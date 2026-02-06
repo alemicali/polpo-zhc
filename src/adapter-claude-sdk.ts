@@ -1,0 +1,172 @@
+import { query, type SDKMessage, type Options } from "@anthropic-ai/claude-agent-sdk";
+import type { AgentConfig, AgentActivity, Task, TaskResult } from "./types.js";
+import type { AgentAdapter, AgentHandle } from "./adapter.js";
+import { createActivity, registerAdapter } from "./adapter.js";
+
+/**
+ * Claude Agent SDK adapter.
+ * Uses @anthropic-ai/claude-agent-sdk to run Claude Code programmatically.
+ * Full streaming, hooks, activity tracking — no process spawning or stdout parsing.
+ */
+class ClaudeSDKAdapter implements AgentAdapter {
+  readonly name = "claude-sdk";
+
+  spawn(agent: AgentConfig, task: Task, cwd: string): AgentHandle {
+    const activity = createActivity();
+    const abortController = new AbortController();
+    let alive = true;
+
+    const prompt = buildPrompt(task);
+
+    const options: Options = {
+      cwd,
+      abortController,
+      permissionMode: "bypassPermissions",
+      allowDangerouslySkipPermissions: true,
+      persistSession: false,
+      model: agent.model,
+      allowedTools: agent.allowedTools,
+      hooks: {
+        PostToolUse: [{
+          hooks: [async (input) => {
+            trackToolUse(input, activity);
+            return {};
+          }],
+        }],
+      },
+    };
+
+    // Add MCP servers if configured
+    if (agent.mcpServers) {
+      options.mcpServers = agent.mcpServers as Options["mcpServers"];
+    }
+
+    const done = runQuery(prompt, options, activity, () => { alive = false; });
+
+    return {
+      agentName: agent.name,
+      taskId: task.id,
+      startedAt: new Date().toISOString(),
+      activity,
+      done,
+      isAlive: () => alive,
+      kill: () => {
+        abortController.abort();
+        alive = false;
+      },
+    };
+  }
+}
+
+function buildPrompt(task: Task): string {
+  const parts = [`Task: ${task.title}`, ``, task.description];
+  if (task.expectations.length > 0) {
+    parts.push(``, `Acceptance criteria:`);
+    for (const exp of task.expectations) {
+      if (exp.type === "test") parts.push(`- Tests must pass: ${exp.command}`);
+      if (exp.type === "file_exists") parts.push(`- Files must exist: ${exp.paths?.join(", ")}`);
+      if (exp.type === "script") parts.push(`- Script must pass: ${exp.command}`);
+      if (exp.type === "llm_review") parts.push(`- Code review criteria: ${exp.criteria}`);
+    }
+  }
+  return parts.join("\n");
+}
+
+/**
+ * Run the Claude Agent SDK query and collect the result.
+ * Streams all messages, tracks activity, and produces a TaskResult.
+ */
+async function runQuery(
+  prompt: string,
+  options: Options,
+  activity: AgentActivity,
+  onFinish: () => void,
+): Promise<TaskResult> {
+  const start = Date.now();
+  let resultText = "";
+  let errorOccurred = false;
+  let errorMessage = "";
+
+  try {
+    const q = query({ prompt, options });
+
+    for await (const message of q) {
+      activity.lastUpdate = new Date().toISOString();
+      processMessage(message, activity);
+
+      // Capture final result
+      if (message.type === "result") {
+        const result = message as unknown as { subtype: string; result?: string; errors?: string[] };
+        if (result.subtype === "success" && result.result) {
+          resultText = result.result;
+        } else if (result.subtype !== "success") {
+          errorOccurred = true;
+          errorMessage = result.errors?.join("; ") ?? result.subtype;
+        }
+      }
+    }
+  } catch (err: unknown) {
+    errorOccurred = true;
+    errorMessage = err instanceof Error ? err.message : String(err);
+  } finally {
+    onFinish();
+  }
+
+  return {
+    exitCode: errorOccurred ? 1 : 0,
+    stdout: resultText,
+    stderr: errorMessage,
+    duration: Date.now() - start,
+  };
+}
+
+/**
+ * Process an SDK message and update activity tracking.
+ */
+function processMessage(message: SDKMessage, activity: AgentActivity): void {
+  // Assistant messages — extract text summary
+  if (message.type === "assistant" && message.message) {
+    const content = message.message.content;
+    if (Array.isArray(content)) {
+      for (const block of content) {
+        if (block.type === "text") {
+          activity.summary = block.text.slice(0, 200);
+        }
+        if (block.type === "tool_use") {
+          activity.toolCalls++;
+          activity.lastTool = block.name;
+        }
+      }
+    }
+  }
+
+  // Tool progress
+  if (message.type === "tool_progress") {
+    activity.lastTool = message.tool_name;
+  }
+}
+
+/**
+ * PostToolUse hook callback — tracks file operations.
+ */
+function trackToolUse(input: any, activity: AgentActivity): void {
+  const toolName = input?.tool_name;
+  const toolInput = input?.tool_input as Record<string, unknown> | undefined;
+  if (!toolName || !toolInput) return;
+
+  const filePath = (toolInput.file_path ?? toolInput.path ?? toolInput.filePath) as string | undefined;
+  if (!filePath) return;
+
+  if (toolName === "Write") {
+    if (!activity.filesCreated.includes(filePath)) activity.filesCreated.push(filePath);
+  } else if (toolName === "Edit") {
+    if (!activity.filesEdited.includes(filePath)) activity.filesEdited.push(filePath);
+  }
+
+  activity.lastFile = filePath;
+}
+
+// Register this adapter
+registerAdapter("claude-sdk", () => new ClaudeSDKAdapter());
+
+export { ClaudeSDKAdapter };

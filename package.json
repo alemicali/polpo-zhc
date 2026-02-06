@@ -1,0 +1,37 @@
+{
+  "name": "@orchestra/core",
+  "version": "0.1.0",
+  "description": "Agent-agnostic framework for orchestrating teams of AI coding agents",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "orchestra": "dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "start": "node dist/cli.js",
+    "test": "vitest"
+  },
+  "keywords": [
+    "ai",
+    "agents",
+    "orchestration",
+    "coding-agents",
+    "multi-agent"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.2.34",
+    "chalk": "^5.4.1",
+    "commander": "^13.1.0",
+    "nanoid": "^5.1.2",
+    "yaml": "^2.7.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.12.0",
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.4"
+  }
+}
