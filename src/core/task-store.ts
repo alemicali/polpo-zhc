@@ -19,4 +19,7 @@ export interface TaskStore {
 
   // State machine
   transition(taskId: string, newStatus: TaskStatus): Task;
+
+  // Lifecycle
+  close?(): void;
 }

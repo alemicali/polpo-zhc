@@ -48,7 +48,6 @@ export class OrchestraTUI {
   private animTimer: ReturnType<typeof setInterval> | null = null;
   private disposeBridge: (() => void) | null = null;
   private workDir: string;
-  private statePath: string;
   private inputMode: "task" | "plan" | "chat" = "task";
   private processing = false;
   private processingStart = 0;
@@ -64,7 +63,6 @@ export class OrchestraTUI {
 
   constructor(workDir: string = ".") {
     this.workDir = resolve(workDir);
-    this.statePath = resolve(this.workDir, ".orchestra", "state.json");
   }
 
   private inputBuffer = "";
@@ -1027,14 +1025,9 @@ export class OrchestraTUI {
 
   private loadState(): void {
     try {
-      if (existsSync(this.statePath)) {
-        const raw = readFileSync(this.statePath, "utf-8");
-        if (raw.trim()) {
-          this.state = JSON.parse(raw);
-        }
-      }
+      this.state = this.orchestrator.getStore().getState();
     } catch {
-      // File being written — skip
+      // Store not ready — skip
     }
   }
 

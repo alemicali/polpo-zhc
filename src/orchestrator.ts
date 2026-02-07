@@ -1,7 +1,7 @@
 import { resolve } from "node:path";
 import { mkdirSync, existsSync } from "node:fs";
 import { parseConfig } from "./config.js";
-import { JsonTaskStore } from "./stores/json-task-store.js";
+import { SqliteTaskStore } from "./stores/sqlite-task-store.js";
 import { getAdapter } from "./adapters/registry.js";
 import { assessTask } from "./assessment/assessor.js";
 import { TypedEmitter } from "./core/events.js";
@@ -59,7 +59,7 @@ export class Orchestrator extends TypedEmitter {
   async init(): Promise<void> {
     const configPath = resolve(this.workDir, "orchestra.yml");
     this.config = await parseConfig(configPath);
-    this.registry = this.injectedStore ?? new JsonTaskStore(this.orchestraDir);
+    this.registry = this.injectedStore ?? new SqliteTaskStore(this.orchestraDir);
   }
 
   /**
@@ -70,7 +70,7 @@ export class Orchestrator extends TypedEmitter {
     if (!existsSync(this.orchestraDir)) {
       mkdirSync(this.orchestraDir, { recursive: true });
     }
-    this.registry = this.injectedStore ?? new JsonTaskStore(this.orchestraDir);
+    this.registry = this.injectedStore ?? new SqliteTaskStore(this.orchestraDir);
     this.config = {
       version: "1",
       project,
@@ -349,8 +349,9 @@ export class Orchestrator extends TypedEmitter {
       }
     }
 
-    // Clear process list in state
+    // Clear process list in state and close store
     this.registry.setState({ processes: [], completedAt: new Date().toISOString() });
+    this.registry.close?.();
     this.emit("orchestrator:shutdown", {});
   }
 

@@ -6,7 +6,7 @@ export { Orchestrator, buildRetryPrompt } from "./orchestrator.js";
 export type { OrchestratorOptions, AssessFn } from "./orchestrator.js";
 
 // Stores
-export { JsonTaskStore } from "./stores/index.js";
+export { JsonTaskStore, SqliteTaskStore } from "./stores/index.js";
 
 // Adapters
 export { registerAdapter, getAdapter, createActivity } from "./adapters/registry.js";

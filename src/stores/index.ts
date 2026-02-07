@@ -1,1 +1,2 @@
 export { JsonTaskStore } from "./json-task-store.js";
+export { SqliteTaskStore } from "./sqlite-task-store.js";
