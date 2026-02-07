@@ -1,5 +1,5 @@
 import { nanoid } from "nanoid";
-import type { Task, TaskStatus, OrchestraState, AgentConfig, AgentActivity, TaskResult, AgentHandle, AgentAdapter, TaskStore } from "../core/index.js";
+import type { Task, TaskStatus, OrchestraState, AgentConfig, AgentActivity, TaskResult, AgentHandle, AgentAdapter, TaskStore, RunStore, RunRecord, RunStatus } from "../core/index.js";
 import { assertValidTransition } from "../core/state-machine.js";
 
 // === InMemoryTaskStore ===
@@ -154,4 +154,61 @@ export function createTestActivity(overrides: Partial<AgentActivity> = {}): Agen
     lastUpdate: new Date().toISOString(),
     ...overrides,
   };
+}
+
+// === InMemoryRunStore ===
+
+export class InMemoryRunStore implements RunStore {
+  private runs = new Map<string, RunRecord>();
+
+  upsertRun(run: RunRecord): void {
+    this.runs.set(run.id, { ...run });
+  }
+
+  updateActivity(runId: string, activity: AgentActivity): void {
+    const run = this.runs.get(runId);
+    if (run) {
+      run.activity = activity;
+      run.updatedAt = new Date().toISOString();
+    }
+  }
+
+  completeRun(runId: string, status: RunStatus, result: TaskResult): void {
+    const run = this.runs.get(runId);
+    if (run) {
+      run.status = status;
+      run.result = result;
+      run.updatedAt = new Date().toISOString();
+    }
+  }
+
+  getRun(runId: string): RunRecord | undefined {
+    const run = this.runs.get(runId);
+    return run ? { ...run } : undefined;
+  }
+
+  getRunByTaskId(taskId: string): RunRecord | undefined {
+    for (const run of this.runs.values()) {
+      if (run.taskId === taskId) return { ...run };
+    }
+    return undefined;
+  }
+
+  getActiveRuns(): RunRecord[] {
+    return [...this.runs.values()].filter(r => r.status === "running");
+  }
+
+  getTerminalRuns(): RunRecord[] {
+    return [...this.runs.values()].filter(r =>
+      r.status === "completed" || r.status === "failed" || r.status === "killed"
+    );
+  }
+
+  deleteRun(runId: string): void {
+    this.runs.delete(runId);
+  }
+
+  close(): void {
+    this.runs.clear();
+  }
 }

@@ -50,7 +50,4 @@ export interface CommandContext extends WidgetHost, TUILogger {
   getInputMode(): "task" | "plan" | "chat";
   setInputMode(mode: "task" | "plan" | "chat"): void;
 
-  // Plan counter
-  getPlanCounter(): number;
-  incrementPlanCounter(): number;
 }

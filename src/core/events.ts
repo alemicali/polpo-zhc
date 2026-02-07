@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import type { Task, TaskStatus, DimensionScore } from "./types.js";
+import type { Task, TaskStatus, DimensionScore, PlanStatus } from "./types.js";
 
 export interface OrchestraEventMap {
   // Task lifecycle
@@ -27,8 +27,18 @@ export interface OrchestraEventMap {
   "task:retry": { taskId: string; attempt: number; maxRetries: number };
   "task:maxRetries": { taskId: string };
 
+  // Resilience
+  "task:timeout": { taskId: string; elapsed: number; timeout: number };
+  "agent:stale": { taskId: string; agentName: string; idleMs: number; action: "warning" | "killed" };
+
   // Recovery
   "task:recovered": { taskId: string; title: string; previousStatus: TaskStatus };
+
+  // Plans
+  "plan:saved": { planId: string; name: string; status: PlanStatus };
+  "plan:executed": { planId: string; group: string; taskCount: number };
+  "plan:completed": { planId: string; group: string; allPassed: boolean };
+  "plan:deleted": { planId: string };
 
   // General
   "log": { level: "info" | "warn" | "error" | "debug"; message: string };

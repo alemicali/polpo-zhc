@@ -3,7 +3,7 @@ import type { Database as DatabaseType, Statement } from "better-sqlite3";
 import { join } from "node:path";
 import { existsSync, readFileSync, renameSync, mkdirSync } from "node:fs";
 import { nanoid } from "nanoid";
-import type { Task, TaskStatus, OrchestraState, AgentProcess, Team } from "../core/types.js";
+import type { Task, TaskStatus, OrchestraState, AgentProcess, Team, Plan, PlanStatus } from "../core/types.js";
 import type { TaskStore } from "../core/task-store.js";
 import { assertValidTransition } from "../core/state-machine.js";
 
@@ -17,6 +17,8 @@ interface TaskRow {
   status: string;
   retries: number;
   max_retries: number;
+  max_duration: number | null;
+  retry_policy: string | null;
   expectations: string;
   metrics: string;
   result: string | null;
@@ -31,6 +33,16 @@ interface ProcessRow {
   started_at: string;
   alive: number;
   activity: string;
+}
+
+interface PlanRow {
+  id: string;
+  name: string;
+  yaml: string;
+  prompt: string | null;
+  status: string;
+  created_at: string;
+  updated_at: string;
 }
 
 export class SqliteTaskStore implements TaskStore {
@@ -48,6 +60,11 @@ export class SqliteTaskStore implements TaskStore {
   private clearProcessesStmt: Statement;
   private insertProcessStmt: Statement;
   private getAllProcessesStmt: Statement;
+  private insertPlanStmt!: Statement;
+  private getPlanStmt!: Statement;
+  private getPlanByNameStmt!: Statement;
+  private getAllPlansStmt!: Statement;
+  private deletePlanStmt!: Statement;
 
   constructor(orchestraDir: string) {
     this.orchestraDir = orchestraDir;
@@ -59,11 +76,12 @@ export class SqliteTaskStore implements TaskStore {
     this.db.pragma("journal_mode = WAL");
     this.db.pragma("synchronous = NORMAL");
     this.initSchema();
+    this.migrateSchema();
 
     // Prepare statements
     this.insertTaskStmt = this.db.prepare(`
-      INSERT INTO tasks (id, title, description, assign_to, "group", depends_on, status, retries, max_retries, expectations, metrics, result, created_at, updated_at)
-      VALUES (@id, @title, @description, @assign_to, @group, @depends_on, @status, @retries, @max_retries, @expectations, @metrics, @result, @created_at, @updated_at)
+      INSERT INTO tasks (id, title, description, assign_to, "group", depends_on, status, retries, max_retries, max_duration, retry_policy, expectations, metrics, result, created_at, updated_at)
+      VALUES (@id, @title, @description, @assign_to, @group, @depends_on, @status, @retries, @max_retries, @max_duration, @retry_policy, @expectations, @metrics, @result, @created_at, @updated_at)
     `);
     this.getTaskStmt = this.db.prepare(`SELECT * FROM tasks WHERE id = ?`);
     this.getAllTasksStmt = this.db.prepare(`SELECT * FROM tasks ORDER BY created_at ASC`);
@@ -77,6 +95,16 @@ export class SqliteTaskStore implements TaskStore {
       VALUES (@agent_name, @pid, @task_id, @started_at, @alive, @activity)
     `);
     this.getAllProcessesStmt = this.db.prepare(`SELECT * FROM processes`);
+
+    // Plan statements
+    this.insertPlanStmt = this.db.prepare(`
+      INSERT INTO plans (id, name, yaml, prompt, status, created_at, updated_at)
+      VALUES (@id, @name, @yaml, @prompt, @status, @created_at, @updated_at)
+    `);
+    this.getPlanStmt = this.db.prepare(`SELECT * FROM plans WHERE id = ?`);
+    this.getPlanByNameStmt = this.db.prepare(`SELECT * FROM plans WHERE name = ?`);
+    this.getAllPlansStmt = this.db.prepare(`SELECT * FROM plans ORDER BY created_at DESC`);
+    this.deletePlanStmt = this.db.prepare(`DELETE FROM plans WHERE id = ?`);
 
     this.migrateFromJson();
   }
@@ -117,7 +145,29 @@ export class SqliteTaskStore implements TaskStore {
         alive      INTEGER NOT NULL DEFAULT 1,
         activity   TEXT NOT NULL DEFAULT '{}'
       );
+
+      CREATE TABLE IF NOT EXISTS plans (
+        id          TEXT PRIMARY KEY,
+        name        TEXT NOT NULL UNIQUE,
+        yaml        TEXT NOT NULL,
+        prompt      TEXT,
+        status      TEXT NOT NULL DEFAULT 'draft',
+        created_at  TEXT NOT NULL,
+        updated_at  TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_plans_status ON plans(status);
     `);
+  }
+
+  private migrateSchema(): void {
+    // Add columns that didn't exist in the initial schema
+    const migrations = [
+      `ALTER TABLE tasks ADD COLUMN max_duration INTEGER`,
+      `ALTER TABLE tasks ADD COLUMN retry_policy TEXT`,
+    ];
+    for (const sql of migrations) {
+      try { this.db.exec(sql); } catch { /* column already exists */ }
+    }
   }
 
   private migrateFromJson(): void {
@@ -162,6 +212,8 @@ export class SqliteTaskStore implements TaskStore {
       status: row.status as TaskStatus,
       retries: row.retries,
       maxRetries: row.max_retries,
+      maxDuration: row.max_duration ?? undefined,
+      retryPolicy: row.retry_policy ? JSON.parse(row.retry_policy) : undefined,
       expectations: JSON.parse(row.expectations),
       metrics: JSON.parse(row.metrics),
       result: row.result ? JSON.parse(row.result) : undefined,
@@ -181,6 +233,8 @@ export class SqliteTaskStore implements TaskStore {
       status: task.status,
       retries: task.retries,
       max_retries: task.maxRetries,
+      max_duration: task.maxDuration ?? null,
+      retry_policy: task.retryPolicy ? JSON.stringify(task.retryPolicy) : null,
       expectations: JSON.stringify(task.expectations ?? []),
       metrics: JSON.stringify(task.metrics ?? []),
       result: task.result ? JSON.stringify(task.result) : null,
@@ -299,6 +353,8 @@ export class SqliteTaskStore implements TaskStore {
     if (updates.status !== undefined) { setClauses.push("status = @status"); params.status = updates.status; }
     if (updates.retries !== undefined) { setClauses.push("retries = @retries"); params.retries = updates.retries; }
     if (updates.maxRetries !== undefined) { setClauses.push("max_retries = @max_retries"); params.max_retries = updates.maxRetries; }
+    if (updates.maxDuration !== undefined) { setClauses.push("max_duration = @max_duration"); params.max_duration = updates.maxDuration; }
+    if (updates.retryPolicy !== undefined) { setClauses.push("retry_policy = @retry_policy"); params.retry_policy = JSON.stringify(updates.retryPolicy); }
     if (updates.expectations !== undefined) { setClauses.push("expectations = @expectations"); params.expectations = JSON.stringify(updates.expectations); }
     if (updates.metrics !== undefined) { setClauses.push("metrics = @metrics"); params.metrics = JSON.stringify(updates.metrics); }
     if (updates.result !== undefined) { setClauses.push("result = @result"); params.result = JSON.stringify(updates.result); }
@@ -343,6 +399,83 @@ export class SqliteTaskStore implements TaskStore {
       .run(newStatus, retries, now, taskId);
 
     return this.rowToTask(this.getTaskStmt.get(taskId) as TaskRow);
+  }
+
+  // === Plan persistence ===
+
+  private rowToPlan(row: PlanRow): Plan {
+    return {
+      id: row.id,
+      name: row.name,
+      yaml: row.yaml,
+      prompt: row.prompt ?? undefined,
+      status: row.status as PlanStatus,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
+  }
+
+  savePlan(plan: Omit<Plan, "id" | "createdAt" | "updatedAt">): Plan {
+    const now = new Date().toISOString();
+    const newPlan: Plan = {
+      ...plan,
+      id: nanoid(),
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.insertPlanStmt.run({
+      id: newPlan.id,
+      name: newPlan.name,
+      yaml: newPlan.yaml,
+      prompt: newPlan.prompt ?? null,
+      status: newPlan.status,
+      created_at: newPlan.createdAt,
+      updated_at: newPlan.updatedAt,
+    });
+    return newPlan;
+  }
+
+  getPlan(planId: string): Plan | undefined {
+    const row = this.getPlanStmt.get(planId) as PlanRow | undefined;
+    return row ? this.rowToPlan(row) : undefined;
+  }
+
+  getPlanByName(name: string): Plan | undefined {
+    const row = this.getPlanByNameStmt.get(name) as PlanRow | undefined;
+    return row ? this.rowToPlan(row) : undefined;
+  }
+
+  getAllPlans(): Plan[] {
+    return (this.getAllPlansStmt.all() as PlanRow[]).map(r => this.rowToPlan(r));
+  }
+
+  updatePlan(planId: string, updates: Partial<Omit<Plan, "id">>): Plan {
+    const existing = this.getPlanStmt.get(planId) as PlanRow | undefined;
+    if (!existing) throw new Error(`Plan not found: ${planId}`);
+
+    const now = new Date().toISOString();
+    const setClauses: string[] = ["updated_at = @updated_at"];
+    const params: Record<string, unknown> = { id: planId, updated_at: now };
+
+    if (updates.name !== undefined) { setClauses.push("name = @name"); params.name = updates.name; }
+    if (updates.yaml !== undefined) { setClauses.push("yaml = @yaml"); params.yaml = updates.yaml; }
+    if (updates.prompt !== undefined) { setClauses.push("prompt = @prompt"); params.prompt = updates.prompt ?? null; }
+    if (updates.status !== undefined) { setClauses.push("status = @status"); params.status = updates.status; }
+
+    const sql = `UPDATE plans SET ${setClauses.join(", ")} WHERE id = @id`;
+    this.db.prepare(sql).run(params);
+
+    return this.rowToPlan(this.getPlanStmt.get(planId) as PlanRow);
+  }
+
+  deletePlan(planId: string): boolean {
+    const result = this.deletePlanStmt.run(planId);
+    return result.changes > 0;
+  }
+
+  nextPlanName(): string {
+    const row = this.db.prepare("SELECT COUNT(*) as c FROM plans").get() as { c: number };
+    return `plan-${row.c + 1}`;
   }
 
   close(): void {

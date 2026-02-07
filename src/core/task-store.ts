@@ -1,4 +1,4 @@
-import type { Task, TaskStatus, OrchestraState } from "./types.js";
+import type { Task, TaskStatus, OrchestraState, Plan } from "./types.js";
 
 /**
  * Abstract interface for task persistence.
@@ -22,4 +22,13 @@ export interface TaskStore {
 
   // Lifecycle
   close?(): void;
+
+  // Plan persistence (optional)
+  savePlan?(plan: Omit<Plan, "id" | "createdAt" | "updatedAt">): Plan;
+  getPlan?(planId: string): Plan | undefined;
+  getPlanByName?(name: string): Plan | undefined;
+  getAllPlans?(): Plan[];
+  updatePlan?(planId: string, updates: Partial<Omit<Plan, "id">>): Plan;
+  deletePlan?(planId: string): boolean;
+  nextPlanName?(): string;
 }

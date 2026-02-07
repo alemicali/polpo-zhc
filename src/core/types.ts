@@ -39,6 +39,15 @@ export interface TaskMetric {
   threshold: number;
 }
 
+export interface RetryPolicy {
+  /** After this many failures, escalate to fallbackAgent */
+  escalateAfter?: number;
+  /** Agent to use for escalation retries */
+  fallbackAgent?: string;
+  /** Model override for escalation (e.g. switch from haiku to sonnet) */
+  escalateModel?: string;
+}
+
 export interface Task {
   id: string;
   title: string;
@@ -51,6 +60,8 @@ export interface Task {
   metrics: TaskMetric[];
   retries: number;
   maxRetries: number;
+  maxDuration?: number;       // ms, 0 = no timeout
+  retryPolicy?: RetryPolicy;
   result?: TaskResult;
   createdAt: string;
   updatedAt: string;
@@ -148,6 +159,31 @@ export interface AssessmentResult {
   timestamp: string;
 }
 
+// === Plan ===
+
+export type PlanStatus = "draft" | "active" | "completed" | "failed" | "cancelled";
+
+export interface Plan {
+  id: string;
+  name: string;         // "plan-1", "plan-2", or custom name
+  yaml: string;         // full YAML content
+  prompt?: string;      // original user prompt that generated this plan
+  status: PlanStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// === Runner Config ===
+
+export interface RunnerConfig {
+  runId: string;
+  taskId: string;
+  agent: AgentConfig;
+  task: Task;
+  dbPath: string;
+  cwd: string;
+}
+
 // === Config (orchestra.yml) ===
 
 export interface OrchestraConfig {
@@ -162,6 +198,9 @@ export interface OrchestraSettings {
   maxRetries: number;
   workDir: string;
   logLevel: "quiet" | "normal" | "verbose";
+  taskTimeout?: number;            // default timeout per task (ms). Default: 30min
+  staleThreshold?: number;         // ms idle before agent considered stale. Default: 5min
+  defaultRetryPolicy?: RetryPolicy;
 }
 
 // === Orchestra State (persisted in .orchestra/state.json) ===

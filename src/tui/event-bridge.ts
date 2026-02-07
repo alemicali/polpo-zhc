@@ -71,6 +71,23 @@ export function bridgeOrchestraEvents(
     logger.logEvent(`  {red-fg}✗{/red-fg} {grey-fg}Max retries reached [${taskId}]{/grey-fg}`);
   });
 
+  // ─── Resilience events ────────────────────────────────
+
+  on("task:timeout", ({ taskId, elapsed }) => {
+    const secs = Math.round(elapsed / 1000);
+    logger.log(`[${taskId}] Task timed out after ${secs}s`);
+    logger.logEvent(`  {red-fg}⏱{/red-fg} Timeout after ${secs}s {grey-fg}[${taskId}]{/grey-fg}`);
+  });
+
+  on("agent:stale", ({ taskId, agentName, idleMs, action }) => {
+    const secs = Math.round(idleMs / 1000);
+    if (action === "killed") {
+      logger.logEvent(`  {red-fg}☠{/red-fg} ${agentName} unresponsive (${secs}s idle) — killed {grey-fg}[${taskId}]{/grey-fg}`);
+    } else {
+      logger.logEvent(`  {yellow-fg}⚠{/yellow-fg} ${agentName} idle for ${secs}s {grey-fg}[${taskId}]{/grey-fg}`);
+    }
+  });
+
   // ─── Recovery events ───────────────────────────────────
 
   on("task:recovered", ({ title, previousStatus }) => {

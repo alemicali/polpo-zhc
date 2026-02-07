@@ -49,6 +49,7 @@ export const SLASH_COMMANDS: Record<string, string> = {
   "/status": "Detailed task status",
   "/result": "Show last task result",
   "/inspect": "Browse tasks & plans",
+  "/plans": "List & manage saved plans",
   "/edit-plan": "Edit a running plan",
   "/reassess": "Re-run assessment on task",
   "/team": "Show / manage team",

@@ -1,22 +1,43 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { Orchestrator, buildRetryPrompt } from "../orchestrator.js";
 import { registerAdapter } from "../adapters/registry.js";
-import { InMemoryTaskStore, MockAdapter, createTestTask, createTestAgent } from "./fixtures.js";
+import { InMemoryTaskStore, InMemoryRunStore, MockAdapter, createTestTask, createTestAgent, createTestActivity } from "./fixtures.js";
 import type { TaskResult } from "../core/types.js";
+import type { RunRecord } from "../core/run-store.js";
+
+function createTestRunRecord(overrides: Partial<RunRecord> = {}): RunRecord {
+  const now = new Date().toISOString();
+  return {
+    id: "run-1",
+    taskId: "task-1",
+    pid: 0,
+    agentName: "agent-1",
+    adapterType: "mock",
+    status: "running",
+    startedAt: now,
+    updatedAt: now,
+    activity: createTestActivity(),
+    configPath: "/tmp/run.json",
+    ...overrides,
+  };
+}
 
 describe("Orchestrator", () => {
   let store: InMemoryTaskStore;
+  let runStore: InMemoryRunStore;
   let mockAdapter: MockAdapter;
   let orchestrator: Orchestrator;
 
   beforeEach(() => {
     store = new InMemoryTaskStore();
+    runStore = new InMemoryRunStore();
     mockAdapter = new MockAdapter();
     registerAdapter("mock", () => mockAdapter);
 
     orchestrator = new Orchestrator({
       workDir: "/tmp/orchestra-test",
       store,
+      runStore,
       assessFn: async () => ({
         passed: true,
         checks: [],
@@ -51,44 +72,25 @@ describe("Orchestrator", () => {
   });
 
   describe("tick", () => {
-    it("spawns agent for ready task", () => {
-      orchestrator.addTask({
-        title: "Ready task",
-        description: "Should be spawned",
+    it("returns true when all tasks are terminal", () => {
+      const task = orchestrator.addTask({
+        title: "Test",
+        description: "Done",
         assignTo: "agent-1",
       });
+      // Manually set to done
+      store.transition(task.id, "assigned");
+      store.transition(task.id, "in_progress");
+      store.transition(task.id, "review");
+      store.transition(task.id, "done");
 
-      orchestrator.tick();
-
-      expect(mockAdapter.spawnCalls).toHaveLength(1);
-      expect(mockAdapter.spawnCalls[0].agent.name).toBe("agent-1");
-    });
-
-    it("skips tasks with unresolved dependencies", () => {
-      const taskA = orchestrator.addTask({
-        title: "Task A",
-        description: "First",
-        assignTo: "agent-1",
-      });
-
-      orchestrator.addTask({
-        title: "Task B",
-        description: "Depends on A",
-        assignTo: "agent-1",
-        dependsOn: [taskA.id],
-      });
-
-      orchestrator.tick();
-
-      // Only task A should be spawned
-      expect(mockAdapter.spawnCalls).toHaveLength(1);
+      expect(orchestrator.tick()).toBe(true);
     });
 
     it("detects deadlock", () => {
       const events: any[] = [];
       orchestrator.on("orchestrator:deadlock", (e) => events.push(e));
 
-      // Create tasks that depend on each other (artificially)
       const taskA = orchestrator.addTask({
         title: "Task A",
         description: "Depends on B",
@@ -121,22 +123,61 @@ describe("Orchestrator", () => {
       expect(lastTick).toHaveProperty("done");
       expect(lastTick).toHaveProperty("failed");
     });
+  });
 
-    it("returns true when all tasks are terminal", () => {
-      // No tasks = done in non-interactive
-      // But orchestrator is interactive, so empty returns false
+  describe("collectResults via RunStore", () => {
+    it("processes terminal runs and transitions tasks", () => {
       const task = orchestrator.addTask({
-        title: "Test",
-        description: "Done",
+        title: "Collect me",
+        description: "Test",
         assignTo: "agent-1",
       });
-      // Manually set to done
       store.transition(task.id, "assigned");
       store.transition(task.id, "in_progress");
-      store.transition(task.id, "review");
-      store.transition(task.id, "done");
 
-      expect(orchestrator.tick()).toBe(true);
+      const result: TaskResult = {
+        exitCode: 0,
+        stdout: "done",
+        stderr: "",
+        duration: 100,
+      };
+
+      // Pre-populate RunStore with a completed run
+      runStore.upsertRun(createTestRunRecord({
+        id: "run-collect",
+        taskId: task.id,
+        status: "completed",
+        result,
+      }));
+
+      orchestrator.tick();
+
+      // Run should be consumed (deleted)
+      expect(runStore.getRun("run-collect")).toBeUndefined();
+      // Task should be done
+      expect(store.getTask(task.id)!.status).toBe("done");
+    });
+
+    it("handles failed runs", () => {
+      const task = orchestrator.addTask({
+        title: "Fail me",
+        description: "Test",
+        assignTo: "agent-1",
+      });
+      store.transition(task.id, "assigned");
+      store.transition(task.id, "in_progress");
+
+      runStore.upsertRun(createTestRunRecord({
+        id: "run-fail",
+        taskId: task.id,
+        status: "failed",
+        result: { exitCode: 1, stdout: "", stderr: "boom", duration: 50 },
+      }));
+
+      orchestrator.tick();
+
+      // Task should be retried (back to pending since retries < maxRetries)
+      expect(store.getTask(task.id)!.status).toBe("pending");
     });
   });
 
@@ -259,6 +300,40 @@ describe("Orchestrator", () => {
 
       orchestrator.recoverOrphanedTasks();
       expect(store.getTask(task.id)!.status).toBe("failed");
+    });
+  });
+
+  describe("syncProcessesFromRunStore", () => {
+    it("syncs active runs to processes state", () => {
+      const task = orchestrator.addTask({
+        title: "Running",
+        description: "Test",
+        assignTo: "agent-1",
+      });
+      store.transition(task.id, "assigned");
+      store.transition(task.id, "in_progress");
+
+      runStore.upsertRun(createTestRunRecord({
+        id: "run-sync",
+        taskId: task.id,
+        pid: 42,
+        agentName: "agent-1",
+        status: "running",
+      }));
+
+      orchestrator.tick();
+
+      const state = store.getState();
+      expect(state.processes).toHaveLength(1);
+      expect(state.processes[0].pid).toBe(42);
+      expect(state.processes[0].agentName).toBe("agent-1");
+      expect(state.processes[0].alive).toBe(true);
+    });
+  });
+
+  describe("getRunStore", () => {
+    it("returns the injected run store", () => {
+      expect(orchestrator.getRunStore()).toBe(runStore);
     });
   });
 });

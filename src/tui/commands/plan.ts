@@ -63,7 +63,7 @@ async function generatePlan(ctx: CommandContext, input: string): Promise<string>
   return extractYaml(resultText);
 }
 
-function showPlanPreview(ctx: CommandContext, yaml: string, originalInput: string): void {
+export function showPlanPreview(ctx: CommandContext, yaml: string, originalInput: string, existingPlanId?: string): void {
   let doc: any;
   try {
     doc = parseYaml(yaml);
@@ -97,6 +97,7 @@ function showPlanPreview(ctx: CommandContext, yaml: string, originalInput: strin
 
   const actionItems = [
     "  {green-fg}✓{/green-fg} Execute plan",
+    "  {blue-fg}■{/blue-fg} Save as draft",
     "  {yellow-fg}✎{/yellow-fg} Edit YAML",
     "  {cyan-fg}↻{/cyan-fg} Refine with feedback",
   ];
@@ -155,29 +156,46 @@ function showPlanPreview(ctx: CommandContext, yaml: string, originalInput: strin
     if (key.name === "return" || key.name === "enter") {
       const selectedIdx = (actionList as any).selected ?? 0;
       cleanup();
-      switch (selectedIdx) {
-        case 0: executePlan(ctx, yaml); break;
-        case 1: showYamlEditor(ctx, yaml, originalInput); break;
-        case 2: showRefineInput(ctx, yaml, originalInput); break;
-      }
+      handleAction(selectedIdx);
       return;
     }
   });
+
+  const handleAction = (idx: number) => {
+    cleanup();
+    switch (idx) {
+      case 0:
+        if (existingPlanId) {
+          // Executing a saved draft — update its YAML and execute
+          ctx.orchestrator.updatePlan(existingPlanId, { yaml });
+          executeSavedPlan(ctx, existingPlanId);
+        } else {
+          executeNewPlan(ctx, yaml, originalInput);
+        }
+        break;
+      case 1:
+        if (existingPlanId) {
+          // Already saved — update YAML
+          ctx.orchestrator.updatePlan(existingPlanId, { yaml });
+          ctx.log("{blue-fg}Draft updated{/blue-fg}");
+        } else {
+          saveDraft(ctx, yaml, originalInput);
+        }
+        break;
+      case 2: showYamlEditor(ctx, yaml, originalInput, existingPlanId); break;
+      case 3: showRefineInput(ctx, yaml, originalInput); break;
+    }
+  };
 
   let previewReady = false;
   setImmediate(() => { previewReady = true; });
   actionList.on("select", (_item: any, index: number) => {
     if (!previewReady) return;
-    cleanup();
-    switch (index) {
-      case 0: executePlan(ctx, yaml); break;
-      case 1: showYamlEditor(ctx, yaml, originalInput); break;
-      case 2: showRefineInput(ctx, yaml, originalInput); break;
-    }
+    handleAction(index);
   });
 }
 
-function showYamlEditor(ctx: CommandContext, yaml: string, originalInput: string): void {
+function showYamlEditor(ctx: CommandContext, yaml: string, originalInput: string, existingPlanId?: string): void {
   ctx.overlayActive = true;
   const editor = blessed.textarea({
     parent: ctx.screen,
@@ -204,13 +222,13 @@ function showYamlEditor(ctx: CommandContext, yaml: string, originalInput: string
     const editedYaml = editor.getValue();
     ctx.overlayActive = false;
     editor.destroy();
-    showPlanPreview(ctx, editedYaml, originalInput);
+    showPlanPreview(ctx, editedYaml, originalInput, existingPlanId);
   });
 
   editor.key(["escape"], () => {
     ctx.overlayActive = false;
     editor.destroy();
-    showPlanPreview(ctx, yaml, originalInput);
+    showPlanPreview(ctx, yaml, originalInput, existingPlanId);
   });
 }
 
@@ -323,54 +341,39 @@ async function generatePlanWithFeedback(ctx: CommandContext, originalInput: stri
   return extractYaml(resultText);
 }
 
-export function executePlan(ctx: CommandContext, yaml: string): void {
+function saveDraft(ctx: CommandContext, yaml: string, prompt: string): void {
   try {
-    const doc = parseYaml(yaml);
-    if (!doc?.tasks || !Array.isArray(doc.tasks)) {
-      ctx.log("{red-fg}Invalid plan: no tasks array{/red-fg}");
-      return;
-    }
+    const plan = ctx.orchestrator.savePlan({ yaml, prompt, status: "draft" });
+    ctx.log(`{blue-fg}Plan saved as draft: ${plan.name}{/blue-fg}`);
+    ctx.logEvent(`  {blue-fg}■{/blue-fg} Draft saved: {bold}${plan.name}{/bold}`);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    ctx.log(`{red-fg}Failed to save draft: ${msg}{/red-fg}`);
+  }
+}
 
-    const counter = ctx.incrementPlanCounter();
-    const group = `plan-${counter}`;
+function executeNewPlan(ctx: CommandContext, yaml: string, prompt: string): void {
+  try {
+    const plan = ctx.orchestrator.savePlan({ yaml, prompt });
+    const { tasks, group } = ctx.orchestrator.executePlan(plan.id);
+    ctx.log(`{green-fg}Plan executed: ${tasks.length} task${tasks.length !== 1 ? "s" : ""} created (${group}){/green-fg}`);
+    ctx.logEvent(`  {green-fg}▸{/green-fg} {bold}Plan started{/bold} — ${tasks.length} tasks {grey-fg}(${group}){/grey-fg}`);
+    ctx.log("{grey-fg}Supervisor will start picking them up...{/grey-fg}");
+    ctx.log("");
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    ctx.log(`{red-fg}Failed to execute plan: ${msg}{/red-fg}`);
+  }
+}
 
-    // Register volatile agents from the plan's team: section
-    if (doc.team && Array.isArray(doc.team)) {
-      for (const agentDef of doc.team) {
-        if (!agentDef.name || !agentDef.adapter) continue;
-        ctx.orchestrator.addVolatileAgent({
-          name: agentDef.name,
-          adapter: agentDef.adapter,
-          model: agentDef.model,
-          role: agentDef.role,
-          systemPrompt: agentDef.systemPrompt,
-          skills: agentDef.skills,
-        }, group);
-      }
-      ctx.log(`{cyan-fg}${doc.team.length} volatile agent(s) registered for ${group}{/cyan-fg}`);
-    }
-
-    const titleToId = new Map<string, string>();
-
-    for (const t of doc.tasks) {
-      const deps = (t.dependsOn || [])
-        .map((title: string) => titleToId.get(title))
-        .filter((id: string | undefined): id is string => !!id);
-
-      const task = ctx.orchestrator.addTask({
-        title: t.title,
-        description: t.description || t.title,
-        assignTo: t.assignTo || ctx.getDefaultAgent(),
-        dependsOn: deps,
-        expectations: t.expectations || [],
-        group,
-      });
-
-      titleToId.set(t.title, task.id);
-    }
-
-    ctx.log(`{green-fg}Plan executed: ${doc.tasks.length} task${doc.tasks.length !== 1 ? "s" : ""} created (${group}){/green-fg}`);
-    ctx.logEvent(`  {green-fg}▸{/green-fg} {bold}Plan started{/bold} — ${doc.tasks.length} tasks {grey-fg}(${group}){/grey-fg}`);
+/**
+ * Execute a previously saved plan (called from /plans command).
+ */
+export function executeSavedPlan(ctx: CommandContext, planId: string): void {
+  try {
+    const { tasks, group } = ctx.orchestrator.executePlan(planId);
+    ctx.log(`{green-fg}Plan executed: ${tasks.length} task${tasks.length !== 1 ? "s" : ""} created (${group}){/green-fg}`);
+    ctx.logEvent(`  {green-fg}▸{/green-fg} {bold}Plan started{/bold} — ${tasks.length} tasks {grey-fg}(${group}){/grey-fg}`);
     ctx.log("{grey-fg}Supervisor will start picking them up...{/grey-fg}");
     ctx.log("");
   } catch (err: unknown) {

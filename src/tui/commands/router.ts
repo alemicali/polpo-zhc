@@ -7,6 +7,7 @@ import { cmdStatus, cmdResult, cmdHelp } from "./status.js";
 import { cmdConfig } from "./config.js";
 import { cmdTeam } from "./team.js";
 import { cmdTaskBrowser, cmdReassess, cmdAbort, cmdClearTasks, cmdEditPlan, cmdInspect } from "./tasks.js";
+import { cmdPlans } from "./plans.js";
 
 export type CommandHandler = (ctx: CommandContext, args: string[]) => void | Promise<void>;
 
@@ -20,6 +21,7 @@ const commands: Record<string, CommandHandler> = {
   "/abort": (ctx) => cmdAbort(ctx),
   "/clear-tasks": (ctx) => cmdClearTasks(ctx),
   "/tasks": (ctx) => cmdTaskBrowser(ctx),
+  "/plans": (ctx) => cmdPlans(ctx),
   "/config": (ctx) => cmdConfig(ctx),
   "/help": (ctx) => cmdHelp(ctx),
 };

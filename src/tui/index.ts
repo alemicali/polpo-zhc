@@ -53,7 +53,6 @@ export class OrchestraTUI {
   private processingStart = 0;
   private processingLabel = "";
   private processingDetail = "";
-  private planCounter = 0;
   private overlayActive = false;
   private menuType: "command" | "agent" | null = null;
   private menuJustClosed = false;
@@ -428,9 +427,24 @@ export class OrchestraTUI {
         item: { bg: "black", fg: "white" },
       },
       hidden: true,
-      keys: true,
+      keys: false,
       vi: false,
       mouse: true,
+    });
+
+    // Persistent mouse click handler for command menu (bound once, checks menuType)
+    this.completionBox.on("select", (_item: any, index: number) => {
+      if (this.menuType === "command") {
+        const cmd = this.commandKeys[index];
+        this.closeMenu();
+        if (cmd) {
+          this.inputBuffer = "";
+          this.updateInputDisplay();
+          this.handleSlashCommand(cmd);
+        }
+      } else if (this.menuType === "agent") {
+        this.resolveMention(index);
+      }
     });
 
     // Manual input handling — all keypress goes through screen
@@ -726,7 +740,6 @@ export class OrchestraTUI {
     this.commandKeys = filtered.map(([cmd]) => cmd);
     const items = filtered.map(([cmd, desc]) => `  ${cmd.padEnd(12)}  ${desc}`);
 
-    const wasOpen = this.menuType === "command";
     this.menuType = "command";
 
     this.completionBox.setItems(items);
@@ -734,20 +747,6 @@ export class OrchestraTUI {
     (this.completionBox as any).setLabel(" {cyan-fg}Commands{/cyan-fg} ");
     this.completionBox.show();
     this.completionBox.select(0);
-    if (!wasOpen) this.completionBox.focus();
-
-    if (!wasOpen) {
-      // Mouse click handler — only bind once
-      this.completionBox.on("select", (_item: any, index: number) => {
-        const cmd = this.commandKeys[index];
-        this.closeMenu();
-        if (cmd) {
-          this.inputBuffer = "";
-          this.updateInputDisplay();
-          this.handleSlashCommand(cmd);
-        }
-      });
-    }
 
     this.scheduleRender();
   }
@@ -817,11 +816,6 @@ export class OrchestraTUI {
     const firstReal = this.mentionEntries.findIndex(e => e.tag !== "");
     this.completionBox.select(firstReal >= 0 ? firstReal : 0);
 
-    // Mouse click → append tag to buffer (don't submit)
-    this.completionBox.on("select", (_item: any, index: number) => {
-      this.resolveMention(index);
-    });
-
     this.scheduleRender();
   }
 
@@ -843,8 +837,6 @@ export class OrchestraTUI {
     this.menuType = null;
     this.menuJustClosed = true;
     this.completionBox.hide();
-    this.completionBox.removeAllListeners("select");
-    this.completionBox.removeAllListeners("cancel");
     this.scheduleRender();
   }
 
@@ -1247,8 +1239,6 @@ export class OrchestraTUI {
       },
       getInputMode: () => tui.inputMode,
       setInputMode: (mode) => { tui.inputMode = mode; },
-      getPlanCounter: () => tui.planCounter,
-      incrementPlanCounter: () => ++tui.planCounter,
     };
   }
 }
