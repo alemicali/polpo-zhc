@@ -1,0 +1,56 @@
+import type blessed from "blessed";
+import type { Orchestrator } from "../orchestrator.js";
+import type { OrchestraState } from "../core/types.js";
+
+// ─── TUI Config ──────────────────────────────────────────
+
+export interface TUIConfig {
+  judge: string;
+  agent: string;
+  model: string;
+}
+
+// ─── Widget Host ─────────────────────────────────────────
+
+export interface WidgetHost {
+  screen: blessed.Widgets.Screen;
+  overlayActive: boolean;
+  scheduleRender(): void;
+}
+
+// ─── TUI Logger ──────────────────────────────────────────
+
+export interface TUILogger {
+  /** Verbose log (shows in verbose mode) */
+  log(msg: string): void;
+  /** Always visible in both modes */
+  logAlways(msg: string): void;
+  /** Event log (shows in clean mode) */
+  logEvent(msg: string): void;
+}
+
+// ─── Command Context ─────────────────────────────────────
+
+export interface CommandContext extends WidgetHost, TUILogger {
+  orchestrator: Orchestrator;
+  config: TUIConfig;
+  workDir: string;
+
+  // State
+  getState(): OrchestraState | null;
+  loadState(): void;
+  getDefaultAgent(): string;
+  setDefaultAgent(name: string): void;
+
+  // Processing indicator
+  setProcessing(active: boolean, label?: string): void;
+  setProcessingDetail(detail: string): void;
+
+  // Input mode
+  getInputMode(): "task" | "plan" | "chat";
+  setInputMode(mode: "task" | "plan" | "chat"): void;
+
+  // Plan counter
+  getPlanCounter(): number;
+  incrementPlanCounter(): number;
+}
