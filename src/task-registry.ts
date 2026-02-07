@@ -89,6 +89,22 @@ export class TaskRegistry {
     return task;
   }
 
+  removeTask(taskId: string): boolean {
+    const idx = this.state.tasks.findIndex((t) => t.id === taskId);
+    if (idx < 0) return false;
+    this.state.tasks.splice(idx, 1);
+    this.persist();
+    return true;
+  }
+
+  removeTasks(filter: (task: Task) => boolean): number {
+    const before = this.state.tasks.length;
+    this.state.tasks = this.state.tasks.filter((t) => !filter(t));
+    const removed = before - this.state.tasks.length;
+    if (removed > 0) this.persist();
+    return removed;
+  }
+
   transition(taskId: string, newStatus: TaskStatus): Task {
     const task = this.state.tasks.find((t) => t.id === taskId);
     if (!task) {

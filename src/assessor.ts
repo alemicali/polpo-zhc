@@ -200,92 +200,138 @@ IMPORTANT:
 - Be strict but fair — apply the rubric literally
 - The reasoning should reference specific code evidence`;
 
-  try {
-    let output = "";
+  const MAX_ATTEMPTS = 2;
 
-    for await (const message of query({
-      prompt: reviewPrompt,
-      options: {
-        cwd,
-        permissionMode: "bypassPermissions",
-        allowDangerouslySkipPermissions: true,
-        allowedTools: ["Read", "Glob", "Grep"],
-        persistSession: false,
-        maxTurns: 3,
-      },
-    })) {
-      if (message.type === "result") {
-        const result = message as unknown as { subtype: string; result?: string };
-        if (result.subtype === "success" && result.result) {
-          output = result.result;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      let output = "";
+
+      for await (const message of query({
+        prompt: attempt === 1
+          ? reviewPrompt
+          : reviewPrompt + "\n\nPREVIOUS ATTEMPT FAILED: your output was not valid JSON. You MUST respond with ONLY a JSON object. No markdown, no explanation, no text before or after the JSON.",
+        options: {
+          cwd,
+          permissionMode: "bypassPermissions",
+          allowDangerouslySkipPermissions: true,
+          allowedTools: ["Read", "Glob", "Grep"],
+          persistSession: false,
+          maxTurns: 3,
+        },
+      })) {
+        if (message.type === "result") {
+          const result = message as unknown as { subtype: string; result?: string };
+          if (result.subtype === "success" && result.result) {
+            output = result.result;
+          }
         }
       }
-    }
 
-    output = output.trim();
+      output = output.trim();
 
-    // Extract JSON from output (may be wrapped in markdown fences)
-    const jsonMatch = output.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
+      // Strip markdown fences if present
+      const fenceMatch = output.match(/```(?:json)?\s*\n?([\s\S]*?)\n?\s*```/);
+      if (fenceMatch) output = fenceMatch[1].trim();
+
+      // Extract JSON object — use lazy match to avoid grabbing trailing text
+      const jsonMatch = output.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) {
+        if (attempt < MAX_ATTEMPTS) continue; // retry
+        return {
+          type: "llm_review",
+          passed: false,
+          message: "LLM review returned non-JSON output",
+          details: output.slice(0, 500),
+        };
+      }
+
+      let jsonStr = jsonMatch[0];
+
+      // Try to repair common JSON issues: trailing commas, single quotes
+      jsonStr = jsonStr.replace(/,\s*([}\]])/g, "$1"); // trailing commas
+      jsonStr = jsonStr.replace(/'/g, '"'); // single quotes → double quotes
+
+      let parsed: {
+        scores: { dimension: string; score: number; reasoning: string }[];
+        summary: string;
+      };
+      try {
+        parsed = JSON.parse(jsonStr);
+      } catch {
+        if (attempt < MAX_ATTEMPTS) continue; // retry
+        return {
+          type: "llm_review",
+          passed: false,
+          message: "LLM review returned malformed JSON",
+          details: jsonStr.slice(0, 500),
+        };
+      }
+
+      if (!parsed.scores || !Array.isArray(parsed.scores)) {
+        if (attempt < MAX_ATTEMPTS) continue; // retry
+        return {
+          type: "llm_review",
+          passed: false,
+          message: "LLM review JSON missing 'scores' array",
+          details: jsonStr.slice(0, 500),
+        };
+      }
+
+      // Build dimension scores with weights
+      const dimScores: DimensionScore[] = parsed.scores.map(s => {
+        const dim = dimensions.find(d => d.name === s.dimension);
+        return {
+          dimension: s.dimension,
+          score: Math.max(1, Math.min(5, Math.round(s.score))),
+          reasoning: s.reasoning,
+          weight: dim?.weight ?? (1 / dimensions.length),
+        };
+      });
+
+      // Compute weighted global score
+      const totalWeight = dimScores.reduce((sum, s) => sum + s.weight, 0);
+      const globalScore = totalWeight > 0
+        ? dimScores.reduce((sum, s) => sum + s.score * s.weight, 0) / totalWeight
+        : 0;
+
+      const passed = globalScore >= threshold;
+
+      // Build readable details
+      const scoreLines = dimScores.map(s =>
+        `  ${s.dimension}: ${s.score}/5 (weight: ${s.weight}) — ${s.reasoning}`
+      ).join("\n");
+      const details = `Global score: ${globalScore.toFixed(2)}/5 (threshold: ${threshold})\n\n${scoreLines}\n\nSummary: ${parsed.summary}`;
+
+      const msg = passed
+        ? `Score ${globalScore.toFixed(1)}/5 — ${parsed.summary.slice(0, 100)}`
+        : `Score ${globalScore.toFixed(1)}/5 (below ${threshold}) — ${parsed.summary.slice(0, 100)}`;
+
+      return {
+        type: "llm_review",
+        passed,
+        message: msg,
+        details,
+        scores: dimScores,
+        globalScore: Math.round(globalScore * 100) / 100,
+      };
+    } catch (err: unknown) {
+      if (attempt < MAX_ATTEMPTS) continue; // retry on unexpected errors
+      const msg = err instanceof Error ? err.message : String(err);
       return {
         type: "llm_review",
         passed: false,
-        message: "LLM review returned non-JSON output",
-        details: output.slice(0, 500),
+        message: "LLM review process failed",
+        details: msg.slice(0, 500),
       };
     }
-
-    const parsed = JSON.parse(jsonMatch[0]) as {
-      scores: { dimension: string; score: number; reasoning: string }[];
-      summary: string;
-    };
-
-    // Build dimension scores with weights
-    const dimScores: DimensionScore[] = parsed.scores.map(s => {
-      const dim = dimensions.find(d => d.name === s.dimension);
-      return {
-        dimension: s.dimension,
-        score: Math.max(1, Math.min(5, Math.round(s.score))),
-        reasoning: s.reasoning,
-        weight: dim?.weight ?? (1 / dimensions.length),
-      };
-    });
-
-    // Compute weighted global score
-    const totalWeight = dimScores.reduce((sum, s) => sum + s.weight, 0);
-    const globalScore = totalWeight > 0
-      ? dimScores.reduce((sum, s) => sum + s.score * s.weight, 0) / totalWeight
-      : 0;
-
-    const passed = globalScore >= threshold;
-
-    // Build readable details
-    const scoreLines = dimScores.map(s =>
-      `  ${s.dimension}: ${s.score}/5 (weight: ${s.weight}) — ${s.reasoning}`
-    ).join("\n");
-    const details = `Global score: ${globalScore.toFixed(2)}/5 (threshold: ${threshold})\n\n${scoreLines}\n\nSummary: ${parsed.summary}`;
-
-    const msg = passed
-      ? `Score ${globalScore.toFixed(1)}/5 — ${parsed.summary.slice(0, 100)}`
-      : `Score ${globalScore.toFixed(1)}/5 (below ${threshold}) — ${parsed.summary.slice(0, 100)}`;
-
-    return {
-      type: "llm_review",
-      passed,
-      message: msg,
-      details,
-      scores: dimScores,
-      globalScore: Math.round(globalScore * 100) / 100,
-    };
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return {
-      type: "llm_review",
-      passed: false,
-      message: "LLM review process failed",
-      details: msg.slice(0, 500),
-    };
   }
+
+  // Should never reach here, but TypeScript needs it
+  return {
+    type: "llm_review",
+    passed: false,
+    message: "LLM review exhausted all attempts",
+  };
 }
 
 async function runCheck(

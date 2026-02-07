@@ -44,6 +44,7 @@ export interface Task {
   title: string;
   description: string;
   assignTo: string;
+  group?: string;
   dependsOn: string[];
   status: TaskStatus;
   expectations: TaskExpectation[];
@@ -79,6 +80,14 @@ export interface AgentConfig {
   allowedTools?: string[];
   /** For claude-sdk adapter: MCP servers config */
   mcpServers?: Record<string, unknown>;
+  /** System prompt appended to the agent's base prompt */
+  systemPrompt?: string;
+  /** Installed skill names (e.g. "find-skills", "frontend-design") */
+  skills?: string[];
+  /** Volatile agent — created for a specific plan, auto-removed when plan completes */
+  volatile?: boolean;
+  /** Plan group this volatile agent belongs to */
+  planGroup?: string;
 }
 
 export interface AgentActivity {
@@ -89,6 +98,7 @@ export interface AgentActivity {
   toolCalls: number;        // total tool calls made
   lastUpdate: string;       // ISO timestamp of last activity
   summary?: string;         // agent's last text output / message
+  sessionId?: string;       // SDK session ID for transcript access
 }
 
 export interface AgentProcess {

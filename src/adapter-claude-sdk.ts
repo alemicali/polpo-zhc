@@ -18,43 +18,79 @@ class ClaudeSDKAdapter implements AgentAdapter {
 
     const prompt = buildPrompt(task);
 
+    // Build allowedTools — ensure "Skill" is included when agent has skills
+    let allowedTools = agent.allowedTools;
+    if (agent.skills?.length) {
+      const tools = new Set(allowedTools ?? []);
+      tools.add("Skill");
+      allowedTools = [...tools];
+    }
+
     const options: Options = {
       cwd,
       abortController,
       permissionMode: "bypassPermissions",
       allowDangerouslySkipPermissions: true,
-      persistSession: false,
+      persistSession: true,
       model: agent.model,
-      allowedTools: agent.allowedTools,
+      allowedTools,
       hooks: {
         PostToolUse: [{
           hooks: [async (input) => {
             trackToolUse(input, activity);
+            // Capture sessionId from hook input
+            if (input?.session_id && !activity.sessionId) {
+              activity.sessionId = input.session_id;
+            }
             return {};
           }],
         }],
       },
     };
 
+    // Build system prompt: user-defined + skill directives
+    const systemParts: string[] = [];
+    if (agent.systemPrompt) systemParts.push(agent.systemPrompt);
+    if (agent.skills?.length) {
+      systemParts.push(
+        `\nYou have the following skills assigned to you. Use ONLY these skills (via the Skill tool) when applicable — do not use other installed skills:\n` +
+        agent.skills.map(s => `- ${s}`).join("\n")
+      );
+    }
+    if (systemParts.length > 0) {
+      (options as any).systemPrompt = {
+        type: "preset",
+        preset: "claude_code",
+        append: systemParts.join("\n\n"),
+      };
+    }
+
     // Add MCP servers if configured
     if (agent.mcpServers) {
       options.mcpServers = agent.mcpServers as Options["mcpServers"];
     }
 
-    const done = runQuery(prompt, options, activity, () => { alive = false; });
-
-    return {
+    const handle: AgentHandle = {
       agentName: agent.name,
       taskId: task.id,
       startedAt: new Date().toISOString(),
+      pid: 0,
       activity,
-      done,
+      done: null as any, // set below
       isAlive: () => alive,
       kill: () => {
         abortController.abort();
         alive = false;
       },
     };
+
+    handle.done = runQuery(prompt, options, activity, () => {
+      alive = false;
+      // Copy sessionId to handle for persistence
+      if (activity.sessionId) handle.sessionId = activity.sessionId;
+    });
+
+    return handle;
   }
 }
 
@@ -124,6 +160,15 @@ async function runQuery(
  * Process an SDK message and update activity tracking.
  */
 function processMessage(message: SDKMessage, activity: AgentActivity): void {
+  // Capture sessionId from any message that has it
+  const msg = message as any;
+  if (msg.session_id && !activity.sessionId) {
+    activity.sessionId = msg.session_id;
+  }
+  if (msg.sessionId && !activity.sessionId) {
+    activity.sessionId = msg.sessionId;
+  }
+
   // Assistant messages — extract text summary
   if (message.type === "assistant" && message.message) {
     const content = message.message.content;

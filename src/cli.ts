@@ -317,4 +317,15 @@ program
     }
   });
 
+// orchestra tui (interactive mode — also the default)
+program
+  .command("tui", { isDefault: true })
+  .description("Launch the interactive TUI (default)")
+  .option("-c, --config <path>", "Path to working directory", ".")
+  .action(async (opts) => {
+    const { OrchestraTUI } = await import("./tui.js");
+    const tui = new OrchestraTUI(opts.config);
+    await tui.start();
+  });
+
 program.parse();

@@ -10,6 +10,10 @@ export interface AgentHandle {
   taskId: string;
   /** When the agent was started */
   startedAt: string;
+  /** Process ID (0 for SDK adapter, real PID for generic) */
+  pid: number;
+  /** SDK session ID — for reading conversation transcripts */
+  sessionId?: string;
   /** Live activity data — adapters update this in place */
   activity: AgentActivity;
   /** Resolves when the agent finishes (success or failure) */

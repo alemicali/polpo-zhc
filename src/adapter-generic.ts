@@ -120,6 +120,7 @@ class GenericAdapter implements AgentAdapter {
       agentName: agent.name,
       taskId: task.id,
       startedAt: new Date().toISOString(),
+      pid: child.pid ?? 0,
       activity,
       done,
       isAlive: () => alive,
