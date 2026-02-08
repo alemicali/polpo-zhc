@@ -1,24 +1,26 @@
 #!/usr/bin/env node
 
 import blessed from "blessed";
-import { resolve } from "node:path";
+import { resolve, basename } from "node:path";
 import { readFileSync, existsSync } from "node:fs";
 import { parse as parseYaml } from "yaml";
 import { Orchestrator } from "../orchestrator.js";
-import type { OrchestraState, Team } from "../core/types.js";
+import type { OrchestraState, Team, Task } from "../core/types.js";
+import { JsonConfigStore } from "../stores/json-config-store.js";
 import type { TUIConfig, CommandContext } from "./context.js";
 import {
-  NOTES, LOGO_LINES, PROVIDERS, MODELS,
+  LOGO_LINES, PROVIDERS, MODELS,
   SLASH_COMMANDS,
 } from "./constants.js";
 import {
   formatElapsed, getStatusIcon,
-  getProviderLabel,
+  getProviderLabel, boxWidth, esc, fmtUserMsg,
 } from "./formatters.js";
 import { bridgeOrchestraEvents } from "./event-bridge.js";
 import { dispatchCommand } from "./commands/router.js";
 import { handlePlanInput as cmdHandlePlanInput } from "./commands/plan.js";
 import { handleChatInput as cmdHandleChatInput } from "./commands/chat.js";
+import { prepareTask, fallbackDirectCreate } from "./commands/task-prep.js";
 
 // Register adapters
 import "../adapters/claude-sdk.js";
@@ -26,7 +28,7 @@ import "../adapters/generic.js";
 
 export class OrchestraTUI {
   private screen!: blessed.Widgets.Screen;
-  private config: TUIConfig = { judge: "claude-sdk", agent: "claude-sdk", model: "claude-sonnet-4-5-20250929" };
+  private config: TUIConfig = { project: "", judge: "claude-sdk", judgeModel: "claude-sonnet-4-5-20250929", agent: "claude-sdk", model: "claude-sonnet-4-5-20250929" };
 
   // Main UI elements
   private header!: blessed.Widgets.BoxElement;
@@ -68,7 +70,32 @@ export class OrchestraTUI {
 
   async start(): Promise<void> {
     this.createScreen();
-    await this.runWizard();
+
+    // Check for persisted config — skip wizard if setup was already completed
+    const orchestraDir = resolve(this.workDir, ".orchestra");
+    const configStore = new JsonConfigStore(orchestraDir);
+    const savedConfig = configStore.get();
+
+    if (savedConfig) {
+      // Backfill for old configs
+      let needsSave = false;
+      if (!savedConfig.project) {
+        savedConfig.project = basename(this.workDir);
+        needsSave = true;
+      }
+      if (!savedConfig.judgeModel) {
+        savedConfig.judgeModel = savedConfig.model || "claude-sonnet-4-5-20250929";
+        needsSave = true;
+      }
+      if (needsSave) configStore.save(savedConfig);
+      this.config = savedConfig;
+    } else {
+      // Default project name from directory
+      this.config.project = basename(this.workDir);
+      await this.runWizard();
+      configStore.save(this.config);
+    }
+
     this.initOrchestrator();
     this.buildMainUI();
     this.startPolling();
@@ -93,7 +120,13 @@ export class OrchestraTUI {
       team = this.makeDefaultTeam();
     }
 
-    this.orchestrator.initInteractive("orchestra-interactive", team);
+    this.orchestrator.initInteractive(this.config.project || basename(this.workDir), team);
+
+    // Pass judge model to orchestrator settings
+    const cfg = this.orchestrator.getConfig();
+    if (cfg && this.config.judgeModel) {
+      cfg.settings.orchestratorModel = this.config.judgeModel;
+    }
 
     // Subscribe to typed orchestrator events (replaces console.log monkey-patch)
     this.disposeBridge = bridgeOrchestraEvents(this.orchestrator, {
@@ -150,11 +183,12 @@ export class OrchestraTUI {
 
   private runWizard(): Promise<void> {
     return new Promise<void>((resolvePromise) => {
+      const wizCols = Math.min(60, (this.screen.cols as number) - 4);
       const wizardBox = blessed.box({
         parent: this.screen,
         top: "center",
         left: "center",
-        width: 60,
+        width: wizCols,
         height: 24,
         tags: true,
         style: { bg: "black" },
@@ -162,8 +196,7 @@ export class OrchestraTUI {
 
       // Logo
       const logoText = LOGO_LINES.map(l =>
-        l.replace(/[♪♫♩♬]/g, m => `{yellow-fg}${m}{/yellow-fg}`)
-          .replace(/[╔╗╚╝║═]/g, m => `{bold}${m}{/bold}`)
+        l.replace(/[╔╗╚╝║═]/g, m => `{bold}${m}{/bold}`)
           .replace(/O R C H E S T R A/g, `{bold}{white-fg}O R C H E S T R A{/white-fg}{/bold}`)
           .replace(/AI Agent Orchestration Framework/g, `{grey-fg}AI Agent Orchestration Framework{/grey-fg}`)
       ).join("\n");
@@ -180,13 +213,19 @@ export class OrchestraTUI {
       });
 
       let step = 0;
-      const selections = { judge: "claude-sdk", agent: "claude-sdk", model: "claude-sonnet-4-5-20250929" };
+      const selections: TUIConfig = {
+        project: this.config.project,
+        judge: "claude-sdk",
+        judgeModel: "claude-sonnet-4-5-20250929",
+        agent: "claude-sdk",
+        model: "claude-sonnet-4-5-20250929",
+      };
 
       const stepLabel = blessed.box({
         parent: wizardBox,
         top: 9,
         left: 2,
-        width: 56,
+        width: wizCols - 4,
         height: 1,
         content: "",
         tags: true,
@@ -197,7 +236,7 @@ export class OrchestraTUI {
         parent: wizardBox,
         top: 11,
         left: 2,
-        width: 54,
+        width: wizCols - 6,
         height: PROVIDERS.length + 2,
         items: [],
         tags: true,
@@ -208,7 +247,7 @@ export class OrchestraTUI {
           selected: { bg: "blue", fg: "white", bold: true },
           item: { bg: "black" },
         },
-        keys: true,
+        keys: false,
         vi: false,
         mouse: true,
       });
@@ -229,34 +268,46 @@ export class OrchestraTUI {
         return `  {grey-fg}○ ${p.label}{/grey-fg}  {yellow-fg}coming soon{/yellow-fg}`;
       });
 
+      const buildModelItems = (adapter: string) => {
+        const available = MODELS.filter(m => m.adapter === adapter);
+        return available.map(m => `  {green-fg}●{/green-fg} ${m.label} {grey-fg}${m.value}{/grey-fg}`);
+      };
+
+      // Steps: 0=Judge adapter, 1=Judge model, 2=Agent adapter, 3=Agent model
       const showStep = (s: number) => {
         if (s === 0) {
-          stepLabel.setContent(`{bold}Step 1/3 — Select Judge{/bold} {grey-fg}(who evaluates task results){/grey-fg}`);
+          stepLabel.setContent(`{bold}Step 1/4 — Select Judge{/bold} {grey-fg}(evaluates results, resolves deadlocks){/grey-fg}`);
           selectionList.setItems(providerItems);
           selectionList.height = PROVIDERS.length + 2;
         } else if (s === 1) {
-          stepLabel.setContent(`{bold}Step 2/3 — Select Agent{/bold} {grey-fg}(who executes tasks){/grey-fg}`);
+          const available = MODELS.filter(m => m.adapter === selections.judge);
+          stepLabel.setContent(`{bold}Step 2/4 — Judge Model{/bold} {grey-fg}(for ${getProviderLabel(selections.judge)}){/grey-fg}`);
+          selectionList.setItems(buildModelItems(selections.judge));
+          selectionList.height = available.length + 2;
+        } else if (s === 2) {
+          stepLabel.setContent(`{bold}Step 3/4 — Select Orchestrator{/bold} {grey-fg}(executes tasks){/grey-fg}`);
           selectionList.setItems(providerItems);
           selectionList.height = PROVIDERS.length + 2;
-        } else if (s === 2) {
+        } else if (s === 3) {
           const available = MODELS.filter(m => m.adapter === selections.agent);
-          stepLabel.setContent(`{bold}Step 3/3 — Select Model{/bold} {grey-fg}(for ${getProviderLabel(selections.agent)}){/grey-fg}`);
-          const modelItems = available.map(m => `  {green-fg}●{/green-fg} ${m.label} {grey-fg}${m.value}{/grey-fg}`);
-          selectionList.setItems(modelItems);
+          stepLabel.setContent(`{bold}Step 4/4 — Agent Model{/bold} {grey-fg}(for ${getProviderLabel(selections.agent)}){/grey-fg}`);
+          selectionList.setItems(buildModelItems(selections.agent));
           selectionList.height = available.length + 2;
         }
         selectionList.select(0);
         this.screen.render();
       };
 
-      showStep(0);
-      selectionList.focus();
+      const finishWizard = () => {
+        this.config = selections;
+        wizardBox.destroy();
+        this.screen.removeListener("keypress", wizKh);
+        this.screen.render();
+        resolvePromise();
+      };
 
-      let initReady = false;
-      setImmediate(() => { initReady = true; });
-      selectionList.on("select", (_item: blessed.Widgets.BlessedElement, index: number) => {
-        if (!initReady) return;
-        if (step === 0 || step === 1) {
+      const handleSelect = (index: number) => {
+        if (step === 0 || step === 2) {
           // Provider selection
           const provider = PROVIDERS[index];
           if (!provider.available) {
@@ -269,36 +320,60 @@ export class OrchestraTUI {
 
           if (step === 0) {
             selections.judge = provider.value;
-            step = 1;
-            showStep(1);
-          } else {
-            selections.agent = provider.value;
-            const available = MODELS.filter(m => m.adapter === selections.agent);
+            const available = MODELS.filter(m => m.adapter === provider.value);
             if (available.length > 0) {
+              step = 1;
+              showStep(1);
+            } else {
+              selections.judgeModel = "";
               step = 2;
               showStep(2);
+            }
+          } else {
+            selections.agent = provider.value;
+            const available = MODELS.filter(m => m.adapter === provider.value);
+            if (available.length > 0) {
+              step = 3;
+              showStep(3);
             } else {
-              // No model selection needed for this adapter
               selections.model = "";
-              this.config = selections;
-              wizardBox.destroy();
-              this.screen.render();
-              resolvePromise();
+              finishWizard();
             }
           }
-        } else if (step === 2) {
-          // Model selection
+        } else if (step === 1) {
+          // Judge model selection
+          const available = MODELS.filter(m => m.adapter === selections.judge);
+          const model = available[index];
+          if (model) selections.judgeModel = model.value;
+          step = 2;
+          showStep(2);
+        } else if (step === 3) {
+          // Agent model selection
           const available = MODELS.filter(m => m.adapter === selections.agent);
           const model = available[index];
-          if (model) {
-            selections.model = model.value;
-          }
-          this.config = selections;
-          wizardBox.destroy();
-          this.screen.render();
-          resolvePromise();
+          if (model) selections.model = model.value;
+          finishWizard();
         }
+      };
+
+      showStep(0);
+      selectionList.focus();
+
+      let initReady = false;
+      setImmediate(() => { initReady = true; });
+      selectionList.on("select", (_item: blessed.Widgets.BlessedElement, index: number) => {
+        if (initReady) handleSelect(index);
       });
+
+      const wizKh = (_ch: string, key: any) => {
+        if (!key || !initReady) return;
+        if (key.name === "up") { selectionList.up(1); this.screen.render(); return; }
+        if (key.name === "down") { selectionList.down(1); this.screen.render(); return; }
+        if (key.name === "return" || key.name === "enter") {
+          handleSelect((selectionList as any).selected ?? 0);
+        }
+      };
+      this.screen.on("keypress", wizKh);
     });
   }
 
@@ -322,7 +397,7 @@ export class OrchestraTUI {
       parent: this.screen,
       top: 1,
       left: 0,
-      width: this.taskPanelVisible ? "75%" : "100%",
+      width: this.taskPanelVisible ? "65%" : "100%",
       height: "100%-4",
       tags: true,
       scrollable: true,
@@ -345,11 +420,11 @@ export class OrchestraTUI {
       parent: this.screen,
       top: 1,
       right: 0,
-      width: "25%",
+      width: "35%",
       height: "100%-4",
       border: { type: "line" },
       tags: true,
-      label: " {yellow-fg}♩{/yellow-fg} {bold}Tasks{/bold} ",
+      label: " {bold}Tasks{/bold} ",
       style: {
         bg: "black",
         border: { fg: "grey" },
@@ -414,7 +489,7 @@ export class OrchestraTUI {
       parent: this.screen,
       bottom: 4,
       left: 1,
-      width: 42,
+      width: Math.min(50, Math.max(30, Math.floor((this.screen.cols as number) * 0.4))),
       height: Object.keys(SLASH_COMMANDS).length + 2,
       items: [],
       tags: true,
@@ -577,35 +652,30 @@ export class OrchestraTUI {
           this.openCommandMenu(this.inputBuffer);
         }
 
-        // "@" at start → open agent menu
-        if (this.inputBuffer === "@") {
+        // "@" anywhere → open mention menu
+        if (ch === "@") {
           this.openMentionMenu();
         }
       }
     });
 
-    // Welcome message
+    // Welcome message (always visible)
     const team = this.orchestrator.getTeam();
     const modelLabel = this.config.model
       ? MODELS.find(m => m.value === this.config.model)?.label ?? this.config.model
       : "";
-    this.log("{yellow-fg}♩{/yellow-fg} Welcome to {bold}Orchestra{/bold}");
-    this.log("");
-    this.log(`  Judge:  {green-fg}${getProviderLabel(this.config.judge)}{/green-fg}`);
-    this.log(`  Agent:  {green-fg}${getProviderLabel(this.config.agent)}{/green-fg}` + (modelLabel ? ` {grey-fg}(${modelLabel}){/grey-fg}` : ""));
-    this.log(`  Team:   {green-fg}${team.name}{/green-fg} (${team.agents.map(a => a.name).join(", ")})`);
-    this.log("");
-    this.log("Type a task description and press Enter to run it.");
-    this.log("{grey-fg}Use {bold}@agent{/bold} to assign, {bold}/team{/bold} to manage, {bold}/config{/bold} to configure, {bold}/help{/bold} for commands{/grey-fg}");
-    this.log("");
-
-    // Clean welcome event
-    this.logEvent("{yellow-fg}♩{/yellow-fg} {bold}Orchestra{/bold}");
-    this.logEvent("");
-    this.logEvent(`  Team {green-fg}${team.name}{/green-fg} — ${team.agents.map(a => a.name).join(", ")}`);
-    this.logEvent("");
-    this.logEvent("{grey-fg}Ctrl+L for verbose log{/grey-fg}");
-    this.logEvent("");
+    this.logAlways("{bold}Orchestra{/bold}");
+    this.logAlways("");
+    const judgeModelLabel = this.config.judgeModel
+      ? MODELS.find(m => m.value === this.config.judgeModel)?.label ?? this.config.judgeModel
+      : "";
+    this.logAlways(`  Judge:  {green-fg}${getProviderLabel(this.config.judge)}{/green-fg}` + (judgeModelLabel ? ` {grey-fg}(${judgeModelLabel}){/grey-fg}` : ""));
+    this.logAlways(`  Orchestrator: {green-fg}${getProviderLabel(this.config.agent)}{/green-fg}` + (modelLabel ? ` {grey-fg}(${modelLabel}){/grey-fg}` : ""));
+    this.logAlways(`  Team:   {green-fg}${team.name}{/green-fg} (${team.agents.map(a => a.name).join(", ")})`);
+    this.logAlways("");
+    this.logAlways("Type a task description and press Enter to run it.");
+    this.logAlways("{grey-fg}Use {bold}@agent{/bold} to assign, {bold}!{/bold} prefix to skip prep, {bold}/config{/bold} to configure, {bold}/help{/bold} for commands{/grey-fg}");
+    this.logAlways("");
 
     this.updateInputDisplay();
   }
@@ -656,23 +726,23 @@ export class OrchestraTUI {
       }
     }
 
-    this.logAlways(`{cyan-fg}>{/cyan-fg} ${input}`);
-    this.logAlways("");
-
-    try {
-      const task = this.orchestrator.addTask({
-        title: description.length > 60 ? description.slice(0, 57) + "..." : description,
-        description,
-        assignTo,
-        group,
-      });
-      const groupInfo = group ? ` {cyan-fg}[${group}]{/cyan-fg}` : "";
-      this.logAlways(`{green-fg}Task created:{/green-fg} ${task.title} {grey-fg}[${task.id}] → ${assignTo}{/grey-fg}${groupInfo}`);
-      this.logAlways("{grey-fg}Agent will pick it up shortly...{/grey-fg}");
+    // Quick-task bypass: "!" prefix skips LLM preparation
+    if (description.startsWith("!")) {
+      description = description.slice(1).trim();
+      this.logAlways(fmtUserMsg(input));
       this.logAlways("");
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      this.logAlways(`{red-fg}Failed to create task: ${msg}{/red-fg}`);
+      fallbackDirectCreate(this.getCommandContext(), description, assignTo, group);
+      return;
+    }
+
+    // LLM-powered task preparation (can be disabled via /config)
+    const taskPrepEnabled = this.config.taskPrep !== false; // default: true
+    if (taskPrepEnabled) {
+      prepareTask(this.getCommandContext(), description, assignTo, group);
+    } else {
+      this.logAlways(fmtUserMsg(input));
+      this.logAlways("");
+      fallbackDirectCreate(this.getCommandContext(), description, assignTo, group);
     }
   }
 
@@ -819,16 +889,19 @@ export class OrchestraTUI {
     this.scheduleRender();
   }
 
-  /** Resolve a mention selection by index → append tag to inputBuffer */
+  /** Resolve a mention selection by index → insert tag at the trigger position */
   private resolveMention(index: number): void {
     const entry = this.mentionEntries[index];
     if (!entry || !entry.tag) return; // skip separators
     this.closeMenu();
-    // Replace the "@" trigger with the selected tag
-    if (this.inputBuffer.endsWith("@")) {
-      this.inputBuffer = this.inputBuffer.slice(0, -1);
+    // Find the last "@" in the buffer (the trigger point)
+    const atPos = this.inputBuffer.lastIndexOf("@");
+    if (atPos >= 0) {
+      // Replace from "@" to end of partial typing (everything after @)
+      this.inputBuffer = this.inputBuffer.slice(0, atPos) + entry.tag + " ";
+    } else {
+      this.inputBuffer += entry.tag + " ";
     }
-    this.inputBuffer += entry.tag + " ";
     this.updateInputDisplay();
   }
 
@@ -847,7 +920,7 @@ export class OrchestraTUI {
 
     if (this.taskPanelVisible) {
       this.taskPanel.show();
-      this.logBox.width = "75%";
+      this.logBox.width = "65%";
     } else {
       this.taskPanel.hide();
       this.logBox.width = "100%";
@@ -893,102 +966,150 @@ export class OrchestraTUI {
     const doneN = counts["done"] || 0;
     const failN = counts["failed"] || 0;
     const pct = Math.round(((doneN + failN) / total) * 100);
-    const barLen = 18;
+    const panelW = boxWidth(this.taskPanel);
+    const barLen = Math.max(8, panelW - 5);
     const greenFill = Math.round((doneN / total) * barLen);
     const redFill = Math.round((failN / total) * barLen);
     const grayFill = Math.max(0, barLen - greenFill - redFill);
     lines.push(`{green-fg}${"█".repeat(greenFill)}{/green-fg}{red-fg}${"█".repeat(redFill)}{/red-fg}{grey-fg}${"░".repeat(grayFill)}{/grey-fg} ${pct}%`);
     lines.push("");
 
-    // Separate ungrouped vs grouped tasks
-    const ungrouped: typeof this.state.tasks = [];
-    const groups = new Map<string, typeof this.state.tasks>();
+    // Build chronological entries: standalone tasks + plan groups interleaved by creation time
+    type Entry = { type: "task"; task: Task; ts: string }
+               | { type: "group"; name: string; tasks: Task[]; ts: string };
+    const entries: Entry[] = [];
+    const groups = new Map<string, Task[]>();
     for (const t of this.state.tasks) {
       if (t.group) {
         if (!groups.has(t.group)) groups.set(t.group, []);
         groups.get(t.group)!.push(t);
       } else {
-        ungrouped.push(t);
+        entries.push({ type: "task", task: t, ts: t.createdAt });
       }
     }
+    for (const [name, tasks] of groups) {
+      const earliest = tasks.reduce((min, t) => t.createdAt < min ? t.createdAt : min, tasks[0].createdAt);
+      entries.push({ type: "group", name, tasks, ts: earliest });
+    }
+    entries.sort((a, b) => a.ts.localeCompare(b.ts));
 
     const blinkPhase = this.frame % 3; // 0, 1, 2 — faster cycle
 
-    const renderTask = (task: typeof this.state.tasks[0], indent: string) => {
-      const isRunning = ["in_progress", "assigned", "review"].includes(task.status);
-      const hasDeps = task.dependsOn && task.dependsOn.length > 0;
-      const depPrefix = hasDeps ? "↳ " : "";
+    // Build task list for dependency rendering
+    const allTasks = this.state.tasks;
 
-      // Blink icon for running tasks — orange (#208) pulsing
-      let icon: string;
+    const taskIcon = (task: typeof allTasks[0]) => {
+      const isRunning = ["in_progress", "assigned", "review"].includes(task.status);
       if (isRunning) {
-        icon = blinkPhase === 0
+        return blinkPhase === 0
           ? "{bold}{#ff8800-fg}●{/#ff8800-fg}{/bold}"
           : blinkPhase === 1
             ? "{#cc6600-fg}●{/#cc6600-fg}"
             : "{#884400-fg}○{/#884400-fg}";
-      } else {
-        icon = getStatusIcon(task.status);
       }
+      return getStatusIcon(task.status);
+    };
 
-      const maxLen = hasDeps ? 16 : 18;
-      const title = task.title.length > maxLen
-        ? task.title.slice(0, maxLen - 1) + "…"
-        : task.title;
-      lines.push(`${indent}${depPrefix}${icon} ${title}`);
-
+    const taskScore = (task: typeof allTasks[0]) => {
       if (task.result?.assessment?.globalScore !== undefined) {
         const gs = task.result.assessment.globalScore;
         const color = gs >= 4 ? "green" : gs >= 3 ? "yellow" : "red";
-        lines.push(`${indent}  {${color}-fg}${gs.toFixed(1)}/5{/${color}-fg}`);
+        return ` {${color}-fg}${gs.toFixed(1)}{/${color}-fg}`;
       }
+      return "";
+    };
 
+    const truncTitle = (title: string, avail: number) => {
+      const max = Math.max(6, avail);
+      return title.length > max ? title.slice(0, max - 1) + "…" : title;
+    };
+
+    const renderTaskLine = (task: typeof allTasks[0], indent: string) => {
+      const icon = taskIcon(task);
+      const score = taskScore(task);
+      let phaseTag = "";
+      if (task.phase === "fix") {
+        phaseTag = ` {magenta-fg}fix ${task.fixAttempts ?? 1}{/magenta-fg}`;
+      } else if (task.phase === "review") {
+        phaseTag = ` {yellow-fg}review{/yellow-fg}`;
+      }
+      const overhead = 4 + (score ? 5 : 0) + (phaseTag ? 6 : 0);
+      const plainIndent = indent.replace(/\{[^}]*\}/g, "");
+      const title = truncTitle(esc(task.title), panelW - plainIndent.length - overhead);
+      lines.push(`${indent}${icon} ${title}${phaseTag}${score}`);
+
+      // Activity line for running tasks
       const proc = (this.state!.processes || []).find(p => p.taskId === task.id);
       if (proc?.alive && proc.activity) {
         const act = proc.activity;
+        const parts: string[] = [];
         if (act.lastTool) {
-          const fileInfo = act.lastFile ? ` → ${act.lastFile.split("/").pop()}` : "";
-          lines.push(`${indent}  {cyan-fg}${s} ${act.lastTool}${fileInfo}{/cyan-fg}`);
+          const file = act.lastFile ? ` ${esc(act.lastFile.split("/").pop() ?? "")}` : "";
+          parts.push(`${esc(act.lastTool)}${file}`);
         }
-        if (act.toolCalls > 0) {
-          const fCount = (act.filesCreated?.length || 0) + (act.filesEdited?.length || 0);
-          const info = [`${act.toolCalls} calls`];
-          if (fCount > 0) info.push(`${fCount} files`);
-          lines.push(`${indent}  {grey-fg}${info.join(", ")}{/grey-fg}`);
-        }
-        if (act.summary) {
-          const summary = act.summary.replace(/\{[^}]+\}/g, "").slice(0, 30);
-          if (summary.trim()) lines.push(`${indent}  {grey-fg}${summary}{/grey-fg}`);
+        if (act.toolCalls > 0) parts.push(`${act.toolCalls} calls`);
+        const fCount = (act.filesCreated?.length || 0) + (act.filesEdited?.length || 0);
+        if (fCount > 0) parts.push(`${fCount} files`);
+        if (parts.length > 0) {
+          lines.push(`${indent}  {cyan-fg}${s}{/cyan-fg} {grey-fg}${parts.join(" · ")}{/grey-fg}`);
         }
       }
     };
 
-    // Ungrouped tasks first
-    for (const task of ungrouped) {
-      renderTask(task, "");
-    }
+    /** Render tasks as a flat ordered list, showing deps inline */
+    const renderTaskList = (tasks: typeof allTasks, baseIndent: string) => {
+      // Sort: running first, then pending, then done, then failed
+      const order: Record<string, number> = {
+        in_progress: 0, assigned: 0, review: 0,
+        pending: 1, done: 2, failed: 3,
+      };
+      const sorted = [...tasks].sort((a, b) =>
+        (order[a.status] ?? 9) - (order[b.status] ?? 9)
+      );
 
-    // Grouped tasks with visual box
-    for (const [groupName, groupTasks] of groups) {
-      if (ungrouped.length > 0 || lines.length > 4) lines.push("");
-      const gDone = groupTasks.filter(t => t.status === "done").length;
-      const gFailed = groupTasks.filter(t => t.status === "failed").length;
-      const gTotal = groupTasks.length;
-      const allTerminal = gDone + gFailed === gTotal;
-
-      // Elapsed time — from earliest createdAt to now (or last updatedAt if all terminal)
-      const earliest = groupTasks.reduce((min, t) => t.createdAt < min ? t.createdAt : min, groupTasks[0].createdAt);
-      const endTime = allTerminal
-        ? groupTasks.reduce((max, t) => t.updatedAt > max ? t.updatedAt : max, groupTasks[0].updatedAt)
-        : new Date().toISOString();
-      const elapsedMs = new Date(endTime).getTime() - new Date(earliest).getTime();
-      const elapsedStr = formatElapsed(elapsedMs);
-
-      lines.push(`{cyan-fg}┌ {bold}${groupName}{/bold} {grey-fg}(${gDone}/${gTotal}){/grey-fg} {grey-fg}${elapsedStr}{/grey-fg}{/cyan-fg}`);
-      for (const task of groupTasks) {
-        renderTask(task, "{cyan-fg}│{/cyan-fg} ");
+      for (const task of sorted) {
+        // Show dependency info for blocked tasks
+        const localDeps = (task.dependsOn || []).filter(d =>
+          tasks.some(t => t.id === d && t.status !== "done")
+        );
+        if (localDeps.length > 0 && task.status === "pending") {
+          const depNames = localDeps.map(d => {
+            const dep = tasks.find(t => t.id === d);
+            return dep ? esc(dep.title.slice(0, 15)) : d.slice(0, 6);
+          });
+          renderTaskLine(task, baseIndent);
+          lines.push(`${baseIndent}  {grey-fg}⏳ after: ${depNames.join(", ")}{/grey-fg}`);
+        } else {
+          renderTaskLine(task, baseIndent);
+        }
       }
-      lines.push(`{cyan-fg}└${"─".repeat(16)}{/cyan-fg}`);
+    };
+
+    // Render entries in chronological order (tasks + plan groups interleaved)
+    for (const entry of entries) {
+      if (entry.type === "task") {
+        renderTaskLine(entry.task, "");
+      } else {
+        const groupTasks = entry.tasks;
+        if (lines.length > 4) lines.push("");
+        const gDone = groupTasks.filter(t => t.status === "done").length;
+        const gFailed = groupTasks.filter(t => t.status === "failed").length;
+        const gTotal = groupTasks.length;
+        const allTerminal = gDone + gFailed === gTotal;
+
+        const endTime = allTerminal
+          ? groupTasks.reduce((max, t) => t.updatedAt > max ? t.updatedAt : max, groupTasks[0].updatedAt)
+          : new Date().toISOString();
+        const elapsedMs = new Date(endTime).getTime() - new Date(entry.ts).getTime();
+        const elapsedStr = formatElapsed(elapsedMs);
+
+        const groupStatus = allTerminal
+          ? (gFailed > 0 ? "{red-fg}FAILED{/red-fg}" : "{green-fg}DONE{/green-fg}")
+          : "{yellow-fg}RUNNING{/yellow-fg}";
+        lines.push(`{bold}${esc(entry.name)}{/bold} {grey-fg}${gDone}/${gTotal}{/grey-fg} ${groupStatus} {grey-fg}${elapsedStr}{/grey-fg}`);
+
+        renderTaskList(groupTasks, "  ");
+      }
     }
 
     lines.push("");
@@ -1027,9 +1148,7 @@ export class OrchestraTUI {
 
   private updateHeader(): void {
     this.loadState();
-    const note = `{yellow-fg}${NOTES[this.frame % NOTES.length]}{/yellow-fg}`;
-
-    const parts = [`${note} {bold}ORCHESTRA{/bold}`];
+    const parts = ["{bold}ORCHESTRA{/bold}"];
 
     if (this.state?.project) {
       parts.push(`{grey-fg}${this.state.project}{/grey-fg}`);
@@ -1064,13 +1183,24 @@ export class OrchestraTUI {
       chat: "{magenta-fg}Chat{/magenta-fg}",
     };
 
+    // Show active plan name when in plan mode
+    let planTag = "";
+    if (this.inputMode === "plan") {
+      const active = this.orchestrator.getResumablePlans().find(p => p.status === "active");
+      if (active) {
+        planTag = ` {yellow-fg}[${active.name}]{/yellow-fg}`;
+      } else {
+        planTag = " {grey-fg}[no active plan]{/grey-fg}";
+      }
+    }
+
     // Truncate workDir for display
     const maxCwd = 30;
     const cwd = this.workDir.length > maxCwd
       ? "…" + this.workDir.slice(-(maxCwd - 1))
       : this.workDir;
 
-    const left = ` ${modeLabels[this.inputMode]}  {grey-fg}│{/grey-fg}  ` +
+    const left = ` ${modeLabels[this.inputMode]}${planTag}  {grey-fg}│{/grey-fg}  ` +
       "{cyan-fg}Alt+T{/cyan-fg} {grey-fg}mode{/grey-fg}  " +
       "{cyan-fg}/{/cyan-fg} {grey-fg}cmds{/grey-fg}  " +
       "{cyan-fg}Ctrl+O{/cyan-fg} {grey-fg}tasks{/grey-fg}  " +

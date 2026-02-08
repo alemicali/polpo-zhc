@@ -5,11 +5,12 @@
 import blessed from "blessed";
 import { parse as parseYaml } from "yaml";
 import type { CommandContext } from "../context.js";
-import { PROVIDERS, MODELS, discoverSkills } from "../constants.js";
+import { PROVIDERS, MODELS } from "../constants.js";
 import { getProviderLabel, formatYamlColored } from "../formatters.js";
-import { querySDK as llmQuerySDK, extractTeamYaml as llmExtractTeamYaml } from "../llm.js";
-import { buildTeamGenPrompt as buildTeamPrompt } from "../prompts.js";
-import { createOverlay, addHintBar } from "../widgets.js";
+import { querySDK as llmQuerySDK, extractTeamYaml as llmExtractTeamYaml } from "../../llm/query.js";
+import { buildTeamGenPrompt as buildTeamPrompt } from "../../llm/prompts.js";
+import { discoverSkills } from "../../llm/skills.js";
+import { createOverlay, addHintBar, showTextInput } from "../widgets.js";
 import { showConfigPicker } from "./config.js";
 
 export function cmdTeam(ctx: CommandContext, _args: string[]): void {
@@ -23,12 +24,15 @@ function showTeamMenu(ctx: CommandContext): void {
   const buildItems = () => {
     const items: string[] = [];
     const agents = ctx.orchestrator.getAgents();
+    // Compute column widths from actual data
+    const nameMax = Math.max(6, ...agents.map(a => a.name.length));
+    const adapterMax = Math.max(7, ...agents.map(a => a.adapter.length));
     for (const a of agents) {
       const def = a.name === ctx.getDefaultAgent() ? " {green-fg}★{/green-fg}" : "";
       const model = a.model ? ` {grey-fg}(${MODELS.find(m => m.value === a.model)?.label ?? a.model}){/grey-fg}` : "";
       const skillsBadge = a.skills?.length ? ` {yellow-fg}⚡${a.skills.length}{/yellow-fg}` : "";
       const sysPrompt = a.systemPrompt ? " {blue-fg}✎{/blue-fg}" : "";
-      items.push(`  {cyan-fg}${a.name}{/cyan-fg}  ${a.adapter}  ${a.role || "-"}${model}${skillsBadge}${sysPrompt}${def}`);
+      items.push(`  {cyan-fg}${a.name.padEnd(nameMax)}{/cyan-fg}  ${a.adapter.padEnd(adapterMax)}  ${a.role || "-"}${model}${skillsBadge}${sysPrompt}${def}`);
     }
     items.push("  {green-fg}+{/green-fg} Add agent");
     items.push("  {magenta-fg}✦{/magenta-fg} Generate team with AI");
@@ -44,7 +48,7 @@ function showTeamMenu(ctx: CommandContext): void {
     items: buildItems(),
     tags: true,
     border: { type: "line" },
-    label: ` {yellow-fg}♩{/yellow-fg} {bold}Team: ${team.name}{/bold} `,
+    label: ` {bold}Team: ${team.name}{/bold} `,
     style: {
       bg: "black",
       border: { fg: "cyan" },
@@ -56,7 +60,7 @@ function showTeamMenu(ctx: CommandContext): void {
     mouse: true,
   });
 
-  addHintBar(overlay, " {cyan-fg}Enter{/cyan-fg} {grey-fg}edit{/grey-fg}  {cyan-fg}d{/cyan-fg} {grey-fg}delete{/grey-fg}  {cyan-fg}r{/cyan-fg} {grey-fg}rename{/grey-fg}  {cyan-fg}*{/cyan-fg} {grey-fg}default{/grey-fg}  {cyan-fg}a{/cyan-fg} {grey-fg}AI generate{/grey-fg}  {cyan-fg}Esc{/cyan-fg} {grey-fg}close{/grey-fg}");
+  addHintBar(overlay, " {cyan-fg}Enter{/cyan-fg} {grey-fg}edit{/grey-fg}  {cyan-fg}d{/cyan-fg} {grey-fg}delete{/grey-fg}  {cyan-fg}r{/cyan-fg} {grey-fg}rename{/grey-fg}  {cyan-fg}*{/cyan-fg} {grey-fg}default{/grey-fg}  {cyan-fg}t{/cyan-fg} {grey-fg}team name{/grey-fg}  {cyan-fg}a{/cyan-fg} {grey-fg}AI generate{/grey-fg}  {cyan-fg}Esc{/cyan-fg} {grey-fg}close{/grey-fg}");
 
   teamList.select(0);
   ctx.scheduleRender();
@@ -132,6 +136,19 @@ function showTeamMenu(ctx: CommandContext): void {
       ctx.setDefaultAgent(agents[idx].name);
       ctx.log(`{green-fg}Default agent: ${agents[idx].name}{/green-fg}`);
       refreshList();
+      return;
+    }
+
+    // t = rename team
+    if (key.name === "t") {
+      cleanup();
+      showTextInput(ctx, { title: "Team Name", initial: team.name }).then(name => {
+        if (name) {
+          ctx.orchestrator.renameTeam(name);
+          ctx.log(`{green-fg}Team renamed to "${name}"{/green-fg}`);
+        }
+        showTeamMenu(ctx);
+      });
       return;
     }
 
@@ -616,19 +633,19 @@ function showAddAgentWizard(ctx: CommandContext): void {
   let agentRole = "";
 
   const stepLabel = blessed.box({
-    parent: overlay, top: 3, left: "center", width: 50, height: 1,
+    parent: overlay, top: 3, left: "center", width: "60%", height: 1,
     content: "", tags: true, style: { bg: "black" },
   });
 
   const inputBox = blessed.box({
-    parent: overlay, top: 5, left: "center", width: 50, height: 3,
+    parent: overlay, top: 5, left: "center", width: "60%", height: 3,
     border: { type: "line" }, tags: true,
     style: { bg: "black", fg: "white", border: { fg: "cyan" } },
     hidden: true,
   });
 
   const selList = blessed.list({
-    parent: overlay, top: 5, left: "center", width: 50, height: 8,
+    parent: overlay, top: 5, left: "center", width: "60%", height: 8,
     items: [], tags: true, border: { type: "line" },
     style: { bg: "black", border: { fg: "cyan" }, selected: { bg: "blue", fg: "white", bold: true }, item: { bg: "black" } },
     keys: false, vi: false, mouse: true, hidden: true,
@@ -788,7 +805,7 @@ function showEditAgentMenu(ctx: CommandContext, agent: { name: string; adapter: 
     : "default";
 
   const truncPrompt = agent.systemPrompt
-    ? agent.systemPrompt.replace(/\n/g, " ").slice(0, 40) + (agent.systemPrompt.length > 40 ? "…" : "")
+    ? agent.systemPrompt.replace(/\n/g, " ").slice(0, 60) + (agent.systemPrompt.length > 60 ? "…" : "")
     : "-";
 
   const skillsLabel = agent.skills?.length ? agent.skills.join(", ") : "-";
@@ -980,7 +997,8 @@ function showSkillPicker(ctx: CommandContext, agent: { name: string; skills?: st
   const buildSkillItems = () =>
     available.map(s => {
       const check = currentSkills.has(s.name) ? "{green-fg}✓{/green-fg}" : " ";
-      return `  [${check}] {cyan-fg}${s.name}{/cyan-fg}  {grey-fg}${s.description.slice(0, 40)}{/grey-fg}`;
+      const descMax = Math.max(20, ((ctx.screen.cols as number) || 80) - s.name.length - 12);
+      return `  [${check}] {cyan-fg}${s.name}{/cyan-fg}  {grey-fg}${s.description.slice(0, descMax)}{/grey-fg}`;
     });
 
   const items = available.length > 0

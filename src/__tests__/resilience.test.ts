@@ -427,7 +427,7 @@ describe("Orchestrator Resilience", () => {
   // ─── Orphan Recovery with RunStore ─────────────────────────
 
   describe("Orphan recovery with RunStore", () => {
-    it("marks run as failed when runner PID is dead", () => {
+    it("cleans up run record when runner PID is dead", () => {
       vi.spyOn(process, "kill").mockImplementation(((pid: number, signal?: string | number) => {
         if (signal === 0) throw new Error("ESRCH");
         return true;
@@ -442,8 +442,9 @@ describe("Orchestrator Resilience", () => {
 
       orchestrator.recoverOrphanedTasks();
 
+      // Dead run gets completed as failed then deleted
       const run = runStore.getRun("run-dead");
-      expect(run!.status).toBe("failed");
+      expect(run).toBeUndefined();
     });
 
     it("keeps run alive when runner PID is still running", () => {

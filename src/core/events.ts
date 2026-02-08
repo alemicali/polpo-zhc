@@ -1,5 +1,6 @@
 import { EventEmitter } from "node:events";
-import type { Task, TaskStatus, DimensionScore, PlanStatus } from "./types.js";
+import type { Task, TaskStatus, DimensionScore, PlanStatus, PlanReport } from "./types.js";
+import type { LogStore } from "./log-store.js";
 
 export interface OrchestraEventMap {
   // Task lifecycle
@@ -15,7 +16,9 @@ export interface OrchestraEventMap {
 
   // Assessment
   "assessment:started": { taskId: string };
+  "assessment:progress": { taskId: string; message: string };
   "assessment:complete": { taskId: string; passed: boolean; scores?: DimensionScore[]; globalScore?: number; message?: string };
+  "assessment:corrected": { taskId: string; corrections: number };
 
   // Orchestrator lifecycle
   "orchestrator:started": { project: string; agents: string[] };
@@ -23,9 +26,20 @@ export interface OrchestraEventMap {
   "orchestrator:deadlock": { taskIds: string[] };
   "orchestrator:shutdown": Record<string, never>;
 
-  // Retry
+  // Retry & Fix
   "task:retry": { taskId: string; attempt: number; maxRetries: number };
+  "task:fix": { taskId: string; attempt: number; maxFix: number };
   "task:maxRetries": { taskId: string };
+
+  // Question detection & auto-resolution
+  "task:question": { taskId: string; question: string };
+  "task:answered": { taskId: string; question: string; answer: string };
+
+  // Deadlock resolution
+  "deadlock:detected": { taskIds: string[]; resolvableCount: number };
+  "deadlock:resolving": { taskId: string; failedDepId: string };
+  "deadlock:resolved": { taskId: string; failedDepId: string; action: "absorb" | "retry"; reason: string };
+  "deadlock:unresolvable": { taskId: string; reason: string };
 
   // Resilience
   "task:timeout": { taskId: string; elapsed: number; timeout: number };
@@ -37,7 +51,8 @@ export interface OrchestraEventMap {
   // Plans
   "plan:saved": { planId: string; name: string; status: PlanStatus };
   "plan:executed": { planId: string; group: string; taskCount: number };
-  "plan:completed": { planId: string; group: string; allPassed: boolean };
+  "plan:completed": { planId: string; group: string; allPassed: boolean; report: PlanReport };
+  "plan:resumed": { planId: string; name: string; retried: number; pending: number };
   "plan:deleted": { planId: string };
 
   // General
@@ -50,10 +65,30 @@ export type OrchestraEvent = keyof OrchestraEventMap;
  * Typed event emitter for Orchestra.
  * Wraps Node's EventEmitter with type-safe emit/on/once/off.
  */
+/** Events to exclude from persistent logging (too frequent or internal). */
+const LOG_EXCLUDED = new Set<string>(["orchestrator:tick", "newListener", "removeListener"]);
+
 export class TypedEmitter extends EventEmitter {
+  private logSink?: LogStore;
+
+  /** Attach a persistent log store. All emitted events will be written to it. */
+  setLogSink(store: LogStore): void {
+    this.logSink = store;
+  }
+
   override emit<K extends OrchestraEvent>(event: K, payload: OrchestraEventMap[K]): boolean;
   override emit(event: string | symbol, ...args: unknown[]): boolean;
   override emit(event: string | symbol, ...args: unknown[]): boolean {
+    // Persist to log store before dispatching
+    if (this.logSink && typeof event === "string" && !LOG_EXCLUDED.has(event)) {
+      try {
+        this.logSink.append({
+          ts: new Date().toISOString(),
+          event,
+          data: args[0],
+        });
+      } catch { /* never let logging break the system */ }
+    }
     return super.emit(event, ...args);
   }
 

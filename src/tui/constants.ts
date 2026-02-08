@@ -1,19 +1,13 @@
-import { resolve } from "node:path";
-import { readFileSync, existsSync, readdirSync } from "node:fs";
-import { parse as parseYaml } from "yaml";
-
 // ─── Notes & Logo ────────────────────────────────────────
 
-export const NOTES = ["♩", "♪", "♫", "♬"];
-
 export const LOGO_LINES = [
-  "    ♪  ╔═══════════════════════════════════╗  ♪",
-  "   ♫  ║                                   ║  ♫",
-  "       ║   ♩ O R C H E S T R A ♩          ║",
+  "       ╔═══════════════════════════════════╗",
+  "       ║                                   ║",
+  "       ║      O R C H E S T R A            ║",
   "       ║                                   ║",
   "       ║   AI Agent Orchestration Framework ║",
-  "   ♫  ║                                   ║  ♫",
-  "    ♪  ╚═══════════════════════════════════╝  ♪",
+  "       ║                                   ║",
+  "       ╚═══════════════════════════════════╝",
 ];
 
 // ─── Provider & Model Options ────────────────────────────
@@ -50,6 +44,7 @@ export const SLASH_COMMANDS: Record<string, string> = {
   "/result": "Show last task result",
   "/inspect": "Browse tasks & plans",
   "/plans": "List & manage saved plans",
+  "/resume": "Resume interrupted plans",
   "/edit-plan": "Edit a running plan",
   "/reassess": "Re-run assessment on task",
   "/team": "Show / manage team",
@@ -57,6 +52,8 @@ export const SLASH_COMMANDS: Record<string, string> = {
   "/clear-tasks": "Clear finished tasks",
   "/tasks": "Browse tasks & plans",
   "/clear": "Clear log",
+  "/memory": "Edit project memory",
+  "/logs": "Browse session logs",
   "/config": "Show configuration",
   "/help": "Commands & shortcuts",
   "/quit": "Exit Orchestra",
@@ -71,54 +68,3 @@ export const SHORTCUTS: Record<string, string> = {
   "Escape": "Clear input",
 };
 
-// ─── Skill Discovery ─────────────────────────────────────
-
-export interface SkillInfo {
-  name: string;
-  description: string;
-  allowedTools?: string[];
-}
-
-/** Scan .claude/skills/ directories for available SKILL.md files */
-export function discoverSkills(cwd: string): SkillInfo[] {
-  const skills: SkillInfo[] = [];
-  const dirs = [
-    resolve(cwd, ".claude", "skills"),
-    resolve(process.env.HOME ?? "", ".claude", "skills"),
-  ];
-
-  for (const dir of dirs) {
-    if (!existsSync(dir)) continue;
-    try {
-      for (const entry of readdirSync(dir, { withFileTypes: true })) {
-        if (!entry.isDirectory()) continue;
-        const skillPath = resolve(dir, entry.name, "SKILL.md");
-        if (!existsSync(skillPath)) continue;
-
-        try {
-          const content = readFileSync(skillPath, "utf-8");
-          const info = parseSkillFrontmatter(content);
-          if (info && !skills.find(s => s.name === info.name)) {
-            skills.push(info);
-          }
-        } catch { /* skip unreadable */ }
-      }
-    } catch { /* skip unreadable dirs */ }
-  }
-  return skills;
-}
-
-/** Parse SKILL.md YAML frontmatter */
-export function parseSkillFrontmatter(content: string): SkillInfo | null {
-  const match = content.match(/^---\n([\s\S]*?)\n---/);
-  if (!match) return null;
-  try {
-    const fm = parseYaml(match[1]);
-    if (!fm?.name) return null;
-    return {
-      name: fm.name,
-      description: fm.description ?? "",
-      allowedTools: fm["allowed-tools"],
-    };
-  } catch { return null; }
-}

@@ -4,7 +4,7 @@
 
 import blessed from "blessed";
 import type { CommandContext } from "../context.js";
-import { getStatusIcon, getStatusLabel, formatElapsed } from "../formatters.js";
+import { getStatusIcon, getStatusLabel, formatElapsed, esc } from "../formatters.js";
 import { createOverlay, addHintBar } from "../widgets.js";
 import { showConfigPicker } from "./config.js";
 
@@ -30,7 +30,7 @@ export function cmdReassess(ctx: CommandContext): void {
   });
 
   const taskList = blessed.list({
-    parent: overlay, top: "center", left: "center", width: 60,
+    parent: overlay, top: "center", left: "center", width: "70%",
     height: Math.min(items.length + 2, 16), items, tags: true,
     border: { type: "line" },
     label: " {yellow-fg}↻{/yellow-fg} {bold}Reassess Task{/bold} ",
@@ -222,105 +222,228 @@ function showBrowserPlan(ctx: CommandContext, planName: string, planTasks: any[]
 
 function showBrowserTaskDetail(ctx: CommandContext, task: any, goBack: () => void): void {
   import("../../session-reader.js").then(({ readSessionSummary }) => {
-    const state = ctx.getState();
-    const proc = (state?.processes || []).find((p: any) => p.taskId === task.id);
-    const sessionId = proc?.activity?.sessionId;
+    const isRunning = ["in_progress", "assigned", "review"].includes(task.status);
 
-    const lines: string[] = [];
-    lines.push(`{bold}${task.title}{/bold} {grey-fg}[${task.id}]{/grey-fg}`);
-    const statusLabel = getStatusLabel(task.status);
-    lines.push(`Status: ${statusLabel}  Agent: {cyan-fg}${task.assignTo}{/cyan-fg}  Retries: ${task.retries}/${task.maxRetries}`);
-    if (task.group) lines.push(`Plan: {cyan-fg}${task.group}{/cyan-fg}`);
-    lines.push("");
+    const buildContent = () => {
+      // Re-read live state for running tasks
+      ctx.loadState();
+      const state = ctx.getState();
+      const freshTask = state?.tasks.find((t: any) => t.id === task.id) ?? task;
+      const proc = (state?.processes || []).find((p: any) => p.taskId === freshTask.id);
+      const sessionId = proc?.activity?.sessionId;
 
-    if (task.description && task.description !== task.title) {
-      lines.push(`{cyan-fg}Description:{/cyan-fg}`);
-      lines.push(`  ${task.description.slice(0, 500)}`);
+      const lines: string[] = [];
+
+      // ── Header ──
+      const statusLabel = getStatusLabel(freshTask.status);
+      lines.push(`{bold}${esc(freshTask.title)}{/bold} {grey-fg}[${freshTask.id}]{/grey-fg}`);
+      lines.push(`${statusLabel}  {cyan-fg}→ ${esc(freshTask.assignTo)}{/cyan-fg}  Retries: ${freshTask.retries}/${freshTask.maxRetries}`);
+      if (freshTask.group) lines.push(`Plan: {cyan-fg}${esc(freshTask.group)}{/cyan-fg}`);
+      if (freshTask.dependsOn?.length > 0) {
+        const depNames = freshTask.dependsOn.map((depId: string) => {
+          const dep = state?.tasks.find((t: any) => t.id === depId);
+          return dep ? esc(dep.title) : depId;
+        });
+        lines.push(`Depends on: {grey-fg}${depNames.join(", ")}{/grey-fg}`);
+      }
       lines.push("");
-    }
 
-    if (proc?.activity) {
-      const act = proc.activity;
-      lines.push(`{cyan-fg}Activity:{/cyan-fg}`);
-      lines.push(`  Tool calls: ${act.toolCalls}`);
-      if (act.filesCreated?.length > 0) lines.push(`  {green-fg}Created:{/green-fg} ${act.filesCreated.join(", ")}`);
-      if (act.filesEdited?.length > 0) lines.push(`  {yellow-fg}Edited:{/yellow-fg} ${act.filesEdited.join(", ")}`);
-      if (act.lastTool) lines.push(`  Last tool: ${act.lastTool}`);
-      if (act.summary) lines.push(`  Summary: ${act.summary.slice(0, 200)}`);
-      lines.push("");
-    }
+      // ── Prompt / Description ──
+      if (freshTask.description && freshTask.description !== freshTask.title) {
+        lines.push("{cyan-fg}━━ Prompt ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━{/cyan-fg}");
+        lines.push(`  ${esc(freshTask.description.slice(0, 800))}`);
+        lines.push("");
+      }
 
-    if (sessionId) {
-      const summary = readSessionSummary(sessionId, ctx.workDir);
-      if (summary) {
-        lines.push(`{cyan-fg}Session:{/cyan-fg} {grey-fg}${sessionId}{/grey-fg}`);
-        lines.push(`  Messages: ${summary.messageCount}`);
-        if (summary.filesCreated.length > 0) {
-          lines.push(`  {green-fg}Files created:{/green-fg}`);
-          for (const f of summary.filesCreated.slice(0, 10)) lines.push(`    ${f}`);
+      // ── Expectations ──
+      if (freshTask.expectations?.length > 0) {
+        lines.push("{yellow-fg}┌─ Expectations ────────────────────────┐{/yellow-fg}");
+        for (const exp of freshTask.expectations) {
+          // Check if this expectation passed (from assessment results)
+          const check = freshTask.result?.assessment?.checks?.find((c: any) => c.type === exp.type);
+          const icon = check ? (check.passed ? "{green-fg}✓{/green-fg}" : "{red-fg}✗{/red-fg}") : "{grey-fg}○{/grey-fg}";
+          let label = "";
+          switch (exp.type) {
+            case "test":
+              label = `test: ${esc(exp.command || "")}`;
+              break;
+            case "file_exists":
+              label = `files: ${esc((exp.paths || []).join(", "))}`;
+              break;
+            case "script":
+              label = `script: ${esc((exp.command || "").split("\n")[0])}`;
+              break;
+            case "llm_review":
+              label = `review: ${esc((exp.criteria || "").slice(0, 80))}`;
+              break;
+            default:
+              label = exp.type;
+          }
+          lines.push(`{yellow-fg}│{/yellow-fg}  ${icon} ${label}`);
         }
-        if (summary.filesEdited.length > 0) {
-          lines.push(`  {yellow-fg}Files edited:{/yellow-fg}`);
-          for (const f of summary.filesEdited.slice(0, 10)) lines.push(`    ${f}`);
+        lines.push("{yellow-fg}└──────────────────────────────────────┘{/yellow-fg}");
+        lines.push("");
+      }
+
+      // ── Live Activity (running tasks) ──
+      if (proc?.alive && proc.activity) {
+        const act = proc.activity;
+        const elapsed = proc.startedAt ? formatElapsed(Date.now() - new Date(proc.startedAt).getTime()) : "";
+        lines.push(`{yellow-fg}━━ Live Activity ━━━━━━━━━━━━━━━━━━━━━━{/yellow-fg} {grey-fg}${elapsed}{/grey-fg}`);
+        if (act.lastTool) {
+          const fileInfo = act.lastFile ? ` → ${esc(act.lastFile.split("/").pop() ?? "")}` : "";
+          lines.push(`  {yellow-fg}▸{/yellow-fg} ${esc(act.lastTool)}${fileInfo}`);
         }
-        if (summary.todos.length > 0) {
-          lines.push(`  {magenta-fg}TODOs:{/magenta-fg}`);
-          for (const t of summary.todos.slice(0, 5)) lines.push(`    ${t}`);
+        lines.push(`  Tool calls: ${act.toolCalls}`);
+        if (act.filesCreated?.length > 0) {
+          lines.push(`  {green-fg}Created:{/green-fg}`);
+          for (const f of act.filesCreated) lines.push(`    {green-fg}+{/green-fg} ${esc(f)}`);
         }
-        if (summary.errors.length > 0) {
-          lines.push(`  {red-fg}Errors:{/red-fg}`);
-          for (const e of summary.errors.slice(0, 3)) lines.push(`    ${e}`);
+        if (act.filesEdited?.length > 0) {
+          lines.push(`  {yellow-fg}Edited:{/yellow-fg}`);
+          for (const f of act.filesEdited) lines.push(`    {yellow-fg}~{/yellow-fg} ${esc(f)}`);
         }
-        if (summary.lastMessage) {
-          lines.push(`  {grey-fg}Last message:{/grey-fg}`);
-          lines.push(`    ${summary.lastMessage.slice(0, 300)}`);
+        if (act.summary) {
+          lines.push("");
+          lines.push(`  {grey-fg}${esc(act.summary.slice(0, 400))}{/grey-fg}`);
         }
         lines.push("");
       }
-    }
 
-    if (task.result) {
-      lines.push(`{cyan-fg}Result:{/cyan-fg}`);
-      lines.push(`  Exit: ${task.result.exitCode} | Duration: ${(task.result.duration / 1000).toFixed(1)}s`);
-      if (task.result.assessment?.globalScore !== undefined) {
-        const gs = task.result.assessment.globalScore;
-        const color = gs >= 4 ? "green" : gs >= 3 ? "yellow" : "red";
-        lines.push(`  {${color}-fg}Score: ${gs.toFixed(1)}/5{/${color}-fg}`);
-        if (task.result.assessment.scores) {
-          for (const s of task.result.assessment.scores) {
-            const sc = s.score >= 4 ? "green" : s.score >= 3 ? "yellow" : "red";
-            const stars = "★".repeat(s.score) + "☆".repeat(5 - s.score);
-            lines.push(`    {${sc}-fg}${stars}{/${sc}-fg} ${s.dimension} — ${s.reasoning.slice(0, 100)}`);
+      // ── Session Transcript ──
+      if (sessionId) {
+        const summary = readSessionSummary(sessionId, ctx.workDir);
+        if (summary) {
+          lines.push("{cyan-fg}━━ Session Transcript ━━━━━━━━━━━━━━━━━{/cyan-fg}");
+          lines.push(`  {grey-fg}ID: ${sessionId}{/grey-fg}  Messages: ${summary.messageCount}`);
+          if (summary.filesCreated.length > 0) {
+            lines.push(`  {green-fg}Files created:{/green-fg}`);
+            for (const f of summary.filesCreated.slice(0, 15)) lines.push(`    {green-fg}+{/green-fg} ${esc(f)}`);
           }
+          if (summary.filesEdited.length > 0) {
+            lines.push(`  {yellow-fg}Files edited:{/yellow-fg}`);
+            for (const f of summary.filesEdited.slice(0, 15)) lines.push(`    {yellow-fg}~{/yellow-fg} ${esc(f)}`);
+          }
+          if (summary.todos.length > 0) {
+            lines.push(`  {magenta-fg}TODOs:{/magenta-fg}`);
+            for (const t of summary.todos.slice(0, 5)) lines.push(`    ${esc(t)}`);
+          }
+          if (summary.errors.length > 0) {
+            lines.push(`  {red-fg}Errors:{/red-fg}`);
+            for (const e of summary.errors.slice(0, 5)) lines.push(`    {red-fg}✗{/red-fg} ${esc(e)}`);
+          }
+          if (summary.lastMessage) {
+            lines.push("");
+            lines.push(`  {grey-fg}Last message:{/grey-fg}`);
+            lines.push(`    ${esc(summary.lastMessage.slice(0, 500))}`);
+          }
+          lines.push("");
         }
       }
-      if (task.result.stdout) {
-        lines.push(`  {grey-fg}Output:{/grey-fg}`);
-        lines.push(`    ${task.result.stdout.slice(0, 500)}`);
+
+      // ── Result & Assessment ──
+      if (freshTask.result) {
+        const exitColor = freshTask.result.exitCode === 0 ? "green" : "red";
+        lines.push("{cyan-fg}━━ Result ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━{/cyan-fg}");
+        lines.push(`  Exit: {${exitColor}-fg}${freshTask.result.exitCode}{/${exitColor}-fg}  Duration: ${(freshTask.result.duration / 1000).toFixed(1)}s`);
+
+        if (freshTask.result.assessment) {
+          const assessment = freshTask.result.assessment;
+          lines.push("");
+          lines.push("{magenta-fg}━━ Assessment ━━━━━━━━━━━━━━━━━━━━━━━━━{/magenta-fg}");
+          const passed = assessment.passed;
+          lines.push(`  Result: ${passed ? "{green-fg}PASSED{/green-fg}" : "{red-fg}FAILED{/red-fg}"}`);
+
+          if (assessment.globalScore !== undefined) {
+            const gs = assessment.globalScore;
+            const color = gs >= 4 ? "green" : gs >= 3 ? "yellow" : "red";
+            lines.push(`  Global score: {${color}-fg}{bold}${gs.toFixed(1)}/5{/bold}{/${color}-fg}`);
+          }
+
+          if (assessment.scores?.length > 0) {
+            lines.push("");
+            for (const s of assessment.scores) {
+              const sc = s.score >= 4 ? "green" : s.score >= 3 ? "yellow" : "red";
+              const bar = "{" + sc + "-fg}" + "█".repeat(s.score) + "{/" + sc + "-fg}" + "{grey-fg}" + "░".repeat(5 - s.score) + "{/grey-fg}";
+              lines.push(`  ${bar} {bold}${esc(s.dimension)}{/bold} ${s.score}/5`);
+              if (s.reasoning) lines.push(`       {grey-fg}${esc(s.reasoning.slice(0, 150))}{/grey-fg}`);
+            }
+          }
+
+          if (assessment.checks?.length > 0) {
+            lines.push("");
+            lines.push("  {cyan-fg}Checks:{/cyan-fg}");
+            for (const c of assessment.checks) {
+              const icon = c.passed ? "{green-fg}✓{/green-fg}" : "{red-fg}✗{/red-fg}";
+              lines.push(`    ${icon} ${c.type}: ${esc(c.message ?? "")}`);
+              if (c.details) lines.push(`      {grey-fg}${esc(c.details.slice(0, 200))}{/grey-fg}`);
+            }
+          }
+
+          if (assessment.llmReview) {
+            lines.push("");
+            lines.push("  {cyan-fg}LLM Review:{/cyan-fg}");
+            lines.push(`    {grey-fg}${esc(assessment.llmReview.slice(0, 500))}{/grey-fg}`);
+          }
+        }
+
+        lines.push("");
+
+        if (freshTask.result.stdout) {
+          lines.push("{cyan-fg}━━ Output ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━{/cyan-fg}");
+          for (const line of freshTask.result.stdout.slice(0, 1000).split("\n")) {
+            lines.push(`  ${esc(line)}`);
+          }
+          lines.push("");
+        }
+        if (freshTask.result.stderr) {
+          lines.push("{red-fg}━━ Stderr ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━{/red-fg}");
+          for (const line of freshTask.result.stderr.slice(0, 500).split("\n")) {
+            lines.push(`  {red-fg}${esc(line)}{/red-fg}`);
+          }
+          lines.push("");
+        }
       }
-      if (task.result.stderr) {
-        lines.push(`  {red-fg}Stderr:{/red-fg}`);
-        lines.push(`    ${task.result.stderr.slice(0, 300)}`);
-      }
-    }
+
+      return lines.join("\n");
+    };
 
     const { overlay, cleanup, onKeypress } = createOverlay(ctx);
-    const content = blessed.box({
+    const contentBox = blessed.box({
       parent: overlay, top: 0, left: 0, width: "100%", height: "100%-1",
-      content: lines.join("\n"), tags: true, border: { type: "line" },
+      content: buildContent(), tags: true, border: { type: "line" },
       label: ` {bold}${task.title}{/bold} `,
       scrollable: true, keys: false, mouse: true,
       style: { bg: "black", border: { fg: "cyan" } },
     });
-    addHintBar(overlay, " {cyan-fg}↑↓{/cyan-fg} {grey-fg}scroll{/grey-fg}  {cyan-fg}Escape{/cyan-fg} {grey-fg}back{/grey-fg}");
-    content.focus();
+    const hintText = isRunning
+      ? " {cyan-fg}↑↓{/cyan-fg} {grey-fg}scroll{/grey-fg}  {yellow-fg}auto-refresh{/yellow-fg}  {cyan-fg}Escape{/cyan-fg} {grey-fg}back{/grey-fg}"
+      : " {cyan-fg}↑↓{/cyan-fg} {grey-fg}scroll{/grey-fg}  {cyan-fg}Escape{/cyan-fg} {grey-fg}back{/grey-fg}";
+    addHintBar(overlay, hintText);
+    contentBox.focus();
     ctx.scheduleRender();
+
+    // Auto-refresh for running tasks
+    let refreshTimer: ReturnType<typeof setInterval> | null = null;
+    if (isRunning) {
+      refreshTimer = setInterval(() => {
+        const scroll = (contentBox as any).childBase ?? 0;
+        contentBox.setContent(buildContent());
+        contentBox.scrollTo(scroll);
+        ctx.scheduleRender();
+      }, 2000);
+    }
 
     onKeypress((_ch, key) => {
       if (!key) return;
-      if (key.name === "escape" || key.name === "q") { cleanup(); goBack(); return; }
-      if (key.name === "up") { content.scroll(-1); ctx.scheduleRender(); return; }
-      if (key.name === "down") { content.scroll(1); ctx.scheduleRender(); return; }
+      if (key.name === "escape" || key.name === "q") {
+        if (refreshTimer) clearInterval(refreshTimer);
+        cleanup();
+        goBack();
+        return;
+      }
+      if (key.name === "up") { contentBox.scroll(-1); ctx.scheduleRender(); return; }
+      if (key.name === "down") { contentBox.scroll(1); ctx.scheduleRender(); return; }
     });
   });
 }
@@ -397,7 +520,9 @@ function showPlanEditor(ctx: CommandContext, groupName: string, groupTasks: any[
       const agent = `{cyan-fg}→ ${t.assignTo}{/cyan-fg}`;
       const editable = t.status === "pending" || t.status === "failed";
       const editMark = editable ? "" : " {grey-fg}(locked){/grey-fg}";
-      items.push(`  ${icon} ${t.title.slice(0, 30)} ${agent}${editMark}`);
+      const cols = (ctx.screen.cols as number) || 80;
+      const titleMax = Math.max(15, cols - 30);
+      items.push(`  ${icon} ${t.title.length > titleMax ? t.title.slice(0, titleMax - 1) + "…" : t.title} ${agent}${editMark}`);
     }
     items.push("  {green-fg}+{/green-fg} Add task to plan");
     return items;
@@ -640,7 +765,7 @@ export function cmdAbort(ctx: CommandContext): void {
 
   for (const t of ungrouped) {
     options.push({
-      label: `  {red-fg}✗{/red-fg} ${t.title.slice(0, 30)}`,
+      label: `  {red-fg}✗{/red-fg} ${t.title.length > 50 ? t.title.slice(0, 49) + "…" : t.title}`,
       action: () => {
         ctx.orchestrator.killTask(t.id);
         ctx.log(`{red-fg}Aborted: ${t.title}{/red-fg}`);
@@ -666,7 +791,7 @@ function showAbortPicker(ctx: CommandContext, options: { label: string; action: 
     parent: overlay,
     top: "center",
     left: "center",
-    width: 50,
+    width: "60%",
     height: items.length + 2,
     items,
     tags: true,
@@ -732,7 +857,7 @@ export function cmdClearTasks(ctx: CommandContext): void {
     parent: overlay,
     top: "center",
     left: "center",
-    width: 50,
+    width: "60%",
     height: items.length + 2,
     items,
     tags: true,

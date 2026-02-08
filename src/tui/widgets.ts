@@ -28,8 +28,11 @@ export function createOverlay(host: WidgetHost): OverlayResult {
   });
 
   const keypressHandlers: Array<(ch: string, key: any) => void> = [];
+  let cleaned = false;
 
   const cleanup = () => {
+    if (cleaned) return; // guard against double cleanup
+    cleaned = true;
     host.overlayActive = false;
     for (const handler of keypressHandlers) {
       host.screen.removeListener("keypress", handler);
@@ -75,7 +78,7 @@ export interface PickerOptions {
   borderColor?: string;
   selectedStyle?: Record<string, any>;
   hint?: string;
-  width?: number;
+  width?: number | string;
   position?: "center" | "fullscreen";
 }
 
@@ -88,7 +91,7 @@ export function showPicker(host: WidgetHost, opts: PickerOptions): Promise<numbe
     const { overlay, cleanup, onKeypress } = createOverlay(host);
     const borderColor = opts.borderColor ?? "cyan";
     const selectedStyle = opts.selectedStyle ?? { bg: "blue", fg: "white", bold: true };
-    const width = opts.width ?? 50;
+    const width = opts.width ?? "60%";
     const isFullscreen = opts.position === "fullscreen";
 
     const list = blessed.list({

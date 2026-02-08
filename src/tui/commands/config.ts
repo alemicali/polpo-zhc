@@ -19,11 +19,23 @@ function showConfigMenu(ctx: CommandContext): void {
   const modelLabel = ctx.config.model
     ? MODELS.find(m => m.value === ctx.config.model)?.label ?? ctx.config.model
     : "default";
+  const judgeModelLabel = ctx.config.judgeModel
+    ? MODELS.find(m => m.value === ctx.config.judgeModel)?.label ?? ctx.config.judgeModel
+    : "default";
+
+  const settings = ctx.orchestrator.getConfig()?.settings;
+  const volatileEnabled = settings?.enableVolatileTeams !== false;
+  const volatileCleanup = settings?.volatileCleanup ?? "on_complete";
+  const taskPrepEnabled = ctx.config.taskPrep !== false;
 
   const configItems = [
-    `  {cyan-fg}Judge{/cyan-fg}      ${getProviderLabel(ctx.config.judge)}`,
-    `  {cyan-fg}Agent{/cyan-fg}      ${getProviderLabel(ctx.config.agent)}`,
-    `  {cyan-fg}Model{/cyan-fg}      ${modelLabel}`,
+    `  {cyan-fg}Judge{/cyan-fg}            ${getProviderLabel(ctx.config.judge)}`,
+    `  {cyan-fg}Judge Model{/cyan-fg}      ${judgeModelLabel}`,
+    `  {cyan-fg}Orchestrator{/cyan-fg}     ${getProviderLabel(ctx.config.agent)}`,
+    `  {cyan-fg}Agent Model{/cyan-fg}      ${modelLabel}`,
+    `  {cyan-fg}Task Preparation{/cyan-fg} ${taskPrepEnabled ? "{green-fg}enabled{/green-fg}" : "{grey-fg}disabled{/grey-fg}"}`,
+    `  {cyan-fg}Volatile Teams{/cyan-fg}   ${volatileEnabled ? "{green-fg}enabled{/green-fg}" : "{red-fg}disabled{/red-fg}"}`,
+    `  {cyan-fg}Volatile Cleanup{/cyan-fg} ${volatileCleanup === "on_complete" ? "{yellow-fg}on_complete{/yellow-fg}" : "{green-fg}manual{/green-fg}"}`,
   ];
 
   const configBox = blessed.list({
@@ -35,7 +47,7 @@ function showConfigMenu(ctx: CommandContext): void {
     items: configItems,
     tags: true,
     border: { type: "line" },
-    label: " {yellow-fg}♩{/yellow-fg} {bold}Configuration{/bold} ",
+    label: " {bold}Configuration{/bold} ",
     style: {
       bg: "black",
       border: { fg: "cyan" },
@@ -53,44 +65,70 @@ function showConfigMenu(ctx: CommandContext): void {
   configBox.focus();
   ctx.scheduleRender();
 
-  let cfgReady = false;
-  setImmediate(() => { cfgReady = true; });
-  configBox.on("select", (_item: any, index: number) => {
-    if (!cfgReady) return;
+  const doConfigSelect = (index: number) => {
     if (index === 0) {
+      // Judge adapter
       showConfigPicker(ctx, overlay, "Select Judge", PROVIDERS, (value) => {
         ctx.config.judge = value;
+        // Auto-set judge model if current one is incompatible
+        const validModels = MODELS.filter(m => m.adapter === value);
+        if (validModels.length > 0 && !validModels.find(m => m.value === ctx.config.judgeModel)) {
+          ctx.config.judgeModel = validModels[0].value;
+        }
+        syncJudgeModel(ctx);
         cleanup();
         ctx.log(`{green-fg}Judge changed to ${getProviderLabel(value)}{/green-fg}`);
       }, cleanup);
     } else if (index === 1) {
-      showConfigPicker(ctx, overlay, "Select Agent", PROVIDERS, (value) => {
+      // Judge model
+      const available = MODELS.filter(m => m.adapter === ctx.config.judge);
+      if (available.length === 0) {
+        cleanup();
+        ctx.log("{yellow-fg}No model selection for this judge adapter{/yellow-fg}");
+        return;
+      }
+      const modelOptions = available.map(m => ({
+        label: `${m.label} {grey-fg}${m.value}{/grey-fg}`,
+        value: m.value,
+        available: true,
+      }));
+      showConfigPicker(ctx, overlay, "Select Judge Model", modelOptions, (value) => {
+        ctx.config.judgeModel = value;
+        syncJudgeModel(ctx);
+        const label = MODELS.find(m => m.value === value)?.label ?? value;
+        cleanup();
+        ctx.log(`{green-fg}Judge model changed to ${label}{/green-fg}`);
+      }, cleanup);
+    } else if (index === 2) {
+      // Orchestrator adapter
+      showConfigPicker(ctx, overlay, "Select Orchestrator", PROVIDERS, (value) => {
         ctx.config.agent = value;
         const team = ctx.orchestrator.getTeam();
         for (const a of team.agents) {
           a.adapter = value;
         }
         cleanup();
-        ctx.log(`{green-fg}Agent changed to ${getProviderLabel(value)}{/green-fg}`);
+        ctx.log(`{green-fg}Orchestrator changed to ${getProviderLabel(value)}{/green-fg}`);
         const validModels = MODELS.filter(m => m.adapter === value);
         if (validModels.length > 0 && !validModels.find(m => m.value === ctx.config.model)) {
           ctx.config.model = validModels[0].value;
-          ctx.log(`{yellow-fg}Model auto-set to ${validModels[0].label}{/yellow-fg}`);
+          ctx.log(`{yellow-fg}Agent model auto-set to ${validModels[0].label}{/yellow-fg}`);
         }
       }, cleanup);
-    } else if (index === 2) {
+    } else if (index === 3) {
+      // Agent model
       const available = MODELS.filter(m => m.adapter === ctx.config.agent);
       if (available.length === 0) {
         cleanup();
         ctx.log("{yellow-fg}No model selection for this adapter{/yellow-fg}");
         return;
       }
-      const modelProviders = available.map(m => ({
+      const modelOptions = available.map(m => ({
         label: `${m.label} {grey-fg}${m.value}{/grey-fg}`,
         value: m.value,
         available: true,
       }));
-      showConfigPicker(ctx, overlay, "Select Model", modelProviders, (value) => {
+      showConfigPicker(ctx, overlay, "Select Agent Model", modelOptions, (value) => {
         ctx.config.model = value;
         const team = ctx.orchestrator.getTeam();
         for (const a of team.agents) {
@@ -98,9 +136,44 @@ function showConfigMenu(ctx: CommandContext): void {
         }
         const label = MODELS.find(m => m.value === value)?.label ?? value;
         cleanup();
-        ctx.log(`{green-fg}Model changed to ${label}{/green-fg}`);
+        ctx.log(`{green-fg}Agent model changed to ${label}{/green-fg}`);
       }, cleanup);
+    } else if (index === 4) {
+      // Toggle task preparation
+      const current = ctx.config.taskPrep !== false;
+      ctx.config.taskPrep = !current;
+      cleanup();
+      ctx.log(`{green-fg}Task preparation ${!current ? "enabled" : "disabled"}{/green-fg}`);
+      if (!current) {
+        ctx.log("{grey-fg}Tasks will be prepared via LLM before execution{/grey-fg}");
+      } else {
+        ctx.log("{grey-fg}Tasks will be created directly without LLM preparation{/grey-fg}");
+      }
+    } else if (index === 5) {
+      // Toggle volatile teams
+      const cfg = ctx.orchestrator.getConfig();
+      if (cfg) {
+        const current = cfg.settings.enableVolatileTeams !== false;
+        cfg.settings.enableVolatileTeams = !current;
+        cleanup();
+        ctx.log(`{green-fg}Volatile teams ${!current ? "enabled" : "disabled"}{/green-fg}`);
+      }
+    } else if (index === 6) {
+      // Toggle volatile cleanup policy
+      const cfg = ctx.orchestrator.getConfig();
+      if (cfg) {
+        const current = cfg.settings.volatileCleanup ?? "on_complete";
+        cfg.settings.volatileCleanup = current === "on_complete" ? "manual" : "on_complete";
+        cleanup();
+        ctx.log(`{green-fg}Volatile cleanup: ${cfg.settings.volatileCleanup}{/green-fg}`);
+      }
     }
+  };
+
+  let cfgReady = false;
+  setImmediate(() => { cfgReady = true; });
+  configBox.on("select", (_item: any, index: number) => {
+    if (cfgReady) doConfigSelect(index);
   });
 
   configBox.on("cancel", cleanup);
@@ -189,4 +262,12 @@ export function showConfigPicker(
     if (key.name === "return" || key.name === "enter") { doSelect((picker as any).selected ?? 0); }
   };
   ctx.screen.on("keypress", kh);
+}
+
+/** Sync judgeModel from TUI config into orchestrator settings.orchestratorModel */
+function syncJudgeModel(ctx: CommandContext): void {
+  const cfg = ctx.orchestrator.getConfig();
+  if (cfg) {
+    cfg.settings.orchestratorModel = ctx.config.judgeModel || undefined;
+  }
 }

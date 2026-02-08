@@ -22,6 +22,10 @@ interface TaskRow {
   expectations: string;
   metrics: string;
   result: string | null;
+  phase: string | null;
+  fix_attempts: number;
+  resolution_attempts: number;
+  original_description: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -80,8 +84,8 @@ export class SqliteTaskStore implements TaskStore {
 
     // Prepare statements
     this.insertTaskStmt = this.db.prepare(`
-      INSERT INTO tasks (id, title, description, assign_to, "group", depends_on, status, retries, max_retries, max_duration, retry_policy, expectations, metrics, result, created_at, updated_at)
-      VALUES (@id, @title, @description, @assign_to, @group, @depends_on, @status, @retries, @max_retries, @max_duration, @retry_policy, @expectations, @metrics, @result, @created_at, @updated_at)
+      INSERT INTO tasks (id, title, description, assign_to, "group", depends_on, status, retries, max_retries, max_duration, retry_policy, expectations, metrics, result, phase, fix_attempts, original_description, created_at, updated_at)
+      VALUES (@id, @title, @description, @assign_to, @group, @depends_on, @status, @retries, @max_retries, @max_duration, @retry_policy, @expectations, @metrics, @result, @phase, @fix_attempts, @original_description, @created_at, @updated_at)
     `);
     this.getTaskStmt = this.db.prepare(`SELECT * FROM tasks WHERE id = ?`);
     this.getAllTasksStmt = this.db.prepare(`SELECT * FROM tasks ORDER BY created_at ASC`);
@@ -129,6 +133,9 @@ export class SqliteTaskStore implements TaskStore {
         expectations TEXT NOT NULL DEFAULT '[]',
         metrics     TEXT NOT NULL DEFAULT '[]',
         result      TEXT,
+        phase       TEXT,
+        fix_attempts INTEGER NOT NULL DEFAULT 0,
+        original_description TEXT,
         created_at  TEXT NOT NULL,
         updated_at  TEXT NOT NULL
       );
@@ -164,6 +171,10 @@ export class SqliteTaskStore implements TaskStore {
     const migrations = [
       `ALTER TABLE tasks ADD COLUMN max_duration INTEGER`,
       `ALTER TABLE tasks ADD COLUMN retry_policy TEXT`,
+      `ALTER TABLE tasks ADD COLUMN phase TEXT`,
+      `ALTER TABLE tasks ADD COLUMN fix_attempts INTEGER NOT NULL DEFAULT 0`,
+      `ALTER TABLE tasks ADD COLUMN original_description TEXT`,
+      `ALTER TABLE tasks ADD COLUMN resolution_attempts INTEGER NOT NULL DEFAULT 0`,
     ];
     for (const sql of migrations) {
       try { this.db.exec(sql); } catch { /* column already exists */ }
@@ -217,6 +228,10 @@ export class SqliteTaskStore implements TaskStore {
       expectations: JSON.parse(row.expectations),
       metrics: JSON.parse(row.metrics),
       result: row.result ? JSON.parse(row.result) : undefined,
+      phase: (row.phase as Task["phase"]) ?? undefined,
+      fixAttempts: row.fix_attempts ?? 0,
+      resolutionAttempts: row.resolution_attempts ?? 0,
+      originalDescription: row.original_description ?? undefined,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     };
@@ -238,6 +253,10 @@ export class SqliteTaskStore implements TaskStore {
       expectations: JSON.stringify(task.expectations ?? []),
       metrics: JSON.stringify(task.metrics ?? []),
       result: task.result ? JSON.stringify(task.result) : null,
+      phase: task.phase ?? null,
+      fix_attempts: task.fixAttempts ?? 0,
+      resolution_attempts: task.resolutionAttempts ?? 0,
+      original_description: task.originalDescription ?? null,
       created_at: task.createdAt,
       updated_at: task.updatedAt,
     };
@@ -358,6 +377,10 @@ export class SqliteTaskStore implements TaskStore {
     if (updates.expectations !== undefined) { setClauses.push("expectations = @expectations"); params.expectations = JSON.stringify(updates.expectations); }
     if (updates.metrics !== undefined) { setClauses.push("metrics = @metrics"); params.metrics = JSON.stringify(updates.metrics); }
     if (updates.result !== undefined) { setClauses.push("result = @result"); params.result = JSON.stringify(updates.result); }
+    if ("phase" in updates) { setClauses.push("phase = @phase"); params.phase = updates.phase ?? null; }
+    if (updates.fixAttempts !== undefined) { setClauses.push("fix_attempts = @fix_attempts"); params.fix_attempts = updates.fixAttempts; }
+    if (updates.resolutionAttempts !== undefined) { setClauses.push("resolution_attempts = @resolution_attempts"); params.resolution_attempts = updates.resolutionAttempts; }
+    if (updates.originalDescription !== undefined) { setClauses.push("original_description = @original_description"); params.original_description = updates.originalDescription ?? null; }
     if (updates.createdAt !== undefined) { setClauses.push("created_at = @created_at"); params.created_at = updates.createdAt; }
 
     const sql = `UPDATE tasks SET ${setClauses.join(", ")} WHERE id = @id`;

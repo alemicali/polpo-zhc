@@ -1,6 +1,8 @@
 import { exec } from "node:child_process";
-import { access } from "node:fs/promises";
+import { access, mkdir, writeFile, unlink } from "node:fs/promises";
+import { join } from "node:path";
 import { promisify } from "node:util";
+import { nanoid } from "nanoid";
 import type {
   Task,
   TaskExpectation,
@@ -9,14 +11,15 @@ import type {
   CheckResult,
   MetricResult,
 } from "../core/types.js";
-import { runLLMReview, type LLMQueryFn } from "./llm-review.js";
+import { runLLMReview } from "./llm-review.js";
 
 const execAsync = promisify(exec);
+const SCRIPT_MAX_BUFFER = 5 * 1024 * 1024; // 5 MB
 
 export async function runCheck(
   expectation: TaskExpectation,
   cwd: string,
-  queryFn?: LLMQueryFn,
+  onProgress?: (msg: string) => void,
 ): Promise<CheckResult> {
   switch (expectation.type) {
     case "test": {
@@ -68,26 +71,56 @@ export async function runCheck(
           message: "No script command provided",
         };
       }
+
+      const isMultiLine = cmd.includes("\n");
+      const label = isMultiLine
+        ? `script (${cmd.split("\n").length} lines)`
+        : cmd;
+
+      if (!isMultiLine) {
+        // Single-line: execute directly
+        try {
+          await execAsync(cmd, { cwd, maxBuffer: SCRIPT_MAX_BUFFER });
+          return { type: "script", passed: true, message: `Script passed: ${label}` };
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : String(err);
+          return { type: "script", passed: false, message: `Script failed: ${label}`, details: msg };
+        }
+      }
+
+      // Multi-line: write to temp file, execute with bash, cleanup
+      const tmpDir = join(cwd, ".orchestra", "tmp");
+      const scriptFile = join(tmpDir, `check-${nanoid(8)}.sh`);
       try {
-        await execAsync(cmd, { cwd });
+        await mkdir(tmpDir, { recursive: true });
+        // set -euo pipefail: fail on first error, like CI/CD
+        const scriptContent = `#!/usr/bin/env bash\nset -euo pipefail\n\n${cmd}\n`;
+        await writeFile(scriptFile, scriptContent);
+        const { stdout, stderr } = await execAsync(`bash "${scriptFile}"`, {
+          cwd,
+          maxBuffer: SCRIPT_MAX_BUFFER,
+        });
         return {
           type: "script",
           passed: true,
-          message: `Script passed: ${cmd}`,
+          message: `Script passed: ${label}`,
+          details: stdout || stderr || undefined,
         };
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
         return {
           type: "script",
           passed: false,
-          message: `Script failed: ${cmd}`,
+          message: `Script failed: ${label}`,
           details: msg,
         };
+      } finally {
+        try { await unlink(scriptFile); } catch { /* ignore */ }
       }
     }
 
     case "llm_review": {
-      return await runLLMReview(expectation, cwd, queryFn);
+      return await runLLMReview(expectation, cwd, onProgress);
     }
   }
 }
@@ -126,10 +159,10 @@ export async function runMetric(
 export async function assessTask(
   task: Task,
   cwd: string,
-  queryFn?: LLMQueryFn,
+  onProgress?: (msg: string) => void,
 ): Promise<AssessmentResult> {
   const checks = await Promise.all(
-    task.expectations.map((exp) => runCheck(exp, cwd, queryFn))
+    task.expectations.map((exp) => runCheck(exp, cwd, onProgress))
   );
   const metrics = await Promise.all(
     task.metrics.map((m) => runMetric(m, cwd))

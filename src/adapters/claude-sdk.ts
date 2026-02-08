@@ -33,7 +33,9 @@ class ClaudeSDKAdapter implements AgentAdapter {
       allowDangerouslySkipPermissions: true,
       persistSession: true,
       model: agent.model,
+      maxTurns: agent.maxTurns ?? 150,
       allowedTools,
+      disallowedTools: ["Task", "AskUserQuestion"],
       hooks: {
         PostToolUse: [{
           hooks: [async (input) => {
@@ -106,6 +108,17 @@ export function buildPrompt(task: Task): string {
       if (exp.type === "llm_review") parts.push(`- Code review criteria: ${exp.criteria}`);
     }
   }
+  parts.push(
+    ``,
+    `IMPORTANT — Orchestration contract:`,
+    `- You are being orchestrated by a supervisor. Complete the task autonomously and EXIT.`,
+    `- Do NOT ask clarifying questions. Make reasonable decisions and proceed.`,
+    `- You MUST terminate after completing your work. Never block indefinitely.`,
+    `- If you start a server, dev watcher, or any long-running process, run it DETACHED (background)`,
+    `  and exit immediately. Do NOT wait for it, tail its logs, or keep your session alive.`,
+    `- Example: use \`nohup cmd &\` or spawn detached. Never \`npm start\` in foreground.`,
+    `- Your session has a timeout. If you hang, you will be killed and the task will fail.`,
+  );
   return parts.join("\n");
 }
 

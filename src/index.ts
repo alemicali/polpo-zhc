@@ -15,7 +15,7 @@ export { GenericAdapter, shellEscape } from "./adapters/generic.js";
 
 // Assessment
 export { assessTask, runCheck, runMetric } from "./assessment/assessor.js";
-export { runLLMReview, defaultLLMQuery, computeWeightedScore, buildRubricSection, DEFAULT_DIMENSIONS } from "./assessment/index.js";
+export { runLLMReview, computeWeightedScore, buildRubricSection, DEFAULT_DIMENSIONS } from "./assessment/index.js";
 export type { LLMQueryFn } from "./assessment/llm-review.js";
 
 // Config

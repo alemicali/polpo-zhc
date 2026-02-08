@@ -48,6 +48,8 @@ export interface RetryPolicy {
   escalateModel?: string;
 }
 
+export type TaskPhase = "execution" | "review" | "fix" | "clarification";
+
 export interface Task {
   id: string;
   title: string;
@@ -63,6 +65,11 @@ export interface Task {
   maxDuration?: number;       // ms, 0 = no timeout
   retryPolicy?: RetryPolicy;
   result?: TaskResult;
+  phase?: TaskPhase;             // current phase (execution/review/fix/clarification)
+  fixAttempts?: number;          // fix attempts in current review cycle
+  questionRounds?: number;       // Q&A rounds with orchestrator (max default: 2)
+  resolutionAttempts?: number;   // deadlock resolution attempts (max default: 2)
+  originalDescription?: string;  // preserved before first retry/fix
   createdAt: string;
   updatedAt: string;
 }
@@ -95,6 +102,8 @@ export interface AgentConfig {
   systemPrompt?: string;
   /** Installed skill names (e.g. "find-skills", "frontend-design") */
   skills?: string[];
+  /** For claude-sdk adapter: max conversation turns before stopping. Default 150 */
+  maxTurns?: number;
   /** Volatile agent — created for a specific plan, auto-removed when plan completes */
   volatile?: boolean;
   /** Plan group this volatile agent belongs to */
@@ -173,6 +182,25 @@ export interface Plan {
   updatedAt: string;
 }
 
+/** Completion report for a plan — aggregated results across all tasks. */
+export interface PlanReport {
+  planId: string;
+  group: string;
+  allPassed: boolean;
+  totalDuration: number;           // ms, sum of all task durations
+  tasks: {
+    title: string;
+    status: "done" | "failed";
+    duration: number;              // ms
+    score?: number;                // global assessment score (1-5)
+    filesCreated: string[];
+    filesEdited: string[];
+  }[];
+  filesCreated: string[];          // aggregated across all tasks
+  filesEdited: string[];           // aggregated across all tasks
+  avgScore?: number;               // average assessment score
+}
+
 // === Runner Config ===
 
 export interface RunnerConfig {
@@ -182,6 +210,17 @@ export interface RunnerConfig {
   task: Task;
   dbPath: string;
   cwd: string;
+}
+
+// === Project Config (persisted preferences) ===
+
+export interface ProjectConfig {
+  project: string;      // project name (default: directory name)
+  judge: string;        // adapter for assessment LLM (e.g. "claude-sdk")
+  judgeModel: string;   // model for orchestrator LLM calls (judge, deadlock, question detection)
+  agent: string;        // default adapter for agents (e.g. "claude-sdk", "generic")
+  model: string;        // default model (e.g. "claude-sonnet-4-5-20250929")
+  taskPrep?: boolean;   // LLM-powered task preparation (default: true)
 }
 
 // === Config (orchestra.yml) ===
@@ -201,6 +240,19 @@ export interface OrchestraSettings {
   taskTimeout?: number;            // default timeout per task (ms). Default: 30min
   staleThreshold?: number;         // ms idle before agent considered stale. Default: 5min
   defaultRetryPolicy?: RetryPolicy;
+  /** Whether plans can define volatile agents in their team: section. Default: true */
+  enableVolatileTeams?: boolean;
+  /** When to clean up volatile agents: "on_complete" (default) removes them when the plan
+   *  finishes, "manual" keeps them until the user explicitly removes them or the plan is deleted */
+  volatileCleanup?: "on_complete" | "manual";
+  /** Max fix attempts per review cycle before falling back to full retry. Default: 2 */
+  maxFixAttempts?: number;
+  /** Max auto-answer rounds per task when agent asks questions. Default: 2 */
+  maxQuestionRounds?: number;
+  /** Max deadlock resolution attempts per task. Default: 2 */
+  maxResolutionAttempts?: number;
+  /** Model for orchestrator LLM calls (judge, question detection, deadlock, plans). */
+  orchestratorModel?: string;
 }
 
 // === Orchestra State (persisted in .orchestra/state.json) ===

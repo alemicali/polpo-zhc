@@ -1,16 +1,33 @@
 import type { TaskStatus } from "../core/types.js";
 import { PROVIDERS } from "./constants.js";
 
+/** Escape dynamic text for blessed tag-enabled elements.
+ *  Replaces { and } so they are not interpreted as blessed markup. */
+export function esc(text: string): string {
+  return text.replace(/\{/g, "{open}").replace(/\}/g, "{close}");
+}
+
+/** Format a user-submitted message with > prefix and dark background */
+export function fmtUserMsg(text: string): string {
+  return `{#1e1e2e-bg} {cyan-fg}>{/cyan-fg} ${esc(text)} {/#1e1e2e-bg}`;
+}
+
+/** Compute inner width of a blessed box (total width minus 2 for borders) */
+export function boxWidth(box: { width: number | string }): number {
+  const w = typeof box.width === "number" ? box.width : 80;
+  return Math.max(10, w - 2);
+}
+
 /** Format milliseconds as human-readable elapsed time */
 export function formatElapsed(ms: number): string {
   const secs = Math.floor(ms / 1000);
-  if (secs < 60) return `${secs}s`;
+  if (secs < 60) return `${secs}sec`;
   const mins = Math.floor(secs / 60);
   const remSecs = secs % 60;
-  if (mins < 60) return `${mins}m ${remSecs}s`;
+  if (mins < 60) return remSecs > 0 ? `${mins}min ${remSecs}sec` : `${mins}min`;
   const hrs = Math.floor(mins / 60);
   const remMins = mins % 60;
-  return `${hrs}h ${remMins}m`;
+  return remMins > 0 ? `${hrs}hour ${remMins}min` : `${hrs}hour`;
 }
 
 /** Status icon for blessed tags */
@@ -25,15 +42,15 @@ export function getStatusIcon(status: TaskStatus): string {
   }
 }
 
-/** Status label for blessed tags */
+/** Status label for blessed tags (uniformly padded to 9 visible chars) */
 export function getStatusLabel(status: TaskStatus): string {
   switch (status) {
-    case "pending": return "{grey-fg}PENDING{/grey-fg}  ";
-    case "assigned": return "{cyan-fg}ASSIGNED{/cyan-fg} ";
-    case "in_progress": return "{yellow-fg}{bold}RUNNING{/bold}{/yellow-fg}  ";
-    case "review": return "{magenta-fg}{bold}REVIEW{/bold}{/magenta-fg}   ";
-    case "done": return "{green-fg}DONE{/green-fg}     ";
-    case "failed": return "{red-fg}{bold}FAILED{/bold}{/red-fg}   ";
+    case "pending": return `{grey-fg}${"PENDING".padEnd(9)}{/grey-fg}`;
+    case "assigned": return `{cyan-fg}${"ASSIGNED".padEnd(9)}{/cyan-fg}`;
+    case "in_progress": return `{yellow-fg}{bold}${"RUNNING".padEnd(9)}{/bold}{/yellow-fg}`;
+    case "review": return `{magenta-fg}{bold}${"REVIEW".padEnd(9)}{/bold}{/magenta-fg}`;
+    case "done": return `{green-fg}${"DONE".padEnd(9)}{/green-fg}`;
+    case "failed": return `{red-fg}{bold}${"FAILED".padEnd(9)}{/bold}{/red-fg}`;
   }
 }
 
@@ -51,15 +68,17 @@ export function stripAnsi(str: string): string {
 /** YAML with basic syntax coloring (blessed tags) */
 export function formatYamlColored(yaml: string): string {
   return yaml.split("\n").map(line => {
-    if (line.match(/^\s*#/)) return `{grey-fg}${line}{/grey-fg}`;
+    const safe = esc(line);
+    if (line.match(/^\s*#/)) return `{grey-fg}${safe}{/grey-fg}`;
     if (line.match(/^\s*-\s/)) {
-      return line.replace(/^(\s*-\s)(.*)$/, "{cyan-fg}$1{/cyan-fg}$2");
+      const m = safe.match(/^(\s*-\s)(.*)$/);
+      return m ? `{cyan-fg}${m[1]}{/cyan-fg}${m[2]}` : safe;
     }
-    const kv = line.match(/^(\s*)(\w[\w\s]*?)(:)(.*)/);
+    const kv = safe.match(/^(\s*)(\w[\w\s]*?)(:)(.*)/);
     if (kv) {
       return `${kv[1]}{green-fg}${kv[2]}{/green-fg}{white-fg}${kv[3]}{/white-fg}${kv[4]}`;
     }
-    return line;
+    return safe;
   }).join("\n");
 }
 
@@ -75,10 +94,10 @@ export function formatPlanReadable(doc: any): string {
     lines.push(`  {bold}{yellow-fg}Volatile team{/yellow-fg}{/bold}  {grey-fg}(agents created for this plan only){/grey-fg}`);
     lines.push("");
     for (const a of volatileTeam) {
-      const model = a.model ? `{grey-fg}${a.model}{/grey-fg}` : "";
-      lines.push(`    {cyan-fg}${a.name}{/cyan-fg}  ${a.adapter || "claude-sdk"}  ${model}`);
-      if (a.role) lines.push(`      {grey-fg}${a.role}{/grey-fg}`);
-      if (a.skills?.length) lines.push(`      {yellow-fg}⚡{/yellow-fg} ${a.skills.join(", ")}`);
+      const model = a.model ? `{grey-fg}${esc(a.model)}{/grey-fg}` : "";
+      lines.push(`    {cyan-fg}${esc(a.name)}{/cyan-fg}  ${esc(a.adapter || "claude-sdk")}  ${model}`);
+      if (a.role) lines.push(`      {grey-fg}${esc(a.role)}{/grey-fg}`);
+      if (a.skills?.length) lines.push(`      {yellow-fg}⚡{/yellow-fg} ${esc(a.skills.join(", "))}`);
     }
     lines.push("");
     lines.push("  ───────────────────────────────");
@@ -92,36 +111,36 @@ export function formatPlanReadable(doc: any): string {
     const t = tasks[i];
     const num = circled[i] ?? `(${i + 1})`;
 
-    lines.push(`  {bold}${num} ${t.title}{/bold}`);
+    lines.push(`  {bold}${num} ${esc(t.title)}{/bold}`);
 
     // Agent + dependencies
     const depParts: string[] = [];
     if (t.dependsOn?.length > 0) {
       const depNums = t.dependsOn.map((dep: string) => {
         const idx = tasks.findIndex((tt: any) => tt.title === dep);
-        return idx >= 0 ? (circled[idx] ?? `#${idx + 1}`) : dep;
+        return idx >= 0 ? (circled[idx] ?? `#${idx + 1}`) : esc(dep);
       });
       depParts.push(`⟵ ${depNums.join(", ")}`);
     }
     const depStr = depParts.length > 0 ? `  {grey-fg}${depParts.join("  ")}{/grey-fg}` : "";
-    lines.push(`    {cyan-fg}→ ${t.assignTo || "default"}{/cyan-fg}${depStr}`);
+    lines.push(`    {cyan-fg}→ ${esc(t.assignTo || "default")}{/cyan-fg}${depStr}`);
 
     // Description (truncated)
     if (t.description && t.description !== t.title) {
       const desc = t.description.length > 120
         ? t.description.slice(0, 117) + "..."
         : t.description;
-      lines.push(`    {grey-fg}${desc}{/grey-fg}`);
+      lines.push(`    {grey-fg}${esc(desc)}{/grey-fg}`);
     }
 
     // Expectations
     if (t.expectations?.length > 0) {
       const exps = t.expectations.map((e: any) => {
         switch (e.type) {
-          case "test": return `{green-fg}☐{/green-fg} test: ${e.command || ""}`;
-          case "file_exists": return `{green-fg}☐{/green-fg} files: ${(e.paths || []).join(", ")}`;
-          case "script": return `{green-fg}☐{/green-fg} script: ${e.command || ""}`;
-          case "llm_review": return `{green-fg}☐{/green-fg} review: ${e.criteria || ""}`;
+          case "test": return `{green-fg}☐{/green-fg} test: ${esc(e.command || "")}`;
+          case "file_exists": return `{green-fg}☐{/green-fg} files: ${esc((e.paths || []).join(", "))}`;
+          case "script": return `{green-fg}☐{/green-fg} script: ${esc(e.command || "")}`;
+          case "llm_review": return `{green-fg}☐{/green-fg} review: ${esc(e.criteria || "")}`;
           default: return `{green-fg}☐{/green-fg} ${e.type}`;
         }
       });
@@ -132,4 +151,10 @@ export function formatPlanReadable(doc: any): string {
   }
 
   return lines.join("\n");
+}
+
+/** Format a single prepared task for preview (reuses plan formatter) */
+export function formatTaskReadable(task: any): string {
+  return formatPlanReadable({ tasks: [task] })
+    .replace(/1 tasks? in plan/, "Task prepared");
 }

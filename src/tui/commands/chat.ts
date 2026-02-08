@@ -3,11 +3,12 @@
  */
 
 import type { CommandContext } from "../context.js";
-import { querySDKText } from "../llm.js";
-import { buildChatSystemPrompt } from "../prompts.js";
+import { querySDKText } from "../../llm/query.js";
+import { buildChatSystemPrompt } from "../../llm/prompts.js";
+import { fmtUserMsg } from "../formatters.js";
 
 export async function handleChatInput(ctx: CommandContext, input: string): Promise<void> {
-  ctx.logAlways(`{magenta-fg}?{/magenta-fg} ${input}`);
+  ctx.logAlways(fmtUserMsg(input));
   ctx.logAlways("");
   ctx.setProcessing(true, "Thinking");
 
@@ -42,5 +43,5 @@ async function queryChatResponse(ctx: CommandContext, input: string): Promise<st
     `Answer concisely based on the current Orchestra state. Use plain text, no markdown.`,
   ].join("\n");
 
-  return querySDKText(prompt, ctx.workDir);
+  return querySDKText(prompt, ctx.workDir, ctx.orchestrator.getConfig()?.settings?.orchestratorModel);
 }

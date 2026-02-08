@@ -4,7 +4,7 @@
 
 import type { Orchestrator } from "../orchestrator.js";
 import type { OrchestraState } from "../core/types.js";
-import { discoverSkills } from "./constants.js";
+import { discoverSkills } from "./skills.js";
 
 /** Build the system prompt for chat mode responses */
 export function buildChatSystemPrompt(
@@ -80,15 +80,24 @@ export function buildChatSystemPrompt(
   }
 
   if (state?.tasks && state.tasks.length > 0) {
-    parts.push(``, `Tasks (${state.tasks.length}):`);
-    for (const t of state.tasks) {
+    const counts: Record<string, number> = {};
+    for (const t of state.tasks) counts[t.status] = (counts[t.status] || 0) + 1;
+    const summary = Object.entries(counts).map(([s, n]) => `${s}: ${n}`).join(", ");
+    parts.push(``, `Tasks (${state.tasks.length}): ${summary}`);
+
+    // Active tasks: full detail (pending, assigned, in_progress, review, failed)
+    const active = state.tasks.filter(t => t.status !== "done");
+    // Completed tasks: titles only (last 10)
+    const done = state.tasks.filter(t => t.status === "done");
+
+    for (const t of active) {
       let line = `  - [${t.status.toUpperCase()}] "${t.title}" → ${t.assignTo}`;
       if (t.group) line += ` [${t.group}]`;
       if (t.retries > 0) line += ` (retry ${t.retries}/${t.maxRetries})`;
       parts.push(line);
 
       if (t.description !== t.title) {
-        parts.push(`    Description: ${t.description.slice(0, 300)}`);
+        parts.push(`    Description: ${t.description.slice(0, 200)}`);
       }
       if (t.dependsOn.length > 0) {
         const depTitles = t.dependsOn.map(id => {
@@ -97,29 +106,21 @@ export function buildChatSystemPrompt(
         });
         parts.push(`    Depends on: ${depTitles.join(", ")}`);
       }
-      if (t.result) {
-        parts.push(`    Result: exit ${t.result.exitCode}, duration ${(t.result.duration / 1000).toFixed(1)}s`);
-        if (t.result.assessment?.globalScore !== undefined) {
-          parts.push(`    Score: ${t.result.assessment.globalScore.toFixed(1)}/5`);
-          if (t.result.assessment.scores) {
-            for (const s of t.result.assessment.scores) {
-              parts.push(`      ${s.dimension}: ${s.score}/5 — ${s.reasoning.slice(0, 100)}`);
-            }
-          }
-        }
-        if (t.result.stderr) {
-          parts.push(`    Stderr: ${t.result.stderr.slice(0, 200)}`);
-        }
-        if (t.result.stdout) {
-          parts.push(`    Output (first 200 chars): ${t.result.stdout.slice(0, 200)}`);
-        }
+      if (t.result?.assessment?.globalScore !== undefined) {
+        parts.push(`    Score: ${t.result.assessment.globalScore.toFixed(1)}/5`);
       }
     }
 
-    const counts: Record<string, number> = {};
-    for (const t of state.tasks) counts[t.status] = (counts[t.status] || 0) + 1;
-    const summary = Object.entries(counts).map(([s, n]) => `${s}: ${n}`).join(", ");
-    parts.push(``, `Summary: ${summary}`);
+    if (done.length > 0) {
+      const recent = done.slice(-10);
+      const hidden = done.length - recent.length;
+      if (hidden > 0) parts.push(`  ... ${hidden} earlier completed tasks omitted`);
+      for (const t of recent) {
+        const score = t.result?.assessment?.globalScore;
+        const scoreStr = score !== undefined ? ` (${score.toFixed(1)}/5)` : "";
+        parts.push(`  - [DONE] "${t.title}"${scoreStr}`);
+      }
+    }
   } else {
     parts.push(``, `Tasks: none yet`);
   }
@@ -216,6 +217,101 @@ export function buildPlanSystemPrompt(
     `  Independent tasks (different files, different modules) MUST NOT have deps between them.`,
     `  Example: creating tests and creating docs for different features can run in parallel.`,
     `- Output ONLY the YAML, nothing else`,
+  ].join("\n");
+}
+
+/** Build the prompt for single-task LLM preparation */
+export function buildTaskPrepPrompt(
+  orchestrator: Orchestrator,
+  state: OrchestraState | null,
+  workDir: string,
+  userInput: string,
+  assignTo: string,
+): string {
+  const contextPrompt = buildChatSystemPrompt(orchestrator, state, workDir);
+  const memory = orchestrator.getMemory();
+
+  const memorySection = memory
+    ? [`## Project Memory`, ``, memory, ``]
+    : [];
+
+  return [
+    contextPrompt,
+    ``,
+    `---`,
+    ``,
+    `## Your Role: Task Preparation`,
+    ``,
+    `The user wants to create a single task. Your job is to:`,
+    `1. Understand the user's intent in context (project state, recent tasks, memory)`,
+    `2. Generate a structured 1-task YAML spec with a clear description and expectations`,
+    `3. Resolve ambiguity using recent activity and project memory`,
+    ``,
+    ...memorySection,
+    `## Context Awareness`,
+    ``,
+    `When the user says something ambiguous, resolve it using:`,
+    `- Recent tasks: what was just built, modified, or failed`,
+    `- Project memory: tech stack, conventions, architecture decisions`,
+    `- Common patterns: "open the browser" → "start dev server and open localhost"`,
+    ``,
+    `## Expectation Selection Guide`,
+    ``,
+    `Choose expectations based on what the task produces:`,
+    `- Creates files → file_exists (list expected paths)`,
+    `- Writes code → test (if test infrastructure exists) + llm_review`,
+    `- Modifies existing code → test (run existing tests) + llm_review`,
+    `- Setup/config tasks → script (verification command or multi-line script)`,
+    `- Build/deploy tasks → script with multi-line CI/CD-style steps`,
+    `- UI/visual tasks → llm_review with specific visual/UX criteria`,
+    `- Simple tasks (run command, open browser) → script with verification command`,
+    `- If unsure → llm_review with descriptive criteria`,
+    ``,
+    `### Script expectations`,
+    `The "script" type supports both single commands and multi-line CI/CD-style scripts.`,
+    `Multi-line scripts run with bash (set -euo pipefail) — they fail on first error.`,
+    `Use YAML literal block scalar (|) for multi-line:`,
+    `  - type: script`,
+    `    command: |`,
+    `      npm run build`,
+    `      test -f dist/index.js`,
+    `      node dist/index.js --version`,
+    ``,
+    `## Output Format`,
+    ``,
+    `Output ONLY valid YAML (no markdown fences, no explanation, no preamble):`,
+    ``,
+    `tasks:`,
+    `  - title: "Clear, specific title"`,
+    `    description: |`,
+    `      Detailed structured description for the agent.`,
+    `      Include specific files, paths, patterns to follow.`,
+    `      Reference existing code or project state if relevant.`,
+    `    assignTo: "${assignTo}"`,
+    `    expectations:`,
+    `      - type: file_exists`,
+    `        paths: ["src/expected-file.ts"]`,
+    `      - type: script`,
+    `        command: |`,
+    `          npm run build`,
+    `          test -f dist/index.js`,
+    `      - type: llm_review`,
+    `        criteria: "Specific quality criteria for this task"`,
+    ``,
+    `## Rules`,
+    ``,
+    `- Generate exactly ONE task`,
+    `- Title should be concise but specific (not just the user's raw input)`,
+    `- Description must be detailed and actionable — the agent has no other context`,
+    `- Add 1-3 expectations based on task type (see guide above)`,
+    `- For llm_review, write specific criteria relevant to THIS task`,
+    `- If the user's intent is ambiguous, choose the most likely interpretation based on context`,
+    `- Output ONLY the YAML, nothing else`,
+    ``,
+    `---`,
+    ``,
+    `User input: "${userInput}"`,
+    `Assigned agent: ${assignTo}`,
   ].join("\n");
 }
 

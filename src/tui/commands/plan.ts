@@ -3,15 +3,15 @@
  */
 
 import blessed from "blessed";
-import { parse as parseYaml } from "yaml";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import type { CommandContext } from "../context.js";
-import { querySDKText, extractYaml } from "../llm.js";
-import { buildPlanSystemPrompt } from "../prompts.js";
-import { formatYamlColored, formatPlanReadable } from "../formatters.js";
+import { querySDKText, extractYaml } from "../../llm/query.js";
+import { buildPlanSystemPrompt, buildTaskPrepPrompt } from "../../llm/prompts.js";
+import { formatYamlColored, formatPlanReadable, fmtUserMsg } from "../formatters.js";
 import { createOverlay, addHintBar } from "../widgets.js";
 
 export async function handlePlanInput(ctx: CommandContext, input: string): Promise<void> {
-  ctx.logAlways(`{yellow-fg}♩{/yellow-fg} ${input}`);
+  ctx.logAlways(fmtUserMsg(input));
   ctx.logAlways("");
   ctx.setProcessing(true, "Generating plan");
 
@@ -59,7 +59,7 @@ async function generatePlan(ctx: CommandContext, input: string): Promise<string>
     `"${input}"`,
   ].join("\n");
 
-  const resultText = await querySDKText(prompt, ctx.workDir);
+  const resultText = await querySDKText(prompt, ctx.workDir, ctx.orchestrator.getConfig()?.settings.orchestratorModel);
   return extractYaml(resultText);
 }
 
@@ -87,7 +87,7 @@ export function showPlanPreview(ctx: CommandContext, yaml: string, originalInput
     height: "100%-8",
     border: { type: "line" },
     tags: true,
-    label: " {yellow-fg}♩{/yellow-fg} {bold}Plan Preview{/bold} ",
+    label: " {bold}Plan Preview{/bold} ",
     scrollable: true,
     keys: true,
     vi: true,
@@ -97,6 +97,7 @@ export function showPlanPreview(ctx: CommandContext, yaml: string, originalInput
 
   const actionItems = [
     "  {green-fg}✓{/green-fg} Execute plan",
+    "  {green-fg}✓{/green-fg}{yellow-fg}⚡{/yellow-fg} Execute with task prep",
     "  {blue-fg}■{/blue-fg} Save as draft",
     "  {yellow-fg}✎{/yellow-fg} Edit YAML",
     "  {cyan-fg}↻{/cyan-fg} Refine with feedback",
@@ -105,7 +106,7 @@ export function showPlanPreview(ctx: CommandContext, yaml: string, originalInput
     parent: overlay,
     bottom: 1,
     left: "center",
-    width: 32,
+    width: 36,
     height: actionItems.length + 2,
     items: actionItems,
     tags: true,
@@ -126,10 +127,10 @@ export function showPlanPreview(ctx: CommandContext, yaml: string, originalInput
   const renderContent = () => {
     if (viewMode === "readable") {
       contentBox.setContent(formatPlanReadable(doc));
-      (contentBox as any).setLabel(" {yellow-fg}♩{/yellow-fg} {bold}Plan Preview{/bold} ");
+      (contentBox as any).setLabel(" {bold}Plan Preview{/bold} ");
     } else {
       contentBox.setContent(formatYamlColored(yaml));
-      (contentBox as any).setLabel(" {yellow-fg}♩{/yellow-fg} {bold}Plan (YAML){/bold} ");
+      (contentBox as any).setLabel(" {bold}Plan (YAML){/bold} ");
     }
   };
 
@@ -155,7 +156,6 @@ export function showPlanPreview(ctx: CommandContext, yaml: string, originalInput
     if (key.name === "down") { actionList.down(1); ctx.scheduleRender(); return; }
     if (key.name === "return" || key.name === "enter") {
       const selectedIdx = (actionList as any).selected ?? 0;
-      cleanup();
       handleAction(selectedIdx);
       return;
     }
@@ -164,26 +164,27 @@ export function showPlanPreview(ctx: CommandContext, yaml: string, originalInput
   const handleAction = (idx: number) => {
     cleanup();
     switch (idx) {
-      case 0:
+      case 0: // Execute as-is
         if (existingPlanId) {
-          // Executing a saved draft — update its YAML and execute
           ctx.orchestrator.updatePlan(existingPlanId, { yaml });
           executeSavedPlan(ctx, existingPlanId);
         } else {
           executeNewPlan(ctx, yaml, originalInput);
         }
         break;
-      case 1:
+      case 1: // Execute with task prep
+        executeWithPrep(ctx, yaml, doc, originalInput, existingPlanId);
+        break;
+      case 2: // Save draft
         if (existingPlanId) {
-          // Already saved — update YAML
           ctx.orchestrator.updatePlan(existingPlanId, { yaml });
           ctx.log("{blue-fg}Draft updated{/blue-fg}");
         } else {
           saveDraft(ctx, yaml, originalInput);
         }
         break;
-      case 2: showYamlEditor(ctx, yaml, originalInput, existingPlanId); break;
-      case 3: showRefineInput(ctx, yaml, originalInput); break;
+      case 3: showYamlEditor(ctx, yaml, originalInput, existingPlanId); break;
+      case 4: showRefineInput(ctx, yaml, originalInput); break;
     }
   };
 
@@ -337,7 +338,7 @@ async function generatePlanWithFeedback(ctx: CommandContext, originalInput: stri
     `Revise the plan based on the feedback. Output ONLY valid YAML.`,
   ].join("\n");
 
-  const resultText = await querySDKText(prompt, ctx.workDir);
+  const resultText = await querySDKText(prompt, ctx.workDir, ctx.orchestrator.getConfig()?.settings.orchestratorModel);
   return extractYaml(resultText);
 }
 
@@ -349,6 +350,74 @@ function saveDraft(ctx: CommandContext, yaml: string, prompt: string): void {
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     ctx.log(`{red-fg}Failed to save draft: ${msg}{/red-fg}`);
+  }
+}
+
+/**
+ * Execute plan with LLM task preparation: enrich each task with detailed
+ * descriptions and expectations before creating them.
+ */
+async function executeWithPrep(
+  ctx: CommandContext,
+  yaml: string,
+  doc: any,
+  originalInput: string,
+  existingPlanId?: string,
+): Promise<void> {
+  const tasks = doc.tasks as any[];
+  ctx.setProcessing(true, "Preparing tasks");
+
+  try {
+    ctx.loadState();
+    const enrichedTasks: any[] = [];
+
+    for (let i = 0; i < tasks.length; i++) {
+      const t = tasks[i];
+      ctx.setProcessingDetail(`Task ${i + 1}/${tasks.length}: ${t.title}`);
+
+      try {
+        const prompt = buildTaskPrepPrompt(
+          ctx.orchestrator,
+          ctx.getState(),
+          ctx.workDir,
+          `${t.title}\n\n${t.description || t.title}`,
+          t.assignTo || ctx.orchestrator.getAgents()[0]?.name || "default",
+        );
+        const resultText = await querySDKText(prompt, ctx.workDir, ctx.orchestrator.getConfig()?.settings.orchestratorModel);
+        const prepYaml = extractYaml(resultText);
+        const prepDoc = parseYaml(prepYaml);
+
+        if (prepDoc?.tasks?.[0]) {
+          // Merge: keep original assignTo/dependsOn, take enriched description + expectations
+          const enriched = prepDoc.tasks[0];
+          enrichedTasks.push({
+            ...t,
+            description: enriched.description || t.description || t.title,
+            expectations: enriched.expectations || t.expectations || [],
+          });
+        } else {
+          enrichedTasks.push(t);
+        }
+      } catch {
+        // Prep failed for this task — keep original
+        enrichedTasks.push(t);
+      }
+    }
+
+    ctx.setProcessing(false);
+
+    // Build enriched YAML and show preview (don't execute yet)
+    const enrichedDoc = { ...doc, tasks: enrichedTasks };
+    const enrichedYaml = stringifyYaml(enrichedDoc);
+
+    ctx.logAlways(`{green-fg}✓{/green-fg} ${enrichedTasks.length} task(s) prepared`);
+    showPlanPreview(ctx, enrichedYaml, originalInput, existingPlanId);
+  } catch (err: unknown) {
+    ctx.setProcessing(false);
+    const msg = err instanceof Error ? err.message : String(err);
+    ctx.log(`{red-fg}Task preparation failed: ${msg}{/red-fg}`);
+    // Re-show original plan preview
+    showPlanPreview(ctx, yaml, originalInput, existingPlanId);
   }
 }
 

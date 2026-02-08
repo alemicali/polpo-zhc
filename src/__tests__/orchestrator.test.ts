@@ -1,9 +1,13 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { rmSync, existsSync } from "node:fs";
 import { Orchestrator, buildRetryPrompt } from "../orchestrator.js";
+import { analyzeBlockedTasks } from "../deadlock-resolver.js";
 import { registerAdapter } from "../adapters/registry.js";
 import { InMemoryTaskStore, InMemoryRunStore, MockAdapter, createTestTask, createTestAgent, createTestActivity } from "./fixtures.js";
 import type { TaskResult } from "../core/types.js";
 import type { RunRecord } from "../core/run-store.js";
+
+const TEST_WORK_DIR = "/tmp/orchestra-test";
 
 function createTestRunRecord(overrides: Partial<RunRecord> = {}): RunRecord {
   const now = new Date().toISOString();
@@ -28,6 +32,11 @@ describe("Orchestrator", () => {
   let mockAdapter: MockAdapter;
   let orchestrator: Orchestrator;
 
+  afterEach(() => {
+    const orchestraDir = `${TEST_WORK_DIR}/.orchestra`;
+    if (existsSync(orchestraDir)) rmSync(orchestraDir, { recursive: true });
+  });
+
   beforeEach(() => {
     store = new InMemoryTaskStore();
     runStore = new InMemoryRunStore();
@@ -35,7 +44,7 @@ describe("Orchestrator", () => {
     registerAdapter("mock", () => mockAdapter);
 
     orchestrator = new Orchestrator({
-      workDir: "/tmp/orchestra-test",
+      workDir: TEST_WORK_DIR,
       store,
       runStore,
       assessFn: async () => ({
@@ -87,7 +96,7 @@ describe("Orchestrator", () => {
       expect(orchestrator.tick()).toBe(true);
     });
 
-    it("detects deadlock", () => {
+    it("detects deadlock with missing deps (unresolvable)", () => {
       const events: any[] = [];
       orchestrator.on("orchestrator:deadlock", (e) => events.push(e));
 
@@ -102,6 +111,36 @@ describe("Orchestrator", () => {
 
       expect(events).toHaveLength(1);
       expect(events[0].taskIds).toContain(taskA.id);
+    });
+
+    it("attempts resolution when dep is failed (resolvable)", () => {
+      const detected: any[] = [];
+      orchestrator.on("deadlock:detected", (e) => detected.push(e));
+
+      // Create Task A (no deps) and force it to failed
+      const taskA = orchestrator.addTask({
+        title: "Task A",
+        description: "Do something",
+        assignTo: "agent-1",
+      });
+      store.transition(taskA.id, "assigned");
+      store.transition(taskA.id, "in_progress");
+      store.transition(taskA.id, "failed");
+
+      // Create Task B that depends on (now-failed) Task A
+      orchestrator.addTask({
+        title: "Task B",
+        description: "Depends on A",
+        assignTo: "agent-1",
+        dependsOn: [taskA.id],
+      });
+
+      // tick should NOT force-fail B immediately — it should detect resolvable deadlock
+      const done = orchestrator.tick();
+
+      expect(done).toBe(false); // loop continues (async resolution pending)
+      expect(detected).toHaveLength(1);
+      expect(detected[0].resolvableCount).toBe(1);
     });
 
     it("emits orchestrator:tick with counts", () => {
@@ -285,7 +324,7 @@ describe("Orchestrator", () => {
       expect(store.getTask(task.id)!.status).toBe("pending");
     });
 
-    it("marks exhausted tasks as failed", () => {
+    it("requeues orphaned in_progress tasks to pending (shutdown is not a real failure)", () => {
       const task = store.addTask({
         title: "Exhausted",
         description: "No retries left",
@@ -299,7 +338,9 @@ describe("Orchestrator", () => {
       store.transition(task.id, "in_progress");
 
       orchestrator.recoverOrphanedTasks();
-      expect(store.getTask(task.id)!.status).toBe("failed");
+      // Recovery doesn't burn retries — task goes back to pending
+      expect(store.getTask(task.id)!.status).toBe("pending");
+      expect(store.getTask(task.id)!.retries).toBe(0);
     });
   });
 
@@ -334,6 +375,30 @@ describe("Orchestrator", () => {
   describe("getRunStore", () => {
     it("returns the injected run store", () => {
       expect(orchestrator.getRunStore()).toBe(runStore);
+    });
+  });
+
+  describe("project memory", () => {
+    it("hasMemory returns false when no memory saved", () => {
+      expect(orchestrator.hasMemory()).toBe(false);
+    });
+
+    it("getMemory returns empty string when no memory", () => {
+      expect(orchestrator.getMemory()).toBe("");
+    });
+
+    it("saveMemory + getMemory round-trips", () => {
+      orchestrator.saveMemory("# Architecture\nTypeScript project");
+      expect(orchestrator.hasMemory()).toBe(true);
+      expect(orchestrator.getMemory()).toBe("# Architecture\nTypeScript project");
+    });
+
+    it("appendMemory adds timestamped entry", () => {
+      orchestrator.saveMemory("# Memory");
+      orchestrator.appendMemory("New insight");
+      const content = orchestrator.getMemory();
+      expect(content).toContain("# Memory");
+      expect(content).toContain("New insight");
     });
   });
 });
@@ -381,5 +446,61 @@ describe("buildRetryPrompt", () => {
     expect(prompt).toContain("correctness: 2/5");
     expect(prompt).toContain("Has bugs");
     expect(prompt).toContain("Focus on improving the lowest-scoring dimensions");
+  });
+});
+
+describe("analyzeBlockedTasks", () => {
+  it("classifies missing deps as unresolvable", () => {
+    const task = createTestTask({
+      id: "t1",
+      title: "Blocked",
+      dependsOn: ["nonexistent"],
+      status: "pending",
+    });
+    const result = analyzeBlockedTasks([task], [task]);
+    expect(result.resolvable).toHaveLength(0);
+    expect(result.unresolvable).toHaveLength(1);
+    expect(result.unresolvable[0].missingDeps).toContain("nonexistent");
+  });
+
+  it("classifies failed deps as resolvable", () => {
+    const depA = createTestTask({ id: "a", title: "Dep A", status: "failed" });
+    const taskB = createTestTask({
+      id: "b",
+      title: "Blocked by A",
+      dependsOn: ["a"],
+      status: "pending",
+    });
+    const result = analyzeBlockedTasks([taskB], [depA, taskB]);
+    expect(result.resolvable).toHaveLength(1);
+    expect(result.unresolvable).toHaveLength(0);
+    expect(result.resolvable[0].failedDeps[0].id).toBe("a");
+  });
+
+  it("follows cascade chains to root failure", () => {
+    const depA = createTestTask({ id: "a", title: "Root fail", status: "failed" });
+    const depB = createTestTask({ id: "b", title: "Cascade blocked", dependsOn: ["a"], status: "pending" });
+    const taskC = createTestTask({ id: "c", title: "Blocked by B", dependsOn: ["b"], status: "pending" });
+    const allTasks = [depA, depB, taskC];
+    const pending = [depB, taskC];
+
+    const result = analyzeBlockedTasks(pending, allTasks);
+    // Both depB and taskC should be resolvable (root cause is depA which is failed)
+    expect(result.resolvable).toHaveLength(2);
+    expect(result.unresolvable).toHaveLength(0);
+  });
+
+  it("skips tasks with all deps done", () => {
+    const depA = createTestTask({ id: "a", title: "Done dep", status: "done" });
+    const taskB = createTestTask({
+      id: "b",
+      title: "Ready",
+      dependsOn: ["a"],
+      status: "pending",
+    });
+    const result = analyzeBlockedTasks([taskB], [depA, taskB]);
+    // All deps are done → not blocked, shouldn't appear in either list
+    expect(result.resolvable).toHaveLength(0);
+    expect(result.unresolvable).toHaveLength(0);
   });
 });

@@ -6,8 +6,8 @@
 export type OnProgress = (event: string) => void;
 
 /** Query Claude SDK for text-only response (no tools) */
-export async function querySDKText(prompt: string, cwd: string): Promise<string> {
-  return querySDK(prompt, [], cwd);
+export async function querySDKText(prompt: string, cwd: string, model?: string): Promise<string> {
+  return querySDK(prompt, [], cwd, undefined, model);
 }
 
 /** Query SDK with optional tool access */
@@ -16,6 +16,7 @@ export async function querySDK(
   allowedTools: string[],
   cwd: string,
   onProgress?: OnProgress,
+  model?: string,
 ): Promise<string> {
   const { query } = await import("@anthropic-ai/claude-agent-sdk");
 
@@ -28,6 +29,7 @@ export async function querySDK(
       allowDangerouslySkipPermissions: true,
       persistSession: false,
       allowedTools,
+      model,
     },
   });
 

@@ -1,5 +1,6 @@
 /**
  * /plans — List and manage saved plans (drafts, active, completed).
+ * /resume — Resume interrupted plans.
  */
 
 import blessed from "blessed";
@@ -56,8 +57,11 @@ export function cmdPlans(ctx: CommandContext): void {
     const color = statusColor(p.status);
     const ago = timeAgo(p.updatedAt);
     const progress = p.status === "active" ? ` ${getGroupProgress(ctx, p.name)}` : "";
-    const prompt = p.prompt ? p.prompt.slice(0, 40) : "(no prompt)";
-    return `  {${color}}${p.status.padEnd(10)}{/${color}} {cyan-fg}${p.name.padEnd(10)}{/cyan-fg} "${prompt}" {grey-fg}${ago}${progress}{/grey-fg}`;
+    // Dynamic prompt width: total minus status(9) + name(10) + padding/quotes(~12) + ago(~8)
+    const cols = (ctx.screen.cols as number) || 80;
+    const promptMax = Math.max(15, cols - 45);
+    const prompt = p.prompt ? (p.prompt.length > promptMax ? p.prompt.slice(0, promptMax - 1) + "…" : p.prompt) : "(no prompt)";
+    return `  {${color}}${p.status.padEnd(9)}{/${color}} {cyan-fg}${p.name.padEnd(10)}{/cyan-fg} "${prompt}" {grey-fg}${ago}${progress}{/grey-fg}`;
   });
 
   const list = blessed.list({
@@ -219,5 +223,104 @@ function showCompletedPlan(ctx: CommandContext, plan: Plan): void {
     cleanup();
     const newPlan = ctx.orchestrator.savePlan({ yaml: plan.yaml, prompt: plan.prompt });
     executeSavedPlan(ctx, newPlan.id);
+  });
+}
+
+/**
+ * /resume — Resume interrupted plans (active or failed).
+ * Uses core orchestrator.getResumablePlans() and orchestrator.resumePlan().
+ */
+export function cmdResume(ctx: CommandContext): void {
+  const resumablePlans = ctx.orchestrator.getResumablePlans();
+
+  if (resumablePlans.length === 0) {
+    ctx.logAlways("{yellow-fg}No plans to resume. All plans are either complete or have no tasks.{/yellow-fg}");
+    return;
+  }
+
+  const state = ctx.getState();
+  const { overlay, cleanup, onKeypress } = createOverlay(ctx);
+
+  const buildItems = () => resumablePlans.map(p => {
+    const tasks = state?.tasks.filter(t => t.group === p.name) ?? [];
+    const done = tasks.filter(t => t.status === "done").length;
+    const failed = tasks.filter(t => t.status === "failed").length;
+    const pending = tasks.filter(t => t.status === "pending").length;
+    const inProgress = tasks.filter(t => ["in_progress", "assigned", "review"].includes(t.status)).length;
+
+    const color = statusColor(p.status);
+    const ago = timeAgo(p.updatedAt);
+    const progress = `${done}/${tasks.length} done`;
+    const failInfo = failed > 0 ? ` {red-fg}${failed} failed{/red-fg}` : "";
+    const pendInfo = pending > 0 ? ` {grey-fg}${pending} pending{/grey-fg}` : "";
+    const runInfo = inProgress > 0 ? ` {yellow-fg}${inProgress} running{/yellow-fg}` : "";
+
+    return `  {${color}}${p.status.padEnd(9)}{/${color}} {cyan-fg}${p.name.padEnd(10)}{/cyan-fg} {green-fg}${progress}{/green-fg}${failInfo}${pendInfo}${runInfo} {grey-fg}${ago}{/grey-fg}`;
+  });
+
+  const list = blessed.list({
+    parent: overlay,
+    top: 0,
+    left: 0,
+    width: "100%",
+    height: "100%-3",
+    items: buildItems(),
+    tags: true,
+    border: { type: "line" },
+    label: " {bold}Resume Plan{/bold} ",
+    style: {
+      bg: "black",
+      border: { fg: "cyan" },
+      selected: { bg: "blue", fg: "white", bold: true },
+      item: { bg: "black" },
+    },
+    keys: false,
+    mouse: true,
+    scrollable: true,
+  });
+
+  addHintBar(overlay, " {cyan-fg}Enter{/cyan-fg} {grey-fg}resume + retry{/grey-fg}  {cyan-fg}p{/cyan-fg} {grey-fg}resume pending only{/grey-fg}  {cyan-fg}Esc{/cyan-fg} {grey-fg}close{/grey-fg}");
+
+  list.select(0);
+  ctx.scheduleRender();
+
+  const doResume = (idx: number, retryFailed: boolean) => {
+    const plan = resumablePlans[idx];
+    if (!plan) return;
+    cleanup();
+
+    try {
+      const result = ctx.orchestrator.resumePlan(plan.id, { retryFailed });
+      ctx.logAlways(`{green-fg}Resumed plan "${plan.name}"{/green-fg}`);
+      if (result.retried > 0) {
+        ctx.logAlways(`{yellow-fg}  Retrying ${result.retried} failed task(s){/yellow-fg}`);
+      }
+      if (result.pending > 0) {
+        ctx.logAlways(`{grey-fg}  ${result.pending} pending task(s) will be picked up{/grey-fg}`);
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      ctx.logAlways(`{red-fg}Failed to resume: ${msg}{/red-fg}`);
+    }
+  };
+
+  let listReady = false;
+  setImmediate(() => { listReady = true; });
+  list.on("select", (_: any, idx: number) => {
+    if (listReady) doResume(idx, true);
+  });
+
+  onKeypress((_ch, key) => {
+    if (!key) return;
+    if (key.name === "escape") { cleanup(); return; }
+    if (key.name === "up") { list.up(1); ctx.scheduleRender(); return; }
+    if (key.name === "down") { list.down(1); ctx.scheduleRender(); return; }
+    if (key.name === "return" || key.name === "enter") {
+      doResume((list as any).selected ?? 0, true);
+      return;
+    }
+    if (key.full === "p") {
+      doResume((list as any).selected ?? 0, false);
+    }
   });
 }

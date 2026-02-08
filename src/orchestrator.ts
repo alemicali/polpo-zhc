@@ -1,12 +1,20 @@
-import { resolve, join, dirname } from "node:path";
-import { mkdirSync, existsSync, writeFileSync } from "node:fs";
+import { resolve, join, dirname, basename } from "node:path";
+import { mkdirSync, existsSync, writeFileSync, readdirSync } from "node:fs";
 import { spawn as cpSpawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { nanoid } from "nanoid";
 import { parseConfig } from "./config.js";
 import { SqliteTaskStore } from "./stores/sqlite-task-store.js";
 import { SqliteRunStore } from "./stores/sqlite-run-store.js";
+import { FileMemoryStore } from "./stores/file-memory-store.js";
+import { FileLogStore } from "./stores/file-log-store.js";
+import type { MemoryStore } from "./core/memory-store.js";
+import type { LogStore } from "./core/log-store.js";
 import { assessTask } from "./assessment/assessor.js";
+import { looksLikeQuestion, classifyAsQuestion } from "./question-detector.js";
+import { generateAnswer } from "./llm/answer-generator.js";
+import { querySDKText } from "./llm/query.js";
+import { analyzeBlockedTasks, resolveDeadlock, isResolving } from "./deadlock-resolver.js";
 import { TypedEmitter } from "./core/events.js";
 import type { TaskStore } from "./core/task-store.js";
 import type { RunStore, RunRecord } from "./core/run-store.js";
@@ -23,11 +31,12 @@ import type {
   PlanStatus,
   RetryPolicy,
   RunnerConfig,
+  PlanReport,
 } from "./core/types.js";
 
 const POLL_INTERVAL = 2000; // 2 seconds
 
-export type AssessFn = (task: Task, cwd: string) => Promise<AssessmentResult>;
+export type AssessFn = (task: Task, cwd: string, onProgress?: (msg: string) => void) => Promise<AssessmentResult>;
 
 export interface OrchestratorOptions {
   workDir?: string;
@@ -50,6 +59,8 @@ export class Orchestrator extends TypedEmitter {
   private assessFn: AssessFn;
   private injectedStore?: TaskStore;
   private injectedRunStore?: RunStore;
+  private memoryStore!: MemoryStore;
+  private logStore!: LogStore;
 
   constructor(workDirOrOptions?: string | OrchestratorOptions) {
     super();
@@ -73,6 +84,8 @@ export class Orchestrator extends TypedEmitter {
     this.config = await parseConfig(configPath);
     this.registry = this.injectedStore ?? new SqliteTaskStore(this.orchestraDir);
     this.runStore = this.injectedRunStore ?? new SqliteRunStore(join(this.orchestraDir, "state.db"));
+    this.memoryStore = new FileMemoryStore(this.orchestraDir);
+    this.initLogStore();
   }
 
   /**
@@ -85,6 +98,8 @@ export class Orchestrator extends TypedEmitter {
     }
     this.registry = this.injectedStore ?? new SqliteTaskStore(this.orchestraDir);
     this.runStore = this.injectedRunStore ?? new SqliteRunStore(join(this.orchestraDir, "state.db"));
+    this.memoryStore = new FileMemoryStore(this.orchestraDir);
+    this.initLogStore();
     this.config = {
       version: "1",
       project,
@@ -168,9 +183,10 @@ export class Orchestrator extends TypedEmitter {
 
     this.emit("assessment:started", { taskId });
     const result = task.result ?? { exitCode: 0, stdout: "", stderr: "", duration: 0 };
+    const onProgress = (msg: string) => this.emit("assessment:progress", { taskId, message: msg });
 
     try {
-      const assessment = await this.assessFn(task, this.workDir);
+      const assessment = await this.assessFn(task, this.workDir, onProgress);
       result.assessment = assessment;
       this.registry.updateTask(taskId, { result });
 
@@ -228,6 +244,19 @@ export class Orchestrator extends TypedEmitter {
   /** Get current team */
   getTeam(): Team {
     return this.config?.team ?? { name: "", agents: [] };
+  }
+
+  /** Get full orchestrator config (for settings access) */
+  getConfig(): OrchestraConfig | null {
+    return this.config;
+  }
+
+  /** Rename the team */
+  renameTeam(newName: string): void {
+    if (!this.config) throw new Error("Orchestrator not initialized");
+    this.config.team.name = newName;
+    this.registry.setState({ team: this.config.team });
+    this.emit("log", { level: "info", message: `Team renamed to "${newName}"` });
   }
 
   /** Add an agent to the team dynamically */
@@ -375,6 +404,116 @@ export class Orchestrator extends TypedEmitter {
     return result;
   }
 
+  // ─── Project Memory ──────────────────────────────────
+
+  /** Check if project memory exists. */
+  hasMemory(): boolean {
+    return this.memoryStore?.exists() ?? false;
+  }
+
+  /** Get the full project memory content. */
+  getMemory(): string {
+    return this.memoryStore?.get() ?? "";
+  }
+
+  /** Overwrite the project memory. */
+  saveMemory(content: string): void {
+    this.memoryStore?.save(content);
+  }
+
+  /** Append a line to the project memory. */
+  appendMemory(line: string): void {
+    this.memoryStore?.append(line);
+  }
+
+  /** Get the persistent log store. */
+  getLogStore(): LogStore | undefined {
+    return this.logStore;
+  }
+
+  /** Initialize the persistent log store and wire it as event sink. */
+  private initLogStore(): void {
+    this.logStore = new FileLogStore(this.orchestraDir);
+    this.logStore.startSession();
+    this.setLogSink(this.logStore);
+    // Auto-prune: keep last 20 sessions
+    try { this.logStore.prune(20); } catch { /* ignore */ }
+  }
+
+  // ─── Plan Resume ────────────────────────────────────
+
+  /**
+   * Get plans that can be resumed: active or failed with incomplete tasks.
+   */
+  getResumablePlans(): Plan[] {
+    const plans = this.getAllPlans();
+    const state = this.registry.getState();
+    return plans.filter(p => {
+      if (p.status === "draft" || p.status === "completed" || p.status === "cancelled") return false;
+      const tasks = state.tasks.filter(t => t.group === p.name);
+      if (tasks.length === 0) return false;
+      return tasks.some(t => t.status === "pending" || t.status === "failed");
+    });
+  }
+
+  /**
+   * Resume an interrupted plan.
+   * Optionally retries all failed tasks. Sets plan status back to "active".
+   * The supervisor loop picks up pending/retried tasks automatically.
+   */
+  resumePlan(planId: string, opts?: { retryFailed?: boolean }): { retried: number; pending: number } {
+    const plan = this.getPlan(planId);
+    if (!plan) throw new Error("Plan not found");
+
+    // Re-register volatile agents if they were cleaned up
+    this.cleanedGroups.delete(plan.name);
+    const enableVolatile = this.config.settings.enableVolatileTeams !== false;
+    if (enableVolatile && plan.yaml) {
+      try {
+        const doc = parseYaml(plan.yaml) as any;
+        if (doc?.team && Array.isArray(doc.team)) {
+          for (const a of doc.team) {
+            if (!a.name || !a.adapter) continue;
+            this.addVolatileAgent({
+              name: a.name,
+              adapter: a.adapter,
+              model: a.model,
+              role: a.role,
+              systemPrompt: a.systemPrompt,
+              skills: a.skills,
+            }, plan.name);
+          }
+        }
+      } catch {
+        // YAML parse error — skip volatile re-registration
+      }
+    }
+
+    const state = this.registry.getState();
+    const tasks = state.tasks.filter(t => t.group === plan.name);
+    const failedTasks = tasks.filter(t => t.status === "failed");
+    const pendingTasks = tasks.filter(t => t.status === "pending");
+
+    let retried = 0;
+    if (opts?.retryFailed) {
+      for (const task of failedTasks) {
+        try {
+          this.retryTask(task.id);
+          retried++;
+        } catch {
+          // Task may have no retries left — skip
+        }
+      }
+    }
+
+    if (plan.status === "failed") {
+      this.updatePlan(planId, { status: "active" });
+    }
+
+    this.emit("plan:resumed", { planId, name: plan.name, retried, pending: pendingTasks.length });
+    return { retried, pending: pendingTasks.length };
+  }
+
   /**
    * Execute a saved plan: parse YAML, create tasks, register volatile agents.
    * Sets plan status to "active". The supervisor loop picks up the tasks.
@@ -392,7 +531,8 @@ export class Orchestrator extends TypedEmitter {
     const group = plan.name;
 
     // Register volatile agents from the plan's team section
-    if (doc.team && Array.isArray(doc.team)) {
+    const enableVolatile = this.config.settings.enableVolatileTeams !== false;
+    if (enableVolatile && doc.team && Array.isArray(doc.team)) {
       for (const a of doc.team) {
         if (!a.name || !a.adapter) continue;
         this.addVolatileAgent({
@@ -442,7 +582,7 @@ export class Orchestrator extends TypedEmitter {
 
   /**
    * Graceful shutdown: SIGTERM all runner subprocesses, wait for them to write results,
-   * mark remaining orphaned tasks as failed, persist final state.
+   * preserve completed work, leave in-progress tasks for recovery on restart.
    */
   async gracefulStop(timeoutMs = 5000): Promise<void> {
     this.stopped = true;
@@ -466,7 +606,7 @@ export class Orchestrator extends TypedEmitter {
         await sleep(200);
       }
 
-      // Force-mark any remaining active runs
+      // Force-mark any remaining active runs as killed
       for (const run of this.runStore.getActiveRuns()) {
         this.runStore.completeRun(run.id, "killed", {
           exitCode: 1, stdout: "", stderr: "Killed during shutdown", duration: 0,
@@ -474,18 +614,21 @@ export class Orchestrator extends TypedEmitter {
       }
     }
 
-    // Mark orphaned tasks as failed
+    // Only save completed work — leave killed/failed tasks in current state for recovery
     for (const run of this.runStore.getTerminalRuns()) {
       const task = this.registry.getTask(run.taskId);
-      if (task && task.status !== "done" && task.status !== "failed") {
+      if (run.status === "completed" && run.result?.exitCode === 0 && task && task.status !== "done") {
+        // Agent finished successfully — save result and mark done (skip async assessment)
         try {
+          this.registry.updateTask(run.taskId, { result: run.result });
           if (task.status === "pending") this.registry.transition(run.taskId, "assigned");
           if (task.status === "assigned") this.registry.transition(run.taskId, "in_progress");
-          this.registry.transition(run.taskId, "failed");
-        } catch {
-          this.registry.updateTask(run.taskId, { status: "failed" as any });
-        }
+          if (task.status === "in_progress") this.registry.transition(run.taskId, "review");
+          this.registry.transition(run.taskId, "done");
+        } catch { /* leave for recovery on restart */ }
       }
+      // For killed/failed runs: task stays in current state (in_progress, assigned, etc.)
+      // recoverOrphanedTasks() on restart will handle retry without burning retry count
       this.runStore.deleteRun(run.id);
     }
 
@@ -494,13 +637,15 @@ export class Orchestrator extends TypedEmitter {
     this.registry.close?.();
     this.runStore.close();
     this.emit("orchestrator:shutdown", {});
+    this.logStore?.close();
   }
 
   /**
    * Recover orphaned tasks on startup.
    * Checks RunStore for active runs — if the runner PID is still alive,
-   * let it keep running (zero work lost). If PID is dead, mark as failed for retry.
-   * Also handles backward-compat with old processes table.
+   * let it keep running (zero work lost). If PID is dead, clean up the run.
+   * Then requeue orphaned tasks to "pending" WITHOUT burning retry count
+   * (shutdown interrupts are not real failures).
    */
   recoverOrphanedTasks(): number {
     // Check RunStore active runs first
@@ -510,10 +655,11 @@ export class Orchestrator extends TypedEmitter {
         // Runner still alive — leave it running, work is NOT lost!
         this.emit("log", { level: "info", message: `Runner PID ${run.pid} still alive for task ${run.taskId} — reconnecting` });
       } else {
-        // Runner died — mark run as failed
+        // Runner died — clean up the run record
         this.runStore.completeRun(run.id, "failed", {
           exitCode: 1, stdout: "", stderr: "Runner process died", duration: 0,
         });
+        this.runStore.deleteRun(run.id);
       }
     }
 
@@ -539,28 +685,12 @@ export class Orchestrator extends TypedEmitter {
         continue;
       }
 
-      if (task.retries < task.maxRetries) {
-        this.emit("task:recovered", { taskId: task.id, title: task.title, previousStatus: task.status });
-        try {
-          if (task.status === "assigned") this.registry.transition(task.id, "in_progress");
-          if (task.status === "in_progress" || task.status === "review") {
-            // Can go to failed directly
-          }
-          this.registry.transition(task.id, "failed");
-          this.registry.transition(task.id, "pending");
-        } catch {
-          this.registry.updateTask(task.id, { status: "pending" as any });
-        }
-        recovered++;
-      } else {
-        this.emit("log", { level: "error", message: `Orphaned task "${task.title}" has no retries left — marking failed` });
-        try {
-          if (task.status === "assigned") this.registry.transition(task.id, "in_progress");
-          this.registry.transition(task.id, "failed");
-        } catch {
-          this.registry.updateTask(task.id, { status: "failed" as any });
-        }
-      }
+      // Recover: reset to pending WITHOUT incrementing retries.
+      // Shutdown interrupts are not real failures — use updateTask directly
+      // instead of transition(failed → pending) which burns a retry.
+      this.emit("task:recovered", { taskId: task.id, title: task.title, previousStatus: task.status });
+      this.registry.updateTask(task.id, { status: "pending" as any });
+      recovered++;
     }
 
     // Clear stale process list
@@ -684,14 +814,31 @@ export class Orchestrator extends TypedEmitter {
       })
     );
 
-    // Check for deadlock
+    // Check for deadlock: no tasks ready, none running, but some pending
     if (ready.length === 0 && inProgress.length === 0 && pending.length > 0) {
-      this.emit("orchestrator:deadlock", { taskIds: pending.map(t => t.id) });
-      for (const t of pending) {
-        this.registry.transition(t.id, "assigned");
-        this.registry.transition(t.id, "in_progress");
-        this.registry.transition(t.id, "failed");
+      // Async resolution already in progress — wait for next tick
+      if (isResolving()) return false;
+
+      const analysis = analyzeBlockedTasks(pending, tasks);
+
+      if (analysis.resolvable.length > 0) {
+        this.emit("deadlock:detected", {
+          taskIds: pending.map(t => t.id),
+          resolvableCount: analysis.resolvable.length,
+        });
+
+        // Async LLM resolution (same pattern as question detection)
+        resolveDeadlock(analysis, this, this.workDir).catch(err => {
+          this.emit("log", { level: "error", message: `Deadlock resolution failed: ${err.message}` });
+          for (const t of pending) this.forceFailTask(t.id);
+        });
+
+        return false; // Don't terminate loop — resolution pending
       }
+
+      // Only missing deps (unresolvable) → force-fail all
+      this.emit("orchestrator:deadlock", { taskIds: pending.map(t => t.id) });
+      for (const t of pending) this.forceFailTask(t.id);
       return true;
     }
 
@@ -814,11 +961,81 @@ export class Orchestrator extends TypedEmitter {
     // Ensure we're in review state
     if (task.status === "in_progress") {
       this.registry.transition(taskId, "review");
+      this.registry.updateTask(taskId, { phase: "review" });
     }
 
+    // Question detection: intercept before assessment
+    const maxQRounds = this.config.settings.maxQuestionRounds ?? 2;
+    const questionRounds = task.questionRounds ?? 0;
+    if (result.exitCode === 0 && questionRounds < maxQRounds) {
+      // Get activity from RunStore for richer heuristic
+      const run = this.runStore.getRunByTaskId(taskId);
+      const activity = run?.activity;
+      if (looksLikeQuestion(result, activity)) {
+        this.handlePossibleQuestion(taskId, task, result);
+        return;
+      }
+    }
+
+    this.proceedToAssessment(taskId, task, result);
+  }
+
+  /**
+   * LLM-classify a potential question, then either resolve+rerun or proceed to assessment.
+   */
+  private handlePossibleQuestion(taskId: string, task: Task, result: TaskResult): void {
+    classifyAsQuestion(result.stdout, this.workDir, this.config.settings.orchestratorModel).then(classification => {
+      if (classification.isQuestion) {
+        this.resolveAndRerun(taskId, task, result, classification.question);
+      } else {
+        this.proceedToAssessment(taskId, task, result);
+      }
+    }).catch(() => {
+      // Classification failed → proceed normally
+      this.proceedToAssessment(taskId, task, result);
+    });
+  }
+
+  /**
+   * Auto-answer an agent's question and re-run the task (no retry burn).
+   */
+  private resolveAndRerun(taskId: string, task: Task, result: TaskResult, question: string): void {
+    this.emit("task:question", { taskId, question });
+
+    generateAnswer(this, task, question, this.workDir, this.config.settings.orchestratorModel).then(answer => {
+      this.emit("task:answered", { taskId, question, answer });
+
+      const current = this.registry.getTask(taskId);
+      if (!current) return;
+
+      // Save original description before first Q&A
+      if (!current.originalDescription) {
+        this.registry.updateTask(taskId, { originalDescription: current.description });
+      }
+
+      // Append Q&A to description and re-run (no retry burn)
+      const qaBlock = `\n\n[Orchestrator Clarification]\nQ: ${question}\nA: ${answer}`;
+      this.registry.updateTask(taskId, {
+        status: "pending" as any,
+        phase: "execution",
+        description: current.description + qaBlock,
+        questionRounds: (current.questionRounds ?? 0) + 1,
+      });
+    }).catch(() => {
+      // Answer generation failed → proceed to assessment normally
+      this.proceedToAssessment(taskId, task, result);
+    });
+  }
+
+  /**
+   * Standard assessment flow: run expectations/metrics, then mark done/failed/fix/retry.
+   * Extracted from handleResult to allow question detection to bypass or proceed.
+   */
+  private proceedToAssessment(taskId: string, task: Task, result: TaskResult): void {
     if (task.expectations.length > 0 || task.metrics.length > 0) {
       this.emit("assessment:started", { taskId });
-      this.assessFn(task, this.workDir).then(assessment => {
+      const progressCb = (msg: string) => this.emit("assessment:progress", { taskId, message: msg });
+      this.assessFn(task, this.workDir, progressCb).then(assessment => {
         result.assessment = assessment;
         this.registry.updateTask(taskId, { result });
 
@@ -837,6 +1054,7 @@ export class Orchestrator extends TypedEmitter {
             task: { ...task, status: "done" },
           });
           this.registry.transition(taskId, "done");
+          this.registry.updateTask(taskId, { phase: undefined });
         } else {
           const reasons = [
             ...assessment.checks.filter(c => !c.passed).map(c => `${c.type}: ${c.message}`),
@@ -849,7 +1067,20 @@ export class Orchestrator extends TypedEmitter {
             globalScore: assessment.globalScore,
             message: reasons.join(", "),
           });
-          this.retryOrFail(taskId, task, result);
+          // Execution OK but review failed → try correcting expectations before fix phase
+          if (result.exitCode === 0) {
+            this.tryAutoCorrectExpectations(taskId, task, result, assessment).then(corrected => {
+              if (corrected) return;
+              // Heuristic didn't help → LLM judge decides: bad expectations or bad work?
+              return this.judgeExpectations(taskId, task, result, assessment).then(judged => {
+                if (!judged) this.fixOrRetry(taskId, task, result);
+              });
+            }).catch(() => {
+              this.fixOrRetry(taskId, task, result);
+            });
+          } else {
+            this.retryOrFail(taskId, task, result);
+          }
         }
       }).catch(err => {
         this.emit("log", { level: "error", message: `[${taskId}] Assessment error: ${err.message}` });
@@ -866,19 +1097,299 @@ export class Orchestrator extends TypedEmitter {
           task: { ...task, status: "done" },
         });
         this.registry.transition(taskId, "done");
+        this.registry.updateTask(taskId, { phase: undefined });
       } else {
         this.retryOrFail(taskId, task, result);
       }
     }
   }
 
-  private retryOrFail(taskId: string, task: Task, result: TaskResult): void {
+  /**
+   * Auto-correct expectations when assessment fails due to wrong paths.
+   * If the only failures are file_exists checks with incorrect paths, search
+   * for the actual files using agent activity + filesystem, update expectations,
+   * and re-assess. Returns true if auto-correction succeeded (task is done).
+   */
+  private async tryAutoCorrectExpectations(
+    taskId: string, task: Task, result: TaskResult, assessment: AssessmentResult,
+  ): Promise<boolean> {
+    // Only attempt if there are failed file_exists checks
+    const failedChecks = assessment.checks.filter(c => !c.passed);
+    const failedMetrics = assessment.metrics.filter(m => !m.passed);
+    if (failedMetrics.length > 0) return false; // metrics failures can't be auto-corrected
+    if (failedChecks.length === 0) return false;
+
+    // All failed checks must be file_exists (other types can't be path-corrected)
+    const nonFileFailures = failedChecks.filter(c => c.type !== "file_exists");
+    if (nonFileFailures.length > 0) return false;
+
+    // Gather agent's actual file list from activity
+    const run = this.runStore.getRunByTaskId(taskId);
+    const activity = run?.activity;
+    const agentFiles = [
+      ...(activity?.filesCreated ?? []),
+      ...(activity?.filesEdited ?? []),
+    ];
+
+    // For each file_exists expectation that failed, try to find the actual path
+    const corrections = new Map<number, string[]>(); // expectation index → corrected paths
+    let allCorrected = true;
+
+    for (let i = 0; i < task.expectations.length; i++) {
+      const exp = task.expectations[i];
+      if (exp.type !== "file_exists" || !exp.paths) continue;
+
+      // Check if this expectation's check failed
+      const check = assessment.checks.find(c => c.type === "file_exists" && !c.passed);
+      if (!check) continue;
+
+      const correctedPaths: string[] = [];
+      for (const expectedPath of exp.paths) {
+        if (existsSync(expectedPath)) {
+          correctedPaths.push(expectedPath);
+          continue;
+        }
+
+        // Try to find by basename in agent's created/edited files
+        const name = basename(expectedPath);
+        const match = agentFiles.find(f => basename(f) === name);
+        if (match && existsSync(match)) {
+          correctedPaths.push(match);
+          continue;
+        }
+
+        // Try to find by basename in workDir (shallow search in common locations)
+        const found = this.findFileByName(name);
+        if (found) {
+          correctedPaths.push(found);
+          continue;
+        }
+
+        // Can't find this file — can't auto-correct
+        allCorrected = false;
+        break;
+      }
+
+      if (!allCorrected) break;
+      if (correctedPaths.length > 0) {
+        corrections.set(i, correctedPaths);
+      }
+    }
+
+    if (!allCorrected || corrections.size === 0) return false;
+
+    // Apply corrections
+    const newExpectations = [...task.expectations];
+    for (const [idx, paths] of corrections) {
+      newExpectations[idx] = { ...newExpectations[idx], paths };
+    }
+
+    this.registry.updateTask(taskId, { expectations: newExpectations });
+    this.emit("assessment:corrected", { taskId, corrections: corrections.size });
+
+    // Re-assess with corrected expectations
+    const current = this.registry.getTask(taskId);
+    if (!current) return false;
+
+    try {
+      const progressCb = (msg: string) => this.emit("assessment:progress", { taskId, message: msg });
+      const newAssessment = await this.assessFn(current, this.workDir, progressCb);
+      result.assessment = newAssessment;
+      this.registry.updateTask(taskId, { result });
+
+      if (newAssessment.passed) {
+        this.emit("assessment:complete", {
+          taskId,
+          passed: true,
+          scores: newAssessment.scores,
+          globalScore: newAssessment.globalScore,
+          message: `${task.title} (paths auto-corrected)`,
+        });
+        this.registry.transition(taskId, "done");
+        this.registry.updateTask(taskId, { phase: undefined });
+        return true;
+      }
+    } catch {
+      // Re-assessment failed — fall through to fix phase
+    }
+
+    return false;
+  }
+
+  /** Search for a file by name in common project locations. */
+  private findFileByName(name: string): string | null {
+    const searchDirs = [this.workDir, join(this.workDir, "src")];
+    for (const dir of searchDirs) {
+      const found = this.searchDir(dir, name, 4);
+      if (found) return found;
+    }
+    return null;
+  }
+
+  /**
+   * LLM judge: analyze failed expectations vs agent output and decide whether
+   * the expectations are wrong (correct them) or the agent's work is wrong (fix phase).
+   * Returns true if expectations were corrected and re-assessment passed.
+   */
+  private async judgeExpectations(
+    taskId: string, task: Task, result: TaskResult, assessment: AssessmentResult,
+  ): Promise<boolean> {
+    const failedChecks = assessment.checks.filter(c => !c.passed);
+    if (failedChecks.length === 0) return false;
+
+    // Don't judge if score is very low — that's clearly bad work
+    if (assessment.globalScore !== undefined && assessment.globalScore < 2.5) return false;
+
+    // Gather context
+    const run = this.runStore.getRunByTaskId(taskId);
+    const activity = run?.activity;
+
+    const prompt = buildJudgePrompt(task, result, assessment, failedChecks, activity);
+
+    let response: string;
+    try {
+      response = await querySDKText(prompt, this.workDir, this.config.settings.orchestratorModel);
+    } catch {
+      return false;
+    }
+
+    // Parse LLM verdict
+    let verdict: JudgeVerdict;
+    try {
+      const cleaned = response.replace(/```json?\n?/g, "").replace(/```/g, "").trim();
+      verdict = JSON.parse(cleaned);
+      if (!verdict.corrections || !Array.isArray(verdict.corrections)) return false;
+    } catch {
+      return false;
+    }
+
+    // Apply corrections only if LLM found at least one fixable expectation
+    const fixable = verdict.corrections.filter((c: any) => c.verdict === "expectation_wrong" && c.fix);
+    if (fixable.length === 0) return false;
+
+    const newExpectations = [...task.expectations];
+    let correctionCount = 0;
+
+    for (const fix of fixable) {
+      const idx = task.expectations.findIndex(e => e.type === fix.type);
+      if (idx < 0 || !fix.fix) continue;
+
+      const exp = newExpectations[idx];
+      const f = fix.fix;
+      if (fix.type === "file_exists" && f.paths) {
+        newExpectations[idx] = { ...exp, paths: f.paths };
+        correctionCount++;
+      } else if ((fix.type === "test" || fix.type === "script") && f.command) {
+        newExpectations[idx] = { ...exp, command: f.command };
+        correctionCount++;
+      } else if (fix.type === "llm_review" && f.threshold !== undefined) {
+        newExpectations[idx] = { ...exp, threshold: f.threshold };
+        correctionCount++;
+      }
+    }
+
+    if (correctionCount === 0) return false;
+
+    this.registry.updateTask(taskId, { expectations: newExpectations });
+    this.emit("assessment:corrected", { taskId, corrections: correctionCount });
+
+    // Re-assess with corrected expectations
+    const current = this.registry.getTask(taskId);
+    if (!current) return false;
+
+    try {
+      const progressCb = (msg: string) => this.emit("assessment:progress", { taskId, message: msg });
+      const newAssessment = await this.assessFn(current, this.workDir, progressCb);
+      result.assessment = newAssessment;
+      this.registry.updateTask(taskId, { result });
+
+      if (newAssessment.passed) {
+        this.emit("assessment:complete", {
+          taskId,
+          passed: true,
+          scores: newAssessment.scores,
+          globalScore: newAssessment.globalScore,
+          message: `${task.title} (expectations corrected)`,
+        });
+        this.registry.transition(taskId, "done");
+        this.registry.updateTask(taskId, { phase: undefined });
+        return true;
+      }
+    } catch {
+      // Re-assessment failed
+    }
+
+    return false;
+  }
+
+  /** Recursive directory search (bounded depth). */
+  private searchDir(dir: string, name: string, maxDepth: number): string | null {
+    if (maxDepth <= 0) return null;
+    try {
+      const entries = readdirSync(dir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (entry.name === "node_modules" || entry.name === ".git") continue;
+        const fullPath = join(dir, entry.name);
+        if (entry.isFile() && entry.name === name) return fullPath;
+        if (entry.isDirectory()) {
+          const found = this.searchDir(fullPath, name, maxDepth - 1);
+          if (found) return found;
+        }
+      }
+    } catch { /* permission error or missing dir */ }
+    return null;
+  }
+
+  /**
+   * Fix phase: when execution succeeded but review failed, try a targeted fix
+   * without burning a full retry. After maxFixAttempts, fall back to full retry.
+   */
+  private fixOrRetry(taskId: string, _task: Task, result: TaskResult): void {
+    const current = this.registry.getTask(taskId);
+    if (!current) return;
+
+    const maxFix = this.config.settings.maxFixAttempts ?? 2;
+    const fixAttempts = (current.fixAttempts ?? 0) + 1;
+
+    if (fixAttempts <= maxFix) {
+      // Save original description before first fix/retry
+      if (!current.originalDescription) {
+        this.registry.updateTask(taskId, { originalDescription: current.description });
+      }
+
+      this.emit("task:fix", { taskId, attempt: fixAttempts, maxFix });
+
+      // Use updateTask to set status directly — bypasses retry increment
+      // (fix attempts are NOT real failures)
+      this.registry.updateTask(taskId, {
+        status: "pending" as any,
+        phase: "fix",
+        fixAttempts,
+        description: buildFixPrompt(current, result),
+      });
+    } else {
+      // Fix attempts exhausted → full retry (burns 1 retry)
+      this.emit("log", { level: "warn", message: `[${taskId}] Fix attempts exhausted (${maxFix}), falling back to full retry` });
+      this.registry.updateTask(taskId, {
+        phase: "execution",
+        fixAttempts: 0,
+      });
+      this.retryOrFail(taskId, _task, result);
+    }
+  }
+
+  private retryOrFail(taskId: string, _task: Task, result: TaskResult): void {
     const current = this.registry.getTask(taskId);
     if (!current) return;
 
     if (current.retries < current.maxRetries) {
       const policy = current.retryPolicy ?? this.config.settings.defaultRetryPolicy;
       const nextAttempt = current.retries + 1;
+
+      // Save original description before first retry
+      if (!current.originalDescription) {
+        this.registry.updateTask(taskId, { originalDescription: current.description });
+      }
 
       // Check if we should escalate to a different agent
       let assignTo = current.assignTo;
@@ -896,13 +1407,30 @@ export class Orchestrator extends TypedEmitter {
       this.registry.transition(taskId, "failed");
       this.registry.transition(taskId, "pending");
       this.registry.updateTask(taskId, {
-        description: buildRetryPrompt(task, result),
+        description: buildRetryPrompt(current, result),
         assignTo,
+        phase: "execution",
+        fixAttempts: 0,
       });
     } else {
       this.emit("task:maxRetries", { taskId });
       this.registry.transition(taskId, "failed");
+      this.registry.updateTask(taskId, { phase: undefined });
     }
+  }
+
+  /** Force-fail a task by walking it through the state machine to "failed". */
+  forceFailTask(taskId: string): void {
+    try {
+      const task = this.registry.getTask(taskId);
+      if (!task || task.status === "done" || task.status === "failed") return;
+      if (task.status === "pending") this.registry.transition(taskId, "assigned");
+      const t2 = this.registry.getTask(taskId);
+      if (t2 && t2.status === "assigned") this.registry.transition(taskId, "in_progress");
+      const t3 = this.registry.getTask(taskId);
+      if (t3 && t3.status === "in_progress") this.registry.transition(taskId, "failed");
+      else if (t3 && t3.status === "review") this.registry.transition(taskId, "failed");
+    } catch { /* already terminal or transition error */ }
   }
 
   private spawnForTask(task: Task): void {
@@ -918,6 +1446,11 @@ export class Orchestrator extends TypedEmitter {
     this.registry.transition(task.id, "assigned");
     this.registry.transition(task.id, "in_progress");
 
+    // Set phase if not already set (new tasks start in execution phase)
+    if (!task.phase) {
+      this.registry.updateTask(task.id, { phase: "execution" });
+    }
+
     const runId = nanoid();
     const tmpDir = join(this.orchestraDir, "tmp");
     if (!existsSync(tmpDir)) {
@@ -925,11 +1458,18 @@ export class Orchestrator extends TypedEmitter {
     }
     const configPath = join(tmpDir, `run-${runId}.json`);
 
+    // Inject project memory into task description for agent context
+    const taskWithMemory = { ...task };
+    const memory = this.getMemory();
+    if (memory) {
+      taskWithMemory.description = `<project-memory>\n${memory}\n</project-memory>\n\n${task.description}`;
+    }
+
     const runnerConfig: RunnerConfig = {
       runId,
       taskId: task.id,
       agent,
-      task,
+      task: taskWithMemory,
       dbPath: join(this.orchestraDir, "state.db"),
       cwd: this.workDir,
     };
@@ -983,7 +1523,10 @@ export class Orchestrator extends TypedEmitter {
       const groupTasks = tasks.filter(t => t.group === group);
       const allTerminal = groupTasks.every(t => t.status === "done" || t.status === "failed");
       if (allTerminal) {
-        this.cleanupVolatileAgents(group);
+        const cleanupPolicy = this.config.settings.volatileCleanup ?? "on_complete";
+        if (cleanupPolicy === "on_complete") {
+          this.cleanupVolatileAgents(group);
+        }
         this.cleanedGroups.add(group);
 
         // Auto-update plan status
@@ -991,10 +1534,59 @@ export class Orchestrator extends TypedEmitter {
         if (plan && plan.status === "active") {
           const allDone = groupTasks.every(t => t.status === "done");
           this.registry.updatePlan?.(plan.id, { status: allDone ? "completed" : "failed" });
-          this.emit("plan:completed", { planId: plan.id, group, allPassed: allDone });
+          const report = this.buildPlanReport(plan.id, group, groupTasks, allDone);
+          this.emit("plan:completed", { planId: plan.id, group, allPassed: allDone, report });
         }
       }
     }
+  }
+
+  private buildPlanReport(planId: string, group: string, groupTasks: Task[], allPassed: boolean): PlanReport {
+    const state = this.registry.getState();
+    const processes = state?.processes ?? [];
+
+    const allFilesCreated = new Set<string>();
+    const allFilesEdited = new Set<string>();
+    let totalDuration = 0;
+    const scores: number[] = [];
+
+    const taskReports = groupTasks.map(t => {
+      const duration = t.result?.duration ?? 0;
+      totalDuration += duration;
+      const score = t.result?.assessment?.globalScore;
+      if (score !== undefined) scores.push(score);
+
+      // Get file activity from processes (may already be gone for completed tasks)
+      const proc = processes.find(p => p.taskId === t.id);
+      const filesCreated = proc?.activity?.filesCreated ?? [];
+      const filesEdited = proc?.activity?.filesEdited ?? [];
+      for (const f of filesCreated) allFilesCreated.add(f);
+      for (const f of filesEdited) allFilesEdited.add(f);
+
+      return {
+        title: t.title,
+        status: t.status as "done" | "failed",
+        duration,
+        score,
+        filesCreated,
+        filesEdited,
+      };
+    });
+
+    const avgScore = scores.length > 0
+      ? scores.reduce((a, b) => a + b, 0) / scores.length
+      : undefined;
+
+    return {
+      planId,
+      group,
+      allPassed,
+      totalDuration,
+      tasks: taskReports,
+      filesCreated: [...allFilesCreated],
+      filesEdited: [...allFilesEdited],
+      avgScore,
+    };
   }
 
   async status(): Promise<void> {
@@ -1007,10 +1599,46 @@ export class Orchestrator extends TypedEmitter {
   }
 }
 
-/** Build the retry prompt with feedback from the previous attempt. */
-export function buildRetryPrompt(task: Task, result: TaskResult): string {
+/** Build a targeted fix prompt — agent's work is on disk, only fix review issues. */
+export function buildFixPrompt(task: Task, result: TaskResult): string {
+  const base = task.originalDescription ?? task.description;
   const parts = [
-    task.description,
+    `TARGETED FIX — Your previous execution was successful (exit code 0).`,
+    `The code you wrote is already on disk. Do NOT start over.`,
+    ``,
+    `ORIGINAL TASK: ${base}`,
+    ``,
+    `The reviewer found these issues:`,
+  ];
+
+  if (result.assessment) {
+    const failed = result.assessment.checks.filter(c => !c.passed);
+    if (failed.length > 0) {
+      for (const c of failed) parts.push(`- ${c.type}: ${c.message} ${c.details || ""}`);
+    }
+    if (result.assessment.scores && result.assessment.scores.length > 0) {
+      parts.push(``, `SCORES (1-5):`);
+      for (const s of result.assessment.scores) {
+        parts.push(`- ${s.dimension}: ${s.score}/5 — ${s.reasoning}`);
+      }
+      if (result.assessment.globalScore !== undefined) {
+        parts.push(`Global score: ${result.assessment.globalScore.toFixed(1)}/5`);
+      }
+    } else if (result.assessment.llmReview) {
+      parts.push(``, `Reviewer feedback:`, result.assessment.llmReview);
+    }
+  }
+
+  parts.push(``, `Fix ONLY the issues listed above, then the task will be re-assessed.`);
+  return parts.join("\n");
+}
+
+/** Build the retry prompt with feedback from the previous attempt (full restart). */
+export function buildRetryPrompt(task: Task, result: TaskResult): string {
+  // Use original description as base (before any fix/retry modifications)
+  const base = task.originalDescription ?? task.description;
+  const parts = [
+    base,
     ``,
     `PREVIOUS ATTEMPT FAILED:`,
     `Exit code: ${result.exitCode}`,
@@ -1042,4 +1670,95 @@ export function buildRetryPrompt(task: Task, result: TaskResult): string {
 
 function sleep(ms: number): Promise<void> {
   return new Promise(r => setTimeout(r, ms));
+}
+
+// ── Expectation Judge ─────────────────────────────────
+
+interface JudgeCorrectionFix {
+  paths?: string[];
+  command?: string;
+  threshold?: number;
+}
+
+interface JudgeCorrection {
+  type: string;
+  verdict: "expectation_wrong" | "work_wrong";
+  reason: string;
+  fix?: JudgeCorrectionFix;
+}
+
+interface JudgeVerdict {
+  corrections: JudgeCorrection[];
+}
+
+function buildJudgePrompt(
+  task: Task,
+  result: TaskResult,
+  assessment: AssessmentResult,
+  failedChecks: Array<{ type: string; passed: boolean; message: string; details?: string }>,
+  activity?: { filesCreated: string[]; filesEdited: string[]; toolCalls: number; summary?: string },
+): string {
+  const parts = [
+    `You are a QA judge for an AI orchestrator. An agent completed a coding task but some acceptance criteria (expectations) failed.`,
+    `Your job: determine if the EXPECTATIONS are wrong (should be corrected) or if the AGENT'S WORK is wrong (needs fixing).`,
+    ``,
+    `## Task`,
+    `Title: ${task.title}`,
+    `Description: ${(task.originalDescription || task.description).slice(0, 800)}`,
+    ``,
+    `## Agent Output`,
+    result.stdout ? `Result (last 800 chars): ${result.stdout.slice(-800)}` : "No output captured.",
+  ];
+
+  if (activity) {
+    if (activity.filesCreated.length > 0) {
+      parts.push(``, `Files created by agent: ${activity.filesCreated.join(", ")}`);
+    }
+    if (activity.filesEdited.length > 0) {
+      parts.push(`Files edited by agent: ${activity.filesEdited.join(", ")}`);
+    }
+    parts.push(`Tool calls: ${activity.toolCalls}`);
+  }
+
+  if (assessment.globalScore !== undefined) {
+    parts.push(``, `LLM Review Score: ${assessment.globalScore.toFixed(1)}/5`);
+  }
+
+  parts.push(``, `## Failed Expectations`);
+  for (const check of failedChecks) {
+    const expDef = task.expectations.find(e => e.type === check.type);
+    parts.push(`- Type: ${check.type}`);
+    parts.push(`  Failure: ${check.message}`);
+    if (check.details) parts.push(`  Details: ${check.details.slice(0, 300)}`);
+    if (expDef?.paths) parts.push(`  Expected paths: ${expDef.paths.join(", ")}`);
+    if (expDef?.command) parts.push(`  Command: ${expDef.command}`);
+    if (expDef?.threshold) parts.push(`  Threshold: ${expDef.threshold}`);
+  }
+
+  parts.push(
+    ``,
+    `## Instructions`,
+    `For EACH failed expectation, decide:`,
+    `- "expectation_wrong": The agent did good work but the expectation is misconfigured (wrong path, wrong command, threshold too strict). Provide a corrected version.`,
+    `- "work_wrong": The agent genuinely didn't meet this criterion. No correction needed.`,
+    ``,
+    `Respond with ONLY a JSON object:`,
+    `{`,
+    `  "corrections": [`,
+    `    {`,
+    `      "type": "file_exists|test|script|llm_review",`,
+    `      "verdict": "expectation_wrong|work_wrong",`,
+    `      "reason": "brief explanation",`,
+    `      "fix": { "paths": ["corrected/path.ts"], "command": "corrected command", "threshold": 2.5 }`,
+    `    }`,
+    `  ]`,
+    `}`,
+    ``,
+    `Only include "fix" when verdict is "expectation_wrong". Fix fields depend on type:`,
+    `- file_exists: { "paths": [...] }`,
+    `- test/script: { "command": "..." }`,
+    `- llm_review: { "threshold": number }`,
+  );
+
+  return parts.join("\n");
 }

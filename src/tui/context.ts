@@ -1,14 +1,10 @@
 import type blessed from "blessed";
 import type { Orchestrator } from "../orchestrator.js";
-import type { OrchestraState } from "../core/types.js";
+import type { OrchestraState, ProjectConfig } from "../core/types.js";
 
 // ─── TUI Config ──────────────────────────────────────────
 
-export interface TUIConfig {
-  judge: string;
-  agent: string;
-  model: string;
-}
+export type TUIConfig = ProjectConfig;
 
 // ─── Widget Host ─────────────────────────────────────────
 

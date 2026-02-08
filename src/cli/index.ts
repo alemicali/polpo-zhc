@@ -89,18 +89,16 @@ function wireConsoleEvents(orchestrator: Orchestrator): void {
 }
 
 const LOGO = `
-    ${chalk.yellow("♪")}  ${chalk.bold("╔═══════════════════════════════════╗")}  ${chalk.yellow("♪")}
-   ${chalk.yellow("♫")}  ${chalk.bold("║")}                                   ${chalk.bold("║")}  ${chalk.yellow("♫")}
-       ${chalk.bold("║")}   ${chalk.yellow("♩")} ${chalk.bold.white("O R C H E S T R A")} ${chalk.yellow("♩")}          ${chalk.bold("║")}
+       ${chalk.bold("╔═══════════════════════════════════╗")}
+       ${chalk.bold("║")}                                   ${chalk.bold("║")}
+       ${chalk.bold("║")}      ${chalk.bold.white("O R C H E S T R A")}            ${chalk.bold("║")}
        ${chalk.bold("║")}                                   ${chalk.bold("║")}
        ${chalk.bold("║")}   ${chalk.dim("AI Agent Orchestration Framework")} ${chalk.bold("║")}
-   ${chalk.yellow("♫")}  ${chalk.bold("║")}                                   ${chalk.bold("║")}  ${chalk.yellow("♫")}
-    ${chalk.yellow("♪")}  ${chalk.bold("╚═══════════════════════════════════╝")}  ${chalk.yellow("♪")}
+       ${chalk.bold("║")}                                   ${chalk.bold("║")}
+       ${chalk.bold("╚═══════════════════════════════════╝")}
 `;
 
-const LOGO_MINI = `  ${chalk.yellow("♩")} ${chalk.bold.white("O R C H E S T R A")} ${chalk.yellow("♩")}`;
-
-const NOTES = ["♩", "♪", "♫", "♬"];
+const LOGO_MINI = `  ${chalk.bold.white("O R C H E S T R A")}  `;
 
 const program = new Command();
 
@@ -140,7 +138,7 @@ program
       await writeFile(statePath, JSON.stringify({ project: "", team: { name: "", agents: [] }, tasks: [], processes: [] }, null, 2), "utf-8");
     }
 
-    console.log(chalk.green("\n  Orchestra initialized! ♪"));
+    console.log(chalk.green("\n  Orchestra initialized!"));
     console.log(chalk.dim("  Edit orchestra.yml to configure your team and tasks."));
     console.log(chalk.dim("  Then run: orchestra run\n"));
   });
@@ -200,7 +198,6 @@ program
 
       const spin = SPINNER[frame % SPINNER.length];
       const pulse = PULSE[frame % PULSE.length];
-      const note = chalk.yellow(NOTES[frame % NOTES.length]);
 
       const getIcon = (status: TaskStatus) => {
         switch (status) {
@@ -288,15 +285,15 @@ program
       const bar = chalk.green("█".repeat(greenFill)) + chalk.red("█".repeat(redFill)) + chalk.gray("░".repeat(Math.max(0, grayFill)));
 
       const isAllDone = processedCount === total;
-      const headerNote = isAllDone
-        ? (failedCount > 0 ? chalk.red("♭") : chalk.green("♯"))
-        : note;
+      const headerIcon = isAllDone
+        ? (failedCount > 0 ? chalk.red("✗") : chalk.green("✓"))
+        : chalk.yellow(spin);
 
       // Elapsed since watch started
       const totalElapsed = formatTime(Date.now() - (state.startedAt ? new Date(state.startedAt).getTime() : startTime));
 
       // Header
-      console.log(`\n  ${headerNote} ${LOGO_MINI} ${headerNote}`);
+      console.log(`\n  ${headerIcon} ${LOGO_MINI} ${headerIcon}`);
       console.log(chalk.dim(`    ${state.project || "project"} | Team: ${state.team.name || "-"} | Agents: ${state.team.agents.map(a => a.name).join(", ") || "-"}`));
       console.log(chalk.dim(`    Elapsed: ${totalElapsed}`));
 
@@ -361,15 +358,15 @@ program
       // Active processes summary
       const aliveProcs = (state.processes || []).filter(p => p.alive);
       if (aliveProcs.length > 0) {
-        console.log(chalk.dim(`\n    ${note} Active agents: ${aliveProcs.length}`));
+        console.log(chalk.dim(`\n    Active agents: ${aliveProcs.length}`));
       }
 
       // Footer
       if (isAllDone) {
         if (failedCount > 0) {
-          console.log(chalk.red.bold(`\n    ♭ Finished: ${doneCount} done, ${failedCount} failed (${totalElapsed})`));
+          console.log(chalk.red.bold(`\n    Finished: ${doneCount} done, ${failedCount} failed (${totalElapsed})`));
         } else {
-          console.log(chalk.green.bold(`\n    ♯ All ${total} tasks completed! (${totalElapsed})`));
+          console.log(chalk.green.bold(`\n    All ${total} tasks completed! (${totalElapsed})`));
         }
       }
       console.log();
