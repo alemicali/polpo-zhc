@@ -24,5 +24,21 @@ export { parseConfig, generateTemplate } from "./config.js";
 // Session reader
 export { readSessionSummary, getRecentMessages, findTranscriptPath } from "./session-reader.js";
 
+// Server
+export { OrchestraServer, createApp, ProjectManager, SSEBridge, WSBridge } from "./server/index.js";
+export type {
+  ServerConfig,
+  ProjectEntry,
+  ProjectInfo,
+  ApiResponse,
+  ApiError,
+  SSEEvent,
+  CreateTaskRequest,
+  UpdateTaskRequest,
+  CreatePlanRequest,
+  UpdatePlanRequest,
+  AddAgentRequest,
+} from "./server/index.js";
+
 // Backward compat alias
 export { JsonTaskStore as TaskRegistry } from "./stores/index.js";

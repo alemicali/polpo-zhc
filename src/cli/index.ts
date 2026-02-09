@@ -394,6 +394,38 @@ program
     }
   });
 
+// orchestra serve — HTTP API server
+program
+  .command("serve")
+  .description("Start the Orchestra HTTP API server")
+  .option("-p, --port <port>", "Port to listen on", "3000")
+  .option("-H, --host <host>", "Host to bind to", "0.0.0.0")
+  .option("-c, --config <path>", "Path to working directory", ".")
+  .option("--api-key <key>", "API key for authentication (optional)")
+  .option("--project-id <id>", "Project ID (defaults to directory name)")
+  .action(async (opts) => {
+    console.log(LOGO);
+    const { basename } = await import("node:path");
+    const { OrchestraServer } = await import("../server/index.js");
+
+    // Register adapters
+    await import("../adapters/claude-sdk.js");
+    await import("../adapters/generic.js");
+
+    const workDir = resolve(opts.config);
+    const projectId = opts.projectId || basename(workDir);
+    const port = parseInt(opts.port, 10);
+
+    const server = new OrchestraServer({
+      port,
+      host: opts.host,
+      apiKeys: opts.apiKey ? [opts.apiKey] : [],
+      projects: [{ id: projectId, workDir, autoStart: true }],
+    });
+
+    await server.start();
+  });
+
 // orchestra tui (interactive mode — also the default)
 program
   .command("tui", { isDefault: true })

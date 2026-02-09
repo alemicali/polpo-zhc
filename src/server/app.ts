@@ -1,0 +1,70 @@
+import { Hono } from "hono";
+import { cors } from "hono/cors";
+import type { Orchestrator } from "../orchestrator.js";
+import type { ProjectManager } from "./project-manager.js";
+import { authMiddleware } from "./middleware/auth.js";
+import { projectMiddleware } from "./middleware/project.js";
+import { errorMiddleware } from "./middleware/error.js";
+import { healthRoutes } from "./routes/health.js";
+import { taskRoutes } from "./routes/tasks.js";
+import { planRoutes } from "./routes/plans.js";
+import { agentRoutes } from "./routes/agents.js";
+import { eventRoutes } from "./routes/events.js";
+import { projectListRoutes, projectDetailRoutes } from "./routes/projects.js";
+
+export type ServerEnv = {
+  Variables: {
+    orchestrator: Orchestrator;
+    projectId: string;
+  };
+};
+
+export interface AppOptions {
+  apiKeys?: string[];
+  corsOrigins?: string[];
+}
+
+/**
+ * Create the Hono app with all routes and middleware.
+ */
+export function createApp(pm: ProjectManager, opts?: AppOptions): Hono {
+  const app = new Hono();
+
+  // Global middleware
+  app.use("*", errorMiddleware());
+
+  if (opts?.corsOrigins && opts.corsOrigins.length > 0) {
+    app.use("*", cors({ origin: opts.corsOrigins }));
+  } else {
+    // Default: allow all origins for local dev
+    app.use("*", cors());
+  }
+
+  // Health (no auth, no project context)
+  app.route("/api/v1/health", healthRoutes());
+
+  // Authenticated routes
+  const authed = new Hono();
+  if (opts?.apiKeys && opts.apiKeys.length > 0) {
+    authed.use("*", authMiddleware(opts.apiKeys));
+  }
+
+  // Project listing (authenticated but no project context)
+  authed.route("/projects", projectListRoutes(pm));
+
+  // Per-project routes (authenticated + project context)
+  const projectApp = new Hono<ServerEnv>();
+  projectApp.use("*", projectMiddleware(pm));
+
+  // Mount sub-routes
+  projectApp.route("/tasks", taskRoutes());
+  projectApp.route("/plans", planRoutes());
+  projectApp.route("/agents", agentRoutes());
+  projectApp.route("/events", eventRoutes(pm));
+  projectApp.route("/", projectDetailRoutes());
+
+  authed.route("/projects/:projectId", projectApp);
+  app.route("/api/v1", authed);
+
+  return app;
+}
