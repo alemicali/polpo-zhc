@@ -1,0 +1,112 @@
+---
+title: CLI
+description: Command-line interface for Orchestra
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Orchestra provides four CLI commands: `init`, `run`, `status`, `serve`, and `tui`.
+
+## `orchestra init`
+
+Initialize Orchestra in the current project.
+
+```bash
+orchestra init
+```
+
+Creates:
+- `orchestra.yml` — configuration file with example agents and plan
+- `.orchestra/` — runtime directory for state, logs, and assessments
+
+## `orchestra run`
+
+Execute all pending plans in headless mode.
+
+```bash
+orchestra run [options]
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `-c, --config <path>` | `.` | Path to working directory containing `orchestra.yml` |
+
+Output is streamed to stdout with color-coded status updates:
+
+```
+[14:23:01] Orchestra started — my-project
+[14:23:01] Team agents: backend-dev, frontend-dev
+
+[14:23:02] [task-1] Task added: Create database schema
+[14:23:02] [task-1] Spawning "backend-dev" (adapter: claude-sdk) for: Create database schema
+[14:24:15] [task-1] Agent finished — exit 0 (73.2s)
+[14:24:18] [task-1] PASSED (score: 4.2/5) — All checks passed
+[14:24:18] [task-1] DONE — Create database schema
+```
+
+The process exits when all tasks are done or failed.
+
+## `orchestra status`
+
+Show current task status as a dashboard.
+
+```bash
+orchestra status [options]
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `-c, --config <path>` | `.` | Path to working directory |
+| `-w, --watch` | `false` | Auto-refresh every 2 seconds |
+
+In watch mode, the display shows:
+- Progress bar with done/running/pending/failed counts
+- Per-task status with agent, elapsed time, PID
+- Live agent activity (current tool, file, tool call count)
+- G-Eval dimension scores for completed tasks (star ratings)
+- Failure reasons for failed tasks
+
+## `orchestra serve`
+
+Start the HTTP API server.
+
+```bash
+orchestra serve [options]
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `-p, --port <port>` | `3000` | Port to listen on |
+| `-H, --host <host>` | `0.0.0.0` | Host to bind to |
+| `-c, --config <path>` | `.` | Path to working directory |
+| `--api-key <key>` | — | API key for authentication (optional) |
+| `--project-id <id>` | dir name | Project ID |
+
+The server provides REST API, SSE streaming, and WebSocket support. See [Server Usage](/usage/server/) for details.
+
+## `orchestra tui`
+
+Launch the interactive terminal UI. This is the **default command** — running `orchestra` without arguments starts the TUI.
+
+```bash
+orchestra tui [options]
+orchestra          # same as orchestra tui
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `-c, --config <path>` | `.` | Path to working directory |
+
+See [TUI Usage](/usage/tui/) for details on features and commands.
+
+## Global Options
+
+All commands accept the `--config` / `-c` flag to specify the working directory. Orchestra will look for `orchestra.yml` in that directory.
+
+```bash
+# Run from a different directory
+orchestra run -c /path/to/my-project
+
+# Serve from a specific project
+orchestra serve -c ./projects/api-service --port 3890
+```

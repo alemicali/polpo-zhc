@@ -1,0 +1,448 @@
+---
+title: REST API Reference
+description: Complete HTTP API endpoint reference
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Base URL: `http://localhost:3890/api/v1`
+
+All project-scoped endpoints are under `/api/v1/projects/:projectId`.
+
+## Response Format
+
+```typescript
+// Success
+{ ok: true, data: T }
+
+// Error
+{ ok: false, error: string, code: string }
+```
+
+Error codes: `NOT_FOUND`, `VALIDATION_ERROR`.
+
+---
+
+## Projects
+
+### List Projects
+
+```http
+GET /api/v1/projects
+```
+
+**Response** `200`:
+```json
+{ "ok": true, "data": [{ "id": "my-project", "workDir": "/path/to/project" }] }
+```
+
+### Get State
+
+```http
+GET /api/v1/projects/:projectId/state
+```
+
+Returns full `OrchestraState` snapshot.
+
+### Get Config
+
+```http
+GET /api/v1/projects/:projectId/config
+```
+
+Returns `OrchestraConfig`.
+
+---
+
+## Tasks
+
+### List Tasks
+
+```http
+GET /tasks?status=failed&group=build-api&assignTo=backend-dev
+```
+
+All query params are optional filters.
+
+**Response** `200`:
+```json
+{ "ok": true, "data": [{ "id": "task-1", "title": "...", "status": "done", ... }] }
+```
+
+### Get Task
+
+```http
+GET /tasks/:taskId
+```
+
+### Create Task
+
+```http
+POST /tasks
+Content-Type: application/json
+
+{
+  "title": "Build auth middleware",
+  "description": "Create JWT authentication middleware",
+  "assignTo": "backend-dev",
+  "group": "auth-feature",
+  "dependsOn": ["task-1"],
+  "maxDuration": 1800000,
+  "expectations": [
+    { "type": "test", "command": "npm test" }
+  ],
+  "retryPolicy": {
+    "escalateAfter": 2,
+    "fallbackAgent": "senior-dev"
+  }
+}
+```
+
+**Response** `201`: Created task object.
+
+### Update Task
+
+```http
+PATCH /tasks/:taskId
+Content-Type: application/json
+
+{
+  "description": "Updated description",
+  "assignTo": "different-agent",
+  "expectations": [...]
+}
+```
+
+All fields optional. Only updates provided fields.
+
+### Delete Task
+
+```http
+DELETE /tasks/:taskId
+```
+
+### Retry Task
+
+```http
+POST /tasks/:taskId/retry
+```
+
+Resets a `failed` task to `pending`.
+
+### Kill Task
+
+```http
+POST /tasks/:taskId/kill
+```
+
+Terminates the running agent and marks task as `failed`.
+
+### Reassess Task
+
+```http
+POST /tasks/:taskId/reassess
+```
+
+Re-runs assessment on a `done` or `failed` task.
+
+---
+
+## Plans
+
+### List Plans
+
+```http
+GET /plans
+```
+
+### List Resumable Plans
+
+```http
+GET /plans/resumable
+```
+
+Returns plans with failed tasks that can be resumed.
+
+### Get Plan
+
+```http
+GET /plans/:planId
+```
+
+### Save Plan
+
+```http
+POST /plans
+Content-Type: application/json
+
+{
+  "yaml": "plans:\n  - group: my-plan\n    tasks: ...",
+  "name": "My Plan",
+  "prompt": "Original user prompt",
+  "status": "draft"
+}
+```
+
+**Response** `201`: Created plan object.
+
+### Update Plan
+
+```http
+PATCH /plans/:planId
+Content-Type: application/json
+
+{ "yaml": "...", "status": "draft" }
+```
+
+### Delete Plan
+
+```http
+DELETE /plans/:planId
+```
+
+### Execute Plan
+
+```http
+POST /plans/:planId/execute
+```
+
+Transitions plan from `draft` to `active` and creates tasks.
+
+**Response**: `{ ok: true, data: { tasks: Task[] } }`
+
+### Resume Plan
+
+```http
+POST /plans/:planId/resume
+Content-Type: application/json
+
+{ "retryFailed": true }
+```
+
+Resumes a plan with failed or pending tasks.
+
+### Abort Plan
+
+```http
+POST /plans/:planId/abort
+```
+
+Kills all running tasks and cancels pending tasks in the plan group.
+
+**Response**: `{ ok: true, data: { aborted: 3 } }`
+
+---
+
+## Agents
+
+### List Agents
+
+```http
+GET /agents
+```
+
+### Add Agent
+
+```http
+POST /agents
+Content-Type: application/json
+
+{
+  "name": "new-dev",
+  "adapter": "claude-sdk",
+  "role": "Full-stack developer",
+  "model": "claude-sonnet-4-5-20250929",
+  "skills": ["frontend-design"],
+  "maxTurns": 200,
+  "systemPrompt": "Focus on TypeScript best practices"
+}
+```
+
+### Remove Agent
+
+```http
+DELETE /agents/:name
+```
+
+### Get Team
+
+```http
+GET /agents/team
+```
+
+### Rename Team
+
+```http
+PATCH /agents/team
+Content-Type: application/json
+
+{ "name": "Dream Team" }
+```
+
+### List Processes
+
+```http
+GET /agents/processes
+```
+
+Returns active `AgentProcess[]` with PID, activity, and alive status.
+
+---
+
+## Memory
+
+### Get Memory
+
+```http
+GET /memory
+```
+
+**Response**:
+```json
+{ "ok": true, "data": { "exists": true, "content": "# Project Memory\n..." } }
+```
+
+### Update Memory
+
+```http
+PUT /memory
+Content-Type: application/json
+
+{ "content": "# Project Memory\n\n## Build\nnpm run build" }
+```
+
+---
+
+## Chat & AI Generation
+
+### Chat
+
+```http
+POST /chat
+Content-Type: application/json
+
+{ "message": "What tasks are currently running?" }
+```
+
+**Response**: `{ ok: true, data: { response: "There are 2 tasks running..." } }`
+
+### Generate Plan
+
+```http
+POST /chat/generate-plan
+Content-Type: application/json
+
+{ "prompt": "Build a REST API with auth, rate limiting, and tests" }
+```
+
+**Response**: `{ ok: true, data: { yaml: "plans:\n...", raw: "..." } }`
+
+### Prepare Task
+
+```http
+POST /chat/prepare-task
+Content-Type: application/json
+
+{ "description": "Add user authentication", "assignTo": "backend-dev", "group": "auth" }
+```
+
+### Generate Team
+
+```http
+POST /chat/generate-team
+Content-Type: application/json
+
+{ "description": "Build a full-stack e-commerce platform" }
+```
+
+### Refine Team
+
+```http
+POST /chat/refine-team
+Content-Type: application/json
+
+{
+  "currentYaml": "agents:\n  - name: ...",
+  "description": "Build e-commerce platform",
+  "feedback": "Add a database specialist"
+}
+```
+
+### Refine Plan
+
+```http
+POST /chat/refine-plan
+Content-Type: application/json
+
+{
+  "currentYaml": "plans:\n  ...",
+  "prompt": "Build REST API",
+  "feedback": "Add rate limiting tasks"
+}
+```
+
+---
+
+## Logs
+
+### List Sessions
+
+```http
+GET /logs
+```
+
+### Get Session Entries
+
+```http
+GET /logs/:sessionId
+```
+
+---
+
+## Events (SSE)
+
+### Subscribe
+
+```http
+GET /events
+```
+
+Or with reconnection:
+
+```http
+GET /events?lastEventId=42
+```
+
+**Event format** (SSE):
+```
+id: 43
+data: {"event":"task:transition","data":{"taskId":"task-1","from":"pending","to":"assigned","task":{...}}}
+```
+
+---
+
+## Health
+
+```http
+GET /api/v1/health
+```
+
+**Response**: `{ ok: true, uptime: 12345 }`
+
+---
+
+## Authentication
+
+When `--api-key` is configured on the server:
+
+```bash
+# Via header
+curl -H "X-API-Key: my-secret" http://localhost:3890/api/v1/projects
+
+# Via query parameter (for EventSource)
+curl "http://localhost:3890/api/v1/projects/my-project/events?apiKey=my-secret"
+```
+
+<Aside>
+Requests without a valid API key receive `401 Unauthorized` when auth is enabled.
+</Aside>

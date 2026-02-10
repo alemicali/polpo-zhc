@@ -10,6 +10,18 @@ import { buildPlanSystemPrompt, buildTaskPrepPrompt } from "../../llm/prompts.js
 import { formatYamlColored, formatPlanReadable, fmtUserMsg } from "../formatters.js";
 import { createOverlay, addHintBar } from "../widgets.js";
 
+function slugify(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 30) || "plan";
+}
+
+function extractPlanName(yaml: string): string | undefined {
+  try {
+    const doc = parseYaml(yaml);
+    if (doc?.name && typeof doc.name === "string") return slugify(doc.name);
+  } catch { /* ignore */ }
+  return undefined;
+}
+
 export async function handlePlanInput(ctx: CommandContext, input: string): Promise<void> {
   ctx.logAlways(fmtUserMsg(input));
   ctx.logAlways("");
@@ -344,7 +356,7 @@ async function generatePlanWithFeedback(ctx: CommandContext, originalInput: stri
 
 function saveDraft(ctx: CommandContext, yaml: string, prompt: string): void {
   try {
-    const plan = ctx.orchestrator.savePlan({ yaml, prompt, status: "draft" });
+    const plan = ctx.orchestrator.savePlan({ yaml, prompt, status: "draft", name: extractPlanName(yaml) });
     ctx.log(`{blue-fg}Plan saved as draft: ${plan.name}{/blue-fg}`);
     ctx.logEvent(`  {blue-fg}■{/blue-fg} Draft saved: {bold}${plan.name}{/bold}`);
   } catch (err: unknown) {
@@ -423,7 +435,7 @@ async function executeWithPrep(
 
 function executeNewPlan(ctx: CommandContext, yaml: string, prompt: string): void {
   try {
-    const plan = ctx.orchestrator.savePlan({ yaml, prompt });
+    const plan = ctx.orchestrator.savePlan({ yaml, prompt, name: extractPlanName(yaml) });
     const { tasks, group } = ctx.orchestrator.executePlan(plan.id);
     ctx.log(`{green-fg}Plan executed: ${tasks.length} task${tasks.length !== 1 ? "s" : ""} created (${group}){/green-fg}`);
     ctx.logEvent(`  {green-fg}▸{/green-fg} {bold}Plan started{/bold} — ${tasks.length} tasks {grey-fg}(${group}){/grey-fg}`);

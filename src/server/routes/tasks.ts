@@ -78,6 +78,9 @@ export function taskRoutes(): Hono<ServerEnv> {
     if (body.assignTo !== undefined) {
       orchestrator.updateTaskAssignment(taskId, body.assignTo);
     }
+    if (body.expectations !== undefined) {
+      orchestrator.updateTaskExpectations(taskId, body.expectations);
+    }
 
     const updated = orchestrator.getStore().getTask(taskId);
     return c.json({ ok: true, data: updated });

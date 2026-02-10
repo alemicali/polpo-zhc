@@ -1,0 +1,188 @@
+---
+title: Configuration Reference
+description: Complete field-by-field reference for orchestra.yml
+---
+
+## Top-Level Structure
+
+```yaml
+version: "1"          # Config version
+project: my-project   # Project name
+team:                  # Team definition
+  name: My Team
+  agents: [...]
+tasks: [...]           # Standalone tasks (outside plans)
+settings: {...}        # Global settings
+```
+
+## Agent Fields
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `name` | string | — | **Required.** Unique agent identifier |
+| `adapter` | string | — | **Required.** `"claude-sdk"` or `"generic"` |
+| `role` | string | — | Agent's role description |
+| `command` | string | — | CLI command (generic adapter only). `{prompt}` and `{taskFile}` are replaced |
+| `model` | string | — | Model to use (claude-sdk adapter) |
+| `allowedTools` | string[] | — | Allowed tool names (claude-sdk adapter) |
+| `mcpServers` | object | — | MCP server configuration (claude-sdk adapter) |
+| `systemPrompt` | string | — | Additional system prompt appended to base |
+| `skills` | string[] | — | Installed skill names |
+| `maxTurns` | number | `150` | Max conversation turns before stopping |
+| `volatile` | boolean | `false` | Auto-cleanup when plan completes |
+| `planGroup` | string | — | Plan group this volatile agent belongs to |
+
+## Task Fields
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `id` | string | auto | Auto-generated unique ID |
+| `title` | string | — | **Required.** Short task title |
+| `description` | string | — | **Required.** Detailed instructions |
+| `assignTo` | string | — | **Required.** Agent name |
+| `group` | string | — | Plan group name |
+| `dependsOn` | string[] | `[]` | Task titles this depends on |
+| `status` | TaskStatus | `"pending"` | Current status |
+| `expectations` | Expectation[] | `[]` | Assessment criteria |
+| `metrics` | Metric[] | `[]` | Custom metrics |
+| `maxRetries` | number | `3` | Max full retry attempts |
+| `maxDuration` | number | `1800000` | Timeout in ms (0 = no timeout) |
+| `retryPolicy` | RetryPolicy | — | Escalation settings |
+
+## TaskExpectation Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `type` | string | **Required.** `"test"`, `"file_exists"`, `"script"`, or `"llm_review"` |
+| `command` | string | Shell command (for `test` and `script`) |
+| `paths` | string[] | File paths to check (for `file_exists`) |
+| `criteria` | string | Review prompt (for `llm_review`) |
+| `dimensions` | EvalDimension[] | Scoring dimensions (for `llm_review`) |
+| `threshold` | number | Minimum passing score 1-5 (default: `3.0`) |
+
+## EvalDimension Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | string | Dimension name (e.g. `"correctness"`) |
+| `description` | string | What this dimension measures |
+| `weight` | number | Weight 0-1 (should sum to ~1 across dimensions) |
+| `rubric` | object | Score descriptions per level (1-5) |
+
+## RetryPolicy Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `escalateAfter` | number | Failure count before escalating |
+| `fallbackAgent` | string | Agent for escalation retries |
+| `escalateModel` | string | Model override for escalation |
+
+## Settings Fields
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `maxRetries` | number | `3` | Default max retries per task |
+| `workDir` | string | `"."` | Working directory |
+| `logLevel` | string | `"normal"` | `"quiet"`, `"normal"`, or `"verbose"` |
+| `taskTimeout` | number | `1800000` | Default task timeout (ms) |
+| `staleThreshold` | number | `300000` | Idle time before stale warning (ms) |
+| `defaultRetryPolicy` | RetryPolicy | — | Default retry policy for all tasks |
+| `enableVolatileTeams` | boolean | `true` | Allow volatile agents in plan `team:` sections |
+| `volatileCleanup` | string | `"on_complete"` | `"on_complete"` or `"manual"` |
+| `maxFixAttempts` | number | `2` | Fix attempts per review cycle |
+| `maxQuestionRounds` | number | `2` | Auto-answer rounds per task |
+| `maxResolutionAttempts` | number | `2` | Deadlock resolution attempts per task |
+| `orchestratorModel` | string | — | Model for orchestrator LLM calls |
+
+## ProjectConfig Fields
+
+Stored in `.orchestra/config.json`:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `project` | string | Project name |
+| `judge` | string | Adapter for assessment LLM |
+| `judgeModel` | string | Model for orchestrator LLM calls |
+| `agent` | string | Default adapter for new agents |
+| `model` | string | Default model |
+| `taskPrep` | boolean | Enable LLM task preparation (default: `true`) |
+
+## Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `ANTHROPIC_API_KEY` | API key for Claude agents |
+| `ORCHESTRATOR_MODEL` | Override model for orchestrator LLM calls |
+| `ORCHESTRATOR_TEMPERATURE` | Temperature for orchestrator LLM |
+| `API_KEY` | Server authentication key |
+
+## Full Example
+
+```yaml
+agents:
+  - name: architect
+    adapter: claude-sdk
+    role: Senior architect
+    model: claude-sonnet-4-5-20250929
+    maxTurns: 200
+    systemPrompt: "Always consider performance implications"
+
+  - name: developer
+    adapter: claude-sdk
+    role: Full-stack developer
+    skills:
+      - frontend-design
+
+  - name: aider-dev
+    adapter: generic
+    command: "aider --no-auto-commit --model gpt-4 {taskFile}"
+    role: Code editor
+
+plans:
+  - group: build-feature
+    team:
+      - name: specialist
+        adapter: claude-sdk
+        role: Feature specialist
+        volatile: true
+
+    tasks:
+      - title: Design database schema
+        agent: architect
+        description: Design normalized schema for user management
+
+      - title: Implement API
+        agent: developer
+        description: Build Express REST API
+        dependencies:
+          - Design database schema
+        maxDuration: 3600000
+        retryPolicy:
+          escalateAfter: 2
+          fallbackAgent: architect
+        expectations:
+          - type: file_exists
+            paths: [src/routes.ts, src/db.ts]
+          - type: test
+            command: npm test
+          - type: llm_review
+            criteria: Verify security and error handling
+            threshold: 4.0
+            dimensions:
+              - name: security
+                weight: 0.6
+                description: No vulnerabilities
+              - name: error_handling
+                weight: 0.4
+                description: Proper error responses
+
+settings:
+  maxRetries: 3
+  workDir: "."
+  logLevel: normal
+  taskTimeout: 1800000
+  staleThreshold: 300000
+  maxFixAttempts: 2
+  maxQuestionRounds: 2
+  orchestratorModel: claude-sonnet-4-5-20250929
+```

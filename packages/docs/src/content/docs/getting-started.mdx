@@ -1,0 +1,138 @@
+---
+title: Getting Started
+description: Install Orchestra and run your first multi-agent plan
+---
+
+import { Steps, Tabs, TabItem, Aside } from '@astrojs/starlight/components';
+
+## Prerequisites
+
+- **Node.js** v18 or higher
+- **npm** v8 or higher
+- **API Keys**: `ANTHROPIC_API_KEY` for Claude agents (or provider-specific keys for other agents)
+
+## Installation
+
+<Steps>
+
+1. **Clone the repository**
+
+   ```bash
+   git clone https://github.com/AlessioToniworking/orchestra.git
+   cd orchestra
+   ```
+
+2. **Install dependencies**
+
+   ```bash
+   npm install
+   ```
+
+3. **Build the project**
+
+   ```bash
+   ./node_modules/.bin/tsc
+   ```
+
+   <Aside type="caution">
+   Always use `./node_modules/.bin/tsc` to build — **not** `npx tsc`, which may pick up the wrong TypeScript package.
+   </Aside>
+
+4. **Link the CLI globally** (optional)
+
+   ```bash
+   npm link
+   ```
+
+</Steps>
+
+## Configure Your Environment
+
+Set your API key for the agent provider you plan to use:
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+```
+
+## Initialize a Project
+
+```bash
+orchestra init
+```
+
+This creates an `orchestra.yml` configuration file in your current directory with example agents and a sample plan.
+
+## Write Your First Plan
+
+Edit `orchestra.yml`:
+
+```yaml
+agents:
+  - name: backend-dev
+    adapter: claude-sdk
+    description: Backend developer specializing in Node.js and databases
+
+  - name: frontend-dev
+    adapter: claude-sdk
+    description: Frontend developer specializing in React and TypeScript
+
+plans:
+  - group: setup-project
+    tasks:
+      - title: Create database schema
+        agent: backend-dev
+        description: |
+          Design and implement a SQLite database schema for users and posts.
+          Create migration files and a seed script.
+
+      - title: Build React UI components
+        agent: frontend-dev
+        description: |
+          Create reusable UI components using shadcn/ui:
+          - UserCard
+          - PostList
+          - CreatePostForm
+```
+
+## Run Your Plan
+
+<Tabs>
+  <TabItem label="TUI (Interactive)">
+    ```bash
+    orchestra tui
+    ```
+    The TUI provides real-time monitoring with tabs for Dashboard, Tasks, Plans, Agents, Logs, and Chat.
+  </TabItem>
+
+  <TabItem label="Headless">
+    ```bash
+    orchestra run
+    ```
+    Runs all pending plans without interactive UI. Logs output to stdout.
+  </TabItem>
+
+  <TabItem label="Server">
+    ```bash
+    orchestra serve --port 3890
+    ```
+    Starts an HTTP API server with SSE streaming and WebSocket support.
+  </TabItem>
+</Tabs>
+
+## What Happens Next
+
+When you run a plan, Orchestra:
+
+1. **Assigns** each task to the specified agent
+2. **Spawns** detached runner processes for each agent
+3. **Monitors** agent progress with periodic health checks
+4. **Assesses** completed work using G-Eval (LLM-as-judge)
+5. **Retries** tasks that don't meet the quality threshold
+6. **Cleans up** volatile agents when their plan completes
+
+## Next Steps
+
+- [Configuration](/configuration/) — Learn about `orchestra.yml` options
+- [Architecture](/concepts/architecture/) — Understand how Orchestra works under the hood
+- [Your First Plan](/guides/first-plan/) — Step-by-step tutorial
+- [CLI Reference](/usage/cli/) — All available commands

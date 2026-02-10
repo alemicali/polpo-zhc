@@ -1106,9 +1106,10 @@ export class OrchestraTUI {
         const groupStatus = allTerminal
           ? (gFailed > 0 ? "{red-fg}FAILED{/red-fg}" : "{green-fg}DONE{/green-fg}")
           : "{yellow-fg}RUNNING{/yellow-fg}";
-        lines.push(`{bold}${esc(entry.name)}{/bold} {grey-fg}${gDone}/${gTotal}{/grey-fg} ${groupStatus} {grey-fg}${elapsedStr}{/grey-fg}`);
+        lines.push(`{cyan-fg}┌{/cyan-fg} {bold}${esc(entry.name)}{/bold} {grey-fg}${gDone}/${gTotal}{/grey-fg} ${groupStatus} {grey-fg}${elapsedStr}{/grey-fg}`);
 
-        renderTaskList(groupTasks, "  ");
+        renderTaskList(groupTasks, "{cyan-fg}│{/cyan-fg} ");
+        lines.push(`{cyan-fg}└${"─".repeat(Math.max(1, panelW - 2))}{/cyan-fg}`);
       }
     }
 

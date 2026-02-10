@@ -1,0 +1,199 @@
+---
+title: Plans
+description: Define multi-task execution plans in YAML
+---
+
+import { Aside, Tabs, TabItem } from '@astrojs/starlight/components';
+
+## What is a Plan?
+
+A **plan** is a group of related tasks that Orchestra executes together. Plans are defined in YAML and can include:
+
+- Multiple tasks with dependencies
+- Volatile teams (temporary agents scoped to the plan)
+- Custom assessment criteria per task
+
+## Plan Lifecycle
+
+```
+draft → active → completed/failed/cancelled
+```
+
+| Status | Description |
+|--------|-------------|
+| `draft` | Plan created but not yet executed |
+| `active` | Tasks are being processed |
+| `completed` | All tasks finished successfully |
+| `failed` | One or more tasks failed after exhausting retries |
+| `cancelled` | Plan was manually aborted |
+
+## YAML Format
+
+```yaml
+plans:
+  - group: feature-auth
+    team:
+      - name: auth-dev
+        adapter: claude-sdk
+        description: Authentication specialist
+        volatile: true
+
+    tasks:
+      - title: Design auth schema
+        agent: auth-dev
+        description: |
+          Design the database schema for user authentication:
+          - users table with email, password_hash, role
+          - sessions table with token, expiry, user_id
+          Create migration files in src/db/migrations/.
+
+      - title: Implement JWT middleware
+        agent: auth-dev
+        description: |
+          Build Express middleware for JWT authentication.
+          Must verify tokens on protected routes.
+        dependencies:
+          - Design auth schema
+
+      - title: Write auth tests
+        agent: auth-dev
+        description: Write integration tests for the auth system
+        dependencies:
+          - Implement JWT middleware
+        expectations:
+          - type: test
+            command: npm test -- --grep auth
+            weight: 0.6
+          - type: llm_review
+            prompt: Verify tests cover login, logout, token refresh, and invalid tokens
+            weight: 0.4
+```
+
+## Dependencies
+
+Tasks can depend on other tasks by referencing their titles:
+
+```yaml
+tasks:
+  - title: Build database layer
+    agent: backend-dev
+    description: Create SQLite database with users and posts tables
+
+  - title: Build REST API
+    agent: backend-dev
+    description: Create Express routes for CRUD operations
+    dependencies:
+      - Build database layer   # waits for this task to complete
+```
+
+<Aside>
+Dependencies are matched by **task title** within the same plan group. A task won't start until all its dependencies reach `done` status.
+</Aside>
+
+## Volatile Teams
+
+The `team:` section lets you define agents that exist only for this plan:
+
+```yaml
+plans:
+  - group: one-off-migration
+    team:
+      - name: migration-expert
+        adapter: claude-sdk
+        description: Database migration specialist
+        volatile: true
+    tasks:
+      - title: Migrate legacy data
+        agent: migration-expert
+        description: Convert old JSON files to SQLite format
+```
+
+When the plan completes (all tasks done or failed), volatile agents are automatically removed from the orchestrator. This prevents agent sprawl when running many specialized plans.
+
+### Cleanup Modes
+
+```yaml
+settings:
+  enableVolatileTeams: true          # default: true
+  volatileCleanup: "on_complete"     # default; or "manual"
+```
+
+- `on_complete`: Agents removed immediately when their plan finishes
+- `manual`: Agents persist until explicitly removed
+
+## Execution
+
+Plans can be executed via:
+
+<Tabs>
+  <TabItem label="TUI">
+    ```
+    /plan
+    ```
+    The TUI plan command lets you create plans from templates or generate them with AI.
+  </TabItem>
+
+  <TabItem label="CLI">
+    ```bash
+    orchestra run --plan feature-auth
+    ```
+    Execute a specific plan group.
+  </TabItem>
+
+  <TabItem label="HTTP API">
+    ```bash
+    curl -X POST http://localhost:3890/api/v1/projects/my-project/plans/plan-id/execute
+    ```
+  </TabItem>
+
+  <TabItem label="Web UI">
+    Navigate to the Plans page and click **Execute** on a draft plan.
+  </TabItem>
+</Tabs>
+
+## Plan Reports
+
+When a plan completes, Orchestra generates a **PlanReport** with:
+
+```typescript
+interface PlanReport {
+  planId: string;
+  group: string;
+  allPassed: boolean;
+  totalDuration: number;        // sum of all task durations (ms)
+  tasks: {
+    title: string;
+    status: "done" | "failed";
+    duration: number;
+    score?: number;             // G-Eval score (1-5)
+    filesCreated: string[];
+    filesEdited: string[];
+  }[];
+  filesCreated: string[];       // aggregated across all tasks
+  filesEdited: string[];
+  avgScore?: number;            // average assessment score
+}
+```
+
+Plan completion triggers the `plan:completed` event with the full report.
+
+## AI-Generated Plans
+
+Orchestra can generate plans from natural language prompts:
+
+```
+/plan
+> Generate with AI
+> Prompt: Build a REST API with authentication, rate limiting, and tests
+```
+
+The AI generates a YAML plan with appropriate agents, tasks, dependencies, and expectations. You can then review, edit, and execute it.
+
+## Editing Running Plans
+
+The `/edit-plan` TUI command lets you modify active plans:
+
+- **Add tasks** to a running plan
+- **Remove** pending tasks
+- **Reassign** tasks to different agents
+- **Retry** specific failed tasks

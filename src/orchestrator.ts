@@ -33,6 +33,7 @@ import type {
   RunnerConfig,
   PlanReport,
 } from "./core/types.js";
+import { sanitizeExpectations } from "./core/schemas.js";
 
 const POLL_INTERVAL = 2000; // 2 seconds
 
@@ -61,6 +62,8 @@ export class Orchestrator extends TypedEmitter {
   private injectedRunStore?: RunStore;
   private memoryStore!: MemoryStore;
   private logStore!: LogStore;
+
+  getWorkDir(): string { return this.workDir; }
 
   constructor(workDirOrOptions?: string | OrchestratorOptions) {
     super();
@@ -136,13 +139,16 @@ export class Orchestrator extends TypedEmitter {
     retryPolicy?: RetryPolicy;
   }): Task {
     if (!this.registry) throw new Error("Orchestrator not initialized");
+    const rawExps = opts.expectations ?? [];
+    const { valid: expectations, warnings } = sanitizeExpectations(rawExps);
+    for (const w of warnings) this.emit("log", { level: "warn", message: `[addTask "${opts.title}"] ${w}` });
     const task = this.registry.addTask({
       title: opts.title,
       description: opts.description,
       assignTo: opts.assignTo,
       group: opts.group,
       dependsOn: opts.dependsOn ?? [],
-      expectations: opts.expectations ?? [],
+      expectations,
       metrics: [],
       maxRetries: this.config.settings.maxRetries,
       maxDuration: opts.maxDuration,
@@ -160,6 +166,20 @@ export class Orchestrator extends TypedEmitter {
   /** Reassign a task to a different agent */
   updateTaskAssignment(taskId: string, agentName: string): void {
     this.registry.updateTask(taskId, { assignTo: agentName });
+  }
+
+  /** Update a task's expectations (acceptance criteria). Only for pending/failed/done tasks. */
+  updateTaskExpectations(taskId: string, expectations: TaskExpectation[]): void {
+    const task = this.registry.getTask(taskId);
+    if (!task) throw new Error("Task not found");
+    const editable = ["pending", "failed", "done"];
+    if (!editable.includes(task.status)) {
+      throw new Error(`Cannot edit expectations of task in "${task.status}" state`);
+    }
+    const { valid, warnings } = sanitizeExpectations(expectations);
+    for (const w of warnings) this.emit("log", { level: "warn", message: `[updateExpectations "${taskId}"] ${w}` });
+    this.registry.updateTask(taskId, { expectations: valid });
+    this.emit("task:updated", { task: this.registry.getTask(taskId)! });
   }
 
   /** Force-retry a failed task by transitioning it back to pending */
@@ -806,13 +826,17 @@ export class Orchestrator extends TypedEmitter {
     // 2. Enforce health checks (timeouts + stale detection)
     this.enforceHealthChecks();
 
-    // 3. Spawn agents for ready tasks
-    const ready = pending.filter(task =>
-      task.dependsOn.every(depId => {
+    // 3. Spawn agents for ready tasks (skip tasks from cancelled/completed plans)
+    const ready = pending.filter(task => {
+      if (task.group) {
+        const plan = this.registry.getPlanByName?.(task.group);
+        if (plan && (plan.status === "cancelled" || plan.status === "completed")) return false;
+      }
+      return task.dependsOn.every(depId => {
         const dep = tasks.find(t => t.id === depId);
         return dep && dep.status === "done";
-      })
-    );
+      });
+    });
 
     // Check for deadlock: no tasks ready, none running, but some pending
     if (ready.length === 0 && inProgress.length === 0 && pending.length > 0) {
@@ -1381,6 +1405,16 @@ export class Orchestrator extends TypedEmitter {
   private retryOrFail(taskId: string, _task: Task, result: TaskResult): void {
     const current = this.registry.getTask(taskId);
     if (!current) return;
+
+    // Don't retry tasks from cancelled plans
+    if (current.group) {
+      const plan = this.registry.getPlanByName?.(current.group);
+      if (plan && plan.status === "cancelled") {
+        this.emit("log", { level: "debug", message: `[${taskId}] Skipping retry — plan cancelled` });
+        this.registry.transition(taskId, "failed");
+        return;
+      }
+    }
 
     if (current.retries < current.maxRetries) {
       const policy = current.retryPolicy ?? this.config.settings.defaultRetryPolicy;

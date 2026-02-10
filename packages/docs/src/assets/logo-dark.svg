@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 40" fill="none">
+  <g transform="translate(4, 4)">
+    <rect x="4" y="4" width="10" height="10" fill="#4B4646"/>
+    <rect x="4" y="4" width="10" height="24" fill="none" stroke="#B7B1B1" stroke-width="2"/>
+    <rect x="18" y="4" width="10" height="10" fill="#4B4646"/>
+    <rect x="18" y="4" width="10" height="24" fill="none" stroke="#B7B1B1" stroke-width="2"/>
+  </g>
+  <text x="52" y="29" font-family="system-ui, -apple-system, sans-serif" font-size="22" font-weight="500" fill="#efe8e8" letter-spacing="-0.01em">Orchestra</text>
+</svg>

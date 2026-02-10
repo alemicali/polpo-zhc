@@ -1,0 +1,204 @@
+---
+title: Server
+description: HTTP API server with SSE and WebSocket streaming
+---
+
+import { Tabs, TabItem, Aside } from '@astrojs/starlight/components';
+
+## Starting the Server
+
+```bash
+orchestra serve --port 3890 --api-key my-secret
+```
+
+The server provides a REST API, Server-Sent Events (SSE), and WebSocket streaming.
+
+## Base URL
+
+```
+http://localhost:3890/api/v1/projects/:projectId
+```
+
+All endpoints are scoped to a project. The project ID defaults to the working directory name.
+
+## Authentication
+
+When `--api-key` is set, all requests must include the key:
+
+<Tabs>
+  <TabItem label="Header">
+    ```bash
+    curl -H "X-API-Key: my-secret" http://localhost:3890/api/v1/projects
+    ```
+  </TabItem>
+  <TabItem label="Query Parameter">
+    ```javascript
+    // For EventSource (can't set headers)
+    const events = new EventSource(
+      'http://localhost:3890/api/v1/projects/my-project/events?apiKey=my-secret'
+    );
+    ```
+  </TabItem>
+</Tabs>
+
+## REST Endpoints
+
+### Projects
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/v1/projects` | List all projects |
+| `GET` | `/api/v1/projects/:id/state` | Full state snapshot |
+| `GET` | `/api/v1/projects/:id/config` | Orchestrator config |
+
+### Tasks
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/tasks` | List all tasks (filterable) |
+| `GET` | `/tasks/:id` | Get single task |
+| `POST` | `/tasks` | Create task |
+| `PATCH` | `/tasks/:id` | Update task |
+| `DELETE` | `/tasks/:id` | Remove task |
+| `POST` | `/tasks/:id/retry` | Retry failed task |
+| `POST` | `/tasks/:id/kill` | Kill running task |
+| `POST` | `/tasks/:id/reassess` | Re-run assessment |
+
+**Filters** (query params on `GET /tasks`):
+- `?status=failed` — filter by status
+- `?group=feature-auth` — filter by plan group
+- `?assignTo=backend-dev` — filter by agent
+
+### Plans
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/plans` | List all plans |
+| `GET` | `/plans/resumable` | List resumable plans |
+| `GET` | `/plans/:id` | Get plan details |
+| `POST` | `/plans` | Save plan (YAML) |
+| `PATCH` | `/plans/:id` | Update plan |
+| `DELETE` | `/plans/:id` | Delete plan |
+| `POST` | `/plans/:id/execute` | Execute plan |
+| `POST` | `/plans/:id/resume` | Resume plan |
+| `POST` | `/plans/:id/abort` | Abort plan |
+
+### Agents
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/agents` | List agents |
+| `POST` | `/agents` | Add agent |
+| `DELETE` | `/agents/:name` | Remove agent |
+| `GET` | `/agents/team` | Get team info |
+| `PATCH` | `/agents/team` | Rename team |
+| `GET` | `/agents/processes` | Active processes |
+
+### Memory
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/memory` | Get project memory |
+| `PUT` | `/memory` | Update project memory |
+
+### Chat / AI Generation
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/chat` | Chat about Orchestra state |
+| `POST` | `/chat/generate-plan` | Generate plan from prompt |
+| `POST` | `/chat/prepare-task` | LLM-enriched task preparation |
+| `POST` | `/chat/generate-team` | Generate team from description |
+| `POST` | `/chat/refine-team` | Refine team with feedback |
+| `POST` | `/chat/refine-plan` | Refine plan with feedback |
+
+### Logs
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/logs` | List log sessions |
+| `GET` | `/logs/:sessionId` | Get session log entries |
+
+### Health
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/v1/health` | Server health check |
+
+## Server-Sent Events (SSE)
+
+Subscribe to real-time events:
+
+```javascript
+const events = new EventSource(
+  'http://localhost:3890/api/v1/projects/my-project/events'
+);
+
+events.onmessage = (e) => {
+  const { event, data } = JSON.parse(e.data);
+  console.log(event, data);
+};
+```
+
+### Reconnection
+
+SSE supports `Last-Event-ID` for reconnection. The server maintains a circular buffer of the last 1000 events:
+
+```javascript
+// Resume from event 42
+const events = new EventSource(
+  'http://localhost:3890/api/v1/projects/my-project/events?lastEventId=42'
+);
+```
+
+## WebSocket
+
+WebSocket provides the same event stream with optional filtering:
+
+```javascript
+const ws = new WebSocket(
+  'ws://localhost:3890/api/v1/projects/my-project/ws'
+);
+
+// Filter events with glob patterns
+ws.send(JSON.stringify({ type: 'subscribe', pattern: 'task:*' }));
+ws.send(JSON.stringify({ type: 'subscribe', pattern: 'assessment:*' }));
+
+ws.onmessage = (e) => {
+  const { event, data } = JSON.parse(e.data);
+  console.log(event, data);
+};
+```
+
+### Filter Patterns
+
+| Pattern | Matches |
+|---------|---------|
+| `task:*` | All task events |
+| `agent:*` | All agent events |
+| `assessment:*` | Assessment events |
+| `plan:*` | Plan events |
+| `*` | All events |
+
+## Response Format
+
+All REST responses follow a consistent format:
+
+```json
+// Success
+{
+  "ok": true,
+  "data": { /* ... */ }
+}
+
+// Error
+{
+  "ok": false,
+  "error": "Task not found",
+  "code": "NOT_FOUND"
+}
+```
+
+<Aside>
+The server uses **Hono** (14KB, zero dependencies) with `@hono/node-server`. It's a pure translation layer over the Orchestrator public API — no core logic is duplicated.
+</Aside>

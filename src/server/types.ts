@@ -48,6 +48,7 @@ export interface CreateTaskRequest {
 export interface UpdateTaskRequest {
   description?: string;
   assignTo?: string;
+  expectations?: TaskExpectation[];
 }
 
 // === Plan Endpoints ===

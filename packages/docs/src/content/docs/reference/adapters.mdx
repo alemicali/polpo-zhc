@@ -1,0 +1,151 @@
+---
+title: Adapters Reference
+description: Built-in adapter configurations and options
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Orchestra ships with two built-in adapters: `claude-sdk` and `generic`.
+
+## claude-sdk Adapter
+
+Uses the `@anthropic-ai/claude-agent-sdk` to call Claude models directly via the Anthropic API.
+
+### Configuration
+
+```yaml
+agents:
+  - name: my-agent
+    adapter: claude-sdk
+    role: Full-stack developer
+    model: claude-sonnet-4-5-20250929
+    allowedTools:
+      - Read
+      - Write
+      - Edit
+      - Bash
+      - Glob
+      - Grep
+    mcpServers:
+      my-server:
+        command: node
+        args: [my-mcp-server.js]
+    systemPrompt: "Focus on TypeScript and React patterns"
+    skills:
+      - frontend-design
+      - ai-sdk-6
+    maxTurns: 200
+```
+
+### Options
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `model` | string | — | Claude model ID (e.g. `claude-sonnet-4-5-20250929`) |
+| `allowedTools` | string[] | all | Restrict available tools |
+| `mcpServers` | object | — | MCP server configurations |
+| `systemPrompt` | string | — | Additional system instructions |
+| `skills` | string[] | — | Installed Claude Code skills |
+| `maxTurns` | number | `150` | Max conversation turns |
+
+### Features
+
+- **Persistent sessions**: `persistSession: true` for transcript access
+- **Session transcripts**: Read via `/inspect` command (`.jsonl` format)
+- **Tool handling**: Automatic tool use with Claude's built-in tools
+- **Activity tracking**: Real-time updates from tool calls
+- **Session ID**: Exposed via `AgentHandle.sessionId`
+
+### Environment
+
+Requires `ANTHROPIC_API_KEY` environment variable.
+
+---
+
+## generic Adapter
+
+Spawns any CLI command as a child process. Use this for non-Claude agents like Aider, GPT-Engineer, or custom scripts.
+
+### Configuration
+
+```yaml
+agents:
+  - name: aider-dev
+    adapter: generic
+    command: "aider --no-auto-commit --model gpt-4 {taskFile}"
+    role: Code editor using Aider
+```
+
+### Command Template Variables
+
+| Variable | Description |
+|----------|-------------|
+| `{prompt}` | Task description as inline text |
+| `{taskFile}` | Path to a temporary file containing the task description |
+
+### Options
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `command` | string | **required** | Shell command to execute |
+
+### Features
+
+- **Real PID tracking**: `AgentHandle.pid` contains the actual process ID
+- **Process lifecycle**: Full SIGTERM/SIGKILL handling
+- **stdin/stdout**: Task description piped to stdin; stdout captured as output
+- **stderr**: Captured separately for error reporting
+- **Exit codes**: 0 = success, non-zero = failure
+
+### How It Works
+
+1. Orchestra writes the task description to a temp file
+2. Replaces `{prompt}` and `{taskFile}` in the command template
+3. Spawns the command as a child process
+4. Captures stdout/stderr
+5. Reports exit code as `TaskResult`
+
+### Example: Custom Python Script
+
+```yaml
+agents:
+  - name: py-analyzer
+    adapter: generic
+    command: "python3 scripts/analyze.py --task {taskFile}"
+    role: Code analysis specialist
+```
+
+### Example: GPT-4 via OpenAI CLI
+
+```yaml
+agents:
+  - name: gpt4-dev
+    adapter: generic
+    command: "openai-cli --model gpt-4 --prompt {prompt}"
+    role: GPT-4 developer
+```
+
+---
+
+## Writing Custom Adapters
+
+See the [Custom Adapter Guide](/guides/custom-adapter/) for a step-by-step walkthrough of building your own adapter.
+
+The adapter interface:
+
+```typescript
+interface AgentAdapter {
+  readonly name: string;
+  spawn(agent: AgentConfig, task: Task, cwd: string): AgentHandle;
+}
+```
+
+Register with:
+
+```typescript
+registerAdapter("my-adapter", new MyAdapter());
+```
+
+<Aside>
+Adapters self-register via side-effect imports. Import your adapter file in the CLI entry point (`src/cli/index.ts`) so it's available at runtime.
+</Aside>

@@ -1,0 +1,127 @@
+---
+title: TUI
+description: Interactive terminal user interface for Orchestra
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+The TUI is Orchestra's interactive terminal interface, providing real-time monitoring and control.
+
+```bash
+orchestra tui
+# or just:
+orchestra
+```
+
+## Tabs
+
+The TUI has 6 tabs, navigable with keyboard:
+
+| Tab | Shortcut | Content |
+|-----|----------|---------|
+| Dashboard | `1` | Overview of tasks, agents, live activity |
+| Tasks | `2` | Detailed task list with status and scores |
+| Plans | `3` | Plan groups and progress |
+| Agents | `4` | Agent configuration and availability |
+| Logs | `5` | Real-time event log |
+| Chat | `6` | Message agents, create tasks, generate plans |
+
+## Slash Commands
+
+Type these in the Chat tab input:
+
+### Task Management
+
+| Command | Description |
+|---------|-------------|
+| `/help` | Show available commands |
+| `/status` | Show task count summary |
+| `/idle` | List idle agents (not working on any task) |
+| `/failed` | Show failed tasks with failure reasons |
+| `/retry <id>` | Retry a specific failed task |
+| `/kill <id>` | Kill a running task's agent |
+
+### Plan Management
+
+| Command | Description |
+|---------|-------------|
+| `/plan` | Create a new plan (template or AI-generated) |
+| `/edit-plan` | Edit a running plan (add/remove/reassign tasks) |
+| `/abort <group>` | Abort all tasks in a plan group |
+| `/resume <group>` | Resume a failed plan (retry failed tasks) |
+
+### Team Management
+
+| Command | Description |
+|---------|-------------|
+| `/team` | Create or manage agent team (with AI generation) |
+| `/inspect` | Inspect agent session transcripts |
+
+### System
+
+| Command | Description |
+|---------|-------------|
+| `/memory` | View/edit project memory |
+| `/config` | Show current configuration |
+| `/clear` | Clear chat history |
+
+## @ Mentions
+
+Reference entities by typing their prefix character:
+
+| Prefix | Entity | Example |
+|--------|--------|---------|
+| `@` | Agent | `@backend-dev fix the tests` |
+| `#` | Task | `retry #Create database schema` |
+| `%` | Plan | `abort %feature-auth` |
+
+Mentions are auto-completed and appended to the input without submitting.
+
+## Plan Creation
+
+The `/plan` command opens an interactive workflow:
+
+1. **Choose template or "Generate with AI"**
+2. **If AI**: Enter a natural language description
+3. **Preview** the generated YAML
+4. **Choose**: Execute, Edit, or Refine with feedback
+5. Plan is saved as `draft` and can be executed
+
+```
+/plan
+> Generate with AI
+> Build a REST API with user auth, rate limiting, and tests
+```
+
+## Team Generation
+
+The `/team` command lets you create agent teams with AI:
+
+1. **"Generate with AI"** option
+2. **Describe** what you need: "Build a full-stack web app"
+3. **Preview** the generated team with roles and skills
+4. **Execute**, **Edit**, or **Refine** with feedback
+
+Generated teams include appropriate skills and adapter configurations.
+
+## Live Monitoring
+
+The Dashboard tab shows:
+- **Task progress** bar with status counts
+- **Active agents** with current tool, file, and progress
+- **Recent events** from the event stream
+- **Shimmer animation** for agents currently working
+
+## Keybindings
+
+| Key | Action |
+|-----|--------|
+| `1`-`6` | Switch tabs |
+| `Tab` | Cycle tabs forward |
+| `Shift+Tab` | Cycle tabs backward |
+| `Enter` | Submit chat message |
+| `Ctrl+C` | Quit |
+
+<Aside>
+The TUI uses the `blessed` library for terminal rendering. It requires a terminal that supports ANSI escape codes.
+</Aside>

@@ -1,0 +1,182 @@
+---
+title: Assessment
+description: G-Eval LLM-as-judge scoring system for task quality
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+## Overview
+
+Orchestra uses **G-Eval** (LLM-as-judge) to automatically assess completed tasks. Each task's output is evaluated against multiple dimensions, producing scores from 1-5 with chain-of-thought reasoning.
+
+## Expectation Types
+
+Tasks can define four types of expectations:
+
+### `test` — Run a Test Command
+
+```yaml
+expectations:
+  - type: test
+    command: npm test
+```
+
+Runs the command and checks the exit code. Exit code 0 = pass.
+
+### `file_exists` — Check File Presence
+
+```yaml
+expectations:
+  - type: file_exists
+    paths:
+      - src/routes/users.ts
+      - src/routes/posts.ts
+```
+
+Verifies that the specified files exist in the working directory.
+
+### `script` — Run a Custom Script
+
+```yaml
+expectations:
+  - type: script
+    command: node scripts/validate-schema.js
+```
+
+Similar to `test` but intended for custom validation scripts that check specific conditions.
+
+### `llm_review` — AI-Powered Code Review
+
+```yaml
+expectations:
+  - type: llm_review
+    prompt: Verify proper error handling and input validation
+    threshold: 3.5
+    dimensions:
+      - name: security
+        weight: 0.5
+        rubric: No SQL injection, XSS, or authentication bypass vulnerabilities
+      - name: error_handling
+        weight: 0.5
+        rubric: All error paths return proper HTTP status codes with messages
+```
+
+The most powerful expectation type. An LLM reviews the agent's work against configurable dimensions.
+
+## Default Dimensions
+
+When no custom dimensions are specified, Orchestra uses these defaults:
+
+| Dimension | Weight | Description |
+|-----------|--------|-------------|
+| `correctness` | 0.35 | Task achieves its stated goals correctly |
+| `completeness` | 0.30 | All requirements in the description are addressed |
+| `code_quality` | 0.20 | Code is clean, readable, and maintainable |
+| `edge_cases` | 0.15 | Edge cases and error conditions are handled |
+
+## Scoring
+
+Each dimension is scored **1-5** with the following scale:
+
+| Score | Meaning |
+|-------|---------|
+| 1 | Completely wrong or missing |
+| 2 | Major issues, barely functional |
+| 3 | Acceptable but with notable gaps |
+| 4 | Good quality with minor issues |
+| 5 | Excellent, exceeds expectations |
+
+### Global Score
+
+The global score is a **weighted average** of all dimension scores:
+
+```
+globalScore = Σ (dimension.score × dimension.weight)
+```
+
+Tasks pass when `globalScore >= threshold` (default: 3.0).
+
+### Chain-of-Thought Reasoning
+
+For each dimension, the LLM generates step-by-step reasoning before scoring:
+
+```json
+{
+  "dimension": "correctness",
+  "score": 4,
+  "reasoning": "The API endpoints correctly implement CRUD operations. GET /users returns paginated results. POST /users validates required fields. However, the PATCH endpoint doesn't handle partial updates correctly — it requires all fields.",
+  "weight": 0.35
+}
+```
+
+This reasoning is included in retry/fix feedback so agents know exactly what to improve.
+
+## Assessment Flow
+
+```
+Task completes → Run expectations in order:
+  1. file_exists checks
+  2. test/script commands
+  3. llm_review (if earlier checks pass)
+→ Aggregate results
+→ Pass: task → done
+→ Fail: task → fix phase (or retry)
+```
+
+<Aside>
+Expectations are evaluated in order. If a `file_exists` or `test` check fails, the `llm_review` is skipped to save API calls. The agent receives specific feedback about which check failed.
+</Aside>
+
+## Retry with Feedback
+
+When assessment fails, the feedback includes:
+
+- **Which expectations failed** and why
+- **Per-dimension scores** with reasoning
+- **Specific suggestions** for improvement
+- **Original task description** (preserved across retries)
+
+The fix phase sends this feedback to the agent so it can make targeted corrections without starting from scratch.
+
+## Custom Rubrics
+
+For fine-grained control, define custom rubrics per dimension:
+
+```yaml
+dimensions:
+  - name: performance
+    weight: 0.5
+    rubric:
+      1: "O(n²) or worse algorithms, no caching"
+      2: "Basic functionality but poor algorithmic choices"
+      3: "Reasonable performance, standard patterns"
+      4: "Good performance with appropriate caching"
+      5: "Optimal algorithms, efficient caching, lazy loading"
+```
+
+## Expectation Correction
+
+Orchestra includes an **expectation judge** that can detect when expectations themselves are wrong (not the agent's work). If the LLM determines that a failing expectation is unreasonable given the task, it can auto-correct the expectations and re-assess.
+
+See [Expectation Judge](/advanced/expectation-judge/) for details.
+
+## Configuration
+
+```yaml
+settings:
+  maxFixAttempts: 2            # fix attempts before full retry
+  maxRetries: 3                # full retry attempts
+  orchestratorModel: claude-sonnet-4-5-20250929   # model for assessment LLM
+```
+
+Override per-task:
+
+```yaml
+tasks:
+  - title: Critical API endpoint
+    maxRetries: 5
+    expectations:
+      - type: llm_review
+        threshold: 4.0    # higher bar for critical tasks
+        dimensions: [...]
+```

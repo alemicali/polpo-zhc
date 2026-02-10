@@ -1,0 +1,150 @@
+---
+title: Architecture
+description: How Orchestra orchestrates agents under the hood
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+## Overview
+
+Orchestra follows a **supervisor architecture**: a central orchestrator manages agent lifecycles, task assignment, assessment, and error recovery. Agents are isolated processes that know nothing about each other — Orchestra handles all coordination.
+
+```
+┌─────────────────────────────────────────────┐
+│                 Orchestrator                 │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  │
+│  │ Task     │  │ Assessor │  │ Deadlock │  │
+│  │ Registry │  │ (G-Eval) │  │ Resolver │  │
+│  └──────────┘  └──────────┘  └──────────┘  │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  │
+│  │ RunStore │  │ Memory   │  │ Events   │  │
+│  │ (SQLite) │  │ Store    │  │ Emitter  │  │
+│  └──────────┘  └──────────┘  └──────────┘  │
+└──────────┬──────────┬──────────┬────────────┘
+           │          │          │
+     ┌─────┴──┐  ┌───┴────┐  ┌─┴──────┐
+     │Runner 1│  │Runner 2│  │Runner N│
+     │(detach)│  │(detach)│  │(detach)│
+     └───┬────┘  └───┬────┘  └───┬────┘
+         │           │           │
+     ┌───┴───┐  ┌───┴───┐  ┌───┴───┐
+     │Claude │  │ Aider │  │GPT-4  │
+     │  SDK  │  │  CLI  │  │ Agent │
+     └───────┘  └───────┘  └───────┘
+```
+
+## Adapter Pattern
+
+Orchestra uses an **adapter pattern** to support any agent type. Each adapter implements a simple interface:
+
+```typescript
+interface AgentAdapter {
+  readonly name: string;
+  spawn(agent: AgentConfig, task: Task, cwd: string): AgentHandle;
+}
+```
+
+The `spawn()` method returns an `AgentHandle` that the orchestrator uses to monitor the agent:
+
+```typescript
+interface AgentHandle {
+  agentName: string;
+  taskId: string;
+  pid: number;              // real PID for generic, 0 for SDK
+  sessionId?: string;       // SDK session ID for transcript access
+  activity: AgentActivity;  // live activity data (tools, files, progress)
+  done: Promise<TaskResult>; // resolves when agent finishes
+  isAlive(): boolean;
+  kill(): void;
+}
+```
+
+### Built-in Adapters
+
+**claude-sdk** — Uses the `@anthropic-ai/claude-agent-sdk` to call Claude models directly. Features persistent sessions, automatic tool handling, and transcript access.
+
+**generic** — Spawns any CLI command as a child process. The task prompt is passed via stdin or `{prompt}` template variable. Tracks real process PIDs for lifecycle management.
+
+### Registering Custom Adapters
+
+Adapters self-register via side-effect imports:
+
+```typescript
+import { registerAdapter } from "./adapter-registry.js";
+
+class MyAdapter implements AgentAdapter {
+  readonly name = "my-agent";
+  spawn(agent, task, cwd) { /* ... */ }
+}
+
+registerAdapter("my-agent", new MyAdapter());
+```
+
+See [Custom Adapter Guide](/guides/custom-adapter/) for a full walkthrough.
+
+## Supervisor Loop
+
+The orchestrator runs a **2-second tick loop** that:
+
+1. **Collects results** from terminated runners (via RunStore)
+2. **Assesses** completed tasks using the configured expectations
+3. **Retries** failed tasks (with fix phase for targeted corrections)
+4. **Spawns** new agents for pending tasks whose dependencies are met
+5. **Enforces health checks** — kills stale or timed-out agents
+6. **Detects deadlocks** — tasks blocked on failed dependencies
+7. **Recovers orphans** — reconnects to live processes after a crash
+
+## Detached Runners
+
+Each agent runs as a **detached subprocess** (`runner.ts`), completely independent of the orchestrator process:
+
+```
+Orchestrator                    Runner (detached)
+     │                               │
+     ├── writes RunnerConfig ──────► │
+     ├── spawns runner process       │
+     │                               ├── imports adapter
+     │                               ├── spawns agent
+     │                               ├── polls activity
+     │                               ├── writes to RunStore
+     │                               └── exits when done
+     │
+     ├── reads RunStore ◄────────────┘
+     └── processes result
+```
+
+This architecture means:
+- **Crash resilience**: If the orchestrator crashes, runners keep working
+- **Process isolation**: One agent crashing doesn't affect others
+- **Orphan recovery**: On restart, the orchestrator reconnects to live runners
+
+## Event System
+
+Orchestra uses a **typed event emitter** with 35+ event types organized by category:
+
+| Category | Events | Description |
+|----------|--------|-------------|
+| `task:*` | created, transition, updated, removed, retry, fix, maxRetries, timeout, recovered, question, answered | Task lifecycle |
+| `agent:*` | spawned, finished, activity, stale | Agent lifecycle |
+| `assessment:*` | started, progress, complete, corrected | Task assessment |
+| `orchestrator:*` | started, tick, deadlock, shutdown | System events |
+| `deadlock:*` | detected, resolving, resolved, unresolvable | Deadlock resolution |
+| `plan:*` | saved, executed, completed, resumed, deleted | Plan lifecycle |
+| `log` | — | General log messages |
+
+Events are consumed by the TUI, HTTP/SSE server, and WebSocket bridge. See [Events Reference](/reference/events/) for full payload details.
+
+## Persistence
+
+| Component | Storage | Purpose |
+|-----------|---------|---------|
+| Task Registry | SQLite (`state.db`) | Task state with atomic writes |
+| RunStore | SQLite (`state.db`) | Runner process tracking |
+| Log Store | SQLite (`state.db`) | Persistent event log |
+| Plan Store | SQLite (`state.db`) | Plan definitions and status |
+| Memory | File (`.orchestra/memory.md`) | Project context for agents |
+| Runner configs | JSON (`.orchestra/tmp/`) | Temporary config for detached runners |
+
+<Aside>
+All SQLite operations use `busy_timeout=5000` to handle concurrent access from the orchestrator and multiple runner processes.
+</Aside>

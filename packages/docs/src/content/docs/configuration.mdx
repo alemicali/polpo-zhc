@@ -1,0 +1,156 @@
+---
+title: Configuration
+description: Overview of the orchestra.yml configuration file
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Orchestra is configured through a YAML file, typically `orchestra.yml` at the root of your project.
+
+## File Structure
+
+```yaml
+# Agent definitions
+agents:
+  - name: agent-name
+    adapter: claude-sdk        # 'claude-sdk' or 'generic'
+    description: Role description
+    command: "aider --no-auto" # generic adapter only
+
+# Plan groups
+plans:
+  - group: plan-group-name
+    team: [...]                # optional volatile agents
+    tasks:
+      - title: Task title
+        agent: agent-name
+        description: What to do
+        dependencies: []
+        expectations: [...]
+```
+
+## Agents
+
+Each agent entry defines a worker that can be assigned tasks:
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `name` | string | yes | Unique identifier for the agent |
+| `adapter` | string | yes | `"claude-sdk"` or `"generic"` |
+| `description` | string | yes | Agent's role and expertise |
+| `command` | string | generic only | CLI command to execute |
+| `volatile` | boolean | no | Auto-cleanup when plan completes (default: `false`) |
+
+```yaml
+agents:
+  # Claude SDK agent — uses Anthropic API directly
+  - name: architect
+    adapter: claude-sdk
+    description: Senior software architect who designs system components
+
+  # Generic agent — wraps any CLI tool
+  - name: aider-dev
+    adapter: generic
+    command: "aider --no-auto-commit --model gpt-4"
+    description: Aider-powered developer for code changes
+```
+
+## Plans
+
+Plans group related tasks into execution units:
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `group` | string | yes | Unique plan identifier |
+| `team` | Agent[] | no | Volatile agents scoped to this plan |
+| `tasks` | Task[] | yes | List of tasks to execute |
+
+### Volatile Teams
+
+Agents defined in the `team` section are automatically created when the plan starts and cleaned up when it completes:
+
+```yaml
+plans:
+  - group: feature-auth
+    team:
+      - name: auth-specialist
+        adapter: claude-sdk
+        description: Authentication expert
+        volatile: true
+    tasks:
+      - title: Implement JWT auth
+        agent: auth-specialist
+        description: Build JWT authentication middleware
+```
+
+## Tasks
+
+Each task is a unit of work assigned to an agent:
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `title` | string | yes | Short task title |
+| `agent` | string | yes | Agent name to assign to |
+| `description` | string | yes | Detailed instructions for the agent |
+| `dependencies` | string[] | no | Task IDs that must complete first |
+| `expectations` | Expectation[] | no | Custom assessment criteria |
+
+## Expectations
+
+Define how completed tasks are assessed:
+
+```yaml
+tasks:
+  - title: Build API endpoints
+    agent: backend-dev
+    description: Create REST API for user management
+    expectations:
+      - type: test
+        command: npm test
+        weight: 0.4
+
+      - type: file_exists
+        path: src/routes/users.ts
+        weight: 0.2
+
+      - type: llm_review
+        prompt: Check for proper error handling and input validation
+        weight: 0.4
+        threshold: 3.5
+        dimensions:
+          - name: security
+            weight: 0.5
+            rubric: No SQL injection or XSS vulnerabilities
+          - name: error_handling
+            weight: 0.5
+            rubric: All error paths return proper HTTP status codes
+```
+
+See [Assessment](/concepts/assessment/) for details on the scoring system.
+
+## Environment Variables
+
+```bash
+# Required for Claude agents
+ANTHROPIC_API_KEY=sk-ant-...
+
+# Optional: customize orchestrator LLM
+ORCHESTRATOR_MODEL=claude-sonnet-4-5-20250929
+ORCHESTRATOR_TEMPERATURE=0.7
+
+# Optional: server authentication
+API_KEY=your-secret-key
+```
+
+## Config Path
+
+By default, Orchestra looks for `orchestra.yml` in the current directory. Override with:
+
+```bash
+orchestra run --config /path/to/orchestra.yml
+orchestra tui -c ./configs/production.yml
+```
+
+<Aside>
+For the full field-by-field reference, see [Configuration Reference](/reference/config/).
+</Aside>

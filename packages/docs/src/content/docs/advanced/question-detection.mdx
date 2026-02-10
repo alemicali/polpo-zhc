@@ -1,0 +1,95 @@
+---
+title: Question Detection
+description: Automatic detection and answering of agent questions
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+## The Problem
+
+Sometimes agents ask clarifying questions instead of completing the task. Without intervention, the task stalls — the agent is waiting for input that never comes.
+
+## How It Works
+
+Orchestra detects when an agent's output contains a question and auto-generates an answer:
+
+1. **Detection**: After the agent finishes (or during activity polling), Orchestra checks the agent's latest output for questions
+2. **Classification**: An LLM determines if the output is a genuine question or just rhetorical
+3. **Answer generation**: The LLM generates an answer using project context (memory, task description, related tasks)
+4. **Injection**: The answer is sent to the agent, and execution continues
+
+## Detection Methods
+
+Orchestra uses two detection approaches:
+
+### Heuristic Detection
+
+Fast pattern matching for common question patterns:
+- Ends with `?`
+- Contains phrases like "should I", "would you like", "which approach"
+- Agent explicitly asks for clarification
+
+### LLM Classification
+
+When heuristics are ambiguous, the orchestrator LLM classifies the output:
+- **Question**: Genuine request for information → generate answer
+- **Rhetorical**: Agent is thinking out loud → no action needed
+- **Completion**: Agent is done → proceed to assessment
+
+## Auto-Answer
+
+When a question is detected, the orchestrator generates an answer using:
+
+- **Task description**: What the agent was asked to do
+- **Project memory**: Persistent context from `.orchestra/memory.md`
+- **Related tasks**: Other tasks in the same plan group
+- **Agent role**: The agent's configured role and expertise
+
+The answer aims to be **decisive** — it makes concrete choices rather than saying "it depends".
+
+## Configuration
+
+```yaml
+settings:
+  maxQuestionRounds: 2    # auto-answer rounds per task (default: 2)
+```
+
+After `maxQuestionRounds`, the task continues without further Q&A to prevent infinite loops.
+
+## Events
+
+| Event | Payload | When |
+|-------|---------|------|
+| `task:question` | `{ taskId, question }` | Question detected |
+| `task:answered` | `{ taskId, question, answer }` | Answer generated |
+
+## Phase Tracking
+
+During Q&A, the task phase is `clarification`:
+
+```
+execution → clarification → execution → review
+```
+
+The `questionRounds` counter on the task tracks how many Q&A rounds have occurred.
+
+## Example Flow
+
+```
+Agent output: "Should I use JWT or session-based authentication?"
+
+task:question → { question: "Should I use JWT or session-based auth?" }
+
+Orchestrator generates answer using project context:
+  "Use JWT authentication. The project uses a stateless API architecture
+   (see memory.md). Implement with jsonwebtoken package, store tokens
+   in httpOnly cookies, and use a 1-hour expiry."
+
+task:answered → { question: "...", answer: "Use JWT authentication..." }
+
+Agent receives answer and continues execution.
+```
+
+<Aside>
+Question detection only runs during the `execution` and `fix` phases. During `review`, agent output is treated as task completion, not a question.
+</Aside>

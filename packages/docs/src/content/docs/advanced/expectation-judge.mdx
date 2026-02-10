@@ -1,0 +1,124 @@
+---
+title: Expectation Judge
+description: Auto-correction of incorrect acceptance criteria
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+## The Problem
+
+Sometimes the **expectations** (acceptance criteria) are wrong, not the agent's work. For example:
+
+- A test command that was incorrect in the plan
+- A file path that doesn't match the actual project structure
+- An LLM review prompt that's too strict for the task scope
+
+Without the expectation judge, the agent would be repeatedly retried for failing criteria that can never be met.
+
+## How It Works
+
+When a task fails assessment, the expectation judge evaluates whether the **expectations themselves** might be wrong:
+
+```
+Task fails assessment
+    │
+    ├── Agent did the work correctly?
+    │   ├── YES, expectations are wrong → correct expectations, re-assess
+    │   └── NO, agent needs to fix → normal retry/fix flow
+```
+
+## Detection
+
+The judge LLM receives:
+
+1. **Task description**: What was requested
+2. **Agent's output**: What the agent produced (stdout, files created/edited)
+3. **Failed expectations**: Which checks failed and why
+4. **Assessment feedback**: Dimension scores and reasoning
+
+It then determines:
+- Did the agent reasonably complete the task?
+- Are the expectations realistic given the task description?
+- Should expectations be corrected?
+
+## Correction Types
+
+### Test Command Fix
+
+```yaml
+# Before (incorrect)
+expectations:
+  - type: test
+    command: npm test -- --grep users
+
+# After (corrected)
+expectations:
+  - type: test
+    command: npm test -- --grep "user management"
+```
+
+### File Path Fix
+
+```yaml
+# Before (wrong path)
+expectations:
+  - type: file_exists
+    paths: [src/routes/users.ts]
+
+# After (actual path)
+expectations:
+  - type: file_exists
+    paths: [src/api/users.ts]
+```
+
+### Threshold Adjustment
+
+```yaml
+# Before (too strict)
+expectations:
+  - type: llm_review
+    threshold: 4.5
+
+# After (reasonable)
+expectations:
+  - type: llm_review
+    threshold: 3.5
+```
+
+## Flow
+
+1. Task fails assessment
+2. Expectation judge evaluates if expectations are wrong
+3. If corrections found → update expectations, emit `assessment:corrected`
+4. Re-run assessment with corrected expectations
+5. If still failing → normal retry/fix flow
+
+## Events
+
+| Event | Payload | When |
+|-------|---------|------|
+| `assessment:corrected` | `{ taskId, corrections }` | Expectations auto-corrected |
+
+The `corrections` count indicates how many expectations were modified.
+
+## Safeguards
+
+The judge has several safeguards to prevent incorrect corrections:
+
+- **Only runs on first failure**: Doesn't keep correcting on subsequent retries
+- **Conservative**: When in doubt, doesn't correct (lets the normal retry flow handle it)
+- **Audit trail**: The `assessment:corrected` event logs what was changed
+- **Original preserved**: `task.originalDescription` is never modified
+
+## Configuration
+
+The expectation judge uses the `orchestratorModel` for its LLM calls:
+
+```yaml
+settings:
+  orchestratorModel: claude-sonnet-4-5-20250929
+```
+
+<Aside type="tip">
+The expectation judge is most useful when plans are AI-generated. Human-written expectations are typically more accurate, but AI-generated plans may include test commands or file paths that don't match the actual project structure.
+</Aside>

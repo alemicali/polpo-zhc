@@ -1,0 +1,136 @@
+---
+title: Task Lifecycle
+description: States, transitions, and phases of task execution
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+## State Machine
+
+Every task in Orchestra moves through a well-defined set of states:
+
+```
+                    ┌──────────┐
+                    │ pending  │
+                    └────┬─────┘
+                         │ assigned to agent
+                    ┌────▼─────┐
+                    │ assigned │
+                    └────┬─────┘
+                         │ runner spawned
+                  ┌──────▼───────┐
+                  │ in_progress  │
+                  └──────┬───────┘
+                         │ agent finishes
+                    ┌────▼─────┐
+              ┌─────│  review  │─────┐
+              │     └──────────┘     │
+              │ passed               │ failed
+         ┌────▼──┐            ┌──────▼──┐
+         │ done  │            │ failed  │
+         └───────┘            └────┬────┘
+                                   │ retry
+                              ┌────▼─────┐
+                              │ pending  │
+                              └──────────┘
+```
+
+## States
+
+| Status | Description |
+|--------|-------------|
+| `pending` | Waiting for dependencies to complete and an agent to be available |
+| `assigned` | Agent selected, runner about to be spawned |
+| `in_progress` | Agent is actively working on the task |
+| `review` | Agent finished, assessment in progress |
+| `done` | Task passed assessment (or assessment skipped) |
+| `failed` | Task failed assessment or agent crashed; may be retried |
+
+## Phases
+
+Within the `in_progress` state, tasks move through **phases** that track the current execution mode:
+
+| Phase | Description |
+|-------|-------------|
+| `execution` | Initial run — agent works on the task from scratch |
+| `review` | Assessment is evaluating the agent's work |
+| `fix` | Agent is making targeted corrections based on assessment feedback |
+| `clarification` | Agent asked a question; orchestrator is generating an answer |
+
+### Fix Phase vs Full Retry
+
+When assessment fails, Orchestra first tries a **fix phase** — sending the agent specific feedback about what's wrong so it can make targeted corrections without starting over:
+
+```
+execution → review → [fail] → fix → review → [fail] → fix → review → [fail] → full retry
+```
+
+- **Fix phase**: Agent receives per-dimension scores and feedback. Up to `maxFixAttempts` (default: 2) before falling back.
+- **Full retry**: Task resets to `pending` and starts execution from scratch. Up to `maxRetries` (default: 3) total.
+
+## Transitions
+
+### Happy Path
+
+1. Plan is executed → tasks created as `pending`
+2. Dependencies met → `assigned` to agent
+3. Runner spawned → `in_progress` (phase: `execution`)
+4. Agent finishes → `review` (phase: `review`)
+5. Assessment passes → `done`
+
+### Retry Path
+
+1. Assessment fails → `in_progress` (phase: `fix`)
+2. Agent applies fixes → `review`
+3. Still failing after `maxFixAttempts` → `failed`
+4. Retries remaining → back to `pending` (new execution)
+5. No retries left → permanent `failed`
+
+### Question Path
+
+1. Agent asks a question during execution → phase becomes `clarification`
+2. Orchestrator detects question, generates answer
+3. Answer injected, phase returns to `execution`
+4. Max `maxQuestionRounds` (default: 2) per task
+
+### Deadlock Path
+
+1. Task is `pending` but depends on a `failed` task
+2. Orchestrator detects deadlock
+3. LLM evaluates: can the blocked task proceed without the dependency?
+4. **Absorb**: Task proceeds with modified description
+5. **Retry**: Failed dependency is retried
+6. **Unresolvable**: Task marked as `failed`
+
+## Configuration
+
+```yaml
+settings:
+  maxRetries: 3              # full retry attempts per task
+  maxFixAttempts: 2          # fix attempts per review cycle
+  maxQuestionRounds: 2       # auto-answer rounds per task
+  maxResolutionAttempts: 2   # deadlock resolution attempts
+  taskTimeout: 1800000       # 30 minutes (ms)
+  staleThreshold: 300000     # 5 minutes idle = stale warning
+```
+
+## Events
+
+Key events during the task lifecycle:
+
+| Event | When |
+|-------|------|
+| `task:created` | Task added to registry |
+| `task:transition` | Status changes (includes `from` and `to`) |
+| `agent:spawned` | Runner started for task |
+| `agent:activity` | Agent made a tool call or updated progress |
+| `assessment:complete` | Assessment finished with pass/fail result |
+| `task:fix` | Fix phase started |
+| `task:retry` | Full retry started |
+| `task:question` | Agent asked a question |
+| `task:answered` | Orchestrator answered the question |
+| `task:timeout` | Task exceeded `maxDuration` |
+
+<Aside>
+All state transitions are **atomic** — the task registry uses SQLite with write-ahead logging to ensure consistency even if the process crashes mid-transition.
+</Aside>

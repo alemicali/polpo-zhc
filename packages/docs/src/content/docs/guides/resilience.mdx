@@ -1,0 +1,161 @@
+---
+title: Crash Resilience
+description: How Orchestra survives crashes and recovers gracefully
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Orchestra is designed to survive crashes without losing work. This guide explains the resilience mechanisms.
+
+## Architecture
+
+Three components work together for crash resilience:
+
+1. **Detached runners** — agent processes run independently of the orchestrator
+2. **RunStore** — SQLite-backed registry of running processes
+3. **Orphan recovery** — automatic reconnection on restart
+
+## Detached Runners
+
+When Orchestra spawns an agent, it doesn't run it in-process. Instead, it launches a **detached runner** as a separate Node.js process:
+
+```
+Orchestrator process          Runner process (detached)
+       │                              │
+       ├── writes config to temp file │
+       ├── spawn("node runner.js")    │
+       │   (detached: true,           │
+       │    stdio: "ignore")          │
+       │                              ├── reads config
+       │                              ├── imports adapter
+       │                              ├── spawns agent
+       │                              ├── polls for activity
+       │                              ├── writes results to RunStore
+       │                              └── exits when done
+       │
+       └── reads RunStore for results
+```
+
+**Key properties:**
+- Runner process has its own PID and survives orchestrator crashes
+- Uses `detached: true` + `unref()` so the orchestrator can exit without killing it
+- Config is passed via a temporary JSON file in `.orchestra/tmp/`
+- Results are written to SQLite (RunStore), not IPC
+
+## RunStore
+
+The RunStore tracks all runner processes in SQLite:
+
+```typescript
+interface RunRecord {
+  runId: string;
+  taskId: string;
+  agentName: string;
+  pid: number;
+  state: "running" | "completed" | "failed" | "killed";
+  exitCode?: number;
+  stdout?: string;
+  stderr?: string;
+  duration?: number;
+  startedAt: string;
+  endedAt?: string;
+}
+```
+
+Both the orchestrator and runners write to the same SQLite database with `busy_timeout=5000` to handle concurrent access.
+
+## Recovery Flow
+
+When Orchestra starts, it checks for orphaned processes:
+
+```
+Orchestrator restarts
+    │
+    ├── Read RunStore: find records with state="running"
+    │
+    ├── For each running record:
+    │   ├── Check if PID is alive (process.kill(pid, 0))
+    │   │
+    │   ├── PID alive → keep running, task stays in_progress
+    │   │   (runner will write results when done)
+    │   │
+    │   └── PID dead → mark as failed, retry task
+    │       (runner crashed or was killed)
+    │
+    └── Continue normal operation
+```
+
+This means:
+- If the **orchestrator** crashes, runners keep working. On restart, Orchestra reconnects.
+- If a **runner** crashes, the orchestrator detects the dead PID and retries the task.
+- If **both** crash, on restart the dead PIDs trigger retries.
+
+## Graceful Shutdown
+
+When Orchestra receives SIGTERM, SIGINT, or SIGHUP:
+
+1. **Stop spawning** new tasks
+2. **SIGTERM** all runner PIDs
+3. **Wait** for RunStore writes (runners log their exit state)
+4. **Force-mark** any remaining active records as killed
+5. **Exit** cleanly
+
+```typescript
+// Signal handlers
+process.on("SIGTERM", () => orchestrator.gracefulStop());
+process.on("SIGHUP",  () => orchestrator.gracefulStop());
+process.on("SIGINT",  () => orchestrator.gracefulStop());
+```
+
+## Health Checks
+
+The orchestrator periodically checks active runners:
+
+### Timeout Detection
+
+Tasks that exceed `maxDuration` (default: 30 minutes) are killed:
+
+```yaml
+settings:
+  taskTimeout: 1800000  # 30 minutes (ms)
+```
+
+Override per-task:
+
+```yaml
+tasks:
+  - title: Long-running migration
+    maxDuration: 3600000  # 1 hour
+```
+
+### Stale Detection
+
+Agents that haven't reported activity for `staleThreshold` (default: 5 minutes) get a warning, then are killed:
+
+```yaml
+settings:
+  staleThreshold: 300000  # 5 minutes (ms)
+```
+
+The orchestrator checks `activity.lastUpdate` on each tick. Stale agents trigger the `agent:stale` event.
+
+## Volatile Agent Cleanup
+
+Volatile agents (scoped to a plan) are cleaned up when their plan completes. A `cleanedGroups` set prevents repeated cleanup attempts:
+
+1. Plan reaches terminal state (completed/failed/cancelled)
+2. Find all volatile agents for that plan group
+3. Remove them from the team
+4. Mark the group as cleaned
+
+## Database Safety
+
+All SQLite operations use:
+- **WAL mode**: Write-ahead logging for concurrent reads
+- **`busy_timeout=5000`**: Wait up to 5 seconds for locks
+- **Atomic writes**: Task transitions use write-then-rename pattern
+- **Own connections**: The orchestrator and each runner have independent SQLite connections
+
+<Aside type="tip">
+If you need to reset corrupted state, delete `.orchestra/state.db` and restart. Orchestra will recreate it from `orchestra.yml`.
+</Aside>

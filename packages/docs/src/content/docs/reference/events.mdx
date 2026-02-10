@@ -1,0 +1,359 @@
+---
+title: Events Reference
+description: All 35+ Orchestra event types with payloads
+---
+
+Orchestra uses a typed event emitter. Events are streamed via SSE and WebSocket to all connected clients.
+
+## Task Events
+
+### `task:created`
+
+Fired when a task is added to the registry.
+
+```typescript
+{ task: Task }
+```
+
+### `task:transition`
+
+Fired on every status change.
+
+```typescript
+{
+  taskId: string;
+  from: TaskStatus;   // "pending" | "assigned" | "in_progress" | "review" | "done" | "failed"
+  to: TaskStatus;
+  task: Task;
+}
+```
+
+### `task:updated`
+
+Fired when task fields are modified (description, assignment, expectations).
+
+```typescript
+{ taskId: string; task: Task }
+```
+
+### `task:removed`
+
+Fired when a task is deleted.
+
+```typescript
+{ taskId: string }
+```
+
+### `task:retry`
+
+Fired when a full retry starts.
+
+```typescript
+{ taskId: string; attempt: number; maxRetries: number }
+```
+
+### `task:fix`
+
+Fired when a fix phase starts (targeted corrections).
+
+```typescript
+{ taskId: string; attempt: number; maxFix: number }
+```
+
+### `task:maxRetries`
+
+Fired when all retries are exhausted.
+
+```typescript
+{ taskId: string }
+```
+
+### `task:timeout`
+
+Fired when a task exceeds its `maxDuration`.
+
+```typescript
+{ taskId: string; elapsed: number; timeout: number }
+```
+
+### `task:recovered`
+
+Fired when an orphaned task is recovered on restart.
+
+```typescript
+{ taskId: string; title: string; previousStatus: TaskStatus }
+```
+
+### `task:question`
+
+Fired when an agent asks a question during execution.
+
+```typescript
+{ taskId: string; question: string }
+```
+
+### `task:answered`
+
+Fired when the orchestrator auto-answers an agent question.
+
+```typescript
+{ taskId: string; question: string; answer: string }
+```
+
+---
+
+## Agent Events
+
+### `agent:spawned`
+
+Fired when a runner is launched for a task.
+
+```typescript
+{ taskId: string; agentName: string; adapter: string; taskTitle: string }
+```
+
+### `agent:finished`
+
+Fired when the agent process exits.
+
+```typescript
+{ taskId: string; agentName: string; exitCode: number; duration: number }
+```
+
+### `agent:activity`
+
+Fired on tool calls and progress updates.
+
+```typescript
+{ taskId: string; agentName: string; tool?: string; file?: string; summary?: string }
+```
+
+### `agent:stale`
+
+Fired when an agent hasn't reported activity recently.
+
+```typescript
+{ taskId: string; agentName: string; idleMs: number; action: "warning" | "killed" }
+```
+
+---
+
+## Assessment Events
+
+### `assessment:started`
+
+Fired when assessment begins for a completed task.
+
+```typescript
+{ taskId: string }
+```
+
+### `assessment:progress`
+
+Fired during assessment with status messages.
+
+```typescript
+{ taskId: string; message: string }
+```
+
+### `assessment:complete`
+
+Fired when assessment finishes.
+
+```typescript
+{
+  taskId: string;
+  passed: boolean;
+  scores?: DimensionScore[];   // per-dimension scores
+  globalScore?: number;         // weighted average (1-5)
+  message?: string;
+}
+```
+
+Where `DimensionScore`:
+```typescript
+{
+  dimension: string;     // e.g. "correctness"
+  score: number;         // 1-5
+  reasoning: string;     // chain-of-thought explanation
+  weight: number;        // weight used for global score
+}
+```
+
+### `assessment:corrected`
+
+Fired when expectations are auto-corrected by the expectation judge.
+
+```typescript
+{ taskId: string; corrections: number }
+```
+
+---
+
+## Deadlock Events
+
+### `deadlock:detected`
+
+Fired when blocked tasks are found.
+
+```typescript
+{ taskIds: string[]; resolvableCount: number }
+```
+
+### `deadlock:resolving`
+
+Fired when attempting to resolve a specific blocked task.
+
+```typescript
+{ taskId: string; failedDepId: string }
+```
+
+### `deadlock:resolved`
+
+Fired when a deadlock is resolved.
+
+```typescript
+{
+  taskId: string;
+  failedDepId: string;
+  action: "absorb" | "retry";   // absorb: proceed without dep; retry: re-run dep
+  reason: string;
+}
+```
+
+### `deadlock:unresolvable`
+
+Fired when a deadlock cannot be resolved.
+
+```typescript
+{ taskId: string; reason: string }
+```
+
+---
+
+## Plan Events
+
+### `plan:saved`
+
+Fired when a plan is created or updated.
+
+```typescript
+{ planId: string; name: string; status: PlanStatus }
+```
+
+### `plan:executed`
+
+Fired when a plan starts execution.
+
+```typescript
+{ planId: string; group: string; taskCount: number }
+```
+
+### `plan:completed`
+
+Fired when all tasks in a plan finish.
+
+```typescript
+{
+  planId: string;
+  group: string;
+  allPassed: boolean;
+  report: PlanReport;    // aggregated results
+}
+```
+
+### `plan:resumed`
+
+Fired when a plan is resumed.
+
+```typescript
+{ planId: string; name: string; retried: number; pending: number }
+```
+
+### `plan:deleted`
+
+Fired when a plan is deleted.
+
+```typescript
+{ planId: string }
+```
+
+---
+
+## Orchestrator Events
+
+### `orchestrator:started`
+
+Fired once on startup.
+
+```typescript
+{ project: string; agents: string[] }
+```
+
+### `orchestrator:tick`
+
+Fired every 2 seconds with aggregate counts. **Not persisted to logs.**
+
+```typescript
+{ pending: number; running: number; done: number; failed: number }
+```
+
+### `orchestrator:deadlock`
+
+Fired when unresolvable deadlocks are detected.
+
+```typescript
+{ taskIds: string[] }
+```
+
+### `orchestrator:shutdown`
+
+Fired during graceful shutdown.
+
+```typescript
+{}
+```
+
+---
+
+## Log Event
+
+### `log`
+
+General log messages.
+
+```typescript
+{ level: "info" | "warn" | "error" | "debug"; message: string }
+```
+
+---
+
+## Subscribing to Events
+
+### SSE (HTTP)
+
+```javascript
+const events = new EventSource('/api/v1/projects/my-project/events');
+events.onmessage = (e) => {
+  const { event, data } = JSON.parse(e.data);
+  // event: "task:transition", data: { taskId: "...", ... }
+};
+```
+
+### WebSocket
+
+```javascript
+const ws = new WebSocket('ws://localhost:3890/api/v1/projects/my-project/ws');
+ws.send(JSON.stringify({ type: 'subscribe', pattern: 'task:*' }));
+ws.onmessage = (e) => {
+  const { event, data } = JSON.parse(e.data);
+};
+```
+
+### Node.js (TypedEmitter)
+
+```typescript
+orchestrator.on("task:transition", ({ taskId, from, to, task }) => {
+  console.log(`Task ${taskId}: ${from} → ${to}`);
+});
+```

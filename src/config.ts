@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { parse, stringify } from "yaml";
 import type { OrchestraConfig, OrchestraSettings } from "./core/types.js";
+import { sanitizeExpectations } from "./core/schemas.js";
 
 const DEFAULT_SETTINGS: OrchestraSettings = {
   maxRetries: 3,
@@ -59,7 +60,11 @@ export async function parseConfig(filePath: string): Promise<OrchestraConfig> {
       throw new Error(`Task "${task.id}" missing required field: assignTo`);
     }
     task.dependsOn = task.dependsOn ?? [];
-    task.expectations = task.expectations ?? [];
+    const { valid, warnings } = sanitizeExpectations(task.expectations ?? []);
+    if (warnings.length > 0) {
+      console.warn(`[config] Task "${task.id}" has invalid expectations: ${warnings.join("; ")}`);
+    }
+    task.expectations = valid;
     task.metrics = task.metrics ?? [];
     task.maxRetries =
       task.maxRetries ?? doc.settings?.maxRetries ?? DEFAULT_SETTINGS.maxRetries;

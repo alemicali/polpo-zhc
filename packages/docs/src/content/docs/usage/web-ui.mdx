@@ -1,0 +1,156 @@
+---
+title: Web UI
+description: Next.js dashboard for Orchestra
+---
+
+import { Steps, Aside } from '@astrojs/starlight/components';
+
+Orchestra includes a modern web dashboard built with Next.js 15 and shadcn/ui.
+
+## Setup
+
+<Steps>
+
+1. **Start the Orchestra server**
+
+   ```bash
+   orchestra serve --port 3890
+   ```
+
+2. **Install web UI dependencies**
+
+   ```bash
+   cd packages/web
+   npm install
+   ```
+
+3. **Configure the server URL**
+
+   Create `packages/web/.env.local`:
+
+   ```env
+   NEXT_PUBLIC_ORCHESTRA_URL=http://localhost:3890
+   ```
+
+4. **Start the dev server**
+
+   ```bash
+   npm run dev
+   ```
+
+   Open `http://localhost:3000` in your browser.
+
+</Steps>
+
+## Pages
+
+### Dashboard
+
+Overview of the entire project:
+- **Stats cards**: Total tasks, running, done, failed counts
+- **Active agents**: Live agent activity with shimmer animation
+- **Event feed**: Real-time SSE event stream
+- **Plan progress**: Visual progress for active plans
+
+### Tasks
+
+Full task management:
+- **DataTable**: Sortable, filterable task list
+- **Detail sheet**: Click any task to see full details, assessment scores, and logs
+- **Actions**: Retry, kill, reassess from the UI
+
+### Plans
+
+Plan management:
+- **Plan list**: All plans with status badges
+- **Execute/abort**: Control plan lifecycle
+- **Progress tracking**: Per-plan task completion
+
+### Team
+
+Agent management:
+- **Agent list**: All registered agents with adapter and role info
+- **Add/remove**: Manage team composition
+- **AI generation**: Generate teams from natural language descriptions
+
+### Memory
+
+Project memory editor:
+- **Monospace editor**: Full-featured text editor for `.orchestra/memory.md`
+- **Keyboard shortcuts**: Ctrl+S to save
+- **Unsaved indicator**: Badge shows when changes need saving
+
+### Logs
+
+Event log viewer:
+- **Session list**: Browse log sessions
+- **Event stream**: Filterable event list with payloads
+
+### Chat
+
+Conversational interface:
+- **Status commands**: `/status`, `/idle`, `/failed`
+- **AI interaction**: Ask questions about project state
+- **Local processing**: Common commands handled client-side
+
+### Settings
+
+Connection and configuration:
+- **Connection status**: Real-time server connection indicator
+- **Config display**: Current orchestrator settings
+
+## React SDK
+
+The web UI is built on the `@orchestra/react` SDK, which provides type-safe hooks:
+
+```tsx
+import {
+  OrchestraProvider,
+  useTasks,
+  useAgents,
+  usePlans,
+  useProcesses,
+  useEvents,
+  useStats,
+  useMemory,
+} from "@orchestra/react";
+
+function App() {
+  return (
+    <OrchestraProvider
+      baseURL="http://localhost:3890"
+      projectId="my-project"
+      apiKey="optional-key"
+    >
+      <Dashboard />
+    </OrchestraProvider>
+  );
+}
+```
+
+See [React SDK Reference](/reference/react-sdk/) for full documentation.
+
+## Command Palette
+
+Press `Ctrl+K` (or `Cmd+K`) to open the command palette with:
+
+- **Navigate**: Jump to any page
+- **Task actions**: Retry all failed, clear finished, kill all running, reassess
+- **Plan actions**: Execute draft plans, abort active plans
+- **AI generation**: Quick access to team and plan generators
+- **Go to task**: Jump directly to any task
+
+## Tech Stack
+
+| Component | Technology |
+|-----------|------------|
+| Framework | Next.js 15 (App Router) |
+| UI Library | shadcn/ui (zinc dark theme) |
+| State | `@orchestra/react` SDK (SSE + `useSyncExternalStore`) |
+| Icons | Lucide React |
+| Toasts | Sonner |
+| Tables | TanStack Table |
+
+<Aside>
+The SDK uses `useSyncExternalStore` with push-based SSE for real-time updates. No polling — events are streamed as they happen.
+</Aside>

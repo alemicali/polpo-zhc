@@ -1,0 +1,82 @@
+---
+title: Orchestra
+description: Agent-agnostic framework for orchestrating teams of AI coding agents
+template: splash
+hero:
+  tagline: Coordinate multiple AI agents working together on complex software development tasks. Define plans in YAML, assign tasks to agents, and let Orchestra handle coordination, monitoring, and assessment.
+  actions:
+    - text: Get Started
+      link: /getting-started/
+      icon: right-arrow
+      variant: primary
+    - text: View on GitHub
+      link: https://github.com/AlessioToniworking/orchestra
+      icon: external
+      variant: minimal
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+## Features
+
+<CardGrid stagger>
+  <Card title="Agent-Agnostic" icon="puzzle">
+    Works with Claude SDK, GPT-4, Aider, or any command-line agent. Swap adapters without changing your plans.
+  </Card>
+
+  <Card title="Plan-Based Orchestration" icon="list-format">
+    Define multi-task plans in YAML with dependencies, volatile teams, and custom assessment criteria.
+  </Card>
+
+  <Card title="G-Eval Assessment" icon="approve-check-circle">
+    Built-in LLM-as-judge with rubric-based scoring across correctness, completeness, code quality, and edge cases.
+  </Card>
+
+  <Card title="Multiple Interfaces" icon="laptop">
+    CLI for automation, interactive TUI with 15+ commands, HTTP API with SSE/WebSocket, React SDK, and Next.js dashboard.
+  </Card>
+
+  <Card title="Crash-Resilient" icon="rocket">
+    SQLite-backed state with detached runner processes. Survives crashes, reconnects to live agents, retries dead ones.
+  </Card>
+
+  <Card title="AI-Powered" icon="star">
+    Automatic deadlock resolution, question detection with auto-answer, expectation correction, and AI team generation.
+  </Card>
+</CardGrid>
+
+## Quick Install
+
+```bash
+git clone https://github.com/AlessioToniworking/orchestra.git
+cd orchestra
+npm install
+./node_modules/.bin/tsc
+```
+
+## Your First Plan
+
+```yaml
+agents:
+  - name: backend-dev
+    adapter: claude-sdk
+    description: Backend developer specializing in Node.js
+
+plans:
+  - group: setup-api
+    tasks:
+      - title: Create REST endpoints
+        agent: backend-dev
+        description: Build CRUD API for users and posts
+```
+
+```bash
+# Run with interactive TUI
+orchestra tui
+
+# Or headless
+orchestra run
+
+# Or as HTTP server
+orchestra serve --port 3890
+```
