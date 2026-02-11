@@ -8,7 +8,7 @@ export default function PlansPage() {
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Plans</h1>
         <p className="text-sm text-muted-foreground">
-          Create, manage, and execute orchestration plans
+          Create, manage, and execute plans
         </p>
       </div>
 

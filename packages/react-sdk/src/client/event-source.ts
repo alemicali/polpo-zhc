@@ -57,7 +57,7 @@ export class EventSourceManager {
       this.handleMessage(e);
     };
 
-    // Listen for named events (Orchestra sends typed event names)
+    // Listen for named events (Polpo sends typed event names)
     // EventSource API: use addEventListener for named events
     es.addEventListener("task:created", (e) => this.handleMessage(e as MessageEvent));
     es.addEventListener("task:transition", (e) => this.handleMessage(e as MessageEvent));

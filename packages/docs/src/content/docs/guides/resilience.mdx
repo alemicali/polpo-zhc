@@ -1,11 +1,11 @@
 ---
 title: Crash Resilience
-description: How Orchestra survives crashes and recovers gracefully
+description: How Polpo survives crashes and recovers gracefully
 ---
 
 import { Aside } from '@astrojs/starlight/components';
 
-Orchestra is designed to survive crashes without losing work. This guide explains the resilience mechanisms.
+Polpo is designed to survive crashes without losing work. This guide explains the resilience mechanisms.
 
 ## Architecture
 
@@ -17,7 +17,7 @@ Three components work together for crash resilience:
 
 ## Detached Runners
 
-When Orchestra spawns an agent, it doesn't run it in-process. Instead, it launches a **detached runner** as a separate Node.js process:
+When Polpo spawns an agent, it doesn't run it in-process. Instead, it launches a **detached runner** as a separate Node.js process:
 
 ```
 Orchestrator process          Runner process (detached)
@@ -39,7 +39,7 @@ Orchestrator process          Runner process (detached)
 **Key properties:**
 - Runner process has its own PID and survives orchestrator crashes
 - Uses `detached: true` + `unref()` so the orchestrator can exit without killing it
-- Config is passed via a temporary JSON file in `.orchestra/tmp/`
+- Config is passed via a temporary JSON file in `.polpo/tmp/`
 - Results are written to SQLite (RunStore), not IPC
 
 ## RunStore
@@ -66,7 +66,7 @@ Both the orchestrator and runners write to the same SQLite database with `busy_t
 
 ## Recovery Flow
 
-When Orchestra starts, it checks for orphaned processes:
+When Polpo starts, it checks for orphaned processes:
 
 ```
 Orchestrator restarts
@@ -86,13 +86,13 @@ Orchestrator restarts
 ```
 
 This means:
-- If the **orchestrator** crashes, runners keep working. On restart, Orchestra reconnects.
+- If the **orchestrator** crashes, runners keep working. On restart, Polpo reconnects.
 - If a **runner** crashes, the orchestrator detects the dead PID and retries the task.
 - If **both** crash, on restart the dead PIDs trigger retries.
 
 ## Graceful Shutdown
 
-When Orchestra receives SIGTERM, SIGINT, or SIGHUP:
+When Polpo receives SIGTERM, SIGINT, or SIGHUP:
 
 1. **Stop spawning** new tasks
 2. **SIGTERM** all runner PIDs
@@ -120,7 +120,7 @@ settings:
   taskTimeout: 1800000  # 30 minutes (ms)
 ```
 
-Override per-task:
+Override per-task in `polpo.yml`:
 
 ```yaml
 tasks:
@@ -157,5 +157,5 @@ All SQLite operations use:
 - **Own connections**: The orchestrator and each runner have independent SQLite connections
 
 <Aside type="tip">
-If you need to reset corrupted state, delete `.orchestra/state.db` and restart. Orchestra will recreate it from `orchestra.yml`.
+If you need to reset corrupted state, delete `.polpo/state.db` and restart. Polpo will recreate it from `polpo.yml`.
 </Aside>

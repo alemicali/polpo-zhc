@@ -1,5 +1,5 @@
 /**
- * Chat mode handler — queries Claude for Q&A about Orchestra state.
+ * Chat mode handler — queries Claude for Q&A about Polpo state.
  */
 
 import type { CommandContext } from "../context.js";
@@ -40,7 +40,7 @@ async function queryChatResponse(ctx: CommandContext, input: string): Promise<st
     ``,
     `User question: ${input}`,
     ``,
-    `Answer concisely based on the current Orchestra state. Use plain text, no markdown.`,
+    `Answer concisely based on the current Polpo state. Use plain text, no markdown.`,
   ].join("\n");
 
   return querySDKText(prompt, ctx.workDir, ctx.orchestrator.getConfig()?.settings?.orchestratorModel);

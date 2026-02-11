@@ -1,6 +1,6 @@
-# @orchestra/react-sdk
+# @openpolpo/react-sdk
 
-Type-safe React hooks for Orchestra with real-time Server-Sent Events (SSE) updates.
+Type-safe React hooks for OpenPolpo with real-time Server-Sent Events (SSE) updates.
 
 ## Features
 
@@ -15,7 +15,7 @@ Type-safe React hooks for Orchestra with real-time Server-Sent Events (SSE) upda
 ## Installation
 
 ```bash
-npm install @orchestra/react-sdk
+npm install @openpolpo/react-sdk
 ```
 
 **Peer Dependencies**:
@@ -24,7 +24,7 @@ npm install @orchestra/react-sdk
 ## Quick Start
 
 ```tsx
-import { OrchestraProvider, useTasks, useAgents } from '@orchestra/react-sdk';
+import { OrchestraProvider, useTasks, useAgents } from '@openpolpo/react-sdk';
 
 function App() {
   return (
@@ -45,7 +45,7 @@ function Dashboard() {
 
   return (
     <div>
-      <h1>Orchestra Dashboard</h1>
+      <h1>Polpo Dashboard</h1>
       <p>Tasks: {tasks.length}</p>
       <p>Active Agents: {stats.activeAgents}</p>
       <ul>
@@ -80,7 +80,7 @@ Root provider component that manages connection and state.
 ```
 
 **Props**:
-- `baseURL`: Orchestra server URL
+- `baseURL`: OpenPolpo server URL
 - `projectId`: Project identifier
 - `apiKey?`: Optional API key for authentication
 - `autoConnect?`: Auto-connect on mount (default: true)
@@ -91,7 +91,7 @@ Root provider component that manages connection and state.
 
 #### useOrchestra()
 
-Access full Orchestra state and methods.
+Access full Polpo state and methods.
 
 ```tsx
 const {
@@ -314,7 +314,7 @@ interface Stats {
 
 #### useMemory()
 
-Get orchestrator memory entries.
+Get Polpo memory entries.
 
 ```tsx
 const memory = useMemory();
@@ -447,7 +447,7 @@ import type {
   Stats,
   CreateTaskInput,
   UpdateTaskInput,
-} from '@orchestra/react-sdk';
+} from '@openpolpo/react-sdk';
 ```
 
 ## Examples
@@ -455,7 +455,7 @@ import type {
 ### Task List with Retry
 
 ```tsx
-import { useTasks, useOrchestra } from '@orchestra/react-sdk';
+import { useTasks, useOrchestra } from '@openpolpo/react-sdk';
 
 function TaskList() {
   const tasks = useTasks();
@@ -481,7 +481,7 @@ function TaskList() {
 ### Live Agent Activity
 
 ```tsx
-import { useProcesses } from '@orchestra/react-sdk';
+import { useProcesses } from '@openpolpo/react-sdk';
 
 function AgentActivity() {
   const processes = useProcesses();
@@ -508,7 +508,7 @@ function AgentActivity() {
 ### Plan Progress
 
 ```tsx
-import { usePlan, useTasks } from '@orchestra/react-sdk';
+import { usePlan, useTasks } from '@openpolpo/react-sdk';
 
 function PlanProgress({ planGroup }: { planGroup: string }) {
   const plan = usePlan(planGroup);
@@ -534,7 +534,7 @@ function PlanProgress({ planGroup }: { planGroup: string }) {
 ### Event Stream
 
 ```tsx
-import { useEvents } from '@orchestra/react-sdk';
+import { useEvents } from '@openpolpo/react-sdk';
 
 function EventFeed() {
   const events = useEvents(20);

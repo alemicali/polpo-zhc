@@ -1,0 +1,7 @@
+{
+  "project": "orchestra",
+  "judge": "claude-sdk",
+  "judgeModel": "claude-sonnet-4-5-20250929",
+  "agent": "claude-sdk",
+  "model": "claude-sonnet-4-5-20250929"
+}

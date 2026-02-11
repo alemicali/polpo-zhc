@@ -13,13 +13,13 @@ export default async function ProjectsPage() {
   try {
     projects = await OrchestraClient.listProjects(ORCHESTRA_URL, API_KEY);
   } catch (e) {
-    error = e instanceof Error ? e.message : "Failed to connect to Orchestra server";
+    error = e instanceof Error ? e.message : "Failed to connect to Polpo server";
   }
 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center p-8">
       <div className="mb-12 text-center">
-        <h1 className="mb-2 text-4xl font-bold tracking-tight">Orchestra</h1>
+        <h1 className="mb-2 text-4xl font-bold tracking-tight">OpenPolpo</h1>
         <p className="text-muted-foreground">AI Agent Mission Control</p>
       </div>
 
@@ -28,7 +28,7 @@ export default async function ProjectsPage() {
           <CardContent className="pt-6">
             <p className="text-sm text-destructive">{error}</p>
             <p className="mt-2 text-xs text-muted-foreground">
-              Make sure <code>orchestra serve</code> is running at {ORCHESTRA_URL}
+              Make sure <code>polpo serve</code> is running at {ORCHESTRA_URL}
             </p>
           </CardContent>
         </Card>
@@ -37,7 +37,7 @@ export default async function ProjectsPage() {
           <CardContent className="pt-6 text-center">
             <p className="text-sm text-muted-foreground">No projects found.</p>
             <p className="mt-2 text-xs text-muted-foreground">
-              Start a project with <code>orchestra serve</code>
+              Start a project with <code>polpo serve</code>
             </p>
           </CardContent>
         </Card>

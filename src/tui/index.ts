@@ -72,7 +72,7 @@ export class OrchestraTUI {
     this.createScreen();
 
     // Check for persisted config — skip wizard if setup was already completed
-    const orchestraDir = resolve(this.workDir, ".orchestra");
+    const orchestraDir = resolve(this.workDir, ".polpo");
     const configStore = new JsonConfigStore(orchestraDir);
     const savedConfig = configStore.get();
 
@@ -104,9 +104,9 @@ export class OrchestraTUI {
   private initOrchestrator(): void {
     this.orchestrator = new Orchestrator(this.workDir);
 
-    // Try to load team from orchestra.yml
+    // Try to load team from polpo.yml
     let team: Team;
-    const ymlPath = resolve(this.workDir, "orchestra.yml");
+    const ymlPath = resolve(this.workDir, "polpo.yml");
     if (existsSync(ymlPath)) {
       try {
         const raw = readFileSync(ymlPath, "utf-8");
@@ -144,7 +144,7 @@ export class OrchestraTUI {
   private createScreen(): void {
     this.screen = blessed.screen({
       smartCSR: true,
-      title: "Orchestra",
+      title: "Polpo",
       fullUnicode: true,
     });
 
@@ -197,7 +197,7 @@ export class OrchestraTUI {
       // Logo
       const logoText = LOGO_LINES.map(l =>
         l.replace(/[╔╗╚╝║═]/g, m => `{bold}${m}{/bold}`)
-          .replace(/O R C H E S T R A/g, `{bold}{white-fg}O R C H E S T R A{/white-fg}{/bold}`)
+          .replace(/🐙 O P E N P O L P O/g, `{bold}{white-fg}🐙 O P E N P O L P O{/white-fg}{/bold}`)
           .replace(/AI Agent Orchestration Framework/g, `{grey-fg}AI Agent Orchestration Framework{/grey-fg}`)
       ).join("\n");
 
@@ -664,7 +664,7 @@ export class OrchestraTUI {
     const modelLabel = this.config.model
       ? MODELS.find(m => m.value === this.config.model)?.label ?? this.config.model
       : "";
-    this.logAlways("{bold}Orchestra{/bold}");
+    this.logAlways("{bold}🐙 Polpo{/bold}");
     this.logAlways("");
     const judgeModelLabel = this.config.judgeModel
       ? MODELS.find(m => m.value === this.config.judgeModel)?.label ?? this.config.judgeModel
@@ -1149,7 +1149,7 @@ export class OrchestraTUI {
 
   private updateHeader(): void {
     this.loadState();
-    const parts = ["{bold}ORCHESTRA{/bold}"];
+    const parts = ["{bold}POLPO{/bold}"];
 
     if (this.state?.project) {
       parts.push(`{grey-fg}${this.state.project}{/grey-fg}`);

@@ -36,7 +36,7 @@ class GenericAdapter implements AgentAdapter {
     const prompt = `${task.title}\n\n${task.description}`;
 
     // Write prompt to temp file for {taskFile}
-    const tmpDir = join(cwd, ".orchestra", "tmp");
+    const tmpDir = join(cwd, ".polpo", "tmp");
     mkdirSync(tmpDir, { recursive: true });
     const tmpFile = join(tmpDir, `prompt-${randomBytes(8).toString("hex")}.txt`);
     writeFileSync(tmpFile, prompt, "utf-8");
@@ -95,7 +95,7 @@ class GenericAdapter implements AgentAdapter {
           resolve({
             exitCode: code ?? 1,
             stdout,
-            stderr: stderr + `\n[orchestra] Process timed out after ${DEFAULT_TIMEOUT}ms`,
+            stderr: stderr + `\n[polpo] Process timed out after ${DEFAULT_TIMEOUT}ms`,
             duration,
           });
           return;

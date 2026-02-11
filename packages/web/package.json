@@ -1,6 +1,7 @@
 {
-  "name": "web",
+  "name": "@openpolpo/web",
   "version": "0.1.0",
+  "description": "OpenPolpo Web UI — AI Agent Mission Control",
   "private": true,
   "scripts": {
     "dev": "next dev",

@@ -5,7 +5,7 @@ import type { ConfigStore } from "../core/config-store.js";
 
 /**
  * JSON-file backed ConfigStore.
- * Reads/writes `.orchestra/config.json` (human-readable, hand-editable).
+ * Reads/writes `.polpo/config.json` (human-readable, hand-editable).
  */
 export class JsonConfigStore implements ConfigStore {
   private readonly filePath: string;

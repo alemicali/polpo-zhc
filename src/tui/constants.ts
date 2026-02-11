@@ -3,7 +3,7 @@
 export const LOGO_LINES = [
   "       ╔═══════════════════════════════════╗",
   "       ║                                   ║",
-  "       ║      O R C H E S T R A            ║",
+  "       ║      🐙 O P E N P O L P O          ║",
   "       ║                                   ║",
   "       ║   AI Agent Orchestration Framework ║",
   "       ║                                   ║",
@@ -56,7 +56,7 @@ export const SLASH_COMMANDS: Record<string, string> = {
   "/logs": "Browse session logs",
   "/config": "Show configuration",
   "/help": "Commands & shortcuts",
-  "/quit": "Exit Orchestra",
+  "/quit": "Exit Polpo",
 };
 
 export const SHORTCUTS: Record<string, string> = {

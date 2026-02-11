@@ -15,11 +15,11 @@ export function buildChatSystemPrompt(
   const team = orchestrator.getTeam();
 
   const parts: string[] = [
-    `You are the Orchestra assistant. Orchestra is an agent-agnostic framework for orchestrating teams of AI coding agents.`,
+    `You are the Polpo assistant. Polpo is an agent-agnostic framework for orchestrating teams of AI coding agents.`,
     ``,
-    `## How Orchestra Works`,
+    `## How Polpo Works`,
     ``,
-    `Orchestra manages teams of AI agents that execute coding tasks autonomously.`,
+    `Polpo manages teams of AI agents that execute coding tasks autonomously.`,
     `The supervisor loop runs every 2 seconds and:`,
     `1. Checks for completed agents and collects their results`,
     `2. Spawns ALL agents for tasks whose dependencies are satisfied — multiple agents run in parallel`,
@@ -67,7 +67,7 @@ export function buildChatSystemPrompt(
     ``,
     `## Current State`,
     ``,
-    `Project: ${state?.project || "orchestra-interactive"}`,
+    `Project: ${state?.project || "polpo-interactive"}`,
     `Team: ${team.name}`,
     `Agents:`,
   ];
@@ -160,8 +160,8 @@ export function buildPlanSystemPrompt(
     ``,
     `## Your Role: Plan Generator`,
     ``,
-    `You are Orchestra's plan generator. Your job is to decompose a user request into`,
-    `a set of atomic tasks that Orchestra's supervisor will execute via AI agents.`,
+    `You are Polpo's plan generator. Your job is to decompose a user request into`,
+    `a set of atomic tasks that Polpo's supervisor will execute via AI agents.`,
     `The agents are autonomous coding agents — they can read/write files, run commands,`,
     `install packages, write tests, etc. Each task gets its own independent agent session.`,
     ``,
@@ -221,7 +221,7 @@ export function buildPlanSystemPrompt(
     `  - type: llm_review → MUST have criteria (string) or dimensions (array)`,
     `  Expectations missing required fields will be silently dropped.`,
     `- Consider existing tasks/state to avoid duplication or conflicts`,
-    `- MAXIMIZE PARALLELISM: Orchestra spawns ALL tasks with satisfied deps simultaneously.`,
+    `- MAXIMIZE PARALLELISM: Polpo spawns ALL tasks with satisfied deps simultaneously.`,
     `  Only add a dependency if task B truly CANNOT start before task A finishes.`,
     `  Independent tasks (different files, different modules) MUST NOT have deps between them.`,
     `  Example: creating tests and creating docs for different features can run in parallel.`,
@@ -343,7 +343,7 @@ export function buildTeamGenPrompt(
     : `No skills currently installed.`;
 
   return [
-    `You are Orchestra's team designer. Orchestra is an agent-agnostic framework for orchestrating teams of AI coding agents.`,
+    `You are Polpo's team designer. Polpo is an agent-agnostic framework for orchestrating teams of AI coding agents.`,
     ``,
     `## Your Role`,
     ``,

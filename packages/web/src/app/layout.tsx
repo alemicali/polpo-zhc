@@ -15,8 +15,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Orchestra — AI Agent Mission Control",
-  description: "Orchestrate teams of AI coding agents",
+  title: "OpenPolpo — AI Agent Mission Control",
+  description: "Orchestrate teams of AI coding agents with Polpo",
 };
 
 export default function RootLayout({

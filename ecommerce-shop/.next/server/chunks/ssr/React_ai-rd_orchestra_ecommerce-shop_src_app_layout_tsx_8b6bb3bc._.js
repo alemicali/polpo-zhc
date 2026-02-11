@@ -1,0 +1,3 @@
+module.exports=[33928,a=>{"use strict";var b=a.i(63775);function c({children:a}){return(0,b.jsx)("html",{lang:"it",children:(0,b.jsx)("body",{className:"antialiased",children:a})})}a.s(["default",()=>c,"metadata",0,{title:"Ferramenta Online - Tutto per il fai da te",description:"Ferramenta Online: scopri la nostra vasta gamma di prodotti per edilizia, giardinaggio e fai da te. Qualità garantita e spedizione rapida.",keywords:["ferramenta","fai da te","utensili","edilizia","giardinaggio"]}])}];
+
+//# sourceMappingURL=React_ai-rd_orchestra_ecommerce-shop_src_app_layout_tsx_8b6bb3bc._.js.map

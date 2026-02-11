@@ -75,7 +75,7 @@ export async function runCheck(
       }
 
       // Multi-line: write to temp file, execute with bash, cleanup
-      const tmpDir = join(cwd, ".orchestra", "tmp");
+      const tmpDir = join(cwd, ".polpo", "tmp");
       const scriptFile = join(tmpDir, `check-${nanoid(8)}.sh`);
       try {
         await mkdir(tmpDir, { recursive: true });

@@ -97,7 +97,7 @@ export function PlanList() {
       {plans.length === 0 ? (
         <Card>
           <CardContent className="py-8 text-center text-sm text-muted-foreground">
-            No plans yet. Create one to orchestrate tasks.
+            No plans yet. Create one to coordinate tasks.
           </CardContent>
         </Card>
       ) : (

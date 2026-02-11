@@ -1,4 +1,6 @@
-/* Orchestra docs — OpenCode-inspired minimal theme */
+/* Polpo docs — OpenCode-inspired minimal theme */
+
+@import url('https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap');
 
 /* ─── Light mode (default) ─── */
 :root {
@@ -67,6 +69,21 @@ body {
   font-size: 14px !important;
 }
 
+:root {
+  --sl-font: 'Geist', system-ui, sans-serif !important;
+  --sl-font-mono: 'Geist Mono', monospace !important;
+  --__sl-font: 'Geist', system-ui, sans-serif;
+  --__sl-font-mono: 'Geist Mono', monospace;
+}
+
+body, html, * {
+  font-family: 'Geist', system-ui, sans-serif;
+}
+
+code, pre, kbd {
+  font-family: 'Geist Mono', monospace !important;
+}
+
 /* ─── Header ─── */
 body > .page > header,
 :root[data-has-sidebar] body > .page > header {
@@ -78,8 +95,19 @@ body > .page > header,
   border-bottom: 1px solid var(--color-border-weak) !important;
 }
 
-body > .page > header a.site-title img {
-  height: 2rem !important;
+header .site-title .logo-size,
+img.logo-size[src] {
+  height: 1.2rem !important;
+  max-height: 1.2rem !important;
+  width: auto !important;
+}
+
+/* Override Starlight scoped height via @layer */
+@layer overrides {
+  .logo-size {
+    height: 1.2rem !important;
+    max-height: 1.2rem !important;
+  }
 }
 
 /* ─── Typography: lighter headings like OpenCode ─── */
@@ -143,14 +171,35 @@ ul.top-level a[aria-current="page"] > span {
   color: var(--color-text-strong) !important;
 }
 
+/* All sidebar links share the same padding and a transparent left border
+   so that the active-page 2px border doesn't shift alignment */
+.top-level > li > a,
 .top-level li a {
   border-radius: 0;
   width: 100%;
   padding: 4px 24px !important;
+  padding-left: 24px !important;
+  border-left: 2px solid transparent;
 }
 
 .top-level li a:hover {
   background: var(--color-background-weak) !important;
+}
+
+/* ── Starlight sidebar: align ungrouped items with grouped children ── */
+/* Remove the nested ul>li indentation so grouped children sit flush */
+ul.top-level ul li {
+  margin-inline-start: 0 !important;
+  border-inline-start: none !important;
+  padding-inline-start: 0 !important;
+}
+
+/* Ungrouped top-level links: remove the .large header styling so they
+   look like normal sidebar links, matching grouped children visually */
+ul.top-level > li > a.large {
+  font-size: inherit !important;
+  font-weight: inherit !important;
+  color: inherit !important;
 }
 
 #starlight__sidebar > div > sl-sidebar-state-persist > ul > li > details > summary {
@@ -176,6 +225,26 @@ nav.sidebar ul.top-level > li > details > summary .group-label > span {
 
 nav.sidebar summary svg.caret {
   color: var(--color-icon) !important;
+}
+
+/* ── Six theme sidebar: align ungrouped items with grouped children ── */
+/* All entry-links get a transparent left border to prevent shift when active */
+.container-sidebar a.entry-link {
+  border-left: 2px solid transparent;
+}
+
+/* Top-level ungrouped entry-links (direct children of container-sidebar) */
+.container-sidebar > a.entry-link {
+  margin-left: 0.75rem !important;
+  padding-left: 0.75rem !important;
+  padding-right: 0.75rem !important;
+}
+
+/* Grouped child entry-links share the same indentation */
+.container-sidebar .container-group-link > a.entry-link {
+  margin-left: 0.75rem !important;
+  padding-left: 0.75rem !important;
+  padding-right: 0.75rem !important;
 }
 
 /* ─── Right sidebar (TOC) ─── */

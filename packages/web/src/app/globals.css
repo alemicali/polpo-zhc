@@ -116,7 +116,7 @@
   --sidebar-ring: oklch(0.552 0.016 285.938);
 }
 
-/* Orchestra status colors */
+/* Polpo status colors */
 :root {
   --status-pending: oklch(0.705 0.015 286.067);
   --status-assigned: oklch(0.7 0.15 200);

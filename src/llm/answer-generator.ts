@@ -37,7 +37,7 @@ function buildAnswerPrompt(
   question: string,
 ): string {
   const parts = [
-    `You are an orchestrator managing AI coding agents. An agent working on a task has asked a question instead of completing the work.`,
+    `You are Polpo, an AI agent orchestration framework. An agent working on a task has asked a question instead of completing the work.`,
     `Your job is to answer the question concisely so the agent can proceed autonomously.`,
     ``,
     `## Task`,

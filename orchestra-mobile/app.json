@@ -1,13 +1,13 @@
 {
   "expo": {
-    "name": "orchestra-mobile",
-    "slug": "orchestra-mobile",
+    "name": "openpolpo-mobile",
+    "slug": "openpolpo-mobile",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
-    "scheme": "orchestra-mobile",
+    "scheme": "openpolpo-mobile",
     "platforms": [
       "ios",
       "android",

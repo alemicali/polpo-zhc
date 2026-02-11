@@ -1,17 +1,30 @@
 // @ts-check
 import { defineConfig } from "astro/config";
 import starlight from "@astrojs/starlight";
+import starlightThemeSix from "@six-tech/starlight-theme-six";
 
 // https://astro.build/config
 export default defineConfig({
   integrations: [
     starlight({
-      title: "Orchestra",
+      title: "Polpo",
       logo: {
-        light: "./src/assets/logo-light.svg",
+        light: "./src/assets/logo.svg",
         dark: "./src/assets/logo-dark.svg",
         replacesTitle: true,
       },
+      head: [
+        {
+          tag: "style",
+          content: `
+            @import url('https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap');
+            .logo-size { height: 1.2rem !important; max-height: 1.2rem !important; width: auto !important; }
+            :root { --sl-font: 'Geist', system-ui, sans-serif; --sl-font-mono: 'Geist Mono', monospace; }
+            body { font-family: 'Geist', system-ui, sans-serif !important; }
+            code, pre, kbd { font-family: 'Geist Mono', monospace !important; }
+          `,
+        },
+      ],
       lastUpdated: true,
       social: [
         {
@@ -20,12 +33,14 @@ export default defineConfig({
           href: "https://github.com/AlessioToniworking/orchestra",
         },
       ],
-      expressiveCode: {
-        themes: ["github-light", "github-dark"],
-      },
-      customCss: ["./src/styles/custom.css"],
+      plugins: [
+        starlightThemeSix({
+          footerText:
+            "Built with [Astro Starlight](https://starlight.astro.build). Powered by [Polpo](https://github.com/AlessioToniworking/orchestra).",
+        }),
+      ],
       sidebar: [
-        { label: "Introduction", slug: "index" },
+        { label: "Introduction", slug: "introduction" },
         { label: "Getting Started", slug: "getting-started" },
         { label: "Configuration", slug: "configuration" },
         {

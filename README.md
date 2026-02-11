@@ -1,60 +1,91 @@
-# Orchestra
+<p align="center"><img src="assets/logo.svg" width="200" /></p>
 
-Agent-agnostic framework for orchestrating teams of AI coding agents.
+<pre align="center">
+  ___                   ____       _
+ / _ \ _ __   ___ _ __ |  _ \ ___ | |_ __   ___
+| | | | '_ \ / _ \ '_ \| |_) / _ \| | '_ \ / _ \
+| |_| | |_) |  __/ | | |  __/ (_) | | |_) | (_) |
+ \___/| .__/ \___|_| |_|_|   \___/|_| .__/ \___/
+      |_|                            |_|
+</pre>
 
-Orchestra enables you to coordinate multiple AI agents (Claude, GPT-4, or any CLI-based agent) working together on complex software development tasks. Define plans in YAML, assign tasks to agents, and let Orchestra handle the coordination, monitoring, and assessment.
+<p align="center">
+  <strong>Agent-agnostic framework for orchestrating teams of AI coding agents.</strong>
+</p>
 
-## Features
+<p align="center">
+  <a href="#installation">Installation</a> &nbsp;&bull;&nbsp;
+  <a href="#quick-start">Quick Start</a> &nbsp;&bull;&nbsp;
+  <a href="#features">Features</a> &nbsp;&bull;&nbsp;
+  <a href="#architecture">Architecture</a> &nbsp;&bull;&nbsp;
+  <a href="#api">API</a> &nbsp;&bull;&nbsp;
+  <a href="#packages">Packages</a>
+</p>
 
-- 🤖 **Agent-Agnostic**: Works with Claude SDK, GPT-4, or any command-line agent
-- 📋 **Plan-Based Orchestration**: Define multi-task plans in YAML
-- 🔄 **Automatic Retry & Assessment**: Built-in G-Eval LLM-powered task assessment
-- 💻 **Multiple Interfaces**: CLI, interactive TUI, HTTP API, React SDK, and Web UI
-- 🔌 **Real-time Updates**: Server-Sent Events (SSE) and WebSocket support
-- 💾 **Crash-Resilient**: SQLite-backed state with detached runner processes
-- 🎯 **Deadlock Resolution**: AI-powered detection and resolution of agent deadlocks
+<p align="center">
+  <!-- badges -->
+  <img alt="npm" src="https://img.shields.io/npm/v/openpolpo?style=flat-square&color=blue" />
+  <img alt="license" src="https://img.shields.io/github/license/openpolpo/openpolpo?style=flat-square" />
+  <img alt="node" src="https://img.shields.io/badge/node-%3E%3D18-brightgreen?style=flat-square" />
+  <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-ESM-blue?style=flat-square" />
+</p>
 
-## Prerequisites
+---
 
-- **Node.js**: v18 or higher
-- **npm**: v8 or higher
-- **API Keys**: Set `ANTHROPIC_API_KEY` environment variable if using Claude agents
-- **TypeScript**: Installed automatically as a dependency
+OpenPolpo coordinates multiple AI agents -- Claude, GPT-4, Codex, or any CLI-based agent -- working together on complex software development tasks. Define plans in YAML, assign tasks to specialized agents, and let Polpo handle coordination, monitoring, assessment, and recovery.
+
+```
+$ polpo
+
+  ┌─ Dashboard ─────────────────────────────────┐
+  │  Agents: 3 active    Tasks: 12/15 done      │
+  │  Plans:  2 running   Failures: 0            │
+  │                                              │
+  │  > backend-dev    ██████████░░  in_progress  │
+  │  > frontend-dev   ████████████  done         │
+  │  > test-engineer  ██████░░░░░░  review       │
+  └──────────────────────────────────────────────┘
+```
 
 ## Installation
 
 ```bash
-# Clone the repository
-git clone https://github.com/yourusername/orchestra.git
-cd orchestra
+npm install -g openpolpo
+```
 
-# Install dependencies
+That gives you the `polpo` CLI globally. Verify it works:
+
+```bash
+polpo --version
+```
+
+### From source
+
+```bash
+git clone https://github.com/openpolpo/openpolpo.git
+cd openpolpo
 npm install
-
-# Build the project (IMPORTANT: use this exact command)
 ./node_modules/.bin/tsc
-
-# Link the CLI globally (optional)
 npm link
 ```
 
-**Note**: Always use `./node_modules/.bin/tsc` to build, not `npx tsc`. The latter may pick up the wrong TypeScript package.
+> **Note:** Always build with `./node_modules/.bin/tsc`, not `npx tsc`. The latter can pick up the wrong TypeScript package.
 
 ## Quick Start
 
-### 1. Initialize a New Project
+### 1. Initialize a project
 
 ```bash
-orchestra init
+polpo init
 ```
 
-This creates an `orchestra.yml` configuration file in your current directory.
+This creates a `polpo.yml` config file in your working directory.
 
-### 2. Edit Your Plan
-
-Edit `orchestra.yml` to define your tasks:
+### 2. Define your plan
 
 ```yaml
+# polpo.yml
+
 agents:
   - name: backend-dev
     adapter: claude-sdk
@@ -65,274 +96,264 @@ agents:
     description: Frontend developer specializing in React and TypeScript
 
 plans:
-  - group: setup-project
+  - group: build-mvp
     tasks:
       - title: Create database schema
         agent: backend-dev
-        description: Design and implement SQLite database schema for users and posts
+        description: Design and implement SQLite schema for users and posts
 
-      - title: Build React UI components
+      - title: Build React components
         agent: frontend-dev
-        description: Create reusable UI components using shadcn/ui
+        description: Create reusable UI components with shadcn/ui
 ```
 
-### 3. Run Your Plan
+### 3. Run
 
 ```bash
-# Run in headless mode
-orchestra run
+# Interactive terminal UI
+polpo
 
-# Run with interactive TUI
-orchestra tui
+# Headless execution
+polpo run
 
-# Run as HTTP server
-orchestra serve --port 3890
+# HTTP API server
+polpo serve --port 3890
 ```
 
-## Usage Modes
+## Features
 
-### CLI Mode
+### Multi-Agent Orchestration
 
-Run plans non-interactively:
-
-```bash
-orchestra run [options]
-
-Options:
-  -c, --config <path>   Path to orchestra.yml (default: ./orchestra.yml)
-  -p, --plan <group>    Run specific plan group
-  --no-tui              Disable interactive mode
-```
-
-### TUI Mode
-
-Interactive terminal interface with real-time monitoring:
-
-```bash
-orchestra tui
-```
-
-**TUI Features**:
-- Tab 1: **Dashboard** - Overview of tasks, agents, and activity
-- Tab 2: **Tasks** - Detailed task list with status
-- Tab 3: **Plans** - Plan groups and progress
-- Tab 4: **Agents** - Agent configuration and availability
-- Tab 5: **Logs** - Real-time event log
-- Tab 6: **Chat** - Send messages to agents or create new tasks
-
-**TUI Commands**:
-- `/help` - Show available commands
-- `/team` - Create or manage agent teams (with AI generation)
-- `/plan` - Create new plan from template or AI generation
-- `/edit-plan` - Edit running plan (add/remove/reassign tasks)
-- `/inspect` - Inspect agent session transcripts
-- `@agent-name` - Mention an agent (appends to input)
-- `#task-title` - Reference a task (appends to input)
-- `%plan-group` - Reference a plan (appends to input)
-
-### Server Mode
-
-Run Orchestra as an HTTP API server:
-
-```bash
-orchestra serve [options]
-
-Options:
-  --port <number>       Port to listen on (default: 3890)
-  --host <address>      Host to bind to (default: 0.0.0.0)
-  --api-key <key>       Optional API key for authentication
-```
-
-The server provides:
-- **REST API**: Manage projects, tasks, plans, agents
-- **SSE Streaming**: Real-time events at `/api/v1/projects/:id/events`
-- **WebSocket**: Real-time updates with event filtering
-- **Multi-project**: Manage multiple Orchestra instances
-
-### Web UI
-
-A modern Next.js dashboard for Orchestra:
-
-```bash
-cd packages/web
-npm install
-npm run dev
-```
-
-Configure the server URL in `packages/web/.env.local`:
-
-```env
-NEXT_PUBLIC_ORCHESTRA_URL=http://localhost:3890
-```
-
-**Web UI Features**:
-- Dashboard with live stats and agent activity
-- Task management with detailed views
-- Plan progress tracking
-- Live event feed
-- Chat interface with AI Elements
-
-## Configuration Reference
-
-### orchestra.yml Format
+Coordinate any number of agents working in parallel. Polpo manages task assignment, dependency resolution, and inter-agent communication.
 
 ```yaml
-# Agent Definitions
-agents:
-  - name: agent-name            # Unique identifier
-    adapter: claude-sdk         # Adapter type: 'claude-sdk' or 'generic'
-    description: Role desc      # Agent's role/expertise
-    command: "aider --no-auto"  # (generic adapter only) CLI command
-    volatile: false             # Auto-cleanup when plan completes
-
-# Plan Groups
 plans:
-  - group: plan-group-name      # Unique plan identifier
-    team:                        # Optional: volatile agents for this plan
-      - name: temp-agent
-        adapter: claude-sdk
-        description: Temporary specialist
-        volatile: true
-
+  - group: full-stack-app
     tasks:
-      - title: Task title
-        agent: agent-name        # Agent to assign
-        description: Detailed task description
-        dependencies: []         # Task IDs this depends on
-
-        # Optional: Custom expectations for assessment
-        expectations:
-          - type: test
-            command: npm test
-            weight: 0.4
-
-          - type: file_exists
-            path: src/output.ts
-            weight: 0.2
-
-          - type: llm_review
-            prompt: Check code quality
-            weight: 0.4
-            dimensions:          # Custom G-Eval dimensions
-              - name: correctness
-                weight: 0.4
-                rubric: Code produces correct results
-              - name: maintainability
-                weight: 0.3
-                rubric: Code is clean and maintainable
+      - title: Design API
+        agent: backend-dev
+      - title: Build UI
+        agent: frontend-dev
+        dependencies: [design-api]    # waits for API design to finish
+      - title: Write tests
+        agent: test-engineer
+        dependencies: [design-api, build-ui]
 ```
 
-### Agent Adapters
+### YAML-Driven Plans
 
-**claude-sdk** (default):
-- Uses `@anthropic-ai/claude-agent-sdk`
-- Requires `ANTHROPIC_API_KEY` environment variable
-- Persistent session tracking
-- Automatic tool use handling
+Everything is defined in `polpo.yml`. Plans group related tasks, declare dependencies, and can include inline agent teams.
 
-**generic**:
-- Spawns any CLI command as subprocess
-- Tracks real process PIDs
-- Streams stdin/stdout
-- Example: Aider, GPT-Engineer, custom scripts
+### Task Assessment (G-Eval LLM-as-Judge)
 
-### Environment Variables
+Every completed task goes through rubric-based assessment using chain-of-thought scoring across multiple dimensions:
 
-```bash
-# Required for Claude agents
-ANTHROPIC_API_KEY=sk-ant-...
+| Dimension      | Weight | Description                        |
+|----------------|--------|------------------------------------|
+| Correctness    | 35%    | Task achieves its stated goals     |
+| Completeness   | 30%    | All requirements are addressed     |
+| Code Quality   | 20%    | Code is clean and maintainable     |
+| Edge Cases     | 15%    | Edge cases are handled properly    |
 
-# Optional: customize orchestrator behavior
-ORCHESTRATOR_MODEL=claude-sonnet-4-5-20250929  # Model for orchestrator LLM calls
-ORCHESTRATOR_TEMPERATURE=0.7                    # Temperature for orchestrator
+Each dimension is scored 1--5. Tasks scoring below the threshold are automatically retried with per-dimension feedback. You can define custom dimensions and thresholds:
 
-# Optional: server authentication
-API_KEY=your-secret-key
-```
-
-### Assessment System
-
-Orchestra uses **G-Eval** (LLM-as-judge) for task assessment:
-
-**Default Dimensions**:
-- `correctness` (35%): Task achieves stated goals
-- `completeness` (30%): All requirements addressed
-- `code_quality` (20%): Code is clean and maintainable
-- `edge_cases` (15%): Edge cases handled properly
-
-Each dimension is scored 1-5 with chain-of-thought reasoning. Tasks scoring below 3.0 are automatically retried with detailed feedback.
-
-**Custom Assessment**:
 ```yaml
 expectations:
   - type: llm_review
-    threshold: 3.5           # Minimum passing score
+    threshold: 3.5
     dimensions:
       - name: performance
         weight: 0.5
-        rubric: Code is optimized for performance
+        rubric: Code is optimized for throughput
       - name: security
         weight: 0.5
-        rubric: No security vulnerabilities
+        rubric: No injection vulnerabilities
 ```
 
-## API Documentation
+### Volatile Teams & AI Team Generation
 
-### REST Endpoints
+Spin up temporary specialist agents scoped to a single plan. Use the `/team` TUI command to let AI generate an optimal team composition:
+
+```yaml
+plans:
+  - group: refactor-auth
+    team:
+      - name: security-specialist
+        adapter: claude-sdk
+        description: Expert in OAuth2 and JWT
+        volatile: true    # cleaned up when plan completes
+    tasks:
+      - title: Audit auth flow
+        agent: security-specialist
+```
+
+### Crash-Resilient Detached Runners
+
+Agent processes run as detached subprocesses tracked in a SQLite-backed RunStore. If the orchestrator crashes:
+
+- On restart, live processes are automatically reconnected
+- Dead processes trigger task retry
+- State is never lost -- everything is persisted to `state.db`
+
+### Terminal UI (Ink)
+
+The TUI provides real-time monitoring with tabs for Dashboard, Tasks, Plans, Agents, Logs, and Chat.
+
+```
+polpo
+```
+
+**TUI Commands:**
+
+| Command        | Description                                    |
+|----------------|------------------------------------------------|
+| `/help`        | Show all available commands                    |
+| `/team`        | Create or generate agent teams                 |
+| `/plan`        | Create a plan from template or AI              |
+| `/edit-plan`   | Add, remove, reassign, or retry tasks          |
+| `/inspect`     | Read agent session transcripts                 |
+| `@agent`       | Mention an agent                               |
+| `#task`        | Reference a task                               |
+| `%plan`        | Reference a plan group                         |
+
+### HTTP API with SSE & WebSocket
+
+Run Polpo as a server and integrate with any frontend or tool:
+
+```bash
+polpo serve --port 3890 --api-key my-secret
+```
+
+- REST API at `/api/v1/`
+- Server-Sent Events for real-time streaming
+- WebSocket with glob-based event filtering (`task:*`, `agent:*`)
+- Multi-project support via `ProjectManager`
+
+### Agent Adapters
+
+Polpo is agent-agnostic. Two built-in adapters, and the interface is open for custom ones.
+
+**`claude-sdk`** -- Uses `@anthropic-ai/claude-agent-sdk` with persistent sessions and automatic tool handling. Requires `ANTHROPIC_API_KEY`.
+
+**`generic`** -- Spawns any CLI command as a subprocess with real PID tracking and stdin/stdout streaming. Works with Aider, GPT-Engineer, Codex CLI, or your own scripts.
+
+```yaml
+agents:
+  - name: aider-agent
+    adapter: generic
+    command: "aider --no-auto-commits"
+    description: Aider-powered coding agent
+```
+
+## Architecture
+
+```
+                         polpo.yml
+                            │
+                            v
+                    ┌───────────────┐
+                    │  Orchestrator  │
+                    │   (2s tick)    │
+                    └───────┬───────┘
+                            │
+              ┌─────────────┼─────────────┐
+              v             v             v
+        ┌──────────┐ ┌──────────┐ ┌──────────┐
+        │  Runner   │ │  Runner   │ │  Runner   │
+        │ (detached)│ │ (detached)│ │ (detached)│
+        └─────┬────┘ └─────┬────┘ └─────┬────┘
+              v             v             v
+        Claude SDK    Generic CLI    Generic CLI
+         Agent          Agent          Agent
+```
+
+### Task State Machine
+
+```
+pending ──> assigned ──> in_progress ──> review ──> done
+                                           │
+                                           v
+                                        failed ──> pending (retry)
+```
+
+### Core Components
+
+| Component         | File                     | Purpose                                       |
+|-------------------|--------------------------|-----------------------------------------------|
+| Orchestrator      | `src/orchestrator.ts`    | Supervisor loop, task assignment, health checks|
+| Task Registry     | `src/task-registry.ts`   | SQLite-backed task persistence                 |
+| Run Store         | `src/run-store.ts`       | Process tracking and crash recovery            |
+| Runner            | `src/runner.ts`          | Detached agent subprocess                      |
+| Assessor          | `src/assessment/assessor.ts` | G-Eval task scoring                        |
+| Adapters          | `src/adapters/`          | Agent interface implementations                |
+| TUI               | `src/tui/`               | Terminal UI (Ink)                               |
+| Server            | `src/server/`            | Hono HTTP API, SSE bridge, WS bridge           |
+| CLI               | `src/cli.ts`             | Commander entry point                          |
+
+### Event System
+
+Polpo uses a typed event emitter with 35+ event types organized by namespace:
+
+```
+task:created   task:assigned   task:started   task:completed   task:failed
+agent:online   agent:offline   agent:activity
+plan:started   plan:completed  plan:failed
+system:tick    system:shutdown  system:error
+```
+
+Events are consumed by the TUI, streamed over SSE to the Web UI, and available via WebSocket with glob filters.
+
+## API
 
 Base URL: `http://localhost:3890/api/v1/projects/:projectId`
 
-**Projects**:
-- `GET /api/v1/projects` - List all projects
-- `POST /api/v1/projects` - Create project
-- `GET /api/v1/projects/:id` - Get project details
+### Endpoints
 
-**Tasks**:
-- `GET /tasks` - List all tasks
-- `POST /tasks` - Create task
-- `GET /tasks/:id` - Get task details
-- `PATCH /tasks/:id` - Update task
-- `POST /tasks/:id/retry` - Retry failed task
+```
+GET    /api/v1/projects                  List projects
+POST   /api/v1/projects                  Create project
+GET    /api/v1/projects/:id              Get project
 
-**Plans**:
-- `GET /plans` - List all plans
-- `POST /plans` - Create plan from YAML
+GET    /tasks                            List tasks
+POST   /tasks                            Create task
+GET    /tasks/:id                        Get task
+PATCH  /tasks/:id                        Update task
+POST   /tasks/:id/retry                  Retry failed task
 
-**Agents**:
-- `GET /agents` - List agents
-- `POST /agents` - Register agent
+GET    /plans                            List plans
+POST   /plans                            Create plan (YAML body)
 
-**Events (SSE)**:
-- `GET /events` - Server-Sent Events stream
-- `GET /events?lastEventId=123` - Resume from event ID
+GET    /agents                           List agents
+POST   /agents                           Register agent
 
-**Chat**:
-- `POST /chat` - Send message to agents
+GET    /events                           SSE stream
+GET    /events?lastEventId=N             Resume from event ID
+
+POST   /chat                             Send message to agents
+```
 
 ### Authentication
 
-Include API key in header (if configured):
-
 ```bash
-curl -H "X-API-Key: your-secret-key" http://localhost:3890/api/v1/projects
+# Header-based
+curl -H "X-API-Key: your-key" http://localhost:3890/api/v1/projects
+
+# Query param (for EventSource which can't send headers)
+const es = new EventSource('/api/v1/projects/abc/events?apiKey=your-key');
 ```
 
-Or as query parameter for EventSource:
+## Packages
 
-```javascript
-const events = new EventSource('http://localhost:3890/api/v1/projects/abc/events?apiKey=your-key');
-```
+### React SDK (`packages/react-sdk/`)
 
-## React SDK
-
-Type-safe React hooks for Orchestra:
+Type-safe React hooks with zero runtime dependencies. Uses `useSyncExternalStore` for push-based SSE updates.
 
 ```bash
-npm install @orchestra/react-sdk
+npm install @openpolpo/react-sdk
 ```
 
 ```tsx
-import { OrchestraProvider, useTasks, useAgents } from '@orchestra/react-sdk';
+import { OrchestraProvider, useTasks, useAgents } from '@openpolpo/react-sdk';
 
 function App() {
   return (
@@ -349,77 +370,127 @@ function App() {
 function Dashboard() {
   const tasks = useTasks();
   const agents = useAgents();
-
-  return (
-    <div>
-      <h1>Tasks: {tasks.length}</h1>
-      <h1>Agents: {agents.length}</h1>
-    </div>
-  );
+  return <p>{tasks.length} tasks, {agents.length} agents</p>;
 }
 ```
 
-**Available Hooks**:
-- `useOrchestra()` - Full state and methods
-- `useTasks()` - All tasks with real-time updates
-- `useTask(id)` - Single task
-- `usePlans()` - All plans
-- `useAgents()` - All agents
-- `useProcesses()` - Running agent processes
-- `useEvents()` - Event stream
-- `useStats()` - Aggregate statistics
+**Hooks:** `useOrchestra` `useTasks` `useTask` `usePlans` `usePlan` `useAgents` `useProcesses` `useEvents` `useStats` `useMemory` `useLogs`
+
+### Web UI (`packages/web/`)
+
+Next.js 15 dashboard with shadcn/ui. Pages for Dashboard, Tasks, Plans, Team, Logs, Chat, and Settings.
+
+```bash
+cd packages/web
+npm install
+npm run dev
+```
+
+Set the server URL in `packages/web/.env.local`:
+
+```env
+NEXT_PUBLIC_POLPO_URL=http://localhost:3890
+```
+
+## Configuration Reference
+
+### `polpo.yml`
+
+```yaml
+# ─── Agents ──────────────────────────────────────────────
+
+agents:
+  - name: agent-name             # unique identifier
+    adapter: claude-sdk           # 'claude-sdk' | 'generic'
+    description: Role description # agent's expertise
+    command: "aider --no-auto"    # (generic adapter only)
+    volatile: false               # auto-cleanup on plan completion
+
+# ─── Plans ───────────────────────────────────────────────
+
+plans:
+  - group: plan-name             # unique plan identifier
+    team:                         # optional volatile agents
+      - name: temp-agent
+        adapter: claude-sdk
+        description: Temporary specialist
+        volatile: true
+
+    tasks:
+      - title: Task title
+        agent: agent-name
+        description: What the agent should do
+        dependencies: []          # task IDs this depends on
+
+        expectations:             # custom assessment criteria
+          - type: test
+            command: npm test
+            weight: 0.4
+
+          - type: file_exists
+            path: src/output.ts
+            weight: 0.2
+
+          - type: llm_review
+            prompt: Check code quality
+            weight: 0.4
+            dimensions:
+              - name: correctness
+                weight: 0.4
+                rubric: Code produces correct results
+              - name: maintainability
+                weight: 0.3
+                rubric: Code is clean and well-documented
+```
+
+### Environment Variables
+
+```bash
+ANTHROPIC_API_KEY=sk-ant-...                    # required for Claude agents
+ORCHESTRATOR_MODEL=claude-sonnet-4-5-20250929   # model for orchestrator LLM calls
+ORCHESTRATOR_TEMPERATURE=0.7                     # temperature for orchestrator
+API_KEY=your-secret-key                          # server authentication
+```
 
 ## Project Structure
 
 ```
-orchestra/
+openpolpo/
 ├── src/
-│   ├── core/           # Core types and interfaces
-│   │   ├── types.ts    # Task, Agent, Plan types
-│   │   ├── adapter.ts  # AgentAdapter interface
-│   │   ├── events.ts   # TypedEmitter event definitions
-│   │   └── schemas.ts  # Zod validation schemas
-│   ├── adapters/       # Agent adapter implementations
-│   │   ├── adapter-claude-sdk.ts
-│   │   └── adapter-generic.ts
-│   ├── orchestrator.ts # Main orchestrator logic
-│   ├── runner.ts       # Detached agent runner process
-│   ├── task-registry.ts # SQLite task persistence
-│   ├── run-store.ts    # Agent process tracking
-│   ├── assessment/     # Task assessment system
-│   │   └── assessor.ts
-│   ├── tui/            # Terminal UI
-│   │   ├── index.ts
-│   │   └── commands/
-│   ├── server/         # HTTP API server
-│   │   ├── app.ts
-│   │   ├── sse-bridge.ts
-│   │   ├── ws-bridge.ts
-│   │   └── routes/
-│   └── cli.ts          # Commander CLI
+│   ├── core/               # types, adapter interface, events, schemas
+│   ├── adapters/            # claude-sdk and generic adapters
+│   ├── assessment/          # G-Eval assessor
+│   ├── tui/                 # terminal UI (Ink) + commands
+│   ├── server/              # Hono HTTP API, SSE/WS bridges, routes
+│   ├── orchestrator.ts      # main supervisor loop
+│   ├── runner.ts            # detached agent runner
+│   ├── task-registry.ts     # SQLite task persistence
+│   ├── run-store.ts         # process tracking
+│   └── cli.ts               # Commander CLI entry point
 ├── packages/
-│   ├── react-sdk/      # React hooks and client
-│   └── web/            # Next.js web dashboard
-├── .orchestra/         # Runtime state (auto-created)
-│   ├── state.db        # SQLite database
-│   ├── logs/           # Agent logs
-│   └── tmp/            # Temporary files
-└── orchestra.yml       # Your configuration
+│   ├── react-sdk/           # React hooks + SSE client
+│   └── web/                 # Next.js dashboard
+├── .polpo/                  # runtime state (auto-created)
+│   ├── state.db             # SQLite database
+│   ├── logs/                # agent logs
+│   └── tmp/                 # runner temp files
+└── polpo.yml                # your configuration
 ```
 
 ## Troubleshooting
 
-### Build Issues
+<details>
+<summary><strong>Build fails with <code>npx tsc</code></strong></summary>
 
-**Problem**: `npx tsc` fails or uses wrong TypeScript version
+Always use `./node_modules/.bin/tsc` to build. `npx tsc` may resolve the wrong TypeScript package.
 
-**Solution**: Always use `./node_modules/.bin/tsc`
+</details>
 
-### SQLite Build Failures
+<details>
+<summary><strong><code>better-sqlite3</code> won't compile</strong></summary>
 
-**Problem**: `better-sqlite3` fails to compile
+Install native build tools:
 
-**Solution**: Install build tools
 ```bash
 # Ubuntu/Debian
 sudo apt-get install build-essential python3
@@ -431,124 +502,73 @@ xcode-select --install
 npm rebuild better-sqlite3
 ```
 
-### Agent Connection Issues
+</details>
 
-**Problem**: Agents not responding or timing out
+<details>
+<summary><strong>Orphaned agent processes after crash</strong></summary>
 
-**Solution**: Check your API keys and adapter configuration
+Polpo auto-recovers on restart. If you need to clean up manually:
+
 ```bash
-# Verify environment
-echo $ANTHROPIC_API_KEY
-
-# Check adapter logs
-ls -la .orchestra/logs/
-
-# Increase timeout in orchestra.yml
-agents:
-  - name: my-agent
-    adapter: claude-sdk
-    timeout: 300000  # 5 minutes
-```
-
-### State Reset
-
-**Problem**: Corrupted state or need fresh start
-
-**Solution**: Delete the state database
-```bash
-rm -rf .orchestra/state.db
-orchestra run  # Will recreate
-```
-
-### Server Connection Issues
-
-**Problem**: Web UI can't connect to server
-
-**Solution**: Verify URLs match
-```bash
-# In terminal running server
-orchestra serve --port 3890
-
-# In packages/web/.env.local
-NEXT_PUBLIC_ORCHESTRA_URL=http://localhost:3890
-```
-
-### Process Cleanup
-
-**Problem**: Orphaned agent processes after crash
-
-**Solution**: Orchestra auto-recovers on restart, or manually kill:
-```bash
-# Find orphaned processes
-ps aux | grep orchestra
-
-# Kill by PID
+ps aux | grep polpo
 kill <pid>
 ```
 
-## Architecture Overview
+</details>
 
-### State Machine
+<details>
+<summary><strong>State reset</strong></summary>
 
-Tasks flow through states:
+Delete the runtime state directory and restart:
+
+```bash
+rm -rf .polpo/state.db
+polpo run    # recreates automatically
 ```
-pending → assigned → in_progress → review → done/failed
-                                         ↓
-                                    failed → pending (retry)
+
+</details>
+
+<details>
+<summary><strong>Web UI can't connect to server</strong></summary>
+
+Make sure the URLs match:
+
+```bash
+polpo serve --port 3890
+
+# packages/web/.env.local
+NEXT_PUBLIC_POLPO_URL=http://localhost:3890
 ```
 
-### Crash Resilience
-
-- **RunStore**: SQLite-backed process registry
-- **Detached Runner**: Agent processes run independently
-- **Orphan Recovery**: Reconnects to live processes or retries dead ones
-- **Graceful Shutdown**: SIGTERM handlers ensure clean state
-
-### Event System
-
-Orchestra uses a typed event emitter with 35+ event types:
-- `task:*` - Task lifecycle events
-- `agent:*` - Agent status changes
-- `plan:*` - Plan progress
-- `system:*` - Orchestrator events
-
-Events are streamed via SSE and consumed by TUI/Web UI.
+</details>
 
 ## Contributing
 
-1. Fork the repository
-2. Create a feature branch: `git checkout -b feat/my-feature`
-3. Make your changes
-4. Build: `./node_modules/.bin/tsc`
-5. Test: `npm test` (if tests exist)
-6. Commit: `git commit -m "feat: add my feature"`
-7. Push: `git push origin feat/my-feature`
-8. Open a Pull Request
-
-### Development Setup
+Contributions are welcome. Here's the workflow:
 
 ```bash
-# Install dependencies
+git clone https://github.com/openpolpo/openpolpo.git
+cd openpolpo
 npm install
+./node_modules/.bin/tsc
 
-# Build in watch mode
-./node_modules/.bin/tsc --watch
-
-# Run locally
-node dist/cli.js tui
-
-# Build React SDK
-npm run build:sdk
-
-# Build Web UI
-npm run build:web
+# make your changes, then:
+./node_modules/.bin/tsc          # build
+npm test                          # test (if available)
+git commit -m "feat: your change"
 ```
+
+1. Fork the repository
+2. Create a feature branch: `git checkout -b feat/my-feature`
+3. Build and verify: `./node_modules/.bin/tsc`
+4. Push and open a Pull Request
 
 ## License
 
 MIT
 
-## Support
+---
 
-- Issues: https://github.com/yourusername/orchestra/issues
-- Discussions: https://github.com/yourusername/orchestra/discussions
+<p align="center">
+  <sub>Built with tentacles.</sub>
+</p>

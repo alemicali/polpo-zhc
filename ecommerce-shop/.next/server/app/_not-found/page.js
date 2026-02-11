@@ -1,0 +1,13 @@
+var R=require("../../chunks/ssr/[turbopack]_runtime.js")("server/app/_not-found/page.js")
+R.c("server/chunks/ssr/React_ai-rd_orchestra_ecommerce-shop_84903ef9._.js")
+R.c("server/chunks/ssr/[root-of-the-server]__b364d3c5._.js")
+R.c("server/chunks/ssr/f74e9_next_dist_esm_build_templates_app-page_b50fdbab.js")
+R.c("server/chunks/ssr/[root-of-the-server]__9e58f4c1._.js")
+R.c("server/chunks/ssr/[root-of-the-server]__570ddfa4._.js")
+R.c("server/chunks/ssr/_b2acd8bf._.js")
+R.c("server/chunks/ssr/React_ai-rd_orchestra_ecommerce-shop_src_app_layout_tsx_8b6bb3bc._.js")
+R.c("server/chunks/ssr/f74e9_next_dist_client_components_5f8ba571._.js")
+R.c("server/chunks/ssr/f74e9_next_dist_client_components_builtin_forbidden_d54eb962.js")
+R.c("server/chunks/ssr/06fa4_ecommerce-shop__next-internal_server_app__not-found_page_actions_b41e6962.js")
+R.m(66284)
+module.exports=R.m(66284).exports

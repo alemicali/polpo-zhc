@@ -1,11 +1,11 @@
 ---
 title: Configuration
-description: Overview of the orchestra.yml configuration file
+description: Overview of the polpo.yml configuration file
 ---
 
 import { Aside } from '@astrojs/starlight/components';
 
-Orchestra is configured through a YAML file, typically `orchestra.yml` at the root of your project.
+Polpo is configured through a YAML file, typically `polpo.yml` at the root of your project.
 
 ## File Structure
 
@@ -144,11 +144,11 @@ API_KEY=your-secret-key
 
 ## Config Path
 
-By default, Orchestra looks for `orchestra.yml` in the current directory. Override with:
+By default, Polpo looks for `polpo.yml` in the current directory. Override with:
 
 ```bash
-orchestra run --config /path/to/orchestra.yml
-orchestra tui -c ./configs/production.yml
+polpo run --config /path/to/polpo.yml
+polpo tui -c ./configs/production.yml
 ```
 
 <Aside>

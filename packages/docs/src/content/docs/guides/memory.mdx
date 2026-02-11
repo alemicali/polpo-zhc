@@ -7,7 +7,7 @@ import { Aside } from '@astrojs/starlight/components';
 
 ## What is Project Memory?
 
-Project memory is a markdown file (`.orchestra/memory.md`) that Orchestra injects into every agent's context. It's persistent across sessions and shared by all agents working on your project.
+Project memory is a markdown file (`.polpo/memory.md`) that Polpo injects into every agent's context. It's persistent across sessions and shared by all agents working on your project.
 
 Use it to capture:
 - Architecture decisions and patterns
@@ -40,7 +40,7 @@ curl -X PUT http://localhost:3890/api/v1/projects/my-project/memory \
 
 ### Manually
 
-Create `.orchestra/memory.md` in your project root:
+Create `.polpo/memory.md` in your project root:
 
 ```markdown
 # Project Memory
@@ -90,9 +90,9 @@ Current issues and workarounds.
 
 ## How Agents Use Memory
 
-When an agent is spawned for a task, Orchestra:
+When an agent is spawned for a task, Polpo:
 
-1. Reads `.orchestra/memory.md`
+1. Reads `.polpo/memory.md`
 2. Prepends it to the agent's system prompt
 3. The agent sees it as project context alongside the task description
 

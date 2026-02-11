@@ -5,22 +5,22 @@ description: Provider, hooks, and client API for the React SDK
 
 import { Aside } from '@astrojs/starlight/components';
 
-The `@orchestra/react` SDK provides type-safe React hooks with real-time SSE updates.
+The `@openpolpo/react-sdk` package provides type-safe React hooks with real-time SSE updates.
 
 ## Installation
 
 ```bash
-npm install @orchestra/react
+npm install @openpolpo/react-sdk
 ```
 
 Peer dependencies: React 18 or 19.
 
 ## OrchestraProvider
 
-Wrap your app to provide Orchestra context:
+Wrap your app to provide Polpo context:
 
 ```tsx
-import { OrchestraProvider } from "@orchestra/react";
+import { OrchestraProvider } from "@openpolpo/react-sdk";
 
 function App() {
   return (
@@ -39,7 +39,7 @@ function App() {
 
 | Prop | Type | Required | Description |
 |------|------|----------|-------------|
-| `baseURL` | string | yes | Orchestra server URL |
+| `baseURL` | string | yes | Polpo server URL |
 | `projectId` | string | yes | Project ID |
 | `apiKey` | string | no | API key for authentication |
 | `children` | ReactNode | yes | Child components |
@@ -48,7 +48,7 @@ function App() {
 
 ## useOrchestra
 
-Access the Orchestra client and connection status.
+Access the Polpo client and connection status.
 
 ```tsx
 const { client, connectionStatus } = useOrchestra();
@@ -238,9 +238,9 @@ const { memory, isLoading, saveMemory, refetch } = useMemory();
 
 The SDK uses `useSyncExternalStore` for push-based state management:
 
-1. **OrchestraClient** — HTTP client with automatic request deduplication
+1. **OrchestraClient** — HTTP client with automatic request deduplication (internal class name)
 2. **EventSourceManager** — SSE with auto-reconnect and exponential backoff
-3. **OrchestraStore** — Central state with `reduceEvent()` for 35+ event types
+3. **OrchestraStore** — Central state with `reduceEvent()` for 35+ event types (internal class name)
 4. **Memoized selectors** — WeakMap-cached selectors for each hook
 5. **Microtask batching** — `queueMicrotask` for batched re-renders
 

@@ -1,12 +1,12 @@
 {
-  "name": "@orchestra/core",
+  "name": "openpolpo",
   "version": "0.1.0",
   "description": "Agent-agnostic framework for orchestrating teams of AI coding agents",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {
-    "orchestra": "dist/cli.js"
+    "polpo": "dist/cli.js"
   },
   "scripts": {
     "build": "tsc",
@@ -29,15 +29,23 @@
     "blessed": "^0.1.81",
     "chalk": "^5.4.1",
     "commander": "^13.1.0",
+    "fullscreen-ink": "^0.1.0",
     "hono": "^4.11.9",
+    "ink": "^5.2.1",
+    "ink-select-input": "^6.2.0",
+    "ink-spinner": "^5.0.0",
+    "ink-text-input": "^6.0.0",
     "nanoid": "^5.1.2",
+    "react": "^18.3.1",
     "yaml": "^2.7.0",
-    "zod": "^4.3.6"
+    "zod": "^4.3.6",
+    "zustand": "^5.0.11"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
     "@types/blessed": "^0.1.27",
     "@types/node": "^22.12.0",
+    "@types/react": "^18.3.28",
     "typescript": "^5.7.3",
     "vitest": "^3.0.4"
   }

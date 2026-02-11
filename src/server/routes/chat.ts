@@ -9,7 +9,7 @@ import { querySDKText, querySDK, extractYaml, extractTeamYaml } from "../../llm/
 export function chatRoutes(): Hono<ServerEnv> {
   const app = new Hono<ServerEnv>();
 
-  // POST /chat — Q&A about Orchestra state
+  // POST /chat — Q&A about Polpo state
   app.post("/", async (c) => {
     const orchestrator = c.get("orchestrator");
     const body = await c.req.json<{ message: string }>();
@@ -32,7 +32,7 @@ export function chatRoutes(): Hono<ServerEnv> {
       ``,
       `User question: ${body.message}`,
       ``,
-      `Answer concisely based on the current Orchestra state. Use markdown for formatting.`,
+      `Answer concisely based on the current Polpo state. Use markdown for formatting.`,
     ].join("\n");
 
     const response = await querySDKText(prompt, workDir, model);

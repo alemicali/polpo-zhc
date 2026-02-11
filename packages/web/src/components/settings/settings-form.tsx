@@ -68,18 +68,18 @@ export function SettingsForm() {
         </CardContent>
       </Card>
 
-      {/* Orchestrator Config */}
+      {/* Polpo Config */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Orchestrator Config</CardTitle>
+          <CardTitle className="text-base">Polpo Config</CardTitle>
           <CardDescription>
-            Current orchestrator settings (read-only from server)
+            Current Polpo settings (read-only from server)
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
             <div>
-              <span className="text-xs text-muted-foreground block">Orchestrator Model</span>
+              <span className="text-xs text-muted-foreground block">Polpo Model</span>
               <span className="font-mono text-xs">
                 {settings.orchestratorModel || "default"}
               </span>

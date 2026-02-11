@@ -11,16 +11,16 @@ Sometimes agents ask clarifying questions instead of completing the task. Withou
 
 ## How It Works
 
-Orchestra detects when an agent's output contains a question and auto-generates an answer:
+Polpo detects when an agent's output contains a question and auto-generates an answer:
 
-1. **Detection**: After the agent finishes (or during activity polling), Orchestra checks the agent's latest output for questions
+1. **Detection**: After the agent finishes (or during activity polling), Polpo checks the agent's latest output for questions
 2. **Classification**: An LLM determines if the output is a genuine question or just rhetorical
 3. **Answer generation**: The LLM generates an answer using project context (memory, task description, related tasks)
 4. **Injection**: The answer is sent to the agent, and execution continues
 
 ## Detection Methods
 
-Orchestra uses two detection approaches:
+Polpo uses two detection approaches:
 
 ### Heuristic Detection
 
@@ -41,7 +41,7 @@ When heuristics are ambiguous, the orchestrator LLM classifies the output:
 When a question is detected, the orchestrator generates an answer using:
 
 - **Task description**: What the agent was asked to do
-- **Project memory**: Persistent context from `.orchestra/memory.md`
+- **Project memory**: Persistent context from `.polpo/memory.md`
 - **Related tasks**: Other tasks in the same plan group
 - **Agent role**: The agent's configured role and expertise
 
@@ -80,7 +80,7 @@ Agent output: "Should I use JWT or session-based authentication?"
 
 task:question → { question: "Should I use JWT or session-based auth?" }
 
-Orchestrator generates answer using project context:
+Polpo generates answer using project context:
   "Use JWT authentication. The project uses a stateless API architecture
    (see memory.md). Implement with jsonwebtoken package, store tokens
    in httpOnly cookies, and use a 1-hour expiry."

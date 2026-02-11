@@ -4,9 +4,9 @@ import { ProjectManager } from "./project-manager.js";
 import type { ServerConfig } from "./types.js";
 
 /**
- * Orchestra HTTP Server.
+ * Polpo HTTP Server.
  *
- * Manages multiple Orchestra projects via HTTP API + SSE streaming.
+ * Manages multiple Polpo projects via HTTP API + SSE streaming.
  * Can run locally, self-hosted, or as a cloud-managed service.
  *
  * Usage:
@@ -47,9 +47,9 @@ export class OrchestraServer {
       hostname: this.config.host,
     });
 
-    console.log(`Orchestra Server listening on http://${this.config.host}:${this.config.port}`);
-    console.log(`  Projects: ${this.config.projects.map(p => p.id).join(", ")}`);
-    console.log(`  API: http://${this.config.host}:${this.config.port}/api/v1/health`);
+    console.log(`\n  Listening  http://${this.config.host}:${this.config.port}`);
+    console.log(`  Projects   ${this.config.projects.map(p => p.id).join(", ")}`);
+    console.log(`  API        http://${this.config.host}:${this.config.port}/api/v1/health\n`);
 
     // Signal handlers for graceful shutdown
     const onSignal = () => { this.stop(); };
@@ -63,11 +63,11 @@ export class OrchestraServer {
 
   /** Graceful shutdown: stop all projects, close HTTP server. */
   async stop(): Promise<void> {
-    console.log("\nShutting down Orchestra Server...");
+    console.log("\nShutting down Polpo Server...");
     await this.pm.shutdownAll();
     this.server?.close();
     for (const fn of this.shutdownHandlers) fn();
-    console.log("Orchestra Server stopped.");
+    console.log("Polpo Server stopped.");
   }
 
   /** Get the project manager (for programmatic access). */

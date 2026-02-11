@@ -33,7 +33,7 @@ describe("Orchestrator", () => {
   let orchestrator: Orchestrator;
 
   afterEach(() => {
-    const orchestraDir = `${TEST_WORK_DIR}/.orchestra`;
+    const orchestraDir = `${TEST_WORK_DIR}/.polpo`;
     if (existsSync(orchestraDir)) rmSync(orchestraDir, { recursive: true });
   });
 

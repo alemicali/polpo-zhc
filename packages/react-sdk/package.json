@@ -1,7 +1,7 @@
 {
-  "name": "@orchestra/react",
+  "name": "@openpolpo/react-sdk",
   "version": "0.1.0",
-  "description": "React SDK for Orchestra — typed client + hooks with real-time SSE updates",
+  "description": "React SDK for OpenPolpo — typed client + hooks with real-time SSE updates",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

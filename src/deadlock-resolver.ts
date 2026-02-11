@@ -235,7 +235,7 @@ function buildResolutionPrompt(
     : "";
 
   const parts = [
-    `You are an AI orchestrator managing a coding plan. A task has FAILED, blocking a downstream task.`,
+    `You are Polpo, an AI agent orchestration framework, managing a coding plan. A task has FAILED, blocking a downstream task.`,
     `Analyze the situation and decide how to unblock the downstream task.`,
     ``,
     `## Failed Task`,

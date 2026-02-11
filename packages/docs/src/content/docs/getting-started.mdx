@@ -1,6 +1,6 @@
 ---
 title: Getting Started
-description: Install Orchestra and run your first multi-agent plan
+description: Install Polpo and run your first multi-agent plan
 ---
 
 import { Steps, Tabs, TabItem, Aside } from '@astrojs/starlight/components';
@@ -18,8 +18,8 @@ import { Steps, Tabs, TabItem, Aside } from '@astrojs/starlight/components';
 1. **Clone the repository**
 
    ```bash
-   git clone https://github.com/AlessioToniworking/orchestra.git
-   cd orchestra
+   git clone https://github.com/AlessioToniworking/openpolpo.git
+   cd openpolpo
    ```
 
 2. **Install dependencies**
@@ -57,14 +57,14 @@ export ANTHROPIC_API_KEY=sk-ant-...
 ## Initialize a Project
 
 ```bash
-orchestra init
+polpo init
 ```
 
-This creates an `orchestra.yml` configuration file in your current directory with example agents and a sample plan.
+This creates a `polpo.yml` configuration file in your current directory with example agents and a sample plan.
 
 ## Write Your First Plan
 
-Edit `orchestra.yml`:
+Edit `polpo.yml`:
 
 ```yaml
 agents:
@@ -99,21 +99,21 @@ plans:
 <Tabs>
   <TabItem label="TUI (Interactive)">
     ```bash
-    orchestra tui
+    polpo tui
     ```
     The TUI provides real-time monitoring with tabs for Dashboard, Tasks, Plans, Agents, Logs, and Chat.
   </TabItem>
 
   <TabItem label="Headless">
     ```bash
-    orchestra run
+    polpo run
     ```
     Runs all pending plans without interactive UI. Logs output to stdout.
   </TabItem>
 
   <TabItem label="Server">
     ```bash
-    orchestra serve --port 3890
+    polpo serve --port 3890
     ```
     Starts an HTTP API server with SSE streaming and WebSocket support.
   </TabItem>
@@ -121,7 +121,7 @@ plans:
 
 ## What Happens Next
 
-When you run a plan, Orchestra:
+When you run a plan, Polpo:
 
 1. **Assigns** each task to the specified agent
 2. **Spawns** detached runner processes for each agent
@@ -132,7 +132,7 @@ When you run a plan, Orchestra:
 
 ## Next Steps
 
-- [Configuration](/configuration/) — Learn about `orchestra.yml` options
-- [Architecture](/concepts/architecture/) — Understand how Orchestra works under the hood
+- [Configuration](/configuration/) — Learn about `polpo.yml` options
+- [Architecture](/concepts/architecture/) — Understand how Polpo works under the hood
 - [Your First Plan](/guides/first-plan/) — Step-by-step tutorial
 - [CLI Reference](/usage/cli/) — All available commands

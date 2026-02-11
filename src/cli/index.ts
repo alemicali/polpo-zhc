@@ -17,7 +17,7 @@ import "../adapters/generic.js";
 function wireConsoleEvents(orchestrator: Orchestrator): void {
   orchestrator.on("orchestrator:started", ({ project, agents }) => {
     const ts = new Date().toLocaleTimeString();
-    console.log(chalk.dim(`[${ts}]`) + ` ${chalk.bold(`Orchestra started — ${project}`)}`);
+    console.log(chalk.dim(`[${ts}]`) + ` ${chalk.bold(`Polpo started — ${project}`)}`);
     console.log(chalk.dim(`[${ts}]`) + ` ${chalk.dim(`Team agents: ${agents.join(", ")}`)}`);
     console.log();
   });
@@ -71,7 +71,7 @@ function wireConsoleEvents(orchestrator: Orchestrator): void {
 
   orchestrator.on("orchestrator:shutdown", () => {
     const ts = new Date().toLocaleTimeString();
-    console.log(chalk.dim(`[${ts}]`) + ` ${chalk.dim("Orchestra shut down cleanly.")}`);
+    console.log(chalk.dim(`[${ts}]`) + ` ${chalk.dim("Polpo shut down cleanly.")}`);
   });
 
   orchestrator.on("task:recovered", ({ title, previousStatus }) => {
@@ -88,35 +88,52 @@ function wireConsoleEvents(orchestrator: Orchestrator): void {
   });
 }
 
-const LOGO = `
-       ${chalk.bold("╔═══════════════════════════════════╗")}
-       ${chalk.bold("║")}                                   ${chalk.bold("║")}
-       ${chalk.bold("║")}      ${chalk.bold.white("O R C H E S T R A")}            ${chalk.bold("║")}
-       ${chalk.bold("║")}                                   ${chalk.bold("║")}
-       ${chalk.bold("║")}   ${chalk.dim("AI Agent Orchestration Framework")} ${chalk.bold("║")}
-       ${chalk.bold("║")}                                   ${chalk.bold("║")}
-       ${chalk.bold("╚═══════════════════════════════════╝")}
-`;
+// Gradient from pink (#F78B97) to indigo (#3B3E73) — 6 rows
+const _logoLines = [
+  "██████╗  ██████╗ ██╗     ██████╗  ██████╗",
+  "██╔══██╗██╔═══██╗██║     ██╔══██╗██╔═══██╗",
+  "██████╔╝██║   ██║██║     ██████╔╝██║   ██║",
+  "██╔═══╝ ██║   ██║██║     ██╔═══╝ ██║   ██║",
+  "██║     ╚██████╔╝███████╗██║     ╚██████╔╝",
+  "╚═╝      ╚═════╝ ╚══════╝╚═╝      ╚═════╝",
+];
+const _gradColors: [number, number, number][] = [
+  [247, 139, 151], // #F78B97
+  [209, 119, 135],
+  [170, 99, 119],
+  [132, 79, 103],
+  [93, 59, 87],
+  [59, 62, 115],   // #3B3E73
+];
+function _buildLogo(center = false): string {
+  const cols = process.stdout.columns || 80;
+  return "\n" + _logoLines.map((l, i) => {
+    const pad = center ? " ".repeat(Math.max(0, Math.floor((cols - l.length) / 2))) : "  ";
+    return pad + chalk.bold.rgb(..._gradColors[i])(l);
+  }).join("\n") + "\n";
+}
+const LOGO = _buildLogo(false);
+const LOGO_CENTER = () => _buildLogo(true);
 
-const LOGO_MINI = `  ${chalk.bold.white("O R C H E S T R A")}  `;
+const LOGO_MINI = `  ${chalk.bold.white("🐙 P O L P O")}  `;
 
 const program = new Command();
 
 program
-  .name("orchestra")
+  .name("polpo")
   .description("Agent-agnostic framework for orchestrating teams of AI coding agents")
   .version("0.1.0");
 
-// orchestra init
+// polpo init
 program
   .command("init")
-  .description("Initialize Orchestra in the current project")
+  .description("Initialize Polpo in the current project")
   .action(async () => {
-    console.log(LOGO);
+    console.log(LOGO_CENTER());
 
     const cwd = process.cwd();
-    const orchestraDir = resolve(cwd, ".orchestra");
-    const configPath = resolve(cwd, "orchestra.yml");
+    const orchestraDir = resolve(cwd, ".polpo");
+    const configPath = resolve(cwd, "polpo.yml");
 
     await mkdir(orchestraDir, { recursive: true });
     await mkdir(resolve(orchestraDir, "logs"), { recursive: true });
@@ -124,11 +141,11 @@ program
 
     try {
       await access(configPath);
-      console.log(chalk.yellow("  orchestra.yml already exists, skipping."));
+      console.log(chalk.yellow("  polpo.yml already exists, skipping."));
     } catch {
       const template = generateTemplate();
       await writeFile(configPath, template, "utf-8");
-      console.log(chalk.green("  Created orchestra.yml"));
+      console.log(chalk.green("  Created polpo.yml"));
     }
 
     const statePath = resolve(orchestraDir, "state.json");
@@ -138,16 +155,16 @@ program
       await writeFile(statePath, JSON.stringify({ project: "", team: { name: "", agents: [] }, tasks: [], processes: [] }, null, 2), "utf-8");
     }
 
-    console.log(chalk.green("\n  Orchestra initialized!"));
-    console.log(chalk.dim("  Edit orchestra.yml to configure your team and tasks."));
-    console.log(chalk.dim("  Then run: orchestra run\n"));
+    console.log(chalk.green("\n  Polpo initialized!"));
+    console.log(chalk.dim("  Edit polpo.yml to configure your team and tasks."));
+    console.log(chalk.dim("  Then run: polpo run\n"));
   });
 
-// orchestra run
+// polpo run
 program
   .command("run")
   .description("Run the orchestration (execute all tasks)")
-  .option("-c, --config <path>", "Path to orchestra.yml", ".")
+  .option("-c, --config <path>", "Path to polpo.yml", ".")
   .action(async (opts) => {
     console.log(LOGO);
     try {
@@ -160,14 +177,14 @@ program
     }
   });
 
-// orchestra status
+// polpo status
 program
   .command("status")
   .description("Show current task status (live dashboard)")
   .option("-c, --config <path>", "Path to working directory", ".")
   .option("-w, --watch", "Watch mode: auto-refresh", false)
   .action(async (opts) => {
-    const statePath = resolve(opts.config, ".orchestra", "state.json");
+    const statePath = resolve(opts.config, ".polpo", "state.json");
     let frame = 0;
     const startTime = Date.now();
     let lastState: OrchestraState | null = null;
@@ -177,7 +194,7 @@ program
 
     const printStatus = async () => {
       if (!existsSync(statePath)) {
-        console.log(chalk.red("  No .orchestra/state.json found. Run 'orchestra init' first."));
+        console.log(chalk.red("  No .polpo/state.json found. Run 'polpo init' first."));
         return;
       }
 
@@ -394,10 +411,10 @@ program
     }
   });
 
-// orchestra serve — HTTP API server
+// polpo serve — HTTP API server
 program
   .command("serve")
-  .description("Start the Orchestra HTTP API server")
+  .description("Start the Polpo HTTP API server")
   .option("-p, --port <port>", "Port to listen on", "3000")
   .option("-H, --host <host>", "Host to bind to", "0.0.0.0")
   .option("-c, --config <path>", "Path to working directory", ".")
@@ -426,15 +443,21 @@ program
     await server.start();
   });
 
-// orchestra tui (interactive mode — also the default)
+// polpo tui (interactive mode — also the default)
 program
   .command("tui", { isDefault: true })
   .description("Launch the interactive TUI (default)")
   .option("-c, --config <path>", "Path to working directory", ".")
+  .option("--legacy", "Use legacy blessed TUI", false)
   .action(async (opts) => {
-    const { OrchestraTUI } = await import("../tui/index.js");
-    const tui = new OrchestraTUI(opts.config);
-    await tui.start();
+    if (opts.legacy) {
+      const { OrchestraTUI } = await import("../tui/index.js");
+      const tui = new OrchestraTUI(opts.config);
+      await tui.start();
+    } else {
+      const { startInkTUI } = await import("../tui/app.js");
+      await startInkTUI(opts.config);
+    }
   });
 
 program.parse();

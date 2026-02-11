@@ -223,7 +223,7 @@ export interface ProjectConfig {
   taskPrep?: boolean;   // LLM-powered task preparation (default: true)
 }
 
-// === Config (orchestra.yml) ===
+// === Config (polpo.yml) ===
 
 export interface OrchestraConfig {
   version: string;
@@ -255,7 +255,7 @@ export interface OrchestraSettings {
   orchestratorModel?: string;
 }
 
-// === Orchestra State (persisted in .orchestra/state.json) ===
+// === Orchestra State (persisted in .polpo/state.json) ===
 
 export interface OrchestraState {
   project: string;

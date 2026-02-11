@@ -606,7 +606,7 @@ export function ChatInterface() {
       {messages.length === 0 ? (
         /* Empty state — centered content */
         <div className="flex-1 flex flex-col items-center justify-center gap-4 text-center px-4">
-          <h2 className="text-lg font-semibold">Orchestra Chat</h2>
+          <h2 className="text-lg font-semibold">Polpo Chat</h2>
           <p className="text-sm text-muted-foreground max-w-md">
             Three modes, like the TUI. Press the mode button or{" "}
             <kbd className="px-1.5 py-0.5 rounded bg-muted text-[10px] font-mono">Alt+T</kbd>{" "}

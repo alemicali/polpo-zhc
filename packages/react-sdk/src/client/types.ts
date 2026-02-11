@@ -1,6 +1,6 @@
 /**
- * Orchestra API types — mirrors the server contract.
- * Intentionally decoupled from @orchestra/core to avoid pulling
+ * OpenPolpo API types — mirrors the server contract.
+ * Intentionally decoupled from @openpolpo/core to avoid pulling
  * server-side dependencies (blessed, sqlite, etc.) into the client bundle.
  */
 

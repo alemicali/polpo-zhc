@@ -114,7 +114,7 @@ export function AppSidebar({ projectId }: { projectId: string }) {
 
 /**
  * Logo area with integrated sidebar toggle.
- * - Expanded: logo + "Orchestra" + close button (replaces green dot)
+ * - Expanded: logo + "Polpo" + close button (replaces green dot)
  * - Collapsed: just "O" icon, hover reveals expand button
  */
 function LogoToggle({
@@ -137,7 +137,7 @@ function LogoToggle({
           <div className="flex h-7 w-7 items-center justify-center rounded-md bg-primary/10 shrink-0">
             <span className="text-sm font-bold text-primary">O</span>
           </div>
-          <span className="font-semibold tracking-tight text-sm">Orchestra</span>
+          <span className="font-semibold tracking-tight text-sm">Polpo</span>
         </Link>
         <button
           onClick={toggleSidebar}

@@ -1,20 +1,20 @@
 ---
 title: Web UI
-description: Next.js dashboard for Orchestra
+description: Next.js dashboard for Polpo
 ---
 
 import { Steps, Aside } from '@astrojs/starlight/components';
 
-Orchestra includes a modern web dashboard built with Next.js 15 and shadcn/ui.
+Polpo includes a modern web dashboard built with Next.js 15 and shadcn/ui.
 
 ## Setup
 
 <Steps>
 
-1. **Start the Orchestra server**
+1. **Start the Polpo server**
 
    ```bash
-   orchestra serve --port 3890
+   polpo serve --port 3890
    ```
 
 2. **Install web UI dependencies**
@@ -29,7 +29,7 @@ Orchestra includes a modern web dashboard built with Next.js 15 and shadcn/ui.
    Create `packages/web/.env.local`:
 
    ```env
-   NEXT_PUBLIC_ORCHESTRA_URL=http://localhost:3890
+   NEXT_PUBLIC_POLPO_URL=http://localhost:3890
    ```
 
 4. **Start the dev server**
@@ -76,7 +76,7 @@ Agent management:
 ### Memory
 
 Project memory editor:
-- **Monospace editor**: Full-featured text editor for `.orchestra/memory.md`
+- **Monospace editor**: Full-featured text editor for `.polpo/memory.md`
 - **Keyboard shortcuts**: Ctrl+S to save
 - **Unsaved indicator**: Badge shows when changes need saving
 
@@ -101,7 +101,7 @@ Connection and configuration:
 
 ## React SDK
 
-The web UI is built on the `@orchestra/react` SDK, which provides type-safe hooks:
+The web UI is built on the `@openpolpo/react` SDK, which provides type-safe hooks:
 
 ```tsx
 import {
@@ -113,7 +113,7 @@ import {
   useEvents,
   useStats,
   useMemory,
-} from "@orchestra/react";
+} from "@openpolpo/react";
 
 function App() {
   return (
@@ -128,7 +128,7 @@ function App() {
 }
 ```
 
-See [React SDK Reference](/reference/react-sdk/) for full documentation.
+See the [React SDK Reference](/reference/react-sdk/) for full documentation.
 
 ## Command Palette
 
@@ -146,7 +146,7 @@ Press `Ctrl+K` (or `Cmd+K`) to open the command palette with:
 |-----------|------------|
 | Framework | Next.js 15 (App Router) |
 | UI Library | shadcn/ui (zinc dark theme) |
-| State | `@orchestra/react` SDK (SSE + `useSyncExternalStore`) |
+| State | `@openpolpo/react` SDK (SSE + `useSyncExternalStore`) |
 | Icons | Lucide React |
 | Toasts | Sonner |
 | Tables | TanStack Table |

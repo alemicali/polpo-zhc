@@ -1,0 +1,354 @@
+---
+// Polpo Landing Page — inspired by opencode.ai
+---
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Polpo — Orchestrate AI coding agents</title>
+  <meta name="description" content="Agent-agnostic framework for orchestrating teams of AI coding agents. Define plans, assign tasks, let Polpo handle coordination." />
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap');
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #fafaf9;
+      --bg-alt: #f5f5f4;
+      --text: #44403c;
+      --text-strong: #1c1917;
+      --text-weak: #78716c;
+      --border: #e7e5e4;
+      --accent: #3B3E73;
+      --accent-light: #F78B97;
+      --code-bg: #1c1917;
+      --code-text: #e7e5e4;
+      --radius: 8px;
+      --max-w: 960px;
+    }
+
+    html { font-family: 'Geist', system-ui, sans-serif; font-size: 15px; line-height: 1.7; color: var(--text); background: var(--bg); }
+    a { color: var(--text-strong); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    code, pre { font-family: 'Geist Mono', monospace; }
+
+    /* ─── Header ─── */
+    .header {
+      display: flex; align-items: center; justify-content: space-between;
+      max-width: var(--max-w); margin: 0 auto;
+      padding: 20px 24px;
+    }
+    .header-border {
+      position: sticky; top: 0; z-index: 100;
+      border-bottom: 1px solid var(--border);
+      background: var(--bg);
+    }
+    .header-logo img { height: 28px; display: block; }
+    .header-nav { display: flex; gap: 28px; align-items: center; font-size: 14px; }
+    .header-nav a { color: var(--text-weak); font-weight: 500; }
+    .header-nav a:hover { color: var(--text-strong); text-decoration: none; }
+    .header-nav .btn-docs {
+      background: var(--text-strong); color: var(--bg) !important;
+      padding: 6px 16px; border-radius: 6px; font-weight: 600;
+    }
+    .header-nav .btn-docs:hover { opacity: 0.85; }
+
+    /* ─── Hero ─── */
+    .hero {
+      max-width: var(--max-w); margin: 60px auto 0; padding: 0 24px; text-align: left;
+    }
+    .hero h1 {
+      font-size: 38px; font-weight: 600; line-height: 1.2;
+      color: var(--text-strong); margin-bottom: 16px; letter-spacing: -0.02em;
+    }
+    .hero .subtitle {
+      font-size: 17px; color: var(--text); max-width: 100%; margin-bottom: 32px;
+    }
+    .install-wrapper {
+      border: 1px solid var(--border); border-radius: var(--radius);
+      max-width: 100%; margin-bottom: 12px; overflow: hidden;
+    }
+    .install-tabs {
+      display: flex; gap: 0; border-bottom: 1px solid var(--border); background: var(--bg);
+    }
+    .install-tabs button {
+      background: transparent; border: none;
+      padding: 10px 20px; font-size: 13px; font-family: 'Geist Mono', monospace;
+      cursor: pointer; color: var(--text-weak);
+    }
+    .install-tabs button.active {
+      color: var(--text-strong); font-weight: 500;
+      box-shadow: inset 0 -2px 0 var(--accent);
+    }
+    .install-block {
+      background: var(--bg-alt);
+      padding: 16px 20px; display: flex; align-items: center; justify-content: space-between;
+      cursor: pointer; position: relative;
+    }
+    .install-block code { color: var(--text-strong); font-size: 14px; }
+    .install-block .copy-hint {
+      color: var(--text-weak); font-size: 12px; font-family: 'Geist', sans-serif;
+    }
+
+    /* ─── Video ─── */
+    .video-block {
+      margin-top: 100px;
+    }
+    .video-block video {
+      width: 100%; display: block;
+    }
+
+    /* ─── Page frame ─── */
+    .page-frame {
+      max-width: 1100px; margin: 0 auto;
+      border-left: 1px solid var(--border); border-right: 1px solid var(--border);
+      min-height: 100vh; background: var(--bg);
+    }
+
+    /* ─── Sections ─── */
+    section {
+      max-width: var(--max-w); margin: 0 auto; padding: 80px 24px;
+    }
+    section + section { border-top: none; }
+    .section-divider {
+      border: none; border-top: 1px solid var(--border); margin: 0;
+    }
+    section h2 {
+      font-size: 22px; font-weight: 600; color: var(--text-strong);
+      margin-bottom: 8px; letter-spacing: -0.01em;
+    }
+    section .section-sub {
+      color: var(--text); margin-bottom: 32px; font-size: 15px;
+    }
+
+    /* ─── Features checklist ─── */
+    .features-list { list-style: none; display: flex; flex-direction: column; gap: 14px; }
+    .features-list li {
+      display: flex; gap: 12px; align-items: baseline;
+    }
+    .features-list .check {
+      color: var(--accent); font-weight: 700; font-size: 16px; flex-shrink: 0;
+    }
+    .features-list strong { color: var(--text-strong); font-weight: 600; }
+
+    .read-docs {
+      display: inline-flex; align-items: center; gap: 6px;
+      margin-top: 28px; padding: 10px 20px;
+      background: var(--text-strong); color: var(--bg); border-radius: 6px;
+      font-weight: 600; font-size: 14px;
+    }
+    .read-docs:hover { opacity: 0.85; text-decoration: none; }
+
+    /* ─── Stats ─── */
+    .stats-grid {
+      display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; margin-top: 24px;
+    }
+    .stat-card {
+      text-align: center; padding: 24px; border: 1px solid var(--border); border-radius: var(--radius);
+    }
+    .stat-card .number {
+      font-size: 22px; font-weight: 700; color: var(--text-strong);
+      letter-spacing: -0.02em;
+    }
+    .stat-card .label { color: var(--text-weak); font-size: 13px; margin-top: 4px; }
+
+    /* ─── FAQ ─── */
+    .faq-list { list-style: none; }
+    .faq-list li { }
+    .faq-list button {
+      width: 100%; text-align: left; background: none; border: none;
+      padding: 16px 0; font-size: 15px; font-weight: 500; cursor: pointer;
+      color: var(--text-strong); display: flex; align-items: center; gap: 12px;
+      font-family: 'Geist', sans-serif;
+    }
+    .faq-list button::before {
+      content: ''; width: 8px; height: 8px; flex-shrink: 0;
+      border-right: 2px solid var(--text-weak); border-bottom: 2px solid var(--text-weak);
+      transform: rotate(-45deg); transition: transform 0.2s;
+    }
+    .faq-list li.open button::before { transform: rotate(45deg); }
+    .faq-list .answer { display: none; padding: 0 0 16px 0; color: var(--text); font-size: 14px; line-height: 1.7; }
+    .faq-list li.open .answer { display: block; }
+
+    /* ─── Footer ─── */
+    .footer {
+      max-width: var(--max-w); margin: 0 auto;
+      padding: 48px 24px 32px;
+      display: flex; align-items: center; justify-content: space-between;
+      font-size: 13px; color: var(--text-weak);
+    }
+    .footer a { color: var(--text-weak) !important; }
+    .footer a:hover { color: var(--text-strong) !important; }
+    .footer-left {
+      display: flex; align-items: center; gap: 16px;
+    }
+    .footer-right {
+      display: flex; align-items: center; gap: 16px;
+    }
+
+    /* ─── Responsive ─── */
+    @media (max-width: 640px) {
+      .hero h1 { font-size: 28px; }
+      .stats-grid { grid-template-columns: 1fr; }
+      .header-nav { gap: 16px; }
+    }
+  </style>
+</head>
+<body>
+
+<div class="page-frame">
+  <!-- Header -->
+  <div class="header-border">
+  <header class="header">
+    <a href="/" class="header-logo">
+      <img src="/src/assets/logo.svg" alt="Polpo" />
+    </a>
+    <nav class="header-nav">
+      <a href="https://github.com/AlessioToniworking/orchestra" title="GitHub"><svg width="20" height="20" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg></a>
+      <a href="/introduction/" class="btn-docs">Docs</a>
+    </nav>
+  </header>
+  </div>
+
+  <!-- Hero -->
+  <div class="hero">
+    <h1>The open source agent teams</h1>
+    <p class="subtitle">
+      Turn individual coding agents into reliable multi-agent systems.<br/>Define plans in YAML, assign tasks to Claude Code, OpenCode, or any agent framework. Polpo handles planning, orchestration, eval, and recovery.
+    </p>
+
+    <div class="install-wrapper">
+      <div class="install-tabs">
+        <button class="active" data-cmd="curl">curl</button>
+        <button data-cmd="npm">npm</button>
+        <button data-cmd="bun">bun</button>
+      </div>
+      <div class="install-block" id="install-cmd" title="Click to copy">
+        <code>curl -fsSL https://openpolpo.dev/install.sh | sh</code>
+        <span class="copy-hint">copy</span>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="video-block">
+    <video src="/demo.mp4" autoplay loop muted playsinline></video>
+  </div>
+
+  <!-- What is Polpo? -->
+  <section>
+    <h2>What is Polpo?</h2>
+    <p class="section-sub">An open-source framework that coordinates multiple AI agents working together on complex tasks.</p>
+
+    <ul class="features-list">
+      <li><span class="check">[*]</span><span><strong>Agent-agnostic</strong> Works with Claude Code, OpenCode, or any CLI agent via adapters</span></li>
+      <li><span class="check">[*]</span><span><strong>Plan-based orchestration</strong> Define complex plans in YAML, break them down into tasks with dependencies and parallel execution</span></li>
+      <li><span class="check">[*]</span><span><strong>Agent teams</strong> Define your agent teams, persistent or created on-the-fly for a specific plan</span></li>
+      <li><span class="check">[*]</span><span><strong>LLM-as-judge</strong> G-Eval rubric-based scoring across multiple dimensions — tasks are assessed and retried automatically</span></li>
+      <li><span class="check">[*]</span><span><strong>Crash-resilient</strong> SQLite-backed state, detached runners, orphan recovery, graceful shutdown</span></li>
+      <li><span class="check">[*]</span><span><strong>Multiple interfaces</strong> Interactive TUI, CLI, HTTP API with SSE/WebSocket, React SDK, Next.js dashboard</span></li>
+      <li><span class="check">[*]</span><span><strong>AI-powered</strong> Deadlock resolution, question auto-answer, expectation correction, AI team generation</span></li>
+      <li><span class="check">[*]</span><span><strong>Open source</strong> MIT licensed, fully extensible, runs anywhere Node.js runs</span></li>
+    </ul>
+
+    <a href="/introduction/" class="read-docs">Read the docs →</a>
+  </section>
+
+  <hr class="section-divider" />
+
+  <!-- Stats -->
+  <section>
+    <h2>Built for reliable orchestration</h2>
+    <p class="section-sub">Everything you need to turn individual coding agents into coordinated multi-agent systems.</p>
+
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="number">Any agent</div>
+        <div class="label">Claude Code, OpenCode, or bring your own</div>
+      </div>
+      <div class="stat-card">
+        <div class="number">0 tasks lost</div>
+        <div class="label">SQLite-backed, crash-resilient orchestration</div>
+      </div>
+      <div class="stat-card">
+        <div class="number">5 interfaces</div>
+        <div class="label">TUI, CLI, HTTP API, React SDK, Web Dashboard</div>
+      </div>
+    </div>
+  </section>
+
+  <hr class="section-divider" />
+
+  <!-- FAQ -->
+  <section>
+    <h2>FAQ</h2>
+    <ul class="faq-list">
+      <li>
+        <button>What AI agents does Polpo support?</button>
+        <div class="answer">Polpo is agent-agnostic. It ships with adapters for Claude SDK and a generic adapter for any CLI-based agent (GPT, Aider, Codex, etc). You can build custom adapters by implementing the AgentAdapter interface.</div>
+      </li>
+      <li>
+        <button>How does task assessment work?</button>
+        <div class="answer">Polpo uses G-Eval, an LLM-as-judge system with rubric-based scoring. Tasks are assessed across correctness, completeness, code quality, and edge cases. Failed tasks are automatically retried with detailed feedback.</div>
+      </li>
+      <li>
+        <button>What happens if Polpo crashes?</button>
+        <div class="answer">Agent processes run as detached subprocesses backed by SQLite. On restart, Polpo reconnects to live agents and retries dead ones. No work is lost.</div>
+      </li>
+      <li>
+        <button>Can I use it without the TUI?</button>
+        <div class="answer">Yes. Polpo offers a CLI for headless automation, an HTTP API server with SSE/WebSocket streaming, a React SDK for custom UIs, and a pre-built Next.js dashboard.</div>
+      </li>
+      <li>
+        <button>Is it free?</button>
+        <div class="answer">Yes, Polpo is fully open source under the MIT license. You bring your own AI provider API keys.</div>
+      </li>
+    </ul>
+  </section>
+
+  <!-- Footer -->
+  <footer class="footer">
+    <div class="footer-left">
+      <span>&copy;<script>document.write(new Date().getFullYear())</script> Polpo</span>
+      <span>MIT License</span>
+    </div>
+    <div class="footer-right">
+      <a href="/introduction/">Docs</a>
+      <a href="https://github.com/AlessioToniworking/orchestra" style="display:inline-flex;align-items:center;gap:4px"><svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> GitHub</a>
+    </div>
+  </footer>
+</div>
+
+  <script>
+    // Install tabs
+    document.querySelectorAll('.install-tabs button').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.install-tabs button').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        const cmd = btn.dataset.cmd;
+        const el = document.querySelector('#install-cmd code');
+        if (cmd === 'curl') el.textContent = 'curl -fsSL https://openpolpo.dev/install.sh | sh';
+        else if (cmd === 'npm') el.textContent = 'npm install -g openpolpo';
+        else if (cmd === 'bun') el.textContent = 'bun add -g openpolpo';
+      });
+    });
+
+    // Copy to clipboard
+    document.getElementById('install-cmd').addEventListener('click', () => {
+      const text = document.querySelector('#install-cmd code').textContent;
+      navigator.clipboard.writeText(text);
+      const hint = document.querySelector('#install-cmd .copy-hint');
+      hint.textContent = 'copied!';
+      setTimeout(() => hint.textContent = 'copy', 1500);
+    });
+
+    // FAQ accordion
+    document.querySelectorAll('.faq-list button').forEach(btn => {
+      btn.addEventListener('click', () => {
+        btn.parentElement.classList.toggle('open');
+      });
+    });
+  </script>
+
+</body>
+</html>

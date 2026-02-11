@@ -7,7 +7,7 @@ import { Aside } from '@astrojs/starlight/components';
 
 ## State Machine
 
-Every task in Orchestra moves through a well-defined set of states:
+Every task in Polpo moves through a well-defined set of states:
 
 ```
                     ┌──────────┐
@@ -59,7 +59,7 @@ Within the `in_progress` state, tasks move through **phases** that track the cur
 
 ### Fix Phase vs Full Retry
 
-When assessment fails, Orchestra first tries a **fix phase** — sending the agent specific feedback about what's wrong so it can make targeted corrections without starting over:
+When assessment fails, Polpo first tries a **fix phase** — sending the agent specific feedback about what's wrong so it can make targeted corrections without starting over:
 
 ```
 execution → review → [fail] → fix → review → [fail] → fix → review → [fail] → full retry

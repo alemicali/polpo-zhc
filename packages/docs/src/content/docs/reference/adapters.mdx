@@ -5,7 +5,7 @@ description: Built-in adapter configurations and options
 
 import { Aside } from '@astrojs/starlight/components';
 
-Orchestra ships with two built-in adapters: `claude-sdk` and `generic`.
+Polpo ships with two built-in adapters: `claude-sdk` and `generic`.
 
 ## claude-sdk Adapter
 
@@ -99,7 +99,7 @@ agents:
 
 ### How It Works
 
-1. Orchestra writes the task description to a temp file
+1. Polpo writes the task description to a temp file
 2. Replaces `{prompt}` and `{taskFile}` in the command template
 3. Spawns the command as a child process
 4. Captures stdout/stderr

@@ -7,7 +7,7 @@ import { Aside } from '@astrojs/starlight/components';
 
 ## Overview
 
-Orchestra uses **G-Eval** (LLM-as-judge) to automatically assess completed tasks. Each task's output is evaluated against multiple dimensions, producing scores from 1-5 with chain-of-thought reasoning.
+Polpo uses **G-Eval** (LLM-as-judge) to automatically assess completed tasks. Each task's output is evaluated against multiple dimensions, producing scores from 1-5 with chain-of-thought reasoning.
 
 ## Expectation Types
 
@@ -65,7 +65,7 @@ The most powerful expectation type. An LLM reviews the agent's work against conf
 
 ## Default Dimensions
 
-When no custom dimensions are specified, Orchestra uses these defaults:
+When no custom dimensions are specified, Polpo uses these defaults:
 
 | Dimension | Weight | Description |
 |-----------|--------|-------------|
@@ -156,7 +156,7 @@ dimensions:
 
 ## Expectation Correction
 
-Orchestra includes an **expectation judge** that can detect when expectations themselves are wrong (not the agent's work). If the LLM determines that a failing expectation is unreasonable given the task, it can auto-correct the expectations and re-assess.
+Polpo includes an **expectation judge** that can detect when expectations themselves are wrong (not the agent's work). If the LLM determines that a failing expectation is unreasonable given the task, it can auto-correct the expectations and re-assess.
 
 See [Expectation Judge](/advanced/expectation-judge/) for details.
 

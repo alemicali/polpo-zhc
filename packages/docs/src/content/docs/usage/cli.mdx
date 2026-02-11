@@ -1,40 +1,40 @@
 ---
 title: CLI
-description: Command-line interface for Orchestra
+description: Command-line interface for Polpo
 ---
 
 import { Aside } from '@astrojs/starlight/components';
 
-Orchestra provides four CLI commands: `init`, `run`, `status`, `serve`, and `tui`.
+Polpo provides four CLI commands: `init`, `run`, `status`, `serve`, and `tui`.
 
-## `orchestra init`
+## `polpo init`
 
-Initialize Orchestra in the current project.
+Initialize Polpo in the current project.
 
 ```bash
-orchestra init
+polpo init
 ```
 
 Creates:
-- `orchestra.yml` — configuration file with example agents and plan
-- `.orchestra/` — runtime directory for state, logs, and assessments
+- `polpo.yml` — configuration file with example agents and plan
+- `.polpo/` — runtime directory for state, logs, and assessments
 
-## `orchestra run`
+## `polpo run`
 
 Execute all pending plans in headless mode.
 
 ```bash
-orchestra run [options]
+polpo run [options]
 ```
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `-c, --config <path>` | `.` | Path to working directory containing `orchestra.yml` |
+| `-c, --config <path>` | `.` | Path to working directory containing `polpo.yml` |
 
 Output is streamed to stdout with color-coded status updates:
 
 ```
-[14:23:01] Orchestra started — my-project
+[14:23:01] Polpo started — my-project
 [14:23:01] Team agents: backend-dev, frontend-dev
 
 [14:23:02] [task-1] Task added: Create database schema
@@ -46,12 +46,12 @@ Output is streamed to stdout with color-coded status updates:
 
 The process exits when all tasks are done or failed.
 
-## `orchestra status`
+## `polpo status`
 
 Show current task status as a dashboard.
 
 ```bash
-orchestra status [options]
+polpo status [options]
 ```
 
 | Option | Default | Description |
@@ -66,12 +66,12 @@ In watch mode, the display shows:
 - G-Eval dimension scores for completed tasks (star ratings)
 - Failure reasons for failed tasks
 
-## `orchestra serve`
+## `polpo serve`
 
 Start the HTTP API server.
 
 ```bash
-orchestra serve [options]
+polpo serve [options]
 ```
 
 | Option | Default | Description |
@@ -84,13 +84,13 @@ orchestra serve [options]
 
 The server provides REST API, SSE streaming, and WebSocket support. See [Server Usage](/usage/server/) for details.
 
-## `orchestra tui`
+## `polpo tui`
 
-Launch the interactive terminal UI. This is the **default command** — running `orchestra` without arguments starts the TUI.
+Launch the interactive terminal UI. This is the **default command** — running `polpo` without arguments starts the TUI.
 
 ```bash
-orchestra tui [options]
-orchestra          # same as orchestra tui
+polpo tui [options]
+polpo          # same as polpo tui
 ```
 
 | Option | Default | Description |
@@ -101,12 +101,12 @@ See [TUI Usage](/usage/tui/) for details on features and commands.
 
 ## Global Options
 
-All commands accept the `--config` / `-c` flag to specify the working directory. Orchestra will look for `orchestra.yml` in that directory.
+All commands accept the `--config` / `-c` flag to specify the working directory. Polpo will look for `polpo.yml` in that directory.
 
 ```bash
 # Run from a different directory
-orchestra run -c /path/to/my-project
+polpo run -c /path/to/my-project
 
 # Serve from a specific project
-orchestra serve -c ./projects/api-service --port 3890
+polpo serve -c ./projects/api-service --port 3890
 ```

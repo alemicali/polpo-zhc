@@ -137,7 +137,7 @@ export function bridgeOrchestraEvents(
   // ─── Orchestrator lifecycle ────────────────────────────
 
   on("orchestrator:started", ({ project, agents }) => {
-    logger.log(`Orchestra started — ${project}`);
+    logger.log(`Polpo started — ${project}`);
     logger.log(`Team agents: ${agents.join(", ")}`);
   });
 
@@ -170,8 +170,8 @@ export function bridgeOrchestraEvents(
   });
 
   on("orchestrator:shutdown", () => {
-    logger.log("Orchestra shut down cleanly.");
-    logger.logEvent(`  {grey-fg}Orchestra stopped{/grey-fg}`);
+    logger.log("Polpo shut down cleanly.");
+    logger.logEvent(`  {grey-fg}Polpo stopped{/grey-fg}`);
   });
 
   // ─── Plan completion report ───────────────────────────

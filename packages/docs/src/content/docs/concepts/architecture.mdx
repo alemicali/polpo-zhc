@@ -1,13 +1,13 @@
 ---
 title: Architecture
-description: How Orchestra orchestrates agents under the hood
+description: How Polpo orchestrates agents under the hood
 ---
 
 import { Aside } from '@astrojs/starlight/components';
 
 ## Overview
 
-Orchestra follows a **supervisor architecture**: a central orchestrator manages agent lifecycles, task assignment, assessment, and error recovery. Agents are isolated processes that know nothing about each other — Orchestra handles all coordination.
+Polpo follows a **supervisor architecture**: a central orchestrator manages agent lifecycles, task assignment, assessment, and error recovery. Agents are isolated processes that know nothing about each other — Polpo handles all coordination.
 
 ```
 ┌─────────────────────────────────────────────┐
@@ -35,7 +35,7 @@ Orchestra follows a **supervisor architecture**: a central orchestrator manages 
 
 ## Adapter Pattern
 
-Orchestra uses an **adapter pattern** to support any agent type. Each adapter implements a simple interface:
+Polpo uses an **adapter pattern** to support any agent type. Each adapter implements a simple interface:
 
 ```typescript
 interface AgentAdapter {
@@ -120,7 +120,7 @@ This architecture means:
 
 ## Event System
 
-Orchestra uses a **typed event emitter** with 35+ event types organized by category:
+Polpo uses a **typed event emitter** with 35+ event types organized by category:
 
 | Category | Events | Description |
 |----------|--------|-------------|
@@ -142,8 +142,8 @@ Events are consumed by the TUI, HTTP/SSE server, and WebSocket bridge. See [Even
 | RunStore | SQLite (`state.db`) | Runner process tracking |
 | Log Store | SQLite (`state.db`) | Persistent event log |
 | Plan Store | SQLite (`state.db`) | Plan definitions and status |
-| Memory | File (`.orchestra/memory.md`) | Project context for agents |
-| Runner configs | JSON (`.orchestra/tmp/`) | Temporary config for detached runners |
+| Memory | File (`.polpo/memory.md`) | Project context for agents |
+| Runner configs | JSON (`.polpo/tmp/`) | Temporary config for detached runners |
 
 <Aside>
 All SQLite operations use `busy_timeout=5000` to handle concurrent access from the orchestrator and multiple runner processes.

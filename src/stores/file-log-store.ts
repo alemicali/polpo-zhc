@@ -13,7 +13,7 @@ import type { LogStore, LogEntry, SessionInfo } from "../core/log-store.js";
 
 /**
  * File-backed LogStore.
- * Writes JSONL files to `.orchestra/logs/`, one per session.
+ * Writes JSONL files to `.polpo/logs/`, one per session.
  *
  * File naming: `{sessionId}.jsonl`
  * First line of each file: `{"_session":true,"sessionId":"...","startedAt":"..."}`
