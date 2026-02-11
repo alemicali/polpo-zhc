@@ -33,7 +33,12 @@ function readConfig(): RunnerConfig {
   }
   const configPath = process.argv[idx + 1];
   const raw = readFileSync(configPath, "utf-8");
-  return JSON.parse(raw) as RunnerConfig;
+  try {
+    return JSON.parse(raw) as RunnerConfig;
+  } catch (err) {
+    console.error(`Failed to parse runner config at ${configPath}:`, err instanceof Error ? err.message : err);
+    process.exit(1);
+  }
 }
 
 function errorResult(err: unknown): TaskResult {

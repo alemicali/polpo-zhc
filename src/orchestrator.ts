@@ -50,7 +50,7 @@ export class Orchestrator extends TypedEmitter {
   private registry!: TaskStore;
   private runStore!: RunStore;
   private config!: OrchestraConfig;
-  private orchestraDir: string;
+  private polpoDir: string;
   private workDir: string;
   private idMap = new Map<string, string>();
   private cleanedGroups = new Set<string>(); // groups already cleaned up
@@ -70,12 +70,12 @@ export class Orchestrator extends TypedEmitter {
     if (typeof workDirOrOptions === "string" || workDirOrOptions === undefined) {
       const workDir = workDirOrOptions ?? ".";
       this.workDir = resolve(workDir);
-      this.orchestraDir = resolve(workDir, ".orchestra");
+      this.polpoDir = resolve(workDir, ".polpo");
       this.assessFn = assessTask;
     } else {
       const opts = workDirOrOptions;
       this.workDir = resolve(opts.workDir ?? ".");
-      this.orchestraDir = resolve(this.workDir, ".orchestra");
+      this.polpoDir = resolve(this.workDir, ".polpo");
       this.assessFn = opts.assessFn ?? assessTask;
       this.injectedStore = opts.store;
       this.injectedRunStore = opts.runStore;
@@ -83,25 +83,25 @@ export class Orchestrator extends TypedEmitter {
   }
 
   async init(): Promise<void> {
-    const configPath = resolve(this.workDir, "orchestra.yml");
+    const configPath = resolve(this.workDir, "polpo.yml");
     this.config = await parseConfig(configPath);
-    this.registry = this.injectedStore ?? new SqliteTaskStore(this.orchestraDir);
-    this.runStore = this.injectedRunStore ?? new SqliteRunStore(join(this.orchestraDir, "state.db"));
-    this.memoryStore = new FileMemoryStore(this.orchestraDir);
+    this.registry = this.injectedStore ?? new SqliteTaskStore(this.polpoDir);
+    this.runStore = this.injectedRunStore ?? new SqliteRunStore(join(this.polpoDir, "state.db"));
+    this.memoryStore = new FileMemoryStore(this.polpoDir);
     this.initLogStore();
   }
 
   /**
-   * Initialize for interactive/TUI mode without requiring orchestra.yml.
-   * Creates .orchestra dir and a minimal config from provided team info.
+   * Initialize for interactive/TUI mode without requiring polpo.yml.
+   * Creates .polpo dir and a minimal config from provided team info.
    */
   initInteractive(project: string, team: Team): void {
-    if (!existsSync(this.orchestraDir)) {
-      mkdirSync(this.orchestraDir, { recursive: true });
+    if (!existsSync(this.polpoDir)) {
+      mkdirSync(this.polpoDir, { recursive: true });
     }
-    this.registry = this.injectedStore ?? new SqliteTaskStore(this.orchestraDir);
-    this.runStore = this.injectedRunStore ?? new SqliteRunStore(join(this.orchestraDir, "state.db"));
-    this.memoryStore = new FileMemoryStore(this.orchestraDir);
+    this.registry = this.injectedStore ?? new SqliteTaskStore(this.polpoDir);
+    this.runStore = this.injectedRunStore ?? new SqliteRunStore(join(this.polpoDir, "state.db"));
+    this.memoryStore = new FileMemoryStore(this.polpoDir);
     this.initLogStore();
     this.config = {
       version: "1",
@@ -238,11 +238,12 @@ export class Orchestrator extends TypedEmitter {
           message: `Reassessment FAILED — ${reasons.join(", ")}`,
         });
         if (task.status === "done") {
-          this.registry.updateTask(taskId, { status: "failed" as any });
+          this.registry.updateTask(taskId, { status: "failed" });
         }
       }
-    } catch (err: any) {
-      this.emit("log", { level: "error", message: `[${taskId}] Reassessment error: ${err.message}` });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.emit("log", { level: "error", message: `[${taskId}] Reassessment error: ${message}` });
     }
   }
 
@@ -344,7 +345,7 @@ export class Orchestrator extends TypedEmitter {
         this.registry.transition(taskId, "failed");
       } catch {
         // Force-set if transitions don't work
-        this.registry.updateTask(taskId, { status: "failed" as any });
+        this.registry.updateTask(taskId, { status: "failed" });
       }
     }
     return true;
@@ -453,7 +454,7 @@ export class Orchestrator extends TypedEmitter {
 
   /** Initialize the persistent log store and wire it as event sink. */
   private initLogStore(): void {
-    this.logStore = new FileLogStore(this.orchestraDir);
+    this.logStore = new FileLogStore(this.polpoDir);
     this.logStore.startSession();
     this.setLogSink(this.logStore);
     // Auto-prune: keep last 20 sessions
@@ -504,8 +505,8 @@ export class Orchestrator extends TypedEmitter {
             }, plan.name);
           }
         }
-      } catch {
-        // YAML parse error — skip volatile re-registration
+      } catch (err) {
+        this.emit("log", { level: "warn", message: `Failed to re-register volatile agents for ${plan.name}: ${err instanceof Error ? err.message : String(err)}` });
       }
     }
 
@@ -709,7 +710,7 @@ export class Orchestrator extends TypedEmitter {
       // Shutdown interrupts are not real failures — use updateTask directly
       // instead of transition(failed → pending) which burns a retry.
       this.emit("task:recovered", { taskId: task.id, title: task.title, previousStatus: task.status });
-      this.registry.updateTask(task.id, { status: "pending" as any });
+      this.registry.updateTask(task.id, { status: "pending" });
       recovered++;
     }
 
@@ -794,16 +795,26 @@ export class Orchestrator extends TypedEmitter {
 
     this.stopped = false;
 
+    // Catch unhandled promise rejections to prevent silent failures
+    const rejectionHandler = (reason: unknown) => {
+      const msg = reason instanceof Error ? reason.message : String(reason);
+      this.emit("log", { level: "error", message: `Unhandled rejection in supervisor: ${msg}` });
+    };
+    process.on("unhandledRejection", rejectionHandler);
+
     // Supervisor loop
     while (!this.stopped) {
       try {
         const allDone = this.tick();
         if (allDone && !this.interactive) break;
-      } catch (err: any) {
-        this.emit("log", { level: "error", message: `[supervisor] Error in tick: ${err.message}` });
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        this.emit("log", { level: "error", message: `[supervisor] Error in tick: ${message}` });
       }
       await sleep(POLL_INTERVAL);
     }
+
+    process.removeListener("unhandledRejection", rejectionHandler);
   }
 
   /**
@@ -1038,9 +1049,9 @@ export class Orchestrator extends TypedEmitter {
       }
 
       // Append Q&A to description and re-run (no retry burn)
-      const qaBlock = `\n\n[Orchestrator Clarification]\nQ: ${question}\nA: ${answer}`;
+      const qaBlock = `\n\n[Polpo Clarification]\nQ: ${question}\nA: ${answer}`;
       this.registry.updateTask(taskId, {
-        status: "pending" as any,
+        status: "pending",
         phase: "execution",
         description: current.description + qaBlock,
         questionRounds: (current.questionRounds ?? 0) + 1,
@@ -1386,7 +1397,7 @@ export class Orchestrator extends TypedEmitter {
       // Use updateTask to set status directly — bypasses retry increment
       // (fix attempts are NOT real failures)
       this.registry.updateTask(taskId, {
-        status: "pending" as any,
+        status: "pending",
         phase: "fix",
         fixAttempts,
         description: buildFixPrompt(current, result),
@@ -1486,7 +1497,7 @@ export class Orchestrator extends TypedEmitter {
     }
 
     const runId = nanoid();
-    const tmpDir = join(this.orchestraDir, "tmp");
+    const tmpDir = join(this.polpoDir, "tmp");
     if (!existsSync(tmpDir)) {
       mkdirSync(tmpDir, { recursive: true });
     }
@@ -1504,7 +1515,7 @@ export class Orchestrator extends TypedEmitter {
       taskId: task.id,
       agent,
       task: taskWithMemory,
-      dbPath: join(this.orchestraDir, "state.db"),
+      dbPath: join(this.polpoDir, "state.db"),
       cwd: this.workDir,
     };
 
@@ -1540,8 +1551,9 @@ export class Orchestrator extends TypedEmitter {
         adapter: agent.adapter,
         taskTitle: task.title,
       });
-    } catch (err: any) {
-      this.emit("log", { level: "error", message: `[${task.id}] Failed to spawn runner: ${err.message}` });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.emit("log", { level: "error", message: `[${task.id}] Failed to spawn runner: ${message}` });
       this.registry.transition(task.id, "failed");
     }
   }
@@ -1733,7 +1745,7 @@ function buildJudgePrompt(
   activity?: { filesCreated: string[]; filesEdited: string[]; toolCalls: number; summary?: string },
 ): string {
   const parts = [
-    `You are a QA judge for an AI orchestrator. An agent completed a coding task but some acceptance criteria (expectations) failed.`,
+    `You are a QA judge for Polpo, an AI agent orchestration framework. An agent completed a coding task but some acceptance criteria (expectations) failed.`,
     `Your job: determine if the EXPECTATIONS are wrong (should be corrected) or if the AGENT'S WORK is wrong (needs fixing).`,
     ``,
     `## Task`,

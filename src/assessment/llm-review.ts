@@ -189,11 +189,11 @@ export async function runLLMReview(
         },
       },
     })) {
-      const msg = message as any;
+      const msg = message as Record<string, unknown>;
       // Emit progress on tool use
       if (msg.type === "tool_use" || msg.tool_name) {
-        const toolName = msg.tool_name ?? msg.name ?? "tool";
-        const input = msg.tool_input ?? msg.input;
+        const toolName = (msg.tool_name ?? msg.name ?? "tool") as string;
+        const input = (msg.tool_input ?? msg.input) as Record<string, unknown> | undefined;
         if (toolName === "Read" && input?.file_path) {
           const file = String(input.file_path).split("/").pop();
           onProgress?.(`Reading ${file}`);
@@ -208,7 +208,7 @@ export async function runLLMReview(
         }
       }
       if (msg.type === "result") {
-        if (msg.subtype === "success" && msg.result) {
+        if (msg.subtype === "success" && typeof msg.result === "string") {
           textOutput = msg.result;
         }
       }

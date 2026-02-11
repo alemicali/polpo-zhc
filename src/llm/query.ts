@@ -25,7 +25,7 @@ export async function querySDK(
     prompt,
     options: {
       cwd,
-      permissionMode: "bypassPermissions" as any,
+      permissionMode: "bypassPermissions" as any, // SDK type mismatch
       allowDangerouslySkipPermissions: true,
       persistSession: false,
       allowedTools,
@@ -34,11 +34,12 @@ export async function querySDK(
   });
 
   for await (const message of q) {
-    if (message.type === "assistant" && (message as any).message) {
-      const content = (message as any).message.content;
+    if (message.type === "assistant" && "message" in message) {
+      const assistantMsg = message as { type: "assistant"; message: { content: Array<{ type: string; text?: string; name?: string; input?: Record<string, unknown> }> } };
+      const content = assistantMsg.message.content;
       if (Array.isArray(content)) {
         for (const block of content) {
-          if (block.type === "text") {
+          if (block.type === "text" && block.text) {
             resultText = block.text;
             if (onProgress) {
               const firstLine = block.text.split("\n").find((l: string) => l.trim()) ?? "";
@@ -46,8 +47,8 @@ export async function querySDK(
             }
           }
           if (block.type === "tool_use" && onProgress) {
-            const toolName = block.name;
-            const toolInput = block.input as Record<string, unknown> | undefined;
+            const toolName = block.name ?? "tool";
+            const toolInput = block.input;
             if (toolName === "Bash") {
               const cmd = (toolInput?.command as string)?.slice(0, 80) ?? "";
               onProgress(`{cyan-fg}${toolName}{/cyan-fg} ${cmd}`);
@@ -61,10 +62,10 @@ export async function querySDK(
         }
       }
     }
-    if (message.type === "result") {
-      const result = message as any;
-      if (result.subtype === "success" && result.result) {
-        resultText = result.result;
+    if (message.type === "result" && "subtype" in message) {
+      const resultMsg = message as { type: "result"; subtype: string; result?: string };
+      if (resultMsg.subtype === "success" && resultMsg.result) {
+        resultText = resultMsg.result;
       }
     }
   }

@@ -49,9 +49,18 @@ interface PlanRow {
   updated_at: string;
 }
 
+function safeJsonParse<T>(json: string | null | undefined, fallback: T): T {
+  if (!json) return fallback;
+  try {
+    return JSON.parse(json) as T;
+  } catch {
+    return fallback;
+  }
+}
+
 export class SqliteTaskStore implements TaskStore {
   private db: DatabaseType;
-  private orchestraDir: string;
+  private polpoDir: string;
 
   // Prepared statements
   private insertTaskStmt: Statement;
@@ -71,7 +80,7 @@ export class SqliteTaskStore implements TaskStore {
   private deletePlanStmt!: Statement;
 
   constructor(orchestraDir: string) {
-    this.orchestraDir = orchestraDir;
+    this.polpoDir = orchestraDir;
     const dbPath = join(orchestraDir, "state.db");
     if (!existsSync(orchestraDir)) {
       mkdirSync(orchestraDir, { recursive: true });
@@ -182,7 +191,7 @@ export class SqliteTaskStore implements TaskStore {
   }
 
   private migrateFromJson(): void {
-    const jsonPath = join(this.orchestraDir, "state.json");
+    const jsonPath = join(this.polpoDir, "state.json");
     if (!existsSync(jsonPath)) return;
 
     // Only migrate if DB has no tasks (fresh DB)
@@ -219,15 +228,15 @@ export class SqliteTaskStore implements TaskStore {
       description: row.description,
       assignTo: row.assign_to,
       group: row.group ?? undefined,
-      dependsOn: JSON.parse(row.depends_on),
+      dependsOn: safeJsonParse<string[]>(row.depends_on, []),
       status: row.status as TaskStatus,
       retries: row.retries,
       maxRetries: row.max_retries,
       maxDuration: row.max_duration ?? undefined,
-      retryPolicy: row.retry_policy ? JSON.parse(row.retry_policy) : undefined,
-      expectations: JSON.parse(row.expectations),
-      metrics: JSON.parse(row.metrics),
-      result: row.result ? JSON.parse(row.result) : undefined,
+      retryPolicy: safeJsonParse(row.retry_policy, undefined),
+      expectations: safeJsonParse(row.expectations, []),
+      metrics: safeJsonParse(row.metrics, []),
+      result: safeJsonParse(row.result, undefined),
       phase: (row.phase as Task["phase"]) ?? undefined,
       fixAttempts: row.fix_attempts ?? 0,
       resolutionAttempts: row.resolution_attempts ?? 0,
@@ -269,7 +278,7 @@ export class SqliteTaskStore implements TaskStore {
       taskId: row.task_id,
       startedAt: row.started_at,
       alive: row.alive === 1,
-      activity: JSON.parse(row.activity),
+      activity: safeJsonParse(row.activity, { filesCreated: [], filesEdited: [], toolCalls: 0, lastUpdate: "" }),
     };
   }
 

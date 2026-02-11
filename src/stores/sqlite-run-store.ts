@@ -19,6 +19,15 @@ interface RunRow {
   config_path: string;
 }
 
+function safeJsonParse<T>(json: string | null | undefined, fallback: T): T {
+  if (!json) return fallback;
+  try {
+    return JSON.parse(json) as T;
+  } catch {
+    return fallback;
+  }
+}
+
 export class SqliteRunStore implements RunStore {
   private db: DatabaseType;
 
@@ -99,8 +108,8 @@ export class SqliteRunStore implements RunStore {
       status: row.status as RunStatus,
       startedAt: row.started_at,
       updatedAt: row.updated_at,
-      activity: JSON.parse(row.activity),
-      result: row.result ? JSON.parse(row.result) : undefined,
+      activity: safeJsonParse(row.activity, { filesCreated: [], filesEdited: [], toolCalls: 0, lastUpdate: "" }),
+      result: safeJsonParse(row.result, undefined),
       configPath: row.config_path,
     };
   }

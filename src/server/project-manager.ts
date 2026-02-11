@@ -32,19 +32,20 @@ export class ProjectManager {
     const orchestrator = new Orchestrator(workDir);
 
     // Load team same way TUI does
-    const orchestraDir = resolve(workDir, ".orchestra");
+    const orchestraDir = resolve(workDir, ".polpo");
     const configStore = new JsonConfigStore(orchestraDir);
     const savedConfig = configStore.get();
     const projectName = savedConfig?.project || basename(workDir);
 
     let team: Team;
-    const ymlPath = resolve(workDir, "orchestra.yml");
+    const ymlPath = resolve(workDir, "polpo.yml");
     if (existsSync(ymlPath)) {
       try {
         const raw = readFileSync(ymlPath, "utf-8");
         const doc = parseYaml(raw) as Record<string, unknown>;
         team = doc.team as Team;
-      } catch {
+      } catch (err) {
+        console.error(`[ProjectManager] Failed to parse ${ymlPath}:`, err instanceof Error ? err.message : err);
         team = { name: "default", agents: [] };
       }
     } else {
@@ -82,7 +83,8 @@ export class ProjectManager {
     if (managed.started) return;
     managed.started = true;
     // Fire and forget — runs until stopped
-    managed.orchestrator.run().catch(() => {
+    managed.orchestrator.run().catch((err) => {
+      console.error(`[ProjectManager] Supervisor loop crashed for ${projectId}:`, err instanceof Error ? err.message : err);
       managed.started = false;
     });
   }
