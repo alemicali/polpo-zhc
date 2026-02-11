@@ -181,21 +181,21 @@ export function InputBar({ width }: { width: number }) {
 
     if (state.inputMode === "chat") {
       const ctx = buildCommandContext();
-      const { handleChatInput } = await import("../commands/chat.js");
+      const { handleChatInput } = await import("../commands/chat-ink.js");
       await handleChatInput(ctx, text);
       return;
     }
 
     if (state.inputMode === "plan") {
       const ctx = buildCommandContext();
-      const { handlePlanInput } = await import("../commands/plan.js");
+      const { handlePlanInput } = await import("../commands/plan-ink.js");
       await handlePlanInput(ctx, text);
       return;
     }
 
     // Task mode — submit as task
     const ctx = buildCommandContext();
-    const { prepareTask, fallbackDirectCreate } = await import("../commands/task-prep.js");
+    const { prepareTask, fallbackDirectCreate } = await import("../commands/task-prep-ink.js");
     try {
       state.setProcessing(true, "Preparing task...");
       await prepareTask(ctx, text, state.defaultAgent);

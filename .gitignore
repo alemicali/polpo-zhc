@@ -1,5 +1,8 @@
 node_modules/
 dist/
 .orchestra/
+.polpo/logs/
+.polpo/state.db*
+.polpo/tmp/
 *.log
 .DS_Store

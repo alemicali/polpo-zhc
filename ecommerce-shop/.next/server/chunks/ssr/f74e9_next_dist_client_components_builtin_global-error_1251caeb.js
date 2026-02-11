@@ -1,3 +1,0 @@
-module.exports=[18583,(a,b,c)=>{let{createClientModuleProxy:d}=a.r(56821);a.n(d("[project]/React/ai-rd/orchestra/ecommerce-shop/node_modules/next/dist/client/components/builtin/global-error.js <module evaluation>"))},14387,(a,b,c)=>{let{createClientModuleProxy:d}=a.r(56821);a.n(d("[project]/React/ai-rd/orchestra/ecommerce-shop/node_modules/next/dist/client/components/builtin/global-error.js"))},27681,a=>{"use strict";a.i(18583);var b=a.i(14387);a.n(b)}];
-
-//# sourceMappingURL=f74e9_next_dist_client_components_builtin_global-error_1251caeb.js.map

@@ -1,3 +1,0 @@
-{"_session":true,"sessionId":"HBKsdkjG5p","startedAt":"2026-02-11T16:20:57.985Z"}
-{"ts":"2026-02-11T16:20:57.987Z","event":"orchestrator:started","data":{"project":"orchestra","agents":[]}}
-{"ts":"2026-02-11T16:21:37.084Z","event":"orchestrator:shutdown","data":{}}

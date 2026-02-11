@@ -6,12 +6,12 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {
-    "polpo": "dist/cli.js"
+    "polpo": "dist/cli/index.js"
   },
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
-    "start": "node dist/cli.js",
+    "start": "node dist/cli/index.js",
     "test": "vitest"
   },
   "keywords": [
