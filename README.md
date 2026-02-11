@@ -278,17 +278,17 @@ pending ──> assigned ──> in_progress ──> review ──> done
 
 ### Core Components
 
-| Component         | File                     | Purpose                                       |
-|-------------------|--------------------------|-----------------------------------------------|
-| Orchestrator      | `src/orchestrator.ts`    | Supervisor loop, task assignment, health checks|
-| Task Registry     | `src/task-registry.ts`   | SQLite-backed task persistence                 |
-| Run Store         | `src/run-store.ts`       | Process tracking and crash recovery            |
-| Runner            | `src/runner.ts`          | Detached agent subprocess                      |
-| Assessor          | `src/assessment/assessor.ts` | G-Eval task scoring                        |
-| Adapters          | `src/adapters/`          | Agent interface implementations                |
-| TUI               | `src/tui/`               | Terminal UI (Ink)                               |
-| Server            | `src/server/`            | Hono HTTP API, SSE bridge, WS bridge           |
-| CLI               | `src/cli.ts`             | Commander entry point                          |
+| Component         | File                          | Purpose                                       |
+|-------------------|-------------------------------|-----------------------------------------------|
+| Orchestrator      | `src/core/orchestrator.ts`    | Supervisor loop, task assignment, health checks|
+| Config            | `src/core/config.ts`          | YAML config parser                             |
+| Runner            | `src/core/runner.ts`          | Detached agent subprocess                      |
+| Stores            | `src/stores/`                 | SQLite task, run, config, log persistence      |
+| Assessor          | `src/assessment/assessor.ts`  | G-Eval task scoring                            |
+| Adapters          | `src/adapters/`               | Agent interface implementations                |
+| TUI               | `src/tui/`                    | Terminal UI (Ink)                               |
+| Server            | `src/server/`                 | Hono HTTP API, SSE bridge, WS bridge           |
+| CLI               | `src/cli/`                    | Commander entry point                          |
 
 ### Event System
 
@@ -376,17 +376,17 @@ function Dashboard() {
 
 **Hooks:** `useOrchestra` `useTasks` `useTask` `usePlans` `usePlan` `useAgents` `useProcesses` `useEvents` `useStats` `useMemory` `useLogs`
 
-### Web UI (`packages/web/`)
+### Web UI (`apps/web/`)
 
 Next.js 15 dashboard with shadcn/ui. Pages for Dashboard, Tasks, Plans, Team, Logs, Chat, and Settings.
 
 ```bash
-cd packages/web
+cd apps/web
 npm install
 npm run dev
 ```
 
-Set the server URL in `packages/web/.env.local`:
+Set the server URL in `apps/web/.env.local`:
 
 ```env
 NEXT_PUBLIC_POLPO_URL=http://localhost:3890
@@ -457,19 +457,20 @@ API_KEY=your-secret-key                          # server authentication
 ```
 openpolpo/
 ├── src/
-│   ├── core/               # types, adapter interface, events, schemas
+│   ├── core/               # orchestrator, config, types, events, runner
 │   ├── adapters/            # claude-sdk and generic adapters
 │   ├── assessment/          # G-Eval assessor
+│   ├── stores/              # SQLite task/run/config/log stores
+│   ├── llm/                 # LLM query, prompts, answer generation
 │   ├── tui/                 # terminal UI (Ink) + commands
 │   ├── server/              # Hono HTTP API, SSE/WS bridges, routes
-│   ├── orchestrator.ts      # main supervisor loop
-│   ├── runner.ts            # detached agent runner
-│   ├── task-registry.ts     # SQLite task persistence
-│   ├── run-store.ts         # process tracking
-│   └── cli.ts               # Commander CLI entry point
+│   ├── cli/                 # Commander CLI entry point
+│   └── index.ts             # barrel exports
+├── apps/
+│   ├── web/                 # Next.js 15 dashboard (shadcn/ui)
+│   └── docs/                # Astro documentation site
 ├── packages/
-│   ├── react-sdk/           # React hooks + SSE client
-│   └── web/                 # Next.js dashboard
+│   └── react-sdk/           # React hooks + SSE client
 ├── .polpo/                  # runtime state (auto-created)
 │   ├── state.db             # SQLite database
 │   ├── logs/                # agent logs
@@ -536,7 +537,7 @@ Make sure the URLs match:
 ```bash
 polpo serve --port 3890
 
-# packages/web/.env.local
+# apps/web/.env.local
 NEXT_PUBLIC_POLPO_URL=http://localhost:3890
 ```
 
