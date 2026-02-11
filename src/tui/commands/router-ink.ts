@@ -7,7 +7,7 @@ import chalk from "chalk";
 import { useTUIStore, type LogSeg } from "../store.js";
 import { PROVIDERS, MODELS, SLASH_COMMANDS, SHORTCUTS } from "../constants.js";
 import { getProviderLabel, formatElapsed } from "../formatters.js";
-import { readSessionSummary } from "../../session-reader.js";
+import { readSessionSummary } from "../../core/session-reader.js";
 import type { Task, TaskStatus } from "../../core/types.js";
 import type { SessionInfo } from "../../core/log-store.js";
 import { parse as parseYaml } from "yaml";

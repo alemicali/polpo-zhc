@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
-import { Orchestrator } from "../orchestrator.js";
+import { Orchestrator } from "../core/orchestrator.js";
 import { registerAdapter } from "../adapters/registry.js";
 import { InMemoryTaskStore, InMemoryRunStore, MockAdapter, createTestAgent, createTestActivity } from "./fixtures.js";
 import type { RunRecord } from "../core/run-store.js";

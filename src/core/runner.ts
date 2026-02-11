@@ -14,10 +14,10 @@
 
 import { readFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
-import { SqliteRunStore } from "./stores/sqlite-run-store.js";
-import { getAdapter } from "./adapters/registry.js";
-import type { RunRecord } from "./core/run-store.js";
-import type { RunnerConfig, TaskResult } from "./core/types.js";
+import { SqliteRunStore } from "../stores/sqlite-run-store.js";
+import { getAdapter } from "../adapters/registry.js";
+import type { RunRecord } from "./run-store.js";
+import type { RunnerConfig, TaskResult } from "./types.js";
 
 // Side-effect imports: register adapters
 import "./adapters/claude-sdk.js";

@@ -1,4 +1,4 @@
-import type { Orchestrator } from "../orchestrator.js";
+import type { Orchestrator } from "../core/orchestrator.js";
 import type { TUIStore, LogSeg } from "./store.js";
 
 type Store = Pick<TUIStore, "log" | "logAlways" | "logEvent">;

@@ -4,20 +4,20 @@ import { spawn as cpSpawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { nanoid } from "nanoid";
 import { parseConfig } from "./config.js";
-import { SqliteTaskStore } from "./stores/sqlite-task-store.js";
-import { SqliteRunStore } from "./stores/sqlite-run-store.js";
-import { FileMemoryStore } from "./stores/file-memory-store.js";
-import { FileLogStore } from "./stores/file-log-store.js";
-import type { MemoryStore } from "./core/memory-store.js";
-import type { LogStore } from "./core/log-store.js";
-import { assessTask } from "./assessment/assessor.js";
+import { SqliteTaskStore } from "../stores/sqlite-task-store.js";
+import { SqliteRunStore } from "../stores/sqlite-run-store.js";
+import { FileMemoryStore } from "../stores/file-memory-store.js";
+import { FileLogStore } from "../stores/file-log-store.js";
+import type { MemoryStore } from "./memory-store.js";
+import type { LogStore } from "./log-store.js";
+import { assessTask } from "../assessment/assessor.js";
 import { looksLikeQuestion, classifyAsQuestion } from "./question-detector.js";
-import { generateAnswer } from "./llm/answer-generator.js";
-import { querySDKText } from "./llm/query.js";
+import { generateAnswer } from "../llm/answer-generator.js";
+import { querySDKText } from "../llm/query.js";
 import { analyzeBlockedTasks, resolveDeadlock, isResolving } from "./deadlock-resolver.js";
-import { TypedEmitter } from "./core/events.js";
-import type { TaskStore } from "./core/task-store.js";
-import type { RunStore, RunRecord } from "./core/run-store.js";
+import { TypedEmitter } from "./events.js";
+import type { TaskStore } from "./task-store.js";
+import type { RunStore, RunRecord } from "./run-store.js";
 import { parse as parseYaml } from "yaml";
 import type {
   OrchestraConfig,
@@ -32,8 +32,8 @@ import type {
   RetryPolicy,
   RunnerConfig,
   PlanReport,
-} from "./core/types.js";
-import { sanitizeExpectations } from "./core/schemas.js";
+} from "./types.js";
+import { sanitizeExpectations } from "./schemas.js";
 
 const POLL_INTERVAL = 2000; // 2 seconds
 

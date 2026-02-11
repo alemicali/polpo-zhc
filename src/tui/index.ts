@@ -4,7 +4,7 @@ import blessed from "blessed";
 import { resolve, basename } from "node:path";
 import { readFileSync, existsSync } from "node:fs";
 import { parse as parseYaml } from "yaml";
-import { Orchestrator } from "../orchestrator.js";
+import { Orchestrator } from "../core/orchestrator.js";
 import type { OrchestraState, Team, Task } from "../core/types.js";
 import { JsonConfigStore } from "../stores/json-config-store.js";
 import type { TUIConfig, CommandContext } from "./context.js";

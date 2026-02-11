@@ -2,8 +2,8 @@
 export * from "./core/index.js";
 
 // Orchestrator
-export { Orchestrator, buildRetryPrompt } from "./orchestrator.js";
-export type { OrchestratorOptions, AssessFn } from "./orchestrator.js";
+export { Orchestrator, buildRetryPrompt } from "./core/orchestrator.js";
+export type { OrchestratorOptions, AssessFn } from "./core/orchestrator.js";
 
 // Stores
 export { JsonTaskStore, SqliteTaskStore } from "./stores/index.js";
@@ -19,10 +19,10 @@ export { runLLMReview, computeWeightedScore, buildRubricSection, DEFAULT_DIMENSI
 export type { LLMQueryFn } from "./assessment/llm-review.js";
 
 // Config
-export { parseConfig, generateTemplate } from "./config.js";
+export { parseConfig, generateTemplate } from "./core/config.js";
 
 // Session reader
-export { readSessionSummary, getRecentMessages, findTranscriptPath } from "./session-reader.js";
+export { readSessionSummary, getRecentMessages, findTranscriptPath } from "./core/session-reader.js";
 
 // Server
 export { OrchestraServer, createApp, ProjectManager, SSEBridge, WSBridge } from "./server/index.js";

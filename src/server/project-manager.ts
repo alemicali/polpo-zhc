@@ -1,7 +1,7 @@
 import { resolve, basename } from "node:path";
 import { existsSync, readFileSync } from "node:fs";
 import { parse as parseYaml } from "yaml";
-import { Orchestrator } from "../orchestrator.js";
+import { Orchestrator } from "../core/orchestrator.js";
 import { JsonConfigStore } from "../stores/json-config-store.js";
 import type { Team } from "../core/types.js";
 import type { ProjectEntry, ProjectInfo } from "./types.js";

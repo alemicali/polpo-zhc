@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { looksLikeQuestion } from "../question-detector.js";
+import { looksLikeQuestion } from "../core/question-detector.js";
 import type { TaskResult, AgentActivity } from "../core/types.js";
 
 function makeResult(stdout: string): TaskResult {

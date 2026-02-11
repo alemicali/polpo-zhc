@@ -2,7 +2,7 @@
  * System prompt builders for LLM-powered features (chat, plan, team generation).
  */
 
-import type { Orchestrator } from "../orchestrator.js";
+import type { Orchestrator } from "../core/orchestrator.js";
 import type { OrchestraState } from "../core/types.js";
 import { discoverSkills } from "./skills.js";
 

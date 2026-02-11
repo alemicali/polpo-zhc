@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { parse, stringify } from "yaml";
-import type { OrchestraConfig, OrchestraSettings } from "./core/types.js";
-import { sanitizeExpectations } from "./core/schemas.js";
+import type { OrchestraConfig, OrchestraSettings } from "./types.js";
+import { sanitizeExpectations } from "./schemas.js";
 
 const DEFAULT_SETTINGS: OrchestraSettings = {
   maxRetries: 3,

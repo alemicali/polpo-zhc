@@ -1,5 +1,5 @@
 import type blessed from "blessed";
-import type { Orchestrator } from "../orchestrator.js";
+import type { Orchestrator } from "../core/orchestrator.js";
 import type { OrchestraState, ProjectConfig } from "../core/types.js";
 
 // ─── TUI Config ──────────────────────────────────────────

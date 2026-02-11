@@ -4,7 +4,7 @@ import { withFullScreen, useScreenSize } from "fullscreen-ink";
 import { resolve, basename } from "node:path";
 import { readFileSync, existsSync } from "node:fs";
 import { parse as parseYaml } from "yaml";
-import { Orchestrator } from "../orchestrator.js";
+import { Orchestrator } from "../core/orchestrator.js";
 import { JsonConfigStore } from "../stores/json-config-store.js";
 import type { Team, ProjectConfig } from "../core/types.js";
 import { useTUIStore } from "./store.js";

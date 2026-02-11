@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { analyzeBlockedTasks } from "../deadlock-resolver.js";
+import { analyzeBlockedTasks } from "../core/deadlock-resolver.js";
 import { createTestTask } from "./fixtures.js";
 import type { Task } from "../core/types.js";
 

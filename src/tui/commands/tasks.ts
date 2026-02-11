@@ -221,7 +221,7 @@ function showBrowserPlan(ctx: CommandContext, planName: string, planTasks: any[]
 }
 
 function showBrowserTaskDetail(ctx: CommandContext, task: any, goBack: () => void): void {
-  import("../../session-reader.js").then(({ readSessionSummary }) => {
+  import("../../core/session-reader.js").then(({ readSessionSummary }) => {
     const isRunning = ["in_progress", "assigned", "review"].includes(task.status);
 
     const buildContent = () => {

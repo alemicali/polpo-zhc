@@ -7,9 +7,9 @@
  * chain should be failed.
  */
 
-import type { Task } from "./core/types.js";
+import type { Task } from "./types.js";
 import type { Orchestrator } from "./orchestrator.js";
-import { querySDKText } from "./llm/query.js";
+import { querySDKText } from "../llm/query.js";
 
 // ── Types ─────────────────────────────────────────────
 

@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
-import type { Orchestrator } from "../orchestrator.js";
+import type { Orchestrator } from "../core/orchestrator.js";
 import type { ProjectManager } from "./project-manager.js";
 import { authMiddleware } from "./middleware/auth.js";
 import { projectMiddleware } from "./middleware/project.js";

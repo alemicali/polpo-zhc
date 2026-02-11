@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdirSync, rmSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import { Orchestrator } from "../orchestrator.js";
+import { Orchestrator } from "../core/orchestrator.js";
 import { SqliteTaskStore } from "../stores/sqlite-task-store.js";
 import { InMemoryRunStore, MockAdapter, createTestAgent } from "./fixtures.js";
 import { registerAdapter } from "../adapters/registry.js";

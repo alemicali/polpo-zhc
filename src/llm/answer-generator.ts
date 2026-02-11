@@ -4,7 +4,7 @@
  */
 
 import { querySDKText } from "./query.js";
-import type { Orchestrator } from "../orchestrator.js";
+import type { Orchestrator } from "../core/orchestrator.js";
 import type { Task } from "../core/types.js";
 
 /**

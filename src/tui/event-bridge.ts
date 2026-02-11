@@ -1,4 +1,4 @@
-import type { Orchestrator } from "../orchestrator.js";
+import type { Orchestrator } from "../core/orchestrator.js";
 import type { TUILogger } from "./context.js";
 import { esc } from "./formatters.js";
 

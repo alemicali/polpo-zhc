@@ -1,4 +1,4 @@
-import type { Orchestrator } from "../orchestrator.js";
+import type { Orchestrator } from "../core/orchestrator.js";
 import type { OrchestraEvent } from "../core/events.js";
 
 /** All Orchestra events to subscribe to. */

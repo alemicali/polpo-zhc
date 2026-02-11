@@ -3,8 +3,8 @@
  * Hybrid approach: cheap sync heuristic pre-filter + async LLM classifier.
  */
 
-import { querySDKText } from "./llm/query.js";
-import type { TaskResult, AgentActivity } from "./core/types.js";
+import { querySDKText } from "../llm/query.js";
+import type { TaskResult, AgentActivity } from "./types.js";
 
 /**
  * Sync heuristic pre-filter: cheap check for likely question outputs.

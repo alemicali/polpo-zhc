@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { rmSync, existsSync } from "node:fs";
-import { Orchestrator, buildRetryPrompt } from "../orchestrator.js";
-import { analyzeBlockedTasks } from "../deadlock-resolver.js";
+import { Orchestrator, buildRetryPrompt } from "../core/orchestrator.js";
+import { analyzeBlockedTasks } from "../core/deadlock-resolver.js";
 import { registerAdapter } from "../adapters/registry.js";
 import { InMemoryTaskStore, InMemoryRunStore, MockAdapter, createTestTask, createTestAgent, createTestActivity } from "./fixtures.js";
 import type { TaskResult } from "../core/types.js";

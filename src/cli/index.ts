@@ -5,8 +5,8 @@ import { mkdir, writeFile, access, readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { Command } from "commander";
 import chalk from "chalk";
-import { generateTemplate } from "../config.js";
-import { Orchestrator } from "../orchestrator.js";
+import { generateTemplate } from "../core/config.js";
+import { Orchestrator } from "../core/orchestrator.js";
 import type { OrchestraState, Task, TaskStatus } from "../core/types.js";
 
 // Register adapters (side-effect imports)
