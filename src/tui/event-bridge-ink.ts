@@ -35,9 +35,17 @@ export function bridgeOrchestraEvents(
     ]);
   });
 
-  on("agent:finished", ({ taskId, agentName, exitCode, duration }) => {
+  on("agent:finished", ({ taskId, agentName, exitCode, duration, sessionId }) => {
     const secs = (duration / 1000).toFixed(1);
-    store.log(`[${taskId}] Agent "${agentName}" finished — exit ${exitCode} (${secs}s)`);
+    const sidStr = sessionId ? ` session:${sessionId}` : "";
+    store.log(`[${taskId}] Agent "${agentName}" finished — exit ${exitCode} (${secs}s)${sidStr}`);
+    if (sessionId) {
+      store.logEvent(`  claude --resume ${sessionId}`, [
+        s("  "),
+        s("claude --resume ", "gray"),
+        s(sessionId, "cyan"),
+      ]);
+    }
   });
 
   // ─── Task events ───────────────────────────────────────

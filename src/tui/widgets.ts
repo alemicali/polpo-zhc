@@ -39,7 +39,9 @@ export function createOverlay(host: WidgetHost): OverlayResult {
     }
     keypressHandlers.length = 0;
     overlay.destroy();
-    host.scheduleRender();
+    // Force synchronous full redraw to prevent rendering artifacts
+    try { host.screen.alloc(); } catch { /* older blessed versions */ }
+    host.screen.render();
   };
 
   const onKeypress = (handler: (ch: string, key: any) => void) => {
@@ -226,11 +228,11 @@ export interface TextareaOptions {
  */
 export function showTextarea(host: WidgetHost, opts: TextareaOptions): Promise<string | null> {
   return new Promise((resolve) => {
-    host.overlayActive = true;
+    const { overlay, cleanup } = createOverlay(host);
     const borderColor = opts.borderColor ?? "yellow";
 
     const editor = blessed.textarea({
-      parent: host.screen,
+      parent: overlay,
       top: 0,
       left: 0,
       width: "100%",
@@ -251,9 +253,7 @@ export function showTextarea(host: WidgetHost, opts: TextareaOptions): Promise<s
     host.scheduleRender();
 
     const done = (result: string | null) => {
-      host.overlayActive = false;
-      editor.destroy();
-      host.scheduleRender();
+      cleanup();
       resolve(result);
     };
 

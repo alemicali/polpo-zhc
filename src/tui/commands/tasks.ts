@@ -543,13 +543,9 @@ function showPlanEditor(ctx: CommandContext, groupName: string, groupTasks: any[
 
   const refreshList = () => { taskList.setItems(buildItems()); ctx.scheduleRender(); };
 
-  /** Callback-based text input for plan editor (simpler than Promise-based widgets) */
+  /** Callback-based text input for plan editor using proper overlay lifecycle */
   const showTextInput = (title: string, initial: string, onSubmit: (value: string) => void, onCancel: () => void) => {
-    ctx.overlayActive = true;
-    const inputOverlay = blessed.box({
-      parent: ctx.screen, top: 0, left: 0, width: "100%", height: "100%",
-      style: { bg: "black" },
-    });
+    const { overlay: inputOverlay, cleanup: inputCleanup, onKeypress: inputOnKeypress } = createOverlay(ctx);
     const box = blessed.box({
       parent: inputOverlay, top: "center", left: "center", width: "60%", height: 5,
       border: { type: "line" }, tags: true,
@@ -563,14 +559,7 @@ function showPlanEditor(ctx: CommandContext, groupName: string, groupTasks: any[
     box.setContent(` ${buf}${cursor}`);
     ctx.scheduleRender();
 
-    const inputCleanup = () => {
-      ctx.overlayActive = false;
-      ctx.screen.removeListener("keypress", inputKh);
-      inputOverlay.destroy();
-      ctx.scheduleRender();
-    };
-
-    const inputKh = (ch: string, key: any) => {
+    inputOnKeypress((ch, key) => {
       if (!key) return;
       if (key.name === "return" || key.name === "enter") { inputCleanup(); onSubmit(buf.trim()); return; }
       if (key.name === "escape") { inputCleanup(); onCancel(); return; }
@@ -578,8 +567,7 @@ function showPlanEditor(ctx: CommandContext, groupName: string, groupTasks: any[
       else if (ch && ch.length === 1 && !key.ctrl && !key.meta) { buf += ch; }
       box.setContent(` ${buf}${cursor}`);
       ctx.scheduleRender();
-    };
-    ctx.screen.on("keypress", inputKh);
+    });
   };
 
   const reopenEditor = () => {
@@ -782,7 +770,7 @@ export function cmdAbort(ctx: CommandContext): void {
 }
 
 function showAbortPicker(ctx: CommandContext, options: { label: string; action: () => void }[]): void {
-  const { overlay, cleanup } = createOverlay(ctx);
+  const { overlay, cleanup, onKeypress } = createOverlay(ctx);
 
   const items = options.map(o => o.label);
   items.push("  {grey-fg}Cancel{/grey-fg}");
@@ -803,7 +791,7 @@ function showAbortPicker(ctx: CommandContext, options: { label: string; action: 
       selected: { bg: "red", fg: "white", bold: true },
       item: { bg: "black" },
     },
-    keys: true,
+    keys: false,
     vi: false,
     mouse: true,
   });
@@ -824,7 +812,20 @@ function showAbortPicker(ctx: CommandContext, options: { label: string; action: 
     }
   });
 
-  list.on("cancel", cleanup);
+  onKeypress((_ch, key) => {
+    if (!key) return;
+    if (key.name === "escape") { cleanup(); return; }
+    if (key.name === "up") { list.up(1); ctx.scheduleRender(); return; }
+    if (key.name === "down") { list.down(1); ctx.scheduleRender(); return; }
+    if (key.name === "return" || key.name === "enter") {
+      if (!abortReady) return;
+      const idx = (list as any).selected ?? 0;
+      cleanup();
+      if (idx < options.length) {
+        options[idx].action();
+      }
+    }
+  });
 }
 
 // ─── /clear-tasks ────────────────────────────────────────
@@ -843,7 +844,7 @@ export function cmdClearTasks(ctx: CommandContext): void {
     return;
   }
 
-  const { overlay, cleanup } = createOverlay(ctx);
+  const { overlay, cleanup, onKeypress } = createOverlay(ctx);
 
   const items = [
     `  {green-fg}✓{/green-fg} Clear completed {grey-fg}(done){/grey-fg}`,
@@ -869,7 +870,7 @@ export function cmdClearTasks(ctx: CommandContext): void {
       selected: { bg: "blue", fg: "white", bold: true },
       item: { bg: "black" },
     },
-    keys: true,
+    keys: false,
     vi: false,
     mouse: true,
   });
@@ -880,10 +881,7 @@ export function cmdClearTasks(ctx: CommandContext): void {
   list.focus();
   ctx.scheduleRender();
 
-  let clearReady = false;
-  setImmediate(() => { clearReady = true; });
-  list.on("select", (_item: any, index: number) => {
-    if (!clearReady) return;
+  const doClear = (index: number) => {
     cleanup();
     let count = 0;
     switch (index) {
@@ -904,7 +902,23 @@ export function cmdClearTasks(ctx: CommandContext): void {
         ctx.log(`{red-fg}Cleared all ${count} tasks{/red-fg}`);
         break;
     }
+  };
+
+  let clearReady = false;
+  setImmediate(() => { clearReady = true; });
+  list.on("select", (_item: any, index: number) => {
+    if (!clearReady) return;
+    doClear(index);
   });
 
-  list.on("cancel", cleanup);
+  onKeypress((_ch, key) => {
+    if (!key) return;
+    if (key.name === "escape") { cleanup(); return; }
+    if (key.name === "up") { list.up(1); ctx.scheduleRender(); return; }
+    if (key.name === "down") { list.down(1); ctx.scheduleRender(); return; }
+    if (key.name === "return" || key.name === "enter") {
+      if (!clearReady) return;
+      doClear((list as any).selected ?? 0);
+    }
+  });
 }

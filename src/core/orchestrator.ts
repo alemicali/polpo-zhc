@@ -8,6 +8,8 @@ import { SqliteTaskStore } from "../stores/sqlite-task-store.js";
 import { SqliteRunStore } from "../stores/sqlite-run-store.js";
 import { FileMemoryStore } from "../stores/file-memory-store.js";
 import { FileLogStore } from "../stores/file-log-store.js";
+import { FileSessionStore } from "../stores/file-session-store.js";
+import type { SessionStore } from "./session-store.js";
 import type { MemoryStore } from "./memory-store.js";
 import type { LogStore } from "./log-store.js";
 import { assessTask } from "../assessment/assessor.js";
@@ -62,6 +64,7 @@ export class Orchestrator extends TypedEmitter {
   private injectedRunStore?: RunStore;
   private memoryStore!: MemoryStore;
   private logStore!: LogStore;
+  private sessionStore!: SessionStore;
 
   getWorkDir(): string { return this.workDir; }
 
@@ -89,6 +92,7 @@ export class Orchestrator extends TypedEmitter {
     this.runStore = this.injectedRunStore ?? new SqliteRunStore(join(this.polpoDir, "state.db"));
     this.memoryStore = new FileMemoryStore(this.polpoDir);
     this.initLogStore();
+    this.initSessionStore();
   }
 
   /**
@@ -103,6 +107,7 @@ export class Orchestrator extends TypedEmitter {
     this.runStore = this.injectedRunStore ?? new SqliteRunStore(join(this.polpoDir, "state.db"));
     this.memoryStore = new FileMemoryStore(this.polpoDir);
     this.initLogStore();
+    this.initSessionStore();
     this.config = {
       version: "1",
       project,
@@ -461,6 +466,17 @@ export class Orchestrator extends TypedEmitter {
     try { this.logStore.prune(20); } catch { /* ignore */ }
   }
 
+  /** Get the chat session store. */
+  getSessionStore(): SessionStore | undefined {
+    return this.sessionStore;
+  }
+
+  /** Initialize the chat session store. */
+  private initSessionStore(): void {
+    this.sessionStore = new FileSessionStore(this.polpoDir);
+    try { this.sessionStore.prune(20); } catch { /* ignore */ }
+  }
+
   // ─── Plan Resume ────────────────────────────────────
 
   /**
@@ -659,6 +675,7 @@ export class Orchestrator extends TypedEmitter {
     this.runStore.close();
     this.emit("orchestrator:shutdown", {});
     this.logStore?.close();
+    this.sessionStore?.close();
   }
 
   /**
@@ -909,6 +926,11 @@ export class Orchestrator extends TypedEmitter {
   private collectResults(): void {
     const terminalRuns = this.runStore.getTerminalRuns();
     for (const run of terminalRuns) {
+      // Persist sessionId on the task before deleting the run
+      const sid = run.sessionId ?? run.activity.sessionId;
+      if (sid) {
+        try { this.registry.updateTask(run.taskId, { sessionId: sid }); } catch { /* task may already be gone */ }
+      }
       if (run.result) {
         this.handleResult(run.taskId, run.result);
       }
@@ -991,6 +1013,7 @@ export class Orchestrator extends TypedEmitter {
       agentName: task.assignTo,
       exitCode: result.exitCode,
       duration: result.duration,
+      sessionId: task.sessionId,
     });
 
     // Ensure we're in review state

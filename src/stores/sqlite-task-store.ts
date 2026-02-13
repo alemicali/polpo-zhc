@@ -1,5 +1,4 @@
-import Database from "better-sqlite3";
-import type { Database as DatabaseType, Statement } from "better-sqlite3";
+import { createDatabase } from "./sqlite-compat.js";
 import { join } from "node:path";
 import { existsSync, readFileSync, renameSync, mkdirSync } from "node:fs";
 import { nanoid } from "nanoid";
@@ -26,6 +25,7 @@ interface TaskRow {
   fix_attempts: number;
   resolution_attempts: number;
   original_description: string | null;
+  session_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -59,25 +59,25 @@ function safeJsonParse<T>(json: string | null | undefined, fallback: T): T {
 }
 
 export class SqliteTaskStore implements TaskStore {
-  private db: DatabaseType;
+  private db: any;
   private polpoDir: string;
 
   // Prepared statements
-  private insertTaskStmt: Statement;
-  private getTaskStmt: Statement;
-  private getAllTasksStmt: Statement;
-  private deleteTaskStmt: Statement;
-  private deleteAllTasksStmt: Statement;
-  private getMetaStmt: Statement;
-  private upsertMetaStmt: Statement;
-  private clearProcessesStmt: Statement;
-  private insertProcessStmt: Statement;
-  private getAllProcessesStmt: Statement;
-  private insertPlanStmt!: Statement;
-  private getPlanStmt!: Statement;
-  private getPlanByNameStmt!: Statement;
-  private getAllPlansStmt!: Statement;
-  private deletePlanStmt!: Statement;
+  private insertTaskStmt: any;
+  private getTaskStmt: any;
+  private getAllTasksStmt: any;
+  private deleteTaskStmt: any;
+  private deleteAllTasksStmt: any;
+  private getMetaStmt: any;
+  private upsertMetaStmt: any;
+  private clearProcessesStmt: any;
+  private insertProcessStmt: any;
+  private getAllProcessesStmt: any;
+  private insertPlanStmt!: any;
+  private getPlanStmt!: any;
+  private getPlanByNameStmt!: any;
+  private getAllPlansStmt!: any;
+  private deletePlanStmt!: any;
 
   constructor(orchestraDir: string) {
     this.polpoDir = orchestraDir;
@@ -85,16 +85,16 @@ export class SqliteTaskStore implements TaskStore {
     if (!existsSync(orchestraDir)) {
       mkdirSync(orchestraDir, { recursive: true });
     }
-    this.db = new Database(dbPath);
-    this.db.pragma("journal_mode = WAL");
-    this.db.pragma("synchronous = NORMAL");
+    this.db = createDatabase(dbPath);
+    this.db.exec("PRAGMA journal_mode = WAL");
+    this.db.exec("PRAGMA synchronous = NORMAL");
     this.initSchema();
     this.migrateSchema();
 
     // Prepare statements
     this.insertTaskStmt = this.db.prepare(`
-      INSERT INTO tasks (id, title, description, assign_to, "group", depends_on, status, retries, max_retries, max_duration, retry_policy, expectations, metrics, result, phase, fix_attempts, original_description, created_at, updated_at)
-      VALUES (@id, @title, @description, @assign_to, @group, @depends_on, @status, @retries, @max_retries, @max_duration, @retry_policy, @expectations, @metrics, @result, @phase, @fix_attempts, @original_description, @created_at, @updated_at)
+      INSERT INTO tasks (id, title, description, assign_to, "group", depends_on, status, retries, max_retries, max_duration, retry_policy, expectations, metrics, result, phase, fix_attempts, original_description, session_id, created_at, updated_at)
+      VALUES (@id, @title, @description, @assign_to, @group, @depends_on, @status, @retries, @max_retries, @max_duration, @retry_policy, @expectations, @metrics, @result, @phase, @fix_attempts, @original_description, @session_id, @created_at, @updated_at)
     `);
     this.getTaskStmt = this.db.prepare(`SELECT * FROM tasks WHERE id = ?`);
     this.getAllTasksStmt = this.db.prepare(`SELECT * FROM tasks ORDER BY created_at ASC`);
@@ -184,6 +184,7 @@ export class SqliteTaskStore implements TaskStore {
       `ALTER TABLE tasks ADD COLUMN fix_attempts INTEGER NOT NULL DEFAULT 0`,
       `ALTER TABLE tasks ADD COLUMN original_description TEXT`,
       `ALTER TABLE tasks ADD COLUMN resolution_attempts INTEGER NOT NULL DEFAULT 0`,
+      `ALTER TABLE tasks ADD COLUMN session_id TEXT`,
     ];
     for (const sql of migrations) {
       try { this.db.exec(sql); } catch { /* column already exists */ }
@@ -241,6 +242,7 @@ export class SqliteTaskStore implements TaskStore {
       fixAttempts: row.fix_attempts ?? 0,
       resolutionAttempts: row.resolution_attempts ?? 0,
       originalDescription: row.original_description ?? undefined,
+      sessionId: row.session_id ?? undefined,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     };
@@ -266,6 +268,7 @@ export class SqliteTaskStore implements TaskStore {
       fix_attempts: task.fixAttempts ?? 0,
       resolution_attempts: task.resolutionAttempts ?? 0,
       original_description: task.originalDescription ?? null,
+      session_id: task.sessionId ?? null,
       created_at: task.createdAt,
       updated_at: task.updatedAt,
     };
@@ -390,6 +393,7 @@ export class SqliteTaskStore implements TaskStore {
     if (updates.fixAttempts !== undefined) { setClauses.push("fix_attempts = @fix_attempts"); params.fix_attempts = updates.fixAttempts; }
     if (updates.resolutionAttempts !== undefined) { setClauses.push("resolution_attempts = @resolution_attempts"); params.resolution_attempts = updates.resolutionAttempts; }
     if (updates.originalDescription !== undefined) { setClauses.push("original_description = @original_description"); params.original_description = updates.originalDescription ?? null; }
+    if (updates.sessionId !== undefined) { setClauses.push("session_id = @session_id"); params.session_id = updates.sessionId ?? null; }
     if (updates.createdAt !== undefined) { setClauses.push("created_at = @created_at"); params.created_at = updates.createdAt; }
 
     const sql = `UPDATE tasks SET ${setClauses.join(", ")} WHERE id = @id`;

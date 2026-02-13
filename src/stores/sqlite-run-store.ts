@@ -1,5 +1,4 @@
-import Database from "better-sqlite3";
-import type { Database as DatabaseType, Statement } from "better-sqlite3";
+import { createDatabase } from "./sqlite-compat.js";
 import { mkdirSync, existsSync } from "node:fs";
 import { dirname } from "node:path";
 import type { AgentActivity, TaskResult } from "../core/types.js";
@@ -11,6 +10,7 @@ interface RunRow {
   pid: number;
   agent_name: string;
   adapter_type: string;
+  session_id: string | null;
   status: string;
   started_at: string;
   updated_at: string;
@@ -29,33 +29,34 @@ function safeJsonParse<T>(json: string | null | undefined, fallback: T): T {
 }
 
 export class SqliteRunStore implements RunStore {
-  private db: DatabaseType;
+  private db: any;
 
-  private upsertRunStmt: Statement;
-  private updateActivityStmt: Statement;
-  private completeRunStmt: Statement;
-  private getRunStmt: Statement;
-  private getRunByTaskIdStmt: Statement;
-  private getActiveRunsStmt: Statement;
-  private getTerminalRunsStmt: Statement;
-  private deleteRunStmt: Statement;
+  private upsertRunStmt: any;
+  private updateActivityStmt: any;
+  private completeRunStmt: any;
+  private getRunStmt: any;
+  private getRunByTaskIdStmt: any;
+  private getActiveRunsStmt: any;
+  private getTerminalRunsStmt: any;
+  private deleteRunStmt: any;
 
   constructor(dbPath: string) {
     const dir = dirname(dbPath);
     if (!existsSync(dir)) {
       mkdirSync(dir, { recursive: true });
     }
-    this.db = new Database(dbPath);
-    this.db.pragma("journal_mode = WAL");
-    this.db.pragma("synchronous = NORMAL");
-    this.db.pragma("busy_timeout = 5000");
+    this.db = createDatabase(dbPath);
+    this.db.exec("PRAGMA journal_mode = WAL");
+    this.db.exec("PRAGMA synchronous = NORMAL");
+    this.db.exec("PRAGMA busy_timeout = 5000");
     this.initSchema();
 
     this.upsertRunStmt = this.db.prepare(`
-      INSERT INTO runs (id, task_id, pid, agent_name, adapter_type, status, started_at, updated_at, activity, result, config_path)
-      VALUES (@id, @task_id, @pid, @agent_name, @adapter_type, @status, @started_at, @updated_at, @activity, @result, @config_path)
+      INSERT INTO runs (id, task_id, pid, agent_name, adapter_type, session_id, status, started_at, updated_at, activity, result, config_path)
+      VALUES (@id, @task_id, @pid, @agent_name, @adapter_type, @session_id, @status, @started_at, @updated_at, @activity, @result, @config_path)
       ON CONFLICT(id) DO UPDATE SET
         pid = excluded.pid,
+        session_id = COALESCE(excluded.session_id, runs.session_id),
         status = excluded.status,
         updated_at = excluded.updated_at,
         activity = excluded.activity,
@@ -64,7 +65,7 @@ export class SqliteRunStore implements RunStore {
     `);
 
     this.updateActivityStmt = this.db.prepare(`
-      UPDATE runs SET activity = @activity, updated_at = @updated_at WHERE id = @id
+      UPDATE runs SET activity = @activity, session_id = COALESCE(@session_id, session_id), updated_at = @updated_at WHERE id = @id
     `);
 
     this.completeRunStmt = this.db.prepare(`
@@ -86,6 +87,7 @@ export class SqliteRunStore implements RunStore {
         pid          INTEGER NOT NULL DEFAULT 0,
         agent_name   TEXT NOT NULL,
         adapter_type TEXT NOT NULL,
+        session_id   TEXT,
         status       TEXT NOT NULL DEFAULT 'running',
         started_at   TEXT NOT NULL,
         updated_at   TEXT NOT NULL,
@@ -96,19 +98,30 @@ export class SqliteRunStore implements RunStore {
       CREATE INDEX IF NOT EXISTS idx_runs_status ON runs(status);
       CREATE INDEX IF NOT EXISTS idx_runs_task_id ON runs(task_id);
     `);
+
+    // Migration: add session_id column for existing databases
+    try {
+      this.db.exec(`ALTER TABLE runs ADD COLUMN session_id TEXT`);
+    } catch {
+      // Column already exists — expected for new databases
+    }
   }
 
   private rowToRecord(row: RunRow): RunRecord {
+    const activity = safeJsonParse<AgentActivity>(row.activity, { filesCreated: [], filesEdited: [], toolCalls: 0, lastUpdate: "" });
+    // Prefer first-class column; fall back to value inside activity JSON
+    const sessionId = row.session_id ?? activity.sessionId ?? undefined;
     return {
       id: row.id,
       taskId: row.task_id,
       pid: row.pid,
       agentName: row.agent_name,
       adapterType: row.adapter_type,
+      sessionId,
       status: row.status as RunStatus,
       startedAt: row.started_at,
       updatedAt: row.updated_at,
-      activity: safeJsonParse(row.activity, { filesCreated: [], filesEdited: [], toolCalls: 0, lastUpdate: "" }),
+      activity,
       result: safeJsonParse(row.result, undefined),
       configPath: row.config_path,
     };
@@ -121,6 +134,7 @@ export class SqliteRunStore implements RunStore {
       pid: run.pid,
       agent_name: run.agentName,
       adapter_type: run.adapterType,
+      session_id: run.sessionId ?? run.activity.sessionId ?? null,
       status: run.status,
       started_at: run.startedAt,
       updated_at: run.updatedAt,
@@ -134,6 +148,7 @@ export class SqliteRunStore implements RunStore {
     this.updateActivityStmt.run({
       id: runId,
       activity: JSON.stringify(activity),
+      session_id: activity.sessionId ?? null,
       updated_at: new Date().toISOString(),
     });
   }

@@ -13,6 +13,12 @@ export interface LogEntry {
   ts: number;
 }
 
+export interface ChatEntry {
+  role: "user" | "assistant";
+  content: string;
+  ts: number;
+}
+
 // ─── Overlay Types ──────────────────────────────────────
 
 export type OverlayType =
@@ -59,6 +65,10 @@ export interface TUIStore {
   fullLogLines: string[];
   eventLogLines: string[];
 
+  // Chat
+  chatMessages: ChatEntry[];
+  activeSessionId: string | null;
+
   // Overlay
   activeOverlay: OverlayType;
   overlayProps: Record<string, unknown>;
@@ -81,6 +91,11 @@ export interface TUIStore {
   logAlways(msg: string, segments?: LogSeg[]): void;
   logEvent(msg: string, segments?: LogSeg[]): void;
   clearLogs(): void;
+
+  addChatMessage(entry: ChatEntry): void;
+  setChatMessages(msgs: ChatEntry[]): void;
+  setActiveSessionId(id: string | null): void;
+  clearChat(): void;
 
   setInputMode(mode: "task" | "plan" | "chat"): void;
   toggleMode(): void;
@@ -131,6 +146,10 @@ export const useTUIStore = create<TUIStore>((set, get) => ({
   fullLogLines: [],
   eventLogLines: [],
 
+  // Chat
+  chatMessages: [],
+  activeSessionId: null,
+
   // Overlay
   activeOverlay: null,
   overlayProps: {},
@@ -180,6 +199,16 @@ export const useTUIStore = create<TUIStore>((set, get) => ({
   },
 
   clearLogs: () => set({ logs: [], fullLogLines: [], eventLogLines: [] }),
+
+  addChatMessage: (entry) => set((s) => {
+    const chatMessages = s.chatMessages.length >= 200
+      ? [...s.chatMessages.slice(-199), entry]
+      : [...s.chatMessages, entry];
+    return { chatMessages };
+  }),
+  setChatMessages: (msgs) => set({ chatMessages: msgs }),
+  setActiveSessionId: (id) => set({ activeSessionId: id }),
+  clearChat: () => set({ chatMessages: [], activeSessionId: null }),
 
   setInputMode: (mode) => set({ inputMode: mode }),
   toggleMode: () => set((s) => {

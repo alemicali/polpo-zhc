@@ -4,5 +4,6 @@ dist/
 .polpo/logs/
 .polpo/state.db*
 .polpo/tmp/
+.polpo/sessions/
 *.log
 .DS_Store

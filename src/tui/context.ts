@@ -23,6 +23,8 @@ export interface TUILogger {
   logAlways(msg: string): void;
   /** Event log (shows in clean mode) */
   logEvent(msg: string): void;
+  /** Write to the chat display area (blessed TUI only, no-op in Ink) */
+  addChatLine?(msg: string): void;
 }
 
 // ─── Command Context ─────────────────────────────────────

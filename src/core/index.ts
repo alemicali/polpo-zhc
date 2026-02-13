@@ -7,6 +7,7 @@ export type { RunStore, RunRecord, RunStatus } from "./run-store.js";
 export type { ConfigStore } from "./config-store.js";
 export type { MemoryStore } from "./memory-store.js";
 export type { LogStore, LogEntry, SessionInfo } from "./log-store.js";
+export type { SessionStore, Session, Message, MessageRole } from "./session-store.js";
 export { Orchestrator, buildRetryPrompt } from "./orchestrator.js";
 export type { OrchestratorOptions, AssessFn } from "./orchestrator.js";
 export { parseConfig, generateTemplate } from "./config.js";

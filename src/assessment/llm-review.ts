@@ -1,7 +1,7 @@
 import { query, createSdkMcpServer, tool } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
 import type { TaskExpectation, DimensionScore, CheckResult } from "../core/types.js";
-import { DEFAULT_DIMENSIONS, buildRubricSection, computeWeightedScore } from "./scoring.js";
+import { DEFAULT_DIMENSIONS, buildRubricSection, computeWeightedScore, computeMedianScores } from "./scoring.js";
 
 /**
  * Injectable function type for LLM queries (used in tests).
@@ -10,7 +10,7 @@ export type LLMQueryFn = (prompt: string, cwd: string) => Promise<string>;
 
 /** Review result shape — matches the submit_review tool schema. */
 interface ReviewPayload {
-  scores: { dimension: string; score: number; reasoning: string }[];
+  scores: { dimension: string; score: number; reasoning: string; evidence?: { file: string; line: number; note: string }[] }[];
   summary: string;
 }
 
@@ -30,12 +30,18 @@ function createReviewServer() {
         `Submit your final structured code review. You MUST call this tool exactly once
 after you have finished reading and analyzing all relevant code files.
 Each dimension must be scored 1-5 based on the rubric provided in the prompt.
+Each reasoning MUST include specific file:line references as evidence.
 Do NOT output the review as plain text — use this tool.`,
         {
           scores: z.array(z.object({
             dimension: z.string().describe("Dimension name from the rubric"),
             score: z.number().int().min(1).max(5).describe("Score 1-5"),
-            reasoning: z.string().describe("Brief reasoning with specific code evidence"),
+            reasoning: z.string().describe("Brief reasoning with specific file:line code evidence"),
+            evidence: z.array(z.object({
+              file: z.string().describe("File path relative to project root"),
+              line: z.number().int().describe("Line number"),
+              note: z.string().describe("What this line demonstrates"),
+            })).optional().describe("Specific code citations backing the score"),
           })).describe("One entry per evaluation dimension"),
           summary: z.string().describe("Overall review summary"),
         },
@@ -73,13 +79,17 @@ INSTRUCTIONS:
    a. Think step-by-step about how the code performs on this dimension.
    b. Reference the rubric to determine the appropriate score (1-5).
    c. Write a brief chain-of-thought reasoning citing specific code evidence.
+   d. Each reasoning MUST include at least one specific file:line reference.
+      Example: "correctness: 4/5 — \`src/auth/jwt.ts:45\` validates token expiry correctly but \`src/middleware/auth.ts:12\` doesn't handle refresh tokens"
+   e. Optionally provide structured evidence entries with file, line, and note.
 4. After evaluating all dimensions, call the submit_review tool with your scores and summary.
 
 IMPORTANT:
 - You MUST call the submit_review tool to deliver your review.
 - You MUST evaluate ALL dimensions: ${dimNames}
 - Each score must be an integer from 1 to 5.
-- Be strict but fair — apply the rubric literally.`;
+- Be strict but fair — apply the rubric literally.
+- Scores without specific code evidence (file:line references) should be considered unreliable.`;
 }
 
 /**
@@ -97,6 +107,7 @@ function buildCheckResult(
       score: Math.max(1, Math.min(5, Math.round(s.score))),
       reasoning: s.reasoning,
       weight: dim?.weight ?? (1 / dimensions.length),
+      evidence: s.evidence,
     };
   });
 
@@ -141,14 +152,99 @@ function tryParseReviewJSON(output: string): ReviewPayload | null {
 }
 
 /**
+ * Run a single reviewer agent. Returns the ReviewPayload or null on failure.
+ */
+async function runSingleReview(
+  reviewPrompt: string,
+  cwd: string,
+  onProgress?: (msg: string) => void,
+): Promise<ReviewPayload | null> {
+  const { server, ref } = createReviewServer();
+
+  let textOutput = "";
+
+  for await (const message of query({
+    prompt: reviewPrompt,
+    options: {
+      cwd,
+      permissionMode: "bypassPermissions",
+      allowDangerouslySkipPermissions: true,
+      maxTurns: 30,
+      persistSession: false,
+      allowedTools: [
+        "Read",
+        "Glob",
+        "Grep",
+        "mcp__reviewer__submit_review",
+      ],
+      mcpServers: {
+        reviewer: server,
+      },
+    },
+  })) {
+    const msg = message as Record<string, unknown>;
+    if (msg.type === "tool_use" || msg.tool_name) {
+      const toolName = (msg.tool_name ?? msg.name ?? "tool") as string;
+      const input = (msg.tool_input ?? msg.input) as Record<string, unknown> | undefined;
+      if (toolName === "Read" && input?.file_path) {
+        const file = String(input.file_path).split("/").pop();
+        onProgress?.(`Reading ${file}`);
+      } else if (toolName === "Glob" && input?.pattern) {
+        onProgress?.(`Searching ${input.pattern}`);
+      } else if (toolName === "Grep" && input?.pattern) {
+        onProgress?.(`Grep: ${String(input.pattern).slice(0, 30)}`);
+      } else if (toolName.includes("submit_review")) {
+        onProgress?.("Submitting review scores...");
+      } else {
+        onProgress?.(`${toolName}...`);
+      }
+    }
+    if (msg.type === "result") {
+      if (msg.subtype === "success" && typeof msg.result === "string") {
+        textOutput = msg.result;
+      }
+    }
+  }
+
+  if (ref.result?.scores && Array.isArray(ref.result.scores) && ref.result.scores.length > 0) {
+    return ref.result;
+  }
+
+  return tryParseReviewJSON(textOutput);
+}
+
+/**
+ * Run a single review with one retry on failure.
+ */
+async function runSingleReviewWithRetry(
+  reviewPrompt: string,
+  cwd: string,
+  onProgress?: (msg: string) => void,
+): Promise<ReviewPayload | null> {
+  try {
+    const result = await runSingleReview(reviewPrompt, cwd, onProgress);
+    if (result) return result;
+  } catch { /* first attempt failed */ }
+
+  // Retry once
+  onProgress?.("Reviewer failed, retrying...");
+  try {
+    return await runSingleReview(reviewPrompt, cwd, onProgress);
+  } catch { /* retry also failed */ }
+
+  return null;
+}
+
+/**
  * Run a G-Eval LLM-as-Judge review.
  *
- * The reviewer agent can read files (Read, Glob, Grep) and must call
- * the `submit_review` MCP tool to deliver structured scores.
+ * Runs 3 independent reviewers in parallel (multi-evaluator consensus).
+ * Falls back to single-reviewer if <2 succeed.
+ * Each reviewer gets one retry on failure before being counted as failed.
  *
- * SAFETY NET: if the evaluator itself fails (can't parse, SDK error, etc.),
- * the task is NOT marked as failed. Evaluator failures default to passed=true
- * so a successful task is never blocked by a broken reviewer.
+ * SAFETY NET: if all evaluators fail, the task is NOT marked as failed.
+ * Evaluator failures default to passed=true so a successful task is never
+ * blocked by a broken reviewer.
  */
 export async function runLLMReview(
   expectation: TaskExpectation,
@@ -163,83 +259,39 @@ export async function runLLMReview(
   const rubricSection = buildRubricSection(dimensions);
   const reviewPrompt = buildReviewPrompt(criteria, rubricSection, dimNames);
 
-  // Create in-process MCP server with submit_review tool
-  const { server, ref } = createReviewServer();
+  onProgress?.("Starting 3 independent review agents...");
 
-  try {
-    let textOutput = "";
-    onProgress?.("Starting code review agent...");
+  const settled = await Promise.allSettled([
+    runSingleReviewWithRetry(reviewPrompt, cwd, onProgress),
+    runSingleReviewWithRetry(reviewPrompt, cwd, onProgress),
+    runSingleReviewWithRetry(reviewPrompt, cwd, onProgress),
+  ]);
 
-    for await (const message of query({
-      prompt: reviewPrompt,
-      options: {
-        cwd,
-        permissionMode: "bypassPermissions",
-        allowDangerouslySkipPermissions: true,
-        maxTurns: 30,
-        persistSession: false,
-        allowedTools: [
-          "Read",
-          "Glob",
-          "Grep",
-          "mcp__reviewer__submit_review",
-        ],
-        mcpServers: {
-          reviewer: server,
-        },
-      },
-    })) {
-      const msg = message as Record<string, unknown>;
-      // Emit progress on tool use
-      if (msg.type === "tool_use" || msg.tool_name) {
-        const toolName = (msg.tool_name ?? msg.name ?? "tool") as string;
-        const input = (msg.tool_input ?? msg.input) as Record<string, unknown> | undefined;
-        if (toolName === "Read" && input?.file_path) {
-          const file = String(input.file_path).split("/").pop();
-          onProgress?.(`Reading ${file}`);
-        } else if (toolName === "Glob" && input?.pattern) {
-          onProgress?.(`Searching ${input.pattern}`);
-        } else if (toolName === "Grep" && input?.pattern) {
-          onProgress?.(`Grep: ${String(input.pattern).slice(0, 30)}`);
-        } else if (toolName.includes("submit_review")) {
-          onProgress?.("Submitting review scores...");
-        } else {
-          onProgress?.(`${toolName}...`);
-        }
-      }
-      if (msg.type === "result") {
-        if (msg.subtype === "success" && typeof msg.result === "string") {
-          textOutput = msg.result;
-        }
-      }
+  const successfulReviews: ReviewPayload[] = [];
+  for (const result of settled) {
+    if (result.status === "fulfilled" && result.value) {
+      successfulReviews.push(result.value);
     }
-
-    // Primary: MCP tool was called — use captured result
-    if (ref.result?.scores && Array.isArray(ref.result.scores) && ref.result.scores.length > 0) {
-      return buildCheckResult(ref.result, dimensions, threshold);
-    }
-
-    // Fallback: try to parse JSON from agent's text output
-    const parsed = tryParseReviewJSON(textOutput);
-    if (parsed) {
-      return buildCheckResult(parsed, dimensions, threshold);
-    }
-
-    // SAFETY NET: evaluator couldn't produce structured output → don't block the task
-    return {
-      type: "llm_review",
-      passed: true,
-      message: "Review inconclusive (evaluator could not produce structured output) — defaulting to pass",
-      details: textOutput.slice(0, 500),
-    };
-  } catch (err: unknown) {
-    // SAFETY NET: evaluator crashed → don't block the task
-    const msg = err instanceof Error ? err.message : String(err);
-    return {
-      type: "llm_review",
-      passed: true,
-      message: "Review skipped (evaluator error) — defaulting to pass",
-      details: msg.slice(0, 500),
-    };
   }
+
+  // Enough reviews for consensus
+  if (successfulReviews.length >= 2) {
+    onProgress?.(`Computing consensus from ${successfulReviews.length} reviewers...`);
+    const consensus = computeMedianScores(successfulReviews, dimensions);
+    return buildCheckResult(consensus, dimensions, threshold);
+  }
+
+  // Single successful review — use it directly
+  if (successfulReviews.length === 1) {
+    onProgress?.("Only 1 reviewer succeeded, using single review...");
+    return buildCheckResult(successfulReviews[0], dimensions, threshold);
+  }
+
+  // SAFETY NET: all evaluators failed → don't block the task
+  return {
+    type: "llm_review",
+    passed: true,
+    message: "Review inconclusive (all evaluators failed) — defaulting to pass",
+    details: "All 3 reviewers failed to produce structured output after retries.",
+  };
 }

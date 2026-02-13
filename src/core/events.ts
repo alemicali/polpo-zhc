@@ -11,7 +11,7 @@ export interface OrchestraEventMap {
 
   // Agent lifecycle
   "agent:spawned": { taskId: string; agentName: string; adapter: string; taskTitle: string };
-  "agent:finished": { taskId: string; agentName: string; exitCode: number; duration: number };
+  "agent:finished": { taskId: string; agentName: string; exitCode: number; duration: number; sessionId?: string };
   "agent:activity": { taskId: string; agentName: string; tool?: string; file?: string; summary?: string };
 
   // Assessment
@@ -54,6 +54,10 @@ export interface OrchestraEventMap {
   "plan:completed": { planId: string; group: string; allPassed: boolean; report: PlanReport };
   "plan:resumed": { planId: string; name: string; retried: number; pending: number };
   "plan:deleted": { planId: string };
+
+  // Chat sessions
+  "session:created": { sessionId: string; title?: string };
+  "message:added": { sessionId: string; messageId: string; role: "user" | "assistant" };
 
   // General
   "log": { level: "info" | "warn" | "error" | "debug"; message: string };

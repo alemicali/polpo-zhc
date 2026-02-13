@@ -14,7 +14,7 @@ export function cmdConfig(ctx: CommandContext): void {
 }
 
 function showConfigMenu(ctx: CommandContext): void {
-  const { overlay, cleanup } = createOverlay(ctx);
+  const { overlay, cleanup, onKeypress } = createOverlay(ctx);
 
   const modelLabel = ctx.config.model
     ? MODELS.find(m => m.value === ctx.config.model)?.label ?? ctx.config.model
@@ -54,7 +54,7 @@ function showConfigMenu(ctx: CommandContext): void {
       selected: { bg: "blue", fg: "white", bold: true },
       item: { bg: "black" },
     },
-    keys: true,
+    keys: false,
     vi: false,
     mouse: true,
   });
@@ -176,7 +176,16 @@ function showConfigMenu(ctx: CommandContext): void {
     if (cfgReady) doConfigSelect(index);
   });
 
-  configBox.on("cancel", cleanup);
+  onKeypress((_ch, key) => {
+    if (!key) return;
+    if (key.name === "escape") { cleanup(); return; }
+    if (key.name === "up") { configBox.up(1); ctx.scheduleRender(); return; }
+    if (key.name === "down") { configBox.down(1); ctx.scheduleRender(); return; }
+    if (key.name === "return" || key.name === "enter") {
+      if (!cfgReady) return;
+      doConfigSelect((configBox as any).selected ?? 0);
+    }
+  });
 }
 
 /** Show a picker sub-menu inside the config overlay */
@@ -194,9 +203,19 @@ export function showConfigPicker(
   });
 
   const isStandalone = parent === ctx.screen;
-  const pickerOverlay = isStandalone
-    ? blessed.box({ parent: ctx.screen, top: 0, left: 0, width: "100%", height: "100%", style: { bg: "black" } })
-    : null;
+
+  // Standalone mode: use full createOverlay pattern
+  // Nested mode: render inside parent overlay
+  let pickerOverlay: blessed.Widgets.BoxElement | null = null;
+  let overlayCleanup: (() => void) | null = null;
+  let overlayOnKeypress: ((handler: (ch: string, key: any) => void) => void) | null = null;
+
+  if (isStandalone) {
+    const ov = createOverlay(ctx);
+    pickerOverlay = ov.overlay;
+    overlayCleanup = ov.cleanup;
+    overlayOnKeypress = ov.onKeypress;
+  }
   const renderParent = pickerOverlay ?? parent;
 
   const picker = blessed.list({
@@ -229,13 +248,13 @@ export function showConfigPicker(
   ctx.scheduleRender();
 
   const pickerCleanup = () => {
-    ctx.screen.removeListener("keypress", kh);
-    if (pickerOverlay) {
-      pickerOverlay.destroy();
+    if (overlayCleanup) {
+      overlayCleanup();
     } else {
+      ctx.screen.removeListener("keypress", kh);
       picker.destroy();
+      ctx.scheduleRender();
     }
-    ctx.scheduleRender();
   };
 
   const doSelect = (index: number) => {
@@ -261,7 +280,12 @@ export function showConfigPicker(
     if (key.name === "down") { picker.down(1); ctx.scheduleRender(); return; }
     if (key.name === "return" || key.name === "enter") { doSelect((picker as any).selected ?? 0); }
   };
-  ctx.screen.on("keypress", kh);
+
+  if (overlayOnKeypress) {
+    overlayOnKeypress(kh);
+  } else {
+    ctx.screen.on("keypress", kh);
+  }
 }
 
 /** Sync judgeModel from TUI config into orchestrator settings.orchestratorModel */

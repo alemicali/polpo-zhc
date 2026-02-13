@@ -13,6 +13,11 @@ import type { OrchestraState, Task, TaskStatus } from "../core/types.js";
 import "../adapters/claude-sdk.js";
 import "../adapters/generic.js";
 
+/** Detect if running under Bun runtime */
+function isBunRuntime(): boolean {
+  return typeof process !== "undefined" && !!(process.versions as any)?.bun;
+}
+
 /** Wire orchestrator events to console output with chalk formatting. */
 function wireConsoleEvents(orchestrator: Orchestrator): void {
   orchestrator.on("orchestrator:started", ({ project, agents }) => {
@@ -449,11 +454,17 @@ program
   .description("Launch the interactive TUI (default)")
   .option("-c, --config <path>", "Path to working directory", ".")
   .option("--legacy", "Use legacy blessed TUI", false)
+  .option("--opentui", "Use OpenTUI (requires Bun runtime)", false)
   .action(async (opts) => {
     if (opts.legacy) {
       const { OrchestraTUI } = await import("../tui/index.js");
       const tui = new OrchestraTUI(opts.config);
       await tui.start();
+    } else if (opts.opentui || (!opts.legacy && isBunRuntime())) {
+      // Dynamic path prevents tsc from resolving tui-opentui (Bun-only, excluded from Node build)
+      const modPath = "../tui-opentui/app.js";
+      const { startOpenTUI } = (await import(modPath)) as { startOpenTUI: (workDir: string) => Promise<void> };
+      await startOpenTUI(opts.config);
     } else {
       const { startInkTUI } = await import("../tui/app.js");
       await startInkTUI(opts.config);

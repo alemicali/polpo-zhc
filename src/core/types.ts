@@ -20,6 +20,7 @@ export interface DimensionScore {
   score: number;             // 1-5
   reasoning: string;         // chain-of-thought for this score
   weight: number;            // weight used for global score
+  evidence?: { file: string; line: number; note: string }[];
 }
 
 export interface TaskExpectation {
@@ -70,6 +71,7 @@ export interface Task {
   questionRounds?: number;       // Q&A rounds with orchestrator (max default: 2)
   resolutionAttempts?: number;   // deadlock resolution attempts (max default: 2)
   originalDescription?: string;  // preserved before first retry/fix
+  sessionId?: string;            // SDK session ID from the last agent run (for transcript access)
   createdAt: string;
   updatedAt: string;
 }

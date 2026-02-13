@@ -94,10 +94,13 @@ async function main(): Promise<void> {
   try {
     const result = await handle.done;
     clearInterval(poll);
+    // Final activity + sessionId flush before marking terminal
+    try { runStore.updateActivity(config.runId, handle.activity); } catch { /* best effort */ }
     const status = sigterm ? "killed" : (result.exitCode === 0 ? "completed" : "failed");
     runStore.completeRun(config.runId, status, result);
   } catch (err) {
     clearInterval(poll);
+    try { runStore.updateActivity(config.runId, handle.activity); } catch { /* best effort */ }
     runStore.completeRun(config.runId, "failed", errorResult(err));
   }
 

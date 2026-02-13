@@ -15,7 +15,7 @@ import { mkdirSync, rmSync, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomBytes } from "node:crypto";
-import { Orchestrator } from "../../orchestrator.js";
+import { Orchestrator } from "../../core/orchestrator.js";
 
 // Claude SDK uses auth from ~/.claude (same as Claude Code CLI) — no env var needed.
 // Only gate on INTEGRATION_TEST to avoid running in CI or on every `npm test`.

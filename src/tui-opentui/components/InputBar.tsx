@@ -1,8 +1,15 @@
-import { Box, Text, useInput } from "ink";
-import { useTUIStore } from "../store.js";
-import type { CommandContext } from "../context.js";
-import { SLASH_COMMANDS } from "../constants.js";
+import { useKeyboard } from "@opentui/react";
+import { useTUIStore } from "../../tui/store.js";
+import type { CommandContext } from "../../tui/context.js";
+import { SLASH_COMMANDS } from "../../tui/constants.js";
 
+// OpenTUI KeyEvent uses: name, sequence, ctrl, meta, shift, option
+// NO "char" or "alt" properties — use sequence for printable chars, meta for Alt
+
+/** Is this a printable character event? */
+function isPrintable(key: { sequence: string; ctrl: boolean; meta: boolean }): boolean {
+  return key.sequence.length === 1 && key.sequence >= " " && !key.ctrl && !key.meta;
+}
 
 /** Build a CommandContext that bridges the Zustand store to the old command interface */
 export function buildCommandContext(): CommandContext {
@@ -29,15 +36,15 @@ export function buildCommandContext(): CommandContext {
 }
 
 /**
- * Input box — cyan-bordered, height 3 — matches old blessed TUI.
- * When processing, the input content is empty (status line handles shimmer).
+ * Input box — cyan-bordered, height 3.
+ * Uses OpenTUI useKeyboard for text entry with keyboard handling for commands.
  */
 export function InputBar({ width }: { width: number }) {
   // Render subscriptions — trigger re-render when these change
   const buffer = useTUIStore((s) => s.inputBuffer);
   const processing = useTUIStore((s) => s.processing);
 
-  useInput((input, key) => {
+  useKeyboard((key) => {
     // Always read latest state to avoid stale closures
     const s = useTUIStore.getState();
     if (s.activeOverlay) return;
@@ -45,21 +52,21 @@ export function InputBar({ width }: { width: number }) {
 
     const buf = s.inputBuffer;
 
-    // If command menu is open, handle all menu navigation here
+    // If command menu is open, handle menu navigation
     if (s.menuType) {
-      if (key.escape) {
+      if (key.name === "escape") {
         s.setMenu(null);
         return;
       }
-      if (key.upArrow) {
+      if (key.name === "up") {
         s.setMenuIndex(Math.max(0, s.menuIndex - 1));
         return;
       }
-      if (key.downArrow) {
+      if (key.name === "down") {
         s.setMenuIndex(Math.min(s.menuItems.length - 1, s.menuIndex + 1));
         return;
       }
-      if (key.return) {
+      if (key.name === "return") {
         const item = s.menuItems[s.menuIndex];
         if (!item) return;
         s.setMenu(null);
@@ -67,7 +74,7 @@ export function InputBar({ width }: { width: number }) {
 
         if (s.menuType === "command") {
           s.setInputBuffer("");
-          import("../commands/router-ink.js").then(({ dispatchInkCommand }) => {
+          import("../../tui/commands/router-ink.js").then(({ dispatchInkCommand }) => {
             const handled = dispatchInkCommand(item.value);
             if (!handled) {
               s.logAlways(`Unknown command: ${item.value}`);
@@ -84,21 +91,21 @@ export function InputBar({ width }: { width: number }) {
         return;
       }
       // Backspace: close menu and delete from buffer
-      if (key.backspace || key.delete) {
+      if (key.name === "backspace" || key.name === "delete") {
         s.setMenu(null);
         s.setInputBuffer(buf.slice(0, -1));
         return;
       }
-      // Any other char: close menu, fall through to input
-      if (input && !key.ctrl && !key.meta) {
+      // Any printable char: close menu, fall through
+      if (isPrintable(key)) {
         s.setMenu(null);
-        // Fall through to regular input below
+        // Fall through to regular input
       } else {
         return;
       }
     }
 
-    if (key.return) {
+    if (key.name === "return") {
       if (buf.trim()) {
         handleSubmit(buf.trim());
         s.setInputBuffer("");
@@ -106,29 +113,30 @@ export function InputBar({ width }: { width: number }) {
       return;
     }
 
-    if (key.escape) {
+    if (key.name === "escape") {
       s.setInputBuffer("");
       s.setMenu(null);
       return;
     }
 
-    if (key.backspace || key.delete) {
+    if (key.name === "backspace" || key.name === "delete") {
       s.setInputBuffer(buf.slice(0, -1));
       return;
     }
 
     // Regular character input
-    if (input && !key.ctrl && !key.meta) {
-      const newBuf = buf + input;
+    if (isPrintable(key)) {
+      const ch = key.sequence;
+      const newBuf = buf + ch;
       s.setInputBuffer(newBuf);
 
-      // "/" at start → open command menu
+      // "/" at start -> open command menu
       if (newBuf.startsWith("/")) {
         openCommandMenu(newBuf);
       }
 
-      // "@" → open mention menu
-      if (input === "@") {
+      // "@" -> open mention menu
+      if (ch === "@") {
         openMentionMenu();
       }
     }
@@ -171,7 +179,7 @@ export function InputBar({ width }: { width: number }) {
     const state = useTUIStore.getState();
 
     if (text.startsWith("/")) {
-      const { dispatchInkCommand } = await import("../commands/router-ink.js");
+      const { dispatchInkCommand } = await import("../../tui/commands/router-ink.js");
       const handled = dispatchInkCommand(text);
       if (!handled) {
         state.logAlways(`Unknown command: ${text}`);
@@ -181,21 +189,21 @@ export function InputBar({ width }: { width: number }) {
 
     if (state.inputMode === "chat") {
       const ctx = buildCommandContext();
-      const { handleChatInput } = await import("../commands/chat-ink.js");
+      const { handleChatInput } = await import("../../tui/commands/chat-ink.js");
       await handleChatInput(ctx, text);
       return;
     }
 
     if (state.inputMode === "plan") {
       const ctx = buildCommandContext();
-      const { handlePlanInput } = await import("../commands/plan-ink.js");
+      const { handlePlanInput } = await import("../../tui/commands/plan-ink.js");
       await handlePlanInput(ctx, text);
       return;
     }
 
     // Task mode — submit as task
     const ctx = buildCommandContext();
-    const { prepareTask, fallbackDirectCreate } = await import("../commands/task-prep-ink.js");
+    const { prepareTask, fallbackDirectCreate } = await import("../../tui/commands/task-prep-ink.js");
     try {
       state.setProcessing(true, "Preparing task...");
       await prepareTask(ctx, text, state.defaultAgent);
@@ -212,24 +220,23 @@ export function InputBar({ width }: { width: number }) {
   const topBorder = `┌${"─".repeat(innerW)}┐`;
   const bottomBorder = `└${"─".repeat(innerW)}┘`;
 
-  // Content line (1 line inside the bordered box)
+  // Content line
   let content: string;
   if (processing) {
-    content = ""; // Empty when processing (StatusLine shows shimmer above)
+    content = "";
   } else {
     content = ` ${buffer}█`;
   }
-  const paddedContent = content.slice(0, innerW).padEnd(innerW);
 
   return (
-    <Box flexDirection="column" width={width} height={3}>
-      <Text color="grey">{topBorder}</Text>
-      <Text>
-        <Text color="grey">│</Text>
-        <Text>{paddedContent}</Text>
-        <Text color="grey">│</Text>
-      </Text>
-      <Text color="grey">{bottomBorder}</Text>
-    </Box>
+    <box style={{ flexDirection: "column", width, height: 3 }}>
+      <text fg="#888888">{topBorder}</text>
+      <text>
+        <span fg="#888888">│</span>
+        <span>{content.slice(0, innerW).padEnd(innerW)}</span>
+        <span fg="#888888">│</span>
+      </text>
+      <text fg="#888888">{bottomBorder}</text>
+    </box>
   );
 }

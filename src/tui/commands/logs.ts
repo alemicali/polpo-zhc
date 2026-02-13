@@ -25,7 +25,7 @@ export function cmdLogs(ctx: CommandContext): void {
 }
 
 function showSessionPicker(ctx: CommandContext, sessions: SessionInfo[]): void {
-  const { overlay, cleanup } = createOverlay(ctx);
+  const { overlay, cleanup, onKeypress } = createOverlay(ctx);
 
   const currentSessionId = ctx.orchestrator.getLogStore()?.getSessionId();
 
@@ -55,7 +55,7 @@ function showSessionPicker(ctx: CommandContext, sessions: SessionInfo[]): void {
       selected: { bg: "blue", fg: "white", bold: true },
       item: { bg: "black" },
     },
-    keys: true,
+    keys: false,
     vi: false,
     mouse: true,
     scrollable: true,
@@ -78,7 +78,17 @@ function showSessionPicker(ctx: CommandContext, sessions: SessionInfo[]): void {
     showSessionEntries(ctx, sessions[index]);
   });
 
-  list.on("cancel", cleanup);
+  onKeypress((_ch, key) => {
+    if (!key) return;
+    if (key.name === "escape") { cleanup(); return; }
+    if (key.name === "up") { list.up(1); ctx.scheduleRender(); return; }
+    if (key.name === "down") { list.down(1); ctx.scheduleRender(); return; }
+    if (key.name === "return" || key.name === "enter") {
+      if (!ready) return;
+      cleanup();
+      showSessionEntries(ctx, sessions[(list as any).selected ?? 0]);
+    }
+  });
 }
 
 function showSessionEntries(ctx: CommandContext, session: SessionInfo): void {
@@ -145,7 +155,8 @@ function summarizeEvent(event: string, data: unknown): string {
       return `{bold}${esc(d.taskTitle ?? "")}{/bold} {grey-fg}→ ${esc(d.agentName ?? "")}{/grey-fg}`;
     case "agent:finished": {
       const secs = d.duration ? (d.duration / 1000).toFixed(1) : "?";
-      return `${esc(d.agentName ?? "")} {grey-fg}exit ${d.exitCode} (${secs}s){/grey-fg}`;
+      const sid = d.sessionId ? ` {cyan-fg}${d.sessionId}{/cyan-fg}` : "";
+      return `${esc(d.agentName ?? "")} {grey-fg}exit ${d.exitCode} (${secs}s){/grey-fg}${sid}`;
     }
     case "assessment:complete": {
       const score = d.globalScore !== undefined ? ` (${d.globalScore.toFixed(1)}/5)` : "";

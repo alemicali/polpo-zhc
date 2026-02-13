@@ -1,17 +1,29 @@
-import { Box, Text } from "ink";
-import { useTUIStore } from "../store.js";
+import { useTUIStore } from "../../tui/store.js";
 import type { Task, TaskStatus } from "../../core/types.js";
-import { formatElapsed } from "../formatters.js";
+import { formatElapsed } from "../../tui/formatters.js";
 
 const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
+// Blessed TUI color scheme (hex for OpenTUI)
+const C = {
+  grey: "#888888",
+  dimGrey: "#888888",
+  cyan: "#00FFFF",
+  green: "#00FF00",
+  red: "#FF0000",
+  yellow: "#FFFF00",
+  magenta: "#FF00FF",
+  blue: "#0088FF",
+  white: "#FFFFFF",
+} as const;
+
 /** A colored segment within a line */
-type Seg = { text: string; color?: string; bold?: boolean; dim?: boolean };
+type Seg = { text: string; fg?: string; bold?: boolean };
 /** A line is an array of colored segments */
 type Line = Seg[];
 
-function seg(text: string, color?: string, bold?: boolean, dim?: boolean): Seg {
-  return { text, color, bold, dim };
+function seg(text: string, fg?: string, bold?: boolean): Seg {
+  return { text, fg, bold };
 }
 
 function getStatusIcon(status: TaskStatus): string {
@@ -27,18 +39,17 @@ function getStatusIcon(status: TaskStatus): string {
 
 function getStatusColor(status: TaskStatus): string {
   switch (status) {
-    case "pending": return "grey";
-    case "assigned": return "cyan";
-    case "in_progress": return "yellow";
-    case "review": return "blue";
-    case "done": return "green";
-    case "failed": return "red";
+    case "pending": return C.grey;
+    case "assigned": return C.cyan;
+    case "in_progress": return C.yellow;
+    case "review": return C.blue;
+    case "done": return C.green;
+    case "failed": return C.red;
   }
 }
 
 /**
- * Task panel — grey-bordered (matching blessed TUI), label "Tasks".
- * Shows summary, progress bar, plan groups, activity lines, blinking icons.
+ * Task panel — grey-bordered (matching blessed TUI), with plan groups, activity, blinking icons.
  */
 export function TaskPanel({ width, height }: { width: number; height: number }) {
   const state = useTUIStore((s) => s.state);
@@ -49,7 +60,7 @@ export function TaskPanel({ width, height }: { width: number; height: number }) 
   const innerW = Math.max(1, width - 2);
   const innerH = Math.max(1, height - 2);
 
-  // Build top border with label — grey borders, bold white label (blessed style)
+  // Build borders
   const labelText = " Tasks ";
   const topRight = Math.max(0, innerW - labelText.length - 1);
   const bottomBorder = `└${"─".repeat(innerW)}┘`;
@@ -58,10 +69,10 @@ export function TaskPanel({ width, height }: { width: number; height: number }) 
   const lines: Line[] = [];
 
   if (tasks.length === 0) {
-    lines.push([seg("  No tasks yet", "grey")]);
+    lines.push([seg("  No tasks yet", C.grey)]);
     lines.push([seg("")]);
-    lines.push([seg("  Type a task description", "grey")]);
-    lines.push([seg("  below and press Enter.", "grey")]);
+    lines.push([seg("  Type a task description", C.grey)]);
+    lines.push([seg("  below and press Enter.", C.grey)]);
   } else {
     const spin = SPINNER[frame % SPINNER.length]!;
     const blinkPhase = frame % 3;
@@ -70,28 +81,28 @@ export function TaskPanel({ width, height }: { width: number; height: number }) 
     const counts: Record<string, number> = {};
     for (const t of tasks) counts[t.status] = (counts[t.status] || 0) + 1;
 
-    // Summary line with colored counts
+    // Summary line
     const summarySegs: Seg[] = [seg(" ")];
     if (counts["done"]) {
-      if (summarySegs.length > 1) summarySegs.push(seg(" ", "grey"));
-      summarySegs.push(seg(`${counts["done"]}`, "green", true));
-      summarySegs.push(seg(" done", "grey"));
+      if (summarySegs.length > 1) summarySegs.push(seg("  ", C.grey));
+      summarySegs.push(seg(`${counts["done"]}`, C.green, true));
+      summarySegs.push(seg(" done", C.grey));
     }
     const running = (counts["in_progress"] || 0) + (counts["assigned"] || 0) + (counts["review"] || 0);
     if (running) {
-      if (summarySegs.length > 1) summarySegs.push(seg("  ", "grey"));
-      summarySegs.push(seg(`${running}`, "yellow", true));
-      summarySegs.push(seg(" running", "grey"));
+      if (summarySegs.length > 1) summarySegs.push(seg("  ", C.grey));
+      summarySegs.push(seg(`${running}`, C.yellow, true));
+      summarySegs.push(seg(" running", C.grey));
     }
     if (counts["pending"]) {
-      if (summarySegs.length > 1) summarySegs.push(seg("  ", "grey"));
-      summarySegs.push(seg(`${counts["pending"]}`, "grey"));
-      summarySegs.push(seg(" pending", "grey"));
+      if (summarySegs.length > 1) summarySegs.push(seg("  ", C.grey));
+      summarySegs.push(seg(`${counts["pending"]}`, C.grey));
+      summarySegs.push(seg(" pending", C.grey));
     }
     if (counts["failed"]) {
-      if (summarySegs.length > 1) summarySegs.push(seg("  ", "grey"));
-      summarySegs.push(seg(`${counts["failed"]}`, "red", true));
-      summarySegs.push(seg(" failed", "grey"));
+      if (summarySegs.length > 1) summarySegs.push(seg("  ", C.grey));
+      summarySegs.push(seg(`${counts["failed"]}`, C.red, true));
+      summarySegs.push(seg(" failed", C.grey));
     }
     lines.push(summarySegs);
 
@@ -105,14 +116,14 @@ export function TaskPanel({ width, height }: { width: number; height: number }) 
     const redFill = Math.round((failN / total) * barLen);
     const grayFill = Math.max(0, barLen - greenFill - redFill);
     const barSegs: Seg[] = [seg(" ")];
-    if (greenFill > 0) barSegs.push(seg("█".repeat(greenFill), "green"));
-    if (redFill > 0) barSegs.push(seg("█".repeat(redFill), "red"));
-    if (grayFill > 0) barSegs.push(seg("░".repeat(grayFill), "grey"));
-    barSegs.push(seg(` ${pct}%`, undefined, false, true));
+    if (greenFill > 0) barSegs.push(seg("█".repeat(greenFill), C.green));
+    if (redFill > 0) barSegs.push(seg("█".repeat(redFill), C.red));
+    if (grayFill > 0) barSegs.push(seg("░".repeat(grayFill), C.grey));
+    barSegs.push(seg(` ${pct}%`, C.dimGrey));
     lines.push(barSegs);
     lines.push([seg("")]);
 
-    // Build chronological entries: standalone tasks + plan groups
+    // Build entries: standalone tasks + plan groups
     type Entry =
       | { type: "task"; task: Task; ts: string }
       | { type: "group"; name: string; tasks: Task[]; ts: string };
@@ -151,20 +162,17 @@ export function TaskPanel({ width, height }: { width: number; height: number }) 
       return title.length > max ? title.slice(0, max - 1) + "…" : title;
     };
 
-    const renderTaskLine = (task: Task, indent: string) => {
+    const renderTaskLine = (task: Task, indent: string, indentColor: string = C.grey) => {
       const { icon, color: iconColor } = taskIcon(task);
       const segs: Seg[] = [];
 
-      // Indent (grey for plan group borders)
       if (indent) {
-        segs.push(seg(indent, "grey"));
+        segs.push(seg(indent, indentColor));
       }
 
-      // Colored icon
       segs.push(seg(icon, iconColor));
       segs.push(seg(" "));
 
-      // Title
       const score = task.result?.assessment?.globalScore;
       let phaseTag = "";
       if (task.phase === "fix") phaseTag = ` fix ${task.fixAttempts ?? 1}`;
@@ -174,16 +182,14 @@ export function TaskPanel({ width, height }: { width: number; height: number }) 
       const title = truncTitle(task.title, innerW - overhead);
       segs.push(seg(title));
 
-      // Phase tag
       if (task.phase === "fix") {
-        segs.push(seg(` fix ${task.fixAttempts ?? 1}`, "magenta"));
+        segs.push(seg(` fix ${task.fixAttempts ?? 1}`, C.magenta));
       } else if (task.phase === "review") {
-        segs.push(seg(" review", "yellow"));
+        segs.push(seg(" review", C.yellow));
       }
 
-      // Score
       if (score !== undefined) {
-        const scoreColor = score >= 4 ? "green" : score >= 3 ? "yellow" : "red";
+        const scoreColor = score >= 4 ? C.green : score >= 3 ? C.yellow : C.red;
         segs.push(seg(` ${score.toFixed(1)}`, scoreColor));
       }
 
@@ -203,16 +209,16 @@ export function TaskPanel({ width, height }: { width: number; height: number }) 
         if (fCount > 0) actParts.push(`${fCount} files`);
         if (actParts.length > 0) {
           const actSegs: Seg[] = [];
-          if (indent) actSegs.push(seg(indent, "grey"));
+          if (indent) actSegs.push(seg(indent, indentColor));
           actSegs.push(seg("  "));
-          actSegs.push(seg(spin, "cyan"));
-          actSegs.push(seg(` ${actParts.join(" · ")}`, "grey"));
+          actSegs.push(seg(spin, C.cyan));
+          actSegs.push(seg(` ${actParts.join(" · ")}`, C.grey));
           lines.push(actSegs);
         }
       }
     };
 
-    const renderTaskList = (taskList: Task[], baseIndent: string) => {
+    const renderTaskList = (taskList: Task[], baseIndent: string, indentColor: string = C.grey) => {
       const order: Record<string, number> = {
         in_progress: 0, assigned: 0, review: 0,
         pending: 1, done: 2, failed: 3,
@@ -222,7 +228,7 @@ export function TaskPanel({ width, height }: { width: number; height: number }) 
       );
 
       for (const task of sorted) {
-        renderTaskLine(task, baseIndent);
+        renderTaskLine(task, baseIndent, indentColor);
         const localDeps = (task.dependsOn || []).filter((d) =>
           taskList.some((t) => t.id === d && t.status !== "done"),
         );
@@ -232,14 +238,13 @@ export function TaskPanel({ width, height }: { width: number; height: number }) 
             return dep ? dep.title.slice(0, 15) : d.slice(0, 6);
           });
           lines.push([
-            seg(baseIndent, "grey"),
-            seg(`  ⏳ after: ${depNames.join(", ")}`, "grey"),
+            seg(baseIndent, indentColor),
+            seg(`  ⏳ after: ${depNames.join(", ")}`, C.grey),
           ]);
         }
       }
     };
 
-    // Render entries in chronological order
     for (const entry of entries) {
       if (entry.type === "task") {
         renderTaskLine(entry.task, " ");
@@ -264,18 +269,18 @@ export function TaskPanel({ width, height }: { width: number; height: number }) 
         const groupStatus = allTerminal
           ? gFailed > 0 ? "FAILED" : "DONE"
           : "RUNNING";
-        const statusColor = groupStatus === "DONE" ? "green" : groupStatus === "FAILED" ? "red" : "yellow";
+        const statusColor = groupStatus === "DONE" ? C.green : groupStatus === "FAILED" ? C.red : C.yellow;
 
         lines.push([
-          seg(" ┌", "grey"),
+          seg(" ┌", C.cyan),
           seg(" "),
           seg(entry.name, undefined, true),
-          seg(` ${gDone}/${gTotal} `, "grey"),
+          seg(` ${gDone}/${gTotal} `, C.grey),
           seg(groupStatus, statusColor),
-          seg(` ${elapsedStr}`, "grey"),
+          seg(` ${elapsedStr}`, C.grey),
         ]);
-        renderTaskList(groupTasks, " │ ");
-        lines.push([seg(` └${"─".repeat(Math.max(1, innerW - 2))}`, "grey")]);
+        renderTaskList(groupTasks, " │ ", C.cyan);
+        lines.push([seg(` └${"─".repeat(Math.max(1, innerW - 2))}`, C.cyan)]);
       }
     }
   }
@@ -291,66 +296,61 @@ export function TaskPanel({ width, height }: { width: number; height: number }) 
   const scrollbarPos = canScroll ? Math.round((scrollOffset / (totalLines - innerH)) * (innerH - scrollbarH)) : 0;
 
   return (
-    <Box flexDirection="column" width={width} height={height}>
-      {/* Top border with label */}
-      <Text>
-        <Text color="grey">┌</Text>
-        <Text bold> Tasks </Text>
-        <Text color="grey">{"─".repeat(topRight)}┐</Text>
-      </Text>
+    <box style={{ flexDirection: "column", width, height }}>
+      {/* Top border with label — grey border, bold white label */}
+      <text>
+        <span fg={C.grey}>┌</span>
+        <span bold>{labelText}</span>
+        <span fg={C.grey}>{"─".repeat(topRight)}┐</span>
+      </text>
       {/* Content rows */}
-      <Box flexDirection="column" height={innerH}>
-        {visibleLines.map((segs, i) => {
-          const showScrollbar = canScroll && i >= scrollbarPos && i < scrollbarPos + scrollbarH;
+      {visibleLines.map((segs, i) => {
+        const showScrollbar = canScroll && i >= scrollbarPos && i < scrollbarPos + scrollbarH;
+        return (
+          <text key={i}>
+            <span fg={C.grey}>│</span>
+            <RenderSegments segs={segs} maxW={innerW - (canScroll ? 1 : 0)} />
+            {canScroll ? (
+              <span fg={C.grey}>{showScrollbar ? "┃" : " "}</span>
+            ) : null}
+            <span fg={C.grey}>│</span>
+          </text>
+        );
+      })}
+      {/* Fill remaining empty lines */}
+      {Array.from({ length: Math.max(0, innerH - visibleLines.length) }).map(
+        (_, i) => {
+          const row = visibleLines.length + i;
+          const showScrollbar = canScroll && row >= scrollbarPos && row < scrollbarPos + scrollbarH;
           return (
-            <Text key={i}>
-              <Text color="grey">│</Text>
-              <RenderSegments segs={segs} maxW={innerW - (canScroll ? 1 : 0)} />
+            <text key={`empty-${i}`}>
+              <span fg={C.grey}>│</span>
+              {" ".repeat(innerW - (canScroll ? 1 : 0))}
               {canScroll ? (
-                <Text color="grey">{showScrollbar ? "┃" : " "}</Text>
+                <span fg={C.grey}>{showScrollbar ? "┃" : " "}</span>
               ) : null}
-              <Text color="grey">│</Text>
-            </Text>
+              <span fg={C.grey}>│</span>
+            </text>
           );
-        })}
-        {/* Fill remaining empty lines */}
-        {Array.from({ length: Math.max(0, innerH - visibleLines.length) }).map(
-          (_, i) => {
-            const row = visibleLines.length + i;
-            const showScrollbar = canScroll && row >= scrollbarPos && row < scrollbarPos + scrollbarH;
-            return (
-              <Text key={`empty-${i}`}>
-                <Text color="grey">│</Text>
-                {" ".repeat(innerW - (canScroll ? 1 : 0))}
-                {canScroll ? (
-                  <Text color="grey">{showScrollbar ? "┃" : " "}</Text>
-                ) : null}
-                <Text color="grey">│</Text>
-              </Text>
-            );
-          },
-        )}
-      </Box>
+        },
+      )}
       {/* Bottom border */}
-      <Text color="grey">{bottomBorder}</Text>
-    </Box>
+      <text fg={C.grey}>{bottomBorder}</text>
+    </box>
   );
 }
 
 /** Render an array of colored segments, padding to maxW */
 function RenderSegments({ segs, maxW }: { segs: Seg[]; maxW: number }) {
-  // Calculate total visible length
   const totalLen = segs.reduce((sum, s) => sum + s.text.length, 0);
   const pad = Math.max(0, maxW - totalLen);
 
   return (
     <>
       {segs.map((s, i) => (
-        <Text key={i} color={s.color} bold={s.bold} dimColor={s.dim}>
-          {s.text}
-        </Text>
+        <span key={i} fg={s.fg} bold={s.bold}>{s.text}</span>
       ))}
-      {pad > 0 ? <Text>{" ".repeat(pad)}</Text> : null}
+      {pad > 0 ? <span>{" ".repeat(pad)}</span> : null}
     </>
   );
 }

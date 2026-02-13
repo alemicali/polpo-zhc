@@ -1,5 +1,10 @@
 import type { EvalDimension, DimensionScore } from "../core/types.js";
 
+interface ReviewPayload {
+  scores: { dimension: string; score: number; reasoning: string; evidence?: { file: string; line: number; note: string }[] }[];
+  summary: string;
+}
+
 /** Default evaluation dimensions for G-Eval LLM-as-Judge. */
 export const DEFAULT_DIMENSIONS: EvalDimension[] = [
   {
@@ -77,4 +82,63 @@ export function computeWeightedScore(scores: DimensionScore[]): number {
   const totalWeight = scores.reduce((sum, s) => sum + s.weight, 0);
   if (totalWeight === 0) return 0;
   return scores.reduce((sum, s) => sum + Math.max(1, Math.min(5, s.score)) * s.weight, 0) / totalWeight;
+}
+
+function median(values: number[]): number {
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 !== 0 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+
+export function computeMedianScores(reviews: ReviewPayload[], dimensions: EvalDimension[]): ReviewPayload {
+  const dimMap = new Map<string, { scores: number[]; entries: ReviewPayload["scores"][0][] }>();
+  for (const dim of dimensions) {
+    dimMap.set(dim.name, { scores: [], entries: [] });
+  }
+
+  for (const review of reviews) {
+    for (const s of review.scores) {
+      const bucket = dimMap.get(s.dimension);
+      if (bucket) {
+        bucket.scores.push(s.score);
+        bucket.entries.push(s);
+      }
+    }
+  }
+
+  const combinedScores: ReviewPayload["scores"] = [];
+  for (const dim of dimensions) {
+    const bucket = dimMap.get(dim.name);
+    if (!bucket || bucket.scores.length === 0) continue;
+
+    const med = median(bucket.scores);
+
+    // Exclude outliers deviating >1.5 from median
+    const filtered = bucket.entries.filter(e => Math.abs(e.score - med) <= 1.5);
+    const pool = filtered.length > 0 ? filtered : bucket.entries;
+
+    const finalMed = median(pool.map(e => e.score));
+
+    // Pick reasoning from entry closest to median
+    let best = pool[0];
+    let bestDist = Math.abs(best.score - finalMed);
+    for (const e of pool) {
+      const dist = Math.abs(e.score - finalMed);
+      if (dist < bestDist) { best = e; bestDist = dist; }
+    }
+
+    combinedScores.push({
+      dimension: dim.name,
+      score: Math.round(finalMed),
+      reasoning: best.reasoning,
+      evidence: best.evidence,
+    });
+  }
+
+  const summaries = reviews.map(r => r.summary).filter(Boolean);
+  const summary = summaries.length > 0
+    ? `Consensus from ${reviews.length} reviewers: ${summaries[0]}`
+    : `Consensus from ${reviews.length} reviewers`;
+
+  return { scores: combinedScores, summary };
 }

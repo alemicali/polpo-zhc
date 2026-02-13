@@ -21,6 +21,7 @@ import { dispatchCommand } from "./commands/router.js";
 import { handlePlanInput as cmdHandlePlanInput } from "./commands/plan.js";
 import { handleChatInput as cmdHandleChatInput } from "./commands/chat.js";
 import { prepareTask, fallbackDirectCreate } from "./commands/task-prep.js";
+import { useTUIStore } from "./store.js";
 
 // Register adapters
 import "../adapters/claude-sdk.js";
@@ -33,6 +34,9 @@ export class OrchestraTUI {
   // Main UI elements
   private header!: blessed.Widgets.BoxElement;
   private logBox!: blessed.Widgets.Log;
+  private chatBox!: blessed.Widgets.Log;
+  private logOverlay!: blessed.Widgets.Log;
+  private logOverlayVisible = false;
   private taskPanel!: blessed.Widgets.BoxElement;
   private taskListBox!: blessed.Widgets.BoxElement;
   private inputBox!: blessed.Widgets.BoxElement;
@@ -56,6 +60,7 @@ export class OrchestraTUI {
   private processingLabel = "";
   private processingDetail = "";
   private overlayActive = false;
+  private overlayLogSnapshot = 0; // line count when overlay opened
   private menuType: "command" | "agent" | null = null;
   private menuJustClosed = false;
   private verboseLog = false;
@@ -392,27 +397,48 @@ export class OrchestraTUI {
     });
     this.updateHeader();
 
-    // Log area
+    // Log area (no border — visible in task/plan mode)
+    const leftWidth = this.taskPanelVisible ? "65%" : "100%";
     this.logBox = blessed.log({
       parent: this.screen,
       top: 1,
       left: 0,
-      width: this.taskPanelVisible ? "65%" : "100%",
+      width: leftWidth,
       height: "100%-4",
       tags: true,
       scrollable: true,
       alwaysScroll: true,
       scrollbar: { ch: "│", style: { fg: "grey" } },
-      border: { type: "line" },
       style: {
         bg: "black",
-        border: { fg: "grey" },
         scrollbar: { fg: "grey" },
       },
-      label: " {grey-fg}Log{/grey-fg} ",
+      padding: { left: 1 },
       keys: true,
       vi: true,
       mouse: true,
+    }) as blessed.Widgets.Log;
+
+    // Chat area (no border — visible only in chat mode)
+    this.chatBox = blessed.log({
+      parent: this.screen,
+      top: 1,
+      left: 0,
+      width: leftWidth,
+      height: "100%-4",
+      tags: true,
+      scrollable: true,
+      alwaysScroll: true,
+      scrollbar: { ch: "│", style: { fg: "grey" } },
+      style: {
+        bg: "black",
+        scrollbar: { fg: "grey" },
+      },
+      padding: { left: 1 },
+      keys: true,
+      vi: true,
+      mouse: true,
+      hidden: true,
     }) as blessed.Widgets.Log;
 
     // Task panel (right side)
@@ -484,13 +510,13 @@ export class OrchestraTUI {
     });
     this.updateHints();
 
-    // Command menu popup (hidden by default)
+    // Command menu popup (hidden by default, max 12 visible items)
     this.completionBox = blessed.list({
       parent: this.screen,
       bottom: 4,
       left: 1,
       width: Math.min(50, Math.max(30, Math.floor((this.screen.cols as number) * 0.4))),
-      height: Object.keys(SLASH_COMMANDS).length + 2,
+      height: Math.min(Object.keys(SLASH_COMMANDS).length + 2, 14),
       items: [],
       tags: true,
       border: { type: "line" },
@@ -508,7 +534,9 @@ export class OrchestraTUI {
     });
 
     // Persistent mouse click handler for command menu (bound once, checks menuType)
+    // Guard: skip events that fire before the menu is "ready" (prevents blessed spurious select)
     this.completionBox.on("select", (_item: any, index: number) => {
+      if (!this.menuReady) return;
       if (this.menuType === "command") {
         const cmd = this.commandKeys[index];
         this.closeMenu();
@@ -525,6 +553,23 @@ export class OrchestraTUI {
     // Manual input handling — all keypress goes through screen
     this.screen.on("keypress", (ch: string, key: { full: string; name: string; ctrl: boolean; meta: boolean; shift: boolean }) => {
       if (!key) return;
+
+      // Log overlay: Ctrl+L or Escape to close, block other input
+      if (this.logOverlayVisible) {
+        if (key.name === "escape" || (key.ctrl && key.name === "l")) {
+          this.logOverlay.hide();
+          this.logOverlayVisible = false;
+          this.scheduleRender();
+          return;
+        }
+        if (key.ctrl && key.name === "v") {
+          this.verboseLog = !this.verboseLog;
+          this.refreshLogOverlay();
+          return;
+        }
+        return; // block other input while log overlay is open
+      }
+
       // Block input while overlay/wizard is open or processing
       if (this.overlayActive) return;
       if (this.processing) return;
@@ -592,7 +637,7 @@ export class OrchestraTUI {
       if (key.ctrl) {
         switch (key.name) {
           case "o": this.toggleTaskPanel(); return;
-          case "l": this.toggleLogMode(); return;
+          case "l": this.toggleLogOverlay(); return;
           case "c": this.quit(); return;
         }
         return;
@@ -659,23 +704,9 @@ export class OrchestraTUI {
       }
     });
 
-    // Welcome message (always visible)
+    // Minimal welcome
     const team = this.orchestrator.getTeam();
-    const modelLabel = this.config.model
-      ? MODELS.find(m => m.value === this.config.model)?.label ?? this.config.model
-      : "";
-    this.logAlways("{bold}🐙 Polpo{/bold}");
-    this.logAlways("");
-    const judgeModelLabel = this.config.judgeModel
-      ? MODELS.find(m => m.value === this.config.judgeModel)?.label ?? this.config.judgeModel
-      : "";
-    this.logAlways(`  Judge:  {green-fg}${getProviderLabel(this.config.judge)}{/green-fg}` + (judgeModelLabel ? ` {grey-fg}(${judgeModelLabel}){/grey-fg}` : ""));
-    this.logAlways(`  Orchestrator: {green-fg}${getProviderLabel(this.config.agent)}{/green-fg}` + (modelLabel ? ` {grey-fg}(${modelLabel}){/grey-fg}` : ""));
-    this.logAlways(`  Team:   {green-fg}${team.name}{/green-fg} (${team.agents.map(a => a.name).join(", ")})`);
-    this.logAlways("");
-    this.logAlways("Type a task description and press Enter to run it.");
-    this.logAlways("{grey-fg}Use {bold}@agent{/bold} to assign, {bold}!{/bold} prefix to skip prep, {bold}/config{/bold} to configure, {bold}/help{/bold} for commands{/grey-fg}");
-    this.logAlways("");
+    this.logAlways(`{bold}🐙 Polpo{/bold}  {grey-fg}${team.name} · ${team.agents.map(a => a.name).join(", ")}{/grey-fg}`);
 
     this.updateInputDisplay();
   }
@@ -770,6 +801,17 @@ export class OrchestraTUI {
     this.inputMode = modes[(idx + 1) % modes.length];
     this.updateModeIndicator();
     this.updateHints();
+
+    // Swap chatBox/logBox visibility based on mode
+    if (this.inputMode === "chat") {
+      this.logBox.hide();
+      this.loadChatHistoryIntoBox();
+      this.chatBox.show();
+    } else {
+      this.chatBox.hide();
+      this.logBox.show();
+    }
+
     this.scheduleRender();
   }
 
@@ -793,6 +835,7 @@ export class OrchestraTUI {
   // ─── Command Menu ────────────────────────────────────
 
   private commandKeys: string[] = [];
+  private menuReady = false;
 
   private openCommandMenu(filter = "/"): void {
     // Filter commands by what the user typed
@@ -813,10 +856,12 @@ export class OrchestraTUI {
     this.menuType = "command";
 
     this.completionBox.setItems(items);
-    this.completionBox.height = items.length + 2;
+    this.completionBox.height = Math.min(items.length + 2, 14);
     (this.completionBox as any).setLabel(" {cyan-fg}Commands{/cyan-fg} ");
+    this.menuReady = false;
     this.completionBox.show();
     this.completionBox.select(0);
+    setImmediate(() => { this.menuReady = true; });
 
     this.scheduleRender();
   }
@@ -881,10 +926,12 @@ export class OrchestraTUI {
     this.completionBox.setItems(items);
     this.completionBox.height = maxH;
     (this.completionBox as any).setLabel(" {cyan-fg}@{/cyan-fg} {grey-fg}Mention{/grey-fg} ");
+    this.menuReady = false;
     this.completionBox.show();
     // Select first non-separator
     const firstReal = this.mentionEntries.findIndex(e => e.tag !== "");
     this.completionBox.select(firstReal >= 0 ? firstReal : 0);
+    setImmediate(() => { this.menuReady = true; });
 
     this.scheduleRender();
   }
@@ -908,6 +955,7 @@ export class OrchestraTUI {
   /** Close popup menu without clearing buffer */
   private closeMenu(): void {
     this.menuType = null;
+    this.menuReady = false;
     this.menuJustClosed = true;
     this.completionBox.hide();
     this.scheduleRender();
@@ -918,13 +966,14 @@ export class OrchestraTUI {
   private toggleTaskPanel(): void {
     this.taskPanelVisible = !this.taskPanelVisible;
 
+    const w = this.taskPanelVisible ? "65%" : "100%";
     if (this.taskPanelVisible) {
       this.taskPanel.show();
-      this.logBox.width = "65%";
     } else {
       this.taskPanel.hide();
-      this.logBox.width = "100%";
     }
+    this.logBox.width = w;
+    this.chatBox.width = w;
 
     this.updateTaskPanel();
     this.screen.render();
@@ -1149,32 +1198,14 @@ export class OrchestraTUI {
 
   private updateHeader(): void {
     this.loadState();
-    const parts = ["{bold}POLPO{/bold}"];
-
-    if (this.state?.project) {
-      parts.push(`{grey-fg}${this.state.project}{/grey-fg}`);
-    }
-
-    if (this.state && this.state.tasks.length > 0) {
-      const counts: Record<string, number> = {};
-      for (const t of this.state.tasks) counts[t.status] = (counts[t.status] || 0) + 1;
-
-      if (counts["in_progress"] || counts["assigned"] || counts["review"]) {
-        const running = (counts["in_progress"] || 0) + (counts["assigned"] || 0) + (counts["review"] || 0);
-        parts.push(`{yellow-fg}● ${running} running{/yellow-fg}`);
-      }
-      if (counts["done"]) parts.push(`{green-fg}✓ ${counts["done"]} done{/green-fg}`);
-      if (counts["failed"]) parts.push(`{red-fg}✗ ${counts["failed"]} failed{/red-fg}`);
-    }
-
-    // Show spinner if agents are active
+    // Show spinner only when agents are active
     const hasActive = this.state && this.state.processes?.some(p => p.alive);
     if (hasActive) {
       const spin = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-      parts.push(`{cyan-fg}${spin[this.frame % spin.length]} orchestrating{/cyan-fg}`);
+      this.header.setContent(` {cyan-fg}${spin[this.frame % spin.length]} orchestrating{/cyan-fg}`);
+    } else {
+      this.header.setContent("");
     }
-
-    this.header.setContent(` ${parts.join("  {grey-fg}|{/grey-fg}  ")}`);
   }
 
   private updateHints(): void {
@@ -1204,6 +1235,7 @@ export class OrchestraTUI {
     const left = ` ${modeLabels[this.inputMode]}${planTag}  {grey-fg}│{/grey-fg}  ` +
       "{cyan-fg}Alt+T{/cyan-fg} {grey-fg}mode{/grey-fg}  " +
       "{cyan-fg}/{/cyan-fg} {grey-fg}cmds{/grey-fg}  " +
+      "{cyan-fg}Ctrl+L{/cyan-fg} {grey-fg}logs{/grey-fg}  " +
       "{cyan-fg}Ctrl+O{/cyan-fg} {grey-fg}tasks{/grey-fg}  " +
       "{cyan-fg}Ctrl+C{/cyan-fg} {grey-fg}quit{/grey-fg}";
 
@@ -1274,11 +1306,13 @@ export class OrchestraTUI {
 
   private log(msg: string): void {
     this.fullLogLines.push(msg);
-    if (this.logBox) {
-      if (this.verboseLog) {
-        this.logBox.log(msg);
-        this.scheduleRender();
-      }
+    if (!this.overlayActive && this.logBox && this.verboseLog) {
+      this.logBox.log(msg);
+      this.scheduleRender();
+    }
+    if (this.logOverlayVisible && this.verboseLog) {
+      this.logOverlay.log(msg);
+      this.scheduleRender();
     }
   }
 
@@ -1286,8 +1320,12 @@ export class OrchestraTUI {
   private logAlways(msg: string): void {
     this.fullLogLines.push(msg);
     this.eventLogLines.push(msg);
-    if (this.logBox) {
+    if (!this.overlayActive && this.logBox) {
       this.logBox.log(msg);
+      this.scheduleRender();
+    }
+    if (this.logOverlayVisible) {
+      this.logOverlay.log(msg);
       this.scheduleRender();
     }
   }
@@ -1295,24 +1333,89 @@ export class OrchestraTUI {
   /** Log a human-readable event (shown in clean mode) */
   private logEvent(msg: string): void {
     this.eventLogLines.push(msg);
-    if (this.logBox && !this.verboseLog) {
+    if (!this.overlayActive && this.logBox && !this.verboseLog) {
       this.logBox.log(msg);
+      this.scheduleRender();
+    }
+    if (this.logOverlayVisible && !this.verboseLog) {
+      this.logOverlay.log(msg);
       this.scheduleRender();
     }
   }
 
-  /** Switch between clean events and full verbose log */
-  private toggleLogMode(): void {
-    this.verboseLog = !this.verboseLog;
-    if (!this.logBox) return;
-    this.logBox.setContent("");
-    (this.logBox as any).setLabel(this.verboseLog
-      ? " {yellow-fg}Log{/yellow-fg} {grey-fg}(verbose){/grey-fg} "
-      : " {grey-fg}Log{/grey-fg} ");
+  /** Write a line to the chat display box */
+  private addChatLine(msg: string): void {
+    if (this.chatBox) {
+      this.chatBox.log(msg);
+      this.scheduleRender();
+    }
+  }
+
+  /** Load chat history from Zustand store into chatBox */
+  private loadChatHistoryIntoBox(): void {
+    const store = useTUIStore.getState();
+    this.chatBox.setContent("");
+    for (const msg of store.chatMessages) {
+      if (msg.role === "user") {
+        this.chatBox.log(fmtUserMsg(msg.content));
+      } else {
+        this.chatBox.log(`  ${msg.content}`);
+      }
+    }
+  }
+
+  /** Open/close the full-screen log overlay (Ctrl+L) */
+  private toggleLogOverlay(): void {
+    if (this.logOverlayVisible) {
+      this.logOverlay.hide();
+      this.logOverlayVisible = false;
+      this.scheduleRender();
+      return;
+    }
+
+    if (!this.logOverlay) {
+      this.logOverlay = blessed.log({
+        parent: this.screen,
+        top: 1,
+        left: 0,
+        width: "100%",
+        height: "100%-4",
+        tags: true,
+        scrollable: true,
+        alwaysScroll: true,
+        scrollbar: { ch: "│", style: { fg: "grey" } },
+        border: { type: "line" },
+        style: {
+          bg: "black",
+          border: { fg: "yellow" },
+          scrollbar: { fg: "grey" },
+        },
+        label: " {yellow-fg}Logs{/yellow-fg}  {grey-fg}Ctrl+L close  Ctrl+V verbose{/grey-fg} ",
+        keys: true,
+        vi: true,
+        mouse: true,
+      }) as blessed.Widgets.Log;
+    }
+
+    this.refreshLogOverlay();
+    this.logOverlay.show();
+    this.logOverlayVisible = true;
+    this.scheduleRender();
+  }
+
+  /** Refresh the log overlay content based on verbose mode */
+  private refreshLogOverlay(): void {
+    if (!this.logOverlay) return;
+    this.logOverlay.setContent("");
     const lines = this.verboseLog ? this.fullLogLines : this.eventLogLines;
     for (const line of lines) {
-      this.logBox.log(line);
+      this.logOverlay.log(line);
     }
+    (this.logOverlay as any).setLabel(this.verboseLog
+      ? " {yellow-fg}Logs (verbose){/yellow-fg}  {grey-fg}Ctrl+L close  Ctrl+V events{/grey-fg} "
+      : " {yellow-fg}Logs{/yellow-fg}  {grey-fg}Ctrl+L close  Ctrl+V verbose{/grey-fg} "
+    );
+    this.logOverlay.setScrollPerc(100);
     this.scheduleRender();
   }
 
@@ -1340,7 +1443,51 @@ export class OrchestraTUI {
     return {
       screen: tui.screen,
       get overlayActive() { return tui.overlayActive; },
-      set overlayActive(v: boolean) { tui.overlayActive = v; },
+      set overlayActive(v: boolean) {
+        tui.overlayActive = v;
+        if (v) {
+          // Snapshot current log line count so we only append new lines on close
+          tui.overlayLogSnapshot = (tui.verboseLog ? tui.fullLogLines : tui.eventLogLines).length;
+          // Detach main widgets so blessed can't render them at all
+          tui.logBox.detach();
+          tui.chatBox.detach();
+          tui.taskPanel.detach();
+          tui.header.detach();
+          tui.inputBox.detach();
+          tui.hintBar.detach();
+          tui.statusLine.detach();
+          tui.completionBox.detach();
+        } else {
+          // Re-attach widgets
+          tui.screen.append(tui.header);
+          tui.screen.append(tui.logBox);
+          tui.screen.append(tui.chatBox);
+          tui.screen.append(tui.taskPanel);
+          tui.screen.append(tui.statusLine);
+          tui.screen.append(tui.inputBox);
+          tui.screen.append(tui.hintBar);
+          tui.screen.append(tui.completionBox);
+          // Restore visibility based on mode
+          if (tui.inputMode === "chat") {
+            tui.logBox.hide();
+            tui.chatBox.show();
+          } else {
+            tui.chatBox.hide();
+            tui.logBox.show();
+          }
+          if (!tui.taskPanelVisible) tui.taskPanel.hide();
+          tui.statusLine.hide();
+          tui.completionBox.hide();
+          // Append only lines that arrived while overlay was open
+          const lines = tui.verboseLog ? tui.fullLogLines : tui.eventLogLines;
+          for (let i = tui.overlayLogSnapshot; i < lines.length; i++) {
+            tui.logBox.log(lines[i]);
+          }
+          // Force clean redraw
+          try { tui.screen.alloc(); } catch {}
+          tui.screen.render();
+        }
+      },
       scheduleRender: () => tui.scheduleRender(),
       orchestrator: tui.orchestrator,
       config: tui.config,
@@ -1348,6 +1495,7 @@ export class OrchestraTUI {
       log: (msg: string) => tui.log(msg),
       logAlways: (msg: string) => tui.logAlways(msg),
       logEvent: (msg: string) => tui.logEvent(msg),
+      addChatLine: (msg: string) => tui.addChatLine(msg),
       getState: () => tui.state,
       loadState: () => tui.loadState(),
       getDefaultAgent: () => tui.defaultAgent,
@@ -1369,7 +1517,19 @@ export class OrchestraTUI {
         tui.updateInputDisplay();
       },
       getInputMode: () => tui.inputMode,
-      setInputMode: (mode) => { tui.inputMode = mode; },
+      setInputMode: (mode) => {
+        tui.inputMode = mode;
+        if (mode === "chat") {
+          tui.logBox.hide();
+          tui.loadChatHistoryIntoBox();
+          tui.chatBox.show();
+        } else {
+          tui.chatBox.hide();
+          tui.logBox.show();
+        }
+        tui.updateHints();
+        tui.scheduleRender();
+      },
     };
   }
 }

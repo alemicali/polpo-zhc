@@ -162,11 +162,7 @@ function showTeamMenu(ctx: CommandContext): void {
 }
 
 function showRenameInput(ctx: CommandContext, agent: any, agents: any[]): void {
-  ctx.overlayActive = true;
-  const overlay = blessed.box({
-    parent: ctx.screen, top: 0, left: 0, width: "100%", height: "100%",
-    style: { bg: "black" },
-  });
+  const { overlay, cleanup, onKeypress } = createOverlay(ctx);
   const box = blessed.box({
     parent: overlay, top: "center", left: "center", width: "60%", height: 5,
     border: { type: "line" }, tags: true,
@@ -180,18 +176,11 @@ function showRenameInput(ctx: CommandContext, agent: any, agents: any[]): void {
   box.setContent(` ${buf}${cursor}`);
   ctx.scheduleRender();
 
-  const inputCleanup = () => {
-    ctx.overlayActive = false;
-    ctx.screen.removeListener("keypress", kh);
-    overlay.destroy();
-    ctx.scheduleRender();
-  };
-
-  const kh = (ch: string, key: any) => {
+  onKeypress((ch, key) => {
     if (!key) return;
     if (key.name === "return" || key.name === "enter") {
       const newName = buf.trim();
-      inputCleanup();
+      cleanup();
       if (newName && newName !== agent.name) {
         if (agents.find((a: any) => a.name === newName && a !== agent)) {
           ctx.log(`{red-fg}Agent "${newName}" already exists{/red-fg}`);
@@ -205,23 +194,18 @@ function showRenameInput(ctx: CommandContext, agent: any, agents: any[]): void {
       showTeamMenu(ctx);
       return;
     }
-    if (key.name === "escape") { inputCleanup(); showTeamMenu(ctx); return; }
+    if (key.name === "escape") { cleanup(); showTeamMenu(ctx); return; }
     if (key.name === "backspace") { buf = buf.slice(0, -1); }
     else if (ch && ch.length === 1 && !key.ctrl && !key.meta) { buf += ch; }
     box.setContent(` ${buf}${cursor}`);
     ctx.scheduleRender();
-  };
-  ctx.screen.on("keypress", kh);
+  });
 }
 
 // ─── AI Team Generation ────────────────────────────────
 
 function showAITeamGenerate(ctx: CommandContext): void {
-  ctx.overlayActive = true;
-  const overlay = blessed.box({
-    parent: ctx.screen, top: 0, left: 0, width: "100%", height: "100%",
-    style: { bg: "black" },
-  });
+  const { overlay, cleanup, onKeypress } = createOverlay(ctx);
 
   const promptBox = blessed.box({
     parent: overlay, top: "center", left: "center", width: "70%", height: 7,
@@ -248,18 +232,11 @@ function showAITeamGenerate(ctx: CommandContext): void {
   addHintBar(overlay, " {cyan-fg}Enter{/cyan-fg} {grey-fg}generate{/grey-fg}  {cyan-fg}Escape{/cyan-fg} {grey-fg}cancel{/grey-fg}");
   ctx.scheduleRender();
 
-  const genCleanup = () => {
-    ctx.overlayActive = false;
-    ctx.screen.removeListener("keypress", keyHandler);
-    overlay.destroy();
-    ctx.scheduleRender();
-  };
-
-  const keyHandler = (ch: string, key: any) => {
+  onKeypress((ch, key) => {
     if (!key) return;
 
     if (key.name === "escape") {
-      genCleanup();
+      cleanup();
       showTeamMenu(ctx);
       return;
     }
@@ -267,7 +244,7 @@ function showAITeamGenerate(ctx: CommandContext): void {
     if (key.name === "return" || key.name === "enter") {
       const description = inputBuffer.trim();
       if (!description) return;
-      genCleanup();
+      cleanup();
       generateAITeam(ctx, description);
       return;
     }
@@ -281,9 +258,7 @@ function showAITeamGenerate(ctx: CommandContext): void {
     if (inputBuffer.length > 0) { hintBox.hide(); } else { hintBox.show(); }
     inputLine.setContent(` ${inputBuffer}${cursor}`);
     ctx.scheduleRender();
-  };
-
-  ctx.screen.on("keypress", keyHandler);
+  });
 }
 
 async function generateAITeam(ctx: CommandContext, description: string): Promise<void> {
@@ -489,9 +464,9 @@ function applyTeam(ctx: CommandContext, yaml: string): void {
 }
 
 function showTeamYamlEditor(ctx: CommandContext, yaml: string, originalDescription: string): void {
-  ctx.overlayActive = true;
+  const { overlay, cleanup } = createOverlay(ctx);
   const editor = blessed.textarea({
-    parent: ctx.screen, top: 0, left: 0, width: "100%", height: "100%-1",
+    parent: overlay, top: 0, left: 0, width: "100%", height: "100%-1",
     value: yaml, inputOnFocus: false,
     border: { type: "line" }, tags: true,
     label: " {yellow-fg}✎{/yellow-fg} {bold}Edit Team{/bold}  {grey-fg}Ctrl+S save  Escape cancel{/grey-fg} ",
@@ -505,50 +480,42 @@ function showTeamYamlEditor(ctx: CommandContext, yaml: string, originalDescripti
 
   editor.key(["C-s"], () => {
     const editedYaml = editor.getValue();
-    ctx.overlayActive = false;
-    editor.destroy();
+    cleanup();
     showTeamPreview(ctx, editedYaml, originalDescription);
   });
 
   editor.key(["escape"], () => {
-    ctx.overlayActive = false;
-    editor.destroy();
+    cleanup();
     showTeamPreview(ctx, yaml, originalDescription);
   });
 }
 
 function showTeamRefineInput(ctx: CommandContext, yaml: string, originalDescription: string): void {
-  ctx.overlayActive = true;
+  const { overlay, cleanup, onKeypress } = createOverlay(ctx);
   const refineBox = blessed.box({
-    parent: ctx.screen, top: "center", left: "center", width: "70%", height: 5,
+    parent: overlay, top: "center", left: "center", width: "70%", height: 5,
     border: { type: "line" }, tags: true,
     label: " {cyan-fg}↻{/cyan-fg} {bold}Refine{/bold}  {grey-fg}What should be changed?{/grey-fg} ",
     style: { bg: "black", fg: "white", border: { fg: "cyan" } },
   });
+  addHintBar(overlay, " {cyan-fg}Enter{/cyan-fg} {grey-fg}refine{/grey-fg}  {cyan-fg}Escape{/cyan-fg} {grey-fg}cancel{/grey-fg}");
 
   let refineBuffer = "";
   const cursor = "{white-fg}█{/white-fg}";
   refineBox.setContent(` ${cursor}`);
   ctx.scheduleRender();
 
-  const refineCleanup = () => {
-    ctx.overlayActive = false;
-    ctx.screen.removeListener("keypress", keyHandler);
-    refineBox.destroy();
-    ctx.scheduleRender();
-  };
-
-  const keyHandler = (ch: string, key: any) => {
+  onKeypress((ch, key) => {
     if (!key) return;
     if (key.name === "return" || key.name === "enter") {
       if (refineBuffer.trim()) {
-        refineCleanup();
+        cleanup();
         refineAITeam(ctx, yaml, originalDescription, refineBuffer.trim());
       }
       return;
     }
     if (key.name === "escape") {
-      refineCleanup();
+      cleanup();
       showTeamPreview(ctx, yaml, originalDescription);
       return;
     }
@@ -559,9 +526,7 @@ function showTeamRefineInput(ctx: CommandContext, yaml: string, originalDescript
     }
     refineBox.setContent(` ${refineBuffer}${cursor}`);
     ctx.scheduleRender();
-  };
-
-  ctx.screen.on("keypress", keyHandler);
+  });
 }
 
 async function refineAITeam(ctx: CommandContext, currentYaml: string, originalDescription: string, feedback: string): Promise<void> {
@@ -620,11 +585,7 @@ async function refineAITeam(ctx: CommandContext, currentYaml: string, originalDe
 // ─── Add Agent Wizard ────────────────────────────────────
 
 function showAddAgentWizard(ctx: CommandContext): void {
-  ctx.overlayActive = true;
-  const overlay = blessed.box({
-    parent: ctx.screen, top: 0, left: 0, width: "100%", height: "100%",
-    style: { bg: "black" },
-  });
+  const { overlay, cleanup, onKeypress } = createOverlay(ctx);
 
   let step = 0;
   let agentName = "";
@@ -660,9 +621,7 @@ function showAddAgentWizard(ctx: CommandContext): void {
   setImmediate(() => { stepReady = true; });
 
   const wizCleanup = () => {
-    ctx.screen.removeListener("keypress", keyHandler);
-    ctx.overlayActive = false;
-    overlay.destroy();
+    cleanup();
     showTeamMenu(ctx);
   };
 
@@ -743,7 +702,7 @@ function showAddAgentWizard(ctx: CommandContext): void {
 
   showTextStep("{bold}Step 1/4 — Agent name{/bold}");
 
-  const keyHandler = (ch: string, key: any) => {
+  onKeypress((ch, key) => {
     if (!key) return;
     if (key.name === "escape") { wizCleanup(); return; }
 
@@ -790,9 +749,7 @@ function showAddAgentWizard(ctx: CommandContext): void {
         return;
       }
     }
-  };
-
-  ctx.screen.on("keypress", keyHandler);
+  });
 }
 
 // ─── Edit Agent Menu ─────────────────────────────────────
@@ -901,11 +858,7 @@ function showEditAgentMenu(ctx: CommandContext, agent: { name: string; adapter: 
 }
 
 function showRoleInput(ctx: CommandContext, agent: { name: string; role?: string }): void {
-  ctx.overlayActive = true;
-  const overlay = blessed.box({
-    parent: ctx.screen, top: 0, left: 0, width: "100%", height: "100%",
-    style: { bg: "black" },
-  });
+  const { overlay, cleanup, onKeypress } = createOverlay(ctx);
   const box = blessed.box({
     parent: overlay, top: "center", left: "center", width: "60%", height: 5,
     border: { type: "line" }, tags: true,
@@ -919,18 +872,11 @@ function showRoleInput(ctx: CommandContext, agent: { name: string; role?: string
   box.setContent(` ${buf}${cursor}`);
   ctx.scheduleRender();
 
-  const inputCleanup = () => {
-    ctx.overlayActive = false;
-    ctx.screen.removeListener("keypress", kh);
-    overlay.destroy();
-    ctx.scheduleRender();
-  };
-
-  const kh = (ch: string, key: any) => {
+  onKeypress((ch, key) => {
     if (!key) return;
     if (key.name === "return" || key.name === "enter") {
       const value = buf.trim();
-      inputCleanup();
+      cleanup();
       const agents = ctx.orchestrator.getAgents();
       const found = agents.find(a => a.name === agent.name);
       if (found) found.role = value || undefined;
@@ -938,21 +884,16 @@ function showRoleInput(ctx: CommandContext, agent: { name: string; role?: string
       showTeamMenu(ctx);
       return;
     }
-    if (key.name === "escape") { inputCleanup(); showTeamMenu(ctx); return; }
+    if (key.name === "escape") { cleanup(); showTeamMenu(ctx); return; }
     if (key.name === "backspace") { buf = buf.slice(0, -1); }
     else if (ch && ch.length === 1 && !key.ctrl && !key.meta) { buf += ch; }
     box.setContent(` ${buf}${cursor}`);
     ctx.scheduleRender();
-  };
-  ctx.screen.on("keypress", kh);
+  });
 }
 
 function showSystemPromptEditor(ctx: CommandContext, agent: { name: string; systemPrompt?: string }): void {
-  ctx.overlayActive = true;
-  const overlay = blessed.box({
-    parent: ctx.screen, top: 0, left: 0, width: "100%", height: "100%",
-    style: { bg: "black" },
-  });
+  const { overlay, cleanup } = createOverlay(ctx);
   const editor = blessed.textarea({
     parent: overlay, top: 0, left: 0, width: "100%", height: "100%-1",
     value: agent.systemPrompt || "", inputOnFocus: false,
@@ -967,15 +908,9 @@ function showSystemPromptEditor(ctx: CommandContext, agent: { name: string; syst
   editor.readInput(() => {});
   ctx.scheduleRender();
 
-  const edCleanup = () => {
-    ctx.overlayActive = false;
-    overlay.destroy();
-    ctx.scheduleRender();
-  };
-
   editor.key(["C-s"], () => {
     const value = editor.getValue().trim();
-    edCleanup();
+    cleanup();
     const agents = ctx.orchestrator.getAgents();
     const found = agents.find(a => a.name === agent.name);
     if (found) found.systemPrompt = value || undefined;
@@ -984,7 +919,7 @@ function showSystemPromptEditor(ctx: CommandContext, agent: { name: string; syst
   });
 
   editor.key(["escape"], () => {
-    edCleanup();
+    cleanup();
     showTeamMenu(ctx);
   });
 }

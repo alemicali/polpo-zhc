@@ -209,9 +209,9 @@ export function showPlanPreview(ctx: CommandContext, yaml: string, originalInput
 }
 
 function showYamlEditor(ctx: CommandContext, yaml: string, originalInput: string, existingPlanId?: string): void {
-  ctx.overlayActive = true;
+  const { overlay, cleanup } = createOverlay(ctx);
   const editor = blessed.textarea({
-    parent: ctx.screen,
+    parent: overlay,
     top: 0,
     left: 0,
     width: "100%",
@@ -233,22 +233,20 @@ function showYamlEditor(ctx: CommandContext, yaml: string, originalInput: string
 
   editor.key(["C-s"], () => {
     const editedYaml = editor.getValue();
-    ctx.overlayActive = false;
-    editor.destroy();
+    cleanup();
     showPlanPreview(ctx, editedYaml, originalInput, existingPlanId);
   });
 
   editor.key(["escape"], () => {
-    ctx.overlayActive = false;
-    editor.destroy();
+    cleanup();
     showPlanPreview(ctx, yaml, originalInput, existingPlanId);
   });
 }
 
 function showRefineInput(ctx: CommandContext, yaml: string, originalInput: string): void {
-  ctx.overlayActive = true;
+  const { overlay, cleanup, onKeypress } = createOverlay(ctx);
   const refineBox = blessed.box({
-    parent: ctx.screen,
+    parent: overlay,
     top: "center",
     left: "center",
     width: "70%",
@@ -258,30 +256,24 @@ function showRefineInput(ctx: CommandContext, yaml: string, originalInput: strin
     label: " {cyan-fg}↻{/cyan-fg} {bold}Refine{/bold}  {grey-fg}What should be changed?{/grey-fg} ",
     style: { bg: "black", fg: "white", border: { fg: "cyan" } },
   });
+  addHintBar(overlay, " {cyan-fg}Enter{/cyan-fg} {grey-fg}refine{/grey-fg}  {cyan-fg}Escape{/cyan-fg} {grey-fg}cancel{/grey-fg}");
 
   let refineBuffer = "";
   const cursor = "{white-fg}█{/white-fg}";
   refineBox.setContent(` ${cursor}`);
   ctx.scheduleRender();
 
-  const refineCleanup = () => {
-    ctx.overlayActive = false;
-    ctx.screen.removeListener("keypress", keyHandler);
-    refineBox.destroy();
-    ctx.scheduleRender();
-  };
-
-  const keyHandler = (ch: string, key: any) => {
+  onKeypress((ch, key) => {
     if (!key) return;
     if (key.name === "return" || key.name === "enter") {
       if (refineBuffer.trim()) {
-        refineCleanup();
+        cleanup();
         handleRefine(ctx, yaml, originalInput, refineBuffer.trim());
       }
       return;
     }
     if (key.name === "escape") {
-      refineCleanup();
+      cleanup();
       showPlanPreview(ctx, yaml, originalInput);
       return;
     }
@@ -292,9 +284,7 @@ function showRefineInput(ctx: CommandContext, yaml: string, originalInput: strin
     }
     refineBox.setContent(` ${refineBuffer}${cursor}`);
     ctx.scheduleRender();
-  };
-
-  ctx.screen.on("keypress", keyHandler);
+  });
 }
 
 async function handleRefine(ctx: CommandContext, currentYaml: string, originalInput: string, feedback: string): Promise<void> {

@@ -8,6 +8,7 @@ export interface RunRecord {
   pid: number;
   agentName: string;
   adapterType: string;
+  sessionId?: string;
   status: RunStatus;
   startedAt: string;
   updatedAt: string;

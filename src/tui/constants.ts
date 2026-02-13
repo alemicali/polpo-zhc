@@ -51,6 +51,8 @@ export const SLASH_COMMANDS: Record<string, string> = {
   "/abort": "Abort running plan/task",
   "/clear-tasks": "Clear finished tasks",
   "/tasks": "Browse tasks & plans",
+  "/sessions": "Browse & resume chat sessions",
+  "/new-chat": "Start a new chat session",
   "/clear": "Clear log",
   "/memory": "Edit project memory",
   "/logs": "Browse session logs",
@@ -62,7 +64,7 @@ export const SLASH_COMMANDS: Record<string, string> = {
 export const SHORTCUTS: Record<string, string> = {
   "Alt+T": "Toggle Direct/Plan mode",
   "Ctrl+O": "Toggle task panel",
-  "Ctrl+L": "Toggle verbose log",
+  "Ctrl+L": "Open operational logs",
   "Ctrl+C": "Quit",
   "Enter": "Submit",
   "Escape": "Clear input",

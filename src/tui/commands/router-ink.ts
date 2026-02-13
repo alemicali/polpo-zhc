@@ -36,6 +36,8 @@ const commands: Record<string, InkCommandHandler> = {
   "/clear-tasks": cmdClearTasks,
   "/reassess": cmdReassess,
   "/edit-plan": cmdEditPlan,
+  "/sessions": cmdSessions,
+  "/new-chat": cmdNewChat,
 };
 
 /** Dispatch a slash command. Returns true if handled. */
@@ -1465,7 +1467,8 @@ function summarizeLogEvent(event: string, data: unknown): string {
       return `${d.taskTitle ?? ""} → ${d.agentName ?? ""}`;
     case "agent:finished": {
       const secs = d.duration ? (d.duration / 1000).toFixed(1) : "?";
-      return `${d.agentName ?? ""} exit ${d.exitCode} (${secs}s)`;
+      const sid = d.sessionId ? ` ${d.sessionId}` : "";
+      return `${d.agentName ?? ""} exit ${d.exitCode} (${secs}s)${sid}`;
     }
     case "assessment:complete": {
       const score = d.globalScore !== undefined ? ` (${d.globalScore.toFixed(1)}/5)` : "";
@@ -1908,4 +1911,87 @@ function reopenPlanEditor(groupName: string) {
     return;
   }
   showPlanEditor(groupName, updated);
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ─── /sessions — Browse & resume chat sessions ───────────
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+function cmdSessions() {
+  const store = useTUIStore.getState();
+  const sessionStore = store.orchestrator?.getSessionStore();
+  if (!sessionStore) {
+    store.logAlways("Session store not available");
+    return;
+  }
+
+  const sessions = sessionStore.listSessions();
+  if (sessions.length === 0) {
+    store.logAlways("No chat sessions yet. Use chat mode to start one.");
+    return;
+  }
+
+  const items = sessions.map((s) => {
+    const date = new Date(s.createdAt);
+    const dateStr = date.toLocaleDateString("it-IT", {
+      day: "2-digit", month: "2-digit", year: "numeric",
+      hour: "2-digit", minute: "2-digit",
+    });
+    const current = s.id === store.activeSessionId ? chalk.green(" (active)") : "";
+    const title = s.title ? ` ${s.title.slice(0, 40)}` : "";
+    return {
+      label: `${chalk.cyan(dateStr)}  ${chalk.gray(`${s.messageCount} msgs`)}${chalk.white(title)}${current}`,
+      value: s.id,
+    };
+  });
+
+  store.openOverlay("picker", {
+    title: `Chat Sessions (${sessions.length})`,
+    items,
+    hint: "Enter resume  d delete  Esc close",
+    onSelect: (_idx: number, value: string) => {
+      // Resume this session
+      store.setActiveSessionId(value);
+      const messages = sessionStore.getMessages(value);
+      store.setChatMessages(messages.map(m => ({
+        role: m.role as "user" | "assistant",
+        content: m.content,
+        ts: new Date(m.ts).getTime(),
+      })));
+      store.setInputMode("chat");
+      store.logAlways(`Resumed session (${messages.length} messages)`);
+    },
+    onKey: (input: string, _key: any, _idx: number, value: string) => {
+      if (input === "d") {
+        // Don't delete active session
+        if (value === store.activeSessionId) {
+          store.logAlways("Cannot delete active session. Use /new-chat first.");
+          return;
+        }
+        sessionStore.deleteSession(value);
+        store.logAlways("Session deleted");
+        store.closeOverlay();
+        cmdSessions(); // Reopen with updated list
+      }
+    },
+  });
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ─── /new-chat — Start a fresh chat session ──────────────
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+function cmdNewChat() {
+  const store = useTUIStore.getState();
+  const sessionStore = store.orchestrator?.getSessionStore();
+  if (!sessionStore) {
+    store.logAlways("Session store not available");
+    return;
+  }
+
+  const newId = sessionStore.create();
+  store.setActiveSessionId(newId);
+  store.setChatMessages([]);
+  store.setInputMode("chat");
+  store.logAlways("New chat session started");
 }

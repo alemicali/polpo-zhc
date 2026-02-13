@@ -10,6 +10,7 @@ const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", 
 export function Header({ width }: { width: number }) {
   const state = useTUIStore((s) => s.state);
   const frame = useTUIStore((s) => s.frame);
+  const config = useTUIStore((s) => s.config);
 
   const tasks = state?.tasks ?? [];
   const counts: Record<string, number> = {};
@@ -27,6 +28,7 @@ export function Header({ width }: { width: number }) {
     <Box width={width} height={1}>
       <Text>
         {" "}
+        {config?.project ? <Text bold>{config.project}</Text> : null}
         {running > 0 ? (
           <>
             <Text dimColor>  |  </Text>

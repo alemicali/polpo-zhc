@@ -3,21 +3,44 @@ import { useTUIStore, type LogSeg, type LogEntry } from "../store.js";
 
 /**
  * Borderless log panel — auto-scrolls to bottom.
- * Supports colored segments (LogSeg[]) for rich log output.
+ * Shows chat messages in chat mode, operational logs otherwise.
  */
 export function LogPanel({ width, height }: { width: number; height: number }) {
   const logs = useTUIStore((s) => s.logs);
   const verboseLog = useTUIStore((s) => s.verboseLog);
+  const inputMode = useTUIStore((s) => s.inputMode);
+  const chatMessages = useTUIStore((s) => s.chatMessages);
 
-  // Filter logs based on verbose mode (matches old TUI: verbose shows all, normal shows events only)
+  const innerW = width;
+
+  // Chat mode: show conversation
+  if (inputMode === "chat") {
+    const tail = chatMessages.slice(-height);
+    return (
+      <Box flexDirection="column" width={width} height={height} overflow="hidden">
+        {tail.length === 0 ? (
+          <Text dimColor wrap="truncate"> Chat mode. Ask anything about the project state.</Text>
+        ) : (
+          tail.map((msg, i) => (
+            <Text key={i} wrap="truncate">
+              {msg.role === "user"
+                ? <Text color="cyan">{`  > ${msg.content}`.slice(0, innerW)}</Text>
+                : <Text>{`  ${msg.content}`.slice(0, innerW)}</Text>}
+            </Text>
+          ))
+        )}
+        {Array.from({ length: Math.max(0, height - Math.max(1, tail.length)) }).map((_, i) => (
+          <Text key={`empty-${i}`}>{" ".repeat(innerW)}</Text>
+        ))}
+      </Box>
+    );
+  }
+
+  // Task/plan mode: show operational logs
   const visibleLogs = verboseLog
     ? logs
     : logs.filter((l) => l.type === "event" || l.type === "always");
 
-  // Full area available for content (no border)
-  const innerW = width;
-
-  // Auto-scroll: show last N lines
   const tail = visibleLogs.slice(-height);
 
   return (
@@ -31,7 +54,6 @@ export function LogPanel({ width, height }: { width: number; height: number }) {
           </Text>
         ))
       )}
-      {/* Fill remaining empty lines */}
       {Array.from({ length: Math.max(0, height - Math.max(1, tail.length)) }).map((_, i) => (
         <Text key={`empty-${i}`}>{" ".repeat(innerW)}</Text>
       ))}
