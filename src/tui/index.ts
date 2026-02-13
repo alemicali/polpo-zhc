@@ -66,6 +66,7 @@ export class OrchestraTUI {
   private verboseLog = false;
   private fullLogLines: string[] = [];
   private eventLogLines: string[] = [];
+  bridge: import("../bridge/index.js").BridgeManager | null = null;
 
   constructor(workDir: string = ".") {
     this.workDir = resolve(workDir);
@@ -1530,6 +1531,8 @@ export class OrchestraTUI {
         tui.updateHints();
         tui.scheduleRender();
       },
+      get bridge() { return tui.bridge; },
+      setBridge: (b) => { tui.bridge = b; },
     };
   }
 }

@@ -22,7 +22,11 @@ export type { LLMQueryFn } from "./assessment/llm-review.js";
 export { parseConfig, generateTemplate } from "./core/config.js";
 
 // Session reader
-export { readSessionSummary, getRecentMessages, findTranscriptPath } from "./core/session-reader.js";
+export { readSessionSummary, readSessionSummaryFromPath, getRecentMessages, findTranscriptPath } from "./core/session-reader.js";
+
+// Bridge
+export { BridgeManager } from "./bridge/index.js";
+export type { BridgeConfig, BridgeSessionState, BridgeSessionStatus } from "./bridge/types.js";
 
 // Server
 export { OrchestraServer, createApp, ProjectManager, SSEBridge, WSBridge } from "./server/index.js";

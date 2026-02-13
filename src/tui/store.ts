@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type { Orchestrator } from "../core/orchestrator.js";
 import type { OrchestraState, ProjectConfig } from "../core/types.js";
+import type { BridgeManager } from "../bridge/index.js";
 
 // ─── Log Entry ──────────────────────────────────────────
 
@@ -47,6 +48,10 @@ export interface TUIStore {
   config: ProjectConfig;
   workDir: string;
   defaultAgent: string;
+
+  // Bridge
+  bridge: BridgeManager | null;
+  setBridge(b: BridgeManager | null): void;
 
   // UI state
   inputMode: "task" | "plan" | "chat";
@@ -128,6 +133,10 @@ export const useTUIStore = create<TUIStore>((set, get) => ({
   config: { project: "", judge: "claude-sdk", judgeModel: "claude-sonnet-4-5-20250929", agent: "claude-sdk", model: "claude-sonnet-4-5-20250929" },
   workDir: ".",
   defaultAgent: "dev",
+
+  // Bridge
+  bridge: null,
+  setBridge: (b) => set({ bridge: b }),
 
   // UI state
   inputMode: "task",

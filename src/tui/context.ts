@@ -1,6 +1,7 @@
 import type blessed from "blessed";
 import type { Orchestrator } from "../core/orchestrator.js";
 import type { OrchestraState, ProjectConfig } from "../core/types.js";
+import type { BridgeManager } from "../bridge/index.js";
 
 // ─── TUI Config ──────────────────────────────────────────
 
@@ -48,4 +49,7 @@ export interface CommandContext extends WidgetHost, TUILogger {
   getInputMode(): "task" | "plan" | "chat";
   setInputMode(mode: "task" | "plan" | "chat"): void;
 
+  // Bridge
+  bridge: BridgeManager | null;
+  setBridge(b: BridgeManager | null): void;
 }

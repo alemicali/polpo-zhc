@@ -11,6 +11,7 @@ import { cmdPlans, cmdResume } from "./plans.js";
 import { cmdMemory } from "./memory.js";
 import { cmdLogs } from "./logs.js";
 import { cmdSessions, cmdNewChat } from "./sessions.js";
+import { cmdWatch } from "./watch.js";
 
 export type CommandHandler = (ctx: CommandContext, args: string[]) => void | Promise<void>;
 
@@ -32,6 +33,7 @@ const commands: Record<string, CommandHandler> = {
   "/help": (ctx) => cmdHelp(ctx),
   "/sessions": (ctx) => cmdSessions(ctx),
   "/new-chat": (ctx) => cmdNewChat(ctx),
+  "/watch": (ctx) => cmdWatch(ctx),
 };
 
 /** Dispatch a slash command. Returns true if handled. */

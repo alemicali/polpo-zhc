@@ -58,6 +58,7 @@ export const SLASH_COMMANDS: Record<string, string> = {
   "/logs": "Browse session logs",
   "/config": "Show configuration",
   "/help": "Commands & shortcuts",
+  "/watch": "Watch Claude Code sessions (bridge)",
   "/quit": "Exit Polpo",
 };
 

@@ -1,5 +1,5 @@
 import { readFileSync, existsSync, readdirSync } from "node:fs";
-import { join } from "node:path";
+import { join, basename } from "node:path";
 import { homedir } from "node:os";
 
 export interface SessionMessage {
@@ -56,12 +56,13 @@ export function findTranscriptPath(sessionId: string, cwd: string): string | nul
 }
 
 /**
- * Read and summarize a session transcript.
+ * Read and summarize a session transcript from an absolute path.
  * Extracts tool calls, files touched, TODOs, errors, and last message.
+ * Used by both readSessionSummary() (Polpo-spawned sessions) and the bridge (external sessions).
  */
-export function readSessionSummary(sessionId: string, cwd: string): SessionSummary | null {
-  const transcriptPath = findTranscriptPath(sessionId, cwd);
-  if (!transcriptPath) return null;
+export function readSessionSummaryFromPath(transcriptPath: string): SessionSummary | null {
+  // Derive sessionId from filename: /path/to/<sessionId>.jsonl → sessionId
+  const sessionId = basename(transcriptPath, ".jsonl");
 
   const toolCalls: string[] = [];
   const filesCreated: string[] = [];
@@ -132,6 +133,16 @@ export function readSessionSummary(sessionId: string, cwd: string): SessionSumma
     todos,
     errors,
   };
+}
+
+/**
+ * Read and summarize a session transcript by session ID and working directory.
+ * Delegates to readSessionSummaryFromPath after resolving the transcript path.
+ */
+export function readSessionSummary(sessionId: string, cwd: string): SessionSummary | null {
+  const transcriptPath = findTranscriptPath(sessionId, cwd);
+  if (!transcriptPath) return null;
+  return readSessionSummaryFromPath(transcriptPath);
 }
 
 /**

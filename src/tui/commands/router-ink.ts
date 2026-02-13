@@ -8,6 +8,7 @@ import { useTUIStore, type LogSeg } from "../store.js";
 import { PROVIDERS, MODELS, SLASH_COMMANDS, SHORTCUTS } from "../constants.js";
 import { getProviderLabel, formatElapsed } from "../formatters.js";
 import { readSessionSummary } from "../../core/session-reader.js";
+import { cmdWatchInk } from "./watch.js";
 import type { Task, TaskStatus } from "../../core/types.js";
 import type { SessionInfo } from "../../core/log-store.js";
 import { parse as parseYaml } from "yaml";
@@ -38,6 +39,7 @@ const commands: Record<string, InkCommandHandler> = {
   "/edit-plan": cmdEditPlan,
   "/sessions": cmdSessions,
   "/new-chat": cmdNewChat,
+  "/watch": cmdWatchInk,
 };
 
 /** Dispatch a slash command. Returns true if handled. */

@@ -25,6 +25,8 @@ export function buildCommandContext(): CommandContext {
     setProcessingDetail: (detail: string) => s.setProcessingDetail(detail),
     getInputMode: () => s.inputMode,
     setInputMode: (mode: "task" | "plan" | "chat") => s.setInputMode(mode),
+    bridge: s.bridge,
+    setBridge: (b) => s.setBridge(b),
   };
 }
 

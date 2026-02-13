@@ -448,6 +448,87 @@ program
     await server.start();
   });
 
+// polpo watch — passive bridge mode
+program
+  .command("watch")
+  .description("Watch existing Claude Code sessions (bridge mode)")
+  .option("--poll-interval <ms>", "Poll interval in milliseconds", "5000")
+  .option("--session-timeout <ms>", "Inactivity timeout in milliseconds", "60000")
+  .option("--paths <paths...>", "Additional paths to watch for JSONL transcripts")
+  .option("--no-claude-code", "Disable Claude Code session discovery")
+  .action(async (opts) => {
+    console.log(LOGO_MINI);
+    console.log(chalk.dim("  Bridge mode — watching for Claude Code sessions...\n"));
+
+    const { BridgeManager } = await import("../bridge/index.js");
+
+    const manager = new BridgeManager({
+      pollInterval: parseInt(opts.pollInterval, 10),
+      sessionTimeout: parseInt(opts.sessionTimeout, 10),
+      watch: {
+        claudeCode: opts.claudeCode !== false,
+        opencode: false,
+        paths: opts.paths ?? [],
+      },
+    });
+
+    const startTime = Date.now();
+
+    manager.emitter.on("bridge:session:discovered", ({ sessionId, projectPath }) => {
+      const ts = new Date().toLocaleTimeString();
+      console.log(chalk.dim(`[${ts}]`) + ` ${chalk.green("DISCOVERED")} ${chalk.bold(sessionId.slice(0, 8))}... → ${chalk.cyan(projectPath)}`);
+    });
+
+    manager.emitter.on("bridge:session:activity", ({ sessionId, messageCount, toolCalls, filesCreated, filesEdited, lastMessage }) => {
+      const ts = new Date().toLocaleTimeString();
+      const parts: string[] = [];
+      parts.push(`msgs: ${messageCount}`);
+      if (toolCalls.length > 0) parts.push(`tools: ${toolCalls.length}`);
+      if (filesCreated.length > 0) parts.push(`created: ${filesCreated.length}`);
+      if (filesEdited.length > 0) parts.push(`edited: ${filesEdited.length}`);
+      console.log(chalk.dim(`[${ts}]`) + ` ${chalk.yellow("ACTIVITY")}  ${chalk.bold(sessionId.slice(0, 8))}... ${chalk.dim(parts.join("  "))}`);
+      if (lastMessage) {
+        console.log(chalk.dim(`           "${lastMessage.slice(0, 100)}${lastMessage.length > 100 ? "..." : ""}"`));
+      }
+    });
+
+    manager.emitter.on("bridge:session:completed", ({ sessionId, projectPath, duration }) => {
+      const ts = new Date().toLocaleTimeString();
+      const dur = duration > 60000 ? `${(duration / 60000).toFixed(1)}m` : `${(duration / 1000).toFixed(0)}s`;
+      console.log(chalk.dim(`[${ts}]`) + ` ${chalk.blue("COMPLETED")} ${chalk.bold(sessionId.slice(0, 8))}... → ${projectPath} (${dur})`);
+    });
+
+    const formatElapsed = (ms: number) => {
+      const s = Math.floor(ms / 1000);
+      if (s < 60) return `${s}s`;
+      const m = Math.floor(s / 60);
+      return `${m}m${s % 60}s`;
+    };
+
+    const shutdown = () => {
+      manager.stop();
+      const stats = manager.getStats();
+      const elapsed = formatElapsed(Date.now() - startTime);
+      console.log(`\n${chalk.dim("─".repeat(50))}`);
+      console.log(chalk.bold("  Bridge stopped") + chalk.dim(` (${elapsed})`));
+      console.log(chalk.dim(`  Sessions: ${stats.total} total, ${stats.active} active, ${stats.completed} completed`));
+      console.log();
+      process.exit(0);
+    };
+
+    process.on("SIGINT", shutdown);
+    process.on("SIGTERM", shutdown);
+
+    manager.start();
+
+    const watchPaths = manager.watcher.getWatchPaths();
+    console.log(chalk.dim(`  Scanning ${watchPaths.length} project directories (poll: ${opts.pollInterval}ms, timeout: ${opts.sessionTimeout}ms)`));
+    console.log(chalk.dim("  Press Ctrl+C to stop\n"));
+
+    // Keep process alive
+    await new Promise(() => {});
+  });
+
 // polpo tui (interactive mode — also the default)
 program
   .command("tui", { isDefault: true })

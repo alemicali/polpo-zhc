@@ -11,6 +11,6 @@ export type { SessionStore, Session, Message, MessageRole } from "./session-stor
 export { Orchestrator, buildRetryPrompt } from "./orchestrator.js";
 export type { OrchestratorOptions, AssessFn } from "./orchestrator.js";
 export { parseConfig, generateTemplate } from "./config.js";
-export { readSessionSummary, getRecentMessages, findTranscriptPath } from "./session-reader.js";
+export { readSessionSummary, readSessionSummaryFromPath, getRecentMessages, findTranscriptPath } from "./session-reader.js";
 export { looksLikeQuestion, classifyAsQuestion } from "./question-detector.js";
 export { analyzeBlockedTasks, resolveDeadlock, isResolving } from "./deadlock-resolver.js";
