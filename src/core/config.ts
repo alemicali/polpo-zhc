@@ -36,8 +36,12 @@ export async function parseConfig(filePath: string): Promise<OrchestraConfig> {
     if (!agent.name || typeof agent.name !== "string") {
       throw new Error("Each agent must have a name");
     }
-    if (!agent.adapter || typeof agent.adapter !== "string") {
-      throw new Error(`Agent "${agent.name}" missing required field: adapter (e.g. "claude-sdk", "generic")`);
+    // Default to native engine when adapter is not specified
+    if (!agent.adapter) {
+      agent.adapter = "native";
+    }
+    if (typeof agent.adapter !== "string") {
+      throw new Error(`Agent "${agent.name}": adapter must be a string`);
     }
     if (agent.adapter === "generic" && (!agent.command || typeof agent.command !== "string")) {
       throw new Error(`Agent "${agent.name}" uses generic adapter but has no command`);
@@ -101,12 +105,12 @@ export function generateTemplate(): string {
       agents: [
         {
           name: "coder",
-          adapter: "claude-sdk",
+          adapter: "native",
           role: "Implements features and fixes bugs",
         },
         {
           name: "reviewer",
-          adapter: "claude-sdk",
+          adapter: "native",
           role: "Reviews code for quality and correctness",
         },
       ],

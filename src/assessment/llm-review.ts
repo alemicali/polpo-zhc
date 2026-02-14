@@ -1,79 +1,136 @@
-import { z } from "zod";
+/**
+ * G-Eval LLM-as-Judge review using pi-ai.
+ *
+ * Runs 3 independent reviewers in parallel with their own tool loop:
+ * LLM call → tool execution → LLM call → ... → submit_review
+ *
+ * Tools: read_file, glob, grep, submit_review (all implemented natively).
+ */
+
+import { readFileSync } from "node:fs";
+import { execSync } from "node:child_process";
+import { resolve, relative } from "node:path";
+import { Type } from "@sinclair/typebox";
 import type { TaskExpectation, DimensionScore, CheckResult } from "../core/types.js";
 import { DEFAULT_DIMENSIONS, buildRubricSection, computeWeightedScore, computeMedianScores } from "./scoring.js";
 import { withRetry } from "../llm/retry.js";
+import { resolveModel } from "../llm/pi-client.js";
+import { completeSimple, type AssistantMessage, type Message, type Tool } from "@mariozechner/pi-ai";
 
-/**
- * Dynamically load the Claude Agent SDK (optional dependency).
- * Throws a clear error if the package is not installed.
- */
-async function loadClaudeSDK() {
-  try {
-    return await import("@anthropic-ai/claude-agent-sdk");
-  } catch { /* SDK not installed */
-    throw new Error(
-      "LLM review requires @anthropic-ai/claude-agent-sdk. Install it with: npm install @anthropic-ai/claude-agent-sdk"
-    );
-  }
-}
-
-/**
- * Injectable function type for LLM queries (used in tests).
- */
 export type LLMQueryFn = (prompt: string, cwd: string) => Promise<string>;
 
-/** Review result shape — matches the submit_review tool schema. */
 interface ReviewPayload {
   scores: { dimension: string; score: number; reasoning: string; evidence?: { file: string; line: number; note: string }[] }[];
   summary: string;
 }
 
-/**
- * Create the in-process MCP server with a `submit_review` tool.
- * The captured result is stored in the returned ref object.
- */
-async function createReviewServer() {
-  const { createSdkMcpServer, tool } = await loadClaudeSDK();
-  const ref: { result: ReviewPayload | null } = { result: null };
+// === Review Tools (native, no SDK dependency) ===
 
-  const server = createSdkMcpServer({
-    name: "reviewer",
-    version: "1.0.0",
-    tools: [
-      tool(
-        "submit_review",
-        `Submit your final structured code review. You MUST call this tool exactly once
+const readFileTool: Tool = {
+  name: "read_file",
+  description: "Read the contents of a file. Returns numbered lines.",
+  parameters: Type.Object({
+    path: Type.String({ description: "File path relative to project root" }),
+    limit: Type.Optional(Type.Number({ description: "Max lines to read (default: 500)" })),
+  }),
+};
+
+const globTool: Tool = {
+  name: "glob",
+  description: "Find files matching a pattern. Returns file paths.",
+  parameters: Type.Object({
+    pattern: Type.String({ description: "Glob pattern (e.g. '*.ts', 'src/**/*.js')" }),
+  }),
+};
+
+const grepTool: Tool = {
+  name: "grep",
+  description: "Search for a pattern in files. Returns matching lines with paths and line numbers.",
+  parameters: Type.Object({
+    pattern: Type.String({ description: "Regex pattern to search for" }),
+    include: Type.Optional(Type.String({ description: "File glob filter (e.g. '*.ts')" })),
+  }),
+};
+
+const submitReviewTool: Tool = {
+  name: "submit_review",
+  description: `Submit your final structured code review. You MUST call this tool exactly once
 after you have finished reading and analyzing all relevant code files.
 Each dimension must be scored 1-5 based on the rubric provided in the prompt.
 Each reasoning MUST include specific file:line references as evidence.
 Do NOT output the review as plain text — use this tool.`,
-        {
-          scores: z.array(z.object({
-            dimension: z.string().describe("Dimension name from the rubric"),
-            score: z.number().int().min(1).max(5).describe("Score 1-5"),
-            reasoning: z.string().describe("Brief reasoning with specific file:line code evidence"),
-            evidence: z.array(z.object({
-              file: z.string().describe("File path relative to project root"),
-              line: z.number().int().describe("Line number"),
-              note: z.string().describe("What this line demonstrates"),
-            })).optional().describe("Specific code citations backing the score"),
-          })).describe("One entry per evaluation dimension"),
-          summary: z.string().describe("Overall review summary"),
-        },
-        async (args) => {
-          ref.result = args;
-          return { content: [{ type: "text" as const, text: "Review submitted successfully." }] };
-        },
-      ),
-    ],
-  });
+  parameters: Type.Object({
+    scores: Type.Array(Type.Object({
+      dimension: Type.String({ description: "Dimension name from the rubric" }),
+      score: Type.Number({ description: "Score 1-5" }),
+      reasoning: Type.String({ description: "Brief reasoning with specific file:line code evidence" }),
+      evidence: Type.Optional(Type.Array(Type.Object({
+        file: Type.String({ description: "File path relative to project root" }),
+        line: Type.Number({ description: "Line number" }),
+        note: Type.String({ description: "What this line demonstrates" }),
+      }))),
+    })),
+    summary: Type.String({ description: "Overall review summary" }),
+  }),
+};
 
-  return { server, ref };
+const REVIEW_TOOLS: Tool[] = [readFileTool, globTool, grepTool, submitReviewTool];
+
+/** Execute a review tool call and return text content. */
+function executeReviewTool(
+  toolName: string,
+  args: Record<string, any>,
+  cwd: string,
+  reviewRef: { result: ReviewPayload | null },
+): string {
+  switch (toolName) {
+    case "read_file": {
+      const filePath = resolve(cwd, args.path);
+      try {
+        const raw = readFileSync(filePath, "utf-8");
+        const lines = raw.split("\n");
+        const limit = args.limit ?? 500;
+        const sliced = lines.slice(0, limit);
+        return sliced.map((l, i) => `${i + 1}\t${l}`).join("\n") +
+          (lines.length > limit ? `\n... (${lines.length - limit} more lines)` : "");
+      } catch (err) {
+        return `Error reading ${args.path}: ${err instanceof Error ? err.message : String(err)}`;
+      }
+    }
+    case "glob": {
+      try {
+        const result = execSync(
+          `find ${JSON.stringify(cwd)} -type f -name ${JSON.stringify(args.pattern)} 2>/dev/null | head -200`,
+          { encoding: "utf-8", timeout: 10_000 },
+        ).trim();
+        return result ? result.split("\n").map(f => relative(cwd, f)).join("\n") : "No files found";
+      } catch {
+        return "No files found";
+      }
+    }
+    case "grep": {
+      const includeFlag = args.include ? `--include=${JSON.stringify(args.include)}` : "";
+      try {
+        const result = execSync(
+          `grep -rn ${includeFlag} -E ${JSON.stringify(args.pattern)} ${JSON.stringify(cwd)} 2>/dev/null | head -100`,
+          { encoding: "utf-8", timeout: 15_000 },
+        ).trim();
+        return result || "No matches found";
+      } catch {
+        return "No matches found";
+      }
+    }
+    case "submit_review": {
+      reviewRef.result = args as ReviewPayload;
+      return "Review submitted successfully.";
+    }
+    default:
+      return `Unknown tool: ${toolName}`;
+  }
 }
 
-/**
- * Build the review prompt for the agent.
- */
+// === Prompt Builder ===
+
 function buildReviewPrompt(
   criteria: string,
   rubricSection: string,
@@ -88,7 +145,7 @@ EVALUATION DIMENSIONS AND RUBRICS:
 ${rubricSection}
 
 INSTRUCTIONS:
-1. Use Read, Glob, and Grep tools to explore the codebase and find relevant files.
+1. Use read_file, glob, and grep tools to explore the codebase and find relevant files.
 2. Read the code carefully and understand what it does relative to the acceptance criteria.
 3. For EACH dimension (${dimNames}), follow this process:
    a. Think step-by-step about how the code performs on this dimension.
@@ -107,9 +164,100 @@ IMPORTANT:
 - Scores without specific code evidence (file:line references) should be considered unreliable.`;
 }
 
-/**
- * Convert a ReviewPayload into a CheckResult.
- */
+// === Single Review Runner (pi-ai tool loop) ===
+
+const MAX_REVIEW_TURNS = 30;
+
+async function runSingleReview(
+  reviewPrompt: string,
+  cwd: string,
+  model?: string,
+  onProgress?: (msg: string) => void,
+): Promise<ReviewPayload | null> {
+  const m = resolveModel(model);
+  const reviewRef: { result: ReviewPayload | null } = { result: null };
+
+  const messages: Message[] = [
+    { role: "user", content: reviewPrompt, timestamp: Date.now() },
+  ];
+
+  for (let turn = 0; turn < MAX_REVIEW_TURNS; turn++) {
+    const response = await completeSimple(m, {
+      systemPrompt: "You are a thorough code reviewer. Use tools to explore the codebase before submitting your review.",
+      messages,
+      tools: REVIEW_TOOLS,
+    });
+
+    messages.push(response);
+
+    // Extract tool calls
+    const toolCalls = response.content.filter(
+      (c): c is { type: "toolCall"; id: string; name: string; arguments: Record<string, any> } =>
+        c.type === "toolCall"
+    );
+
+    if (toolCalls.length === 0) break; // Agent done, no more tools
+
+    // Execute each tool call
+    for (const call of toolCalls) {
+      if (call.name === "read_file" && onProgress) {
+        const file = String(call.arguments?.path ?? "").split("/").pop();
+        onProgress(`Reading ${file}`);
+      } else if (call.name === "glob" && onProgress) {
+        onProgress(`Searching ${call.arguments?.pattern}`);
+      } else if (call.name === "grep" && onProgress) {
+        onProgress(`Grep: ${String(call.arguments?.pattern ?? "").slice(0, 30)}`);
+      } else if (call.name === "submit_review" && onProgress) {
+        onProgress("Submitting review scores...");
+      }
+
+      const resultText = executeReviewTool(call.name, call.arguments, cwd, reviewRef);
+      messages.push({
+        role: "toolResult",
+        toolCallId: call.id,
+        toolName: call.name,
+        content: [{ type: "text", text: resultText }],
+        isError: false,
+        timestamp: Date.now(),
+      });
+    }
+
+    // If review was submitted, we're done
+    if (reviewRef.result) break;
+  }
+
+  if (reviewRef.result?.scores && Array.isArray(reviewRef.result.scores) && reviewRef.result.scores.length > 0) {
+    return reviewRef.result;
+  }
+
+  // Try to extract from the last assistant text as fallback
+  const lastAssistant = [...messages].reverse().find(m => m.role === "assistant") as AssistantMessage | undefined;
+  if (lastAssistant) {
+    const textBlocks = lastAssistant.content.filter((c): c is { type: "text"; text: string } => c.type === "text");
+    const fullText = textBlocks.map(b => b.text).join("\n");
+    return tryParseReviewJSON(fullText);
+  }
+
+  return null;
+}
+
+function tryParseReviewJSON(output: string): ReviewPayload | null {
+  let text = output.trim();
+  const fenceMatch = text.match(/```(?:json)?\s*\n?([\s\S]*?)\n?\s*```/);
+  if (fenceMatch) text = fenceMatch[1].trim();
+  const jsonMatch = text.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) return null;
+  let jsonStr = jsonMatch[0];
+  jsonStr = jsonStr.replace(/,\s*([}\]])/g, "$1");
+  try {
+    const parsed = JSON.parse(jsonStr);
+    if (parsed.scores && Array.isArray(parsed.scores)) return parsed;
+  } catch { /* fall through */ }
+  return null;
+}
+
+// === CheckResult Builder (unchanged) ===
+
 function buildCheckResult(
   parsed: ReviewPayload,
   dimensions: import("../core/types.js").EvalDimension[],
@@ -148,108 +296,29 @@ function buildCheckResult(
   };
 }
 
-/**
- * Try to parse a ReviewPayload from raw text output (fallback).
- */
-function tryParseReviewJSON(output: string): ReviewPayload | null {
-  let text = output.trim();
-  const fenceMatch = text.match(/```(?:json)?\s*\n?([\s\S]*?)\n?\s*```/);
-  if (fenceMatch) text = fenceMatch[1].trim();
-  const jsonMatch = text.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) return null;
-  let jsonStr = jsonMatch[0];
-  jsonStr = jsonStr.replace(/,\s*([}\]])/g, "$1");
-  try {
-    const parsed = JSON.parse(jsonStr);
-    if (parsed.scores && Array.isArray(parsed.scores)) return parsed;
-  } catch { /* fall through */ }
-  return null;
-}
+// === Single Review with Retry ===
 
-/**
- * Run a single reviewer agent. Returns the ReviewPayload or null on failure.
- */
-async function runSingleReview(
-  reviewPrompt: string,
-  cwd: string,
-  onProgress?: (msg: string) => void,
-): Promise<ReviewPayload | null> {
-  const { query } = await loadClaudeSDK();
-  const { server, ref } = await createReviewServer();
-
-  let textOutput = "";
-
-  for await (const message of query({
-    prompt: reviewPrompt,
-    options: {
-      cwd,
-      permissionMode: "bypassPermissions",
-      allowDangerouslySkipPermissions: true,
-      maxTurns: 30,
-      persistSession: false,
-      allowedTools: [
-        "Read",
-        "Glob",
-        "Grep",
-        "mcp__reviewer__submit_review",
-      ],
-      mcpServers: {
-        reviewer: server,
-      },
-    },
-  })) {
-    const msg = message as Record<string, unknown>;
-    if (msg.type === "tool_use" || msg.tool_name) {
-      const toolName = (msg.tool_name ?? msg.name ?? "tool") as string;
-      const input = (msg.tool_input ?? msg.input) as Record<string, unknown> | undefined;
-      if (toolName === "Read" && input?.file_path) {
-        const file = String(input.file_path).split("/").pop();
-        onProgress?.(`Reading ${file}`);
-      } else if (toolName === "Glob" && input?.pattern) {
-        onProgress?.(`Searching ${input.pattern}`);
-      } else if (toolName === "Grep" && input?.pattern) {
-        onProgress?.(`Grep: ${String(input.pattern).slice(0, 30)}`);
-      } else if (toolName.includes("submit_review")) {
-        onProgress?.("Submitting review scores...");
-      } else {
-        onProgress?.(`${toolName}...`);
-      }
-    }
-    if (msg.type === "result") {
-      if (msg.subtype === "success" && typeof msg.result === "string") {
-        textOutput = msg.result;
-      }
-    }
-  }
-
-  if (ref.result?.scores && Array.isArray(ref.result.scores) && ref.result.scores.length > 0) {
-    return ref.result;
-  }
-
-  return tryParseReviewJSON(textOutput);
-}
-
-/**
- * Run a single review with one retry on failure.
- */
 async function runSingleReviewWithRetry(
   reviewPrompt: string,
   cwd: string,
+  model?: string,
   onProgress?: (msg: string) => void,
 ): Promise<ReviewPayload | null> {
   try {
     return await withRetry(
       async () => {
-        const result = await runSingleReview(reviewPrompt, cwd, onProgress);
+        const result = await runSingleReview(reviewPrompt, cwd, model, onProgress);
         if (!result) throw new Error("Reviewer produced no result");
         return result;
       },
       { maxRetries: 1, initialDelayMs: 2000, checkTransient: false },
     );
-  } catch { /* retries exhausted */
+  } catch {
     return null;
   }
 }
+
+// === Main Entry Point ===
 
 /**
  * Run a G-Eval LLM-as-Judge review.
@@ -275,12 +344,15 @@ export async function runLLMReview(
   const rubricSection = buildRubricSection(dimensions);
   const reviewPrompt = buildReviewPrompt(criteria, rubricSection, dimNames);
 
+  // Use orchestrator model for reviews (configurable via env or default)
+  const reviewModel = process.env.POLPO_JUDGE_MODEL || process.env.POLPO_MODEL || undefined;
+
   onProgress?.("Starting 3 independent review agents...");
 
   const settled = await Promise.allSettled([
-    runSingleReviewWithRetry(reviewPrompt, cwd, onProgress),
-    runSingleReviewWithRetry(reviewPrompt, cwd, onProgress),
-    runSingleReviewWithRetry(reviewPrompt, cwd, onProgress),
+    runSingleReviewWithRetry(reviewPrompt, cwd, reviewModel, onProgress),
+    runSingleReviewWithRetry(reviewPrompt, cwd, reviewModel, onProgress),
+    runSingleReviewWithRetry(reviewPrompt, cwd, reviewModel, onProgress),
   ]);
 
   const successfulReviews: ReviewPayload[] = [];
@@ -290,20 +362,17 @@ export async function runLLMReview(
     }
   }
 
-  // Enough reviews for consensus
   if (successfulReviews.length >= 2) {
     onProgress?.(`Computing consensus from ${successfulReviews.length} reviewers...`);
     const consensus = computeMedianScores(successfulReviews, dimensions);
     return buildCheckResult(consensus, dimensions, threshold);
   }
 
-  // Single successful review — use it directly
   if (successfulReviews.length === 1) {
     onProgress?.("Only 1 reviewer succeeded, using single review...");
     return buildCheckResult(successfulReviews[0], dimensions, threshold);
   }
 
-  // SAFETY NET: all evaluators failed → don't block the task
   return {
     type: "llm_review",
     passed: true,

@@ -17,6 +17,7 @@ import { Orchestrator } from "../../core/orchestrator.js";
 import type { Task, TaskStatus, TaskExpectation } from "../../core/types.js";
 
 // Register adapters (side-effect imports)
+import "../../adapters/native.js";
 import "../../adapters/claude-sdk.js";
 import "../../adapters/generic.js";
 

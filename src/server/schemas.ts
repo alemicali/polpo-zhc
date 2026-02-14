@@ -49,7 +49,7 @@ export const UpdatePlanSchema = z.object({
 
 export const AddAgentSchema = z.object({
   name: z.string().min(1),
-  adapter: z.string().min(1),
+  adapter: z.string().min(1).default("native"),
   role: z.string().optional(),
   command: z.string().optional(),
   model: z.string().optional(),

@@ -20,6 +20,7 @@ import { OverlayHost } from "./overlays/OverlayHost.js";
 
 
 // Register adapters
+import "../adapters/native.js";
 import "../adapters/claude-sdk.js";
 import "../adapters/generic.js";
 

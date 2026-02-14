@@ -6,7 +6,6 @@ team:
   description: "Default Polpo team"
   agents:
     - name: "dev-1"
-      command: "claude -p {prompt}"
       role: "developer"
 
 tasks:

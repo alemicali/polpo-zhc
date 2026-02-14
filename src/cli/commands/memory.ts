@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { writeFile, readFile, unlink } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
 import { Orchestrator } from "../../core/orchestrator.js";
+import "../../adapters/native.js";
 import "../../adapters/claude-sdk.js";
 import "../../adapters/generic.js";
 

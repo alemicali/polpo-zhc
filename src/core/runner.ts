@@ -20,6 +20,7 @@ import type { RunRecord } from "./run-store.js";
 import type { RunnerConfig, TaskResult } from "./types.js";
 
 // Side-effect imports: register adapters
+import "../adapters/native.js";
 import "../adapters/claude-sdk.js";
 import "../adapters/generic.js";
 

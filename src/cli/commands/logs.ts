@@ -6,6 +6,7 @@ import { Command } from "commander";
 import chalk from "chalk";
 import { resolve } from "node:path";
 import { Orchestrator } from "../../core/orchestrator.js";
+import "../../adapters/native.js";
 import "../../adapters/claude-sdk.js";
 import "../../adapters/generic.js";
 

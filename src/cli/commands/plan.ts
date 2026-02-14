@@ -7,6 +7,7 @@ import chalk from "chalk";
 import { resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { Orchestrator } from "../../core/orchestrator.js";
+import "../../adapters/native.js";
 import "../../adapters/claude-sdk.js";
 import "../../adapters/generic.js";
 

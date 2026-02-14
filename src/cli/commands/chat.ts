@@ -5,6 +5,7 @@ import { Orchestrator } from "../../core/orchestrator.js";
 import { buildChatSystemPrompt } from "../../llm/prompts.js";
 import { querySDKText } from "../../llm/query.js";
 import type { SessionStore } from "../../core/session-store.js";
+import "../../adapters/native.js";
 import "../../adapters/claude-sdk.js";
 import "../../adapters/generic.js";
 

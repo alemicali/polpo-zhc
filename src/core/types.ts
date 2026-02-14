@@ -89,17 +89,18 @@ export interface TaskResult {
 
 // === Agent ===
 
-export type AdapterType = "claude-sdk" | "generic" | string;
+export type AdapterType = "native" | "claude-sdk" | "generic" | string;
 
 export interface AgentConfig {
   name: string;
+  /** Adapter to use. Defaults to "native" (Polpo's built-in engine). Use "claude-sdk" or "generic" for external tools. */
   adapter: AdapterType;
   role?: string;
   /** For generic adapter: the shell command to run. {prompt} and {taskFile} are replaced. */
   command?: string;
-  /** For claude-sdk adapter: model to use */
+  /** Model to use. Format: "provider:model" (e.g. "anthropic:claude-sonnet-4-5-20250929") or bare model ID (auto-inferred). */
   model?: string;
-  /** For claude-sdk adapter: allowed tools */
+  /** Allowed tools for the agent (e.g. ["read", "write", "edit", "bash", "glob", "grep"]) */
   allowedTools?: string[];
   /** For claude-sdk adapter: MCP servers config */
   mcpServers?: Record<string, unknown>;
@@ -107,7 +108,7 @@ export interface AgentConfig {
   systemPrompt?: string;
   /** Installed skill names (e.g. "find-skills", "frontend-design") */
   skills?: string[];
-  /** For claude-sdk adapter: max conversation turns before stopping. Default 150 */
+  /** Max conversation turns before stopping. Default 150 */
   maxTurns?: number;
   /** Volatile agent — created for a specific plan, auto-removed when plan completes */
   volatile?: boolean;

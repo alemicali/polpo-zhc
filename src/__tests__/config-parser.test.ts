@@ -378,7 +378,7 @@ describe("parseConfig", () => {
       await expect(parseConfig(path)).rejects.toThrow("Each agent must have a name");
     });
 
-    it("throws on agent without adapter", async () => {
+    it("defaults adapter to 'native' when not specified", async () => {
       const cfg = {
         ...minimalConfig(),
         team: {
@@ -387,9 +387,8 @@ describe("parseConfig", () => {
         },
       };
       const path = writeYaml("agent-no-adapter.yml", cfg);
-      await expect(parseConfig(path)).rejects.toThrow(
-        'Agent "orphan" missing required field: adapter'
-      );
+      const parsed = await parseConfig(path);
+      expect(parsed.team.agents[0].adapter).toBe("native");
     });
 
     it("throws on generic adapter without command", async () => {
