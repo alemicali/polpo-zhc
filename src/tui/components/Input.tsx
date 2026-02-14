@@ -2,10 +2,18 @@
  * Input — bottom bar with mode indicator, text input, and processing shimmer.
  */
 
+import React from "react";
 import { Box, Text, useInput, useApp } from "ink";
 import { useState, useRef, useEffect } from "react";
 import { useStore } from "../store.js";
 import { usePolpo } from "../app.js";
+import { findMentionSpans } from "../mentions.js";
+
+const MENTION_COLORS: Record<string, string> = {
+  agent: "cyan",
+  task: "yellow",
+  plan: "blue",
+};
 
 const COMMANDS = [
   "/status", "/help", "/team", "/tasks", "/plans", "/plan",
@@ -152,6 +160,30 @@ export function Input({
 
   const modeColor = MODE_COLORS[mode] ?? "white";
 
+  const renderWithMentions = (text: string) => {
+    const spans = findMentionSpans(text);
+    if (spans.length === 0) return <Text>{text}</Text>;
+
+    const parts: React.ReactNode[] = [];
+    let pos = 0;
+    for (const span of spans) {
+      if (span.start > pos) {
+        parts.push(<Text key={`t${pos}`}>{text.slice(pos, span.start)}</Text>);
+      }
+      const color = MENTION_COLORS[span.type] ?? "white";
+      parts.push(
+        <Text key={`m${span.start}`} color={color} bold>
+          {text.slice(span.start, span.end)}
+        </Text>,
+      );
+      pos = span.end;
+    }
+    if (pos < text.length) {
+      parts.push(<Text key={`t${pos}`}>{text.slice(pos)}</Text>);
+    }
+    return <>{parts}</>;
+  };
+
   return (
     <Box height={1} paddingX={1}>
       {processing ? (
@@ -165,7 +197,7 @@ export function Input({
             {mode}
           </Text>
           <Text color="gray"> ❯ </Text>
-          <Text>{buffer}</Text>
+          {renderWithMentions(buffer)}
           <Text color="gray">█</Text>
         </Text>
       )}

@@ -16,6 +16,7 @@ import { ConfirmPage } from "../pages/ConfirmPage.js";
 import { createTask } from "../actions/create-task.js";
 import { createPlan } from "../actions/create-plan.js";
 import { startChat } from "../actions/chat.js";
+import { parseMentions } from "../mentions.js";
 
 export function Shell() {
   const pageId = useStore((s) => s.page.id);
@@ -37,14 +38,17 @@ export function Shell() {
       return;
     }
 
+    // Parse @ mentions
+    const mentions = parseMentions(text);
+
     // Mode-specific handling
     const mode = s.inputMode;
     if (mode === "chat") {
-      startChat(text, polpo, s);
+      startChat(mentions.text || text, polpo, s);
     } else if (mode === "plan") {
-      createPlan(text, polpo, s);
+      createPlan(mentions.text || text, polpo, s);
     } else {
-      createTask(text, polpo, s);
+      createTask(mentions.text || text, polpo, s, mentions.agent);
     }
   };
 

@@ -1,16 +1,22 @@
 /**
  * Task creation action — creates a task from user input.
  * If multiple agents available, shows picker first.
+ * Optionally enriches task via LLM task-prep (controlled by config.taskPrep).
  */
 
+import { parse as parseYaml } from "yaml";
 import type { Orchestrator } from "../../core/orchestrator.js";
 import type { TUIStore } from "../store.js";
+import type { TaskExpectation } from "../../core/types.js";
 import { seg } from "../format.js";
+import { querySDKText, extractYaml } from "../../llm/query.js";
+import { buildTaskPrepPrompt } from "../../llm/prompts.js";
 
 export function createTask(
   description: string,
   polpo: Orchestrator,
   store: TUIStore,
+  mentionedAgent?: string,
 ): void {
   const agents = polpo.getAgents();
 
@@ -20,6 +26,20 @@ export function createTask(
       seg("Use ", "gray"),
       seg("/team", "cyan"),
       seg(" to add agents.", "gray"),
+    ]);
+    return;
+  }
+
+  // @agent mention overrides default
+  if (mentionedAgent) {
+    const found = agents.find((a) => a.name === mentionedAgent);
+    if (found) {
+      doCreate(description, found.name, polpo, store);
+      return;
+    }
+    store.log(`Agent not found: @${mentionedAgent}`, [
+      seg(`Agent not found: `, "red"),
+      seg(`@${mentionedAgent}`, "cyan"),
     ]);
     return;
   }
@@ -68,6 +88,25 @@ export function createTask(
 }
 
 function doCreate(
+  userInput: string,
+  agentName: string,
+  polpo: Orchestrator,
+  store: TUIStore,
+): void {
+  // Check if task-prep is enabled (default: true)
+  const config = polpo.getConfig();
+  const taskPrepEnabled = config?.settings && "taskPrep" in config.settings
+    ? (config.settings as Record<string, unknown>).taskPrep !== false
+    : true;
+
+  if (taskPrepEnabled && agentName) {
+    doCreateWithPrep(userInput, agentName, polpo, store);
+  } else {
+    doCreateDirect(userInput, agentName, polpo, store);
+  }
+}
+
+function doCreateDirect(
   description: string,
   agentName: string,
   polpo: Orchestrator,
@@ -89,8 +128,101 @@ function doCreate(
     seg(` → ${agentName}`, "gray"),
   ]);
 
-  // Start orchestrator if not already running
-  polpo.run().catch(() => {
-    // Already running or error — both fine
-  });
+  polpo.run().catch(() => {});
+}
+
+async function doCreateWithPrep(
+  userInput: string,
+  agentName: string,
+  polpo: Orchestrator,
+  store: TUIStore,
+): Promise<void> {
+  store.setProcessing(true, "Preparing task...");
+
+  try {
+    const state = (() => {
+      try { return polpo.getStore()?.getState() ?? null; }
+      catch { return null; }
+    })();
+
+    const prompt = buildTaskPrepPrompt(polpo, state, polpo.getWorkDir(), userInput, agentName);
+    const model = polpo.getConfig()?.settings?.orchestratorModel;
+    const result = await querySDKText(prompt, polpo.getWorkDir(), model);
+    const yaml = extractYaml(result);
+
+    store.setProcessing(false);
+
+    if (!yaml?.trim()) {
+      // Fallback to direct creation
+      doCreateDirect(userInput, agentName, polpo, store);
+      return;
+    }
+
+    let doc: any;
+    try {
+      doc = parseYaml(yaml);
+    } catch {
+      doCreateDirect(userInput, agentName, polpo, store);
+      return;
+    }
+
+    const prepTask = doc?.tasks?.[0];
+    if (!prepTask?.title) {
+      doCreateDirect(userInput, agentName, polpo, store);
+      return;
+    }
+
+    // Parse expectations from LLM output
+    const expectations: TaskExpectation[] = [];
+    if (Array.isArray(prepTask.expectations)) {
+      for (const e of prepTask.expectations) {
+        if (e.type === "test" && e.command) {
+          expectations.push({ type: "test", command: e.command });
+        } else if (e.type === "file_exists" && Array.isArray(e.paths) && e.paths.length > 0) {
+          expectations.push({ type: "file_exists", paths: e.paths, confidence: "estimated" });
+        } else if (e.type === "script" && e.command) {
+          expectations.push({ type: "script", command: e.command });
+        } else if (e.type === "llm_review" && (e.criteria || e.dimensions)) {
+          expectations.push({
+            type: "llm_review",
+            criteria: e.criteria,
+            dimensions: e.dimensions,
+            threshold: e.threshold,
+          });
+        }
+      }
+    }
+
+    const task = polpo.addTask({
+      title: prepTask.title,
+      description: prepTask.description || userInput,
+      assignTo: agentName,
+      expectations,
+    });
+
+    store.log(`Task prepared: ${task.title}`, [
+      seg("+ ", "green"),
+      seg(task.title, undefined, true),
+      seg(` → ${agentName}`, "gray"),
+    ]);
+
+    if (expectations.length > 0) {
+      const types = expectations.map((e) => e.type).join(", ");
+      store.log(`  Expectations: ${types}`, [
+        seg("  Expectations: ", "gray"),
+        seg(types, "gray", false, true),
+      ]);
+    }
+
+    polpo.run().catch(() => {});
+  } catch (err: unknown) {
+    store.setProcessing(false);
+    // Fallback to direct creation on any error
+    const msg = err instanceof Error ? err.message : String(err);
+    store.log(`Task prep failed, creating directly: ${msg}`, [
+      seg("Task prep failed: ", "yellow"),
+      seg(msg, "gray", false, true),
+    ]);
+    doCreateDirect(userInput, agentName, polpo, store);
+  }
 }
