@@ -32,6 +32,9 @@ export interface TaskExpectation {
   dimensions?: EvalDimension[];
   /** For llm_review: minimum weighted score (1-5) to pass. Default 3.0 */
   threshold?: number;
+  /** Whether this expectation is a firm requirement or an estimate that can be auto-corrected.
+   *  Default: "estimated" for file_exists, "firm" for test/script/llm_review. */
+  confidence?: "firm" | "estimated";
 }
 
 export interface TaskMetric {
@@ -253,7 +256,9 @@ export interface OrchestraSettings {
   maxQuestionRounds?: number;
   /** Max deadlock resolution attempts per task. Default: 2 */
   maxResolutionAttempts?: number;
-  /** Model for orchestrator LLM calls (judge, question detection, deadlock, plans). */
+  /** Auto-correct correctable expectations (e.g. file_exists paths) on assessment failure. Default: true */
+  autoCorrectExpectations?: boolean;
+  /** Model for orchestrator LLM calls (question detection, deadlock, plans). */
   orchestratorModel?: string;
 }
 

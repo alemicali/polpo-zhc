@@ -1,277 +1,161 @@
+/**
+ * TUI state — pure UI data, no business logic objects.
+ * Orchestrator lives in React Context, not here.
+ */
+
 import { create } from "zustand";
-import type { Orchestrator } from "../core/orchestrator.js";
-import type { OrchestraState, ProjectConfig } from "../core/types.js";
-import type { BridgeManager } from "../bridge/index.js";
+import type { Task, AgentProcess, OrchestraState } from "../core/types.js";
 
-// ─── Log Entry ──────────────────────────────────────────
+// ─── Segment (styled text unit) ─────────────────────────
 
-export type LogSeg = { text: string; color?: string; bold?: boolean; dim?: boolean };
-
-export interface LogEntry {
+export interface Seg {
   text: string;
-  segments?: LogSeg[];
-  type: "event" | "verbose" | "always";
-  ts: number;
+  color?: string;
+  bold?: boolean;
+  dim?: boolean;
 }
 
-export interface ChatEntry {
-  role: "user" | "assistant";
-  content: string;
-  ts: number;
-}
+// ─── Stream entries ─────────────────────────────────────
 
-// ─── Overlay Types ──────────────────────────────────────
+export type StreamEntry =
+  | { type: "event"; segs: Seg[]; ts: string }
+  | { type: "user"; text: string; ts: string }
+  | { type: "response"; segs: Seg[]; ts: string }
+  | { type: "system"; text: string; ts: string };
 
-export type OverlayType =
-  | "plan-preview"
-  | "task-browser"
-  | "picker"
-  | "text-input"
-  | "content-viewer"
-  | "yaml-editor"
-  | null;
+// ─── Pages (full-screen views) ──────────────────────────
 
-// ─── Menu Types ─────────────────────────────────────────
-
-export interface MenuItem {
+export interface PickerItem {
   label: string;
   value: string;
   description?: string;
 }
 
-// ─── Store Interface ────────────────────────────────────
+export type Page =
+  | { id: "main" }
+  | {
+      id: "picker";
+      title: string;
+      items: PickerItem[];
+      hint?: string;
+      onSelect: (index: number, value: string) => void;
+      onCancel: () => void;
+      onKey?: (input: string, index: number, value: string) => void;
+    }
+  | {
+      id: "editor";
+      title: string;
+      initial: string;
+      onSave: (value: string) => void;
+      onCancel: () => void;
+    }
+  | {
+      id: "viewer";
+      title: string;
+      content: string;
+      actions?: string[];
+      onAction?: (index: number) => void;
+      onClose: () => void;
+    }
+  | {
+      id: "confirm";
+      message: string;
+      onConfirm: () => void;
+      onCancel: () => void;
+    };
+
+// ─── Store ──────────────────────────────────────────────
+
+const MAX_LINES = 2000;
+const MAX_HISTORY = 100;
 
 export interface TUIStore {
-  // Orchestrator
-  orchestrator: Orchestrator | null;
-  state: OrchestraState | null;
-  config: ProjectConfig;
-  workDir: string;
-  defaultAgent: string;
+  // Stream
+  lines: StreamEntry[];
+  pushLine(entry: StreamEntry): void;
+  log(text: string, segs?: Seg[]): void;
+  clearLines(): void;
 
-  // Bridge
-  bridge: BridgeManager | null;
-  setBridge(b: BridgeManager | null): void;
+  // Tasks (snapshot from orchestrator)
+  tasks: Task[];
+  processes: AgentProcess[];
+  syncState(state: OrchestraState): void;
 
-  // UI state
-  inputMode: "task" | "plan" | "chat";
+  // Input
   inputBuffer: string;
-  processing: boolean;
-  processingStart: number;
-  processingLabel: string;
-  processingDetail: string;
-  taskPanelVisible: boolean;
-  verboseLog: boolean;
-  frame: number;
-  quitting: boolean;
-
-  // Log
-  logs: LogEntry[];
-  fullLogLines: string[];
-  eventLogLines: string[];
-
-  // Chat
-  chatMessages: ChatEntry[];
-  activeSessionId: string | null;
-
-  // Overlay
-  activeOverlay: OverlayType;
-  overlayProps: Record<string, unknown>;
-
-  // Menu
-  menuType: "command" | "agent" | null;
-  menuItems: MenuItem[];
-  menuIndex: number;
-  menuJustClosed: boolean;
-
-  // Actions
-  setOrchestrator(o: Orchestrator): void;
-  setState(s: OrchestraState): void;
-  setConfig(c: ProjectConfig): void;
-  setWorkDir(d: string): void;
-  setDefaultAgent(name: string): void;
-
-  addLog(entry: LogEntry): void;
-  log(msg: string): void;
-  logAlways(msg: string, segments?: LogSeg[]): void;
-  logEvent(msg: string, segments?: LogSeg[]): void;
-  clearLogs(): void;
-
-  addChatMessage(entry: ChatEntry): void;
-  setChatMessages(msgs: ChatEntry[]): void;
-  setActiveSessionId(id: string | null): void;
-  clearChat(): void;
-
-  setInputMode(mode: "task" | "plan" | "chat"): void;
-  toggleMode(): void;
   setInputBuffer(buf: string): void;
+  inputMode: "task" | "plan" | "chat";
+  setInputMode(mode: "task" | "plan" | "chat"): void;
+  history: string[];
+  pushHistory(cmd: string): void;
+
+  // Pages
+  page: Page;
+  navigate(page: Page): void;
+  goMain(): void;
+
+  // Processing indicator
+  processing: boolean;
+  processingLabel: string;
   setProcessing(active: boolean, label?: string): void;
-  setProcessingDetail(detail: string): void;
-  toggleTaskPanel(): void;
-  toggleVerbose(): void;
-  tick(): void;
-  setQuitting(q: boolean): void;
 
-  openOverlay(type: OverlayType, props?: Record<string, unknown>): void;
-  closeOverlay(): void;
-
-  setMenu(type: "command" | "agent" | null, items?: MenuItem[]): void;
-  setMenuIndex(n: number): void;
-  setMenuJustClosed(v: boolean): void;
-
-  loadState(): void;
+  // Preferences
+  defaultAgent: string;
+  setDefaultAgent(name: string): void;
 }
 
-// ─── Store Implementation ───────────────────────────────
+export const useStore = create<TUIStore>((set) => ({
+  // Stream
+  lines: [],
+  pushLine: (entry) =>
+    set((s) => ({
+      lines: [...s.lines.slice(-(MAX_LINES - 1)), entry],
+    })),
+  log: (text, segs) =>
+    set((s) => ({
+      lines: [
+        ...s.lines.slice(-(MAX_LINES - 1)),
+        {
+          type: "event" as const,
+          segs: segs ?? [{ text }],
+          ts: new Date().toISOString(),
+        },
+      ],
+    })),
+  clearLines: () => set({ lines: [] }),
 
-const MAX_LOGS = 2000;
+  // Tasks
+  tasks: [],
+  processes: [],
+  syncState: (state) =>
+    set({
+      tasks: state.tasks,
+      processes: state.processes,
+    }),
 
-export const useTUIStore = create<TUIStore>((set, get) => ({
-  // Orchestrator
-  orchestrator: null,
-  state: null,
-  config: { project: "", judge: "claude-sdk", judgeModel: "claude-sonnet-4-5-20250929", agent: "claude-sdk", model: "claude-sonnet-4-5-20250929" },
-  workDir: ".",
-  defaultAgent: "dev",
-
-  // Bridge
-  bridge: null,
-  setBridge: (b) => set({ bridge: b }),
-
-  // UI state
-  inputMode: "task",
+  // Input
   inputBuffer: "",
-  processing: false,
-  processingStart: 0,
-  processingLabel: "",
-  processingDetail: "",
-  taskPanelVisible: true,
-  verboseLog: false,
-  frame: 0,
-  quitting: false,
-
-  // Log
-  logs: [],
-  fullLogLines: [],
-  eventLogLines: [],
-
-  // Chat
-  chatMessages: [],
-  activeSessionId: null,
-
-  // Overlay
-  activeOverlay: null,
-  overlayProps: {},
-
-  // Menu
-  menuType: null,
-  menuItems: [],
-  menuIndex: 0,
-  menuJustClosed: false,
-
-  // Actions
-  setOrchestrator: (o) => set({ orchestrator: o }),
-  setState: (s) => set({ state: s }),
-  setConfig: (c) => set({ config: c }),
-  setWorkDir: (d) => set({ workDir: d }),
-  setDefaultAgent: (name) => set({ defaultAgent: name }),
-
-  addLog: (entry) => set((s) => {
-    const logs = s.logs.length >= MAX_LOGS
-      ? [...s.logs.slice(-MAX_LOGS + 1), entry]
-      : [...s.logs, entry];
-    return { logs };
-  }),
-
-  log: (msg) => {
-    const entry: LogEntry = { text: msg, type: "verbose", ts: Date.now() };
-    get().addLog(entry);
-    set((s) => ({ fullLogLines: [...s.fullLogLines, msg] }));
-  },
-
-  logAlways: (msg, segments) => {
-    const entry: LogEntry = { text: msg, segments, type: "always", ts: Date.now() };
-    get().addLog(entry);
-    set((s) => ({
-      fullLogLines: [...s.fullLogLines, msg],
-      eventLogLines: [...s.eventLogLines, msg],
-    }));
-  },
-
-  logEvent: (msg, segments) => {
-    const entry: LogEntry = { text: msg, segments, type: "event", ts: Date.now() };
-    get().addLog(entry);
-    set((s) => ({
-      fullLogLines: [...s.fullLogLines, msg],
-      eventLogLines: [...s.eventLogLines, msg],
-    }));
-  },
-
-  clearLogs: () => set({ logs: [], fullLogLines: [], eventLogLines: [] }),
-
-  addChatMessage: (entry) => set((s) => {
-    const chatMessages = s.chatMessages.length >= 200
-      ? [...s.chatMessages.slice(-199), entry]
-      : [...s.chatMessages, entry];
-    return { chatMessages };
-  }),
-  setChatMessages: (msgs) => set({ chatMessages: msgs }),
-  setActiveSessionId: (id) => set({ activeSessionId: id }),
-  clearChat: () => set({ chatMessages: [], activeSessionId: null }),
-
-  setInputMode: (mode) => set({ inputMode: mode }),
-  toggleMode: () => set((s) => {
-    const modes: Array<"task" | "plan" | "chat"> = ["task", "plan", "chat"];
-    const idx = modes.indexOf(s.inputMode);
-    return { inputMode: modes[(idx + 1) % modes.length] };
-  }),
-
   setInputBuffer: (buf) => set({ inputBuffer: buf }),
+  inputMode: "task",
+  setInputMode: (mode) => set({ inputMode: mode }),
+  history: [],
+  pushHistory: (cmd) =>
+    set((s) => ({
+      history: [...s.history.slice(-MAX_HISTORY), cmd],
+    })),
 
-  setProcessing: (active, label) => set({
-    processing: active,
-    processingLabel: label ?? "",
-    processingDetail: "",
-    processingStart: active ? Date.now() : 0,
-  }),
+  // Pages
+  page: { id: "main" },
+  navigate: (page) => set({ page }),
+  goMain: () => set({ page: { id: "main" } }),
 
-  setProcessingDetail: (detail) => set({ processingDetail: detail }),
+  // Processing
+  processing: false,
+  processingLabel: "",
+  setProcessing: (active, label) =>
+    set({ processing: active, processingLabel: label ?? "" }),
 
-  toggleTaskPanel: () => set((s) => ({ taskPanelVisible: !s.taskPanelVisible })),
-  toggleVerbose: () => set((s) => ({ verboseLog: !s.verboseLog })),
-
-  tick: () => set((s) => ({ frame: s.frame + 1 })),
-
-  setQuitting: (q) => set({ quitting: q }),
-
-  openOverlay: (type, props) => set({
-    activeOverlay: type,
-    overlayProps: props ?? {},
-  }),
-
-  closeOverlay: () => set({
-    activeOverlay: null,
-    overlayProps: {},
-  }),
-
-  setMenu: (type, items) => set({
-    menuType: type,
-    menuItems: items ?? [],
-    menuIndex: 0,
-  }),
-
-  setMenuIndex: (n) => set({ menuIndex: n }),
-
-  setMenuJustClosed: (v) => set({ menuJustClosed: v }),
-
-  loadState: () => {
-    const orch = get().orchestrator;
-    if (!orch) return;
-    try {
-      const newState = orch.getStore().getState();
-      if (newState) set({ state: newState });
-    } catch {
-      // Store not ready
-    }
-  },
+  // Preferences
+  defaultAgent: "",
+  setDefaultAgent: (name) => set({ defaultAgent: name }),
 }));

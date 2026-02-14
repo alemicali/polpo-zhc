@@ -1,50 +1,54 @@
 /**
- * Command dispatch table — routes slash commands to handlers.
+ * Command router — thin dispatch table.
+ * Each domain is a separate handler function.
  */
 
-import type { CommandContext } from "../context.js";
-import { cmdStatus, cmdResult, cmdHelp } from "./status.js";
-import { cmdConfig } from "./config.js";
+import type { CommandAPI } from "./types.js";
+import { cmdStatus } from "./status.js";
+import { cmdHelp } from "./help.js";
 import { cmdTeam } from "./team.js";
-import { cmdTaskBrowser, cmdReassess, cmdAbort, cmdClearTasks, cmdEditPlan, cmdInspect } from "./tasks.js";
-import { cmdPlans, cmdResume } from "./plans.js";
-import { cmdMemory } from "./memory.js";
-import { cmdLogs } from "./logs.js";
-import { cmdSessions, cmdNewChat } from "./sessions.js";
-import { cmdWatch } from "./watch.js";
+import { cmdTasks } from "./tasks.js";
+import { cmdPlans } from "./plans.js";
+import { cmdConfig } from "./config.js";
+import { cmdChat } from "./chat.js";
+import { cmdSessions } from "./sessions.js";
 
-export type CommandHandler = (ctx: CommandContext, args: string[]) => void | Promise<void>;
+type Handler = (api: CommandAPI) => void | Promise<void>;
 
-const commands: Record<string, CommandHandler> = {
-  "/status": (ctx) => cmdStatus(ctx),
-  "/result": (ctx) => cmdResult(ctx),
-  "/team": (ctx, args) => cmdTeam(ctx, args),
-  "/inspect": (ctx) => cmdInspect(ctx),
-  "/edit-plan": (ctx) => cmdEditPlan(ctx),
-  "/reassess": (ctx) => cmdReassess(ctx),
-  "/abort": (ctx) => cmdAbort(ctx),
-  "/clear-tasks": (ctx) => cmdClearTasks(ctx),
-  "/tasks": (ctx) => cmdTaskBrowser(ctx),
-  "/plans": (ctx) => cmdPlans(ctx),
-  "/resume": (ctx) => cmdResume(ctx),
-  "/memory": (ctx) => cmdMemory(ctx),
-  "/logs": (ctx) => cmdLogs(ctx),
-  "/config": (ctx) => cmdConfig(ctx),
-  "/help": (ctx) => cmdHelp(ctx),
-  "/sessions": (ctx) => cmdSessions(ctx),
-  "/new-chat": (ctx) => cmdNewChat(ctx),
-  "/watch": (ctx) => cmdWatch(ctx),
+const commands: Record<string, Handler> = {
+  "/status": cmdStatus,
+  "/help": cmdHelp,
+  "/team": cmdTeam,
+  "/tasks": cmdTasks,
+  "/plans": cmdPlans,
+  "/plan": cmdPlans,
+  "/config": cmdConfig,
+  "/chat": cmdChat,
+  "/sessions": cmdSessions,
+  "/clear": ({ store }) => store.clearLines(),
+  "/quit": () => process.exit(0),
+  "/abort": ({ polpo, store, args }) => {
+    const group = args[0];
+    if (group) {
+      polpo.abortGroup(group);
+      store.log(`Aborted group: ${group}`);
+    } else {
+      store.log("Usage: /abort <group>");
+    }
+  },
+  "/clear-tasks": ({ polpo, store }) => {
+    polpo.clearTasks(() => true);
+    store.log("Tasks cleared");
+  },
 };
 
 /** Dispatch a slash command. Returns true if handled. */
-export function dispatchCommand(ctx: CommandContext, cmd: string): boolean {
-  const parts = cmd.split(/\s+/);
-  const command = parts[0].toLowerCase();
-
-  const handler = commands[command];
-  if (handler) {
-    handler(ctx, parts.slice(1));
-    return true;
-  }
-  return false;
+export function dispatch(input: string, api: CommandAPI): boolean {
+  const parts = input.split(/\s+/);
+  const cmd = parts[0]!.toLowerCase();
+  const args = parts.slice(1);
+  const handler = commands[cmd];
+  if (!handler) return false;
+  handler({ ...api, args });
+  return true;
 }
