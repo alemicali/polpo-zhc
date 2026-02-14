@@ -147,6 +147,6 @@ function App({ workDir }: { workDir: string }) {
 // ─── Entry Point ────────────────────────────────────────
 
 export async function startInkTUI(workDir: string = "."): Promise<void> {
-  const { waitUntilExit } = render(<App workDir={workDir} />);
+  const { waitUntilExit } = render(<App workDir={workDir} />, { exitOnCtrlC: false });
   await waitUntilExit();
 }

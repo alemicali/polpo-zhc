@@ -194,7 +194,7 @@ export async function parseConfig(path: string): Promise<OrchestraConfig> {
     team: polpoConfig!.team,
     tasks: [],
     settings: polpoConfig!.settings ?? DEFAULT_SETTINGS,
-    providers: polpoConfig!.providers,
+    providers: polpoConfig!.providers ? parseProviders(polpoConfig!.providers as Record<string, unknown>) : undefined,
   };
 }
 

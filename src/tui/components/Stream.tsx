@@ -22,12 +22,21 @@ function entryRows(entry: StreamEntry): number {
 }
 
 /** Margin before entry: separate groups but not consecutive responses. */
-function needsMargin(lines: StreamEntry[], idx: number): boolean {
+function needsMarginTop(lines: StreamEntry[], idx: number): boolean {
   const t = lines[idx]!.type;
   if (t === "system") return false;
   if (idx === 0) return true;
   const prev = lines[idx - 1]!.type;
   if (t === "response" && prev === "response") return false;
+  return true;
+}
+
+/** Margin after response entries (assistant messages). */
+function needsMarginBottom(lines: StreamEntry[], idx: number): boolean {
+  const t = lines[idx]!.type;
+  if (t !== "response") return false;
+  // Only add margin after the last consecutive response
+  if (idx + 1 < lines.length && lines[idx + 1]!.type === "response") return false;
   return true;
 }
 
@@ -39,7 +48,7 @@ export function Stream({ height }: { height: number }) {
   let rows = 0;
   let startIdx = lines.length;
   for (let i = lines.length - 1; i >= 0 && rows < height; i--) {
-    const cost = entryRows(lines[i]!) + (needsMargin(lines, i) ? 1 : 0);
+    const cost = entryRows(lines[i]!) + (needsMarginTop(lines, i) ? 1 : 0) + (needsMarginBottom(lines, i) ? 1 : 0);
     if (rows + cost > height && i < lines.length - 1) break;
     rows += cost;
     startIdx = i;
@@ -47,9 +56,13 @@ export function Stream({ height }: { height: number }) {
   const visible = lines.slice(startIdx);
 
   return (
-    <Box flexDirection="column" height={height} overflow="hidden">
+    <Box flexDirection="column" height={height} overflow="hidden" paddingX={1}>
       {visible.map((entry, i) => (
-        <Box key={startIdx + i} marginTop={needsMargin(lines, startIdx + i) ? 1 : 0}>
+        <Box
+          key={startIdx + i}
+          marginTop={needsMarginTop(lines, startIdx + i) ? 1 : 0}
+          marginBottom={needsMarginBottom(lines, startIdx + i) ? 1 : 0}
+        >
           <StreamLine entry={entry} />
         </Box>
       ))}

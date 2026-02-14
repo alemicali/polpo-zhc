@@ -30,8 +30,8 @@ export function bridgeEvents(polpo: Orchestrator, store: TUIStore): Off {
   // ─── Agent lifecycle ────────────────────────────────
 
   on("agent:spawned", ({ agentName, taskTitle: title }: any) => {
-    store.log(`→ ${title} → ${agentName}`, [
-      seg("→ ", "cyan"),
+    store.log(`▸ ${title} → ${agentName}`, [
+      seg("▸ ", "cyan"),
       seg(title, undefined, true),
       seg(` → ${agentName}`, "gray"),
     ]);
@@ -118,8 +118,8 @@ export function bridgeEvents(polpo: Orchestrator, store: TUIStore): Off {
 
   on("assessment:started", ({ taskId }: any) => {
     const title = taskTitle(polpo, taskId);
-    store.log(`⚖ Assessing: ${title}`, [
-      seg("⚖ ", "magenta"),
+    store.log(`✦ Assessing: ${title}`, [
+      seg("✦ ", "yellow"),
       seg(title, undefined, true),
       seg("...", "gray"),
     ]);
@@ -141,7 +141,7 @@ export function bridgeEvents(polpo: Orchestrator, store: TUIStore): Off {
       store.log(`✓ Passed: ${title}${scoreText}`, [
         seg("✓ ", "green", true),
         seg(title, undefined, true),
-        seg(scoreText, "gray"),
+        seg(scoreText, "green"),
       ]);
     } else {
       const reason = message ? `: ${message}` : "";

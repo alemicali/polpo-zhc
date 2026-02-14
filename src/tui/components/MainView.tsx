@@ -27,6 +27,7 @@ export function MainView({ onSubmit }: { onSubmit: (text: string) => void }) {
 
   const buffer = useStore((s) => s.inputBuffer);
   const processing = useStore((s) => s.processing);
+  const taskPanelVisible = useStore((s) => s.taskPanelVisible);
 
   // Calculate menu height when active
   const menuActive = !processing && buffer.startsWith("/") && !buffer.includes(" ");
@@ -37,7 +38,8 @@ export function MainView({ onSubmit }: { onSubmit: (text: string) => void }) {
   const menuHeight = matchCount > 0 ? Math.min(matchCount, MAX_MENU_ITEMS) + 2 : 0; // +2 for border
 
   const contentHeight = Math.max(1, rows - HEADER_HEIGHT - INPUT_HEIGHT - menuHeight - 1);
-  const streamWidth = Math.max(10, cols - TASK_PANEL_WIDTH);
+  const panelWidth = taskPanelVisible ? TASK_PANEL_WIDTH : 0;
+  const streamWidth = Math.max(10, cols - panelWidth);
 
   const handleCommandSelect = (cmd: string) => {
     const store = useStore.getState();
@@ -51,7 +53,9 @@ export function MainView({ onSubmit }: { onSubmit: (text: string) => void }) {
         <Box width={streamWidth}>
           <Stream height={contentHeight} />
         </Box>
-        <TaskPanel width={TASK_PANEL_WIDTH} height={contentHeight} />
+        {taskPanelVisible && (
+          <TaskPanel width={TASK_PANEL_WIDTH} height={contentHeight} />
+        )}
       </Box>
       {menuHeight > 0 && <CompletionMenu onSelect={handleCommandSelect} />}
       <Input onSubmit={onSubmit} />

@@ -1,5 +1,5 @@
 /**
- * Input — bottom bar with mode indicator, text input, and processing shimmer.
+ * Input — bottom bar with mode indicator, text input, processing shimmer, and voice recording.
  */
 
 import React from "react";
@@ -8,7 +8,8 @@ import { useState, useRef, useEffect } from "react";
 import { useStore } from "../store.js";
 import { usePolpo } from "../app.js";
 import { findMentionSpans } from "../mentions.js";
-import { basename } from "node:path";
+import { startRecording, stopAndTranscribe, type RecordingHandle } from "../voice.js";
+import { basename, join } from "node:path";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
@@ -36,7 +37,7 @@ const MODE_COLORS: Record<string, string> = {
   chat: "magenta",
 };
 
-const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+const SPINNER = ["\u28CB", "\u28D9", "\u28F9", "\u28F8", "\u28FC", "\u28F4", "\u28E6", "\u28E7", "\u28C7", "\u28CF"];
 
 export function Input({
   onSubmit,
@@ -50,12 +51,16 @@ export function Input({
   const processingLabel = useStore((s) => s.processingLabel);
   const history = useStore((s) => s.history);
   const page = useStore((s) => s.page);
+  const recording = useStore((s) => s.recording);
   const polpo = usePolpo();
   const { exit } = useApp();
 
   const [historyIdx, setHistoryIdx] = useState(-1);
   const [spinnerTick, setSpinnerTick] = useState(0);
+  const [ctrlCHint, setCtrlCHint] = useState(false);
   const savedBuffer = useRef("");
+  const lastCtrlC = useRef(0);
+  const recordingHandle = useRef<RecordingHandle | null>(null);
 
   // Animate spinner during processing
   useEffect(() => {
@@ -66,14 +71,124 @@ export function Input({
 
   const completionActive = useStore((s) => s.completionActive);
 
-  // Only capture input when on main page and not processing
+  // Only capture input when on main page
   useInput(
     (input, key) => {
       if (page.id !== "main") return;
-      if (processing) return;
+
+      // ── Esc — cancel processing or close menu ──
+      if (key.escape) {
+        if (processing) {
+          useStore.getState().setProcessing(false);
+          return;
+        }
+        // CompletionMenu handles its own Esc
+        return;
+      }
+
+      // ── Ctrl+R — toggle voice recording ──
+      if (input === "r" && key.ctrl) {
+        const store = useStore.getState();
+        if (store.recording) {
+          // Stop recording and transcribe
+          const handle = recordingHandle.current;
+          if (!handle) {
+            store.setRecording(false);
+            return;
+          }
+          recordingHandle.current = null;
+          store.setRecording(false);
+          store.setProcessing(true, "Transcribing...");
+
+          stopAndTranscribe(handle)
+            .then((text) => {
+              if (text) {
+                const current = useStore.getState().inputBuffer;
+                const separator = current && !current.endsWith(" ") ? " " : "";
+                useStore.getState().setInputBuffer(current + separator + text);
+              }
+            })
+            .catch((err: unknown) => {
+              const msg = err instanceof Error ? err.message : String(err);
+              useStore.getState().log(`Voice error: ${msg}`, [
+                { text: "Voice error: ", color: "red" },
+                { text: msg, color: "gray" },
+              ]);
+            })
+            .finally(() => {
+              useStore.getState().setProcessing(false);
+            });
+        } else {
+          // Start recording
+          try {
+            const tmpDir = join(polpo.getWorkDir(), ".polpo", "tmp");
+            const handle = startRecording(tmpDir);
+            recordingHandle.current = handle;
+            store.setRecording(true);
+
+            // If rec process exits unexpectedly, reset state
+            handle.child.on("error", () => {
+              recordingHandle.current = null;
+              useStore.getState().setRecording(false);
+              useStore.getState().log(
+                "sox not found. Install with: sudo apt install sox",
+                [{ text: "sox not found. Install with: ", color: "red" }, { text: "sudo apt install sox", color: "yellow" }],
+              );
+            });
+          } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : String(err);
+            store.log(`Voice error: ${msg}`, [
+              { text: "Voice error: ", color: "red" },
+              { text: msg, color: "gray" },
+            ]);
+          }
+        }
+        return;
+      }
+
+      // ── Ctrl+O — toggle task panel ──
+      if (input === "o" && key.ctrl) {
+        useStore.getState().toggleTaskPanel();
+        return;
+      }
+
+      // ── Ctrl+C — clear input / double-tap quit ──
+      if (input === "c" && key.ctrl) {
+        if (recording) {
+          // Cancel recording without transcribing
+          const handle = recordingHandle.current;
+          if (handle) {
+            handle.child.kill("SIGTERM");
+          }
+          recordingHandle.current = null;
+          useStore.getState().setRecording(false);
+          return;
+        }
+        if (processing) {
+          // Do nothing during processing — use Esc instead
+          return;
+        }
+        if (buffer.length > 0) {
+          setBuffer("");
+          setHistoryIdx(-1);
+          return;
+        }
+        const now = Date.now();
+        if (now - lastCtrlC.current < 2000) {
+          polpo.stop();
+          exit();
+          return;
+        }
+        lastCtrlC.current = now;
+        setCtrlCHint(true);
+        setTimeout(() => setCtrlCHint(false), 2000);
+        return;
+      }
+
+      if (processing || recording) return;
 
       // Let CompletionMenu handle Enter/arrows/Esc when active
-      if (completionActive && (key.return || key.upArrow || key.downArrow || key.escape)) {
+      if (completionActive && (key.return || key.upArrow || key.downArrow)) {
         return;
       }
 
@@ -113,23 +228,6 @@ export function Input({
         return;
       }
 
-      // Ctrl+C — graceful stop / exit
-      if (input === "c" && key.ctrl) {
-        if (processing) {
-          // Cancel current processing
-          useStore.getState().setProcessing(false);
-        } else if (buffer.length > 0) {
-          // Clear input
-          setBuffer("");
-          setHistoryIdx(-1);
-        } else {
-          // Exit app
-          polpo.stop();
-          exit();
-        }
-        return;
-      }
-
       // Ctrl+L — clear stream
       if (input === "l" && key.ctrl) {
         useStore.getState().clearLines();
@@ -142,7 +240,6 @@ export function Input({
         if (matches.length === 1) {
           setBuffer(matches[0]! + " ");
         } else if (matches.length > 1) {
-          // Find longest common prefix
           let prefix = matches[0]!;
           for (const m of matches) {
             while (!m.startsWith(prefix)) prefix = prefix.slice(0, -1);
@@ -154,7 +251,7 @@ export function Input({
         return;
       }
 
-      // Tab — cycle mode (when not autocompleting commands)
+      // Tab — cycle mode
       if (key.tab) {
         const modes: Array<"task" | "plan" | "chat"> = ["chat", "plan", "task"];
         const next = modes[(modes.indexOf(mode) + 1) % modes.length]!;
@@ -199,12 +296,19 @@ export function Input({
 
   return (
     <Box flexDirection="column">
-      <Box borderStyle="single" borderColor="gray" paddingX={1}>
-        {processing ? (
+      <Box borderStyle="single" borderColor={recording ? "red" : "gray"} paddingX={1}>
+        {recording ? (
+          <Text>
+            <Text color="red" bold>● Recording...</Text>
+            <Text color="gray"> (Ctrl+R to stop, Ctrl+C to cancel)</Text>
+          </Text>
+        ) : processing ? (
           <Text>
             <Text color="cyan">{SPINNER[spinnerTick]} </Text>
             <Text color="gray">{processingLabel || "Processing..."}</Text>
           </Text>
+        ) : ctrlCHint ? (
+          <Text color="yellow">Press Ctrl+C again to quit</Text>
         ) : (
           <Text>
             <Text color={modeColor} bold>
@@ -219,9 +323,10 @@ export function Input({
       <Box justifyContent="space-between" paddingX={1}>
         <Text>
           <Text color="cyan">Tab</Text><Text color="gray"> mode  </Text>
-          <Text color="cyan">↑↓</Text><Text color="gray"> history  </Text>
-          <Text color="cyan">/</Text><Text color="gray"> commands  </Text>
-          <Text color="cyan">@agent #task %plan</Text><Text color="gray"> mentions</Text>
+          <Text color="cyan">/</Text><Text color="gray"> cmds  </Text>
+          <Text color="cyan">Ctrl+R</Text><Text color="gray"> voice  </Text>
+          <Text color="cyan">Ctrl+C</Text><Text color="gray"> quit  </Text>
+          <Text color="cyan">Esc</Text><Text color="gray"> cancel</Text>
         </Text>
         <Text>
           <Text color="cyan" bold>Polpo</Text>

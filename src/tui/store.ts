@@ -109,6 +109,14 @@ export interface TUIStore {
   completionActive: boolean;
   setCompletionActive(active: boolean): void;
 
+  // Task panel visibility
+  taskPanelVisible: boolean;
+  toggleTaskPanel(): void;
+
+  // Voice recording
+  recording: boolean;
+  setRecording(active: boolean): void;
+
   // Preferences
   defaultAgent: string;
   setDefaultAgent(name: string): void;
@@ -182,6 +190,14 @@ export const useStore = create<TUIStore>((set) => ({
   // Completion menu
   completionActive: false,
   setCompletionActive: (active) => set({ completionActive: active }),
+
+  // Task panel visibility
+  taskPanelVisible: true,
+  toggleTaskPanel: () => set((s) => ({ taskPanelVisible: !s.taskPanelVisible })),
+
+  // Voice recording
+  recording: false,
+  setRecording: (active) => set({ recording: active }),
 
   // Preferences
   defaultAgent: "",

@@ -29,7 +29,7 @@ const STATUS_ICONS: Record<TaskStatus, string> = {
 const STATUS_COLORS: Record<TaskStatus, string> = {
   pending: "gray",
   assigned: "yellow",
-  in_progress: "cyan",
+  in_progress: "#FFA500",
   review: "magenta",
   done: "green",
   failed: "red",
