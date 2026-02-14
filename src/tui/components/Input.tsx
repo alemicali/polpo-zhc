@@ -156,7 +156,7 @@ export function Input({
 
       // Tab — cycle mode (when not autocompleting commands)
       if (key.tab) {
-        const modes: Array<"task" | "plan" | "chat"> = ["task", "plan", "chat"];
+        const modes: Array<"task" | "plan" | "chat"> = ["chat", "plan", "task"];
         const next = modes[(modes.indexOf(mode) + 1) % modes.length]!;
         useStore.getState().setInputMode(next);
         return;

@@ -224,13 +224,16 @@ export interface OrchestraState {
   completedAt?: string;
 }
 
-export interface ProjectConfig {
+export interface ProviderConfig {
+  apiKey?: string;
+  baseUrl?: string;
+}
+
+export interface PolpoConfig {
   project: string;
-  judge: string;
-  judgeModel: string;
-  agent: string;
-  model: string;
-  taskPrep?: boolean;
+  team: Team;
+  settings: OrchestraSettings;
+  providers?: Record<string, ProviderConfig>;
 }
 
 // === API ===

@@ -7,26 +7,49 @@ import { Box, Text } from "ink";
 import { useStore, type StreamEntry } from "../store.js";
 import { SegmentLine } from "./SegmentLine.js";
 
+/** Count visual rows an entry occupies (embedded \n in segs). */
+function entryRows(entry: StreamEntry): number {
+  if (entry.type === "response" || entry.type === "event") {
+    let n = 1;
+    for (const s of entry.segs) {
+      for (let j = 0; j < s.text.length; j++) {
+        if (s.text[j] === "\n") n++;
+      }
+    }
+    return n;
+  }
+  return 1;
+}
+
+/** Margin before entry: separate groups but not consecutive responses. */
+function needsMargin(lines: StreamEntry[], idx: number): boolean {
+  const t = lines[idx]!.type;
+  if (t === "system") return false;
+  if (idx === 0) return true;
+  const prev = lines[idx - 1]!.type;
+  if (t === "response" && prev === "response") return false;
+  return true;
+}
+
 export function Stream({ height }: { height: number }) {
   const lines = useStore((s) => s.lines);
 
-  // Each user message takes 2 rows (1 content + 1 margin-top), others take 1
-  // Walk backwards to find how many entries fit
+  // Walk backwards to find how many entries fit.
+  // Always include the last entry even if it overflows (Ink clips at top).
   let rows = 0;
   let startIdx = lines.length;
   for (let i = lines.length - 1; i >= 0 && rows < height; i--) {
-    const t = lines[i]!.type;
-    const cost = (t === "user" || t === "event" || t === "response") ? 2 : 1;
-    if (rows + cost > height) break;
+    const cost = entryRows(lines[i]!) + (needsMargin(lines, i) ? 1 : 0);
+    if (rows + cost > height && i < lines.length - 1) break;
     rows += cost;
     startIdx = i;
   }
   const visible = lines.slice(startIdx);
 
   return (
-    <Box flexDirection="column" height={height}>
+    <Box flexDirection="column" height={height} overflow="hidden">
       {visible.map((entry, i) => (
-        <Box key={startIdx + i} marginTop={entry.type === "system" ? 0 : 1}>
+        <Box key={startIdx + i} marginTop={needsMargin(lines, startIdx + i) ? 1 : 0}>
           <StreamLine entry={entry} />
         </Box>
       ))}

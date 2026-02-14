@@ -13,7 +13,7 @@ describe("Plan resume (Orchestrator)", () => {
   let runStore: InMemoryRunStore;
   let orchestrator: Orchestrator;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     if (existsSync(TEST_DIR)) rmSync(TEST_DIR, { recursive: true });
     mkdirSync(TEST_DIR, { recursive: true });
 
@@ -34,7 +34,7 @@ describe("Plan resume (Orchestrator)", () => {
       }),
     });
 
-    orchestrator.initInteractive("test-project", {
+    await orchestrator.initInteractive("test-project", {
       name: "test-team",
       agents: [createTestAgent({ name: "dev", adapter: "mock" })],
     });

@@ -46,7 +46,7 @@ async function setupOrchestratorEnv(): Promise<{ tempDir: string; o: Orchestrato
   // Deep-copy the team so mutations in one test suite do not leak to others
   const team: Team = JSON.parse(JSON.stringify(VALID_TEAM));
   const o = new Orchestrator({ workDir: tempDir });
-  o.initInteractive("test-cli", team);
+  await o.initInteractive("test-cli", team);
   return { tempDir, o };
 }
 

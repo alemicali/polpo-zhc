@@ -214,19 +214,27 @@ export interface RunnerConfig {
   taskId: string;
   agent: AgentConfig;
   task: Task;
-  dbPath: string;
+  polpoDir: string;
   cwd: string;
+  storage?: "file" | "sqlite";
 }
 
-// === Project Config (persisted preferences) ===
+// === Polpo Config (.polpo/polpo.json — persistent project configuration) ===
 
-export interface ProjectConfig {
-  project: string;      // project name (default: directory name)
-  judge: string;        // adapter for assessment LLM (e.g. "claude-sdk")
-  judgeModel: string;   // model for orchestrator LLM calls (judge, deadlock, question detection)
-  agent: string;        // default adapter for agents (e.g. "claude-sdk", "generic")
-  model: string;        // default model (e.g. "claude-sonnet-4-5-20250929")
-  taskPrep?: boolean;   // LLM-powered task preparation (default: true)
+export interface PolpoConfig {
+  project: string;
+  team: Team;
+  settings: OrchestraSettings;
+  providers?: Record<string, ProviderConfig>;
+}
+
+// === Provider Config ===
+
+export interface ProviderConfig {
+  /** API key (direct value or "${ENV_VAR}" reference). */
+  apiKey?: string;
+  /** Override base URL for the provider (e.g. custom proxy). */
+  baseUrl?: string;
 }
 
 // === Config (polpo.yml) ===
@@ -237,6 +245,8 @@ export interface OrchestraConfig {
   team: Team;
   tasks: Omit<Task, "status" | "retries" | "result" | "createdAt" | "updatedAt">[];
   settings: OrchestraSettings;
+  /** Per-provider API key and base URL overrides. */
+  providers?: Record<string, ProviderConfig>;
 }
 
 export interface OrchestraSettings {
@@ -261,6 +271,8 @@ export interface OrchestraSettings {
   autoCorrectExpectations?: boolean;
   /** Model for orchestrator LLM calls (question detection, deadlock, plans). */
   orchestratorModel?: string;
+  /** Storage backend for tasks, plans, and runs. Default: "file" (filesystem JSON). */
+  storage?: "file" | "sqlite";
 }
 
 // === Orchestra State (persisted in .polpo/state.json) ===
@@ -272,4 +284,14 @@ export interface OrchestraState {
   processes: AgentProcess[];
   startedAt?: string;
   completedAt?: string;
+}
+
+// === Project Config (legacy JSON format) ===
+
+/** Legacy project config stored in config.json */
+export interface ProjectConfig {
+  project: string;
+  judge?: string;
+  agent?: string;
+  model?: string;
 }

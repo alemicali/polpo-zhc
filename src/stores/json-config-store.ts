@@ -1,17 +1,46 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join, dirname } from "node:path";
-import type { ProjectConfig } from "../core/types.js";
+import type { PolpoConfig, ProjectConfig } from "../core/types.js";
 import type { ConfigStore } from "../core/config-store.js";
 
 /**
  * JSON-file backed ConfigStore.
- * Reads/writes `.polpo/config.json` (human-readable, hand-editable).
+ * Reads/writes `.polpo/polpo.json`.
  */
-export class JsonConfigStore implements ConfigStore {
+export class PolpoConfigStore implements ConfigStore {
   private readonly filePath: string;
 
-  constructor(orchestraDir: string) {
-    this.filePath = join(orchestraDir, "config.json");
+  constructor(polpoDir: string) {
+    this.filePath = join(polpoDir, "polpo.json");
+  }
+
+  exists(): boolean {
+    return existsSync(this.filePath);
+  }
+
+  get(): PolpoConfig | undefined {
+    if (!existsSync(this.filePath)) return undefined;
+    try {
+      return JSON.parse(readFileSync(this.filePath, "utf-8")) as PolpoConfig;
+    } catch { return undefined; }
+  }
+
+  save(config: PolpoConfig): void {
+    const dir = dirname(this.filePath);
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+    writeFileSync(this.filePath, JSON.stringify(config, null, 2), "utf-8");
+  }
+}
+
+/**
+ * Legacy JSON-file backed ConfigStore.
+ * Reads/writes `config.json` directly in the given directory.
+ */
+export class JsonConfigStore {
+  private readonly filePath: string;
+
+  constructor(dir: string) {
+    this.filePath = join(dir, "config.json");
   }
 
   exists(): boolean {
@@ -19,17 +48,10 @@ export class JsonConfigStore implements ConfigStore {
   }
 
   get(): ProjectConfig | undefined {
-    if (!this.exists()) return undefined;
+    if (!existsSync(this.filePath)) return undefined;
     try {
-      const raw = readFileSync(this.filePath, "utf-8");
-      const parsed = JSON.parse(raw);
-      if (parsed && typeof parsed.judge === "string" && typeof parsed.agent === "string") {
-        return parsed as ProjectConfig;
-      }
-      return undefined;
-    } catch { /* corrupt or unreadable config */
-      return undefined;
-    }
+      return JSON.parse(readFileSync(this.filePath, "utf-8")) as ProjectConfig;
+    } catch { return undefined; }
   }
 
   save(config: ProjectConfig): void {

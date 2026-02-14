@@ -1,8 +1,5 @@
 import { resolve, basename } from "node:path";
-import { existsSync, readFileSync } from "node:fs";
-import { parse as parseYaml } from "yaml";
 import { Orchestrator } from "../core/orchestrator.js";
-import { JsonConfigStore } from "../stores/json-config-store.js";
 import type { Team } from "../core/types.js";
 import type { ProjectEntry, ProjectInfo } from "./types.js";
 import { SSEBridge } from "./sse-bridge.js";
@@ -23,7 +20,7 @@ export class ProjectManager {
   private projects = new Map<string, ManagedProject>();
 
   /** Register and initialize a project. Does NOT start the supervisor loop. */
-  register(entry: ProjectEntry): Orchestrator {
+  async register(entry: ProjectEntry): Promise<Orchestrator> {
     if (this.projects.has(entry.id)) {
       return this.projects.get(entry.id)!.orchestrator;
     }
@@ -31,38 +28,13 @@ export class ProjectManager {
     const workDir = resolve(entry.workDir);
     const orchestrator = new Orchestrator(workDir);
 
-    // Load team same way TUI does
-    const orchestraDir = resolve(workDir, ".polpo");
-    const configStore = new JsonConfigStore(orchestraDir);
-    const savedConfig = configStore.get();
-    const projectName = savedConfig?.project || basename(workDir);
+    // Default team fallback (initInteractive will load from .polpo/polpo.json if available)
+    const defaultTeam: Team = {
+      name: "default",
+      agents: [{ name: "dev-1", adapter: "native", role: "developer" }],
+    };
 
-    let team: Team;
-    const ymlPath = resolve(workDir, "polpo.yml");
-    if (existsSync(ymlPath)) {
-      try {
-        const raw = readFileSync(ymlPath, "utf-8");
-        const doc = parseYaml(raw) as Record<string, unknown>;
-        team = doc.team as Team;
-      } catch (err) {
-        console.error(`[ProjectManager] Failed to parse ${ymlPath}:`, err instanceof Error ? err.message : err);
-        team = { name: "default", agents: [
-          { name: "claude", adapter: "generic", command: "claude -p {prompt}", role: "developer" },
-        ] };
-      }
-    } else {
-      team = { name: "default", agents: [
-        { name: "claude", adapter: "generic", command: "claude -p {prompt}", role: "developer" },
-      ] };
-    }
-
-    orchestrator.initInteractive(projectName, team);
-
-    // Apply orchestrator model from config
-    if (savedConfig?.judgeModel) {
-      const cfg = orchestrator.getConfig();
-      if (cfg) cfg.settings.orchestratorModel = savedConfig.judgeModel;
-    }
+    await orchestrator.initInteractive(basename(workDir), defaultTeam);
 
     // Create SSE bridge and start listening to events
     const sseBridge = new SSEBridge(orchestrator);

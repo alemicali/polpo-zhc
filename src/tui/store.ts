@@ -74,6 +74,8 @@ export interface TUIStore {
   lines: StreamEntry[];
   pushLine(entry: StreamEntry): void;
   log(text: string, segs?: Seg[]): void;
+  /** Replace the last line's segments (for streaming updates). */
+  updateLastLine(segs: Seg[]): void;
   clearLines(): void;
 
   // Tasks (snapshot from orchestrator)
@@ -130,6 +132,16 @@ export const useStore = create<TUIStore>((set) => ({
         },
       ],
     })),
+  updateLastLine: (segs) =>
+    set((s) => {
+      if (s.lines.length === 0) return s;
+      const updated = [...s.lines];
+      const last = updated[updated.length - 1]!;
+      if (last.type === "response" || last.type === "event") {
+        updated[updated.length - 1] = { ...last, segs };
+      }
+      return { lines: updated };
+    }),
   clearLines: () => set({ lines: [] }),
 
   // Tasks
@@ -144,7 +156,7 @@ export const useStore = create<TUIStore>((set) => ({
   // Input
   inputBuffer: "",
   setInputBuffer: (buf) => set({ inputBuffer: buf }),
-  inputMode: "task",
+  inputMode: "chat",
   setInputMode: (mode) => set({ inputMode: mode }),
   history: [],
   pushHistory: (cmd) =>

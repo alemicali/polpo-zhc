@@ -102,14 +102,12 @@ export function registerConfigCommands(program: Command): void {
   // polpo config validate
   configCmd
     .command("validate")
-    .description("Validate a polpo.yml configuration file")
+    .description("Validate configuration (.polpo/polpo.json + polpo.yml)")
     .option("-c, --config <path>", "Path to working directory", ".")
-    .option("--file <file>", "Specific YAML file to validate")
     .action(async (opts) => {
-      const configPath = opts.file ?? resolve(opts.config, "polpo.yml");
-
+      const workDir = resolve(opts.config);
       try {
-        const config = await parseConfig(configPath);
+        const config = await parseConfig(workDir);
         console.log(chalk.green("\n  \u2713 Configuration valid"));
         console.log(chalk.dim(`    Project: ${config.project}`));
         console.log(chalk.dim(`    Tasks:   ${config.tasks.length}`));

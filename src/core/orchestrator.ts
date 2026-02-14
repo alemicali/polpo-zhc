@@ -1,8 +1,8 @@
-import { resolve, join } from "node:path";
+import { resolve } from "node:path";
 import { mkdirSync, existsSync } from "node:fs";
-import { parseConfig } from "./config.js";
-import { SqliteTaskStore } from "../stores/sqlite-task-store.js";
-import { SqliteRunStore } from "../stores/sqlite-run-store.js";
+import { parseConfig, loadPolpoConfig } from "./config.js";
+import { FileTaskStore } from "../stores/file-task-store.js";
+import { FileRunStore } from "../stores/file-run-store.js";
 import { FileMemoryStore } from "../stores/file-memory-store.js";
 import { FileLogStore } from "../stores/file-log-store.js";
 import { FileSessionStore } from "../stores/file-session-store.js";
@@ -37,6 +37,7 @@ import {
   sleep,
 } from "./assessment-prompts.js";
 import type { AssessFn } from "./orchestrator-context.js";
+import { setProviderOverrides, validateProviderKeys } from "../llm/pi-client.js";
 
 // Re-export for backward compatibility (consumed by core/index.ts and external modules)
 export { buildFixPrompt, buildRetryPrompt };
@@ -92,15 +93,72 @@ export class Orchestrator extends TypedEmitter {
     }
   }
 
+  /** Create task + run stores based on the configured storage backend. */
+  private async createStores(storage?: "file" | "sqlite"): Promise<{ task: TaskStore; run: RunStore }> {
+    if (storage === "sqlite") {
+      const { join } = await import("node:path");
+      const { SqliteTaskStore } = await import("../stores/sqlite-task-store.js");
+      const { SqliteRunStore } = await import("../stores/sqlite-run-store.js");
+      return {
+        task: new SqliteTaskStore(this.polpoDir),
+        run: new SqliteRunStore(join(this.polpoDir, "state.db")),
+      };
+    }
+    return {
+      task: new FileTaskStore(this.polpoDir),
+      run: new FileRunStore(this.polpoDir),
+    };
+  }
+
   async init(): Promise<void> {
-    const configPath = resolve(this.workDir, "polpo.yml");
-    this.config = await parseConfig(configPath);
-    this.registry = this.injectedStore ?? new SqliteTaskStore(this.polpoDir);
-    this.runStore = this.injectedRunStore ?? new SqliteRunStore(join(this.polpoDir, "state.db"));
+    this.config = await parseConfig(this.workDir);
+
+    // Apply provider overrides from config
+    if (this.config.providers) {
+      setProviderOverrides(this.config.providers);
+    }
+
+    // Validate API keys for all configured models
+    this.validateProviders();
+
+    const stores = this.injectedStore
+      ? { task: this.injectedStore, run: this.injectedRunStore! }
+      : await this.createStores(this.config.settings.storage);
+    this.registry = stores.task;
+    this.runStore = stores.run;
     this.memoryStore = new FileMemoryStore(this.polpoDir);
     this.initLogStore();
     this.initSessionStore();
     this.initManagers();
+  }
+
+  private validateProviders(): void {
+    const modelSpecs: string[] = [];
+    // Default model
+    if (process.env.POLPO_MODEL) modelSpecs.push(process.env.POLPO_MODEL);
+    // Orchestrator model
+    if (this.config.settings.orchestratorModel) {
+      modelSpecs.push(this.config.settings.orchestratorModel);
+    }
+    // Judge model
+    if (process.env.POLPO_JUDGE_MODEL) modelSpecs.push(process.env.POLPO_JUDGE_MODEL);
+    // Per-agent models
+    for (const agent of this.config.team.agents) {
+      if (agent.model) modelSpecs.push(agent.model);
+    }
+
+    if (modelSpecs.length === 0) return;
+
+    const missing = validateProviderKeys(modelSpecs);
+    if (missing.length > 0) {
+      const details = missing
+        .map(m => `  - ${m.provider} (model: ${m.modelSpec})`)
+        .join("\n");
+      this.emit("log", {
+        level: "warn",
+        message: `Missing API keys for providers:\n${details}\nSet the corresponding env vars or add them to providers: in polpo.yml`,
+      });
+    }
   }
 
   /** Create manager instances with shared context. */
@@ -128,22 +186,38 @@ export class Orchestrator extends TypedEmitter {
    * Initialize for interactive/TUI mode without requiring polpo.yml.
    * Creates .polpo dir and a minimal config from provided team info.
    */
-  initInteractive(project: string, team: Team): void {
+  async initInteractive(project: string, team: Team): Promise<void> {
     if (!existsSync(this.polpoDir)) {
       mkdirSync(this.polpoDir, { recursive: true });
     }
-    this.registry = this.injectedStore ?? new SqliteTaskStore(this.polpoDir);
-    this.runStore = this.injectedRunStore ?? new SqliteRunStore(join(this.polpoDir, "state.db"));
+
+    // Load persistent config if available
+    const polpoConfig = loadPolpoConfig(this.polpoDir);
+    const settings = polpoConfig?.settings ?? { maxRetries: 2, workDir: ".", logLevel: "normal" as const };
+
+    const stores = this.injectedStore
+      ? { task: this.injectedStore, run: this.injectedRunStore! }
+      : await this.createStores(settings.storage);
+    this.registry = stores.task;
+    this.runStore = stores.run;
     this.memoryStore = new FileMemoryStore(this.polpoDir);
     this.initLogStore();
     this.initSessionStore();
+
     this.config = {
       version: "1",
-      project,
-      team,
+      project: polpoConfig?.project ?? project,
+      team: polpoConfig?.team ?? team,
       tasks: [],
-      settings: { maxRetries: 2, workDir: ".", logLevel: "normal" },
+      settings,
+      providers: polpoConfig?.providers,
     };
+
+    // Apply provider overrides
+    if (this.config.providers) {
+      setProviderOverrides(this.config.providers);
+    }
+
     this.initManagers();
     this.interactive = true;
     this.registry.setState({

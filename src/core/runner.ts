@@ -13,10 +13,10 @@
  */
 
 import { readFileSync, unlinkSync, appendFileSync, mkdirSync, existsSync } from "node:fs";
-import { join, dirname } from "node:path";
-import { SqliteRunStore } from "../stores/sqlite-run-store.js";
+import { join } from "node:path";
+import { FileRunStore } from "../stores/file-run-store.js";
 import { getAdapter } from "../adapters/registry.js";
-import type { RunRecord } from "./run-store.js";
+import type { RunStore, RunRecord } from "./run-store.js";
 import type { RunnerConfig, TaskResult } from "./types.js";
 
 // Side-effect imports: register adapters
@@ -52,8 +52,8 @@ class RunActivityLog {
   private logPath: string;
   private lastSnapshot = "";
 
-  constructor(dbPath: string, runId: string, taskId: string, agentName: string) {
-    const logsDir = join(dirname(dbPath), "logs");
+  constructor(polpoDir: string, runId: string, taskId: string, agentName: string) {
+    const logsDir = join(polpoDir, "logs");
     if (!existsSync(logsDir)) mkdirSync(logsDir, { recursive: true });
     this.logPath = join(logsDir, `run-${runId}.jsonl`);
     // Write header
@@ -83,10 +83,19 @@ class RunActivityLog {
   }
 }
 
+async function createRunStore(config: RunnerConfig): Promise<RunStore> {
+  if (config.storage === "sqlite") {
+    const { SqliteRunStore } = await import("../stores/sqlite-run-store.js");
+    const { join } = await import("node:path");
+    return new SqliteRunStore(join(config.polpoDir, "state.db"));
+  }
+  return new FileRunStore(config.polpoDir);
+}
+
 async function main(): Promise<void> {
   const config = readConfig();
-  const runStore = new SqliteRunStore(config.dbPath);
-  const actLog = new RunActivityLog(config.dbPath, config.runId, config.taskId, config.agent.name);
+  const runStore = await createRunStore(config);
+  const actLog = new RunActivityLog(config.polpoDir, config.runId, config.taskId, config.agent.name);
 
   const now = new Date().toISOString();
   const initialRecord: RunRecord = {

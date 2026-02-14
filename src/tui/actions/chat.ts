@@ -1,5 +1,6 @@
 /**
  * Chat action — sends message to LLM for conversational interaction.
+ * Streams response chunks in real-time into the TUI.
  * Persists conversation history via SessionStore.
  */
 
@@ -7,7 +8,7 @@ import type { Orchestrator } from "../../core/orchestrator.js";
 import type { TUIStore } from "../store.js";
 import type { SessionStore } from "../../core/session-store.js";
 import { seg } from "../format.js";
-import { querySDKText } from "../../llm/query.js";
+import { querySDKStream } from "../../llm/query.js";
 import { buildChatSystemPrompt } from "../../llm/prompts.js";
 
 const SESSION_TIMEOUT_MS = 30 * 60 * 1000; // 30 min
@@ -59,25 +60,40 @@ export async function startChat(
       `User question: ${message}`,
       "",
       "Answer concisely based on the current Polpo state. Use plain text, no markdown.",
+      "IMPORTANT: You are in chat-only mode. You have NO access to tools, functions, or commands.",
+      "Do NOT output tool calls, function calls, XML tags, or any structured markup.",
+      "Respond with plain text only.",
     );
 
+    // Single entry — raw chunks get concatenated as-is
+    const ts = new Date().toISOString();
+    store.pushLine({ type: "response", segs: [seg("...", "gray")], ts });
+    let accumulated = "";
+
     const model = polpo.getConfig()?.settings?.orchestratorModel;
-    const response = await querySDKText(parts.join("\n"), polpo.getWorkDir(), model);
+    const response = await querySDKStream(
+      parts.join("\n"),
+      polpo.getWorkDir(),
+      model,
+      (delta) => {
+        accumulated += delta;
+        // Raw append — Ink <Text> handles \n natively
+        store.updateLastLine([seg(accumulated)]);
+      },
+    );
 
     store.setProcessing(false);
 
-    if (response) {
-      // Persist assistant response
+    // Use accumulated deltas as the final text — response from queryStream
+    // may differ (it joins text blocks with extra \n).
+    const finalText = accumulated.trim() || response;
+    if (finalText) {
       if (sessionStore && sessionId) {
-        sessionStore.addMessage(sessionId, "assistant", response);
+        sessionStore.addMessage(sessionId, "assistant", finalText);
       }
-
-      // Show response
-      for (const line of response.split("\n")) {
-        store.log(line, [seg("  ", "gray"), seg(line)]);
-      }
+      store.updateLastLine([seg(finalText)]);
     } else {
-      store.log("No response", [seg("No response", "gray")]);
+      store.updateLastLine([seg("No response", "gray")]);
     }
   } catch (err: unknown) {
     store.setProcessing(false);

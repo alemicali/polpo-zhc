@@ -45,7 +45,7 @@ describe("integration: lifecycle", () => {
   let mockAdapter: MockAdapter;
   let orchestrator: Orchestrator;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     store = new InMemoryTaskStore();
     runStore = new InMemoryRunStore();
     mockAdapter = new MockAdapter();
@@ -63,7 +63,7 @@ describe("integration: lifecycle", () => {
       }),
     });
 
-    orchestrator.initInteractive("integration-test", {
+    await orchestrator.initInteractive("integration-test", {
       name: "test-team",
       agents: [
         createTestAgent({ name: "worker", adapter: "mock" }),

@@ -13,7 +13,7 @@ import type { AgentAdapter, AgentHandle } from "../core/adapter.js";
 import { createActivity, registerAdapter } from "./registry.js";
 import { Agent } from "@mariozechner/pi-agent-core";
 import type { AgentEvent } from "@mariozechner/pi-agent-core";
-import { resolveModel } from "../llm/pi-client.js";
+import { resolveModel, resolveApiKey } from "../llm/pi-client.js";
 import { createCodingTools } from "../tools/coding-tools.js";
 
 /**
@@ -72,6 +72,7 @@ class NativeAdapter implements AgentAdapter {
 
     // Create the pi-agent-core Agent
     const agent = new Agent({
+      getApiKey: (provider: string) => resolveApiKey(provider),
       initialState: {
         systemPrompt: buildSystemPrompt(agentConfig),
         model,

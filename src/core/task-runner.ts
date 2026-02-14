@@ -205,8 +205,9 @@ export class TaskRunner {
       taskId: task.id,
       agent,
       task: taskWithMemory,
-      dbPath: join(this.ctx.polpoDir, "state.db"),
+      polpoDir: this.ctx.polpoDir,
       cwd: this.ctx.workDir,
+      storage: this.ctx.config.settings.storage,
     };
 
     try {

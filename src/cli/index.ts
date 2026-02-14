@@ -5,7 +5,7 @@ import { mkdir, writeFile, access, readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { Command } from "commander";
 import chalk from "chalk";
-import { generateTemplate } from "../core/config.js";
+import { generatePolpoConfigDefault, generatePlanTemplate, savePolpoConfig } from "../core/config.js";
 import { Orchestrator } from "../core/orchestrator.js";
 import type { OrchestraState, Task, TaskStatus } from "../core/types.js";
 
@@ -148,24 +148,35 @@ program
     await mkdir(resolve(orchestraDir, "logs"), { recursive: true });
     await mkdir(resolve(orchestraDir, "assessments"), { recursive: true });
 
+    // Create .polpo/polpo.json (persistent project config)
+    const polpoJsonPath = resolve(orchestraDir, "polpo.json");
+    try {
+      await access(polpoJsonPath);
+      console.log(chalk.yellow("  .polpo/polpo.json already exists, skipping."));
+    } catch {
+      const projectName = cwd.split("/").pop() || "my-project";
+      savePolpoConfig(orchestraDir, generatePolpoConfigDefault(projectName));
+      console.log(chalk.green("  Created .polpo/polpo.json"));
+    }
+
+    // Create polpo.yml (execution plan)
     try {
       await access(configPath);
       console.log(chalk.yellow("  polpo.yml already exists, skipping."));
-    } catch { /* file does not exist — create it */
-      const template = generateTemplate();
-      await writeFile(configPath, template, "utf-8");
+    } catch {
+      await writeFile(configPath, generatePlanTemplate(), "utf-8");
       console.log(chalk.green("  Created polpo.yml"));
     }
 
     const statePath = resolve(orchestraDir, "state.json");
     try {
       await access(statePath);
-    } catch { /* file does not exist — create it */
+    } catch {
       await writeFile(statePath, JSON.stringify({ project: "", team: { name: "", agents: [] }, tasks: [], processes: [] }, null, 2), "utf-8");
     }
 
     console.log(chalk.green("\n  Polpo initialized!"));
-    console.log(chalk.dim("  Edit polpo.yml to configure your team and tasks."));
+    console.log(chalk.dim("  Edit .polpo/polpo.json for team & settings, polpo.yml for tasks."));
     console.log(chalk.dim("  Then run: polpo run\n"));
   });
 

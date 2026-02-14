@@ -1,9 +1,10 @@
 /**
  * Thin wrapper around pi-ai for Polpo's orchestrator-level LLM calls.
- * Provides model parsing, simple completion, and streaming.
+ * Provides model parsing, simple completion, streaming, and provider auth resolution.
  */
 
-import { getModel, completeSimple, streamSimple, type Model, type Api, type KnownProvider } from "@mariozechner/pi-ai";
+import { getModel, getEnvApiKey, completeSimple, streamSimple, type Model, type Api, type KnownProvider } from "@mariozechner/pi-ai";
+import type { ProviderConfig } from "../core/types.js";
 
 /** Provider inference map: model ID prefix → pi-ai provider name */
 const PROVIDER_MAP: Record<string, KnownProvider> = {
@@ -16,9 +17,53 @@ const PROVIDER_MAP: Record<string, KnownProvider> = {
   "mistral-": "mistral",
   "llama-": "groq",
   "deepseek-": "openrouter",
+  "big-pickle": "opencode",
 };
 
-const DEFAULT_MODEL = "anthropic:claude-sonnet-4-5-20250929";
+const DEFAULT_MODEL = "opencode:big-pickle";
+
+// --- Provider override management ---
+
+/** Provider overrides from polpo.yml — set by the orchestrator at init time. */
+let providerOverrides: Record<string, ProviderConfig> = {};
+
+export function setProviderOverrides(overrides: Record<string, ProviderConfig>): void {
+  providerOverrides = overrides;
+}
+
+/**
+ * Resolve API key for a provider.
+ * Priority: 1) polpo.yml overrides, 2) pi-ai env var lookup.
+ */
+export function resolveApiKey(provider: string): string | undefined {
+  const override = providerOverrides[provider];
+  if (override?.apiKey) return override.apiKey;
+  return getEnvApiKey(provider as KnownProvider);
+}
+
+/**
+ * Validate that all required providers have API keys available.
+ * Returns entries with missing keys.
+ */
+export function validateProviderKeys(
+  modelSpecs: string[]
+): { provider: string; modelSpec: string }[] {
+  const missing: { provider: string; modelSpec: string }[] = [];
+  const seen = new Set<string>();
+
+  for (const spec of modelSpecs) {
+    const { provider } = parseModelSpec(spec);
+    if (seen.has(provider)) continue;
+    seen.add(provider);
+
+    if (!resolveApiKey(provider)) {
+      missing.push({ provider, modelSpec: spec });
+    }
+  }
+  return missing;
+}
+
+// --- Model spec parsing ---
 
 /**
  * Parse a model spec string into provider + modelId.
@@ -45,8 +90,8 @@ export function parseModelSpec(spec?: string): { provider: KnownProvider; modelI
     }
   }
 
-  // Default to anthropic
-  return { provider: "anthropic", modelId: s };
+  // Default to opencode
+  return { provider: "opencode", modelId: s };
 }
 
 /**
@@ -60,14 +105,13 @@ export function resolveModel(spec?: string): Model<Api> {
 
 /**
  * Simple prompt → text completion using pi-ai.
- * Replaces querySDKText for orchestrator-level calls.
  */
 export async function queryText(prompt: string, model?: string): Promise<string> {
   const m = resolveModel(model);
+  const apiKey = resolveApiKey(m.provider);
   const response = await completeSimple(m, {
     messages: [{ role: "user", content: prompt, timestamp: Date.now() }],
-  });
-  // Extract text from response content blocks
+  }, apiKey ? { apiKey } : undefined);
   const textBlocks = response.content.filter((c): c is { type: "text"; text: string } => c.type === "text");
   return textBlocks.map(b => b.text).join("\n").trim();
 }
@@ -81,9 +125,10 @@ export async function queryStream(
   onProgress?: (text: string) => void,
 ): Promise<string> {
   const m = resolveModel(model);
+  const apiKey = resolveApiKey(m.provider);
   const s = streamSimple(m, {
     messages: [{ role: "user", content: prompt, timestamp: Date.now() }],
-  });
+  }, apiKey ? { apiKey } : undefined);
 
   for await (const event of s) {
     if (event.type === "text_delta" && onProgress) {

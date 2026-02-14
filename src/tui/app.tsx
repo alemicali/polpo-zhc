@@ -24,6 +24,43 @@ export function usePolpo(): Orchestrator {
   return ctx;
 }
 
+// ─── Session Restore ─────────────────────────────────────
+
+const SESSION_TIMEOUT_MS = 30 * 60 * 1000; // 30 min
+
+function restoreSession(orc: Orchestrator, store: ReturnType<typeof useStore.getState>): void {
+  try {
+    const sessionStore = orc.getSessionStore();
+    if (!sessionStore) return;
+
+    const latest = sessionStore.getLatestSession();
+    if (!latest) return;
+
+    // Only restore if session is recent
+    const age = Date.now() - new Date(latest.updatedAt).getTime();
+    if (age > SESSION_TIMEOUT_MS) return;
+
+    const messages = sessionStore.getRecentMessages(latest.id, 50);
+    if (messages.length === 0) return;
+
+    // Set active session so chat continues in the same thread
+    store.setActiveSessionId(latest.id);
+
+    // Push a separator + previous messages into the stream
+    store.pushLine({ type: "system", text: `── Session restored (${messages.length} messages) ──`, ts: new Date().toISOString() });
+
+    for (const msg of messages) {
+      if (msg.role === "user") {
+        store.pushLine({ type: "user", text: msg.content, ts: msg.ts });
+      } else {
+        store.pushLine({ type: "response", segs: [seg(msg.content)], ts: msg.ts });
+      }
+    }
+  } catch {
+    // Non-critical — start fresh if restore fails
+  }
+}
+
 // ─── Init Hook ──────────────────────────────────────────
 
 function useOrchestratorInit(workDir: string) {
@@ -51,9 +88,7 @@ function useOrchestratorInit(workDir: string) {
 
     const boot = hasConfig
       ? orc.init()
-      : Promise.resolve(
-          orc.initInteractive(basename(absDir), defaultTeam),
-        );
+      : orc.initInteractive(basename(absDir), defaultTeam);
 
     boot.then(() => {
       const config = orc.getConfig();
@@ -61,13 +96,18 @@ function useOrchestratorInit(workDir: string) {
         store.setDefaultAgent(config.team.agents[0].name);
       }
 
+      // Restore previous session messages into the stream
+      restoreSession(orc, store);
+
       setPolpo(orc);
     }).catch((err: unknown) => {
       const msg = err instanceof Error ? err.message : String(err);
       store.log(`Init error: ${msg}`, [seg(`Init error: ${msg}`, "red")]);
       // Fallback to interactive mode
-      orc.initInteractive(basename(absDir), defaultTeam);
-      setPolpo(orc);
+      orc.initInteractive(basename(absDir), defaultTeam).then(() => {
+        restoreSession(orc, store);
+        setPolpo(orc);
+      });
     });
 
     // State sync interval

@@ -6,7 +6,7 @@
  */
 
 import { withRetry } from "./retry.js";
-import { queryText } from "./pi-client.js";
+import { queryText, queryStream } from "./pi-client.js";
 
 /** Progress callback for querySDK */
 export type OnProgress = (event: string) => void;
@@ -100,6 +100,21 @@ export async function querySDK(
     }
 
     return resultText.trim();
+  }, { maxRetries: 2 });
+}
+
+/**
+ * Streaming text query with progress callback.
+ * Each delta chunk is passed to onChunk as it arrives.
+ */
+export async function querySDKStream(
+  prompt: string,
+  _cwd: string,
+  model?: string,
+  onChunk?: (delta: string) => void,
+): Promise<string> {
+  return withRetry(async () => {
+    return queryStream(prompt, model, onChunk);
   }, { maxRetries: 2 });
 }
 

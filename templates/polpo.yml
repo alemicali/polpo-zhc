@@ -1,12 +1,4 @@
-version: "1.0"
-project: "my-project"
-
-team:
-  name: "default-team"
-  description: "Default Polpo team"
-  agents:
-    - name: "dev-1"
-      role: "developer"
+version: "1"
 
 tasks:
   - id: "example-task"
@@ -21,8 +13,3 @@ tasks:
       - type: "file_exists"
         paths: ["src/index.ts"]
     metrics: []
-
-settings:
-  maxRetries: 3
-  workDir: "."
-  logLevel: "normal"
