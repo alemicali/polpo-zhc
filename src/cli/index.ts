@@ -13,6 +13,14 @@ import type { OrchestraState, Task, TaskStatus } from "../core/types.js";
 import "../adapters/claude-sdk.js";
 import "../adapters/generic.js";
 
+import { registerTaskCommands } from "./commands/task.js";
+import { registerPlanCommands } from "./commands/plan.js";
+import { registerTeamCommands } from "./commands/team.js";
+import { registerMemoryCommands } from "./commands/memory.js";
+import { registerLogsCommands } from "./commands/logs.js";
+import { registerConfigCommands } from "./commands/config.js";
+import { registerChatCommands } from "./commands/chat.js";
+
 /** Wire orchestrator events to console output with chalk formatting. */
 function wireConsoleEvents(orchestrator: Orchestrator): void {
   orchestrator.on("orchestrator:started", ({ project, agents }) => {
@@ -532,5 +540,14 @@ program
     const { startInkTUI } = await import("../tui/app.js");
     await startInkTUI(opts.config);
   });
+
+// Register subcommand groups
+registerTaskCommands(program);
+registerPlanCommands(program);
+registerTeamCommands(program);
+registerMemoryCommands(program);
+registerLogsCommands(program);
+registerConfigCommands(program);
+registerChatCommands(program);
 
 program.parse();

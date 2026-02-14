@@ -12,16 +12,16 @@
  *   6. Cleanup & exit
  */
 
-import { readFileSync, unlinkSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync, unlinkSync, appendFileSync, mkdirSync, existsSync } from "node:fs";
+import { join, dirname } from "node:path";
 import { SqliteRunStore } from "../stores/sqlite-run-store.js";
 import { getAdapter } from "../adapters/registry.js";
 import type { RunRecord } from "./run-store.js";
 import type { RunnerConfig, TaskResult } from "./types.js";
 
 // Side-effect imports: register adapters
-import "./adapters/claude-sdk.js";
-import "./adapters/generic.js";
+import "../adapters/claude-sdk.js";
+import "../adapters/generic.js";
 
 const ACTIVITY_POLL_MS = 1500;
 
@@ -46,9 +46,41 @@ function errorResult(err: unknown): TaskResult {
   return { exitCode: 1, stdout: "", stderr: `Runner error: ${msg}`, duration: 0 };
 }
 
+/** Persistent per-run activity log (JSONL file in .polpo/logs/) */
+class RunActivityLog {
+  private logPath: string;
+  private lastSnapshot = "";
+
+  constructor(dbPath: string, runId: string, taskId: string, agentName: string) {
+    const logsDir = join(dirname(dbPath), "logs");
+    if (!existsSync(logsDir)) mkdirSync(logsDir, { recursive: true });
+    this.logPath = join(logsDir, `run-${runId}.jsonl`);
+    // Write header
+    this.write({ _run: true, runId, taskId, agentName, startedAt: new Date().toISOString(), pid: process.pid });
+  }
+
+  /** Log activity diff — only writes if something changed */
+  logActivity(activity: Record<string, unknown>): void {
+    const snapshot = JSON.stringify(activity);
+    if (snapshot === this.lastSnapshot) return;
+    this.lastSnapshot = snapshot;
+    this.write({ ts: new Date().toISOString(), event: "activity", data: activity });
+  }
+
+  /** Log a lifecycle event */
+  logEvent(event: string, data?: Record<string, unknown>): void {
+    this.write({ ts: new Date().toISOString(), event, ...(data ? { data } : {}) });
+  }
+
+  private write(obj: Record<string, unknown>): void {
+    try { appendFileSync(this.logPath, JSON.stringify(obj) + "\n", "utf-8"); } catch { /* best effort */ }
+  }
+}
+
 async function main(): Promise<void> {
   const config = readConfig();
   const runStore = new SqliteRunStore(config.dbPath);
+  const actLog = new RunActivityLog(config.dbPath, config.runId, config.taskId, config.agent.name);
 
   const now = new Date().toISOString();
   const initialRecord: RunRecord = {
@@ -64,21 +96,26 @@ async function main(): Promise<void> {
     configPath: join(process.argv[process.argv.indexOf("--config") + 1]),
   };
   runStore.upsertRun(initialRecord);
+  actLog.logEvent("spawning", { adapter: config.agent.adapter, task: config.task.title });
 
   let handle;
   try {
     const adapter = getAdapter(config.agent.adapter);
     handle = adapter.spawn(config.agent, config.task, config.cwd);
+    actLog.logEvent("spawned");
   } catch (err) {
-    runStore.completeRun(config.runId, "failed", errorResult(err));
+    const result = errorResult(err);
+    actLog.logEvent("error", { message: result.stderr });
+    runStore.completeRun(config.runId, "failed", result);
     runStore.close();
     process.exit(1);
   }
 
-  // Activity polling
+  // Activity polling + persistent logging
   const poll = setInterval(() => {
     try {
       runStore.updateActivity(config.runId, handle.activity);
+      actLog.logActivity({ ...handle.activity });
     } catch { /* DB temporarily locked */
     }
   }, ACTIVITY_POLL_MS);
@@ -87,6 +124,7 @@ async function main(): Promise<void> {
   let sigterm = false;
   process.on("SIGTERM", () => {
     sigterm = true;
+    actLog.logEvent("sigterm");
     handle.kill();
   });
 
@@ -95,11 +133,14 @@ async function main(): Promise<void> {
     clearInterval(poll);
     // Final activity + sessionId flush before marking terminal
     try { runStore.updateActivity(config.runId, handle.activity); } catch { /* best effort */ }
+    actLog.logActivity({ ...handle.activity });
     const status = sigterm ? "killed" : (result.exitCode === 0 ? "completed" : "failed");
+    actLog.logEvent("done", { status, exitCode: result.exitCode, duration: result.duration });
     runStore.completeRun(config.runId, status, result);
   } catch (err) {
     clearInterval(poll);
     try { runStore.updateActivity(config.runId, handle.activity); } catch { /* best effort */ }
+    actLog.logEvent("error", { message: err instanceof Error ? err.message : String(err) });
     runStore.completeRun(config.runId, "failed", errorResult(err));
   }
 

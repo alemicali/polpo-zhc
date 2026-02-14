@@ -1,0 +1,125 @@
+import { Command } from "commander";
+import chalk from "chalk";
+import { resolve } from "node:path";
+import { Orchestrator } from "../../core/orchestrator.js";
+import { parseConfig } from "../../core/config.js";
+import "../../adapters/claude-sdk.js";
+import "../../adapters/generic.js";
+
+async function initOrchestrator(configPath: string): Promise<Orchestrator> {
+  const o = new Orchestrator(resolve(configPath));
+  await o.init();
+  return o;
+}
+
+export function registerConfigCommands(program: Command): void {
+  const configCmd = program
+    .command("config")
+    .description("Configuration management");
+
+  // polpo config show
+  configCmd
+    .command("show")
+    .description("Show current configuration")
+    .option("-c, --config <path>", "Path to working directory", ".")
+    .action(async (opts) => {
+      try {
+        const orchestrator = await initOrchestrator(opts.config);
+        const config = orchestrator.getConfig();
+
+        if (!config) {
+          console.log(chalk.yellow("No configuration loaded"));
+          return;
+        }
+
+        console.log(chalk.bold("\n  Project: ") + config.project);
+        console.log(chalk.bold("  Version: ") + config.version);
+        console.log(
+          chalk.bold("  Team:    ") +
+            config.team.name +
+            chalk.dim(` (${config.team.agents.length} agents)`)
+        );
+
+        // Settings
+        const s = config.settings;
+        console.log(chalk.bold("\n  Settings"));
+        console.log(chalk.dim("  ────────────────────────────────────"));
+        console.log(`  maxRetries              ${s.maxRetries}`);
+        console.log(`  logLevel                ${s.logLevel}`);
+        console.log(
+          `  taskTimeout             ${s.taskTimeout ? `${Math.round(s.taskTimeout / 60000)}m` : chalk.dim("default")}`
+        );
+        console.log(
+          `  staleThreshold          ${s.staleThreshold ? `${Math.round(s.staleThreshold / 60000)}m` : chalk.dim("default")}`
+        );
+        console.log(
+          `  enableVolatileTeams     ${s.enableVolatileTeams ?? chalk.dim("default")}`
+        );
+        console.log(
+          `  autoCorrectExpectations ${s.autoCorrectExpectations ?? chalk.dim("default")}`
+        );
+        console.log(
+          `  orchestratorModel       ${s.orchestratorModel ?? chalk.dim("default")}`
+        );
+
+        // Agents table
+        console.log(chalk.bold("\n  Agents"));
+        console.log(chalk.dim("  ────────────────────────────────────"));
+        const nameWidth = Math.max(
+          6,
+          ...config.team.agents.map((a) => a.name.length)
+        );
+        const adapterWidth = Math.max(
+          8,
+          ...config.team.agents.map((a) => a.adapter.length)
+        );
+        const modelWidth = Math.max(
+          6,
+          ...config.team.agents.map((a) => (a.model ?? "-").length)
+        );
+
+        console.log(
+          chalk.dim(
+            `  ${"NAME".padEnd(nameWidth)}  ${"ADAPTER".padEnd(adapterWidth)}  ${"MODEL".padEnd(modelWidth)}  ROLE`
+          )
+        );
+        for (const agent of config.team.agents) {
+          const name = agent.name.padEnd(nameWidth);
+          const adapter = agent.adapter.padEnd(adapterWidth);
+          const model = (agent.model ?? "-").padEnd(modelWidth);
+          const role = agent.role ?? "-";
+          console.log(`  ${chalk.cyan(name)}  ${adapter}  ${chalk.dim(model)}  ${chalk.dim(role)}`);
+        }
+
+        console.log();
+      } catch (err: any) {
+        console.error(chalk.red(`Error: ${err.message}`));
+        process.exit(1);
+      }
+    });
+
+  // polpo config validate
+  configCmd
+    .command("validate")
+    .description("Validate a polpo.yml configuration file")
+    .option("-c, --config <path>", "Path to working directory", ".")
+    .option("--file <file>", "Specific YAML file to validate")
+    .action(async (opts) => {
+      const configPath = opts.file ?? resolve(opts.config, "polpo.yml");
+
+      try {
+        const config = await parseConfig(configPath);
+        console.log(chalk.green("\n  \u2713 Configuration valid"));
+        console.log(chalk.dim(`    Project: ${config.project}`));
+        console.log(chalk.dim(`    Tasks:   ${config.tasks.length}`));
+        console.log(chalk.dim(`    Agents:  ${config.team.agents.length}`));
+        console.log();
+        process.exit(0);
+      } catch (err: any) {
+        console.log(chalk.red("\n  \u2717 Configuration invalid"));
+        console.log(chalk.red(`    ${err.message}`));
+        console.log();
+        process.exit(1);
+      }
+    });
+}

@@ -57,6 +57,10 @@ export class TaskRunner {
           if (run.pid > 0) {
             try { process.kill(run.pid, "SIGTERM"); } catch { /* already dead */ }
           }
+          // Mark run as killed so we don't retry every tick
+          this.ctx.runStore.completeRun(run.id, "killed", {
+            exitCode: 1, stdout: "", stderr: `Timed out after ${Math.round(elapsed / 1000)}s`, duration: elapsed,
+          });
           this.staleWarned.delete(run.taskId);
           continue;
         }
@@ -72,6 +76,10 @@ export class TaskRunner {
           if (run.pid > 0) {
             try { process.kill(run.pid, "SIGTERM"); } catch { /* already dead */ }
           }
+          // Mark run as killed so we don't retry every tick
+          this.ctx.runStore.completeRun(run.id, "killed", {
+            exitCode: 1, stdout: "", stderr: `Agent unresponsive for ${Math.round(idle / 1000)}s`, duration: idle,
+          });
           this.staleWarned.delete(run.taskId);
         } else if (idle > staleThreshold && !this.staleWarned.has(run.taskId)) {
           this.ctx.emitter.emit("agent:stale", { taskId: run.taskId, agentName: run.agentName, idleMs: idle, action: "warning" });
