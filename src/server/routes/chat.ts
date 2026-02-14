@@ -2,6 +2,15 @@ import { Hono } from "hono";
 import type { ServerEnv } from "../app.js";
 import { buildChatSystemPrompt, buildPlanSystemPrompt, buildTeamGenPrompt } from "../../llm/prompts.js";
 import { querySDKText, querySDK, extractYaml, extractTeamYaml } from "../../llm/query.js";
+import {
+  ChatMessageSchema,
+  GeneratePlanSchema,
+  PrepareTaskSchema,
+  GenerateTeamSchema,
+  RefineTeamSchema,
+  RefinePlanSchema,
+  parseBody,
+} from "../schemas.js";
 
 /**
  * Chat & LLM generation routes.
@@ -12,14 +21,7 @@ export function chatRoutes(): Hono<ServerEnv> {
   // POST /chat — Q&A about Polpo state
   app.post("/", async (c) => {
     const orchestrator = c.get("orchestrator");
-    const body = await c.req.json<{ message: string; sessionId?: string }>();
-
-    if (!body.message?.trim()) {
-      return c.json(
-        { ok: false, error: "message is required", code: "VALIDATION_ERROR" },
-        400
-      );
-    }
+    const body = parseBody(ChatMessageSchema, await c.req.json());
 
     const state = orchestrator.getStore().getState();
     const workDir = orchestrator.getWorkDir();
@@ -67,14 +69,7 @@ export function chatRoutes(): Hono<ServerEnv> {
   // POST /chat/generate-plan — generate plan YAML from natural language
   app.post("/generate-plan", async (c) => {
     const orchestrator = c.get("orchestrator");
-    const body = await c.req.json<{ prompt: string }>();
-
-    if (!body.prompt?.trim()) {
-      return c.json(
-        { ok: false, error: "prompt is required", code: "VALIDATION_ERROR" },
-        400
-      );
-    }
+    const body = parseBody(GeneratePlanSchema, await c.req.json());
 
     const state = orchestrator.getStore().getState();
     const workDir = orchestrator.getWorkDir();
@@ -97,14 +92,7 @@ export function chatRoutes(): Hono<ServerEnv> {
   // POST /chat/prepare-task — LLM-enriched task preparation
   app.post("/prepare-task", async (c) => {
     const orchestrator = c.get("orchestrator");
-    const body = await c.req.json<{ description: string; assignTo: string; group?: string }>();
-
-    if (!body.description?.trim() || !body.assignTo?.trim()) {
-      return c.json(
-        { ok: false, error: "description and assignTo are required", code: "VALIDATION_ERROR" },
-        400
-      );
-    }
+    const body = parseBody(PrepareTaskSchema, await c.req.json());
 
     const { buildTaskPrepPrompt } = await import("../../llm/prompts.js");
     const state = orchestrator.getStore().getState();
@@ -120,14 +108,7 @@ export function chatRoutes(): Hono<ServerEnv> {
   // POST /chat/generate-team — AI team generation from natural language
   app.post("/generate-team", async (c) => {
     const orchestrator = c.get("orchestrator");
-    const body = await c.req.json<{ description: string }>();
-
-    if (!body.description?.trim()) {
-      return c.json(
-        { ok: false, error: "description is required", code: "VALIDATION_ERROR" },
-        400
-      );
-    }
+    const body = parseBody(GenerateTeamSchema, await c.req.json());
 
     const workDir = orchestrator.getWorkDir();
     const model = orchestrator.getConfig()?.settings?.orchestratorModel;
@@ -142,14 +123,7 @@ export function chatRoutes(): Hono<ServerEnv> {
   // POST /chat/refine-team — refine generated team with feedback
   app.post("/refine-team", async (c) => {
     const orchestrator = c.get("orchestrator");
-    const body = await c.req.json<{ currentYaml: string; description: string; feedback: string }>();
-
-    if (!body.currentYaml?.trim() || !body.feedback?.trim()) {
-      return c.json(
-        { ok: false, error: "currentYaml and feedback are required", code: "VALIDATION_ERROR" },
-        400
-      );
-    }
+    const body = parseBody(RefineTeamSchema, await c.req.json());
 
     const workDir = orchestrator.getWorkDir();
     const model = orchestrator.getConfig()?.settings?.orchestratorModel;
@@ -201,14 +175,7 @@ export function chatRoutes(): Hono<ServerEnv> {
   // POST /chat/refine-plan — refine generated plan with feedback
   app.post("/refine-plan", async (c) => {
     const orchestrator = c.get("orchestrator");
-    const body = await c.req.json<{ currentYaml: string; prompt: string; feedback: string }>();
-
-    if (!body.currentYaml?.trim() || !body.feedback?.trim()) {
-      return c.json(
-        { ok: false, error: "currentYaml and feedback are required", code: "VALIDATION_ERROR" },
-        400
-      );
-    }
+    const body = parseBody(RefinePlanSchema, await c.req.json());
 
     const state = orchestrator.getStore().getState();
     const workDir = orchestrator.getWorkDir();

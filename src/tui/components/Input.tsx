@@ -8,6 +8,11 @@ import { useState, useRef, useEffect } from "react";
 import { useStore } from "../store.js";
 import { usePolpo } from "../app.js";
 import { findMentionSpans } from "../mentions.js";
+import { basename } from "node:path";
+import { createRequire } from "node:module";
+
+const require = createRequire(import.meta.url);
+const { version: PKG_VERSION } = require("../../../package.json") as { version: string };
 
 const MENTION_COLORS: Record<string, string> = {
   agent: "cyan",
@@ -26,8 +31,8 @@ const COMMANDS = [
 ];
 
 const MODE_COLORS: Record<string, string> = {
-  task: "green",
-  plan: "blue",
+  task: "blue",
+  plan: "yellow",
   chat: "magenta",
 };
 
@@ -59,11 +64,18 @@ export function Input({
     return () => clearInterval(id);
   }, [processing]);
 
+  const completionActive = useStore((s) => s.completionActive);
+
   // Only capture input when on main page and not processing
   useInput(
     (input, key) => {
       if (page.id !== "main") return;
       if (processing) return;
+
+      // Let CompletionMenu handle Enter/arrows/Esc when active
+      if (completionActive && (key.return || key.upArrow || key.downArrow || key.escape)) {
+        return;
+      }
 
       if (key.return) {
         const text = buffer.trim();
@@ -186,22 +198,37 @@ export function Input({
   };
 
   return (
-    <Box height={1} paddingX={1}>
-      {processing ? (
-        <Text>
-          <Text color="cyan">{SPINNER[spinnerTick]} </Text>
-          <Text color="gray">{processingLabel || "Processing..."}</Text>
-        </Text>
-      ) : (
-        <Text>
-          <Text color={modeColor} bold>
-            {mode}
+    <Box flexDirection="column">
+      <Box borderStyle="single" borderColor="gray" paddingX={1}>
+        {processing ? (
+          <Text>
+            <Text color="cyan">{SPINNER[spinnerTick]} </Text>
+            <Text color="gray">{processingLabel || "Processing..."}</Text>
           </Text>
-          <Text color="gray"> ❯ </Text>
-          {renderWithMentions(buffer)}
-          <Text color="gray">█</Text>
+        ) : (
+          <Text>
+            <Text color={modeColor} bold>
+              {mode}
+            </Text>
+            <Text color="gray"> ❯ </Text>
+            {renderWithMentions(buffer)}
+            <Text color="gray">█</Text>
+          </Text>
+        )}
+      </Box>
+      <Box justifyContent="space-between" paddingX={1}>
+        <Text>
+          <Text color="cyan">Tab</Text><Text color="gray"> mode  </Text>
+          <Text color="cyan">↑↓</Text><Text color="gray"> history  </Text>
+          <Text color="cyan">/</Text><Text color="gray"> commands  </Text>
+          <Text color="cyan">@agent #task %plan</Text><Text color="gray"> mentions</Text>
         </Text>
-      )}
+        <Text>
+          <Text color="cyan" bold>Polpo</Text>
+          <Text color="gray"> v{PKG_VERSION}</Text>
+          <Text color="gray"> — {basename(polpo.getWorkDir())}</Text>
+        </Text>
+      </Box>
     </Box>
   );
 }

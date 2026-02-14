@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import type { ServerEnv } from "../app.js";
-import type { AddAgentRequest } from "../types.js";
+import { AddAgentSchema, RenameTeamSchema, parseBody } from "../schemas.js";
 
 /**
  * Agent/team management routes.
@@ -17,14 +17,7 @@ export function agentRoutes(): Hono<ServerEnv> {
   // POST /agents — add agent
   app.post("/", async (c) => {
     const orchestrator = c.get("orchestrator");
-    const body = await c.req.json<AddAgentRequest>();
-
-    if (!body.name || !body.adapter) {
-      return c.json(
-        { ok: false, error: "name and adapter are required", code: "VALIDATION_ERROR" },
-        400
-      );
-    }
+    const body = parseBody(AddAgentSchema, await c.req.json());
 
     orchestrator.addAgent({
       name: body.name,
@@ -60,13 +53,7 @@ export function agentRoutes(): Hono<ServerEnv> {
   // PATCH /team — rename team
   app.patch("/team", async (c) => {
     const orchestrator = c.get("orchestrator");
-    const body = await c.req.json<{ name: string }>();
-    if (!body.name) {
-      return c.json(
-        { ok: false, error: "name is required", code: "VALIDATION_ERROR" },
-        400
-      );
-    }
+    const body = parseBody(RenameTeamSchema, await c.req.json());
     orchestrator.renameTeam(body.name);
     return c.json({ ok: true, data: orchestrator.getTeam() });
   });

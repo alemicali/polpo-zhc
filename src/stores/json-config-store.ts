@@ -27,7 +27,7 @@ export class JsonConfigStore implements ConfigStore {
         return parsed as ProjectConfig;
       }
       return undefined;
-    } catch {
+    } catch { /* corrupt or unreadable config */
       return undefined;
     }
   }

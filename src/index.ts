@@ -10,7 +10,6 @@ export { JsonTaskStore, SqliteTaskStore } from "./stores/index.js";
 
 // Adapters
 export { registerAdapter, getAdapter, createActivity } from "./adapters/registry.js";
-export { ClaudeSDKAdapter, buildPrompt } from "./adapters/claude-sdk.js";
 export { GenericAdapter, shellEscape } from "./adapters/generic.js";
 
 // Assessment
@@ -43,6 +42,3 @@ export type {
   UpdatePlanRequest,
   AddAgentRequest,
 } from "./server/index.js";
-
-// Backward compat alias
-export { JsonTaskStore as TaskRegistry } from "./stores/index.js";

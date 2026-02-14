@@ -1,4 +1,13 @@
+import { timingSafeEqual } from "node:crypto";
 import type { MiddlewareHandler } from "hono";
+
+/**
+ * Constant-time string comparison to prevent timing attacks.
+ */
+function safeCompare(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(Buffer.from(a), Buffer.from(b));
+}
 
 /**
  * API key authentication middleware.
@@ -12,7 +21,7 @@ export function authMiddleware(apiKeys: string[]): MiddlewareHandler {
     }
 
     const key = c.req.header("x-api-key") || c.req.query("apiKey");
-    if (!key || !apiKeys.includes(key)) {
+    if (!key || !apiKeys.some(k => safeCompare(k, key))) {
       return c.json(
         { ok: false, error: "API key required", code: "AUTH_REQUIRED" },
         401

@@ -2,7 +2,30 @@ import { parse as parseYaml } from "yaml";
 import type { OrchestratorContext } from "./orchestrator-context.js";
 import type { TaskManager } from "./task-manager.js";
 import type { AgentManager } from "./agent-manager.js";
-import type { Plan, PlanStatus, PlanReport, Task } from "./types.js";
+import type { Plan, PlanStatus, PlanReport, Task, TaskExpectation } from "./types.js";
+
+interface PlanDocument {
+  tasks?: Array<{
+    title: string;
+    description: string;
+    assignTo?: string;
+    dependsOn?: string[];
+    expectations?: TaskExpectation[];
+    metrics?: unknown[];
+    maxRetries?: number;
+    maxDuration?: number;
+    retryPolicy?: { escalateAfter?: number; fallbackAgent?: string };
+  }>;
+  team?: Array<{
+    name: string;
+    adapter?: string;
+    role?: string;
+    command?: string;
+    model?: string;
+    systemPrompt?: string;
+    skills?: string[];
+  }>;
+}
 
 /**
  * Plan CRUD + execution + resume + group lifecycle.
@@ -73,7 +96,7 @@ export class PlanExecutor {
     const enableVolatile = this.ctx.config.settings.enableVolatileTeams !== false;
     if (enableVolatile && plan.yaml) {
       try {
-        const doc = parseYaml(plan.yaml) as any;
+        const doc = parseYaml(plan.yaml) as PlanDocument;
         if (doc?.team && Array.isArray(doc.team)) {
           for (const a of doc.team) {
             if (!a.name || !a.adapter) continue;
@@ -103,8 +126,7 @@ export class PlanExecutor {
         try {
           this.taskMgr.retryTask(task.id);
           retried++;
-        } catch {
-          // Task may have no retries left — skip
+        } catch { /* no retries left — skip */
         }
       }
     }
@@ -122,7 +144,7 @@ export class PlanExecutor {
     if (!plan) throw new Error("Plan not found");
     if (plan.status === "active") throw new Error("Plan already active");
 
-    const doc = parseYaml(plan.yaml) as any;
+    const doc = parseYaml(plan.yaml) as PlanDocument;
     if (!doc?.tasks || !Array.isArray(doc.tasks) || doc.tasks.length === 0) {
       throw new Error("Plan has no tasks");
     }

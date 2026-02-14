@@ -136,7 +136,7 @@ export class TaskManager {
         if (task.status === "pending") this.ctx.registry.transition(taskId, "assigned");
         if (task.status === "assigned") this.ctx.registry.transition(taskId, "in_progress");
         this.ctx.registry.transition(taskId, "failed");
-      } catch {
+      } catch { /* transition race — force status */
         this.ctx.registry.updateTask(taskId, { status: "failed" });
       }
     }
@@ -217,7 +217,7 @@ export class TaskManager {
       if (task.status === "pending") this.ctx.registry.transition(taskId, "assigned");
       if (task.status === "assigned") this.ctx.registry.transition(taskId, "in_progress");
       this.ctx.registry.transition(taskId, "failed");
-    } catch {
+    } catch { /* transition race — force status */
       this.ctx.registry.updateTask(taskId, { status: "failed" });
     }
   }

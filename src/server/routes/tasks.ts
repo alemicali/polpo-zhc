@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import type { ServerEnv } from "../app.js";
-import type { CreateTaskRequest, UpdateTaskRequest } from "../types.js";
+import { CreateTaskSchema, UpdateTaskSchema, parseBody } from "../schemas.js";
 
 /**
  * Task CRUD + action routes.
@@ -38,14 +38,7 @@ export function taskRoutes(): Hono<ServerEnv> {
   // POST /tasks — create task
   app.post("/", async (c) => {
     const orchestrator = c.get("orchestrator");
-    const body = await c.req.json<CreateTaskRequest>();
-
-    if (!body.title || !body.description || !body.assignTo) {
-      return c.json(
-        { ok: false, error: "title, description, and assignTo are required", code: "VALIDATION_ERROR" },
-        400
-      );
-    }
+    const body = parseBody(CreateTaskSchema, await c.req.json());
 
     const task = orchestrator.addTask({
       title: body.title,
@@ -65,7 +58,7 @@ export function taskRoutes(): Hono<ServerEnv> {
   app.patch("/:taskId", async (c) => {
     const orchestrator = c.get("orchestrator");
     const taskId = c.req.param("taskId");
-    const body = await c.req.json<UpdateTaskRequest>();
+    const body = parseBody(UpdateTaskSchema, await c.req.json());
 
     const task = orchestrator.getStore().getTask(taskId);
     if (!task) {

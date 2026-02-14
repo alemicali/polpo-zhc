@@ -157,7 +157,7 @@ export class TaskRunner {
 
   isProcessAlive(pid: number): boolean {
     if (pid <= 0) return false;
-    try { process.kill(pid, 0); return true; } catch { return false; }
+    try { process.kill(pid, 0); return true; } catch { return false; /* process not found */ }
   }
 
   spawnForTask(task: Task): void {
@@ -248,8 +248,7 @@ export class TaskRunner {
       setTimeout(() => {
         try { process.kill(pid, "SIGKILL"); } catch { /* already dead */ }
       }, 3000);
-    } catch {
-      // Process already dead
+    } catch { /* process already dead */
     }
   }
 }

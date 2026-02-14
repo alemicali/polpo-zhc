@@ -48,7 +48,7 @@ export function eventRoutes(pm: ProjectManager): Hono<ServerEnv> {
       const heartbeat = setInterval(() => {
         try {
           stream.writeSSE({ event: "heartbeat", data: "" });
-        } catch {
+        } catch { /* client disconnected */
           clearInterval(heartbeat);
           sseBridge.removeClient(clientId);
         }

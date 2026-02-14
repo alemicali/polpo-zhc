@@ -59,8 +59,7 @@ export async function classifyAsQuestion(
     const cleaned = response.replace(/```json?\n?/g, "").replace(/```/g, "").trim();
     const parsed = JSON.parse(cleaned);
     return { isQuestion: !!parsed.isQuestion, question: parsed.question || "" };
-  } catch {
-    // Parse failure → assume not a question (safe fallback)
+  } catch { /* malformed JSON — assume not a question */
     return { isQuestion: false, question: "" };
   }
 }

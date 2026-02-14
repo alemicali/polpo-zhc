@@ -46,10 +46,14 @@ export class ProjectManager {
         team = doc.team as Team;
       } catch (err) {
         console.error(`[ProjectManager] Failed to parse ${ymlPath}:`, err instanceof Error ? err.message : err);
-        team = { name: "default", agents: [] };
+        team = { name: "default", agents: [
+          { name: "claude", adapter: "generic", command: "claude -p {prompt}", role: "developer" },
+        ] };
       }
     } else {
-      team = { name: "default", agents: [] };
+      team = { name: "default", agents: [
+        { name: "claude", adapter: "generic", command: "claude -p {prompt}", role: "developer" },
+      ] };
     }
 
     orchestrator.initInteractive(projectName, team);

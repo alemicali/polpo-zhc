@@ -2,7 +2,7 @@ import { join, basename } from "node:path";
 import { existsSync, readdirSync } from "node:fs";
 import type { OrchestratorContext } from "./orchestrator-context.js";
 import type { Task, TaskResult, AssessmentResult, TaskExpectation } from "./types.js";
-import { buildFixPrompt, buildRetryPrompt, buildJudgePrompt, type JudgeVerdict } from "./assessment-prompts.js";
+import { buildFixPrompt, buildRetryPrompt, buildJudgePrompt, type JudgeVerdict, type JudgeCorrection } from "./assessment-prompts.js";
 import { looksLikeQuestion, classifyAsQuestion } from "./question-detector.js";
 import { generateAnswer } from "../llm/answer-generator.js";
 import { querySDKText } from "../llm/query.js";
@@ -301,8 +301,7 @@ export class AssessmentOrchestrator {
         this.ctx.registry.updateTask(taskId, { phase: undefined });
         return true;
       }
-    } catch {
-      // Re-assessment failed — fall through to fix phase
+    } catch { /* re-assessment failed */
     }
 
     return false;
@@ -347,7 +346,7 @@ export class AssessmentOrchestrator {
     let response: string;
     try {
       response = await querySDKText(prompt, this.ctx.workDir, this.ctx.config.settings.orchestratorModel);
-    } catch {
+    } catch { /* LLM query failed */
       return false;
     }
 
@@ -357,12 +356,12 @@ export class AssessmentOrchestrator {
       const cleaned = response.replace(/```json?\n?/g, "").replace(/```/g, "").trim();
       verdict = JSON.parse(cleaned);
       if (!verdict.corrections || !Array.isArray(verdict.corrections)) return false;
-    } catch {
+    } catch { /* malformed JSON response */
       return false;
     }
 
     // Apply corrections only if LLM found at least one fixable expectation
-    const fixable = verdict.corrections.filter((c: any) => c.verdict === "expectation_wrong" && c.fix);
+    const fixable = verdict.corrections.filter((c: JudgeCorrection) => c.verdict === "expectation_wrong" && c.fix);
     if (fixable.length === 0) return false;
 
     const newExpectations = [...task.expectations];
@@ -415,8 +414,7 @@ export class AssessmentOrchestrator {
         this.ctx.registry.updateTask(taskId, { phase: undefined });
         return true;
       }
-    } catch {
-      // Re-assessment failed
+    } catch { /* re-assessment failed */
     }
 
     return false;

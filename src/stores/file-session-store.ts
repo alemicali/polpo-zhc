@@ -38,8 +38,7 @@ export class FileSessionStore implements SessionStore {
     });
     try {
       appendFileSync(this.sessionFile(sessionId), header + "\n", "utf-8");
-    } catch {
-      // Never let session creation failures break the system
+    } catch { /* best-effort: non-critical */
     }
     return sessionId;
   }
@@ -54,8 +53,7 @@ export class FileSessionStore implements SessionStore {
     try {
       const line = JSON.stringify(message);
       appendFileSync(this.sessionFile(sessionId), line + "\n", "utf-8");
-    } catch {
-      // Never let message append failures break the system
+    } catch { /* best-effort: non-critical */
     }
     return message;
   }
@@ -73,7 +71,7 @@ export class FileSessionStore implements SessionStore {
         messages.push(obj as Message);
       }
       return messages;
-    } catch {
+    } catch { /* unreadable session file */
       return [];
     }
   }
@@ -111,8 +109,7 @@ export class FileSessionStore implements SessionStore {
           updatedAt,
           messageCount,
         });
-      } catch {
-        // skip corrupt files
+      } catch { /* skip corrupt file */
       }
     }
     return sessions;
@@ -134,7 +131,7 @@ export class FileSessionStore implements SessionStore {
         updatedAt,
         messageCount,
       };
-    } catch {
+    } catch { /* unreadable session file */
       return undefined;
     }
   }
@@ -150,7 +147,7 @@ export class FileSessionStore implements SessionStore {
     try {
       unlinkSync(file);
       return true;
-    } catch {
+    } catch { /* file already removed */
       return false;
     }
   }
@@ -164,7 +161,7 @@ export class FileSessionStore implements SessionStore {
       try {
         unlinkSync(this.sessionFile(s.id));
         removed++;
-      } catch { /* ignore */ }
+      } catch { /* file already removed */ }
     }
     return removed;
   }

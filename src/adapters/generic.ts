@@ -80,7 +80,7 @@ class GenericAdapter implements AgentAdapter {
 
     const cleanup = () => {
       alive = false;
-      try { unlinkSync(tmpFile); } catch {}
+      try { unlinkSync(tmpFile); } catch { /* file already removed */ }
     };
 
     const done = new Promise<TaskResult>((resolve) => {

@@ -1,4 +1,4 @@
-import { createDatabase } from "./sqlite-compat.js";
+import { createDatabase, type PolpoDatabase, type PolpoStatement } from "./sqlite-compat.js";
 import { mkdirSync, existsSync } from "node:fs";
 import { dirname } from "node:path";
 import { nanoid } from "nanoid";
@@ -21,17 +21,17 @@ interface MessageRow {
 }
 
 export class SqliteSessionStore implements SessionStore {
-  private db: any;
+  private db: PolpoDatabase;
 
-  private createSessionStmt: any;
-  private addMessageStmt: any;
-  private updateSessionStmt: any;
-  private getMessagesStmt: any;
-  private getRecentMessagesStmt: any;
-  private listSessionsStmt: any;
-  private getSessionStmt: any;
-  private getLatestSessionStmt: any;
-  private deleteSessionStmt: any;
+  private createSessionStmt: PolpoStatement;
+  private addMessageStmt: PolpoStatement;
+  private updateSessionStmt: PolpoStatement;
+  private getMessagesStmt: PolpoStatement;
+  private getRecentMessagesStmt: PolpoStatement;
+  private listSessionsStmt: PolpoStatement;
+  private getSessionStmt: PolpoStatement;
+  private getLatestSessionStmt: PolpoStatement;
+  private deleteSessionStmt: PolpoStatement;
 
   constructor(dbPath: string) {
     const dir = dirname(dbPath);

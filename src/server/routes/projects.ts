@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import type { ServerEnv } from "../app.js";
 import type { ProjectManager } from "../project-manager.js";
+import { UpdateMemorySchema, parseBody } from "../schemas.js";
 
 /**
  * Project listing, state, config, memory, logs routes.
@@ -50,13 +51,7 @@ export function projectDetailRoutes(): Hono<ServerEnv> {
   // PUT /memory — update project memory
   app.put("/memory", async (c) => {
     const orchestrator = c.get("orchestrator");
-    const body = await c.req.json<{ content: string }>();
-    if (body.content === undefined) {
-      return c.json(
-        { ok: false, error: "content is required", code: "VALIDATION_ERROR" },
-        400
-      );
-    }
+    const body = parseBody(UpdateMemorySchema, await c.req.json());
     orchestrator.saveMemory(body.content);
     return c.json({ ok: true, data: { saved: true } });
   });

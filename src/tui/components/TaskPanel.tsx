@@ -1,9 +1,10 @@
 /**
- * TaskPanel — compact right sidebar showing task status and agent activity.
+ * TaskPanel — right sidebar: Mission Control with tasks, plans, and agent activity.
  */
 
 import { Box, Text } from "ink";
 import { useStore } from "../store.js";
+import { usePolpo } from "../app.js";
 import { statusIcon, statusColor } from "../format.js";
 import type { Task } from "../../core/types.js";
 
@@ -12,31 +13,22 @@ const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", 
 export function TaskPanel({ width, height }: { width: number; height: number }) {
   const tasks = useStore((s) => s.tasks);
   const processes = useStore((s) => s.processes);
+  const polpo = usePolpo();
 
-  if (tasks.length === 0) {
-    return (
-      <Box
-        flexDirection="column"
-        width={width}
-        height={height}
-        borderStyle="single"
-        borderColor="gray"
-        paddingX={1}
-      >
-        <Text bold color="gray">Tasks</Text>
-        <Text color="gray" dimColor>No tasks yet</Text>
-      </Box>
-    );
-  }
-
-  // Counts
+  // Task counts
   const done = tasks.filter((t) => t.status === "done").length;
   const failed = tasks.filter((t) => t.status === "failed").length;
   const running = tasks.filter((t) => t.status === "in_progress" || t.status === "review").length;
-  const pending = tasks.filter((t) => t.status === "pending" || t.status === "assigned").length;
 
-  // Visible tasks (fit in available height minus header + summary)
-  const available = Math.max(0, height - 4);
+  // Plan counts
+  let plans: { status: string }[] = [];
+  try { plans = polpo.getAllPlans?.() ?? []; } catch { /* */ }
+  const plansActive = plans.filter((p) => p.status === "active").length;
+  const plansTotal = plans.length;
+
+  // Visible tasks (fit in available height minus header lines)
+  const headerLines = 3; // title + stats line + blank
+  const available = Math.max(0, height - headerLines);
   const visible = tasks.slice(0, available);
 
   const tick = Math.floor(Date.now() / 80) % SPINNER.length;
@@ -50,17 +42,21 @@ export function TaskPanel({ width, height }: { width: number; height: number }) 
       borderColor="gray"
       paddingX={1}
     >
-      {/* Summary line */}
+      {/* Title */}
+      <Text color="cyan" bold>🐙 Mission Control</Text>
+
+      {/* Stats — inline */}
       <Text>
-        <Text bold>Tasks </Text>
-        <Text color="green">{done}✓</Text>
-        <Text> </Text>
-        {failed > 0 && <Text color="red">{failed}✗ </Text>}
-        {running > 0 && <Text color="cyan">{running}● </Text>}
-        {pending > 0 && <Text color="gray">{pending}○</Text>}
+        <Text color="gray">tasks </Text>
+        <Text color="blue" bold>{running > 0 ? `${done}/${tasks.length}` : `${done}/${tasks.length}`}</Text>
+        {running > 0 && <Text color="cyan"> {running}●</Text>}
+        {failed > 0 && <Text color="red"> {failed}✗</Text>}
+        <Text color="gray">  plans </Text>
+        <Text color="yellow" bold>{plansActive > 0 ? `${plansActive}/${plansTotal}` : `${plansTotal}`}</Text>
       </Text>
 
       {/* Task list */}
+      {visible.length > 0 && <Text> </Text>}
       {visible.map((task) => (
         <TaskRow
           key={task.id}
@@ -72,7 +68,7 @@ export function TaskPanel({ width, height }: { width: number; height: number }) 
       ))}
 
       {tasks.length > available && (
-        <Text color="gray" dimColor>
+        <Text color="gray">
           +{tasks.length - available} more
         </Text>
       )}

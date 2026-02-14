@@ -37,8 +37,10 @@ export function createApp(pm: ProjectManager, opts?: AppOptions): Hono {
   if (opts?.corsOrigins && opts.corsOrigins.length > 0) {
     app.use("*", cors({ origin: opts.corsOrigins }));
   } else {
-    // Default: allow all origins for local dev
-    app.use("*", cors());
+    // Default: restrict to localhost origins only
+    app.use("*", cors({
+      origin: ["http://localhost:3000", "http://localhost:3001", "http://127.0.0.1:3000", "http://127.0.0.1:3001"],
+    }));
   }
 
   // Health (no auth, no project context)

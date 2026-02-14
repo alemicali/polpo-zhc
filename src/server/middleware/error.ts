@@ -54,8 +54,10 @@ export function errorMiddleware(): MiddlewareHandler {
         );
       }
 
+      // Never leak internal error details to clients
+      console.error("[polpo] Internal server error:", message);
       return c.json(
-        { ok: false, error: message, code: "INTERNAL_ERROR" },
+        { ok: false, error: "Internal server error", code: "INTERNAL_ERROR" },
         500,
       );
     }

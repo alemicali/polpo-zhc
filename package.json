@@ -5,9 +5,37 @@
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./core": {
+      "types": "./dist/core/index.d.ts",
+      "import": "./dist/core/index.js"
+    },
+    "./server": {
+      "types": "./dist/server/index.d.ts",
+      "import": "./dist/server/index.js"
+    },
+    "./assessment": {
+      "types": "./dist/assessment/index.d.ts",
+      "import": "./dist/assessment/index.js"
+    },
+    "./adapters": {
+      "types": "./dist/adapters/index.d.ts",
+      "import": "./dist/adapters/index.js"
+    }
+  },
   "bin": {
     "polpo": "dist/cli/index.js"
   },
+  "files": [
+    "dist/",
+    "templates/",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
@@ -22,8 +50,19 @@
     "multi-agent"
   ],
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/openpolpo/openpolpo.git"
+  },
+  "homepage": "https://github.com/openpolpo/openpolpo",
+  "bugs": {
+    "url": "https://github.com/openpolpo/openpolpo/issues"
+  },
+  "author": "OpenPolpo Contributors",
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.2.34",
     "@hono/node-server": "^1.19.9",
     "better-sqlite3": "^12.6.2",
     "chalk": "^5.4.1",
@@ -39,6 +78,9 @@
     "yaml": "^2.7.0",
     "zod": "^4.3.6",
     "zustand": "^5.0.11"
+  },
+  "optionalDependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.2.34"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",

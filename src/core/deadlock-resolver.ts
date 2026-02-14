@@ -7,7 +7,7 @@
  * chain should be failed.
  */
 
-import type { Task } from "./types.js";
+import type { Task, TaskStatus } from "./types.js";
 import type { Orchestrator } from "./orchestrator.js";
 import { querySDKText } from "../llm/query.js";
 
@@ -156,8 +156,7 @@ export async function resolveDeadlock(
       let decision: ResolutionDecision;
       try {
         decision = await classifyBlockage(task, failedDep, allTasks, memory, cwd, model);
-      } catch {
-        // LLM call failed → fail this task
+      } catch { /* LLM classification failed */
         orchestrator.emit("deadlock:unresolvable", {
           taskId: task.id,
           reason: "LLM analysis failed",
@@ -207,7 +206,7 @@ async function classifyBlockage(
       reason: parsed.reason || "no reason provided",
       absorbedDescription: parsed.absorbedDescription,
     };
-  } catch {
+  } catch { /* malformed JSON response */
     return { action: "fail", reason: "failed to parse LLM response" };
   }
 }
@@ -321,7 +320,7 @@ function applyDecision(
       store.updateTask(blockedTask.id, {
         dependsOn: cleanDeps,
         description: absorbBlock,
-        status: "pending" as any,
+        status: "pending" as TaskStatus,
         resolutionAttempts: (blockedTask.resolutionAttempts ?? 0) + 1,
       });
 

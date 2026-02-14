@@ -142,7 +142,7 @@ program
     try {
       await access(configPath);
       console.log(chalk.yellow("  polpo.yml already exists, skipping."));
-    } catch {
+    } catch { /* file does not exist — create it */
       const template = generateTemplate();
       await writeFile(configPath, template, "utf-8");
       console.log(chalk.green("  Created polpo.yml"));
@@ -151,7 +151,7 @@ program
     const statePath = resolve(orchestraDir, "state.json");
     try {
       await access(statePath);
-    } catch {
+    } catch { /* file does not exist — create it */
       await writeFile(statePath, JSON.stringify({ project: "", team: { name: "", agents: [] }, tasks: [], processes: [] }, null, 2), "utf-8");
     }
 
@@ -201,8 +201,7 @@ program
       try {
         const raw = await readFile(statePath, "utf-8");
         lastState = JSON.parse(raw);
-      } catch {
-        // File is being written — use last valid state
+      } catch { /* file being written — use last state */
       }
 
       const state = lastState;

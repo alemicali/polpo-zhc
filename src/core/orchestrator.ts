@@ -235,7 +235,7 @@ export class Orchestrator extends TypedEmitter {
     this.logStore.startSession();
     this.setLogSink(this.logStore);
     // Auto-prune: keep last 20 sessions
-    try { this.logStore.prune(20); } catch { /* ignore */ }
+    try { this.logStore.prune(20); } catch { /* best-effort: non-critical */ }
   }
 
   /** Get the chat session store. */
@@ -246,7 +246,7 @@ export class Orchestrator extends TypedEmitter {
   /** Initialize the chat session store. */
   private initSessionStore(): void {
     this.sessionStore = new FileSessionStore(this.polpoDir);
-    try { this.sessionStore.prune(20); } catch { /* ignore */ }
+    try { this.sessionStore.prune(20); } catch { /* best-effort: non-critical */ }
   }
 
   // ─── Plan Resume / Execute (delegates to PlanExecutor) ──

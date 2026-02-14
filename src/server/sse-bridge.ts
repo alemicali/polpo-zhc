@@ -63,7 +63,7 @@ export class SSEBridge {
         for (const client of this.clients.values()) {
           try {
             client.send(event, data, eventId);
-          } catch {
+          } catch { /* client disconnected */
             this.removeClient(client.id);
           }
         }
@@ -72,7 +72,7 @@ export class SSEBridge {
         for (const listener of this.externalListeners) {
           try {
             listener(event, data, eventId);
-          } catch { /* ignore */ }
+          } catch { /* best-effort: non-critical */ }
         }
       };
       this.orchestrator.on(event, fn);
@@ -99,7 +99,7 @@ export class SSEBridge {
       for (const e of events) {
         try {
           client.send(e.event, e.data, e.id);
-        } catch {
+        } catch { /* client disconnected */
           this.removeClient(client.id);
           return;
         }
@@ -137,7 +137,7 @@ export class SSEBridge {
   dispose(): void {
     this.disposeFn?.();
     for (const client of this.clients.values()) {
-      try { client.close(); } catch { /* ignore */ }
+      try { client.close(); } catch { /* already closed */ }
     }
     this.clients.clear();
     this.externalListeners.clear();

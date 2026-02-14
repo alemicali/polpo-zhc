@@ -46,7 +46,7 @@ export class WSBridge {
         if (this.matchesSubscription(client, event)) {
           try {
             (client.ws as any).send(serialized);
-          } catch {
+          } catch { /* client disconnected */
             this.removeClient(client.id);
           }
         }
@@ -72,7 +72,7 @@ export class WSBridge {
       try {
         const msg: WSClientMessage = JSON.parse(raw.toString());
         this.handleMessage(client, msg);
-      } catch {
+      } catch { /* malformed JSON message */
         this.sendError(client, "Invalid JSON message", "VALIDATION_ERROR");
       }
     });
@@ -137,14 +137,14 @@ export class WSBridge {
     const msg: WSServerError = { type: "error", error, code: code as WSServerError["code"] };
     try {
       (client.ws as any).send(JSON.stringify(msg));
-    } catch { /* ignore */ }
+    } catch { /* client disconnected */ }
   }
 
   /** Remove a WS client. */
   removeClient(clientId: string): void {
     const client = this.clients.get(clientId);
     if (client) {
-      try { (client.ws as any).close(); } catch { /* ignore */ }
+      try { (client.ws as any).close(); } catch { /* already closed */ }
       this.clients.delete(clientId);
     }
   }
@@ -159,7 +159,7 @@ export class WSBridge {
       this.sseBridge.offEvent(this.eventListener);
     }
     for (const client of this.clients.values()) {
-      try { (client.ws as any).close(); } catch { /* ignore */ }
+      try { (client.ws as any).close(); } catch { /* already closed */ }
     }
     this.clients.clear();
   }

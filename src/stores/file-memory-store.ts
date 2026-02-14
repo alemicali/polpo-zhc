@@ -21,7 +21,7 @@ export class FileMemoryStore implements MemoryStore {
     if (!this.exists()) return "";
     try {
       return readFileSync(this.filePath, "utf-8");
-    } catch {
+    } catch { /* unreadable memory file */
       return "";
     }
   }

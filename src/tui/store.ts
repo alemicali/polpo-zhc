@@ -103,6 +103,10 @@ export interface TUIStore {
   activeSessionId: string | null;
   setActiveSessionId(id: string | null): void;
 
+  // Completion menu
+  completionActive: boolean;
+  setCompletionActive(active: boolean): void;
+
   // Preferences
   defaultAgent: string;
   setDefaultAgent(name: string): void;
@@ -162,6 +166,10 @@ export const useStore = create<TUIStore>((set) => ({
   // Chat session
   activeSessionId: null,
   setActiveSessionId: (id) => set({ activeSessionId: id }),
+
+  // Completion menu
+  completionActive: false,
+  setCompletionActive: (active) => set({ completionActive: active }),
 
   // Preferences
   defaultAgent: "",

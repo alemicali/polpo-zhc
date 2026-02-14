@@ -79,8 +79,7 @@ async function main(): Promise<void> {
   const poll = setInterval(() => {
     try {
       runStore.updateActivity(config.runId, handle.activity);
-    } catch {
-      // DB may be temporarily locked — skip this tick
+    } catch { /* DB temporarily locked */
     }
   }, ACTIVITY_POLL_MS);
 

@@ -42,10 +42,17 @@ function useOrchestratorInit(workDir: string) {
     const configPath = resolve(absDir, "polpo.yml");
     const hasConfig = existsSync(configPath);
 
+    const defaultTeam = {
+      name: "default",
+      agents: [
+        { name: "claude", adapter: "generic" as const, command: "claude -p {prompt}", role: "developer" },
+      ],
+    };
+
     const boot = hasConfig
       ? orc.init()
       : Promise.resolve(
-          orc.initInteractive(basename(absDir), { name: "default", agents: [] }),
+          orc.initInteractive(basename(absDir), defaultTeam),
         );
 
     boot.then(() => {
@@ -54,50 +61,12 @@ function useOrchestratorInit(workDir: string) {
         store.setDefaultAgent(config.team.agents[0].name);
       }
 
-      // Welcome
-      const project = config?.project ?? basename(absDir);
-      store.log("Welcome to Polpo", [
-        seg("Welcome to ", "gray"),
-        seg("Polpo", "cyan", true),
-      ]);
-      store.log(`Project: ${project}`, [
-        seg("Project: ", "gray"),
-        seg(project, undefined, true),
-      ]);
-
-      const agents = config?.team.agents.length ?? 0;
-      if (agents > 0) {
-        store.log(`Team: ${config!.team.name} (${agents} agents)`, [
-          seg("Team: ", "gray"),
-          seg(config!.team.name, undefined, true),
-          seg(` (${agents} agents)`, "gray"),
-        ]);
-      }
-
-      if (!hasConfig) {
-        store.log("No polpo.yml found — interactive mode", [
-          seg("No polpo.yml found — ", "yellow"),
-          seg("interactive mode", "yellow", true),
-        ]);
-        store.log("Use /team add to add agents, then type a task", [
-          seg("Use ", "gray"),
-          seg("/team add", "cyan"),
-          seg(" to add agents, then type a task", "gray"),
-        ]);
-      }
-
-      store.log("Type /help for commands", [
-        seg("Type ", "gray"),
-        seg("/help", "cyan"),
-        seg(" for commands", "gray"),
-      ]);
-
       setPolpo(orc);
     }).catch((err: unknown) => {
       const msg = err instanceof Error ? err.message : String(err);
       store.log(`Init error: ${msg}`, [seg(`Init error: ${msg}`, "red")]);
       // Fallback to interactive mode
-      orc.initInteractive(basename(absDir), { name: "default", agents: [] });
+      orc.initInteractive(basename(absDir), defaultTeam);
       setPolpo(orc);
     });
 

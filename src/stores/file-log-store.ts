@@ -49,8 +49,7 @@ export class FileLogStore implements LogStore {
     try {
       const line = JSON.stringify(entry);
       appendFileSync(this.sessionFile(this.sessionId), line + "\n", "utf-8");
-    } catch {
-      // Never let logging failures break the system
+    } catch { /* best-effort: non-critical */
     }
   }
 
@@ -69,7 +68,7 @@ export class FileLogStore implements LogStore {
         entries.push(obj as LogEntry);
       }
       return entries;
-    } catch {
+    } catch { /* unreadable log file */
       return [];
     }
   }
@@ -100,8 +99,7 @@ export class FileLogStore implements LogStore {
           startedAt: header.startedAt ?? new Date(statSync(filePath).mtimeMs).toISOString(),
           entries: lines.length - 1, // exclude header
         });
-      } catch {
-        // skip corrupt files
+      } catch { /* skip corrupt file */
       }
     }
     return sessions;
@@ -118,7 +116,7 @@ export class FileLogStore implements LogStore {
       try {
         unlinkSync(this.sessionFile(s.sessionId));
         removed++;
-      } catch { /* ignore */ }
+      } catch { /* file already removed */ }
     }
     return removed;
   }

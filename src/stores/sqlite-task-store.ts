@@ -1,4 +1,4 @@
-import { createDatabase } from "./sqlite-compat.js";
+import { createDatabase, type PolpoDatabase, type PolpoStatement } from "./sqlite-compat.js";
 import { join } from "node:path";
 import { existsSync, readFileSync, renameSync, mkdirSync } from "node:fs";
 import { nanoid } from "nanoid";
@@ -53,31 +53,31 @@ function safeJsonParse<T>(json: string | null | undefined, fallback: T): T {
   if (!json) return fallback;
   try {
     return JSON.parse(json) as T;
-  } catch {
+  } catch { /* malformed JSON — use fallback */
     return fallback;
   }
 }
 
 export class SqliteTaskStore implements TaskStore {
-  private db: any;
+  private db: PolpoDatabase;
   private polpoDir: string;
 
   // Prepared statements
-  private insertTaskStmt: any;
-  private getTaskStmt: any;
-  private getAllTasksStmt: any;
-  private deleteTaskStmt: any;
-  private deleteAllTasksStmt: any;
-  private getMetaStmt: any;
-  private upsertMetaStmt: any;
-  private clearProcessesStmt: any;
-  private insertProcessStmt: any;
-  private getAllProcessesStmt: any;
-  private insertPlanStmt!: any;
-  private getPlanStmt!: any;
-  private getPlanByNameStmt!: any;
-  private getAllPlansStmt!: any;
-  private deletePlanStmt!: any;
+  private insertTaskStmt: PolpoStatement;
+  private getTaskStmt: PolpoStatement;
+  private getAllTasksStmt: PolpoStatement;
+  private deleteTaskStmt: PolpoStatement;
+  private deleteAllTasksStmt: PolpoStatement;
+  private getMetaStmt: PolpoStatement;
+  private upsertMetaStmt: PolpoStatement;
+  private clearProcessesStmt: PolpoStatement;
+  private insertProcessStmt: PolpoStatement;
+  private getAllProcessesStmt: PolpoStatement;
+  private insertPlanStmt!: PolpoStatement;
+  private getPlanStmt!: PolpoStatement;
+  private getPlanByNameStmt!: PolpoStatement;
+  private getAllPlansStmt!: PolpoStatement;
+  private deletePlanStmt!: PolpoStatement;
 
   constructor(orchestraDir: string) {
     this.polpoDir = orchestraDir;
@@ -88,6 +88,7 @@ export class SqliteTaskStore implements TaskStore {
     this.db = createDatabase(dbPath);
     this.db.exec("PRAGMA journal_mode = WAL");
     this.db.exec("PRAGMA synchronous = NORMAL");
+    this.db.exec("PRAGMA busy_timeout = 5000");
     this.initSchema();
     this.migrateSchema();
 
@@ -215,8 +216,7 @@ export class SqliteTaskStore implements TaskStore {
       })();
 
       renameSync(jsonPath, jsonPath + ".migrated");
-    } catch {
-      // Migration failed — non-fatal, start fresh
+    } catch { /* migration failed — start fresh */
     }
   }
 

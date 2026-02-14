@@ -10,17 +10,23 @@ import { SegmentLine } from "./SegmentLine.js";
 export function Stream({ height }: { height: number }) {
   const lines = useStore((s) => s.lines);
 
-  // Show last N lines that fit the viewport
-  const visible = lines.slice(-height);
-  const emptyRows = Math.max(0, height - visible.length);
+  // Each user message takes 2 rows (1 content + 1 margin-top), others take 1
+  // Walk backwards to find how many entries fit
+  let rows = 0;
+  let startIdx = lines.length;
+  for (let i = lines.length - 1; i >= 0 && rows < height; i--) {
+    const t = lines[i]!.type;
+    const cost = (t === "user" || t === "event" || t === "response") ? 2 : 1;
+    if (rows + cost > height) break;
+    rows += cost;
+    startIdx = i;
+  }
+  const visible = lines.slice(startIdx);
 
   return (
     <Box flexDirection="column" height={height}>
-      {/* Empty padding at top when few lines */}
-      {emptyRows > 0 && <Box height={emptyRows} />}
-
       {visible.map((entry, i) => (
-        <Box key={lines.length - visible.length + i}>
+        <Box key={startIdx + i} marginTop={entry.type === "system" ? 0 : 1}>
           <StreamLine entry={entry} />
         </Box>
       ))}
@@ -34,9 +40,8 @@ function StreamLine({ entry }: { entry: StreamEntry }) {
       return <SegmentLine segs={entry.segs} />;
     case "user":
       return (
-        <Text>
-          <Text color="cyan" bold>{"❯ "}</Text>
-          <Text>{entry.text}</Text>
+        <Text backgroundColor="#333333" color="white">
+          {" ❯ "}{entry.text}{" "}
         </Text>
       );
     case "response":

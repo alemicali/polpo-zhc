@@ -8,7 +8,7 @@ export interface SessionMessage {
   sessionId?: string;
   message?: {
     role: string;
-    content: string | Array<{ type: string; text?: string; name?: string; input?: any }>;
+    content: string | Array<{ type: string; text?: string; name?: string; input?: Record<string, unknown> }>;
   };
 }
 
@@ -46,7 +46,7 @@ export function findTranscriptPath(sessionId: string, cwd: string): string | nul
         const candidate = join(claudeDir, d, sessionId, `${sessionId}.jsonl`);
         if (!candidates.includes(candidate)) candidates.push(candidate);
       }
-    } catch { /* ignore */ }
+    } catch { /* unreadable projects dir */ }
   }
 
   for (const path of candidates) {
@@ -77,12 +77,13 @@ export function readSessionSummaryFromPath(transcriptPath: string): SessionSumma
     const lines = raw.split("\n").filter(l => l.trim());
 
     for (const line of lines) {
-      let msg: any;
-      try { msg = JSON.parse(line); } catch { continue; }
+      let msg: Record<string, unknown>;
+      try { msg = JSON.parse(line) as Record<string, unknown>; } catch { continue; /* skip malformed line */ }
       messageCount++;
 
-      if (msg.type === "assistant" && msg.message?.content) {
-        const content = msg.message.content;
+      if (msg.type === "assistant" && (msg.message as Record<string, unknown> | undefined)?.content) {
+        const msgObj = msg.message as Record<string, unknown>;
+        const content = msgObj.content;
         if (Array.isArray(content)) {
           for (const block of content) {
             if (block.type === "text" && block.text) {
@@ -96,7 +97,7 @@ export function readSessionSummaryFromPath(transcriptPath: string): SessionSumma
             }
             if (block.type === "tool_use") {
               const toolName = block.name;
-              const input = block.input as Record<string, any> | undefined;
+              const input = block.input as Record<string, unknown> | undefined;
               toolCalls.push(toolName);
 
               const filePath = input?.file_path ?? input?.path ?? input?.filePath;
@@ -114,13 +115,13 @@ export function readSessionSummaryFromPath(transcriptPath: string): SessionSumma
 
       // Capture errors from result messages
       if (msg.type === "result") {
-        const result = msg as any;
-        if (result.subtype !== "success" && result.errors) {
+        const result = msg as Record<string, unknown>;
+        if (result.subtype !== "success" && Array.isArray(result.errors)) {
           for (const e of result.errors) errors.push(String(e).slice(0, 200));
         }
       }
     }
-  } catch { return null; }
+  } catch { return null; /* unreadable transcript */ }
 
   return {
     sessionId,
@@ -159,11 +160,12 @@ export function getRecentMessages(sessionId: string, cwd: string, limit = 5): st
     const lines = raw.split("\n").filter(l => l.trim());
 
     for (const line of lines) {
-      let msg: any;
-      try { msg = JSON.parse(line); } catch { continue; }
+      let msg: Record<string, unknown>;
+      try { msg = JSON.parse(line) as Record<string, unknown>; } catch { continue; /* skip malformed line */ }
 
-      if (msg.type === "assistant" && msg.message?.content) {
-        const content = msg.message.content;
+      if (msg.type === "assistant" && (msg.message as Record<string, unknown> | undefined)?.content) {
+        const msgObj = msg.message as Record<string, unknown>;
+        const content = msgObj.content;
         if (Array.isArray(content)) {
           for (const block of content) {
             if (block.type === "text" && block.text?.trim()) {
@@ -173,7 +175,7 @@ export function getRecentMessages(sessionId: string, cwd: string, limit = 5): st
         }
       }
     }
-  } catch { return []; }
+  } catch { return []; /* unreadable transcript */ }
 
   return messages.slice(-limit);
 }

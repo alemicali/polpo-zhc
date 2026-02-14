@@ -2,6 +2,8 @@
  * LLM integration: Claude SDK query wrappers and YAML extraction.
  */
 
+import { withRetry } from "./retry.js";
+
 /** Progress callback for querySDK */
 export type OnProgress = (event: string) => void;
 
@@ -18,59 +20,61 @@ export async function querySDK(
   onProgress?: OnProgress,
   model?: string,
 ): Promise<string> {
-  const { query } = await import("@anthropic-ai/claude-agent-sdk");
+  return withRetry(async () => {
+    const { query } = await import("@anthropic-ai/claude-agent-sdk");
 
-  let resultText = "";
-  const q = query({
-    prompt,
-    options: {
-      cwd,
-      permissionMode: "bypassPermissions" as any, // SDK type mismatch
-      allowDangerouslySkipPermissions: true,
-      persistSession: false,
-      allowedTools,
-      model,
-    },
-  });
+    let resultText = "";
+    const q = query({
+      prompt,
+      options: {
+        cwd,
+        permissionMode: "bypassPermissions" as any, // Claude SDK doesn't export PermissionMode type
+        allowDangerouslySkipPermissions: true,
+        persistSession: false,
+        allowedTools,
+        model,
+      },
+    });
 
-  for await (const message of q) {
-    if (message.type === "assistant" && "message" in message) {
-      const assistantMsg = message as { type: "assistant"; message: { content: Array<{ type: string; text?: string; name?: string; input?: Record<string, unknown> }> } };
-      const content = assistantMsg.message.content;
-      if (Array.isArray(content)) {
-        for (const block of content) {
-          if (block.type === "text" && block.text) {
-            resultText = block.text;
-            if (onProgress) {
-              const firstLine = block.text.split("\n").find((l: string) => l.trim()) ?? "";
-              if (firstLine.trim()) onProgress(firstLine.trim().slice(0, 120));
+    for await (const message of q) {
+      if (message.type === "assistant" && "message" in message) {
+        const assistantMsg = message as { type: "assistant"; message: { content: Array<{ type: string; text?: string; name?: string; input?: Record<string, unknown> }> } };
+        const content = assistantMsg.message.content;
+        if (Array.isArray(content)) {
+          for (const block of content) {
+            if (block.type === "text" && block.text) {
+              resultText = block.text;
+              if (onProgress) {
+                const firstLine = block.text.split("\n").find((l: string) => l.trim()) ?? "";
+                if (firstLine.trim()) onProgress(firstLine.trim().slice(0, 120));
+              }
             }
-          }
-          if (block.type === "tool_use" && onProgress) {
-            const toolName = block.name ?? "tool";
-            const toolInput = block.input;
-            if (toolName === "Bash") {
-              const cmd = (toolInput?.command as string)?.slice(0, 80) ?? "";
-              onProgress(`{cyan-fg}${toolName}{/cyan-fg} ${cmd}`);
-            } else if (toolName === "Skill") {
-              const skill = (toolInput?.skill as string) ?? "";
-              onProgress(`{cyan-fg}Skill{/cyan-fg} ${skill}`);
-            } else {
-              onProgress(`{cyan-fg}${toolName}{/cyan-fg}`);
+            if (block.type === "tool_use" && onProgress) {
+              const toolName = block.name ?? "tool";
+              const toolInput = block.input;
+              if (toolName === "Bash") {
+                const cmd = (toolInput?.command as string)?.slice(0, 80) ?? "";
+                onProgress(`[${toolName}] ${cmd}`);
+              } else if (toolName === "Skill") {
+                const skill = (toolInput?.skill as string) ?? "";
+                onProgress(`[Skill] ${skill}`);
+              } else {
+                onProgress(`[${toolName}]`);
+              }
             }
           }
         }
       }
-    }
-    if (message.type === "result" && "subtype" in message) {
-      const resultMsg = message as { type: "result"; subtype: string; result?: string };
-      if (resultMsg.subtype === "success" && resultMsg.result) {
-        resultText = resultMsg.result;
+      if (message.type === "result" && "subtype" in message) {
+        const resultMsg = message as { type: "result"; subtype: string; result?: string };
+        if (resultMsg.subtype === "success" && resultMsg.result) {
+          resultText = resultMsg.result;
+        }
       }
     }
-  }
 
-  return resultText.trim();
+    return resultText.trim();
+  }, { maxRetries: 2 });
 }
 
 /** Extract YAML block from LLM response (handles markdown fences) */

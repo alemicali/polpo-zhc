@@ -59,14 +59,14 @@ export class SessionWatcher extends EventEmitter {
       let entries: string[];
       try {
         entries = readdirSync(dir).filter(f => f.endsWith(".jsonl"));
-      } catch { continue; }
+      } catch { continue; /* unreadable dir */ }
 
       for (const file of entries) {
         const fullPath = join(dir, file);
         let size: number;
         try {
           size = statSync(fullPath).size;
-        } catch { continue; }
+        } catch { continue; /* file vanished */ }
 
         if (size === 0) continue;
 

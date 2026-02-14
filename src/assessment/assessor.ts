@@ -101,7 +101,7 @@ export async function runCheck(
           details: msg,
         };
       } finally {
-        try { await unlink(scriptFile); } catch { /* ignore */ }
+        try { await unlink(scriptFile); } catch { /* file already removed */ }
       }
     }
 
@@ -132,7 +132,7 @@ export async function runMetric(
       threshold: metric.threshold,
       passed: value >= metric.threshold,
     };
-  } catch {
+  } catch { /* metric command failed */
     return {
       name: metric.name,
       value: 0,

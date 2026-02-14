@@ -5,7 +5,7 @@
 import type { CommandAPI } from "./types.js";
 import { seg } from "../format.js";
 
-const COMMANDS: [string, string][] = [
+export const COMMANDS: [string, string][] = [
   ["/status", "Show orchestrator state"],
   ["/team [add|rm|edit]", "Manage team agents"],
   ["/tasks [list]", "Browse and manage tasks"],

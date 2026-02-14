@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import type { ServerEnv } from "../app.js";
-import type { CreatePlanRequest, UpdatePlanRequest } from "../types.js";
+import { CreatePlanSchema, UpdatePlanSchema, parseBody } from "../schemas.js";
 
 /**
  * Plan CRUD + execute/resume/abort routes.
@@ -33,14 +33,7 @@ export function planRoutes(): Hono<ServerEnv> {
   // POST /plans — save plan
   app.post("/", async (c) => {
     const orchestrator = c.get("orchestrator");
-    const body = await c.req.json<CreatePlanRequest>();
-
-    if (!body.yaml) {
-      return c.json(
-        { ok: false, error: "yaml is required", code: "VALIDATION_ERROR" },
-        400
-      );
-    }
+    const body = parseBody(CreatePlanSchema, await c.req.json());
 
     const plan = orchestrator.savePlan({
       yaml: body.yaml,
@@ -55,7 +48,7 @@ export function planRoutes(): Hono<ServerEnv> {
   // PATCH /plans/:planId — update plan
   app.patch("/:planId", async (c) => {
     const orchestrator = c.get("orchestrator");
-    const body = await c.req.json<UpdatePlanRequest>();
+    const body = parseBody(UpdatePlanSchema, await c.req.json());
     const plan = orchestrator.updatePlan(c.req.param("planId"), body);
     return c.json({ ok: true, data: plan });
   });

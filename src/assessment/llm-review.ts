@@ -1,7 +1,21 @@
-import { query, createSdkMcpServer, tool } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
 import type { TaskExpectation, DimensionScore, CheckResult } from "../core/types.js";
 import { DEFAULT_DIMENSIONS, buildRubricSection, computeWeightedScore, computeMedianScores } from "./scoring.js";
+import { withRetry } from "../llm/retry.js";
+
+/**
+ * Dynamically load the Claude Agent SDK (optional dependency).
+ * Throws a clear error if the package is not installed.
+ */
+async function loadClaudeSDK() {
+  try {
+    return await import("@anthropic-ai/claude-agent-sdk");
+  } catch { /* SDK not installed */
+    throw new Error(
+      "LLM review requires @anthropic-ai/claude-agent-sdk. Install it with: npm install @anthropic-ai/claude-agent-sdk"
+    );
+  }
+}
 
 /**
  * Injectable function type for LLM queries (used in tests).
@@ -18,7 +32,8 @@ interface ReviewPayload {
  * Create the in-process MCP server with a `submit_review` tool.
  * The captured result is stored in the returned ref object.
  */
-function createReviewServer() {
+async function createReviewServer() {
+  const { createSdkMcpServer, tool } = await loadClaudeSDK();
   const ref: { result: ReviewPayload | null } = { result: null };
 
   const server = createSdkMcpServer({
@@ -159,7 +174,8 @@ async function runSingleReview(
   cwd: string,
   onProgress?: (msg: string) => void,
 ): Promise<ReviewPayload | null> {
-  const { server, ref } = createReviewServer();
+  const { query } = await loadClaudeSDK();
+  const { server, ref } = await createReviewServer();
 
   let textOutput = "";
 
@@ -222,17 +238,17 @@ async function runSingleReviewWithRetry(
   onProgress?: (msg: string) => void,
 ): Promise<ReviewPayload | null> {
   try {
-    const result = await runSingleReview(reviewPrompt, cwd, onProgress);
-    if (result) return result;
-  } catch { /* first attempt failed */ }
-
-  // Retry once
-  onProgress?.("Reviewer failed, retrying...");
-  try {
-    return await runSingleReview(reviewPrompt, cwd, onProgress);
-  } catch { /* retry also failed */ }
-
-  return null;
+    return await withRetry(
+      async () => {
+        const result = await runSingleReview(reviewPrompt, cwd, onProgress);
+        if (!result) throw new Error("Reviewer produced no result");
+        return result;
+      },
+      { maxRetries: 1, initialDelayMs: 2000, checkTransient: false },
+    );
+  } catch { /* retries exhausted */
+    return null;
+  }
 }
 
 /**

@@ -53,5 +53,5 @@ export function parseSkillFrontmatter(content: string): SkillInfo | null {
       description: fm.description ?? "",
       allowedTools: fm["allowed-tools"],
     };
-  } catch { return null; }
+  } catch { return null; /* malformed YAML frontmatter */ }
 }

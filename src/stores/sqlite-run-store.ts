@@ -1,4 +1,4 @@
-import { createDatabase } from "./sqlite-compat.js";
+import { createDatabase, type PolpoDatabase, type PolpoStatement } from "./sqlite-compat.js";
 import { mkdirSync, existsSync } from "node:fs";
 import { dirname } from "node:path";
 import type { AgentActivity, TaskResult } from "../core/types.js";
@@ -23,22 +23,22 @@ function safeJsonParse<T>(json: string | null | undefined, fallback: T): T {
   if (!json) return fallback;
   try {
     return JSON.parse(json) as T;
-  } catch {
+  } catch { /* malformed JSON — use fallback */
     return fallback;
   }
 }
 
 export class SqliteRunStore implements RunStore {
-  private db: any;
+  private db: PolpoDatabase;
 
-  private upsertRunStmt: any;
-  private updateActivityStmt: any;
-  private completeRunStmt: any;
-  private getRunStmt: any;
-  private getRunByTaskIdStmt: any;
-  private getActiveRunsStmt: any;
-  private getTerminalRunsStmt: any;
-  private deleteRunStmt: any;
+  private upsertRunStmt: PolpoStatement;
+  private updateActivityStmt: PolpoStatement;
+  private completeRunStmt: PolpoStatement;
+  private getRunStmt: PolpoStatement;
+  private getRunByTaskIdStmt: PolpoStatement;
+  private getActiveRunsStmt: PolpoStatement;
+  private getTerminalRunsStmt: PolpoStatement;
+  private deleteRunStmt: PolpoStatement;
 
   constructor(dbPath: string) {
     const dir = dirname(dbPath);
@@ -102,8 +102,7 @@ export class SqliteRunStore implements RunStore {
     // Migration: add session_id column for existing databases
     try {
       this.db.exec(`ALTER TABLE runs ADD COLUMN session_id TEXT`);
-    } catch {
-      // Column already exists — expected for new databases
+    } catch { /* column already exists */
     }
   }
 
