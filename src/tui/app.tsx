@@ -6,7 +6,8 @@
 import { createContext, useContext, useState, useEffect } from "react";
 import { render } from "ink";
 import { FullScreenBox } from "fullscreen-ink";
-import { resolve } from "node:path";
+import { resolve, basename } from "node:path";
+import { existsSync } from "node:fs";
 import { Orchestrator } from "../core/orchestrator.js";
 import { useStore } from "./store.js";
 import { bridgeEvents } from "./bridge.js";
@@ -38,17 +39,23 @@ function useOrchestratorInit(workDir: string) {
     // Bridge events → store
     const unbridge = bridgeEvents(orc, store);
 
-    // Init orchestrator (loads config, opens stores)
-    orc.init().then(() => {
-      // Set default agent from loaded config
+    const configPath = resolve(absDir, "polpo.yml");
+    const hasConfig = existsSync(configPath);
+
+    const boot = hasConfig
+      ? orc.init()
+      : Promise.resolve(
+          orc.initInteractive(basename(absDir), { name: "default", agents: [] }),
+        );
+
+    boot.then(() => {
       const config = orc.getConfig();
       if (config?.team.agents[0]) {
         store.setDefaultAgent(config.team.agents[0].name);
       }
 
-      // Welcome messages
-      const project = config?.project ?? "unknown";
-      const agents = config?.team.agents.length ?? 0;
+      // Welcome
+      const project = config?.project ?? basename(absDir);
       store.log("Welcome to Polpo", [
         seg("Welcome to ", "gray"),
         seg("Polpo", "cyan", true),
@@ -57,6 +64,8 @@ function useOrchestratorInit(workDir: string) {
         seg("Project: ", "gray"),
         seg(project, undefined, true),
       ]);
+
+      const agents = config?.team.agents.length ?? 0;
       if (agents > 0) {
         store.log(`Team: ${config!.team.name} (${agents} agents)`, [
           seg("Team: ", "gray"),
@@ -64,6 +73,19 @@ function useOrchestratorInit(workDir: string) {
           seg(` (${agents} agents)`, "gray"),
         ]);
       }
+
+      if (!hasConfig) {
+        store.log("No polpo.yml found — interactive mode", [
+          seg("No polpo.yml found — ", "yellow"),
+          seg("interactive mode", "yellow", true),
+        ]);
+        store.log("Use /team add to add agents, then type a task", [
+          seg("Use ", "gray"),
+          seg("/team add", "cyan"),
+          seg(" to add agents, then type a task", "gray"),
+        ]);
+      }
+
       store.log("Type /help for commands", [
         seg("Type ", "gray"),
         seg("/help", "cyan"),
@@ -74,7 +96,8 @@ function useOrchestratorInit(workDir: string) {
     }).catch((err: unknown) => {
       const msg = err instanceof Error ? err.message : String(err);
       store.log(`Init error: ${msg}`, [seg(`Init error: ${msg}`, "red")]);
-      // Still set polpo so the UI renders (with empty config)
+      // Fallback to interactive mode
+      orc.initInteractive(basename(absDir), { name: "default", agents: [] });
       setPolpo(orc);
     });
 

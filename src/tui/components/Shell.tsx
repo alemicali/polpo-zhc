@@ -12,11 +12,14 @@ import { MainView } from "./MainView.js";
 import { PickerPage } from "../pages/PickerPage.js";
 import { EditorPage } from "../pages/EditorPage.js";
 import { ViewerPage } from "../pages/ViewerPage.js";
+import { ConfirmPage } from "../pages/ConfirmPage.js";
+import { createTask } from "../actions/create-task.js";
+import { createPlan } from "../actions/create-plan.js";
+import { startChat } from "../actions/chat.js";
 
 export function Shell() {
   const pageId = useStore((s) => s.page.id);
   const polpo = usePolpo();
-  const store = useStore.getState();
 
   const handleSubmit = (text: string) => {
     const s = useStore.getState();
@@ -37,15 +40,11 @@ export function Shell() {
     // Mode-specific handling
     const mode = s.inputMode;
     if (mode === "chat") {
-      // TODO: send to LLM chat
-      s.log("Chat mode — coming soon", [seg("Chat mode — coming soon", "gray")]);
+      startChat(text, polpo, s);
     } else if (mode === "plan") {
-      // TODO: create plan from description
-      s.log("Plan mode — coming soon", [seg("Plan mode — coming soon", "gray")]);
+      createPlan(text, polpo, s);
     } else {
-      // Task mode — create task from description
-      // TODO: LLM task preparation or direct task creation
-      s.log("Task creation — coming soon", [seg("Task creation — coming soon", "gray")]);
+      createTask(text, polpo, s);
     }
   };
 
@@ -58,6 +57,8 @@ export function Shell() {
       return <EditorPage />;
     case "viewer":
       return <ViewerPage />;
+    case "confirm":
+      return <ConfirmPage />;
     default:
       return <MainView onSubmit={handleSubmit} />;
   }

@@ -99,6 +99,10 @@ export interface TUIStore {
   processingLabel: string;
   setProcessing(active: boolean, label?: string): void;
 
+  // Chat session
+  activeSessionId: string | null;
+  setActiveSessionId(id: string | null): void;
+
   // Preferences
   defaultAgent: string;
   setDefaultAgent(name: string): void;
@@ -154,6 +158,10 @@ export const useStore = create<TUIStore>((set) => ({
   processingLabel: "",
   setProcessing: (active, label) =>
     set({ processing: active, processingLabel: label ?? "" }),
+
+  // Chat session
+  activeSessionId: null,
+  setActiveSessionId: (id) => set({ activeSessionId: id }),
 
   // Preferences
   defaultAgent: "",

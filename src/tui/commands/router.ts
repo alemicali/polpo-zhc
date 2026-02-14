@@ -10,7 +10,7 @@ import { cmdTeam } from "./team.js";
 import { cmdTasks } from "./tasks.js";
 import { cmdPlans } from "./plans.js";
 import { cmdConfig } from "./config.js";
-import { cmdChat } from "./chat.js";
+import { cmdChat, cmdTaskMode } from "./chat.js";
 import { cmdSessions } from "./sessions.js";
 
 type Handler = (api: CommandAPI) => void | Promise<void>;
@@ -24,6 +24,7 @@ const commands: Record<string, Handler> = {
   "/plan": cmdPlans,
   "/config": cmdConfig,
   "/chat": cmdChat,
+  "/task": cmdTaskMode,
   "/sessions": cmdSessions,
   "/clear": ({ store }) => store.clearLines(),
   "/quit": () => process.exit(0),
