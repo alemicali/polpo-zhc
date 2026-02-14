@@ -15,6 +15,8 @@ const COMMANDS: [string, string][] = [
   ["/task", "Switch to task mode"],
   ["/sessions", "View agent sessions"],
   ["/memory [edit]", "View/edit project memory"],
+  ["/logs [sessions]", "View event log"],
+  ["/inspect", "View current session events"],
   ["/abort <group>", "Abort a task group"],
   ["/clear-tasks", "Clear all tasks"],
   ["/clear", "Clear the stream"],
