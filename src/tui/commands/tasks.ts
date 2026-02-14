@@ -5,7 +5,7 @@
 
 import type { CommandAPI } from "./types.js";
 import type { Task } from "../../core/types.js";
-import { seg, statusIcon, statusColor, formatElapsed } from "../format.js";
+import { seg, statusIcon, statusColor, formatElapsed, kickRun } from "../format.js";
 
 export function cmdTasks({ polpo, store, args }: CommandAPI) {
   const state = polpo.getStore().getState();
@@ -122,7 +122,7 @@ function showTaskDetail(
           seg("↻ ", "yellow"),
           seg(task.title, undefined, true),
         ]);
-        polpo.run().catch(() => {});
+        kickRun(polpo, store);
       } else if (action === "Kill") {
         const killed = polpo.killTask(task.id);
         store.log(

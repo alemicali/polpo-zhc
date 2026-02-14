@@ -12,6 +12,7 @@ import { cmdPlans } from "./plans.js";
 import { cmdConfig } from "./config.js";
 import { cmdChat, cmdTaskMode } from "./chat.js";
 import { cmdSessions } from "./sessions.js";
+import { cmdMemory } from "./memory.js";
 
 type Handler = (api: CommandAPI) => void | Promise<void>;
 
@@ -26,6 +27,7 @@ const commands: Record<string, Handler> = {
   "/chat": cmdChat,
   "/task": cmdTaskMode,
   "/sessions": cmdSessions,
+  "/memory": cmdMemory,
   "/clear": ({ store }) => store.clearLines(),
   "/quit": () => process.exit(0),
   "/abort": ({ polpo, store, args }) => {

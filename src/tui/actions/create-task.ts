@@ -8,7 +8,7 @@ import { parse as parseYaml } from "yaml";
 import type { Orchestrator } from "../../core/orchestrator.js";
 import type { TUIStore } from "../store.js";
 import type { TaskExpectation } from "../../core/types.js";
-import { seg } from "../format.js";
+import { seg, kickRun } from "../format.js";
 import { querySDKText, extractYaml } from "../../llm/query.js";
 import { buildTaskPrepPrompt } from "../../llm/prompts.js";
 
@@ -128,7 +128,7 @@ function doCreateDirect(
     seg(` → ${agentName}`, "gray"),
   ]);
 
-  polpo.run().catch(() => {});
+  kickRun(polpo, store);
 }
 
 async function doCreateWithPrep(
@@ -214,7 +214,7 @@ async function doCreateWithPrep(
       ]);
     }
 
-    polpo.run().catch(() => {});
+    kickRun(polpo, store);
   } catch (err: unknown) {
     store.setProcessing(false);
     // Fallback to direct creation on any error

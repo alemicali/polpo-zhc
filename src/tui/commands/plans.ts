@@ -9,7 +9,7 @@
 
 import type { CommandAPI } from "./types.js";
 import type { Plan } from "../../core/types.js";
-import { seg } from "../format.js";
+import { seg, kickRun } from "../format.js";
 
 const STATUS_COLORS: Record<string, string> = {
   draft: "gray",
@@ -239,7 +239,7 @@ function executePlan(
       seg(plan.name, undefined, true),
       seg(` → ${result.tasks.length} tasks`, "gray"),
     ]);
-    polpo.run().catch(() => {});
+    kickRun(polpo, store);
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     store.log(`Execute error: ${msg}`, [seg(`Error: ${msg}`, "red")]);
@@ -292,7 +292,7 @@ function resumePlanAction(
       seg(plan.name, undefined, true),
       seg(` (${result.retried} retried, ${result.pending} pending)`, "gray"),
     ]);
-    polpo.run().catch(() => {});
+    kickRun(polpo, store);
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     store.log(`Resume error: ${msg}`, [seg(`Error: ${msg}`, "red")]);

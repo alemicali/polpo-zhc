@@ -6,7 +6,7 @@
 import { parse as parseYaml } from "yaml";
 import type { Orchestrator } from "../../core/orchestrator.js";
 import type { TUIStore } from "../store.js";
-import { seg } from "../format.js";
+import { seg, kickRun } from "../format.js";
 import { querySDKText, extractYaml } from "../../llm/query.js";
 import { buildPlanSystemPrompt } from "../../llm/prompts.js";
 
@@ -219,7 +219,7 @@ function executePlanFromYaml(
       seg(plan.name, undefined, true),
       seg(` → ${result.tasks.length} tasks`, "gray"),
     ]);
-    polpo.run().catch(() => {});
+    kickRun(polpo, store);
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     store.log(`Execute error: ${msg}`, [seg(`Error: ${msg}`, "red")]);

@@ -51,6 +51,19 @@ export function formatElapsed(ms: number): string {
   return `${(ms / 60_000).toFixed(1)}m`;
 }
 
+// ─── Run helper ─────────────────────────────────────
+
+/** Kick the orchestrator run loop, logging errors to the TUI store. */
+export function kickRun(
+  polpo: { run(): Promise<void> },
+  store: { log(text: string, segs: Seg[]): void },
+): void {
+  polpo.run().catch((err: unknown) => {
+    const msg = err instanceof Error ? err.message : String(err);
+    store.log(`Run error: ${msg}`, [seg("Run error: ", "red"), seg(msg, "gray")]);
+  });
+}
+
 // ─── Provider labels ────────────────────────────────────
 
 const PROVIDER_LABELS: Record<string, string> = {

@@ -5,9 +5,19 @@
 
 import type { Orchestrator } from "../core/orchestrator.js";
 import type { TUIStore } from "./store.js";
-import { seg } from "./format.js";
+import { seg, formatElapsed } from "./format.js";
 
 type Off = () => void;
+
+/** Look up a task title from store, falling back to truncated taskId. */
+function taskTitle(polpo: Orchestrator, taskId: string): string {
+  try {
+    const t = polpo.getStore()?.getTask(taskId);
+    return t?.title ?? taskId.slice(0, 8);
+  } catch {
+    return taskId.slice(0, 8);
+  }
+}
 
 export function bridgeEvents(polpo: Orchestrator, store: TUIStore): Off {
   const offs: Off[] = [];
@@ -19,11 +29,25 @@ export function bridgeEvents(polpo: Orchestrator, store: TUIStore): Off {
 
   // ─── Agent lifecycle ────────────────────────────────
 
-  on("agent:spawned", ({ agentName, taskTitle }: any) => {
-    store.log(`→ ${taskTitle} → ${agentName}`, [
+  on("agent:spawned", ({ agentName, taskTitle: title }: any) => {
+    store.log(`→ ${title} → ${agentName}`, [
       seg("→ ", "cyan"),
-      seg(taskTitle, undefined, true),
+      seg(title, undefined, true),
       seg(` → ${agentName}`, "gray"),
+    ]);
+  });
+
+  on("agent:finished", ({ taskId, agentName, exitCode, duration }: any) => {
+    const title = taskTitle(polpo, taskId);
+    const elapsed = formatElapsed(duration ?? 0);
+    const icon = exitCode === 0 ? "✓" : "✗";
+    const color = exitCode === 0 ? "green" : "red";
+    store.log(`${icon} ${agentName} finished ${title} (${elapsed})`, [
+      seg(`${icon} `, color),
+      seg(agentName, undefined, true),
+      seg(` finished `, "gray"),
+      seg(title, undefined, true),
+      seg(` (${elapsed})`, "gray"),
     ]);
   });
 
@@ -46,23 +70,26 @@ export function bridgeEvents(polpo: Orchestrator, store: TUIStore): Off {
     ]);
   });
 
-  on("task:done", ({ title, score }: any) => {
-    const scoreText = score !== undefined ? ` (${score.toFixed(1)}/5)` : "";
-    store.log(`✓ ${title}${scoreText}`, [
-      seg("✓ ", "green", true),
-      seg(title, undefined, true),
-      seg(scoreText, "gray"),
-    ]);
+  on("task:transition", ({ taskId, to, task }: any) => {
+    const title = task?.title ?? taskTitle(polpo, taskId);
+    if (to === "done") {
+      const score = task?.result?.assessment?.globalScore;
+      const scoreText = score !== undefined ? ` (${score.toFixed(1)}/5)` : "";
+      store.log(`✓ ${title}${scoreText}`, [
+        seg("✓ ", "green", true),
+        seg(title, undefined, true),
+        seg(scoreText, "gray"),
+      ]);
+    } else if (to === "failed") {
+      store.log(`✗ ${title}`, [
+        seg("✗ ", "red", true),
+        seg(title, undefined, true),
+      ]);
+    }
   });
 
-  on("task:failed", ({ title }: any) => {
-    store.log(`✗ ${title}`, [
-      seg("✗ ", "red", true),
-      seg(title, undefined, true),
-    ]);
-  });
-
-  on("task:retry", ({ title, attempt, maxRetries }: any) => {
+  on("task:retry", ({ taskId, attempt, maxRetries }: any) => {
+    const title = taskTitle(polpo, taskId);
     store.log(`↻ ${title} (${attempt}/${maxRetries})`, [
       seg("↻ ", "yellow"),
       seg(title, undefined, true),
@@ -79,16 +106,18 @@ export function bridgeEvents(polpo: Orchestrator, store: TUIStore): Off {
   });
 
   on("task:timeout", ({ taskId }: any) => {
-    store.log(`⏱ Timeout: ${taskId}`, [
+    const title = taskTitle(polpo, taskId);
+    store.log(`⏱ Timeout: ${title}`, [
       seg("⏱ ", "red"),
-      seg(taskId, undefined, true),
+      seg(title, undefined, true),
       seg(" timed out", "gray"),
     ]);
   });
 
   // ─── Assessment ─────────────────────────────────────
 
-  on("assessment:started", ({ title }: any) => {
+  on("assessment:started", ({ taskId }: any) => {
+    const title = taskTitle(polpo, taskId);
     store.log(`⚖ Assessing: ${title}`, [
       seg("⚖ ", "magenta"),
       seg(title, undefined, true),
@@ -96,27 +125,69 @@ export function bridgeEvents(polpo: Orchestrator, store: TUIStore): Off {
     ]);
   });
 
-  on("assessment:passed", ({ title, score }: any) => {
-    const scoreText = score !== undefined ? ` ${score.toFixed(1)}/5` : "";
-    store.log(`✓ Passed: ${title}${scoreText}`, [
-      seg("✓ ", "green", true),
+  on("assessment:progress", ({ taskId, message }: any) => {
+    const title = taskTitle(polpo, taskId);
+    store.log(`  ${title}: ${message}`, [
+      seg("  ", "gray"),
       seg(title, undefined, true),
-      seg(scoreText, "gray"),
+      seg(`: ${message}`, "gray"),
     ]);
   });
 
-  on("assessment:failed", ({ title }: any) => {
-    store.log(`✗ Failed: ${title}`, [
-      seg("✗ ", "red"),
-      seg(title, undefined, true),
-    ]);
+  on("assessment:complete", ({ taskId, passed, globalScore, message }: any) => {
+    const title = taskTitle(polpo, taskId);
+    if (passed) {
+      const scoreText = globalScore !== undefined ? ` ${globalScore.toFixed(1)}/5` : "";
+      store.log(`✓ Passed: ${title}${scoreText}`, [
+        seg("✓ ", "green", true),
+        seg(title, undefined, true),
+        seg(scoreText, "gray"),
+      ]);
+    } else {
+      const reason = message ? `: ${message}` : "";
+      store.log(`✗ Failed: ${title}${reason}`, [
+        seg("✗ ", "red"),
+        seg(title, undefined, true),
+        seg(reason, "gray", false, true),
+      ]);
+    }
   });
 
-  on("assessment:autoCorrect", ({ corrections }: any) => {
-    store.log(`⚡ Auto-corrected ${corrections} expectation(s)`, [
+  on("assessment:corrected", ({ taskId, corrections }: any) => {
+    const title = taskTitle(polpo, taskId);
+    store.log(`⚡ Auto-corrected ${corrections} expectation(s) for ${title}`, [
       seg("⚡ ", "yellow"),
       seg(`${corrections}`, undefined, true),
-      seg(" expectation(s) corrected", "gray"),
+      seg(` expectation(s) corrected — `, "gray"),
+      seg(title, undefined, true),
+    ]);
+  });
+
+  // ─── Deadlock ─────────────────────────────────────
+
+  on("deadlock:detected", ({ taskIds }: any) => {
+    store.log(`⚠ Deadlock detected: ${taskIds.length} tasks`, [
+      seg("⚠ ", "red", true),
+      seg("Deadlock: ", "red"),
+      seg(`${taskIds.length} tasks blocked`, "gray"),
+    ]);
+  });
+
+  on("deadlock:resolved", ({ taskId, action, reason }: any) => {
+    const title = taskTitle(polpo, taskId);
+    store.log(`✓ Deadlock resolved: ${title} (${action})`, [
+      seg("✓ ", "green"),
+      seg(title, undefined, true),
+      seg(` ${action}: ${reason}`, "gray"),
+    ]);
+  });
+
+  on("deadlock:unresolvable", ({ taskId, reason }: any) => {
+    const title = taskTitle(polpo, taskId);
+    store.log(`✗ Unresolvable: ${title}`, [
+      seg("✗ ", "red"),
+      seg(title, undefined, true),
+      seg(`: ${reason}`, "gray"),
     ]);
   });
 

@@ -18,7 +18,7 @@ const MENTION_COLORS: Record<string, string> = {
 const COMMANDS = [
   "/status", "/help", "/team", "/tasks", "/plans", "/plan",
   "/config", "/chat", "/task", "/sessions",
-  "/abort", "/clear", "/clear-tasks", "/quit",
+  "/abort", "/clear", "/clear-tasks", "/quit", "/memory",
   "/team add", "/team remove", "/team edit", "/team rename",
   "/plans new", "/plans exec", "/plans resume", "/plans list",
   "/tasks list",
