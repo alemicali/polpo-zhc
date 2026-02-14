@@ -67,6 +67,11 @@ class RunActivityLog {
     this.write({ ts: new Date().toISOString(), event: "activity", data: activity });
   }
 
+  /** Log a transcript entry from the adapter (assistant text, tool_use, tool_result, etc.) */
+  logTranscript(entry: Record<string, unknown>): void {
+    this.write({ ts: new Date().toISOString(), ...entry });
+  }
+
   /** Log a lifecycle event */
   logEvent(event: string, data?: Record<string, unknown>): void {
     this.write({ ts: new Date().toISOString(), event, ...(data ? { data } : {}) });
@@ -102,6 +107,8 @@ async function main(): Promise<void> {
   try {
     const adapter = getAdapter(config.agent.adapter);
     handle = adapter.spawn(config.agent, config.task, config.cwd);
+    // Wire transcript persistence — every agent message gets written to the run log
+    handle.onTranscript = (entry) => actLog.logTranscript(entry);
     actLog.logEvent("spawned");
   } catch (err) {
     const result = errorResult(err);

@@ -3,6 +3,13 @@ import type { AgentConfig, AgentActivity, Task, TaskResult } from "../core/types
 import type { AgentAdapter, AgentHandle } from "../core/adapter.js";
 import { createActivity, registerAdapter } from "./registry.js";
 
+/** Truncate a string for logging. Works on any value — stringifies non-strings. */
+function truncateHook(value: unknown, max: number): string | undefined {
+  if (value == null) return undefined;
+  const s = typeof value === "string" ? value : JSON.stringify(value);
+  return s.length > max ? s.slice(0, max) + "…[truncated]" : s;
+}
+
 /**
  * Claude Agent SDK adapter.
  * Uses @anthropic-ai/claude-agent-sdk to run Claude Code programmatically.
@@ -38,11 +45,21 @@ class ClaudeSDKAdapter implements AgentAdapter {
       disallowedTools: ["Task", "AskUserQuestion"],
       hooks: {
         PostToolUse: [{
-          hooks: [async (input) => {
+          hooks: [async (rawInput) => {
+            const input = rawInput as any;
             trackToolUse(input, activity);
             // Capture sessionId from hook input
             if (input?.session_id && !activity.sessionId) {
               activity.sessionId = input.session_id;
+            }
+            // Persist tool result to transcript
+            if (handle.onTranscript && input?.tool_name) {
+              handle.onTranscript({
+                type: "post_tool_use",
+                tool: input.tool_name,
+                file: input.tool_input?.file_path ?? input.tool_input?.path,
+                output: truncateHook(input.tool_output, 2000),
+              });
             }
             return {};
           }],
@@ -86,7 +103,7 @@ class ClaudeSDKAdapter implements AgentAdapter {
       },
     };
 
-    handle.done = runQuery(prompt, options, activity, () => {
+    handle.done = runQuery(prompt, options, activity, handle, () => {
       alive = false;
       // Copy sessionId to handle for persistence
       if (activity.sessionId) handle.sessionId = activity.sessionId;
@@ -124,12 +141,13 @@ export function buildPrompt(task: Task): string {
 
 /**
  * Run the Claude Agent SDK query and collect the result.
- * Streams all messages, tracks activity, and produces a TaskResult.
+ * Streams all messages, tracks activity, persists transcript, and produces a TaskResult.
  */
 async function runQuery(
   prompt: string,
   options: Options,
   activity: AgentActivity,
+  handle: AgentHandle,
   onFinish: () => void,
 ): Promise<TaskResult> {
   const start = Date.now();
@@ -143,6 +161,9 @@ async function runQuery(
     for await (const message of q) {
       activity.lastUpdate = new Date().toISOString();
       processMessage(message, activity);
+
+      // Persist transcript entry
+      emitTranscript(handle, message);
 
       // Capture final result
       if (message.type === "result") {
@@ -168,6 +189,59 @@ async function runQuery(
     stderr: errorMessage,
     duration: Date.now() - start,
   };
+}
+
+/**
+ * Emit a transcript entry for persistence.
+ * Extracts meaningful data from SDK messages — text, tool_use, tool_result.
+ */
+function emitTranscript(handle: AgentHandle, message: SDKMessage): void {
+  if (!handle.onTranscript) return;
+
+  if (message.type === "assistant" && message.message) {
+    const content = message.message.content;
+    if (Array.isArray(content)) {
+      for (const block of content) {
+        if (block.type === "text") {
+          handle.onTranscript({ type: "assistant", text: block.text });
+        }
+        if (block.type === "tool_use") {
+          handle.onTranscript({
+            type: "tool_use",
+            tool: block.name,
+            toolId: block.id,
+            input: block.input,
+          });
+        }
+      }
+    }
+  }
+
+  // tool_result comes through as a raw message type not in the SDK union
+  const msgType = (message as any).type;
+  if (msgType === "tool_result") {
+    const msg = message as any;
+    handle.onTranscript({
+      type: "tool_result",
+      toolId: msg.tool_use_id,
+      content: truncate(typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content), 2000),
+    });
+  }
+
+  if (message.type === "result") {
+    const result = message as unknown as { subtype: string; result?: string; errors?: string[] };
+    handle.onTranscript({
+      type: "result",
+      subtype: result.subtype,
+      result: truncate(result.result, 1000),
+      errors: result.errors,
+    });
+  }
+}
+
+function truncate(s: string | undefined, max: number): string | undefined {
+  if (!s) return s;
+  return s.length > max ? s.slice(0, max) + "…[truncated]" : s;
 }
 
 /**

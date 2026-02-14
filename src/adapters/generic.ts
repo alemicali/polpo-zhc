@@ -57,20 +57,6 @@ class GenericAdapter implements AgentAdapter {
     const stdoutChunks: Buffer[] = [];
     const stderrChunks: Buffer[] = [];
 
-    child.stdout.on("data", (chunk: Buffer) => {
-      stdoutChunks.push(chunk);
-      activity.lastUpdate = new Date().toISOString();
-      // Try to extract useful info from stdout
-      const text = chunk.toString();
-      if (text.trim()) {
-        activity.summary = text.trim().slice(-200);
-      }
-    });
-
-    child.stderr.on("data", (chunk: Buffer) => {
-      stderrChunks.push(chunk);
-    });
-
     let killed = false;
     const timer = setTimeout(() => {
       killed = true;
@@ -116,7 +102,7 @@ class GenericAdapter implements AgentAdapter {
       });
     });
 
-    return {
+    const handle: AgentHandle = {
       agentName: agent.name,
       taskId: task.id,
       startedAt: new Date().toISOString(),
@@ -131,6 +117,29 @@ class GenericAdapter implements AgentAdapter {
         }
       },
     };
+
+    // Wire stdout/stderr to transcript (after handle is created)
+    child.stdout.on("data", (chunk: Buffer) => {
+      stdoutChunks.push(chunk);
+      activity.lastUpdate = new Date().toISOString();
+      const text = chunk.toString();
+      if (text.trim()) {
+        activity.summary = text.trim().slice(-200);
+      }
+      if (handle.onTranscript && text.trim()) {
+        handle.onTranscript({ type: "stdout", text: text.trimEnd() });
+      }
+    });
+
+    child.stderr.on("data", (chunk: Buffer) => {
+      stderrChunks.push(chunk);
+      const text = chunk.toString();
+      if (handle.onTranscript && text.trim()) {
+        handle.onTranscript({ type: "stderr", text: text.trimEnd() });
+      }
+    });
+
+    return handle;
   }
 }
 

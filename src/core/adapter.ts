@@ -23,6 +23,11 @@ export interface AgentHandle {
   isAlive(): boolean;
   /** Kill the agent process */
   kill(): void;
+  /**
+   * Transcript callback — set by the runner to persist every agent message.
+   * Adapters call this for each message/event (assistant text, tool use, tool result, etc.)
+   */
+  onTranscript?: (entry: Record<string, unknown>) => void;
 }
 
 /**
