@@ -1,6 +1,6 @@
 import { nanoid } from "nanoid";
 import type { TypedEmitter, OrchestraEvent, OrchestraEventMap } from "../core/events.js";
-import type { NotificationsConfig, NotificationRule, NotificationChannelConfig } from "../core/types.js";
+import type { NotificationsConfig, NotificationRule, NotificationChannelConfig, NotificationCondition } from "../core/types.js";
 import type { NotificationChannel, Notification } from "./types.js";
 import { defaultTitle, defaultBody, applyTemplate } from "./templates.js";
 import { SlackChannel } from "./channels/slack.js";
@@ -27,6 +27,9 @@ export class NotificationRouter {
   private rules: NotificationRule[] = [];
   private cooldowns = new Map<string, number>(); // ruleId → last dispatch timestamp
   private listeners: Array<{ event: string; fn: (...args: unknown[]) => void }> = [];
+  /** Track which concrete events we're already subscribed to (avoid duplicate listeners) */
+  private subscribedEvents = new Set<string>();
+  private started = false;
 
   constructor(private emitter: TypedEmitter) {}
 
@@ -58,6 +61,8 @@ export class NotificationRouter {
    * Subscribes to all unique event patterns from the configured rules.
    */
   start(): void {
+    this.started = true;
+
     // Collect all unique event patterns
     const patterns = new Set<string>();
     for (const rule of this.rules) {
@@ -67,13 +72,20 @@ export class NotificationRouter {
     }
 
     // Subscribe to matching events
+    this.subscribePatterns(patterns);
+  }
+
+  /**
+   * Subscribe to concrete events matching the given glob patterns.
+   * Skips events that are already subscribed to (idempotent).
+   */
+  private subscribePatterns(patterns: Iterable<string>): void {
     const allEvents = getAllEventNames();
-    const subscribedEvents = new Set<string>();
 
     for (const pattern of patterns) {
       for (const event of allEvents) {
-        if (matchGlob(pattern, event) && !subscribedEvents.has(event)) {
-          subscribedEvents.add(event);
+        if (matchGlob(pattern, event) && !this.subscribedEvents.has(event)) {
+          this.subscribedEvents.add(event);
           const fn = (data: unknown) => this.handleEvent(event, data);
           this.emitter.on(event as OrchestraEvent, fn as (payload: OrchestraEventMap[OrchestraEvent]) => void);
           this.listeners.push({ event, fn });
@@ -91,11 +103,10 @@ export class NotificationRouter {
       const matches = rule.events.some(pattern => matchGlob(pattern, event));
       if (!matches) continue;
 
-      // Check optional condition
+      // Check optional JSON condition (pure data — no eval)
       if (rule.condition) {
         try {
-          const fn = new Function("data", `try { return !!(${rule.condition}); } catch { return false; }`);
-          if (!fn(data)) continue;
+          if (!evaluateCondition(rule.condition, data)) continue;
         } catch {
           continue;
         }
@@ -193,9 +204,15 @@ export class NotificationRouter {
 
   /**
    * Add a notification rule programmatically.
+   * If the router is already started, also subscribes to any new event patterns.
    */
   addRule(rule: NotificationRule): void {
     this.rules.push(rule);
+
+    // If already started, subscribe to events for this new rule
+    if (this.started) {
+      this.subscribePatterns(rule.events);
+    }
   }
 
   /**
@@ -302,9 +319,85 @@ function getAllEventNames(): string[] {
     "approval:requested", "approval:resolved", "approval:timeout",
     // Escalation
     "escalation:triggered", "escalation:resolved", "escalation:human",
+    // SLA & Deadlines
+    "sla:warning", "sla:violated", "sla:met",
+    // Quality gates (plan-level)
+    "quality:gate:passed", "quality:gate:failed", "quality:threshold:failed",
+    // Scheduling
+    "schedule:triggered", "schedule:created", "schedule:completed",
     // Notifications
     "notification:sent", "notification:failed",
     // General
     "log",
   ];
+}
+
+// ─── JSON Condition Evaluator ───────────────────────
+//
+// Pure-data condition evaluator for notification rules.
+// No eval(), no new Function(), no string parsing.
+//
+// Conditions are JSON objects:
+//   { "field": "status", "op": "==", "value": "failed" }
+//   { "and": [ { "field": "status", "op": "==", "value": "failed" }, { "field": "retries", "op": ">", "value": 3 } ] }
+//   { "or": [ ... ] }
+//   { "not": { "field": "status", "op": "==", "value": "done" } }
+//   { "field": "error", "op": "exists" }
+
+/** Evaluate a JSON condition against event data. Returns boolean. */
+function evaluateCondition(condition: NotificationCondition, data: unknown): boolean {
+  // Logical combinators
+  if ("and" in condition) {
+    return condition.and.every(c => evaluateCondition(c, data));
+  }
+  if ("or" in condition) {
+    return condition.or.some(c => evaluateCondition(c, data));
+  }
+  if ("not" in condition) {
+    return !evaluateCondition(condition.not, data);
+  }
+
+  // Single comparison
+  const fieldValue = resolvePath(condition.field, data);
+
+  switch (condition.op) {
+    case "exists":
+      return fieldValue !== undefined && fieldValue !== null;
+    case "not_exists":
+      return fieldValue === undefined || fieldValue === null;
+    case "==":
+      return fieldValue == condition.value;
+    case "!=":
+      return fieldValue != condition.value;
+    case ">":
+      return (fieldValue as number) > (condition.value as number);
+    case ">=":
+      return (fieldValue as number) >= (condition.value as number);
+    case "<":
+      return (fieldValue as number) < (condition.value as number);
+    case "<=":
+      return (fieldValue as number) <= (condition.value as number);
+    case "includes":
+      if (typeof fieldValue === "string") return fieldValue.includes(String(condition.value));
+      if (Array.isArray(fieldValue)) return fieldValue.includes(condition.value);
+      return false;
+    case "not_includes":
+      if (typeof fieldValue === "string") return !fieldValue.includes(String(condition.value));
+      if (Array.isArray(fieldValue)) return !fieldValue.includes(condition.value);
+      return true;
+    default:
+      return false;
+  }
+}
+
+/** Resolve a dotted property path (e.g. "task.status") on the data object. */
+function resolvePath(path: string, data: unknown): unknown {
+  const parts = path.split(/[.[\]]+/).filter(Boolean);
+  let current: unknown = data;
+  for (const part of parts) {
+    if (current === null || current === undefined) return undefined;
+    if (typeof current !== "object") return undefined;
+    current = (current as Record<string, unknown>)[part];
+  }
+  return current;
 }

@@ -416,7 +416,7 @@ program
   .command("serve")
   .description("Start the Polpo HTTP API server")
   .option("-p, --port <port>", "Port to listen on", "3000")
-  .option("-H, --host <host>", "Host to bind to", "0.0.0.0")
+  .option("-H, --host <host>", "Host to bind to", "127.0.0.1")
   .option("-d, --dir <path>", "Working directory", ".")
   .option("--api-key <key>", "API key for authentication (optional)")
   .option("--project-id <id>", "Project ID (defaults to directory name)")
@@ -432,10 +432,25 @@ program
     const projectId = opts.projectId || basename(workDir);
     const port = parseInt(opts.port, 10);
 
+    const apiKeys = opts.apiKey ? [opts.apiKey] : [];
+
+    // Security warning: no authentication configured
+    if (apiKeys.length === 0) {
+      const isExposed = opts.host === "0.0.0.0" || opts.host === "::";
+      console.log(
+        chalk.yellow.bold("\n  WARNING: No API key configured — server has no authentication.\n") +
+        (isExposed
+          ? chalk.yellow(`  The server is binding to ${opts.host} (all interfaces) and is accessible\n`) +
+            chalk.yellow("  from the network. Anyone on your network can control your agents.\n\n") +
+            chalk.yellow("  To secure it, use: ") + chalk.white("polpo serve --api-key <secret>\n")
+          : chalk.dim("  Server is localhost-only. Use --api-key <secret> for network access.\n")),
+      );
+    }
+
     const server = new OrchestraServer({
       port,
       host: opts.host,
-      apiKeys: opts.apiKey ? [opts.apiKey] : [],
+      apiKeys,
       projects: [{ id: projectId, workDir, autoStart: true }],
     });
 

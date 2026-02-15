@@ -19,6 +19,7 @@ import { Type } from "@sinclair/typebox";
 import type { TSchema } from "@sinclair/typebox";
 import type { AgentTool, AgentToolResult } from "@mariozechner/pi-agent-core";
 import type { McpServerConfig } from "./types.js";
+import { mcpSafeEnv } from "../tools/safe-env.js";
 
 // ── MCP server connection ──
 
@@ -114,16 +115,20 @@ export class McpClientManager {
       transport = new StdioClientTransport({
         command: config.command,
         args: config.args,
-        env: config.env ? { ...process.env, ...config.env } as Record<string, string> : undefined,
+        env: mcpSafeEnv(config.env),
         cwd: this.cwd,
       });
     } else if ("url" in config) {
       const url = new URL(config.url);
+      // Build requestInit with configured headers (auth tokens, API keys, etc.)
+      const requestInit: RequestInit | undefined = config.headers
+        ? { headers: config.headers }
+        : undefined;
       if (config.type === "sse") {
-        transport = new SSEClientTransport(url);
+        transport = new SSEClientTransport(url, { requestInit });
       } else {
         // Default to streamable HTTP (newer, preferred)
-        transport = new StreamableHTTPClientTransport(url);
+        transport = new StreamableHTTPClientTransport(url, { requestInit });
       }
     } else {
       throw new Error(`Invalid MCP server config for "${name}": must have "command" or "url"`);

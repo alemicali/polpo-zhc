@@ -1,4 +1,5 @@
 import type { OrchestratorContext } from "../core/orchestrator-context.js";
+import type { NotificationRouter } from "../notifications/index.js";
 import type { SLAConfig, Task, Plan } from "../core/types.js";
 
 /**
@@ -10,12 +11,15 @@ import type { SLAConfig, Task, Plan } from "../core/types.js";
  *   - sla:met      — when an entity completes before its deadline
  *
  * Can optionally force-fail tasks that violate their SLA.
+ * When warningChannels/violationChannels are configured, registers dynamic
+ * notification rules to route SLA events to those specific channels.
  */
 export class SLAMonitor {
   private config: Required<SLAConfig>;
   private warned = new Set<string>();    // entity IDs already warned
   private violated = new Set<string>();  // entity IDs already violated
   private lastCheckMs = 0;
+  private notificationRouter?: NotificationRouter;
 
   constructor(
     private ctx: OrchestratorContext,
@@ -31,9 +35,19 @@ export class SLAMonitor {
   }
 
   /**
-   * Initialize: register after:task:complete hook to detect SLA met.
+   * Set the notification router — enables SLA channel routing.
+   * Called by the orchestrator after both SLAMonitor and NotificationRouter are initialized.
+   */
+  setNotificationRouter(router: NotificationRouter): void {
+    this.notificationRouter = router;
+  }
+
+  /**
+   * Initialize: register hooks and notification rules for SLA channels.
    */
   init(): void {
+    // Register dynamic notification rules for SLA channels
+    this.registerNotificationRules();
     // Detect SLA met when task/plan completes
     this.ctx.hooks.register({
       hook: "task:complete",
@@ -149,6 +163,44 @@ export class SLAMonitor {
   clearEntity(entityId: string): void {
     this.warned.delete(entityId);
     this.violated.delete(entityId);
+  }
+
+  /**
+   * Register dynamic notification rules for SLA warning/violation channels.
+   * This wires up SLAConfig.warningChannels and violationChannels to the
+   * notification system so SLA events are actually routed to those channels.
+   */
+  private registerNotificationRules(): void {
+    if (!this.notificationRouter) return;
+
+    if (this.config.warningChannels.length > 0) {
+      this.notificationRouter.addRule({
+        id: "sla-auto-warning",
+        name: "SLA Warning (auto-registered)",
+        events: ["sla:warning"],
+        channels: this.config.warningChannels,
+        severity: "warning",
+      });
+    }
+
+    if (this.config.violationChannels.length > 0) {
+      this.notificationRouter.addRule({
+        id: "sla-auto-violated",
+        name: "SLA Violation (auto-registered)",
+        events: ["sla:violated"],
+        channels: this.config.violationChannels,
+        severity: "critical",
+      });
+
+      // Also route sla:met to violation channels (good news to the same audience)
+      this.notificationRouter.addRule({
+        id: "sla-auto-met",
+        name: "SLA Met (auto-registered)",
+        events: ["sla:met"],
+        channels: this.config.violationChannels,
+        severity: "info",
+      });
+    }
   }
 
   dispose(): void {

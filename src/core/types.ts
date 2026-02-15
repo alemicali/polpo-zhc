@@ -462,6 +462,41 @@ export interface NotificationChannelConfig {
 
 export type NotificationSeverity = "info" | "warning" | "critical";
 
+/**
+ * JSON-based condition for notification rule filtering.
+ *
+ * Supports:
+ *   - Single comparison: { "field": "status", "op": "==", "value": "failed" }
+ *   - Logical AND:       { "and": [ ...conditions ] }
+ *   - Logical OR:        { "or": [ ...conditions ] }
+ *   - Logical NOT:       { "not": condition }
+ *   - Inclusion:         { "field": "tags", "op": "includes", "value": "urgent" }
+ *   - Existence:         { "field": "error", "op": "exists" }
+ *
+ * Fields are dot-paths resolved on the event data (e.g. "task.status", "score").
+ */
+export type ConditionOp = "==" | "!=" | ">" | ">=" | "<" | "<=" | "includes" | "not_includes" | "exists" | "not_exists";
+
+export interface ConditionExpr {
+  field: string;
+  op: ConditionOp;
+  value?: string | number | boolean | null;
+}
+
+export interface ConditionAnd {
+  and: NotificationCondition[];
+}
+
+export interface ConditionOr {
+  or: NotificationCondition[];
+}
+
+export interface ConditionNot {
+  not: NotificationCondition;
+}
+
+export type NotificationCondition = ConditionExpr | ConditionAnd | ConditionOr | ConditionNot;
+
 export interface NotificationRule {
   /** Unique rule ID. */
   id: string;
@@ -469,8 +504,8 @@ export interface NotificationRule {
   name: string;
   /** Event patterns to match (glob-style: "task:*", "plan:completed"). */
   events: string[];
-  /** Optional JS-like condition on the event payload. */
-  condition?: string;
+  /** Optional JSON condition on the event payload. No eval — pure data. */
+  condition?: NotificationCondition;
   /** Channels to notify (references to channel IDs in config). */
   channels: string[];
   /** Severity level. Default: "info". */

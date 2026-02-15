@@ -51,6 +51,9 @@ export { TelegramChannel } from "./notifications/channels/telegram.js";
 export { EmailChannel } from "./notifications/channels/email.js";
 export { WebhookChannel } from "./notifications/channels/webhook.js";
 
+// Security
+export { safeEnv, bashSafeEnv, mcpSafeEnv } from "./tools/safe-env.js";
+
 // Quality Layer
 export { SLAMonitor } from "./quality/sla-monitor.js";
 export { QualityController } from "./quality/quality-controller.js";

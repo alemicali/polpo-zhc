@@ -237,11 +237,19 @@ export class Orchestrator extends TypedEmitter {
     // Initialize SLA monitor if configured
     if (this.config.settings.sla) {
       this.slaMonitor = new SLAMonitor(ctx, this.config.settings.sla);
+      // Wire notification router so SLA channels (warningChannels/violationChannels) work
+      if (this.notificationRouter) {
+        this.slaMonitor.setNotificationRouter(this.notificationRouter);
+      }
       this.slaMonitor.init();
     }
 
     // Initialize quality controller (always available — zero-cost when unused)
     this.qualityController = new QualityController(ctx);
+    // Wire notification router so per-gate notifyChannels work
+    if (this.notificationRouter) {
+      this.qualityController.setNotificationRouter(this.notificationRouter);
+    }
     this.qualityController.init();
     this.planExec.setQualityController(this.qualityController);
 

@@ -12,6 +12,7 @@ import { join, dirname, resolve, relative } from "node:path";
 import { Type } from "@sinclair/typebox";
 import type { AgentTool, AgentToolResult } from "@mariozechner/pi-agent-core";
 import { resolveAllowedPaths, assertPathAllowed } from "./path-sandbox.js";
+import { bashSafeEnv } from "./safe-env.js";
 
 const MAX_READ_LINES = 500;
 const MAX_OUTPUT_BYTES = 30_000;
@@ -135,7 +136,7 @@ function createBashTool(cwd: string): AgentTool<typeof BashSchema> {
         const child = spawnChild(params.command, {
           shell: true,
           cwd,
-          env: { ...process.env },
+          env: bashSafeEnv(),
           stdio: ["ignore", "pipe", "pipe"],
         });
 
@@ -206,7 +207,7 @@ function createGlobTool(cwd: string, sandbox: string[]): AgentTool<typeof GlobSc
         // If find with -name doesn't work well for globs, fallback to shell glob
         if (!result) {
           const shResult = execSync(
-            `cd ${JSON.stringify(searchDir)} && ls -1 ${params.pattern} 2>/dev/null | head -200`,
+            `cd ${JSON.stringify(searchDir)} && ls -1 ${JSON.stringify(params.pattern)} 2>/dev/null | head -200`,
             { encoding: "utf-8", timeout: 10_000, shell: "/bin/bash" },
           ).trim();
           const files = shResult ? shResult.split("\n") : [];

@@ -33,6 +33,11 @@ function num(data: unknown, key: string): number {
   return typeof v === "number" ? v : 0;
 }
 
+function numFixed(data: unknown, key: string, decimals = 1): string {
+  const v = field(data, key);
+  return typeof v === "number" ? v.toFixed(decimals) : "N/A";
+}
+
 function bool(data: unknown, key: string): boolean {
   return field(data, key) === true;
 }
@@ -102,6 +107,30 @@ export function defaultTitle(ctx: TemplateContext): string {
     case "deadlock:resolved":
       return `${emoji} Deadlock Resolved`;
 
+    // SLA & Deadlines
+    case "sla:warning":
+      return `${emoji} SLA Warning: ${str(data, "entityType")} ${str(data, "entityId")} at ${Math.round(num(data, "percentUsed") * 100)}% of deadline`;
+    case "sla:violated":
+      return `${emoji} SLA Violated: ${str(data, "entityType")} ${str(data, "entityId")} is overdue`;
+    case "sla:met":
+      return `${emoji} SLA Met: ${str(data, "entityType")} ${str(data, "entityId")} completed on time`;
+
+    // Quality gates
+    case "quality:gate:passed":
+      return `${emoji} Quality Gate Passed: ${str(data, "gateName")}`;
+    case "quality:gate:failed":
+      return `${emoji} Quality Gate Failed: ${str(data, "gateName")}`;
+    case "quality:threshold:failed":
+      return `${emoji} Plan Quality Below Threshold: ${numFixed(data, "avgScore")}/${numFixed(data, "threshold")}`;
+
+    // Scheduling
+    case "schedule:triggered":
+      return `${emoji} Schedule Triggered: plan ${str(data, "planId")}`;
+    case "schedule:created":
+      return `${emoji} Schedule Created: plan ${str(data, "planId")}`;
+    case "schedule:completed":
+      return `${emoji} Schedule Completed: plan ${str(data, "planId")}`;
+
     default:
       return `${emoji} ${event}`;
   }
@@ -144,6 +173,56 @@ export function defaultBody(ctx: TemplateContext): string {
     case "escalation:human":
       lines.push(str(data, "message"));
       break;
+
+    // SLA & Deadlines
+    case "sla:warning": {
+      const pct = Math.round(num(data, "percentUsed") * 100);
+      const remainSec = Math.round(num(data, "remaining") / 1000);
+      lines.push(`${str(data, "entityType")} **${str(data, "entityId")}** has used ${pct}% of its deadline budget.`);
+      lines.push(`Remaining: ${remainSec}s`);
+      lines.push(`Deadline: ${str(data, "deadline")}`);
+      break;
+    }
+    case "sla:violated":
+      lines.push(`${str(data, "entityType")} **${str(data, "entityId")}** has exceeded its deadline.`);
+      lines.push(`Overdue by: ${Math.round(num(data, "overdueMs") / 1000)}s`);
+      lines.push(`Deadline was: ${str(data, "deadline")}`);
+      break;
+    case "sla:met": {
+      const marginSec = Math.round(num(data, "marginMs") / 1000);
+      lines.push(`${str(data, "entityType")} **${str(data, "entityId")}** completed before its deadline.`);
+      lines.push(`Margin: ${marginSec}s remaining`);
+      break;
+    }
+
+    // Quality gates
+    case "quality:gate:passed":
+      lines.push(`Quality gate **${str(data, "gateName")}** passed for plan **${str(data, "planId")}**.`);
+      if (num(data, "avgScore") > 0) lines.push(`Average score: ${numFixed(data, "avgScore")}/5`);
+      break;
+    case "quality:gate:failed":
+      lines.push(`Quality gate **${str(data, "gateName")}** failed for plan **${str(data, "planId")}**.`);
+      lines.push(`Reason: ${str(data, "reason")}`);
+      if (num(data, "avgScore") > 0) lines.push(`Average score: ${numFixed(data, "avgScore")}/5`);
+      break;
+    case "quality:threshold:failed":
+      lines.push(`Plan **${str(data, "planId")}** did not meet its quality threshold.`);
+      lines.push(`Score: ${numFixed(data, "avgScore")}/5 (required: ${numFixed(data, "threshold")})`);
+      break;
+
+    // Scheduling
+    case "schedule:triggered":
+      lines.push(`Scheduled execution of plan **${str(data, "planId")}** has been triggered.`);
+      lines.push(`Expression: \`${str(data, "expression")}\``);
+      break;
+    case "schedule:created":
+      lines.push(`Schedule created for plan **${str(data, "planId")}**.`);
+      if (str(data, "nextRunAt")) lines.push(`Next run: ${str(data, "nextRunAt")}`);
+      break;
+    case "schedule:completed":
+      lines.push(`Scheduled execution of plan **${str(data, "planId")}** has completed.`);
+      break;
+
     default:
       // Generic: dump key fields
       if (typeof data === "object" && data !== null) {

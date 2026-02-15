@@ -1,4 +1,5 @@
 import type { OrchestratorContext } from "../core/orchestrator-context.js";
+import type { NotificationRouter } from "../notifications/index.js";
 import type { PlanQualityGate, QualityMetrics, Task, Plan, AssessmentResult } from "../core/types.js";
 
 /**
@@ -20,9 +21,21 @@ export class QualityController {
   /** Track which quality gates have already been evaluated (prevent re-evaluation) */
   private evaluatedGates = new Set<string>();
 
+  /** Track which gate notification rules have been registered (by gateKey) */
+  private registeredGateRules = new Set<string>();
+
+  private notificationRouter?: NotificationRouter;
+
   constructor(
     private ctx: OrchestratorContext,
   ) {}
+
+  /**
+   * Set the notification router — enables per-gate channel routing.
+   */
+  setNotificationRouter(router: NotificationRouter): void {
+    this.notificationRouter = router;
+  }
 
   /**
    * Initialize: register hooks to collect metrics from completed assessments
@@ -107,6 +120,9 @@ export class QualityController {
     tasks: Task[],
   ): { passed: boolean; reason?: string; avgScore?: number } {
     const gateKey = `${planId}:${gate.name}`;
+
+    // Register dynamic notification rules for this gate's channels (once per gate)
+    this.ensureGateNotificationRules(gateKey, gate);
 
     // Already evaluated and passed — don't re-evaluate
     if (this.evaluatedGates.has(gateKey)) {
@@ -452,6 +468,39 @@ export class QualityController {
     return [];
   }
 
+  /**
+   * Register dynamic notification rules for a gate's notifyChannels (once per gate).
+   * This ensures that quality:gate:passed and quality:gate:failed events for gates
+   * with notifyChannels are actually routed to those channels.
+   */
+  private ensureGateNotificationRules(gateKey: string, gate: PlanQualityGate): void {
+    if (!this.notificationRouter) return;
+    if (!gate.notifyChannels || gate.notifyChannels.length === 0) return;
+    if (this.registeredGateRules.has(gateKey)) return;
+
+    this.registeredGateRules.add(gateKey);
+
+    // Rule for gate passed
+    this.notificationRouter.addRule({
+      id: `qgate-pass-${gateKey}`,
+      name: `Quality Gate "${gate.name}" Passed (auto-registered)`,
+      events: ["quality:gate:passed"],
+      condition: { field: "gateName", op: "==", value: gate.name },
+      channels: gate.notifyChannels,
+      severity: "info",
+    });
+
+    // Rule for gate failed
+    this.notificationRouter.addRule({
+      id: `qgate-fail-${gateKey}`,
+      name: `Quality Gate "${gate.name}" Failed (auto-registered)`,
+      events: ["quality:gate:failed"],
+      condition: { field: "gateName", op: "==", value: gate.name },
+      channels: gate.notifyChannels,
+      severity: "critical",
+    });
+  }
+
   /** Clear gate evaluation cache (e.g. when a plan is retried) */
   clearGateCache(planId?: string): void {
     if (planId) {
@@ -468,5 +517,6 @@ export class QualityController {
   dispose(): void {
     this.metrics.clear();
     this.evaluatedGates.clear();
+    this.registeredGateRules.clear();
   }
 }

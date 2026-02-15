@@ -13,6 +13,7 @@ import { randomBytes } from "node:crypto";
 import { join } from "node:path";
 import { mkdirSync, unlinkSync, readFileSync, statSync } from "node:fs";
 import { resolveApiKey } from "../llm/pi-client.js";
+import { safeEnv } from "../tools/safe-env.js";
 
 const DEFAULT_MODEL = "gpt-4o-mini-transcribe";
 const DEFAULT_LANG = "auto";
@@ -50,7 +51,7 @@ export function startRecording(tmpDir: string): RecordingHandle {
 
   const child = spawn("rec", ["-c", "1", "-r", "16000", "-b", "16", filePath], {
     stdio: ["ignore", "ignore", "pipe"],
-    env: { ...process.env },
+    env: safeEnv(),
   });
 
   // Suppress sox stderr noise (progress output)
