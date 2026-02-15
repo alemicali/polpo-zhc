@@ -50,3 +50,11 @@ export { SlackChannel } from "./notifications/channels/slack.js";
 export { TelegramChannel } from "./notifications/channels/telegram.js";
 export { EmailChannel } from "./notifications/channels/email.js";
 export { WebhookChannel } from "./notifications/channels/webhook.js";
+
+// Quality Layer
+export { SLAMonitor } from "./quality/sla-monitor.js";
+export { QualityController } from "./quality/quality-controller.js";
+
+// Scheduling
+export { Scheduler } from "./scheduling/scheduler.js";
+export { parseCron, matchesCron, nextCronOccurrence, isCronExpression } from "./scheduling/cron.js";

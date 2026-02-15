@@ -1,12 +1,12 @@
 <p align="center"><img src="assets/logo.svg" width="200" /></p>
 
 <pre align="center">
-  ___                   ____       _
- / _ \ _ __   ___ _ __ |  _ \ ___ | |_ __   ___
-| | | | '_ \ / _ \ '_ \| |_) / _ \| | '_ \ / _ \
-| |_| | |_) |  __/ | | |  __/ (_) | | |_) | (_) |
- \___/| .__/ \___|_| |_|_|   \___/|_| .__/ \___/
-      |_|                            |_|
+██████╗  ██████╗ ██╗     ██████╗  ██████╗
+██╔══██╗██╔═══██╗██║     ██╔══██╗██╔═══██╗
+██████╔╝██║   ██║██║     ██████╔╝██║   ██║
+██╔═══╝ ██║   ██║██║     ██╔═══╝ ██║   ██║
+██║     ╚██████╔╝███████╗██║     ╚██████╔╝
+╚═╝      ╚═════╝ ╚══════╝╚═╝      ╚═════╝
 </pre>
 
 <p align="center">
@@ -32,20 +32,9 @@
 
 ---
 
-OpenPolpo coordinates multiple AI agents -- Claude, GPT-4, Codex, or any CLI-based agent -- working together on complex software development tasks. Define plans in YAML, assign tasks to specialized agents, and let Polpo handle coordination, monitoring, assessment, and recovery.
+OpenPolpo coordinates multiple AI agents working together on complex software development tasks. Define plans in JSON, assign tasks to specialized agents, and let Polpo handle coordination, monitoring, assessment, and recovery.
 
-```
-$ polpo
-
-  ┌─ Dashboard ─────────────────────────────────┐
-  │  Agents: 3 active    Tasks: 12/15 done      │
-  │  Plans:  2 running   Failures: 0            │
-  │                                              │
-  │  > backend-dev    ██████████░░  in_progress  │
-  │  > frontend-dev   ████████████  done         │
-  │  > test-engineer  ██████░░░░░░  review       │
-  └──────────────────────────────────────────────┘
-```
+When no external adapter is specified, Polpo uses its built-in engine (Pi Agent) -- a full agentic loop with 7 coding tools, 18+ LLM providers, and MCP support. The `claude-sdk` adapter is available for Claude Agent SDK integration.
 
 ## Installation
 
@@ -64,12 +53,9 @@ polpo --version
 ```bash
 git clone https://github.com/openpolpo/openpolpo.git
 cd openpolpo
-npm install
-./node_modules/.bin/tsc
-npm link
+pnpm install
+pnpm run build
 ```
-
-> **Note:** Always build with `./node_modules/.bin/tsc`, not `npx tsc`. The latter can pick up the wrong TypeScript package.
 
 ## Quick Start
 
@@ -79,33 +65,44 @@ npm link
 polpo init
 ```
 
-This creates a `polpo.yml` config file in your working directory.
+This creates a `.polpo/` directory with a `polpo.json` config file.
 
-### 2. Define your plan
+### 2. Define your agents and plan
 
-```yaml
-# polpo.yml
-
-agents:
-  - name: backend-dev
-    adapter: claude-sdk
-    description: Backend developer specializing in Node.js and databases
-
-  - name: frontend-dev
-    adapter: claude-sdk
-    description: Frontend developer specializing in React and TypeScript
-
-plans:
-  - group: build-mvp
-    tasks:
-      - title: Create database schema
-        agent: backend-dev
-        description: Design and implement SQLite schema for users and posts
-
-      - title: Build React components
-        agent: frontend-dev
-        description: Create reusable UI components with shadcn/ui
+```json
+{
+  "agents": [
+    {
+      "name": "backend-dev",
+      "adapter": "claude-sdk",
+      "description": "Backend developer specializing in Node.js and databases"
+    },
+    {
+      "name": "frontend-dev",
+      "description": "Frontend developer specializing in React and TypeScript"
+    }
+  ],
+  "plans": [
+    {
+      "group": "build-mvp",
+      "tasks": [
+        {
+          "title": "Create database schema",
+          "assignTo": "backend-dev",
+          "description": "Design and implement SQLite schema for users and posts"
+        },
+        {
+          "title": "Build React components",
+          "assignTo": "frontend-dev",
+          "description": "Create reusable UI components with shadcn/ui"
+        }
+      ]
+    }
+  ]
+}
 ```
+
+> When `adapter` is omitted, the built-in engine (Pi Agent) is used automatically.
 
 ### 3. Run
 
@@ -126,23 +123,69 @@ polpo serve --port 3890
 
 Coordinate any number of agents working in parallel. Polpo manages task assignment, dependency resolution, and inter-agent communication.
 
-```yaml
-plans:
-  - group: full-stack-app
-    tasks:
-      - title: Design API
-        agent: backend-dev
-      - title: Build UI
-        agent: frontend-dev
-        dependencies: [design-api]    # waits for API design to finish
-      - title: Write tests
-        agent: test-engineer
-        dependencies: [design-api, build-ui]
+```json
+{
+  "group": "full-stack-app",
+  "tasks": [
+    { "title": "Design API", "assignTo": "backend-dev" },
+    { "title": "Build UI", "assignTo": "frontend-dev", "dependsOn": ["Design API"] },
+    { "title": "Write tests", "assignTo": "test-engineer", "dependsOn": ["Design API", "Build UI"] }
+  ]
+}
 ```
 
-### YAML-Driven Plans
+### Built-in Engine (Pi Agent)
 
-Everything is defined in `polpo.yml`. Plans group related tasks, declare dependencies, and can include inline agent teams.
+When no adapter is specified, Polpo runs agents using its built-in engine powered by Pi Agent:
+
+- **7 coding tools**: `read`, `write`, `edit`, `bash`, `glob`, `grep`, `ls`
+- **18+ LLM providers** via `@mariozechner/pi-ai`
+- **MCP support**: connect external tool servers to any agent
+- **Filesystem sandbox**: restrict agent file access via `allowedPaths`
+- Dynamic tool updates at runtime via `Agent.setTools()`
+
+### MCP (Model Context Protocol) Support
+
+Connect external MCP servers to agents for extended tool capabilities:
+
+```json
+{
+  "name": "dev-agent",
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/project"]
+    },
+    "github": {
+      "url": "https://mcp.github.com",
+      "type": "http"
+    }
+  }
+}
+```
+
+MCP tools are automatically bridged to the agent's tool set with server-name prefixing to prevent collisions.
+
+### Filesystem Sandbox
+
+Restrict which directories an agent can access:
+
+```json
+{
+  "name": "backend-dev",
+  "allowedPaths": ["/project/src", "/project/tests"]
+}
+```
+
+Path validation uses separator-aware prefix matching. Defaults to the working directory when omitted. The `bash` tool is not sandboxed (agents can run arbitrary shell commands).
+
+### Skills System
+
+Polpo-native skills system for reusable agent instructions:
+
+- **Project pool**: `.polpo/skills/` -- available to all agents
+- **Per-agent skills**: `.polpo/agents/<name>/skills/` -- symlinks to the project pool
+- Skills are injected into agent system prompts automatically
 
 ### Task Assessment (G-Eval LLM-as-Judge)
 
@@ -157,35 +200,50 @@ Every completed task goes through rubric-based assessment using chain-of-thought
 
 Each dimension is scored 1--5. Tasks scoring below the threshold are automatically retried with per-dimension feedback. You can define custom dimensions and thresholds:
 
-```yaml
-expectations:
-  - type: llm_review
-    threshold: 3.5
-    dimensions:
-      - name: performance
-        weight: 0.5
-        rubric: Code is optimized for throughput
-      - name: security
-        weight: 0.5
-        rubric: No injection vulnerabilities
+```json
+{
+  "expectations": [
+    {
+      "type": "llm_review",
+      "threshold": 3.5,
+      "dimensions": [
+        { "name": "performance", "weight": 0.5, "rubric": "Code is optimized for throughput" },
+        { "name": "security", "weight": 0.5, "rubric": "No injection vulnerabilities" }
+      ]
+    }
+  ]
+}
 ```
 
 ### Volatile Teams & AI Team Generation
 
 Spin up temporary specialist agents scoped to a single plan. Use the `/team` TUI command to let AI generate an optimal team composition:
 
-```yaml
-plans:
-  - group: refactor-auth
-    team:
-      - name: security-specialist
-        adapter: claude-sdk
-        description: Expert in OAuth2 and JWT
-        volatile: true    # cleaned up when plan completes
-    tasks:
-      - title: Audit auth flow
-        agent: security-specialist
+```json
+{
+  "group": "refactor-auth",
+  "team": [
+    {
+      "name": "security-specialist",
+      "adapter": "claude-sdk",
+      "description": "Expert in OAuth2 and JWT",
+      "volatile": true
+    }
+  ],
+  "tasks": [
+    { "title": "Audit auth flow", "assignTo": "security-specialist" }
+  ]
+}
 ```
+
+### Lifecycle Hooks
+
+Register before/after hooks on key lifecycle events to modify behavior, enforce gates, or observe operations:
+
+- **Hook points**: `task:create`, `task:spawn`, `task:transition`, `task:complete`, `task:fail`, `task:retry`, `plan:execute`, `plan:complete`, `assessment:run`, `assessment:complete`, `orchestrator:tick`, `orchestrator:shutdown`
+- **Before hooks** can cancel or modify the operation
+- **After hooks** are observe-only (fire-and-forget)
+- Priority-ordered sequential execution
 
 ### Crash-Resilient Detached Runners
 
@@ -199,7 +257,7 @@ Agent processes run as detached subprocesses tracked in a SQLite-backed RunStore
 
 The TUI provides real-time monitoring with tabs for Dashboard, Tasks, Plans, Agents, Logs, and Chat.
 
-```
+```bash
 polpo
 ```
 
@@ -231,64 +289,69 @@ polpo serve --port 3890 --api-key my-secret
 
 ### Agent Adapters
 
-Polpo is agent-agnostic. Two built-in adapters, and the interface is open for custom ones.
+Polpo is agent-agnostic. When `adapter` is omitted from an agent config, the **built-in engine** (Pi Agent) is used. The `claude-sdk` adapter is available for Claude Agent SDK integration.
 
-**`claude-sdk`** -- Uses `@anthropic-ai/claude-agent-sdk` with persistent sessions and automatic tool handling. Requires `ANTHROPIC_API_KEY`.
+**Built-in engine** (default) -- Full agentic loop with 7 coding tools, 18+ LLM providers, MCP support, and filesystem sandbox. No external process needed.
 
-**`generic`** -- Spawns any CLI command as a subprocess with real PID tracking and stdin/stdout streaming. Works with Aider, GPT-Engineer, Codex CLI, or your own scripts.
-
-```yaml
-agents:
-  - name: aider-agent
-    adapter: generic
-    command: "aider --no-auto-commits"
-    description: Aider-powered coding agent
-```
+**`claude-sdk`** -- Uses `@anthropic-ai/claude-agent-sdk` with persistent sessions and automatic tool handling. Requires `ANTHROPIC_API_KEY`. MCP server configs are passed through natively.
 
 ## Architecture
 
 ```
-                         polpo.yml
-                            │
-                            v
-                    ┌───────────────┐
-                    │  Orchestrator  │
-                    │   (2s tick)    │
-                    └───────┬───────┘
-                            │
-              ┌─────────────┼─────────────┐
-              v             v             v
-        ┌──────────┐ ┌──────────┐ ┌──────────┐
-        │  Runner   │ │  Runner   │ │  Runner   │
-        │ (detached)│ │ (detached)│ │ (detached)│
-        └─────┬────┘ └─────┬────┘ └─────┬────┘
-              v             v             v
-        Claude SDK    Generic CLI    Generic CLI
-         Agent          Agent          Agent
+                       polpo.json
+                           |
+                           v
+                   ┌───────────────┐
+                   │  Orchestrator  │
+                   │   (2s tick)    │
+                   └───────┬───────┘
+                           |
+             ┌─────────────┼─────────────┐
+             v             v             v
+       ┌──────────┐ ┌──────────┐ ┌──────────┐
+       │  Runner   │ │  Runner   │ │  Runner   │
+       │ (detached)│ │ (detached)│ │ (detached)│
+       └─────┬────┘ └─────┬────┘ └─────┬────┘
+             v             v             v
+       Built-in       Claude SDK    Built-in
+        Engine          Adapter      Engine
 ```
 
 ### Task State Machine
 
 ```
-pending ──> assigned ──> in_progress ──> review ──> done
-                                           │
-                                           v
-                                        failed ──> pending (retry)
+                      ┌───────────────────┐
+                      v                   |
+pending ──> awaiting_approval ──> assigned ──> in_progress ──> review ──> done
+                |                                               |
+                v                                               v
+              failed <──────────────────────────────────────  failed
+                |
+                v
+             pending (retry)
 ```
 
 ### Core Components
 
-| Component         | File                          | Purpose                                       |
-|-------------------|-------------------------------|-----------------------------------------------|
-| Orchestrator      | `src/core/orchestrator.ts`    | Supervisor loop, task assignment, health checks|
-| Config            | `src/core/config.ts`          | YAML config parser                             |
-| Runner            | `src/core/runner.ts`          | Detached agent subprocess                      |
-| Stores            | `src/stores/`                 | SQLite task, run, config, log persistence      |
-| Assessor          | `src/assessment/assessor.ts`  | G-Eval task scoring                            |
-| Adapters          | `src/adapters/`               | Agent interface implementations                |
-| TUI               | `src/tui/`                    | Terminal UI (Ink)                               |
-| Server            | `src/server/`                 | Hono HTTP API, SSE bridge, WS bridge           |
-| CLI               | `src/cli/`                    | Commander entry point                          |
+| Component            | Location                          | Purpose                                       |
+|----------------------|-----------------------------------|-----------------------------------------------|
+| Orchestrator         | `src/core/orchestrator.ts`        | Supervisor loop, task assignment, health checks|
+| Config               | `src/core/config.ts`              | JSON config parser and validation              |
+| Task Manager         | `src/core/task-manager.ts`        | Task CRUD, state transitions, lifecycle hooks  |
+| Plan Executor        | `src/core/plan-executor.ts`       | Plan execution, group management               |
+| Assessment           | `src/core/assessment-orchestrator.ts` | Task assessment, retry logic, fix phase    |
+| Hooks                | `src/core/hooks.ts`               | Lifecycle hook registry (before/after)         |
+| State Machine        | `src/core/state-machine.ts`       | Task status transitions and validation         |
+| Stores               | `src/stores/`                     | SQLite task, run, config, log persistence      |
+| Assessor             | `src/assessment/assessor.ts`      | G-Eval task scoring                            |
+| Coding Tools         | `src/tools/coding-tools.ts`       | 7 built-in file/shell tools with sandbox       |
+| Path Sandbox         | `src/tools/path-sandbox.ts`       | Filesystem path validation                     |
+| MCP Client           | `src/mcp/client.ts`               | MCP server connection and tool bridging        |
+| Built-in Engine      | `src/adapters/engine.ts`          | Pi Agent integration with MCP + sandbox        |
+| Claude SDK Adapter   | `src/adapters/claude-sdk.ts`      | Claude Agent SDK integration                   |
+| TUI                  | `src/tui/`                        | Terminal UI (Ink)                               |
+| Server               | `src/server/`                     | Hono HTTP API, SSE bridge, WS bridge           |
+| CLI                  | `src/cli/`                        | Commander entry point                          |
 
 ### Event System
 
@@ -298,6 +361,7 @@ Polpo uses a typed event emitter with 35+ event types organized by namespace:
 task:created   task:assigned   task:started   task:completed   task:failed
 agent:online   agent:offline   agent:activity
 plan:started   plan:completed  plan:failed
+approval:requested  approval:resolved  approval:timeout
 system:tick    system:shutdown  system:error
 ```
 
@@ -321,7 +385,7 @@ PATCH  /tasks/:id                        Update task
 POST   /tasks/:id/retry                  Retry failed task
 
 GET    /plans                            List plans
-POST   /plans                            Create plan (YAML body)
+POST   /plans                            Create plan (JSON body)
 
 GET    /agents                           List agents
 POST   /agents                           Register agent
@@ -339,7 +403,7 @@ POST   /chat                             Send message to agents
 curl -H "X-API-Key: your-key" http://localhost:3890/api/v1/projects
 
 # Query param (for EventSource which can't send headers)
-const es = new EventSource('/api/v1/projects/abc/events?apiKey=your-key');
+# const es = new EventSource('/api/v1/projects/abc/events?apiKey=your-key');
 ```
 
 ## Packages
@@ -376,71 +440,88 @@ function Dashboard() {
 
 **Hooks:** `useOrchestra` `useTasks` `useTask` `usePlans` `usePlan` `useAgents` `useProcesses` `useEvents` `useStats` `useMemory` `useLogs`
 
-### Web UI (`apps/web/`)
+### Web UI (`ui/`)
 
-Next.js 15 dashboard with shadcn/ui. Pages for Dashboard, Tasks, Plans, Team, Logs, Chat, and Settings.
+Vite + React monitoring dashboard with shadcn/ui. Read-only view into the framework's actual state -- tasks, plans, agents, activity, logs, memory, and chat.
 
 ```bash
-cd apps/web
+cd ui
+pnpm install
+pnpm run dev
+```
+
+The UI connects to the Polpo server at `http://localhost:3890`.
+
+### Documentation (`apps/docs/`)
+
+Astro-powered documentation site with Starlight.
+
+```bash
+cd apps/docs
 npm install
 npm run dev
 ```
 
-Set the server URL in `apps/web/.env.local`:
-
-```env
-NEXT_PUBLIC_POLPO_URL=http://localhost:3890
-```
-
 ## Configuration Reference
 
-### `polpo.yml`
+### `polpo.json`
 
-```yaml
-# ─── Agents ──────────────────────────────────────────────
-
-agents:
-  - name: agent-name             # unique identifier
-    adapter: claude-sdk           # 'claude-sdk' | 'generic'
-    description: Role description # agent's expertise
-    command: "aider --no-auto"    # (generic adapter only)
-    volatile: false               # auto-cleanup on plan completion
-
-# ─── Plans ───────────────────────────────────────────────
-
-plans:
-  - group: plan-name             # unique plan identifier
-    team:                         # optional volatile agents
-      - name: temp-agent
-        adapter: claude-sdk
-        description: Temporary specialist
-        volatile: true
-
-    tasks:
-      - title: Task title
-        agent: agent-name
-        description: What the agent should do
-        dependencies: []          # task IDs this depends on
-
-        expectations:             # custom assessment criteria
-          - type: test
-            command: npm test
-            weight: 0.4
-
-          - type: file_exists
-            path: src/output.ts
-            weight: 0.2
-
-          - type: llm_review
-            prompt: Check code quality
-            weight: 0.4
-            dimensions:
-              - name: correctness
-                weight: 0.4
-                rubric: Code produces correct results
-              - name: maintainability
-                weight: 0.3
-                rubric: Code is clean and well-documented
+```json
+{
+  "agents": [
+    {
+      "name": "agent-name",
+      "adapter": "claude-sdk",
+      "description": "Role description",
+      "volatile": false,
+      "allowedPaths": ["/project/src"],
+      "mcpServers": {
+        "server-name": {
+          "command": "npx",
+          "args": ["-y", "mcp-server"]
+        }
+      }
+    }
+  ],
+  "plans": [
+    {
+      "group": "plan-name",
+      "team": [
+        {
+          "name": "temp-agent",
+          "description": "Temporary specialist",
+          "volatile": true
+        }
+      ],
+      "tasks": [
+        {
+          "title": "Task title",
+          "assignTo": "agent-name",
+          "description": "What the agent should do",
+          "dependsOn": [],
+          "expectations": [
+            { "type": "test", "command": "npm test", "weight": 0.4 },
+            { "type": "file_exists", "path": "src/output.ts", "weight": 0.2 },
+            {
+              "type": "llm_review",
+              "prompt": "Check code quality",
+              "weight": 0.4,
+              "dimensions": [
+                { "name": "correctness", "weight": 0.4, "rubric": "Code produces correct results" },
+                { "name": "maintainability", "weight": 0.3, "rubric": "Code is clean and well-documented" }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "settings": {
+    "maxRetries": 3,
+    "maxConcurrency": 4,
+    "logLevel": "info"
+  }
+}
 ```
 
 ### Environment Variables
@@ -457,35 +538,34 @@ API_KEY=your-secret-key                          # server authentication
 ```
 openpolpo/
 ├── src/
-│   ├── core/               # orchestrator, config, types, events, runner
-│   ├── adapters/            # claude-sdk and generic adapters
-│   ├── assessment/          # G-Eval assessor
-│   ├── stores/              # SQLite task/run/config/log stores
-│   ├── llm/                 # LLM query, prompts, answer generation
+│   ├── core/               # orchestrator, config, types, events, hooks, state machine
+│   ├── adapters/            # built-in engine + claude-sdk adapter
+│   ├── assessment/          # G-Eval assessor and scoring
+│   ├── tools/               # 7 coding tools + path sandbox
+│   ├── mcp/                 # MCP client manager and tool bridging
+│   ├── stores/              # SQLite task, run, config, log persistence
+│   ├── llm/                 # LLM queries, prompts, plan generation, skills
 │   ├── tui/                 # terminal UI (Ink) + commands
 │   ├── server/              # Hono HTTP API, SSE/WS bridges, routes
 │   ├── cli/                 # Commander CLI entry point
 │   └── index.ts             # barrel exports
+├── ui/                      # Vite + React monitoring dashboard
 ├── apps/
-│   ├── web/                 # Next.js 15 dashboard (shadcn/ui)
 │   └── docs/                # Astro documentation site
 ├── packages/
 │   └── react-sdk/           # React hooks + SSE client
+├── assets/
+│   └── logo.svg             # project logo
 ├── .polpo/                  # runtime state (auto-created)
 │   ├── state.db             # SQLite database
+│   ├── skills/              # project-level skill pool
+│   ├── agents/              # per-agent skill symlinks
 │   ├── logs/                # agent logs
 │   └── tmp/                 # runner temp files
-└── polpo.yml                # your configuration
+└── polpo.json               # your configuration
 ```
 
 ## Troubleshooting
-
-<details>
-<summary><strong>Build fails with <code>npx tsc</code></strong></summary>
-
-Always use `./node_modules/.bin/tsc` to build. `npx tsc` may resolve the wrong TypeScript package.
-
-</details>
 
 <details>
 <summary><strong><code>better-sqlite3</code> won't compile</strong></summary>
@@ -500,7 +580,7 @@ sudo apt-get install build-essential python3
 xcode-select --install
 
 # Then rebuild
-npm rebuild better-sqlite3
+pnpm rebuild better-sqlite3
 ```
 
 </details>
@@ -532,14 +612,13 @@ polpo run    # recreates automatically
 <details>
 <summary><strong>Web UI can't connect to server</strong></summary>
 
-Make sure the URLs match:
+Make sure the Polpo server is running:
 
 ```bash
 polpo serve --port 3890
-
-# apps/web/.env.local
-NEXT_PUBLIC_POLPO_URL=http://localhost:3890
 ```
+
+The UI at `ui/` connects to `http://localhost:3890` by default.
 
 </details>
 
@@ -550,18 +629,14 @@ Contributions are welcome. Here's the workflow:
 ```bash
 git clone https://github.com/openpolpo/openpolpo.git
 cd openpolpo
-npm install
-./node_modules/.bin/tsc
-
-# make your changes, then:
-./node_modules/.bin/tsc          # build
-npm test                          # test (if available)
-git commit -m "feat: your change"
+pnpm install
+pnpm run build
+pnpm run test -- --run
 ```
 
 1. Fork the repository
 2. Create a feature branch: `git checkout -b feat/my-feature`
-3. Build and verify: `./node_modules/.bin/tsc`
+3. Build and test: `pnpm run build && pnpm run test -- --run`
 4. Push and open a Pull Request
 
 ## License

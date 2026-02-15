@@ -1,7 +1,8 @@
 import type { OrchestratorContext } from "./orchestrator-context.js";
 import type { TaskManager } from "./task-manager.js";
 import type { AgentManager } from "./agent-manager.js";
-import type { Plan, PlanStatus, PlanReport, Task, TaskExpectation } from "./types.js";
+import type { Plan, PlanStatus, PlanReport, Task, TaskExpectation, PlanQualityGate } from "./types.js";
+import type { QualityController } from "../quality/quality-controller.js";
 import { sanitizeExpectations } from "./schemas.js";
 
 interface PlanDocument {
@@ -24,6 +25,7 @@ interface PlanDocument {
     systemPrompt?: string;
     skills?: string[];
   }>;
+  qualityGates?: PlanQualityGate[];
 }
 
 /**
@@ -31,12 +33,26 @@ interface PlanDocument {
  */
 export class PlanExecutor {
   private cleanedGroups = new Set<string>();
+  /** Quality gates parsed from plan documents, keyed by plan group name */
+  private gatesByGroup = new Map<string, PlanQualityGate[]>();
+  /** Optional quality controller — set by orchestrator after init */
+  private qualityCtrl?: QualityController;
 
   constructor(
     private ctx: OrchestratorContext,
     private taskMgr: TaskManager,
     private agentMgr: AgentManager,
   ) {}
+
+  /** Set the quality controller instance (called by Orchestrator after init). */
+  setQualityController(ctrl: QualityController): void {
+    this.qualityCtrl = ctrl;
+  }
+
+  /** Get quality gates for a plan group. Returns empty array if none defined. */
+  getQualityGates(group: string): PlanQualityGate[] {
+    return this.gatesByGroup.get(group) ?? [];
+  }
 
   savePlan(opts: { data: string; prompt?: string; name?: string; status?: PlanStatus }): Plan {
     if (!this.ctx.registry.savePlan) throw new Error("Store does not support plans");
@@ -208,6 +224,11 @@ export class PlanExecutor {
       tasks.push(task);
     }
 
+    // Parse and store quality gates from plan document
+    if (doc.qualityGates && Array.isArray(doc.qualityGates) && doc.qualityGates.length > 0) {
+      this.gatesByGroup.set(group, doc.qualityGates);
+    }
+
     // Mark plan as active
     this.ctx.registry.updatePlan?.(planId, { status: "active" });
     this.ctx.emitter.emit("plan:executed", { planId, group, taskCount: tasks.length });
@@ -244,10 +265,33 @@ export class PlanExecutor {
       // Auto-update plan status
       const plan = this.ctx.registry.getPlanByName?.(group);
       if (plan && plan.status === "active") {
-        const allDone = groupTasks.every(t => t.status === "done");
+        let allDone = groupTasks.every(t => t.status === "done");
+
+        // Check plan quality threshold (only if all tasks passed structurally)
+        if (allDone && this.qualityCtrl) {
+          const thresholdResult = this.qualityCtrl.checkPlanThreshold(
+            plan,
+            groupTasks,
+            this.ctx.config.settings.defaultQualityThreshold,
+          );
+          if (!thresholdResult.passed) {
+            allDone = false; // Quality threshold not met — mark plan as failed
+            this.ctx.emitter.emit("log", {
+              level: "warn",
+              message: `Plan "${group}" quality threshold not met: ${thresholdResult.avgScore?.toFixed(2) ?? "N/A"} < ${thresholdResult.threshold}`,
+            });
+          }
+        }
+
         this.ctx.registry.updatePlan?.(plan.id, { status: allDone ? "completed" : "failed" });
         const report = this.buildPlanReport(plan.id, group, groupTasks, allDone);
         this.ctx.emitter.emit("plan:completed", { planId: plan.id, group, allPassed: allDone, report });
+
+        // Aggregate plan metrics
+        this.qualityCtrl?.aggregatePlanMetrics(plan.id, groupTasks);
+
+        // Clean up gate cache
+        this.gatesByGroup.delete(group);
       }
     }
   }

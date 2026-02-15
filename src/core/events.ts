@@ -74,6 +74,21 @@ export interface OrchestraEventMap {
   "escalation:resolved": { taskId: string; level: number; action: string };
   "escalation:human": { taskId: string; message: string; channels?: string[] };
 
+  // SLA & Deadlines
+  "sla:warning": { entityId: string; entityType: "task" | "plan"; deadline: string; elapsed: number; remaining: number; percentUsed: number };
+  "sla:violated": { entityId: string; entityType: "task" | "plan"; deadline: string; overdueMs: number };
+  "sla:met": { entityId: string; entityType: "task" | "plan"; deadline: string; marginMs: number };
+
+  // Quality gates (plan-level)
+  "quality:gate:passed": { planId: string; gateName: string; avgScore?: number };
+  "quality:gate:failed": { planId: string; gateName: string; avgScore?: number; reason: string };
+  "quality:threshold:failed": { planId: string; avgScore: number; threshold: number };
+
+  // Scheduling
+  "schedule:triggered": { scheduleId: string; planId: string; expression: string };
+  "schedule:created": { scheduleId: string; planId: string; nextRunAt?: string };
+  "schedule:completed": { scheduleId: string; planId: string };
+
   // Notifications
   "notification:sent": { ruleId: string; channel: string; event: string };
   "notification:failed": { ruleId: string; channel: string; error: string };
