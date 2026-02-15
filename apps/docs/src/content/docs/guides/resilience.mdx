@@ -108,7 +108,7 @@ process.on("SIGINT",  () => orchestrator.gracefulStop());
 ```
 
 <Aside type="tip">
-For automatic retry logic, escalation policies, and the fix phase, see [Retry & Escalation](/advanced/retry-escalation/).
+For automatic retry logic, escalation policies, and the fix phase, see [Escalation Chain](/orchestration/escalation/).
 </Aside>
 
 ## Health Checks
@@ -119,9 +119,12 @@ The orchestrator periodically checks active runners:
 
 Tasks that exceed `maxDuration` (default: 30 minutes) are killed:
 
-```yaml
-settings:
-  taskTimeout: 1800000  # 30 minutes (ms)
+```json
+{
+  "settings": {
+    "taskTimeout": 1800000
+  }
+}
 ```
 
 Override per-task when creating tasks via TUI/CLI:
@@ -137,9 +140,12 @@ orchestrator.addTask({
 
 Agents that haven't reported activity for `staleThreshold` (default: 5 minutes) get a warning, then are killed:
 
-```yaml
-settings:
-  staleThreshold: 300000  # 5 minutes (ms)
+```json
+{
+  "settings": {
+    "staleThreshold": 300000
+  }
+}
 ```
 
 The orchestrator checks `activity.lastUpdate` on each tick. Stale agents trigger the `agent:stale` event.

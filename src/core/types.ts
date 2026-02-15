@@ -114,7 +114,7 @@ export interface AgentConfig {
   role?: string;
   /** Model to use. Format: "provider:model" (e.g. "anthropic:claude-sonnet-4-5-20250929") or bare model ID (auto-inferred). */
   model?: string;
-  /** Allowed tools for the agent (e.g. ["read", "write", "edit", "bash", "glob", "grep"]) */
+  /** Allowed tools for the agent (e.g. ["read", "write", "edit", "bash", "glob", "grep", "browser_navigate", "git_status"]) */
   allowedTools?: string[];
   /** Filesystem sandbox — directories the agent is allowed to access.
    *  Paths can be absolute or relative to workDir. When set, all file tool operations
@@ -135,6 +135,45 @@ export interface AgentConfig {
   volatile?: boolean;
   /** Plan group this volatile agent belongs to */
   planGroup?: string;
+
+  // ── Extended tool categories (opt-in) ──
+
+  /** Enable browser automation tools (requires agent-browser installed).
+   *  Tools: browser_navigate, browser_snapshot, browser_click, browser_fill, browser_type,
+   *  browser_press, browser_screenshot, browser_get, browser_select, browser_hover,
+   *  browser_scroll, browser_wait, browser_eval, browser_close, browser_back, browser_forward,
+   *  browser_reload, browser_tabs */
+  enableBrowser?: boolean;
+  /** Enable HTTP/fetch tools for API calls and web requests.
+   *  Tools: http_fetch, http_download */
+  enableHttp?: boolean;
+  /** Enable structured git tools.
+   *  Tools: git_status, git_diff, git_log, git_commit, git_branch, git_stash, git_show */
+  enableGit?: boolean;
+  /** Enable multi-file editing tools for batch operations.
+   *  Tools: multi_edit, regex_replace, bulk_rename */
+  enableMultifile?: boolean;
+  /** Enable dependency management tools (npm/pnpm/yarn/bun).
+   *  Tools: dep_install, dep_add, dep_remove, dep_outdated, dep_audit, dep_info */
+  enableDeps?: boolean;
+  /** Enable Excel/CSV tools for spreadsheet operations.
+   *  Tools: excel_read, excel_write, excel_query, excel_info */
+  enableExcel?: boolean;
+  /** Enable PDF tools for document operations.
+   *  Tools: pdf_read, pdf_create, pdf_merge, pdf_info */
+  enablePdf?: boolean;
+  /** Enable Word/DOCX tools for document operations.
+   *  Tools: docx_read, docx_create */
+  enableDocx?: boolean;
+  /** Enable email tools for sending messages via SMTP.
+   *  Tools: email_send, email_verify. Requires SMTP_HOST/SMTP_USER/SMTP_PASS env vars. */
+  enableEmail?: boolean;
+  /** Enable audio tools for speech-to-text and text-to-speech.
+   *  Tools: audio_transcribe, audio_speak. Requires OPENAI_API_KEY/DEEPGRAM_API_KEY/ELEVENLABS_API_KEY env vars. */
+  enableAudio?: boolean;
+  /** Enable image tools for generation and vision analysis.
+   *  Tools: image_generate, image_analyze. Requires OPENAI_API_KEY/REPLICATE_API_TOKEN/ANTHROPIC_API_KEY env vars. */
+  enableImage?: boolean;
 }
 
 export interface AgentActivity {

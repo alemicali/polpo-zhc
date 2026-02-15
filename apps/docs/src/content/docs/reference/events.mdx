@@ -1,176 +1,68 @@
 ---
 title: Events Reference
-description: All 35+ Polpo event types with payloads
+description: All 55 Polpo event types organized by category with typed payloads
 ---
 
-Polpo uses a typed event emitter. Events are streamed via SSE and WebSocket to all connected clients.
+import { Aside } from '@astrojs/starlight/components';
 
-## Task Events
+Polpo uses a typed event emitter (`TypedEmitter`) that wraps Node's `EventEmitter` with type-safe `emit`/`on`/`once`/`off`. Events are streamed via SSE and WebSocket to all connected clients and optionally persisted to a log store.
 
-### `task:created`
+<Aside>
+Events marked with **Not persisted** are excluded from the log store because they fire too frequently. All other events are automatically persisted when a `LogStore` is attached.
+</Aside>
 
-Fired when a task is added to the registry.
+---
 
-```typescript
-{ task: Task }
-```
+## Task Lifecycle
 
-### `task:transition`
+Core events for task creation, state transitions, updates, and removal.
 
-Fired on every status change.
-
-```typescript
-{
-  taskId: string;
-  from: TaskStatus;   // "pending" | "assigned" | "in_progress" | "review" | "done" | "failed"
-  to: TaskStatus;
-  task: Task;
-}
-```
-
-### `task:updated`
-
-Fired when task fields are modified (description, assignment, expectations).
+| Event | Description | Key Payload Fields |
+|-------|-------------|-------------------|
+| `task:created` | Task added to the registry | `task: Task` |
+| `task:transition` | Task status changed | `taskId`, `from: TaskStatus`, `to: TaskStatus`, `task: Task` |
+| `task:updated` | Task fields modified (description, assignment, etc.) | `taskId`, `task: Task` |
+| `task:removed` | Task deleted from registry | `taskId` |
 
 ```typescript
-{ taskId: string; task: Task }
-```
-
-### `task:removed`
-
-Fired when a task is deleted.
-
-```typescript
-{ taskId: string }
-```
-
-### `task:retry`
-
-Fired when a full retry starts.
-
-```typescript
-{ taskId: string; attempt: number; maxRetries: number }
-```
-
-### `task:fix`
-
-Fired when a fix phase starts (targeted corrections).
-
-```typescript
-{ taskId: string; attempt: number; maxFix: number }
-```
-
-### `task:maxRetries`
-
-Fired when all retries are exhausted.
-
-```typescript
-{ taskId: string }
-```
-
-### `task:timeout`
-
-Fired when a task exceeds its `maxDuration`.
-
-```typescript
-{ taskId: string; elapsed: number; timeout: number }
-```
-
-### `task:recovered`
-
-Fired when an orphaned task is recovered on restart.
-
-```typescript
-{ taskId: string; title: string; previousStatus: TaskStatus }
-```
-
-### `task:question`
-
-Fired when an agent asks a question during execution.
-
-```typescript
-{ taskId: string; question: string }
-```
-
-### `task:answered`
-
-Fired when the orchestrator auto-answers an agent question.
-
-```typescript
-{ taskId: string; question: string; answer: string }
+// Example: listen for status changes
+orchestrator.on("task:transition", ({ taskId, from, to, task }) => {
+  console.log(`Task ${taskId}: ${from} → ${to}`);
+});
 ```
 
 ---
 
-## Agent Events
+## Agent Lifecycle
 
-### `agent:spawned`
+Events tracking agent process spawning, completion, and real-time activity.
 
-Fired when a runner is launched for a task.
-
-```typescript
-{ taskId: string; agentName: string; adapter: string; taskTitle: string }
-```
-
-### `agent:finished`
-
-Fired when the agent process exits.
+| Event | Description | Key Payload Fields |
+|-------|-------------|-------------------|
+| `agent:spawned` | Agent process launched for a task | `taskId`, `agentName`, `adapter?`, `taskTitle` |
+| `agent:finished` | Agent process exited | `taskId`, `agentName`, `exitCode`, `duration`, `sessionId?` |
+| `agent:activity` | Tool call or progress update from an agent | `taskId`, `agentName`, `tool?`, `file?`, `summary?` |
 
 ```typescript
-{ taskId: string; agentName: string; exitCode: number; duration: number }
-```
-
-### `agent:activity`
-
-Fired on tool calls and progress updates.
-
-```typescript
-{ taskId: string; agentName: string; tool?: string; file?: string; summary?: string }
-```
-
-### `agent:stale`
-
-Fired when an agent hasn't reported activity recently.
-
-```typescript
-{ taskId: string; agentName: string; idleMs: number; action: "warning" | "killed" }
+orchestrator.on("agent:finished", ({ taskId, agentName, exitCode, duration }) => {
+  console.log(`${agentName} finished task ${taskId} in ${duration}ms (exit: ${exitCode})`);
+});
 ```
 
 ---
 
-## Assessment Events
+## Assessment
 
-### `assessment:started`
+Events for the assessment lifecycle — started, progress updates, completion, and expectation corrections.
 
-Fired when assessment begins for a completed task.
+| Event | Description | Key Payload Fields |
+|-------|-------------|-------------------|
+| `assessment:started` | Assessment began for a task | `taskId` |
+| `assessment:progress` | Status update during assessment | `taskId`, `message` |
+| `assessment:complete` | Assessment finished | `taskId`, `passed: boolean`, `scores?: DimensionScore[]`, `globalScore?: number`, `message?` |
+| `assessment:corrected` | Expectations auto-corrected by the judge | `taskId`, `corrections: number` |
 
-```typescript
-{ taskId: string }
-```
-
-### `assessment:progress`
-
-Fired during assessment with status messages.
-
-```typescript
-{ taskId: string; message: string }
-```
-
-### `assessment:complete`
-
-Fired when assessment finishes.
-
-```typescript
-{
-  taskId: string;
-  passed: boolean;
-  scores?: DimensionScore[];   // per-dimension scores
-  globalScore?: number;         // weighted average (1-5)
-  message?: string;
-}
-```
-
-Where `DimensionScore`:
+The `DimensionScore` type:
 ```typescript
 {
   dimension: string;     // e.g. "correctness"
@@ -180,151 +72,195 @@ Where `DimensionScore`:
 }
 ```
 
-### `assessment:corrected`
+---
 
-Fired when expectations are auto-corrected by the expectation judge.
+## Orchestrator
 
-```typescript
-{ taskId: string; corrections: number }
-```
+Events for the orchestrator's own lifecycle.
+
+| Event | Description | Key Payload Fields |
+|-------|-------------|-------------------|
+| `orchestrator:started` | Orchestrator started | `project`, `agents: string[]` |
+| `orchestrator:tick` | Periodic aggregate counts (**Not persisted**) | `pending`, `running`, `done`, `failed`, `queued` |
+| `orchestrator:deadlock` | Unresolvable deadlocks found | `taskIds: string[]` |
+| `orchestrator:shutdown` | Graceful shutdown initiated | _(empty)_ |
+
+<Aside>
+`orchestrator:tick` fires every 5 seconds and includes a `queued` count in addition to `pending`, `running`, `done`, and `failed`.
+</Aside>
 
 ---
 
-## Deadlock Events
+## Retry & Fix
 
-### `deadlock:detected`
+Events for the multi-stage retry system: fix attempts, full retries, and exhaustion.
 
-Fired when blocked tasks are found.
-
-```typescript
-{ taskIds: string[]; resolvableCount: number }
-```
-
-### `deadlock:resolving`
-
-Fired when attempting to resolve a specific blocked task.
-
-```typescript
-{ taskId: string; failedDepId: string }
-```
-
-### `deadlock:resolved`
-
-Fired when a deadlock is resolved.
-
-```typescript
-{
-  taskId: string;
-  failedDepId: string;
-  action: "absorb" | "retry";   // absorb: proceed without dep; retry: re-run dep
-  reason: string;
-}
-```
-
-### `deadlock:unresolvable`
-
-Fired when a deadlock cannot be resolved.
-
-```typescript
-{ taskId: string; reason: string }
-```
+| Event | Description | Key Payload Fields |
+|-------|-------------|-------------------|
+| `task:retry` | Full retry started | `taskId`, `attempt`, `maxRetries` |
+| `task:fix` | Fix phase started (targeted corrections) | `taskId`, `attempt`, `maxFix` |
+| `task:maxRetries` | All retries exhausted | `taskId` |
 
 ---
 
-## Plan Events
+## Question Detection
 
-### `plan:saved`
+Events for agent questions and auto-resolution.
 
-Fired when a plan is created or updated.
-
-```typescript
-{ planId: string; name: string; status: PlanStatus }
-```
-
-### `plan:executed`
-
-Fired when a plan starts execution.
-
-```typescript
-{ planId: string; group: string; taskCount: number }
-```
-
-### `plan:completed`
-
-Fired when all tasks in a plan finish.
-
-```typescript
-{
-  planId: string;
-  group: string;
-  allPassed: boolean;
-  report: PlanReport;    // aggregated results
-}
-```
-
-### `plan:resumed`
-
-Fired when a plan is resumed.
-
-```typescript
-{ planId: string; name: string; retried: number; pending: number }
-```
-
-### `plan:deleted`
-
-Fired when a plan is deleted.
-
-```typescript
-{ planId: string }
-```
+| Event | Description | Key Payload Fields |
+|-------|-------------|-------------------|
+| `task:question` | Agent asked a question during execution | `taskId`, `question` |
+| `task:answered` | Orchestrator auto-answered a question | `taskId`, `question`, `answer` |
 
 ---
 
-## Orchestrator Events
+## Deadlock Resolution
 
-### `orchestrator:started`
+Events for detecting and resolving dependency deadlocks.
 
-Fired once on startup.
-
-```typescript
-{ project: string; agents: string[] }
-```
-
-### `orchestrator:tick`
-
-Fired every 2 seconds with aggregate counts. **Not persisted to logs.**
-
-```typescript
-{ pending: number; running: number; done: number; failed: number }
-```
-
-### `orchestrator:deadlock`
-
-Fired when unresolvable deadlocks are detected.
-
-```typescript
-{ taskIds: string[] }
-```
-
-### `orchestrator:shutdown`
-
-Fired during graceful shutdown.
-
-```typescript
-{}
-```
+| Event | Description | Key Payload Fields |
+|-------|-------------|-------------------|
+| `deadlock:detected` | Blocked tasks found with failed dependencies | `taskIds: string[]`, `resolvableCount` |
+| `deadlock:resolving` | Attempting to resolve a specific blocked task | `taskId`, `failedDepId` |
+| `deadlock:resolved` | Deadlock successfully resolved | `taskId`, `failedDepId`, `action: "absorb" \| "retry"`, `reason` |
+| `deadlock:unresolvable` | Deadlock cannot be resolved | `taskId`, `reason` |
 
 ---
 
-## Log Event
+## Resilience
 
-### `log`
+Events for timeout and stale agent detection.
 
-General log messages.
+| Event | Description | Key Payload Fields |
+|-------|-------------|-------------------|
+| `task:timeout` | Task exceeded its `maxDuration` | `taskId`, `elapsed`, `timeout` |
+| `agent:stale` | Agent hasn't reported activity recently | `taskId`, `agentName`, `idleMs`, `action: "warning" \| "killed"` |
 
-```typescript
-{ level: "info" | "warn" | "error" | "debug"; message: string }
-```
+---
+
+## Recovery
+
+Events for task recovery after restarts.
+
+| Event | Description | Key Payload Fields |
+|-------|-------------|-------------------|
+| `task:recovered` | Orphaned task recovered on restart | `taskId`, `title`, `previousStatus: TaskStatus` |
+
+---
+
+## Plans
+
+Events for plan lifecycle management.
+
+| Event | Description | Key Payload Fields |
+|-------|-------------|-------------------|
+| `plan:saved` | Plan created or updated | `planId`, `name`, `status: PlanStatus` |
+| `plan:executed` | Plan group started execution | `planId`, `group`, `taskCount` |
+| `plan:completed` | All tasks in a plan group finished | `planId`, `group`, `allPassed: boolean`, `report: PlanReport` |
+| `plan:resumed` | Plan resumed from a previous run | `planId`, `name`, `retried`, `pending` |
+| `plan:deleted` | Plan deleted | `planId` |
+
+---
+
+## Chat / Sessions
+
+Events for the conversational chat interface.
+
+| Event | Description | Key Payload Fields |
+|-------|-------------|-------------------|
+| `session:created` | New chat session created | `sessionId`, `title?` |
+| `message:added` | Message added to a session | `sessionId`, `messageId`, `role: "user" \| "assistant"` |
+
+---
+
+## Bridge
+
+Events for passive session discovery (monitoring external coding sessions). The `bridge:session:activity` event is **not persisted** due to high frequency.
+
+| Event | Description | Key Payload Fields |
+|-------|-------------|-------------------|
+| `bridge:session:discovered` | External session found | `sessionId`, `projectPath`, `transcriptPath` |
+| `bridge:session:activity` | Session activity update (**Not persisted**) | `sessionId`, `projectPath`, `messageCount`, `toolCalls`, `filesCreated`, `filesEdited`, `lastMessage` |
+| `bridge:session:completed` | External session finished | `sessionId`, `projectPath`, `summary: SessionSummary \| null`, `duration` |
+
+---
+
+## Approval Gates
+
+Events for human-in-the-loop approval workflows.
+
+| Event | Description | Key Payload Fields |
+|-------|-------------|-------------------|
+| `approval:requested` | Approval request created | `requestId`, `gateId`, `gateName`, `taskId?`, `planId?` |
+| `approval:resolved` | Approval resolved | `requestId`, `status: "approved" \| "rejected"`, `resolvedBy?` |
+| `approval:timeout` | Approval timed out | `requestId`, `action: "approve" \| "reject"` |
+
+---
+
+## Escalation
+
+Events for the 4-level escalation chain (agent retry, fallback agent, orchestrator LLM, human).
+
+| Event | Description | Key Payload Fields |
+|-------|-------------|-------------------|
+| `escalation:triggered` | Escalation level activated | `taskId`, `level`, `handler`, `target?` |
+| `escalation:resolved` | Escalation level completed | `taskId`, `level`, `action` |
+| `escalation:human` | Human notification sent | `taskId`, `message`, `channels?` |
+
+---
+
+## SLA & Deadlines
+
+Events for monitoring task and plan deadlines.
+
+| Event | Description | Key Payload Fields |
+|-------|-------------|-------------------|
+| `sla:warning` | Approaching deadline | `entityId`, `entityType: "task" \| "plan"`, `deadline`, `elapsed`, `remaining`, `percentUsed` |
+| `sla:violated` | Deadline exceeded | `entityId`, `entityType: "task" \| "plan"`, `deadline`, `overdueMs` |
+| `sla:met` | Completed within deadline | `entityId`, `entityType: "task" \| "plan"`, `deadline`, `marginMs` |
+
+---
+
+## Quality Gates
+
+Plan-level quality gate events.
+
+| Event | Description | Key Payload Fields |
+|-------|-------------|-------------------|
+| `quality:gate:passed` | Quality gate passed | `planId`, `gateName`, `avgScore?` |
+| `quality:gate:failed` | Quality gate failed | `planId`, `gateName`, `avgScore?`, `reason` |
+| `quality:threshold:failed` | Plan average score below threshold | `planId`, `avgScore`, `threshold` |
+
+---
+
+## Scheduling
+
+Events for cron-based plan scheduling.
+
+| Event | Description | Key Payload Fields |
+|-------|-------------|-------------------|
+| `schedule:triggered` | Scheduled plan triggered | `scheduleId`, `planId`, `expression` |
+| `schedule:created` | Schedule registered | `scheduleId`, `planId`, `nextRunAt?` |
+| `schedule:completed` | Scheduled run completed | `scheduleId`, `planId` |
+
+---
+
+## Notifications
+
+Events for the notification router.
+
+| Event | Description | Key Payload Fields |
+|-------|-------------|-------------------|
+| `notification:sent` | Notification dispatched successfully | `ruleId`, `channel`, `event` |
+| `notification:failed` | Notification dispatch failed | `ruleId`, `channel`, `error` |
+
+---
+
+## General
+
+| Event | Description | Key Payload Fields |
+|-------|-------------|-------------------|
+| `log` | General log message | `level: "info" \| "warn" \| "error" \| "debug"`, `message` |
 
 ---
 
@@ -353,7 +289,12 @@ ws.onmessage = (e) => {
 ### Node.js (TypedEmitter)
 
 ```typescript
+import { TypedEmitter } from "polpo";
+
 orchestrator.on("task:transition", ({ taskId, from, to, task }) => {
   console.log(`Task ${taskId}: ${from} → ${to}`);
 });
+
+// Glob-style patterns work for notifications
+// (see Notifications guide for details)
 ```

@@ -30,77 +30,101 @@ export default defineConfig({
         {
           icon: "github",
           label: "GitHub",
-          href: "https://github.com/AlessioToniworking/orchestra",
+          href: "https://github.com/openpolpo/openpolpo",
         },
       ],
       plugins: [
         starlightThemeSix({
+          navLinks: [
+            { label: "Docs", link: "/introduction" },
+            { label: "API", link: "/reference/api" },
+            { label: "GitHub", link: "https://github.com/openpolpo/openpolpo", attrs: { target: "_blank" } },
+          ],
           footerText:
-            "Built with [Astro Starlight](https://starlight.astro.build). Powered by [Polpo](https://github.com/AlessioToniworking/orchestra).",
+            "Built with tentacles and [Starlight](https://starlight.astro.build). [Open source](https://github.com/openpolpo/openpolpo), obviously.",
         }),
       ],
       sidebar: [
+        // ── Getting Started ─────────────────────────────────────
         { label: "Introduction", slug: "introduction" },
-        { label: "Getting Started", slug: "getting-started" },
+        { label: "Installation & Setup", slug: "getting-started" },
+        { label: "Your First Plan", slug: "guides/first-plan" },
         { label: "Configuration", slug: "configuration" },
+
+        // ── Core Concepts ───────────────────────────────────────
         {
-          label: "Concepts",
+          label: "Core Concepts",
           items: [
             { label: "Architecture", slug: "concepts/architecture" },
+            { label: "Agents & Teams", slug: "concepts/agents-and-teams" },
             { label: "Task Lifecycle", slug: "concepts/task-lifecycle" },
-            { label: "Plans", slug: "concepts/plans" },
-            { label: "Assessment", slug: "concepts/assessment" },
+            { label: "Plans & Dependencies", slug: "concepts/plans" },
+            { label: "Result Evaluation", slug: "concepts/assessment" },
+            { label: "Tools & MCP", slug: "concepts/tools-and-skills" },
+            { label: "Skills", slug: "concepts/skills" },
+            { label: "Hooks", slug: "concepts/lifecycle-hooks" },
+            { label: "Providers & Models", slug: "concepts/providers-and-models" },
+            { label: "Sessions", slug: "concepts/sessions" },
+            { label: "Logs & Activity", slug: "concepts/logs-and-activity" },
+            { label: "Memory", slug: "concepts/memory" },
           ],
         },
+
+        // ── Orchestration ────────────────────────────────────────
+        {
+          label: "Orchestration",
+          items: [
+            {
+              label: "Notification System",
+              slug: "orchestration/notifications",
+            },
+            { label: "Approval Gates", slug: "orchestration/approval-gates" },
+            { label: "Escalation Chain", slug: "orchestration/escalation" },
+            { label: "Quality & SLA", slug: "orchestration/quality-sla" },
+            { label: "Scheduling", slug: "orchestration/scheduling" },
+            { label: "Bridge System", slug: "orchestration/bridge" },
+          ],
+        },
+
+        // ── Usage ───────────────────────────────────────────────
         {
           label: "Usage",
           items: [
             { label: "CLI", slug: "usage/cli" },
             { label: "TUI", slug: "usage/tui" },
-            { label: "Server", slug: "usage/server" },
+            { label: "HTTP Server", slug: "usage/server" },
             { label: "Web UI", slug: "usage/web-ui" },
           ],
         },
+
+        // ── Guides ──────────────────────────────────────────────
         {
           label: "Guides",
           items: [
-            { label: "Your First Plan", slug: "guides/first-plan" },
             { label: "Custom Adapter", slug: "guides/custom-adapter" },
-            { label: "Project Memory", slug: "guides/memory" },
             { label: "Crash Resilience", slug: "guides/resilience" },
+            { label: "Deadlock Resolution", slug: "guides/deadlock-resolution" },
+            { label: "Question Detection", slug: "guides/question-detection" },
+            { label: "Expectation Judge", slug: "guides/expectation-judge" },
+            { label: "Store Backends", slug: "guides/store-backends" },
+            { label: "Security", slug: "guides/security" },
           ],
         },
+
+        // ── Reference ───────────────────────────────────────────
         {
           label: "Reference",
           items: [
-            { label: "Configuration", slug: "reference/config" },
+            { label: "Configuration Schema", slug: "reference/config" },
             { label: "REST API", slug: "reference/api" },
             { label: "Events", slug: "reference/events" },
             { label: "React SDK", slug: "reference/react-sdk" },
             { label: "Adapters", slug: "reference/adapters" },
+            { label: "Tools Reference", slug: "reference/coding-tools" },
           ],
         },
-        {
-          label: "Advanced",
-          items: [
-            {
-              label: "Deadlock Resolution",
-              slug: "advanced/deadlock-resolution",
-            },
-            {
-              label: "Retry & Escalation",
-              slug: "advanced/retry-escalation",
-            },
-            {
-              label: "Question Detection",
-              slug: "advanced/question-detection",
-            },
-            {
-              label: "Expectation Judge",
-              slug: "advanced/expectation-judge",
-            },
-          ],
-        },
+
+
       ],
     }),
   ],

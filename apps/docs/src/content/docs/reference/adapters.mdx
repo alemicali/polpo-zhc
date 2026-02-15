@@ -15,15 +15,18 @@ The native adapter provides a multi-provider LLM interface with built-in coding 
 
 ### Configuration
 
-```yaml
-agents:
-  - name: my-agent
-    adapter: native  # optional — this is the default
-    role: Full-stack developer
-    model: opencode:big-pickle  # free model (default)
-    # or use: anthropic:claude-sonnet-4-5-20250929
-    # or use: openai:gpt-4
-    systemPrompt: "Focus on TypeScript and React patterns"
+```json
+{
+  "agents": [
+    {
+      "name": "my-agent",
+      "adapter": "native",
+      "role": "Full-stack developer",
+      "model": "opencode:big-pickle",
+      "systemPrompt": "Focus on TypeScript and React patterns"
+    }
+  ]
+}
 ```
 
 <Aside type="tip">
@@ -58,12 +61,13 @@ export POLPO_MODEL=anthropic:claude-sonnet-4-5-20250929
 
 Or per-agent in config:
 
-```yaml
-agents:
-  - name: architect
-    model: anthropic:claude-sonnet-4-5-20250929
-  - name: implementer
-    model: openai:gpt-4o
+```json
+{
+  "agents": [
+    { "name": "architect", "model": "anthropic:claude-sonnet-4-5-20250929" },
+    { "name": "implementer", "model": "openai:gpt-4o" }
+  ]
+}
 ```
 
 ### Built-in Coding Tools
@@ -127,28 +131,27 @@ Uses the `@anthropic-ai/claude-agent-sdk` to call Claude models directly via the
 
 ### Configuration
 
-```yaml
-agents:
-  - name: my-agent
-    adapter: claude-sdk
-    role: Full-stack developer
-    model: claude-sonnet-4-5-20250929
-    allowedTools:
-      - Read
-      - Write
-      - Edit
-      - Bash
-      - Glob
-      - Grep
-    mcpServers:
-      my-server:
-        command: node
-        args: [my-mcp-server.js]
-    systemPrompt: "Focus on TypeScript and React patterns"
-    skills:
-      - frontend-design
-      - ai-sdk-6
-    maxTurns: 200
+```json
+{
+  "agents": [
+    {
+      "name": "my-agent",
+      "adapter": "claude-sdk",
+      "role": "Full-stack developer",
+      "model": "claude-sonnet-4-5-20250929",
+      "allowedTools": ["Read", "Write", "Edit", "Bash", "Glob", "Grep"],
+      "mcpServers": {
+        "my-server": {
+          "command": "node",
+          "args": ["my-mcp-server.js"]
+        }
+      },
+      "systemPrompt": "Focus on TypeScript and React patterns",
+      "skills": ["frontend-design", "ai-sdk-6"],
+      "maxTurns": 200
+    }
+  ]
+}
 ```
 
 ### Options
@@ -182,12 +185,17 @@ Spawns any CLI command as a child process. Use this for non-Claude agents like A
 
 ### Configuration
 
-```yaml
-agents:
-  - name: aider-dev
-    adapter: generic
-    command: "aider --no-auto-commit --model gpt-4 {taskFile}"
-    role: Code editor using Aider
+```json
+{
+  "agents": [
+    {
+      "name": "cli-agent",
+      "adapter": "generic",
+      "command": "my-agent --task {taskFile}",
+      "role": "CLI-based agent"
+    }
+  ]
+}
 ```
 
 ### Command Template Variables
@@ -221,22 +229,32 @@ agents:
 
 ### Example: Custom Python Script
 
-```yaml
-agents:
-  - name: py-analyzer
-    adapter: generic
-    command: "python3 scripts/analyze.py --task {taskFile}"
-    role: Code analysis specialist
+```json
+{
+  "agents": [
+    {
+      "name": "py-analyzer",
+      "adapter": "generic",
+      "command": "python3 scripts/analyze.py --task {taskFile}",
+      "role": "Code analysis specialist"
+    }
+  ]
+}
 ```
 
-### Example: GPT-4 via OpenAI CLI
+### Example: Custom CLI Tool
 
-```yaml
-agents:
-  - name: gpt4-dev
-    adapter: generic
-    command: "openai-cli --model gpt-4 --prompt {prompt}"
-    role: GPT-4 developer
+```json
+{
+  "agents": [
+    {
+      "name": "my-tool",
+      "adapter": "generic",
+      "command": "my-tool --prompt {prompt}",
+      "role": "Custom tool agent"
+    }
+  ]
+}
 ```
 
 ---

@@ -176,12 +176,14 @@ POST /plans
 Content-Type: application/json
 
 {
-  "yaml": "plans:\n  - group: my-plan\n    tasks: ...",
+  "data": "plans:\n  - group: my-plan\n    tasks: ...",
   "name": "My Plan",
   "prompt": "Original user prompt",
   "status": "draft"
 }
 ```
+
+The `data` field contains the plan definition as a string.
 
 **Response** `201`: Created plan object.
 
@@ -191,7 +193,7 @@ Content-Type: application/json
 PATCH /plans/:planId
 Content-Type: application/json
 
-{ "yaml": "...", "status": "draft" }
+{ "data": "...", "status": "draft" }
 ```
 
 ### Delete Plan
@@ -335,7 +337,7 @@ Content-Type: application/json
 { "prompt": "Build a REST API with auth, rate limiting, and tests" }
 ```
 
-**Response**: `{ ok: true, data: { yaml: "plans:\n...", raw: "..." } }`
+**Response**: `{ ok: true, data: { data: "plans:\n...", raw: "..." } }`
 
 ### Prepare Task
 
@@ -362,7 +364,7 @@ POST /chat/refine-team
 Content-Type: application/json
 
 {
-  "currentYaml": "agents:\n  - name: ...",
+  "currentData": "agents:\n  - name: ...",
   "description": "Build e-commerce platform",
   "feedback": "Add a database specialist"
 }
@@ -375,7 +377,7 @@ POST /chat/refine-plan
 Content-Type: application/json
 
 {
-  "currentYaml": "plans:\n  ...",
+  "currentData": "plans:\n  ...",
   "prompt": "Build REST API",
   "feedback": "Add rate limiting tasks"
 }
@@ -385,16 +387,80 @@ Content-Type: application/json
 
 ## Logs
 
-### List Sessions
+### List Log Sessions
 
 ```http
 GET /logs
 ```
 
-### Get Session Entries
+Returns persisted event log sessions.
+
+### Get Log Entries
 
 ```http
 GET /logs/:sessionId
+```
+
+Returns event entries for a log session.
+
+---
+
+## Chat Sessions
+
+### List Chat Sessions
+
+```http
+GET /chat/sessions
+```
+
+Returns all chat sessions (conversational AI interactions).
+
+### Get Session Messages
+
+```http
+GET /chat/sessions/:sessionId/messages
+```
+
+Returns messages for a specific chat session.
+
+### Delete Session
+
+```http
+DELETE /chat/sessions/:sessionId
+```
+
+---
+
+## Skills
+
+### List Skills
+
+```http
+GET /skills
+```
+
+Discovers available skills from `.polpo/skills/`, `.claude/skills/`, and `~/.claude/skills/`.
+
+**Response** `200`:
+```json
+{ "ok": true, "data": [{ "name": "frontend-design", "description": "...", "path": "..." }] }
+```
+
+---
+
+## Task Activity
+
+### Get Task Activity
+
+```http
+GET /agents/processes/:taskId/activity
+```
+
+Returns the JSONL activity history for a specific task's run (tool calls, file edits, summaries). Looks up the run by `taskId` in the active `RunStore` and falls back to scanning `run-*.jsonl` files in `.polpo/logs/`.
+
+**Response** `200`:
+```json
+{ "ok": true, "data": [{ "type": "activity", "tool": "Edit", "file": "src/app.ts", "timestamp": "..." }] }
 ```
 
 ---

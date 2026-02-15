@@ -1,0 +1,197 @@
+---
+title: Providers & Models
+description: How Polpo resolves models, supports 22+ LLM providers, and manages API keys
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Polpo is provider-agnostic. Every agent can use a different model from a different provider — or you can let it fall back to the free default and not think about it at all.
+
+## Model Format
+
+Models are specified as a `provider:model` string:
+
+```json
+{
+  "name": "architect",
+  "model": "anthropic:claude-sonnet-4-5-20250929"
+}
+```
+
+If you omit the provider prefix, Polpo infers it from the model name:
+
+```json
+{
+  "model": "claude-sonnet-4-5-20250929"
+}
+```
+
+The inference rules match on name prefix:
+
+| Prefix | Provider |
+|--------|----------|
+| `claude-` | `anthropic` |
+| `gpt-` | `openai` |
+| `o1-`, `o3-`, `o4-` | `openai` |
+| `gemini-` | `google` |
+| `mistral-` | `mistral` |
+| `llama-` | `groq` |
+| `deepseek-` | `openrouter` |
+| `big-pickle` | `opencode` |
+
+Anything that doesn't match defaults to `opencode`.
+
+## Default Model
+
+When no model is specified anywhere, Polpo uses `opencode:big-pickle` — a free model that requires no API key. Good for trying things out.
+
+**Resolution order:**
+1. Agent's `model` field
+2. `POLPO_MODEL` environment variable
+3. `opencode:big-pickle` (free default)
+
+## Supported Providers
+
+Polpo supports **22+ LLM providers** out of the box:
+
+| Provider | ID | Env Variable | Notes |
+|----------|----|-------------|-------|
+| **Anthropic** | `anthropic` | `ANTHROPIC_API_KEY` | Claude family |
+| **OpenAI** | `openai` | `OPENAI_API_KEY` | GPT, o-series, DALL-E, Whisper, TTS |
+| **Google** | `google` | `GEMINI_API_KEY` | Gemini family |
+| **Google Vertex** | `google-vertex` | ADC + `GOOGLE_CLOUD_PROJECT` | Enterprise Google AI |
+| **Amazon Bedrock** | `amazon-bedrock` | AWS credentials | Claude, Llama, Mistral on AWS |
+| **Azure OpenAI** | `azure-openai-responses` | `AZURE_OPENAI_API_KEY` | OpenAI on Azure |
+| **Groq** | `groq` | `GROQ_API_KEY` | Fast Llama inference |
+| **Cerebras** | `cerebras` | `CEREBRAS_API_KEY` | Ultra-fast inference |
+| **Mistral** | `mistral` | `MISTRAL_API_KEY` | Mistral models |
+| **xAI** | `xai` | `XAI_API_KEY` | Grok models |
+| **OpenRouter** | `openrouter` | `OPENROUTER_API_KEY` | Gateway to many providers |
+| **Vercel AI Gateway** | `vercel-ai-gateway` | `AI_GATEWAY_API_KEY` | Vercel's gateway |
+| **GitHub Copilot** | `github-copilot` | `COPILOT_GITHUB_TOKEN` | Via Copilot API |
+| **Hugging Face** | `huggingface` | `HF_TOKEN` | Open models |
+| **MiniMax** | `minimax` | `MINIMAX_API_KEY` | MiniMax models |
+| **Kimi** | `kimi-coding` | `KIMI_API_KEY` | Kimi coding models |
+| **OpenCode** | `opencode` | `OPENCODE_API_KEY` | Free default (`big-pickle`) |
+
+Any provider string works — if you use a custom/unknown provider, set its API key and base URL in the `providers` config.
+
+## Provider Configuration
+
+You can configure API keys and base URLs per provider in `polpo.json`:
+
+```json
+{
+  "providers": {
+    "anthropic": "${ANTHROPIC_API_KEY}",
+    "openai": {
+      "apiKey": "${OPENAI_API_KEY}"
+    },
+    "custom-llm": {
+      "apiKey": "sk-custom-...",
+      "baseUrl": "https://my-proxy.example.com/v1"
+    }
+  }
+}
+```
+
+**Key resolution order:**
+1. `providers` config in `polpo.json` (supports `${ENV_VAR}` references)
+2. Standard environment variables (see table above)
+
+The shorthand `"anthropic": "sk-..."` sets just the API key. The full object form adds `baseUrl` for custom endpoints or proxies.
+
+## Orchestrator Model
+
+The orchestrator itself uses an LLM for internal tasks — plan generation, question detection, deadlock resolution, escalation decisions, and chat mode. This is separate from the models agents use.
+
+```json
+{
+  "settings": {
+    "orchestratorModel": "anthropic:claude-sonnet-4-5-20250929"
+  }
+}
+```
+
+When not set, it falls back to `POLPO_MODEL` → `opencode:big-pickle`.
+
+## Judge Model
+
+The assessment system uses a separate model for LLM-as-Judge reviews. This can be overridden independently:
+
+```
+POLPO_JUDGE_MODEL=anthropic:claude-sonnet-4-5-20250929
+```
+
+When not set, it uses the same resolution chain as the orchestrator model.
+
+## Mixing Models
+
+Each agent can use a different provider. The orchestrator validates API keys at startup and warns about missing ones.
+
+```json
+{
+  "providers": {
+    "anthropic": "${ANTHROPIC_API_KEY}",
+    "openai": "${OPENAI_API_KEY}",
+    "google": "${GEMINI_API_KEY}"
+  },
+  "agents": [
+    {
+      "name": "architect",
+      "model": "anthropic:claude-sonnet-4-5-20250929",
+      "role": "System design and architecture"
+    },
+    {
+      "name": "coder",
+      "model": "anthropic:claude-sonnet-4-5-20250929",
+      "role": "Implementation"
+    },
+    {
+      "name": "reviewer",
+      "model": "openai:o3",
+      "role": "Code review with deep reasoning"
+    },
+    {
+      "name": "fast-worker",
+      "model": "groq:llama-3.3-70b",
+      "role": "Quick tasks, boilerplate"
+    }
+  ],
+  "settings": {
+    "orchestratorModel": "google:gemini-2.5-pro"
+  }
+}
+```
+
+<Aside>
+API key validation happens at startup — Polpo checks that every model referenced by an agent, the orchestrator model, and the judge model has a corresponding API key available. Missing keys emit a warning but don't block startup.
+</Aside>
+
+## Recommended Models
+
+| Use Case | Model | Why |
+|----------|-------|-----|
+| **Free default** | `opencode:big-pickle` | No API key needed, good for experiments |
+| **Best all-round** | `anthropic:claude-sonnet-4-5-20250929` | Strong coding, follows instructions well |
+| **Most capable** | `anthropic:claude-opus-4-6` | Complex architecture, multi-step reasoning |
+| **Fast + cheap** | `anthropic:claude-haiku-4-5-20251001` | Quick tasks, boilerplate generation |
+| **Deep reasoning** | `openai:o3` | Code review, complex logic problems |
+| **Fast inference** | `groq:llama-3.3-70b` | High throughput, lower quality ceiling |
+| **Long context** | `google:gemini-2.5-pro` | Large codebases, extensive context |
+
+## Escalation Model Override
+
+When a task fails and escalates, you can override the model for the retry attempt:
+
+```json
+{
+  "retryPolicy": {
+    "escalateAfter": 2,
+    "fallbackAgent": "senior-dev",
+    "escalateModel": "anthropic:claude-opus-4-6"
+  }
+}
+```
+
+This bumps the model only for the escalation retries — the original agent keeps its configured model for normal work.

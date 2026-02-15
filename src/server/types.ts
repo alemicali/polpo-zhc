@@ -77,6 +77,18 @@ export interface AddAgentRequest {
   systemPrompt?: string;
   skills?: string[];
   maxTurns?: number;
+  // Extended tool categories
+  enableBrowser?: boolean;
+  enableHttp?: boolean;
+  enableGit?: boolean;
+  enableMultifile?: boolean;
+  enableDeps?: boolean;
+  enableExcel?: boolean;
+  enablePdf?: boolean;
+  enableDocx?: boolean;
+  enableEmail?: boolean;
+  enableAudio?: boolean;
+  enableImage?: boolean;
 }
 
 // === SSE Event ===

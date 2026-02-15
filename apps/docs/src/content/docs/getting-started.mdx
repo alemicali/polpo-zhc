@@ -18,7 +18,7 @@ import { Steps, Tabs, TabItem, Aside } from '@astrojs/starlight/components';
 1. **Clone the repository**
 
    ```bash
-   git clone https://github.com/AlessioToniworking/openpolpo.git
+   git clone https://github.com/openpolpo/openpolpo.git
    cd openpolpo
    ```
 
@@ -31,12 +31,8 @@ import { Steps, Tabs, TabItem, Aside } from '@astrojs/starlight/components';
 3. **Build the project**
 
    ```bash
-   ./node_modules/.bin/tsc
+   pnpm run build
    ```
-
-   <Aside type="caution">
-   Always use `./node_modules/.bin/tsc` to build — **not** `npx tsc`, which may pick up the wrong TypeScript package.
-   </Aside>
 
 4. **Link the CLI globally** (optional)
 
@@ -97,24 +93,25 @@ Your initial config looks like:
         "role": "Frontend developer specializing in React and TypeScript"
       }
     ]
-  }
-
-plans:
-  - group: setup-project
-    tasks:
-      - title: Create database schema
-        agent: backend-dev
-        description: |
-          Design and implement a SQLite database schema for users and posts.
-          Create migration files and a seed script.
-
-      - title: Build React UI components
-        agent: frontend-dev
-        description: |
-          Create reusable UI components using shadcn/ui:
-          - UserCard
-          - PostList
-          - CreatePostForm
+  },
+  "plans": [
+    {
+      "group": "setup-project",
+      "tasks": [
+        {
+          "title": "Create database schema",
+          "agent": "backend-dev",
+          "description": "Design and implement a SQLite database schema for users and posts. Create migration files and a seed script."
+        },
+        {
+          "title": "Build React UI components",
+          "agent": "frontend-dev",
+          "description": "Create reusable UI components using shadcn/ui: UserCard, PostList, CreatePostForm"
+        }
+      ]
+    }
+  ]
+}
 ```
 
 ## Run Your Plan
@@ -122,7 +119,7 @@ plans:
 <Tabs>
   <TabItem label="TUI (Interactive)">
     ```bash
-    polpo tui
+    polpo
     ```
     The TUI provides real-time monitoring with tabs for Dashboard, Tasks, Plans, Agents, Logs, and Chat.
   </TabItem>

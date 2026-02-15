@@ -45,44 +45,32 @@ It then determines:
 
 ### Test Command Fix
 
-```yaml
-# Before (incorrect)
-expectations:
-  - type: test
-    command: npm test -- --grep users
+```json
+// Before (incorrect)
+{ "type": "test", "command": "npm test -- --grep users" }
 
-# After (corrected)
-expectations:
-  - type: test
-    command: npm test -- --grep "user management"
+// After (corrected)
+{ "type": "test", "command": "npm test -- --grep \"user management\"" }
 ```
 
 ### File Path Fix
 
-```yaml
-# Before (wrong path)
-expectations:
-  - type: file_exists
-    paths: [src/routes/users.ts]
+```json
+// Before (wrong path)
+{ "type": "file_exists", "paths": ["src/routes/users.ts"] }
 
-# After (actual path)
-expectations:
-  - type: file_exists
-    paths: [src/api/users.ts]
+// After (actual path)
+{ "type": "file_exists", "paths": ["src/api/users.ts"] }
 ```
 
 ### Threshold Adjustment
 
-```yaml
-# Before (too strict)
-expectations:
-  - type: llm_review
-    threshold: 4.5
+```json
+// Before (too strict)
+{ "type": "llm_review", "threshold": 4.5 }
 
-# After (reasonable)
-expectations:
-  - type: llm_review
-    threshold: 3.5
+// After (reasonable)
+{ "type": "llm_review", "threshold": 3.5 }
 ```
 
 ## Flow
@@ -114,9 +102,12 @@ The judge has several safeguards to prevent incorrect corrections:
 
 The expectation judge uses the `orchestratorModel` for its LLM calls:
 
-```yaml
-settings:
-  orchestratorModel: claude-sonnet-4-5-20250929
+```json
+{
+  "settings": {
+    "orchestratorModel": "claude-sonnet-4-5-20250929"
+  }
+}
 ```
 
 <Aside type="tip">

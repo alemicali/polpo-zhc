@@ -56,6 +56,18 @@ export const AddAgentSchema = z.object({
   systemPrompt: z.string().optional(),
   skills: z.array(z.string()).optional(),
   maxTurns: z.number().int().positive().optional(),
+  // Extended tool categories
+  enableBrowser: z.boolean().optional(),
+  enableHttp: z.boolean().optional(),
+  enableGit: z.boolean().optional(),
+  enableMultifile: z.boolean().optional(),
+  enableDeps: z.boolean().optional(),
+  enableExcel: z.boolean().optional(),
+  enablePdf: z.boolean().optional(),
+  enableDocx: z.boolean().optional(),
+  enableEmail: z.boolean().optional(),
+  enableAudio: z.boolean().optional(),
+  enableImage: z.boolean().optional(),
 });
 
 export const RenameTeamSchema = z.object({

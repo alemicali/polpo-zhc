@@ -12,6 +12,9 @@ A **plan** is a group of related tasks that Polpo executes together. Plans are s
 - Multiple tasks with dependencies
 - Volatile teams (temporary agents scoped to the plan)
 - Custom assessment criteria per task
+- Quality gates that block progression until thresholds are met
+- Cron-based scheduling for recurring execution
+- Deadlines tracked by SLA monitoring
 
 ## Plan Lifecycle
 
@@ -29,63 +32,79 @@ draft → active → completed/failed/cancelled
 
 ## Plan Format
 
-Plans are created via the TUI/CLI/API. Here's an example of the structure (shown in YAML-like format for readability):
+Plans are created via the TUI/CLI/API. Here's an example of the JSON structure:
 
-```yaml
-plans:
-  - group: feature-auth
-    team:
-      - name: auth-dev
-        adapter: claude-sdk
-        description: Authentication specialist
-        volatile: true
-
-    tasks:
-      - title: Design auth schema
-        agent: auth-dev
-        description: |
-          Design the database schema for user authentication:
-          - users table with email, password_hash, role
-          - sessions table with token, expiry, user_id
-          Create migration files in src/db/migrations/.
-
-      - title: Implement JWT middleware
-        agent: auth-dev
-        description: |
-          Build Express middleware for JWT authentication.
-          Must verify tokens on protected routes.
-        dependencies:
-          - Design auth schema
-
-      - title: Write auth tests
-        agent: auth-dev
-        description: Write integration tests for the auth system
-        dependencies:
-          - Implement JWT middleware
-        expectations:
-          - type: test
-            command: npm test -- --grep auth
-            weight: 0.6
-          - type: llm_review
-            prompt: Verify tests cover login, logout, token refresh, and invalid tokens
-            weight: 0.4
+```json
+{
+  "plans": [
+    {
+      "group": "feature-auth",
+      "deadline": "2025-12-31T23:59:59Z",
+      "qualityThreshold": 3.5,
+      "team": [
+        {
+          "name": "auth-dev",
+          "adapter": "claude-sdk",
+          "description": "Authentication specialist",
+          "volatile": true
+        }
+      ],
+      "tasks": [
+        {
+          "title": "Design auth schema",
+          "agent": "auth-dev",
+          "description": "Design the database schema for user authentication: users table with email, password_hash, role; sessions table with token, expiry, user_id. Create migration files in src/db/migrations/."
+        },
+        {
+          "title": "Implement JWT middleware",
+          "agent": "auth-dev",
+          "description": "Build Express middleware for JWT authentication. Must verify tokens on protected routes.",
+          "dependsOn": ["Design auth schema"]
+        },
+        {
+          "title": "Write auth tests",
+          "agent": "auth-dev",
+          "description": "Write integration tests for the auth system",
+          "dependsOn": ["Implement JWT middleware"],
+          "expectations": [
+            {
+              "type": "test",
+              "command": "npm test -- --grep auth",
+              "weight": 0.6
+            },
+            {
+              "type": "llm_review",
+              "prompt": "Verify tests cover login, logout, token refresh, and invalid tokens",
+              "weight": 0.4
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
 ```
 
 ## Dependencies
 
-Tasks can depend on other tasks by referencing their titles:
+Tasks can depend on other tasks by referencing their titles using the `dependsOn` field:
 
-```yaml
-tasks:
-  - title: Build database layer
-    agent: backend-dev
-    description: Create SQLite database with users and posts tables
-
-  - title: Build REST API
-    agent: backend-dev
-    description: Create Express routes for CRUD operations
-    dependencies:
-      - Build database layer   # waits for this task to complete
+```json
+{
+  "tasks": [
+    {
+      "title": "Build database layer",
+      "agent": "backend-dev",
+      "description": "Create SQLite database with users and posts tables"
+    },
+    {
+      "title": "Build REST API",
+      "agent": "backend-dev",
+      "description": "Create Express routes for CRUD operations",
+      "dependsOn": ["Build database layer"]
+    }
+  ]
+}
 ```
 
 <Aside>
@@ -94,34 +113,106 @@ Dependencies are matched by **task title** within the same plan group. A task wo
 
 ## Volatile Teams
 
-The `team:` section lets you define agents that exist only for this plan:
+The `team` section lets you define agents that exist only for this plan:
 
-```yaml
-plans:
-  - group: one-off-migration
-    team:
-      - name: migration-expert
-        adapter: claude-sdk
-        description: Database migration specialist
-        volatile: true
-    tasks:
-      - title: Migrate legacy data
-        agent: migration-expert
-        description: Convert old JSON files to SQLite format
+```json
+{
+  "plans": [
+    {
+      "group": "one-off-migration",
+      "team": [
+        {
+          "name": "migration-expert",
+          "adapter": "claude-sdk",
+          "description": "Database migration specialist",
+          "volatile": true
+        }
+      ],
+      "tasks": [
+        {
+          "title": "Migrate legacy data",
+          "agent": "migration-expert",
+          "description": "Convert old JSON files to new format"
+        }
+      ]
+    }
+  ]
+}
 ```
 
 When the plan completes (all tasks done or failed), volatile agents are automatically removed from the orchestrator. This prevents agent sprawl when running many specialized plans.
 
 ### Cleanup Modes
 
-```yaml
-settings:
-  enableVolatileTeams: true          # default: true
-  volatileCleanup: "on_complete"     # default; or "manual"
+```json
+{
+  "settings": {
+    "enableVolatileTeams": true,
+    "volatileCleanup": "on_complete"
+  }
+}
 ```
 
 - `on_complete`: Agents removed immediately when their plan finishes
 - `manual`: Agents persist until explicitly removed
+
+## Quality Gates
+
+Quality gates block plan progression until preceding tasks meet a score threshold. Define checkpoints within a plan:
+
+```json
+{
+  "group": "build-feature",
+  "qualityThreshold": 3.5,
+  "qualityGates": [
+    {
+      "name": "design-review",
+      "afterTasks": ["Design API schema", "Design database schema"],
+      "minScore": 4.0
+    },
+    {
+      "name": "implementation-review",
+      "afterTasks": ["Implement API endpoints", "Implement database layer"],
+      "minScore": 3.5
+    }
+  ],
+  "tasks": [
+    { "title": "Design API schema", "agent": "architect", "description": "..." },
+    { "title": "Design database schema", "agent": "architect", "description": "..." },
+    { "title": "Implement API endpoints", "agent": "backend-dev", "description": "...", "dependsOn": ["Design API schema"] },
+    { "title": "Implement database layer", "agent": "backend-dev", "description": "...", "dependsOn": ["Design database schema"] },
+    { "title": "Write integration tests", "agent": "backend-dev", "description": "...", "dependsOn": ["Implement API endpoints", "Implement database layer"] }
+  ]
+}
+```
+
+Tasks after a quality gate won't start until all gate tasks are `done` and their average assessment score meets `minScore`. The `quality:gate` hook fires when a gate is evaluated.
+
+## Scheduling
+
+Plans can be scheduled using cron expressions:
+
+```json
+{
+  "group": "nightly-audit",
+  "schedule": "0 2 * * *",
+  "recurring": true,
+  "tasks": [
+    {
+      "title": "Run security audit",
+      "agent": "security-dev",
+      "description": "Scan codebase for vulnerabilities and generate report"
+    }
+  ]
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `schedule` | string | Cron expression (e.g., `"0 2 * * *"` for daily at 2 AM) |
+| `recurring` | boolean | If `true`, the plan re-executes on each trigger. If `false` (default), it runs once at the next scheduled time. |
+
+Scheduling requires `"enableScheduler": true` in the top-level config. The `schedule:trigger` hook fires when a scheduled plan is triggered.
 
 ## Execution
 

@@ -55,6 +55,17 @@ const PlanTeamSchema = Type.Object({
   skills: Type.Optional(Type.Array(Type.String(), { description: "Skill names" })),
   maxTurns: Type.Optional(Type.Number({ description: "Max agentic turns (default: 150)" })),
   allowedTools: Type.Optional(Type.Array(Type.String(), { description: "Restrict agent to specific tools (e.g. ['read', 'write', 'edit', 'bash'])" })),
+  enableBrowser: Type.Optional(Type.Boolean({ description: "Enable browser automation tools (navigate, click, fill, screenshot, etc.)" })),
+  enableHttp: Type.Optional(Type.Boolean({ description: "Enable HTTP/fetch tools for API calls" })),
+  enableGit: Type.Optional(Type.Boolean({ description: "Enable structured git tools (status, diff, commit, branch)" })),
+  enableMultifile: Type.Optional(Type.Boolean({ description: "Enable multi-file batch editing tools" })),
+  enableDeps: Type.Optional(Type.Boolean({ description: "Enable package manager tools (install, add, remove)" })),
+  enableExcel: Type.Optional(Type.Boolean({ description: "Enable Excel/CSV tools (read, write, query spreadsheets)" })),
+  enablePdf: Type.Optional(Type.Boolean({ description: "Enable PDF tools (read, create, merge PDFs)" })),
+  enableDocx: Type.Optional(Type.Boolean({ description: "Enable Word/DOCX tools (read, create documents)" })),
+  enableEmail: Type.Optional(Type.Boolean({ description: "Enable email tools (send emails via SMTP)" })),
+  enableAudio: Type.Optional(Type.Boolean({ description: "Enable audio tools (transcribe speech, generate speech)" })),
+  enableImage: Type.Optional(Type.Boolean({ description: "Enable image tools (generate images, analyze/describe images with vision)" })),
 });
 
 const SubmitPlanSchema = Type.Object({
@@ -152,6 +163,17 @@ export interface PlanTeamData {
   skills?: string[];
   maxTurns?: number;
   allowedTools?: string[];
+  enableBrowser?: boolean;
+  enableHttp?: boolean;
+  enableGit?: boolean;
+  enableMultifile?: boolean;
+  enableDeps?: boolean;
+  enableExcel?: boolean;
+  enablePdf?: boolean;
+  enableDocx?: boolean;
+  enableEmail?: boolean;
+  enableAudio?: boolean;
+  enableImage?: boolean;
 }
 
 export interface PlanData {

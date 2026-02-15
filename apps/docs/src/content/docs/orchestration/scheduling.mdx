@@ -1,0 +1,164 @@
+---
+title: Scheduling
+description: Cron-based and one-shot plan scheduling
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Polpo's Scheduler enables time-based execution of plans using cron expressions or one-shot ISO timestamps. It integrates directly with the orchestrator tick loop.
+
+## How It Works
+
+The Scheduler is **tick-driven** — it runs on every orchestrator tick, checks all registered schedules, and triggers plan execution when a schedule is due. There are no background timers; the orchestrator tick drives everything.
+
+```
+Orchestrator tick
+     │
+     ▼
+ Scheduler.check()
+     │
+     ├── Schedule "0 2 * * *" → next run: 02:00 → now >= 02:00? → trigger
+     │
+     └── Schedule "2026-03-01T10:00:00Z" → one-shot → now >= time? → trigger
+```
+
+## Plan Scheduling
+
+Plans can define a `schedule` field (cron expression or ISO timestamp) and an optional `recurring` flag:
+
+```json
+{
+  "name": "Nightly Test Suite",
+  "schedule": "0 2 * * *",
+  "recurring": true,
+  "tasks": [
+    { "title": "Run integration tests", "assignTo": "test-agent" },
+    { "title": "Generate coverage report", "assignTo": "report-agent" }
+  ]
+}
+```
+
+### One-Shot Scheduling
+
+Use an ISO timestamp for a single future execution:
+
+```json
+{
+  "name": "Release v2.0",
+  "schedule": "2026-03-15T14:00:00Z",
+  "tasks": [
+    { "title": "Build release artifacts", "assignTo": "build-agent" },
+    { "title": "Deploy to production", "assignTo": "devops-agent" }
+  ]
+}
+```
+
+After execution, one-shot schedules are automatically disabled.
+
+### Recurring Plans
+
+Set `recurring: true` to re-execute on every cron tick. After each execution completes, the plan is reset to `draft` status and the next run time is calculated.
+
+```json
+{
+  "name": "Daily Health Check",
+  "schedule": "30 8 * * 1-5",
+  "recurring": true,
+  "tasks": [
+    { "title": "Check service health", "assignTo": "monitoring-agent" }
+  ]
+}
+```
+
+## Cron Expression Format
+
+Polpo uses standard **5-field cron expressions**:
+
+```
+┌─────────── minute (0-59)
+│ ┌─────────── hour (0-23)
+│ │ ┌─────────── day of month (1-31)
+│ │ │ ┌─────────── month (1-12)
+│ │ │ │ ┌─────────── day of week (0-7, 0 and 7 = Sunday)
+│ │ │ │ │
+* * * * *
+```
+
+### Supported Syntax
+
+| Syntax | Example | Description |
+|--------|---------|-------------|
+| Number | `30` | Exact value |
+| Wildcard | `*` | Every value in the range |
+| Range | `1-5` | Values 1 through 5 |
+| Step | `*/15` | Every 15th value |
+| List | `1,3,5` | Values 1, 3, and 5 |
+| Range + Step | `0-30/10` | 0, 10, 20, 30 |
+
+### Examples
+
+| Expression | Description |
+|------------|-------------|
+| `0 2 * * *` | Every day at 02:00 |
+| `*/15 * * * *` | Every 15 minutes |
+| `0 9 * * 1-5` | Weekdays at 09:00 |
+| `0 0 1 * *` | First day of every month at midnight |
+| `30 8,12,18 * * *` | At 08:30, 12:30, and 18:30 daily |
+
+<Aside type="note">
+The cron parser does not support `@yearly`, `@monthly`, or other shorthand aliases. Use the 5-field format. Seconds fields and `L`/`W`/`#` modifiers are also not supported.
+</Aside>
+
+## Schedule Entry
+
+Each registered schedule is tracked as a `ScheduleEntry`:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | `string` | Unique schedule ID (`sched-{planId}`) |
+| `planId` | `string` | Plan to execute |
+| `expression` | `string` | Cron expression or ISO timestamp |
+| `recurring` | `boolean` | Whether this schedule repeats |
+| `enabled` | `boolean` | Whether the schedule is active |
+| `lastRunAt` | `string?` | ISO timestamp of last execution |
+| `nextRunAt` | `string?` | ISO timestamp of next scheduled execution |
+| `createdAt` | `string` | ISO timestamp of creation |
+
+## Hook: Cancelling Triggers
+
+The `before:schedule:trigger` hook fires before a scheduled plan is executed. Return a cancellation to prevent execution — useful for maintenance windows or conditional scheduling.
+
+The hook receives:
+
+```json
+{
+  "scheduleId": "sched-nightly-tests",
+  "planId": "nightly-tests",
+  "expression": "0 2 * * *"
+}
+```
+
+If the hook cancels, the schedule entry remains active and will try again at the next cron occurrence.
+
+## Plan State Requirements
+
+The Scheduler only triggers plans in `draft` or `completed` status:
+
+- **draft** — normal first execution
+- **completed** — recurring plans that finished their last run
+
+Plans in `active`, `failed`, or `cancelled` status are skipped on that tick. For recurring plans on `completed` status, the plan is reset to `draft` before execution.
+
+## Events
+
+| Event | Payload | Description |
+|-------|---------|-------------|
+| `schedule:created` | `{ scheduleId, planId, nextRunAt }` | A new schedule was registered |
+| `schedule:triggered` | `{ scheduleId, planId, expression }` | A schedule fired and plan execution started |
+| `schedule:completed` | `{ scheduleId, planId }` | A scheduled plan execution finished |
+
+## Initialization
+
+On startup, the Scheduler scans all plans with a `schedule` field that are in `draft` status and registers them. Plans added later (via API or TUI) are registered when saved.
+
+The check interval defaults to 30 seconds but can be configured via `checkIntervalMs` in the Scheduler constructor options.

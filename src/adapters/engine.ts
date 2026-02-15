@@ -15,7 +15,7 @@ import { createActivity } from "./registry.js";
 import { Agent } from "@mariozechner/pi-agent-core";
 import type { AgentEvent } from "@mariozechner/pi-agent-core";
 import { resolveModel, resolveApiKey } from "../llm/pi-client.js";
-import { createCodingTools } from "../tools/coding-tools.js";
+import { createCodingTools, createAllTools } from "../tools/coding-tools.js";
 import { loadAgentSkills, buildSkillPrompt } from "../llm/skills.js";
 import { McpClientManager } from "../mcp/client.js";
 import type { McpServerConfig } from "../mcp/types.js";
@@ -82,8 +82,31 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
   // Resolve model
   const model = resolveModel(agentConfig.model);
 
-  // Create coding tools scoped to working directory with path sandboxing
-  const codingTools = createCodingTools(cwd, agentConfig.allowedTools, agentConfig.allowedPaths);
+  // Create all tools scoped to working directory with path sandboxing
+  // Extended tool categories are enabled via agent config flags or by naming them in allowedTools
+  const hasExtended = agentConfig.enableBrowser || agentConfig.enableHttp || agentConfig.enableGit ||
+    agentConfig.enableMultifile || agentConfig.enableDeps || agentConfig.enableExcel ||
+    agentConfig.enablePdf || agentConfig.enableDocx || agentConfig.enableEmail ||
+    agentConfig.enableAudio || agentConfig.enableImage;
+  const codingTools = hasExtended
+    ? createAllTools({
+        cwd,
+        allowedTools: agentConfig.allowedTools,
+        allowedPaths: agentConfig.allowedPaths,
+        browserSession: agentConfig.name,
+        enableBrowser: agentConfig.enableBrowser,
+        enableHttp: agentConfig.enableHttp,
+        enableGit: agentConfig.enableGit,
+        enableMultifile: agentConfig.enableMultifile,
+        enableDeps: agentConfig.enableDeps,
+        enableExcel: agentConfig.enableExcel,
+        enablePdf: agentConfig.enablePdf,
+        enableDocx: agentConfig.enableDocx,
+        enableEmail: agentConfig.enableEmail,
+        enableAudio: agentConfig.enableAudio,
+        enableImage: agentConfig.enableImage,
+      })
+    : createCodingTools(cwd, agentConfig.allowedTools, agentConfig.allowedPaths);
 
   // MCP client manager — initialized later (async) if mcpServers are configured
   let mcpManager: McpClientManager | null = null;

@@ -32,54 +32,41 @@ A simple API project with two tasks:
 
    The `.polpo/polpo.json` file contains your team configuration. Plans are created interactively via TUI or CLI, not in the config file.
 
-   ```yaml
-   agents:
-     - name: api-dev
-       adapter: claude-sdk
-       description: >
-         Backend developer specializing in Node.js, Express, and SQLite.
-         Writes clean, well-tested code with proper error handling.
-
-   plans:
-     - group: build-api
-       tasks:
-         - title: Create database layer
-           agent: api-dev
-           description: |
-             Create a SQLite database layer for a blog application:
-             1. Install better-sqlite3
-             2. Create src/db.ts with:
-                - users table (id, name, email, created_at)
-                - posts table (id, title, body, author_id, created_at)
-             3. Create a seed script that adds sample data
-             4. Export typed query functions: getUsers, getUser, createUser, getPosts, createPost
-
-           expectations:
-             - type: file_exists
-               paths:
-                 - src/db.ts
-             - type: test
-               command: "node -e \"require('./src/db')\""
-
-         - title: Build REST endpoints
-           agent: api-dev
-           description: |
-             Build Express REST API endpoints using the database layer from src/db.ts:
-             - GET /users - list all users
-             - GET /users/:id - get single user
-             - POST /users - create user (validate email)
-             - GET /posts - list all posts (with author info)
-             - POST /posts - create post (require title and body)
-             Add proper error handling and input validation.
-           dependencies:
-             - Create database layer
-           expectations:
-             - type: file_exists
-               paths:
-                 - src/routes.ts
-             - type: llm_review
-               prompt: Verify proper input validation, error handling, and REST conventions
-               threshold: 3.5
+   ```json
+   {
+     "agents": [
+       {
+         "name": "api-dev",
+         "description": "Backend developer specializing in Node.js, Express, and SQLite. Writes clean, well-tested code with proper error handling."
+       }
+     ],
+     "plans": [
+       {
+         "group": "build-api",
+         "tasks": [
+           {
+             "title": "Create database layer",
+             "agent": "api-dev",
+             "description": "Create a SQLite database layer for a blog application:\n1. Install better-sqlite3\n2. Create src/db.ts with:\n   - users table (id, name, email, created_at)\n   - posts table (id, title, body, author_id, created_at)\n3. Create a seed script that adds sample data\n4. Export typed query functions: getUsers, getUser, createUser, getPosts, createPost",
+             "expectations": [
+               { "type": "file_exists", "paths": ["src/db.ts"] },
+               { "type": "test", "command": "node -e \"require('./src/db')\"" }
+             ]
+           },
+           {
+             "title": "Build REST endpoints",
+             "agent": "api-dev",
+             "description": "Build Express REST API endpoints using the database layer from src/db.ts:\n- GET /users - list all users\n- GET /users/:id - get single user\n- POST /users - create user (validate email)\n- GET /posts - list all posts (with author info)\n- POST /posts - create post (require title and body)\nAdd proper error handling and input validation.",
+             "dependencies": ["Create database layer"],
+             "expectations": [
+               { "type": "file_exists", "paths": ["src/routes.ts"] },
+               { "type": "llm_review", "prompt": "Verify proper input validation, error handling, and REST conventions", "threshold": 3.5 }
+             ]
+           }
+         ]
+       }
+     ]
+   }
    ```
 
 4. **Run the plan**

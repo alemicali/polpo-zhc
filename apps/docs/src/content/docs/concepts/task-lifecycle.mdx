@@ -7,32 +7,45 @@ import { Aside } from '@astrojs/starlight/components';
 
 ## State Machine
 
-Every task in Polpo moves through a well-defined set of states:
+Every task in Polpo moves through a well-defined set of 7 states:
 
 ```
                     ┌──────────┐
                     │ pending  │
                     └────┬─────┘
-                         │ assigned to agent
-                    ┌────▼─────┐
-                    │ assigned │
-                    └────┬─────┘
-                         │ runner spawned
-                  ┌──────▼───────┐
-                  │ in_progress  │
-                  └──────┬───────┘
-                         │ agent finishes
-                    ┌────▼─────┐
-              ┌─────│  review  │─────┐
-              │     └──────────┘     │
-              │ passed               │ failed
-         ┌────▼──┐            ┌──────▼──┐
-         │ done  │            │ failed  │
-         └───────┘            └────┬────┘
-                                   │ retry
-                              ┌────▼─────┐
-                              │ pending  │
-                              └──────────┘
+                         │ approval required?
+              ┌──────────┴──────────┐
+              │ yes                 │ no
+   ┌──────────▼──────────┐         │
+   │ awaiting_approval   │         │
+   └──┬─────────────┬────┘         │
+      │ approved     │ rejected/   │
+      │              │ timeout     │
+      │         ┌────▼─────┐       │
+      │         │ failed   │       │
+      │         └──────────┘       │
+      │                            │
+      └────────────┬───────────────┘
+                   │ assigned to agent
+              ┌────▼─────┐
+              │ assigned │
+              └────┬─────┘
+                   │ runner spawned
+            ┌──────▼───────┐
+            │ in_progress  │
+            └──────┬───────┘
+                   │ agent finishes
+              ┌────▼─────┐
+        ┌─────│  review  │─────┐
+        │     └──────────┘     │
+        │ passed               │ failed
+   ┌────▼──┐            ┌─────▼───┐
+   │ done  │            │ failed  │
+   └───────┘            └────┬────┘
+                             │ retry
+                        ┌────▼─────┐
+                        │ pending  │
+                        └──────────┘
 ```
 
 ## States
@@ -40,11 +53,12 @@ Every task in Polpo moves through a well-defined set of states:
 | Status | Description |
 |--------|-------------|
 | `pending` | Waiting for dependencies to complete and an agent to be available |
+| `awaiting_approval` | Task requires approval before it can be assigned; waiting for human or automated approval |
 | `assigned` | Agent selected, runner about to be spawned |
 | `in_progress` | Agent is actively working on the task |
 | `review` | Agent finished, assessment in progress |
 | `done` | Task passed assessment (or assessment skipped) |
-| `failed` | Task failed assessment or agent crashed; may be retried |
+| `failed` | Task failed assessment, agent crashed, or approval was rejected/timed out; may be retried |
 
 ## Phases
 
@@ -73,10 +87,19 @@ execution → review → [fail] → fix → review → [fail] → fix → review
 ### Happy Path
 
 1. Plan is executed → tasks created as `pending`
-2. Dependencies met → `assigned` to agent
-3. Runner spawned → `in_progress` (phase: `execution`)
-4. Agent finishes → `review` (phase: `review`)
-5. Assessment passes → `done`
+2. If approval gates are enabled → `awaiting_approval` → approved → `assigned`
+3. Otherwise, dependencies met → `assigned` to agent
+4. Runner spawned → `in_progress` (phase: `execution`)
+5. Agent finishes → `review` (phase: `review`)
+6. Assessment passes → `done`
+
+### Approval Path
+
+1. Task moves to `awaiting_approval`
+2. Human or automated approver reviews the task
+3. **Approved** → task transitions to `assigned`
+4. **Rejected** → task transitions to `failed` (may be retried)
+5. **Timeout** → task transitions to `failed` if `autoRejectOnTimeout` is enabled
 
 ### Retry Path
 
@@ -102,16 +125,30 @@ execution → review → [fail] → fix → review → [fail] → fix → review
 5. **Retry**: Failed dependency is retried
 6. **Unresolvable**: Task marked as `failed`
 
+## SLA Deadline Tracking
+
+Tasks and plans can have `deadline` fields (ISO-8601 timestamps). The SLA monitor tracks these deadlines every tick cycle and emits events:
+
+- **Warning** (`quality:sla` with `status: "warning"`) — when the configured warning threshold is reached (default: 80% of deadline elapsed)
+- **Violation** (`quality:sla` with `status: "violated"`) — when the deadline is exceeded
+
+## Quality Gates in Plans
+
+Plans can define quality gates that block task progression. When a quality gate is configured at a specific point in a plan, subsequent tasks will not start until all preceding tasks meet the required quality threshold. See [Plans](/concepts/plans/) for details.
+
 ## Configuration
 
-```yaml
-settings:
-  maxRetries: 3              # full retry attempts per task
-  maxFixAttempts: 2          # fix attempts per review cycle
-  maxQuestionRounds: 2       # auto-answer rounds per task
-  maxResolutionAttempts: 2   # deadlock resolution attempts
-  taskTimeout: 1800000       # 30 minutes (ms)
-  staleThreshold: 300000     # 5 minutes idle = stale warning
+```json
+{
+  "settings": {
+    "maxRetries": 3,
+    "maxFixAttempts": 2,
+    "maxQuestionRounds": 2,
+    "maxResolutionAttempts": 2,
+    "taskTimeout": 1800000,
+    "staleThreshold": 300000
+  }
+}
 ```
 
 ## Events
@@ -130,7 +167,10 @@ Key events during the task lifecycle:
 | `task:question` | Agent asked a question |
 | `task:answered` | Orchestrator answered the question |
 | `task:timeout` | Task exceeded `maxDuration` |
+| `approval:requested` | Task entered `awaiting_approval` |
+| `approval:resolved` | Task approval granted or denied (check `status` field) |
+| `quality:sla` | SLA warning or violation on a task deadline |
 
 <Aside>
-All state transitions are **atomic** — the task registry uses SQLite with write-ahead logging to ensure consistency even if the process crashes mid-transition.
+All state transitions are **atomic** — the task registry uses file-based stores (default) with atomic write operations to ensure consistency even if the process crashes mid-transition. SQLite and JSON are available as alternative stores.
 </Aside>

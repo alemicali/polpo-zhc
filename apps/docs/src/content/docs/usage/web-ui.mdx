@@ -1,11 +1,11 @@
 ---
 title: Web UI
-description: Next.js dashboard for Polpo
+description: Vite + React dashboard for Polpo
 ---
 
 import { Steps, Aside } from '@astrojs/starlight/components';
 
-Polpo includes a modern web dashboard built with Next.js 15 and shadcn/ui.
+Polpo includes a modern web dashboard built with Vite, React 19, and shadcn/ui.
 
 ## Setup
 
@@ -20,16 +20,16 @@ Polpo includes a modern web dashboard built with Next.js 15 and shadcn/ui.
 2. **Install web UI dependencies**
 
    ```bash
-   cd packages/web
+   cd ui
    npm install
    ```
 
 3. **Configure the server URL**
 
-   Create `packages/web/.env.local`:
+   Create `ui/.env.local`:
 
    ```env
-   NEXT_PUBLIC_POLPO_URL=http://localhost:3890
+   VITE_POLPO_URL=http://localhost:3890
    ```
 
 4. **Start the dev server**
@@ -38,7 +38,7 @@ Polpo includes a modern web dashboard built with Next.js 15 and shadcn/ui.
    npm run dev
    ```
 
-   Open `http://localhost:3000` in your browser.
+   Open `http://localhost:5173` in your browser.
 
 </Steps>
 
@@ -101,7 +101,7 @@ Connection and configuration:
 
 ## React SDK
 
-The web UI is built on the `@openpolpo/react` SDK, which provides type-safe hooks:
+The web UI is built on the `@openpolpo/react-sdk` package, which provides type-safe hooks:
 
 ```tsx
 import {
@@ -113,7 +113,7 @@ import {
   useEvents,
   useStats,
   useMemory,
-} from "@openpolpo/react";
+} from "@openpolpo/react-sdk";
 
 function App() {
   return (
@@ -144,12 +144,16 @@ Press `Ctrl+K` (or `Cmd+K`) to open the command palette with:
 
 | Component | Technology |
 |-----------|------------|
-| Framework | Next.js 15 (App Router) |
-| UI Library | shadcn/ui (zinc dark theme) |
-| State | `@openpolpo/react` SDK (SSE + `useSyncExternalStore`) |
+| Framework | Vite + React 19 |
+| Routing | React Router v7 |
+| UI Library | shadcn/ui (Radix UI primitives) |
+| State | `@openpolpo/react-sdk` (SSE + `useSyncExternalStore`) |
+| Styling | Tailwind CSS v4 |
 | Icons | Lucide React |
 | Toasts | Sonner |
-| Tables | TanStack Table |
+| Tables | cmdk (command palette) |
+| Charts | Recharts |
+| AI Chat | Vercel AI SDK (`@ai-sdk/react`) |
 
 <Aside>
 The SDK uses `useSyncExternalStore` with push-based SSE for real-time updates. No polling — events are streamed as they happen.

@@ -5,7 +5,7 @@ description: Command-line interface for Polpo
 
 import { Aside } from '@astrojs/starlight/components';
 
-Polpo provides four CLI commands: `init`, `run`, `status`, `serve`, and `tui`.
+Polpo provides five CLI commands: `init`, `run`, `status`, `serve`, and `tui`.
 
 ## `polpo init`
 
@@ -38,7 +38,7 @@ Output is streamed to stdout with color-coded status updates:
 [14:23:01] Team agents: backend-dev, frontend-dev
 
 [14:23:02] [task-1] Task added: Create database schema
-[14:23:02] [task-1] Spawning "backend-dev" (adapter: claude-sdk) for: Create database schema
+[14:23:02] [task-1] Spawning "backend-dev" for: Create database schema
 [14:24:15] [task-1] Agent finished — exit 0 (73.2s)
 [14:24:18] [task-1] PASSED (score: 4.2/5) — All checks passed
 [14:24:18] [task-1] DONE — Create database schema
@@ -57,7 +57,7 @@ polpo status [options]
 | Option | Default | Description |
 |--------|---------|-------------|
 | `-d, --dir <path>` | `.` | Path to working directory |
-| `-w, --watch` | `false` | Auto-refresh every 2 seconds |
+| `-w, --watch` | `false` | Auto-refresh every 5 seconds |
 
 In watch mode, the display shows:
 - Progress bar with done/running/pending/failed counts
@@ -76,8 +76,8 @@ polpo serve [options]
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `-p, --port <port>` | `3000` | Port to listen on |
-| `-H, --host <host>` | `0.0.0.0` | Host to bind to |
+| `-p, --port <port>` | `3890` | Port to listen on |
+| `-H, --host <host>` | `127.0.0.1` | Host to bind to |
 | `-d, --dir <path>` | `.` | Path to working directory |
 | `--api-key <key>` | — | API key for authentication (optional) |
 | `--project-id <id>` | dir name | Project ID |
@@ -105,8 +105,8 @@ All commands accept the `-d` / `--dir` flag to specify the working directory. Po
 
 ```bash
 # Run from a different directory
-polpo run -c /path/to/my-project
+polpo run -d /path/to/my-project
 
 # Serve from a specific project
-polpo serve -c ./projects/api-service --port 3890
+polpo serve -d ./projects/api-service --port 3890
 ```

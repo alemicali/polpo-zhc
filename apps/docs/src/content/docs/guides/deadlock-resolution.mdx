@@ -17,7 +17,7 @@ Without intervention, tasks B and C would be stuck forever.
 
 ## Detection
 
-On every tick (2s), the orchestrator scans for deadlocks:
+On every tick (5s), the orchestrator scans for deadlocks:
 
 1. Find all `pending` tasks
 2. Check if any depend on `failed` tasks (with max retries exhausted)
@@ -61,10 +61,13 @@ The blocked task is marked as `failed`.
 
 ## Configuration
 
-```yaml
-settings:
-  maxResolutionAttempts: 2    # attempts per blocked task (default: 2)
-  orchestratorModel: claude-sonnet-4-5-20250929  # model for resolution LLM
+```json
+{
+  "settings": {
+    "maxResolutionAttempts": 2,
+    "orchestratorModel": "claude-sonnet-4-5-20250929"
+  }
+}
 ```
 
 ## Events

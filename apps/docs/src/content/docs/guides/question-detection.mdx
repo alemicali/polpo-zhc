@@ -49,9 +49,12 @@ The answer aims to be **decisive** — it makes concrete choices rather than say
 
 ## Configuration
 
-```yaml
-settings:
-  maxQuestionRounds: 2    # auto-answer rounds per task (default: 2)
+```json
+{
+  "settings": {
+    "maxQuestionRounds": 2
+  }
+}
 ```
 
 After `maxQuestionRounds`, the task continues without further Q&A to prevent infinite loops.

@@ -1,0 +1,213 @@
+---
+title: Notification System
+description: Event-driven notification routing with channels, conditions, and templates
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Polpo includes an event-driven **NotificationRouter** that subscribes to orchestrator events, matches them against configurable rules, and dispatches notifications to external channels.
+
+## Architecture
+
+The notification system has three layers:
+
+1. **Channels** — adapters that deliver messages to external services (Slack, Telegram, Email, Webhook)
+2. **Rules** — event pattern + optional condition + target channels
+3. **Router** — glue that listens to orchestrator events, evaluates rules, and dispatches
+
+```
+Orchestrator Events
+       │
+       ▼
+ NotificationRouter
+       │
+       ├── Rule: "task:*" where status == "failed" → #slack-alerts
+       ├── Rule: "sla:**" → #ops-email
+       └── Rule: "escalation:human" → #telegram-oncall
+```
+
+## Configuration
+
+Notifications are configured under `settings.notifications` in your Polpo config:
+
+```json
+{
+  "settings": {
+    "notifications": {
+      "channels": {
+        "slack-alerts": {
+          "type": "slack",
+          "webhookUrl": "https://hooks.slack.com/services/T00/B00/xxx"
+        },
+        "ops-email": {
+          "type": "email",
+          "provider": "smtp",
+          "host": "smtp.example.com",
+          "port": 587,
+          "from": "polpo@example.com",
+          "to": ["ops@example.com"]
+        },
+        "telegram-oncall": {
+          "type": "telegram",
+          "botToken": "${TELEGRAM_BOT_TOKEN}",
+          "chatId": "-1001234567890"
+        },
+        "webhook-pagerduty": {
+          "type": "webhook",
+          "url": "https://events.pagerduty.com/v2/enqueue",
+          "headers": {
+            "Authorization": "Token token=${PD_TOKEN}"
+          }
+        }
+      },
+      "rules": [
+        {
+          "id": "failed-tasks",
+          "name": "Notify on task failure",
+          "events": ["task:transition"],
+          "condition": { "field": "to", "op": "==", "value": "failed" },
+          "channels": ["slack-alerts"],
+          "severity": "critical"
+        },
+        {
+          "id": "sla-warnings",
+          "name": "SLA approaching deadline",
+          "events": ["sla:warning", "sla:violated"],
+          "channels": ["ops-email", "slack-alerts"],
+          "severity": "warning",
+          "cooldownMs": 300000
+        }
+      ]
+    }
+  }
+}
+```
+
+## Channel Adapters
+
+Each channel type requires specific configuration fields:
+
+| Channel | Required Fields | Description |
+|---------|----------------|-------------|
+| `slack` | `webhookUrl` | Posts to a Slack incoming webhook |
+| `telegram` | `botToken`, `chatId` | Sends via Telegram Bot API |
+| `email` | `provider`, `to`, `host`, `port`, `from` | SMTP email delivery |
+| `webhook` | `url` | Generic HTTP POST with JSON payload |
+
+The `webhook` type also accepts optional `headers` for authentication. API keys and tokens support `${ENV_VAR}` syntax for environment variable references.
+
+## Event Pattern Matching
+
+Rules use **glob-style patterns** to match events:
+
+| Pattern | Matches |
+|---------|---------|
+| `task:created` | Exactly `task:created` |
+| `task:*` | `task:created`, `task:transition`, `task:timeout`, etc. |
+| `sla:**` | All SLA events at any depth |
+| `*` | Every event |
+
+The router resolves glob patterns against all known event names at startup and subscribes to each matching concrete event.
+
+## Condition DSL
+
+Rules can include an optional **JSON condition** that filters on the event payload. Conditions are pure data — no `eval()`, no string parsing.
+
+### Simple comparison
+
+```json
+{ "field": "to", "op": "==", "value": "failed" }
+```
+
+### Supported operators
+
+| Operator | Description |
+|----------|-------------|
+| `==` | Loose equality |
+| `!=` | Loose inequality |
+| `>`, `>=`, `<`, `<=` | Numeric comparison |
+| `includes` | String contains or array includes |
+| `not_includes` | Negation of includes |
+| `exists` | Field is not null/undefined |
+| `not_exists` | Field is null/undefined |
+
+### Logical combinators
+
+```json
+{
+  "and": [
+    { "field": "to", "op": "==", "value": "failed" },
+    { "field": "task.retries", "op": ">=", "value": 3 }
+  ]
+}
+```
+
+```json
+{
+  "or": [
+    { "field": "severity", "op": "==", "value": "critical" },
+    { "field": "level", "op": ">=", "value": 3 }
+  ]
+}
+```
+
+```json
+{
+  "not": { "field": "status", "op": "==", "value": "done" }
+}
+```
+
+Fields use **dot-path resolution** on the event data (e.g. `task.status`, `result.assessment.globalScore`).
+
+## Cooldown / Throttling
+
+Each rule can set `cooldownMs` to prevent notification storms. If a rule fires and its cooldown has not elapsed since the last dispatch, the notification is silently dropped.
+
+```json
+{
+  "id": "task-failure-alert",
+  "name": "Task failures",
+  "events": ["task:transition"],
+  "condition": { "field": "to", "op": "==", "value": "failed" },
+  "channels": ["slack-alerts"],
+  "cooldownMs": 60000
+}
+```
+
+## Template System
+
+The router generates default titles and bodies for each event type using built-in templates with severity emoji prefixes. You can override this per-rule with a `template` field using `{{variable}}` interpolation:
+
+```json
+{
+  "id": "custom-alert",
+  "name": "Custom task alert",
+  "events": ["task:transition"],
+  "channels": ["slack-alerts"],
+  "template": "Task {{taskId}} moved to {{to}} (agent: {{agentName}})"
+}
+```
+
+Template variables are resolved from the event payload using dot-path access.
+
+## Dynamic Rule Registration
+
+Rules can be added programmatically at runtime via `addRule()`. This is used internally by:
+
+- **SLAMonitor** — registers rules for `warningChannels` and `violationChannels`
+- **QualityController** — registers rules for per-gate `notifyChannels`
+
+When a rule is added after the router has started, the router automatically subscribes to any new event patterns.
+
+## Events
+
+The notification system emits its own events:
+
+| Event | Payload | Description |
+|-------|---------|-------------|
+| `notification:sent` | `{ ruleId, channel, event }` | Notification delivered successfully |
+| `notification:failed` | `{ ruleId, channel, error }` | Channel delivery failed |
+
+<Aside type="tip">
+Use `testChannels()` on the NotificationRouter to verify all configured channels are reachable before starting the orchestrator.
+</Aside>

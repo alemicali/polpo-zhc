@@ -1,0 +1,165 @@
+---
+title: Escalation Chain
+description: Multi-level escalation from agent retry to human intervention
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+When a task fails repeatedly, Polpo's escalation chain progressively increases the intervention level — from automated retries up to human-in-the-loop approval.
+
+## The 4-Level Chain
+
+| Level | Handler | Description |
+|-------|---------|-------------|
+| 0 | `agent` | Retry with the same agent (handled by the retry system) |
+| 1 | `agent` | Reassign to a fallback agent |
+| 2 | `orchestrator` | LLM analyzes the failure and reformulates the task |
+| 3 | `human` | Human-in-the-loop — creates an approval request |
+
+Levels 0 and 1 are handled by the existing retry and fallback agent systems. The **EscalationManager** takes over from Level 2 onward, intercepting `maxRetries` failures via the `before:task:fail` lifecycle hook.
+
+```
+Task fails (maxRetries exhausted)
+     │
+     ▼
+ before:task:fail hook
+     │
+     ├── Level 2: Orchestrator LLM reformulates → retry
+     │        ↓ (still fails)
+     └── Level 3: Human approval → awaiting_approval
+```
+
+## How It Hooks In
+
+The EscalationManager registers a `before:task:fail` hook at priority `60` (after approval gates at 50, before user hooks at 100). It only intercepts failures where `reason === "maxRetries"` — other failure types pass through normally.
+
+When the hook fires, it **cancels** the failure transition and starts the escalation process asynchronously.
+
+## Level Details
+
+### Level 0 — Same Agent Retry
+
+Handled by the standard retry system (`AssessmentOrchestrator`). The agent retries the task up to `maxRetries` times. Not managed by the EscalationManager.
+
+### Level 1 — Fallback Agent
+
+Handled by the `RetryPolicy` fallback agent configuration. The task is reassigned to a different agent. If `target` is specified in the escalation level, the EscalationManager can also perform this reassignment directly.
+
+```json
+{
+  "level": 1,
+  "handler": "agent",
+  "target": "senior-developer",
+  "timeoutMs": 300000
+}
+```
+
+### Level 2 — Orchestrator LLM Reformulation
+
+The orchestrator's LLM analyzes the failure context (exit code, stderr, assessment results) and generates a reformulated task description. The task is then retried with:
+
+- The new description (prefixed with `[Escalation: Reformulated by orchestrator]`)
+- Reset fix attempts
+- One additional retry attempt
+
+```json
+{
+  "level": 2,
+  "handler": "orchestrator",
+  "timeoutMs": 600000,
+  "notifyChannels": ["slack-alerts"]
+}
+```
+
+The failure context sent to the LLM includes:
+- Task title and original description
+- Agent name and retry count
+- Exit code and last 500 characters of stderr
+- Assessment scores and failed checks
+
+### Level 3 — Human-in-the-Loop
+
+The task transitions to `awaiting_approval`. A detailed notification is sent with:
+- Full failure context
+- Available actions: approve (retry), reject (permanent failure), modify (update via API)
+
+```json
+{
+  "level": 3,
+  "handler": "human",
+  "notifyChannels": ["slack-alerts", "telegram-oncall"]
+}
+```
+
+If an `ApprovalManager` is available, a formal approval request is created that can be resolved via the API or TUI.
+
+## Configuration
+
+The escalation policy is configured under `settings.escalationPolicy`:
+
+```json
+{
+  "settings": {
+    "escalationPolicy": {
+      "name": "default",
+      "levels": [
+        {
+          "level": 0,
+          "handler": "agent"
+        },
+        {
+          "level": 1,
+          "handler": "agent",
+          "target": "senior-developer",
+          "timeoutMs": 300000
+        },
+        {
+          "level": 2,
+          "handler": "orchestrator",
+          "timeoutMs": 600000,
+          "notifyChannels": ["slack-alerts"]
+        },
+        {
+          "level": 3,
+          "handler": "human",
+          "notifyChannels": ["slack-alerts", "telegram-oncall"]
+        }
+      ]
+    }
+  }
+}
+```
+
+## Level Properties
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `level` | `number` | Level number (0 = first) |
+| `handler` | `"agent" \| "orchestrator" \| "human"` | Who handles this level |
+| `target` | `string` | Target agent name (for `agent` handler) |
+| `timeoutMs` | `number` | Timeout before advancing to next level (ms) |
+| `notifyChannels` | `string[]` | Notification channels to alert at this level |
+
+## Level Advancement
+
+Each level has an optional `timeoutMs`. If the task is still stuck (pending, in_progress, or failed) when the timeout fires, the manager automatically advances to the next level.
+
+If all levels are exhausted without resolution, the task fails permanently with reason `"escalation exhausted"`.
+
+## Events
+
+| Event | Payload | Description |
+|-------|---------|-------------|
+| `escalation:triggered` | `{ taskId, level, handler, target }` | An escalation level was activated |
+| `escalation:resolved` | `{ taskId, level, action }` | An escalation level completed its action |
+| `escalation:human` | `{ taskId, message, channels }` | Human intervention requested (picked up by NotificationRouter) |
+
+<Aside type="tip">
+The `escalation:human` event includes a `channels` field. If you have notification rules that match this event, you can route human escalation alerts to specific Slack channels, email addresses, or PagerDuty.
+</Aside>
+
+## Integration with Other Systems
+
+- **Approval Gates** — Level 3 creates an approval request, enabling resolution through the same API/TUI flow as configured gates
+- **Notifications** — `escalation:human` events with `notifyChannels` are picked up by the NotificationRouter for delivery
+- **Quality Metrics** — Retries triggered by escalation are tracked in the quality metrics system

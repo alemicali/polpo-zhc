@@ -1,6 +1,6 @@
 ---
-title: Coding Tools Reference
-description: Built-in tools for the native adapter
+title: Tools Reference
+description: All built-in tools — coding, browser, git, HTTP, and more
 ---
 
 import { Aside } from '@astrojs/starlight/components';
@@ -323,6 +323,168 @@ If `allowedTools` is not specified, all 7 tools are available.
 // Good: Specific search
 { pattern: "async function handle.*Request", include: "*.ts" }
 ```
+
+---
+
+## Extended Tool Categories
+
+Beyond the 7 core coding tools, Polpo offers 11 optional tool categories that can be enabled per-agent. Each category adds specialized tools for a specific domain — 52 extended tools total.
+
+Enable them in agent config:
+
+```json
+{
+  "name": "full-stack-dev",
+  "enableBrowser": true,
+  "enableGit": true,
+  "enableHttp": true,
+  "enableMultifile": true,
+  "enableDeps": true,
+  "enableExcel": true,
+  "enablePdf": true,
+  "enableDocx": true,
+  "enableEmail": true,
+  "enableAudio": true,
+  "enableImage": true
+}
+```
+
+### Browser Tools (18 tools) — `enableBrowser`
+
+Browser automation powered by the `agent-browser` CLI. Each agent gets its own isolated browser session.
+
+| Tool | Description |
+|------|-------------|
+| `browser_navigate` | Open a URL |
+| `browser_snapshot` | Get accessibility tree with element refs |
+| `browser_click` | Click an element by ref or CSS selector |
+| `browser_fill` | Clear and type into an input field |
+| `browser_type` | Type text without clearing (append) |
+| `browser_press` | Press keyboard key (supports modifiers) |
+| `browser_screenshot` | Take a screenshot, save to file |
+| `browser_get` | Get text/html/value/title/url from page or element |
+| `browser_select` | Select a dropdown option |
+| `browser_hover` | Hover over an element |
+| `browser_scroll` | Scroll page (up/down/left/right) |
+| `browser_wait` | Wait for element/text/URL/load state |
+| `browser_eval` | Execute JavaScript in page context |
+| `browser_close` | Close the browser session |
+| `browser_back` | Navigate back |
+| `browser_forward` | Navigate forward |
+| `browser_reload` | Reload current page |
+| `browser_tabs` | Manage tabs (list/new/switch/close) |
+
+### Git Tools (7 tools) — `enableGit`
+
+Structured git operations using safe environment (no API key leakage).
+
+| Tool | Description |
+|------|-------------|
+| `git_status` | Working tree status with branch, staged/modified/untracked counts |
+| `git_diff` | Show diffs (staged, unstaged, against commit/branch) |
+| `git_log` | Commit history with filters (count, author, since, file) |
+| `git_commit` | Stage files and create a commit |
+| `git_branch` | List, create, switch, or delete branches |
+| `git_stash` | Push, pop, list, or drop stashes |
+| `git_show` | Show a specific commit's details and changes |
+
+### HTTP Tools (2 tools) — `enableHttp`
+
+HTTP/fetch tools for network access. Response limit: 100 KB, timeout: 30s.
+
+| Tool | Description |
+|------|-------------|
+| `http_fetch` | Make HTTP requests (GET/POST/PUT/DELETE/PATCH/HEAD/OPTIONS) |
+| `http_download` | Download a file from URL to local path (sandbox-enforced) |
+
+### Multi-file Tools (3 tools) — `enableMultifile`
+
+Batch file operations with path sandboxing. Limits: 50 files, 500 replacements.
+
+| Tool | Description |
+|------|-------------|
+| `multi_edit` | Apply multiple find-and-replace edits across files atomically |
+| `regex_replace` | Regex find-and-replace across files in a directory |
+| `bulk_rename` | Rename files by regex pattern (supports dry run) |
+
+### Dependency Tools (6 tools) — `enableDeps`
+
+Package management for npm/pnpm/yarn/bun. Auto-detects package manager from lockfiles.
+
+| Tool | Description |
+|------|-------------|
+| `dep_install` | Install all project dependencies |
+| `dep_add` | Add packages (supports `--dev`, `--exact`) |
+| `dep_remove` | Remove packages |
+| `dep_outdated` | List packages with newer versions |
+| `dep_audit` | Security vulnerability audit (optional auto-fix) |
+| `dep_info` | Show npm registry info for a package |
+
+### Excel/CSV Tools (4 tools) — `enableExcel`
+
+Read, write, and query Excel (.xlsx) and CSV files.
+
+| Tool | Description |
+|------|-------------|
+| `excel_read` | Read data with column headers, supports sheet and range selection |
+| `excel_write` | Create Excel or CSV from structured data |
+| `excel_query` | Filter, sort, and select columns (like a simple SQL SELECT) |
+| `excel_info` | Sheet names, row/column counts, data types |
+
+### PDF Tools (4 tools) — `enablePdf`
+
+Read, create, merge, and inspect PDF documents.
+
+| Tool | Description |
+|------|-------------|
+| `pdf_read` | Extract text from all or specific pages |
+| `pdf_create` | Create a PDF with text content and font options |
+| `pdf_merge` | Merge multiple PDFs into one |
+| `pdf_info` | Page count, title, author, dimensions |
+
+### Word/DOCX Tools (2 tools) — `enableDocx`
+
+Read and create Word documents with formatting.
+
+| Tool | Description |
+|------|-------------|
+| `docx_read` | Extract content as plain text, Markdown, or HTML |
+| `docx_create` | Create documents with headings, paragraphs, lists, formatting |
+
+### Email Tools (2 tools) — `enableEmail`
+
+Send emails via SMTP. Requires SMTP environment variables.
+
+| Tool | Description |
+|------|-------------|
+| `email_send` | Send email with HTML, attachments, to/cc/bcc |
+| `email_verify` | Verify SMTP connection and credentials |
+
+### Audio Tools (2 tools) — `enableAudio`
+
+Speech-to-text and text-to-speech. Requires `OPENAI_API_KEY`, `DEEPGRAM_API_KEY`, or `ELEVENLABS_API_KEY`.
+
+| Tool | Description |
+|------|-------------|
+| `audio_transcribe` | Transcribe audio to text (Whisper or Deepgram Nova). Supports language and prompt hints |
+| `audio_speak` | Generate speech from text (OpenAI TTS or ElevenLabs). Configurable voice, speed, and style |
+
+**Providers:**
+- **Transcription**: OpenAI Whisper (`openai`, default) or Deepgram Nova (`deepgram`)
+- **TTS**: OpenAI (`openai`, default) or ElevenLabs (`elevenlabs`)
+
+### Image Tools (2 tools) — `enableImage`
+
+AI image generation and analysis. Requires `OPENAI_API_KEY`, `REPLICATE_API_TOKEN`, or `ANTHROPIC_API_KEY`.
+
+| Tool | Description |
+|------|-------------|
+| `image_generate` | Generate images from text prompts (OpenAI gpt-image-1/DALL-E or Replicate Flux). Configurable size, quality, style |
+| `image_analyze` | Analyze images with AI vision (OpenAI GPT-4o or Claude). Describe, OCR, answer questions, read charts |
+
+**Providers:**
+- **Generation**: OpenAI (`openai`, default) or Replicate Flux (`replicate`)
+- **Analysis**: OpenAI (`openai`, default) or Anthropic Claude (`anthropic`)
 
 ---
 

@@ -337,3 +337,170 @@ export function createCodingTools(cwd: string, allowedTools?: string[], allowedP
 
   return names.map(n => factories[n]());
 }
+
+// === Extended Tools Factory ===
+
+import { createBrowserTools, ALL_BROWSER_TOOL_NAMES } from "./browser-tools.js";
+import { createHttpTools, ALL_HTTP_TOOL_NAMES } from "./http-tools.js";
+import { createGitTools, ALL_GIT_TOOL_NAMES } from "./git-tools.js";
+import { createMultifileTools, ALL_MULTIFILE_TOOL_NAMES } from "./multifile-tools.js";
+import { createDepTools, ALL_DEP_TOOL_NAMES } from "./dep-tools.js";
+import { createExcelTools, ALL_EXCEL_TOOL_NAMES } from "./excel-tools.js";
+import { createPdfTools, ALL_PDF_TOOL_NAMES } from "./pdf-tools.js";
+import { createDocxTools, ALL_DOCX_TOOL_NAMES } from "./docx-tools.js";
+import { createEmailTools, ALL_EMAIL_TOOL_NAMES } from "./email-tools.js";
+import { createAudioTools, ALL_AUDIO_TOOL_NAMES } from "./audio-tools.js";
+import { createImageTools, ALL_IMAGE_TOOL_NAMES } from "./image-tools.js";
+
+export type { BrowserToolName } from "./browser-tools.js";
+export type { HttpToolName } from "./http-tools.js";
+export type { GitToolName } from "./git-tools.js";
+export type { MultifileToolName } from "./multifile-tools.js";
+export type { DepToolName } from "./dep-tools.js";
+export type { ExcelToolName } from "./excel-tools.js";
+export type { PdfToolName } from "./pdf-tools.js";
+export type { DocxToolName } from "./docx-tools.js";
+export type { EmailToolName } from "./email-tools.js";
+export type { AudioToolName } from "./audio-tools.js";
+export type { ImageToolName } from "./image-tools.js";
+
+/** All known tool names across all categories */
+export type ExtendedToolName = CodingToolName
+  | import("./browser-tools.js").BrowserToolName
+  | import("./http-tools.js").HttpToolName
+  | import("./git-tools.js").GitToolName
+  | import("./multifile-tools.js").MultifileToolName
+  | import("./dep-tools.js").DepToolName
+  | import("./excel-tools.js").ExcelToolName
+  | import("./pdf-tools.js").PdfToolName
+  | import("./docx-tools.js").DocxToolName
+  | import("./email-tools.js").EmailToolName
+  | import("./audio-tools.js").AudioToolName
+  | import("./image-tools.js").ImageToolName;
+
+/** All available tool names for documentation/config validation */
+export const ALL_EXTENDED_TOOL_NAMES: string[] = [
+  ...ALL_TOOL_NAMES,
+  ...ALL_BROWSER_TOOL_NAMES,
+  ...ALL_HTTP_TOOL_NAMES,
+  ...ALL_GIT_TOOL_NAMES,
+  ...ALL_MULTIFILE_TOOL_NAMES,
+  ...ALL_DEP_TOOL_NAMES,
+  ...ALL_EXCEL_TOOL_NAMES,
+  ...ALL_PDF_TOOL_NAMES,
+  ...ALL_DOCX_TOOL_NAMES,
+  ...ALL_EMAIL_TOOL_NAMES,
+  ...ALL_AUDIO_TOOL_NAMES,
+  ...ALL_IMAGE_TOOL_NAMES,
+];
+
+export interface CreateAllToolsOptions {
+  /** Working directory for the agent */
+  cwd: string;
+  /** Tool name filter — only include tools with these names. If omitted, includes core coding tools + explicitly enabled categories. */
+  allowedTools?: string[];
+  /** Filesystem sandbox paths */
+  allowedPaths?: string[];
+  /** Browser session name for isolation (default: "default") */
+  browserSession?: string;
+  /** Enable browser tools (requires agent-browser installed). Default: false — must be explicitly enabled. */
+  enableBrowser?: boolean;
+  /** Enable HTTP/fetch tools. Default: false — must be explicitly enabled. */
+  enableHttp?: boolean;
+  /** Enable git tools. Default: false — must be explicitly enabled. */
+  enableGit?: boolean;
+  /** Enable multi-file editing tools. Default: false — must be explicitly enabled. */
+  enableMultifile?: boolean;
+  /** Enable dependency management tools. Default: false — must be explicitly enabled. */
+  enableDeps?: boolean;
+  /** Enable Excel/CSV tools (requires exceljs). Default: false. */
+  enableExcel?: boolean;
+  /** Enable PDF tools (requires pdf-lib). Default: false. */
+  enablePdf?: boolean;
+  /** Enable Word/DOCX tools (requires docx, mammoth). Default: false. */
+  enableDocx?: boolean;
+  /** Enable email tools (requires nodemailer + SMTP config). Default: false. */
+  enableEmail?: boolean;
+  /** Enable audio tools for STT/TTS (requires OPENAI_API_KEY / DEEPGRAM_API_KEY / ELEVENLABS_API_KEY). Default: false. */
+  enableAudio?: boolean;
+  /** Enable image tools for generation/vision (requires OPENAI_API_KEY / REPLICATE_API_TOKEN / ANTHROPIC_API_KEY). Default: false. */
+  enableImage?: boolean;
+}
+
+/**
+ * Create all available tools for an agent, including extended tool categories.
+ *
+ * By default, only core coding tools (read, write, edit, bash, glob, grep, ls) are included.
+ * Extended categories must be explicitly enabled via options or by including their names in allowedTools.
+ *
+ * When allowedTools is provided, it acts as a filter across ALL categories — any tool whose name
+ * appears in allowedTools will be included (and its category auto-enabled).
+ */
+export function createAllTools(options: CreateAllToolsOptions): AgentTool<any>[] {
+  const { cwd, allowedTools, allowedPaths, browserSession } = options;
+  const tools: AgentTool<any>[] = [];
+
+  // Helper: check if any tool from a category is in the allowedTools list
+  const categoryRequested = (names: readonly string[]) =>
+    allowedTools?.some(a => names.some(n => n === a.toLowerCase()));
+
+  // Core coding tools (always included unless filtered out)
+  tools.push(...createCodingTools(cwd, allowedTools, allowedPaths));
+
+  // Browser tools
+  if (options.enableBrowser || categoryRequested(ALL_BROWSER_TOOL_NAMES)) {
+    tools.push(...createBrowserTools(cwd, browserSession, allowedTools));
+  }
+
+  // HTTP tools
+  if (options.enableHttp || categoryRequested(ALL_HTTP_TOOL_NAMES)) {
+    tools.push(...createHttpTools(cwd, allowedPaths, allowedTools));
+  }
+
+  // Git tools
+  if (options.enableGit || categoryRequested(ALL_GIT_TOOL_NAMES)) {
+    tools.push(...createGitTools(cwd, allowedTools));
+  }
+
+  // Multi-file tools
+  if (options.enableMultifile || categoryRequested(ALL_MULTIFILE_TOOL_NAMES)) {
+    tools.push(...createMultifileTools(cwd, allowedPaths, allowedTools));
+  }
+
+  // Dependency tools
+  if (options.enableDeps || categoryRequested(ALL_DEP_TOOL_NAMES)) {
+    tools.push(...createDepTools(cwd, allowedTools));
+  }
+
+  // Excel/CSV tools
+  if (options.enableExcel || categoryRequested(ALL_EXCEL_TOOL_NAMES)) {
+    tools.push(...createExcelTools(cwd, allowedPaths, allowedTools));
+  }
+
+  // PDF tools
+  if (options.enablePdf || categoryRequested(ALL_PDF_TOOL_NAMES)) {
+    tools.push(...createPdfTools(cwd, allowedPaths, allowedTools));
+  }
+
+  // Word/DOCX tools
+  if (options.enableDocx || categoryRequested(ALL_DOCX_TOOL_NAMES)) {
+    tools.push(...createDocxTools(cwd, allowedPaths, allowedTools));
+  }
+
+  // Email tools
+  if (options.enableEmail || categoryRequested(ALL_EMAIL_TOOL_NAMES)) {
+    tools.push(...createEmailTools(cwd, allowedPaths, allowedTools));
+  }
+
+  // Audio tools (STT/TTS)
+  if (options.enableAudio || categoryRequested(ALL_AUDIO_TOOL_NAMES)) {
+    tools.push(...createAudioTools(cwd, allowedPaths, allowedTools));
+  }
+
+  // Image tools (generation/vision)
+  if (options.enableImage || categoryRequested(ALL_IMAGE_TOOL_NAMES)) {
+    tools.push(...createImageTools(cwd, allowedPaths, allowedTools));
+  }
+
+  return tools;
+}

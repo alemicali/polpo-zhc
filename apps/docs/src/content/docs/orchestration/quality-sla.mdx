@@ -1,0 +1,201 @@
+---
+title: Quality & SLA
+description: Quality gates, plan-level thresholds, and SLA deadline monitoring
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Polpo provides two complementary systems for ensuring work quality and timeline adherence: the **QualityController** for quality gates and metrics, and the **SLAMonitor** for deadline tracking.
+
+## Quality Controller
+
+The QualityController manages quality gates within plans, aggregates quality metrics across tasks and agents, and enforces plan-level quality thresholds.
+
+### Quality Gates
+
+Quality gates are checkpoints defined in plan documents that control task execution flow. A gate sits between two phases of tasks: it waits for `afterTasks` to complete, evaluates pass/fail criteria, and then either unblocks `blocksTasks` or halts the plan.
+
+```
+Phase 1 Tasks                Quality Gate              Phase 2 Tasks
+┌──────────┐                ┌────────────┐            ┌──────────┐
+│ task-a    │──completed──▶ │ "review"   │──passed──▶ │ task-c   │
+│ task-b    │──completed──▶ │ minScore:4 │            │ task-d   │
+└──────────┘                └────────────┘            └──────────┘
+```
+
+### Gate Properties
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `name` | `string` | Gate identifier |
+| `afterTasks` | `string[]` | Tasks that must complete before evaluation |
+| `blocksTasks` | `string[]` | Tasks blocked until this gate passes |
+| `minScore` | `number` | Minimum average score of `afterTasks` to pass (1-5 scale) |
+| `requireAllPassed` | `boolean` | All `afterTasks` must have status `done` (not `failed`) |
+| `notifyChannels` | `string[]` | Notification channels to alert on pass/fail |
+
+### Gate Configuration in Plans
+
+Quality gates are defined directly in plan documents:
+
+```json
+{
+  "name": "Build Feature X",
+  "tasks": [
+    { "title": "Implement core module", "assignTo": "backend-agent" },
+    { "title": "Write unit tests", "assignTo": "test-agent" },
+    { "title": "Integration testing", "assignTo": "test-agent" },
+    { "title": "Deploy to staging", "assignTo": "devops-agent" }
+  ],
+  "qualityGates": [
+    {
+      "name": "code-review",
+      "afterTasks": ["Implement core module", "Write unit tests"],
+      "blocksTasks": ["Integration testing"],
+      "minScore": 4.0,
+      "requireAllPassed": true,
+      "notifyChannels": ["slack-alerts"]
+    },
+    {
+      "name": "integration-check",
+      "afterTasks": ["Integration testing"],
+      "blocksTasks": ["Deploy to staging"],
+      "requireAllPassed": true
+    }
+  ]
+}
+```
+
+### Gate Evaluation
+
+Gates are evaluated by the PlanExecutor when checking if blocked tasks can proceed. The evaluation:
+
+1. Checks that all `afterTasks` are in a terminal state (done or failed)
+2. If `requireAllPassed` is set, verifies none of the `afterTasks` failed
+3. If `minScore` is set, computes the average assessment score across `afterTasks` and compares against the threshold
+
+Gates are evaluated at most once — after passing, they are cached and not re-evaluated.
+
+### Gate Notifications
+
+When `notifyChannels` is configured on a gate, the QualityController dynamically registers notification rules for `quality:gate:passed` and `quality:gate:failed` events routed to those channels.
+
+### Plan Quality Threshold
+
+Plans can define a `qualityThreshold` — a minimum weighted average score across all completed tasks. This is checked when a plan finishes.
+
+The scoring uses **weighted averages** based on task priority:
+
+```json
+{
+  "name": "Release Pipeline",
+  "qualityThreshold": 3.5,
+  "tasks": [
+    { "title": "Critical path", "priority": 2.0, "assignTo": "agent-a" },
+    { "title": "Nice-to-have", "priority": 0.5, "assignTo": "agent-b" }
+  ]
+}
+```
+
+If the weighted average score falls below the threshold, a `quality:threshold:failed` event is emitted.
+
+### Quality Metrics
+
+The QualityController aggregates metrics per entity (task, agent, or plan):
+
+| Metric | Description |
+|--------|-------------|
+| `totalAssessments` | Total assessments run |
+| `passedAssessments` | Assessments that passed |
+| `avgScore` | Average global score (1-5) |
+| `minScore` / `maxScore` | Score range |
+| `dimensionScores` | Per-dimension average scores |
+| `totalRetries` | Total retries consumed |
+| `totalFixes` | Total fix attempts consumed |
+| `deadlinesMet` / `deadlinesMissed` | SLA tracking |
+
+---
+
+## SLA Monitor
+
+The SLAMonitor tracks deadlines on tasks and plans, emitting warning and violation events as deadlines approach or pass.
+
+### How It Works
+
+The monitor runs on the orchestrator tick loop, checking all active tasks and plans with deadlines at a configurable interval (default: 30 seconds). It tracks the percentage of deadline budget consumed and emits events accordingly.
+
+```
+Task created (with deadline)
+     │
+     ├── 80% of budget elapsed → sla:warning
+     │
+     ├── Deadline passed → sla:violated
+     │                     (optionally force-fail)
+     │
+     └── Task completes before deadline → sla:met
+```
+
+### SLA Configuration
+
+SLA monitoring is configured under `settings.sla`:
+
+```json
+{
+  "settings": {
+    "sla": {
+      "warningThreshold": 0.8,
+      "checkIntervalMs": 30000,
+      "warningChannels": ["slack-alerts"],
+      "violationChannels": ["slack-alerts", "pagerduty"],
+      "violationAction": "notify"
+    }
+  }
+}
+```
+
+### SLA Properties
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `warningThreshold` | `number` | `0.8` | Fraction of deadline elapsed before warning (0-1) |
+| `checkIntervalMs` | `number` | `30000` | Check interval in milliseconds |
+| `warningChannels` | `string[]` | `[]` | Channels for warning notifications |
+| `violationChannels` | `string[]` | `[]` | Channels for violation notifications |
+| `violationAction` | `"notify" \| "fail"` | `"notify"` | Action on violation |
+
+### Violation Actions
+
+| Action | Behavior |
+|--------|----------|
+| `"notify"` | Emit `sla:violated` event only (default) |
+| `"fail"` | Emit event and force-fail the task |
+
+<Aside type="caution">
+The `"fail"` violation action immediately transitions the task to `failed` status, bypassing normal retry and escalation flows. Use with care.
+</Aside>
+
+### Channel Routing
+
+When `warningChannels` or `violationChannels` are configured, the SLAMonitor dynamically registers notification rules:
+
+- `sla:warning` events route to `warningChannels`
+- `sla:violated` events route to `violationChannels`
+- `sla:met` events also route to `violationChannels` (positive confirmation to the same audience)
+
+## Events
+
+### Quality Events
+
+| Event | Payload | Description |
+|-------|---------|-------------|
+| `quality:gate:passed` | `{ planId, gateName, avgScore? }` | A quality gate passed |
+| `quality:gate:failed` | `{ planId, gateName, reason, avgScore? }` | A quality gate failed |
+| `quality:threshold:failed` | `{ planId, avgScore, threshold }` | Plan did not meet its quality threshold |
+
+### SLA Events
+
+| Event | Payload | Description |
+|-------|---------|-------------|
+| `sla:warning` | `{ entityId, entityType, deadline, elapsed, remaining, percentUsed }` | Approaching deadline |
+| `sla:violated` | `{ entityId, entityType, deadline, overdueMs }` | Deadline exceeded |
+| `sla:met` | `{ entityId, entityType, deadline, marginMs }` | Completed before deadline |

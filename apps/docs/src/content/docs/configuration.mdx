@@ -32,7 +32,28 @@ Polpo is configured through a JSON file at `.polpo/polpo.json` in your project d
     "maxRetries": 3,
     "workDir": ".",
     "logLevel": "normal"
-  }
+  },
+  "approvalGates": {
+    "enabled": false,
+    "defaultTimeout": 3600000,
+    "autoRejectOnTimeout": true
+  },
+  "notifications": {
+    "enabled": false,
+    "channels": []
+  },
+  "escalationPolicy": {
+    "enabled": false,
+    "maxEscalations": 3,
+    "rules": []
+  },
+  "sla": {
+    "enabled": false,
+    "warningThreshold": 0.8,
+    "violationThreshold": 1.0
+  },
+  "enableScheduler": false,
+  "defaultQualityThreshold": 3.0
 }
 ```
 
@@ -89,23 +110,39 @@ Plans group related tasks into execution units:
 | `group` | string | yes | Unique plan identifier |
 | `team` | Agent[] | no | Volatile agents scoped to this plan |
 | `tasks` | Task[] | yes | List of tasks to execute |
+| `schedule` | string | no | Cron expression for scheduled execution |
+| `recurring` | boolean | no | Whether the plan re-runs on each schedule trigger (default: `false`) |
+| `qualityGates` | QualityGate[] | no | Quality checkpoints that block progression |
+| `qualityThreshold` | number | no | Minimum average score to pass quality gates (default: `3.0`) |
+| `deadline` | string | no | ISO-8601 deadline for the plan, tracked by SLA monitoring |
 
 ### Volatile Teams
 
 Agents defined in the `team` section are automatically created when the plan starts and cleaned up when it completes:
 
-```yaml
-plans:
-  - group: feature-auth
-    team:
-      - name: auth-specialist
-        adapter: claude-sdk
-        description: Authentication expert
-        volatile: true
-    tasks:
-      - title: Implement JWT auth
-        agent: auth-specialist
-        description: Build JWT authentication middleware
+```json
+{
+  "plans": [
+    {
+      "group": "feature-auth",
+      "team": [
+        {
+          "name": "auth-specialist",
+          "adapter": "claude-sdk",
+          "description": "Authentication expert",
+          "volatile": true
+        }
+      ],
+      "tasks": [
+        {
+          "title": "Implement JWT auth",
+          "agent": "auth-specialist",
+          "description": "Build JWT authentication middleware"
+        }
+      ]
+    }
+  ]
+}
 ```
 
 ## Tasks
@@ -117,41 +154,166 @@ Each task is a unit of work assigned to an agent:
 | `title` | string | yes | Short task title |
 | `agent` | string | yes | Agent name to assign to |
 | `description` | string | yes | Detailed instructions for the agent |
-| `dependencies` | string[] | no | Task IDs that must complete first |
+| `dependsOn` | string[] | no | Task titles that must complete first |
 | `expectations` | Expectation[] | no | Custom assessment criteria |
+| `deadline` | string | no | ISO-8601 deadline for this task, tracked by SLA monitoring |
+| `priority` | number | no | Task priority (lower = higher priority, default: `100`) |
 
 ## Expectations
 
 Define how completed tasks are assessed:
 
-```yaml
-tasks:
-  - title: Build API endpoints
-    agent: backend-dev
-    description: Create REST API for user management
-    expectations:
-      - type: test
-        command: npm test
-        weight: 0.4
-
-      - type: file_exists
-        path: src/routes/users.ts
-        weight: 0.2
-
-      - type: llm_review
-        criteria: Check for proper error handling and input validation
-        weight: 0.4
-        threshold: 3.5
-        dimensions:
-          - name: security
-            weight: 0.5
-            rubric: No SQL injection or XSS vulnerabilities
-          - name: error_handling
-            weight: 0.5
-            rubric: All error paths return proper HTTP status codes
+```json
+{
+  "tasks": [
+    {
+      "title": "Build API endpoints",
+      "agent": "backend-dev",
+      "description": "Create REST API for user management",
+      "expectations": [
+        {
+          "type": "test",
+          "command": "npm test",
+          "weight": 0.4
+        },
+        {
+          "type": "file_exists",
+          "path": "src/routes/users.ts",
+          "weight": 0.2
+        },
+        {
+          "type": "llm_review",
+          "criteria": "Check for proper error handling and input validation",
+          "weight": 0.4,
+          "threshold": 3.5,
+          "dimensions": [
+            {
+              "name": "security",
+              "weight": 0.5,
+              "rubric": "No SQL injection or XSS vulnerabilities"
+            },
+            {
+              "name": "error_handling",
+              "weight": 0.5,
+              "rubric": "All error paths return proper HTTP status codes"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
 ```
 
 See [Assessment](/concepts/assessment/) for details on the scoring system.
+
+## Approval Gates
+
+Control whether tasks require approval before proceeding:
+
+```json
+{
+  "approvalGates": {
+    "enabled": true,
+    "defaultTimeout": 3600000,
+    "autoRejectOnTimeout": true
+  }
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `enabled` | boolean | Enable the approval gate system |
+| `defaultTimeout` | number | Milliseconds before an unapproved task times out (default: 1 hour) |
+| `autoRejectOnTimeout` | boolean | Automatically reject tasks that exceed the timeout |
+
+## Notifications
+
+Configure notification channels for events:
+
+```json
+{
+  "notifications": {
+    "enabled": true,
+    "channels": [
+      {
+        "type": "webhook",
+        "url": "https://hooks.slack.com/services/...",
+        "events": ["task:complete", "task:fail", "quality:sla"]
+      }
+    ]
+  }
+}
+```
+
+## Escalation Policy
+
+Define escalation rules for repeated failures:
+
+```json
+{
+  "escalationPolicy": {
+    "enabled": true,
+    "maxEscalations": 3,
+    "rules": [
+      {
+        "afterFailures": 2,
+        "action": "reassign",
+        "targetAgent": "senior-dev"
+      },
+      {
+        "afterFailures": 4,
+        "action": "notify",
+        "channel": "webhook"
+      }
+    ]
+  }
+}
+```
+
+## SLA Monitoring
+
+Track deadlines on plans and tasks:
+
+```json
+{
+  "sla": {
+    "enabled": true,
+    "warningThreshold": 0.8,
+    "violationThreshold": 1.0
+  }
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `enabled` | boolean | Enable SLA deadline tracking |
+| `warningThreshold` | number | Fraction of deadline elapsed before warning (default: `0.8`) |
+| `violationThreshold` | number | Fraction of deadline elapsed before violation (default: `1.0`) |
+
+## Scheduler
+
+Enable cron-based plan scheduling:
+
+```json
+{
+  "enableScheduler": true
+}
+```
+
+Plans with a `schedule` field will be automatically triggered according to their cron expression.
+
+## Default Quality Threshold
+
+Set the global minimum score for quality gates:
+
+```json
+{
+  "defaultQualityThreshold": 3.5
+}
+```
+
+Individual plans can override this with their own `qualityThreshold` field.
 
 ## Environment Variables
 
@@ -173,7 +335,7 @@ By default, Polpo looks for `.polpo/polpo.json` in the current directory. Use `-
 
 ```bash
 polpo run -d /path/to/workdir
-polpo tui -d /path/to/workdir
+polpo -d /path/to/workdir
 ```
 
 The config file must always be at `.polpo/polpo.json` relative to the working directory.

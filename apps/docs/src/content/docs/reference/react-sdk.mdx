@@ -103,7 +103,7 @@ const { task, isLoading, error, updateTask, deleteTask, killTask, reassessTask, 
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `task` | `Task \| null` | Task object |
+| `task` | `Task \| undefined` | Task object |
 | `updateTask` | `(opts) => Promise<Task>` | Update description, assignment, expectations |
 | `killTask` | `() => Promise<void>` | Kill running agent |
 | `reassessTask` | `() => Promise<void>` | Re-run assessment |
@@ -211,7 +211,7 @@ Aggregated statistics.
 
 ```tsx
 const stats = useStats();
-// stats: { total, pending, assigned, inProgress, review, done, failed, completionPct }
+// stats: { pending, running, done, failed, queued }
 ```
 
 ---
@@ -234,13 +234,100 @@ const { memory, isLoading, saveMemory, refetch } = useMemory();
 
 ---
 
+## useSkills
+
+Discover available skills in the project.
+
+```tsx
+const { skills, isLoading, error, refetch } = useSkills();
+```
+
+### Returns
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `skills` | `SkillInfo[]` | Available skills discovered from `.polpo/skills/` and other locations |
+| `isLoading` | `boolean` | Initial load in progress |
+| `error` | `Error \| null` | Fetch error |
+| `refetch` | `() => Promise<void>` | Force refetch |
+
+---
+
+## useSessions
+
+Chat session management.
+
+```tsx
+const { sessions, activeSessionId, setActiveSessionId, getMessages, deleteSession } = useSessions();
+```
+
+### Returns
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `sessions` | `ChatSession[]` | All chat sessions |
+| `isLoading` | `boolean` | Initial load in progress |
+| `error` | `Error \| null` | Fetch error |
+| `activeSessionId` | `string \| null` | Currently selected session |
+| `setActiveSessionId` | `(id: string \| null) => void` | Select a session |
+| `getMessages` | `(sessionId: string) => Promise<ChatMessage[]>` | Fetch messages for a session |
+| `deleteSession` | `(sessionId: string) => Promise<void>` | Delete a session |
+| `refetch` | `() => Promise<void>` | Force refetch |
+
+---
+
+## useTaskActivity
+
+Per-task activity history from run logs.
+
+```tsx
+const { entries, isLoading, error, refetch } = useTaskActivity("task-1");
+```
+
+### Parameters
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `taskId` | `string \| null` | Task ID to fetch activity for. Pass `null` to skip. |
+
+### Returns
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `entries` | `RunActivityEntry[]` | Activity log entries (tool calls, file edits, summaries) |
+| `isLoading` | `boolean` | Initial load in progress |
+| `error` | `Error \| null` | Fetch error |
+| `refetch` | `() => Promise<void>` | Force refetch |
+
+---
+
+## useLogs
+
+Event log sessions and entries.
+
+```tsx
+const { sessions, isLoading, getLogEntries } = useLogs();
+```
+
+### Returns
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `sessions` | `LogSession[]` | All log sessions |
+| `isLoading` | `boolean` | Initial load in progress |
+| `error` | `Error \| null` | Fetch error |
+| `getLogEntries` | `(sessionId: string) => Promise<LogEntry[]>` | Fetch entries for a log session |
+| `refetch` | `() => Promise<void>` | Force refetch |
+
+---
+
 ## Architecture
 
 The SDK uses `useSyncExternalStore` for push-based state management:
 
 1. **OrchestraClient** — HTTP client with automatic request deduplication (internal class name)
 2. **EventSourceManager** — SSE with auto-reconnect and exponential backoff
-3. **OrchestraStore** — Central state with `reduceEvent()` for 35+ event types (internal class name)
+3. **OrchestraStore** — Central state with `reduceEvent()` for 55 event types (internal class name)
 4. **Memoized selectors** — WeakMap-cached selectors for each hook
 5. **Microtask batching** — `queueMicrotask` for batched re-renders
 

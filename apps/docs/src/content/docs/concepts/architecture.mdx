@@ -10,27 +10,31 @@ import { Aside } from '@astrojs/starlight/components';
 Polpo follows a **supervisor architecture**: a central orchestrator manages agent lifecycles, task assignment, assessment, and error recovery. Agents are isolated processes that know nothing about each other — Polpo handles all coordination.
 
 ```
-┌─────────────────────────────────────────────┐
-│                 Orchestrator                 │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐  │
-│  │ Task     │  │ Assessor │  │ Deadlock │  │
-│  │ Registry │  │ (G-Eval) │  │ Resolver │  │
-│  └──────────┘  └──────────┘  └──────────┘  │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐  │
-│  │ RunStore │  │ Memory   │  │ Events   │  │
-│  │ (SQLite) │  │ Store    │  │ Emitter  │  │
-│  └──────────┘  └──────────┘  └──────────┘  │
-└──────────┬──────────┬──────────┬────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│                        Orchestrator                          │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌────────────┐  │
+│  │ Task     │  │ Assessor │  │ Deadlock │  │ Approval   │  │
+│  │ Registry │  │ (G-Eval) │  │ Resolver │  │ Manager    │  │
+│  └──────────┘  └──────────┘  └──────────┘  └────────────┘  │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌────────────┐  │
+│  │ RunStore │  │ Memory   │  │ Events   │  │ Escalation │  │
+│  │ (File)   │  │ Store    │  │ Emitter  │  │ Manager    │  │
+│  └──────────┘  └──────────┘  └──────────┘  └────────────┘  │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌────────────┐  │
+│  │ Quality  │  │ SLA      │  │Scheduler │  │Notification│  │
+│  │Controller│  │ Monitor  │  │          │  │ Router     │  │
+│  └──────────┘  └──────────┘  └──────────┘  └────────────┘  │
+└──────────┬──────────┬──────────┬─────────────────────────────┘
            │          │          │
      ┌─────┴──┐  ┌───┴────┐  ┌─┴──────┐
      │Runner 1│  │Runner 2│  │Runner N│
      │(detach)│  │(detach)│  │(detach)│
      └───┬────┘  └───┬────┘  └───┬────┘
          │           │           │
-     ┌───┴───┐  ┌───┴───┐  ┌───┴───┐
-     │Claude │  │ Aider │  │GPT-4  │
-     │  SDK  │  │  CLI  │  │ Agent │
-     └───────┘  └───────┘  └───────┘
+      ┌───┴───┐  ┌───┴───┐  ┌───┴───┐
+      │Agent A│  │Agent B│  │Agent C│
+      │       │  │       │  │       │
+      └───────┘  └───────┘  └───────┘
 ```
 
 ## Adapter Pattern
@@ -50,8 +54,8 @@ The `spawn()` method returns an `AgentHandle` that the orchestrator uses to moni
 interface AgentHandle {
   agentName: string;
   taskId: string;
-  pid: number;              // real PID for generic, 0 for SDK
-  sessionId?: string;       // SDK session ID for transcript access
+  pid: number;              // real process ID (0 if not applicable)
+  sessionId?: string;       // optional session ID for transcript access
   activity: AgentActivity;  // live activity data (tools, files, progress)
   done: Promise<TaskResult>; // resolves when agent finishes
   isAlive(): boolean;
@@ -61,9 +65,7 @@ interface AgentHandle {
 
 ### Built-in Adapters
 
-**claude-sdk** — Uses the `@anthropic-ai/claude-agent-sdk` to call Claude models directly. Features persistent sessions, automatic tool handling, and transcript access.
-
-**generic** — Spawns any CLI command as a child process. The task prompt is passed via stdin or `{prompt}` template variable. Tracks real process PIDs for lifecycle management.
+Polpo ships with adapters for different agent types. Each adapter wraps a different execution model — from direct LLM SDK calls to arbitrary CLI commands. See [Adapters Reference](/reference/adapters/) for the full list and configuration options.
 
 ### Registering Custom Adapters
 
@@ -84,15 +86,18 @@ See [Custom Adapter Guide](/guides/custom-adapter/) for a full walkthrough.
 
 ## Supervisor Loop
 
-The orchestrator runs a **2-second tick loop** that:
+The orchestrator runs a **5-second tick loop** that:
 
 1. **Collects results** from terminated runners (via RunStore)
 2. **Assesses** completed tasks using the configured expectations
 3. **Retries** failed tasks (with fix phase for targeted corrections)
 4. **Spawns** new agents for pending tasks whose dependencies are met
 5. **Enforces health checks** — kills stale or timed-out agents
-6. **Detects deadlocks** — tasks blocked on failed dependencies ([Deadlock Resolution](/advanced/deadlock-resolution/))
+6. **Detects deadlocks** — tasks blocked on failed dependencies ([Deadlock Resolution](/guides/deadlock-resolution/))
 7. **Recovers orphans** — reconnects to live processes after a crash
+8. **Checks SLA deadlines** — emits warnings or violations when deadlines approach
+9. **Evaluates quality gates** — blocks plan progression until thresholds are met
+10. **Processes approval gates** — transitions tasks through `awaiting_approval` when required
 
 ## Detached Runners
 
@@ -120,7 +125,7 @@ This architecture means:
 
 ## Event System
 
-Polpo uses a **typed event emitter** with 35+ event types organized by category:
+Polpo uses a **typed event emitter** with 55+ event types organized by category:
 
 | Category | Events | Description |
 |----------|--------|-------------|
@@ -130,6 +135,14 @@ Polpo uses a **typed event emitter** with 35+ event types organized by category:
 | `orchestrator:*` | started, tick, deadlock, shutdown | System events |
 | `deadlock:*` | detected, resolving, resolved, unresolvable | Deadlock resolution |
 | `plan:*` | saved, executed, completed, resumed, deleted | Plan lifecycle |
+| `session:*` | created, message:added | Chat sessions |
+| `bridge:*` | session:discovered, session:activity, session:completed | External sessions |
+| `approval:*` | requested, resolved, timeout | Approval gates |
+| `sla:*` | warning, violated, met | SLA monitoring |
+| `quality:*` | gate:passed, gate:failed, threshold:failed | Quality gates |
+| `schedule:*` | triggered, created, completed | Plan scheduling |
+| `escalation:*` | triggered, resolved, human | Escalation chain |
+| `notification:*` | sent, failed | Notification delivery |
 | `log` | — | General log messages |
 
 Events are consumed by the TUI, HTTP/SSE server, and WebSocket bridge. See [Events Reference](/reference/events/) for full payload details.
@@ -138,13 +151,15 @@ Events are consumed by the TUI, HTTP/SSE server, and WebSocket bridge. See [Even
 
 | Component | Storage | Purpose |
 |-----------|---------|---------|
-| Task Registry | SQLite (`state.db`) | Task state with atomic writes |
-| RunStore | SQLite (`state.db`) | Runner process tracking |
-| Log Store | SQLite (`state.db`) | Persistent event log |
-| Plan Store | SQLite (`state.db`) | Plan definitions and status |
+| Task Registry | File-based store (default) | Task state with atomic writes |
+| RunStore | File-based store (default) | Runner process tracking |
+| Log Store | File-based store (default) | Persistent event log |
+| Plan Store | File-based store (default) | Plan definitions and status |
 | Memory | File (`.polpo/memory.md`) | Project context for agents |
 | Runner configs | JSON (`.polpo/tmp/`) | Temporary config for detached runners |
 
+File-based stores are the default. SQLite and JSON are available as alternatives via configuration.
+
 <Aside>
-All SQLite operations use `busy_timeout=5000` to handle concurrent access from the orchestrator and multiple runner processes.
+File-based stores use atomic write operations to handle concurrent access from the orchestrator and multiple runner processes.
 </Aside>

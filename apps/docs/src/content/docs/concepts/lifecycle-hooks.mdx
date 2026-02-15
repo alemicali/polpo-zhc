@@ -1,0 +1,272 @@
+---
+title: Lifecycle Hooks
+description: Extensible hook system for intercepting and modifying orchestrator behavior
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+## Overview
+
+Polpo provides a **HookRegistry** with 15 hook points that let you intercept, modify, or observe every stage of the orchestration lifecycle. Hooks are the primary extension mechanism — use them to add custom validation, logging, notifications, SLA enforcement, and more.
+
+## Hook Phases
+
+Each hook point supports two phases:
+
+| Phase | Behavior |
+|-------|----------|
+| `before` | Runs before the operation. Can **cancel** the operation or **modify** the payload. Handlers are awaited sequentially. |
+| `after` | Runs after the operation completes. **Fire-and-forget** — cannot cancel or modify anything. Errors are logged but never propagate. |
+
+There is also a synchronous variant:
+
+| Phase | Behavior |
+|-------|----------|
+| `beforeSync` | Synchronous version of `before` for hot paths where `async` is not feasible. Async handlers are skipped with a warning. |
+
+## All 15 Hook Points
+
+### Task Lifecycle (6 hooks)
+
+| Hook | Payload | Description |
+|------|---------|-------------|
+| `task:create` | `{ title, description, assignTo, expectations?, dependsOn?, group?, maxDuration?, retryPolicy? }` | Fired when a task is about to be created. `before` can modify fields or cancel creation. |
+| `task:spawn` | `{ task, agent }` | Fired before a runner is spawned for a task. `before` can cancel spawning. |
+| `task:transition` | `{ taskId, from, to, task }` | Fired on every state transition. `before` can cancel the transition. |
+| `task:complete` | `{ taskId, task, result?, assessment? }` | Fired when a task reaches `done`. |
+| `task:fail` | `{ taskId, task, result?, reason? }` | Fired when a task reaches `failed`. |
+| `task:retry` | `{ taskId, task, attempt, maxRetries }` | Fired when a task is about to be retried. `before` can cancel the retry. |
+
+### Plan Lifecycle (2 hooks)
+
+| Hook | Payload | Description |
+|------|---------|-------------|
+| `plan:execute` | `{ planId, plan, taskCount }` | Fired before a plan starts execution. `before` can cancel the plan. |
+| `plan:complete` | `{ planId, plan, allPassed, report }` | Fired when all tasks in a plan are finished. |
+
+### Assessment (2 hooks)
+
+| Hook | Payload | Description |
+|------|---------|-------------|
+| `assessment:run` | `{ taskId, task }` | Fired before assessment begins on a completed task. |
+| `assessment:complete` | `{ taskId, task, assessment, passed }` | Fired when assessment finishes with results. |
+
+### Quality & SLA (2 hooks)
+
+| Hook | Payload | Description |
+|------|---------|-------------|
+| `quality:gate` | `{ planId, gateName, avgScore?, allPassed, tasks[] }` | Fired when a quality gate is evaluated. `tasks` includes each task's ID, title, status, and score. |
+| `quality:sla` | `{ entityId, entityType, deadline, status, percentUsed }` | Fired on SLA warning or violation. `entityType` is `"task"` or `"plan"`. `status` is `"warning"` or `"violated"`. |
+
+### Scheduling (1 hook)
+
+| Hook | Payload | Description |
+|------|---------|-------------|
+| `schedule:trigger` | `{ scheduleId, planId, expression }` | Fired when a cron schedule triggers a plan execution. `before` can cancel the trigger. |
+
+### Orchestrator (2 hooks)
+
+| Hook | Payload | Description |
+|------|---------|-------------|
+| `orchestrator:tick` | `{ pending, running, done, failed }` | Fired on every tick of the supervisor loop (every 5 seconds). |
+| `orchestrator:shutdown` | `{}` | Fired when the orchestrator is shutting down. |
+
+<Aside>
+The `orchestrator:shutdown` hook payload is an empty object (`Record<string, never>`). It exists primarily for cleanup logic in `after` handlers.
+</Aside>
+
+## Priority System
+
+Handlers are sorted by **priority** (ascending) and run sequentially. Lower numbers run first.
+
+| Priority | Convention |
+|----------|-----------|
+| 1–49 | System-critical hooks (validation, security) |
+| 50–99 | High-priority user hooks |
+| 100 | Default priority |
+| 101–199 | Normal user hooks |
+| 200+ | Low-priority hooks (logging, analytics) |
+
+## HookRegistry API
+
+### Registering a Hook
+
+```typescript
+import { HookRegistry, type HookRegistration } from "./core/hooks.js";
+
+const hooks = new HookRegistry();
+
+const unsubscribe = hooks.register({
+  hook: "task:create",
+  phase: "before",
+  priority: 50,
+  name: "validate-task-title",
+  handler(ctx) {
+    if (ctx.data.title.length < 5) {
+      ctx.cancel("Task title must be at least 5 characters");
+    }
+  },
+});
+
+// Later: remove the hook
+unsubscribe();
+```
+
+The `register()` method returns an **unsubscribe function** that removes the handler when called.
+
+### Running Hooks
+
+The orchestrator calls these methods internally:
+
+```typescript
+// Async before — returns { cancelled, cancelReason?, data }
+const result = await hooks.runBefore("plan:execute", {
+  planId: "abc",
+  plan,
+  taskCount: 5,
+});
+
+if (result.cancelled) {
+  console.log(`Plan blocked: ${result.cancelReason}`);
+  return;
+}
+
+// ... execute the plan ...
+
+// Async after — fire-and-forget
+await hooks.runAfter("plan:complete", {
+  planId: "abc",
+  plan,
+  allPassed: true,
+  report,
+});
+
+// Sync before — for hot paths (skips async handlers)
+const tickResult = hooks.runBeforeSync("orchestrator:tick", {
+  pending: 3, running: 2, done: 10, failed: 1,
+});
+```
+
+### Diagnostics
+
+```typescript
+hooks.size;    // number of registered handlers
+hooks.list();  // array of { hook, phase, priority, name? }
+hooks.clear(); // remove all handlers
+```
+
+## HookContext
+
+Every handler receives a `HookContext<T>` object:
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `hook` | `LifecycleHook` | Which hook point fired |
+| `phase` | `"before" \| "after"` | Current phase |
+| `data` | `T` | The payload — mutable in `before` hooks |
+| `cancel(reason?)` | function | Cancel the operation (only works in `before` hooks; no-op in `after`) |
+| `cancelled` | boolean | Whether any handler has called `cancel()` |
+| `cancelReason` | string? | Reason provided to `cancel()` |
+| `timestamp` | string | ISO timestamp when the hook was triggered |
+
+<Aside type="caution">
+A throwing hook does **not** cancel the operation — it's treated as a hook bug. The error is logged and the remaining handlers continue running. If you want to block an operation, use `ctx.cancel()`.
+</Aside>
+
+## Examples
+
+### Blocking a Plan Execution
+
+Prevent plans from executing during maintenance windows:
+
+```typescript
+hooks.register({
+  hook: "plan:execute",
+  phase: "before",
+  priority: 10,
+  name: "maintenance-window",
+  handler(ctx) {
+    const hour = new Date().getHours();
+    if (hour >= 2 && hour < 4) {
+      ctx.cancel("Maintenance window: 2-4 AM. Plans are paused.");
+    }
+  },
+});
+```
+
+### Logging Assessment Results
+
+```typescript
+hooks.register({
+  hook: "assessment:complete",
+  phase: "after",
+  priority: 200,
+  name: "log-assessment",
+  handler(ctx) {
+    const { taskId, assessment, passed } = ctx.data;
+    console.log(
+      `[Assessment] Task ${taskId}: ${passed ? "PASSED" : "FAILED"} ` +
+      `(score: ${assessment.globalScore?.toFixed(2)})`
+    );
+  },
+});
+```
+
+### Custom SLA Behavior
+
+Escalate to a webhook when an SLA is violated:
+
+```typescript
+hooks.register({
+  hook: "quality:sla",
+  phase: "after",
+  priority: 50,
+  name: "sla-webhook",
+  async handler(ctx) {
+    if (ctx.data.status === "violated") {
+      await fetch("https://hooks.slack.com/services/...", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text: `SLA violated for ${ctx.data.entityType} ${ctx.data.entityId}. ` +
+                `Deadline: ${ctx.data.deadline}, usage: ${(ctx.data.percentUsed * 100).toFixed(0)}%`,
+        }),
+      });
+    }
+  },
+});
+```
+
+### Modifying Task Fields Before Creation
+
+Add a default deadline to all tasks:
+
+```typescript
+hooks.register({
+  hook: "task:create",
+  phase: "before",
+  priority: 100,
+  name: "default-deadline",
+  handler(ctx) {
+    if (!ctx.data.maxDuration) {
+      ctx.data.maxDuration = 30 * 60 * 1000; // 30 minutes
+    }
+  },
+});
+```
+
+### Preventing Retries on Specific Failures
+
+```typescript
+hooks.register({
+  hook: "task:retry",
+  phase: "before",
+  priority: 50,
+  name: "no-retry-auth-errors",
+  handler(ctx) {
+    if (ctx.data.task.lastError?.includes("AUTHENTICATION_FAILED")) {
+      ctx.cancel("Auth errors should not be retried — fix credentials first");
+    }
+  },
+});
+```

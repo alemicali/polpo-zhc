@@ -26,91 +26,107 @@ The TUI has 6 tabs, navigable with keyboard:
 | Logs | `5` | Real-time event log |
 | Chat | `6` | Message agents, create tasks, generate plans |
 
-## Slash Commands
+## Input Modes
 
-Type these in the Chat tab input:
+The Chat tab has three input modes that determine how free-text input (non-slash-command) is handled:
+
+| Mode | Command | Behavior |
+|------|---------|----------|
+| **Task** | `/task` | Free text creates a new task |
+| **Plan** | `/plan` | Free text generates a plan with AI |
+| **Chat** | `/chat` | Free text is conversational Q&A with the orchestrator |
+
+The current mode is shown in the input prompt. Switch modes with the corresponding slash command.
+
+## Slash Commands
 
 ### Task Management
 
 | Command | Description |
 |---------|-------------|
-| `/help` | Show available commands |
-| `/status` | Show task count summary |
-| `/idle` | List idle agents (not working on any task) |
-| `/failed` | Show failed tasks with failure reasons |
-| `/retry <id>` | Retry a specific failed task |
-| `/kill <id>` | Kill a running task's agent |
+| `/status` | Show task count summary (pending, running, done, failed) |
+| `/tasks` | Browse all tasks with an interactive picker — view details, retry, kill |
+| `/abort <group>` | Abort all tasks in a plan group |
+| `/clear-tasks` | Clear all tasks from the registry |
 
 ### Plan Management
 
 | Command | Description |
 |---------|-------------|
-| `/plan` | Create a new plan (template or AI-generated) |
-| `/edit-plan` | Edit a running plan (add/remove/reassign tasks) |
-| `/abort <group>` | Abort all tasks in a plan group |
-| `/resume <group>` | Resume a failed plan (retry failed tasks) |
+| `/plans` | Browse, create, execute, and resume plans via interactive picker |
+| `/plan` | Switch to plan mode (free text generates plans with AI) |
+
+In plan mode, type a natural language description and Polpo will:
+1. Generate a plan with AI
+2. Ask clarifying questions if needed
+3. Show a preview for review
+4. Let you execute, edit, or refine with feedback
 
 ### Team Management
 
 | Command | Description |
 |---------|-------------|
-| `/team` | Create or manage agent team (with AI generation) |
-| `/inspect` | Inspect agent session transcripts |
+| `/team` | Manage agents — add, remove, edit, rename team, or generate with AI |
+
+### Sessions & Logs
+
+| Command | Description |
+|---------|-------------|
+| `/sessions` | Browse past chat sessions, view messages, delete sessions |
+| `/logs` | View the event log stream |
+| `/inspect` | View current session events |
+
+### Memory & Config
+
+| Command | Description |
+|---------|-------------|
+| `/memory` | View project memory. `/memory edit` opens the editor. |
+| `/config` | View configuration. `/config edit` opens interactive settings editor. |
 
 ### System
 
 | Command | Description |
 |---------|-------------|
-| `/memory` | View/edit project memory |
-| `/config` | Show current configuration |
-| `/clear` | Clear chat history |
+| `/help` | Show all available commands |
+| `/chat` | Switch to chat mode |
+| `/task` | Switch to task mode |
+| `/clear` | Clear the stream output |
+| `/quit` | Exit Polpo |
 
 ## @ Mentions
 
-Reference entities by typing their prefix character:
+Reference entities by typing their prefix character. Supports quoted form for names with spaces:
 
 | Prefix | Entity | Example |
 |--------|--------|---------|
 | `@` | Agent | `@backend-dev fix the tests` |
-| `#` | Task | `retry #Create database schema` |
-| `%` | Plan | `abort %feature-auth` |
+| `#` | Task | `#"Create database schema" retry this` |
+| `%` | Plan | `%"feature-auth" abort` |
 
-Mentions are auto-completed and appended to the input without submitting.
+Mentions are parsed and stripped from input text before processing. The referenced entity is passed as context to the action.
 
-## Plan Creation
+## Voice Input
 
-The `/plan` command opens an interactive workflow:
+The TUI supports voice input via microphone recording and transcription:
 
-1. **Choose template or "Generate with AI"**
-2. **If AI**: Enter a natural language description
-3. **Preview** the generated plan
-4. **Choose**: Execute, Edit, or Refine with feedback
-5. Plan is saved as `draft` and can be executed
+- Records audio using `sox` (auto-installed if missing)
+- Transcribes via OpenAI's speech-to-text API
+- Requires `OPENAI_API_KEY` environment variable
 
-```
-/plan
-> Generate with AI
-> Build a REST API with user auth, rate limiting, and tests
-```
+| Env Variable | Default | Description |
+|--------------|---------|-------------|
+| `OPENAI_API_KEY` | — | Required for transcription |
+| `POLPO_STT_MODEL` | `gpt-4o-mini-transcribe` | Transcription model |
+| `POLPO_STT_LANG` | auto | Language (ISO 639-1 code) |
 
 ## Team Generation
 
 The `/team` command lets you create agent teams with AI:
 
-1. **"Generate with AI"** option
-2. **Describe** what you need: "Build a full-stack web app"
-3. **Preview** the generated team with roles and skills
-4. **Execute**, **Edit**, or **Refine** with feedback
-
-Generated teams include appropriate skills and adapter configurations.
-
-## Live Monitoring
-
-The Dashboard tab shows:
-- **Task progress** bar with status counts
-- **Active agents** with current tool, file, and progress
-- **Recent events** from the event stream
-- **Shimmer animation** for agents currently working
+1. Select **"Generate with AI"**
+2. Describe what you need: "Build a full-stack web app"
+3. Preview the generated team with roles and skills
+4. Execute, edit, or refine with feedback
 
 ## Keybindings
 
@@ -119,7 +135,7 @@ The Dashboard tab shows:
 | `1`-`6` | Switch tabs |
 | `Tab` | Cycle tabs forward |
 | `Shift+Tab` | Cycle tabs backward |
-| `Enter` | Submit chat message |
+| `Enter` | Submit input |
 | `Ctrl+C` | Quit |
 
 <Aside type="tip">

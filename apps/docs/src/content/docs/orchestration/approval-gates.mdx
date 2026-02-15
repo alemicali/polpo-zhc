@@ -1,0 +1,158 @@
+---
+title: Approval Gates
+description: Hybrid auto/human approval system for task lifecycle control
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Approval gates let you insert checkpoints into the task lifecycle that either automatically evaluate a condition or block execution until a human approves or rejects.
+
+## How It Works
+
+Gates are registered as **lifecycle hooks**. When a hook fires (e.g. `before:task:assign`), the gate evaluates:
+
+- **Auto gates** — check a condition expression. If the condition matches, the operation is blocked.
+- **Human gates** — pause the operation, transition the task to `awaiting_approval`, and wait for external resolution.
+
+```
+Task Lifecycle
+     │
+     ▼
+ before:task:assign hook fires
+     │
+     ├── Auto gate: condition matches? → Block
+     │                                  → Pass (no match)
+     │
+     └── Human gate: condition matches? → Task → awaiting_approval
+                                        → Emit approval:requested
+                                        → Wait for approve/reject/timeout
+```
+
+## The `awaiting_approval` State
+
+When a human gate triggers, the task transitions to `awaiting_approval`. This is a dedicated state in the task state machine — the task will not be picked up by agents or advance until resolved.
+
+On resolution:
+- **Approved** — task transitions back to `assigned` and continues execution
+- **Rejected** — task transitions to `failed`
+- **Timeout** — applies the configured `timeoutAction` (default: `reject`)
+
+## Configuration
+
+Gates are configured under `settings.approvalGates` as an array:
+
+```json
+{
+  "settings": {
+    "approvalGates": [
+      {
+        "id": "prod-deploy-gate",
+        "name": "Production Deployment Review",
+        "handler": "human",
+        "hook": "task:assign",
+        "condition": {
+          "expression": "task.group === 'production'"
+        },
+        "notifyChannels": ["slack-alerts"],
+        "timeoutMs": 3600000,
+        "timeoutAction": "reject",
+        "priority": 50
+      },
+      {
+        "id": "high-retry-guard",
+        "name": "Block tasks with excessive retries",
+        "handler": "auto",
+        "hook": "task:assign",
+        "condition": {
+          "expression": "task.retries >= 5"
+        }
+      }
+    ]
+  }
+}
+```
+
+## Gate Properties
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `id` | `string` | Yes | Unique gate identifier |
+| `name` | `string` | Yes | Human-readable name |
+| `handler` | `"auto" \| "human"` | Yes | Gate type |
+| `hook` | `string` | Yes | Lifecycle hook to attach to (e.g. `task:assign`, `task:fail`) |
+| `condition` | `{ expression: string }` | No | When to activate the gate |
+| `notifyChannels` | `string[]` | No | Channels to alert when gate activates |
+| `timeoutMs` | `number` | No | Timeout in ms for human gates (0 = no timeout) |
+| `timeoutAction` | `"approve" \| "reject"` | No | Action on timeout (default: `"reject"`) |
+| `priority` | `number` | No | Hook priority — lower runs first (default: 50) |
+
+## Auto Gates
+
+Auto gates evaluate a condition expression against the hook payload. The expression has access to `data`, `task`, and `plan` variables.
+
+```json
+{
+  "id": "block-failed-plans",
+  "name": "Block tasks in failed plans",
+  "handler": "auto",
+  "hook": "task:assign",
+  "condition": {
+    "expression": "data.allPassed === false"
+  }
+}
+```
+
+When the condition matches, the hook is cancelled and the operation is blocked. If there is no condition, the auto gate is a no-op (always passes).
+
+## Human Gates
+
+Human gates block execution and create an **ApprovalRequest** that must be resolved externally — via the API, TUI, or timeout.
+
+```json
+{
+  "id": "manual-review",
+  "name": "Manual Code Review",
+  "handler": "human",
+  "hook": "task:complete",
+  "condition": {
+    "expression": "task.assignTo === 'junior-agent'"
+  },
+  "timeoutMs": 1800000,
+  "timeoutAction": "reject"
+}
+```
+
+### Timeout Handling
+
+| `timeoutAction` | Behavior |
+|-----------------|----------|
+| `"approve"` | Task proceeds automatically after timeout |
+| `"reject"` | Task fails after timeout (default) |
+
+If `timeoutMs` is `0` or omitted, the gate waits indefinitely.
+
+<Aside type="caution">
+Pending approvals survive orchestrator restarts. On startup, the ApprovalManager resumes timeout timers for any pending requests, adjusting for elapsed time.
+</Aside>
+
+## Persistence
+
+Approval requests are persisted via the `ApprovalStore` interface. The default implementation (`FileApprovalStore`) writes to `.polpo/approvals.json`. Each request tracks:
+
+- Gate ID and name
+- Related task and plan IDs
+- Status (`pending`, `approved`, `rejected`, `timeout`)
+- Timestamps for creation and resolution
+- Who resolved it and optional notes
+
+## Events
+
+| Event | Payload | Description |
+|-------|---------|-------------|
+| `approval:requested` | `{ requestId, gateId, gateName, taskId, planId }` | A new approval request was created |
+| `approval:resolved` | `{ requestId, status, resolvedBy }` | Request was approved or rejected |
+| `approval:timeout` | `{ requestId, action }` | Request timed out; `action` is the applied timeout action |
+
+## Integration with Escalation
+
+When escalation reaches **Level 3 (human-in-the-loop)**, the escalation manager transitions the task to `awaiting_approval` and emits `approval:requested`. This creates the same approval flow as a configured gate — the task waits for human resolution via the API or TUI.

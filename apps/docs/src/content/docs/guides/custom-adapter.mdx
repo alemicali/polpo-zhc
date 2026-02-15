@@ -122,11 +122,16 @@ import "../adapters/my-agent.js"; // your adapter
 
 ### 3. Use in Configuration
 
-```yaml
-agents:
-  - name: my-specialist
-    adapter: my-agent
-    description: Specialist using the my-agent framework
+```json
+{
+  "agents": [
+    {
+      "name": "my-specialist",
+      "adapter": "my-agent",
+      "description": "Specialist using the my-agent framework"
+    }
+  ]
+}
 ```
 
 ## Key Responsibilities

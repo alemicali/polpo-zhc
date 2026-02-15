@@ -30,6 +30,17 @@ export function agentRoutes(): Hono<ServerEnv> {
       systemPrompt: body.systemPrompt,
       skills: body.skills,
       maxTurns: body.maxTurns,
+      enableBrowser: body.enableBrowser,
+      enableHttp: body.enableHttp,
+      enableGit: body.enableGit,
+      enableMultifile: body.enableMultifile,
+      enableDeps: body.enableDeps,
+      enableExcel: body.enableExcel,
+      enablePdf: body.enablePdf,
+      enableDocx: body.enableDocx,
+      enableEmail: body.enableEmail,
+      enableAudio: body.enableAudio,
+      enableImage: body.enableImage,
     });
 
     return c.json({ ok: true, data: { added: true } }, 201);
