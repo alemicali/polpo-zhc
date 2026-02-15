@@ -1,6 +1,9 @@
 /**
  * Standard coding tools for the native pi adapter.
  * Each tool implements pi-agent-core's AgentTool interface with TypeBox schemas.
+ *
+ * All file-based tools enforce path sandboxing when allowedPaths is provided.
+ * The bash tool runs with cwd set to the agent's primary working directory.
  */
 
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, statSync } from "node:fs";
@@ -8,6 +11,7 @@ import { execSync, spawn as spawnChild } from "node:child_process";
 import { join, dirname, resolve, relative } from "node:path";
 import { Type } from "@sinclair/typebox";
 import type { AgentTool, AgentToolResult } from "@mariozechner/pi-agent-core";
+import { resolveAllowedPaths, assertPathAllowed } from "./path-sandbox.js";
 
 const MAX_READ_LINES = 500;
 const MAX_OUTPUT_BYTES = 30_000;
@@ -20,7 +24,7 @@ const ReadSchema = Type.Object({
   limit: Type.Optional(Type.Number({ description: "Max number of lines to read" })),
 });
 
-function createReadTool(cwd: string): AgentTool<typeof ReadSchema> {
+function createReadTool(cwd: string, sandbox: string[]): AgentTool<typeof ReadSchema> {
   return {
     name: "read",
     label: "Read File",
@@ -28,6 +32,7 @@ function createReadTool(cwd: string): AgentTool<typeof ReadSchema> {
     parameters: ReadSchema,
     async execute(_toolCallId, params) {
       const filePath = resolve(cwd, params.path);
+      assertPathAllowed(filePath, sandbox, "read");
       const raw = readFileSync(filePath, "utf-8");
       const allLines = raw.split("\n");
       const offset = (params.offset ?? 1) - 1;
@@ -51,7 +56,7 @@ const WriteSchema = Type.Object({
   content: Type.String({ description: "File content to write" }),
 });
 
-function createWriteTool(cwd: string): AgentTool<typeof WriteSchema> {
+function createWriteTool(cwd: string, sandbox: string[]): AgentTool<typeof WriteSchema> {
   return {
     name: "write",
     label: "Write File",
@@ -59,6 +64,7 @@ function createWriteTool(cwd: string): AgentTool<typeof WriteSchema> {
     parameters: WriteSchema,
     async execute(_toolCallId, params) {
       const filePath = resolve(cwd, params.path);
+      assertPathAllowed(filePath, sandbox, "write");
       mkdirSync(dirname(filePath), { recursive: true });
       writeFileSync(filePath, params.content, "utf-8");
       return {
@@ -77,7 +83,7 @@ const EditSchema = Type.Object({
   new_text: Type.String({ description: "Replacement text" }),
 });
 
-function createEditTool(cwd: string): AgentTool<typeof EditSchema> {
+function createEditTool(cwd: string, sandbox: string[]): AgentTool<typeof EditSchema> {
   return {
     name: "edit",
     label: "Edit File",
@@ -85,6 +91,7 @@ function createEditTool(cwd: string): AgentTool<typeof EditSchema> {
     parameters: EditSchema,
     async execute(_toolCallId, params) {
       const filePath = resolve(cwd, params.path);
+      assertPathAllowed(filePath, sandbox, "edit");
       const content = readFileSync(filePath, "utf-8");
       const occurrences = content.split(params.old_text).length - 1;
       if (occurrences === 0) {
@@ -181,7 +188,7 @@ const GlobSchema = Type.Object({
   path: Type.Optional(Type.String({ description: "Directory to search in (default: cwd)" })),
 });
 
-function createGlobTool(cwd: string): AgentTool<typeof GlobSchema> {
+function createGlobTool(cwd: string, sandbox: string[]): AgentTool<typeof GlobSchema> {
   return {
     name: "glob",
     label: "Find Files",
@@ -189,6 +196,7 @@ function createGlobTool(cwd: string): AgentTool<typeof GlobSchema> {
     parameters: GlobSchema,
     async execute(_toolCallId, params) {
       const searchDir = params.path ? resolve(cwd, params.path) : cwd;
+      assertPathAllowed(searchDir, sandbox, "glob");
       try {
         // Use find command as cross-platform glob
         const result = execSync(
@@ -230,7 +238,7 @@ const GrepSchema = Type.Object({
   include: Type.Optional(Type.String({ description: "File glob filter (e.g. '*.ts')" })),
 });
 
-function createGrepTool(cwd: string): AgentTool<typeof GrepSchema> {
+function createGrepTool(cwd: string, sandbox: string[]): AgentTool<typeof GrepSchema> {
   return {
     name: "grep",
     label: "Search Code",
@@ -238,6 +246,7 @@ function createGrepTool(cwd: string): AgentTool<typeof GrepSchema> {
     parameters: GrepSchema,
     async execute(_toolCallId, params) {
       const searchPath = params.path ? resolve(cwd, params.path) : cwd;
+      assertPathAllowed(searchPath, sandbox, "grep");
       const includeFlag = params.include ? `--include=${JSON.stringify(params.include)}` : "";
       try {
         const result = execSync(
@@ -271,7 +280,7 @@ const LsSchema = Type.Object({
   path: Type.Optional(Type.String({ description: "Directory to list (default: cwd)" })),
 });
 
-function createLsTool(cwd: string): AgentTool<typeof LsSchema> {
+function createLsTool(cwd: string, sandbox: string[]): AgentTool<typeof LsSchema> {
   return {
     name: "ls",
     label: "List Directory",
@@ -279,6 +288,7 @@ function createLsTool(cwd: string): AgentTool<typeof LsSchema> {
     parameters: LsSchema,
     async execute(_toolCallId, params) {
       const dir = params.path ? resolve(cwd, params.path) : cwd;
+      assertPathAllowed(dir, sandbox, "ls");
       const entries = readdirSync(dir).map(name => {
         try {
           const stat = statSync(join(dir, name));
@@ -305,21 +315,24 @@ const ALL_TOOL_NAMES: CodingToolName[] = ["read", "write", "edit", "bash", "glob
 /**
  * Create the standard set of coding tools scoped to a working directory.
  * If allowedTools is provided, only those tools are included.
+ * If allowedPaths is provided, file-based tools enforce path sandboxing.
  */
-export function createCodingTools(cwd: string, allowedTools?: string[]): AgentTool<any>[] {
-  const factories: Record<CodingToolName, (cwd: string) => AgentTool<any>> = {
-    read: createReadTool,
-    write: createWriteTool,
-    edit: createEditTool,
-    bash: createBashTool,
-    glob: createGlobTool,
-    grep: createGrepTool,
-    ls: createLsTool,
+export function createCodingTools(cwd: string, allowedTools?: string[], allowedPaths?: string[]): AgentTool<any>[] {
+  const sandbox = resolveAllowedPaths(cwd, allowedPaths);
+
+  const factories: Record<CodingToolName, () => AgentTool<any>> = {
+    read: () => createReadTool(cwd, sandbox),
+    write: () => createWriteTool(cwd, sandbox),
+    edit: () => createEditTool(cwd, sandbox),
+    bash: () => createBashTool(cwd),
+    glob: () => createGlobTool(cwd, sandbox),
+    grep: () => createGrepTool(cwd, sandbox),
+    ls: () => createLsTool(cwd, sandbox),
   };
 
   const names = allowedTools
     ? ALL_TOOL_NAMES.filter(n => allowedTools.some(a => a.toLowerCase() === n))
     : ALL_TOOL_NAMES;
 
-  return names.map(n => factories[n](cwd));
+  return names.map(n => factories[n]());
 }

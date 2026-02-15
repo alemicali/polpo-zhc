@@ -33,6 +33,17 @@ export function validateAgents(agents: any[]): void {
     if (agent.adapter !== undefined && typeof agent.adapter !== "string") {
       throw new Error(`Agent "${agent.name}": adapter must be a string`);
     }
+    // Validate allowedPaths
+    if (agent.allowedPaths !== undefined) {
+      if (!Array.isArray(agent.allowedPaths)) {
+        throw new Error(`Agent "${agent.name}": allowedPaths must be an array of strings`);
+      }
+      for (const p of agent.allowedPaths) {
+        if (typeof p !== "string" || p.trim() === "") {
+          throw new Error(`Agent "${agent.name}": each allowedPaths entry must be a non-empty string`);
+        }
+      }
+    }
     // Validate MCP server configs
     if (agent.mcpServers) {
       if (typeof agent.mcpServers !== "object" || Array.isArray(agent.mcpServers)) {

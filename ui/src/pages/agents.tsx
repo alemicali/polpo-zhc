@@ -721,6 +721,20 @@ function AgentCard({
                   </div>
                 </div>
               )}
+
+              {/* Allowed Paths (sandbox) */}
+              {agent.allowedPaths && agent.allowedPaths.length > 0 && (
+                <div>
+                  <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-1.5 flex items-center gap-1">
+                    <Shield className="h-3 w-3" /> Allowed Paths ({agent.allowedPaths.length})
+                  </p>
+                  <div className="flex flex-wrap gap-1">
+                    {agent.allowedPaths.map((p) => (
+                      <Badge key={p} variant="outline" className="text-[9px] font-mono">{p}</Badge>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Adapter features for this agent */}

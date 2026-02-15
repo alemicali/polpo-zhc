@@ -141,6 +141,9 @@ export interface AgentConfig {
   allowedTools?: string[];
   /** MCP servers to connect to. Works with both the built-in engine and claude-sdk adapter. */
   mcpServers?: Record<string, McpServerConfig>;
+  /** Filesystem sandbox — directories the agent is allowed to access.
+   *  When omitted, defaults to the project workDir. */
+  allowedPaths?: string[];
   systemPrompt?: string;
   skills?: string[];
   maxTurns?: number;

@@ -111,6 +111,10 @@ export interface AgentConfig {
   model?: string;
   /** Allowed tools for the agent (e.g. ["read", "write", "edit", "bash", "glob", "grep"]) */
   allowedTools?: string[];
+  /** Filesystem sandbox — directories the agent is allowed to access.
+   *  Paths can be absolute or relative to workDir. When set, all file tool operations
+   *  and bash cwd are validated against these paths. When omitted, defaults to [workDir]. */
+  allowedPaths?: string[];
   /** MCP servers to connect to. Works with both the built-in engine and claude-sdk adapter.
    *  Keys are server names, values are server configs (stdio or HTTP). */
   mcpServers?: Record<string, McpServerConfig>;

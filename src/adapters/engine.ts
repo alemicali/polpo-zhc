@@ -82,8 +82,8 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
   // Resolve model
   const model = resolveModel(agentConfig.model);
 
-  // Create coding tools scoped to working directory
-  const codingTools = createCodingTools(cwd, agentConfig.allowedTools);
+  // Create coding tools scoped to working directory with path sandboxing
+  const codingTools = createCodingTools(cwd, agentConfig.allowedTools, agentConfig.allowedPaths);
 
   // MCP client manager — initialized later (async) if mcpServers are configured
   let mcpManager: McpClientManager | null = null;
