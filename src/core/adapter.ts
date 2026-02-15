@@ -1,4 +1,4 @@
-import type { AgentConfig, AgentActivity, Task, TaskResult } from "./types.js";
+import type { AgentConfig, AgentActivity, Task, TaskResult, TaskOutcome } from "./types.js";
 
 /**
  * Handle returned by adapter.spawn().
@@ -28,6 +28,12 @@ export interface AgentHandle {
    * Adapters call this for each message/event (assistant text, tool use, tool result, etc.)
    */
   onTranscript?: (entry: Record<string, unknown>) => void;
+  /**
+   * Auto-collected outcomes from tool executions.
+   * Populated by the engine when tools produce files, media, or other artifacts.
+   * The runner reads this after completion and stores them on the run record.
+   */
+  outcomes?: TaskOutcome[];
 }
 
 /** Extra context passed to adapters at spawn time. */

@@ -45,7 +45,10 @@ export type {
 
 // Notifications
 export { NotificationRouter } from "./notifications/index.js";
-export type { NotificationChannel, Notification } from "./notifications/types.js";
+export type { NotificationChannel, Notification, OutcomeAttachment } from "./notifications/types.js";
+export type { NotificationStore, NotificationRecord, NotificationStatus } from "./core/notification-store.js";
+export { FileNotificationStore } from "./stores/file-notification-store.js";
+export { SqliteNotificationStore } from "./stores/sqlite-notification-store.js";
 export { SlackChannel } from "./notifications/channels/slack.js";
 export { TelegramChannel } from "./notifications/channels/telegram.js";
 export { EmailChannel } from "./notifications/channels/email.js";

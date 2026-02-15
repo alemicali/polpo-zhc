@@ -1,5 +1,5 @@
 import type { OrchestratorContext } from "./orchestrator-context.js";
-import type { Task, TaskExpectation, RetryPolicy, ReviewContext } from "./types.js";
+import type { Task, TaskExpectation, ExpectedOutcome, RetryPolicy, ReviewContext } from "./types.js";
 import { setAssessment } from "./types.js";
 import { sanitizeExpectations } from "./schemas.js";
 
@@ -16,6 +16,7 @@ export class TaskManager {
     description: string;
     assignTo: string;
     expectations?: TaskExpectation[];
+    expectedOutcomes?: ExpectedOutcome[];
     dependsOn?: string[];
     group?: string;
     maxDuration?: number;
@@ -29,6 +30,7 @@ export class TaskManager {
       description: opts.description,
       assignTo: opts.assignTo,
       expectations: opts.expectations,
+      expectedOutcomes: opts.expectedOutcomes,
       dependsOn: opts.dependsOn,
       group: opts.group,
       maxDuration: opts.maxDuration,
@@ -50,6 +52,7 @@ export class TaskManager {
       group: hookData.group,
       dependsOn: hookData.dependsOn ?? [],
       expectations,
+      expectedOutcomes: hookData.expectedOutcomes,
       metrics: [],
       maxRetries: this.ctx.config.settings.maxRetries,
       maxDuration: hookData.maxDuration,

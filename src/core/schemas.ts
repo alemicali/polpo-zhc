@@ -1,5 +1,5 @@
 /**
- * Zod schemas for runtime validation of Orchestra types.
+ * Zod schemas for runtime validation of Polpo types.
  * Central source of truth — used by config parser, orchestrator, and API routes.
  */
 

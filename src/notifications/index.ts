@@ -1,14 +1,17 @@
 import { nanoid } from "nanoid";
+import { readFileSync, existsSync, statSync } from "node:fs";
 import type { TypedEmitter, PolpoEvent, PolpoEventMap } from "../core/events.js";
-import type { NotificationsConfig, NotificationRule, NotificationChannelConfig, NotificationCondition } from "../core/types.js";
-import type { NotificationChannel, Notification } from "./types.js";
+import type { NotificationsConfig, NotificationRule, NotificationChannelConfig, NotificationCondition, TaskOutcome, OutcomeType } from "../core/types.js";
+import type { NotificationChannel, Notification, OutcomeAttachment } from "./types.js";
+import type { NotificationStore, NotificationRecord } from "../core/notification-store.js";
 import { defaultTitle, defaultBody, applyTemplate } from "./templates.js";
 import { SlackChannel } from "./channels/slack.js";
 import { TelegramChannel } from "./channels/telegram.js";
 import { EmailChannel } from "./channels/email.js";
 import { WebhookChannel } from "./channels/webhook.js";
 
-export type { NotificationChannel, Notification } from "./types.js";
+export type { NotificationChannel, Notification, OutcomeAttachment } from "./types.js";
+export type { NotificationStore, NotificationRecord, NotificationStatus } from "../core/notification-store.js";
 
 /**
  * Event-driven notification router.
@@ -30,8 +33,20 @@ export class NotificationRouter {
   /** Track which concrete events we're already subscribed to (avoid duplicate listeners) */
   private subscribedEvents = new Set<string>();
   private started = false;
+  /** Optional persistent store for notification history. */
+  private store?: NotificationStore;
 
   constructor(private emitter: TypedEmitter) {}
+
+  /** Set the notification store for persisting notification history. */
+  setStore(store: NotificationStore): void {
+    this.store = store;
+  }
+
+  /** Get the notification store (if configured). */
+  getStore(): NotificationStore | undefined {
+    return this.store;
+  }
 
   /**
    * Initialize from configuration.
@@ -141,6 +156,11 @@ export class NotificationRouter {
       ? applyTemplate(rule.template, data)
       : defaultBody(templateCtx);
 
+    // Prepare outcome attachments if the rule requests them
+    const attachments = rule.includeOutcomes
+      ? this.loadAttachments(data, rule.outcomeFilter, rule.maxAttachmentSize)
+      : [];
+
     for (const channelId of rule.channels) {
       const channel = this.channels.get(channelId);
       if (!channel) {
@@ -163,12 +183,19 @@ export class NotificationRouter {
         timestamp: new Date().toISOString(),
       };
 
-      channel.send(notification).then(() => {
+      // Use sendWithAttachments if channel supports it and we have attachments
+      const sendPromise = (attachments.length > 0 && channel.sendWithAttachments)
+        ? channel.sendWithAttachments(notification, attachments)
+        : channel.send(notification);
+
+      sendPromise.then(() => {
         this.emitter.emit("notification:sent", {
           ruleId: rule.id,
           channel: channelId,
           event,
         });
+        // Persist successful notification
+        this.persist(notification, rule, channel.type, "sent", attachments.length, attachments);
       }).catch((err) => {
         const msg = err instanceof Error ? err.message : String(err);
         this.emitter.emit("notification:failed", {
@@ -176,8 +203,100 @@ export class NotificationRouter {
           channel: channelId,
           error: msg,
         });
+        // Persist failed notification
+        this.persist(notification, rule, channel.type, "failed", attachments.length, attachments, msg);
       });
     }
+  }
+
+  /** Persist a notification record to the store (if configured). */
+  private persist(
+    notification: Notification,
+    rule: NotificationRule,
+    channelType: string,
+    status: "sent" | "failed",
+    attachmentCount: number,
+    attachments: OutcomeAttachment[],
+    error?: string,
+  ): void {
+    if (!this.store) return;
+    try {
+      const record: NotificationRecord = {
+        id: notification.id,
+        timestamp: notification.timestamp,
+        ruleId: rule.id,
+        ruleName: rule.name,
+        channel: notification.channel,
+        channelType,
+        status,
+        error,
+        title: notification.title,
+        body: notification.body,
+        severity: notification.severity,
+        sourceEvent: notification.sourceEvent,
+        attachmentCount,
+        attachmentTypes: attachmentCount > 0
+          ? [...new Set(attachments.map(a => a.type))]
+          : undefined,
+      };
+      this.store.append(record);
+    } catch {
+      // Best-effort — don't break notification flow if store write fails
+    }
+  }
+
+  /**
+   * Load outcome attachments from the event data.
+   * Looks for outcomes in common event payload shapes:
+   *   - task:transition / task:created → data.task.outcomes
+   *   - plan:completed → data.report.outcomes
+   *   - Direct outcomes array on data
+   */
+  private loadAttachments(
+    data: unknown,
+    typeFilter?: OutcomeType[],
+    maxSize?: number,
+  ): OutcomeAttachment[] {
+    const maxBytes = maxSize ?? 10 * 1024 * 1024; // default 10MB
+    const outcomes = extractOutcomes(data);
+    if (outcomes.length === 0) return [];
+
+    const attachments: OutcomeAttachment[] = [];
+    for (const outcome of outcomes) {
+      // Apply type filter
+      if (typeFilter && typeFilter.length > 0 && !typeFilter.includes(outcome.type)) continue;
+
+      const att: OutcomeAttachment = {
+        label: outcome.label,
+        type: outcome.type,
+        mimeType: outcome.mimeType,
+        text: outcome.text,
+        url: outcome.url,
+      };
+
+      // Load file content for file/media outcomes
+      if (outcome.path) {
+        try {
+          if (!existsSync(outcome.path)) continue; // skip missing files
+          const stat = statSync(outcome.path);
+          if (stat.size > maxBytes) continue; // skip files that are too large
+          att.filePath = outcome.path;
+          att.size = stat.size;
+          att.content = readFileSync(outcome.path);
+        } catch {
+          continue; // skip unreadable files
+        }
+      }
+
+      // For text/json/url outcomes without a file, include the text directly
+      if (!att.content && !att.text && outcome.data) {
+        att.text = JSON.stringify(outcome.data, null, 2);
+      }
+
+      attachments.push(att);
+    }
+
+    return attachments;
   }
 
   /**
@@ -330,6 +449,52 @@ function getAllEventNames(): string[] {
     // General
     "log",
   ];
+}
+
+/**
+ * Extract TaskOutcome[] from an event payload.
+ * Supports multiple event shapes:
+ *   - { task: { outcomes: [...] } }              — task:transition, task:created
+ *   - { report: { outcomes: [...] } }            — plan:completed
+ *   - { report: { tasks: [{ outcomes: [...] }] } } — plan:completed (per-task)
+ *   - { outcomes: [...] }                        — direct
+ */
+function extractOutcomes(data: unknown): TaskOutcome[] {
+  if (!data || typeof data !== "object") return [];
+  const d = data as Record<string, unknown>;
+
+  // Direct outcomes array on the payload
+  if (Array.isArray(d.outcomes) && d.outcomes.length > 0) {
+    return d.outcomes as TaskOutcome[];
+  }
+
+  // task.outcomes (task lifecycle events)
+  if (d.task && typeof d.task === "object") {
+    const task = d.task as Record<string, unknown>;
+    if (Array.isArray(task.outcomes) && task.outcomes.length > 0) {
+      return task.outcomes as TaskOutcome[];
+    }
+  }
+
+  // report.outcomes (plan:completed aggregated outcomes)
+  if (d.report && typeof d.report === "object") {
+    const report = d.report as Record<string, unknown>;
+    if (Array.isArray(report.outcomes) && report.outcomes.length > 0) {
+      return report.outcomes as TaskOutcome[];
+    }
+    // Fall back to per-task outcomes within the report
+    if (Array.isArray(report.tasks)) {
+      const outcomes: TaskOutcome[] = [];
+      for (const t of report.tasks) {
+        if (t && typeof t === "object" && Array.isArray((t as Record<string, unknown>).outcomes)) {
+          outcomes.push(...(t as Record<string, unknown>).outcomes as TaskOutcome[]);
+        }
+      }
+      if (outcomes.length > 0) return outcomes;
+    }
+  }
+
+  return [];
 }
 
 // ─── JSON Condition Evaluator ───────────────────────

@@ -1,4 +1,4 @@
-import type { Task, AgentConfig, Plan, PlanReport, TaskResult, AssessmentResult, TaskExpectation, RetryPolicy } from "./types.js";
+import type { Task, AgentConfig, Plan, PlanReport, TaskResult, AssessmentResult, TaskExpectation, ExpectedOutcome, RetryPolicy } from "./types.js";
 
 // ─── Lifecycle Hook Points ───────────────────────────
 
@@ -33,6 +33,7 @@ export interface HookPayloads {
     description: string;
     assignTo: string;
     expectations?: TaskExpectation[];
+    expectedOutcomes?: ExpectedOutcome[];
     dependsOn?: string[];
     group?: string;
     maxDuration?: number;

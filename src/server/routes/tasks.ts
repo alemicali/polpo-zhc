@@ -45,6 +45,7 @@ export function taskRoutes(): Hono<ServerEnv> {
       description: body.description,
       assignTo: body.assignTo,
       expectations: body.expectations,
+      expectedOutcomes: body.expectedOutcomes,
       dependsOn: body.dependsOn,
       group: body.group,
       maxDuration: body.maxDuration,

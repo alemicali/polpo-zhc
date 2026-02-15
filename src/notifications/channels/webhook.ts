@@ -1,5 +1,6 @@
-import type { NotificationChannel, Notification } from "../types.js";
+import type { NotificationChannel, Notification, OutcomeAttachment } from "../types.js";
 import type { NotificationChannelConfig } from "../../core/types.js";
+import { basename } from "node:path";
 
 /**
  * Generic HTTP webhook notification channel.
@@ -42,6 +43,44 @@ export class WebhookChannel implements NotificationChannel {
         data: notification.sourceData,
         timestamp: notification.timestamp,
         ruleId: notification.ruleId,
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Webhook failed: ${response.status} ${response.statusText}`);
+    }
+  }
+
+  async sendWithAttachments(notification: Notification, attachments: OutcomeAttachment[]): Promise<void> {
+    // Include attachments as base64-encoded data in the JSON payload
+    const attachmentPayloads = attachments.map(att => ({
+      label: att.label,
+      type: att.type,
+      filename: att.filePath ? basename(att.filePath) : undefined,
+      mimeType: att.mimeType,
+      size: att.size,
+      text: att.text,
+      url: att.url,
+      // Base64-encode file content for JSON transport
+      contentBase64: att.content ? att.content.toString("base64") : undefined,
+    }));
+
+    const response = await fetch(this.url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...this.headers,
+      },
+      body: JSON.stringify({
+        id: notification.id,
+        event: notification.sourceEvent,
+        severity: notification.severity,
+        title: notification.title,
+        body: notification.body,
+        data: notification.sourceData,
+        timestamp: notification.timestamp,
+        ruleId: notification.ruleId,
+        attachments: attachmentPayloads,
       }),
     });
 

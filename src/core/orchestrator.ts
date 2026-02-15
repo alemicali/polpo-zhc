@@ -21,6 +21,7 @@ import type {
   Task,
   TaskResult,
   TaskExpectation,
+  ExpectedOutcome,
   Team,
   Plan,
   PlanStatus,
@@ -44,6 +45,7 @@ import { HookRegistry } from "./hooks.js";
 import { ApprovalManager } from "./approval-manager.js";
 import { FileApprovalStore } from "../stores/file-approval-store.js";
 import { NotificationRouter } from "../notifications/index.js";
+import { FileNotificationStore } from "../stores/file-notification-store.js";
 import { EscalationManager } from "./escalation-manager.js";
 import { SLAMonitor } from "../quality/sla-monitor.js";
 import { QualityController } from "../quality/quality-controller.js";
@@ -225,6 +227,9 @@ export class Orchestrator extends TypedEmitter {
     if (this.config.settings.notifications) {
       this.notificationRouter = new NotificationRouter(this);
       this.notificationRouter.init(this.config.settings.notifications);
+      // Attach persistent notification store
+      const notifStore = new FileNotificationStore(this.polpoDir);
+      this.notificationRouter.setStore(notifStore);
       this.notificationRouter.start();
     }
 
@@ -318,8 +323,8 @@ export class Orchestrator extends TypedEmitter {
 
   addTask(opts: {
     title: string; description: string; assignTo: string;
-    expectations?: TaskExpectation[]; dependsOn?: string[];
-    group?: string; maxDuration?: number; retryPolicy?: RetryPolicy;
+    expectations?: TaskExpectation[]; expectedOutcomes?: ExpectedOutcome[];
+    dependsOn?: string[]; group?: string; maxDuration?: number; retryPolicy?: RetryPolicy;
   }): Task { return this.taskMgr.addTask(opts); }
   updateTaskDescription(taskId: string, description: string): void { this.taskMgr.updateTaskDescription(taskId, description); }
   updateTaskAssignment(taskId: string, agentName: string): void { this.taskMgr.updateTaskAssignment(taskId, agentName); }

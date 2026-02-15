@@ -161,6 +161,13 @@ async function main(): Promise<void> {
     // Final activity + sessionId flush before marking terminal
     try { runStore.updateActivity(config.runId, handle.activity); } catch { /* best effort */ }
     actLog.logActivity({ ...handle.activity });
+
+    // Store auto-collected outcomes on the run record
+    if (handle.outcomes && handle.outcomes.length > 0) {
+      try { runStore.updateOutcomes(config.runId, handle.outcomes); } catch { /* best effort */ }
+      actLog.logEvent("outcomes", { count: handle.outcomes.length, types: handle.outcomes.map(o => o.type) });
+    }
+
     const status = sigterm ? "killed" : (result.exitCode === 0 ? "completed" : "failed");
     actLog.logEvent("done", { status, exitCode: result.exitCode, duration: result.duration });
     runStore.completeRun(config.runId, status, result);

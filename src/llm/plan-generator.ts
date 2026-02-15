@@ -37,12 +37,29 @@ const ExpectationSchema = Type.Object({
   }), { description: "For llm_review: evaluation dimensions. REQUIRED if no criteria provided. 3 reviewers score each dimension 1-5." })),
 });
 
+const ExpectedOutcomeSchema = Type.Object({
+  type: Type.Union([
+    Type.Literal("file"),
+    Type.Literal("text"),
+    Type.Literal("url"),
+    Type.Literal("json"),
+    Type.Literal("media"),
+  ], { description: "Outcome type: file (documents, spreadsheets), text (transcriptions, summaries), url (links), json (structured data), media (audio, images, video)" }),
+  label: Type.String({ description: "Human-readable label (e.g. 'Sales Report', 'Speech Audio', 'Transcription')" }),
+  description: Type.Optional(Type.String({ description: "Hints for the agent about what to produce" })),
+  path: Type.Optional(Type.String({ description: "Expected file path (optional — agent can choose)" })),
+  mimeType: Type.Optional(Type.String({ description: "Expected MIME type (e.g. 'audio/mpeg', 'application/pdf')" })),
+  required: Type.Optional(Type.Boolean({ description: "Whether this outcome is required (default: true)" })),
+  tags: Type.Optional(Type.Array(Type.String(), { description: "Tags for categorization" })),
+});
+
 const PlanTaskSchema = Type.Object({
   title: Type.String({ description: "Short descriptive title" }),
   description: Type.String({ description: "Detailed description — be specific about files, logic, etc." }),
   assignTo: Type.String({ description: "Agent name to assign the task to" }),
   dependsOn: Type.Optional(Type.Array(Type.String(), { description: "Task titles this depends on" })),
   expectations: Type.Optional(Type.Array(ExpectationSchema)),
+  expectedOutcomes: Type.Optional(Type.Array(ExpectedOutcomeSchema, { description: "Artifacts this task should produce (files, text, URLs, data). Auto-collected from tool results + validated." })),
   maxRetries: Type.Optional(Type.Number({ description: "Max retry attempts (default: 2)" })),
 });
 
@@ -150,6 +167,15 @@ export interface PlanTaskData {
       description: string;
       rubric?: Record<string, string>;
     }>;
+  }>;
+  expectedOutcomes?: Array<{
+    type: "file" | "text" | "url" | "json" | "media";
+    label: string;
+    description?: string;
+    path?: string;
+    mimeType?: string;
+    required?: boolean;
+    tags?: string[];
   }>;
   maxRetries?: number;
 }

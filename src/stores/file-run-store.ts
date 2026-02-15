@@ -8,7 +8,7 @@ import {
   readdirSync,
   unlinkSync,
 } from "node:fs";
-import type { AgentActivity, TaskResult } from "../core/types.js";
+import type { AgentActivity, TaskResult, TaskOutcome } from "../core/types.js";
 import type { RunStore, RunRecord, RunStatus } from "../core/run-store.js";
 
 function safeJsonParse<T>(raw: string, fallback: T): T {
@@ -87,6 +87,14 @@ export class FileRunStore implements RunStore {
     if (!run) return;
     run.activity = activity;
     if (activity.sessionId) run.sessionId = activity.sessionId;
+    run.updatedAt = new Date().toISOString();
+    this.writeRun(run);
+  }
+
+  updateOutcomes(runId: string, outcomes: TaskOutcome[]): void {
+    const run = this.readRun(runId);
+    if (!run) return;
+    run.outcomes = outcomes;
     run.updatedAt = new Date().toISOString();
     this.writeRun(run);
   }

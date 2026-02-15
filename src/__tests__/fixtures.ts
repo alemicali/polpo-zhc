@@ -1,5 +1,5 @@
 import { nanoid } from "nanoid";
-import type { Task, TaskStatus, PolpoState, AgentConfig, AgentActivity, TaskResult, AgentHandle, AgentAdapter, TaskStore, RunStore, RunRecord, RunStatus } from "../core/index.js";
+import type { Task, TaskStatus, TaskOutcome, PolpoState, AgentConfig, AgentActivity, TaskResult, AgentHandle, AgentAdapter, TaskStore, RunStore, RunRecord, RunStatus } from "../core/index.js";
 import { assertValidTransition } from "../core/state-machine.js";
 
 // === InMemoryTaskStore ===
@@ -180,6 +180,14 @@ export class InMemoryRunStore implements RunStore {
     const run = this.runs.get(runId);
     if (run) {
       run.activity = activity;
+      run.updatedAt = new Date().toISOString();
+    }
+  }
+
+  updateOutcomes(runId: string, outcomes: TaskOutcome[]): void {
+    const run = this.runs.get(runId);
+    if (run) {
+      run.outcomes = outcomes;
       run.updatedAt = new Date().toISOString();
     }
   }

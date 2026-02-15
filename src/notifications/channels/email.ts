@@ -1,5 +1,6 @@
-import type { NotificationChannel, Notification } from "../types.js";
+import type { NotificationChannel, Notification, OutcomeAttachment } from "../types.js";
 import type { NotificationChannelConfig } from "../../core/types.js";
+import { basename } from "node:path";
 
 /**
  * Email notification channel — sends emails via HTTP API (Resend/SendGrid)
@@ -45,6 +46,100 @@ export class EmailChannel implements NotificationChannel {
         return this.sendViaSMTP(notification);
       default:
         throw new Error(`Unknown email provider: ${this.provider}`);
+    }
+  }
+
+  async sendWithAttachments(notification: Notification, attachments: OutcomeAttachment[]): Promise<void> {
+    // Build base64 attachment array for Resend/SendGrid
+    const emailAttachments = attachments
+      .filter(a => a.content && a.filePath)
+      .map(a => ({
+        filename: basename(a.filePath!),
+        content: a.content!.toString("base64"),
+        type: a.mimeType ?? "application/octet-stream",
+      }));
+
+    // Append text outcomes to the body
+    let bodyExtra = "";
+    for (const att of attachments) {
+      if (att.text && !att.content) {
+        bodyExtra += `\n\n--- ${att.label} ---\n${att.text}`;
+      }
+    }
+    const enrichedBody = notification.body + bodyExtra;
+    const enrichedNotification = { ...notification, body: enrichedBody };
+
+    switch (this.provider) {
+      case "resend":
+        return this.sendViaResendWithAttachments(enrichedNotification, emailAttachments);
+      case "sendgrid":
+        return this.sendViaSendGridWithAttachments(enrichedNotification, emailAttachments);
+      default:
+        // SMTP and others — fall back to plain send with enriched body
+        return this.send(enrichedNotification);
+    }
+  }
+
+  private async sendViaResendWithAttachments(
+    notification: Notification,
+    attachments: { filename: string; content: string; type: string }[],
+  ): Promise<void> {
+    const response = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${this.apiKey}`,
+      },
+      body: JSON.stringify({
+        from: this.from,
+        to: this.to,
+        subject: notification.title,
+        text: notification.body,
+        html: markdownToSimpleHtml(notification.body),
+        attachments: attachments.map(a => ({
+          filename: a.filename,
+          content: a.content,
+          content_type: a.type,
+        })),
+      }),
+    });
+
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error(`Resend API failed: ${response.status} — ${body}`);
+    }
+  }
+
+  private async sendViaSendGridWithAttachments(
+    notification: Notification,
+    attachments: { filename: string; content: string; type: string }[],
+  ): Promise<void> {
+    const response = await fetch("https://api.sendgrid.com/v3/mail/send", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${this.apiKey}`,
+      },
+      body: JSON.stringify({
+        personalizations: [{ to: this.to.map(email => ({ email })) }],
+        from: { email: this.from },
+        subject: notification.title,
+        content: [
+          { type: "text/plain", value: notification.body },
+          { type: "text/html", value: markdownToSimpleHtml(notification.body) },
+        ],
+        attachments: attachments.map(a => ({
+          content: a.content,
+          type: a.type,
+          filename: a.filename,
+          disposition: "attachment",
+        })),
+      }),
+    });
+
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error(`SendGrid API failed: ${response.status} — ${body}`);
     }
   }
 

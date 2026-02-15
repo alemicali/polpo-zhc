@@ -12,6 +12,8 @@ import { agentRoutes } from "./routes/agents.js";
 import { eventRoutes } from "./routes/events.js";
 import { chatRoutes } from "./routes/chat.js";
 import { skillRoutes } from "./routes/skills.js";
+import { notificationRoutes } from "./routes/notifications.js";
+import { approvalRoutes } from "./routes/approvals.js";
 import { projectListRoutes, projectDetailRoutes } from "./routes/projects.js";
 
 export type ServerEnv = {
@@ -72,6 +74,8 @@ export function createApp(pm: ProjectManager, opts?: AppOptions): Hono {
   projectApp.route("/events", eventRoutes(pm));
   projectApp.route("/chat", chatRoutes());
   projectApp.route("/skills", skillRoutes());
+  projectApp.route("/notifications", notificationRoutes());
+  projectApp.route("/approvals", approvalRoutes());
   projectApp.route("/", projectDetailRoutes());
 
   authed.route("/projects/:projectId", projectApp);

@@ -1,6 +1,18 @@
 import { z } from "zod";
 import { ApiHttpError } from "./middleware/error.js";
 
+// ── Outcome schemas ───────────────────────────────────────────────────
+
+const ExpectedOutcomeSchema = z.object({
+  type: z.enum(["file", "text", "url", "json", "media"]),
+  label: z.string().min(1),
+  description: z.string().optional(),
+  path: z.string().optional(),
+  mimeType: z.string().optional(),
+  required: z.boolean().optional(),
+  tags: z.array(z.string()).optional(),
+});
+
 // ── Task schemas ──────────────────────────────────────────────────────
 
 export const CreateTaskSchema = z.object({
@@ -8,6 +20,7 @@ export const CreateTaskSchema = z.object({
   description: z.string().min(1),
   assignTo: z.string().min(1),
   expectations: z.array(z.any()).optional(),
+  expectedOutcomes: z.array(ExpectedOutcomeSchema).optional(),
   dependsOn: z.array(z.string()).optional(),
   group: z.string().optional(),
   maxDuration: z.number().positive().optional(),
@@ -105,6 +118,18 @@ export const RefinePlanSchema = z.object({
   currentData: z.string().min(1),
   prompt: z.string().optional().default(""),
   feedback: z.string().min(1),
+});
+
+// ── Approval schemas ──────────────────────────────────────────────────
+
+export const ApproveRequestSchema = z.object({
+  resolvedBy: z.string().optional(),
+  note: z.string().optional(),
+});
+
+export const RejectRequestSchema = z.object({
+  resolvedBy: z.string().optional(),
+  note: z.string().optional(),
 });
 
 // ── Memory schema ─────────────────────────────────────────────────────

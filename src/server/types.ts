@@ -1,5 +1,6 @@
 import type {
   TaskExpectation,
+  ExpectedOutcome,
   RetryPolicy,
   PlanStatus,
 } from "../core/types.js";
@@ -39,6 +40,7 @@ export interface CreateTaskRequest {
   description: string;
   assignTo: string;
   expectations?: TaskExpectation[];
+  expectedOutcomes?: ExpectedOutcome[];
   dependsOn?: string[];
   group?: string;
   maxDuration?: number;

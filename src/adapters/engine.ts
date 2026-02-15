@@ -9,7 +9,7 @@
  * on an agent, this engine is used directly (not through the adapter registry).
  */
 
-import type { AgentConfig, Task, TaskResult } from "../core/types.js";
+import type { AgentConfig, Task, TaskResult, TaskOutcome, OutcomeType } from "../core/types.js";
 import type { AgentHandle, SpawnContext } from "../core/adapter.js";
 import { createActivity } from "./registry.js";
 import { Agent } from "@mariozechner/pi-agent-core";
@@ -19,6 +19,7 @@ import { createCodingTools, createAllTools } from "../tools/coding-tools.js";
 import { loadAgentSkills, buildSkillPrompt } from "../llm/skills.js";
 import { McpClientManager } from "../mcp/client.js";
 import type { McpServerConfig } from "../mcp/types.js";
+import { nanoid } from "nanoid";
 
 /**
  * Build the system prompt for the agent, including loaded skills.
@@ -192,6 +193,17 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
             activity.filesEdited.push(filePath);
           }
         }
+
+        // Auto-collect outcomes from tools that produce artifacts
+        if (!event.isError && details) {
+          const contentText = event.result?.content?.map((c: any) => c.text ?? "").join("") ?? "";
+          const outcome = collectOutcome(event.toolName, details, contentText);
+          if (outcome) {
+            if (!handle.outcomes) handle.outcomes = [];
+            handle.outcomes.push(outcome);
+          }
+        }
+
         // Emit tool result transcript
         const resultText = event.result?.content?.map((c: any) => c.text ?? "").join("") ?? "";
         handle.onTranscript?.({
@@ -276,4 +288,84 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
   })();
 
   return handle;
+}
+
+// ─── Outcome Auto-Collection ────────────────────────
+//
+// Maps tool names to outcome types. When a tool returns `details.path` or
+// `details.bytes`, an outcome is automatically created.
+
+/** Tools that produce file/media outcomes. Keyed by tool name. */
+const OUTCOME_TOOLS: Record<string, { type: OutcomeType; labelPrefix: string }> = {
+  audio_speak:      { type: "media",  labelPrefix: "Generated Audio" },
+  image_generate:   { type: "media",  labelPrefix: "Generated Image" },
+  excel_write:      { type: "file",   labelPrefix: "Excel File" },
+  pdf_create:       { type: "file",   labelPrefix: "PDF Document" },
+  pdf_merge:        { type: "file",   labelPrefix: "Merged PDF" },
+  docx_create:      { type: "file",   labelPrefix: "Word Document" },
+  http_download:    { type: "file",   labelPrefix: "Downloaded File" },
+  audio_transcribe: { type: "text",   labelPrefix: "Transcription" },
+  image_analyze:    { type: "text",   labelPrefix: "Image Analysis" },
+};
+
+/** MIME type inference from file extension. */
+const EXT_MIME: Record<string, string> = {
+  ".mp3": "audio/mpeg", ".wav": "audio/wav", ".ogg": "audio/ogg", ".flac": "audio/flac",
+  ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".gif": "image/gif",
+  ".pdf": "application/pdf",
+  ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  ".xls": "application/vnd.ms-excel",
+  ".csv": "text/csv",
+  ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  ".json": "application/json",
+  ".txt": "text/plain",
+  ".html": "text/html",
+  ".zip": "application/zip",
+};
+
+function guessMime(filePath: string): string | undefined {
+  const ext = filePath.slice(filePath.lastIndexOf(".")).toLowerCase();
+  return EXT_MIME[ext];
+}
+
+/**
+ * Try to create a TaskOutcome from a tool execution result.
+ * Returns undefined if the tool is not an outcome-producing tool.
+ *
+ * @param contentText - the concatenated text from the tool result's content blocks,
+ *   used for text-type outcomes where the text is in content rather than details.
+ */
+function collectOutcome(toolName: string, details: Record<string, unknown>, contentText?: string): TaskOutcome | undefined {
+  const spec = OUTCOME_TOOLS[toolName];
+  if (!spec) return undefined;
+
+  const path = details.path as string | undefined;
+  const bytes = details.bytes as number | undefined;
+  // For text outcomes, prefer details.text, fall back to contentText
+  const text = (details.text as string | undefined) ?? contentText;
+
+  // For file/media outcomes, we need at least a path
+  if ((spec.type === "file" || spec.type === "media") && !path) return undefined;
+  // For text outcomes, we need text
+  if (spec.type === "text" && !text) return undefined;
+
+  const outcome: TaskOutcome = {
+    id: nanoid(),
+    type: spec.type,
+    label: path ? `${spec.labelPrefix}: ${path.split("/").pop()}` : spec.labelPrefix,
+    producedBy: toolName,
+    producedAt: new Date().toISOString(),
+  };
+
+  if (path) {
+    outcome.path = path;
+    outcome.mimeType = guessMime(path);
+    if (bytes) outcome.size = bytes;
+  }
+
+  if (text) {
+    outcome.text = text;
+  }
+
+  return outcome;
 }

@@ -1,7 +1,7 @@
 import type { Orchestrator } from "../core/orchestrator.js";
 import type { PolpoEvent } from "../core/events.js";
 
-/** All Orchestra events to subscribe to. */
+/** All Polpo events to subscribe to. */
 const ALL_EVENTS: PolpoEvent[] = [
   "task:created", "task:transition", "task:updated", "task:removed",
   "agent:spawned", "agent:finished", "agent:activity",

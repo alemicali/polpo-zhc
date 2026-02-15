@@ -100,7 +100,7 @@ export interface PolpoEventMap {
 export type PolpoEvent = keyof PolpoEventMap;
 
 /**
- * Typed event emitter for Orchestra.
+ * Typed event emitter for Polpo.
  * Wraps Node's EventEmitter with type-safe emit/on/once/off.
  */
 /** Events to exclude from persistent logging (too frequent or internal). */

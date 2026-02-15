@@ -19,7 +19,7 @@ All project-scoped endpoints are under `/api/v1/projects/:projectId`.
 { ok: false, error: string, code: string }
 ```
 
-Error codes: `NOT_FOUND`, `VALIDATION_ERROR`.
+Error codes: `NOT_FOUND`, `VALIDATION_ERROR`, `CONFLICT`.
 
 ---
 
@@ -462,6 +462,81 @@ Returns the JSONL activity history for a specific task's run (tool calls, file e
 ```json
 { "ok": true, "data": [{ "type": "activity", "tool": "Edit", "file": "src/app.ts", "timestamp": "..." }] }
 ```
+
+---
+
+## Approvals
+
+Manage approval requests created by [approval gates](/concepts/approvals).
+
+### List Approvals
+
+```http
+GET /approvals?status=pending&taskId=task-1
+```
+
+Both query params are optional filters. Valid `status` values: `pending`, `approved`, `rejected`, `timeout`.
+
+**Response** `200`:
+```json
+{
+  "ok": true,
+  "data": [
+    {
+      "id": "req_abc123",
+      "gateId": "gate-1",
+      "gateName": "Production Deploy Gate",
+      "taskId": "task-1",
+      "status": "pending",
+      "requestedAt": "2025-01-15T10:30:00Z"
+    }
+  ]
+}
+```
+
+### Get Approval Request
+
+```http
+GET /approvals/:id
+```
+
+**Response** `200`: Single `ApprovalRequest` object.
+
+### Approve Request
+
+```http
+POST /approvals/:id/approve
+Content-Type: application/json
+
+{
+  "resolvedBy": "alice",
+  "note": "Looks good, ship it"
+}
+```
+
+Both fields are optional. On success, the blocked task transitions from `awaiting_approval` to `assigned` and resumes execution.
+
+**Response** `200`: Updated `ApprovalRequest` with `status: "approved"`.
+
+Returns `404` if the request does not exist, or `409` if already resolved.
+
+### Reject Request
+
+```http
+POST /approvals/:id/reject
+Content-Type: application/json
+
+{
+  "resolvedBy": "bob",
+  "note": "Needs more tests first"
+}
+```
+
+Both fields are optional. On rejection, the blocked task transitions to `failed`.
+
+**Response** `200`: Updated `ApprovalRequest` with `status: "rejected"`.
+
+Returns `404` if the request does not exist, or `409` if already resolved.
 
 ---
 

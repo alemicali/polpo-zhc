@@ -30,6 +30,14 @@ export class TaskRunner {
       if (sid) {
         try { this.ctx.registry.updateTask(run.taskId, { sessionId: sid }); } catch { /* task may already be gone */ }
       }
+      // Persist auto-collected outcomes on the task
+      if (run.outcomes && run.outcomes.length > 0) {
+        try {
+          const task = this.ctx.registry.getTask(run.taskId);
+          const existing = task?.outcomes ?? [];
+          this.ctx.registry.updateTask(run.taskId, { outcomes: [...existing, ...run.outcomes] });
+        } catch { /* task may already be gone */ }
+      }
       if (run.result) {
         onResult(run.taskId, run.result);
       }

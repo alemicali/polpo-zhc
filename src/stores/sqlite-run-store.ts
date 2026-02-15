@@ -1,7 +1,7 @@
 import { createDatabase, type PolpoDatabase, type PolpoStatement } from "./sqlite-compat.js";
 import { mkdirSync, existsSync } from "node:fs";
 import { dirname } from "node:path";
-import type { AgentActivity, TaskResult } from "../core/types.js";
+import type { AgentActivity, TaskResult, TaskOutcome } from "../core/types.js";
 import type { RunStore, RunRecord, RunStatus } from "../core/run-store.js";
 
 interface RunRow {
@@ -16,6 +16,7 @@ interface RunRow {
   updated_at: string;
   activity: string;
   result: string | null;
+  outcomes: string | null;
   config_path: string;
 }
 
@@ -33,6 +34,7 @@ export class SqliteRunStore implements RunStore {
 
   private upsertRunStmt: PolpoStatement;
   private updateActivityStmt: PolpoStatement;
+  private updateOutcomesStmt: PolpoStatement;
   private completeRunStmt: PolpoStatement;
   private getRunStmt: PolpoStatement;
   private getRunByTaskIdStmt: PolpoStatement;
@@ -66,6 +68,10 @@ export class SqliteRunStore implements RunStore {
 
     this.updateActivityStmt = this.db.prepare(`
       UPDATE runs SET activity = @activity, session_id = COALESCE(@session_id, session_id), updated_at = @updated_at WHERE id = @id
+    `);
+
+    this.updateOutcomesStmt = this.db.prepare(`
+      UPDATE runs SET outcomes = @outcomes, updated_at = @updated_at WHERE id = @id
     `);
 
     this.completeRunStmt = this.db.prepare(`
@@ -104,6 +110,12 @@ export class SqliteRunStore implements RunStore {
       this.db.exec(`ALTER TABLE runs ADD COLUMN session_id TEXT`);
     } catch { /* column already exists */
     }
+
+    // Migration: add outcomes column for existing databases
+    try {
+      this.db.exec(`ALTER TABLE runs ADD COLUMN outcomes TEXT`);
+    } catch { /* column already exists */
+    }
   }
 
   private rowToRecord(row: RunRow): RunRecord {
@@ -122,6 +134,7 @@ export class SqliteRunStore implements RunStore {
       updatedAt: row.updated_at,
       activity,
       result: safeJsonParse(row.result, undefined),
+      outcomes: safeJsonParse<TaskOutcome[] | undefined>(row.outcomes, undefined),
       configPath: row.config_path,
     };
   }
@@ -148,6 +161,14 @@ export class SqliteRunStore implements RunStore {
       id: runId,
       activity: JSON.stringify(activity),
       session_id: activity.sessionId ?? null,
+      updated_at: new Date().toISOString(),
+    });
+  }
+
+  updateOutcomes(runId: string, outcomes: TaskOutcome[]): void {
+    this.updateOutcomesStmt.run({
+      id: runId,
+      outcomes: JSON.stringify(outcomes),
       updated_at: new Date().toISOString(),
     });
   }

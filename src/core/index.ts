@@ -9,6 +9,7 @@ export type { MemoryStore } from "./memory-store.js";
 export type { LogStore, LogEntry, SessionInfo } from "./log-store.js";
 export type { SessionStore, Session, Message, MessageRole } from "./session-store.js";
 export type { ApprovalStore } from "./approval-store.js";
+export type { NotificationStore, NotificationRecord, NotificationStatus } from "./notification-store.js";
 export { Orchestrator, buildRetryPrompt } from "./orchestrator.js";
 export type { OrchestratorOptions, AssessFn } from "./orchestrator.js";
 export { parseConfig, loadPolpoConfig, savePolpoConfig, generatePolpoConfigDefault, validateAgents } from "./config.js";

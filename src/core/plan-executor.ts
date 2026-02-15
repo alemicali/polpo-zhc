@@ -1,7 +1,7 @@
 import type { OrchestratorContext } from "./orchestrator-context.js";
 import type { TaskManager } from "./task-manager.js";
 import type { AgentManager } from "./agent-manager.js";
-import type { Plan, PlanStatus, PlanReport, Task, TaskExpectation, PlanQualityGate } from "./types.js";
+import type { Plan, PlanStatus, PlanReport, Task, TaskExpectation, ExpectedOutcome, PlanQualityGate } from "./types.js";
 import type { QualityController } from "../quality/quality-controller.js";
 import { sanitizeExpectations } from "./schemas.js";
 
@@ -12,6 +12,7 @@ interface PlanDocument {
     assignTo?: string;
     dependsOn?: string[];
     expectations?: TaskExpectation[];
+    expectedOutcomes?: ExpectedOutcome[];
     metrics?: unknown[];
     maxRetries?: number;
     maxDuration?: number;
@@ -216,6 +217,7 @@ export class PlanExecutor {
         assignTo: t.assignTo || this.ctx.config.team.agents[0]?.name || "default",
         dependsOn: deps,
         expectations,
+        expectedOutcomes: t.expectedOutcomes,
         group,
         maxDuration: t.maxDuration,
         retryPolicy: t.retryPolicy,
@@ -304,6 +306,7 @@ export class PlanExecutor {
     const allFilesEdited = new Set<string>();
     let totalDuration = 0;
     const scores: number[] = [];
+    const allOutcomes: import("./types.js").TaskOutcome[] = [];
 
     const taskReports = groupTasks.map(t => {
       const duration = t.result?.duration ?? 0;
@@ -318,6 +321,11 @@ export class PlanExecutor {
       for (const f of filesCreated) allFilesCreated.add(f);
       for (const f of filesEdited) allFilesEdited.add(f);
 
+      // Aggregate outcomes across all tasks
+      if (t.outcomes) {
+        for (const o of t.outcomes) allOutcomes.push(o);
+      }
+
       return {
         title: t.title,
         status: t.status as "done" | "failed",
@@ -325,6 +333,7 @@ export class PlanExecutor {
         score,
         filesCreated,
         filesEdited,
+        outcomes: t.outcomes,
       };
     });
 
@@ -340,6 +349,7 @@ export class PlanExecutor {
       tasks: taskReports,
       filesCreated: [...allFilesCreated],
       filesEdited: [...allFilesEdited],
+      outcomes: allOutcomes.length > 0 ? allOutcomes : undefined,
       avgScore,
     };
   }

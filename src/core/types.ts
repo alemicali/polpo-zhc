@@ -58,6 +58,69 @@ export interface RetryPolicy {
 
 export type TaskPhase = "execution" | "review" | "fix" | "clarification";
 
+// === Outcomes ===
+
+/** What type of artifact a task can produce. */
+export type OutcomeType = "file" | "text" | "url" | "json" | "media";
+
+/**
+ * A concrete artifact produced by a task at runtime.
+ * Populated automatically by tool interception and/or explicitly by agent output.
+ */
+export interface TaskOutcome {
+  /** Unique outcome ID (nanoid). */
+  id: string;
+  /** Outcome category. */
+  type: OutcomeType;
+  /** Human-readable label (e.g. "Sales Report", "Transcription", "Generated Audio"). */
+  label: string;
+
+  // --- Type-specific payload ---
+
+  /** file/media: relative or absolute path to the produced file. */
+  path?: string;
+  /** file/media: MIME type (auto-detected from extension or explicit). */
+  mimeType?: string;
+  /** file/media: file size in bytes. */
+  size?: number;
+  /** text: the content itself (transcription, summary, analysis, etc.). */
+  text?: string;
+  /** url: link to external resource (deploy URL, PR, page, etc.). */
+  url?: string;
+  /** json: structured data payload (query results, metrics, report, etc.). */
+  data?: unknown;
+
+  // --- Metadata ---
+
+  /** Tool name that generated this outcome (auto-collected). */
+  producedBy?: string;
+  /** ISO timestamp when the outcome was created. */
+  producedAt: string;
+  /** User-defined tags for filtering and categorization. */
+  tags?: string[];
+}
+
+/**
+ * Declared in task/plan definitions — tells the agent what it should produce.
+ * Used for validation: the orchestrator checks that expected outcomes are fulfilled.
+ */
+export interface ExpectedOutcome {
+  /** Expected outcome type. */
+  type: OutcomeType;
+  /** Human-readable label — also used to match against produced TaskOutcome.label. */
+  label: string;
+  /** Hints for the agent about what to produce. */
+  description?: string;
+  /** Expected file path (optional — agent can choose). */
+  path?: string;
+  /** Expected MIME type (e.g. "audio/mpeg", "application/pdf"). */
+  mimeType?: string;
+  /** Whether this outcome is required for the task to pass. Default: true. */
+  required?: boolean;
+  /** Tags to auto-apply to the produced outcome. */
+  tags?: string[];
+}
+
 export interface Task {
   id: string;
   title: string;
@@ -83,6 +146,10 @@ export interface Task {
   deadline?: string;
   /** Priority weight for quality scoring (higher = more important). Default: 1.0 */
   priority?: number;
+  /** Declared expected outcomes — what this task should produce. */
+  expectedOutcomes?: ExpectedOutcome[];
+  /** Actual outcomes produced at runtime (auto-collected + explicit). */
+  outcomes?: TaskOutcome[];
   createdAt: string;
   updatedAt: string;
 }
@@ -297,9 +364,11 @@ export interface PlanReport {
     score?: number;                // global assessment score (1-5)
     filesCreated: string[];
     filesEdited: string[];
+    outcomes?: TaskOutcome[];      // outcomes produced by this task
   }[];
   filesCreated: string[];          // aggregated across all tasks
   filesEdited: string[];           // aggregated across all tasks
+  outcomes?: TaskOutcome[];        // aggregated outcomes across all tasks
   avgScore?: number;               // average assessment score
 }
 
@@ -389,7 +458,7 @@ export interface PolpoSettings {
   defaultQualityThreshold?: number;
 }
 
-// === Orchestra State (persisted in .polpo/state.json) ===
+// === Polpo State (persisted in .polpo/state.json) ===
 
 export interface PolpoState {
   project: string;
@@ -553,6 +622,12 @@ export interface NotificationRule {
   template?: string;
   /** Minimum interval between notifications for the same rule (ms). */
   cooldownMs?: number;
+  /** Attach task outcomes to the notification (files sent as attachments). Default: false. */
+  includeOutcomes?: boolean;
+  /** Only include outcomes of these types. When omitted, all types are included. */
+  outcomeFilter?: OutcomeType[];
+  /** Max file size per attachment in bytes. Files larger than this are skipped. Default: 10MB. */
+  maxAttachmentSize?: number;
 }
 
 export interface NotificationsConfig {
