@@ -7,7 +7,7 @@
  * chain should be failed.
  */
 
-import type { Task, TaskStatus } from "./types.js";
+import type { Task } from "./types.js";
 import type { Orchestrator } from "./orchestrator.js";
 import { querySDKText } from "../llm/query.js";
 
@@ -317,10 +317,10 @@ function applyDecision(
       const allFailedIds = new Set(blockage.failedDeps.map(d => d.id));
       const cleanDeps = newDeps.filter(id => !allFailedIds.has(id));
 
+      store.unsafeSetStatus(blockedTask.id, "pending", "deadlock absorb — failed dep removed");
       store.updateTask(blockedTask.id, {
         dependsOn: cleanDeps,
         description: absorbBlock,
-        status: "pending" as TaskStatus,
         resolutionAttempts: (blockedTask.resolutionAttempts ?? 0) + 1,
       });
 

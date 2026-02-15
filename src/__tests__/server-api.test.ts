@@ -3,26 +3,20 @@ import { mkdtemp, writeFile, mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Hono } from "hono";
-import "../adapters/generic.js";
-
 // ── Test Setup ───────────────────────────────────────────────────────
 
 const PROJECT_ID = "test-api";
 
-const CONFIG_YAML = `\
-version: "1"
-project: test-api
-team:
-  name: api-team
-  agents:
-    - name: agent-1
-      adapter: generic
-      command: "echo done"
-      role: Test agent
-settings:
-  maxRetries: 2
-  logLevel: quiet
-`;
+const POLPO_CONFIG = JSON.stringify({
+  project: "test-api",
+  team: {
+    name: "api-team",
+    agents: [
+      { name: "agent-1", role: "Test agent" },
+    ],
+  },
+  settings: { maxRetries: 2, logLevel: "quiet" },
+}, null, 2);
 
 let tmpDir: string;
 let app: Hono;
@@ -50,7 +44,7 @@ function jsonReq(
 beforeAll(async () => {
   tmpDir = await mkdtemp(join(tmpdir(), "polpo-api-test-"));
   await mkdir(join(tmpDir, ".polpo"), { recursive: true });
-  await writeFile(join(tmpDir, "polpo.yml"), CONFIG_YAML);
+  await writeFile(join(tmpDir, ".polpo", "polpo.json"), POLPO_CONFIG);
 
   // Dynamically import server modules (ESM)
   const { ProjectManager } = await import("../server/project-manager.js");
@@ -297,17 +291,12 @@ describe("Tasks API", () => {
 // ── Plans API ────────────────────────────────────────────────────────
 
 describe("Plans API", () => {
-  const PLAN_YAML = `\
-tasks:
-  - title: Build feature
-    description: Implement the new feature
-    assignTo: agent-1
-  - title: Write tests
-    description: Write tests for the feature
-    assignTo: agent-1
-    dependsOn:
-      - Build feature
-`;
+  const PLAN_DATA = JSON.stringify({
+    tasks: [
+      { title: "Build feature", description: "Implement the new feature", assignTo: "agent-1" },
+      { title: "Write tests", description: "Write tests for the feature", assignTo: "agent-1", dependsOn: ["Build feature"] },
+    ],
+  });
 
   test("GET /plans returns 200 with plan array", async () => {
     const res = await app.request(api("/plans"));
@@ -321,7 +310,7 @@ tasks:
     const res = await app.request(
       api("/plans"),
       jsonReq("POST", {
-        yaml: PLAN_YAML,
+        data: PLAN_DATA,
         name: "test-plan-create",
       }),
     );
@@ -329,7 +318,7 @@ tasks:
     const body = await res.json();
     expect(body.ok).toBe(true);
     expect(body.data).toHaveProperty("id");
-    expect(body.data.yaml).toBe(PLAN_YAML);
+    expect(body.data.data).toBe(PLAN_DATA);
     expect(body.data.name).toBe("test-plan-create");
     expect(body.data.status).toBe("draft");
   });
@@ -339,7 +328,7 @@ tasks:
     const createRes = await app.request(
       api("/plans"),
       jsonReq("POST", {
-        yaml: PLAN_YAML,
+        data: PLAN_DATA,
         name: "test-plan-get",
       }),
     );
@@ -367,7 +356,7 @@ tasks:
     const createRes = await app.request(
       api("/plans"),
       jsonReq("POST", {
-        yaml: PLAN_YAML,
+        data: PLAN_DATA,
         name: "test-plan-delete",
       }),
     );
@@ -391,7 +380,7 @@ tasks:
     const createRes = await app.request(
       api("/plans"),
       jsonReq("POST", {
-        yaml: PLAN_YAML,
+        data: PLAN_DATA,
         name: "test-plan-execute",
       }),
     );
@@ -413,11 +402,11 @@ tasks:
     expect(body.data.tasks[1].dependsOn).toContain(body.data.tasks[0].id);
   });
 
-  test("POST /plans with empty yaml is rejected", async () => {
+  test("POST /plans with empty data is rejected", async () => {
     const res = await app.request(
       api("/plans"),
       jsonReq("POST", {
-        yaml: "",
+        data: "",
       }),
     );
     // Validation error: must not succeed
@@ -430,7 +419,7 @@ tasks:
     const createRes = await app.request(
       api("/plans"),
       jsonReq("POST", {
-        yaml: PLAN_YAML,
+        data: PLAN_DATA,
         name: "test-plan-patch",
       }),
     );
@@ -464,7 +453,7 @@ describe("Agents API", () => {
     expect(body.data.length).toBeGreaterThanOrEqual(1);
     const agent1 = body.data.find((a: any) => a.name === "agent-1");
     expect(agent1).toBeDefined();
-    expect(agent1.adapter).toBe("generic");
+    expect(agent1.adapter).toBeUndefined();
   });
 
   test("POST /agents adds a new agent (201)", async () => {
@@ -472,8 +461,6 @@ describe("Agents API", () => {
       api("/agents"),
       jsonReq("POST", {
         name: "agent-2",
-        adapter: "generic",
-        command: "echo hello",
         role: "helper",
       }),
     );
@@ -496,8 +483,6 @@ describe("Agents API", () => {
       api("/agents"),
       jsonReq("POST", {
         name: "agent-disposable",
-        adapter: "generic",
-        command: "echo bye",
       }),
     );
 
@@ -631,7 +616,7 @@ describe("Project routes", () => {
     expect(Array.isArray(body.data)).toBe(true);
     const proj = body.data.find((p: any) => p.id === PROJECT_ID);
     expect(proj).toBeDefined();
-    // Project name comes from JsonConfigStore or basename(workDir), not polpo.yml
+    // Project name comes from initInteractive or basename(workDir)
     expect(typeof proj.name).toBe("string");
     expect(proj.name.length).toBeGreaterThan(0);
   });

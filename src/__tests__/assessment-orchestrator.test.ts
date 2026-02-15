@@ -628,7 +628,7 @@ describe("AssessmentOrchestrator", () => {
       // Add getPlanByName to the store to simulate cancelled plan
       (h.store as any).getPlanByName = (name: string) => {
         if (name === "cancelled-plan") {
-          return { id: "p1", name: "cancelled-plan", status: "cancelled", yaml: "", createdAt: "", updatedAt: "" };
+          return { id: "p1", name: "cancelled-plan", status: "cancelled", data: "", createdAt: "", updatedAt: "" };
         }
         return undefined;
       };

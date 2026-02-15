@@ -3,9 +3,8 @@ import { resolve } from "node:path";
 import { Orchestrator } from "../core/orchestrator.js";
 import type { Task, Plan, TaskStatus } from "../core/types.js";
 
-// Register adapters (side-effect imports)
+// Register external adapters (side-effect imports)
 import "../adapters/claude-sdk.js";
-import "../adapters/generic.js";
 
 /** Create and initialize an Orchestrator for the given config path. */
 export async function createOrchestrator(configPath: string): Promise<Orchestrator> {

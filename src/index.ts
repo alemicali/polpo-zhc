@@ -6,11 +6,11 @@ export { Orchestrator, buildRetryPrompt } from "./core/orchestrator.js";
 export type { OrchestratorOptions, AssessFn } from "./core/orchestrator.js";
 
 // Stores
-export { JsonTaskStore, SqliteTaskStore } from "./stores/index.js";
+export { FileTaskStore, FileRunStore, JsonTaskStore, SqliteTaskStore } from "./stores/index.js";
 
-// Adapters
+// Adapters & Engine
 export { registerAdapter, getAdapter, createActivity } from "./adapters/registry.js";
-export { GenericAdapter, shellEscape } from "./adapters/generic.js";
+export { spawnEngine } from "./adapters/engine.js";
 
 // Assessment
 export { assessTask, runCheck, runMetric } from "./assessment/assessor.js";
@@ -18,7 +18,7 @@ export { runLLMReview, computeWeightedScore, buildRubricSection, DEFAULT_DIMENSI
 export type { LLMQueryFn } from "./assessment/llm-review.js";
 
 // Config
-export { parseConfig, generateTemplate } from "./core/config.js";
+export { parseConfig, loadPolpoConfig, savePolpoConfig, generatePolpoConfigDefault, validateAgents } from "./core/config.js";
 
 // Session reader
 export { readSessionSummary, readSessionSummaryFromPath, getRecentMessages, findTranscriptPath } from "./core/session-reader.js";

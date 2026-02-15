@@ -24,7 +24,7 @@ describe("Plan Persistence (SqliteTaskStore)", () => {
       const store = makeStore();
       const plan = store.savePlan({
         name: "plan-1",
-        yaml: "tasks:\n  - title: Test",
+        data: JSON.stringify({ tasks: [{ title: "Test" }] }),
         prompt: "Build a test",
         status: "draft",
       });
@@ -32,7 +32,7 @@ describe("Plan Persistence (SqliteTaskStore)", () => {
       expect(plan.id.length).toBeGreaterThan(0);
       expect(plan.name).toBe("plan-1");
       expect(plan.status).toBe("draft");
-      expect(plan.yaml).toContain("tasks:");
+      expect(plan.data).toContain("tasks");
       expect(plan.prompt).toBe("Build a test");
       expect(plan.createdAt).toBeDefined();
       expect(plan.updatedAt).toBeDefined();
@@ -43,7 +43,7 @@ describe("Plan Persistence (SqliteTaskStore)", () => {
       const store = makeStore();
       const plan = store.savePlan({
         name: "plan-1",
-        yaml: "tasks:\n  - title: Test",
+        data: JSON.stringify({ tasks: [{ title: "Test" }] }),
         status: "draft",
       });
       expect(plan.prompt).toBeUndefined();
@@ -52,8 +52,8 @@ describe("Plan Persistence (SqliteTaskStore)", () => {
 
     it("enforces unique name", () => {
       const store = makeStore();
-      store.savePlan({ name: "plan-1", yaml: "a", status: "draft" });
-      expect(() => store.savePlan({ name: "plan-1", yaml: "b", status: "draft" }))
+      store.savePlan({ name: "plan-1", data: "a", status: "draft" });
+      expect(() => store.savePlan({ name: "plan-1", data: "b", status: "draft" }))
         .toThrow();
       store.close();
     });
@@ -62,7 +62,7 @@ describe("Plan Persistence (SqliteTaskStore)", () => {
   describe("getPlan", () => {
     it("returns plan by ID", () => {
       const store = makeStore();
-      const created = store.savePlan({ name: "p1", yaml: "y", status: "draft" });
+      const created = store.savePlan({ name: "p1", data: "d", status: "draft" });
       const found = store.getPlan(created.id);
       expect(found).toBeDefined();
       expect(found!.id).toBe(created.id);
@@ -80,7 +80,7 @@ describe("Plan Persistence (SqliteTaskStore)", () => {
   describe("getPlanByName", () => {
     it("returns plan by name", () => {
       const store = makeStore();
-      const created = store.savePlan({ name: "my-plan", yaml: "y", status: "draft" });
+      const created = store.savePlan({ name: "my-plan", data: "d", status: "draft" });
       const found = store.getPlanByName("my-plan");
       expect(found).toBeDefined();
       expect(found!.id).toBe(created.id);
@@ -97,9 +97,9 @@ describe("Plan Persistence (SqliteTaskStore)", () => {
   describe("getAllPlans", () => {
     it("returns all plans", () => {
       const store = makeStore();
-      store.savePlan({ name: "p1", yaml: "a", status: "draft" });
-      store.savePlan({ name: "p2", yaml: "b", status: "active" });
-      store.savePlan({ name: "p3", yaml: "c", status: "completed" });
+      store.savePlan({ name: "p1", data: "a", status: "draft" });
+      store.savePlan({ name: "p2", data: "b", status: "active" });
+      store.savePlan({ name: "p3", data: "c", status: "completed" });
       const plans = store.getAllPlans();
       expect(plans).toHaveLength(3);
       const names = plans.map(p => p.name).sort();
@@ -109,18 +109,18 @@ describe("Plan Persistence (SqliteTaskStore)", () => {
   });
 
   describe("updatePlan", () => {
-    it("updates yaml", () => {
+    it("updates data", () => {
       const store = makeStore();
-      const plan = store.savePlan({ name: "p1", yaml: "old", status: "draft" });
-      const updated = store.updatePlan(plan.id, { yaml: "new yaml" });
-      expect(updated.yaml).toBe("new yaml");
+      const plan = store.savePlan({ name: "p1", data: "old", status: "draft" });
+      const updated = store.updatePlan(plan.id, { data: "new data" });
+      expect(updated.data).toBe("new data");
       expect(updated.name).toBe("p1"); // unchanged
       store.close();
     });
 
     it("updates status", () => {
       const store = makeStore();
-      const plan = store.savePlan({ name: "p1", yaml: "y", status: "draft" });
+      const plan = store.savePlan({ name: "p1", data: "d", status: "draft" });
       const updated = store.updatePlan(plan.id, { status: "active" });
       expect(updated.status).toBe("active");
       store.close();
@@ -128,7 +128,7 @@ describe("Plan Persistence (SqliteTaskStore)", () => {
 
     it("updates name", () => {
       const store = makeStore();
-      const plan = store.savePlan({ name: "old-name", yaml: "y", status: "draft" });
+      const plan = store.savePlan({ name: "old-name", data: "d", status: "draft" });
       const updated = store.updatePlan(plan.id, { name: "new-name" });
       expect(updated.name).toBe("new-name");
       store.close();
@@ -136,7 +136,7 @@ describe("Plan Persistence (SqliteTaskStore)", () => {
 
     it("throws for missing plan", () => {
       const store = makeStore();
-      expect(() => store.updatePlan("nope", { yaml: "x" })).toThrow("Plan not found");
+      expect(() => store.updatePlan("nope", { data: "x" })).toThrow("Plan not found");
       store.close();
     });
   });
@@ -144,7 +144,7 @@ describe("Plan Persistence (SqliteTaskStore)", () => {
   describe("deletePlan", () => {
     it("deletes and returns true", () => {
       const store = makeStore();
-      const plan = store.savePlan({ name: "p1", yaml: "y", status: "draft" });
+      const plan = store.savePlan({ name: "p1", data: "d", status: "draft" });
       expect(store.deletePlan(plan.id)).toBe(true);
       expect(store.getAllPlans()).toHaveLength(0);
       store.close();
@@ -166,9 +166,9 @@ describe("Plan Persistence (SqliteTaskStore)", () => {
 
     it("increments based on count", () => {
       const store = makeStore();
-      store.savePlan({ name: "plan-1", yaml: "a", status: "draft" });
+      store.savePlan({ name: "plan-1", data: "a", status: "draft" });
       expect(store.nextPlanName()).toBe("plan-2");
-      store.savePlan({ name: "plan-2", yaml: "b", status: "active" });
+      store.savePlan({ name: "plan-2", data: "b", status: "active" });
       expect(store.nextPlanName()).toBe("plan-3");
       store.close();
     });
@@ -177,7 +177,7 @@ describe("Plan Persistence (SqliteTaskStore)", () => {
   describe("plan status lifecycle", () => {
     it("supports draft → active → completed", () => {
       const store = makeStore();
-      const plan = store.savePlan({ name: "p1", yaml: "y", status: "draft" });
+      const plan = store.savePlan({ name: "p1", data: "d", status: "draft" });
       expect(plan.status).toBe("draft");
 
       const active = store.updatePlan(plan.id, { status: "active" });
@@ -190,7 +190,7 @@ describe("Plan Persistence (SqliteTaskStore)", () => {
 
     it("supports draft → active → failed", () => {
       const store = makeStore();
-      const plan = store.savePlan({ name: "p1", yaml: "y", status: "draft" });
+      const plan = store.savePlan({ name: "p1", data: "d", status: "draft" });
       store.updatePlan(plan.id, { status: "active" });
       const failed = store.updatePlan(plan.id, { status: "failed" });
       expect(failed.status).toBe("failed");
@@ -199,7 +199,7 @@ describe("Plan Persistence (SqliteTaskStore)", () => {
 
     it("supports active → cancelled", () => {
       const store = makeStore();
-      const plan = store.savePlan({ name: "p1", yaml: "y", status: "active" });
+      const plan = store.savePlan({ name: "p1", data: "d", status: "active" });
       const cancelled = store.updatePlan(plan.id, { status: "cancelled" });
       expect(cancelled.status).toBe("cancelled");
       store.close();
@@ -209,7 +209,7 @@ describe("Plan Persistence (SqliteTaskStore)", () => {
   describe("persistence", () => {
     it("survives close and reopen", () => {
       const store1 = makeStore();
-      store1.savePlan({ name: "persistent", yaml: "tasks:\n  - hi", status: "draft", prompt: "test" });
+      store1.savePlan({ name: "persistent", data: JSON.stringify({ tasks: [{ title: "hi" }] }), status: "draft", prompt: "test" });
       store1.close();
 
       const store2 = makeStore();

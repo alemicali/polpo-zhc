@@ -13,6 +13,7 @@ const ALL_EVENTS: OrchestraEvent[] = [
   "task:timeout", "agent:stale",
   "task:recovered",
   "plan:saved", "plan:executed", "plan:completed", "plan:resumed", "plan:deleted",
+  "session:created", "message:added",
   "log",
 ];
 

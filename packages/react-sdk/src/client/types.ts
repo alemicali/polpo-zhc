@@ -21,11 +21,18 @@ export interface EvalDimension {
   rubric?: Record<number, string>;
 }
 
+export interface DimensionScoreEvidence {
+  file: string;
+  line: number;
+  note: string;
+}
+
 export interface DimensionScore {
   dimension: string;
   score: number;
   reasoning: string;
   weight: number;
+  evidence?: DimensionScoreEvidence[];
 }
 
 export interface TaskExpectation {
@@ -35,6 +42,7 @@ export interface TaskExpectation {
   criteria?: string;
   dimensions?: EvalDimension[];
   threshold?: number;
+  confidence?: "firm" | "estimated";
 }
 
 export interface TaskMetric {
@@ -71,6 +79,7 @@ export interface Task {
   questionRounds?: number;
   resolutionAttempts?: number;
   originalDescription?: string;
+  sessionId?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -81,23 +90,65 @@ export interface TaskResult {
   stderr: string;
   duration: number;
   assessment?: AssessmentResult;
+  /** All previous assessments (oldest first). Current assessment is always in `assessment`. */
+  assessmentHistory?: AssessmentResult[];
 }
 
 // === Agent ===
 
-export type AdapterType = "claude-sdk" | "generic" | string;
+/**
+ * Adapter type for external agent runtimes.
+ * When not specified (undefined), Polpo's built-in engine (Pi Agent) is used.
+ */
+export type AdapterType = "claude-sdk" | string;
+
+// === MCP Server Config ===
+
+/** Stdio-based MCP server — spawns a child process */
+export interface McpStdioServerConfig {
+  type?: "stdio";
+  command: string;
+  args?: string[];
+  env?: Record<string, string>;
+}
+
+/** SSE-based MCP server (legacy, prefer HTTP) */
+export interface McpSseServerConfig {
+  type: "sse";
+  url: string;
+  headers?: Record<string, string>;
+}
+
+/** HTTP-based MCP server (streamable HTTP, recommended for remote) */
+export interface McpHttpServerConfig {
+  type: "http";
+  url: string;
+  headers?: Record<string, string>;
+}
+
+/** Union of all supported MCP server configs */
+export type McpServerConfig =
+  | McpStdioServerConfig
+  | McpSseServerConfig
+  | McpHttpServerConfig;
 
 export interface AgentConfig {
   name: string;
-  adapter: AdapterType;
+  /** External adapter. When omitted, Polpo's built-in engine is used. */
+  adapter?: AdapterType;
   role?: string;
-  command?: string;
   model?: string;
   allowedTools?: string[];
-  mcpServers?: Record<string, unknown>;
+  /** MCP servers to connect to. Works with both the built-in engine and claude-sdk adapter. */
+  mcpServers?: Record<string, McpServerConfig>;
+  /** Filesystem sandbox — directories the agent is allowed to access.
+   *  When omitted, defaults to the project workDir. */
+  allowedPaths?: string[];
   systemPrompt?: string;
   skills?: string[];
   maxTurns?: number;
+  /** Max concurrent tasks for this agent. Default: unlimited. */
+  maxConcurrency?: number;
   volatile?: boolean;
   planGroup?: string;
 }
@@ -108,6 +159,7 @@ export interface AgentActivity {
   filesCreated: string[];
   filesEdited: string[];
   toolCalls: number;
+  totalTokens?: number;
   lastUpdate: string;
   summary?: string;
   sessionId?: string;
@@ -148,6 +200,8 @@ export interface MetricResult {
   passed: boolean;
 }
 
+export type AssessmentTrigger = "initial" | "reassess" | "fix" | "retry" | "auto-correct" | "judge";
+
 export interface AssessmentResult {
   passed: boolean;
   checks: CheckResult[];
@@ -156,6 +210,8 @@ export interface AssessmentResult {
   scores?: DimensionScore[];
   globalScore?: number;
   timestamp: string;
+  /** What triggered this assessment. */
+  trigger?: AssessmentTrigger;
 }
 
 // === Plan ===
@@ -165,7 +221,7 @@ export type PlanStatus = "draft" | "active" | "completed" | "failed" | "cancelle
 export interface Plan {
   id: string;
   name: string;
-  yaml: string;
+  data: string;
   prompt?: string;
   status: PlanStatus;
   createdAt: string;
@@ -224,13 +280,16 @@ export interface OrchestraState {
   completedAt?: string;
 }
 
-export interface ProjectConfig {
+export interface ProviderConfig {
+  apiKey?: string;
+  baseUrl?: string;
+}
+
+export interface PolpoConfig {
   project: string;
-  judge: string;
-  judgeModel: string;
-  agent: string;
-  model: string;
-  taskPrep?: boolean;
+  team: Team;
+  settings: OrchestraSettings;
+  providers?: Record<string, ProviderConfig>;
 }
 
 // === API ===
@@ -287,23 +346,22 @@ export interface UpdateTaskRequest {
 }
 
 export interface CreatePlanRequest {
-  yaml: string;
+  data: string;
   prompt?: string;
   name?: string;
   status?: PlanStatus;
 }
 
 export interface UpdatePlanRequest {
-  yaml?: string;
+  data?: string;
   status?: PlanStatus;
   name?: string;
 }
 
 export interface AddAgentRequest {
   name: string;
-  adapter: string;
+  adapter?: string;
   role?: string;
-  command?: string;
   model?: string;
   allowedTools?: string[];
   systemPrompt?: string;
@@ -353,11 +411,69 @@ export interface ResumePlanResult {
 export interface LogSession {
   sessionId: string;
   startedAt: string;
-  eventCount: number;
+  entries: number;
 }
 
 export interface LogEntry {
-  timestamp: string;
+  ts: string;
   event: string;
   data: unknown;
+}
+
+// === Run Activity types ===
+
+/** A single entry from the per-run JSONL activity log. */
+export interface RunActivityEntry {
+  /** ISO timestamp (present on all entries except the header) */
+  ts?: string;
+  /** Event type: "spawning", "spawned", "activity", "sigterm", "done", "error" */
+  event?: string;
+  /** Transcript type: "stdout", "tool_use", "tool_result", "assistant", etc. */
+  type?: string;
+  /** Agent output text (for stdout/transcript entries) */
+  text?: string;
+  /** Payload data (activity snapshot, lifecycle info, etc.) */
+  data?: unknown;
+  /** Present on the header line only */
+  _run?: boolean;
+  runId?: string;
+  taskId?: string;
+  agentName?: string;
+  startedAt?: string;
+  pid?: number;
+}
+
+// === Skill types ===
+
+/** A discovered skill from the project skill pool. */
+export interface SkillInfo {
+  name: string;
+  description: string;
+  allowedTools?: string[];
+  /** Where this skill was discovered from. */
+  source: "polpo" | "claude" | "home";
+  /** Absolute path to the skill directory. */
+  path: string;
+}
+
+// === Chat Session types ===
+
+export interface ChatSession {
+  id: string;
+  title?: string;
+  createdAt: string;
+  updatedAt: string;
+  messageCount: number;
+}
+
+export interface ChatMessage {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  ts: string;
+}
+
+export interface ChatResponse {
+  response: string;
+  sessionId: string;
 }

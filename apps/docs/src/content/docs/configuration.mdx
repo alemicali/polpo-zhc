@@ -1,33 +1,44 @@
 ---
 title: Configuration
-description: Overview of the polpo.yml configuration file
+description: Overview of the .polpo/polpo.json configuration file
 ---
 
 import { Aside } from '@astrojs/starlight/components';
 
-Polpo is configured through a YAML file, typically `polpo.yml` at the root of your project.
+Polpo is configured through a JSON file at `.polpo/polpo.json` in your project directory.
 
 ## File Structure
 
-```yaml
-# Agent definitions
-agents:
-  - name: agent-name
-    adapter: claude-sdk        # 'claude-sdk' or 'generic'
-    description: Role description
-    command: "aider --no-auto" # generic adapter only
-
-# Plan groups
-plans:
-  - group: plan-group-name
-    team: [...]                # optional volatile agents
-    tasks:
-      - title: Task title
-        agent: agent-name
-        description: What to do
-        dependencies: []
-        expectations: [...]
+```json
+{
+  "project": "my-project",
+  "team": {
+    "name": "default",
+    "description": "Project team description",
+    "agents": [
+      {
+        "name": "agent-name",
+        "adapter": "native",
+        "role": "Role description",
+        "model": "opencode:big-pickle"
+      }
+    ]
+  },
+  "providers": {
+    "anthropic": "${ANTHROPIC_API_KEY}",
+    "openai": "${OPENAI_API_KEY}"
+  },
+  "settings": {
+    "maxRetries": 3,
+    "workDir": ".",
+    "logLevel": "normal"
+  }
+}
 ```
+
+<Aside type="note">
+Plans and tasks are managed dynamically via the TUI/CLI/API and stored in `.polpo/plans/*.json` and task stores — they are NOT defined in the config file.
+</Aside>
 
 ## Agents
 
@@ -36,23 +47,37 @@ Each agent entry defines a worker that can be assigned tasks:
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `name` | string | yes | Unique identifier for the agent |
-| `adapter` | string | yes | `"claude-sdk"` or `"generic"` |
-| `description` | string | yes | Agent's role and expertise |
+| `adapter` | string | no | `"native"` (default), `"claude-sdk"`, or `"generic"` |
+| `role` | string | no | Agent's role and expertise description |
+| `model` | string | native only | LLM model (e.g., `opencode:big-pickle`, `anthropic:claude-sonnet-4-5`) |
 | `command` | string | generic only | CLI command to execute |
 | `volatile` | boolean | no | Auto-cleanup when plan completes (default: `false`) |
 
-```yaml
-agents:
-  # Claude SDK agent — uses Anthropic API directly
-  - name: architect
-    adapter: claude-sdk
-    description: Senior software architect who designs system components
-
-  # Generic agent — wraps any CLI tool
-  - name: aider-dev
-    adapter: generic
-    command: "aider --no-auto-commit --model gpt-4"
-    description: Aider-powered developer for code changes
+```json
+{
+  "team": {
+    "agents": [
+      {
+        "name": "developer",
+        "adapter": "native",
+        "model": "opencode:big-pickle",
+        "role": "Full-stack developer using Polpo's native engine"
+      },
+      {
+        "name": "architect",
+        "adapter": "claude-sdk",
+        "model": "claude-sonnet-4-5-20250929",
+        "role": "Senior software architect who designs system components"
+      },
+      {
+        "name": "aider-dev",
+        "adapter": "generic",
+        "command": "aider --no-auto-commit --model gpt-4",
+        "role": "Aider-powered developer for code changes"
+      }
+    ]
+  }
+}
 ```
 
 ## Plans
@@ -114,7 +139,7 @@ tasks:
         weight: 0.2
 
       - type: llm_review
-        prompt: Check for proper error handling and input validation
+        criteria: Check for proper error handling and input validation
         weight: 0.4
         threshold: 3.5
         dimensions:
@@ -144,12 +169,14 @@ API_KEY=your-secret-key
 
 ## Config Path
 
-By default, Polpo looks for `polpo.yml` in the current directory. Override with:
+By default, Polpo looks for `.polpo/polpo.json` in the current directory. Use `-d` or `--dir` to specify a different working directory:
 
 ```bash
-polpo run --config /path/to/polpo.yml
-polpo tui -c ./configs/production.yml
+polpo run -d /path/to/workdir
+polpo tui -d /path/to/workdir
 ```
+
+The config file must always be at `.polpo/polpo.json` relative to the working directory.
 
 <Aside>
 For the full field-by-field reference, see [Configuration Reference](/reference/config/).

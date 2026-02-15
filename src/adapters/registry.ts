@@ -27,6 +27,7 @@ export function createActivity(): AgentActivity {
     filesCreated: [],
     filesEdited: [],
     toolCalls: 0,
+    totalTokens: 0,
     lastUpdate: new Date().toISOString(),
   };
 }

@@ -37,7 +37,7 @@ describe("Orchestrator", () => {
     if (existsSync(orchestraDir)) rmSync(orchestraDir, { recursive: true });
   });
 
-  beforeEach(() => {
+  beforeEach(async () => {
     store = new InMemoryTaskStore();
     runStore = new InMemoryRunStore();
     mockAdapter = new MockAdapter();
@@ -59,7 +59,7 @@ describe("Orchestrator", () => {
       name: "test-team",
       agents: [createTestAgent({ name: "agent-1", adapter: "mock" })],
     };
-    orchestrator.initInteractive("test-project", team);
+    await orchestrator.initInteractive("test-project", team);
   });
 
   describe("addTask", () => {

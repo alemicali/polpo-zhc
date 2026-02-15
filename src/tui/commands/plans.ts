@@ -4,12 +4,13 @@
  * /plans list     → inline summary
  * /plans execute  → pick a draft plan and execute
  * /plans resume   → pick a resumable plan and resume
- * /plans new      → open editor for new plan YAML
+ * /plans new      → open editor for new plan JSON
  */
 
 import type { CommandAPI } from "./types.js";
 import type { Plan } from "../../core/types.js";
 import { seg, kickRun } from "../format.js";
+import { formatPlanReadable, formatPlanRich, type PlanData } from "../../llm/plan-generator.js";
 
 const STATUS_COLORS: Record<string, string> = {
   draft: "gray",
@@ -112,21 +113,41 @@ function planPicker(
   });
 }
 
+/** Human-readable plan detail view */
 function showPlanDetail(
   plan: Plan,
   polpo: import("../../core/orchestrator.js").Orchestrator,
   store: import("../store.js").TUIStore,
 ) {
-  const lines = [
-    `Name: ${plan.name}`,
-    `Status: ${plan.status}`,
-    plan.prompt ? `Prompt: ${plan.prompt}` : "",
-    `Created: ${plan.createdAt}`,
-    `Updated: ${plan.updatedAt}`,
-    "",
-    "── YAML ──",
-    plan.yaml,
+  type Seg = import("../store.js").Seg;
+  const sg = (text: string, color?: string, bold?: boolean, dim?: boolean): Seg =>
+    ({ text, color, bold, dim });
+
+  // Build rich metadata header
+  const statusColor = STATUS_COLORS[plan.status] ?? "gray";
+  const headerLines: Seg[][] = [
+    [sg("Status  ", "gray", false, true), sg(plan.status, statusColor, true)],
   ];
+  if (plan.prompt) {
+    headerLines.push([sg("Prompt  ", "gray", false, true), sg(plan.prompt, "white")]);
+  }
+  headerLines.push([sg("Created ", "gray", false, true), sg(plan.createdAt, "gray")]);
+  headerLines.push([sg("Updated ", "gray", false, true), sg(plan.updatedAt, "gray")]);
+  headerLines.push([]);
+
+  // Build rich plan content
+  let richContent: Seg[][];
+  let plainContent: string;
+  try {
+    const data = JSON.parse(plan.data) as PlanData;
+    richContent = [...headerLines, ...formatPlanRich(data, process.stdout.columns) as Seg[][]];
+    plainContent = headerLines.map(segs => segs.map(s => s.text).join("")).join("\n")
+      + "\n" + formatPlanReadable(data);
+  } catch {
+    richContent = [...headerLines, [sg(plan.data)]];
+    plainContent = headerLines.map(segs => segs.map(s => s.text).join("")).join("\n")
+      + "\n" + plan.data;
+  }
 
   const actions: string[] = [];
   if (plan.status === "draft") actions.push("Execute", "Edit");
@@ -138,7 +159,8 @@ function showPlanDetail(
   store.navigate({
     id: "viewer",
     title: plan.name,
-    content: lines.filter(Boolean).join("\n"),
+    content: plainContent,
+    richContent,
     actions: uniqueActions,
     onAction: (idx) => {
       const action = uniqueActions[idx];
@@ -176,25 +198,30 @@ function planNew(
   polpo: import("../../core/orchestrator.js").Orchestrator,
   store: import("../store.js").TUIStore,
 ) {
-  const template = [
-    "# Plan tasks",
-    "tasks:",
-    "  - title: Task 1",
-    "    description: Description here",
-    "    assignTo: agent-name",
-    "",
-    "# Optional: team section for volatile agents",
-    "# team:",
-    "#   - name: temp-agent",
-    "#     adapter: pi",
-  ].join("\n");
+  const template = JSON.stringify({
+    name: "my-plan",
+    tasks: [
+      {
+        title: "Task 1",
+        description: "Description here",
+        assignTo: "agent-name",
+      },
+    ],
+  }, null, 2);
 
   store.navigate({
     id: "editor",
-    title: "New Plan (YAML)",
+    title: "New Plan (JSON)",
     initial: template,
-    onSave: (yaml) => {
-      const plan = polpo.savePlan({ yaml });
+    onSave: (json) => {
+      try {
+        JSON.parse(json); // validate
+      } catch {
+        store.goMain();
+        store.log("Invalid JSON", [seg("Invalid JSON", "red")]);
+        return;
+      }
+      const plan = polpo.savePlan({ data: json });
       store.goMain();
       store.log(`Plan created: ${plan.name}`, [
         seg("+ ", "green"),
@@ -211,12 +238,27 @@ function planEdit(
   polpo: import("../../core/orchestrator.js").Orchestrator,
   store: import("../store.js").TUIStore,
 ) {
+  // Pretty-print JSON for editing
+  let editContent: string;
+  try {
+    editContent = JSON.stringify(JSON.parse(plan.data), null, 2);
+  } catch {
+    editContent = plan.data;
+  }
+
   store.navigate({
     id: "editor",
     title: `Edit: ${plan.name}`,
-    initial: plan.yaml,
-    onSave: (yaml) => {
-      polpo.updatePlan(plan.id, { yaml });
+    initial: editContent,
+    onSave: (json) => {
+      try {
+        JSON.parse(json); // validate
+      } catch {
+        store.goMain();
+        store.log("Invalid JSON", [seg("Invalid JSON", "red")]);
+        return;
+      }
+      polpo.updatePlan(plan.id, { data: json });
       store.goMain();
       store.log(`Updated plan: ${plan.name}`, [
         seg("✎ ", "cyan"),

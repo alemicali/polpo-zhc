@@ -52,11 +52,18 @@ describe("runCheck", () => {
     expect(mockedExec).toHaveBeenCalledWith("npm test", expect.anything());
   });
 
-  it("file_exists: always returns passed (disabled)", async () => {
-    const exp: TaskExpectation = { type: "file_exists", paths: ["/nope"] };
+  it("file_exists: returns failed when files are missing", async () => {
+    const exp: TaskExpectation = { type: "file_exists", paths: ["/nope/does-not-exist.txt"] };
+    const result = await runCheck(exp, "/tmp");
+    expect(result.passed).toBe(false);
+    expect(result.message).toContain("Missing");
+  });
+
+  it("file_exists: returns passed when all files exist", async () => {
+    const exp: TaskExpectation = { type: "file_exists", paths: ["/tmp"] };
     const result = await runCheck(exp, "/tmp");
     expect(result.passed).toBe(true);
-    expect(result.message).toContain("disabled");
+    expect(result.message).toContain("exist");
   });
 
   it("script: returns passed on success", async () => {
@@ -89,7 +96,7 @@ describe("runCheck", () => {
     const exp: TaskExpectation = { type: "llm_review", criteria: "be good" };
     const result = await runCheck(exp, "/tmp");
     expect(result.passed).toBe(true);
-    expect(mockedLLMReview).toHaveBeenCalledWith(exp, "/tmp", undefined);
+    expect(mockedLLMReview).toHaveBeenCalledWith(exp, "/tmp", undefined, undefined);
   });
 });
 

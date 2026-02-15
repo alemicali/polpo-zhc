@@ -26,7 +26,7 @@ describe.runIf(RUN_E2E)("e2e: Claude SDK full pipeline", () => {
   let orchestrator: Orchestrator;
   const events: Array<{ type: string; data: unknown }> = [];
 
-  beforeAll(() => {
+  beforeAll(async () => {
     // Create isolated temp workspace
     tmpDir = join(tmpdir(), `polpo-e2e-${randomBytes(6).toString("hex")}`);
     mkdirSync(join(tmpDir, ".polpo", "tmp"), { recursive: true });
@@ -35,7 +35,7 @@ describe.runIf(RUN_E2E)("e2e: Claude SDK full pipeline", () => {
     orchestrator = new Orchestrator(tmpDir);
 
     // Initialize in interactive mode with a Claude SDK agent
-    orchestrator.initInteractive("e2e-test", {
+    await orchestrator.initInteractive("e2e-test", {
       name: "e2e-team",
       agents: [
         {
@@ -143,7 +143,7 @@ describe.runIf(RUN_E2E)("e2e: Claude SDK full pipeline", () => {
     // Save as a plan for plan:completed event
     orchestrator.savePlan({
       name: "e2e-plan",
-      yaml: "tasks:\n  - title: Create greet module\n  - title: Create main module\n  - title: Verify files exist",
+      data: JSON.stringify({ tasks: [{ title: "Create greet module" }, { title: "Create main module" }, { title: "Verify files exist" }] }),
       status: "active",
     });
 

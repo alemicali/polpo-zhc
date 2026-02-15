@@ -107,6 +107,10 @@ process.on("SIGHUP",  () => orchestrator.gracefulStop());
 process.on("SIGINT",  () => orchestrator.gracefulStop());
 ```
 
+<Aside type="tip">
+For automatic retry logic, escalation policies, and the fix phase, see [Retry & Escalation](/advanced/retry-escalation/).
+</Aside>
+
 ## Health Checks
 
 The orchestrator periodically checks active runners:
@@ -120,12 +124,13 @@ settings:
   taskTimeout: 1800000  # 30 minutes (ms)
 ```
 
-Override per-task in `polpo.yml`:
+Override per-task when creating tasks via TUI/CLI:
 
-```yaml
-tasks:
-  - title: Long-running migration
-    maxDuration: 3600000  # 1 hour
+```typescript
+orchestrator.addTask({
+  title: "Long-running migration",
+  maxDuration: 3600000  // 1 hour
+})
 ```
 
 ### Stale Detection
@@ -138,6 +143,10 @@ settings:
 ```
 
 The orchestrator checks `activity.lastUpdate` on each tick. Stale agents trigger the `agent:stale` event.
+
+<Aside type="note">
+Settings are configured in `.polpo/polpo.json` under the `settings` object.
+</Aside>
 
 ## Volatile Agent Cleanup
 
@@ -157,5 +166,5 @@ All SQLite operations use:
 - **Own connections**: The orchestrator and each runner have independent SQLite connections
 
 <Aside type="tip">
-If you need to reset corrupted state, delete `.polpo/state.db` and restart. Polpo will recreate it from `polpo.yml`.
+If you need to reset corrupted state, delete `.polpo/state.db` (or `.polpo/state.json`) and restart. The orchestrator will recreate it.
 </Aside>

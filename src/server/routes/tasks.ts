@@ -83,7 +83,7 @@ export function taskRoutes(): Hono<ServerEnv> {
   app.delete("/:taskId", (c) => {
     const orchestrator = c.get("orchestrator");
     const taskId = c.req.param("taskId");
-    const removed = orchestrator.getStore().removeTask(taskId);
+    const removed = orchestrator.deleteTask(taskId);
     if (!removed) {
       return c.json({ ok: false, error: "Task not found", code: "NOT_FOUND" }, 404);
     }

@@ -1,4 +1,6 @@
 import { Hono } from "hono";
+import { join } from "node:path";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import type { ServerEnv } from "../app.js";
 import { AddAgentSchema, RenameTeamSchema, parseBody } from "../schemas.js";
 
@@ -23,7 +25,6 @@ export function agentRoutes(): Hono<ServerEnv> {
       name: body.name,
       adapter: body.adapter,
       role: body.role,
-      command: body.command,
       model: body.model,
       allowedTools: body.allowedTools,
       systemPrompt: body.systemPrompt,
@@ -63,6 +64,56 @@ export function agentRoutes(): Hono<ServerEnv> {
     const orchestrator = c.get("orchestrator");
     const state = orchestrator.getStore().getState();
     return c.json({ ok: true, data: state.processes || [] });
+  });
+
+  // GET /processes/:taskId/activity — activity history for a task (from run JSONL)
+  app.get("/processes/:taskId/activity", (c) => {
+    const orchestrator = c.get("orchestrator");
+    const taskId = c.req.param("taskId");
+    const logsDir = join(orchestrator.getPolpoDir(), "logs");
+
+    if (!existsSync(logsDir)) {
+      return c.json({ ok: true, data: [] });
+    }
+
+    // Strategy: first check active RunStore for the runId, otherwise scan JSONL headers
+    let runId: string | undefined;
+    const run = orchestrator.getRunStore().getRunByTaskId(taskId);
+    if (run) {
+      runId = run.id;
+    } else {
+      // Scan run-*.jsonl files for matching taskId in the header line
+      const files = readdirSync(logsDir).filter(f => f.startsWith("run-") && f.endsWith(".jsonl"));
+      for (const file of files) {
+        try {
+          const firstLine = readFileSync(join(logsDir, file), "utf-8").split("\n")[0];
+          const header = JSON.parse(firstLine);
+          if (header._run && header.taskId === taskId) {
+            runId = header.runId;
+            break;
+          }
+        } catch { /* skip malformed files */ }
+      }
+    }
+
+    if (!runId) {
+      return c.json({ ok: true, data: [] });
+    }
+
+    const logPath = join(logsDir, `run-${runId}.jsonl`);
+    if (!existsSync(logPath)) {
+      return c.json({ ok: true, data: [] });
+    }
+
+    try {
+      const lines = readFileSync(logPath, "utf-8").split("\n").filter(Boolean);
+      const entries = lines
+        .map(line => { try { return JSON.parse(line); } catch { return null; } })
+        .filter(Boolean);
+      return c.json({ ok: true, data: entries });
+    } catch {
+      return c.json({ ok: true, data: [] });
+    }
   });
 
   return app;

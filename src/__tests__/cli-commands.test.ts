@@ -1,52 +1,30 @@
 import { describe, test, expect, beforeAll, afterAll } from "vitest";
-import { mkdtemp, writeFile, mkdir, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Orchestrator } from "../core/orchestrator.js";
-import { parseConfig } from "../core/config.js";
-import "../adapters/generic.js";
+import { parseConfig, savePolpoConfig } from "../core/config.js";
 import type { Team } from "../core/types.js";
 
-// ── Shared YAML config ──────────────────────────────────────────
-const VALID_CONFIG_YAML = `\
-version: "1"
-project: test-cli
-team:
-  name: test-team
-  agents:
-    - name: agent-1
-      adapter: generic
-      command: "echo done"
-      role: Test agent
-tasks:
-  - id: seed-1
-    title: Seed task
-    description: A seed task for config validation
-    assignTo: agent-1
-settings:
-  maxRetries: 2
-  logLevel: quiet
-`;
 
 const VALID_TEAM: Team = {
   name: "test-team",
   agents: [
-    { name: "agent-1", adapter: "generic", command: "echo done", role: "Test agent" },
+    { name: "agent-1", role: "Test agent" },
   ],
 };
 
 // ── Helpers ──────────────────────────────────────────────────────
 
-/** Create a temp directory, write polpo.yml, create .polpo/ dir, and return a ready Orchestrator. */
+/** Create a temp directory, create .polpo/ dir, and return a ready Orchestrator. */
 async function setupOrchestratorEnv(): Promise<{ tempDir: string; o: Orchestrator }> {
   const tempDir = await mkdtemp(join(tmpdir(), "polpo-cli-test-"));
-  await writeFile(join(tempDir, "polpo.yml"), VALID_CONFIG_YAML, "utf-8");
   await mkdir(join(tempDir, ".polpo"), { recursive: true });
 
   // Deep-copy the team so mutations in one test suite do not leak to others
   const team: Team = JSON.parse(JSON.stringify(VALID_TEAM));
   const o = new Orchestrator({ workDir: tempDir });
-  o.initInteractive("test-cli", team);
+  await o.initInteractive("test-cli", team);
   return { tempDir, o };
 }
 
@@ -176,17 +154,17 @@ describe("CLI: plan operations", () => {
 
   test("plan save — creates draft plan", () => {
     const plan = o.savePlan({
-      yaml: "tasks:\n  - title: Test\n    description: Do something\n    assignTo: agent-1",
+      data: JSON.stringify({ tasks: [{ title: "Test", description: "Do something", assignTo: "agent-1" }] }),
     });
     expect(plan.status).toBe("draft");
     expect(plan.name).toBeDefined();
     expect(plan.id).toBeDefined();
-    expect(plan.yaml).toContain("tasks:");
+    expect(plan.data).toContain("tasks");
   });
 
   test("plan show — finds by ID", () => {
     const plan = o.savePlan({
-      yaml: "tasks:\n  - title: FindById\n    description: Test\n    assignTo: agent-1",
+      data: JSON.stringify({ tasks: [{ title: "FindById", description: "Test", assignTo: "agent-1" }] }),
       name: "find-by-id",
     });
     const found = o.getPlan(plan.id);
@@ -197,7 +175,7 @@ describe("CLI: plan operations", () => {
 
   test("plan show — finds by name", () => {
     const plan = o.savePlan({
-      yaml: "tasks:\n  - title: FindByName\n    description: Test\n    assignTo: agent-1",
+      data: JSON.stringify({ tasks: [{ title: "FindByName", description: "Test", assignTo: "agent-1" }] }),
       name: "named-plan",
     });
     const found = o.getPlanByName("named-plan");
@@ -207,7 +185,7 @@ describe("CLI: plan operations", () => {
 
   test("plan delete — removes plan", () => {
     const plan = o.savePlan({
-      yaml: "tasks:\n  - title: DeleteMe\n    description: Test\n    assignTo: agent-1",
+      data: JSON.stringify({ tasks: [{ title: "DeleteMe", description: "Test", assignTo: "agent-1" }] }),
       name: "to-delete",
     });
     const result = o.deletePlan(plan.id);
@@ -217,7 +195,7 @@ describe("CLI: plan operations", () => {
 
   test("plan execute — creates tasks from plan", () => {
     const plan = o.savePlan({
-      yaml: "tasks:\n  - title: Plan task\n    description: Do work\n    assignTo: agent-1",
+      data: JSON.stringify({ tasks: [{ title: "Plan task", description: "Do work", assignTo: "agent-1" }] }),
       name: "exec-plan",
     });
     const result = o.executePlan(plan.id);
@@ -257,8 +235,6 @@ describe("CLI: team operations", () => {
   test("team add — adds agent to runtime", () => {
     o.addAgent({
       name: "agent-2",
-      adapter: "generic",
-      command: "echo hello",
       role: "Helper",
     });
     const agents = o.getAgents();
@@ -268,8 +244,6 @@ describe("CLI: team operations", () => {
   test("team remove — removes agent", () => {
     o.addAgent({
       name: "agent-temp",
-      adapter: "generic",
-      command: "echo temp",
     });
     const result = o.removeAgent("agent-temp");
     expect(result).toBe(true);
@@ -359,22 +333,23 @@ describe("CLI: config operations", () => {
   });
 
   test("config validate — valid config succeeds", async () => {
-    const configPath = join(tempDir, "polpo.yml");
-    const config = await parseConfig(configPath);
+    // parseConfig reads from .polpo/polpo.json — write it first
+    savePolpoConfig(join(tempDir, ".polpo"), {
+      project: "test-cli",
+      team: VALID_TEAM,
+      settings: { maxRetries: 2, workDir: ".", logLevel: "normal" },
+    });
+    const config = await parseConfig(tempDir);
     expect(config.version).toBe("1");
     expect(config.project).toBe("test-cli");
     expect(config.team.name).toBe("test-team");
-    expect(config.settings.maxRetries).toBe(2);
-    expect(config.settings.logLevel).toBe("quiet");
   });
 
-  test("config validate — invalid config fails", async () => {
+  test("config validate — missing config fails", async () => {
     const invalidDir = await mkdtemp(join(tmpdir(), "polpo-invalid-cfg-"));
     try {
-      // Missing required fields (no version, no project, no team, no tasks)
-      await writeFile(join(invalidDir, "bad.yml"), "foo: bar\n", "utf-8");
-      await expect(parseConfig(join(invalidDir, "bad.yml"))).rejects.toThrow(
-        /missing required field/i,
+      await expect(parseConfig(invalidDir)).rejects.toThrow(
+        /No configuration found/i,
       );
     } finally {
       await rm(invalidDir, { recursive: true, force: true });

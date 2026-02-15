@@ -13,6 +13,7 @@ import { PickerPage } from "../pages/PickerPage.js";
 import { EditorPage } from "../pages/EditorPage.js";
 import { ViewerPage } from "../pages/ViewerPage.js";
 import { ConfirmPage } from "../pages/ConfirmPage.js";
+import { QuestionsPage } from "../pages/QuestionsPage.js";
 import { createTask } from "../actions/create-task.js";
 import { createPlan } from "../actions/create-plan.js";
 import { startChat } from "../actions/chat.js";
@@ -63,6 +64,8 @@ export function Shell() {
       return <ViewerPage />;
     case "confirm":
       return <ConfirmPage />;
+    case "questions":
+      return <QuestionsPage />;
     default:
       return <MainView onSubmit={handleSubmit} />;
   }

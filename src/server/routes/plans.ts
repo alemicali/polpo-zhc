@@ -36,7 +36,7 @@ export function planRoutes(): Hono<ServerEnv> {
     const body = parseBody(CreatePlanSchema, await c.req.json());
 
     const plan = orchestrator.savePlan({
-      yaml: body.yaml,
+      data: body.data,
       prompt: body.prompt,
       name: body.name,
       status: body.status,

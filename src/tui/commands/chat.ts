@@ -21,11 +21,11 @@ function switchTo(store: CommandAPI["store"], mode: "task" | "plan" | "chat") {
 }
 
 export function cmdChat({ store }: CommandAPI) {
-  switchTo(store, store.inputMode === "chat" ? "task" : "chat");
+  switchTo(store, "chat");
 }
 
 export function cmdPlanMode({ store }: CommandAPI) {
-  switchTo(store, store.inputMode === "plan" ? "task" : "plan");
+  switchTo(store, "plan");
 }
 
 export function cmdTaskMode({ store }: CommandAPI) {

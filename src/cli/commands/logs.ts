@@ -7,7 +7,6 @@ import chalk from "chalk";
 import { resolve } from "node:path";
 import { Orchestrator } from "../../core/orchestrator.js";
 import "../../adapters/claude-sdk.js";
-import "../../adapters/generic.js";
 
 async function initOrchestrator(configPath: string): Promise<Orchestrator> {
   const o = new Orchestrator(resolve(configPath));
@@ -36,9 +35,9 @@ export function registerLogsCommands(program: Command): void {
   logs
     .command("list")
     .description("List all log sessions")
-    .option("-c, --config <path>", "Path to working directory", ".")
+    .option("-d, --dir <path>", "Working directory", ".")
     .action(async (opts) => {
-      const orchestrator = await initOrchestrator(opts.config);
+      const orchestrator = await initOrchestrator(opts.dir);
       const logStore = orchestrator.getLogStore();
       if (!logStore) {
         console.error(chalk.red("No log store available. Run 'polpo init' first."));
@@ -65,11 +64,11 @@ export function registerLogsCommands(program: Command): void {
   logs
     .command("show [sessionId]")
     .description("Show log entries for a session")
-    .option("-c, --config <path>", "Path to working directory", ".")
+    .option("-d, --dir <path>", "Working directory", ".")
     .option("-n, --limit <n>", "Limit number of entries", "50")
     .option("--event <pattern>", "Filter by event name (substring match)")
     .action(async (sessionId: string | undefined, opts) => {
-      const orchestrator = await initOrchestrator(opts.config);
+      const orchestrator = await initOrchestrator(opts.dir);
       const logStore = orchestrator.getLogStore();
       if (!logStore) {
         console.error(chalk.red("No log store available. Run 'polpo init' first."));

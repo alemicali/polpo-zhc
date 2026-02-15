@@ -1,5 +1,5 @@
 /**
- * EditorPage — full-screen multi-line text/YAML editor.
+ * EditorPage — full-screen multi-line text editor.
  */
 
 import { Box, Text, useInput } from "ink";

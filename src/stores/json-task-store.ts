@@ -72,7 +72,18 @@ export class JsonTaskStore implements TaskStore {
     return this.state.tasks;
   }
 
-  updateTask(taskId: string, updates: Partial<Omit<Task, "id">>): Task {
+  unsafeSetStatus(taskId: string, newStatus: TaskStatus, reason: string): Task {
+    const task = this.state.tasks.find((t) => t.id === taskId);
+    if (!task) throw new Error(`Task not found: ${taskId}`);
+    const from = task.status;
+    task.status = newStatus;
+    task.updatedAt = new Date().toISOString();
+    this.persist();
+    console.warn(`[unsafeSetStatus] ${taskId}: ${from} → ${newStatus} — ${reason}`);
+    return task;
+  }
+
+  updateTask(taskId: string, updates: Partial<Omit<Task, "id" | "status">>): Task {
     const task = this.state.tasks.find((t) => t.id === taskId);
     if (!task) {
       throw new Error(`Task not found: ${taskId}`);

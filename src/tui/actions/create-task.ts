@@ -4,12 +4,11 @@
  * Optionally enriches task via LLM task-prep (controlled by config.taskPrep).
  */
 
-import { parse as parseYaml } from "yaml";
 import type { Orchestrator } from "../../core/orchestrator.js";
 import type { TUIStore } from "../store.js";
 import type { TaskExpectation } from "../../core/types.js";
 import { seg, kickRun } from "../format.js";
-import { querySDKText, extractYaml } from "../../llm/query.js";
+import { generateTaskPrep } from "../../llm/plan-generator.js";
 import { buildTaskPrepPrompt } from "../../llm/prompts.js";
 
 export function createTask(
@@ -137,6 +136,7 @@ async function doCreateWithPrep(
   polpo: Orchestrator,
   store: TUIStore,
 ): Promise<void> {
+  store.startStreaming();
   store.setProcessing(true, "Preparing task...");
 
   try {
@@ -145,36 +145,21 @@ async function doCreateWithPrep(
       catch { return null; }
     })();
 
-    const prompt = buildTaskPrepPrompt(polpo, state, polpo.getWorkDir(), userInput, agentName);
+    const systemPrompt = buildTaskPrepPrompt(polpo, state, polpo.getWorkDir(), userInput, agentName);
     const model = polpo.getConfig()?.settings?.orchestratorModel;
-    const result = await querySDKText(prompt, polpo.getWorkDir(), model);
-    const yaml = extractYaml(result);
+    const prepTask = await generateTaskPrep(
+      systemPrompt,
+      userInput,
+      model,
+      (tokens) => store.updateProcessingTokens(tokens),
+    );
 
     store.setProcessing(false);
+    store.stopStreaming();
 
-    if (!yaml?.trim()) {
-      // Fallback to direct creation
-      doCreateDirect(userInput, agentName, polpo, store);
-      return;
-    }
-
-    let doc: any;
-    try {
-      doc = parseYaml(yaml);
-    } catch {
-      doCreateDirect(userInput, agentName, polpo, store);
-      return;
-    }
-
-    const prepTask = doc?.tasks?.[0];
-    if (!prepTask?.title) {
-      doCreateDirect(userInput, agentName, polpo, store);
-      return;
-    }
-
-    // Parse expectations from LLM output
+    // Build expectations from validated data
     const expectations: TaskExpectation[] = [];
-    if (Array.isArray(prepTask.expectations)) {
+    if (prepTask.expectations) {
       for (const e of prepTask.expectations) {
         if (e.type === "test" && e.command) {
           expectations.push({ type: "test", command: e.command });
@@ -217,6 +202,7 @@ async function doCreateWithPrep(
     kickRun(polpo, store);
   } catch (err: unknown) {
     store.setProcessing(false);
+    store.stopStreaming();
     // Fallback to direct creation on any error
     const msg = err instanceof Error ? err.message : String(err);
     store.log(`Task prep failed, creating directly: ${msg}`, [

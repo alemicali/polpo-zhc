@@ -1,4 +1,4 @@
-import type { Task, Plan, AgentProcess, SSEEvent, TaskStatus } from "../client/types.js";
+import type { Task, Plan, PlanReport, AgentProcess, SSEEvent, TaskStatus } from "../client/types.js";
 import type { StoreState } from "./types.js";
 
 export interface TaskFilter {
@@ -58,6 +58,10 @@ export function selectPlans(state: StoreState): Plan[] {
 
 export function selectPlan(state: StoreState, planId: string): Plan | undefined {
   return state.plans.get(planId);
+}
+
+export function selectPlanReport(state: StoreState, planId: string): PlanReport | undefined {
+  return state.planReports.get(planId);
 }
 
 // ── Process selector ────────────────────────────────────────

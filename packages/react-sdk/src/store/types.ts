@@ -1,6 +1,7 @@
 import type {
   Task,
   Plan,
+  PlanReport,
   AgentConfig,
   AgentProcess,
   SSEEvent,
@@ -12,11 +13,14 @@ export interface OrchestraStats {
   running: number;
   done: number;
   failed: number;
+  queued: number;
 }
 
 export interface StoreState {
   tasks: Map<string, Task>;
   plans: Map<string, Plan>;
+  /** Plan completion reports keyed by planId. Populated from plan:completed SSE events. */
+  planReports: Map<string, PlanReport>;
   agents: AgentConfig[];
   processes: AgentProcess[];
   stats: OrchestraStats | null;

@@ -7,7 +7,7 @@ export interface RunRecord {
   taskId: string;
   pid: number;
   agentName: string;
-  adapterType: string;
+  adapterType?: string;
   sessionId?: string;
   status: RunStatus;
   startedAt: string;

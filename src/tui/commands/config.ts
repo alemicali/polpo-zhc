@@ -6,6 +6,7 @@
 
 import type { CommandAPI } from "./types.js";
 import { seg } from "../format.js";
+import { savePolpoConfig } from "../../core/config.js";
 
 export function cmdConfig({ polpo, store, args }: CommandAPI) {
   const sub = args[0]?.toLowerCase();
@@ -94,6 +95,20 @@ function configEdit(
           else if (/^\d+$/.test(parsed as string)) parsed = parseInt(parsed as string, 10);
 
           (s as unknown as Record<string, unknown>)[field] = parsed || undefined;
+
+          // Persist to .polpo/polpo.json
+          try {
+            const polpoDir = (polpo as any).polpoDir as string;
+            if (polpoDir) {
+              savePolpoConfig(polpoDir, {
+                project: config.project,
+                team: config.team,
+                settings: config.settings,
+                providers: config.providers,
+              });
+            }
+          } catch { /* best-effort persist */ }
+
           store.goMain();
           store.log(`Updated settings.${field}`, [
             seg(`settings.${field} = `, "gray"),

@@ -64,7 +64,10 @@
   },
   "dependencies": {
     "@hono/node-server": "^1.19.9",
-    "better-sqlite3": "^12.6.2",
+    "@mariozechner/pi-agent-core": "^0.52.12",
+    "@mariozechner/pi-ai": "^0.52.12",
+    "@modelcontextprotocol/sdk": "^1.26.0",
+    "@sinclair/typebox": "^0.34.48",
     "chalk": "^5.4.1",
     "commander": "^13.1.0",
     "fullscreen-ink": "^0.1.0",
@@ -74,13 +77,15 @@
     "ink-spinner": "^5.0.0",
     "ink-text-input": "^6.0.0",
     "nanoid": "^5.1.2",
-    "react": "^19.2.4",
+    "react": "^18.3.1",
+    "sox": "^0.1.0",
     "yaml": "^2.7.0",
     "zod": "^4.3.6",
     "zustand": "^5.0.11"
   },
   "optionalDependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.2.34"
+    "@anthropic-ai/claude-agent-sdk": "^0.2.34",
+    "better-sqlite3": "^12.6.2"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",

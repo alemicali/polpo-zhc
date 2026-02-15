@@ -29,7 +29,7 @@ export const UpdateTaskSchema = z.object({
 // ── Plan schemas ──────────────────────────────────────────────────────
 
 export const CreatePlanSchema = z.object({
-  yaml: z.string().min(1),
+  data: z.string().min(1),
   prompt: z.string().optional(),
   name: z.string().optional(),
   status: z
@@ -38,7 +38,7 @@ export const CreatePlanSchema = z.object({
 });
 
 export const UpdatePlanSchema = z.object({
-  yaml: z.string().min(1).optional(),
+  data: z.string().min(1).optional(),
   status: z
     .enum(["draft", "active", "completed", "failed", "cancelled"])
     .optional(),
@@ -49,9 +49,8 @@ export const UpdatePlanSchema = z.object({
 
 export const AddAgentSchema = z.object({
   name: z.string().min(1),
-  adapter: z.string().min(1),
+  adapter: z.string().min(1).optional(),
   role: z.string().optional(),
-  command: z.string().optional(),
   model: z.string().optional(),
   allowedTools: z.array(z.string()).optional(),
   systemPrompt: z.string().optional(),
@@ -85,13 +84,13 @@ export const GenerateTeamSchema = z.object({
 });
 
 export const RefineTeamSchema = z.object({
-  currentYaml: z.string().min(1),
+  currentData: z.string().min(1),
   description: z.string().optional().default(""),
   feedback: z.string().min(1),
 });
 
 export const RefinePlanSchema = z.object({
-  currentYaml: z.string().min(1),
+  currentData: z.string().min(1),
   prompt: z.string().optional().default(""),
   feedback: z.string().min(1),
 });

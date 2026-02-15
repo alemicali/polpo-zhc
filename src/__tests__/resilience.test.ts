@@ -27,7 +27,7 @@ describe("Orchestrator Resilience", () => {
   let mockAdapter: MockAdapter;
   let orchestrator: Orchestrator;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     store = new InMemoryTaskStore();
     runStore = new InMemoryRunStore();
     mockAdapter = new MockAdapter();
@@ -52,7 +52,7 @@ describe("Orchestrator Resilience", () => {
         createTestAgent({ name: "agent-senior", adapter: "mock" }),
       ],
     };
-    orchestrator.initInteractive("test-project", team);
+    await orchestrator.initInteractive("test-project", team);
   });
 
   afterEach(() => {

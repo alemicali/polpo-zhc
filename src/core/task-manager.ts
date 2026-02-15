@@ -1,5 +1,6 @@
 import type { OrchestratorContext } from "./orchestrator-context.js";
-import type { Task, TaskExpectation, RetryPolicy } from "./types.js";
+import type { Task, TaskExpectation, RetryPolicy, ReviewContext } from "./types.js";
+import { setAssessment } from "./types.js";
 import { sanitizeExpectations } from "./schemas.js";
 
 /**
@@ -82,9 +83,20 @@ export class TaskManager {
     const result = task.result ?? { exitCode: 0, stdout: "", stderr: "", duration: 0 };
     const onProgress = (msg: string) => this.ctx.emitter.emit("assessment:progress", { taskId, message: msg });
 
+    // Build ReviewContext from RunStore (same as initial assessment)
+    const run = this.ctx.runStore.getRunByTaskId(taskId);
+    const activity = run?.activity;
+    const reviewContext: ReviewContext = {
+      taskTitle: task.title,
+      taskDescription: task.originalDescription ?? task.description,
+      agentOutput: result.stdout || undefined,
+      filesCreated: activity?.filesCreated,
+      filesEdited: activity?.filesEdited,
+    };
+
     try {
-      const assessment = await this.ctx.assessFn(task, this.ctx.workDir, onProgress);
-      result.assessment = assessment;
+      const assessment = await this.ctx.assessFn(task, this.ctx.workDir, onProgress, reviewContext);
+      setAssessment(result, assessment, "reassess");
       this.ctx.registry.updateTask(taskId, { result });
 
       if (assessment.passed) {
@@ -115,7 +127,7 @@ export class TaskManager {
           message: `Reassessment FAILED — ${reasons.join(", ")}`,
         });
         if (task.status === "done") {
-          this.ctx.registry.updateTask(taskId, { status: "failed" });
+          this.ctx.registry.unsafeSetStatus(taskId, "failed", "reassessment invalidated done task");
         }
       }
     } catch (err: unknown) {
@@ -137,7 +149,7 @@ export class TaskManager {
         if (task.status === "assigned") this.ctx.registry.transition(taskId, "in_progress");
         this.ctx.registry.transition(taskId, "failed");
       } catch { /* transition race — force status */
-        this.ctx.registry.updateTask(taskId, { status: "failed" });
+        this.ctx.registry.unsafeSetStatus(taskId, "failed", "killTask transition race fallback");
       }
     }
     return true;
@@ -218,7 +230,7 @@ export class TaskManager {
       if (task.status === "assigned") this.ctx.registry.transition(taskId, "in_progress");
       this.ctx.registry.transition(taskId, "failed");
     } catch { /* transition race — force status */
-      this.ctx.registry.updateTask(taskId, { status: "failed" });
+      this.ctx.registry.unsafeSetStatus(taskId, "failed", "forceFailTask transition race fallback");
     }
   }
 }

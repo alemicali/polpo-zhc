@@ -1,8 +1,9 @@
-import { resolve, join } from "node:path";
+import { resolve } from "node:path";
 import { mkdirSync, existsSync } from "node:fs";
-import { parseConfig } from "./config.js";
-import { SqliteTaskStore } from "../stores/sqlite-task-store.js";
-import { SqliteRunStore } from "../stores/sqlite-run-store.js";
+import type { Server } from "node:net";
+import { parseConfig, loadPolpoConfig } from "./config.js";
+import { FileTaskStore } from "../stores/file-task-store.js";
+import { FileRunStore } from "../stores/file-run-store.js";
 import { FileMemoryStore } from "../stores/file-memory-store.js";
 import { FileLogStore } from "../stores/file-log-store.js";
 import { FileSessionStore } from "../stores/file-session-store.js";
@@ -37,12 +38,14 @@ import {
   sleep,
 } from "./assessment-prompts.js";
 import type { AssessFn } from "./orchestrator-context.js";
+import { setProviderOverrides, validateProviderKeys } from "../llm/pi-client.js";
+import { startNotificationServer } from "./notification.js";
 
 // Re-export for backward compatibility (consumed by core/index.ts and external modules)
 export { buildFixPrompt, buildRetryPrompt };
 export type { AssessFn };
 
-const POLL_INTERVAL = 2000; // 2 seconds
+const POLL_INTERVAL = 5000; // 5s safety net (push notification is primary)
 
 export interface OrchestratorOptions {
   workDir?: string;
@@ -65,6 +68,7 @@ export class Orchestrator extends TypedEmitter {
   private memoryStore!: MemoryStore;
   private logStore!: LogStore;
   private sessionStore!: SessionStore;
+  private notificationServer?: Server;
 
   // Managers
   private agentMgr!: AgentManager;
@@ -92,15 +96,72 @@ export class Orchestrator extends TypedEmitter {
     }
   }
 
+  /** Create task + run stores based on the configured storage backend. */
+  private async createStores(storage?: "file" | "sqlite"): Promise<{ task: TaskStore; run: RunStore }> {
+    if (storage === "sqlite") {
+      const { join } = await import("node:path");
+      const { SqliteTaskStore } = await import("../stores/sqlite-task-store.js");
+      const { SqliteRunStore } = await import("../stores/sqlite-run-store.js");
+      return {
+        task: new SqliteTaskStore(this.polpoDir),
+        run: new SqliteRunStore(join(this.polpoDir, "state.db")),
+      };
+    }
+    return {
+      task: new FileTaskStore(this.polpoDir),
+      run: new FileRunStore(this.polpoDir),
+    };
+  }
+
   async init(): Promise<void> {
-    const configPath = resolve(this.workDir, "polpo.yml");
-    this.config = await parseConfig(configPath);
-    this.registry = this.injectedStore ?? new SqliteTaskStore(this.polpoDir);
-    this.runStore = this.injectedRunStore ?? new SqliteRunStore(join(this.polpoDir, "state.db"));
+    this.config = await parseConfig(this.workDir);
+
+    // Apply provider overrides from config
+    if (this.config.providers) {
+      setProviderOverrides(this.config.providers);
+    }
+
+    // Validate API keys for all configured models
+    this.validateProviders();
+
+    const stores = this.injectedStore
+      ? { task: this.injectedStore, run: this.injectedRunStore! }
+      : await this.createStores(this.config.settings.storage);
+    this.registry = stores.task;
+    this.runStore = stores.run;
     this.memoryStore = new FileMemoryStore(this.polpoDir);
     this.initLogStore();
     this.initSessionStore();
     this.initManagers();
+  }
+
+  private validateProviders(): void {
+    const modelSpecs: string[] = [];
+    // Default model
+    if (process.env.POLPO_MODEL) modelSpecs.push(process.env.POLPO_MODEL);
+    // Orchestrator model
+    if (this.config.settings.orchestratorModel) {
+      modelSpecs.push(this.config.settings.orchestratorModel);
+    }
+    // Judge model
+    if (process.env.POLPO_JUDGE_MODEL) modelSpecs.push(process.env.POLPO_JUDGE_MODEL);
+    // Per-agent models
+    for (const agent of this.config.team.agents) {
+      if (agent.model) modelSpecs.push(agent.model);
+    }
+
+    if (modelSpecs.length === 0) return;
+
+    const missing = validateProviderKeys(modelSpecs);
+    if (missing.length > 0) {
+      const details = missing
+        .map(m => `  - ${m.provider} (model: ${m.modelSpec})`)
+        .join("\n");
+      this.emit("log", {
+        level: "warn",
+        message: `Missing API keys for providers:\n${details}\nSet the corresponding env vars or add them to .polpo/polpo.json providers section`,
+      });
+    }
   }
 
   /** Create manager instances with shared context. */
@@ -122,28 +183,52 @@ export class Orchestrator extends TypedEmitter {
     this.planExec = new PlanExecutor(ctx, this.taskMgr, this.agentMgr);
     this.runner = new TaskRunner(ctx);
     this.assessor = new AssessmentOrchestrator(ctx);
+
+    // Start push notification server (runners notify on completion)
+    this.notificationServer = startNotificationServer(
+      this.polpoDir,
+      () => {
+        this.runner.collectResults((id, res) => this.assessor.handleResult(id, res));
+      },
+    );
   }
 
   /**
-   * Initialize for interactive/TUI mode without requiring polpo.yml.
+   * Initialize for interactive/TUI mode.
    * Creates .polpo dir and a minimal config from provided team info.
    */
-  initInteractive(project: string, team: Team): void {
+  async initInteractive(project: string, team: Team): Promise<void> {
     if (!existsSync(this.polpoDir)) {
       mkdirSync(this.polpoDir, { recursive: true });
     }
-    this.registry = this.injectedStore ?? new SqliteTaskStore(this.polpoDir);
-    this.runStore = this.injectedRunStore ?? new SqliteRunStore(join(this.polpoDir, "state.db"));
+
+    // Load persistent config if available
+    const polpoConfig = loadPolpoConfig(this.polpoDir);
+    const settings = polpoConfig?.settings ?? { maxRetries: 2, workDir: ".", logLevel: "normal" as const };
+
+    const stores = this.injectedStore
+      ? { task: this.injectedStore, run: this.injectedRunStore! }
+      : await this.createStores(settings.storage);
+    this.registry = stores.task;
+    this.runStore = stores.run;
     this.memoryStore = new FileMemoryStore(this.polpoDir);
     this.initLogStore();
     this.initSessionStore();
+
     this.config = {
       version: "1",
-      project,
-      team,
+      project: polpoConfig?.project ?? project,
+      team: polpoConfig?.team ?? team,
       tasks: [],
-      settings: { maxRetries: 2, workDir: ".", logLevel: "normal" },
+      settings,
+      providers: polpoConfig?.providers,
     };
+
+    // Apply provider overrides
+    if (this.config.providers) {
+      setProviderOverrides(this.config.providers);
+    }
+
     this.initManagers();
     this.interactive = true;
     this.registry.setState({
@@ -172,6 +257,7 @@ export class Orchestrator extends TypedEmitter {
   retryTask(taskId: string): void { this.taskMgr.retryTask(taskId); }
   reassessTask(taskId: string): Promise<void> { return this.taskMgr.reassessTask(taskId); }
   killTask(taskId: string): boolean { return this.taskMgr.killTask(taskId); }
+  deleteTask(taskId: string): boolean { return this.registry.removeTask(taskId); }
   abortGroup(group: string): number { return this.taskMgr.abortGroup(group); }
   clearTasks(filter: (task: Task) => boolean): number { return this.taskMgr.clearTasks(filter); }
   forceFailTask(taskId: string): void { this.taskMgr.forceFailTask(taskId); }
@@ -180,6 +266,7 @@ export class Orchestrator extends TypedEmitter {
 
   getStore(): TaskStore { return this.registry; }
   getRunStore(): RunStore { return this.runStore; }
+  getPolpoDir(): string { return this.polpoDir; }
 
   // ── Agent Management (delegates to AgentManager) ──
 
@@ -195,11 +282,11 @@ export class Orchestrator extends TypedEmitter {
 
   // ─── Plan Management (delegates to PlanExecutor) ──
 
-  savePlan(opts: { yaml: string; prompt?: string; name?: string; status?: PlanStatus }): Plan { return this.planExec.savePlan(opts); }
+  savePlan(opts: { data: string; prompt?: string; name?: string; status?: PlanStatus }): Plan { return this.planExec.savePlan(opts); }
   getPlan(planId: string): Plan | undefined { return this.planExec.getPlan(planId); }
   getPlanByName(name: string): Plan | undefined { return this.planExec.getPlanByName(name); }
   getAllPlans(): Plan[] { return this.planExec.getAllPlans(); }
-  updatePlan(planId: string, updates: { yaml?: string; status?: PlanStatus; name?: string }): Plan { return this.planExec.updatePlan(planId, updates); }
+  updatePlan(planId: string, updates: { data?: string; status?: PlanStatus; name?: string }): Plan { return this.planExec.updatePlan(planId, updates); }
   deletePlan(planId: string): boolean { return this.planExec.deletePlan(planId); }
 
   // ─── Project Memory ──────────────────────────────────
@@ -312,8 +399,9 @@ export class Orchestrator extends TypedEmitter {
       this.runStore.deleteRun(run.id);
     }
 
-    // Clear process list in state and close store
+    // Clear process list in state and close stores
     this.registry.setState({ processes: [], completedAt: new Date().toISOString() });
+    this.notificationServer?.close();
     this.registry.close?.();
     this.runStore.close();
     this.emit("orchestrator:shutdown", {});
@@ -391,7 +479,13 @@ export class Orchestrator extends TypedEmitter {
 
     // Check if all tasks are terminal (done or failed)
     const terminal = tasks.filter(t => t.status === "done" || t.status === "failed");
-    if (terminal.length === tasks.length) return true;
+    if (terminal.length === tasks.length) {
+      // Must run cleanup BEFORE returning — assessment transitions happen async
+      // between ticks, so this may be the first tick that sees all tasks terminal.
+      this.planExec.cleanupCompletedGroups(tasks);
+      this.runner.syncProcessesFromRunStore();
+      return true;
+    }
 
     // 1. Collect results from finished runners
     this.runner.collectResults((id, res) => this.assessor.handleResult(id, res));
@@ -439,11 +533,43 @@ export class Orchestrator extends TypedEmitter {
       return true;
     }
 
+    // Concurrency-aware spawn loop
+    const activeRuns = this.runStore.getActiveRuns();
+    const globalMax = this.config.settings.maxConcurrency ?? Infinity;
+    let totalActive = activeRuns.length;
+
+    // Per-agent active counts
+    const agentActiveCounts = new Map<string, number>();
+    for (const run of activeRuns) {
+      agentActiveCounts.set(run.agentName, (agentActiveCounts.get(run.agentName) ?? 0) + 1);
+    }
+
+    let queued = 0;
+
     for (const task of ready) {
-      // Check if already has an active run
+      // Global concurrency limit
+      if (totalActive >= globalMax) {
+        queued += ready.length - ready.indexOf(task);
+        break;
+      }
+
+      // Skip if already running
       const existingRun = this.runStore.getRunByTaskId(task.id);
       if (existingRun && existingRun.status === "running") continue;
+
+      // Per-agent concurrency limit
+      const agentName = task.assignTo;
+      const agentConfig = this.config.team.agents.find(a => a.name === agentName);
+      if (agentConfig?.maxConcurrency) {
+        if ((agentActiveCounts.get(agentName) ?? 0) >= agentConfig.maxConcurrency) {
+          queued++;
+          continue;
+        }
+      }
+
       this.runner.spawnForTask(task);
+      totalActive++;
+      agentActiveCounts.set(agentName, (agentActiveCounts.get(agentName) ?? 0) + 1);
     }
 
     // Emit tick stats
@@ -454,10 +580,13 @@ export class Orchestrator extends TypedEmitter {
       running: inProgress.length,
       done,
       failed,
+      queued,
     });
 
-    // Clean up volatile agents for completed plan groups
-    this.planExec.cleanupCompletedGroups(tasks);
+    // Clean up volatile agents for completed plan groups.
+    // Re-read tasks fresh — assessment callbacks (async) may have transitioned
+    // tasks to done/failed since the snapshot at the top of tick().
+    this.planExec.cleanupCompletedGroups(this.registry.getAllTasks());
 
     // Sync process list from RunStore for backward compat with TUI
     this.runner.syncProcessesFromRunStore();

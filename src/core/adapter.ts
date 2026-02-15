@@ -30,6 +30,12 @@ export interface AgentHandle {
   onTranscript?: (entry: Record<string, unknown>) => void;
 }
 
+/** Extra context passed to adapters at spawn time. */
+export interface SpawnContext {
+  /** Absolute path to the .polpo directory. Used for skill loading, logs, etc. */
+  polpoDir: string;
+}
+
 /**
  * Adapter interface — each adapter knows how to talk to one type of agent.
  */
@@ -45,5 +51,5 @@ export interface AgentAdapter {
    * - Tracking activity (tool calls, files, progress)
    * - Resolving `handle.done` when the agent finishes
    */
-  spawn(agent: AgentConfig, task: Task, cwd: string): AgentHandle;
+  spawn(agent: AgentConfig, task: Task, cwd: string, ctx?: SpawnContext): AgentHandle;
 }

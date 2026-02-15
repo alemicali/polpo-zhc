@@ -6,12 +6,15 @@ import { nanoid } from "nanoid";
 import type { OrchestratorContext } from "./orchestrator-context.js";
 import type { Task, TaskResult, RunnerConfig } from "./types.js";
 import type { RunRecord } from "./run-store.js";
+import { getSocketPath } from "./notification.js";
 
 /**
  * Spawns, monitors, and collects results from agent runner subprocesses.
  */
 export class TaskRunner {
   private staleWarned = new Set<string>();
+  /** Last known activity snapshot per taskId, used to diff and emit SSE events */
+  private lastActivity = new Map<string, string>();
 
   constructor(private ctx: OrchestratorContext) {}
 
@@ -90,9 +93,34 @@ export class TaskRunner {
     }
   }
 
-  /** Sync process list from RunStore into the old processes table for TUI backward compat */
+  /** Sync process list from RunStore into the old processes table for TUI backward compat.
+   *  Also emits `agent:activity` SSE events when activity changes (diff-based). */
   syncProcessesFromRunStore(): void {
     const active = this.ctx.runStore.getActiveRuns();
+
+    // Emit agent:activity for each run whose activity snapshot changed
+    const seenTaskIds = new Set<string>();
+    for (const r of active) {
+      seenTaskIds.add(r.taskId);
+      const snapshot = JSON.stringify(r.activity);
+      const prev = this.lastActivity.get(r.taskId);
+      if (prev !== snapshot) {
+        this.lastActivity.set(r.taskId, snapshot);
+        this.ctx.emitter.emit("agent:activity", {
+          taskId: r.taskId,
+          agentName: r.agentName,
+          tool: r.activity.lastTool,
+          file: r.activity.lastFile,
+          summary: r.activity.summary,
+        });
+      }
+    }
+
+    // Cleanup stale entries for tasks no longer active
+    for (const taskId of this.lastActivity.keys()) {
+      if (!seenTaskIds.has(taskId)) this.lastActivity.delete(taskId);
+    }
+
     this.ctx.registry.setState({
       processes: active.map(r => ({
         agentName: r.agentName,
@@ -148,10 +176,10 @@ export class TaskRunner {
       }
 
       // Recover: reset to pending WITHOUT incrementing retries.
-      // Shutdown interrupts are not real failures — use updateTask directly
-      // instead of transition(failed → pending) which burns a retry.
+      // Shutdown interrupts are not real failures — unsafeSetStatus bypasses
+      // transition(failed → pending) which would burn a retry.
       this.ctx.emitter.emit("task:recovered", { taskId: task.id, title: task.title, previousStatus: task.status });
-      this.ctx.registry.updateTask(task.id, { status: "pending" });
+      this.ctx.registry.unsafeSetStatus(task.id, "pending", "orphan recovery — shutdown interrupt");
       recovered++;
     }
 
@@ -205,8 +233,10 @@ export class TaskRunner {
       taskId: task.id,
       agent,
       task: taskWithMemory,
-      dbPath: join(this.ctx.polpoDir, "state.db"),
+      polpoDir: this.ctx.polpoDir,
       cwd: this.ctx.workDir,
+      storage: this.ctx.config.settings.storage,
+      notifySocket: getSocketPath(this.ctx.polpoDir),
     };
 
     try {
@@ -230,7 +260,7 @@ export class TaskRunner {
         status: "running",
         startedAt: now,
         updatedAt: now,
-        activity: { filesCreated: [], filesEdited: [], toolCalls: 0, lastUpdate: now },
+        activity: { filesCreated: [], filesEdited: [], toolCalls: 0, totalTokens: 0, lastUpdate: now },
         configPath,
       };
       this.ctx.runStore.upsertRun(runRecord);

@@ -15,8 +15,7 @@ function makeMock(name: string): AgentAdapter {
 
 describe("adapter-registry", () => {
   // Note: registry is global module state, registrations persist.
-  // The built-in "claude-sdk" and "generic" adapters are already registered
-  // via side-effect imports in the test environment.
+  // External adapters (e.g. "claude-sdk") register via side-effect imports.
 
   it("registerAdapter + getAdapter returns correct instance", () => {
     registerAdapter("test-adapter", () => makeMock("test-adapter"));

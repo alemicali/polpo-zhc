@@ -1,7 +1,8 @@
 import { query, type SDKMessage, type Options } from "@anthropic-ai/claude-agent-sdk";
 import type { AgentConfig, AgentActivity, Task, TaskResult } from "../core/types.js";
-import type { AgentAdapter, AgentHandle } from "../core/adapter.js";
+import type { AgentAdapter, AgentHandle, SpawnContext } from "../core/adapter.js";
 import { createActivity, registerAdapter } from "./registry.js";
+import { loadAgentSkills, buildSkillPrompt } from "../llm/skills.js";
 
 /** Truncate a string for logging. Works on any value — stringifies non-strings. */
 function truncateHook(value: unknown, max: number): string | undefined {
@@ -18,14 +19,20 @@ function truncateHook(value: unknown, max: number): string | undefined {
 class ClaudeSDKAdapter implements AgentAdapter {
   readonly name = "claude-sdk";
 
-  spawn(agent: AgentConfig, task: Task, cwd: string): AgentHandle {
+  spawn(agent: AgentConfig, task: Task, cwd: string, ctx?: SpawnContext): AgentHandle {
     const activity = createActivity();
     const abortController = new AbortController();
     let alive = true;
 
     const prompt = buildPrompt(task);
 
+    // Load Polpo skills for this agent
+    const polpoSkills = ctx?.polpoDir
+      ? loadAgentSkills(cwd, ctx.polpoDir, agent.name, agent.skills)
+      : [];
+
     // Build allowedTools — ensure "Skill" is included when agent has skills
+    // (Claude's native Skill tool is still useful for runtime skill invocation)
     let allowedTools = agent.allowedTools;
     if (agent.skills?.length) {
       const tools = new Set(allowedTools ?? []);
@@ -67,15 +74,29 @@ class ClaudeSDKAdapter implements AgentAdapter {
       },
     };
 
-    // Build system prompt: user-defined + skill directives
+    // Build system prompt: user-defined + Polpo skill content
     const systemParts: string[] = [];
     if (agent.systemPrompt) systemParts.push(agent.systemPrompt);
-    if (agent.skills?.length) {
-      systemParts.push(
-        `\nYou have the following skills assigned to you. Use ONLY these skills (via the Skill tool) when applicable — do not use other installed skills:\n` +
-        agent.skills.map(s => `- ${s}`).join("\n")
-      );
+
+    // Inject loaded skill content directly into the prompt
+    const skillBlock = buildSkillPrompt(polpoSkills);
+    if (skillBlock) {
+      systemParts.push(skillBlock);
     }
+
+    // If agent has claude-native skill names (from config) that weren't loaded
+    // as Polpo skills, keep the directive for Claude's Skill tool
+    if (agent.skills?.length) {
+      const loadedNames = new Set(polpoSkills.map(s => s.name));
+      const unloaded = agent.skills.filter(s => !loadedNames.has(s));
+      if (unloaded.length > 0) {
+        systemParts.push(
+          `\nYou also have access to these skills via the Skill tool:\n` +
+          unloaded.map(s => `- ${s}`).join("\n")
+        );
+      }
+    }
+
     if (systemParts.length > 0) {
       (options as any).systemPrompt = {
         type: "preset",

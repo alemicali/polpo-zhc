@@ -13,15 +13,16 @@
  */
 
 import { readFileSync, unlinkSync, appendFileSync, mkdirSync, existsSync } from "node:fs";
-import { join, dirname } from "node:path";
-import { SqliteRunStore } from "../stores/sqlite-run-store.js";
+import { join } from "node:path";
+import { FileRunStore } from "../stores/file-run-store.js";
 import { getAdapter } from "../adapters/registry.js";
-import type { RunRecord } from "./run-store.js";
+import { spawnEngine } from "../adapters/engine.js";
+import type { RunStore, RunRecord } from "./run-store.js";
 import type { RunnerConfig, TaskResult } from "./types.js";
 
-// Side-effect imports: register adapters
+// Side-effect import: register external adapters (claude-sdk)
 import "../adapters/claude-sdk.js";
-import "../adapters/generic.js";
+import { notifyRunComplete } from "./notification.js";
 
 const ACTIVITY_POLL_MS = 1500;
 
@@ -51,8 +52,8 @@ class RunActivityLog {
   private logPath: string;
   private lastSnapshot = "";
 
-  constructor(dbPath: string, runId: string, taskId: string, agentName: string) {
-    const logsDir = join(dirname(dbPath), "logs");
+  constructor(polpoDir: string, runId: string, taskId: string, agentName: string) {
+    const logsDir = join(polpoDir, "logs");
     if (!existsSync(logsDir)) mkdirSync(logsDir, { recursive: true });
     this.logPath = join(logsDir, `run-${runId}.jsonl`);
     // Write header
@@ -82,10 +83,19 @@ class RunActivityLog {
   }
 }
 
+async function createRunStore(config: RunnerConfig): Promise<RunStore> {
+  if (config.storage === "sqlite") {
+    const { SqliteRunStore } = await import("../stores/sqlite-run-store.js");
+    const { join } = await import("node:path");
+    return new SqliteRunStore(join(config.polpoDir, "state.db"));
+  }
+  return new FileRunStore(config.polpoDir);
+}
+
 async function main(): Promise<void> {
   const config = readConfig();
-  const runStore = new SqliteRunStore(config.dbPath);
-  const actLog = new RunActivityLog(config.dbPath, config.runId, config.taskId, config.agent.name);
+  const runStore = await createRunStore(config);
+  const actLog = new RunActivityLog(config.polpoDir, config.runId, config.taskId, config.agent.name);
 
   const now = new Date().toISOString();
   const initialRecord: RunRecord = {
@@ -97,7 +107,7 @@ async function main(): Promise<void> {
     status: "running",
     startedAt: now,
     updatedAt: now,
-    activity: { filesCreated: [], filesEdited: [], toolCalls: 0, lastUpdate: now },
+    activity: { filesCreated: [], filesEdited: [], toolCalls: 0, totalTokens: 0, lastUpdate: now },
     configPath: join(process.argv[process.argv.indexOf("--config") + 1]),
   };
   runStore.upsertRun(initialRecord);
@@ -105,8 +115,15 @@ async function main(): Promise<void> {
 
   let handle;
   try {
-    const adapter = getAdapter(config.agent.adapter);
-    handle = adapter.spawn(config.agent, config.task, config.cwd);
+    const spawnCtx = { polpoDir: config.polpoDir };
+    if (config.agent.adapter) {
+      // External adapter (e.g. claude-sdk) — use the registry
+      const adapter = getAdapter(config.agent.adapter);
+      handle = adapter.spawn(config.agent, config.task, config.cwd, spawnCtx);
+    } else {
+      // No adapter specified — use Polpo's built-in engine
+      handle = spawnEngine(config.agent, config.task, config.cwd, spawnCtx);
+    }
     // Wire transcript persistence — every agent message gets written to the run log
     handle.onTranscript = (entry) => actLog.logTranscript(entry);
     actLog.logEvent("spawned");
@@ -114,6 +131,9 @@ async function main(): Promise<void> {
     const result = errorResult(err);
     actLog.logEvent("error", { message: result.stderr });
     runStore.completeRun(config.runId, "failed", result);
+    if (config.notifySocket) {
+      notifyRunComplete(config.notifySocket, config.runId, config.taskId, "failed");
+    }
     runStore.close();
     process.exit(1);
   }
@@ -144,11 +164,17 @@ async function main(): Promise<void> {
     const status = sigterm ? "killed" : (result.exitCode === 0 ? "completed" : "failed");
     actLog.logEvent("done", { status, exitCode: result.exitCode, duration: result.duration });
     runStore.completeRun(config.runId, status, result);
+    if (config.notifySocket) {
+      notifyRunComplete(config.notifySocket, config.runId, config.taskId, status);
+    }
   } catch (err) {
     clearInterval(poll);
     try { runStore.updateActivity(config.runId, handle.activity); } catch { /* best effort */ }
     actLog.logEvent("error", { message: err instanceof Error ? err.message : String(err) });
     runStore.completeRun(config.runId, "failed", errorResult(err));
+    if (config.notifySocket) {
+      notifyRunComplete(config.notifySocket, config.runId, config.taskId, "failed");
+    }
   }
 
   // Cleanup config file

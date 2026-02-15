@@ -1,8 +1,8 @@
-import { parse as parseYaml } from "yaml";
 import type { OrchestratorContext } from "./orchestrator-context.js";
 import type { TaskManager } from "./task-manager.js";
 import type { AgentManager } from "./agent-manager.js";
 import type { Plan, PlanStatus, PlanReport, Task, TaskExpectation } from "./types.js";
+import { sanitizeExpectations } from "./schemas.js";
 
 interface PlanDocument {
   tasks?: Array<{
@@ -20,7 +20,6 @@ interface PlanDocument {
     name: string;
     adapter?: string;
     role?: string;
-    command?: string;
     model?: string;
     systemPrompt?: string;
     skills?: string[];
@@ -39,12 +38,12 @@ export class PlanExecutor {
     private agentMgr: AgentManager,
   ) {}
 
-  savePlan(opts: { yaml: string; prompt?: string; name?: string; status?: PlanStatus }): Plan {
+  savePlan(opts: { data: string; prompt?: string; name?: string; status?: PlanStatus }): Plan {
     if (!this.ctx.registry.savePlan) throw new Error("Store does not support plans");
     const name = opts.name ?? this.ctx.registry.nextPlanName?.() ?? `plan-${Date.now()}`;
     const plan = this.ctx.registry.savePlan({
       name,
-      yaml: opts.yaml,
+      data: opts.data,
       prompt: opts.prompt,
       status: opts.status ?? "draft",
     });
@@ -64,7 +63,7 @@ export class PlanExecutor {
     return this.ctx.registry.getAllPlans?.() ?? [];
   }
 
-  updatePlan(planId: string, updates: { yaml?: string; status?: PlanStatus; name?: string }): Plan {
+  updatePlan(planId: string, updates: { data?: string; status?: PlanStatus; name?: string }): Plan {
     if (!this.ctx.registry.updatePlan) throw new Error("Store does not support plans");
     return this.ctx.registry.updatePlan(planId, updates);
   }
@@ -94,12 +93,12 @@ export class PlanExecutor {
     // Re-register volatile agents if they were cleaned up
     this.cleanedGroups.delete(plan.name);
     const enableVolatile = this.ctx.config.settings.enableVolatileTeams !== false;
-    if (enableVolatile && plan.yaml) {
+    if (enableVolatile && plan.data) {
       try {
-        const doc = parseYaml(plan.yaml) as PlanDocument;
+        const doc = JSON.parse(plan.data) as PlanDocument;
         if (doc?.team && Array.isArray(doc.team)) {
           for (const a of doc.team) {
-            if (!a.name || !a.adapter) continue;
+            if (!a.name) continue;
             this.agentMgr.addVolatileAgent({
               name: a.name,
               adapter: a.adapter,
@@ -144,7 +143,7 @@ export class PlanExecutor {
     if (!plan) throw new Error("Plan not found");
     if (plan.status === "active") throw new Error("Plan already active");
 
-    const doc = parseYaml(plan.yaml) as PlanDocument;
+    const doc = JSON.parse(plan.data) as PlanDocument;
     if (!doc?.tasks || !Array.isArray(doc.tasks) || doc.tasks.length === 0) {
       throw new Error("Plan has no tasks");
     }
@@ -155,7 +154,7 @@ export class PlanExecutor {
     const enableVolatile = this.ctx.config.settings.enableVolatileTeams !== false;
     if (enableVolatile && doc.team && Array.isArray(doc.team)) {
       for (const a of doc.team) {
-        if (!a.name || !a.adapter) continue;
+        if (!a.name) continue;
         this.agentMgr.addVolatileAgent({
           name: a.name,
           adapter: a.adapter,
@@ -175,12 +174,22 @@ export class PlanExecutor {
         .map((title: string) => titleToId.get(title))
         .filter((id: string | undefined): id is string => !!id);
 
+      // Validate expectations through Zod schemas
+      let expectations: TaskExpectation[] = [];
+      if (t.expectations && Array.isArray(t.expectations) && t.expectations.length > 0) {
+        const { valid, warnings } = sanitizeExpectations(t.expectations);
+        expectations = valid;
+        for (const w of warnings) {
+          this.ctx.emitter.emit("log", { level: "warn", message: `Plan task "${t.title}": ${w}` });
+        }
+      }
+
       const task = this.taskMgr.addTask({
         title: t.title,
         description: t.description || t.title,
         assignTo: t.assignTo || this.ctx.config.team.agents[0]?.name || "default",
         dependsOn: deps,
-        expectations: t.expectations || [],
+        expectations,
         group,
         maxDuration: t.maxDuration,
         retryPolicy: t.retryPolicy,
@@ -203,24 +212,32 @@ export class PlanExecutor {
       if (t.group) groups.add(t.group);
     }
     for (const group of groups) {
-      if (this.cleanedGroups.has(group)) continue;
       const groupTasks = tasks.filter(t => t.group === group);
       const allTerminal = groupTasks.every(t => t.status === "done" || t.status === "failed");
-      if (allTerminal) {
-        const cleanupPolicy = this.ctx.config.settings.volatileCleanup ?? "on_complete";
-        if (cleanupPolicy === "on_complete") {
-          this.agentMgr.cleanupVolatileAgents(group);
-        }
-        this.cleanedGroups.add(group);
 
-        // Auto-update plan status
-        const plan = this.ctx.registry.getPlanByName?.(group);
-        if (plan && plan.status === "active") {
-          const allDone = groupTasks.every(t => t.status === "done");
-          this.ctx.registry.updatePlan?.(plan.id, { status: allDone ? "completed" : "failed" });
-          const report = this.buildPlanReport(plan.id, group, groupTasks, allDone);
-          this.ctx.emitter.emit("plan:completed", { planId: plan.id, group, allPassed: allDone, report });
-        }
+      // If tasks went back to non-terminal (e.g. individual retry via retryTask),
+      // clear the cleaned flag so the group will be re-evaluated when done again.
+      if (!allTerminal && this.cleanedGroups.has(group)) {
+        this.cleanedGroups.delete(group);
+        continue;
+      }
+
+      if (this.cleanedGroups.has(group)) continue;
+      if (!allTerminal) continue;
+
+      const cleanupPolicy = this.ctx.config.settings.volatileCleanup ?? "on_complete";
+      if (cleanupPolicy === "on_complete") {
+        this.agentMgr.cleanupVolatileAgents(group);
+      }
+      this.cleanedGroups.add(group);
+
+      // Auto-update plan status
+      const plan = this.ctx.registry.getPlanByName?.(group);
+      if (plan && plan.status === "active") {
+        const allDone = groupTasks.every(t => t.status === "done");
+        this.ctx.registry.updatePlan?.(plan.id, { status: allDone ? "completed" : "failed" });
+        const report = this.buildPlanReport(plan.id, group, groupTasks, allDone);
+        this.ctx.emitter.emit("plan:completed", { planId: plan.id, group, allPassed: allDone, report });
       }
     }
   }

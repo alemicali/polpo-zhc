@@ -1,34 +1,42 @@
 /**
- * Header — persistent top bar showing project and team.
+ * Header — persistent top bar: POLPO | <dir> | ● N running | ✓ N done | status
  */
 
 import { Box, Text } from "ink";
 import { usePolpo } from "../app.js";
+import { useStore } from "../store.js";
+import { basename } from "node:path";
 
 export function Header() {
   const polpo = usePolpo();
-  const config = polpo.getConfig();
-  const project = config?.project ?? "polpo";
-  const agents = config?.team.agents ?? [];
+  const tasks = useStore((s) => s.tasks);
+  const plans = useStore((s) => s.plans);
+
+  const dir = basename(polpo.getWorkDir());
+  const done = tasks.filter((t) => t.status === "done").length;
+  const running = tasks.filter(
+    (t) => t.status === "in_progress" || t.status === "review",
+  ).length;
+  const orchestrating = running > 0;
+  const draftPlans = plans.filter((p) => p.status === "draft").length;
 
   return (
     <Box paddingX={1} justifyContent="space-between">
       <Text>
-        <Text color="cyan" bold>🐙 {project}</Text>
-        <Text color="gray"> — {polpo.getWorkDir()}</Text>
+        <Text color="white" bold>POLPO</Text>
+        <Text color="gray"> | </Text>
+        <Text color="gray">{dir}</Text>
       </Text>
-      <Text>
-        <Text color="gray">team </Text>
-        {agents.length > 0 ? (
-          agents.map((a, i) => (
-            <Text key={a.name}>
-              {i > 0 && <Text color="gray">, </Text>}
-              <Text color="gray">{a.name}</Text>
-            </Text>
-          ))
-        ) : (
-          <Text color="gray">—</Text>
-        )}
+      <Text wrap="truncate">
+        {running > 0 && <Text color="#FFA500">● {running} running</Text>}
+        {running > 0 && <Text color="gray"> | </Text>}
+        {done > 0 && <Text color="green">✓ {done} done</Text>}
+        {done > 0 && <Text color="gray"> | </Text>}
+        {draftPlans > 0 && <Text color="yellow">□ {draftPlans} draft</Text>}
+        {draftPlans > 0 && <Text color="gray"> | </Text>}
+        <Text color={orchestrating ? "green" : "gray"}>
+          {orchestrating ? "♪ orchestrating" : "♪ idle"}
+        </Text>
       </Text>
     </Box>
   );

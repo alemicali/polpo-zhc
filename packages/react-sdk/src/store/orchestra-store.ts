@@ -15,6 +15,7 @@ function createInitialState(): StoreState {
   return {
     tasks: new Map(),
     plans: new Map(),
+    planReports: new Map(),
     agents: [],
     processes: [],
     stats: null,

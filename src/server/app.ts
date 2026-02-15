@@ -11,6 +11,7 @@ import { planRoutes } from "./routes/plans.js";
 import { agentRoutes } from "./routes/agents.js";
 import { eventRoutes } from "./routes/events.js";
 import { chatRoutes } from "./routes/chat.js";
+import { skillRoutes } from "./routes/skills.js";
 import { projectListRoutes, projectDetailRoutes } from "./routes/projects.js";
 
 export type ServerEnv = {
@@ -39,7 +40,12 @@ export function createApp(pm: ProjectManager, opts?: AppOptions): Hono {
   } else {
     // Default: restrict to localhost origins only
     app.use("*", cors({
-      origin: ["http://localhost:3000", "http://localhost:3001", "http://127.0.0.1:3000", "http://127.0.0.1:3001"],
+      origin: [
+        "http://localhost:3000", "http://localhost:3001",
+        "http://localhost:5173", "http://localhost:5174",
+        "http://127.0.0.1:3000", "http://127.0.0.1:3001",
+        "http://127.0.0.1:5173", "http://127.0.0.1:5174",
+      ],
     }));
   }
 
@@ -65,6 +71,7 @@ export function createApp(pm: ProjectManager, opts?: AppOptions): Hono {
   projectApp.route("/agents", agentRoutes());
   projectApp.route("/events", eventRoutes(pm));
   projectApp.route("/chat", chatRoutes());
+  projectApp.route("/skills", skillRoutes());
   projectApp.route("/", projectDetailRoutes());
 
   authed.route("/projects/:projectId", projectApp);

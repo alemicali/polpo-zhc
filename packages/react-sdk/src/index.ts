@@ -14,6 +14,9 @@ export { useEvents } from "./hooks/use-events.js";
 export { useStats } from "./hooks/use-stats.js";
 export { useMemory } from "./hooks/use-memory.js";
 export { useLogs } from "./hooks/use-logs.js";
+export { useSessions } from "./hooks/use-sessions.js";
+export { useTaskActivity } from "./hooks/use-task-activity.js";
+export { useSkills } from "./hooks/use-skills.js";
 
 // Client (re-export for convenience)
 export { OrchestraClient } from "./client/orchestra-client.js";
@@ -34,7 +37,10 @@ export type {
   AgentActivity,
   Team,
   AssessmentResult,
+  AssessmentTrigger,
   DimensionScore,
+  DimensionScoreEvidence,
+  EvalDimension,
   CheckResult,
   MetricResult,
   OrchestraState,
@@ -50,6 +56,11 @@ export type {
   TaskFilters,
   LogSession,
   LogEntry,
+  RunActivityEntry,
+  ChatSession,
+  ChatMessage,
+  ChatResponse,
+  SkillInfo,
 } from "./client/types.js";
 
 export type { ConnectionStatus } from "./client/event-source.js";

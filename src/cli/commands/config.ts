@@ -4,7 +4,6 @@ import { resolve } from "node:path";
 import { Orchestrator } from "../../core/orchestrator.js";
 import { parseConfig } from "../../core/config.js";
 import "../../adapters/claude-sdk.js";
-import "../../adapters/generic.js";
 
 async function initOrchestrator(configPath: string): Promise<Orchestrator> {
   const o = new Orchestrator(resolve(configPath));
@@ -21,10 +20,10 @@ export function registerConfigCommands(program: Command): void {
   configCmd
     .command("show")
     .description("Show current configuration")
-    .option("-c, --config <path>", "Path to working directory", ".")
+    .option("-d, --dir <path>", "Working directory", ".")
     .action(async (opts) => {
       try {
-        const orchestrator = await initOrchestrator(opts.config);
+        const orchestrator = await initOrchestrator(opts.dir);
         const config = orchestrator.getConfig();
 
         if (!config) {
@@ -71,7 +70,7 @@ export function registerConfigCommands(program: Command): void {
         );
         const adapterWidth = Math.max(
           8,
-          ...config.team.agents.map((a) => a.adapter.length)
+          ...config.team.agents.map((a) => (a.adapter ?? "engine").length)
         );
         const modelWidth = Math.max(
           6,
@@ -85,7 +84,7 @@ export function registerConfigCommands(program: Command): void {
         );
         for (const agent of config.team.agents) {
           const name = agent.name.padEnd(nameWidth);
-          const adapter = agent.adapter.padEnd(adapterWidth);
+          const adapter = (agent.adapter ?? "engine").padEnd(adapterWidth);
           const model = (agent.model ?? "-").padEnd(modelWidth);
           const role = agent.role ?? "-";
           console.log(`  ${chalk.cyan(name)}  ${adapter}  ${chalk.dim(model)}  ${chalk.dim(role)}`);
@@ -101,17 +100,14 @@ export function registerConfigCommands(program: Command): void {
   // polpo config validate
   configCmd
     .command("validate")
-    .description("Validate a polpo.yml configuration file")
-    .option("-c, --config <path>", "Path to working directory", ".")
-    .option("--file <file>", "Specific YAML file to validate")
+    .description("Validate configuration (.polpo/polpo.json)")
+    .option("-d, --dir <path>", "Working directory", ".")
     .action(async (opts) => {
-      const configPath = opts.file ?? resolve(opts.config, "polpo.yml");
-
+      const workDir = resolve(opts.dir);
       try {
-        const config = await parseConfig(configPath);
+        const config = await parseConfig(workDir);
         console.log(chalk.green("\n  \u2713 Configuration valid"));
         console.log(chalk.dim(`    Project: ${config.project}`));
-        console.log(chalk.dim(`    Tasks:   ${config.tasks.length}`));
         console.log(chalk.dim(`    Agents:  ${config.team.agents.length}`));
         console.log();
         process.exit(0);

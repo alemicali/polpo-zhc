@@ -30,7 +30,7 @@ export class OrchestraServer {
   async start(): Promise<void> {
     // Register all configured projects
     for (const entry of this.config.projects) {
-      this.pm.register(entry);
+      await this.pm.register(entry);
       if (entry.autoStart) {
         await this.pm.start(entry.id);
       }

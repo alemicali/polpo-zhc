@@ -13,7 +13,7 @@ describe("Plan resume (Orchestrator)", () => {
   let runStore: InMemoryRunStore;
   let orchestrator: Orchestrator;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     if (existsSync(TEST_DIR)) rmSync(TEST_DIR, { recursive: true });
     mkdirSync(TEST_DIR, { recursive: true });
 
@@ -34,7 +34,7 @@ describe("Plan resume (Orchestrator)", () => {
       }),
     });
 
-    orchestrator.initInteractive("test-project", {
+    await orchestrator.initInteractive("test-project", {
       name: "test-team",
       agents: [createTestAgent({ name: "dev", adapter: "mock" })],
     });
@@ -52,19 +52,19 @@ describe("Plan resume (Orchestrator)", () => {
     });
 
     it("returns empty array for draft plans", () => {
-      orchestrator.savePlan({ yaml: "tasks:\n  - title: T1\n    assignTo: dev", status: "draft" });
+      orchestrator.savePlan({ data: JSON.stringify({ tasks: [{ title: "T1", assignTo: "dev" }] }), status: "draft" });
       expect(orchestrator.getResumablePlans()).toEqual([]);
     });
 
     it("returns empty array for completed plans", () => {
-      const plan = orchestrator.savePlan({ yaml: "tasks:\n  - title: T1\n    assignTo: dev", status: "draft" });
+      const plan = orchestrator.savePlan({ data: JSON.stringify({ tasks: [{ title: "T1", assignTo: "dev" }] }), status: "draft" });
       orchestrator.updatePlan(plan.id, { status: "completed" });
       expect(orchestrator.getResumablePlans()).toEqual([]);
     });
 
     it("returns active plan with pending tasks", () => {
-      const yaml = "tasks:\n  - title: Task1\n    description: Do something\n    assignTo: dev";
-      const plan = orchestrator.savePlan({ yaml });
+      const data = JSON.stringify({ tasks: [{ title: "Task1", description: "Do something", assignTo: "dev" }] });
+      const plan = orchestrator.savePlan({ data });
       orchestrator.executePlan(plan.id);
 
       const resumable = orchestrator.getResumablePlans();
@@ -74,8 +74,8 @@ describe("Plan resume (Orchestrator)", () => {
     });
 
     it("returns failed plan with failed tasks", () => {
-      const yaml = "tasks:\n  - title: FailTask\n    description: Will fail\n    assignTo: dev";
-      const plan = orchestrator.savePlan({ yaml });
+      const data = JSON.stringify({ tasks: [{ title: "FailTask", description: "Will fail", assignTo: "dev" }] });
+      const plan = orchestrator.savePlan({ data });
       orchestrator.executePlan(plan.id);
 
       // Manually fail the task
@@ -94,8 +94,8 @@ describe("Plan resume (Orchestrator)", () => {
     });
 
     it("excludes cancelled plans", () => {
-      const yaml = "tasks:\n  - title: T\n    description: d\n    assignTo: dev";
-      const plan = orchestrator.savePlan({ yaml });
+      const data = JSON.stringify({ tasks: [{ title: "T", description: "d", assignTo: "dev" }] });
+      const plan = orchestrator.savePlan({ data });
       orchestrator.executePlan(plan.id);
       orchestrator.updatePlan(plan.id, { status: "cancelled" });
 
@@ -109,8 +109,8 @@ describe("Plan resume (Orchestrator)", () => {
     });
 
     it("resumes a failed plan and retries failed tasks", () => {
-      const yaml = "tasks:\n  - title: ResumableTask\n    description: Will be resumed\n    assignTo: dev";
-      const plan = orchestrator.savePlan({ yaml });
+      const data = JSON.stringify({ tasks: [{ title: "ResumableTask", description: "Will be resumed", assignTo: "dev" }] });
+      const plan = orchestrator.savePlan({ data });
       orchestrator.executePlan(plan.id);
 
       // Fail the task
@@ -135,8 +135,8 @@ describe("Plan resume (Orchestrator)", () => {
     });
 
     it("resumes without retrying when retryFailed is false", () => {
-      const yaml = "tasks:\n  - title: NoRetryTask\n    description: d\n    assignTo: dev";
-      const plan = orchestrator.savePlan({ yaml });
+      const data = JSON.stringify({ tasks: [{ title: "NoRetryTask", description: "d", assignTo: "dev" }] });
+      const plan = orchestrator.savePlan({ data });
       orchestrator.executePlan(plan.id);
 
       const state = store.getState();
@@ -156,8 +156,8 @@ describe("Plan resume (Orchestrator)", () => {
     });
 
     it("emits plan:resumed event", () => {
-      const yaml = "tasks:\n  - title: EventTask\n    description: d\n    assignTo: dev";
-      const plan = orchestrator.savePlan({ yaml });
+      const data = JSON.stringify({ tasks: [{ title: "EventTask", description: "d", assignTo: "dev" }] });
+      const plan = orchestrator.savePlan({ data });
       orchestrator.executePlan(plan.id);
       orchestrator.updatePlan(plan.id, { status: "failed" });
 
