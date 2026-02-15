@@ -105,7 +105,7 @@ The web UI is built on the `@openpolpo/react-sdk` package, which provides type-s
 
 ```tsx
 import {
-  OrchestraProvider,
+  PolpoProvider,
   useTasks,
   useAgents,
   usePlans,
@@ -117,13 +117,13 @@ import {
 
 function App() {
   return (
-    <OrchestraProvider
+    <PolpoProvider
       baseURL="http://localhost:3890"
       projectId="my-project"
       apiKey="optional-key"
     >
       <Dashboard />
-    </OrchestraProvider>
+    </PolpoProvider>
   );
 }
 ```

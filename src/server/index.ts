@@ -10,14 +10,14 @@ import type { ServerConfig } from "./types.js";
  * Can run locally, self-hosted, or as a cloud-managed service.
  *
  * Usage:
- *   const server = new OrchestraServer({
+ *   const server = new PolpoServer({
  *     port: 3000,
  *     host: "0.0.0.0",
  *     projects: [{ id: "my-project", workDir: "./my-project", autoStart: true }],
  *   });
  *   await server.start();
  */
-export class OrchestraServer {
+export class PolpoServer {
   private pm: ProjectManager;
   private server: ReturnType<typeof serve> | null = null;
   private shutdownHandlers: (() => void)[] = [];

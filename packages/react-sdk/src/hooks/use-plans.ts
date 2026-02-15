@@ -1,5 +1,5 @@
 import { useSyncExternalStore, useCallback, useEffect, useState } from "react";
-import { useOrchestraContext } from "../provider/orchestra-context.js";
+import { usePolpoContext } from "../provider/polpo-context.js";
 import { selectPlans } from "../store/selectors.js";
 import type { Plan, CreatePlanRequest, UpdatePlanRequest, ExecutePlanResult, ResumePlanResult } from "../client/types.js";
 
@@ -17,7 +17,7 @@ export interface UsePlansReturn {
 }
 
 export function usePlans(): UsePlansReturn {
-  const { client, store } = useOrchestraContext();
+  const { client, store } = usePolpoContext();
 
   const plans = useSyncExternalStore(
     store.subscribe,

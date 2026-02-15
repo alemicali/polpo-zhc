@@ -1,23 +1,23 @@
 import { readFileSync, writeFileSync, renameSync, mkdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { nanoid } from "nanoid";
-import type { Task, TaskStatus, OrchestraState } from "../core/types.js";
+import type { Task, TaskStatus, PolpoState } from "../core/types.js";
 import type { TaskStore } from "../core/task-store.js";
 import { assertValidTransition } from "../core/state-machine.js";
 
 export class JsonTaskStore implements TaskStore {
   private statePath: string;
-  private state: OrchestraState;
+  private state: PolpoState;
 
-  constructor(orchestraDir: string) {
-    this.statePath = join(orchestraDir, "state.json");
+  constructor(polpoDir: string) {
+    this.statePath = join(polpoDir, "state.json");
     this.state = this.load();
   }
 
-  private load(): OrchestraState {
+  private load(): PolpoState {
     if (existsSync(this.statePath)) {
       const raw = readFileSync(this.statePath, "utf-8");
-      return JSON.parse(raw) as OrchestraState;
+      return JSON.parse(raw) as PolpoState;
     }
     return {
       project: "",
@@ -38,11 +38,11 @@ export class JsonTaskStore implements TaskStore {
     renameSync(tmp, this.statePath);
   }
 
-  getState(): OrchestraState {
+  getState(): PolpoState {
     return this.state;
   }
 
-  setState(partial: Partial<OrchestraState>): void {
+  setState(partial: Partial<PolpoState>): void {
     Object.assign(this.state, partial);
     this.persist();
   }

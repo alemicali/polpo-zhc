@@ -40,7 +40,7 @@ function configView(
     ["Stale threshold", s.staleThreshold ? `${(s.staleThreshold / 60000).toFixed(0)}min` : "5min"],
     ["Volatile teams", s.enableVolatileTeams !== false ? "enabled" : "disabled"],
     ["Auto-correct", s.autoCorrectExpectations !== false ? "enabled" : "disabled"],
-    ["Orchestrator model", s.orchestratorModel ?? "(default)"],
+    ["Polpo model", s.orchestratorModel ?? "(default)"],
   ];
 
   store.log("Configuration:", [seg("Configuration:", undefined, true)]);

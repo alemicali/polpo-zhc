@@ -7,12 +7,12 @@ import { QualityController } from "../quality/quality-controller.js";
 import { HookRegistry } from "../core/hooks.js";
 import { InMemoryTaskStore, InMemoryRunStore, createTestTask } from "./fixtures.js";
 import type { OrchestratorContext } from "../core/orchestrator-context.js";
-import type { OrchestraConfig, NotificationsConfig, PlanQualityGate } from "../core/types.js";
+import type { PolpoConfig, NotificationsConfig, PlanQualityGate } from "../core/types.js";
 import type { NotificationChannel, Notification } from "../notifications/types.js";
 
 // ── Helpers ──────────────────────────────────────────
 
-function createMinimalConfig(): OrchestraConfig {
+function createMinimalConfig(): PolpoConfig {
   return {
     version: "1",
     project: "test",

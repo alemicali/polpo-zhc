@@ -1,12 +1,12 @@
-import { OrchestraApiError } from "./errors.js";
+import { PolpoApiError } from "./errors.js";
 import type {
   Task,
   Plan,
   AgentConfig,
   AgentProcess,
   Team,
-  OrchestraState,
-  OrchestraConfig,
+  PolpoState,
+  PolpoConfig,
   ProjectInfo,
   HealthResponse,
   TaskFilters,
@@ -27,14 +27,14 @@ import type {
   SkillInfo,
 } from "./types.js";
 
-export interface OrchestraClientConfig {
+export interface PolpoClientConfig {
   baseUrl: string;
   projectId: string;
   apiKey?: string;
   fetch?: typeof globalThis.fetch;
 }
 
-export class OrchestraClient {
+export class PolpoClient {
   private readonly baseUrl: string;
   private readonly projectId: string;
   private readonly headers: Record<string, string>;
@@ -42,7 +42,7 @@ export class OrchestraClient {
   /** In-flight GET deduplication */
   private readonly inflight = new Map<string, Promise<unknown>>();
 
-  constructor(config: OrchestraClientConfig) {
+  constructor(config: PolpoClientConfig) {
     this.baseUrl = config.baseUrl.replace(/\/$/, "");
     this.projectId = config.projectId;
     this.fetchFn = config.fetch ?? globalThis.fetch.bind(globalThis);
@@ -66,7 +66,7 @@ export class OrchestraClient {
     });
     const json = (await res.json()) as ApiResult<T>;
     if (!json.ok) {
-      throw new OrchestraApiError(json.error, json.code, res.status, json.details);
+      throw new PolpoApiError(json.error, json.code, res.status, json.details);
     }
     return json.data;
   }
@@ -199,12 +199,12 @@ export class OrchestraClient {
 
   // ── Project ──────────────────────────────────────────────
 
-  getState(): Promise<OrchestraState> {
-    return this.get<OrchestraState>("/state");
+  getState(): Promise<PolpoState> {
+    return this.get<PolpoState>("/state");
   }
 
-  getConfig(): Promise<OrchestraConfig> {
-    return this.get<OrchestraConfig>("/config");
+  getConfig(): Promise<PolpoConfig> {
+    return this.get<PolpoConfig>("/config");
   }
 
   getMemory(): Promise<{ exists: boolean; content: string }> {
@@ -287,14 +287,14 @@ export class OrchestraClient {
     if (apiKey) headers["x-api-key"] = apiKey;
     const res = await fetch(`${baseUrl.replace(/\/$/, "")}/api/v1/projects`, { headers });
     const json = (await res.json()) as ApiResult<ProjectInfo[]>;
-    if (!json.ok) throw new OrchestraApiError(json.error, json.code, res.status);
+    if (!json.ok) throw new PolpoApiError(json.error, json.code, res.status);
     return json.data;
   }
 
   static async health(baseUrl: string): Promise<HealthResponse> {
     const res = await fetch(`${baseUrl.replace(/\/$/, "")}/api/v1/health`);
     const json = (await res.json()) as ApiResult<HealthResponse>;
-    if (!json.ok) throw new OrchestraApiError(json.error, json.code, res.status);
+    if (!json.ok) throw new PolpoApiError(json.error, json.code, res.status);
     return json.data;
   }
 

@@ -16,7 +16,7 @@ import { TypedEmitter } from "./events.js";
 import type { TaskStore } from "./task-store.js";
 import type { RunStore } from "./run-store.js";
 import type {
-  OrchestraConfig,
+  PolpoConfig,
   AgentConfig,
   Task,
   TaskResult,
@@ -66,7 +66,7 @@ export interface OrchestratorOptions {
 export class Orchestrator extends TypedEmitter {
   private registry!: TaskStore;
   private runStore!: RunStore;
-  private config!: OrchestraConfig;
+  private config!: PolpoConfig;
   private polpoDir: string;
   private workDir: string;
   private interactive = false;
@@ -360,7 +360,7 @@ export class Orchestrator extends TypedEmitter {
 
   getAgents(): AgentConfig[] { return this.agentMgr.getAgents(); }
   getTeam(): Team { return this.agentMgr.getTeam(); }
-  getConfig(): OrchestraConfig | null { return this.config; }
+  getConfig(): PolpoConfig | null { return this.config; }
   renameTeam(newName: string): void { this.agentMgr.renameTeam(newName); }
   addAgent(agent: AgentConfig): void { this.agentMgr.addAgent(agent); }
   removeAgent(name: string): boolean { return this.agentMgr.removeAgent(name); }

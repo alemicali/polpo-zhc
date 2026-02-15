@@ -4,11 +4,11 @@ import { HookRegistry } from "../core/hooks.js";
 import { TypedEmitter } from "../core/events.js";
 import { InMemoryTaskStore, InMemoryRunStore, createTestTask } from "./fixtures.js";
 import type { OrchestratorContext } from "../core/orchestrator-context.js";
-import type { OrchestraConfig, Task, PlanQualityGate, Plan, AssessmentResult } from "../core/types.js";
+import type { PolpoConfig, Task, PlanQualityGate, Plan, AssessmentResult } from "../core/types.js";
 
 // ── Helpers ──────────────────────────────────────────
 
-function createMinimalConfig(): OrchestraConfig {
+function createMinimalConfig(): PolpoConfig {
   return {
     version: "1",
     project: "test",

@@ -24,17 +24,17 @@ npm install @openpolpo/react-sdk
 ## Quick Start
 
 ```tsx
-import { OrchestraProvider, useTasks, useAgents } from '@openpolpo/react-sdk';
+import { PolpoProvider, useTasks, useAgents } from '@openpolpo/react-sdk';
 
 function App() {
   return (
-    <OrchestraProvider
+    <PolpoProvider
       baseURL="http://localhost:3890"
       projectId="my-project"
       apiKey="optional-api-key"
     >
       <Dashboard />
-    </OrchestraProvider>
+    </PolpoProvider>
   );
 }
 
@@ -62,12 +62,12 @@ function Dashboard() {
 
 ## API Reference
 
-### OrchestraProvider
+### PolpoProvider
 
 Root provider component that manages connection and state.
 
 ```tsx
-<OrchestraProvider
+<PolpoProvider
   baseURL="http://localhost:3890"
   projectId="my-project"
   apiKey="optional-key"
@@ -76,7 +76,7 @@ Root provider component that manages connection and state.
   maxReconnectInterval={30000}
 >
   {children}
-</OrchestraProvider>
+</PolpoProvider>
 ```
 
 **Props**:
@@ -89,7 +89,7 @@ Root provider component that manages connection and state.
 
 ### Hooks
 
-#### useOrchestra()
+#### usePolpo()
 
 Access full Polpo state and methods.
 
@@ -116,7 +116,7 @@ const {
   sendMessage,
   connect,
   disconnect,
-} = useOrchestra();
+} = usePolpo();
 ```
 
 #### useTasks(filter?)
@@ -278,7 +278,7 @@ return (
 );
 ```
 
-**Returns**: `OrchestraEvent[]`
+**Returns**: `PolpoEvent[]`
 
 #### useStats()
 
@@ -339,7 +339,7 @@ const logs = useLogs(100);
 Create a new task.
 
 ```tsx
-const { createTask } = useOrchestra();
+const { createTask } = usePolpo();
 
 await createTask({
   title: 'Implement feature X',
@@ -353,7 +353,7 @@ await createTask({
 Update an existing task.
 
 ```tsx
-const { updateTask } = useOrchestra();
+const { updateTask } = usePolpo();
 
 await updateTask('task-123', {
   status: 'done',
@@ -366,7 +366,7 @@ await updateTask('task-123', {
 Retry a failed task.
 
 ```tsx
-const { retryTask } = useOrchestra();
+const { retryTask } = usePolpo();
 
 await retryTask('task-123');
 ```
@@ -376,7 +376,7 @@ await retryTask('task-123');
 Create a new plan from YAML.
 
 ```tsx
-const { createPlan } = useOrchestra();
+const { createPlan } = usePolpo();
 
 const yaml = `
 group: new-feature
@@ -394,7 +394,7 @@ await createPlan(yaml);
 Send a message through the chat interface.
 
 ```tsx
-const { sendMessage } = useOrchestra();
+const { sendMessage } = usePolpo();
 
 await sendMessage('Create a new task for implementing auth', {
   targetAgent: 'backend-dev',
@@ -423,7 +423,7 @@ The SDK supports two authentication methods:
 
 **Header-based** (preferred):
 ```tsx
-<OrchestraProvider
+<PolpoProvider
   baseURL="http://localhost:3890"
   projectId="my-project"
   apiKey="your-api-key"
@@ -443,7 +443,7 @@ import type {
   Plan,
   Agent,
   AgentProcess,
-  OrchestraEvent,
+  PolpoEvent,
   Stats,
   CreateTaskInput,
   UpdateTaskInput,
@@ -455,11 +455,11 @@ import type {
 ### Task List with Retry
 
 ```tsx
-import { useTasks, useOrchestra } from '@openpolpo/react-sdk';
+import { useTasks, usePolpo } from '@openpolpo/react-sdk';
 
 function TaskList() {
   const tasks = useTasks();
-  const { retryTask } = useOrchestra();
+  const { retryTask } = usePolpo();
 
   return (
     <ul>

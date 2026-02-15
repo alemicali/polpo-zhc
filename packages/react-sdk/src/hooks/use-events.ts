@@ -1,5 +1,5 @@
 import { useRef, useSyncExternalStore } from "react";
-import { useOrchestraContext } from "../provider/orchestra-context.js";
+import { usePolpoContext } from "../provider/polpo-context.js";
 import { selectEvents } from "../store/selectors.js";
 import { useStableValue } from "./use-stable-value.js";
 import type { SSEEvent } from "../client/types.js";
@@ -9,7 +9,7 @@ export interface UseEventsReturn {
 }
 
 export function useEvents(filter?: string[], maxEvents = 200): UseEventsReturn {
-  const { store } = useOrchestraContext();
+  const { store } = usePolpoContext();
   const stableFilter = useStableValue(filter);
   const cacheRef = useRef<{ source: SSEEvent[]; result: SSEEvent[] }>({
     source: [],

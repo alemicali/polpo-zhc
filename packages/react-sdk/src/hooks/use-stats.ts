@@ -1,9 +1,9 @@
 import { useSyncExternalStore } from "react";
-import { useOrchestraContext } from "../provider/orchestra-context.js";
-import type { OrchestraStats } from "../store/types.js";
+import { usePolpoContext } from "../provider/polpo-context.js";
+import type { PolpoStats } from "../store/types.js";
 
-export function useStats(): OrchestraStats | null {
-  const { store } = useOrchestraContext();
+export function useStats(): PolpoStats | null {
+  const { store } = usePolpoContext();
 
   return useSyncExternalStore(
     store.subscribe,

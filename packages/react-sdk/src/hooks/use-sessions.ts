@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { useOrchestraContext } from "../provider/orchestra-context.js";
+import { usePolpoContext } from "../provider/polpo-context.js";
 import type { ChatSession, ChatMessage } from "../client/types.js";
 
 export interface UseSessionsReturn {
@@ -14,7 +14,7 @@ export interface UseSessionsReturn {
 }
 
 export function useSessions(): UseSessionsReturn {
-  const { client } = useOrchestraContext();
+  const { client } = usePolpoContext();
 
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [isLoading, setIsLoading] = useState(true);

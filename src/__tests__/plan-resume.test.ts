@@ -6,7 +6,7 @@ import { SqliteTaskStore } from "../stores/sqlite-task-store.js";
 import { InMemoryRunStore, MockAdapter, createTestAgent } from "./fixtures.js";
 import { registerAdapter } from "../adapters/registry.js";
 
-const TEST_DIR = join(process.cwd(), ".test-orchestra-plan-resume");
+const TEST_DIR = join(process.cwd(), ".test-polpo-plan-resume");
 
 describe("Plan resume (Orchestrator)", () => {
   let store: SqliteTaskStore;

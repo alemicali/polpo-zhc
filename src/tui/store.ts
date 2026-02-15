@@ -4,7 +4,7 @@
  */
 
 import { create } from "zustand";
-import type { Task, AgentProcess, OrchestraState, Plan } from "../core/types.js";
+import type { Task, AgentProcess, PolpoState, Plan } from "../core/types.js";
 import type { UserQuestion, UserAnswer } from "../llm/plan-generator.js";
 
 // ─── Segment (styled text unit) ─────────────────────────
@@ -97,7 +97,7 @@ export interface TUIStore {
   plans: Plan[];
   orchestratorStartedAt: string | null;
   tuiStartedAt: string;
-  syncState(state: OrchestraState, plans?: Plan[]): void;
+  syncState(state: PolpoState, plans?: Plan[]): void;
 
   // Input
   inputBuffer: string;

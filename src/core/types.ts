@@ -317,12 +317,12 @@ export interface RunnerConfig {
   notifySocket?: string;
 }
 
-// === Polpo Config (.polpo/polpo.json — persistent project configuration) ===
+// === Polpo File Config (.polpo/polpo.json — persistent project configuration) ===
 
-export interface PolpoConfig {
+export interface PolpoFileConfig {
   project: string;
   team: Team;
-  settings: OrchestraSettings;
+  settings: PolpoSettings;
   providers?: Record<string, ProviderConfig>;
 }
 
@@ -337,17 +337,17 @@ export interface ProviderConfig {
 
 // === Config (.polpo/polpo.json) ===
 
-export interface OrchestraConfig {
+export interface PolpoConfig {
   version: string;
   project: string;
   team: Team;
   tasks: Omit<Task, "status" | "retries" | "result" | "createdAt" | "updatedAt">[];
-  settings: OrchestraSettings;
+  settings: PolpoSettings;
   /** Per-provider API key and base URL overrides. */
   providers?: Record<string, ProviderConfig>;
 }
 
-export interface OrchestraSettings {
+export interface PolpoSettings {
   maxRetries: number;
   workDir: string;
   logLevel: "quiet" | "normal" | "verbose";
@@ -391,7 +391,7 @@ export interface OrchestraSettings {
 
 // === Orchestra State (persisted in .polpo/state.json) ===
 
-export interface OrchestraState {
+export interface PolpoState {
   project: string;
   team: Team;
   tasks: Task[];
@@ -671,7 +671,7 @@ export interface ScheduleEntry {
 
 // === Extended Settings ===
 
-export interface OrchestraSettingsExtended {
+export interface PolpoSettingsExtended {
   /** Approval gates configuration. */
   approvalGates?: ApprovalGate[];
   /** Notification system configuration. */
@@ -680,5 +680,5 @@ export interface OrchestraSettingsExtended {
   escalationPolicy?: EscalationPolicy;
 }
 
-// === Quality & Scheduling Settings (on OrchestraSettings) ===
-// These are added to OrchestraSettings directly — see the interface above.
+// === Quality & Scheduling Settings (on PolpoSettings) ===
+// These are added to PolpoSettings directly — see the interface above.

@@ -15,22 +15,22 @@ npm install @openpolpo/react-sdk
 
 Peer dependencies: React 18 or 19.
 
-## OrchestraProvider
+## PolpoProvider
 
 Wrap your app to provide Polpo context:
 
 ```tsx
-import { OrchestraProvider } from "@openpolpo/react-sdk";
+import { PolpoProvider } from "@openpolpo/react-sdk";
 
 function App() {
   return (
-    <OrchestraProvider
+    <PolpoProvider
       baseURL="http://localhost:3890"
       projectId="my-project"
       apiKey="optional-key"
     >
       <MyApp />
-    </OrchestraProvider>
+    </PolpoProvider>
   );
 }
 ```
@@ -46,19 +46,19 @@ function App() {
 
 ---
 
-## useOrchestra
+## usePolpo
 
 Access the Polpo client and connection status.
 
 ```tsx
-const { client, connectionStatus } = useOrchestra();
+const { client, connectionStatus } = usePolpo();
 ```
 
 ### Returns
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `client` | `OrchestraClient` | HTTP client with request deduplication |
+| `client` | `PolpoClient` | HTTP client with request deduplication |
 | `connectionStatus` | `"connected" \| "connecting" \| "disconnected"` | SSE connection state |
 
 ---
@@ -325,9 +325,9 @@ const { sessions, isLoading, getLogEntries } = useLogs();
 
 The SDK uses `useSyncExternalStore` for push-based state management:
 
-1. **OrchestraClient** — HTTP client with automatic request deduplication (internal class name)
+1. **PolpoClient** — HTTP client with automatic request deduplication (internal class name)
 2. **EventSourceManager** — SSE with auto-reconnect and exponential backoff
-3. **OrchestraStore** — Central state with `reduceEvent()` for 55 event types (internal class name)
+3. **PolpoStore** — Central state with `reduceEvent()` for 55 event types (internal class name)
 4. **Memoized selectors** — WeakMap-cached selectors for each hook
 5. **Microtask batching** — `queueMicrotask` for batched re-renders
 

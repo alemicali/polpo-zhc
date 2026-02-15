@@ -1,5 +1,5 @@
 import { useSyncExternalStore, useCallback, useEffect, useState } from "react";
-import { useOrchestraContext } from "../provider/orchestra-context.js";
+import { usePolpoContext } from "../provider/polpo-context.js";
 import type { AgentConfig, Team, AddAgentRequest } from "../client/types.js";
 
 export interface UseAgentsReturn {
@@ -14,7 +14,7 @@ export interface UseAgentsReturn {
 }
 
 export function useAgents(): UseAgentsReturn {
-  const { client, store } = useOrchestraContext();
+  const { client, store } = usePolpoContext();
 
   const agents = useSyncExternalStore(
     store.subscribe,

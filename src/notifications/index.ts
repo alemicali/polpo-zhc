@@ -1,5 +1,5 @@
 import { nanoid } from "nanoid";
-import type { TypedEmitter, OrchestraEvent, OrchestraEventMap } from "../core/events.js";
+import type { TypedEmitter, PolpoEvent, PolpoEventMap } from "../core/events.js";
 import type { NotificationsConfig, NotificationRule, NotificationChannelConfig, NotificationCondition } from "../core/types.js";
 import type { NotificationChannel, Notification } from "./types.js";
 import { defaultTitle, defaultBody, applyTemplate } from "./templates.js";
@@ -13,7 +13,7 @@ export type { NotificationChannel, Notification } from "./types.js";
 /**
  * Event-driven notification router.
  *
- * Subscribes to OrchestraEventMap events, matches them against configured rules,
+ * Subscribes to PolpoEventMap events, matches them against configured rules,
  * and dispatches notifications to the appropriate channels.
  *
  * Features:
@@ -87,7 +87,7 @@ export class NotificationRouter {
         if (matchGlob(pattern, event) && !this.subscribedEvents.has(event)) {
           this.subscribedEvents.add(event);
           const fn = (data: unknown) => this.handleEvent(event, data);
-          this.emitter.on(event as OrchestraEvent, fn as (payload: OrchestraEventMap[OrchestraEvent]) => void);
+          this.emitter.on(event as PolpoEvent, fn as (payload: PolpoEventMap[PolpoEvent]) => void);
           this.listeners.push({ event, fn });
         }
       }
@@ -234,7 +234,7 @@ export class NotificationRouter {
    */
   dispose(): void {
     for (const { event, fn } of this.listeners) {
-      this.emitter.off(event as OrchestraEvent, fn as (payload: OrchestraEventMap[OrchestraEvent]) => void);
+      this.emitter.off(event as PolpoEvent, fn as (payload: PolpoEventMap[PolpoEvent]) => void);
     }
     this.listeners.length = 0;
   }
@@ -288,7 +288,7 @@ function matchGlob(pattern: string, event: string): boolean {
 }
 
 /**
- * Get all known event names from the OrchestraEventMap.
+ * Get all known event names from the PolpoEventMap.
  * Used to subscribe to concrete events matching glob patterns.
  */
 function getAllEventNames(): string[] {

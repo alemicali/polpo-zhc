@@ -43,7 +43,7 @@ import {
   Map,
   Check,
 } from "lucide-react";
-import { useTasks, useOrchestra, useProcesses, usePlans } from "@openpolpo/react-sdk";
+import { useTasks, usePolpo, useProcesses, usePlans } from "@openpolpo/react-sdk";
 import type { Task, TaskStatus, AgentProcess } from "@openpolpo/react-sdk";
 import { toast } from "sonner";
 import { formatDistanceToNow } from "date-fns";
@@ -463,7 +463,7 @@ export function TasksPage() {
   const navigate = useNavigate();
   const { tasks, isLoading: loading, refetch, retryTask } = useTasks();
   const { processes } = useProcesses();
-  const { client } = useOrchestra();
+  const { client } = usePolpo();
   const { plans } = usePlans();
   const [search, setSearch] = useState("");
   const [viewMode, setViewMode] = useState<ViewMode>(() => {

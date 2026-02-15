@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useRef, type ReactNode } from "react";
-import { OrchestraClient } from "../client/orchestra-client.js";
+import { PolpoClient } from "../client/polpo-client.js";
 import { EventSourceManager } from "../client/event-source.js";
 import type { SSEEvent } from "../client/types.js";
-import { OrchestraStore } from "../store/orchestra-store.js";
-import { OrchestraContext } from "./orchestra-context.js";
+import { PolpoStore } from "../store/polpo-store.js";
+import { PolpoContext } from "./polpo-context.js";
 
-export interface OrchestraProviderProps {
+export interface PolpoProviderProps {
   baseUrl: string;
   projectId: string;
   apiKey?: string;
@@ -14,23 +14,23 @@ export interface OrchestraProviderProps {
   eventFilter?: string[];
 }
 
-export function OrchestraProvider({
+export function PolpoProvider({
   baseUrl,
   projectId,
   apiKey,
   children,
   autoConnect = true,
   eventFilter,
-}: OrchestraProviderProps) {
+}: PolpoProviderProps) {
   const configKey = `${baseUrl}|${projectId}|${apiKey ?? ""}`;
-  const storeRef = useRef<OrchestraStore>(null as unknown as OrchestraStore);
-  const clientRef = useRef<OrchestraClient>(null as unknown as OrchestraClient);
+  const storeRef = useRef<PolpoStore>(null as unknown as PolpoStore);
+  const clientRef = useRef<PolpoClient>(null as unknown as PolpoClient);
   const lastConfigKey = useRef("");
 
   if (lastConfigKey.current !== configKey) {
     lastConfigKey.current = configKey;
-    clientRef.current = new OrchestraClient({ baseUrl, projectId, apiKey });
-    storeRef.current = new OrchestraStore();
+    clientRef.current = new PolpoClient({ baseUrl, projectId, apiKey });
+    storeRef.current = new PolpoStore();
   }
 
   const client = clientRef.current!;
@@ -83,8 +83,8 @@ export function OrchestraProvider({
   const value = useMemo(() => ({ client, store }), [client, store]);
 
   return (
-    <OrchestraContext.Provider value={value}>
+    <PolpoContext.Provider value={value}>
       {children}
-    </OrchestraContext.Provider>
+    </PolpoContext.Provider>
   );
 }

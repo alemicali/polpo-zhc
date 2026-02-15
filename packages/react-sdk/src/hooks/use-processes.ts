@@ -1,5 +1,5 @@
 import { useSyncExternalStore, useCallback, useEffect, useState } from "react";
-import { useOrchestraContext } from "../provider/orchestra-context.js";
+import { usePolpoContext } from "../provider/polpo-context.js";
 import { selectProcesses } from "../store/selectors.js";
 import type { AgentProcess } from "../client/types.js";
 
@@ -11,7 +11,7 @@ export interface UseProcessesReturn {
 }
 
 export function useProcesses(): UseProcessesReturn {
-  const { client, store } = useOrchestraContext();
+  const { client, store } = usePolpoContext();
 
   const processes = useSyncExternalStore(
     store.subscribe,

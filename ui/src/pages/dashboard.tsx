@@ -40,7 +40,7 @@ import {
   Brain,
 } from "lucide-react";
 import { useTasks, usePlans, useProcesses, useAgents, useStats } from "@openpolpo/react-sdk";
-import type { Task, AgentProcess, OrchestraStats } from "@openpolpo/react-sdk";
+import type { Task, AgentProcess, PolpoStats } from "@openpolpo/react-sdk";
 import { cn } from "@/lib/utils";
 
 // ── Phase icon helper ──
@@ -56,7 +56,7 @@ function PhaseIcon({ phase }: { phase?: string }) {
 
 // ── Live ticker ──
 
-function LiveTicker({ stats }: { stats: OrchestraStats | null }) {
+function LiveTicker({ stats }: { stats: PolpoStats | null }) {
   if (!stats) return null;
   const items = [
     { label: "Pending", value: stats.pending, color: "bg-zinc-500" },

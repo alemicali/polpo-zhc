@@ -1,7 +1,7 @@
 import { EventEmitter } from "node:events";
 import { readSessionSummaryFromPath } from "../core/session-reader.js";
 import type { BridgeSessionState, BridgeConfig } from "./types.js";
-import type { OrchestraEventMap } from "../core/events.js";
+import type { PolpoEventMap } from "../core/events.js";
 
 /**
  * Decode Claude Code's project directory encoding back to a readable path.
@@ -14,8 +14,8 @@ export function decodeProjectDir(encoded: string): string {
   return encoded.replace(/-/g, "/");
 }
 
-type BridgeEvent = Extract<keyof OrchestraEventMap, `bridge:${string}`>;
-type BridgePayload<K extends BridgeEvent> = OrchestraEventMap[K];
+type BridgeEvent = Extract<keyof PolpoEventMap, `bridge:${string}`>;
+type BridgePayload<K extends BridgeEvent> = PolpoEventMap[K];
 
 /**
  * Maintains state for all discovered sessions.

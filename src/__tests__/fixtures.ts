@@ -1,20 +1,20 @@
 import { nanoid } from "nanoid";
-import type { Task, TaskStatus, OrchestraState, AgentConfig, AgentActivity, TaskResult, AgentHandle, AgentAdapter, TaskStore, RunStore, RunRecord, RunStatus } from "../core/index.js";
+import type { Task, TaskStatus, PolpoState, AgentConfig, AgentActivity, TaskResult, AgentHandle, AgentAdapter, TaskStore, RunStore, RunRecord, RunStatus } from "../core/index.js";
 import { assertValidTransition } from "../core/state-machine.js";
 
 // === InMemoryTaskStore ===
 
 export class InMemoryTaskStore implements TaskStore {
-  private state: OrchestraState = {
+  private state: PolpoState = {
     project: "",
     team: { name: "", agents: [] },
     tasks: [],
     processes: [],
   };
 
-  getState(): OrchestraState { return this.state; }
+  getState(): PolpoState { return this.state; }
 
-  setState(partial: Partial<OrchestraState>): void {
+  setState(partial: Partial<PolpoState>): void {
     Object.assign(this.state, partial);
   }
 

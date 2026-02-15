@@ -2,7 +2,7 @@ import { EventEmitter } from "node:events";
 import type { Task, TaskStatus, DimensionScore, PlanStatus, PlanReport } from "./types.js";
 import type { LogStore } from "./log-store.js";
 
-export interface OrchestraEventMap {
+export interface PolpoEventMap {
   // Task lifecycle
   "task:created": { task: Task };
   "task:transition": { taskId: string; from: TaskStatus; to: TaskStatus; task: Task };
@@ -97,7 +97,7 @@ export interface OrchestraEventMap {
   "log": { level: "info" | "warn" | "error" | "debug"; message: string };
 }
 
-export type OrchestraEvent = keyof OrchestraEventMap;
+export type PolpoEvent = keyof PolpoEventMap;
 
 /**
  * Typed event emitter for Orchestra.
@@ -114,7 +114,7 @@ export class TypedEmitter extends EventEmitter {
     this.logSink = store;
   }
 
-  override emit<K extends OrchestraEvent>(event: K, payload: OrchestraEventMap[K]): boolean;
+  override emit<K extends PolpoEvent>(event: K, payload: PolpoEventMap[K]): boolean;
   override emit(event: string | symbol, ...args: unknown[]): boolean;
   override emit(event: string | symbol, ...args: unknown[]): boolean {
     // Persist to log store before dispatching
@@ -130,19 +130,19 @@ export class TypedEmitter extends EventEmitter {
     return super.emit(event, ...args);
   }
 
-  override on<K extends OrchestraEvent>(event: K, listener: (payload: OrchestraEventMap[K]) => void): this;
+  override on<K extends PolpoEvent>(event: K, listener: (payload: PolpoEventMap[K]) => void): this;
   override on(event: string | symbol, listener: (...args: unknown[]) => void): this;
   override on(event: string | symbol, listener: (...args: unknown[]) => void): this {
     return super.on(event, listener);
   }
 
-  override once<K extends OrchestraEvent>(event: K, listener: (payload: OrchestraEventMap[K]) => void): this;
+  override once<K extends PolpoEvent>(event: K, listener: (payload: PolpoEventMap[K]) => void): this;
   override once(event: string | symbol, listener: (...args: unknown[]) => void): this;
   override once(event: string | symbol, listener: (...args: unknown[]) => void): this {
     return super.once(event, listener);
   }
 
-  override off<K extends OrchestraEvent>(event: K, listener: (payload: OrchestraEventMap[K]) => void): this;
+  override off<K extends PolpoEvent>(event: K, listener: (payload: PolpoEventMap[K]) => void): this;
   override off(event: string | symbol, listener: (...args: unknown[]) => void): this;
   override off(event: string | symbol, listener: (...args: unknown[]) => void): this {
     return super.off(event, listener);

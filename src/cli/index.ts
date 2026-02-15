@@ -7,7 +7,7 @@ import { Command } from "commander";
 import chalk from "chalk";
 import { generatePolpoConfigDefault, savePolpoConfig } from "../core/config.js";
 import { Orchestrator } from "../core/orchestrator.js";
-import type { OrchestraState, Task, TaskStatus } from "../core/types.js";
+import type { PolpoState, Task, TaskStatus } from "../core/types.js";
 
 // Register external adapters (side-effect imports)
 import "../adapters/claude-sdk.js";
@@ -139,20 +139,20 @@ program
     console.log(LOGO_CENTER());
 
     const cwd = process.cwd();
-    const orchestraDir = resolve(cwd, ".polpo");
+    const polpoDir = resolve(cwd, ".polpo");
 
-    await mkdir(orchestraDir, { recursive: true });
-    await mkdir(resolve(orchestraDir, "logs"), { recursive: true });
-    await mkdir(resolve(orchestraDir, "assessments"), { recursive: true });
+    await mkdir(polpoDir, { recursive: true });
+    await mkdir(resolve(polpoDir, "logs"), { recursive: true });
+    await mkdir(resolve(polpoDir, "assessments"), { recursive: true });
 
     // Create .polpo/polpo.json (persistent project config)
-    const polpoJsonPath = resolve(orchestraDir, "polpo.json");
+    const polpoJsonPath = resolve(polpoDir, "polpo.json");
     try {
       await access(polpoJsonPath);
       console.log(chalk.yellow("  .polpo/polpo.json already exists, skipping."));
     } catch {
       const projectName = cwd.split("/").pop() || "my-project";
-      savePolpoConfig(orchestraDir, generatePolpoConfigDefault(projectName));
+      savePolpoConfig(polpoDir, generatePolpoConfigDefault(projectName));
       console.log(chalk.green("  Created .polpo/polpo.json"));
     }
 
@@ -188,7 +188,7 @@ program
     const statePath = resolve(opts.dir, ".polpo", "state.json");
     let frame = 0;
     const startTime = Date.now();
-    let lastState: OrchestraState | null = null;
+    let lastState: PolpoState | null = null;
 
     const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
     const PULSE  = ["●", "◉", "○", "◉"];
@@ -423,7 +423,7 @@ program
   .action(async (opts) => {
     console.log(LOGO);
     const { basename } = await import("node:path");
-    const { OrchestraServer } = await import("../server/index.js");
+    const { PolpoServer } = await import("../server/index.js");
 
     // Register external adapters
     await import("../adapters/claude-sdk.js");
@@ -447,7 +447,7 @@ program
       );
     }
 
-    const server = new OrchestraServer({
+    const server = new PolpoServer({
       port,
       host: opts.host,
       apiKeys,

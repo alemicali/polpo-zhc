@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { useOrchestraContext } from "../provider/orchestra-context.js";
+import { usePolpoContext } from "../provider/polpo-context.js";
 import type { SkillInfo } from "../client/types.js";
 
 export interface UseSkillsReturn {
@@ -14,7 +14,7 @@ export interface UseSkillsReturn {
  * Skills are not reactive (no SSE updates) — they're discovered on demand.
  */
 export function useSkills(): UseSkillsReturn {
-  const { client } = useOrchestraContext();
+  const { client } = usePolpoContext();
   const [skills, setSkills] = useState<SkillInfo[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);

@@ -2,7 +2,7 @@
  * Custom hooks that complement the @openpolpo/react-sdk.
  *
  * The SDK provides: useTasks, useTask, usePlans, usePlan, useAgents,
- * useProcesses, useEvents, useStats, useMemory, useLogs, useOrchestra,
+ * useProcesses, useEvents, useStats, useMemory, useLogs, usePolpo,
  * useSessions.
  *
  * This file provides hooks the SDK doesn't cover:
@@ -11,7 +11,7 @@
  */
 
 import { useState, useCallback, useEffect, useRef } from "react";
-import { useOrchestra, useSessions, OrchestraClient } from "@openpolpo/react-sdk";
+import { usePolpo, useSessions, PolpoClient } from "@openpolpo/react-sdk";
 import type { ProjectInfo, ChatMessage } from "@openpolpo/react-sdk";
 import { config } from "@/lib/config";
 
@@ -20,7 +20,7 @@ import { config } from "@/lib/config";
 // adds message state + client.chat() for the messaging layer.
 
 export function useChat() {
-  const { client } = useOrchestra();
+  const { client } = usePolpo();
   const {
     sessions,
     isLoading: sessionsLoading,
@@ -156,7 +156,7 @@ export function useProjectInfo() {
 
     (async () => {
       try {
-        const projects = await OrchestraClient.listProjects(
+        const projects = await PolpoClient.listProjects(
           config.baseUrl,
           config.apiKey
         );

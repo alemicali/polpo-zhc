@@ -43,7 +43,7 @@ import {
   Scale,
 } from "lucide-react";
 import { MessageResponse } from "@/components/ai-elements/message";
-import { useTask, useProcesses, useTaskActivity, useOrchestra } from "@openpolpo/react-sdk";
+import { useTask, useProcesses, useTaskActivity, usePolpo } from "@openpolpo/react-sdk";
 import type { TaskStatus, DimensionScore, CheckResult, EvalDimension, AssessmentResult, AssessmentTrigger, AgentProcess, RunActivityEntry } from "@openpolpo/react-sdk";
 import { toast } from "sonner";
 import { formatDistanceToNow, format } from "date-fns";
@@ -406,7 +406,7 @@ export function TaskDetailPage() {
   const navigate = useNavigate();
   const { task, isLoading, error, retryTask, killTask, reassessTask } = useTask(taskId ?? "");
   const { processes } = useProcesses();
-  const { client: _ } = useOrchestra();
+  const { client: _ } = usePolpo();
 
   const process = task ? processes.find(p => p.taskId === task.id) : undefined;
 

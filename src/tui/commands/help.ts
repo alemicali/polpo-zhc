@@ -6,7 +6,7 @@ import type { CommandAPI } from "./types.js";
 import { seg } from "../format.js";
 
 export const COMMANDS: [string, string][] = [
-  ["/status", "Show orchestrator state"],
+  ["/status", "Show status"],
   ["/team [add|rm|edit]", "Manage team agents"],
   ["/tasks [list]", "Browse and manage tasks"],
   ["/plans [new|exec|resume]", "Manage plans"],

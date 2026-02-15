@@ -12,7 +12,7 @@ import {
   FolderOpen,
   Columns2,
 } from "lucide-react";
-import { useOrchestra } from "@openpolpo/react-sdk";
+import { usePolpo } from "@openpolpo/react-sdk";
 import { useProjectInfo } from "@/hooks/use-polpo";
 import { cn } from "@/lib/utils";
 import {
@@ -63,7 +63,7 @@ const statusConfig: Record<string, { color: string; pulse: boolean; label: strin
 const STORAGE_KEY = "polpo-sidebar-collapsed";
 
 export function Sidebar() {
-  const { connectionStatus } = useOrchestra();
+  const { connectionStatus } = usePolpo();
   const { info } = useProjectInfo();
   const status = statusConfig[connectionStatus];
 
@@ -94,8 +94,8 @@ export function Sidebar() {
       <div className="relative flex h-14 items-center border-b border-border group">
         {collapsed ? (
           <div className="flex w-full items-center justify-center">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground text-sm font-bold">
-              P
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg text-lg">
+              🐙
             </div>
             <button
               onClick={() => setCollapsed(false)}
@@ -108,12 +108,12 @@ export function Sidebar() {
         ) : (
           <div className="flex w-full items-center justify-between px-4">
             <div className="flex items-center gap-2">
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground text-sm font-bold shrink-0">
-                P
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg text-lg shrink-0">
+                🐙
               </div>
               <div>
                 <h1 className="text-sm font-semibold text-sidebar-foreground">Polpo</h1>
-                <p className="text-[10px] text-muted-foreground">Agent Orchestrator</p>
+                <p className="text-[10px] text-muted-foreground">AI Agent Wrangler</p>
               </div>
             </div>
             <button

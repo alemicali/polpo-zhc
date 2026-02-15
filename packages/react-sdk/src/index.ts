@@ -1,9 +1,9 @@
 // Provider
-export { OrchestraProvider } from "./provider/orchestra-provider.js";
-export type { OrchestraProviderProps } from "./provider/orchestra-provider.js";
+export { PolpoProvider } from "./provider/polpo-provider.js";
+export type { PolpoProviderProps } from "./provider/polpo-provider.js";
 
 // Hooks
-export { useOrchestra } from "./hooks/use-orchestra.js";
+export { usePolpo } from "./hooks/use-polpo.js";
 export { useTasks } from "./hooks/use-tasks.js";
 export { useTask } from "./hooks/use-task.js";
 export { usePlans } from "./hooks/use-plans.js";
@@ -19,8 +19,8 @@ export { useTaskActivity } from "./hooks/use-task-activity.js";
 export { useSkills } from "./hooks/use-skills.js";
 
 // Client (re-export for convenience)
-export { OrchestraClient } from "./client/orchestra-client.js";
-export { OrchestraApiError } from "./client/errors.js";
+export { PolpoClient } from "./client/polpo-client.js";
+export { PolpoApiError } from "./client/errors.js";
 
 // Types
 export type {
@@ -43,9 +43,9 @@ export type {
   EvalDimension,
   CheckResult,
   MetricResult,
-  OrchestraState,
-  OrchestraConfig,
-  OrchestraSettings,
+  PolpoState,
+  PolpoConfig,
+  PolpoSettings,
   ProjectInfo,
   SSEEvent,
   CreateTaskRequest,
@@ -64,5 +64,5 @@ export type {
 } from "./client/types.js";
 
 export type { ConnectionStatus } from "./client/event-source.js";
-export type { OrchestraStats, StoreState } from "./store/types.js";
+export type { PolpoStats, StoreState } from "./store/types.js";
 export type { TaskFilter } from "./store/selectors.js";

@@ -1,4 +1,4 @@
-import type { Task, TaskStatus, OrchestraState, Plan } from "./types.js";
+import type { Task, TaskStatus, PolpoState, Plan } from "./types.js";
 
 /**
  * Abstract interface for task persistence.
@@ -6,8 +6,8 @@ import type { Task, TaskStatus, OrchestraState, Plan } from "./types.js";
  */
 export interface TaskStore {
   // State access
-  getState(): OrchestraState;
-  setState(partial: Partial<OrchestraState>): void;
+  getState(): PolpoState;
+  setState(partial: Partial<PolpoState>): void;
 
   // Task CRUD
   addTask(task: Omit<Task, "id" | "status" | "retries" | "createdAt" | "updatedAt">): Task;

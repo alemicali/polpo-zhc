@@ -2,7 +2,7 @@ import { createDatabase, type PolpoDatabase, type PolpoStatement } from "./sqlit
 import { join } from "node:path";
 import { existsSync, readFileSync, renameSync, mkdirSync } from "node:fs";
 import { nanoid } from "nanoid";
-import type { Task, TaskStatus, OrchestraState, AgentProcess, Team, Plan, PlanStatus } from "../core/types.js";
+import type { Task, TaskStatus, PolpoState, AgentProcess, Team, Plan, PlanStatus } from "../core/types.js";
 import type { TaskStore } from "../core/task-store.js";
 import { assertValidTransition } from "../core/state-machine.js";
 
@@ -79,11 +79,11 @@ export class SqliteTaskStore implements TaskStore {
   private getAllPlansStmt!: PolpoStatement;
   private deletePlanStmt!: PolpoStatement;
 
-  constructor(orchestraDir: string) {
-    this.polpoDir = orchestraDir;
-    const dbPath = join(orchestraDir, "state.db");
-    if (!existsSync(orchestraDir)) {
-      mkdirSync(orchestraDir, { recursive: true });
+  constructor(polpoDir: string) {
+    this.polpoDir = polpoDir;
+    const dbPath = join(polpoDir, "state.db");
+    if (!existsSync(polpoDir)) {
+      mkdirSync(polpoDir, { recursive: true });
     }
     this.db = createDatabase(dbPath);
     this.db.exec("PRAGMA journal_mode = WAL");
@@ -203,7 +203,7 @@ export class SqliteTaskStore implements TaskStore {
 
     try {
       const raw = readFileSync(jsonPath, "utf-8");
-      const state: OrchestraState = JSON.parse(raw);
+      const state: PolpoState = JSON.parse(raw);
 
       this.db.transaction(() => {
         if (state.project) this.upsertMetaStmt.run("project", state.project);
@@ -288,7 +288,7 @@ export class SqliteTaskStore implements TaskStore {
 
   // === TaskStore interface ===
 
-  getState(): OrchestraState {
+  getState(): PolpoState {
     const projectRow = this.getMetaStmt.get("project") as { value: string } | undefined;
     const teamRow = this.getMetaStmt.get("team") as { value: string } | undefined;
     const startedRow = this.getMetaStmt.get("startedAt") as { value: string } | undefined;
@@ -297,7 +297,7 @@ export class SqliteTaskStore implements TaskStore {
     const tasks = (this.getAllTasksStmt.all() as TaskRow[]).map(r => this.rowToTask(r));
     const processes = (this.getAllProcessesStmt.all() as ProcessRow[]).map(r => this.rowToProcess(r));
 
-    const state: OrchestraState = {
+    const state: PolpoState = {
       project: projectRow?.value ?? "",
       team: teamRow ? JSON.parse(teamRow.value) as Team : { name: "", agents: [] },
       tasks,
@@ -308,7 +308,7 @@ export class SqliteTaskStore implements TaskStore {
     return state;
   }
 
-  setState(partial: Partial<OrchestraState>): void {
+  setState(partial: Partial<PolpoState>): void {
     this.db.transaction(() => {
       if (partial.project !== undefined) {
         this.upsertMetaStmt.run("project", partial.project);

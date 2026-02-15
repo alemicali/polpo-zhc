@@ -248,7 +248,7 @@ export interface PlanReport {
 
 // === Config ===
 
-export interface OrchestraSettings {
+export interface PolpoSettings {
   maxRetries: number;
   workDir: string;
   logLevel: "quiet" | "normal" | "verbose";
@@ -263,15 +263,15 @@ export interface OrchestraSettings {
   orchestratorModel?: string;
 }
 
-export interface OrchestraConfig {
+export interface PolpoConfig {
   version: string;
   project: string;
   team: Team;
   tasks: Omit<Task, "status" | "retries" | "result" | "createdAt" | "updatedAt">[];
-  settings: OrchestraSettings;
+  settings: PolpoSettings;
 }
 
-export interface OrchestraState {
+export interface PolpoState {
   project: string;
   team: Team;
   tasks: Task[];
@@ -288,7 +288,7 @@ export interface ProviderConfig {
 export interface PolpoConfig {
   project: string;
   team: Team;
-  settings: OrchestraSettings;
+  settings: PolpoSettings;
   providers?: Record<string, ProviderConfig>;
 }
 

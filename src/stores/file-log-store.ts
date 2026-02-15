@@ -22,8 +22,8 @@ export class FileLogStore implements LogStore {
   private readonly logsDir: string;
   private sessionId?: string;
 
-  constructor(orchestraDir: string) {
-    this.logsDir = join(orchestraDir, "logs");
+  constructor(polpoDir: string) {
+    this.logsDir = join(polpoDir, "logs");
   }
 
   startSession(): string {

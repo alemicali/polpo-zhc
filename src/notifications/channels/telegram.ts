@@ -4,6 +4,9 @@ import type { NotificationChannelConfig } from "../../core/types.js";
 /**
  * Telegram notification channel — sends messages via Bot API.
  *
+ * Uses HTML parse_mode (much more reliable than MarkdownV2).
+ * Converts standard Markdown from templates to Telegram HTML.
+ *
  * Configuration:
  *   botToken: Telegram Bot token (from @BotFather)
  *   chatId: Chat/Group/Channel ID to send to
@@ -28,12 +31,16 @@ export class TelegramChannel implements NotificationChannel {
     };
 
     const emoji = severityEmoji[notification.severity] ?? "ℹ️";
+    const title = escapeHtml(notification.title);
+    const body = markdownToHtml(notification.body);
+    const event = escapeHtml(notification.sourceEvent);
+
     const text = [
-      `${emoji} *${escapeMarkdown(notification.title)}*`,
+      `${emoji} <b>${title}</b>`,
       "",
-      escapeMarkdown(notification.body),
+      body,
       "",
-      `_${escapeMarkdown(notification.sourceEvent)}_`,
+      `<i>${event}</i>`,
     ].join("\n");
 
     const url = `https://api.telegram.org/bot${this.botToken}/sendMessage`;
@@ -43,14 +50,14 @@ export class TelegramChannel implements NotificationChannel {
       body: JSON.stringify({
         chat_id: this.chatId,
         text,
-        parse_mode: "MarkdownV2",
+        parse_mode: "HTML",
         disable_web_page_preview: true,
       }),
     });
 
     if (!response.ok) {
-      const body = await response.text();
-      throw new Error(`Telegram API failed: ${response.status} — ${body}`);
+      const respBody = await response.text();
+      throw new Error(`Telegram API failed: ${response.status} — ${respBody}`);
     }
   }
 
@@ -65,9 +72,32 @@ export class TelegramChannel implements NotificationChannel {
   }
 }
 
-/** Escape special MarkdownV2 characters for Telegram. */
-function escapeMarkdown(text: string): string {
-  return text.replace(/([_*\[\]()~`>#+\-=|{}.!])/g, "\\$1");
+/** Escape HTML special characters for Telegram HTML parse mode. */
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+/**
+ * Convert standard Markdown formatting to Telegram HTML.
+ * Handles: **bold** → <b>, *italic* → <i>, `code` → <code>, _italic_ → <i>
+ * Escapes HTML entities first, then applies formatting.
+ */
+function markdownToHtml(text: string): string {
+  let html = escapeHtml(text);
+
+  // **bold** → <b>bold</b>  (must come before single *)
+  html = html.replace(/\*\*(.+?)\*\*/g, "<b>$1</b>");
+  // *italic* → <i>italic</i>
+  html = html.replace(/\*(.+?)\*/g, "<i>$1</i>");
+  // _italic_ → <i>italic</i>
+  html = html.replace(/_(.+?)_/g, "<i>$1</i>");
+  // `code` → <code>code</code>
+  html = html.replace(/`(.+?)`/g, "<code>$1</code>");
+
+  return html;
 }
 
 function resolveEnvVar(value: string): string {

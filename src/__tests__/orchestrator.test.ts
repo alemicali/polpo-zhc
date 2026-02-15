@@ -7,7 +7,7 @@ import { InMemoryTaskStore, InMemoryRunStore, MockAdapter, createTestTask, creat
 import type { TaskResult } from "../core/types.js";
 import type { RunRecord } from "../core/run-store.js";
 
-const TEST_WORK_DIR = "/tmp/orchestra-test";
+const TEST_WORK_DIR = "/tmp/polpo-test";
 
 function createTestRunRecord(overrides: Partial<RunRecord> = {}): RunRecord {
   const now = new Date().toISOString();
@@ -33,8 +33,8 @@ describe("Orchestrator", () => {
   let orchestrator: Orchestrator;
 
   afterEach(() => {
-    const orchestraDir = `${TEST_WORK_DIR}/.polpo`;
-    if (existsSync(orchestraDir)) rmSync(orchestraDir, { recursive: true });
+    const polpoDir = `${TEST_WORK_DIR}/.polpo`;
+    if (existsSync(polpoDir)) rmSync(polpoDir, { recursive: true });
   });
 
   beforeEach(async () => {

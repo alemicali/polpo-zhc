@@ -3,7 +3,7 @@ import type {
   RetryPolicy,
   PlanStatus,
 } from "../core/types.js";
-import type { OrchestraEvent } from "../core/events.js";
+import type { PolpoEvent } from "../core/events.js";
 
 // === API Response Envelope ===
 
@@ -95,7 +95,7 @@ export interface AddAgentRequest {
 
 export interface SSEEvent {
   id: string;
-  event: OrchestraEvent;
+  event: PolpoEvent;
   data: unknown;
   timestamp: string;
 }
@@ -131,12 +131,12 @@ export interface ProjectEntry {
 
 export interface WSSubscribeMessage {
   type: "subscribe";
-  events?: OrchestraEvent[];
+  events?: PolpoEvent[];
 }
 
 export interface WSUnsubscribeMessage {
   type: "unsubscribe";
-  events?: OrchestraEvent[];
+  events?: PolpoEvent[];
 }
 
 export interface WSCommandMessage {
@@ -149,7 +149,7 @@ export type WSClientMessage = WSSubscribeMessage | WSUnsubscribeMessage | WSComm
 
 export interface WSServerEvent {
   type: "event";
-  event: OrchestraEvent;
+  event: PolpoEvent;
   data: unknown;
   id: string;
   timestamp: string;

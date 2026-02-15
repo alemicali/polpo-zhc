@@ -1,5 +1,5 @@
 import { useSyncExternalStore, useCallback, useEffect, useState } from "react";
-import { useOrchestraContext } from "../provider/orchestra-context.js";
+import { usePolpoContext } from "../provider/polpo-context.js";
 
 export interface UseMemoryReturn {
   memory: { exists: boolean; content: string } | null;
@@ -10,7 +10,7 @@ export interface UseMemoryReturn {
 }
 
 export function useMemory(): UseMemoryReturn {
-  const { client, store } = useOrchestraContext();
+  const { client, store } = usePolpoContext();
 
   const memory = useSyncExternalStore(
     store.subscribe,

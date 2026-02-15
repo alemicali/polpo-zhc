@@ -3,13 +3,13 @@
  */
 
 import type { Orchestrator } from "../core/orchestrator.js";
-import type { OrchestraState } from "../core/types.js";
+import type { PolpoState } from "../core/types.js";
 import { discoverSkills } from "./skills.js";
 
 /** Build the system prompt for chat mode responses */
 export function buildChatSystemPrompt(
   orchestrator: Orchestrator,
-  state: OrchestraState | null,
+  state: PolpoState | null,
   _workDir?: string,
 ): string {
   const team = orchestrator.getTeam();
@@ -195,7 +195,7 @@ export function buildChatSystemPrompt(
 /** Build the system prompt for plan generation */
 export function buildPlanSystemPrompt(
   orchestrator: Orchestrator,
-  state: OrchestraState | null,
+  state: PolpoState | null,
   workDir: string,
 ): string {
   const orchestraKnowledge = buildChatSystemPrompt(orchestrator, state, workDir);
@@ -293,7 +293,7 @@ export function buildPlanSystemPrompt(
 /** Build the prompt for single-task LLM preparation */
 export function buildTaskPrepPrompt(
   orchestrator: Orchestrator,
-  state: OrchestraState | null,
+  state: PolpoState | null,
   workDir: string,
   userInput: string,
   assignTo: string,

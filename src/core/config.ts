@@ -1,8 +1,8 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { resolve, join } from "node:path";
-import type { OrchestraConfig, OrchestraSettings, PolpoConfig, ProviderConfig } from "./types.js";
+import type { PolpoFileConfig, PolpoSettings, PolpoConfig, ProviderConfig } from "./types.js";
 
-const DEFAULT_SETTINGS: OrchestraSettings = {
+const DEFAULT_SETTINGS: PolpoSettings = {
   maxRetries: 3,
   workDir: ".",
   logLevel: "normal",
@@ -10,15 +10,15 @@ const DEFAULT_SETTINGS: OrchestraSettings = {
 
 // --- .polpo/polpo.json (persistent project config) ---
 
-export function loadPolpoConfig(polpoDir: string): PolpoConfig | undefined {
+export function loadPolpoConfig(polpoDir: string): PolpoFileConfig | undefined {
   const filePath = join(polpoDir, "polpo.json");
   if (!existsSync(filePath)) return undefined;
   try {
-    return JSON.parse(readFileSync(filePath, "utf-8")) as PolpoConfig;
+    return JSON.parse(readFileSync(filePath, "utf-8")) as PolpoFileConfig;
   } catch { return undefined; }
 }
 
-export function savePolpoConfig(polpoDir: string, config: PolpoConfig): void {
+export function savePolpoConfig(polpoDir: string, config: PolpoFileConfig): void {
   if (!existsSync(polpoDir)) mkdirSync(polpoDir, { recursive: true });
   writeFileSync(join(polpoDir, "polpo.json"), JSON.stringify(config, null, 2), "utf-8");
 }
@@ -90,8 +90,8 @@ function parseProviders(raw: Record<string, unknown>): Record<string, ProviderCo
   return providers;
 }
 
-function parseSettings(raw: any): OrchestraSettings {
-  const settings: OrchestraSettings = {
+function parseSettings(raw: any): PolpoSettings {
+  const settings: PolpoSettings = {
     maxRetries: raw?.maxRetries ?? DEFAULT_SETTINGS.maxRetries,
     workDir: raw?.workDir ?? DEFAULT_SETTINGS.workDir,
     logLevel: raw?.logLevel ?? DEFAULT_SETTINGS.logLevel,
@@ -109,6 +109,14 @@ function parseSettings(raw: any): OrchestraSettings {
   if (raw?.maxAssessmentRetries != null) settings.maxAssessmentRetries = raw.maxAssessmentRetries;
   if (raw?.maxConcurrency != null) settings.maxConcurrency = raw.maxConcurrency;
 
+  // Extended settings: notifications, approval gates, escalation, SLA, scheduling, quality
+  if (raw?.approvalGates) settings.approvalGates = raw.approvalGates;
+  if (raw?.notifications) settings.notifications = raw.notifications;
+  if (raw?.escalationPolicy) settings.escalationPolicy = raw.escalationPolicy;
+  if (raw?.sla) settings.sla = raw.sla;
+  if (raw?.enableScheduler != null) settings.enableScheduler = raw.enableScheduler;
+  if (raw?.defaultQualityThreshold != null) settings.defaultQualityThreshold = raw.defaultQualityThreshold;
+
   if (!["quiet", "normal", "verbose"].includes(settings.logLevel)) {
     throw new Error(`Invalid logLevel "${settings.logLevel}": must be quiet, normal, or verbose`);
   }
@@ -121,7 +129,7 @@ function parseSettings(raw: any): OrchestraSettings {
  * Load config from workDir. Reads `.polpo/polpo.json` for project config.
  * Tasks are managed via plans and the task store — not in the config file.
  */
-export async function parseConfig(workDir: string): Promise<OrchestraConfig> {
+export async function parseConfig(workDir: string): Promise<PolpoConfig> {
   const polpoDir = resolve(workDir, ".polpo");
   const polpoConfig = loadPolpoConfig(polpoDir);
 
@@ -150,7 +158,7 @@ export async function parseConfig(workDir: string): Promise<OrchestraConfig> {
 
 // --- Default config generator ---
 
-export function generatePolpoConfigDefault(projectName: string): PolpoConfig {
+export function generatePolpoConfigDefault(projectName: string): PolpoFileConfig {
   return {
     project: projectName,
     team: {

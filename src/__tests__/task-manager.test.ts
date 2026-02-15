@@ -7,7 +7,7 @@ import { TypedEmitter } from "../core/events.js";
 import { InMemoryTaskStore, InMemoryRunStore, createTestAgent } from "./fixtures.js";
 import type { OrchestratorContext } from "../core/orchestrator-context.js";
 import { HookRegistry } from "../core/hooks.js";
-import type { OrchestraConfig, Plan } from "../core/types.js";
+import type { PolpoConfig, Plan } from "../core/types.js";
 import type { TaskStore } from "../core/task-store.js";
 
 // ── Extended InMemoryTaskStore with plan support ───────────────────────
@@ -92,7 +92,7 @@ function createNoopSessionStore() {
 
 // ── Helpers ────────────────────────────────────────────────────────────
 
-function createDefaultConfig(overrides?: Partial<OrchestraConfig>): OrchestraConfig {
+function createDefaultConfig(overrides?: Partial<PolpoConfig>): PolpoConfig {
   return {
     version: "1",
     project: "test-project",
@@ -111,7 +111,7 @@ function createDefaultConfig(overrides?: Partial<OrchestraConfig>): OrchestraCon
 }
 
 function createContext(overrides?: {
-  config?: OrchestraConfig;
+  config?: PolpoConfig;
   registry?: TaskStore;
 }): OrchestratorContext {
   const config = overrides?.config ?? createDefaultConfig();

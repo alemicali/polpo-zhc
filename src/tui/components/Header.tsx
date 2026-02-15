@@ -35,7 +35,7 @@ export function Header() {
         {draftPlans > 0 && <Text color="yellow">□ {draftPlans} draft</Text>}
         {draftPlans > 0 && <Text color="gray"> | </Text>}
         <Text color={orchestrating ? "green" : "gray"}>
-          {orchestrating ? "♪ orchestrating" : "♪ idle"}
+          {orchestrating ? "♪ running" : "♪ idle"}
         </Text>
       </Text>
     </Box>

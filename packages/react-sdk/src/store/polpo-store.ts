@@ -9,7 +9,7 @@ import type { ConnectionStatus } from "../client/event-source.js";
 import type { StoreState } from "./types.js";
 import { reduceEvent } from "./event-reducer.js";
 
-export type { StoreState, OrchestraStats } from "./types.js";
+export type { StoreState, PolpoStats } from "./types.js";
 
 function createInitialState(): StoreState {
   return {
@@ -28,7 +28,7 @@ function createInitialState(): StoreState {
 
 const SERVER_SNAPSHOT = createInitialState();
 
-export class OrchestraStore {
+export class PolpoStore {
   private state: StoreState;
   private listeners = new Set<() => void>();
 

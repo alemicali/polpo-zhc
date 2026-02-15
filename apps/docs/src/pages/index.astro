@@ -5,8 +5,10 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Polpo — Orchestrate AI coding agents</title>
-  <meta name="description" content="Agent-agnostic framework for orchestrating teams of AI coding agents. Define plans, assign tasks, let Polpo handle coordination." />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <meta name="theme-color" content="#3B3E73" />
+  <title>Polpo — The octopus that wrangles AI agents</title>
+  <meta name="description" content="Open-source framework that wrangles AI coding agents into autonomous teams. Plans the work, checks the results, pokes you when it matters." />
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap');
 
@@ -204,7 +206,7 @@
       <img src="/src/assets/logo.svg" alt="Polpo" />
     </a>
     <nav class="header-nav">
-      <a href="https://github.com/AlessioToniworking/orchestra" title="GitHub"><svg width="20" height="20" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg></a>
+      <a href="https://github.com/openpolpo/openpolpo" title="GitHub"><svg width="20" height="20" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg></a>
       <a href="/introduction/" class="btn-docs">Docs</a>
     </nav>
   </header>
@@ -212,9 +214,9 @@
 
   <!-- Hero -->
   <div class="hero">
-    <h1>The open source agent teams</h1>
+    <h1>Open source AI agent teams</h1>
     <p class="subtitle">
-      Turn individual coding agents into reliable multi-agent systems.<br/>Define plans in YAML, assign tasks to Claude Code, OpenCode, or any agent framework. Polpo handles planning, orchestration, eval, and recovery.
+      Define a plan, assign agents, let Polpo handle the rest — coordination, evaluation, retries, and recovery. Works with any LLM provider, any agent framework.
     </p>
 
     <div class="install-wrapper">
@@ -238,17 +240,18 @@
   <!-- What is Polpo? -->
   <section>
     <h2>What is Polpo?</h2>
-    <p class="section-sub">An open-source framework that coordinates multiple AI agents working together on complex tasks.</p>
+    <p class="section-sub">A framework that turns individual AI agents into coordinated teams.</p>
 
     <ul class="features-list">
-      <li><span class="check">[*]</span><span><strong>Agent-agnostic</strong> Works with Claude Code, OpenCode, or any CLI agent via adapters</span></li>
-      <li><span class="check">[*]</span><span><strong>Plan-based orchestration</strong> Define complex plans in YAML, break them down into tasks with dependencies and parallel execution</span></li>
-      <li><span class="check">[*]</span><span><strong>Agent teams</strong> Define agent teams with native skills support, persistent or plan scoped</span></li>
-      <li><span class="check">[*]</span><span><strong>LLM-as-judge</strong> G-Eval rubric-based scoring across multiple dimensions — tasks are assessed and retried automatically</span></li>
-      <li><span class="check">[*]</span><span><strong>Crash-resilient</strong> SQLite-backed state, detached runners, orphan recovery, graceful shutdown</span></li>
-      <li><span class="check">[*]</span><span><strong>Multiple interfaces</strong> Interactive TUI, CLI, HTTP API with SSE/WebSocket, React SDK, Next.js dashboard</span></li>
-      <li><span class="check">[*]</span><span><strong>AI-powered</strong> Deadlock resolution, question auto-answer, expectation correction, AI team generation</span></li>
-      <li><span class="check">[*]</span><span><strong>Open source</strong> MIT licensed, fully extensible, runs anywhere Node.js runs</span></li>
+      <li><span class="check">[*]</span><span><strong>Agent-agnostic</strong> Works with any agent via adapters — built-in engine supports 22+ LLM providers</span></li>
+      <li><span class="check">[*]</span><span><strong>Plan-based</strong> Define plans in JSON with tasks, dependencies, and parallel execution</span></li>
+      <li><span class="check">[*]</span><span><strong>Agent teams</strong> Persistent or plan-scoped teams with roles, skills, and per-agent model selection</span></li>
+      <li><span class="check">[*]</span><span><strong>LLM-as-judge</strong> G-Eval scoring with multiple reviewers — failed tasks get retried with specific feedback</span></li>
+      <li><span class="check">[*]</span><span><strong>Crash-resilient</strong> SQLite-backed state, detached runners, orphan recovery on restart</span></li>
+      <li><span class="check">[*]</span><span><strong>Multiple interfaces</strong> TUI, CLI, HTTP API with SSE streaming, React SDK, web dashboard</span></li>
+      <li><span class="check">[*]</span><span><strong>59 built-in tools</strong> Coding, browser, git, HTTP, Excel, PDF, Word, email, audio, image generation</span></li>
+      <li><span class="check">[*]</span><span><strong>AI-powered ops</strong> Deadlock resolution, question auto-answer, expectation correction, team generation</span></li>
+      <li><span class="check">[*]</span><span><strong>Open source</strong> MIT licensed, no telemetry, runs anywhere Node.js runs</span></li>
     </ul>
 
     <a href="/introduction/" class="read-docs">Read the docs →</a>
@@ -258,21 +261,21 @@
 
   <!-- Stats -->
   <section>
-    <h2>Built for reliable orchestration</h2>
-    <p class="section-sub">Everything you need to turn individual coding agents into coordinated multi-agent systems.</p>
+    <h2>Built for real work</h2>
+    <p class="section-sub">Everything you need to run agent teams in production.</p>
 
     <div class="stats-grid">
       <div class="stat-card">
-        <div class="number">Any agent</div>
-        <div class="label">Claude Code, OpenCode, or bring your own</div>
+        <div class="number">22+</div>
+        <div class="label">LLM providers supported out of the box</div>
       </div>
       <div class="stat-card">
-        <div class="number">0 tasks lost</div>
-        <div class="label">SQLite-backed, crash-resilient orchestration</div>
+        <div class="number">59 tools</div>
+        <div class="label">Coding, browser, git, PDF, Excel, audio, image</div>
       </div>
       <div class="stat-card">
-        <div class="number">5 interfaces</div>
-        <div class="label">TUI, CLI, HTTP API, React SDK, Web Dashboard</div>
+        <div class="number">55 events</div>
+        <div class="label">Real-time streaming via SSE</div>
       </div>
     </div>
   </section>
@@ -285,23 +288,27 @@
     <ul class="faq-list">
       <li>
         <button>What AI agents does Polpo support?</button>
-        <div class="answer">Polpo is agent-agnostic. It ships with adapters for Claude SDK and a generic adapter for any CLI-based agent (GPT, Aider, Codex, etc). You can build custom adapters by implementing the AgentAdapter interface.</div>
+        <div class="answer">Polpo is agent-agnostic. The built-in engine supports 22+ LLM providers (Anthropic, OpenAI, Google, Groq, Mistral, etc.) and there's a Claude Code SDK adapter. You can also write custom adapters for any CLI-based agent.</div>
       </li>
       <li>
         <button>How does task assessment work?</button>
-        <div class="answer">Polpo uses G-Eval, an LLM-as-judge system with rubric-based scoring. Tasks are assessed across correctness, completeness, code quality, and edge cases. Failed tasks are automatically retried with detailed feedback.</div>
+        <div class="answer">G-Eval scoring with three independent LLM reviewers and median consensus. Tests and file checks run first, then the LLM judge evaluates against your criteria. Failed tasks get specific feedback and are retried automatically.</div>
       </li>
       <li>
         <button>What happens if Polpo crashes?</button>
-        <div class="answer">Agent processes run as detached subprocesses backed by SQLite. On restart, Polpo reconnects to live agents and retries dead ones. No work is lost.</div>
+        <div class="answer">Agents run as detached processes, state lives in SQLite or JSON files. On restart, Polpo finds orphaned tasks, reconnects to live agents, and retries dead ones. No work is lost.</div>
       </li>
       <li>
         <button>Can I use it without the TUI?</button>
-        <div class="answer">Yes. Polpo offers a CLI for headless automation, an HTTP API server with SSE/WebSocket streaming, a React SDK for custom UIs, and a pre-built Next.js dashboard.</div>
+        <div class="answer">Yes. There's a headless CLI, an HTTP API with SSE streaming, a React SDK for custom interfaces, and a web dashboard.</div>
+      </li>
+      <li>
+        <button>What about browser, email, PDF, audio?</button>
+        <div class="answer">There are 11 opt-in tool categories beyond the core coding tools — browser automation, git, HTTP, Excel/CSV, PDF, Word, email, audio transcription, image generation, and more. Enable per agent in config.</div>
       </li>
       <li>
         <button>Is it free?</button>
-        <div class="answer">Yes, Polpo is fully open source under the MIT license. You bring your own AI provider API keys.</div>
+        <div class="answer">Fully open source, MIT licensed. You bring your own LLM API keys — or start with the free <code>opencode:big-pickle</code> model, no key needed.</div>
       </li>
     </ul>
   </section>
@@ -314,7 +321,7 @@
     </div>
     <div class="footer-right">
       <a href="/introduction/">Docs</a>
-      <a href="https://github.com/AlessioToniworking/orchestra" style="display:inline-flex;align-items:center;gap:4px"><svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> GitHub</a>
+      <a href="https://github.com/openpolpo/openpolpo" style="display:inline-flex;align-items:center;gap:4px"><svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> GitHub</a>
     </div>
   </footer>
 </div>

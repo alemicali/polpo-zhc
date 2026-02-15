@@ -1,4 +1,4 @@
-import type { OrchestraEvent } from "../core/events.js";
+import type { PolpoEvent } from "../core/events.js";
 import type { SSEBridge } from "./sse-bridge.js";
 import type { WSClientMessage, WSServerEvent, WSServerError } from "./types.js";
 
@@ -35,7 +35,7 @@ export class WSBridge {
     this.eventListener = (event: string, data: unknown, eventId: string) => {
       const msg: WSServerEvent = {
         type: "event",
-        event: event as OrchestraEvent,
+        event: event as PolpoEvent,
         data,
         id: eventId,
         timestamp: new Date().toISOString(),

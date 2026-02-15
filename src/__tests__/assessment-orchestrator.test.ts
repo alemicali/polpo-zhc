@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi, type Mock } from "vitest";
 import { AssessmentOrchestrator } from "../core/assessment-orchestrator.js";
 import type { OrchestratorContext, AssessFn } from "../core/orchestrator-context.js";
 import { HookRegistry } from "../core/hooks.js";
-import type { Task, TaskResult, AssessmentResult, OrchestraConfig } from "../core/types.js";
+import type { Task, TaskResult, AssessmentResult, PolpoConfig } from "../core/types.js";
 import { TypedEmitter } from "../core/events.js";
 import { InMemoryTaskStore, InMemoryRunStore, createTestActivity } from "./fixtures.js";
 import type { RunRecord } from "../core/run-store.js";
@@ -119,7 +119,7 @@ function createSessionStore() {
   };
 }
 
-function createMinimalConfig(): OrchestraConfig {
+function createMinimalConfig(): PolpoConfig {
   return {
     version: "1",
     project: "test",
@@ -144,7 +144,7 @@ interface TestHarness {
   ao: AssessmentOrchestrator;
 }
 
-function createHarness(configOverrides: Partial<OrchestraConfig["settings"]> = {}): TestHarness {
+function createHarness(configOverrides: Partial<PolpoConfig["settings"]> = {}): TestHarness {
   const store = new InMemoryTaskStore();
   const runStore = new InMemoryRunStore();
   const emitter = new TypedEmitter();

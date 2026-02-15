@@ -14,8 +14,8 @@ The core `TaskStore` interface defines the abstract contract that all task persi
 ```typescript
 interface TaskStore {
   // State access
-  getState(): OrchestraState;
-  setState(partial: Partial<OrchestraState>): void;
+  getState(): PolpoState;
+  setState(partial: Partial<PolpoState>): void;
 
   // Task CRUD
   addTask(task: Omit<Task, "id" | "status" | "retries" | "createdAt" | "updatedAt">): Task;
@@ -132,7 +132,7 @@ Supported values: `"file"` (default), `"json"`, `"sqlite"`.
 When using the programmatic API, you can pass stores directly:
 
 ```typescript
-import { Orchestrator, SqliteTaskStore, SqliteRunStore } from "polpo";
+import { Orchestrator, SqliteTaskStore, SqliteRunStore } from "openpolpo";
 
 const orchestrator = new Orchestrator({
   workDir: "./my-project",

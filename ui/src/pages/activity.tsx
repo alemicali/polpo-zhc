@@ -38,7 +38,7 @@ import {
   Pause,
   Trash2,
 } from "lucide-react";
-import { useEvents, useOrchestra } from "@openpolpo/react-sdk";
+import { useEvents, usePolpo } from "@openpolpo/react-sdk";
 import type { SSEEvent } from "@openpolpo/react-sdk";
 import { formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -353,7 +353,7 @@ function CategoryStats({ events }: { events: SSEEvent[] }) {
 
 export function ActivityPage() {
   const { events } = useEvents(undefined, 500);
-  const { connectionStatus } = useOrchestra();
+  const { connectionStatus } = usePolpo();
   const connected = connectionStatus === "connected";
   const [search, setSearch] = useState("");
   const [tab, setTab] = useState("all");

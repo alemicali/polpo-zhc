@@ -12,7 +12,7 @@ import { nanoid } from "nanoid";
 import type {
   Task,
   TaskStatus,
-  OrchestraState,
+  PolpoState,
   AgentProcess,
   Team,
   Plan,
@@ -131,7 +131,7 @@ export class FileTaskStore implements TaskStore {
 
   // ── TaskStore interface ──
 
-  getState(): OrchestraState {
+  getState(): PolpoState {
     const meta = this.readMeta();
     const tasks = this.getAllTasks();
     return {
@@ -144,7 +144,7 @@ export class FileTaskStore implements TaskStore {
     };
   }
 
-  setState(partial: Partial<OrchestraState>): void {
+  setState(partial: Partial<PolpoState>): void {
     const meta = this.readMeta();
 
     if (partial.project !== undefined) meta.project = partial.project;

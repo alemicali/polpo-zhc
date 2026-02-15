@@ -1,8 +1,8 @@
 import type { Orchestrator } from "../core/orchestrator.js";
-import type { OrchestraEvent } from "../core/events.js";
+import type { PolpoEvent } from "../core/events.js";
 
 /** All Orchestra events to subscribe to. */
-const ALL_EVENTS: OrchestraEvent[] = [
+const ALL_EVENTS: PolpoEvent[] = [
   "task:created", "task:transition", "task:updated", "task:removed",
   "agent:spawned", "agent:finished", "agent:activity",
   "assessment:started", "assessment:progress", "assessment:complete", "assessment:corrected",
@@ -88,7 +88,7 @@ export class SSEBridge {
 
     this.disposeFn = () => {
       for (const { event, fn } of handlers) {
-        this.orchestrator.off(event as OrchestraEvent, fn);
+        this.orchestrator.off(event as PolpoEvent, fn);
       }
     };
   }

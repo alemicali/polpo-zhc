@@ -28,7 +28,7 @@ export { BridgeManager } from "./bridge/index.js";
 export type { BridgeConfig, BridgeSessionState, BridgeSessionStatus } from "./bridge/types.js";
 
 // Server
-export { OrchestraServer, createApp, ProjectManager, SSEBridge, WSBridge } from "./server/index.js";
+export { PolpoServer, createApp, ProjectManager, SSEBridge, WSBridge } from "./server/index.js";
 export type {
   ServerConfig,
   ProjectEntry,

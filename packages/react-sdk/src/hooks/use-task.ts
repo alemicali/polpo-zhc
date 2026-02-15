@@ -1,5 +1,5 @@
 import { useSyncExternalStore, useCallback, useEffect, useState } from "react";
-import { useOrchestraContext } from "../provider/orchestra-context.js";
+import { usePolpoContext } from "../provider/polpo-context.js";
 import { selectTask } from "../store/selectors.js";
 import type { Task, UpdateTaskRequest } from "../client/types.js";
 
@@ -15,7 +15,7 @@ export interface UseTaskReturn {
 }
 
 export function useTask(taskId: string): UseTaskReturn {
-  const { client, store } = useOrchestraContext();
+  const { client, store } = usePolpoContext();
 
   const task = useSyncExternalStore(
     store.subscribe,

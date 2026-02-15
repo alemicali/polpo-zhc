@@ -8,7 +8,7 @@ import type {
 } from "../client/types.js";
 import type { ConnectionStatus } from "../client/event-source.js";
 
-export interface OrchestraStats {
+export interface PolpoStats {
   pending: number;
   running: number;
   done: number;
@@ -23,7 +23,7 @@ export interface StoreState {
   planReports: Map<string, PlanReport>;
   agents: AgentConfig[];
   processes: AgentProcess[];
-  stats: OrchestraStats | null;
+  stats: PolpoStats | null;
   connectionStatus: ConnectionStatus;
   recentEvents: SSEEvent[];
   plansStale: boolean;

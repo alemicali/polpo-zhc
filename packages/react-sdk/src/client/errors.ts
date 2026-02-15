@@ -1,13 +1,13 @@
 import type { ErrorCode } from "./types.js";
 
-export class OrchestraApiError extends Error {
+export class PolpoApiError extends Error {
   readonly code: ErrorCode;
   readonly status: number;
   readonly details?: unknown;
 
   constructor(message: string, code: ErrorCode, status: number, details?: unknown) {
     super(message);
-    this.name = "OrchestraApiError";
+    this.name = "PolpoApiError";
     this.code = code;
     this.status = status;
     this.details = details;

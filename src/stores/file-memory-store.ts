@@ -9,8 +9,8 @@ import type { MemoryStore } from "../core/memory-store.js";
 export class FileMemoryStore implements MemoryStore {
   private readonly filePath: string;
 
-  constructor(orchestraDir: string) {
-    this.filePath = join(orchestraDir, "memory.md");
+  constructor(polpoDir: string) {
+    this.filePath = join(polpoDir, "memory.md");
   }
 
   exists(): boolean {

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { useOrchestraContext } from "../provider/orchestra-context.js";
+import { usePolpoContext } from "../provider/polpo-context.js";
 import type { LogSession, LogEntry } from "../client/types.js";
 
 export interface UseLogsReturn {
@@ -11,7 +11,7 @@ export interface UseLogsReturn {
 }
 
 export function useLogs(): UseLogsReturn {
-  const { client } = useOrchestraContext();
+  const { client } = usePolpoContext();
 
   const [sessions, setSessions] = useState<LogSession[]>([]);
   const [isLoading, setIsLoading] = useState(true);

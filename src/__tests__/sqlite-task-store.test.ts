@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdirSync, rmSync, existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { SqliteTaskStore } from "../stores/sqlite-task-store.js";
-import type { Task, OrchestraState } from "../core/types.js";
+import type { Task, PolpoState } from "../core/types.js";
 
 const TEST_DIR = join(process.cwd(), ".test-orchestra-sqlite");
 
@@ -229,7 +229,7 @@ describe("SqliteTaskStore", () => {
 
   describe("JSON migration", () => {
     it("auto-migrates from state.json on first open", () => {
-      const jsonState: OrchestraState = {
+      const jsonState: PolpoState = {
         project: "migrated-project",
         team: { name: "old-team", agents: [{ name: "dev", adapter: "generic" }] },
         tasks: [{

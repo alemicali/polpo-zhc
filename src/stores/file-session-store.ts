@@ -21,8 +21,8 @@ import type { SessionStore, Session, Message, MessageRole } from "../core/sessio
 export class FileSessionStore implements SessionStore {
   private readonly sessionsDir: string;
 
-  constructor(orchestraDir: string) {
-    this.sessionsDir = join(orchestraDir, "sessions");
+  constructor(polpoDir: string) {
+    this.sessionsDir = join(polpoDir, "sessions");
   }
 
   create(title?: string): string {

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { useOrchestraContext } from "../provider/orchestra-context.js";
+import { usePolpoContext } from "../provider/polpo-context.js";
 import type { RunActivityEntry } from "../client/types.js";
 
 export interface UseTaskActivityReturn {
@@ -14,7 +14,7 @@ export interface UseTaskActivityReturn {
  * Pass `null` to skip fetching (e.g. when no task is selected).
  */
 export function useTaskActivity(taskId: string | null): UseTaskActivityReturn {
-  const { client } = useOrchestraContext();
+  const { client } = usePolpoContext();
   const [entries, setEntries] = useState<RunActivityEntry[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);

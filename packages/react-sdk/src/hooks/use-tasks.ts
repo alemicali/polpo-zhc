@@ -1,5 +1,5 @@
 import { useSyncExternalStore, useCallback, useEffect, useState } from "react";
-import { useOrchestraContext } from "../provider/orchestra-context.js";
+import { usePolpoContext } from "../provider/polpo-context.js";
 import { selectTasks, type TaskFilter } from "../store/selectors.js";
 import { useStableValue } from "./use-stable-value.js";
 import type { Task, CreateTaskRequest } from "../client/types.js";
@@ -15,7 +15,7 @@ export interface UseTasksReturn {
 }
 
 export function useTasks(filter?: TaskFilter): UseTasksReturn {
-  const { client, store } = useOrchestraContext();
+  const { client, store } = usePolpoContext();
   const stableFilter = useStableValue(filter);
 
   const tasks = useSyncExternalStore(
