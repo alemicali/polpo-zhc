@@ -50,7 +50,9 @@ export class JsonConfigStore {
   get(): ProjectConfig | undefined {
     if (!existsSync(this.filePath)) return undefined;
     try {
-      return JSON.parse(readFileSync(this.filePath, "utf-8")) as ProjectConfig;
+      const parsed = JSON.parse(readFileSync(this.filePath, "utf-8"));
+      if (!parsed || typeof parsed !== "object" || typeof parsed.project !== "string") return undefined;
+      return parsed as ProjectConfig;
     } catch { return undefined; }
   }
 

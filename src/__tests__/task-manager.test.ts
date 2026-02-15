@@ -687,7 +687,7 @@ describe("TaskManager", () => {
       const store = ctx.registry as InMemoryTaskStoreWithPlans;
       const plan = store.savePlan({
         name: "g2",
-        yaml: "tasks:\n  - title: T1",
+        data: JSON.stringify({ tasks: [{ title: "T1" }] }),
         status: "active",
       });
 
@@ -781,13 +781,13 @@ describe("PlanExecutor", () => {
   describe("savePlan", () => {
     it("persists a plan with draft status by default", () => {
       const plan = planExec.savePlan({
-        yaml: "tasks:\n  - title: T1\n    assignTo: dev",
+        data: JSON.stringify({ tasks: [{ title: "T1", assignTo: "dev" }] }),
       });
 
       expect(plan).toBeDefined();
       expect(plan.id).toBeTruthy();
       expect(plan.status).toBe("draft");
-      expect(plan.yaml).toContain("tasks:");
+      expect(plan.data).toContain("tasks");
 
       // Verify it is retrievable
       const found = planExec.getPlan(plan.id);
@@ -800,7 +800,7 @@ describe("PlanExecutor", () => {
       ctx.emitter.on("plan:saved", (e) => events.push(e));
 
       const plan = planExec.savePlan({
-        yaml: "tasks:\n  - title: T1",
+        data: JSON.stringify({ tasks: [{ title: "T1" }] }),
       });
 
       expect(events).toHaveLength(1);
@@ -810,7 +810,7 @@ describe("PlanExecutor", () => {
 
     it("assigns auto-generated name when none provided", () => {
       const plan = planExec.savePlan({
-        yaml: "tasks:\n  - title: T1",
+        data: JSON.stringify({ tasks: [{ title: "T1" }] }),
       });
 
       expect(plan.name).toBeTruthy();
@@ -820,7 +820,7 @@ describe("PlanExecutor", () => {
 
     it("uses provided name", () => {
       const plan = planExec.savePlan({
-        yaml: "tasks:\n  - title: T1",
+        data: JSON.stringify({ tasks: [{ title: "T1" }] }),
         name: "my-custom-plan",
       });
 
@@ -829,7 +829,7 @@ describe("PlanExecutor", () => {
 
     it("stores optional prompt", () => {
       const plan = planExec.savePlan({
-        yaml: "tasks:\n  - title: T1",
+        data: JSON.stringify({ tasks: [{ title: "T1" }] }),
         prompt: "Build a login page",
       });
 
@@ -840,18 +840,13 @@ describe("PlanExecutor", () => {
   // ── executePlan ──────────────────────────────────────────────────────
 
   describe("executePlan", () => {
-    it("creates tasks from YAML plan", () => {
-      const yaml = [
-        "tasks:",
-        "  - title: Setup project",
-        "    description: Initialize the project structure",
-        "    assignTo: dev",
-        "  - title: Write tests",
-        "    description: Add unit tests",
-        "    assignTo: dev",
-      ].join("\n");
+    it("creates tasks from JSON plan", () => {
+      const data = JSON.stringify({ tasks: [
+          { title: "Setup project", description: "Initialize the project structure", assignTo: "dev" },
+          { title: "Write tests", description: "Add unit tests", assignTo: "dev" },
+        ] });
 
-      const plan = planExec.savePlan({ yaml });
+      const plan = planExec.savePlan({ data });
       const result = planExec.executePlan(plan.id);
 
       expect(result.tasks).toHaveLength(2);
@@ -866,19 +861,12 @@ describe("PlanExecutor", () => {
     });
 
     it("resolves title-based dependencies within the plan", () => {
-      const yaml = [
-        "tasks:",
-        "  - title: Create DB",
-        "    description: Setup database",
-        "    assignTo: dev",
-        "  - title: Build API",
-        "    description: Implement REST API",
-        "    assignTo: dev",
-        "    dependsOn:",
-        "      - Create DB",
-      ].join("\n");
+      const data = JSON.stringify({ tasks: [
+          { title: "Create DB", description: "Setup database", assignTo: "dev" },
+          { title: "Build API", description: "Implement REST API", assignTo: "dev", dependsOn: ["Create DB"] },
+        ] });
 
-      const plan = planExec.savePlan({ yaml });
+      const plan = planExec.savePlan({ data });
       const result = planExec.executePlan(plan.id);
 
       const dbTask = result.tasks.find((t) => t.title === "Create DB")!;
@@ -894,8 +882,8 @@ describe("PlanExecutor", () => {
     });
 
     it("throws for already-active plan", () => {
-      const yaml = "tasks:\n  - title: T1\n    description: d\n    assignTo: dev";
-      const plan = planExec.savePlan({ yaml });
+      const data = JSON.stringify({ tasks: [{ title: "T1", description: "d", assignTo: "dev" }] });
+      const plan = planExec.savePlan({ data });
       planExec.executePlan(plan.id);
 
       // Plan is now active — second execution should throw
@@ -904,15 +892,15 @@ describe("PlanExecutor", () => {
       );
     });
 
-    it("throws for plan with no tasks in YAML", () => {
-      const plan = planExec.savePlan({ yaml: "team:\n  - name: dev" });
+    it("throws for plan with no tasks in plan data", () => {
+      const plan = planExec.savePlan({ data: JSON.stringify({ team: [{ name: "dev" }] }) });
 
       expect(() => planExec.executePlan(plan.id)).toThrow("Plan has no tasks");
     });
 
     it("marks plan as active after execution", () => {
-      const yaml = "tasks:\n  - title: T1\n    description: d\n    assignTo: dev";
-      const plan = planExec.savePlan({ yaml });
+      const data = JSON.stringify({ tasks: [{ title: "T1", description: "d", assignTo: "dev" }] });
+      const plan = planExec.savePlan({ data });
       planExec.executePlan(plan.id);
 
       const updated = planExec.getPlan(plan.id)!;
@@ -923,8 +911,8 @@ describe("PlanExecutor", () => {
       const events: any[] = [];
       ctx.emitter.on("plan:executed", (e) => events.push(e));
 
-      const yaml = "tasks:\n  - title: T1\n    description: d\n    assignTo: dev";
-      const plan = planExec.savePlan({ yaml });
+      const data = JSON.stringify({ tasks: [{ title: "T1", description: "d", assignTo: "dev" }] });
+      const plan = planExec.savePlan({ data });
       planExec.executePlan(plan.id);
 
       expect(events).toHaveLength(1);
@@ -932,9 +920,9 @@ describe("PlanExecutor", () => {
       expect(events[0].taskCount).toBe(1);
     });
 
-    it("uses first agent from config when assignTo is missing in YAML", () => {
-      const yaml = "tasks:\n  - title: No Agent\n    description: has no assignTo";
-      const plan = planExec.savePlan({ yaml });
+    it("uses first agent from config when assignTo is missing in plan data", () => {
+      const data = JSON.stringify({ tasks: [{ title: "No Agent", description: "has no assignTo" }] });
+      const plan = planExec.savePlan({ data });
       const result = planExec.executePlan(plan.id);
 
       expect(result.tasks[0].assignTo).toBe("dev");
@@ -951,14 +939,11 @@ describe("PlanExecutor", () => {
     });
 
     it("resets failed tasks when retryFailed is true", () => {
-      const yaml = [
-        "tasks:",
-        "  - title: Failing task",
-        "    description: This will fail",
-        "    assignTo: dev",
-      ].join("\n");
+      const data = JSON.stringify({ tasks: [
+          { title: "Failing task", description: "This will fail", assignTo: "dev" },
+        ] });
 
-      const plan = planExec.savePlan({ yaml });
+      const plan = planExec.savePlan({ data });
       planExec.executePlan(plan.id);
 
       // Fail the task manually through state machine
@@ -983,8 +968,8 @@ describe("PlanExecutor", () => {
     });
 
     it("does not retry when retryFailed is false", () => {
-      const yaml = "tasks:\n  - title: T\n    description: d\n    assignTo: dev";
-      const plan = planExec.savePlan({ yaml });
+      const data = JSON.stringify({ tasks: [{ title: "T", description: "d", assignTo: "dev" }] });
+      const plan = planExec.savePlan({ data });
       planExec.executePlan(plan.id);
 
       const task = ctx.registry.getAllTasks().find((t) => t.group === plan.name)!;
@@ -1004,8 +989,8 @@ describe("PlanExecutor", () => {
       const events: any[] = [];
       ctx.emitter.on("plan:resumed", (e) => events.push(e));
 
-      const yaml = "tasks:\n  - title: T\n    description: d\n    assignTo: dev";
-      const plan = planExec.savePlan({ yaml });
+      const data = JSON.stringify({ tasks: [{ title: "T", description: "d", assignTo: "dev" }] });
+      const plan = planExec.savePlan({ data });
       planExec.executePlan(plan.id);
       planExec.updatePlan(plan.id, { status: "failed" });
 
@@ -1017,17 +1002,12 @@ describe("PlanExecutor", () => {
     });
 
     it("reports pending task count", () => {
-      const yaml = [
-        "tasks:",
-        "  - title: T1",
-        "    description: d1",
-        "    assignTo: dev",
-        "  - title: T2",
-        "    description: d2",
-        "    assignTo: dev",
-      ].join("\n");
+      const data = JSON.stringify({ tasks: [
+          { title: "T1", description: "d1", assignTo: "dev" },
+          { title: "T2", description: "d2", assignTo: "dev" },
+        ] });
 
-      const plan = planExec.savePlan({ yaml });
+      const plan = planExec.savePlan({ data });
       planExec.executePlan(plan.id);
 
       // Both tasks are pending
@@ -1042,8 +1022,8 @@ describe("PlanExecutor", () => {
 
   describe("cleanupCompletedGroups", () => {
     it("marks plan as completed when all tasks are done", () => {
-      const yaml = "tasks:\n  - title: T1\n    description: d\n    assignTo: dev";
-      const plan = planExec.savePlan({ yaml });
+      const data = JSON.stringify({ tasks: [{ title: "T1", description: "d", assignTo: "dev" }] });
+      const plan = planExec.savePlan({ data });
       planExec.executePlan(plan.id);
 
       // Complete the task
@@ -1060,17 +1040,12 @@ describe("PlanExecutor", () => {
     });
 
     it("marks plan as failed when some tasks failed", () => {
-      const yaml = [
-        "tasks:",
-        "  - title: T1",
-        "    description: d1",
-        "    assignTo: dev",
-        "  - title: T2",
-        "    description: d2",
-        "    assignTo: dev",
-      ].join("\n");
+      const data = JSON.stringify({ tasks: [
+          { title: "T1", description: "d1", assignTo: "dev" },
+          { title: "T2", description: "d2", assignTo: "dev" },
+        ] });
 
-      const plan = planExec.savePlan({ yaml });
+      const plan = planExec.savePlan({ data });
       planExec.executePlan(plan.id);
 
       const tasks = ctx.registry.getAllTasks().filter((t) => t.group === plan.name);
@@ -1095,8 +1070,8 @@ describe("PlanExecutor", () => {
       const events: any[] = [];
       ctx.emitter.on("plan:completed", (e) => events.push(e));
 
-      const yaml = "tasks:\n  - title: T1\n    description: d\n    assignTo: dev";
-      const plan = planExec.savePlan({ yaml });
+      const data = JSON.stringify({ tasks: [{ title: "T1", description: "d", assignTo: "dev" }] });
+      const plan = planExec.savePlan({ data });
       planExec.executePlan(plan.id);
 
       const task = ctx.registry.getAllTasks().find((t) => t.group === plan.name)!;
@@ -1113,8 +1088,8 @@ describe("PlanExecutor", () => {
     });
 
     it("only cleans up each group once", () => {
-      const yaml = "tasks:\n  - title: T1\n    description: d\n    assignTo: dev";
-      const plan = planExec.savePlan({ yaml });
+      const data = JSON.stringify({ tasks: [{ title: "T1", description: "d", assignTo: "dev" }] });
+      const plan = planExec.savePlan({ data });
       planExec.executePlan(plan.id);
 
       const task = ctx.registry.getAllTasks().find((t) => t.group === plan.name)!;

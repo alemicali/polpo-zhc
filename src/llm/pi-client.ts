@@ -24,7 +24,7 @@ const DEFAULT_MODEL = "opencode:big-pickle";
 
 // --- Provider override management ---
 
-/** Provider overrides from polpo.yml — set by the orchestrator at init time. */
+/** Provider overrides from polpo.json — set by the orchestrator at init time. */
 let providerOverrides: Record<string, ProviderConfig> = {};
 
 export function setProviderOverrides(overrides: Record<string, ProviderConfig>): void {
@@ -33,7 +33,7 @@ export function setProviderOverrides(overrides: Record<string, ProviderConfig>):
 
 /**
  * Resolve API key for a provider.
- * Priority: 1) polpo.yml overrides, 2) pi-ai env var lookup.
+ * Priority: 1) polpo.json overrides, 2) pi-ai env var lookup.
  */
 export function resolveApiKey(provider: string): string | undefined {
   const override = providerOverrides[provider];

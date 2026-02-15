@@ -181,6 +181,7 @@ export function reduceEvent(state: StoreState, sseEvent: SSEEvent): StoreState {
         running: number;
         done: number;
         failed: number;
+        queued: number;
       };
       const prev = next.stats;
       // Reuse existing object if values haven't changed (stable reference for useSyncExternalStore)
@@ -189,7 +190,8 @@ export function reduceEvent(state: StoreState, sseEvent: SSEEvent): StoreState {
         prev.pending === incoming.pending &&
         prev.running === incoming.running &&
         prev.done === incoming.done &&
-        prev.failed === incoming.failed
+        prev.failed === incoming.failed &&
+        prev.queued === incoming.queued
       ) {
         return next;
       }
@@ -229,6 +231,11 @@ export function reduceEvent(state: StoreState, sseEvent: SSEEvent): StoreState {
 
     case "plan:completed": {
       const payload = data as { planId: string; group: string; allPassed: boolean; report: PlanReport };
+      // Store the PlanReport — this is the only source of aggregated plan results
+      const planReports = new Map(state.planReports);
+      if (payload.report) {
+        planReports.set(payload.planId, payload.report);
+      }
       const existing = state.plans.get(payload.planId);
       if (existing) {
         const plans = new Map(state.plans);
@@ -237,9 +244,9 @@ export function reduceEvent(state: StoreState, sseEvent: SSEEvent): StoreState {
           status: payload.allPassed ? ("completed" as PlanStatus) : ("failed" as PlanStatus),
           updatedAt: new Date().toISOString(),
         });
-        return { ...next, plans };
+        return { ...next, plans, planReports };
       }
-      return { ...next, plansStale: true };
+      return { ...next, plansStale: true, planReports };
     }
 
     case "plan:resumed":

@@ -42,7 +42,7 @@ interface ProcessRow {
 interface PlanRow {
   id: string;
   name: string;
-  yaml: string;
+  data: string;
   prompt: string | null;
   status: string;
   created_at: string;
@@ -112,8 +112,8 @@ export class SqliteTaskStore implements TaskStore {
 
     // Plan statements
     this.insertPlanStmt = this.db.prepare(`
-      INSERT INTO plans (id, name, yaml, prompt, status, created_at, updated_at)
-      VALUES (@id, @name, @yaml, @prompt, @status, @created_at, @updated_at)
+      INSERT INTO plans (id, name, data, prompt, status, created_at, updated_at)
+      VALUES (@id, @name, @data, @prompt, @status, @created_at, @updated_at)
     `);
     this.getPlanStmt = this.db.prepare(`SELECT * FROM plans WHERE id = ?`);
     this.getPlanByNameStmt = this.db.prepare(`SELECT * FROM plans WHERE name = ?`);
@@ -166,7 +166,7 @@ export class SqliteTaskStore implements TaskStore {
       CREATE TABLE IF NOT EXISTS plans (
         id          TEXT PRIMARY KEY,
         name        TEXT NOT NULL UNIQUE,
-        yaml        TEXT NOT NULL,
+        data        TEXT NOT NULL,
         prompt      TEXT,
         status      TEXT NOT NULL DEFAULT 'draft',
         created_at  TEXT NOT NULL,
@@ -186,9 +186,10 @@ export class SqliteTaskStore implements TaskStore {
       `ALTER TABLE tasks ADD COLUMN original_description TEXT`,
       `ALTER TABLE tasks ADD COLUMN resolution_attempts INTEGER NOT NULL DEFAULT 0`,
       `ALTER TABLE tasks ADD COLUMN session_id TEXT`,
+      `ALTER TABLE plans RENAME COLUMN yaml TO data`,
     ];
     for (const sql of migrations) {
-      try { this.db.exec(sql); } catch { /* column already exists */ }
+      try { this.db.exec(sql); } catch { /* column already exists or rename already applied */ }
     }
   }
 
@@ -281,7 +282,7 @@ export class SqliteTaskStore implements TaskStore {
       taskId: row.task_id,
       startedAt: row.started_at,
       alive: row.alive === 1,
-      activity: safeJsonParse(row.activity, { filesCreated: [], filesEdited: [], toolCalls: 0, lastUpdate: "" }),
+      activity: safeJsonParse(row.activity, { filesCreated: [], filesEdited: [], toolCalls: 0, totalTokens: 0, lastUpdate: "" }),
     };
   }
 
@@ -368,7 +369,18 @@ export class SqliteTaskStore implements TaskStore {
     return (this.getAllTasksStmt.all() as TaskRow[]).map(r => this.rowToTask(r));
   }
 
-  updateTask(taskId: string, updates: Partial<Omit<Task, "id">>): Task {
+  unsafeSetStatus(taskId: string, newStatus: TaskStatus, reason: string): Task {
+    const row = this.getTaskStmt.get(taskId) as TaskRow | undefined;
+    if (!row) throw new Error(`Task not found: ${taskId}`);
+    const from = row.status;
+    const now = new Date().toISOString();
+    this.db.prepare("UPDATE tasks SET status = @status, updated_at = @now WHERE id = @id")
+      .run({ id: taskId, status: newStatus, now });
+    console.warn(`[unsafeSetStatus] ${taskId}: ${from} → ${newStatus} — ${reason}`);
+    return this.rowToTask(this.getTaskStmt.get(taskId) as TaskRow);
+  }
+
+  updateTask(taskId: string, updates: Partial<Omit<Task, "id" | "status">>): Task {
     const existing = this.getTaskStmt.get(taskId) as TaskRow | undefined;
     if (!existing) throw new Error(`Task not found: ${taskId}`);
 
@@ -381,7 +393,6 @@ export class SqliteTaskStore implements TaskStore {
     if (updates.assignTo !== undefined) { setClauses.push("assign_to = @assign_to"); params.assign_to = updates.assignTo; }
     if (updates.group !== undefined) { setClauses.push('"group" = @group'); params.group = updates.group ?? null; }
     if (updates.dependsOn !== undefined) { setClauses.push("depends_on = @depends_on"); params.depends_on = JSON.stringify(updates.dependsOn); }
-    if (updates.status !== undefined) { setClauses.push("status = @status"); params.status = updates.status; }
     if (updates.retries !== undefined) { setClauses.push("retries = @retries"); params.retries = updates.retries; }
     if (updates.maxRetries !== undefined) { setClauses.push("max_retries = @max_retries"); params.max_retries = updates.maxRetries; }
     if (updates.maxDuration !== undefined) { setClauses.push("max_duration = @max_duration"); params.max_duration = updates.maxDuration; }
@@ -443,7 +454,7 @@ export class SqliteTaskStore implements TaskStore {
     return {
       id: row.id,
       name: row.name,
-      yaml: row.yaml,
+      data: row.data,
       prompt: row.prompt ?? undefined,
       status: row.status as PlanStatus,
       createdAt: row.created_at,
@@ -462,7 +473,7 @@ export class SqliteTaskStore implements TaskStore {
     this.insertPlanStmt.run({
       id: newPlan.id,
       name: newPlan.name,
-      yaml: newPlan.yaml,
+      data: newPlan.data,
       prompt: newPlan.prompt ?? null,
       status: newPlan.status,
       created_at: newPlan.createdAt,
@@ -494,7 +505,7 @@ export class SqliteTaskStore implements TaskStore {
     const params: Record<string, unknown> = { id: planId, updated_at: now };
 
     if (updates.name !== undefined) { setClauses.push("name = @name"); params.name = updates.name; }
-    if (updates.yaml !== undefined) { setClauses.push("yaml = @yaml"); params.yaml = updates.yaml; }
+    if (updates.data !== undefined) { setClauses.push("data = @data"); params.data = updates.data; }
     if (updates.prompt !== undefined) { setClauses.push("prompt = @prompt"); params.prompt = updates.prompt ?? null; }
     if (updates.status !== undefined) { setClauses.push("status = @status"); params.status = updates.status; }
 

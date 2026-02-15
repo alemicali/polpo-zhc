@@ -11,7 +11,7 @@ import { existsSync } from "node:fs";
 import { Orchestrator } from "../core/orchestrator.js";
 import { useStore } from "./store.js";
 import { bridgeEvents } from "./bridge.js";
-import { seg } from "./format.js";
+import { seg, parseMarkdown } from "./format.js";
 import { Shell } from "./components/Shell.js";
 
 // ─── Orchestrator Context ───────────────────────────────
@@ -53,9 +53,12 @@ function restoreSession(orc: Orchestrator, store: ReturnType<typeof useStore.get
       if (msg.role === "user") {
         store.pushLine({ type: "user", text: msg.content, ts: msg.ts });
       } else {
-        store.pushLine({ type: "response", segs: [seg(msg.content)], ts: msg.ts });
+        store.pushLine({ type: "response", segs: parseMarkdown(msg.content), ts: msg.ts });
       }
     }
+
+    // Scroll to top so the user sees the conversation from the beginning
+    store.scrollUp(Number.MAX_SAFE_INTEGER);
   } catch {
     // Non-critical — start fresh if restore fails
   }
@@ -70,19 +73,19 @@ function useOrchestratorInit(workDir: string) {
     const absDir = resolve(workDir);
     const store = useStore.getState();
 
-    // Create orchestrator — it loads config from polpo.yml in init()
+    // Create orchestrator — it loads config from .polpo/polpo.json in init()
     const orc = new Orchestrator(absDir);
 
     // Bridge events → store
     const unbridge = bridgeEvents(orc, store);
 
-    const configPath = resolve(absDir, "polpo.yml");
+    const configPath = resolve(absDir, ".polpo", "polpo.json");
     const hasConfig = existsSync(configPath);
 
     const defaultTeam = {
       name: "default",
       agents: [
-        { name: "claude", adapter: "generic" as const, command: "claude -p {prompt}", role: "developer" },
+        { name: "dev-1", role: "developer" },
       ],
     };
 
@@ -114,7 +117,7 @@ function useOrchestratorInit(workDir: string) {
     const syncInterval = setInterval(() => {
       try {
         const state = orc.getStore()?.getState();
-        if (state) store.syncState(state);
+        if (state) store.syncState(state, orc.getAllPlans());
       } catch { /* store not ready yet */ }
     }, 1000);
 

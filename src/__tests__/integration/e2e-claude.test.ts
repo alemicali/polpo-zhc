@@ -143,7 +143,7 @@ describe.runIf(RUN_E2E)("e2e: Claude SDK full pipeline", () => {
     // Save as a plan for plan:completed event
     orchestrator.savePlan({
       name: "e2e-plan",
-      yaml: "tasks:\n  - title: Create greet module\n  - title: Create main module\n  - title: Verify files exist",
+      data: JSON.stringify({ tasks: [{ title: "Create greet module" }, { title: "Create main module" }, { title: "Verify files exist" }] }),
       status: "active",
     });
 

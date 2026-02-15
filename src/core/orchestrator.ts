@@ -1,5 +1,6 @@
 import { resolve } from "node:path";
 import { mkdirSync, existsSync } from "node:fs";
+import type { Server } from "node:net";
 import { parseConfig, loadPolpoConfig } from "./config.js";
 import { FileTaskStore } from "../stores/file-task-store.js";
 import { FileRunStore } from "../stores/file-run-store.js";
@@ -38,12 +39,13 @@ import {
 } from "./assessment-prompts.js";
 import type { AssessFn } from "./orchestrator-context.js";
 import { setProviderOverrides, validateProviderKeys } from "../llm/pi-client.js";
+import { startNotificationServer } from "./notification.js";
 
 // Re-export for backward compatibility (consumed by core/index.ts and external modules)
 export { buildFixPrompt, buildRetryPrompt };
 export type { AssessFn };
 
-const POLL_INTERVAL = 2000; // 2 seconds
+const POLL_INTERVAL = 5000; // 5s safety net (push notification is primary)
 
 export interface OrchestratorOptions {
   workDir?: string;
@@ -66,6 +68,7 @@ export class Orchestrator extends TypedEmitter {
   private memoryStore!: MemoryStore;
   private logStore!: LogStore;
   private sessionStore!: SessionStore;
+  private notificationServer?: Server;
 
   // Managers
   private agentMgr!: AgentManager;
@@ -156,7 +159,7 @@ export class Orchestrator extends TypedEmitter {
         .join("\n");
       this.emit("log", {
         level: "warn",
-        message: `Missing API keys for providers:\n${details}\nSet the corresponding env vars or add them to providers: in polpo.yml`,
+        message: `Missing API keys for providers:\n${details}\nSet the corresponding env vars or add them to .polpo/polpo.json providers section`,
       });
     }
   }
@@ -180,10 +183,18 @@ export class Orchestrator extends TypedEmitter {
     this.planExec = new PlanExecutor(ctx, this.taskMgr, this.agentMgr);
     this.runner = new TaskRunner(ctx);
     this.assessor = new AssessmentOrchestrator(ctx);
+
+    // Start push notification server (runners notify on completion)
+    this.notificationServer = startNotificationServer(
+      this.polpoDir,
+      () => {
+        this.runner.collectResults((id, res) => this.assessor.handleResult(id, res));
+      },
+    );
   }
 
   /**
-   * Initialize for interactive/TUI mode without requiring polpo.yml.
+   * Initialize for interactive/TUI mode.
    * Creates .polpo dir and a minimal config from provided team info.
    */
   async initInteractive(project: string, team: Team): Promise<void> {
@@ -246,6 +257,7 @@ export class Orchestrator extends TypedEmitter {
   retryTask(taskId: string): void { this.taskMgr.retryTask(taskId); }
   reassessTask(taskId: string): Promise<void> { return this.taskMgr.reassessTask(taskId); }
   killTask(taskId: string): boolean { return this.taskMgr.killTask(taskId); }
+  deleteTask(taskId: string): boolean { return this.registry.removeTask(taskId); }
   abortGroup(group: string): number { return this.taskMgr.abortGroup(group); }
   clearTasks(filter: (task: Task) => boolean): number { return this.taskMgr.clearTasks(filter); }
   forceFailTask(taskId: string): void { this.taskMgr.forceFailTask(taskId); }
@@ -254,6 +266,7 @@ export class Orchestrator extends TypedEmitter {
 
   getStore(): TaskStore { return this.registry; }
   getRunStore(): RunStore { return this.runStore; }
+  getPolpoDir(): string { return this.polpoDir; }
 
   // ── Agent Management (delegates to AgentManager) ──
 
@@ -269,11 +282,11 @@ export class Orchestrator extends TypedEmitter {
 
   // ─── Plan Management (delegates to PlanExecutor) ──
 
-  savePlan(opts: { yaml: string; prompt?: string; name?: string; status?: PlanStatus }): Plan { return this.planExec.savePlan(opts); }
+  savePlan(opts: { data: string; prompt?: string; name?: string; status?: PlanStatus }): Plan { return this.planExec.savePlan(opts); }
   getPlan(planId: string): Plan | undefined { return this.planExec.getPlan(planId); }
   getPlanByName(name: string): Plan | undefined { return this.planExec.getPlanByName(name); }
   getAllPlans(): Plan[] { return this.planExec.getAllPlans(); }
-  updatePlan(planId: string, updates: { yaml?: string; status?: PlanStatus; name?: string }): Plan { return this.planExec.updatePlan(planId, updates); }
+  updatePlan(planId: string, updates: { data?: string; status?: PlanStatus; name?: string }): Plan { return this.planExec.updatePlan(planId, updates); }
   deletePlan(planId: string): boolean { return this.planExec.deletePlan(planId); }
 
   // ─── Project Memory ──────────────────────────────────
@@ -386,8 +399,9 @@ export class Orchestrator extends TypedEmitter {
       this.runStore.deleteRun(run.id);
     }
 
-    // Clear process list in state and close store
+    // Clear process list in state and close stores
     this.registry.setState({ processes: [], completedAt: new Date().toISOString() });
+    this.notificationServer?.close();
     this.registry.close?.();
     this.runStore.close();
     this.emit("orchestrator:shutdown", {});
@@ -465,7 +479,13 @@ export class Orchestrator extends TypedEmitter {
 
     // Check if all tasks are terminal (done or failed)
     const terminal = tasks.filter(t => t.status === "done" || t.status === "failed");
-    if (terminal.length === tasks.length) return true;
+    if (terminal.length === tasks.length) {
+      // Must run cleanup BEFORE returning — assessment transitions happen async
+      // between ticks, so this may be the first tick that sees all tasks terminal.
+      this.planExec.cleanupCompletedGroups(tasks);
+      this.runner.syncProcessesFromRunStore();
+      return true;
+    }
 
     // 1. Collect results from finished runners
     this.runner.collectResults((id, res) => this.assessor.handleResult(id, res));
@@ -513,11 +533,43 @@ export class Orchestrator extends TypedEmitter {
       return true;
     }
 
+    // Concurrency-aware spawn loop
+    const activeRuns = this.runStore.getActiveRuns();
+    const globalMax = this.config.settings.maxConcurrency ?? Infinity;
+    let totalActive = activeRuns.length;
+
+    // Per-agent active counts
+    const agentActiveCounts = new Map<string, number>();
+    for (const run of activeRuns) {
+      agentActiveCounts.set(run.agentName, (agentActiveCounts.get(run.agentName) ?? 0) + 1);
+    }
+
+    let queued = 0;
+
     for (const task of ready) {
-      // Check if already has an active run
+      // Global concurrency limit
+      if (totalActive >= globalMax) {
+        queued += ready.length - ready.indexOf(task);
+        break;
+      }
+
+      // Skip if already running
       const existingRun = this.runStore.getRunByTaskId(task.id);
       if (existingRun && existingRun.status === "running") continue;
+
+      // Per-agent concurrency limit
+      const agentName = task.assignTo;
+      const agentConfig = this.config.team.agents.find(a => a.name === agentName);
+      if (agentConfig?.maxConcurrency) {
+        if ((agentActiveCounts.get(agentName) ?? 0) >= agentConfig.maxConcurrency) {
+          queued++;
+          continue;
+        }
+      }
+
       this.runner.spawnForTask(task);
+      totalActive++;
+      agentActiveCounts.set(agentName, (agentActiveCounts.get(agentName) ?? 0) + 1);
     }
 
     // Emit tick stats
@@ -528,10 +580,13 @@ export class Orchestrator extends TypedEmitter {
       running: inProgress.length,
       done,
       failed,
+      queued,
     });
 
-    // Clean up volatile agents for completed plan groups
-    this.planExec.cleanupCompletedGroups(tasks);
+    // Clean up volatile agents for completed plan groups.
+    // Re-read tasks fresh — assessment callbacks (async) may have transitioned
+    // tasks to done/failed since the snapshot at the top of tick().
+    this.planExec.cleanupCompletedGroups(this.registry.getAllTasks());
 
     // Sync process list from RunStore for backward compat with TUI
     this.runner.syncProcessesFromRunStore();

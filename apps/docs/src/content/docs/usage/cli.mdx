@@ -16,8 +16,8 @@ polpo init
 ```
 
 Creates:
-- `polpo.yml` — configuration file with example agents and plan
-- `.polpo/` — runtime directory for state, logs, and assessments
+- `.polpo/polpo.json` — configuration file with your team setup
+- `.polpo/` — runtime directory for plans, state, logs, and assessments
 
 ## `polpo run`
 
@@ -29,7 +29,7 @@ polpo run [options]
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `-c, --config <path>` | `.` | Path to working directory containing `polpo.yml` |
+| `-d, --dir <path>` | `.` | Path to working directory containing `.polpo/polpo.json` |
 
 Output is streamed to stdout with color-coded status updates:
 
@@ -56,7 +56,7 @@ polpo status [options]
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `-c, --config <path>` | `.` | Path to working directory |
+| `-d, --dir <path>` | `.` | Path to working directory |
 | `-w, --watch` | `false` | Auto-refresh every 2 seconds |
 
 In watch mode, the display shows:
@@ -78,7 +78,7 @@ polpo serve [options]
 |--------|---------|-------------|
 | `-p, --port <port>` | `3000` | Port to listen on |
 | `-H, --host <host>` | `0.0.0.0` | Host to bind to |
-| `-c, --config <path>` | `.` | Path to working directory |
+| `-d, --dir <path>` | `.` | Path to working directory |
 | `--api-key <key>` | — | API key for authentication (optional) |
 | `--project-id <id>` | dir name | Project ID |
 
@@ -95,13 +95,13 @@ polpo          # same as polpo tui
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `-c, --config <path>` | `.` | Path to working directory |
+| `-d, --dir <path>` | `.` | Path to working directory |
 
 See [TUI Usage](/usage/tui/) for details on features and commands.
 
 ## Global Options
 
-All commands accept the `--config` / `-c` flag to specify the working directory. Polpo will look for `polpo.yml` in that directory.
+All commands accept the `-d` / `--dir` flag to specify the working directory. Polpo will look for `.polpo/polpo.json` in that directory.
 
 ```bash
 # Run from a different directory

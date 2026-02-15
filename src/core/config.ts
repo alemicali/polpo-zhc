@@ -1,9 +1,6 @@
-import { readFile } from "node:fs/promises";
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { resolve, join } from "node:path";
-import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import type { OrchestraConfig, OrchestraSettings, PolpoConfig, ProviderConfig } from "./types.js";
-import { sanitizeExpectations } from "./schemas.js";
 
 const DEFAULT_SETTINGS: OrchestraSettings = {
   maxRetries: 3,
@@ -28,43 +25,14 @@ export function savePolpoConfig(polpoDir: string, config: PolpoConfig): void {
 
 // --- Validation helpers ---
 
-function validateAgents(agents: any[]): void {
+export function validateAgents(agents: any[]): void {
   for (const agent of agents) {
     if (!agent.name || typeof agent.name !== "string") {
       throw new Error("Each agent must have a name");
     }
-    if (!agent.adapter) agent.adapter = "native";
-    if (typeof agent.adapter !== "string") {
+    if (agent.adapter !== undefined && typeof agent.adapter !== "string") {
       throw new Error(`Agent "${agent.name}": adapter must be a string`);
     }
-    if (agent.adapter === "generic" && (!agent.command || typeof agent.command !== "string")) {
-      throw new Error(`Agent "${agent.name}" uses generic adapter but has no command`);
-    }
-  }
-}
-
-function validateTasks(tasks: any[], defaultMaxRetries: number): void {
-  for (const task of tasks) {
-    if (!task.id || typeof task.id !== "string") {
-      throw new Error("Each task must have an id");
-    }
-    if (!task.title || typeof task.title !== "string") {
-      throw new Error(`Task "${task.id}" missing required field: title`);
-    }
-    if (!task.description || typeof task.description !== "string") {
-      throw new Error(`Task "${task.id}" missing required field: description`);
-    }
-    if (!task.assignTo || typeof task.assignTo !== "string") {
-      throw new Error(`Task "${task.id}" missing required field: assignTo`);
-    }
-    task.dependsOn = task.dependsOn ?? [];
-    const { valid, warnings } = sanitizeExpectations(task.expectations ?? []);
-    if (warnings.length > 0) {
-      console.warn(`[config] Task "${task.id}" has invalid expectations: ${warnings.join("; ")}`);
-    }
-    task.expectations = valid;
-    task.metrics = task.metrics ?? [];
-    task.maxRetries = task.maxRetries ?? defaultMaxRetries;
   }
 }
 
@@ -106,6 +74,8 @@ function parseSettings(raw: any): OrchestraSettings {
   if (raw?.maxResolutionAttempts != null) settings.maxResolutionAttempts = raw.maxResolutionAttempts;
   if (raw?.autoCorrectExpectations != null) settings.autoCorrectExpectations = raw.autoCorrectExpectations;
   if (raw?.defaultRetryPolicy) settings.defaultRetryPolicy = raw.defaultRetryPolicy;
+  if (raw?.maxAssessmentRetries != null) settings.maxAssessmentRetries = raw.maxAssessmentRetries;
+  if (raw?.maxConcurrency != null) settings.maxConcurrency = raw.maxConcurrency;
 
   if (!["quiet", "normal", "verbose"].includes(settings.logLevel)) {
     throw new Error(`Invalid logLevel "${settings.logLevel}": must be quiet, normal, or verbose`);
@@ -113,92 +83,40 @@ function parseSettings(raw: any): OrchestraSettings {
   return settings;
 }
 
-// --- parseConfig: .polpo/polpo.json + polpo.yml ---
+// --- parseConfig: .polpo/polpo.json only ---
 
 /**
- * Load config from workDir. Merges `.polpo/polpo.json` (persistent config) + `polpo.yml` (plan).
- * 
- * @param path - Either a directory path (looks for polpo.yml in that dir) or a file path (polpo.yml)
+ * Load config from workDir. Reads `.polpo/polpo.json` for project config.
+ * Tasks are managed via plans and the task store — not in the config file.
  */
-export async function parseConfig(path: string): Promise<OrchestraConfig> {
-  // Check if path is a file or directory
-  const stats = await import("node:fs/promises").then(fs => fs.stat(path).catch(() => null));
-  
-  let workDir: string;
-  let yamlPath: string;
-  
-  if (stats?.isFile()) {
-    // Path is a file - use its directory as workDir
-    workDir = resolve(path, "..");
-    yamlPath = path;
-  } else {
-    // Path is a directory
-    workDir = path;
-    yamlPath = resolve(workDir, "polpo.yml");
-  }
-
+export async function parseConfig(workDir: string): Promise<OrchestraConfig> {
   const polpoDir = resolve(workDir, ".polpo");
-
   const polpoConfig = loadPolpoConfig(polpoDir);
-  const hasYaml = existsSync(yamlPath);
 
-  if (!hasYaml && !polpoConfig) {
-    throw new Error(`No configuration found: missing both .polpo/polpo.json and polpo.yml in ${workDir}`);
+  if (!polpoConfig) {
+    throw new Error(`No configuration found: missing .polpo/polpo.json in ${workDir}. Run 'polpo init' first.`);
   }
 
-  if (hasYaml) {
-    const raw = await readFile(yamlPath, "utf-8");
-    const doc = parseYaml(raw);
-    if (!doc || typeof doc !== "object") {
-      throw new Error(`Invalid YAML: ${yamlPath}`);
-    }
-
-    const base: PolpoConfig = polpoConfig ?? {
-      project: doc.project ?? "my-project",
-      team: { name: "default", agents: [{ name: "dev-1", adapter: "native", role: "developer" }] },
-      settings: DEFAULT_SETTINGS,
-    };
-
-    const tasks = doc.tasks;
-    if (!Array.isArray(tasks) || tasks.length === 0) {
-      throw new Error("polpo.yml must contain a non-empty tasks array");
-    }
-
-    const team = doc.team ?? base.team;
-    if (team && Array.isArray(team.agents)) {
-      validateAgents(team.agents);
-    }
-
-    const settings = parseSettings({ ...base.settings, ...(doc.settings ?? {}) });
-    validateTasks(tasks, settings.maxRetries);
-
-    const providers = {
-      ...(base.providers ?? {}),
-      ...(doc.providers ? parseProviders(doc.providers) : {}),
-    };
-
-    return {
-      version: doc.version ?? "1",
-      project: base.project,
-      team,
-      tasks,
-      settings,
-      providers: Object.keys(providers).length > 0 ? providers : undefined,
-    };
+  if (polpoConfig.team?.agents) {
+    validateAgents(polpoConfig.team.agents);
   }
 
-  // No YAML — interactive mode with just polpo.json
+  const settings = parseSettings(polpoConfig.settings ?? {});
+  const providers = polpoConfig.providers
+    ? parseProviders(polpoConfig.providers as Record<string, unknown>)
+    : undefined;
+
   return {
     version: "1",
-    project: polpoConfig!.project,
-    team: polpoConfig!.team,
+    project: polpoConfig.project,
+    team: polpoConfig.team,
     tasks: [],
-    settings: polpoConfig!.settings ?? DEFAULT_SETTINGS,
-    providers: polpoConfig!.providers ? parseProviders(polpoConfig!.providers as Record<string, unknown>) : undefined,
+    settings,
+    providers: providers && Object.keys(providers).length > 0 ? providers : undefined,
   };
 }
 
-// --- Template generators ---
+// --- Default config generator ---
 
 export function generatePolpoConfigDefault(projectName: string): PolpoConfig {
   return {
@@ -207,30 +125,9 @@ export function generatePolpoConfigDefault(projectName: string): PolpoConfig {
       name: "default",
       description: "Default Polpo team",
       agents: [
-        { name: "dev-1", adapter: "native", role: "developer" },
+        { name: "dev-1", role: "developer" },
       ],
     },
     settings: { ...DEFAULT_SETTINGS },
   };
 }
-
-export function generatePlanTemplate(): string {
-  return stringifyYaml({
-    version: "1",
-    tasks: [
-      {
-        id: "task-1",
-        title: "Example task",
-        description: "Replace with your actual task description",
-        assignTo: "dev-1",
-        dependsOn: [],
-        expectations: [{ type: "test", command: "npm test" }],
-        metrics: [],
-        maxRetries: 3,
-      },
-    ],
-  }, { lineWidth: 0 });
-}
-
-/** Alias for generatePlanTemplate */
-export const generateTemplate = generatePlanTemplate;

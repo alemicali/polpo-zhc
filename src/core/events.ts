@@ -10,7 +10,7 @@ export interface OrchestraEventMap {
   "task:removed": { taskId: string };
 
   // Agent lifecycle
-  "agent:spawned": { taskId: string; agentName: string; adapter: string; taskTitle: string };
+  "agent:spawned": { taskId: string; agentName: string; adapter?: string; taskTitle: string };
   "agent:finished": { taskId: string; agentName: string; exitCode: number; duration: number; sessionId?: string };
   "agent:activity": { taskId: string; agentName: string; tool?: string; file?: string; summary?: string };
 
@@ -22,7 +22,7 @@ export interface OrchestraEventMap {
 
   // Orchestrator lifecycle
   "orchestrator:started": { project: string; agents: string[] };
-  "orchestrator:tick": { pending: number; running: number; done: number; failed: number };
+  "orchestrator:tick": { pending: number; running: number; done: number; failed: number; queued: number };
   "orchestrator:deadlock": { taskIds: string[] };
   "orchestrator:shutdown": Record<string, never>;
 

@@ -1,25 +1,27 @@
 /**
- * Plan creation action — generates a YAML plan from user prompt via LLM.
+ * Plan creation action — generates a structured plan from user prompt via LLM.
+ * Uses tool-based structured output (submit_plan tool) for reliable generation.
  * Shows preview in viewer with Execute/Edit/Save/Refine actions.
  */
 
-import { parse as parseYaml } from "yaml";
 import type { Orchestrator } from "../../core/orchestrator.js";
 import type { TUIStore } from "../store.js";
 import { seg, kickRun } from "../format.js";
-import { querySDKText, extractYaml } from "../../llm/query.js";
 import { buildPlanSystemPrompt } from "../../llm/prompts.js";
+import {
+  generatePlanInteractive,
+  continuePlanWithAnswers,
+  refinePlanStructured,
+  planDataToJson,
+  formatPlanReadable,
+  formatPlanRich,
+  type PlanData,
+  type GeneratePlanResult,
+  type UserAnswer,
+} from "../../llm/plan-generator.js";
 
 function slugify(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 30) || "plan";
-}
-
-function extractPlanName(yaml: string): string | undefined {
-  try {
-    const doc = parseYaml(yaml);
-    if (doc?.name && typeof doc.name === "string") return slugify(doc.name);
-  } catch { /* ignore */ }
-  return undefined;
 }
 
 export async function createPlan(
@@ -38,6 +40,7 @@ export async function createPlan(
     return;
   }
 
+  store.startStreaming();
   store.setProcessing(true, "Generating plan...");
 
   try {
@@ -47,133 +50,136 @@ export async function createPlan(
     })();
 
     const systemPrompt = buildPlanSystemPrompt(polpo, state, polpo.getWorkDir());
-    const fullPrompt = [
-      systemPrompt,
-      "", "---", "",
-      `Generate a task plan for:`,
-      `"${prompt}"`,
-    ].join("\n");
-
+    const userPrompt = `Generate a task plan for:\n"${prompt}"`;
     const model = polpo.getConfig()?.settings?.orchestratorModel;
-    const result = await querySDKText(fullPrompt, polpo.getWorkDir(), model);
-    const yaml = extractYaml(result);
+
+    const result = await generatePlanInteractive(
+      systemPrompt,
+      userPrompt,
+      model,
+      (tokens) => store.updateProcessingTokens(tokens),
+    );
 
     store.setProcessing(false);
+    store.stopStreaming();
 
-    if (!yaml?.trim()) {
-      store.log("Plan generation returned empty result", [
-        seg("Plan generation returned empty result", "red"),
-      ]);
-      return;
-    }
-
-    // Validate YAML
-    let doc: any;
-    try {
-      doc = parseYaml(yaml);
-      if (!doc?.tasks || !Array.isArray(doc.tasks) || doc.tasks.length === 0) {
-        store.log("Plan has no tasks. Try a more specific prompt.", [
-          seg("Plan has no tasks. Try a more specific prompt.", "red"),
-        ]);
-        return;
-      }
-    } catch (parseErr: unknown) {
-      const msg = parseErr instanceof Error ? parseErr.message : String(parseErr);
-      store.log(`Invalid YAML: ${msg}`, [seg(`Invalid YAML: ${msg}`, "red")]);
-      return;
-    }
-
-    showPlanPreview(yaml, doc, prompt, polpo, store);
+    handlePlanResult(result, systemPrompt, prompt, polpo, store, model);
   } catch (err: unknown) {
     store.setProcessing(false);
+    store.stopStreaming();
     const msg = err instanceof Error ? err.message : String(err);
     store.log(`Plan generation failed: ${msg}`, [seg(`Plan error: ${msg}`, "red")]);
   }
 }
 
+/**
+ * Handle a plan generation result — either show questions or plan preview.
+ */
+function handlePlanResult(
+  result: GeneratePlanResult,
+  systemPrompt: string,
+  originalPrompt: string,
+  polpo: Orchestrator,
+  store: TUIStore,
+  model?: string,
+): void {
+  if (result.type === "questions") {
+    showQuestions(result, systemPrompt, originalPrompt, polpo, store, model);
+  } else {
+    showPlanPreview(result.data, originalPrompt, polpo, store);
+  }
+}
+
+/**
+ * Show the questions page for user clarification, then continue plan generation.
+ */
+function showQuestions(
+  result: Extract<GeneratePlanResult, { type: "questions" }>,
+  systemPrompt: string,
+  originalPrompt: string,
+  polpo: Orchestrator,
+  store: TUIStore,
+  model?: string,
+): void {
+  store.navigate({
+    id: "questions",
+    title: "Clarification needed",
+    questions: result.questions,
+    onSubmit: async (answers: UserAnswer[]) => {
+      store.goMain();
+      store.startStreaming();
+      store.setProcessing(true, "Generating plan with your answers...");
+      try {
+        const nextResult = await continuePlanWithAnswers(
+          systemPrompt,
+          result.messages,
+          answers,
+          model,
+          (tokens) => store.updateProcessingTokens(tokens),
+        );
+        store.setProcessing(false);
+        store.stopStreaming();
+        handlePlanResult(nextResult, systemPrompt, originalPrompt, polpo, store, model);
+      } catch (err: unknown) {
+        store.setProcessing(false);
+        store.stopStreaming();
+        const msg = err instanceof Error ? err.message : String(err);
+        store.log(`Plan generation failed: ${msg}`, [seg(`Plan error: ${msg}`, "red")]);
+      }
+    },
+    onCancel: () => {
+      store.goMain();
+      store.log("Plan cancelled", [seg("Plan cancelled", "yellow")]);
+    },
+  });
+}
+
 function showPlanPreview(
-  yaml: string,
-  doc: any,
+  planData: PlanData,
   originalPrompt: string,
   polpo: Orchestrator,
   store: TUIStore,
 ): void {
-  const tasks = doc.tasks as any[];
-  const volatileTeam = doc.team as any[] | undefined;
-
-  // Build readable preview
-  const lines: string[] = [];
-
-  if (volatileTeam?.length) {
-    lines.push("Volatile team (plan-only agents):");
-    for (const a of volatileTeam) {
-      lines.push(`  ${a.name} (${a.adapter || "claude-sdk"})${a.role ? ` — ${a.role}` : ""}`);
-    }
-    lines.push("");
-  }
-
-  lines.push(`${tasks.length} task${tasks.length !== 1 ? "s" : ""} in plan:`);
-  lines.push("");
-
-  for (let i = 0; i < tasks.length; i++) {
-    const t = tasks[i];
-    const deps = t.dependsOn?.length
-      ? ` ⟵ ${t.dependsOn.join(", ")}`
-      : "";
-    lines.push(`  ${i + 1}. ${t.title}`);
-    lines.push(`     → ${t.assignTo || "default"}${deps}`);
-    if (t.description && t.description !== t.title) {
-      const desc = t.description.length > 120 ? t.description.slice(0, 117) + "..." : t.description;
-      lines.push(`     ${desc}`);
-    }
-    if (t.expectations?.length) {
-      const exps = t.expectations.map((e: any) => {
-        if (e.type === "test") return `test: ${e.command || ""}`;
-        if (e.type === "file_exists") return `files: ${(e.paths || []).join(", ")}`;
-        if (e.type === "script") return `script: ${(e.command || "").split("\n")[0]}`;
-        if (e.type === "llm_review") return `review: ${(e.criteria || "").slice(0, 60)}`;
-        return e.type;
-      });
-      lines.push(`     [${exps.join("] [")}]`);
-    }
-    lines.push("");
-  }
+  const richContent = formatPlanRich(planData, process.stdout.columns) as import("../store.js").Seg[][];
+  const preview = formatPlanReadable(planData);
+  const json = planDataToJson(planData);
 
   store.navigate({
     id: "viewer",
-    title: `Plan: ${doc.name || "generated"}`,
-    content: lines.join("\n"),
-    actions: ["Execute", "Save draft", "Edit YAML", "Refine", "Cancel"],
+    title: `Plan: ${planData.name || "generated"}`,
+    content: preview,
+    richContent,
+    actions: ["Execute", "Save draft", "Edit JSON", "Refine", "Cancel"],
     onAction: (idx) => {
       switch (idx) {
         case 0: // Execute
           store.goMain();
-          executePlanFromYaml(yaml, originalPrompt, polpo, store);
+          executePlan(json, originalPrompt, polpo, store, planData.name);
           break;
         case 1: // Save draft
           store.goMain();
-          saveDraft(yaml, originalPrompt, polpo, store);
+          saveDraft(json, originalPrompt, polpo, store, planData.name);
           break;
-        case 2: // Edit YAML
+        case 2: // Edit JSON
           store.navigate({
             id: "editor",
-            title: "Edit Plan YAML",
-            initial: yaml,
+            title: "Edit Plan JSON",
+            initial: JSON.stringify(planData, null, 2),
             onSave: (edited) => {
               try {
-                const newDoc = parseYaml(edited);
-                if (newDoc?.tasks?.length) {
-                  showPlanPreview(edited, newDoc, originalPrompt, polpo, store);
+                const newData = JSON.parse(edited) as PlanData;
+                if (newData?.tasks?.length) {
+                  showPlanPreview(newData, originalPrompt, polpo, store);
                 } else {
                   store.goMain();
                   store.log("Edited plan has no tasks", [seg("Edited plan has no tasks", "red")]);
                 }
               } catch {
                 store.goMain();
-                store.log("Invalid YAML in edited plan", [seg("Invalid YAML in edited plan", "red")]);
+                store.log("Invalid JSON in edited plan", [seg("Invalid JSON in edited plan", "red")]);
               }
             },
-            onCancel: () => showPlanPreview(yaml, doc, originalPrompt, polpo, store),
+            onCancel: () => showPlanPreview(planData, originalPrompt, polpo, store),
           });
           break;
         case 3: // Refine
@@ -183,13 +189,13 @@ function showPlanPreview(
             initial: "",
             onSave: (feedback) => {
               if (!feedback.trim()) {
-                showPlanPreview(yaml, doc, originalPrompt, polpo, store);
+                showPlanPreview(planData, originalPrompt, polpo, store);
                 return;
               }
               store.goMain();
-              refinePlan(yaml, originalPrompt, feedback.trim(), polpo, store);
+              refinePlan(json, originalPrompt, feedback.trim(), polpo, store);
             },
-            onCancel: () => showPlanPreview(yaml, doc, originalPrompt, polpo, store),
+            onCancel: () => showPlanPreview(planData, originalPrompt, polpo, store),
           });
           break;
         case 4: // Cancel
@@ -205,14 +211,16 @@ function showPlanPreview(
   });
 }
 
-function executePlanFromYaml(
-  yaml: string,
+function executePlan(
+  json: string,
   prompt: string,
   polpo: Orchestrator,
   store: TUIStore,
+  name?: string,
 ): void {
   try {
-    const plan = polpo.savePlan({ yaml, prompt, name: extractPlanName(yaml) });
+    const planName = name ? slugify(name) : undefined;
+    const plan = polpo.savePlan({ data: json, prompt, name: planName });
     const result = polpo.executePlan(plan.id);
     store.log(`Plan executed: ${plan.name} (${result.tasks.length} tasks)`, [
       seg("▶ ", "blue", true),
@@ -227,13 +235,15 @@ function executePlanFromYaml(
 }
 
 function saveDraft(
-  yaml: string,
+  json: string,
   prompt: string,
   polpo: Orchestrator,
   store: TUIStore,
+  name?: string,
 ): void {
   try {
-    const plan = polpo.savePlan({ yaml, prompt, status: "draft", name: extractPlanName(yaml) });
+    const planName = name ? slugify(name) : undefined;
+    const plan = polpo.savePlan({ data: json, prompt, status: "draft", name: planName });
     store.log(`Draft saved: ${plan.name}`, [
       seg("■ ", "blue"),
       seg(plan.name, undefined, true),
@@ -246,12 +256,13 @@ function saveDraft(
 }
 
 async function refinePlan(
-  currentYaml: string,
+  currentJson: string,
   originalPrompt: string,
   feedback: string,
   polpo: Orchestrator,
   store: TUIStore,
 ): Promise<void> {
+  store.startStreaming();
   store.setProcessing(true, "Refining plan...");
 
   try {
@@ -261,42 +272,23 @@ async function refinePlan(
     })();
 
     const systemPrompt = buildPlanSystemPrompt(polpo, state, polpo.getWorkDir());
-    const fullPrompt = [
-      systemPrompt,
-      "", "---", "",
-      `Original request: "${originalPrompt}"`,
-      "",
-      "Current plan:",
-      currentYaml,
-      "",
-      `User feedback: "${feedback}"`,
-      "",
-      "Revise the plan based on the feedback. Output ONLY valid YAML.",
-    ].join("\n");
-
     const model = polpo.getConfig()?.settings?.orchestratorModel;
-    const result = await querySDKText(fullPrompt, polpo.getWorkDir(), model);
-    const newYaml = extractYaml(result);
+
+    const planData = await refinePlanStructured(
+      systemPrompt,
+      originalPrompt,
+      currentJson,
+      feedback,
+      model,
+      (tokens) => store.updateProcessingTokens(tokens),
+    );
 
     store.setProcessing(false);
-
-    if (!newYaml?.trim()) {
-      store.log("Refine returned empty result", [seg("Refine returned empty result", "red")]);
-      return;
-    }
-
-    try {
-      const doc = parseYaml(newYaml);
-      if (doc?.tasks?.length) {
-        showPlanPreview(newYaml, doc, originalPrompt, polpo, store);
-      } else {
-        store.log("Refined plan has no tasks", [seg("Refined plan has no tasks", "red")]);
-      }
-    } catch {
-      store.log("Refined plan has invalid YAML", [seg("Refined plan has invalid YAML", "red")]);
-    }
+    store.stopStreaming();
+    showPlanPreview(planData, originalPrompt, polpo, store);
   } catch (err: unknown) {
     store.setProcessing(false);
+    store.stopStreaming();
     const msg = err instanceof Error ? err.message : String(err);
     store.log(`Refine error: ${msg}`, [seg(`Error: ${msg}`, "red")]);
   }

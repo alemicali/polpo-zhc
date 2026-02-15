@@ -20,6 +20,11 @@ import type {
   ApiResult,
   LogSession,
   LogEntry,
+  ChatSession,
+  ChatMessage,
+  ChatResponse,
+  RunActivityEntry,
+  SkillInfo,
 } from "./types.js";
 
 export interface OrchestraClientConfig {
@@ -218,30 +223,58 @@ export class OrchestraClient {
     return this.get<LogEntry[]>(`/logs/${sessionId}`);
   }
 
+  // ── Skills ───────────────────────────────────────────────
+
+  /** Discover available skills in the project (.claude/skills/). */
+  getSkills(): Promise<SkillInfo[]> {
+    return this.get<SkillInfo[]>("/skills");
+  }
+
+  // ── Run Activity ────────────────────────────────────────────
+
+  /** Get the full activity history for a task from its run JSONL log. */
+  getTaskActivity(taskId: string): Promise<RunActivityEntry[]> {
+    return this.get<RunActivityEntry[]>(`/agents/processes/${taskId}/activity`);
+  }
+
   // ── Chat / LLM ────────────────────────────────────────────
 
-  chat(message: string): Promise<{ response: string }> {
-    return this.post<{ response: string }>("/chat", { message });
+  chat(message: string, sessionId?: string): Promise<ChatResponse> {
+    return this.post<ChatResponse>("/chat", { message, sessionId });
   }
 
-  generatePlan(prompt: string): Promise<{ yaml: string; raw: string }> {
-    return this.post<{ yaml: string; raw: string }>("/chat/generate-plan", { prompt });
+  // ── Sessions ────────────────────────────────────────────
+
+  getSessions(): Promise<{ sessions: ChatSession[] }> {
+    return this.get<{ sessions: ChatSession[] }>("/chat/sessions");
   }
 
-  prepareTask(description: string, assignTo: string): Promise<{ yaml: string; raw: string }> {
-    return this.post<{ yaml: string; raw: string }>("/chat/prepare-task", { description, assignTo });
+  getSessionMessages(sessionId: string): Promise<{ session: ChatSession; messages: ChatMessage[] }> {
+    return this.get<{ session: ChatSession; messages: ChatMessage[] }>(`/chat/sessions/${sessionId}/messages`);
   }
 
-  generateTeam(description: string): Promise<{ yaml: string; raw: string }> {
-    return this.post<{ yaml: string; raw: string }>("/chat/generate-team", { description });
+  deleteSession(sessionId: string): Promise<{ deleted: boolean }> {
+    return this.del<{ deleted: boolean }>(`/chat/sessions/${sessionId}`);
   }
 
-  refineTeam(currentYaml: string, description: string, feedback: string): Promise<{ yaml: string; raw: string }> {
-    return this.post<{ yaml: string; raw: string }>("/chat/refine-team", { currentYaml, description, feedback });
+  generatePlan(prompt: string): Promise<{ json: string; planData: unknown }> {
+    return this.post<{ json: string; planData: unknown }>("/chat/generate-plan", { prompt });
   }
 
-  refinePlan(currentYaml: string, prompt: string, feedback: string): Promise<{ yaml: string; raw: string }> {
-    return this.post<{ yaml: string; raw: string }>("/chat/refine-plan", { currentYaml, prompt, feedback });
+  prepareTask(description: string, assignTo: string): Promise<{ taskData: unknown }> {
+    return this.post<{ taskData: unknown }>("/chat/prepare-task", { description, assignTo });
+  }
+
+  generateTeam(description: string): Promise<{ teamData: unknown }> {
+    return this.post<{ teamData: unknown }>("/chat/generate-team", { description });
+  }
+
+  refineTeam(currentData: string, description: string, feedback: string): Promise<{ teamData: unknown }> {
+    return this.post<{ teamData: unknown }>("/chat/refine-team", { currentData, description, feedback });
+  }
+
+  refinePlan(currentData: string, prompt: string, feedback: string): Promise<{ json: string; planData: unknown }> {
+    return this.post<{ json: string; planData: unknown }>("/chat/refine-plan", { currentData, prompt, feedback });
   }
 
   // ── Static ───────────────────────────────────────────────

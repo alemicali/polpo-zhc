@@ -92,7 +92,7 @@ export async function stopAndTranscribe(handle: RecordingHandle): Promise<string
 export async function transcribe(filePath: string): Promise<string> {
   const apiKey = resolveApiKey("openai");
   if (!apiKey) {
-    throw new Error("Set OPENAI_API_KEY or configure openai provider in polpo.yml");
+    throw new Error("Set OPENAI_API_KEY or configure openai provider in .polpo/polpo.json");
   }
 
   const model = process.env.POLPO_STT_MODEL ?? DEFAULT_MODEL;

@@ -5,11 +5,8 @@
 import { Command } from "commander";
 import chalk from "chalk";
 import { resolve } from "node:path";
-import { parse as parseYaml } from "yaml";
 import { Orchestrator } from "../../core/orchestrator.js";
-import "../../adapters/native.js";
 import "../../adapters/claude-sdk.js";
-import "../../adapters/generic.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -21,18 +18,8 @@ async function initOrchestrator(configPath: string): Promise<Orchestrator> {
   return o;
 }
 
-function extractPlanName(yaml: string): string | undefined {
-  try {
-    const doc = parseYaml(yaml);
-    if (doc?.name && typeof doc.name === "string") {
-      return doc.name
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, "-")
-        .replace(/^-|-$/g, "")
-        .slice(0, 30) || "plan";
-    }
-  } catch { /* ignore */ }
-  return undefined;
+function slugify(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 30) || "plan";
 }
 
 // ---------------------------------------------------------------------------
@@ -48,10 +35,10 @@ export function registerPlanCommands(program: Command): void {
   plan
     .command("list")
     .description("List all plans")
-    .option("-c, --config <path>", "Path to working directory", ".")
+    .option("-d, --dir <path>", "Working directory", ".")
     .action(async (opts) => {
       try {
-        const orchestrator = await initOrchestrator(opts.config);
+        const orchestrator = await initOrchestrator(opts.dir);
         const plans = orchestrator.getAllPlans();
 
         if (plans.length === 0) {
@@ -88,10 +75,10 @@ export function registerPlanCommands(program: Command): void {
   plan
     .command("show <planId>")
     .description("Show details of a plan")
-    .option("-c, --config <path>", "Path to working directory", ".")
+    .option("-d, --dir <path>", "Working directory", ".")
     .action(async (planId: string, opts) => {
       try {
-        const orchestrator = await initOrchestrator(opts.config);
+        const orchestrator = await initOrchestrator(opts.dir);
         const p = orchestrator.getPlan(planId) ?? orchestrator.getPlanByName(planId);
 
         if (!p) {
@@ -107,9 +94,14 @@ export function registerPlanCommands(program: Command): void {
         console.log(chalk.bold(`  Created:   `) + p.createdAt);
         console.log(chalk.bold(`  Updated:   `) + p.updatedAt);
         console.log();
-        console.log(chalk.dim("  --- YAML ---"));
+        console.log(chalk.dim("  --- Plan Data ---"));
         console.log();
-        console.log(p.yaml);
+        try {
+          const parsed = JSON.parse(p.data);
+          console.log(JSON.stringify(parsed, null, 2));
+        } catch {
+          console.log(p.data);
+        }
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
         console.error(chalk.red(`Error: ${msg}`));
@@ -121,16 +113,16 @@ export function registerPlanCommands(program: Command): void {
   plan
     .command("create <prompt...>")
     .description("Generate a new plan from a prompt using the LLM")
-    .option("-c, --config <path>", "Path to working directory", ".")
+    .option("-d, --dir <path>", "Working directory", ".")
     .option("--execute", "Immediately execute the plan after creating")
     .option("--save", "Save as draft (default if --execute not given)")
     .action(async (promptArgs: string[], opts) => {
       try {
-        const orchestrator = await initOrchestrator(opts.config);
+        const orchestrator = await initOrchestrator(opts.dir);
         const prompt = promptArgs.join(" ");
 
         const { buildPlanSystemPrompt } = await import("../../llm/prompts.js");
-        const { querySDKText, extractYaml } = await import("../../llm/query.js");
+        const { generatePlan, planDataToJson } = await import("../../llm/plan-generator.js");
 
         const state = (() => {
           try { return orchestrator.getStore()?.getState() ?? null; }
@@ -138,35 +130,16 @@ export function registerPlanCommands(program: Command): void {
         })();
 
         const systemPrompt = buildPlanSystemPrompt(orchestrator, state, orchestrator.getWorkDir());
-        const fullPrompt = systemPrompt + "\n\n---\n\nGenerate a task plan for:\n\"" + prompt + "\"";
-
+        const userPrompt = `Generate a task plan for:\n"${prompt}"`;
         const model = orchestrator.getConfig()?.settings?.orchestratorModel;
+
         console.log(chalk.dim("  Generating plan..."));
-        const result = await querySDKText(fullPrompt, orchestrator.getWorkDir(), model);
-        const yaml = extractYaml(result);
+        const planData = await generatePlan(systemPrompt, userPrompt, model);
+        const json = planDataToJson(planData);
 
-        if (!yaml?.trim()) {
-          console.error(chalk.red("Plan generation returned empty result."));
-          process.exit(1);
-        }
-
-        // Validate
-        let doc: any;
-        try {
-          doc = parseYaml(yaml);
-          if (!doc?.tasks || !Array.isArray(doc.tasks) || doc.tasks.length === 0) {
-            console.error(chalk.red("Plan has no tasks. Try a more specific prompt."));
-            process.exit(1);
-          }
-        } catch (parseErr: unknown) {
-          const msg = parseErr instanceof Error ? parseErr.message : String(parseErr);
-          console.error(chalk.red(`Invalid YAML: ${msg}`));
-          process.exit(1);
-        }
-
-        const planName = extractPlanName(yaml);
+        const planName = slugify(planData.name);
         const plan = orchestrator.savePlan({
-          yaml,
+          data: json,
           prompt,
           name: planName,
           status: opts.execute ? undefined : "draft",
@@ -193,10 +166,10 @@ export function registerPlanCommands(program: Command): void {
   plan
     .command("execute <planId>")
     .description("Execute a saved plan")
-    .option("-c, --config <path>", "Path to working directory", ".")
+    .option("-d, --dir <path>", "Working directory", ".")
     .action(async (planId: string, opts) => {
       try {
-        const orchestrator = await initOrchestrator(opts.config);
+        const orchestrator = await initOrchestrator(opts.dir);
         const p = orchestrator.getPlan(planId) ?? orchestrator.getPlanByName(planId);
 
         if (!p) {
@@ -219,11 +192,11 @@ export function registerPlanCommands(program: Command): void {
   plan
     .command("resume <planId>")
     .description("Resume a plan (retry failed tasks)")
-    .option("-c, --config <path>", "Path to working directory", ".")
+    .option("-d, --dir <path>", "Working directory", ".")
     .option("--no-retry-failed", "Do not retry failed tasks")
     .action(async (planId: string, opts) => {
       try {
-        const orchestrator = await initOrchestrator(opts.config);
+        const orchestrator = await initOrchestrator(opts.dir);
         const p = orchestrator.getPlan(planId) ?? orchestrator.getPlanByName(planId);
 
         if (!p) {
@@ -247,10 +220,10 @@ export function registerPlanCommands(program: Command): void {
   plan
     .command("delete <planId>")
     .description("Delete a plan")
-    .option("-c, --config <path>", "Path to working directory", ".")
+    .option("-d, --dir <path>", "Working directory", ".")
     .action(async (planId: string, opts) => {
       try {
-        const orchestrator = await initOrchestrator(opts.config);
+        const orchestrator = await initOrchestrator(opts.dir);
         const p = orchestrator.getPlan(planId) ?? orchestrator.getPlanByName(planId);
 
         if (!p) {
@@ -271,10 +244,10 @@ export function registerPlanCommands(program: Command): void {
   plan
     .command("abort <group>")
     .description("Abort all tasks in a plan group")
-    .option("-c, --config <path>", "Path to working directory", ".")
+    .option("-d, --dir <path>", "Working directory", ".")
     .action(async (group: string, opts) => {
       try {
-        const orchestrator = await initOrchestrator(opts.config);
+        const orchestrator = await initOrchestrator(opts.dir);
         const count = orchestrator.abortGroup(group);
         console.log(chalk.green(`  Aborted ${count} task(s) in group "${group}".`));
       } catch (err: unknown) {

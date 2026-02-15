@@ -5,7 +5,121 @@ description: Built-in adapter configurations and options
 
 import { Aside } from '@astrojs/starlight/components';
 
-Polpo ships with two built-in adapters: `claude-sdk` and `generic`.
+Polpo ships with three built-in adapters: `native` (default), `claude-sdk`, and `generic`.
+
+## native Adapter
+
+**Default adapter** — Polpo's built-in agentic engine using [`@mariozechner/pi-ai`](https://github.com/mariozechner/pi-ai) and [`@mariozechner/pi-agent-core`](https://github.com/mariozechner/pi-agent-core).
+
+The native adapter provides a multi-provider LLM interface with built-in coding tools, supporting any provider compatible with pi-ai (Anthropic, OpenAI, Google, Groq, DeepSeek, and more).
+
+### Configuration
+
+```yaml
+agents:
+  - name: my-agent
+    adapter: native  # optional — this is the default
+    role: Full-stack developer
+    model: opencode:big-pickle  # free model (default)
+    # or use: anthropic:claude-sonnet-4-5-20250929
+    # or use: openai:gpt-4
+    systemPrompt: "Focus on TypeScript and React patterns"
+```
+
+<Aside type="tip">
+The `adapter: native` field is **optional** — agents default to the native adapter when `adapter` is not specified.
+</Aside>
+
+### Model Configuration
+
+Specify models using `provider:model` syntax:
+
+| Provider | Example Model | Env Var Required |
+|----------|---------------|------------------|
+| `opencode` | `opencode:big-pickle` | None (free) |
+| `anthropic` | `anthropic:claude-sonnet-4-5-20250929` | `ANTHROPIC_API_KEY` |
+| `openai` | `openai:gpt-4o` | `OPENAI_API_KEY` |
+| `google` | `google:gemini-2.0-flash-exp` | `GOOGLE_API_KEY` |
+| `groq` | `groq:llama-3.3-70b-versatile` | `GROQ_API_KEY` |
+| `deepseek` | `deepseek:deepseek-chat` | `DEEPSEEK_API_KEY` |
+
+**Auto-inference**: If provider is omitted, pi-ai infers from model name:
+- `claude-*` → `anthropic`
+- `gpt-*` → `openai`
+- `gemini-*` → `google`
+
+### Default Model
+
+The default model is **`opencode:big-pickle`** (free, no API key required). Override globally via environment variable:
+
+```bash
+export POLPO_MODEL=anthropic:claude-sonnet-4-5-20250929
+```
+
+Or per-agent in config:
+
+```yaml
+agents:
+  - name: architect
+    model: anthropic:claude-sonnet-4-5-20250929
+  - name: implementer
+    model: openai:gpt-4o
+```
+
+### Built-in Coding Tools
+
+The native adapter includes these coding tools (always available):
+
+- **read** — Read files with line numbers
+- **write** — Create new files
+- **edit** — String replacement edits
+- **bash** — Execute shell commands
+- **glob** — Find files by pattern
+- **grep** — Search file contents
+- **ls** — List directory contents
+
+### Features
+
+- **Multi-provider**: One adapter, many LLM providers
+- **Free tier**: `opencode:big-pickle` works out-of-the-box
+- **Agentic loop**: Built-in reasoning + tool use
+- **No SDK dependency**: Lightweight, no `@anthropic-ai/claude-agent-sdk` required
+- **Transcript logging**: Full JSONL logs in `.polpo/logs/`
+
+### Environment Variables
+
+Set API keys for your chosen provider:
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+export OPENAI_API_KEY=sk-...
+export GOOGLE_API_KEY=...
+export GROQ_API_KEY=gsk_...
+export DEEPSEEK_API_KEY=...
+```
+
+### Provider Overrides
+
+Advanced: Override provider base URLs via environment:
+
+```bash
+export POLPO_ANTHROPIC_BASE_URL=https://custom.anthropic.proxy
+export POLPO_OPENAI_BASE_URL=https://custom.openai.proxy
+```
+
+### When to Use
+
+- ✅ **Default choice** — Works for most use cases
+- ✅ Free tier available (`opencode:big-pickle`)
+- ✅ Multi-provider flexibility (switch models easily)
+- ✅ Lightweight (no Claude SDK dependency)
+
+### When NOT to Use
+
+- ❌ Need Claude-specific features (skills, MCP servers) → use `claude-sdk`
+- ❌ Need custom CLI agents → use `generic`
+
+---
 
 ## claude-sdk Adapter
 

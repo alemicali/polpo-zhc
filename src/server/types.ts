@@ -54,14 +54,14 @@ export interface UpdateTaskRequest {
 // === Plan Endpoints ===
 
 export interface CreatePlanRequest {
-  yaml: string;
+  data: string;
   prompt?: string;
   name?: string;
   status?: PlanStatus;
 }
 
 export interface UpdatePlanRequest {
-  yaml?: string;
+  data?: string;
   status?: PlanStatus;
   name?: string;
 }
@@ -70,9 +70,8 @@ export interface UpdatePlanRequest {
 
 export interface AddAgentRequest {
   name: string;
-  adapter: string;
+  adapter?: string;
   role?: string;
-  command?: string;
   model?: string;
   allowedTools?: string[];
   systemPrompt?: string;

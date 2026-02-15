@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import type { ServerEnv } from "../app.js";
 import { buildChatSystemPrompt, buildPlanSystemPrompt, buildTeamGenPrompt } from "../../llm/prompts.js";
-import { querySDKText, querySDK, extractYaml, extractTeamYaml } from "../../llm/query.js";
+import { querySDKText } from "../../llm/query.js";
 import {
   ChatMessageSchema,
   GeneratePlanSchema,
@@ -30,13 +30,20 @@ export function chatRoutes(): Hono<ServerEnv> {
 
     // Resolve session
     let sessionId = body.sessionId;
+
     if (sessionStore) {
       if (!sessionId) {
         const latest = sessionStore.getLatestSession();
         const age = latest ? Date.now() - new Date(latest.updatedAt).getTime() : Infinity;
-        sessionId = age < 30 * 60 * 1000 ? latest!.id : sessionStore.create();
+        if (age < 30 * 60 * 1000) {
+          sessionId = latest!.id;
+        } else {
+          sessionId = sessionStore.create();
+          orchestrator.emit("session:created", { sessionId, title: body.message.slice(0, 60) });
+        }
       }
-      sessionStore.addMessage(sessionId, "user", body.message);
+      const userMsg = sessionStore.addMessage(sessionId, "user", body.message);
+      orchestrator.emit("message:added", { sessionId, messageId: userMsg.id, role: "user" });
     }
 
     // Build prompt with history
@@ -60,13 +67,14 @@ export function chatRoutes(): Hono<ServerEnv> {
     const response = await querySDKText(parts.join("\n"), workDir, model);
 
     if (sessionStore && sessionId) {
-      sessionStore.addMessage(sessionId, "assistant", response);
+      const assistantMsg = sessionStore.addMessage(sessionId, "assistant", response);
+      orchestrator.emit("message:added", { sessionId, messageId: assistantMsg.id, role: "assistant" });
     }
 
     return c.json({ ok: true, data: { response, sessionId } });
   });
 
-  // POST /chat/generate-plan — generate plan YAML from natural language
+  // POST /chat/generate-plan — generate plan from natural language (tool-based)
   app.post("/generate-plan", async (c) => {
     const orchestrator = c.get("orchestrator");
     const body = parseBody(GeneratePlanSchema, await c.req.json());
@@ -75,37 +83,32 @@ export function chatRoutes(): Hono<ServerEnv> {
     const workDir = orchestrator.getWorkDir();
     const model = orchestrator.getConfig()?.settings?.orchestratorModel;
 
+    const { generatePlan, planDataToJson } = await import("../../llm/plan-generator.js");
     const systemPrompt = buildPlanSystemPrompt(orchestrator, state, workDir);
-    const fullPrompt = [
-      systemPrompt,
-      ``,
-      `---`,
-      ``,
-      `User request: ${body.prompt}`,
-    ].join("\n");
+    const userPrompt = `Generate a task plan for:\n"${body.prompt}"`;
 
-    const raw = await querySDKText(fullPrompt, workDir, model);
-    const yaml = extractYaml(raw);
-    return c.json({ ok: true, data: { yaml, raw } });
+    const planData = await generatePlan(systemPrompt, userPrompt, model);
+    const json = planDataToJson(planData);
+    return c.json({ ok: true, data: { json, planData } });
   });
 
-  // POST /chat/prepare-task — LLM-enriched task preparation
+  // POST /chat/prepare-task — LLM-enriched task preparation (tool-based)
   app.post("/prepare-task", async (c) => {
     const orchestrator = c.get("orchestrator");
     const body = parseBody(PrepareTaskSchema, await c.req.json());
 
     const { buildTaskPrepPrompt } = await import("../../llm/prompts.js");
+    const { generateTaskPrep } = await import("../../llm/plan-generator.js");
     const state = orchestrator.getStore().getState();
     const workDir = orchestrator.getWorkDir();
     const model = orchestrator.getConfig()?.settings?.orchestratorModel;
 
-    const prompt = buildTaskPrepPrompt(orchestrator, state, workDir, body.description, body.assignTo);
-    const raw = await querySDKText(prompt, workDir, model);
-    const yaml = extractYaml(raw);
-    return c.json({ ok: true, data: { yaml, raw } });
+    const systemPrompt = buildTaskPrepPrompt(orchestrator, state, workDir, body.description, body.assignTo);
+    const taskData = await generateTaskPrep(systemPrompt, body.description, model);
+    return c.json({ ok: true, data: { taskData } });
   });
 
-  // POST /chat/generate-team — AI team generation from natural language
+  // POST /chat/generate-team — AI team generation (tool-based)
   app.post("/generate-team", async (c) => {
     const orchestrator = c.get("orchestrator");
     const body = parseBody(GenerateTeamSchema, await c.req.json());
@@ -113,14 +116,13 @@ export function chatRoutes(): Hono<ServerEnv> {
     const workDir = orchestrator.getWorkDir();
     const model = orchestrator.getConfig()?.settings?.orchestratorModel;
 
-    const prompt = buildTeamGenPrompt(orchestrator, workDir, body.description);
-    // Team gen needs Skill + Bash tools for skill discovery/installation
-    const raw = await querySDK(prompt, ["Skill", "Bash"], workDir, undefined, model);
-    const yaml = extractTeamYaml(raw);
-    return c.json({ ok: true, data: { yaml, raw } });
+    const { generateTeam } = await import("../../llm/plan-generator.js");
+    const systemPrompt = buildTeamGenPrompt(orchestrator, workDir, body.description);
+    const teamData = await generateTeam(systemPrompt, body.description, model);
+    return c.json({ ok: true, data: { teamData } });
   });
 
-  // POST /chat/refine-team — refine generated team with feedback
+  // POST /chat/refine-team — refine generated team with feedback (tool-based)
   app.post("/refine-team", async (c) => {
     const orchestrator = c.get("orchestrator");
     const body = parseBody(RefineTeamSchema, await c.req.json());
@@ -128,22 +130,10 @@ export function chatRoutes(): Hono<ServerEnv> {
     const workDir = orchestrator.getWorkDir();
     const model = orchestrator.getConfig()?.settings?.orchestratorModel;
 
-    const prompt = [
-      buildTeamGenPrompt(orchestrator, workDir, body.description || ""),
-      ``,
-      `---`,
-      ``,
-      `Current team YAML:`,
-      body.currentYaml,
-      ``,
-      `User feedback: "${body.feedback}"`,
-      ``,
-      `Revise the team based on the feedback. Output ONLY valid YAML.`,
-    ].join("\n");
-
-    const raw = await querySDK(prompt, ["Skill", "Bash"], workDir, undefined, model);
-    const yaml = extractTeamYaml(raw);
-    return c.json({ ok: true, data: { yaml, raw } });
+    const { refineTeam } = await import("../../llm/plan-generator.js");
+    const systemPrompt = buildTeamGenPrompt(orchestrator, workDir, body.description || "");
+    const teamData = await refineTeam(systemPrompt, body.currentData, body.feedback, model);
+    return c.json({ ok: true, data: { teamData } });
   });
 
   // GET /chat/sessions — list chat sessions
@@ -172,6 +162,20 @@ export function chatRoutes(): Hono<ServerEnv> {
     return c.json({ ok: true, data: { session, messages } });
   });
 
+  // DELETE /chat/sessions/:id — delete a session
+  app.delete("/sessions/:id", (c) => {
+    const orchestrator = c.get("orchestrator");
+    const sessionStore = orchestrator.getSessionStore();
+    if (!sessionStore) {
+      return c.json({ ok: false, error: "Session store not available", code: "NOT_AVAILABLE" }, 503);
+    }
+    const deleted = sessionStore.deleteSession(c.req.param("id"));
+    if (!deleted) {
+      return c.json({ ok: false, error: "Session not found", code: "NOT_FOUND" }, 404);
+    }
+    return c.json({ ok: true, data: { deleted: true } });
+  });
+
   // POST /chat/refine-plan — refine generated plan with feedback
   app.post("/refine-plan", async (c) => {
     const orchestrator = c.get("orchestrator");
@@ -181,25 +185,14 @@ export function chatRoutes(): Hono<ServerEnv> {
     const workDir = orchestrator.getWorkDir();
     const model = orchestrator.getConfig()?.settings?.orchestratorModel;
 
+    const { refinePlanStructured, planDataToJson } = await import("../../llm/plan-generator.js");
     const systemPrompt = buildPlanSystemPrompt(orchestrator, state, workDir);
-    const fullPrompt = [
-      systemPrompt,
-      ``,
-      `---`,
-      ``,
-      `Original request: ${body.prompt || ""}`,
-      ``,
-      `Current plan YAML:`,
-      body.currentYaml,
-      ``,
-      `User feedback: "${body.feedback}"`,
-      ``,
-      `Revise the plan based on the feedback. Output ONLY valid YAML.`,
-    ].join("\n");
 
-    const raw = await querySDKText(fullPrompt, workDir, model);
-    const yaml = extractYaml(raw);
-    return c.json({ ok: true, data: { yaml, raw } });
+    const planData = await refinePlanStructured(
+      systemPrompt, body.prompt || "", body.currentData, body.feedback, model,
+    );
+    const json = planDataToJson(planData);
+    return c.json({ ok: true, data: { json, planData } });
   });
 
   return app;

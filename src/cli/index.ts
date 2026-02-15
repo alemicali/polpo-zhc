@@ -1,18 +1,16 @@
 #!/usr/bin/env node
 
 import { resolve } from "node:path";
-import { mkdir, writeFile, access, readFile } from "node:fs/promises";
+import { mkdir, access, readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { Command } from "commander";
 import chalk from "chalk";
-import { generatePolpoConfigDefault, generatePlanTemplate, savePolpoConfig } from "../core/config.js";
+import { generatePolpoConfigDefault, savePolpoConfig } from "../core/config.js";
 import { Orchestrator } from "../core/orchestrator.js";
 import type { OrchestraState, Task, TaskStatus } from "../core/types.js";
 
-// Register adapters (side-effect imports)
-import "../adapters/native.js";
+// Register external adapters (side-effect imports)
 import "../adapters/claude-sdk.js";
-import "../adapters/generic.js";
 
 import { registerTaskCommands } from "./commands/task.js";
 import { registerPlanCommands } from "./commands/plan.js";
@@ -142,7 +140,6 @@ program
 
     const cwd = process.cwd();
     const orchestraDir = resolve(cwd, ".polpo");
-    const configPath = resolve(cwd, "polpo.yml");
 
     await mkdir(orchestraDir, { recursive: true });
     await mkdir(resolve(orchestraDir, "logs"), { recursive: true });
@@ -159,36 +156,20 @@ program
       console.log(chalk.green("  Created .polpo/polpo.json"));
     }
 
-    // Create polpo.yml (execution plan)
-    try {
-      await access(configPath);
-      console.log(chalk.yellow("  polpo.yml already exists, skipping."));
-    } catch {
-      await writeFile(configPath, generatePlanTemplate(), "utf-8");
-      console.log(chalk.green("  Created polpo.yml"));
-    }
-
-    const statePath = resolve(orchestraDir, "state.json");
-    try {
-      await access(statePath);
-    } catch {
-      await writeFile(statePath, JSON.stringify({ project: "", team: { name: "", agents: [] }, tasks: [], processes: [] }, null, 2), "utf-8");
-    }
-
     console.log(chalk.green("\n  Polpo initialized!"));
-    console.log(chalk.dim("  Edit .polpo/polpo.json for team & settings, polpo.yml for tasks."));
-    console.log(chalk.dim("  Then run: polpo run\n"));
+    console.log(chalk.dim("  Edit .polpo/polpo.json for team & settings."));
+    console.log(chalk.dim("  Then run: polpo tui\n"));
   });
 
 // polpo run
 program
   .command("run")
-  .description("Run the orchestration (execute all tasks)")
-  .option("-c, --config <path>", "Path to polpo.yml", ".")
+  .description("Run the orchestration (execute pending tasks)")
+  .option("-d, --dir <path>", "Working directory", ".")
   .action(async (opts) => {
     console.log(LOGO);
     try {
-      const orchestrator = new Orchestrator(opts.config);
+      const orchestrator = new Orchestrator(opts.dir);
       wireConsoleEvents(orchestrator);
       await orchestrator.run();
     } catch (err: any) {
@@ -201,10 +182,10 @@ program
 program
   .command("status")
   .description("Show current task status (live dashboard)")
-  .option("-c, --config <path>", "Path to working directory", ".")
+  .option("-d, --dir <path>", "Working directory", ".")
   .option("-w, --watch", "Watch mode: auto-refresh", false)
   .action(async (opts) => {
-    const statePath = resolve(opts.config, ".polpo", "state.json");
+    const statePath = resolve(opts.dir, ".polpo", "state.json");
     let frame = 0;
     const startTime = Date.now();
     let lastState: OrchestraState | null = null;
@@ -436,7 +417,7 @@ program
   .description("Start the Polpo HTTP API server")
   .option("-p, --port <port>", "Port to listen on", "3000")
   .option("-H, --host <host>", "Host to bind to", "0.0.0.0")
-  .option("-c, --config <path>", "Path to working directory", ".")
+  .option("-d, --dir <path>", "Working directory", ".")
   .option("--api-key <key>", "API key for authentication (optional)")
   .option("--project-id <id>", "Project ID (defaults to directory name)")
   .action(async (opts) => {
@@ -444,12 +425,10 @@ program
     const { basename } = await import("node:path");
     const { OrchestraServer } = await import("../server/index.js");
 
-    // Register adapters
-    await import("../adapters/native.js");
+    // Register external adapters
     await import("../adapters/claude-sdk.js");
-    await import("../adapters/generic.js");
 
-    const workDir = resolve(opts.config);
+    const workDir = resolve(opts.dir);
     const projectId = opts.projectId || basename(workDir);
     const port = parseInt(opts.port, 10);
 
@@ -548,10 +527,10 @@ program
 program
   .command("tui", { isDefault: true })
   .description("Launch the interactive TUI (default)")
-  .option("-c, --config <path>", "Path to working directory", ".")
+  .option("-d, --dir <path>", "Working directory", ".")
   .action(async (opts) => {
     const { startInkTUI } = await import("../tui/app.js");
-    await startInkTUI(opts.config);
+    await startInkTUI(opts.dir);
   });
 
 // Register subcommand groups

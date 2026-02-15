@@ -16,13 +16,13 @@ import { readFileSync, unlinkSync, appendFileSync, mkdirSync, existsSync } from 
 import { join } from "node:path";
 import { FileRunStore } from "../stores/file-run-store.js";
 import { getAdapter } from "../adapters/registry.js";
+import { spawnEngine } from "../adapters/engine.js";
 import type { RunStore, RunRecord } from "./run-store.js";
 import type { RunnerConfig, TaskResult } from "./types.js";
 
-// Side-effect imports: register adapters
-import "../adapters/native.js";
+// Side-effect import: register external adapters (claude-sdk)
 import "../adapters/claude-sdk.js";
-import "../adapters/generic.js";
+import { notifyRunComplete } from "./notification.js";
 
 const ACTIVITY_POLL_MS = 1500;
 
@@ -107,7 +107,7 @@ async function main(): Promise<void> {
     status: "running",
     startedAt: now,
     updatedAt: now,
-    activity: { filesCreated: [], filesEdited: [], toolCalls: 0, lastUpdate: now },
+    activity: { filesCreated: [], filesEdited: [], toolCalls: 0, totalTokens: 0, lastUpdate: now },
     configPath: join(process.argv[process.argv.indexOf("--config") + 1]),
   };
   runStore.upsertRun(initialRecord);
@@ -115,8 +115,15 @@ async function main(): Promise<void> {
 
   let handle;
   try {
-    const adapter = getAdapter(config.agent.adapter);
-    handle = adapter.spawn(config.agent, config.task, config.cwd);
+    const spawnCtx = { polpoDir: config.polpoDir };
+    if (config.agent.adapter) {
+      // External adapter (e.g. claude-sdk) — use the registry
+      const adapter = getAdapter(config.agent.adapter);
+      handle = adapter.spawn(config.agent, config.task, config.cwd, spawnCtx);
+    } else {
+      // No adapter specified — use Polpo's built-in engine
+      handle = spawnEngine(config.agent, config.task, config.cwd, spawnCtx);
+    }
     // Wire transcript persistence — every agent message gets written to the run log
     handle.onTranscript = (entry) => actLog.logTranscript(entry);
     actLog.logEvent("spawned");
@@ -124,6 +131,9 @@ async function main(): Promise<void> {
     const result = errorResult(err);
     actLog.logEvent("error", { message: result.stderr });
     runStore.completeRun(config.runId, "failed", result);
+    if (config.notifySocket) {
+      notifyRunComplete(config.notifySocket, config.runId, config.taskId, "failed");
+    }
     runStore.close();
     process.exit(1);
   }
@@ -154,11 +164,17 @@ async function main(): Promise<void> {
     const status = sigterm ? "killed" : (result.exitCode === 0 ? "completed" : "failed");
     actLog.logEvent("done", { status, exitCode: result.exitCode, duration: result.duration });
     runStore.completeRun(config.runId, status, result);
+    if (config.notifySocket) {
+      notifyRunComplete(config.notifySocket, config.runId, config.taskId, status);
+    }
   } catch (err) {
     clearInterval(poll);
     try { runStore.updateActivity(config.runId, handle.activity); } catch { /* best effort */ }
     actLog.logEvent("error", { message: err instanceof Error ? err.message : String(err) });
     runStore.completeRun(config.runId, "failed", errorResult(err));
+    if (config.notifySocket) {
+      notifyRunComplete(config.notifySocket, config.runId, config.taskId, "failed");
+    }
   }
 
   // Cleanup config file

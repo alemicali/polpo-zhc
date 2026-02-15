@@ -9,7 +9,7 @@ import { Steps, Tabs, TabItem, Aside } from '@astrojs/starlight/components';
 
 - **Node.js** v18 or higher
 - **npm** v8 or higher
-- **API Keys**: `ANTHROPIC_API_KEY` for Claude agents (or provider-specific keys for other agents)
+- **API Keys** (optional): Only required for paid models. The default `opencode:big-pickle` model is free and requires no API key.
 
 ## Installation
 
@@ -46,12 +46,22 @@ import { Steps, Tabs, TabItem, Aside } from '@astrojs/starlight/components';
 
 </Steps>
 
-## Configure Your Environment
+## Configure Your Environment (Optional)
 
-Set your API key for the agent provider you plan to use:
+The default `opencode:big-pickle` model works out-of-the-box without any API key.
+
+If you want to use a paid model, set the appropriate API key:
 
 ```bash
+# For Anthropic Claude models
 export ANTHROPIC_API_KEY=sk-ant-...
+
+# For OpenAI models
+export OPENAI_API_KEY=sk-...
+
+# For other providers
+export GOOGLE_API_KEY=...
+export GROQ_API_KEY=gsk_...
 ```
 
 ## Initialize a Project
@@ -60,21 +70,34 @@ export ANTHROPIC_API_KEY=sk-ant-...
 polpo init
 ```
 
-This creates a `polpo.yml` configuration file in your current directory with example agents and a sample plan.
+This creates a `.polpo/` directory with `polpo.json` configuration file containing your project setup and default agents.
 
 ## Write Your First Plan
 
-Edit `polpo.yml`:
+The `.polpo/polpo.json` file contains your team configuration. Plans are created dynamically via the TUI or CLI.
 
-```yaml
-agents:
-  - name: backend-dev
-    adapter: claude-sdk
-    description: Backend developer specializing in Node.js and databases
+Your initial config looks like:
 
-  - name: frontend-dev
-    adapter: claude-sdk
-    description: Frontend developer specializing in React and TypeScript
+```json
+{
+  "project": "my-project",
+  "team": {
+    "name": "default",
+    "agents": [
+      {
+        "name": "backend-dev",
+        "adapter": "native",
+        "model": "opencode:big-pickle",
+        "role": "Backend developer specializing in Node.js and databases"
+      },
+      {
+        "name": "frontend-dev",
+        "adapter": "native",
+        "model": "opencode:big-pickle",
+        "role": "Frontend developer specializing in React and TypeScript"
+      }
+    ]
+  }
 
 plans:
   - group: setup-project
@@ -132,7 +155,7 @@ When you run a plan, Polpo:
 
 ## Next Steps
 
-- [Configuration](/configuration/) — Learn about `polpo.yml` options
+- [Configuration](/configuration/) — Learn about `.polpo/polpo.json` options
 - [Architecture](/concepts/architecture/) — Understand how Polpo works under the hood
 - [Your First Plan](/guides/first-plan/) — Step-by-step tutorial
 - [CLI Reference](/usage/cli/) — All available commands

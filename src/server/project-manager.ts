@@ -31,7 +31,7 @@ export class ProjectManager {
     // Default team fallback (initInteractive will load from .polpo/polpo.json if available)
     const defaultTeam: Team = {
       name: "default",
-      agents: [{ name: "dev-1", adapter: "native", role: "developer" }],
+      agents: [{ name: "dev-1", role: "developer" }],
     };
 
     await orchestrator.initInteractive(basename(workDir), defaultTeam);

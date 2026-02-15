@@ -85,19 +85,25 @@ export interface TaskResult {
   stderr: string;
   duration: number;
   assessment?: AssessmentResult;
+  /** All previous assessments (oldest first). Current assessment is always in `assessment`. */
+  assessmentHistory?: AssessmentResult[];
 }
 
 // === Agent ===
 
-export type AdapterType = "native" | "claude-sdk" | "generic" | string;
+/**
+ * Adapter type for external agent runtimes.
+ * When not specified (undefined), Polpo's built-in engine (Pi Agent) is used.
+ * "claude-sdk" delegates to Anthropic's Claude Code SDK.
+ */
+export type AdapterType = "claude-sdk" | string;
 
 export interface AgentConfig {
   name: string;
-  /** Adapter to use. Defaults to "native" (Polpo's built-in engine). Use "claude-sdk" or "generic" for external tools. */
-  adapter: AdapterType;
+  /** External adapter to use. When omitted, Polpo's built-in engine (Pi Agent) is used.
+   *  Use "claude-sdk" to delegate to Claude Code. */
+  adapter?: AdapterType;
   role?: string;
-  /** For generic adapter: the shell command to run. {prompt} and {taskFile} are replaced. */
-  command?: string;
   /** Model to use. Format: "provider:model" (e.g. "anthropic:claude-sonnet-4-5-20250929") or bare model ID (auto-inferred). */
   model?: string;
   /** Allowed tools for the agent (e.g. ["read", "write", "edit", "bash", "glob", "grep"]) */
@@ -110,6 +116,8 @@ export interface AgentConfig {
   skills?: string[];
   /** Max conversation turns before stopping. Default 150 */
   maxTurns?: number;
+  /** Max concurrent tasks for this agent. Default: unlimited (undefined). */
+  maxConcurrency?: number;
   /** Volatile agent — created for a specific plan, auto-removed when plan completes */
   volatile?: boolean;
   /** Plan group this volatile agent belongs to */
@@ -122,6 +130,7 @@ export interface AgentActivity {
   filesCreated: string[];   // files created during this task
   filesEdited: string[];    // files edited during this task
   toolCalls: number;        // total tool calls made
+  totalTokens: number;      // cumulative token usage across all turns
   lastUpdate: string;       // ISO timestamp of last activity
   summary?: string;         // agent's last text output / message
   sessionId?: string;       // SDK session ID for transcript access
@@ -164,6 +173,8 @@ export interface MetricResult {
   passed: boolean;
 }
 
+export type AssessmentTrigger = "initial" | "reassess" | "fix" | "retry" | "auto-correct" | "judge";
+
 export interface AssessmentResult {
   passed: boolean;
   checks: CheckResult[];
@@ -172,6 +183,31 @@ export interface AssessmentResult {
   scores?: DimensionScore[];     // aggregated dimension scores
   globalScore?: number;          // aggregated weighted score (1-5)
   timestamp: string;
+  /** What triggered this assessment. Defaults to "initial" for backwards compatibility. */
+  trigger?: AssessmentTrigger;
+}
+
+/**
+ * Replace the current assessment on a TaskResult, archiving the old one in assessmentHistory.
+ * Also tags the new assessment with the given trigger.
+ */
+export function setAssessment(result: TaskResult, assessment: AssessmentResult, trigger: AssessmentTrigger): void {
+  if (result.assessment) {
+    if (!result.assessmentHistory) result.assessmentHistory = [];
+    result.assessmentHistory.push(result.assessment);
+  }
+  assessment.trigger = trigger;
+  result.assessment = assessment;
+}
+
+// === Review Context (passed to LLM reviewers for richer assessment) ===
+
+export interface ReviewContext {
+  taskTitle: string;
+  taskDescription: string;
+  agentOutput?: string;       // stdout truncated to last 2000 chars
+  filesCreated?: string[];
+  filesEdited?: string[];
 }
 
 // === Plan ===
@@ -181,7 +217,7 @@ export type PlanStatus = "draft" | "active" | "completed" | "failed" | "cancelle
 export interface Plan {
   id: string;
   name: string;         // "plan-1", "plan-2", or custom name
-  yaml: string;         // full YAML content
+  data: string;         // JSON plan content (tasks, team, etc.)
   prompt?: string;      // original user prompt that generated this plan
   status: PlanStatus;
   createdAt: string;
@@ -217,6 +253,8 @@ export interface RunnerConfig {
   polpoDir: string;
   cwd: string;
   storage?: "file" | "sqlite";
+  /** UDS path for push-notifying the orchestrator on completion. */
+  notifySocket?: string;
 }
 
 // === Polpo Config (.polpo/polpo.json — persistent project configuration) ===
@@ -237,7 +275,7 @@ export interface ProviderConfig {
   baseUrl?: string;
 }
 
-// === Config (polpo.yml) ===
+// === Config (.polpo/polpo.json) ===
 
 export interface OrchestraConfig {
   version: string;
@@ -273,6 +311,10 @@ export interface OrchestraSettings {
   orchestratorModel?: string;
   /** Storage backend for tasks, plans, and runs. Default: "file" (filesystem JSON). */
   storage?: "file" | "sqlite";
+  /** Max assessment retries when all reviewers fail before falling back to fix/retry. Default: 1 */
+  maxAssessmentRetries?: number;
+  /** Max concurrent agent processes. Default: unlimited (undefined). */
+  maxConcurrency?: number;
 }
 
 // === Orchestra State (persisted in .polpo/state.json) ===

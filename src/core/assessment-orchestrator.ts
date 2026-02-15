@@ -1,7 +1,8 @@
 import { join, basename } from "node:path";
 import { existsSync, readdirSync } from "node:fs";
 import type { OrchestratorContext } from "./orchestrator-context.js";
-import type { Task, TaskResult, AssessmentResult, TaskExpectation } from "./types.js";
+import type { Task, TaskResult, AssessmentResult, TaskExpectation, ReviewContext } from "./types.js";
+import { setAssessment } from "./types.js";
 import { buildFixPrompt, buildRetryPrompt, buildJudgePrompt, type JudgeVerdict, type JudgeCorrection } from "./assessment-prompts.js";
 import { looksLikeQuestion, classifyAsQuestion } from "./question-detector.js";
 import { generateAnswer } from "../llm/answer-generator.js";
@@ -99,8 +100,8 @@ export class AssessmentOrchestrator {
 
       // Append Q&A to description and re-run (no retry burn)
       const qaBlock = `\n\n[Polpo Clarification]\nQ: ${question}\nA: ${answer}`;
+      this.ctx.registry.unsafeSetStatus(taskId, "pending", "Q&A re-run — no retry burn");
       this.ctx.registry.updateTask(taskId, {
-        status: "pending",
         phase: "execution",
         description: current.description + qaBlock,
         questionRounds: (current.questionRounds ?? 0) + 1,
@@ -112,17 +113,61 @@ export class AssessmentOrchestrator {
   }
 
   /**
+   * Run assessment with retry when all LLM reviewers fail.
+   * Retries up to maxAssessmentRetries times before returning the failed result.
+   */
+  private async runAssessmentWithRetry(
+    task: Task, cwd: string, progressCb: (msg: string) => void,
+    context?: ReviewContext,
+  ): Promise<AssessmentResult> {
+    const maxRetries = this.ctx.config.settings.maxAssessmentRetries ?? 1;
+
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      const assessment = await this.ctx.assessFn(task, cwd, progressCb, context);
+
+      // Check if failure is due to all evaluators failing (not low scores)
+      const allEvalsFailed = !assessment.passed && assessment.checks.some(
+        c => c.type === "llm_review" && !c.passed && c.message.includes("all evaluators failed"),
+      );
+
+      if (!allEvalsFailed || attempt === maxRetries) {
+        return assessment;
+      }
+
+      this.ctx.emitter.emit("log", {
+        level: "warn",
+        message: `[${task.id}] All reviewers failed, retrying assessment (${attempt + 1}/${maxRetries})`,
+      });
+    }
+
+    // Unreachable — satisfies TypeScript
+    return this.ctx.assessFn(task, cwd, progressCb, context);
+  }
+
+  /**
    * Standard assessment flow: run expectations/metrics, then mark done/failed/fix/retry.
    */
   private proceedToAssessment(taskId: string, task: Task, result: TaskResult): void {
     if (task.expectations.length > 0 || task.metrics.length > 0) {
       this.ctx.emitter.emit("assessment:started", { taskId });
       const progressCb = (msg: string) => this.ctx.emitter.emit("assessment:progress", { taskId, message: msg });
-      this.ctx.assessFn(task, this.ctx.workDir, progressCb).then(assessment => {
-        result.assessment = assessment;
+
+      // Build review context from RunStore activity
+      const run = this.ctx.runStore.getRunByTaskId(taskId);
+      const activity = run?.activity;
+      const reviewContext: ReviewContext = {
+        taskTitle: task.title,
+        taskDescription: task.originalDescription ?? task.description,
+        agentOutput: result.stdout || undefined,
+        filesCreated: activity?.filesCreated,
+        filesEdited: activity?.filesEdited,
+      };
+
+      this.runAssessmentWithRetry(task, this.ctx.workDir, progressCb, reviewContext).then(assessment => {
+        setAssessment(result, assessment, "initial");
         this.ctx.registry.updateTask(taskId, { result });
 
-        if (assessment.passed) {
+        if (assessment.passed && result.exitCode === 0) {
           this.ctx.emitter.emit("assessment:complete", {
             taskId,
             passed: true,
@@ -138,6 +183,26 @@ export class AssessmentOrchestrator {
           });
           this.ctx.registry.transition(taskId, "done");
           this.ctx.registry.updateTask(taskId, { phase: undefined });
+        } else if (assessment.passed && result.exitCode !== 0) {
+          // Checks passed but agent failed (killed, crashed, non-zero exit).
+          // Override assessment to failed — the agent didn't complete successfully.
+          assessment.passed = false;
+          const exitMsg = `Agent exited with code ${result.exitCode}`;
+          assessment.checks.push({
+            type: "test",
+            passed: false,
+            message: exitMsg,
+            details: result.stderr || undefined,
+          });
+          this.ctx.registry.updateTask(taskId, { result });
+          this.ctx.emitter.emit("assessment:complete", {
+            taskId,
+            passed: false,
+            scores: assessment.scores,
+            globalScore: assessment.globalScore,
+            message: exitMsg,
+          });
+          this.retryOrFail(taskId, task, result);
         } else {
           const reasons = [
             ...assessment.checks.filter(c => !c.passed).map(c => `${c.type}: ${c.message}`),
@@ -285,8 +350,15 @@ export class AssessmentOrchestrator {
 
     try {
       const progressCb = (msg: string) => this.ctx.emitter.emit("assessment:progress", { taskId, message: msg });
-      const newAssessment = await this.ctx.assessFn(current, this.ctx.workDir, progressCb);
-      result.assessment = newAssessment;
+      const reCtx: ReviewContext = {
+        taskTitle: task.title,
+        taskDescription: task.originalDescription ?? task.description,
+        agentOutput: result.stdout || undefined,
+        filesCreated: activity?.filesCreated,
+        filesEdited: activity?.filesEdited,
+      };
+      const newAssessment = await this.ctx.assessFn(current, this.ctx.workDir, progressCb, reCtx);
+      setAssessment(result, newAssessment, "auto-correct");
       this.ctx.registry.updateTask(taskId, { result });
 
       if (newAssessment.passed) {
@@ -398,8 +470,15 @@ export class AssessmentOrchestrator {
 
     try {
       const progressCb = (msg: string) => this.ctx.emitter.emit("assessment:progress", { taskId, message: msg });
-      const newAssessment = await this.ctx.assessFn(current, this.ctx.workDir, progressCb);
-      result.assessment = newAssessment;
+      const judgeCtx: ReviewContext = {
+        taskTitle: task.title,
+        taskDescription: task.originalDescription ?? task.description,
+        agentOutput: result.stdout || undefined,
+        filesCreated: activity?.filesCreated,
+        filesEdited: activity?.filesEdited,
+      };
+      const newAssessment = await this.ctx.assessFn(current, this.ctx.workDir, progressCb, judgeCtx);
+      setAssessment(result, newAssessment, "judge");
       this.ctx.registry.updateTask(taskId, { result });
 
       if (newAssessment.passed) {
@@ -457,10 +536,9 @@ export class AssessmentOrchestrator {
 
       this.ctx.emitter.emit("task:fix", { taskId, attempt: fixAttempts, maxFix });
 
-      // Use updateTask to set status directly — bypasses retry increment
-      // (fix attempts are NOT real failures)
+      // unsafeSetStatus bypasses retry increment (fix attempts are NOT real failures)
+      this.ctx.registry.unsafeSetStatus(taskId, "pending", "fix phase — no retry burn");
       this.ctx.registry.updateTask(taskId, {
-        status: "pending",
         phase: "fix",
         fixAttempts,
         description: buildFixPrompt(current, result),

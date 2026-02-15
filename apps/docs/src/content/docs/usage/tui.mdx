@@ -83,7 +83,7 @@ The `/plan` command opens an interactive workflow:
 
 1. **Choose template or "Generate with AI"**
 2. **If AI**: Enter a natural language description
-3. **Preview** the generated YAML
+3. **Preview** the generated plan
 4. **Choose**: Execute, Edit, or Refine with feedback
 5. Plan is saved as `draft` and can be executed
 
@@ -122,6 +122,10 @@ The Dashboard tab shows:
 | `Enter` | Submit chat message |
 | `Ctrl+C` | Quit |
 
-<Aside>
-The TUI uses the `blessed` library for terminal rendering. It requires a terminal that supports ANSI escape codes.
+<Aside type="tip">
+The TUI uses **Ink 5** (React for CLI) for terminal rendering. It requires a terminal that supports ANSI escape codes.
+
+**Alternative TUIs:**
+- `--legacy` — Use the legacy blessed-based TUI
+- `--opentui` — Use OpenTUI (Bun-only, Zig-based rendering)
 </Aside>

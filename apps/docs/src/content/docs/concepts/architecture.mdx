@@ -91,7 +91,7 @@ The orchestrator runs a **2-second tick loop** that:
 3. **Retries** failed tasks (with fix phase for targeted corrections)
 4. **Spawns** new agents for pending tasks whose dependencies are met
 5. **Enforces health checks** — kills stale or timed-out agents
-6. **Detects deadlocks** — tasks blocked on failed dependencies
+6. **Detects deadlocks** — tasks blocked on failed dependencies ([Deadlock Resolution](/advanced/deadlock-resolution/))
 7. **Recovers orphans** — reconnects to live processes after a crash
 
 ## Detached Runners

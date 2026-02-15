@@ -11,7 +11,7 @@ import { readFileSync } from "node:fs";
 import { execSync } from "node:child_process";
 import { resolve, relative } from "node:path";
 import { Type } from "@sinclair/typebox";
-import type { TaskExpectation, DimensionScore, CheckResult } from "../core/types.js";
+import type { TaskExpectation, DimensionScore, CheckResult, ReviewContext } from "../core/types.js";
 import { DEFAULT_DIMENSIONS, buildRubricSection, computeWeightedScore, computeMedianScores } from "./scoring.js";
 import { withRetry } from "../llm/retry.js";
 import { resolveModel } from "../llm/pi-client.js";
@@ -135,12 +135,21 @@ function buildReviewPrompt(
   criteria: string,
   rubricSection: string,
   dimNames: string,
+  context?: ReviewContext,
 ): string {
+  const contextSection = context ? `
+TASK CONTEXT:
+Title: ${context.taskTitle}
+Description: ${context.taskDescription}
+${context.filesCreated?.length ? `\nFiles created by agent: ${context.filesCreated.join(", ")}` : ""}${context.filesEdited?.length ? `\nFiles edited by agent: ${context.filesEdited.join(", ")}` : ""}
+${context.agentOutput ? `\nAGENT OUTPUT (last 2000 chars):\n${context.agentOutput.slice(-2000)}` : ""}
+` : "";
+
   return `You are a senior code reviewer performing a structured G-Eval evaluation.
 
 ACCEPTANCE CRITERIA:
 ${criteria}
-
+${contextSection}
 EVALUATION DIMENSIONS AND RUBRICS:
 ${rubricSection}
 
@@ -311,7 +320,7 @@ async function runSingleReviewWithRetry(
         if (!result) throw new Error("Reviewer produced no result");
         return result;
       },
-      { maxRetries: 1, initialDelayMs: 2000, checkTransient: false },
+      { maxRetries: 2, initialDelayMs: 2000, checkTransient: false },
     );
   } catch {
     return null;
@@ -335,6 +344,7 @@ export async function runLLMReview(
   expectation: TaskExpectation,
   cwd: string,
   onProgress?: (msg: string) => void,
+  context?: ReviewContext,
 ): Promise<CheckResult> {
   const criteria = expectation.criteria || "Code should be correct, well-structured, and meet the task requirements.";
   const dimensions = expectation.dimensions ?? DEFAULT_DIMENSIONS;
@@ -342,7 +352,7 @@ export async function runLLMReview(
 
   const dimNames = dimensions.map(d => d.name).join(", ");
   const rubricSection = buildRubricSection(dimensions);
-  const reviewPrompt = buildReviewPrompt(criteria, rubricSection, dimNames);
+  const reviewPrompt = buildReviewPrompt(criteria, rubricSection, dimNames, context);
 
   // Use orchestrator model for reviews (configurable via env or default)
   const reviewModel = process.env.POLPO_JUDGE_MODEL || process.env.POLPO_MODEL || undefined;
@@ -375,8 +385,8 @@ export async function runLLMReview(
 
   return {
     type: "llm_review",
-    passed: true,
-    message: "Review inconclusive (all evaluators failed) — defaulting to pass",
-    details: "All 3 reviewers failed to produce structured output after retries.",
+    passed: false,
+    message: "Review failed — all evaluators failed to produce results",
+    details: "All 3 reviewers failed to produce structured output after retries. Task marked as failed for safety.",
   };
 }

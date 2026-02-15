@@ -13,12 +13,16 @@ export interface TaskStore {
   addTask(task: Omit<Task, "id" | "status" | "retries" | "createdAt" | "updatedAt">): Task;
   getTask(taskId: string): Task | undefined;
   getAllTasks(): Task[];
-  updateTask(taskId: string, updates: Partial<Omit<Task, "id">>): Task;
+  updateTask(taskId: string, updates: Partial<Omit<Task, "id" | "status">>): Task;
   removeTask(taskId: string): boolean;
   removeTasks(filter: (task: Task) => boolean): number;
 
   // State machine
   transition(taskId: string, newStatus: TaskStatus): Task;
+
+  /** Bypass state machine — sets status directly with mandatory reason logging.
+   *  Use ONLY for recovery, race-condition fallbacks, and fix/Q&A re-runs. */
+  unsafeSetStatus(taskId: string, newStatus: TaskStatus, reason: string): Task;
 
   // Lifecycle
   close?(): void;

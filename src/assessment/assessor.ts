@@ -1,4 +1,5 @@
 import { exec } from "node:child_process";
+import { access } from "node:fs/promises";
 import { mkdir, writeFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -10,6 +11,7 @@ import type {
   AssessmentResult,
   CheckResult,
   MetricResult,
+  ReviewContext,
 } from "../core/types.js";
 import { runLLMReview } from "./llm-review.js";
 
@@ -20,6 +22,7 @@ export async function runCheck(
   expectation: TaskExpectation,
   cwd: string,
   onProgress?: (msg: string) => void,
+  context?: ReviewContext,
 ): Promise<CheckResult> {
   switch (expectation.type) {
     case "test": {
@@ -39,12 +42,30 @@ export async function runCheck(
     }
 
     case "file_exists": {
-      // Disabled: file_exists checks are unreliable (path mismatches).
-      // The LLM judge handles file verification via llm_review instead.
+      const paths = expectation.paths ?? [];
+      if (paths.length === 0) {
+        return { type: "file_exists", passed: false, message: "No paths specified" };
+      }
+      const missing: string[] = [];
+      for (const p of paths) {
+        try {
+          await access(p);
+        } catch {
+          missing.push(p);
+        }
+      }
+      if (missing.length === 0) {
+        return {
+          type: "file_exists",
+          passed: true,
+          message: `All ${paths.length} file(s) exist`,
+        };
+      }
       return {
         type: "file_exists",
-        passed: true,
-        message: `Skipped (file_exists disabled)`,
+        passed: false,
+        message: `Missing ${missing.length}/${paths.length} file(s)`,
+        details: missing.join(", "),
       };
     }
 
@@ -106,7 +127,7 @@ export async function runCheck(
     }
 
     case "llm_review": {
-      return await runLLMReview(expectation, cwd, onProgress);
+      return await runLLMReview(expectation, cwd, onProgress, context);
     }
   }
 }
@@ -146,9 +167,10 @@ export async function assessTask(
   task: Task,
   cwd: string,
   onProgress?: (msg: string) => void,
+  context?: ReviewContext,
 ): Promise<AssessmentResult> {
   const checks = await Promise.all(
-    task.expectations.map((exp) => runCheck(exp, cwd, onProgress))
+    task.expectations.map((exp) => runCheck(exp, cwd, onProgress, context))
   );
   const metrics = await Promise.all(
     task.metrics.map((m) => runMetric(m, cwd))

@@ -1,13 +1,13 @@
 ---
 title: Plans
-description: Define multi-task execution plans in YAML
+description: Define multi-task execution plans
 ---
 
 import { Aside, Tabs, TabItem } from '@astrojs/starlight/components';
 
 ## What is a Plan?
 
-A **plan** is a group of related tasks that Polpo executes together. Plans are defined in YAML and can include:
+A **plan** is a group of related tasks that Polpo executes together. Plans are stored as JSON in `.polpo/plans/*.json` and can include:
 
 - Multiple tasks with dependencies
 - Volatile teams (temporary agents scoped to the plan)
@@ -27,7 +27,9 @@ draft → active → completed/failed/cancelled
 | `failed` | One or more tasks failed after exhausting retries |
 | `cancelled` | Plan was manually aborted |
 
-## YAML Format
+## Plan Format
+
+Plans are created via the TUI/CLI/API. Here's an example of the structure (shown in YAML-like format for readability):
 
 ```yaml
 plans:
@@ -187,7 +189,7 @@ Polpo can generate plans from natural language prompts:
 > Prompt: Build a REST API with authentication, rate limiting, and tests
 ```
 
-The AI generates a YAML plan with appropriate agents, tasks, dependencies, and expectations. You can then review, edit, and execute it.
+The AI generates a plan with appropriate agents, tasks, dependencies, and expectations. You can then review, edit, and execute it.
 
 ## Editing Running Plans
 

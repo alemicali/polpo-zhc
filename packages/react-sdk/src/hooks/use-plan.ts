@@ -1,10 +1,12 @@
 import { useSyncExternalStore, useCallback, useEffect, useState } from "react";
 import { useOrchestraContext } from "../provider/orchestra-context.js";
-import { selectPlan } from "../store/selectors.js";
-import type { Plan, UpdatePlanRequest, ExecutePlanResult, ResumePlanResult } from "../client/types.js";
+import { selectPlan, selectPlanReport } from "../store/selectors.js";
+import type { Plan, PlanReport, UpdatePlanRequest, ExecutePlanResult, ResumePlanResult } from "../client/types.js";
 
 export interface UsePlanReturn {
   plan: Plan | undefined;
+  /** Completion report — populated from plan:completed SSE event */
+  report: PlanReport | undefined;
   isLoading: boolean;
   error: Error | null;
   updatePlan: (req: UpdatePlanRequest) => Promise<Plan>;
@@ -21,6 +23,12 @@ export function usePlan(planId: string): UsePlanReturn {
     store.subscribe,
     () => selectPlan(store.getSnapshot(), planId),
     () => selectPlan(store.getServerSnapshot(), planId),
+  );
+
+  const report = useSyncExternalStore(
+    store.subscribe,
+    () => selectPlanReport(store.getSnapshot(), planId),
+    () => selectPlanReport(store.getServerSnapshot(), planId),
   );
 
   const [isLoading, setIsLoading] = useState(!plan);
@@ -68,5 +76,5 @@ export function usePlan(planId: string): UsePlanReturn {
     await client.deletePlan(planId);
   }, [client, planId]);
 
-  return { plan, isLoading, error, updatePlan, executePlan, resumePlan, abortPlan, deletePlan };
+  return { plan, report, isLoading, error, updatePlan, executePlan, resumePlan, abortPlan, deletePlan };
 }

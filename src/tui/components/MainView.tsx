@@ -3,6 +3,7 @@
  * CompletionMenu appears above Input when typing "/".
  */
 
+import { useEffect } from "react";
 import { Box, useStdout } from "ink";
 import { Header } from "./Header.js";
 import { Stream } from "./Stream.js";
@@ -12,9 +13,8 @@ import { CompletionMenu } from "./CompletionMenu.js";
 import { useStore } from "../store.js";
 import { dispatch } from "../commands/router.js";
 import { usePolpo } from "../app.js";
-import { COMMANDS } from "../commands/help.js";
 
-const TASK_PANEL_WIDTH = 36;
+const TASK_PANEL_WIDTH = 64;
 const HEADER_HEIGHT = 1;
 const INPUT_HEIGHT = 4; // border (3) + hint row (1)
 const MAX_MENU_ITEMS = 8;
@@ -25,21 +25,32 @@ export function MainView({ onSubmit }: { onSubmit: (text: string) => void }) {
   const cols = stdout?.columns ?? 80;
   const polpo = usePolpo();
 
-  const buffer = useStore((s) => s.inputBuffer);
   const processing = useStore((s) => s.processing);
+  const streaming = useStore((s) => s.streaming);
+  const recording = useStore((s) => s.recording);
   const taskPanelVisible = useStore((s) => s.taskPanelVisible);
+  const completionActive = useStore((s) => s.completionActive);
 
-  // Calculate menu height when active
-  const menuActive = !processing && buffer.startsWith("/") && !buffer.includes(" ");
-  const query = buffer.slice(1).toLowerCase();
-  const matchCount = menuActive
-    ? COMMANDS.filter(([cmd]) => cmd.split(" ")[0]!.slice(1).startsWith(query)).length
-    : 0;
-  const menuHeight = matchCount > 0 ? Math.min(matchCount, MAX_MENU_ITEMS) + 2 : 0; // +2 for border
+  // CompletionMenu reports its active state — we reserve space for it
+  const menuHeight = completionActive ? MAX_MENU_ITEMS + 2 : 0;
 
-  const contentHeight = Math.max(1, rows - HEADER_HEIGHT - INPUT_HEIGHT - menuHeight - 1);
+  // Status line above input adds 1 row when processing, streaming, or recording
+  const statusLineHeight = (processing || streaming || recording) ? 1 : 0;
+  const contentHeight = Math.max(1, rows - HEADER_HEIGHT - INPUT_HEIGHT - menuHeight - statusLineHeight);
   const panelWidth = taskPanelVisible ? TASK_PANEL_WIDTH : 0;
   const streamWidth = Math.max(10, cols - panelWidth);
+
+  // ── Mouse wheel scrolling ──
+  // Alternate scroll mode: terminal converts wheel events to arrow keys.
+  // No escape sequence parsing needed — Ink handles arrow keys natively.
+  // The existing up/down arrow handler in Input.tsx scrolls the stream.
+  useEffect(() => {
+    if (!process.stdout.isTTY) return;
+    process.stdout.write("\x1b[?1007h"); // enable alternate scroll mode
+    return () => {
+      process.stdout.write("\x1b[?1007l"); // disable
+    };
+  }, []);
 
   const handleCommandSelect = (cmd: string) => {
     const store = useStore.getState();
@@ -51,13 +62,13 @@ export function MainView({ onSubmit }: { onSubmit: (text: string) => void }) {
       <Header />
       <Box flexDirection="row" height={contentHeight}>
         <Box width={streamWidth}>
-          <Stream height={contentHeight} />
+          <Stream height={contentHeight} width={streamWidth} />
         </Box>
         {taskPanelVisible && (
           <TaskPanel width={TASK_PANEL_WIDTH} height={contentHeight} />
         )}
       </Box>
-      {menuHeight > 0 && <CompletionMenu onSelect={handleCommandSelect} />}
+      <CompletionMenu onSelect={handleCommandSelect} />
       <Input onSubmit={onSubmit} />
     </Box>
   );

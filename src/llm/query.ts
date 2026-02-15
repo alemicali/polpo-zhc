@@ -1,5 +1,5 @@
 /**
- * LLM integration: query wrappers and YAML extraction.
+ * LLM integration: query wrappers and structured extraction.
  *
  * Primary backend: pi-ai (multi-provider, works with any LLM).
  * Fallback: Claude Agent SDK for tool-using queries (queryWithTools).
@@ -118,33 +118,3 @@ export async function querySDKStream(
   }, { maxRetries: 2 });
 }
 
-/** Extract YAML block from LLM response (handles markdown fences) */
-export function extractYaml(text: string): string {
-  let yaml = text.trim();
-  const fenceMatch = yaml.match(/```(?:ya?ml)?\n([\s\S]*?)\n```/i);
-  if (fenceMatch) {
-    yaml = fenceMatch[1].trim();
-  }
-  if (!yaml.startsWith("tasks:") && !yaml.startsWith("team:")) {
-    const teamIdx = yaml.indexOf("team:");
-    const tasksIdx = yaml.indexOf("tasks:");
-    if (teamIdx >= 0 && (tasksIdx < 0 || teamIdx < tasksIdx)) {
-      yaml = yaml.slice(teamIdx);
-    } else if (tasksIdx >= 0) {
-      yaml = yaml.slice(tasksIdx);
-    }
-  }
-  return yaml;
-}
-
-/** Extract team YAML block from LLM response */
-export function extractTeamYaml(text: string): string {
-  let yaml = text.trim();
-  const fenceMatch = yaml.match(/```(?:ya?ml)?\n([\s\S]*?)\n```/i);
-  if (fenceMatch) yaml = fenceMatch[1].trim();
-  if (!yaml.startsWith("team:")) {
-    const idx = yaml.indexOf("team:");
-    if (idx >= 0) yaml = yaml.slice(idx);
-  }
-  return yaml;
-}

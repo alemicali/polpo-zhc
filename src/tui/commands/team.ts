@@ -57,10 +57,9 @@ function teamList(polpo: import("../../core/orchestrator.js").Orchestrator, stor
 
 function teamAdd(polpo: import("../../core/orchestrator.js").Orchestrator, store: import("../store.js").TUIStore) {
   // Step 1: Pick adapter type
-  const adapters: { label: string; value: AdapterType; description: string }[] = [
-    { label: "pi", value: "pi", description: "Native pi-ai adapter (recommended)" },
+  const adapters: { label: string; value: string; description: string }[] = [
+    { label: "engine", value: "", description: "Polpo built-in engine (recommended)" },
     { label: "claude-sdk", value: "claude-sdk", description: "Anthropic Claude Agent SDK" },
-    { label: "generic", value: "generic", description: "Generic CLI command adapter" },
   ];
 
   store.navigate({
@@ -90,7 +89,7 @@ function teamAdd(polpo: import("../../core/orchestrator.js").Orchestrator, store
 
           const agent: AgentConfig = {
             name: trimmed,
-            adapter: adapter as AdapterType,
+            ...(adapter ? { adapter: adapter as AdapterType } : {}),
           };
 
           polpo.addAgent(agent);
@@ -98,7 +97,7 @@ function teamAdd(polpo: import("../../core/orchestrator.js").Orchestrator, store
           store.log(`Added agent: ${trimmed}`, [
             seg("+ ", "green"),
             seg(trimmed, "cyan", true),
-            seg(` (${adapter})`, "gray"),
+            seg(` (${adapter || "engine"})`, "gray"),
           ]);
         },
         onCancel: () => {
@@ -172,7 +171,6 @@ function teamEdit(
     const fields = [
       { label: `model: ${agent.model ?? "(none)"}`, value: "model" },
       { label: `role: ${agent.role ?? "(none)"}`, value: "role" },
-      { label: `command: ${agent.command ?? "(none)"}`, value: "command" },
       { label: `systemPrompt: ${agent.systemPrompt ? "set" : "(none)"}`, value: "systemPrompt" },
       { label: `maxTurns: ${agent.maxTurns ?? "default"}`, value: "maxTurns" },
     ];

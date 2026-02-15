@@ -107,7 +107,7 @@ export class SqliteRunStore implements RunStore {
   }
 
   private rowToRecord(row: RunRow): RunRecord {
-    const activity = safeJsonParse<AgentActivity>(row.activity, { filesCreated: [], filesEdited: [], toolCalls: 0, lastUpdate: "" });
+    const activity = safeJsonParse<AgentActivity>(row.activity, { filesCreated: [], filesEdited: [], toolCalls: 0, totalTokens: 0, lastUpdate: "" });
     // Prefer first-class column; fall back to value inside activity JSON
     const sessionId = row.session_id ?? activity.sessionId ?? undefined;
     return {

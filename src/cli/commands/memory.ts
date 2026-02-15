@@ -5,9 +5,7 @@ import { tmpdir } from "node:os";
 import { writeFile, readFile, unlink } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
 import { Orchestrator } from "../../core/orchestrator.js";
-import "../../adapters/native.js";
 import "../../adapters/claude-sdk.js";
-import "../../adapters/generic.js";
 
 async function initOrchestrator(configPath: string): Promise<Orchestrator> {
   const o = new Orchestrator(resolve(configPath));
@@ -24,10 +22,10 @@ export function registerMemoryCommands(program: Command): void {
   mem
     .command("show")
     .description("Display the current project memory")
-    .option("-c, --config <path>", "Path to working directory", ".")
+    .option("-d, --dir <path>", "Working directory", ".")
     .action(async (opts) => {
       try {
-        const orchestrator = await initOrchestrator(opts.config);
+        const orchestrator = await initOrchestrator(opts.dir);
         if (!orchestrator.hasMemory()) {
           console.log(chalk.dim("No project memory."));
           return;
@@ -43,10 +41,10 @@ export function registerMemoryCommands(program: Command): void {
   mem
     .command("set <content...>")
     .description("Replace the entire project memory with the given content")
-    .option("-c, --config <path>", "Path to working directory", ".")
+    .option("-d, --dir <path>", "Working directory", ".")
     .action(async (content: string[], opts) => {
       try {
-        const orchestrator = await initOrchestrator(opts.config);
+        const orchestrator = await initOrchestrator(opts.dir);
         const text = content.join(" ");
         orchestrator.saveMemory(text);
         console.log(chalk.green("Memory saved."));
@@ -60,10 +58,10 @@ export function registerMemoryCommands(program: Command): void {
   mem
     .command("append <line...>")
     .description("Append a line to the project memory")
-    .option("-c, --config <path>", "Path to working directory", ".")
+    .option("-d, --dir <path>", "Working directory", ".")
     .action(async (line: string[], opts) => {
       try {
-        const orchestrator = await initOrchestrator(opts.config);
+        const orchestrator = await initOrchestrator(opts.dir);
         const text = line.join(" ");
         orchestrator.appendMemory(text);
         console.log(chalk.green("Memory updated."));
@@ -77,10 +75,10 @@ export function registerMemoryCommands(program: Command): void {
   mem
     .command("edit")
     .description("Open project memory in $EDITOR")
-    .option("-c, --config <path>", "Path to working directory", ".")
+    .option("-d, --dir <path>", "Working directory", ".")
     .action(async (opts) => {
       try {
-        const orchestrator = await initOrchestrator(opts.config);
+        const orchestrator = await initOrchestrator(opts.dir);
         const editor = process.env.EDITOR || "vi";
         const current = orchestrator.hasMemory() ? orchestrator.getMemory() : "";
         const tmpPath = resolve(tmpdir(), "polpo-memory-" + Date.now() + ".md");

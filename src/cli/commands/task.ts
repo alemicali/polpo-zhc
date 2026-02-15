@@ -16,10 +16,8 @@ import { resolve } from "node:path";
 import { Orchestrator } from "../../core/orchestrator.js";
 import type { Task, TaskStatus, TaskExpectation } from "../../core/types.js";
 
-// Register adapters (side-effect imports)
-import "../../adapters/native.js";
+// Register external adapters (side-effect imports)
 import "../../adapters/claude-sdk.js";
-import "../../adapters/generic.js";
 
 // ── Helpers ──
 
@@ -67,12 +65,12 @@ export function registerTaskCommands(program: Command): void {
   task
     .command("list")
     .description("List all tasks")
-    .option("-c, --config <path>", "Path to working directory", ".")
+    .option("-d, --dir <path>", "Working directory", ".")
     .option("--status <status>", "Filter by status")
     .option("--group <group>", "Filter by group")
     .action(async (opts) => {
       try {
-        const orchestrator = await initOrchestrator(opts.config);
+        const orchestrator = await initOrchestrator(opts.dir);
         let tasks = orchestrator.getStore().getAllTasks();
 
         if (opts.status) {
@@ -114,10 +112,10 @@ export function registerTaskCommands(program: Command): void {
   task
     .command("show <taskId>")
     .description("Show task details")
-    .option("-c, --config <path>", "Path to working directory", ".")
+    .option("-d, --dir <path>", "Working directory", ".")
     .action(async (taskId: string, opts) => {
       try {
-        const orchestrator = await initOrchestrator(opts.config);
+        const orchestrator = await initOrchestrator(opts.dir);
         const tasks = orchestrator.getStore().getAllTasks();
         const t = findTask(tasks, taskId);
 
@@ -209,17 +207,17 @@ export function registerTaskCommands(program: Command): void {
   task
     .command("add <description...>")
     .description("Create a new task")
-    .option("-c, --config <path>", "Path to working directory", ".")
+    .option("-d, --dir <path>", "Working directory", ".")
     .option("-a, --agent <name>", "Assign to specific agent")
     .option("--no-prep", "Skip LLM task-prep, create directly")
     .action(async (descParts: string[], opts) => {
       try {
         const description = descParts.join(" ");
-        const orchestrator = await initOrchestrator(opts.config);
+        const orchestrator = await initOrchestrator(opts.dir);
         const agents = orchestrator.getAgents();
 
         if (agents.length === 0) {
-          console.error(chalk.red("No agents configured. Edit polpo.yml to add agents."));
+          console.error(chalk.red("No agents configured. Edit .polpo/polpo.json to add agents."));
           process.exit(1);
         }
 
@@ -250,11 +248,10 @@ export function registerTaskCommands(program: Command): void {
           console.log(chalk.dim(`    ID: ${t.id}  Agent: ${agentName}`));
           console.log(chalk.dim(`\n  Run ${chalk.white("polpo run")} to execute.`));
         } else {
-          // LLM task-prep (default)
+          // LLM task-prep (default) — tool-based structured output
           try {
             const { buildTaskPrepPrompt } = await import("../../llm/prompts.js");
-            const { querySDKText, extractYaml } = await import("../../llm/query.js");
-            const { parse: parseYaml } = await import("yaml");
+            const { generateTaskPrep } = await import("../../llm/plan-generator.js");
 
             const state = (() => {
               try { return orchestrator.getStore()?.getState() ?? null; }
@@ -263,47 +260,13 @@ export function registerTaskCommands(program: Command): void {
 
             console.log(chalk.dim("  Preparing task with AI..."));
 
-            const prompt = buildTaskPrepPrompt(orchestrator, state, orchestrator.getWorkDir(), description, agentName);
+            const systemPrompt = buildTaskPrepPrompt(orchestrator, state, orchestrator.getWorkDir(), description, agentName);
             const model = orchestrator.getConfig()?.settings?.orchestratorModel;
-            const result = await querySDKText(prompt, orchestrator.getWorkDir(), model);
-            const yaml = extractYaml(result);
+            const prepTask = await generateTaskPrep(systemPrompt, description, model);
 
-            if (!yaml?.trim()) {
-              // Fallback to direct creation
-              const title = description.length > 80 ? description.slice(0, 77) + "..." : description;
-              const t = orchestrator.addTask({ title, description, assignTo: agentName });
-              console.log(chalk.green(`  + Task created (direct): ${t.title}`));
-              console.log(chalk.dim(`    ID: ${t.id}  Agent: ${agentName}`));
-              console.log(chalk.dim(`\n  Run ${chalk.white("polpo run")} to execute.`));
-              return;
-            }
-
-            let doc: any;
-            try {
-              doc = parseYaml(yaml);
-            } catch {
-              const title = description.length > 80 ? description.slice(0, 77) + "..." : description;
-              const t = orchestrator.addTask({ title, description, assignTo: agentName });
-              console.log(chalk.yellow("  YAML parse failed, creating directly."));
-              console.log(chalk.green(`  + Task created: ${t.title}`));
-              console.log(chalk.dim(`    ID: ${t.id}  Agent: ${agentName}`));
-              console.log(chalk.dim(`\n  Run ${chalk.white("polpo run")} to execute.`));
-              return;
-            }
-
-            const prepTask = doc?.tasks?.[0];
-            if (!prepTask?.title) {
-              const title = description.length > 80 ? description.slice(0, 77) + "..." : description;
-              const t = orchestrator.addTask({ title, description, assignTo: agentName });
-              console.log(chalk.green(`  + Task created (direct): ${t.title}`));
-              console.log(chalk.dim(`    ID: ${t.id}  Agent: ${agentName}`));
-              console.log(chalk.dim(`\n  Run ${chalk.white("polpo run")} to execute.`));
-              return;
-            }
-
-            // Parse expectations from LLM output
+            // Build expectations from validated data
             const expectations: TaskExpectation[] = [];
-            if (Array.isArray(prepTask.expectations)) {
+            if (prepTask.expectations) {
               for (const e of prepTask.expectations) {
                 if (e.type === "test" && e.command) {
                   expectations.push({ type: "test", command: e.command });
@@ -359,10 +322,10 @@ export function registerTaskCommands(program: Command): void {
   task
     .command("retry <taskId>")
     .description("Retry a failed task")
-    .option("-c, --config <path>", "Path to working directory", ".")
+    .option("-d, --dir <path>", "Working directory", ".")
     .action(async (taskId: string, opts) => {
       try {
-        const orchestrator = await initOrchestrator(opts.config);
+        const orchestrator = await initOrchestrator(opts.dir);
         const tasks = orchestrator.getStore().getAllTasks();
         const t = findTask(tasks, taskId);
 
@@ -384,10 +347,10 @@ export function registerTaskCommands(program: Command): void {
   task
     .command("kill <taskId>")
     .description("Kill a running task")
-    .option("-c, --config <path>", "Path to working directory", ".")
+    .option("-d, --dir <path>", "Working directory", ".")
     .action(async (taskId: string, opts) => {
       try {
-        const orchestrator = await initOrchestrator(opts.config);
+        const orchestrator = await initOrchestrator(opts.dir);
         const tasks = orchestrator.getStore().getAllTasks();
         const t = findTask(tasks, taskId);
 
@@ -413,10 +376,10 @@ export function registerTaskCommands(program: Command): void {
   task
     .command("reassess <taskId>")
     .description("Re-run assessment on a completed task")
-    .option("-c, --config <path>", "Path to working directory", ".")
+    .option("-d, --dir <path>", "Working directory", ".")
     .action(async (taskId: string, opts) => {
       try {
-        const orchestrator = await initOrchestrator(opts.config);
+        const orchestrator = await initOrchestrator(opts.dir);
         const tasks = orchestrator.getStore().getAllTasks();
         const t = findTask(tasks, taskId);
 
@@ -439,10 +402,10 @@ export function registerTaskCommands(program: Command): void {
   task
     .command("delete <taskId>")
     .description("Delete a task")
-    .option("-c, --config <path>", "Path to working directory", ".")
+    .option("-d, --dir <path>", "Working directory", ".")
     .action(async (taskId: string, opts) => {
       try {
-        const orchestrator = await initOrchestrator(opts.config);
+        const orchestrator = await initOrchestrator(opts.dir);
         const tasks = orchestrator.getStore().getAllTasks();
         const t = findTask(tasks, taskId);
 
@@ -451,7 +414,7 @@ export function registerTaskCommands(program: Command): void {
           process.exit(1);
         }
 
-        const removed = orchestrator.getStore().removeTask(t.id);
+        const removed = orchestrator.deleteTask(t.id);
         if (removed) {
           console.log(chalk.green(`  Task "${t.title}" deleted.`));
         } else {

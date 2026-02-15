@@ -4,12 +4,13 @@ import type { RunStore } from "./run-store.js";
 import type { MemoryStore } from "./memory-store.js";
 import type { LogStore } from "./log-store.js";
 import type { SessionStore } from "./session-store.js";
-import type { OrchestraConfig, Task, AssessmentResult } from "./types.js";
+import type { OrchestraConfig, Task, AssessmentResult, ReviewContext } from "./types.js";
 
 export type AssessFn = (
   task: Task,
   cwd: string,
   onProgress?: (msg: string) => void,
+  context?: ReviewContext,
 ) => Promise<AssessmentResult>;
 
 /**

@@ -5,9 +5,7 @@ import { Orchestrator } from "../../core/orchestrator.js";
 import { buildChatSystemPrompt } from "../../llm/prompts.js";
 import { querySDKText } from "../../llm/query.js";
 import type { SessionStore } from "../../core/session-store.js";
-import "../../adapters/native.js";
 import "../../adapters/claude-sdk.js";
-import "../../adapters/generic.js";
 
 const SESSION_TIMEOUT_MS = 30 * 60 * 1000; // 30 min
 const MAX_HISTORY = 20;
@@ -36,12 +34,12 @@ export function registerChatCommands(program: Command): void {
   program
     .command("chat <message...>")
     .description("Chat with the Polpo assistant about your project")
-    .option("-c, --config <path>", "Path to working directory", ".")
+    .option("-d, --dir <path>", "Working directory", ".")
     .action(async (messageArgs: string[], opts) => {
       const message = messageArgs.join(" ");
 
       try {
-        const orchestrator = await initOrchestrator(opts.config);
+        const orchestrator = await initOrchestrator(opts.dir);
         const sessionStore = orchestrator.getSessionStore();
         const sessionId = resolveSession(sessionStore);
 

@@ -4,7 +4,8 @@
  */
 
 import { create } from "zustand";
-import type { Task, AgentProcess, OrchestraState } from "../core/types.js";
+import type { Task, AgentProcess, OrchestraState, Plan } from "../core/types.js";
+import type { UserQuestion, UserAnswer } from "../llm/plan-generator.js";
 
 // ─── Segment (styled text unit) ─────────────────────────
 
@@ -13,6 +14,9 @@ export interface Seg {
   color?: string;
   bold?: boolean;
   dim?: boolean;
+  bgColor?: string;
+  underline?: boolean;
+  italic?: boolean;
 }
 
 // ─── Stream entries ─────────────────────────────────────
@@ -53,6 +57,8 @@ export type Page =
       id: "viewer";
       title: string;
       content: string;
+      /** Rich content with colored segments — takes priority over plain content when present. */
+      richContent?: Seg[][];
       actions?: string[];
       onAction?: (index: number) => void;
       onClose: () => void;
@@ -61,6 +67,13 @@ export type Page =
       id: "confirm";
       message: string;
       onConfirm: () => void;
+      onCancel: () => void;
+    }
+  | {
+      id: "questions";
+      title: string;
+      questions: UserQuestion[];
+      onSubmit: (answers: UserAnswer[]) => void;
       onCancel: () => void;
     };
 
@@ -78,14 +91,18 @@ export interface TUIStore {
   updateLastLine(segs: Seg[]): void;
   clearLines(): void;
 
-  // Tasks (snapshot from orchestrator)
+  // Tasks & plans (snapshot from orchestrator)
   tasks: Task[];
   processes: AgentProcess[];
-  syncState(state: OrchestraState): void;
+  plans: Plan[];
+  orchestratorStartedAt: string | null;
+  tuiStartedAt: string;
+  syncState(state: OrchestraState, plans?: Plan[]): void;
 
   // Input
   inputBuffer: string;
-  setInputBuffer(buf: string): void;
+  inputCursorPos: number;
+  setInputBuffer(buf: string, cursorPos?: number): void;
   inputMode: "task" | "plan" | "chat";
   setInputMode(mode: "task" | "plan" | "chat"): void;
   history: string[];
@@ -99,7 +116,20 @@ export interface TUIStore {
   // Processing indicator
   processing: boolean;
   processingLabel: string;
+  processingStartedAt: string | null;
+  processingTokens: number;
   setProcessing(active: boolean, label?: string): void;
+  updateProcessingTokens(tokens: number): void;
+
+  // Streaming session — stays active across the entire request lifecycle
+  // (from user submit through all agentic turns until final response).
+  // Unlike `processing`, this is NOT turned off during text streaming.
+  streaming: boolean;
+  streamingStartedAt: string | null;
+  streamingTokens: number;
+  startStreaming(): void;
+  stopStreaming(): void;
+  updateStreamingTokens(tokens: number): void;
 
   // Chat session
   activeSessionId: string | null;
@@ -109,6 +139,13 @@ export interface TUIStore {
   completionActive: boolean;
   setCompletionActive(active: boolean): void;
 
+  // Stream scroll
+  scrollOffset: number;
+  scrollUp(rows: number): void;
+  scrollDown(rows: number): void;
+  scrollToBottom(): void;
+  setScrollOffset(offset: number): void;
+
   // Task panel visibility
   taskPanelVisible: boolean;
   toggleTaskPanel(): void;
@@ -116,6 +153,19 @@ export interface TUIStore {
   // Voice recording
   recording: boolean;
   setRecording(active: boolean): void;
+
+  // Approval mode
+  approvalMode: "approval" | "accept-all";
+  toggleApprovalMode(): void;
+  pendingApproval: {
+    toolName: string;
+    args: Record<string, unknown>;
+    description: string;
+    onApprove: () => void;
+    onReject: () => void;
+  } | null;
+  setPendingApproval(pending: TUIStore["pendingApproval"]): void;
+  clearPendingApproval(): void;
 
   // Preferences
   defaultAgent: string;
@@ -128,6 +178,9 @@ export const useStore = create<TUIStore>((set) => ({
   pushLine: (entry) =>
     set((s) => ({
       lines: [...s.lines.slice(-(MAX_LINES - 1)), entry],
+      // Preserve scroll position: if user scrolled up, don't jump to bottom.
+      // scrollOffset 0 = already at bottom, so new content stays visible.
+      // scrollOffset > 0 = user is reading history, keep their position.
     })),
   log: (text, segs) =>
     set((s) => ({
@@ -152,18 +205,24 @@ export const useStore = create<TUIStore>((set) => ({
     }),
   clearLines: () => set({ lines: [] }),
 
-  // Tasks
+  // Tasks & plans
   tasks: [],
   processes: [],
-  syncState: (state) =>
+  plans: [],
+  orchestratorStartedAt: null,
+  tuiStartedAt: new Date().toISOString(),
+  syncState: (state, plans) =>
     set({
       tasks: state.tasks,
       processes: state.processes,
+      plans: plans ?? [],
+      orchestratorStartedAt: state.startedAt ?? null,
     }),
 
   // Input
   inputBuffer: "",
-  setInputBuffer: (buf) => set({ inputBuffer: buf }),
+  inputCursorPos: 0,
+  setInputBuffer: (buf, cursorPos) => set({ inputBuffer: buf, inputCursorPos: cursorPos ?? buf.length }),
   inputMode: "chat",
   setInputMode: (mode) => set({ inputMode: mode }),
   history: [],
@@ -180,8 +239,39 @@ export const useStore = create<TUIStore>((set) => ({
   // Processing
   processing: false,
   processingLabel: "",
+  processingStartedAt: null,
+  processingTokens: 0,
   setProcessing: (active, label) =>
-    set({ processing: active, processingLabel: label ?? "" }),
+    set((s) => ({
+      processing: active,
+      processingLabel: label ?? "",
+      processingStartedAt: active ? new Date().toISOString() : null,
+      // Only reset processingTokens when starting fresh (not during an active streaming session)
+      processingTokens: s.streaming ? s.processingTokens : 0,
+    })),
+  updateProcessingTokens: (tokens) =>
+    set((s) => ({
+      processingTokens: s.processingTokens + tokens,
+      streamingTokens: s.streamingTokens + tokens,
+    })),
+
+  // Streaming session — persists across the entire request lifecycle
+  streaming: false,
+  streamingStartedAt: null,
+  streamingTokens: 0,
+  startStreaming: () =>
+    set({
+      streaming: true,
+      streamingStartedAt: new Date().toISOString(),
+      streamingTokens: 0,
+    }),
+  stopStreaming: () =>
+    set({
+      streaming: false,
+      streamingStartedAt: null,
+    }),
+  updateStreamingTokens: (tokens) =>
+    set((s) => ({ streamingTokens: s.streamingTokens + tokens })),
 
   // Chat session
   activeSessionId: null,
@@ -191,6 +281,13 @@ export const useStore = create<TUIStore>((set) => ({
   completionActive: false,
   setCompletionActive: (active) => set({ completionActive: active }),
 
+  // Stream scroll
+  scrollOffset: 0,
+  scrollUp: (rows) => set((s) => ({ scrollOffset: s.scrollOffset + rows })),
+  scrollDown: (rows) => set((s) => ({ scrollOffset: Math.max(0, s.scrollOffset - rows) })),
+  scrollToBottom: () => set({ scrollOffset: 0 }),
+  setScrollOffset: (offset) => set({ scrollOffset: Math.max(0, offset) }),
+
   // Task panel visibility
   taskPanelVisible: true,
   toggleTaskPanel: () => set((s) => ({ taskPanelVisible: !s.taskPanelVisible })),
@@ -198,6 +295,16 @@ export const useStore = create<TUIStore>((set) => ({
   // Voice recording
   recording: false,
   setRecording: (active) => set({ recording: active }),
+
+  // Approval mode
+  approvalMode: "approval",
+  toggleApprovalMode: () =>
+    set((s) => ({
+      approvalMode: s.approvalMode === "approval" ? "accept-all" : "approval",
+    })),
+  pendingApproval: null,
+  setPendingApproval: (pending) => set({ pendingApproval: pending }),
+  clearPendingApproval: () => set({ pendingApproval: null }),
 
   // Preferences
   defaultAgent: "",

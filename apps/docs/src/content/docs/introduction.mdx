@@ -5,17 +5,17 @@ description: Agent-agnostic framework for orchestrating teams of AI coding agent
 
 import { Card, CardGrid } from '@astrojs/starlight/components';
 
-**Polpo** is an agent-agnostic framework for orchestrating teams of AI coding agents. Define plans in YAML, assign tasks to agents, and let Polpo handle coordination, monitoring, and assessment.
+**Polpo** is an agent-agnostic framework for orchestrating teams of AI coding agents. Define plans in JSON, assign tasks to agents, and let Polpo handle coordination, monitoring, and assessment.
 
 ## Features
 
 <CardGrid stagger>
   <Card title="Agent-Agnostic" icon="puzzle">
-    Works with Claude SDK, GPT-4, Aider, or any command-line agent. Swap adapters without changing your plans.
+    Built-in native engine (multi-provider), Claude SDK, or any CLI agent. Free tier available with `opencode:big-pickle`.
   </Card>
 
   <Card title="Plan-Based Orchestration" icon="list-format">
-    Define multi-task plans in YAML with dependencies, volatile teams, and custom assessment criteria.
+    Define multi-task plans with dependencies, volatile teams, and custom assessment criteria. Plans are stored as JSON.
   </Card>
 
   <Card title="G-Eval Assessment" icon="approve-check-circle">
@@ -46,18 +46,19 @@ npm install
 
 ## Your First Plan
 
-```yaml
-agents:
-  - name: backend-dev
-    adapter: claude-sdk
-    description: Backend developer specializing in Node.js
+Plans are created via the TUI, CLI, or HTTP API and stored as JSON in `.polpo/plans/*.json`:
 
-plans:
-  - group: setup-api
-    tasks:
-      - title: Create REST endpoints
-        agent: backend-dev
-        description: Build CRUD API for users and posts
+```json
+{
+  "group": "setup-api",
+  "tasks": [
+    {
+      "title": "Create REST endpoints",
+      "agent": "backend-dev",
+      "description": "Build CRUD API for users and posts"
+    }
+  ]
+}
 ```
 
 ```bash

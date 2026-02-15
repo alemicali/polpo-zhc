@@ -197,7 +197,17 @@ export class FileTaskStore implements TaskStore {
     return tasks;
   }
 
-  updateTask(taskId: string, updates: Partial<Omit<Task, "id">>): Task {
+  unsafeSetStatus(taskId: string, newStatus: TaskStatus, reason: string): Task {
+    const existing = this.readTask(taskId);
+    if (!existing) throw new Error(`Task not found: ${taskId}`);
+    const from = existing.status;
+    const updated: Task = { ...existing, status: newStatus, updatedAt: new Date().toISOString() };
+    this.writeTask(updated);
+    console.warn(`[unsafeSetStatus] ${taskId}: ${from} → ${newStatus} — ${reason}`);
+    return updated;
+  }
+
+  updateTask(taskId: string, updates: Partial<Omit<Task, "id" | "status">>): Task {
     const existing = this.readTask(taskId);
     if (!existing) throw new Error(`Task not found: ${taskId}`);
 
