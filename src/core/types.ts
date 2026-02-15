@@ -79,6 +79,10 @@ export interface Task {
   resolutionAttempts?: number;   // deadlock resolution attempts (max default: 2)
   originalDescription?: string;  // preserved before first retry/fix
   sessionId?: string;            // SDK session ID from the last agent run (for transcript access)
+  /** Absolute deadline (ISO timestamp). Task is SLA-violated if not done by this time. */
+  deadline?: string;
+  /** Priority weight for quality scoring (higher = more important). Default: 1.0 */
+  priority?: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -229,6 +233,14 @@ export interface Plan {
   data: string;         // JSON plan content (tasks, team, etc.)
   prompt?: string;      // original user prompt that generated this plan
   status: PlanStatus;
+  /** Absolute deadline for the entire plan (ISO timestamp). */
+  deadline?: string;
+  /** Cron expression or ISO timestamp for scheduled execution. */
+  schedule?: string;
+  /** If true, re-execute on every schedule trigger (recurring). Default: false (one-shot). */
+  recurring?: boolean;
+  /** Minimum average score for the plan to be considered successful. */
+  qualityThreshold?: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -330,6 +342,12 @@ export interface OrchestraSettings {
   notifications?: NotificationsConfig;
   /** Default escalation policy — defines escalation chain when tasks fail repeatedly. */
   escalationPolicy?: EscalationPolicy;
+  /** SLA monitoring configuration. */
+  sla?: SLAConfig;
+  /** Enable the scheduling engine. Default: true if any plan has a schedule. */
+  enableScheduler?: boolean;
+  /** Default quality threshold for plans (1-5). Plans below this score are marked failed. */
+  defaultQualityThreshold?: number;
 }
 
 // === Orchestra State (persisted in .polpo/state.json) ===
@@ -492,6 +510,91 @@ export interface EscalationPolicy {
   levels: EscalationLevel[];
 }
 
+// === Quality Layer ===
+
+/** Quality gate defined within a plan — checkpoint between task phases. */
+export interface PlanQualityGate {
+  /** Gate name. */
+  name: string;
+  /** Tasks that must be completed before this gate is evaluated. */
+  afterTasks: string[];
+  /** Tasks that are blocked until this gate passes. */
+  blocksTasks: string[];
+  /** Minimum average score of `afterTasks` to pass. */
+  minScore?: number;
+  /** All `afterTasks` must have status "done" (not just completed — they must pass). */
+  requireAllPassed?: boolean;
+  /** Custom condition expression evaluated against gate context. */
+  condition?: string;
+  /** Notification channels to alert on gate pass/fail. */
+  notifyChannels?: string[];
+}
+
+/** SLA configuration for deadline monitoring. */
+export interface SLAConfig {
+  /** Percentage of deadline elapsed before emitting a warning (0-1). Default: 0.8 */
+  warningThreshold?: number;
+  /** Check interval in ms. Default: 30000 (30s). */
+  checkIntervalMs?: number;
+  /** Notification channels for SLA warnings. */
+  warningChannels?: string[];
+  /** Notification channels for SLA violations. */
+  violationChannels?: string[];
+  /** Action on SLA violation: "notify" (default) or "fail" (force-fail the task). */
+  violationAction?: "notify" | "fail";
+}
+
+/** Quality metrics snapshot for a single entity (task, agent, plan). */
+export interface QualityMetrics {
+  /** Entity identifier. */
+  entityId: string;
+  /** Entity type. */
+  entityType: "task" | "agent" | "plan";
+  /** Total assessments run. */
+  totalAssessments: number;
+  /** Assessments that passed. */
+  passedAssessments: number;
+  /** Average global score (1-5). */
+  avgScore?: number;
+  /** Minimum score observed. */
+  minScore?: number;
+  /** Maximum score observed. */
+  maxScore?: number;
+  /** Per-dimension average scores. */
+  dimensionScores: Record<string, number>;
+  /** Total retries consumed. */
+  totalRetries: number;
+  /** Total fix attempts consumed. */
+  totalFixes: number;
+  /** Deadlines met vs missed. */
+  deadlinesMet: number;
+  deadlinesMissed: number;
+  /** Last updated. */
+  updatedAt: string;
+}
+
+/** Scheduled plan entry. */
+export interface ScheduleEntry {
+  /** Unique schedule ID. */
+  id: string;
+  /** Plan ID to execute. */
+  planId: string;
+  /** Cron expression (e.g. "0 2 * * *") or ISO timestamp for one-shot. */
+  expression: string;
+  /** Whether this schedule recurs. */
+  recurring: boolean;
+  /** Whether this schedule is active. */
+  enabled: boolean;
+  /** Last execution time (ISO). */
+  lastRunAt?: string;
+  /** Next scheduled execution time (ISO). */
+  nextRunAt?: string;
+  /** Deadline offset — auto-set task/plan deadline to N ms after execution start. */
+  deadlineOffsetMs?: number;
+  /** Created at. */
+  createdAt: string;
+}
+
 // === Extended Settings ===
 
 export interface OrchestraSettingsExtended {
@@ -502,3 +605,6 @@ export interface OrchestraSettingsExtended {
   /** Default escalation policy for tasks. */
   escalationPolicy?: EscalationPolicy;
 }
+
+// === Quality & Scheduling Settings (on OrchestraSettings) ===
+// These are added to OrchestraSettings directly — see the interface above.

@@ -16,6 +16,11 @@ export type LifecycleHook =
   // Assessment
   | "assessment:run"
   | "assessment:complete"
+  // Quality
+  | "quality:gate"
+  | "quality:sla"
+  // Scheduling
+  | "schedule:trigger"
   // Orchestrator
   | "orchestrator:tick"
   | "orchestrator:shutdown";
@@ -81,6 +86,25 @@ export interface HookPayloads {
     task: Task;
     assessment: AssessmentResult;
     passed: boolean;
+  };
+  "quality:gate": {
+    planId: string;
+    gateName: string;
+    avgScore?: number;
+    allPassed: boolean;
+    tasks: Array<{ taskId: string; title: string; status: string; score?: number }>;
+  };
+  "quality:sla": {
+    entityId: string;
+    entityType: "task" | "plan";
+    deadline: string;
+    status: "warning" | "violated";
+    percentUsed: number;
+  };
+  "schedule:trigger": {
+    scheduleId: string;
+    planId: string;
+    expression: string;
   };
   "orchestrator:tick": {
     pending: number;

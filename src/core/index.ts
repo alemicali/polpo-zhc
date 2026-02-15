@@ -34,3 +34,11 @@ export { ApprovalManager } from "./approval-manager.js";
 
 // Escalation
 export { EscalationManager } from "./escalation-manager.js";
+
+// Quality Layer
+export { SLAMonitor } from "../quality/sla-monitor.js";
+export { QualityController } from "../quality/quality-controller.js";
+
+// Scheduling
+export { Scheduler } from "../scheduling/scheduler.js";
+export { parseCron, matchesCron, nextCronOccurrence, isCronExpression } from "../scheduling/cron.js";

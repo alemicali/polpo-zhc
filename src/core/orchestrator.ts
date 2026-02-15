@@ -45,6 +45,9 @@ import { ApprovalManager } from "./approval-manager.js";
 import { FileApprovalStore } from "../stores/file-approval-store.js";
 import { NotificationRouter } from "../notifications/index.js";
 import { EscalationManager } from "./escalation-manager.js";
+import { SLAMonitor } from "../quality/sla-monitor.js";
+import { QualityController } from "../quality/quality-controller.js";
+import { Scheduler } from "../scheduling/scheduler.js";
 import type { ApprovalRequest, ApprovalStatus } from "./types.js";
 
 // Re-export for backward compatibility (consumed by core/index.ts and external modules)
@@ -79,6 +82,9 @@ export class Orchestrator extends TypedEmitter {
   private approvalMgr?: ApprovalManager;
   private notificationRouter?: NotificationRouter;
   private escalationMgr?: EscalationManager;
+  private slaMonitor?: SLAMonitor;
+  private qualityController?: QualityController;
+  private scheduler?: Scheduler;
 
   // Managers
   private agentMgr!: AgentManager;
@@ -90,6 +96,9 @@ export class Orchestrator extends TypedEmitter {
   getWorkDir(): string { return this.workDir; }
   getHooks(): HookRegistry { return this.hookRegistry; }
   getNotificationRouter(): NotificationRouter | undefined { return this.notificationRouter; }
+  getSLAMonitor(): SLAMonitor | undefined { return this.slaMonitor; }
+  getQualityController(): QualityController | undefined { return this.qualityController; }
+  getScheduler(): Scheduler | undefined { return this.scheduler; }
 
   constructor(workDirOrOptions?: string | OrchestratorOptions) {
     super();
@@ -223,6 +232,26 @@ export class Orchestrator extends TypedEmitter {
     if (this.config.settings.escalationPolicy) {
       this.escalationMgr = new EscalationManager(ctx, this.approvalMgr);
       this.escalationMgr.init();
+    }
+
+    // Initialize SLA monitor if configured
+    if (this.config.settings.sla) {
+      this.slaMonitor = new SLAMonitor(ctx, this.config.settings.sla);
+      this.slaMonitor.init();
+    }
+
+    // Initialize quality controller (always available — zero-cost when unused)
+    this.qualityController = new QualityController(ctx);
+    this.qualityController.init();
+    this.planExec.setQualityController(this.qualityController);
+
+    // Initialize scheduler if enabled or any plan has a schedule
+    const hasScheduledPlans = (this.config.settings.enableScheduler !== false) &&
+      (this.registry.getAllPlans?.() ?? []).some(p => !!p.schedule);
+    if (this.config.settings.enableScheduler || hasScheduledPlans) {
+      this.scheduler = new Scheduler(ctx);
+      this.scheduler.setExecutor((planId) => this.planExec.executePlan(planId));
+      this.scheduler.init();
     }
   }
 
@@ -457,6 +486,9 @@ export class Orchestrator extends TypedEmitter {
     this.approvalMgr?.dispose();
     this.notificationRouter?.dispose();
     this.escalationMgr?.dispose();
+    this.slaMonitor?.dispose();
+    this.qualityController?.dispose();
+    this.scheduler?.dispose();
     this.registry.close?.();
     this.runStore.close();
     this.emit("orchestrator:shutdown", {});
@@ -551,11 +583,32 @@ export class Orchestrator extends TypedEmitter {
     // 2. Enforce health checks (timeouts + stale detection)
     this.runner.enforceHealthChecks();
 
+    // 2b. SLA deadline checks
+    this.slaMonitor?.check();
+
+    // 2c. Scheduler checks (trigger due plans)
+    this.scheduler?.check();
+
     // 3. Spawn agents for ready tasks (skip tasks from cancelled/completed plans)
     const ready = pending.filter(task => {
       if (task.group) {
         const plan = this.registry.getPlanByName?.(task.group);
         if (plan && (plan.status === "cancelled" || plan.status === "completed")) return false;
+
+        // Check quality gates — task may be blocked by a gate even if deps are done
+        if (this.qualityController) {
+          const gates = this.planExec.getQualityGates(task.group);
+          if (gates.length > 0) {
+            const blocking = this.qualityController.getBlockingGate(
+              plan?.id ?? task.group,
+              task.title,
+              task.id,
+              gates,
+              tasks,
+            );
+            if (blocking) return false; // Blocked by quality gate
+          }
+        }
       }
       return task.dependsOn.every(depId => {
         const dep = tasks.find(t => t.id === depId);

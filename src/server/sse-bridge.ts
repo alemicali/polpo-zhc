@@ -16,6 +16,9 @@ const ALL_EVENTS: OrchestraEvent[] = [
   "session:created", "message:added",
   "approval:requested", "approval:resolved", "approval:timeout",
   "escalation:triggered", "escalation:resolved", "escalation:human",
+  "sla:warning", "sla:violated", "sla:met",
+  "quality:gate:passed", "quality:gate:failed", "quality:threshold:failed",
+  "schedule:triggered", "schedule:created", "schedule:completed",
   "notification:sent", "notification:failed",
   "log",
 ];
