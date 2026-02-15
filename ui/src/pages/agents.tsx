@@ -707,11 +707,10 @@ function AgentCard({
                   </p>
                   <div className="flex flex-wrap gap-1">
                     {Object.entries(agent.mcpServers).map(([name, cfg]) => {
-                      const c = cfg as Record<string, unknown>;
-                      const type = c.command ? "stdio" : (c.type as string) ?? "http";
-                      const detail = c.command
-                        ? `${c.command} ${Array.isArray(c.args) ? c.args.join(" ") : ""}`.trim()
-                        : (c.url as string) ?? "";
+                      const type = "command" in cfg ? "stdio" : ("type" in cfg ? cfg.type : "http");
+                      const detail = "command" in cfg
+                        ? `${cfg.command} ${"args" in cfg && Array.isArray(cfg.args) ? cfg.args.join(" ") : ""}`.trim()
+                        : ("url" in cfg ? cfg.url : "");
                       return (
                         <Badge key={name} variant="secondary" className="text-[9px] font-mono" title={detail}>
                           {name} <span className="text-muted-foreground ml-0.5">({type})</span>

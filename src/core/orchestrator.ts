@@ -40,6 +40,12 @@ import {
 import type { AssessFn } from "./orchestrator-context.js";
 import { setProviderOverrides, validateProviderKeys } from "../llm/pi-client.js";
 import { startNotificationServer } from "./notification.js";
+import { HookRegistry } from "./hooks.js";
+import { ApprovalManager } from "./approval-manager.js";
+import { FileApprovalStore } from "../stores/file-approval-store.js";
+import { NotificationRouter } from "../notifications/index.js";
+import { EscalationManager } from "./escalation-manager.js";
+import type { ApprovalRequest, ApprovalStatus } from "./types.js";
 
 // Re-export for backward compatibility (consumed by core/index.ts and external modules)
 export { buildFixPrompt, buildRetryPrompt };
@@ -69,6 +75,10 @@ export class Orchestrator extends TypedEmitter {
   private logStore!: LogStore;
   private sessionStore!: SessionStore;
   private notificationServer?: Server;
+  private hookRegistry = new HookRegistry();
+  private approvalMgr?: ApprovalManager;
+  private notificationRouter?: NotificationRouter;
+  private escalationMgr?: EscalationManager;
 
   // Managers
   private agentMgr!: AgentManager;
@@ -78,6 +88,8 @@ export class Orchestrator extends TypedEmitter {
   private assessor!: AssessmentOrchestrator;
 
   getWorkDir(): string { return this.workDir; }
+  getHooks(): HookRegistry { return this.hookRegistry; }
+  getNotificationRouter(): NotificationRouter | undefined { return this.notificationRouter; }
 
   constructor(workDirOrOptions?: string | OrchestratorOptions) {
     super();
@@ -173,6 +185,7 @@ export class Orchestrator extends TypedEmitter {
       memoryStore: this.memoryStore,
       logStore: this.logStore,
       sessionStore: this.sessionStore,
+      hooks: this.hookRegistry,
       config: this.config,
       workDir: this.workDir,
       polpoDir: this.polpoDir,
@@ -191,6 +204,26 @@ export class Orchestrator extends TypedEmitter {
         this.runner.collectResults((id, res) => this.assessor.handleResult(id, res));
       },
     );
+
+    // Initialize approval gates if configured
+    if (this.config.settings.approvalGates && this.config.settings.approvalGates.length > 0) {
+      const approvalStore = new FileApprovalStore(this.polpoDir);
+      this.approvalMgr = new ApprovalManager(ctx, approvalStore);
+      this.approvalMgr.init();
+    }
+
+    // Initialize notification router if configured
+    if (this.config.settings.notifications) {
+      this.notificationRouter = new NotificationRouter(this);
+      this.notificationRouter.init(this.config.settings.notifications);
+      this.notificationRouter.start();
+    }
+
+    // Initialize escalation manager if configured
+    if (this.config.settings.escalationPolicy) {
+      this.escalationMgr = new EscalationManager(ctx, this.approvalMgr);
+      this.escalationMgr.init();
+    }
   }
 
   /**
@@ -261,6 +294,24 @@ export class Orchestrator extends TypedEmitter {
   abortGroup(group: string): number { return this.taskMgr.abortGroup(group); }
   clearTasks(filter: (task: Task) => boolean): number { return this.taskMgr.clearTasks(filter); }
   forceFailTask(taskId: string): void { this.taskMgr.forceFailTask(taskId); }
+
+  // ── Approval Management ──
+
+  approveRequest(requestId: string, resolvedBy?: string, note?: string): ApprovalRequest | null {
+    return this.approvalMgr?.approve(requestId, resolvedBy, note) ?? null;
+  }
+  rejectRequest(requestId: string, resolvedBy?: string, note?: string): ApprovalRequest | null {
+    return this.approvalMgr?.reject(requestId, resolvedBy, note) ?? null;
+  }
+  getPendingApprovals(): ApprovalRequest[] {
+    return this.approvalMgr?.getPending() ?? [];
+  }
+  getAllApprovals(status?: ApprovalStatus): ApprovalRequest[] {
+    return this.approvalMgr?.getAll(status) ?? [];
+  }
+  getApprovalRequest(id: string): ApprovalRequest | undefined {
+    return this.approvalMgr?.getRequest(id);
+  }
 
   // ── Store Accessors ──
 
@@ -352,6 +403,7 @@ export class Orchestrator extends TypedEmitter {
    * preserve completed work, leave in-progress tasks for recovery on restart.
    */
   async gracefulStop(timeoutMs = 5000): Promise<void> {
+    await this.hookRegistry.runBefore("orchestrator:shutdown", {});
     this.stopped = true;
     const activeRuns = this.runStore.getActiveRuns();
 
@@ -402,9 +454,13 @@ export class Orchestrator extends TypedEmitter {
     // Clear process list in state and close stores
     this.registry.setState({ processes: [], completedAt: new Date().toISOString() });
     this.notificationServer?.close();
+    this.approvalMgr?.dispose();
+    this.notificationRouter?.dispose();
+    this.escalationMgr?.dispose();
     this.registry.close?.();
     this.runStore.close();
     this.emit("orchestrator:shutdown", {});
+    await this.hookRegistry.runAfter("orchestrator:shutdown", {});
     this.logStore?.close();
     this.sessionStore?.close();
   }
@@ -475,9 +531,11 @@ export class Orchestrator extends TypedEmitter {
     if (tasks.length === 0) return !this.interactive;
 
     const pending = tasks.filter(t => t.status === "pending");
+    const awaitingApproval = tasks.filter(t => t.status === "awaiting_approval");
     const inProgress = tasks.filter(t => t.status === "in_progress" || t.status === "assigned" || t.status === "review");
 
     // Check if all tasks are terminal (done or failed)
+    // awaiting_approval tasks are NOT terminal — they're waiting for human action
     const terminal = tasks.filter(t => t.status === "done" || t.status === "failed");
     if (terminal.length === tasks.length) {
       // Must run cleanup BEFORE returning — assessment transitions happen async
@@ -506,7 +564,8 @@ export class Orchestrator extends TypedEmitter {
     });
 
     // Check for deadlock: no tasks ready, none running, but some pending
-    if (ready.length === 0 && inProgress.length === 0 && pending.length > 0) {
+    // Don't consider it a deadlock if tasks are awaiting approval
+    if (ready.length === 0 && inProgress.length === 0 && pending.length > 0 && awaitingApproval.length === 0) {
       // Async resolution already in progress — wait for next tick
       if (isResolving()) return false;
 

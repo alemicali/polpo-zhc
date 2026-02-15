@@ -33,12 +33,14 @@ async function initOrchestrator(configPath: string): Promise<Orchestrator> {
 
 function statusIcon(status: TaskStatus): string {
   switch (status) {
-    case "pending":     return chalk.gray("\u25CB");   // ○
-    case "assigned":    return chalk.cyan("\u25CE");    // ◎
-    case "in_progress": return chalk.yellow("\u25D4");  // ◔
-    case "review":      return chalk.magenta("\u25D4"); // ◔
-    case "done":        return chalk.green("\u25CF");   // ●
-    case "failed":      return chalk.red("\u2717");     // ✗
+    case "pending":            return chalk.gray("\u25CB");   // ○
+    case "awaiting_approval":  return chalk.yellow("\u23F3"); // ⏳
+    case "assigned":           return chalk.cyan("\u25CE");    // ◎
+    case "in_progress":        return chalk.yellow("\u25D4");  // ◔
+    case "review":             return chalk.magenta("\u25D4"); // ◔
+    case "done":               return chalk.green("\u25CF");   // ●
+    case "failed":             return chalk.red("\u2717");     // ✗
+    default:                   return chalk.gray("?");
   }
 }
 

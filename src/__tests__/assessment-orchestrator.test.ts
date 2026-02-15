@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi, type Mock } from "vitest";
 import { AssessmentOrchestrator } from "../core/assessment-orchestrator.js";
 import type { OrchestratorContext, AssessFn } from "../core/orchestrator-context.js";
+import { HookRegistry } from "../core/hooks.js";
 import type { Task, TaskResult, AssessmentResult, OrchestraConfig } from "../core/types.js";
 import { TypedEmitter } from "../core/events.js";
 import { InMemoryTaskStore, InMemoryRunStore, createTestActivity } from "./fixtures.js";
@@ -159,6 +160,7 @@ function createHarness(configOverrides: Partial<OrchestraConfig["settings"]> = {
     memoryStore: createMemoryStore(),
     logStore: createLogStore(),
     sessionStore: createSessionStore(),
+    hooks: new HookRegistry(),
     config,
     workDir: "/tmp/test",
     polpoDir: "/tmp/test/.polpo",

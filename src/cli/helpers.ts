@@ -37,11 +37,13 @@ export function ts(): string {
 export function statusIcon(status: TaskStatus): string {
   switch (status) {
     case "pending": return chalk.gray("○");
+    case "awaiting_approval": return chalk.yellow("⏳");
     case "assigned": return chalk.cyan("◉");
     case "in_progress": return chalk.yellow("●");
     case "review": return chalk.magenta("●");
     case "done": return chalk.green("●");
     case "failed": return chalk.red("✗");
+    default: return chalk.gray("?");
   }
 }
 

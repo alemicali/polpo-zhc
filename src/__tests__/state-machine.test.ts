@@ -16,8 +16,12 @@ describe("state-machine", () => {
       }
     });
 
-    it("pending can only go to assigned", () => {
-      expect(VALID_TRANSITIONS.pending).toEqual(["assigned"]);
+    it("pending can go to assigned or awaiting_approval", () => {
+      expect(VALID_TRANSITIONS.pending).toEqual(["assigned", "awaiting_approval"]);
+    });
+
+    it("awaiting_approval can go to assigned or failed", () => {
+      expect(VALID_TRANSITIONS.awaiting_approval).toEqual(["assigned", "failed"]);
     });
 
     it("assigned can only go to in_progress", () => {
@@ -86,7 +90,7 @@ describe("state-machine", () => {
 
     it("throws for invalid transitions with descriptive message", () => {
       expect(() => assertValidTransition("pending", "done"))
-        .toThrow("Invalid transition: pending → done (allowed: assigned)");
+        .toThrow("Invalid transition: pending → done (allowed: assigned, awaiting_approval)");
     });
 
     it("throws for terminal state transitions with empty allowed list", () => {

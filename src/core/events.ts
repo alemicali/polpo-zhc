@@ -64,6 +64,20 @@ export interface OrchestraEventMap {
   "bridge:session:activity": { sessionId: string; projectPath: string; messageCount: number; toolCalls: string[]; filesCreated: string[]; filesEdited: string[]; lastMessage: string };
   "bridge:session:completed": { sessionId: string; projectPath: string; summary: import("./session-reader.js").SessionSummary | null; duration: number };
 
+  // Approval gates
+  "approval:requested": { requestId: string; gateId: string; gateName: string; taskId?: string; planId?: string };
+  "approval:resolved": { requestId: string; status: "approved" | "rejected"; resolvedBy?: string };
+  "approval:timeout": { requestId: string; action: "approve" | "reject" };
+
+  // Escalation
+  "escalation:triggered": { taskId: string; level: number; handler: string; target?: string };
+  "escalation:resolved": { taskId: string; level: number; action: string };
+  "escalation:human": { taskId: string; message: string; channels?: string[] };
+
+  // Notifications
+  "notification:sent": { ruleId: string; channel: string; event: string };
+  "notification:failed": { ruleId: string; channel: string; error: string };
+
   // General
   "log": { level: "info" | "warn" | "error" | "debug"; message: string };
 }

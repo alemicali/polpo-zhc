@@ -6,6 +6,7 @@ import { AgentManager } from "../core/agent-manager.js";
 import { TypedEmitter } from "../core/events.js";
 import { InMemoryTaskStore, InMemoryRunStore, createTestAgent } from "./fixtures.js";
 import type { OrchestratorContext } from "../core/orchestrator-context.js";
+import { HookRegistry } from "../core/hooks.js";
 import type { OrchestraConfig, Plan } from "../core/types.js";
 import type { TaskStore } from "../core/task-store.js";
 
@@ -121,6 +122,7 @@ function createContext(overrides?: {
     memoryStore: createNoopMemoryStore(),
     logStore: createNoopLogStore(),
     sessionStore: createNoopSessionStore(),
+    hooks: new HookRegistry(),
     config,
     workDir: "/tmp/test",
     polpoDir: "/tmp/test/.polpo",

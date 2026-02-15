@@ -22,22 +22,51 @@ export class TaskManager {
     retryPolicy?: RetryPolicy;
   }): Task {
     if (!this.ctx.registry) throw new Error("Orchestrator not initialized");
-    const rawExps = opts.expectations ?? [];
-    const { valid: expectations, warnings } = sanitizeExpectations(rawExps);
-    for (const w of warnings) this.ctx.emitter.emit("log", { level: "warn", message: `[addTask "${opts.title}"] ${w}` });
-    const task = this.ctx.registry.addTask({
+
+    // Run before:task:create hook (sync — addTask is synchronous)
+    const hookResult = this.ctx.hooks.runBeforeSync("task:create", {
       title: opts.title,
       description: opts.description,
       assignTo: opts.assignTo,
+      expectations: opts.expectations,
+      dependsOn: opts.dependsOn,
       group: opts.group,
-      dependsOn: opts.dependsOn ?? [],
-      expectations,
-      metrics: [],
-      maxRetries: this.ctx.config.settings.maxRetries,
       maxDuration: opts.maxDuration,
       retryPolicy: opts.retryPolicy,
     });
+    if (hookResult.cancelled) {
+      throw new Error(`Task creation blocked by hook: ${hookResult.cancelReason ?? "no reason"}`);
+    }
+    // Apply any modifications from hooks
+    const hookData = hookResult.data;
+
+    const rawExps = hookData.expectations ?? [];
+    const { valid: expectations, warnings } = sanitizeExpectations(rawExps);
+    for (const w of warnings) this.ctx.emitter.emit("log", { level: "warn", message: `[addTask "${hookData.title}"] ${w}` });
+    const task = this.ctx.registry.addTask({
+      title: hookData.title,
+      description: hookData.description,
+      assignTo: hookData.assignTo,
+      group: hookData.group,
+      dependsOn: hookData.dependsOn ?? [],
+      expectations,
+      metrics: [],
+      maxRetries: this.ctx.config.settings.maxRetries,
+      maxDuration: hookData.maxDuration,
+      retryPolicy: hookData.retryPolicy,
+    });
     this.ctx.emitter.emit("task:created", { task });
+
+    // Fire after:task:create hook (async, fire-and-forget)
+    this.ctx.hooks.runAfter("task:create", {
+      title: task.title,
+      description: task.description,
+      assignTo: task.assignTo,
+      expectations: task.expectations,
+      dependsOn: task.dependsOn,
+      group: task.group,
+    }).catch(() => { /* hook errors are logged internally */ });
+
     return task;
   }
 

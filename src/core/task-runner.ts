@@ -206,6 +206,16 @@ export class TaskRunner {
       return;
     }
 
+    // Run before:task:spawn hook (sync — tick loop is synchronous)
+    const hookResult = this.ctx.hooks.runBeforeSync("task:spawn", { task, agent });
+    if (hookResult.cancelled) {
+      this.ctx.emitter.emit("log", {
+        level: "info",
+        message: `[${task.id}] Spawn blocked by hook: ${hookResult.cancelReason ?? "no reason"}`,
+      });
+      return;  // task stays pending — will be re-evaluated next tick
+    }
+
     this.ctx.registry.transition(task.id, "assigned");
     this.ctx.registry.transition(task.id, "in_progress");
 

@@ -59,6 +59,7 @@
     "url": "https://github.com/openpolpo/openpolpo/issues"
   },
   "author": "OpenPolpo Contributors",
+  "packageManager": "pnpm@10.29.3",
   "engines": {
     "node": ">=18.0.0"
   },
@@ -93,5 +94,13 @@
     "@types/react": "^19.2.14",
     "typescript": "^5.7.3",
     "vitest": "^3.0.4"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@swc/core",
+      "better-sqlite3",
+      "esbuild",
+      "sharp"
+    ]
   }
 }

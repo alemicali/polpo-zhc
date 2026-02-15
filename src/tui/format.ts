@@ -19,6 +19,7 @@ export const seg = (
 
 const STATUS_ICONS: Record<TaskStatus, string> = {
   pending: "○",
+  awaiting_approval: "⏳",
   assigned: "◎",
   in_progress: "●",
   review: "◉",
@@ -28,6 +29,7 @@ const STATUS_ICONS: Record<TaskStatus, string> = {
 
 const STATUS_COLORS: Record<TaskStatus, string> = {
   pending: "gray",
+  awaiting_approval: "yellow",
   assigned: "yellow",
   in_progress: "cyan",
   review: "magenta",

@@ -8,3 +8,4 @@ export { FileMemoryStore } from "./file-memory-store.js";
 export { FileLogStore } from "./file-log-store.js";
 export { FileSessionStore } from "./file-session-store.js";
 export { SqliteSessionStore } from "./sqlite-session-store.js";
+export { FileApprovalStore } from "./file-approval-store.js";

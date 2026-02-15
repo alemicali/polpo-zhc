@@ -14,6 +14,9 @@ const ALL_EVENTS: OrchestraEvent[] = [
   "task:recovered",
   "plan:saved", "plan:executed", "plan:completed", "plan:resumed", "plan:deleted",
   "session:created", "message:added",
+  "approval:requested", "approval:resolved", "approval:timeout",
+  "escalation:triggered", "escalation:resolved", "escalation:human",
+  "notification:sent", "notification:failed",
   "log",
 ];
 

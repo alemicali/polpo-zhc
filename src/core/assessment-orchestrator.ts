@@ -149,7 +149,63 @@ export class AssessmentOrchestrator {
    */
   private proceedToAssessment(taskId: string, task: Task, result: TaskResult): void {
     if (task.expectations.length > 0 || task.metrics.length > 0) {
-      this.ctx.emitter.emit("assessment:started", { taskId });
+      // Run before:assessment:run hook (async — assessment is already async)
+      this.ctx.hooks.runBefore("assessment:run", { taskId, task }).then(hookResult => {
+        if (hookResult.cancelled) {
+          this.ctx.emitter.emit("log", {
+            level: "info",
+            message: `[${taskId}] Assessment blocked by hook: ${hookResult.cancelReason ?? "no reason"}`,
+          });
+          // Skip assessment — mark done with result as-is
+          this.ctx.registry.updateTask(taskId, { result });
+          if (result.exitCode === 0) {
+            this.ctx.registry.transition(taskId, "done");
+            this.ctx.registry.updateTask(taskId, { phase: undefined });
+          } else {
+            this.retryOrFail(taskId, task, result);
+          }
+          return;
+        }
+        this.runAssessmentFlow(taskId, task, result);
+      }).catch(() => {
+        this.runAssessmentFlow(taskId, task, result);
+      });
+    } else {
+      this.ctx.registry.updateTask(taskId, { result });
+      if (result.exitCode === 0) {
+        // Run before:task:complete hook (sync — no-expectations path is a hot sync path)
+        const hookResult = this.ctx.hooks.runBeforeSync("task:complete", {
+          taskId, task, result,
+        });
+        if (hookResult.cancelled) {
+          this.ctx.emitter.emit("log", {
+            level: "info",
+            message: `[${taskId}] Completion blocked by hook: ${hookResult.cancelReason ?? "no reason"}`,
+          });
+          return;
+        }
+        this.ctx.emitter.emit("task:transition", {
+          taskId,
+          from: "review",
+          to: "done",
+          task: { ...task, status: "done" },
+        });
+        this.ctx.registry.transition(taskId, "done");
+        this.ctx.registry.updateTask(taskId, { phase: undefined });
+
+        // Fire after:task:complete (async, fire-and-forget)
+        this.ctx.hooks.runAfter("task:complete", { taskId, task, result }).catch(() => {});
+      } else {
+        this.retryOrFail(taskId, task, result);
+      }
+    }
+  }
+
+  /**
+   * Core assessment flow — extracted to allow hook interception in proceedToAssessment.
+   */
+  private runAssessmentFlow(taskId: string, task: Task, result: TaskResult): void {
+    this.ctx.emitter.emit("assessment:started", { taskId });
       const progressCb = (msg: string) => this.ctx.emitter.emit("assessment:progress", { taskId, message: msg });
 
       // Build review context from RunStore activity
@@ -241,21 +297,6 @@ export class AssessmentOrchestrator {
         this.ctx.registry.updateTask(taskId, { result });
         this.retryOrFail(taskId, task, result);
       });
-    } else {
-      this.ctx.registry.updateTask(taskId, { result });
-      if (result.exitCode === 0) {
-        this.ctx.emitter.emit("task:transition", {
-          taskId,
-          from: "review",
-          to: "done",
-          task: { ...task, status: "done" },
-        });
-        this.ctx.registry.transition(taskId, "done");
-        this.ctx.registry.updateTask(taskId, { phase: undefined });
-      } else {
-        this.retryOrFail(taskId, task, result);
-      }
-    }
   }
 
   /**
@@ -601,8 +642,36 @@ export class AssessmentOrchestrator {
       });
     } else {
       this.ctx.emitter.emit("task:maxRetries", { taskId });
-      this.ctx.registry.transition(taskId, "failed");
-      this.ctx.registry.updateTask(taskId, { phase: undefined });
+
+      // Run before:task:fail hook — escalation manager can intercept here
+      this.ctx.hooks.runBefore("task:fail", {
+        taskId,
+        task: current,
+        result,
+        reason: "maxRetries",
+      }).then(hookResult => {
+        if (hookResult.cancelled) {
+          this.ctx.emitter.emit("log", {
+            level: "info",
+            message: `[${taskId}] Final failure intercepted by hook: ${hookResult.cancelReason ?? "escalation"}`,
+          });
+          return;  // Escalation manager (or other hook) is handling this
+        }
+        this.ctx.registry.transition(taskId, "failed");
+        this.ctx.registry.updateTask(taskId, { phase: undefined });
+
+        // Fire after:task:fail
+        this.ctx.hooks.runAfter("task:fail", {
+          taskId,
+          task: current,
+          result,
+          reason: "maxRetries",
+        }).catch(() => {});
+      }).catch(() => {
+        // Hook failed — fail the task normally
+        this.ctx.registry.transition(taskId, "failed");
+        this.ctx.registry.updateTask(taskId, { phase: undefined });
+      });
     }
   }
 }

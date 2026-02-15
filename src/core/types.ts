@@ -5,6 +5,7 @@ export type { McpServerConfig } from "../mcp/types.js";
 
 export type TaskStatus =
   | "pending"
+  | "awaiting_approval"
   | "assigned"
   | "in_progress"
   | "review"
@@ -323,6 +324,12 @@ export interface OrchestraSettings {
   maxAssessmentRetries?: number;
   /** Max concurrent agent processes. Default: unlimited (undefined). */
   maxConcurrency?: number;
+  /** Approval gates — checkpoints that block task/plan execution until approved. */
+  approvalGates?: ApprovalGate[];
+  /** Notification system — routes events to external channels (Slack, email, Telegram). */
+  notifications?: NotificationsConfig;
+  /** Default escalation policy — defines escalation chain when tasks fail repeatedly. */
+  escalationPolicy?: EscalationPolicy;
 }
 
 // === Orchestra State (persisted in .polpo/state.json) ===
@@ -344,4 +351,154 @@ export interface ProjectConfig {
   judge?: string;
   agent?: string;
   model?: string;
+}
+
+// === Approval Gates ===
+
+export type ApprovalGateHandler = "auto" | "human";
+
+export interface ApprovalGateCondition {
+  /** JS-like expression evaluated against the hook payload.
+   *  For "auto" gates — if condition passes, task proceeds. If it fails, task is blocked.
+   *  For "human" gates — condition determines WHEN to trigger the gate. */
+  expression: string;
+}
+
+export interface ApprovalGate {
+  /** Unique gate ID. */
+  id: string;
+  /** Human-readable name. */
+  name: string;
+  /** "auto" = system evaluates condition. "human" = blocks for human approval. */
+  handler: ApprovalGateHandler;
+  /** Which lifecycle hook triggers this gate. */
+  hook: string;
+  /** Optional condition — when to activate the gate. */
+  condition?: ApprovalGateCondition;
+  /** Notification channels to alert on gate activation (for "human" gates). */
+  notifyChannels?: string[];
+  /** Timeout in ms (for "human" gates). 0 = no timeout. */
+  timeoutMs?: number;
+  /** Action when timeout expires. Default: "reject". */
+  timeoutAction?: "approve" | "reject";
+  /** Priority within the same hook point. Lower = first. Default: 100. */
+  priority?: number;
+}
+
+export type ApprovalStatus = "pending" | "approved" | "rejected" | "timeout";
+
+export interface ApprovalRequest {
+  /** Unique request ID. */
+  id: string;
+  /** Gate that triggered this request. */
+  gateId: string;
+  /** Gate name (denormalized for display). */
+  gateName: string;
+  /** Related task ID, if applicable. */
+  taskId?: string;
+  /** Related plan ID, if applicable. */
+  planId?: string;
+  /** Current status. */
+  status: ApprovalStatus;
+  /** Hook payload snapshot at time of request. */
+  payload: unknown;
+  /** When the request was created. */
+  requestedAt: string;
+  /** When the request was resolved (approved/rejected/timeout). */
+  resolvedAt?: string;
+  /** Who resolved it (user ID, "system", "timeout"). */
+  resolvedBy?: string;
+  /** Optional resolution note. */
+  note?: string;
+}
+
+// === Notification System ===
+
+export type NotificationChannelType = "slack" | "email" | "telegram" | "webhook";
+
+export interface NotificationChannelConfig {
+  type: NotificationChannelType;
+  /** Slack: webhook URL. */
+  webhookUrl?: string;
+  /** Email: recipient addresses. */
+  to?: string[];
+  /** Email: provider ("smtp" | "resend" | "sendgrid"). */
+  provider?: string;
+  /** API key (direct value or "${ENV_VAR}" reference). */
+  apiKey?: string;
+  /** Telegram: bot token. */
+  botToken?: string;
+  /** Telegram: chat ID. */
+  chatId?: string;
+  /** Webhook: target URL. */
+  url?: string;
+  /** Webhook: custom headers. */
+  headers?: Record<string, string>;
+  /** SMTP host. */
+  host?: string;
+  /** SMTP port. */
+  port?: number;
+  /** SMTP from address. */
+  from?: string;
+}
+
+export type NotificationSeverity = "info" | "warning" | "critical";
+
+export interface NotificationRule {
+  /** Unique rule ID. */
+  id: string;
+  /** Human-readable name. */
+  name: string;
+  /** Event patterns to match (glob-style: "task:*", "plan:completed"). */
+  events: string[];
+  /** Optional JS-like condition on the event payload. */
+  condition?: string;
+  /** Channels to notify (references to channel IDs in config). */
+  channels: string[];
+  /** Severity level. Default: "info". */
+  severity?: NotificationSeverity;
+  /** Mustache-style template for the notification body. */
+  template?: string;
+  /** Minimum interval between notifications for the same rule (ms). */
+  cooldownMs?: number;
+}
+
+export interface NotificationsConfig {
+  channels: Record<string, NotificationChannelConfig>;
+  rules: NotificationRule[];
+}
+
+// === Escalation ===
+
+export type EscalationHandlerType = "agent" | "orchestrator" | "human";
+
+export interface EscalationLevel {
+  /** Level number (0 = first). */
+  level: number;
+  /** Who handles at this level. */
+  handler: EscalationHandlerType;
+  /** Target agent name (for "agent"), notification channel (for "human"). */
+  target?: string;
+  /** Timeout before escalating to next level (ms). */
+  timeoutMs?: number;
+  /** Notification channels to alert at this level. */
+  notifyChannels?: string[];
+}
+
+export interface EscalationPolicy {
+  /** Policy name. */
+  name: string;
+  /** Ordered escalation levels. */
+  levels: EscalationLevel[];
+}
+
+// === Extended Settings ===
+
+export interface OrchestraSettingsExtended {
+  /** Approval gates configuration. */
+  approvalGates?: ApprovalGate[];
+  /** Notification system configuration. */
+  notifications?: NotificationsConfig;
+  /** Default escalation policy for tasks. */
+  escalationPolicy?: EscalationPolicy;
 }

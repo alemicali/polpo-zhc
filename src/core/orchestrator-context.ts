@@ -5,6 +5,7 @@ import type { MemoryStore } from "./memory-store.js";
 import type { LogStore } from "./log-store.js";
 import type { SessionStore } from "./session-store.js";
 import type { OrchestraConfig, Task, AssessmentResult, ReviewContext } from "./types.js";
+import type { HookRegistry } from "./hooks.js";
 
 export type AssessFn = (
   task: Task,
@@ -24,6 +25,8 @@ export interface OrchestratorContext {
   readonly memoryStore: MemoryStore;
   readonly logStore: LogStore;
   readonly sessionStore: SessionStore;
+  /** Lifecycle hook registry — managers call runBefore/runAfter at key points. */
+  readonly hooks: HookRegistry;
   config: OrchestraConfig;
   readonly workDir: string;
   readonly polpoDir: string;

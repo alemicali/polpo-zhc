@@ -150,6 +150,16 @@ export class PlanExecutor {
 
     const group = plan.name;
 
+    // Run before:plan:execute hook
+    const hookResult = this.ctx.hooks.runBeforeSync("plan:execute", {
+      planId,
+      plan,
+      taskCount: doc.tasks.length,
+    });
+    if (hookResult.cancelled) {
+      throw new Error(`Plan execution blocked by hook: ${hookResult.cancelReason ?? "no reason"}`);
+    }
+
     // Register volatile agents from the plan's team section
     const enableVolatile = this.ctx.config.settings.enableVolatileTeams !== false;
     if (enableVolatile && doc.team && Array.isArray(doc.team)) {
