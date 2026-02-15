@@ -1,3 +1,6 @@
+import type { McpServerConfig } from "../mcp/types.js";
+export type { McpServerConfig } from "../mcp/types.js";
+
 // === Task ===
 
 export type TaskStatus =
@@ -108,8 +111,9 @@ export interface AgentConfig {
   model?: string;
   /** Allowed tools for the agent (e.g. ["read", "write", "edit", "bash", "glob", "grep"]) */
   allowedTools?: string[];
-  /** For claude-sdk adapter: MCP servers config */
-  mcpServers?: Record<string, unknown>;
+  /** MCP servers to connect to. Works with both the built-in engine and claude-sdk adapter.
+   *  Keys are server names, values are server configs (stdio or HTTP). */
+  mcpServers?: Record<string, McpServerConfig>;
   /** System prompt appended to the agent's base prompt */
   systemPrompt?: string;
   /** Installed skill names (e.g. "find-skills", "frontend-design") */

@@ -17,6 +17,8 @@ import type { AgentEvent } from "@mariozechner/pi-agent-core";
 import { resolveModel, resolveApiKey } from "../llm/pi-client.js";
 import { createCodingTools } from "../tools/coding-tools.js";
 import { loadAgentSkills, buildSkillPrompt } from "../llm/skills.js";
+import { McpClientManager } from "../mcp/client.js";
+import type { McpServerConfig } from "../mcp/types.js";
 
 /**
  * Build the system prompt for the agent, including loaded skills.
@@ -80,17 +82,21 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
   // Resolve model
   const model = resolveModel(agentConfig.model);
 
-  // Create tools scoped to working directory
-  const tools = createCodingTools(cwd, agentConfig.allowedTools);
+  // Create coding tools scoped to working directory
+  const codingTools = createCodingTools(cwd, agentConfig.allowedTools);
 
-  // Create the pi-agent-core Agent
+  // MCP client manager — initialized later (async) if mcpServers are configured
+  let mcpManager: McpClientManager | null = null;
+  const hasMcp = agentConfig.mcpServers && Object.keys(agentConfig.mcpServers).length > 0;
+
+  // Create the pi-agent-core Agent (starts with coding tools only; MCP tools added before prompt)
   const agent = new Agent({
     getApiKey: (provider: string) => resolveApiKey(provider),
     initialState: {
       systemPrompt: buildSystemPrompt(agentConfig, cwd, ctx?.polpoDir),
       model,
       thinkingLevel: "off",
-      tools,
+      tools: codingTools,
       messages: [],
       isStreaming: false,
       streamMessage: null,
@@ -109,6 +115,8 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
     kill: () => {
       agent.abort();
       alive = false;
+      // Best-effort MCP cleanup on kill
+      if (mcpManager) mcpManager.close().catch(() => {});
     },
   };
 
@@ -185,6 +193,21 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
   // Run the agent and capture result
   handle.done = (async (): Promise<TaskResult> => {
     try {
+      // Connect to MCP servers if configured (async — must happen before prompt)
+      if (hasMcp) {
+        mcpManager = new McpClientManager(cwd);
+        const log = (msg: string) => handle.onTranscript?.({ type: "assistant", text: msg });
+        await mcpManager.connectAll(
+          agentConfig.mcpServers as Record<string, McpServerConfig>,
+          log,
+        );
+        const mcpTools = mcpManager.getTools();
+        if (mcpTools.length > 0) {
+          // Merge MCP tools with coding tools and update the agent
+          agent.setTools([...codingTools, ...mcpTools]);
+        }
+      }
+
       const prompt = buildPrompt(task);
       await agent.prompt(prompt);
 
@@ -221,6 +244,11 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
         stderr: msg,
         duration: Date.now() - start,
       };
+    } finally {
+      // Always disconnect MCP servers on completion/failure
+      if (mcpManager) {
+        await mcpManager.close().catch(() => {});
+      }
     }
   })();
 

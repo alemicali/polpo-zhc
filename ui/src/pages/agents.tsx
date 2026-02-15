@@ -706,9 +706,18 @@ function AgentCard({
                     <Activity className="h-3 w-3" /> MCP Servers ({Object.keys(agent.mcpServers).length})
                   </p>
                   <div className="flex flex-wrap gap-1">
-                    {Object.keys(agent.mcpServers).map((s) => (
-                      <Badge key={s} variant="secondary" className="text-[9px] font-mono">{s}</Badge>
-                    ))}
+                    {Object.entries(agent.mcpServers).map(([name, cfg]) => {
+                      const c = cfg as Record<string, unknown>;
+                      const type = c.command ? "stdio" : (c.type as string) ?? "http";
+                      const detail = c.command
+                        ? `${c.command} ${Array.isArray(c.args) ? c.args.join(" ") : ""}`.trim()
+                        : (c.url as string) ?? "";
+                      return (
+                        <Badge key={name} variant="secondary" className="text-[9px] font-mono" title={detail}>
+                          {name} <span className="text-muted-foreground ml-0.5">({type})</span>
+                        </Badge>
+                      );
+                    })}
                   </div>
                 </div>
               )}
