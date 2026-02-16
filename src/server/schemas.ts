@@ -128,11 +128,6 @@ export const ApproveRequestSchema = z.object({
 });
 
 export const RejectRequestSchema = z.object({
-  resolvedBy: z.string().optional(),
-  note: z.string().optional(),
-});
-
-export const ReviseRequestSchema = z.object({
   feedback: z.string().min(1),
   resolvedBy: z.string().optional(),
 });

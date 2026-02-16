@@ -359,9 +359,9 @@ export class TelegramCallbackPoller {
 
     this.pendingRevise.delete(chatId);
 
-    const result = await this.resolver.revise(requestId, message.text, "telegram-user");
+    const result = await this.resolver.reject(requestId, message.text, "telegram-user");
     const msg = result.ok
-      ? `✏️ Revision sent with feedback:\n<i>${escapeHtml(message.text)}</i>`
+      ? `❌ Rejected — task will retry with your feedback:\n<i>${escapeHtml(message.text)}</i>`
       : `❌ Error: ${result.error}`;
     await this.sendReply(chatId, msg);
   }
@@ -417,8 +417,7 @@ export interface ApprovalCallbackResult {
 
 export interface ApprovalCallbackResolver {
   approve(requestId: string, resolvedBy: string): Promise<ApprovalCallbackResult>;
-  reject(requestId: string, resolvedBy: string): Promise<ApprovalCallbackResult>;
-  revise(requestId: string, feedback: string, resolvedBy: string): Promise<ApprovalCallbackResult>;
+  reject(requestId: string, feedback: string, resolvedBy: string): Promise<ApprovalCallbackResult>;
 }
 
 // ─── Telegram API types ────────────────────

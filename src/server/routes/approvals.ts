@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import type { ServerEnv } from "../app.js";
-import { ApproveRequestSchema, RejectRequestSchema, ReviseRequestSchema, parseBody } from "../schemas.js";
+import { ApproveRequestSchema, RejectRequestSchema, parseBody } from "../schemas.js";
 
 /**
  * Approval routes.
@@ -8,7 +8,7 @@ import { ApproveRequestSchema, RejectRequestSchema, ReviseRequestSchema, parseBo
  * GET  /approvals           — list approvals (optional ?status=pending|approved|rejected|timeout)
  * GET  /approvals/:id       — get single approval request
  * POST /approvals/:id/approve — approve a pending request
- * POST /approvals/:id/reject  — reject a pending request
+ * POST /approvals/:id/reject  — reject with feedback (task retries with notes)
  */
 export function approvalRoutes(): Hono<ServerEnv> {
   const app = new Hono<ServerEnv>();
@@ -75,15 +75,18 @@ export function approvalRoutes(): Hono<ServerEnv> {
     return c.json({ ok: true, data: result });
   });
 
-  // POST /approvals/:id/revise — send task back for rework with feedback
-  app.post("/:id/revise", async (c) => {
+  // POST /approvals/:id/reject — reject with feedback, task retries with notes
+  app.post("/:id/reject", async (c) => {
     const orchestrator = c.get("orchestrator");
     const id = c.req.param("id");
 
-    const body = parseBody(ReviseRequestSchema, await c.req.json());
+    const body = parseBody(RejectRequestSchema, await c.req.json());
+    if (!body.feedback) {
+      return c.json({ ok: false, error: "feedback is required for rejection", code: "BAD_REQUEST" }, 400);
+    }
 
-    // Check if revision is allowed (max revisions)
-    const check = orchestrator.canReviseRequest(id);
+    // Check if rejection is allowed (max rejections)
+    const check = orchestrator.canRejectRequest(id);
     if (!check.allowed) {
       const existing = orchestrator.getApprovalRequest(id);
       if (!existing) {
@@ -98,45 +101,14 @@ export function approvalRoutes(): Hono<ServerEnv> {
       }
       return c.json({
         ok: false,
-        error: `Max revisions reached (${check.revisionCount}/${check.maxRevisions}). Use approve or reject instead.`,
+        error: `Max rejections reached (${check.rejectionCount}/${check.maxRejections}). Only approve is available.`,
         code: "CONFLICT",
       }, 409);
     }
 
-    const result = orchestrator.reviseRequest(id, body.feedback, body.resolvedBy);
+    const result = orchestrator.rejectRequest(id, body.feedback, body.resolvedBy);
     if (!result) {
-      return c.json({ ok: false, error: "Failed to revise request", code: "CONFLICT" }, 409);
-    }
-
-    return c.json({ ok: true, data: result });
-  });
-
-  // POST /approvals/:id/reject — reject a pending request
-  app.post("/:id/reject", async (c) => {
-    const orchestrator = c.get("orchestrator");
-    const id = c.req.param("id");
-
-    let resolvedBy: string | undefined;
-    let note: string | undefined;
-    try {
-      const body = parseBody(RejectRequestSchema, await c.req.json());
-      resolvedBy = body.resolvedBy;
-      note = body.note;
-    } catch {
-      // Empty body or parse error — that's fine, use defaults
-    }
-
-    const result = orchestrator.rejectRequest(id, resolvedBy, note);
-    if (!result) {
-      const existing = orchestrator.getApprovalRequest(id);
-      if (!existing) {
-        return c.json({ ok: false, error: "Approval request not found", code: "NOT_FOUND" }, 404);
-      }
-      return c.json({
-        ok: false,
-        error: `Request already resolved with status: ${existing.status}`,
-        code: "CONFLICT",
-      }, 409);
+      return c.json({ ok: false, error: "Failed to reject request", code: "CONFLICT" }, 409);
     }
 
     return c.json({ ok: true, data: result });

@@ -200,30 +200,24 @@ export class ApprovalManager {
   }
 
   /**
-   * Reject a pending request. Returns the updated request or null if not found/already resolved.
-   */
-  reject(requestId: string, resolvedBy?: string, note?: string): ApprovalRequest | null {
-    return this.resolve(requestId, "rejected", resolvedBy, note);
-  }
-
-  /**
-   * Revise a pending request: send the task back for rework with feedback.
+   * Reject a pending request: send the task back for rework with feedback.
+   * Feedback is mandatory — a reject without explanation is useless to the agent.
    *
-   * The task's description is appended with the revision feedback,
+   * The task's description is appended with the rejection feedback,
    * `revisionCount` is incremented on the task, and the task transitions
-   * back to `assigned` so the agent re-spawns with the new instructions.
+   * back to `pending` so the supervisor re-spawns it with the new instructions.
    *
    * Returns the updated request, or `null` if:
    * - Request not found or already resolved
    * - No taskId on the request
-   * - Max revisions exceeded (check with `canRevise()` first)
+   * - Max rejections exceeded (check with `canReject()` first)
    */
-  revise(requestId: string, feedback: string, resolvedBy?: string): ApprovalRequest | null {
+  reject(requestId: string, feedback: string, resolvedBy?: string): ApprovalRequest | null {
     const request = this.store.get(requestId);
     if (!request || request.status !== "pending") return null;
     if (!request.taskId) return null;
 
-    // Check max revisions
+    // Check max rejections
     const gate = this.ctx.config.settings.approvalGates?.find(g => g.id === request.gateId);
     const maxRevisions = gate?.maxRevisions ?? 3;
     const task = this.ctx.registry.getTask(request.taskId);
@@ -232,8 +226,8 @@ export class ApprovalManager {
     const currentCount = task.revisionCount ?? 0;
     if (currentCount >= maxRevisions) return null;
 
-    // 1. Mark request as revised
-    request.status = "revised";
+    // 1. Mark request as rejected
+    request.status = "rejected";
     request.resolvedAt = new Date().toISOString();
     request.resolvedBy = resolvedBy ?? "user";
     request.note = feedback;
@@ -250,24 +244,28 @@ export class ApprovalManager {
 
     // 4. Append feedback to task description
     const separator = "\n\n---\n";
-    const feedbackBlock = `**Revision #${newCount} feedback:** ${feedback}`;
+    const feedbackBlock = `**Rejection #${newCount} feedback:** ${feedback}`;
     const updatedDescription = task.description + separator + feedbackBlock;
     this.ctx.registry.updateTask(request.taskId, {
       description: updatedDescription,
     });
 
     // 5. Emit event
-    this.ctx.emitter.emit("approval:revised", {
+    this.ctx.emitter.emit("approval:rejected", {
       requestId,
       taskId: request.taskId,
       feedback,
-      revisionCount: newCount,
+      rejectionCount: newCount,
       resolvedBy: request.resolvedBy,
     });
 
-    // 6. Transition task back to assigned (triggers re-spawn)
+    // 6. Clear old outcomes — the agent will produce fresh ones on re-execution.
+    //    Without this, outcomes accumulate across rejections and all get re-sent.
+    this.ctx.registry.updateTask(request.taskId, { outcomes: [] });
+
+    // 7. Transition task back to pending so the supervisor tick re-spawns it.
     try {
-      this.ctx.registry.transition(request.taskId, "assigned");
+      this.ctx.registry.transition(request.taskId, "pending");
     } catch {
       // Task may have been modified externally
     }
@@ -276,20 +274,20 @@ export class ApprovalManager {
   }
 
   /**
-   * Check whether a request can be revised (not at max revisions).
+   * Check whether a request can be rejected (not at max rejections).
    */
-  canRevise(requestId: string): { allowed: boolean; revisionCount: number; maxRevisions: number } {
+  canReject(requestId: string): { allowed: boolean; rejectionCount: number; maxRejections: number } {
     const request = this.store.get(requestId);
     if (!request || request.status !== "pending" || !request.taskId) {
-      return { allowed: false, revisionCount: 0, maxRevisions: 0 };
+      return { allowed: false, rejectionCount: 0, maxRejections: 0 };
     }
 
     const gate = this.ctx.config.settings.approvalGates?.find(g => g.id === request.gateId);
-    const maxRevisions = gate?.maxRevisions ?? 3;
+    const maxRejections = gate?.maxRevisions ?? 3;
     const task = this.ctx.registry.getTask(request.taskId);
     const currentCount = task?.revisionCount ?? 0;
 
-    return { allowed: currentCount < maxRevisions, revisionCount: currentCount, maxRevisions };
+    return { allowed: currentCount < maxRejections, rejectionCount: currentCount, maxRejections };
   }
 
   /**

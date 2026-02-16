@@ -359,14 +359,11 @@ export class Orchestrator extends TypedEmitter {
   approveRequest(requestId: string, resolvedBy?: string, note?: string): ApprovalRequest | null {
     return this.approvalMgr?.approve(requestId, resolvedBy, note) ?? null;
   }
-  rejectRequest(requestId: string, resolvedBy?: string, note?: string): ApprovalRequest | null {
-    return this.approvalMgr?.reject(requestId, resolvedBy, note) ?? null;
+  rejectRequest(requestId: string, feedback: string, resolvedBy?: string): ApprovalRequest | null {
+    return this.approvalMgr?.reject(requestId, feedback, resolvedBy) ?? null;
   }
-  reviseRequest(requestId: string, feedback: string, resolvedBy?: string): ApprovalRequest | null {
-    return this.approvalMgr?.revise(requestId, feedback, resolvedBy) ?? null;
-  }
-  canReviseRequest(requestId: string): { allowed: boolean; revisionCount: number; maxRevisions: number } {
-    return this.approvalMgr?.canRevise(requestId) ?? { allowed: false, revisionCount: 0, maxRevisions: 0 };
+  canRejectRequest(requestId: string): { allowed: boolean; rejectionCount: number; maxRejections: number } {
+    return this.approvalMgr?.canReject(requestId) ?? { allowed: false, rejectionCount: 0, maxRejections: 0 };
   }
   getPendingApprovals(): ApprovalRequest[] {
     return this.approvalMgr?.getPending() ?? [];
@@ -571,13 +568,9 @@ export class Orchestrator extends TypedEmitter {
         const result = approvalMgr.approve(requestId, resolvedBy);
         return result ? { ok: true } : { ok: false, error: "Not found or already resolved" };
       },
-      reject: async (requestId, resolvedBy) => {
-        const result = approvalMgr.reject(requestId, resolvedBy);
-        return result ? { ok: true } : { ok: false, error: "Not found or already resolved" };
-      },
-      revise: async (requestId, feedback, resolvedBy) => {
-        const result = approvalMgr.revise(requestId, feedback, resolvedBy);
-        return result ? { ok: true } : { ok: false, error: "Not found, already resolved, or max revisions reached" };
+      reject: async (requestId, feedback, resolvedBy) => {
+        const result = approvalMgr.reject(requestId, feedback, resolvedBy);
+        return result ? { ok: true } : { ok: false, error: "Not found, already resolved, or max rejections reached" };
       },
     };
 

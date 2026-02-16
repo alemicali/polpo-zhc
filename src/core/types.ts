@@ -517,7 +517,7 @@ export interface ApprovalGate {
   includeOutcomes?: boolean;
 }
 
-export type ApprovalStatus = "pending" | "approved" | "rejected" | "revised" | "timeout";
+export type ApprovalStatus = "pending" | "approved" | "rejected" | "timeout";
 
 export interface ApprovalRequest {
   /** Unique request ID. */
