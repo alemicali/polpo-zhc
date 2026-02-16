@@ -20,8 +20,8 @@ describe("state-machine", () => {
       expect(VALID_TRANSITIONS.pending).toEqual(["assigned", "awaiting_approval"]);
     });
 
-    it("awaiting_approval can go to assigned, failed, or done", () => {
-      expect(VALID_TRANSITIONS.awaiting_approval).toEqual(["assigned", "failed", "done"]);
+    it("awaiting_approval can go to assigned, failed, done, or pending", () => {
+      expect(VALID_TRANSITIONS.awaiting_approval).toEqual(["assigned", "failed", "done", "pending"]);
     });
 
     it("assigned can go to in_progress or awaiting_approval", () => {

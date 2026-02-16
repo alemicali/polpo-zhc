@@ -1,0 +1,219 @@
+---
+title: "Security"
+description: "Environment sandboxing, condition evaluation, and network security in Polpo"
+---
+
+Polpo runs AI agents as subprocesses that can execute arbitrary code. This guide covers the security measures in place to limit the blast radius.
+
+## Environment Variable Filtering (safeEnv)
+
+### The Problem
+
+By default, child processes inherit the full `process.env` of their parent. This means every agent subprocess — including bash tool commands and MCP stdio servers — would have access to all API keys, tokens, and secrets in the environment.
+
+An agent could trivially read secrets via `env`, `echo $SECRET`, or any other shell command.
+
+### The Solution
+
+Polpo uses `safeEnv()` to create a **filtered copy** of `process.env` containing only system-essential variables. API keys and secrets are never passed to agent processes.
+
+The allowlist of system-essential variables:
+
+| Category | Variables |
+|----------|-----------|
+| Core system | `PATH`, `HOME`, `USER`, `SHELL`, `TERM`, `LANG`, `LC_ALL`, `LC_CTYPE` |
+| Temp directories | `TMPDIR`, `TMP`, `TEMP` |
+| Node.js | `NODE_ENV`, `NODE_PATH`, `NODE_OPTIONS` |
+| Editor | `EDITOR`, `VISUAL` |
+| XDG directories | `XDG_DATA_HOME`, `XDG_CONFIG_HOME`, `XDG_CACHE_HOME`, `XDG_RUNTIME_DIR` |
+| Linux display | `DISPLAY`, `WAYLAND_DISPLAY`, `DBUS_SESSION_BUS_ADDRESS` |
+| Windows | `SYSTEMROOT`, `COMSPEC`, `PATHEXT`, `APPDATA`, `LOCALAPPDATA`, `PROGRAMFILES`, `WINDIR` |
+| SSH (for git) | `SSH_AUTH_SOCK`, `SSH_AGENT_PID` |
+| Git | `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL`, `GIT_COMMITTER_NAME`, `GIT_COMMITTER_EMAIL` |
+| Proxy | `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`, `http_proxy`, `https_proxy`, `no_proxy` |
+| Timezone | `TZ` |
+
+### Adding Extra Variables
+
+If agents need specific environment variables, pass them explicitly:
+
+```typescript
+import { safeEnv } from "polpo/tools/safe-env";
+
+// Add extra vars from config (takes precedence over process.env)
+const env = safeEnv({ MY_API_URL: "https://api.example.com" });
+
+// Allow specific process.env vars through
+const env = safeEnv(undefined, ["DATABASE_URL", "REDIS_URL"]);
+```
+
+Convenience helpers are available for common use cases:
+
+```typescript
+import { bashSafeEnv, mcpSafeEnv } from "polpo/tools/safe-env";
+
+// For bash tool commands — system vars only
+const bashEnv = bashSafeEnv();
+
+// For MCP stdio transport — system vars + explicit config overrides
+const mcpEnv = mcpSafeEnv({ SOME_CONFIG: "value" });
+```
+
+## JSON Condition DSL
+
+### Why Not eval()?
+
+Notification rules support conditions that filter which events trigger notifications. A naive approach would be `eval()` or `new Function()` to evaluate user-provided expressions — this would be a code injection vulnerability.
+
+### The Structured Approach
+
+Instead, Polpo uses a pure-data JSON condition format (`NotificationCondition`) that is evaluated without any string parsing or code execution:
+
+```json
+{
+  "field": "passed",
+  "op": "==",
+  "value": false
+}
+```
+
+Supported operators:
+
+| Operator | Description |
+|----------|-------------|
+| `==` | Equal |
+| `!=` | Not equal |
+| `>`, `>=`, `<`, `<=` | Numeric comparison |
+| `includes` | String contains or array includes |
+| `not_includes` | Negation of includes |
+| `exists` | Field is not null/undefined |
+| `not_exists` | Field is null/undefined |
+
+Logical combinators:
+
+```json
+{
+  "and": [
+    { "field": "passed", "op": "==", "value": false },
+    { "field": "globalScore", "op": "<", "value": 2 }
+  ]
+}
+```
+
+```json
+{
+  "or": [
+    { "field": "level", "op": "==", "value": "error" },
+    { "field": "level", "op": "==", "value": "warn" }
+  ]
+}
+```
+
+```json
+{
+  "not": { "field": "status", "op": "==", "value": "done" }
+}
+```
+
+Fields use dot-path notation resolved on the event payload (e.g. `"task.status"`, `"scores[0].score"`).
+
+## Network Security
+
+### Localhost-Only Default
+
+The Polpo server binds to `127.0.0.1` by default — it is **not** accessible from other machines on the network:
+
+```bash
+polpo serve --port 3890
+# Binds to 127.0.0.1:3890 (localhost only)
+```
+
+### Binding to 0.0.0.0
+
+If you need to expose the server to the network (e.g., for remote dashboards), you can override the host:
+
+```bash
+polpo serve --host 0.0.0.0 --port 3890
+```
+
+<Warning>
+When binding to `0.0.0.0`, the server is accessible to **anyone** on the network. Always configure API key authentication when exposing the server:
+
+```json
+{
+  "server": {
+    "host": "0.0.0.0",
+    "port": 3890,
+    "apiKeys": ["your-secret-key-here"]
+  }
+}
+```
+</Warning>
+
+### CORS
+
+The server restricts CORS origins to common local development ports by default:
+- `http://localhost:3000`, `http://localhost:3001`
+- `http://localhost:5173`, `http://localhost:5174`
+- `http://127.0.0.1:3000`, `http://127.0.0.1:3001`
+- `http://127.0.0.1:5173`, `http://127.0.0.1:5174`
+
+Configure custom origins via `corsOrigins` in the server config.
+
+## Filesystem Sandbox
+
+### allowedPaths
+
+Each agent can be restricted to specific filesystem paths using `allowedPaths`. All file-based tools (read, write, edit, glob, grep) enforce path sandboxing when this is configured.
+
+```json
+{
+  "team": {
+    "agents": [
+      {
+        "name": "frontend-dev",
+        "allowedPaths": ["src/", "public/", "package.json"],
+        "role": "Frontend developer"
+      }
+    ]
+  }
+}
+```
+
+**How it works:**
+- Paths are resolved relative to the project's `workDir`
+- Every file operation checks if the target path falls within the allowed directories
+- If no `allowedPaths` are configured, the agent defaults to the project's `workDir` (cannot access parent directories)
+- Attempts to access paths outside the sandbox throw an error with a descriptive message
+
+### Path Resolution
+
+```typescript
+// Agent with allowedPaths: ["src/", "tests/"]
+// workDir: /home/user/my-project
+
+// Allowed:
+//   /home/user/my-project/src/index.ts       ✓
+//   /home/user/my-project/tests/unit.test.ts  ✓
+
+// Blocked:
+//   /home/user/my-project/secrets.env         ✗
+//   /home/user/.ssh/id_rsa                    ✗
+//   /etc/passwd                               ✗
+```
+
+## General Security Posture
+
+| Concern | Mitigation |
+|---------|-----------|
+| API key leakage to agents | `safeEnv()` filters environment variables |
+| Code injection in conditions | JSON condition DSL — no `eval()` |
+| Network exposure | Localhost-only by default (`127.0.0.1`) |
+| Unauthorized API access | Optional API key authentication |
+| Agent filesystem access | `allowedPaths` sandbox per agent |
+| Cross-origin requests | CORS restricted to localhost origins |
+| Log store errors | Wrapped in try/catch — never breaks the system |
+
+<Note>
+Polpo follows a defense-in-depth approach. No single measure is sufficient on its own, but together they significantly limit the blast radius of a compromised agent.
+</Note>

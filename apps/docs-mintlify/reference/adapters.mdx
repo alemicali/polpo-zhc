@@ -1,0 +1,281 @@
+---
+title: "Adapters Reference"
+description: "Built-in adapter configurations and options"
+---
+
+Polpo ships with three built-in adapters: `native` (default), `claude-sdk`, and `generic`.
+
+## native Adapter
+
+**Default adapter** — Polpo's built-in agentic engine using [`@mariozechner/pi-ai`](/https://github.com/mariozechner/pi-ai) and [`@mariozechner/pi-agent-core`](/https://github.com/mariozechner/pi-agent-core).
+
+The native adapter provides a multi-provider LLM interface with built-in coding tools, supporting any provider compatible with pi-ai (Anthropic, OpenAI, Google, Groq, DeepSeek, and more).
+
+### Configuration
+
+```json
+{
+  "agents": [
+    {
+      "name": "my-agent",
+      "adapter": "native",
+      "role": "Full-stack developer",
+      "model": "opencode:big-pickle",
+      "systemPrompt": "Focus on TypeScript and React patterns"
+    }
+  ]
+}
+```
+
+<Tip>
+The `adapter: native` field is **optional** — agents default to the native adapter when `adapter` is not specified.
+</Tip>
+
+### Model Configuration
+
+Specify models using `provider:model` syntax:
+
+| Provider | Example Model | Env Var Required |
+|----------|---------------|------------------|
+| `opencode` | `opencode:big-pickle` | None (free) |
+| `anthropic` | `anthropic:claude-sonnet-4-5-20250929` | `ANTHROPIC_API_KEY` |
+| `openai` | `openai:gpt-4o` | `OPENAI_API_KEY` |
+| `google` | `google:gemini-2.0-flash-exp` | `GOOGLE_API_KEY` |
+| `groq` | `groq:llama-3.3-70b-versatile` | `GROQ_API_KEY` |
+| `deepseek` | `deepseek:deepseek-chat` | `DEEPSEEK_API_KEY` |
+
+**Auto-inference**: If provider is omitted, pi-ai infers from model name:
+- `claude-*` → `anthropic`
+- `gpt-*` → `openai`
+- `gemini-*` → `google`
+
+### Default Model
+
+The default model is **`opencode:big-pickle`** (free, no API key required). Override globally via environment variable:
+
+```bash
+export POLPO_MODEL=anthropic:claude-sonnet-4-5-20250929
+```
+
+Or per-agent in config:
+
+```json
+{
+  "agents": [
+    { "name": "architect", "model": "anthropic:claude-sonnet-4-5-20250929" },
+    { "name": "implementer", "model": "openai:gpt-4o" }
+  ]
+}
+```
+
+### Built-in Coding Tools
+
+The native adapter includes these coding tools (always available):
+
+- **read** — Read files with line numbers
+- **write** — Create new files
+- **edit** — String replacement edits
+- **bash** — Execute shell commands
+- **glob** — Find files by pattern
+- **grep** — Search file contents
+- **ls** — List directory contents
+
+### Features
+
+- **Multi-provider**: One adapter, many LLM providers
+- **Free tier**: `opencode:big-pickle` works out-of-the-box
+- **Agentic loop**: Built-in reasoning + tool use
+- **No SDK dependency**: Lightweight, no `@anthropic-ai/claude-agent-sdk` required
+- **Transcript logging**: Full JSONL logs in `.polpo/logs/`
+
+### Environment Variables
+
+Set API keys for your chosen provider:
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+export OPENAI_API_KEY=sk-...
+export GOOGLE_API_KEY=...
+export GROQ_API_KEY=gsk_...
+export DEEPSEEK_API_KEY=...
+```
+
+### Provider Overrides
+
+Advanced: Override provider base URLs via environment:
+
+```bash
+export POLPO_ANTHROPIC_BASE_URL=https://custom.anthropic.proxy
+export POLPO_OPENAI_BASE_URL=https://custom.openai.proxy
+```
+
+### When to Use
+
+- ✅ **Default choice** — Works for most use cases
+- ✅ Free tier available (`opencode:big-pickle`)
+- ✅ Multi-provider flexibility (switch models easily)
+- ✅ Lightweight (no Claude SDK dependency)
+
+### When NOT to Use
+
+- ❌ Need Claude-specific features (skills, MCP servers) → use `claude-sdk`
+- ❌ Need custom CLI agents → use `generic`
+
+---
+
+## claude-sdk Adapter
+
+Uses the `@anthropic-ai/claude-agent-sdk` to call Claude models directly via the Anthropic API.
+
+### Configuration
+
+```json
+{
+  "agents": [
+    {
+      "name": "my-agent",
+      "adapter": "claude-sdk",
+      "role": "Full-stack developer",
+      "model": "claude-sonnet-4-5-20250929",
+      "allowedTools": ["Read", "Write", "Edit", "Bash", "Glob", "Grep"],
+      "mcpServers": {
+        "my-server": {
+          "command": "node",
+          "args": ["my-mcp-server.js"]
+        }
+      },
+      "systemPrompt": "Focus on TypeScript and React patterns",
+      "skills": ["frontend-design", "ai-sdk-6"],
+      "maxTurns": 200
+    }
+  ]
+}
+```
+
+### Options
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `model` | string | — | Claude model ID (e.g. `claude-sonnet-4-5-20250929`) |
+| `allowedTools` | string[] | all | Restrict available tools |
+| `mcpServers` | object | — | MCP server configurations |
+| `systemPrompt` | string | — | Additional system instructions |
+| `skills` | string[] | — | Installed Claude Code skills |
+| `maxTurns` | number | `150` | Max conversation turns |
+
+### Features
+
+- **Persistent sessions**: `persistSession: true` for transcript access
+- **Session transcripts**: Read via `/inspect` command (`.jsonl` format)
+- **Tool handling**: Automatic tool use with Claude's built-in tools
+- **Activity tracking**: Real-time updates from tool calls
+- **Session ID**: Exposed via `AgentHandle.sessionId`
+
+### Environment
+
+Requires `ANTHROPIC_API_KEY` environment variable.
+
+---
+
+## generic Adapter
+
+Spawns any CLI command as a child process. Use this for non-Claude agents like Aider, GPT-Engineer, or custom scripts.
+
+### Configuration
+
+```json
+{
+  "agents": [
+    {
+      "name": "cli-agent",
+      "adapter": "generic",
+      "command": "my-agent --task {taskFile}",
+      "role": "CLI-based agent"
+    }
+  ]
+}
+```
+
+### Command Template Variables
+
+| Variable | Description |
+|----------|-------------|
+| `{prompt}` | Task description as inline text |
+| `{taskFile}` | Path to a temporary file containing the task description |
+
+### Options
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `command` | string | **required** | Shell command to execute |
+
+### Features
+
+- **Real PID tracking**: `AgentHandle.pid` contains the actual process ID
+- **Process lifecycle**: Full SIGTERM/SIGKILL handling
+- **stdin/stdout**: Task description piped to stdin; stdout captured as output
+- **stderr**: Captured separately for error reporting
+- **Exit codes**: 0 = success, non-zero = failure
+
+### How It Works
+
+1. Polpo writes the task description to a temp file
+2. Replaces `{prompt}` and `{taskFile}` in the command template
+3. Spawns the command as a child process
+4. Captures stdout/stderr
+5. Reports exit code as `TaskResult`
+
+### Example: Custom Python Script
+
+```json
+{
+  "agents": [
+    {
+      "name": "py-analyzer",
+      "adapter": "generic",
+      "command": "python3 scripts/analyze.py --task {taskFile}",
+      "role": "Code analysis specialist"
+    }
+  ]
+}
+```
+
+### Example: Custom CLI Tool
+
+```json
+{
+  "agents": [
+    {
+      "name": "my-tool",
+      "adapter": "generic",
+      "command": "my-tool --prompt {prompt}",
+      "role": "Custom tool agent"
+    }
+  ]
+}
+```
+
+---
+
+## Writing Custom Adapters
+
+See the [Custom Adapter](/reference/custom-adapter) for a step-by-step walkthrough of building your own adapter.
+
+The adapter interface:
+
+```typescript
+interface AgentAdapter {
+  readonly name: string;
+  spawn(agent: AgentConfig, task: Task, cwd: string): AgentHandle;
+}
+```
+
+Register with:
+
+```typescript
+registerAdapter("my-adapter", new MyAdapter());
+```
+
+<Note>
+Adapters self-register via side-effect imports. Import your adapter file in the CLI entry point (`src/cli/index.ts`) so it's available at runtime.
+</Note>

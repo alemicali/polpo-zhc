@@ -125,9 +125,13 @@ describe("integration: lifecycle", () => {
       exitCode: 0, stdout: "ok", stderr: "", duration: 50,
     });
 
-    // Tick 2: collect A result, A → done, spawn B
+    // Tick 2: collect A result, A → done (async transition)
     orchestrator.tick();
-    await new Promise(r => setTimeout(r, 10));
+    await new Promise(r => setTimeout(r, 50));
+
+    // Tick 3: now A is done, B's dependency is satisfied → spawn B
+    orchestrator.tick();
+    await new Promise(r => setTimeout(r, 50));
 
     expect(spawnOrder).toContain("Task B");
   });

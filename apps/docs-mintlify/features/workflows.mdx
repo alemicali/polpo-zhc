@@ -1,0 +1,226 @@
+---
+title: "Workflows"
+description: "Parameterized, reusable plan templates that encode repeatable engineering processes."
+---
+
+Workflows are **parameterized plan templates** — JSON files that define a complete [Plan](/concepts/plans) with `{{placeholder}}` parameters. When you execute a workflow, Polpo substitutes your parameters, saves the result as a standard Plan, and runs it. Think of them as GitHub Actions reusable workflows, but for multi-agent orchestration.
+
+## Why Workflows?
+
+Plans are powerful, but writing a full plan JSON every time you want to do a code review or fix a bug is tedious. Workflows solve this by letting you define a process **once** and reuse it with different parameters:
+
+```bash
+# Review the auth module, focusing on security
+polpo workflow run code-review --param module=src/auth --param focus=security
+
+# Fix a specific bug
+polpo workflow run bug-fix --param issue="Login fails when email has + character"
+```
+
+The key insight: **a workflow is data, not code**. It's a JSON file on disk. When executed, it becomes a regular Plan — no new runtime concepts, no special execution path.
+
+## Anatomy of a Workflow
+
+A workflow lives in a directory with a `workflow.json` file:
+
+```
+.polpo/workflows/
+  code-review/
+    workflow.json
+  bug-fix/
+    workflow.json
+```
+
+The `workflow.json` has three top-level fields:
+
+```json
+{
+  "name": "code-review",
+  "description": "Deep code review of a module: analysis, fixes, and verification",
+  "parameters": [ ... ],
+  "plan": { ... }
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `name` | string | Yes | Workflow identifier (kebab-case) |
+| `description` | string | Yes | Human-readable summary |
+| `parameters` | array | No | Declared parameters (see below) |
+| `plan` | object | Yes | Plan template — same shape as a PlanDocument, with `{{placeholders}}` |
+
+## Parameters
+
+Each parameter declares a name, type, and constraints:
+
+```json
+{
+  "name": "module",
+  "description": "Module or directory to review",
+  "type": "string",
+  "required": true
+}
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `name` | string | — | Parameter name, used as `{{name}}` in the plan |
+| `description` | string | — | Human-readable explanation |
+| `type` | `"string"` \| `"number"` \| `"boolean"` | `"string"` | Value type — booleans accept `true/false/yes/no/1/0` |
+| `required` | boolean | `false` | Whether the parameter must be provided |
+| `default` | string \| number \| boolean | — | Default value when not provided |
+| `enum` | array | — | Allowed values (enum constraint) |
+
+<Tip>
+Parameters with a `default` value don't need to be marked `required` — they'll always resolve to something.
+</Tip>
+
+### Enum Parameters
+
+Constrain a parameter to specific values:
+
+```json
+{
+  "name": "focus",
+  "description": "Review focus area",
+  "type": "string",
+  "default": "general",
+  "enum": ["general", "performance", "security", "readability", "types"]
+}
+```
+
+## Plan Template
+
+The `plan` field is a standard Plan structure — teams, tasks, dependencies, expectations, quality gates — with `{{placeholder}}` tokens wherever you want parameter substitution:
+
+```json
+{
+  "plan": {
+    "team": [
+      {
+        "name": "analyst",
+        "role": "Senior code analyst",
+        "enableGit": true
+      }
+    ],
+    "tasks": [
+      {
+        "title": "Analyze {{module}}",
+        "description": "Perform a deep {{focus}} review of {{module}}.",
+        "assignTo": "analyst",
+        "expectations": [
+          { "type": "test", "command": "{{test_command}}" }
+        ]
+      }
+    ]
+  }
+}
+```
+
+Placeholders work anywhere in the plan JSON — titles, descriptions, commands, file paths, even `dependsOn` references. During instantiation, Polpo serializes the plan to a string, replaces all `{{param}}` tokens, and parses it back.
+
+<Note>
+Every placeholder in the plan **must** correspond to a declared parameter (or have a default). Polpo will throw an error if any `{{placeholder}}` remains unreplaced after substitution.
+</Note>
+
+## Discovery
+
+Polpo discovers workflows from three locations, in priority order (first match wins by name):
+
+| Priority | Location | Scope |
+|----------|----------|-------|
+| 1 | `<polpoDir>/workflows/` | Project-level |
+| 2 | `<cwd>/.polpo/workflows/` | Fallback (if polpoDir differs) |
+| 3 | `~/.polpo/workflows/` | User-level (shared across projects) |
+
+Each workflow is a **directory** containing a `workflow.json` file. Directories without a valid `workflow.json` are silently skipped.
+
+If two workflows share the same `name`, the higher-priority location wins. This lets you override a user-level workflow with a project-specific version.
+
+## Execution Flow
+
+When you run a workflow, four things happen:
+
+1. **Load** — the workflow definition is loaded from disk
+2. **Validate** — parameters are checked against declared types, enums, and required flags. Defaults are applied.
+3. **Instantiate** — all `{{placeholder}}` tokens are replaced with resolved values. The result is validated as legal JSON.
+4. **Execute** — the instantiated plan is saved via `savePlan()` and executed via `executePlan()` — from here on it's a standard Plan
+
+```
+workflow.json + params → validation → substitution → PlanDocument → executePlan()
+```
+
+The workflow system adds zero runtime overhead — once instantiated, the plan executes through the exact same path as any manually created plan. Same task lifecycle, same assessment, same quality gates, same hooks.
+
+## Running Workflows
+
+<Tabs>
+  <Tab title="CLI">
+    ```bash
+    # List available workflows
+    polpo workflow list
+
+    # Show details and parameters
+    polpo workflow show code-review
+
+    # Run with parameters
+    polpo workflow run code-review --param module=src/auth --param focus=security
+
+    # Dry run — see the instantiated plan without executing
+    polpo workflow run code-review --param module=src/auth --dry-run
+
+    # Validate a workflow definition
+    polpo workflow validate code-review
+    ```
+  </Tab>
+
+  <Tab title="TUI">
+    ```
+    /workflow              → interactive picker
+    /workflow list         → inline summary
+    /workflow code-review module=src/auth focus=security
+    ```
+  </Tab>
+
+  <Tab title="HTTP API">
+    ```bash
+    # List workflows
+    curl http://localhost:3890/api/v1/projects/my-project/workflows
+
+    # Get workflow details
+    curl http://localhost:3890/api/v1/projects/my-project/workflows/code-review
+
+    # Execute with parameters
+    curl -X POST http://localhost:3890/api/v1/projects/my-project/workflows/code-review/run \
+      -H "Content-Type: application/json" \
+      -d '{ "params": { "module": "src/auth", "focus": "security" } }'
+    ```
+  </Tab>
+</Tabs>
+
+## Built-in Workflows
+
+Polpo ships with 8 ready-to-use workflows:
+
+| Workflow | Description | Key Parameters |
+|----------|-------------|----------------|
+| `code-review` | Deep code review with analysis, fixes, and verification | `module` (required), `focus`, `test_command` |
+| `bug-fix` | Structured bug fix: reproduce, fix, test, verify | `issue` (required), `scope`, `test_command` |
+| `refactoring` | Safe refactoring with analysis and test validation | `module` (required), `goal` (required), `test_command` |
+| `test-coverage` | Improve test coverage for a module | `module` (required), `target_coverage`, `test_command` |
+| `documentation` | Generate or improve documentation | `module` (required), `style`, `scope` |
+| `security-audit` | Security audit with vulnerability assessment | `module` (required), `severity`, `test_command` |
+| `migration` | Database or API migration workflow | `from` (required), `to` (required), `test_command` |
+| `onboarding` | Generate onboarding docs for a codebase | `module` (required), `audience` |
+
+## Workflows vs Skills vs Plans
+
+| Dimension | Skills | Workflows | Plans |
+|-----------|--------|-----------|-------|
+| **Layer** | Prompt | Orchestration | Execution |
+| **Format** | Markdown (`SKILL.md`) | JSON (`workflow.json`) | JSON (`.polpo/plans/`) |
+| **What it does** | Injects instructions into agent's system prompt | Generates a Plan from a parameterized template | Defines tasks, agents, and dependencies to execute |
+| **Reusability** | Assigned to agents across tasks | Instantiated with different parameters | Single-use (one execution) |
+| **Runtime impact** | Affects how the agent thinks | None — becomes a standard Plan | Drives task execution |
+
+Skills make agents smarter. Workflows make processes repeatable. Plans are the execution unit.

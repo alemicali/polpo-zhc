@@ -1,0 +1,157 @@
+---
+title: "Configuration"
+description: "Overview of the .polpo/polpo.json configuration file"
+---
+
+Polpo is configured through a JSON file at `.polpo/polpo.json` in your project directory.
+
+## File Structure
+
+```json
+{
+  "project": "my-project",
+  "team": {
+    "name": "default",
+    "description": "Project team description",
+    "agents": [
+      {
+        "name": "agent-name",
+        "adapter": "native",
+        "role": "Role description",
+        "model": "opencode:big-pickle"
+      }
+    ]
+  },
+  "providers": {
+    "anthropic": "${ANTHROPIC_API_KEY}",
+    "openai": "${OPENAI_API_KEY}"
+  },
+  "settings": {
+    "maxRetries": 3,
+    "workDir": ".",
+    "logLevel": "normal"
+  }
+}
+```
+
+<Note>
+Plans and tasks are managed dynamically via the TUI/CLI/API and stored in `.polpo/plans/*.json` and task stores — they are NOT defined in the config file.
+</Note>
+
+## Agents
+
+Each agent entry defines a worker that can be assigned tasks. You specify a `name`, an `adapter` (native, claude-sdk, or generic), a `role` describing its expertise, and a `model` for the LLM to use.
+
+```json
+{
+  "team": {
+    "agents": [
+      {
+        "name": "developer",
+        "adapter": "native",
+        "model": "opencode:big-pickle",
+        "role": "Full-stack developer using Polpo's native engine"
+      },
+      {
+        "name": "architect",
+        "adapter": "claude-sdk",
+        "model": "claude-sonnet-4-5-20250929",
+        "role": "Senior software architect who designs system components"
+      },
+      {
+        "name": "aider-dev",
+        "adapter": "generic",
+        "command": "aider --no-auto-commit --model gpt-4",
+        "role": "Aider-powered developer for code changes"
+      }
+    ]
+  }
+}
+```
+
+Agents support many additional options like `allowedTools`, `allowedPaths`, `enableBrowser`, `skills`, and more. See [Configuration Reference](/reference/config) for the full field list.
+
+## Plans and Tasks
+
+Plans group related tasks into execution units with optional dependencies, quality gates, scheduling, and deadlines:
+
+```json
+{
+  "plans": [
+    {
+      "group": "feature-auth",
+      "tasks": [
+        {
+          "title": "Implement JWT auth",
+          "agent": "developer",
+          "description": "Build JWT authentication middleware",
+          "dependsOn": [],
+          "expectations": [
+            { "type": "test", "command": "npm test" }
+          ]
+        }
+      ]
+    }
+  ]
+}
+```
+
+Plans can also define volatile teams (agents scoped to a single plan) and quality gates. See [Plans & Dependencies](/concepts/plans) for details on plan structure.
+
+## Settings
+
+The `settings` object controls orchestrator behavior — retry limits, tick interval, log level, stale detection thresholds, and more:
+
+```json
+{
+  "settings": {
+    "maxRetries": 3,
+    "maxFixAttempts": 2,
+    "tickIntervalMs": 5000,
+    "staleThreshold": 300000,
+    "logLevel": "normal",
+    "workDir": ".",
+    "orchestratorModel": "claude-sonnet-4-5-20250929"
+  }
+}
+```
+
+## Optional Systems
+
+Polpo includes several optional systems that can be enabled in the config:
+
+| System | Config Key | Learn More |
+|--------|------------|------------|
+| Approval gates | `approvalGates` | [Approval Gates](/features/approval-gates) |
+| Notifications | `notifications` | [Notifications](/features/notifications) |
+| Escalation | `escalationPolicy` | [Escalation Chain](/features/escalation) |
+| SLA monitoring | `sla` | [Assessment & Quality](/features/assessment) |
+| Scheduling | `enableScheduler` | [Scheduling](/features/scheduling) |
+| Quality threshold | `defaultQualityThreshold` | [Assessment & Quality](/features/assessment) |
+
+## Environment Variables
+
+```bash
+# Required for Claude agents
+ANTHROPIC_API_KEY=sk-ant-...
+
+# Optional: customize orchestrator LLM
+ORCHESTRATOR_MODEL=claude-sonnet-4-5-20250929
+ORCHESTRATOR_TEMPERATURE=0.7
+
+# Optional: server authentication
+API_KEY=your-secret-key
+```
+
+## Config Path
+
+By default, Polpo looks for `.polpo/polpo.json` in the current directory. Use `-d` or `--dir` to specify a different working directory:
+
+```bash
+polpo run -d /path/to/workdir
+polpo -d /path/to/workdir
+```
+
+<Note>
+For the complete field-by-field reference with every option, see [Configuration Reference](/reference/config).
+</Note>

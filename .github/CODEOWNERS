@@ -1,0 +1,23 @@
+# Default owners for the entire repository
+* @openpolpo/maintainers
+
+# Core framework
+/src/core/ @openpolpo/maintainers
+/src/adapters/ @openpolpo/maintainers
+
+# Server and API
+/src/server/ @openpolpo/maintainers
+
+# React SDK
+/packages/react-sdk/ @openpolpo/maintainers
+
+# Web UI
+/ui/ @openpolpo/maintainers
+
+# Documentation
+/apps/docs/ @openpolpo/maintainers
+
+# CI/CD and project config
+/.github/ @openpolpo/maintainers
+/package.json @openpolpo/maintainers
+/tsconfig.json @openpolpo/maintainers

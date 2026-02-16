@@ -25,6 +25,7 @@ Thumbs.db
 .env
 .env.local
 .env.*.local
+ui/.env
 
 # Agent/coding tool config directories (local per-user)
 .adal/

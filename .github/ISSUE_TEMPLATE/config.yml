@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Documentation
+    url: https://openpolpo.dev
+    about: Check the docs before opening an issue
+  - name: Discussions
+    url: https://github.com/openpolpo/openpolpo/discussions
+    about: Ask questions and share ideas

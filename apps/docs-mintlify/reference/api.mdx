@@ -1,0 +1,877 @@
+---
+title: "REST API Reference"
+description: "Complete HTTP API endpoint reference"
+---
+
+Base URL: `http://localhost:3890/api/v1`
+
+All project-scoped endpoints are under `/api/v1/projects/:projectId`.
+
+## Response Format
+
+```typescript
+// Success
+{ ok: true, data: T }
+
+// Error
+{ ok: false, error: string, code: string }
+```
+
+Error codes: `NOT_FOUND`, `VALIDATION_ERROR`, `CONFLICT`.
+
+---
+
+## Projects
+
+### List Projects
+
+```http
+GET /api/v1/projects
+```
+
+**Response** `200`:
+```json
+{ "ok": true, "data": [{ "id": "my-project", "workDir": "/path/to/project" }] }
+```
+
+### Get State
+
+```http
+GET /api/v1/projects/:projectId/state
+```
+
+Returns full `PolpoState` snapshot.
+
+### Get Config
+
+```http
+GET /api/v1/projects/:projectId/config
+```
+
+Returns `PolpoConfig`.
+
+---
+
+## Tasks
+
+### List Tasks
+
+```http
+GET /tasks?status=failed&group=build-api&assignTo=backend-dev
+```
+
+All query params are optional filters.
+
+**Response** `200`:
+```json
+{ "ok": true, "data": [{ "id": "task-1", "title": "...", "status": "done", ... }] }
+```
+
+### Get Task
+
+```http
+GET /tasks/:taskId
+```
+
+### Create Task
+
+```http
+POST /tasks
+Content-Type: application/json
+
+{
+  "title": "Build auth middleware",
+  "description": "Create JWT authentication middleware",
+  "assignTo": "backend-dev",
+  "group": "auth-feature",
+  "dependsOn": ["task-1"],
+  "maxDuration": 1800000,
+  "expectations": [
+    { "type": "test", "command": "npm test" }
+  ],
+  "retryPolicy": {
+    "escalateAfter": 2,
+    "fallbackAgent": "senior-dev"
+  }
+}
+```
+
+**Response** `201`: Created task object.
+
+### Update Task
+
+```http
+PATCH /tasks/:taskId
+Content-Type: application/json
+
+{
+  "description": "Updated description",
+  "assignTo": "different-agent",
+  "expectations": [...]
+}
+```
+
+All fields optional. Only updates provided fields.
+
+### Delete Task
+
+```http
+DELETE /tasks/:taskId
+```
+
+### Retry Task
+
+```http
+POST /tasks/:taskId/retry
+```
+
+Resets a `failed` task to `pending`.
+
+### Kill Task
+
+```http
+POST /tasks/:taskId/kill
+```
+
+Terminates the running agent and marks task as `failed`.
+
+### Reassess Task
+
+```http
+POST /tasks/:taskId/reassess
+```
+
+Re-runs assessment on a `done` or `failed` task.
+
+---
+
+## Plans
+
+### List Plans
+
+```http
+GET /plans
+```
+
+### List Resumable Plans
+
+```http
+GET /plans/resumable
+```
+
+Returns plans with failed tasks that can be resumed.
+
+### Get Plan
+
+```http
+GET /plans/:planId
+```
+
+### Save Plan
+
+```http
+POST /plans
+Content-Type: application/json
+
+{
+  "data": "plans:\n  - group: my-plan\n    tasks: ...",
+  "name": "My Plan",
+  "prompt": "Original user prompt",
+  "status": "draft"
+}
+```
+
+The `data` field contains the plan definition as a string.
+
+**Response** `201`: Created plan object.
+
+### Update Plan
+
+```http
+PATCH /plans/:planId
+Content-Type: application/json
+
+{ "data": "...", "status": "draft" }
+```
+
+### Delete Plan
+
+```http
+DELETE /plans/:planId
+```
+
+### Execute Plan
+
+```http
+POST /plans/:planId/execute
+```
+
+Transitions plan from `draft` to `active` and creates tasks.
+
+**Response**: `{ ok: true, data: { tasks: Task[] } }`
+
+### Resume Plan
+
+```http
+POST /plans/:planId/resume
+Content-Type: application/json
+
+{ "retryFailed": true }
+```
+
+Resumes a plan with failed or pending tasks.
+
+### Abort Plan
+
+```http
+POST /plans/:planId/abort
+```
+
+Kills all running tasks and cancels pending tasks in the plan group.
+
+**Response**: `{ ok: true, data: { aborted: 3 } }`
+
+---
+
+## Agents
+
+### List Agents
+
+```http
+GET /agents
+```
+
+### Add Agent
+
+```http
+POST /agents
+Content-Type: application/json
+
+{
+  "name": "new-dev",
+  "adapter": "claude-sdk",
+  "role": "Full-stack developer",
+  "model": "claude-sonnet-4-5-20250929",
+  "skills": ["frontend-design"],
+  "maxTurns": 200,
+  "systemPrompt": "Focus on TypeScript best practices"
+}
+```
+
+### Remove Agent
+
+```http
+DELETE /agents/:name
+```
+
+### Get Team
+
+```http
+GET /agents/team
+```
+
+### Rename Team
+
+```http
+PATCH /agents/team
+Content-Type: application/json
+
+{ "name": "Dream Team" }
+```
+
+### List Processes
+
+```http
+GET /agents/processes
+```
+
+Returns active `AgentProcess[]` with PID, activity, and alive status.
+
+---
+
+## Memory
+
+### Get Memory
+
+```http
+GET /memory
+```
+
+**Response**:
+```json
+{ "ok": true, "data": { "exists": true, "content": "# Project Memory\n..." } }
+```
+
+### Update Memory
+
+```http
+PUT /memory
+Content-Type: application/json
+
+{ "content": "# Project Memory\n\n## Build\nnpm run build" }
+```
+
+---
+
+## Chat & AI Generation
+
+### Chat
+
+```http
+POST /chat
+Content-Type: application/json
+
+{ "message": "What tasks are currently running?" }
+```
+
+**Response**: `{ ok: true, data: { response: "There are 2 tasks running..." } }`
+
+### Generate Plan
+
+```http
+POST /chat/generate-plan
+Content-Type: application/json
+
+{ "prompt": "Build a REST API with auth, rate limiting, and tests" }
+```
+
+**Response**: `{ ok: true, data: { data: "plans:\n...", raw: "..." } }`
+
+### Prepare Task
+
+```http
+POST /chat/prepare-task
+Content-Type: application/json
+
+{ "description": "Add user authentication", "assignTo": "backend-dev", "group": "auth" }
+```
+
+### Generate Team
+
+```http
+POST /chat/generate-team
+Content-Type: application/json
+
+{ "description": "Build a full-stack e-commerce platform" }
+```
+
+### Refine Team
+
+```http
+POST /chat/refine-team
+Content-Type: application/json
+
+{
+  "currentData": "agents:\n  - name: ...",
+  "description": "Build e-commerce platform",
+  "feedback": "Add a database specialist"
+}
+```
+
+### Refine Plan
+
+```http
+POST /chat/refine-plan
+Content-Type: application/json
+
+{
+  "currentData": "plans:\n  ...",
+  "prompt": "Build REST API",
+  "feedback": "Add rate limiting tasks"
+}
+```
+
+---
+
+## Logs
+
+### List Log Sessions
+
+```http
+GET /logs
+```
+
+Returns persisted event log sessions.
+
+### Get Log Entries
+
+```http
+GET /logs/:sessionId
+```
+
+Returns event entries for a log session.
+
+---
+
+## Chat Sessions
+
+### List Chat Sessions
+
+```http
+GET /chat/sessions
+```
+
+Returns all chat sessions (conversational AI interactions).
+
+### Get Session Messages
+
+```http
+GET /chat/sessions/:sessionId/messages
+```
+
+Returns messages for a specific chat session.
+
+### Delete Session
+
+```http
+DELETE /chat/sessions/:sessionId
+```
+
+---
+
+## Workflows
+
+### List Workflows
+
+```http
+GET /workflows
+```
+
+Discovers available workflows from `.polpo/workflows/` and `~/.polpo/workflows/`.
+
+**Response** `200`:
+```json
+{
+  "ok": true,
+  "data": [
+    {
+      "name": "code-review",
+      "description": "Deep code review of a module",
+      "parameters": [
+        { "name": "module", "type": "string", "required": true, "description": "Module to review" }
+      ],
+      "path": "/path/to/.polpo/workflows/code-review"
+    }
+  ]
+}
+```
+
+### Get Workflow
+
+```http
+GET /workflows/:name
+```
+
+Returns the full workflow definition including the plan template.
+
+**Response** `200`:
+```json
+{
+  "ok": true,
+  "data": {
+    "name": "code-review",
+    "description": "Deep code review of a module",
+    "parameters": [ ... ],
+    "plan": { ... }
+  }
+}
+```
+
+Returns `404` if the workflow is not found.
+
+### Execute Workflow
+
+```http
+POST /workflows/:name/run
+Content-Type: application/json
+
+{
+  "params": {
+    "module": "src/auth",
+    "focus": "security"
+  }
+}
+```
+
+Validates parameters, instantiates the workflow template, saves the resulting plan, and executes it.
+
+**Response** `201`:
+```json
+{
+  "ok": true,
+  "data": {
+    "plan": { "id": "plan-abc123", ... },
+    "tasks": 3,
+    "group": "code-review"
+  }
+}
+```
+
+Returns `404` if the workflow is not found, or `400` with `VALIDATION_ERROR` if parameters fail validation:
+
+```json
+{
+  "ok": false,
+  "error": "Parameter validation failed",
+  "code": "VALIDATION_ERROR",
+  "details": ["Missing required parameter: module"]
+}
+```
+
+---
+
+## Skills
+
+### List Skills
+
+```http
+GET /skills
+```
+
+Returns skills from the pool (`.polpo/skills/` and `~/.polpo/skills/`) with per-agent assignment info.
+
+**Response** `200`:
+```json
+{
+  "ok": true,
+  "data": [
+    {
+      "name": "frontend-design",
+      "description": "Create distinctive frontend interfaces",
+      "source": "project",
+      "path": "/path/to/.polpo/skills/frontend-design",
+      "assignedTo": ["frontend-dev"]
+    }
+  ]
+}
+```
+
+### Install Skills
+
+```http
+POST /skills/add
+Content-Type: application/json
+
+{
+  "source": "vercel-labs/agent-skills",
+  "skillNames": ["frontend-design", "web-design-guidelines"],
+  "global": false,
+  "force": false
+}
+```
+
+Clones the repository, discovers `SKILL.md` files, and copies them into the pool. The `source` field accepts GitHub `owner/repo` shorthand, full URLs, or local paths. All other fields are optional.
+
+**Response** `201`:
+```json
+{
+  "ok": true,
+  "data": {
+    "installed": [{ "name": "frontend-design", "description": "...", "path": "..." }],
+    "skipped": [],
+    "errors": []
+  }
+}
+```
+
+Returns `400` if no skills could be installed.
+
+### Remove Skill
+
+```http
+DELETE /skills/:name
+```
+
+Removes a skill from the project pool. Add `?global=true` to remove from the global pool.
+
+**Response** `200`:
+```json
+{ "ok": true, "data": { "removed": "frontend-design" } }
+```
+
+Returns `404` if the skill is not found.
+
+### Assign Skill to Agent
+
+```http
+POST /skills/:name/assign
+Content-Type: application/json
+
+{ "agent": "frontend-dev" }
+```
+
+Creates a symlink from the agent's skill directory to the pool skill, so the skill is loaded when that agent spawns.
+
+**Response** `200`:
+```json
+{ "ok": true, "data": { "skill": "frontend-design", "agent": "frontend-dev" } }
+```
+
+Returns `404` if the skill is not found in the pool.
+
+---
+
+## Task Activity
+
+### Get Task Activity
+
+```http
+GET /agents/processes/:taskId/activity
+```
+
+Returns the JSONL activity history for a specific task's run (tool calls, file edits, summaries). Looks up the run by `taskId` in the active `RunStore` and falls back to scanning `run-*.jsonl` files in `.polpo/logs/`.
+
+**Response** `200`:
+```json
+{ "ok": true, "data": [{ "type": "activity", "tool": "Edit", "file": "src/app.ts", "timestamp": "..." }] }
+```
+
+---
+
+## Notifications
+
+Manage notification history and send direct notifications. See also the [Notification System](/features/notifications) guide.
+
+### List Notification History
+
+```http
+GET /notifications?limit=100&status=sent&channel=telegram-oncall&rule=failed-tasks
+```
+
+All query params are optional filters.
+
+| Param | Description |
+|-------|-------------|
+| `limit` | Max records to return (default: 100) |
+| `status` | Filter by `sent` or `failed` |
+| `channel` | Filter by channel ID |
+| `rule` | Filter by rule ID |
+
+**Response** `200`:
+```json
+{
+  "ok": true,
+  "data": [
+    {
+      "id": "notif_abc123",
+      "timestamp": "2025-01-15T10:30:00Z",
+      "ruleId": "failed-tasks",
+      "ruleName": "Notify on task failure",
+      "channel": "slack-alerts",
+      "channelType": "slack",
+      "status": "sent",
+      "title": "Task Failed",
+      "body": "Task \"Run tests\" has failed",
+      "severity": "critical",
+      "sourceEvent": "task:transition",
+      "attachmentCount": 0
+    }
+  ]
+}
+```
+
+### Get Notification Stats
+
+```http
+GET /notifications/stats
+```
+
+**Response** `200`:
+```json
+{
+  "ok": true,
+  "data": {
+    "total": 42,
+    "sent": 39,
+    "failed": 3
+  }
+}
+```
+
+### Send Direct Notification
+
+```http
+POST /notifications/send
+Content-Type: application/json
+
+{
+  "channel": "telegram-oncall",
+  "title": "Deployment Complete",
+  "body": "Version 2.0.1 deployed to production",
+  "severity": "info",
+  "delayMs": 5000
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `channel` | string | Yes | Channel ID from your configuration |
+| `title` | string | Yes | Notification title |
+| `body` | string | Yes | Notification body (HTML supported for Telegram) |
+| `severity` | string | No | `info`, `warning`, or `critical` (default: `info`) |
+| `delayMs` | number | No | Delay in milliseconds before sending |
+
+**Response** `200`:
+```json
+{
+  "ok": true,
+  "data": {
+    "id": "notif_def456",
+    "scheduledAt": "2025-01-15T10:30:00.000Z",
+    "firesAt": "2025-01-15T10:30:05.000Z"
+  }
+}
+```
+
+When `delayMs` is set, the notification is scheduled with an in-memory `setTimeout`. The `firesAt` field indicates when it will fire.
+
+---
+
+## Approvals
+
+Manage approval requests created by [approval gates](/concepts/approvals).
+
+### List Approvals
+
+```http
+GET /approvals?status=pending&taskId=task-1
+```
+
+Both query params are optional filters. Valid `status` values: `pending`, `approved`, `rejected`, `revised`, `timeout`.
+
+**Response** `200`:
+```json
+{
+  "ok": true,
+  "data": [
+    {
+      "id": "req_abc123",
+      "gateId": "gate-1",
+      "gateName": "Production Deploy Gate",
+      "taskId": "task-1",
+      "status": "pending",
+      "requestedAt": "2025-01-15T10:30:00Z"
+    }
+  ]
+}
+```
+
+### Get Approval Request
+
+```http
+GET /approvals/:id
+```
+
+**Response** `200`: Single `ApprovalRequest` object.
+
+### Approve Request
+
+```http
+POST /approvals/:id/approve
+Content-Type: application/json
+
+{
+  "resolvedBy": "alice",
+  "note": "Looks good, ship it"
+}
+```
+
+Both fields are optional. On success, the blocked task transitions from `awaiting_approval` to `assigned` and resumes execution.
+
+**Response** `200`: Updated `ApprovalRequest` with `status: "approved"`.
+
+Returns `404` if the request does not exist, or `409` if already resolved.
+
+### Revise Request
+
+```http
+POST /approvals/:id/revise
+Content-Type: application/json
+
+{
+  "feedback": "The auth middleware is missing rate limiting. Add it before the JWT check.",
+  "resolvedBy": "alice"
+}
+```
+
+`feedback` is **required** — it tells the agent what to fix. `resolvedBy` is optional.
+
+On revision:
+1. The approval request is marked as `"revised"`
+2. The feedback is appended to the task description so the agent sees it
+3. The task's `revisionCount` is incremented
+4. The task transitions back to `assigned` and the agent re-spawns with the updated instructions
+
+**Response** `200`: Updated `ApprovalRequest` with `status: "revised"`.
+
+Returns `404` if the request does not exist, `409` if already resolved or max revisions reached.
+
+Each approval gate has a `maxRevisions` limit (default: 3). Once reached, the only options are approve or reject.
+
+### Reject Request
+
+```http
+POST /approvals/:id/reject
+Content-Type: application/json
+
+{
+  "resolvedBy": "bob",
+  "note": "Needs more tests first"
+}
+```
+
+Both fields are optional. On rejection, the blocked task transitions to `failed`.
+
+**Response** `200`: Updated `ApprovalRequest` with `status: "rejected"`.
+
+Returns `404` if the request does not exist, or `409` if already resolved.
+
+---
+
+## Events (SSE)
+
+### Subscribe
+
+```http
+GET /events
+```
+
+Or with reconnection:
+
+```http
+GET /events?lastEventId=42
+```
+
+**Event format** (SSE):
+```
+id: 43
+data: {"event":"task:transition","data":{"taskId":"task-1","from":"pending","to":"assigned","task":{...}}}
+```
+
+---
+
+## Health
+
+```http
+GET /api/v1/health
+```
+
+**Response**: `{ ok: true, uptime: 12345 }`
+
+---
+
+## Authentication
+
+When `--api-key` is configured on the server:
+
+```bash
+# Via header
+curl -H "X-API-Key: my-secret" http://localhost:3890/api/v1/projects
+
+# Via query parameter (for EventSource)
+curl "http://localhost:3890/api/v1/projects/my-project/events?apiKey=my-secret"
+```
+
+<Note>
+Requests without a valid API key receive `401 Unauthorized` when auth is enabled.
+</Note>

@@ -1,0 +1,334 @@
+---
+title: "React SDK Reference"
+description: "Provider, hooks, and client API for the React SDK"
+---
+
+The `@openpolpo/react-sdk` package provides type-safe React hooks with real-time SSE updates.
+
+## Installation
+
+```bash
+npm install @openpolpo/react-sdk
+```
+
+Peer dependencies: React 18 or 19.
+
+## PolpoProvider
+
+Wrap your app to provide Polpo context:
+
+```tsx
+import { PolpoProvider } from "@openpolpo/react-sdk";
+
+function App() {
+  return (
+    <PolpoProvider
+      baseURL="http://localhost:3890"
+      projectId="my-project"
+      apiKey="optional-key"
+    >
+      <MyApp />
+    </PolpoProvider>
+  );
+}
+```
+
+### Props
+
+| Prop | Type | Required | Description |
+|------|------|----------|-------------|
+| `baseURL` | string | yes | Polpo server URL |
+| `projectId` | string | yes | Project ID |
+| `apiKey` | string | no | API key for authentication |
+| `children` | ReactNode | yes | Child components |
+
+---
+
+## usePolpo
+
+Access the Polpo client and connection status.
+
+```tsx
+const { client, connectionStatus } = usePolpo();
+```
+
+### Returns
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `client` | `PolpoClient` | HTTP client with request deduplication |
+| `connectionStatus` | `"connected" \| "connecting" \| "disconnected"` | SSE connection state |
+
+---
+
+## useTasks
+
+List tasks with real-time updates.
+
+```tsx
+const { tasks, isLoading, error, createTask, deleteTask, retryTask, refetch } = useTasks();
+```
+
+### Returns
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `tasks` | `Task[]` | All tasks (auto-updated via SSE) |
+| `isLoading` | `boolean` | Initial load in progress |
+| `error` | `Error \| null` | Fetch error |
+| `createTask` | `(opts) => Promise<Task>` | Create a new task |
+| `deleteTask` | `(id) => Promise<void>` | Delete a task |
+| `retryTask` | `(id) => Promise<void>` | Retry a failed task |
+| `refetch` | `() => void` | Force refetch |
+
+---
+
+## useTask
+
+Single task details with actions.
+
+```tsx
+const { task, isLoading, error, updateTask, deleteTask, killTask, reassessTask, retryTask } = useTask("task-1");
+```
+
+### Parameters
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `taskId` | string | Task ID to subscribe to |
+
+### Returns
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `task` | `Task \| undefined` | Task object |
+| `updateTask` | `(opts) => Promise<Task>` | Update description, assignment, expectations |
+| `killTask` | `() => Promise<void>` | Kill running agent |
+| `reassessTask` | `() => Promise<void>` | Re-run assessment |
+| `retryTask` | `() => Promise<void>` | Retry failed task |
+
+---
+
+## usePlans
+
+List plans with management actions.
+
+```tsx
+const { plans, isLoading, createPlan, executePlan, resumePlan, abortPlan, deletePlan } = usePlans();
+```
+
+### Returns
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `plans` | `Plan[]` | All plans |
+| `createPlan` | `(opts) => Promise<Plan>` | Save new plan |
+| `executePlan` | `(id) => Promise<{ tasks: Task[] }>` | Execute a draft plan |
+| `resumePlan` | `(id, opts?) => Promise` | Resume failed plan |
+| `abortPlan` | `(id) => Promise<{ aborted: number }>` | Abort active plan |
+| `deletePlan` | `(id) => Promise<void>` | Delete plan |
+
+---
+
+## usePlan
+
+Single plan with actions.
+
+```tsx
+const { plan, executePlan, resumePlan, abortPlan, deletePlan } = usePlan("plan-1");
+```
+
+---
+
+## useAgents
+
+Team and agent management.
+
+```tsx
+const { agents, team, isLoading, addAgent, removeAgent, renameTeam } = useAgents();
+```
+
+### Returns
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `agents` | `AgentConfig[]` | All agents |
+| `team` | `Team \| null` | Team info |
+| `addAgent` | `(opts) => Promise<void>` | Register new agent |
+| `removeAgent` | `(name) => Promise<void>` | Remove agent |
+| `renameTeam` | `(name) => Promise<void>` | Rename the team |
+
+---
+
+## useProcesses
+
+Active agent processes.
+
+```tsx
+const { processes, isLoading } = useProcesses();
+```
+
+### Returns
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `processes` | `AgentProcess[]` | Active processes with PID, activity, alive status |
+
+`AgentProcess` fields:
+- `agentName`, `pid`, `taskId`, `startedAt`, `alive`
+- `activity`: `{ lastTool, lastFile, lastUpdate, toolCalls, filesCreated, filesEdited, summary }`
+
+---
+
+## useEvents
+
+SSE event stream.
+
+```tsx
+const { events } = useEvents(["task:*", "assessment:*"], 100);
+```
+
+### Parameters
+
+| Param | Type | Default | Description |
+|-------|------|---------|-------------|
+| `filter` | string[] | — | Glob patterns to filter events |
+| `maxEvents` | number | `200` | Max events to keep in buffer |
+
+### Returns
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `events` | `Event[]` | Buffered events (newest first) |
+
+---
+
+## useStats
+
+Aggregated statistics.
+
+```tsx
+const stats = useStats();
+// stats: { pending, running, done, failed, queued }
+```
+
+---
+
+## useMemory
+
+Project memory access.
+
+```tsx
+const { memory, isLoading, saveMemory, refetch } = useMemory();
+```
+
+### Returns
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `memory` | `{ exists: boolean, content: string } \| null` | Memory state |
+| `saveMemory` | `(content: string) => Promise<void>` | Save memory |
+| `refetch` | `() => void` | Force refetch |
+
+---
+
+## useSkills
+
+Discover available skills in the project.
+
+```tsx
+const { skills, isLoading, error, refetch } = useSkills();
+```
+
+### Returns
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `skills` | `SkillInfo[]` | Available skills discovered from `.polpo/skills/` and other locations |
+| `isLoading` | `boolean` | Initial load in progress |
+| `error` | `Error \| null` | Fetch error |
+| `refetch` | `() => Promise<void>` | Force refetch |
+
+---
+
+## useSessions
+
+Chat session management.
+
+```tsx
+const { sessions, activeSessionId, setActiveSessionId, getMessages, deleteSession } = useSessions();
+```
+
+### Returns
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `sessions` | `ChatSession[]` | All chat sessions |
+| `isLoading` | `boolean` | Initial load in progress |
+| `error` | `Error \| null` | Fetch error |
+| `activeSessionId` | `string \| null` | Currently selected session |
+| `setActiveSessionId` | `(id: string \| null) => void` | Select a session |
+| `getMessages` | `(sessionId: string) => Promise<ChatMessage[]>` | Fetch messages for a session |
+| `deleteSession` | `(sessionId: string) => Promise<void>` | Delete a session |
+| `refetch` | `() => Promise<void>` | Force refetch |
+
+---
+
+## useTaskActivity
+
+Per-task activity history from run logs.
+
+```tsx
+const { entries, isLoading, error, refetch } = useTaskActivity("task-1");
+```
+
+### Parameters
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `taskId` | `string \| null` | Task ID to fetch activity for. Pass `null` to skip. |
+
+### Returns
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `entries` | `RunActivityEntry[]` | Activity log entries (tool calls, file edits, summaries) |
+| `isLoading` | `boolean` | Initial load in progress |
+| `error` | `Error \| null` | Fetch error |
+| `refetch` | `() => Promise<void>` | Force refetch |
+
+---
+
+## useLogs
+
+Event log sessions and entries.
+
+```tsx
+const { sessions, isLoading, getLogEntries } = useLogs();
+```
+
+### Returns
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `sessions` | `LogSession[]` | All log sessions |
+| `isLoading` | `boolean` | Initial load in progress |
+| `error` | `Error \| null` | Fetch error |
+| `getLogEntries` | `(sessionId: string) => Promise<LogEntry[]>` | Fetch entries for a log session |
+| `refetch` | `() => Promise<void>` | Force refetch |
+
+---
+
+## Architecture
+
+The SDK uses `useSyncExternalStore` for push-based state management:
+
+1. **PolpoClient** — HTTP client with automatic request deduplication (internal class name)
+2. **EventSourceManager** — SSE with auto-reconnect and exponential backoff
+3. **PolpoStore** — Central state with `reduceEvent()` for 55 event types (internal class name)
+4. **Memoized selectors** — WeakMap-cached selectors for each hook
+5. **Microtask batching** — `queueMicrotask` for batched re-renders
+
+<Note>
+The SDK has zero runtime dependencies (React is a peer dependency) and is tree-shakeable with `sideEffects: false`.
+</Note>

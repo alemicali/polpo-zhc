@@ -1,0 +1,290 @@
+---
+title: "Plans"
+description: "Define multi-task execution plans"
+---
+
+## What is a Plan?
+
+A **plan** is a group of related tasks that Polpo executes together. Plans are stored as JSON in `.polpo/plans/*.json` and can include:
+
+- Multiple tasks with dependencies
+- Volatile teams (temporary agents scoped to the plan)
+- Custom assessment criteria per task
+- Quality gates that block progression until thresholds are met
+- Cron-based scheduling for recurring execution
+- Deadlines tracked by SLA monitoring
+
+## Plan Lifecycle
+
+```
+draft → active → completed/failed/cancelled
+```
+
+| Status | Description |
+|--------|-------------|
+| `draft` | Plan created but not yet executed |
+| `active` | Tasks are being processed |
+| `completed` | All tasks finished successfully |
+| `failed` | One or more tasks failed after exhausting retries |
+| `cancelled` | Plan was manually aborted |
+
+## Plan Format
+
+Plans are created via the TUI/CLI/API. Here's an example of the JSON structure:
+
+```json
+{
+  "plans": [
+    {
+      "group": "feature-auth",
+      "deadline": "2025-12-31T23:59:59Z",
+      "qualityThreshold": 3.5,
+      "team": [
+        {
+          "name": "auth-dev",
+          "adapter": "claude-sdk",
+          "description": "Authentication specialist",
+          "volatile": true
+        }
+      ],
+      "tasks": [
+        {
+          "title": "Design auth schema",
+          "agent": "auth-dev",
+          "description": "Design the database schema for user authentication: users table with email, password_hash, role; sessions table with token, expiry, user_id. Create migration files in src/db/migrations/."
+        },
+        {
+          "title": "Implement JWT middleware",
+          "agent": "auth-dev",
+          "description": "Build Express middleware for JWT authentication. Must verify tokens on protected routes.",
+          "dependsOn": ["Design auth schema"]
+        },
+        {
+          "title": "Write auth tests",
+          "agent": "auth-dev",
+          "description": "Write integration tests for the auth system",
+          "dependsOn": ["Implement JWT middleware"],
+          "expectations": [
+            {
+              "type": "test",
+              "command": "npm test -- --grep auth",
+              "weight": 0.6
+            },
+            {
+              "type": "llm_review",
+              "prompt": "Verify tests cover login, logout, token refresh, and invalid tokens",
+              "weight": 0.4
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
+```
+
+## Dependencies
+
+Tasks can depend on other tasks by referencing their titles using the `dependsOn` field:
+
+```json
+{
+  "tasks": [
+    {
+      "title": "Build database layer",
+      "agent": "backend-dev",
+      "description": "Create SQLite database with users and posts tables"
+    },
+    {
+      "title": "Build REST API",
+      "agent": "backend-dev",
+      "description": "Create Express routes for CRUD operations",
+      "dependsOn": ["Build database layer"]
+    }
+  ]
+}
+```
+
+<Note>
+Dependencies are matched by **task title** within the same plan group. A task won't start until all its dependencies reach `done` status.
+</Note>
+
+## Volatile Teams
+
+The `team` section lets you define agents that exist only for this plan:
+
+```json
+{
+  "plans": [
+    {
+      "group": "one-off-migration",
+      "team": [
+        {
+          "name": "migration-expert",
+          "adapter": "claude-sdk",
+          "description": "Database migration specialist",
+          "volatile": true
+        }
+      ],
+      "tasks": [
+        {
+          "title": "Migrate legacy data",
+          "agent": "migration-expert",
+          "description": "Convert old JSON files to new format"
+        }
+      ]
+    }
+  ]
+}
+```
+
+When the plan completes (all tasks done or failed), volatile agents are automatically removed from the orchestrator. This prevents agent sprawl when running many specialized plans.
+
+### Cleanup Modes
+
+```json
+{
+  "settings": {
+    "enableVolatileTeams": true,
+    "volatileCleanup": "on_complete"
+  }
+}
+```
+
+- `on_complete`: Agents removed immediately when their plan finishes
+- `manual`: Agents persist until explicitly removed
+
+## Quality Gates
+
+Quality gates block plan progression until preceding tasks meet a score threshold. Define checkpoints within a plan:
+
+```json
+{
+  "group": "build-feature",
+  "qualityThreshold": 3.5,
+  "qualityGates": [
+    {
+      "name": "design-review",
+      "afterTasks": ["Design API schema", "Design database schema"],
+      "minScore": 4.0
+    },
+    {
+      "name": "implementation-review",
+      "afterTasks": ["Implement API endpoints", "Implement database layer"],
+      "minScore": 3.5
+    }
+  ],
+  "tasks": [
+    { "title": "Design API schema", "agent": "architect", "description": "..." },
+    { "title": "Design database schema", "agent": "architect", "description": "..." },
+    { "title": "Implement API endpoints", "agent": "backend-dev", "description": "...", "dependsOn": ["Design API schema"] },
+    { "title": "Implement database layer", "agent": "backend-dev", "description": "...", "dependsOn": ["Design database schema"] },
+    { "title": "Write integration tests", "agent": "backend-dev", "description": "...", "dependsOn": ["Implement API endpoints", "Implement database layer"] }
+  ]
+}
+```
+
+Tasks after a quality gate won't start until all gate tasks are `done` and their average assessment score meets `minScore`. The `quality:gate` hook fires when a gate is evaluated.
+
+## Scheduling
+
+Plans can be scheduled using cron expressions:
+
+```json
+{
+  "group": "nightly-audit",
+  "schedule": "0 2 * * *",
+  "recurring": true,
+  "tasks": [
+    {
+      "title": "Run security audit",
+      "agent": "security-dev",
+      "description": "Scan codebase for vulnerabilities and generate report"
+    }
+  ]
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `schedule` | string | Cron expression (e.g., `"0 2 * * *"` for daily at 2 AM) |
+| `recurring` | boolean | If `true`, the plan re-executes on each trigger. If `false` (default), it runs once at the next scheduled time. |
+
+Scheduling requires `"enableScheduler": true` in the top-level config. The `schedule:trigger` hook fires when a scheduled plan is triggered.
+
+## Execution
+
+Plans can be executed via:
+
+<Tabs>
+  <Tab title="TUI">
+    ```
+    /plan
+    ```
+    The TUI plan command lets you create plans from templates or generate them with AI.
+  </Tab>
+
+  <Tab title="CLI">
+    ```bash
+    polpo run --plan feature-auth
+    ```
+    Execute a specific plan group.
+  </Tab>
+
+  <Tab title="HTTP API">
+    ```bash
+    curl -X POST http://localhost:3890/api/v1/projects/my-project/plans/plan-id/execute
+    ```
+  </Tab>
+
+  <Tab title="Web UI">
+    Navigate to the Plans page and click **Execute** on a draft plan.
+  </Tab>
+</Tabs>
+
+## Plan Reports
+
+When a plan completes, Polpo generates a **PlanReport** with:
+
+```typescript
+interface PlanReport {
+  planId: string;
+  group: string;
+  allPassed: boolean;
+  totalDuration: number;        // sum of all task durations (ms)
+  tasks: {
+    title: string;
+    status: "done" | "failed";
+    duration: number;
+    score?: number;             // G-Eval score (1-5)
+    filesCreated: string[];
+    filesEdited: string[];
+  }[];
+  filesCreated: string[];       // aggregated across all tasks
+  filesEdited: string[];
+  avgScore?: number;            // average assessment score
+}
+```
+
+Plan completion triggers the `plan:completed` event with the full report.
+
+## AI-Generated Plans
+
+Polpo can generate plans from natural language prompts:
+
+```
+/plan
+> Generate with AI
+> Prompt: Build a REST API with authentication, rate limiting, and tests
+```
+
+The AI generates a plan with appropriate agents, tasks, dependencies, and expectations. You can then review, edit, and execute it.
+
+## Editing Running Plans
+
+The `/edit-plan` TUI command lets you modify active plans:
+
+- **Add tasks** to a running plan
+- **Remove** pending tasks
+- **Reassign** tasks to different agents
+- **Retry** specific failed tasks

@@ -165,7 +165,7 @@ describe("Orchestrator", () => {
   });
 
   describe("collectResults via RunStore", () => {
-    it("processes terminal runs and transitions tasks", () => {
+    it("processes terminal runs and transitions tasks", async () => {
       const task = orchestrator.addTask({
         title: "Collect me",
         description: "Test",
@@ -190,6 +190,8 @@ describe("Orchestrator", () => {
       }));
 
       orchestrator.tick();
+      // transitionToDone is async (runs hooks) — wait for microtasks to settle
+      await new Promise(r => setTimeout(r, 50));
 
       // Run should be consumed (deleted)
       expect(runStore.getRun("run-collect")).toBeUndefined();

@@ -1,0 +1,166 @@
+---
+title: "Installation"
+description: "Install Polpo and get it running"
+---
+
+## Prerequisites
+
+- **Node.js** v18 or higher
+- **npm** v8 or higher
+- **pnpm** (for building from source)
+
+<Note>
+API keys are **optional**. The default `opencode:big-pickle` model is free and requires no key.
+</Note>
+
+## Install from Source
+
+<Steps>
+
+1. **Clone the repository**
+
+   ```bash
+   git clone https://github.com/openpolpo/openpolpo.git
+   cd openpolpo
+   ```
+
+2. **Install dependencies**
+
+   ```bash
+   npm install
+   ```
+
+3. **Build the project**
+
+   ```bash
+   pnpm run build
+   ```
+
+4. **Link the CLI globally** (optional)
+
+   ```bash
+   npm link
+   ```
+
+   This makes the `polpo` command available system-wide.
+
+</Steps>
+
+## Verify the Installation
+
+```bash
+polpo --version
+```
+
+You should see the current version number. Run `polpo --help` to see all available commands.
+
+## Configure API Keys (Optional)
+
+The default model works out-of-the-box. If you want to use a paid provider, set the appropriate API key:
+
+<Tabs>
+  <Tab title="Anthropic">
+    ```bash
+    export ANTHROPIC_API_KEY=sk-ant-...
+    ```
+  </Tab>
+  <Tab title="OpenAI">
+    ```bash
+    export OPENAI_API_KEY=sk-...
+    ```
+  </Tab>
+  <Tab title="Google">
+    ```bash
+    export GEMINI_API_KEY=...
+    ```
+  </Tab>
+  <Tab title="Others">
+    ```bash
+    export GROQ_API_KEY=gsk_...
+    export MISTRAL_API_KEY=...
+    export XAI_API_KEY=...
+    export OPENROUTER_API_KEY=sk-or-...
+    ```
+  </Tab>
+</Tabs>
+
+See [Providers & Models](/concepts/providers-and-models) for the full list of 18+ supported providers.
+
+You can also configure API keys in `.polpo/polpo.json` using `${ENV_VAR}` references:
+
+```json
+{
+  "providers": {
+    "anthropic": "${ANTHROPIC_API_KEY}",
+    "openai": "${OPENAI_API_KEY}"
+  }
+}
+```
+
+## Initialize a Project
+
+```bash
+polpo init
+```
+
+This creates a `.polpo/` directory with:
+- **`polpo.json`** — configuration file with your team setup and default agents
+- Runtime directories for plans, state, logs, and assessments
+
+## Running Polpo
+
+Polpo offers three ways to run:
+
+<Tabs>
+  <Tab title="TUI (Interactive)">
+    ```bash
+    polpo
+    ```
+    The default. Full interactive terminal UI with real-time monitoring, chat, and plan management. See [TUI](/usage/tui).
+  </Tab>
+
+  <Tab title="CLI (Headless)">
+    ```bash
+    polpo run
+    ```
+    Runs all pending plans without interactive UI. Logs output to stdout. See [CLI](/usage/cli).
+  </Tab>
+
+  <Tab title="HTTP Server">
+    ```bash
+    polpo serve --port 3890
+    ```
+    REST API with SSE and WebSocket streaming. Powers the web dashboard and React SDK. See [Server](/usage/server).
+  </Tab>
+</Tabs>
+
+## What Happens When You Run
+
+When you execute a plan, Polpo:
+
+1. **Assigns** each task to the specified agent
+2. **Spawns** detached runner processes for each agent
+3. **Monitors** agent progress with periodic health checks
+4. **Assesses** completed work using G-Eval (LLM-as-judge)
+5. **Retries** tasks that don't meet the quality threshold
+6. **Cleans up** volatile agents when their plan completes
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Your First Plan" icon="book-open" href="/guides/first-plan">
+    Step-by-step tutorial for creating and running your first multi-agent plan.
+  </Card>
+
+  <Card title="Configuration" icon="gear" href="/configuration">
+    Learn about `.polpo/polpo.json` options — agents, settings, providers.
+  </Card>
+
+  <Card title="Architecture" icon="gears" href="/concepts/architecture">
+    Understand how the orchestrator, runners, and stores fit together.
+  </Card>
+
+  <Card title="CLI Reference" icon="terminal" href="/usage/cli">
+    All available commands and options.
+  </Card>
+</CardGroup>
