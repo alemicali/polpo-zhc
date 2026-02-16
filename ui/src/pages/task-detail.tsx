@@ -646,7 +646,7 @@ export function TaskDetailPage() {
                           : o.type === "text" ? FileText
                           : File;
                         return (
-                          <div key={o.id} className="rounded-md border border-border p-3 space-y-1">
+                          <div key={o.id} className="rounded-md border border-border p-3 space-y-1.5">
                             <div className="flex items-center gap-2">
                               <OutcomeIcon className="h-4 w-4 text-muted-foreground shrink-0" />
                               <span className="text-sm font-medium">{o.label}</span>
@@ -663,12 +663,21 @@ export function TaskDetailPage() {
                               )}
                             </div>
                             {o.path && (
-                              <code className="block text-[11px] bg-muted/40 rounded px-2 py-1 font-mono text-muted-foreground truncate">
-                                {o.path}
-                              </code>
+                              <button
+                                onClick={() => {
+                                  navigator.clipboard.writeText(o.path!);
+                                  toast.success("Path copied to clipboard");
+                                }}
+                                className="flex items-center gap-1.5 text-[11px] bg-muted/40 rounded px-2 py-1.5 font-mono text-blue-400 hover:text-blue-300 hover:bg-muted/60 transition-colors cursor-pointer w-full text-left group"
+                                title={`Click to copy: ${o.path}`}
+                              >
+                                <Copy className="h-3 w-3 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
+                                <span className="truncate">{o.path}</span>
+                              </button>
                             )}
                             {o.url && (
-                              <a href={o.url} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-400 hover:underline truncate block">
+                              <a href={o.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 text-xs text-blue-400 hover:underline truncate">
+                                <Link2 className="h-3 w-3 shrink-0" />
                                 {o.url}
                               </a>
                             )}
