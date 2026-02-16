@@ -61,10 +61,19 @@ function buildPrompt(task: Task): string {
     `- You are being orchestrated by a supervisor. Complete the task autonomously and EXIT.`,
     `- Do NOT ask clarifying questions. Make reasonable decisions and proceed.`,
     `- You MUST terminate after completing your work. Never block indefinitely.`,
-    `- If you start a server, dev watcher, or any long-running process, run it DETACHED (background)`,
-    `  and exit immediately. Do NOT wait for it, tail its logs, or keep your session alive.`,
-    `- Example: use \`nohup cmd &\` or spawn detached. Never \`npm start\` in foreground.`,
     `- Your session has a timeout. If you hang, you will be killed and the task will fail.`,
+    ``,
+    `CRITICAL — Bash tool rules:`,
+    `- The bash tool has a default timeout of 30 seconds. Commands that exceed it are killed.`,
+    `- For long commands (npm install, builds, etc.), pass an explicit timeout: {"command": "...", "timeout": 120000}`,
+    `- NEVER run a server or long-lived process in the foreground. It will block forever and kill your session.`,
+    `- To start a background server, ALWAYS use this exact pattern:`,
+    `  {"command": "nohup python3 server.py > /tmp/server.log 2>&1 & echo \"PID=$!\"", "timeout": 5000}`,
+    `  Then verify separately: {"command": "sleep 2 && curl -s --max-time 5 http://127.0.0.1:PORT/", "timeout": 10000}`,
+    `- NEVER combine server start + verification in one command (e.g. "cmd & sleep 2 && lsof" WILL hang).`,
+    `- NEVER use "lsof" or "netstat" to check if a server is running. Use "curl" instead.`,
+    `- NEVER use "tail -f", "watch", or any command that runs forever.`,
+    `- If a command times out, do NOT retry the same command. Analyze why it hung and fix the approach.`,
   );
   return parts.join("\n");
 }

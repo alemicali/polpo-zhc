@@ -19,6 +19,7 @@ import { registerMemoryCommands } from "./commands/memory.js";
 import { registerLogsCommands } from "./commands/logs.js";
 import { registerConfigCommands } from "./commands/config.js";
 import { registerChatCommands } from "./commands/chat.js";
+import { registerWorkflowCommands } from "./commands/workflow.js";
 
 /** Wire orchestrator events to console output with chalk formatting. */
 function wireConsoleEvents(orchestrator: Orchestrator): void {
@@ -556,5 +557,6 @@ registerMemoryCommands(program);
 registerLogsCommands(program);
 registerConfigCommands(program);
 registerChatCommands(program);
+registerWorkflowCommands(program);
 
 program.parse();

@@ -5,7 +5,7 @@ description: Command-line interface for Polpo
 
 import { Aside } from '@astrojs/starlight/components';
 
-Polpo provides five CLI commands: `init`, `run`, `status`, `serve`, and `tui`.
+Polpo provides six CLI commands: `init`, `run`, `status`, `serve`, `tui`, and `workflow`.
 
 ## `polpo init`
 
@@ -83,6 +83,45 @@ polpo serve [options]
 | `--project-id <id>` | dir name | Project ID |
 
 The server provides REST API, SSE streaming, and WebSocket support. See [Server Usage](/usage/server/) for details.
+
+## `polpo workflow`
+
+Manage and execute reusable [workflow templates](/concepts/workflows/).
+
+```bash
+polpo workflow <subcommand> [options]
+```
+
+### Subcommands
+
+| Subcommand | Description |
+|------------|-------------|
+| `list` | List all available workflows |
+| `show <name>` | Show workflow details, parameters, and plan template |
+| `run <name>` | Execute a workflow with parameters |
+| `validate <name>` | Validate a workflow definition |
+
+### `polpo workflow run`
+
+```bash
+polpo workflow run <name> [options]
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `-d, --dir <path>` | `.` | Working directory |
+| `-p, --param <key=value...>` | — | Parameters as `key=value` pairs (repeatable) |
+| `--dry-run` | `false` | Show the instantiated plan without executing |
+
+```bash
+# Run a code review on the auth module
+polpo workflow run code-review --param module=src/auth --param focus=security
+
+# Preview what the plan would look like
+polpo workflow run code-review --param module=src/auth --dry-run
+```
+
+See [Writing Workflows](/guides/writing-workflows/) for how to create your own.
 
 ## `polpo tui`
 

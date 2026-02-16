@@ -43,3 +43,7 @@ export { QualityController } from "../quality/quality-controller.js";
 // Scheduling
 export { Scheduler } from "../scheduling/scheduler.js";
 export { parseCron, matchesCron, nextCronOccurrence, isCronExpression } from "../scheduling/cron.js";
+
+// Workflows
+export { discoverWorkflows, loadWorkflow, validateParams, instantiateWorkflow } from "./workflow.js";
+export type { WorkflowParameter, WorkflowDefinition, WorkflowInfo, ValidationResult } from "./workflow.js";

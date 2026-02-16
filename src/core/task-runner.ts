@@ -1,5 +1,5 @@
 import { join, dirname } from "node:path";
-import { mkdirSync, existsSync, writeFileSync } from "node:fs";
+import { mkdirSync, existsSync, writeFileSync, readFileSync } from "node:fs";
 import { spawn as cpSpawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { nanoid } from "nanoid";
@@ -46,10 +46,112 @@ export class TaskRunner {
           run.result.exitCode = 1;
           run.result.stderr = (run.result.stderr ? run.result.stderr + "\n" : "") + "Run was killed (timeout or shutdown)";
         }
+        // For killed runs, build a diagnosis from the activity log so the retry
+        // prompt tells the agent exactly what went wrong (e.g. "you got stuck
+        // running `python3 server.py &` for 120s").
+        if (run.status === "killed") {
+          const diagnosis = this.buildTimeoutDiagnosis(run);
+          if (diagnosis) {
+            run.result.stderr = (run.result.stderr ? run.result.stderr + "\n" : "") + diagnosis;
+          }
+        }
         onResult(run.taskId, run.result);
       }
       this.ctx.runStore.deleteRun(run.id);
       this.staleWarned.delete(run.taskId);
+    }
+  }
+
+  /**
+   * Read the JSONL activity log for a killed run and produce a human-readable
+   * diagnosis of what the agent was doing when it timed out.
+   * This gets appended to stderr so buildRetryPrompt includes it automatically.
+   */
+  private buildTimeoutDiagnosis(run: RunRecord): string | null {
+    try {
+      const logPath = join(this.ctx.polpoDir, "logs", `run-${run.id}.jsonl`);
+      if (!existsSync(logPath)) return null;
+
+      const lines = readFileSync(logPath, "utf-8").trim().split("\n");
+      // Parse last N entries (skip header)
+      const entries: Array<Record<string, unknown>> = [];
+      for (const line of lines) {
+        try { entries.push(JSON.parse(line)); } catch { /* skip malformed */ }
+      }
+      if (entries.length === 0) return null;
+
+      // Gather stats
+      const toolUses = entries.filter(e => e.type === "tool_use");
+      const toolResults = entries.filter(e => e.type === "tool_result");
+      const assistantMsgs = entries.filter(e => e.type === "assistant");
+      const activitySnaps = entries.filter(e => e.event === "activity");
+
+      // Find the last tool_use (likely the one that blocked)
+      const lastToolUse = toolUses[toolUses.length - 1];
+      const lastToolResult = toolResults[toolResults.length - 1];
+
+      // Check if last tool_use has no matching result (= it was the blocking call)
+      const lastToolId = lastToolUse?.toolId as string | undefined;
+      const lastResultId = lastToolResult?.toolId as string | undefined;
+      const wasBlocking = lastToolId && lastToolId !== lastResultId;
+
+      // Get activity stats from last snapshot
+      const lastSnap = activitySnaps[activitySnaps.length - 1];
+      const snapData = lastSnap?.data as Record<string, unknown> | undefined;
+
+      const parts = [
+        ``,
+        `TIMEOUT DIAGNOSIS:`,
+        `- Total tool calls attempted: ${toolUses.length}`,
+        `- Total tool results received: ${toolResults.length}`,
+        `- Files created: ${(snapData?.filesCreated as string[] | undefined)?.length ?? 0}`,
+        `- Files edited: ${(snapData?.filesEdited as string[] | undefined)?.length ?? 0}`,
+      ];
+
+      if (wasBlocking && lastToolUse) {
+        const tool = lastToolUse.tool as string;
+        const input = lastToolUse.input as Record<string, unknown> | undefined;
+        parts.push(
+          ``,
+          `BLOCKED ON: tool="${tool}"`,
+        );
+        if (tool === "bash" && input?.command) {
+          const cmd = String(input.command);
+          parts.push(
+            `Command that hung: ${cmd.slice(0, 500)}`,
+            ``,
+            `DO NOT repeat this command. It blocks forever.`,
+            `If you need to start a server, use: nohup <cmd> > /tmp/server.log 2>&1 & echo "PID=$!"`,
+            `Then verify with a SEPARATE bash call: curl --max-time 5 http://127.0.0.1:<port>/`,
+            `NEVER combine server start + verification in one command.`,
+            `NEVER use lsof or netstat to check servers — use curl.`,
+          );
+        } else {
+          parts.push(`Input: ${JSON.stringify(input ?? {}).slice(0, 500)}`);
+        }
+      } else {
+        // Last tool completed — agent might have been in a loop or LLM was slow
+        const lastAssistant = assistantMsgs[assistantMsgs.length - 1];
+        if (lastAssistant?.text) {
+          parts.push(`Last agent message: ${String(lastAssistant.text).slice(0, 300)}`);
+        }
+        if (lastToolUse) {
+          parts.push(`Last completed tool: ${lastToolUse.tool}`);
+        }
+      }
+
+      // List files created so agent knows what's already done
+      const filesCreated = (snapData?.filesCreated as string[] | undefined) ?? [];
+      const filesEdited = (snapData?.filesEdited as string[] | undefined) ?? [];
+      if (filesCreated.length > 0 || filesEdited.length > 0) {
+        parts.push(``, `WORK ALREADY DONE (do not redo):`);
+        if (filesCreated.length > 0) parts.push(`Created: ${filesCreated.join(", ")}`);
+        if (filesEdited.length > 0) parts.push(`Edited: ${filesEdited.join(", ")}`);
+      }
+
+      return parts.join("\n");
+    } catch {
+      return null;
     }
   }
 

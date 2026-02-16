@@ -16,6 +16,38 @@ import type { Orchestrator } from "./orchestrator.js";
 export class AssessmentOrchestrator {
   constructor(private ctx: OrchestratorContext) {}
 
+  /**
+   * Attempt to transition a task to "done", but first run the before:task:complete
+   * hook so approval gates (and any other hooks) can block it.
+   * Returns true if the task transitioned to done, false if a hook blocked it.
+   */
+  private async transitionToDone(
+    taskId: string, task: Task, result: TaskResult,
+  ): Promise<boolean> {
+    const hookResult = await this.ctx.hooks.runBefore("task:complete", {
+      taskId, task, result,
+    });
+    if (hookResult.cancelled) {
+      this.ctx.emitter.emit("log", {
+        level: "info",
+        message: `[${taskId}] Completion blocked by hook: ${hookResult.cancelReason ?? "no reason"}`,
+      });
+      return false;
+    }
+    this.ctx.emitter.emit("task:transition", {
+      taskId,
+      from: task.status,
+      to: "done",
+      task: { ...task, status: "done" },
+    });
+    this.ctx.registry.transition(taskId, "done");
+    this.ctx.registry.updateTask(taskId, { phase: undefined });
+
+    // Fire after:task:complete (async, fire-and-forget)
+    this.ctx.hooks.runAfter("task:complete", { taskId, task, result }).catch(() => {});
+    return true;
+  }
+
   /** Resolve effective confidence: explicit field, or default by type. */
   private getConfidence(exp: TaskExpectation): "firm" | "estimated" {
     if (exp.confidence) return exp.confidence;
@@ -159,8 +191,7 @@ export class AssessmentOrchestrator {
           // Skip assessment — mark done with result as-is
           this.ctx.registry.updateTask(taskId, { result });
           if (result.exitCode === 0) {
-            this.ctx.registry.transition(taskId, "done");
-            this.ctx.registry.updateTask(taskId, { phase: undefined });
+            this.transitionToDone(taskId, task, result).catch(() => {});
           } else {
             this.retryOrFail(taskId, task, result);
           }
@@ -173,28 +204,7 @@ export class AssessmentOrchestrator {
     } else {
       this.ctx.registry.updateTask(taskId, { result });
       if (result.exitCode === 0) {
-        // Run before:task:complete hook (sync — no-expectations path is a hot sync path)
-        const hookResult = this.ctx.hooks.runBeforeSync("task:complete", {
-          taskId, task, result,
-        });
-        if (hookResult.cancelled) {
-          this.ctx.emitter.emit("log", {
-            level: "info",
-            message: `[${taskId}] Completion blocked by hook: ${hookResult.cancelReason ?? "no reason"}`,
-          });
-          return;
-        }
-        this.ctx.emitter.emit("task:transition", {
-          taskId,
-          from: "review",
-          to: "done",
-          task: { ...task, status: "done" },
-        });
-        this.ctx.registry.transition(taskId, "done");
-        this.ctx.registry.updateTask(taskId, { phase: undefined });
-
-        // Fire after:task:complete (async, fire-and-forget)
-        this.ctx.hooks.runAfter("task:complete", { taskId, task, result }).catch(() => {});
+        this.transitionToDone(taskId, task, result).catch(() => {});
       } else {
         this.retryOrFail(taskId, task, result);
       }
@@ -231,14 +241,7 @@ export class AssessmentOrchestrator {
             globalScore: assessment.globalScore,
             message: task.title,
           });
-          this.ctx.emitter.emit("task:transition", {
-            taskId,
-            from: "review",
-            to: "done",
-            task: { ...task, status: "done" },
-          });
-          this.ctx.registry.transition(taskId, "done");
-          this.ctx.registry.updateTask(taskId, { phase: undefined });
+          this.transitionToDone(taskId, task, result).catch(() => {});
         } else if (assessment.passed && result.exitCode !== 0) {
           // Checks passed but agent failed (killed, crashed, non-zero exit).
           // Override assessment to failed — the agent didn't complete successfully.
@@ -410,9 +413,7 @@ export class AssessmentOrchestrator {
           globalScore: newAssessment.globalScore,
           message: `${task.title} (paths auto-corrected)`,
         });
-        this.ctx.registry.transition(taskId, "done");
-        this.ctx.registry.updateTask(taskId, { phase: undefined });
-        return true;
+        return this.transitionToDone(taskId, task, result);
       }
     } catch { /* re-assessment failed */
     }
@@ -530,9 +531,7 @@ export class AssessmentOrchestrator {
           globalScore: newAssessment.globalScore,
           message: `${task.title} (expectations corrected)`,
         });
-        this.ctx.registry.transition(taskId, "done");
-        this.ctx.registry.updateTask(taskId, { phase: undefined });
-        return true;
+        return this.transitionToDone(taskId, task, result);
       }
     } catch { /* re-assessment failed */
     }
