@@ -5,6 +5,7 @@
 import type { Orchestrator } from "../core/orchestrator.js";
 import type { PolpoState } from "../core/types.js";
 import { discoverSkills } from "./skills.js";
+import { buildModelListingForPrompt } from "./pi-client.js";
 
 /** Build the system prompt for chat mode responses */
 export function buildChatSystemPrompt(
@@ -44,14 +45,7 @@ export function buildChatSystemPrompt(
     ``,
     `## Available Models & Providers`,
     ``,
-    `Format: "provider:model" (e.g. "anthropic:claude-sonnet-4-5-20250929") or just "model" (auto-inferred from prefix).`,
-    `- anthropic: claude-haiku-4-5-20251001 (fast/cheap), claude-sonnet-4-5-20250929 (balanced), claude-opus-4-6 (most capable)`,
-    `- openai: gpt-4o, gpt-4o-mini, o1, o3, o4-mini`,
-    `- google: gemini-2.0-flash, gemini-2.5-pro`,
-    `- opencode: big-pickle (FREE default model — good for standard tasks)`,
-    `- mistral: mistral-large, mistral-small`,
-    `- groq: llama-3.3-70b`,
-    `Default model (when none specified): opencode:big-pickle`,
+    buildModelListingForPrompt(),
     ``,
     `## Assessment System`,
     ``,
@@ -443,13 +437,7 @@ export function buildTeamGenPrompt(
     ``,
     `## Available Models`,
     ``,
-    `Format: "provider:model" or just the model name (provider auto-detected from prefix).`,
-    `- opencode:big-pickle — FREE default model, good for standard tasks`,
-    `- claude-haiku-4-5-20251001 — Fast and cheap. Simple tasks, formatting, quick edits.`,
-    `- claude-sonnet-4-5-20250929 — Balanced. Most coding tasks.`,
-    `- claude-opus-4-6 — Most capable. Complex reasoning, architecture, code review.`,
-    `- gpt-4o, gpt-4o-mini — OpenAI models`,
-    `- gemini-2.0-flash, gemini-2.5-pro — Google models`,
+    buildModelListingForPrompt(),
     ``,
     `## Current Team`,
     ``,

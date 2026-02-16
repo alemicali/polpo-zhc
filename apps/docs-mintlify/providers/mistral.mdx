@@ -1,0 +1,69 @@
+---
+title: "Mistral"
+sidebarTitle: "Mistral"
+description: "Mistral's hosted models — including code-specialized Codestral and Devstral."
+---
+
+Mistral AI provides a range of models, including dedicated code-specialized variants (Codestral, Devstral) that are particularly good at code generation and understanding.
+
+## Setup
+
+Get your API key from [Mistral's platform](https://console.mistral.ai/).
+
+```bash
+export MISTRAL_API_KEY=...
+```
+
+### Config
+
+```json
+{
+  "providers": {
+    "mistral": "${MISTRAL_API_KEY}"
+  }
+}
+```
+
+### Use it
+
+```json
+{
+  "agents": [
+    { "name": "coder", "model": "mistral:codestral-latest" }
+  ]
+}
+```
+
+Polpo auto-infers `mistral` from `mistral-`, `codestral-`, and `devstral-` prefixes.
+
+## Models
+
+| Model | Best for | Context |
+|-------|----------|---------|
+| `mistral-large` | Flagship general-purpose model | 128K |
+| `codestral-latest` | Code generation and completion | 256K |
+| `devstral-small` | Lightweight code assistant | 128K |
+
+## Features
+
+| Feature | Supported |
+|---------|-----------|
+| Streaming | Yes |
+| Tool use | Yes |
+| Vision (images) | No |
+| Reasoning | No |
+
+## Provider Details
+
+| | |
+|---|---|
+| **Provider ID** | `mistral` |
+| **Env variable** | `MISTRAL_API_KEY` |
+| **API type** | Mistral API |
+| **Auto-infer prefixes** | `mistral-`, `codestral-`, `devstral-` |
+
+## Notes
+
+- Codestral has a 256K token context window — one of the largest among code-specialized models.
+- Devstral Small is a good budget option for code tasks where you don't need the full power of Codestral.
+- Mistral models tend to be fast and cost-effective compared to similarly-sized models from other providers.

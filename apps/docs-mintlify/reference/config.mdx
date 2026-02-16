@@ -115,7 +115,7 @@ description: "Complete field-by-field reference for .polpo/polpo.json"
 | `approvalGates` | ApprovalGate[] | — | Approval gate checkpoints. See [Approval Gates](/features/approval-gates) |
 | `notifications` | object | — | Notification routing configuration. See [Notifications](/features/notifications) |
 | `escalationPolicy` | object | — | Default escalation chain. See [Escalation](/features/escalation) |
-| `sla` | object | — | SLA monitoring configuration. See [Assessment & Quality](/features/assessment) |
+| `sla` | object | — | SLA monitoring configuration. See [Review & Scoring](/features/assessment) |
 | `enableScheduler` | boolean | auto | Enable the scheduling engine. Default: `true` if any plan has a schedule |
 | `defaultQualityThreshold` | number | — | Default quality threshold for plans (1-5). Plans below this score are marked failed |
 
@@ -153,7 +153,7 @@ Per-provider API key and base URL overrides. Keys are provider names, values can
 | `apiKey` | string | API key. Supports `${ENV_VAR}` references resolved at startup |
 | `baseUrl` | string | Override base URL (for custom proxies or self-hosted endpoints) |
 
-See [Providers & Models](/concepts/providers-and-models) for supported providers and model resolution.
+See [Providers & Models](/models/overview) for supported providers and model resolution.
 
 ## Environment Variables
 

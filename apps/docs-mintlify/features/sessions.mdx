@@ -1,6 +1,6 @@
 ---
-title: "Sessions & Observability"
-description: "Chat sessions, agent transcripts, event logging, and activity tracking."
+title: "Sessions"
+description: "Chat sessions, agent transcripts, and activity tracking."
 ---
 
 Polpo records everything — chat history, agent transcripts, event logs, and per-run activity. This data powers the TUI dashboard, the web UI, and post-mortem analysis.
@@ -74,7 +74,7 @@ Polpo can read agent transcripts to extract structured summaries:
 
 ### Connecting Tasks to Transcripts
 
-Each `AgentHandle` can carry a `sessionId`. When a task is running, you can use the `/inspect` TUI command or the [Bridge System](/features/bridge) to access the agent's transcript in real-time.
+Each `AgentHandle` can carry a `sessionId`. When a task is running, you can use the `/inspect` TUI command or the REST API to access the agent's transcript in real-time.
 
 <Tip>
 Agent transcripts are recorded automatically for all agents. Full JSONL logs are written to `.polpo/logs/`.
@@ -124,7 +124,7 @@ Events are grouped by session (one per Polpo start):
 | React SDK | `useLogs()` hook |
 
 <Note>
-High-frequency events like `orchestrator:tick` and `bridge:session:activity` are excluded from log persistence to avoid noise.
+High-frequency events like `orchestrator:tick` are excluded from log persistence to avoid noise.
 </Note>
 
 ---

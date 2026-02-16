@@ -173,18 +173,6 @@ Events for the conversational chat interface.
 
 ---
 
-## Bridge
-
-Events for passive session discovery (monitoring external coding sessions). The `bridge:session:activity` event is **not persisted** due to high frequency.
-
-| Event | Description | Key Payload Fields |
-|-------|-------------|-------------------|
-| `bridge:session:discovered` | External session found | `sessionId`, `projectPath`, `transcriptPath` |
-| `bridge:session:activity` | Session activity update (**Not persisted**) | `sessionId`, `projectPath`, `messageCount`, `toolCalls`, `filesCreated`, `filesEdited`, `lastMessage` |
-| `bridge:session:completed` | External session finished | `sessionId`, `projectPath`, `summary: SessionSummary \| null`, `duration` |
-
----
-
 ## Approval Gates
 
 Events for human-in-the-loop approval workflows.

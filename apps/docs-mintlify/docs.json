@@ -3,10 +3,10 @@
   "name": "Polpo",
   "theme": "mint",
   "logo": {
-    "light": "/logo.svg",
-    "dark": "/logo-dark.svg"
+    "light": "/logo-text.svg",
+    "dark": "/logo-text-dark.svg"
   },
-  "favicon": "/favicon.svg",
+  "favicon": "/favicon.png",
   "colors": {
     "primary": "#3B3E73",
     "light": "#8B8FD4",
@@ -30,58 +30,38 @@
     "links": [
       {
         "label": "GitHub",
+        "icon": "github",
+        "iconType": "brands",
         "href": "https://github.com/openpolpo/openpolpo"
+      },
+      {
+        "label": "Releases",
+        "icon": "npm",
+        "iconType": "brands",
+        "href": "https://www.npmjs.com/package/openpolpo"
       }
-    ],
-    "primary": {
-      "type": "github",
-      "href": "https://github.com/openpolpo/openpolpo"
-    }
+    ]
   },
   "navigation": {
     "tabs": [
       {
-        "tab": "Documentation",
+        "tab": "Get Started",
         "groups": [
           {
-            "group": "Getting Started",
+            "group": "Overview",
             "pages": [
               "introduction",
               "getting-started",
+              "concepts/index",
+              "concepts/architecture"
+            ]
+          },
+          {
+            "group": "First Steps",
+            "pages": [
+              "install/index",
               "guides/first-plan",
               "configuration"
-            ]
-          },
-          {
-            "group": "Core Concepts",
-            "pages": [
-              "concepts/architecture",
-              "concepts/agents-and-teams",
-              "concepts/task-lifecycle",
-              "concepts/plans",
-              "concepts/providers-and-models"
-            ]
-          },
-          {
-            "group": "Features",
-            "pages": [
-              "features/tools-and-mcp",
-              "features/skills",
-              "features/workflows",
-              "features/assessment",
-              "features/hooks",
-              "features/notifications",
-              "features/approval-gates",
-              "features/escalation",
-              "features/scheduling",
-              "features/bridge",
-              "features/sessions",
-              "features/memory",
-              "features/deadlock-resolution",
-              "features/question-detection",
-              "features/resilience",
-              "features/security",
-              "features/writing-workflows"
             ]
           },
           {
@@ -94,29 +74,159 @@
             ]
           },
           {
-            "group": "Reference",
+            "group": "Deploy",
+            "pages": [
+              "install/hetzner",
+              "install/google-cloud",
+              "install/aws",
+              "install/railway",
+              "install/fly"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/agents",
+              "concepts/teams",
+              "concepts/tasks",
+              "concepts/plans",
+              "features/memory",
+              "features/sessions"
+            ]
+          },
+          {
+            "group": "Agent Capabilities",
+            "pages": [
+              "features/tools-and-mcp",
+              "features/skills"
+            ]
+          },
+          {
+            "group": "Plan Execution",
+            "pages": [
+              "features/workflows",
+              "features/scheduling",
+              "features/hooks",
+              {
+                "group": "Notifications",
+                "root": "features/notifications",
+                "pages": [
+                  "notifications/slack",
+                  "notifications/telegram",
+                  "notifications/email",
+                  "notifications/webhook"
+                ]
+              }
+            ]
+          },
+          {
+            "group": "Human-in-the-Loop",
+            "pages": [
+              "features/checkpoints",
+              "features/approval-gates",
+              "features/question-detection"
+            ]
+          },
+          {
+            "group": "Quality & Recovery",
+            "pages": [
+              "features/assessment",
+              "features/escalation",
+              "features/deadlock-resolution",
+              "features/resilience"
+            ]
+          },
+          {
+            "group": "Security",
+            "pages": [
+              "features/security"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Models & Providers",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": [
+              "models/overview",
+              "models/providers",
+              "models/authentication",
+              "models/configuration",
+              "models/fallback-and-failover",
+              "models/cost-tracking",
+              "models/model-catalog"
+            ]
+          },
+          {
+            "group": "Providers",
+            "pages": [
+              "providers/anthropic",
+              "providers/openai",
+              "providers/google",
+              "providers/google-vertex",
+              "providers/amazon-bedrock",
+              "providers/azure-openai",
+              "providers/groq",
+              "providers/cerebras",
+              "providers/mistral",
+              "providers/xai",
+              "providers/openrouter",
+              "providers/vercel-ai-gateway",
+              "providers/litellm",
+              "providers/github-copilot",
+              "providers/opencode",
+              "providers/huggingface",
+              "providers/minimax",
+              "providers/kimi",
+              "providers/zai",
+              "providers/ollama",
+              "providers/vllm",
+              "providers/lmstudio",
+              "providers/tgi",
+              "models/custom-providers"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Reference",
+        "groups": [
+          {
+            "group": "Core",
             "pages": [
               "reference/config",
               "reference/events",
-              "reference/react-sdk",
-              "reference/store-backends",
+              "reference/store-backends"
+            ]
+          },
+          {
+            "group": "Development",
+            "pages": [
+              "reference/react-sdk"
+            ]
+          },
+          {
+            "group": "Tools",
+            "pages": [
               "reference/coding-tools",
-              {
-                "group": "Extended Tools",
-                "pages": [
-                  "reference/tools/browser",
-                  "reference/tools/git",
-                  "reference/tools/http",
-                  "reference/tools/multifile",
-                  "reference/tools/deps",
-                  "reference/tools/excel",
-                  "reference/tools/pdf",
-                  "reference/tools/docx",
-                  "reference/tools/email",
-                  "reference/tools/audio",
-                  "reference/tools/image"
-                ]
-              }
+              "reference/tools/browser",
+              "reference/tools/git",
+              "reference/tools/http",
+              "reference/tools/multifile",
+              "reference/tools/deps",
+              "reference/tools/excel",
+              "reference/tools/pdf",
+              "reference/tools/docx",
+              "reference/tools/email",
+              "reference/tools/audio",
+              "reference/tools/image"
             ]
           }
         ]
@@ -127,6 +237,28 @@
       }
     ]
   },
+  "redirects": [
+    {
+      "source": "/concepts/providers-and-models",
+      "destination": "/models/overview"
+    },
+    {
+      "source": "/concepts/task-lifecycle",
+      "destination": "/concepts/tasks"
+    },
+    {
+      "source": "/concepts/agents-and-teams",
+      "destination": "/concepts/agents"
+    },
+    {
+      "source": "/features/writing-workflows",
+      "destination": "/features/workflows"
+    },
+    {
+      "source": "/features/bridge",
+      "destination": "/features/sessions"
+    }
+  ],
   "footer": {
     "socials": {
       "github": "https://github.com/openpolpo/openpolpo"

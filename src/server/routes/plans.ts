@@ -143,6 +143,39 @@ const resumePlanRoute = createRoute({
   },
 });
 
+const listCheckpointsRoute = createRoute({
+  method: "get",
+  path: "/checkpoints",
+  tags: ["Plans"],
+  summary: "List all active checkpoints",
+  responses: {
+    200: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.array(z.any()) }) } },
+      description: "List of active checkpoints",
+    },
+  },
+});
+
+const resumeCheckpointRoute = createRoute({
+  method: "post",
+  path: "/{planId}/checkpoints/{checkpointName}/resume",
+  tags: ["Plans"],
+  summary: "Resume a checkpoint",
+  request: {
+    params: z.object({ planId: z.string(), checkpointName: z.string() }),
+  },
+  responses: {
+    200: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.object({ resumed: z.boolean() }) }) } },
+      description: "Checkpoint resumed",
+    },
+    404: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string(), code: z.string() }) } },
+      description: "Checkpoint not found or not active",
+    },
+  },
+});
+
 const abortPlanRoute = createRoute({
   method: "post",
   path: "/{planId}/abort",
@@ -245,6 +278,23 @@ export function planRoutes(): OpenAPIHono<ServerEnv> {
     const body = c.req.valid("json");
     const result = orchestrator.resumePlan(planId, body);
     return c.json({ ok: true, data: result });
+  });
+
+  // GET /plans/checkpoints — list all active checkpoints
+  app.openapi(listCheckpointsRoute, (c) => {
+    const orchestrator = c.get("orchestrator");
+    return c.json({ ok: true, data: orchestrator.getActiveCheckpoints() });
+  });
+
+  // POST /plans/:planId/checkpoints/:checkpointName/resume — resume a checkpoint
+  app.openapi(resumeCheckpointRoute, (c) => {
+    const orchestrator = c.get("orchestrator");
+    const { planId, checkpointName } = c.req.valid("param");
+    const resumed = orchestrator.resumeCheckpointByPlanId(planId, checkpointName);
+    if (!resumed) {
+      return c.json({ ok: false, error: "Checkpoint not found or not active", code: "NOT_FOUND" }, 404);
+    }
+    return c.json({ ok: true, data: { resumed: true } }, 200);
   });
 
   // POST /plans/:planId/abort — abort plan group

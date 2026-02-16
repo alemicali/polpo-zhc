@@ -1,6 +1,7 @@
 import type { OrchestratorContext } from "./orchestrator-context.js";
 import type { Task, TaskResult, EscalationPolicy, EscalationLevel } from "./types.js";
 import type { ApprovalManager } from "./approval-manager.js";
+// resolveModelSpec no longer needed — queryOrchestratorText handles ModelConfig directly
 
 /**
  * Manages the escalation chain when tasks fail repeatedly.
@@ -170,7 +171,7 @@ export class EscalationManager {
     policy: EscalationPolicy,
   ): Promise<void> {
     try {
-      const { querySDKText } = await import("../llm/query.js");
+      const { queryOrchestratorText } = await import("../llm/query.js");
 
       const failureContext = this.buildFailureContext(task);
       const prompt = [
@@ -190,11 +191,11 @@ export class EscalationManager {
         "Return ONLY the new description text, no explanation.",
       ].join("\n");
 
-      const newDescription = await querySDKText(
+      const newDescription = (await queryOrchestratorText(
         prompt,
         this.ctx.workDir,
         this.ctx.config.settings.orchestratorModel,
-      );
+      )).text;
 
       if (newDescription && newDescription.length > 20) {
         // Reformulate and retry with extra retry budget

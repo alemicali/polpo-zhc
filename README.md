@@ -188,7 +188,6 @@ openpolpo/
 │   ├── llm/                # LLM queries, prompts, plan generation, skills
 │   ├── tui/                # Terminal UI (Ink) + TUI commands
 │   ├── server/             # Hono HTTP API, SSE bridge, WebSocket bridge, routes
-│   ├── bridge/             # Passive session discovery for external agents
 │   ├── cli/                # Commander CLI entry point + subcommands
 │   └── index.ts            # Barrel exports
 ├── ui/                     # Vite + React monitoring dashboard

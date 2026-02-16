@@ -1,0 +1,95 @@
+---
+title: "Telegram"
+description: "Send notifications to Telegram chats with interactive approval buttons."
+---
+
+The Telegram adapter sends notifications via the [Telegram Bot API](https://core.telegram.org/bots/api). It supports HTML formatting, file/image/audio attachments, and **interactive inline keyboards** for approval gates.
+
+## Configuration
+
+```json
+{
+  "settings": {
+    "notifications": {
+      "channels": {
+        "telegram-oncall": {
+          "type": "telegram",
+          "botToken": "${TELEGRAM_BOT_TOKEN}",
+          "chatId": "-1001234567890"
+        }
+      }
+    }
+  }
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|:--------:|-------------|
+| `type` | `"telegram"` | Yes | Channel type |
+| `botToken` | string | Yes | Bot token from [@BotFather](https://t.me/botfather) |
+| `chatId` | string | Yes | Target chat, group, or channel ID |
+
+Both `botToken` and `chatId` support `${ENV_VAR}` syntax.
+
+## Message Format
+
+Messages are sent in **HTML parse mode** with a severity emoji prefix:
+
+| Severity | Emoji |
+|----------|-------|
+| `info` | ℹ️ |
+| `warning` | ⚠️ |
+| `critical` | 🚨 |
+
+Markdown in the notification body is converted to Telegram HTML: `**bold**` becomes `<b>bold</b>`, `_italic_` becomes `<i>italic</i>`, `` `code` `` becomes `<code>code</code>`.
+
+## Interactive Approvals
+
+When a notification is triggered by an `approval:requested` event, the Telegram message automatically includes an **inline keyboard** with **Approve** and **Reject** buttons.
+
+- **Approve** — immediately approves the task
+- **Reject** — asks the user for feedback via a `ForceReply` prompt. The next text message in the chat is captured as rejection feedback, and the task is sent back for rework with that feedback
+
+This turns Telegram into a full approval interface — no need to open the web UI or CLI.
+
+<Tip>
+The interactive approval flow requires the `TelegramCallbackPoller` to be running, which Polpo starts automatically when Telegram channels are configured.
+</Tip>
+
+## Attachments
+
+When `includeOutcomes: true` is set on a notification rule, task outcomes are sent as follow-up messages:
+
+| MIME Type | Telegram Method |
+|-----------|----------------|
+| `image/*` | `sendPhoto` (with caption) |
+| `audio/*` | `sendAudio` |
+| Everything else | `sendDocument` |
+| Text-only outcomes | Formatted `<pre>` code blocks (truncated to 3800 chars) |
+
+If there's a single image attachment, it's sent as a photo with the notification text as the caption — this gives a clean, image-first layout in chat.
+
+## Connectivity Test
+
+The `test()` method calls `getMe` on the Telegram Bot API — a real network call that validates the bot token is valid and the bot is reachable.
+
+## Setup
+
+<Steps>
+
+1. **Create a bot** via [@BotFather](https://t.me/botfather) — save the bot token
+
+2. **Get the chat ID** — add the bot to a group, send a message, then call `https://api.telegram.org/bot{token}/getUpdates` to find the chat ID
+
+3. **Add to Polpo config**:
+   ```json
+   {
+     "type": "telegram",
+     "botToken": "${TELEGRAM_BOT_TOKEN}",
+     "chatId": "-1001234567890"
+   }
+   ```
+
+4. The bot must have permission to send messages in the target chat
+
+</Steps>

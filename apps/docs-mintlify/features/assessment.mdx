@@ -1,20 +1,26 @@
 ---
-title: "Assessment & Quality"
-description: "G-Eval LLM-as-judge scoring, expectation correction, quality gates, and SLA deadline monitoring"
+title: "Review & Scoring"
+description: "Multi-judge G-Eval scoring, expectation correction, quality gates, and SLA deadline monitoring"
 ---
 
 ## Overview
 
-Polpo uses **G-Eval** (LLM-as-judge) to automatically assess completed tasks. Each task's output is evaluated against multiple dimensions, producing scores from 1-5 with chain-of-thought reasoning.
+When an agent finishes a task, Polpo reviews the work automatically. Three independent G-Eval reviewer agents run in parallel, each exploring the agent's output with tools (file reads, grep, glob) and scoring it across multiple dimensions. Their scores are merged via **median consensus** — outliers are filtered, and the final score reflects agreement between reviewers.
 
-The assessment system runs an internal **8-phase pipeline**:
+A separate **expectation judge** acts as a meta-judge: when a task fails assessment, Polpo first checks whether the expectations themselves were wrong (bad test command, wrong file path, threshold too strict) before blaming the agent.
+
+<Frame>
+  <img src="/review-system.svg" alt="Review system: agent completes task → run expectations → 3 parallel G-Eval reviewers read code and score → median consensus → passed? yes → done, no → expectation judge" />
+</Frame>
+
+Polpo's assessment runs an **8-phase pipeline**:
 
 1. **Collect context** — gather task description, expectations, and agent output
 2. **File existence checks** — verify required files exist
 3. **Test/script execution** — run test commands and validation scripts
 4. **Diff analysis** — analyze files created and edited by the agent
-5. **LLM review** — G-Eval scoring across configured dimensions
-6. **Score aggregation** — compute weighted global score
+5. **Multi-judge LLM review** — 3 parallel G-Eval reviewers score all dimensions independently
+6. **Consensus scoring** — median aggregation across reviewers, outlier filtering
 7. **Quality metrics collection** — record scores for quality gate evaluation and SLA tracking
 8. **Result determination** — pass/fail decision with feedback generation
 
@@ -96,7 +102,7 @@ Similar to `test` but intended for custom validation scripts that check specific
 }
 ```
 
-The most powerful expectation type. An LLM reviews the agent's work against configurable dimensions.
+The most powerful expectation type. Three independent LLM reviewer agents explore the agent's output with tools and score the work against configurable dimensions. Scores are merged via median consensus.
 
 ## Default Dimensions
 
@@ -131,9 +137,11 @@ globalScore = Σ (dimension.score × dimension.weight)
 
 Tasks pass when `globalScore >= threshold` (default: 3.0).
 
-### Chain-of-Thought Reasoning
+### Multi-Judge Consensus
 
-For each dimension, the LLM generates step-by-step reasoning before scoring:
+Each of the 3 reviewer agents independently reads code, runs tools, and submits a structured review with per-dimension scores. Polpo then merges results using **median scoring** — entries that deviate more than 1.5 from the median are excluded as outliers. At least 2 of 3 reviewers must succeed; if only 1 succeeds, its scores are used directly.
+
+Each reviewer produces chain-of-thought reasoning per dimension:
 
 ```json
 {
@@ -152,11 +160,14 @@ This reasoning is included in retry/fix feedback so agents know exactly what to 
 Task completes → Run expectations in order:
   1. file_exists checks
   2. test/script commands
-  3. llm_review (if earlier checks pass)
+  3. llm_review → 3 parallel reviewer agents
+     → median consensus scoring
 → Aggregate results
 → Collect quality metrics
 → Pass: task → done
-→ Fail: task → fix phase (or retry)
+→ Fail: expectation judge evaluates
+  → Expectations wrong? → auto-correct → re-assess
+  → Agent work wrong? → fix phase (or retry)
 ```
 
 <Note>
@@ -198,11 +209,11 @@ For fine-grained control, define custom rubrics per dimension:
 
 ## Retry and Fix Phase
 
-When assessment fails, Polpo uses a multi-stage retry system:
+When assessment fails, Polpo uses a multi-stage retry strategy:
 
-1. **Fix phase** — Send targeted feedback to the agent (up to `maxFixAttempts` attempts)
-2. **Full retry** — Reset and start from scratch (up to `maxRetries` attempts)
-3. **Escalation** — Switch to a different agent or model if configured via the [escalation policy](/features/escalation)
+1. **Fix phase** — Polpo sends targeted feedback to the agent (up to `maxFixAttempts` attempts)
+2. **Full retry** — Polpo resets the task and starts from scratch (up to `maxRetries` attempts)
+3. **Escalation** — Polpo switches to a different agent or model if configured via the [escalation policy](/features/escalation)
 
 ---
 
@@ -218,7 +229,7 @@ Without the expectation judge, the agent would be repeatedly retried for failing
 
 ### How Detection Works
 
-When a task fails assessment, the expectation judge evaluates whether the **expectations themselves** might be wrong:
+When a task fails assessment, Polpo's expectation judge evaluates whether the **expectations themselves** might be wrong:
 
 <Frame>
   <img src="/expectation-judge.svg" alt="Expectation judge: task fails assessment → agent did work correctly? → YES: correct expectations → NO: normal retry/fix" />

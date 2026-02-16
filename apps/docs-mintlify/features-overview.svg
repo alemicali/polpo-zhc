@@ -1,0 +1,78 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 480" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif">
+
+  <!-- ── Execution ──────────────────────────────── -->
+  <rect x="20" y="20" width="330" height="130" rx="8" fill="none" stroke="#999" stroke-width="1.5" stroke-dasharray="6 3"/>
+  <text x="40" y="42" font-size="11" fill="#888" font-weight="600" letter-spacing="0.5">EXECUTION</text>
+
+  <rect x="40" y="56" width="140" height="36" rx="5" fill="#f8f8f8" stroke="#888" stroke-width="1.2"/>
+  <text x="110" y="79" font-size="12" fill="#333" text-anchor="middle" font-weight="500">Parallel Agents</text>
+
+  <rect x="195" y="56" width="140" height="36" rx="5" fill="#f8f8f8" stroke="#888" stroke-width="1.2"/>
+  <text x="265" y="79" font-size="12" fill="#333" text-anchor="middle" font-weight="500">Dependency Graph</text>
+
+  <rect x="40" y="102" width="140" height="36" rx="5" fill="#f8f8f8" stroke="#888" stroke-width="1.2"/>
+  <text x="110" y="125" font-size="12" fill="#333" text-anchor="middle" font-weight="500">Crash Recovery</text>
+
+  <rect x="195" y="102" width="140" height="36" rx="5" fill="#f8f8f8" stroke="#888" stroke-width="1.2"/>
+  <text x="265" y="125" font-size="12" fill="#333" text-anchor="middle" font-weight="500">Scheduling</text>
+
+  <!-- ── Quality ────────────────────────────────── -->
+  <rect x="370" y="20" width="330" height="130" rx="8" fill="none" stroke="#999" stroke-width="1.5" stroke-dasharray="6 3"/>
+  <text x="390" y="42" font-size="11" fill="#888" font-weight="600" letter-spacing="0.5">QUALITY</text>
+
+  <rect x="390" y="56" width="140" height="36" rx="5" fill="#f8f8f8" stroke="#888" stroke-width="1.2"/>
+  <text x="460" y="79" font-size="12" fill="#333" text-anchor="middle" font-weight="500">G-Eval Scoring</text>
+
+  <rect x="545" y="56" width="140" height="36" rx="5" fill="#f8f8f8" stroke="#888" stroke-width="1.2"/>
+  <text x="615" y="79" font-size="12" fill="#333" text-anchor="middle" font-weight="500">Approval Gates</text>
+
+  <rect x="390" y="102" width="140" height="36" rx="5" fill="#f8f8f8" stroke="#888" stroke-width="1.2"/>
+  <text x="460" y="125" font-size="12" fill="#333" text-anchor="middle" font-weight="500">Auto Retry</text>
+
+  <rect x="545" y="102" width="140" height="36" rx="5" fill="#f8f8f8" stroke="#888" stroke-width="1.2"/>
+  <text x="615" y="125" font-size="12" fill="#333" text-anchor="middle" font-weight="500">Escalation</text>
+
+  <!-- ── Ops ────────────────────────────────────── -->
+  <rect x="20" y="170" width="330" height="130" rx="8" fill="none" stroke="#999" stroke-width="1.5" stroke-dasharray="6 3"/>
+  <text x="40" y="192" font-size="11" fill="#888" font-weight="600" letter-spacing="0.5">OPS &amp; NOTIFICATIONS</text>
+
+  <rect x="40" y="206" width="140" height="36" rx="5" fill="#f8f8f8" stroke="#888" stroke-width="1.2"/>
+  <text x="110" y="229" font-size="12" fill="#333" text-anchor="middle" font-weight="500">Slack / Email</text>
+
+  <rect x="195" y="206" width="140" height="36" rx="5" fill="#f8f8f8" stroke="#888" stroke-width="1.2"/>
+  <text x="265" y="229" font-size="12" fill="#333" text-anchor="middle" font-weight="500">Webhooks</text>
+
+  <rect x="40" y="252" width="140" height="36" rx="5" fill="#f8f8f8" stroke="#888" stroke-width="1.2"/>
+  <text x="110" y="275" font-size="12" fill="#333" text-anchor="middle" font-weight="500">Desktop Alerts</text>
+
+  <rect x="195" y="252" width="140" height="36" rx="5" fill="#f8f8f8" stroke="#888" stroke-width="1.2"/>
+  <text x="265" y="275" font-size="12" fill="#333" text-anchor="middle" font-weight="500">SLA Monitor</text>
+
+  <!-- ── Tools ──────────────────────────────────── -->
+  <rect x="370" y="170" width="330" height="130" rx="8" fill="none" stroke="#999" stroke-width="1.5" stroke-dasharray="6 3"/>
+  <text x="390" y="192" font-size="11" fill="#888" font-weight="600" letter-spacing="0.5">TOOLS &amp; PROVIDERS</text>
+
+  <rect x="390" y="206" width="140" height="36" rx="5" fill="#f8f8f8" stroke="#888" stroke-width="1.2"/>
+  <text x="460" y="229" font-size="12" fill="#333" text-anchor="middle" font-weight="500">59 Built-in Tools</text>
+
+  <rect x="545" y="206" width="140" height="36" rx="5" fill="#f8f8f8" stroke="#888" stroke-width="1.2"/>
+  <text x="615" y="229" font-size="12" fill="#333" text-anchor="middle" font-weight="500">MCP Servers</text>
+
+  <rect x="390" y="252" width="140" height="36" rx="5" fill="#f8f8f8" stroke="#888" stroke-width="1.2"/>
+  <text x="460" y="275" font-size="12" fill="#333" text-anchor="middle" font-weight="500">22+ LLM Providers</text>
+
+  <rect x="545" y="252" width="140" height="36" rx="5" fill="#f8f8f8" stroke="#888" stroke-width="1.2"/>
+  <text x="615" y="275" font-size="12" fill="#333" text-anchor="middle" font-weight="500">Zero Lock-in</text>
+
+  <!-- ── Descriptions ───────────────────────────── -->
+  <rect x="20" y="325" width="680" height="140" rx="8" fill="none" stroke="#ccc" stroke-width="1" stroke-dasharray="4 2"/>
+
+  <text x="40"  y="350" font-size="10" fill="#999" font-weight="500" letter-spacing="0.3">HOW IT WORKS</text>
+
+  <text x="40"  y="375" font-size="11" fill="#666"><tspan font-weight="600" fill="#444">Parallel execution</tspan>  Multiple agents work on different tasks at the same time</text>
+  <text x="40"  y="395" font-size="11" fill="#666"><tspan font-weight="600" fill="#444">Dependency graphs</tspan>  Task B waits for Task A, automatically</text>
+  <text x="40"  y="415" font-size="11" fill="#666"><tspan font-weight="600" fill="#444">Quality scoring</tspan>  Every output scored by LLM judge (G-Eval). Bad work gets sent back</text>
+  <text x="40"  y="435" font-size="11" fill="#666"><tspan font-weight="600" fill="#444">Crash recovery</tspan>  Detached processes. Kill the orchestrator, restart, nothing is lost</text>
+  <text x="40"  y="455" font-size="11" fill="#666"><tspan font-weight="600" fill="#444">Zero lock-in</tspan>  Swap agents, models, or providers without changing your plans</text>
+
+</svg>

@@ -1,0 +1,148 @@
+---
+title: "Ollama"
+sidebarTitle: "Ollama"
+description: "Run open-source models locally — zero API cost, full privacy."
+---
+
+[Ollama](https://ollama.com) makes it easy to run open-source models on your own machine. No API key, no cost, full data privacy. Polpo connects to Ollama's OpenAI-compatible endpoint.
+
+## Quick Start
+
+```bash
+# Install Ollama
+curl -fsSL https://ollama.com/install.sh | sh
+
+# Pull a model
+ollama pull qwen2.5-coder:32b
+
+# Ollama is now serving on localhost:11434
+```
+
+### Config
+
+```json
+{
+  "providers": {
+    "ollama": {
+      "baseUrl": "http://localhost:11434/v1",
+      "api": "openai-completions",
+      "models": [
+        {
+          "id": "qwen2.5-coder:32b",
+          "name": "Qwen 2.5 Coder 32B",
+          "contextWindow": 131072,
+          "maxTokens": 8192,
+          "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 }
+        }
+      ]
+    }
+  }
+}
+```
+
+### Use it
+
+```json
+{
+  "agents": [
+    { "name": "local-coder", "model": "ollama:qwen2.5-coder:32b" }
+  ]
+}
+```
+
+## Auto-Discovery
+
+Polpo can discover your Ollama models automatically with `polpo models scan`:
+
+```bash
+polpo models scan
+```
+
+This scans `localhost:11434` and lists all available models with their capabilities.
+
+## Recommended Models
+
+| Model | Size | Best for |
+|-------|------|----------|
+| `qwen2.5-coder:32b` | 32B | Best open coding model |
+| `qwen2.5-coder:7b` | 7B | Fast coding, lower quality |
+| `llama3.1:70b` | 70B | General purpose, strong reasoning |
+| `llama3.1:8b` | 8B | Fast general purpose |
+| `deepseek-coder-v2:16b` | 16B | Good code generation |
+| `codestral:22b` | 22B | Mistral's code model |
+
+## Remote Ollama
+
+If Ollama runs on a different machine (e.g. a GPU server):
+
+```json
+{
+  "providers": {
+    "ollama": {
+      "baseUrl": "http://gpu-server:11434/v1",
+      "api": "openai-completions",
+      "models": [...]
+    }
+  }
+}
+```
+
+## Fallback Pattern: Local First, Cloud Backup
+
+A common pattern is to try the local model first, then fall back to a cloud provider if it's unavailable:
+
+```json
+{
+  "providers": {
+    "ollama": {
+      "baseUrl": "http://localhost:11434/v1",
+      "api": "openai-completions",
+      "models": [
+        { "id": "qwen2.5-coder:32b", "name": "Qwen 2.5 Coder 32B", "contextWindow": 131072, "maxTokens": 8192 }
+      ]
+    },
+    "anthropic": "${ANTHROPIC_API_KEY}"
+  },
+  "settings": {
+    "orchestratorModel": {
+      "primary": "ollama:qwen2.5-coder:32b",
+      "fallbacks": ["anthropic:claude-sonnet-4-5-20250929"]
+    }
+  }
+}
+```
+
+## Provider Details
+
+| | |
+|---|---|
+| **Provider ID** | `ollama` (custom) |
+| **Default port** | `11434` |
+| **API type** | `openai-completions` |
+| **Base URL** | `http://localhost:11434/v1` |
+| **API key** | Not required |
+| **Cost** | Free (runs locally) |
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Connection refused">
+    Make sure Ollama is running: `ollama serve`. Check the port with `curl http://localhost:11434/api/tags`.
+  </Accordion>
+
+  <Accordion title="Model not found">
+    Pull the model first: `ollama pull qwen2.5-coder:32b`. The model ID in your config must exactly match the Ollama tag name.
+  </Accordion>
+
+  <Accordion title="Out of memory">
+    Large models (32B+) need significant VRAM. Check your GPU memory with `nvidia-smi`. Consider using a smaller model like `qwen2.5-coder:7b` if you're limited on memory.
+  </Accordion>
+
+  <Accordion title="Slow inference">
+    Ollama performance depends on your hardware. For faster inference, ensure you're using GPU acceleration (CUDA/ROCm). CPU-only inference is 10-50x slower.
+  </Accordion>
+</AccordionGroup>
+
+<Tip>
+The `/v1` suffix in the base URL is required — it enables Ollama's OpenAI-compatible API endpoint. Without it, Polpo can't communicate with Ollama.
+</Tip>

@@ -69,7 +69,6 @@ export default defineConfig({
             { label: "Approval Gates", slug: "features/approval-gates" },
             { label: "Escalation", slug: "features/escalation" },
             { label: "Scheduling", slug: "features/scheduling" },
-            { label: "Bridge System", slug: "features/bridge" },
             { label: "Sessions & Observability", slug: "features/sessions" },
             { label: "Memory", slug: "features/memory" },
             { label: "Deadlock Resolution", slug: "features/deadlock-resolution" },

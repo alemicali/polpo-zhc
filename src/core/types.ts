@@ -324,7 +324,7 @@ export interface ReviewContext {
 
 // === Plan ===
 
-export type PlanStatus = "draft" | "active" | "completed" | "failed" | "cancelled";
+export type PlanStatus = "draft" | "active" | "paused" | "completed" | "failed" | "cancelled";
 
 export interface Plan {
   id: string;
@@ -395,8 +395,47 @@ export interface PolpoFileConfig {
 export interface ProviderConfig {
   /** API key (direct value or "${ENV_VAR}" reference). */
   apiKey?: string;
-  /** Override base URL for the provider (e.g. custom proxy). */
+  /** Override base URL for the provider (e.g. custom proxy, Ollama, vLLM). */
   baseUrl?: string;
+  /** API compatibility mode for custom endpoints. */
+  api?: "openai-completions" | "openai-responses" | "anthropic-messages";
+  /** Custom model definitions for this provider (used with custom endpoints). */
+  models?: CustomModelDef[];
+}
+
+/** Custom model definition for non-catalog providers (Ollama, vLLM, LM Studio, etc.) */
+export interface CustomModelDef {
+  /** Model ID used in API calls. */
+  id: string;
+  /** Human-readable name. */
+  name: string;
+  /** Whether the model supports extended thinking / reasoning. */
+  reasoning?: boolean;
+  /** Supported input types. Default: ["text"] */
+  input?: ("text" | "image")[];
+  /** Cost per million tokens. Default: all zeros (free/local). */
+  cost?: { input: number; output: number; cacheRead: number; cacheWrite: number };
+  /** Context window size in tokens. Default: 200000 */
+  contextWindow?: number;
+  /** Max output tokens. Default: 8192 */
+  maxTokens?: number;
+}
+
+// === Model Config (primary + fallbacks) ===
+
+export interface ModelConfig {
+  /** Primary model spec (e.g. "anthropic:claude-opus-4-6"). */
+  primary?: string;
+  /** Ordered fallback models — tried when primary fails. */
+  fallbacks?: string[];
+}
+
+/** Model allowlist entry with optional alias. */
+export interface ModelAllowlistEntry {
+  /** Display alias for this model (e.g. "Sonnet", "GPT"). */
+  alias?: string;
+  /** Per-model parameter overrides. */
+  params?: Record<string, unknown>;
 }
 
 // === Config (.polpo/polpo.json) ===
@@ -431,8 +470,14 @@ export interface PolpoSettings {
   maxResolutionAttempts?: number;
   /** Auto-correct correctable expectations (e.g. file_exists paths) on assessment failure. Default: true */
   autoCorrectExpectations?: boolean;
-  /** Model for orchestrator LLM calls (question detection, deadlock, plans). */
-  orchestratorModel?: string;
+  /** Model for orchestrator LLM calls (question detection, deadlock, plans).
+   *  Can be a simple string ("anthropic:claude-opus-4-6") or a ModelConfig with fallbacks. */
+  orchestratorModel?: string | ModelConfig;
+  /** Image-capable model for tasks that need vision (falls back to orchestratorModel). */
+  imageModel?: string;
+  /** Model allowlist — when set, only these models can be used.
+   *  Keys are model specs (e.g. "anthropic:claude-opus-4-6"), values are aliases/params. */
+  modelAllowlist?: Record<string, ModelAllowlistEntry>;
   /** Storage backend for tasks, plans, and runs. Default: "file" (filesystem JSON). */
   storage?: "file" | "sqlite";
   /** Max assessment retries when all reviewers fail before falling back to fix/retry. Default: 1 */
@@ -692,6 +737,24 @@ export interface PlanQualityGate {
   condition?: string;
   /** Notification channels to alert on gate pass/fail. */
   notifyChannels?: string[];
+}
+
+/** Checkpoint defined within a plan — planned stopping point for human review.
+ *
+ * Unlike approval gates (which ask yes/no and auto-resume on approval),
+ * checkpoints unconditionally pause the plan until explicitly resumed.
+ * Use checkpoints for human-in-the-loop review at defined milestones. */
+export interface PlanCheckpoint {
+  /** Checkpoint name (used in events and notifications). */
+  name: string;
+  /** Tasks that must be completed before this checkpoint triggers. */
+  afterTasks: string[];
+  /** Tasks that are blocked until the checkpoint is resumed. */
+  blocksTasks: string[];
+  /** Notification channels to alert when the checkpoint is reached. */
+  notifyChannels?: string[];
+  /** Optional message included in the notification when the checkpoint triggers. */
+  message?: string;
 }
 
 /** SLA configuration for deadline monitoring. */

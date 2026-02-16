@@ -3,11 +3,7 @@ title: "Question Detection"
 description: "Automatic detection and answering of agent questions"
 ---
 
-## The Problem
-
 Sometimes agents ask clarifying questions instead of completing the task. Without intervention, the task stalls — the agent is waiting for input that never comes.
-
-## How It Works
 
 Polpo detects when an agent's output contains a question and auto-generates an answer:
 
@@ -29,14 +25,14 @@ Fast pattern matching for common question patterns:
 
 ### LLM Classification
 
-When heuristics are ambiguous, the orchestrator LLM classifies the output:
+When heuristics are ambiguous, Polpo classifies the output:
 - **Question**: Genuine request for information → generate answer
 - **Rhetorical**: Agent is thinking out loud → no action needed
 - **Completion**: Agent is done → proceed to assessment
 
 ## Auto-Answer
 
-When a question is detected, the orchestrator generates an answer using:
+When a question is detected, Polpo generates an answer using:
 
 - **Task description**: What the agent was asked to do
 - **Project memory**: Persistent context from `.polpo/memory.md`

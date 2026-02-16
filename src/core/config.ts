@@ -1,6 +1,6 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { resolve, join } from "node:path";
-import type { PolpoFileConfig, PolpoSettings, PolpoConfig, ProviderConfig } from "./types.js";
+import type { PolpoFileConfig, PolpoSettings, PolpoConfig, ProviderConfig, ModelConfig } from "./types.js";
 
 const DEFAULT_SETTINGS: PolpoSettings = {
   maxRetries: 3,
@@ -75,6 +75,8 @@ function parseProviders(raw: Record<string, unknown>): Record<string, ProviderCo
       const c = cfg as Record<string, unknown>;
       if (typeof c.apiKey === "string") pc.apiKey = c.apiKey;
       if (typeof c.baseUrl === "string") pc.baseUrl = c.baseUrl;
+      if (typeof c.api === "string") pc.api = c.api as ProviderConfig["api"];
+      if (Array.isArray(c.models)) pc.models = c.models;
     }
     if (pc.apiKey) {
       const envMatch = pc.apiKey.match(/^\$\{(\w+)\}$/);
@@ -87,6 +89,22 @@ function parseProviders(raw: Record<string, unknown>): Record<string, ProviderCo
   return providers;
 }
 
+/** Parse orchestratorModel which can be string or ModelConfig */
+function parseOrchestratorModel(raw: unknown): string | ModelConfig | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  if (typeof raw === "string") return raw;
+  if (typeof raw === "object") {
+    const obj = raw as Record<string, unknown>;
+    const result: ModelConfig = {};
+    if (typeof obj.primary === "string") result.primary = obj.primary;
+    if (Array.isArray(obj.fallbacks)) {
+      result.fallbacks = obj.fallbacks.filter((f): f is string => typeof f === "string");
+    }
+    return result;
+  }
+  return undefined;
+}
+
 function parseSettings(raw: any): PolpoSettings {
   const settings: PolpoSettings = {
     maxRetries: raw?.maxRetries ?? DEFAULT_SETTINGS.maxRetries,
@@ -95,7 +113,9 @@ function parseSettings(raw: any): PolpoSettings {
   };
   if (raw?.taskTimeout != null) settings.taskTimeout = raw.taskTimeout;
   if (raw?.staleThreshold != null) settings.staleThreshold = raw.staleThreshold;
-  if (raw?.orchestratorModel) settings.orchestratorModel = raw.orchestratorModel;
+  if (raw?.orchestratorModel) settings.orchestratorModel = parseOrchestratorModel(raw.orchestratorModel);
+  if (raw?.imageModel && typeof raw.imageModel === "string") settings.imageModel = raw.imageModel;
+  if (raw?.modelAllowlist && typeof raw.modelAllowlist === "object") settings.modelAllowlist = raw.modelAllowlist;
   if (raw?.enableVolatileTeams != null) settings.enableVolatileTeams = raw.enableVolatileTeams;
   if (raw?.volatileCleanup) settings.volatileCleanup = raw.volatileCleanup;
   if (raw?.maxFixAttempts != null) settings.maxFixAttempts = raw.maxFixAttempts;

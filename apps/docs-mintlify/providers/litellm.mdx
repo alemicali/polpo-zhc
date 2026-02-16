@@ -1,0 +1,94 @@
+---
+title: "LiteLLM"
+sidebarTitle: "LiteLLM"
+description: "Unified proxy that routes 100+ LLM providers behind a single OpenAI-compatible endpoint."
+---
+
+[LiteLLM](https://github.com/BerriAI/litellm) is a proxy server that unifies 100+ LLM providers behind a single OpenAI-compatible endpoint. Useful when you want centralized model management, logging, and rate limiting.
+
+## Setup
+
+```bash
+pip install litellm
+litellm --model gpt-4o --port 4000
+```
+
+Or with Docker:
+
+```bash
+docker run -p 4000:4000 ghcr.io/berriai/litellm:main
+```
+
+### Config
+
+```json
+{
+  "providers": {
+    "litellm": {
+      "apiKey": "${LITELLM_MASTER_KEY}",
+      "baseUrl": "http://localhost:4000",
+      "api": "openai-completions",
+      "models": [
+        {
+          "id": "gpt-4o",
+          "name": "GPT-4o (via LiteLLM)",
+          "input": ["text", "image"],
+          "contextWindow": 128000,
+          "maxTokens": 16384,
+          "cost": { "input": 2.5, "output": 10, "cacheRead": 0, "cacheWrite": 0 }
+        },
+        {
+          "id": "claude-sonnet",
+          "name": "Claude Sonnet (via LiteLLM)",
+          "reasoning": true,
+          "input": ["text", "image"],
+          "contextWindow": 200000,
+          "maxTokens": 8192,
+          "cost": { "input": 3, "output": 15, "cacheRead": 0.3, "cacheWrite": 0 }
+        }
+      ]
+    }
+  }
+}
+```
+
+### Use it
+
+```json
+{
+  "agents": [
+    { "name": "coder", "model": "litellm:gpt-4o" }
+  ]
+}
+```
+
+## Auto-Discovery
+
+```bash
+polpo models scan
+```
+
+Scans `localhost:4000` for a running LiteLLM proxy.
+
+## Provider Details
+
+| | |
+|---|---|
+| **Provider ID** | `litellm` (custom) |
+| **Default port** | `4000` |
+| **API type** | `openai-completions` |
+| **Base URL** | `http://localhost:4000` |
+| **API key** | LiteLLM master key (if configured) |
+
+## When to Use LiteLLM
+
+- You want a **single endpoint** that routes to multiple providers (OpenAI, Anthropic, etc.).
+- You need **centralized logging** and spend tracking across providers.
+- You want to add **rate limiting** and **budget controls** in front of your LLM calls.
+- You're running Polpo in a team environment and want to manage API keys centrally.
+
+## Notes
+
+- Define cost per model in your Polpo config to get accurate cost tracking. LiteLLM's cost tracking is separate from Polpo's.
+- The `apiKey` is LiteLLM's master key, not the underlying provider's key. Provider keys are configured in LiteLLM's own config.
+- LiteLLM supports load balancing across multiple instances of the same model — useful for high-throughput workloads.

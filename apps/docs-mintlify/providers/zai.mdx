@@ -1,0 +1,51 @@
+---
+title: "ZAI (GLM)"
+sidebarTitle: "ZAI / GLM"
+description: "Zhipu AI's GLM models — strong bilingual (Chinese/English) capability."
+---
+
+ZAI (Zhipu AI) provides the GLM model family, known for strong bilingual Chinese/English capability.
+
+## Setup
+
+```bash
+export ZAI_API_KEY=...
+```
+
+### Config
+
+```json
+{
+  "providers": {
+    "zai": "${ZAI_API_KEY}"
+  }
+}
+```
+
+### Use it
+
+```json
+{
+  "agents": [
+    { "name": "coder", "model": "zai:glm-4-plus" }
+  ]
+}
+```
+
+Polpo auto-infers `zai` from the `glm-` prefix.
+
+## Models
+
+| Model | Best for |
+|-------|----------|
+| `glm-4-plus` | Flagship — strong general and bilingual tasks |
+| `glm-4-flash` | Fast and cheap |
+
+## Provider Details
+
+| | |
+|---|---|
+| **Provider ID** | `zai` |
+| **Env variable** | `ZAI_API_KEY` |
+| **API type** | ZAI API |
+| **Auto-infer prefix** | `glm-` |

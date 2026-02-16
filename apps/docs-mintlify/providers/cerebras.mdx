@@ -1,0 +1,64 @@
+---
+title: "Cerebras"
+sidebarTitle: "Cerebras"
+description: "Wafer-scale inference — extremely fast completion on open models."
+---
+
+Cerebras runs models on custom wafer-scale chips, delivering extremely fast inference. If raw speed is your priority, Cerebras is hard to beat.
+
+## Setup
+
+Get your API key from [Cerebras Cloud](https://cloud.cerebras.ai/).
+
+```bash
+export CEREBRAS_API_KEY=...
+```
+
+### Config
+
+```json
+{
+  "providers": {
+    "cerebras": "${CEREBRAS_API_KEY}"
+  }
+}
+```
+
+### Use it
+
+```json
+{
+  "agents": [
+    { "name": "fast-worker", "model": "cerebras:gpt-oss-cerebras" }
+  ]
+}
+```
+
+## Models
+
+| Model | Best for |
+|-------|----------|
+| `gpt-oss-cerebras` | Fast general-purpose inference |
+| Llama variants | Open model inference at speed |
+
+## Features
+
+| Feature | Supported |
+|---------|-----------|
+| Streaming | Yes |
+| Tool use | Yes |
+| Vision (images) | No |
+
+## Provider Details
+
+| | |
+|---|---|
+| **Provider ID** | `cerebras` |
+| **Env variable** | `CEREBRAS_API_KEY` |
+| **API type** | OpenAI-compatible |
+| **Auto-infer prefix** | `gpt-oss-` |
+
+## Notes
+
+- Cerebras is one of the fastest inference providers available. Time-to-first-token is often under 100ms.
+- Good for the same "fast-worker" pattern as [Groq](/providers/groq) — assign high-volume, simpler tasks to Cerebras agents.

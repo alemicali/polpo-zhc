@@ -10,6 +10,7 @@ import type { TaskExpectation } from "../../core/types.js";
 import { seg, kickRun } from "../format.js";
 import { generateTaskPrep } from "../../llm/plan-generator.js";
 import { buildTaskPrepPrompt } from "../../llm/prompts.js";
+import { resolveModelSpec } from "../../llm/pi-client.js";
 
 export function createTask(
   description: string,
@@ -146,7 +147,7 @@ async function doCreateWithPrep(
     })();
 
     const systemPrompt = buildTaskPrepPrompt(polpo, state, polpo.getWorkDir(), userInput, agentName);
-    const model = polpo.getConfig()?.settings?.orchestratorModel;
+    const model = resolveModelSpec(polpo.getConfig()?.settings?.orchestratorModel);
     const prepTask = await generateTaskPrep(
       systemPrompt,
       userInput,

@@ -1,166 +1,127 @@
 ---
-title: "Installation"
-description: "Install Polpo and get it running"
+title: "Quickstart"
+description: "From zero to running agents in under 2 minutes."
 ---
 
-## Prerequisites
-
-- **Node.js** v18 or higher
-- **npm** v8 or higher
-- **pnpm** (for building from source)
-
 <Note>
-API keys are **optional**. The default `opencode:big-pickle` model is free and requires no key.
+  No API key needed. The default model is free.
 </Note>
-
-## Install from Source
 
 <Steps>
 
-1. **Clone the repository**
+1. **Install**
+
+   <Tabs>
+     <Tab title="npm">
+       ```bash
+       npm install -g openpolpo
+       ```
+     </Tab>
+     <Tab title="pnpm">
+       ```bash
+       pnpm add -g openpolpo
+       ```
+     </Tab>
+     <Tab title="Docker">
+       ```bash
+       docker pull ghcr.io/openpolpo/openpolpo:latest
+       ```
+       Then skip to step 4 — run with `docker run -p 3000:3000 -v $(pwd):/workspace ghcr.io/openpolpo/openpolpo:latest`
+     </Tab>
+   </Tabs>
+
+2. **Init a project**
 
    ```bash
-   git clone https://github.com/openpolpo/openpolpo.git
-   cd openpolpo
+   mkdir my-project && cd my-project
+   polpo init
    ```
 
-2. **Install dependencies**
+   This creates `.polpo/polpo.json` with a default team.
+
+3. **Launch the TUI**
 
    ```bash
-   npm install
+   polpo
    ```
 
-3. **Build the project**
+   You're in. Tell Polpo what you need, hit Enter, and watch it work.
+
+4. **Or go headless**
 
    ```bash
-   pnpm run build
+   polpo serve --port 3000
    ```
 
-4. **Link the CLI globally** (optional)
-
-   ```bash
-   npm link
-   ```
-
-   This makes the `polpo` command available system-wide.
+   Full REST API at `http://localhost:3000/api/v1/` — create tasks, execute plans, stream events via SSE.
 
 </Steps>
 
-## Verify the Installation
+## Try a plan
 
-```bash
-polpo --version
-```
-
-You should see the current version number. Run `polpo --help` to see all available commands.
-
-## Configure API Keys (Optional)
-
-The default model works out-of-the-box. If you want to use a paid provider, set the appropriate API key:
-
-<Tabs>
-  <Tab title="Anthropic">
-    ```bash
-    export ANTHROPIC_API_KEY=sk-ant-...
-    ```
-  </Tab>
-  <Tab title="OpenAI">
-    ```bash
-    export OPENAI_API_KEY=sk-...
-    ```
-  </Tab>
-  <Tab title="Google">
-    ```bash
-    export GEMINI_API_KEY=...
-    ```
-  </Tab>
-  <Tab title="Others">
-    ```bash
-    export GROQ_API_KEY=gsk_...
-    export MISTRAL_API_KEY=...
-    export XAI_API_KEY=...
-    export OPENROUTER_API_KEY=sk-or-...
-    ```
-  </Tab>
-</Tabs>
-
-See [Providers & Models](/concepts/providers-and-models) for the full list of 18+ supported providers.
-
-You can also configure API keys in `.polpo/polpo.json` using `${ENV_VAR}` references:
+Create `.polpo/plans/hello.json`:
 
 ```json
 {
-  "providers": {
-    "anthropic": "${ANTHROPIC_API_KEY}",
-    "openai": "${OPENAI_API_KEY}"
+  "name": "hello-world",
+  "group": "hello",
+  "tasks": [
+    {
+      "title": "Create a greeting",
+      "agent": "default",
+      "description": "Create a file called hello.txt that says 'Hello from Polpo!' in a creative way."
+    }
+  ]
+}
+```
+
+Run it:
+
+```bash
+polpo run
+```
+
+Polpo picks the right agent, runs the task, and writes `hello.txt` to your project directory.
+
+## Add an API key (optional)
+
+Want to use Claude, GPT-4, or Gemini instead of the free default?
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+```
+
+Then set the model in `.polpo/polpo.json`:
+
+```json
+{
+  "team": {
+    "agents": [
+      {
+        "name": "default",
+        "model": "anthropic:claude-sonnet-4-5-20250929",
+        "role": "general-purpose developer"
+      }
+    ]
   }
 }
 ```
 
-## Initialize a Project
+See [Providers & Models](/models/overview) for 22+ supported providers.
 
-```bash
-polpo init
-```
-
-This creates a `.polpo/` directory with:
-- **`polpo.json`** — configuration file with your team setup and default agents
-- Runtime directories for plans, state, logs, and assessments
-
-## Running Polpo
-
-Polpo offers three ways to run:
-
-<Tabs>
-  <Tab title="TUI (Interactive)">
-    ```bash
-    polpo
-    ```
-    The default. Full interactive terminal UI with real-time monitoring, chat, and plan management. See [TUI](/usage/tui).
-  </Tab>
-
-  <Tab title="CLI (Headless)">
-    ```bash
-    polpo run
-    ```
-    Runs all pending plans without interactive UI. Logs output to stdout. See [CLI](/usage/cli).
-  </Tab>
-
-  <Tab title="HTTP Server">
-    ```bash
-    polpo serve --port 3890
-    ```
-    REST API with SSE and WebSocket streaming. Powers the web dashboard and React SDK. See [Server](/usage/server).
-  </Tab>
-</Tabs>
-
-## What Happens When You Run
-
-When you execute a plan, Polpo:
-
-1. **Assigns** each task to the specified agent
-2. **Spawns** detached runner processes for each agent
-3. **Monitors** agent progress with periodic health checks
-4. **Assesses** completed work using G-Eval (LLM-as-judge)
-5. **Retries** tasks that don't meet the quality threshold
-6. **Cleans up** volatile agents when their plan completes
-
-## Next Steps
+## What's next
 
 <CardGroup cols={2}>
-  <Card title="Your First Plan" icon="book-open" href="/guides/first-plan">
-    Step-by-step tutorial for creating and running your first multi-agent plan.
+  <Card title="Your First Plan" icon="map" href="/guides/first-plan">
+    Build a real multi-task plan with dependencies and assessment.
   </Card>
-
   <Card title="Configuration" icon="gear" href="/configuration">
-    Learn about `.polpo/polpo.json` options — agents, settings, providers.
+    Teams, models, settings, providers.
   </Card>
-
-  <Card title="Architecture" icon="gears" href="/concepts/architecture">
-    Understand how the orchestrator, runners, and stores fit together.
+  <Card title="Install & Deploy" icon="rocket" href="/install/index">
+    Docker, Hetzner, AWS, GCP, Railway, Fly.io.
   </Card>
-
-  <Card title="CLI Reference" icon="terminal" href="/usage/cli">
-    All available commands and options.
+  <Card title="Architecture" icon="diagram-project" href="/concepts/architecture">
+    How Polpo, runners, and stores fit together.
   </Card>
 </CardGroup>

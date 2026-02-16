@@ -1,7 +1,8 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import type { ServerEnv } from "../app.js";
 import { buildChatSystemPrompt, buildPlanSystemPrompt, buildTeamGenPrompt } from "../../llm/prompts.js";
-import { querySDKText } from "../../llm/query.js";
+import { queryOrchestratorText } from "../../llm/query.js";
+import { resolveModelSpec } from "../../llm/pi-client.js";
 import {
   ChatMessageSchema,
   GeneratePlanSchema,
@@ -185,7 +186,7 @@ export function chatRoutes(): OpenAPIHono<ServerEnv> {
 
     const state = orchestrator.getStore().getState();
     const workDir = orchestrator.getWorkDir();
-    const model = orchestrator.getConfig()?.settings?.orchestratorModel;
+    const orchestratorModel = orchestrator.getConfig()?.settings?.orchestratorModel;
     const sessionStore = orchestrator.getSessionStore();
 
     // Resolve session
@@ -224,7 +225,7 @@ export function chatRoutes(): OpenAPIHono<ServerEnv> {
 
     parts.push("", "---", "", `User question: ${body.message}`, "", `Answer concisely based on the current Polpo state. Use markdown for formatting.`);
 
-    const response = await querySDKText(parts.join("\n"), workDir, model);
+    const response = (await queryOrchestratorText(parts.join("\n"), workDir, orchestratorModel)).text;
 
     if (sessionStore && sessionId) {
       const assistantMsg = sessionStore.addMessage(sessionId, "assistant", response);
@@ -241,7 +242,7 @@ export function chatRoutes(): OpenAPIHono<ServerEnv> {
 
     const state = orchestrator.getStore().getState();
     const workDir = orchestrator.getWorkDir();
-    const model = orchestrator.getConfig()?.settings?.orchestratorModel;
+    const model = resolveModelSpec(orchestrator.getConfig()?.settings?.orchestratorModel);
 
     const { generatePlan, planDataToJson } = await import("../../llm/plan-generator.js");
     const systemPrompt = buildPlanSystemPrompt(orchestrator, state, workDir);
@@ -261,7 +262,7 @@ export function chatRoutes(): OpenAPIHono<ServerEnv> {
     const { generateTaskPrep } = await import("../../llm/plan-generator.js");
     const state = orchestrator.getStore().getState();
     const workDir = orchestrator.getWorkDir();
-    const model = orchestrator.getConfig()?.settings?.orchestratorModel;
+    const model = resolveModelSpec(orchestrator.getConfig()?.settings?.orchestratorModel);
 
     const systemPrompt = buildTaskPrepPrompt(orchestrator, state, workDir, body.description, body.assignTo);
     const taskData = await generateTaskPrep(systemPrompt, body.description, model);
@@ -274,7 +275,7 @@ export function chatRoutes(): OpenAPIHono<ServerEnv> {
     const body = c.req.valid("json");
 
     const workDir = orchestrator.getWorkDir();
-    const model = orchestrator.getConfig()?.settings?.orchestratorModel;
+    const model = resolveModelSpec(orchestrator.getConfig()?.settings?.orchestratorModel);
 
     const { generateTeam } = await import("../../llm/plan-generator.js");
     const systemPrompt = buildTeamGenPrompt(orchestrator, workDir, body.description);
@@ -288,7 +289,7 @@ export function chatRoutes(): OpenAPIHono<ServerEnv> {
     const body = c.req.valid("json");
 
     const workDir = orchestrator.getWorkDir();
-    const model = orchestrator.getConfig()?.settings?.orchestratorModel;
+    const model = resolveModelSpec(orchestrator.getConfig()?.settings?.orchestratorModel);
 
     const { refineTeam } = await import("../../llm/plan-generator.js");
     const systemPrompt = buildTeamGenPrompt(orchestrator, workDir, body.description || "");
@@ -345,7 +346,7 @@ export function chatRoutes(): OpenAPIHono<ServerEnv> {
 
     const state = orchestrator.getStore().getState();
     const workDir = orchestrator.getWorkDir();
-    const model = orchestrator.getConfig()?.settings?.orchestratorModel;
+    const model = resolveModelSpec(orchestrator.getConfig()?.settings?.orchestratorModel);
 
     const { refinePlanStructured, planDataToJson } = await import("../../llm/plan-generator.js");
     const systemPrompt = buildPlanSystemPrompt(orchestrator, state, workDir);

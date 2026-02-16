@@ -1,0 +1,155 @@
+---
+title: "Google Cloud"
+description: "Deploy Polpo on Google Cloud Run or Compute Engine."
+---
+
+## Option A: Cloud Run
+
+[Cloud Run](https://cloud.google.com/run) is the simplest option — serverless containers with pay-per-use pricing. Good for intermittent workloads.
+
+<Warning>
+  Cloud Run has a **max request timeout of 60 minutes** and containers can be shut down between requests. For long-running orchestration, use the **always-on** option (min instances = 1) or use Compute Engine instead.
+</Warning>
+
+<Steps>
+
+1. **Push the image to Artifact Registry**
+
+   ```bash
+   # Create a repository (one-time)
+   gcloud artifacts repositories create polpo \
+     --repository-format=docker \
+     --location=us-central1
+
+   # Build and push
+   gcloud builds submit \
+     --tag us-central1-docker.pkg.dev/YOUR_PROJECT/polpo/polpo:latest
+   ```
+
+   Or use the pre-built image directly from GitHub Container Registry.
+
+2. **Deploy to Cloud Run**
+
+   ```bash
+   gcloud run deploy polpo \
+     --image ghcr.io/openpolpo/openpolpo:latest \
+     --platform managed \
+     --region us-central1 \
+     --port 3000 \
+     --cpu 2 \
+     --memory 2Gi \
+     --min-instances 1 \
+     --max-instances 1 \
+     --timeout 3600 \
+     --set-env-vars "ANTHROPIC_API_KEY=sk-ant-..." \
+     --execution-environment gen2 \
+     --allow-unauthenticated
+   ```
+
+   Key flags:
+   - `--min-instances 1` keeps the container always running
+   - `--max-instances 1` prevents multiple instances (Polpo is single-process)
+   - `--execution-environment gen2` enables full Linux syscalls (needed for child processes)
+   - `--timeout 3600` allows long-running SSE connections
+
+3. **Add persistent storage**
+
+   Cloud Run supports NFS volumes via Filestore:
+
+   ```bash
+   # Create a Filestore instance
+   gcloud filestore instances create polpo-data \
+     --zone=us-central1-a \
+     --file-share=name=workspace,capacity=10GB \
+     --network=name=default
+
+   # Update the Cloud Run service to mount it
+   gcloud run services update polpo \
+     --add-volume name=workspace,type=nfs,location=FILESTORE_IP:/workspace \
+     --add-volume-mount volume=workspace,mount-path=/workspace
+   ```
+
+</Steps>
+
+## Option B: Compute Engine
+
+For always-on orchestration, a Compute Engine VM is simpler and cheaper.
+
+<Steps>
+
+1. **Create a VM**
+
+   ```bash
+   gcloud compute instances create polpo \
+     --machine-type e2-small \
+     --zone us-central1-a \
+     --image-family ubuntu-2404-lts-amd64 \
+     --image-project ubuntu-os-cloud \
+     --boot-disk-size 20GB \
+     --tags http-server,https-server
+   ```
+
+2. **SSH in**
+
+   ```bash
+   gcloud compute ssh polpo
+   ```
+
+3. **Install Docker and deploy**
+
+   ```bash
+   curl -fsSL https://get.docker.com | sh
+
+   mkdir -p /opt/polpo/workspace
+   cd /opt/polpo
+
+   cat > docker-compose.yml << 'EOF'
+   services:
+     polpo:
+       image: ghcr.io/openpolpo/openpolpo:latest
+       ports:
+         - "3000:3000"
+       volumes:
+         - ./workspace:/workspace
+       environment:
+         - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+       restart: unless-stopped
+   EOF
+
+   echo "ANTHROPIC_API_KEY=sk-ant-..." > .env
+   docker compose up -d
+   ```
+
+4. **Open the firewall**
+
+   ```bash
+   gcloud compute firewall-rules create allow-polpo \
+     --allow tcp:3000 \
+     --target-tags http-server
+   ```
+
+</Steps>
+
+## SSL
+
+For Compute Engine, use Caddy as a reverse proxy:
+
+```bash
+sudo apt install caddy
+echo 'polpo.yourdomain.com { reverse_proxy localhost:3000 }' | sudo tee /etc/caddy/Caddyfile
+sudo systemctl reload caddy
+```
+
+For Cloud Run, HTTPS is automatic on the `*.run.app` domain. Add a custom domain via:
+
+```bash
+gcloud run domain-mappings create --service polpo --domain polpo.yourdomain.com
+```
+
+## Cost estimate
+
+| Setup | Specs | Monthly cost |
+|---|---|---|
+| Cloud Run (always-on) | 2 vCPU, 2 GB | ~$30 |
+| Compute Engine e2-small | 0.5 vCPU, 2 GB | ~$15 |
+| Compute Engine e2-medium | 1 vCPU, 4 GB | ~$25 |

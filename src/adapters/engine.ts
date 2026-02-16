@@ -21,7 +21,7 @@ export function createActivity(): AgentActivity {
 }
 import { Agent } from "@mariozechner/pi-agent-core";
 import type { AgentEvent } from "@mariozechner/pi-agent-core";
-import { resolveModel, resolveApiKey } from "../llm/pi-client.js";
+import { resolveModel, resolveApiKey, enforceModelAllowlist } from "../llm/pi-client.js";
 import { createCodingTools, createAllTools } from "../tools/coding-tools.js";
 import { loadAgentSkills, buildSkillPrompt } from "../llm/skills.js";
 import { McpClientManager } from "../mcp/client.js";
@@ -95,6 +95,11 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
   const activity = createActivity();
   const start = Date.now();
   let alive = true;
+
+  // Enforce model allowlist (throws if model not allowed)
+  if (agentConfig.model) {
+    enforceModelAllowlist(agentConfig.model);
+  }
 
   // Resolve model
   const model = resolveModel(agentConfig.model);

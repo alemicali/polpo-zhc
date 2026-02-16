@@ -41,7 +41,6 @@ const FILES = [
   'features/approval-gates.mdx',
   'features/escalation.mdx',
   'features/scheduling.mdx',
-  'features/bridge.mdx',
   'features/sessions.mdx',
   'features/memory.mdx',
   'features/deadlock-resolution.mdx',

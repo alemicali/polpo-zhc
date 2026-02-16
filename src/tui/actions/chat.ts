@@ -9,7 +9,7 @@ import type { Orchestrator } from "../../core/orchestrator.js";
 import type { TUIStore } from "../store.js";
 import type { SessionStore } from "../../core/session-store.js";
 import { seg, parseMarkdown } from "../format.js";
-import { resolveModel, resolveApiKey } from "../../llm/pi-client.js";
+import { resolveModel, resolveApiKey, resolveModelSpec } from "../../llm/pi-client.js";
 import { buildChatSystemPrompt } from "../../llm/prompts.js";
 import { streamSimple, type Message } from "@mariozechner/pi-ai";
 import {
@@ -73,7 +73,7 @@ export async function startChat(
     // Add current user message
     messages.push({ role: "user", content: message, timestamp: Date.now() });
 
-    const model = polpo.getConfig()?.settings?.orchestratorModel;
+    const model = resolveModelSpec(polpo.getConfig()?.settings?.orchestratorModel);
     const m = resolveModel(model);
     const apiKey = resolveApiKey(m.provider);
     const streamOpts = apiKey ? { apiKey } : undefined;

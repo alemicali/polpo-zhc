@@ -59,11 +59,6 @@ export interface PolpoEventMap {
   "session:created": { sessionId: string; title?: string };
   "message:added": { sessionId: string; messageId: string; role: "user" | "assistant" };
 
-  // Bridge (passive session discovery)
-  "bridge:session:discovered": { sessionId: string; projectPath: string; transcriptPath: string };
-  "bridge:session:activity": { sessionId: string; projectPath: string; messageCount: number; toolCalls: string[]; filesCreated: string[]; filesEdited: string[]; lastMessage: string };
-  "bridge:session:completed": { sessionId: string; projectPath: string; summary: import("./session-reader.js").SessionSummary | null; duration: number };
-
   // Approval gates
   "approval:requested": { requestId: string; gateId: string; gateName: string; taskId?: string; planId?: string };
   "approval:resolved": { requestId: string; status: "approved" | "rejected"; resolvedBy?: string };
@@ -108,7 +103,7 @@ export type PolpoEvent = keyof PolpoEventMap;
  * Wraps Node's EventEmitter with type-safe emit/on/once/off.
  */
 /** Events to exclude from persistent logging (too frequent or internal). */
-const LOG_EXCLUDED = new Set<string>(["orchestrator:tick", "bridge:session:activity", "newListener", "removeListener"]);
+const LOG_EXCLUDED = new Set<string>(["orchestrator:tick", "newListener", "removeListener"]);
 
 export class TypedEmitter extends EventEmitter {
   private logSink?: LogStore;

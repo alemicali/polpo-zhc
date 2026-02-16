@@ -1,0 +1,153 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 820 440" fill="none">
+  <style>
+    .box { rx: 8; ry: 8; }
+    .task { rx: 6; ry: 6; }
+    .label { font-family: system-ui, -apple-system, sans-serif; font-size: 13px; font-weight: 600; fill: #1c1917; text-anchor: middle; }
+    .sublabel { font-family: system-ui, -apple-system, sans-serif; font-size: 10px; fill: #78716c; text-anchor: middle; }
+    .task-label { font-family: system-ui, -apple-system, sans-serif; font-size: 11px; font-weight: 600; fill: #1c1917; text-anchor: middle; }
+    .task-sub { font-family: system-ui, -apple-system, sans-serif; font-size: 9px; fill: #78716c; text-anchor: middle; }
+    .phase-label { font-family: system-ui, -apple-system, sans-serif; font-size: 10px; font-weight: 600; fill: #78716c; text-anchor: middle; letter-spacing: 1px; }
+    .arrow { stroke: #a8a29e; stroke-width: 1.5; fill: none; marker-end: url(#ah); }
+    .arrow-dep { stroke: #c4b5fd; stroke-width: 1.5; fill: none; stroke-dasharray: 4,3; marker-end: url(#ah-purple); }
+    .arrow-retry { stroke: #F78B97; stroke-width: 1.5; fill: none; stroke-dasharray: 5,3; marker-end: url(#ah-pink); }
+  </style>
+  <defs>
+    <marker id="ah" markerWidth="7" markerHeight="5" refX="7" refY="2.5" orient="auto">
+      <path d="M0,0 L7,2.5 L0,5" fill="#a8a29e"/>
+    </marker>
+    <marker id="ah-purple" markerWidth="7" markerHeight="5" refX="7" refY="2.5" orient="auto">
+      <path d="M0,0 L7,2.5 L0,5" fill="#c4b5fd"/>
+    </marker>
+    <marker id="ah-pink" markerWidth="7" markerHeight="5" refX="7" refY="2.5" orient="auto">
+      <path d="M0,0 L7,2.5 L0,5" fill="#F78B97"/>
+    </marker>
+  </defs>
+
+  <!-- ==================== PHASE 1: PLAN ==================== -->
+  <text x="80" y="20" class="phase-label">PLAN</text>
+
+  <rect x="20" y="32" width="120" height="100" class="box" fill="#f5f5f4" stroke="#d6d3d1" stroke-width="1.5"/>
+  <text x="80" y="52" class="label">polpo.json</text>
+
+  <!-- Tasks inside plan -->
+  <rect x="32" y="62" width="96" height="22" class="task" fill="#fff" stroke="#d6d3d1" stroke-width="1"/>
+  <text x="80" y="77" class="task-sub">Task A — Setup DB</text>
+
+  <rect x="32" y="88" width="96" height="22" class="task" fill="#fff" stroke="#d6d3d1" stroke-width="1"/>
+  <text x="80" y="103" class="task-sub">Task B — API</text>
+
+  <rect x="32" y="114" width="96" height="22" class="task" fill="#fff" stroke="#d6d3d1" stroke-width="1"/>
+  <text x="80" y="129" class="task-sub">Task C — UI</text>
+
+  <!-- Arrow plan → dependency graph -->
+  <path d="M140,82 L175,82" class="arrow"/>
+
+  <!-- ==================== PHASE 2: DEPENDENCY GRAPH ==================== -->
+  <text x="260" y="20" class="phase-label">DEPENDENCY GRAPH</text>
+
+  <rect x="175" y="32" width="170" height="100" class="box" fill="#ede9fe" stroke="#c4b5fd" stroke-width="1.5"/>
+
+  <!-- Task nodes in graph -->
+  <rect x="195" y="50" width="56" height="28" rx="4" fill="#fff" stroke="#c4b5fd" stroke-width="1.5"/>
+  <text x="223" y="69" class="task-label">A</text>
+
+  <rect x="270" y="42" width="56" height="28" rx="4" fill="#fff" stroke="#c4b5fd" stroke-width="1.5"/>
+  <text x="298" y="61" class="task-label">B</text>
+
+  <rect x="270" y="86" width="56" height="28" rx="4" fill="#fff" stroke="#c4b5fd" stroke-width="1.5"/>
+  <text x="298" y="105" class="task-label">C</text>
+
+  <!-- Dependency arrows: A→B, A→C -->
+  <path d="M251,58 L270,56" class="arrow-dep"/>
+  <path d="M251,72 L270,100" class="arrow-dep"/>
+
+  <!-- B and C are parallel (no dep between them) -->
+  <text x="260" y="145" class="task-sub">B + C run in parallel</text>
+
+  <!-- Arrow graph → execution -->
+  <path d="M345,82 L385,82" class="arrow"/>
+
+  <!-- ==================== PHASE 3: EXECUTION ==================== -->
+  <text x="490" y="20" class="phase-label">EXECUTION</text>
+
+  <rect x="385" y="32" width="210" height="140" class="box" fill="#dbeafe" stroke="#93c5fd" stroke-width="1.5"/>
+  <text x="490" y="52" class="sublabel">Polpo orchestrator</text>
+
+  <!-- Task A running -->
+  <rect x="400" y="62" width="180" height="30" class="task" fill="#fff" stroke="#93c5fd" stroke-width="1.5"/>
+  <text x="440" y="81" class="task-label">Task A</text>
+  <text x="548" y="81" class="task-sub">agent-1</text>
+  <rect x="400" y="62" width="120" height="30" rx="6" ry="6" fill="#93c5fd" opacity="0.2"/>
+
+  <!-- Task B running -->
+  <rect x="400" y="100" width="180" height="30" class="task" fill="#fff" stroke="#93c5fd" stroke-width="1.5"/>
+  <text x="440" y="119" class="task-label">Task B</text>
+  <text x="548" y="119" class="task-sub">agent-2</text>
+  <rect x="400" y="100" width="80" height="30" rx="6" ry="6" fill="#93c5fd" opacity="0.2"/>
+
+  <!-- Task C waiting -->
+  <rect x="400" y="138" width="180" height="30" class="task" fill="#fff" stroke="#d6d3d1" stroke-width="1" stroke-dasharray="4,2"/>
+  <text x="440" y="157" class="task-label" style="fill: #a8a29e;">Task C</text>
+  <text x="540" y="157" class="task-sub">waiting for A</text>
+
+  <!-- Arrow execution → scoring -->
+  <path d="M595,82 L635,82" class="arrow"/>
+
+  <!-- ==================== PHASE 4: SCORING ==================== -->
+  <text x="720" y="20" class="phase-label">SCORING</text>
+
+  <rect x="635" y="32" width="170" height="140" class="box" fill="#fef3c7" stroke="#fcd34d" stroke-width="1.5"/>
+  <text x="720" y="52" class="sublabel">LLM judge (G-Eval)</text>
+
+  <!-- Task A scored - pass -->
+  <rect x="650" y="62" width="140" height="28" class="task" fill="#d1fae5" stroke="#6ee7b7" stroke-width="1.5"/>
+  <text x="695" y="80" class="task-label" style="fill: #065f46;">Task A</text>
+  <text x="762" y="80" class="task-sub" style="fill: #065f46;">8.5/10</text>
+
+  <!-- Task B scored - fail -->
+  <rect x="650" y="98" width="140" height="28" class="task" fill="#fff1f2" stroke="#F78B97" stroke-width="1.5"/>
+  <text x="695" y="116" class="task-label" style="fill: #be123c;">Task B</text>
+  <text x="762" y="116" class="task-sub" style="fill: #be123c;">4.2/10</text>
+
+  <!-- Task C scored - pass -->
+  <rect x="650" y="134" width="140" height="28" class="task" fill="#d1fae5" stroke="#6ee7b7" stroke-width="1.5"/>
+  <text x="695" y="152" class="task-label" style="fill: #065f46;">Task C</text>
+  <text x="762" y="152" class="task-sub" style="fill: #065f46;">9.1/10</text>
+
+  <!-- ==================== RETRY LOOP ==================== -->
+  <!-- Task B fails → retry arrow back to execution -->
+  <path d="M720,126 L720,210 L490,210 L490,172" class="arrow-retry"/>
+  <rect x="570" y="198" width="100" height="24" rx="4" fill="#fff1f2" stroke="#F78B97" stroke-width="1"/>
+  <text x="620" y="214" class="task-sub" style="fill: #be123c; font-weight: 600;">Fix / Retry</text>
+
+  <!-- ==================== BOTTOM: RESULTS ==================== -->
+  <text x="410" y="270" class="phase-label">RESULTS</text>
+
+  <!-- Done tasks -->
+  <rect x="300" y="282" width="110" height="44" class="box" fill="#d1fae5" stroke="#6ee7b7" stroke-width="1.5"/>
+  <text x="355" y="301" class="task-label" style="fill: #065f46;">Task A</text>
+  <text x="355" y="316" class="task-sub" style="fill: #065f46;">done</text>
+
+  <rect x="420" y="282" width="110" height="44" class="box" fill="#d1fae5" stroke="#6ee7b7" stroke-width="1.5"/>
+  <text x="475" y="301" class="task-label" style="fill: #065f46;">Task C</text>
+  <text x="475" y="316" class="task-sub" style="fill: #065f46;">done</text>
+
+  <rect x="540" y="282" width="110" height="44" class="box" fill="#fef3c7" stroke="#fcd34d" stroke-width="1.5"/>
+  <text x="595" y="301" class="task-label">Task B</text>
+  <text x="595" y="316" class="task-sub">retrying...</text>
+
+  <!-- Arrows from scoring down to results -->
+  <path d="M720,170 L720,240 L475,240 L475,282" class="arrow" style="stroke: #6ee7b7;"/>
+
+  <!-- ==================== NOTIFY ==================== -->
+  <rect x="310" y="345" width="230" height="32" class="box" fill="#f5f5f4" stroke="#d6d3d1" stroke-width="1.5"/>
+  <text x="425" y="366" class="sublabel">Slack / Email / Webhook / Desktop</text>
+
+  <path d="M425,326 L425,345" class="arrow"/>
+
+  <!-- ==================== ESCALATION ==================== -->
+  <rect x="560" y="345" width="170" height="32" class="box" fill="#fff1f2" stroke="#F78B97" stroke-width="1.5"/>
+  <text x="645" y="366" class="task-sub" style="fill: #be123c; font-weight: 600;">Escalate: swap model / notify human</text>
+
+  <path d="M595,326 L645,345" class="arrow-retry"/>
+</svg>

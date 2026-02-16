@@ -1,54 +1,125 @@
 ---
 title: "Scheduling"
-description: "Cron-based and one-shot plan scheduling"
+description: "Run plans automatically — nightly tests, daily health checks, or a one-time future deployment."
 ---
 
-Polpo's Scheduler enables time-based execution of plans using cron expressions or one-shot ISO timestamps. It integrates directly with the orchestrator tick loop.
+Scheduling lets you **run plans automatically at a given time** — either once (a deploy next Tuesday at 14:00) or on a recurring basis (nightly tests, daily health checks, weekly security audits). You define a cron expression or an ISO timestamp directly in the plan, and Polpo takes care of the rest. No external cron job or CI pipeline needed.
 
-## How It Works
+## Quick Start
 
-The Scheduler is **tick-driven** — it runs on every orchestrator tick, checks all registered schedules, and triggers plan execution when a schedule is due. There are no background timers; the orchestrator tick drives everything.
+Add a `schedule` field to any plan:
 
-<Frame>
-  <img src="/scheduler-check.svg" alt="Scheduler tick-driven check: evaluates cron and one-shot schedules, triggers plan execution" />
-</Frame>
+<Tabs>
+  <Tab title="Recurring (cron)">
+    ```json
+    {
+      "name": "Nightly Test Suite",
+      "schedule": "0 2 * * *",
+      "recurring": true,
+      "tasks": [
+        { "title": "Run integration tests", "assignTo": "test-agent" },
+        { "title": "Generate coverage report", "assignTo": "report-agent" }
+      ]
+    }
+    ```
 
-## Plan Scheduling
+    This runs every day at 02:00. After each run completes, the plan resets to `draft` and waits for the next scheduled time.
+  </Tab>
 
-Plans can define a `schedule` field (cron expression or ISO timestamp) and an optional `recurring` flag:
+  <Tab title="One-shot (timestamp)">
+    ```json
+    {
+      "name": "Release v2.0",
+      "schedule": "2026-03-15T14:00:00Z",
+      "tasks": [
+        { "title": "Build release artifacts", "assignTo": "build-agent" },
+        { "title": "Deploy to production", "assignTo": "devops-agent" }
+      ]
+    }
+    ```
+
+    This runs once at the specified time and then automatically disables itself.
+  </Tab>
+</Tabs>
+
+That's it. Save the plan, start Polpo, and the scheduler picks it up.
+
+## Recurring vs One-Shot
+
+| | Recurring | One-Shot |
+|---|---|---|
+| **`schedule`** | Cron expression (`0 2 * * *`) | ISO timestamp (`2026-03-15T14:00:00Z`) |
+| **`recurring`** | `true` | `false` (default) |
+| **After execution** | Plan resets to `draft`, next run time is calculated | Schedule is disabled automatically |
+| **Use case** | Repeated tasks (tests, audits, health checks) | Single future event (deploy, migration) |
+
+## Cron Expressions
+
+Polpo uses standard **5-field cron expressions**:
+
+```
+┌───────────── minute (0–59)
+│ ┌───────────── hour (0–23)
+│ │ ┌───────────── day of month (1–31)
+│ │ │ ┌───────────── month (1–12)
+│ │ │ │ ┌───────────── day of week (0–7, 0 and 7 = Sunday)
+│ │ │ │ │
+* * * * *
+```
+
+### Syntax
+
+| Syntax | Example | Meaning |
+|--------|---------|---------|
+| Number | `30` | Exact value |
+| `*` | `*` | Every value in range |
+| Range | `1-5` | Values 1 through 5 |
+| Step | `*/15` | Every 15th value |
+| List | `1,3,5` | Values 1, 3, and 5 |
+| Range + Step | `0-30/10` | 0, 10, 20, 30 |
+
+### Common Patterns
+
+| Expression | When it runs |
+|------------|-------------|
+| `0 2 * * *` | Every day at 02:00 |
+| `*/15 * * * *` | Every 15 minutes |
+| `0 9 * * 1-5` | Weekdays at 09:00 |
+| `0 0 1 * *` | First day of every month at midnight |
+| `30 8,12,18 * * *` | At 08:30, 12:30, and 18:30 daily |
+| `0 22 * * 0` | Every Sunday at 22:00 |
+| `0 6 * * 1` | Every Monday at 06:00 |
+
+<Note>
+Shorthand aliases like `@daily`, `@weekly`, `@monthly` are not supported — use the 5-field format. Seconds, `L`, `W`, and `#` modifiers are also not supported.
+</Note>
+
+## Examples
+
+### Nightly integration tests
 
 ```json
 {
-  "name": "Nightly Test Suite",
+  "name": "Nightly Tests",
   "schedule": "0 2 * * *",
   "recurring": true,
   "tasks": [
-    { "title": "Run integration tests", "assignTo": "test-agent" },
-    { "title": "Generate coverage report", "assignTo": "report-agent" }
+    {
+      "title": "Run full test suite",
+      "description": "Run all integration and unit tests. Report any failures.",
+      "assignTo": "test-agent"
+    },
+    {
+      "title": "Generate coverage report",
+      "description": "Generate a coverage report and save to coverage-report.md.",
+      "assignTo": "report-agent",
+      "dependsOn": ["Run full test suite"]
+    }
   ]
 }
 ```
 
-### One-Shot Scheduling
-
-Use an ISO timestamp for a single future execution:
-
-```json
-{
-  "name": "Release v2.0",
-  "schedule": "2026-03-15T14:00:00Z",
-  "tasks": [
-    { "title": "Build release artifacts", "assignTo": "build-agent" },
-    { "title": "Deploy to production", "assignTo": "devops-agent" }
-  ]
-}
-```
-
-After execution, one-shot schedules are automatically disabled.
-
-### Recurring Plans
-
-Set `recurring: true` to re-execute on every cron tick. After each execution completes, the plan is reset to `draft` status and the next run time is calculated.
+### Weekday morning health check
 
 ```json
 {
@@ -56,94 +127,130 @@ Set `recurring: true` to re-execute on every cron tick. After each execution com
   "schedule": "30 8 * * 1-5",
   "recurring": true,
   "tasks": [
-    { "title": "Check service health", "assignTo": "monitoring-agent" }
+    {
+      "title": "Check service health",
+      "description": "Verify all endpoints respond correctly, check for error spikes in logs.",
+      "assignTo": "monitoring-agent"
+    }
   ]
 }
 ```
 
-## Cron Expression Format
-
-Polpo uses standard **5-field cron expressions**:
-
-<Frame>
-  <img src="/cron-format.svg" alt="Cron expression format: 5 fields — minute, hour, day of month, month, day of week" />
-</Frame>
-
-### Supported Syntax
-
-| Syntax | Example | Description |
-|--------|---------|-------------|
-| Number | `30` | Exact value |
-| Wildcard | `*` | Every value in the range |
-| Range | `1-5` | Values 1 through 5 |
-| Step | `*/15` | Every 15th value |
-| List | `1,3,5` | Values 1, 3, and 5 |
-| Range + Step | `0-30/10` | 0, 10, 20, 30 |
-
-### Examples
-
-| Expression | Description |
-|------------|-------------|
-| `0 2 * * *` | Every day at 02:00 |
-| `*/15 * * * *` | Every 15 minutes |
-| `0 9 * * 1-5` | Weekdays at 09:00 |
-| `0 0 1 * *` | First day of every month at midnight |
-| `30 8,12,18 * * *` | At 08:30, 12:30, and 18:30 daily |
-
-<Note>
-The cron parser does not support `@yearly`, `@monthly`, or other shorthand aliases. Use the 5-field format. Seconds fields and `L`/`W`/`#` modifiers are also not supported.
-</Note>
-
-## Schedule Entry
-
-Each registered schedule is tracked as a `ScheduleEntry`:
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `id` | `string` | Unique schedule ID (`sched-{planId}`) |
-| `planId` | `string` | Plan to execute |
-| `expression` | `string` | Cron expression or ISO timestamp |
-| `recurring` | `boolean` | Whether this schedule repeats |
-| `enabled` | `boolean` | Whether the schedule is active |
-| `lastRunAt` | `string?` | ISO timestamp of last execution |
-| `nextRunAt` | `string?` | ISO timestamp of next scheduled execution |
-| `createdAt` | `string` | ISO timestamp of creation |
-
-## Hook: Cancelling Triggers
-
-The `before:schedule:trigger` hook fires before a scheduled plan is executed. Return a cancellation to prevent execution — useful for maintenance windows or conditional scheduling.
-
-The hook receives:
+### Weekly security audit
 
 ```json
 {
-  "scheduleId": "sched-nightly-tests",
-  "planId": "nightly-tests",
-  "expression": "0 2 * * *"
+  "name": "Weekly Security Audit",
+  "schedule": "0 6 * * 1",
+  "recurring": true,
+  "tasks": [
+    {
+      "title": "Scan for vulnerabilities",
+      "description": "Run dependency audit and check for known CVEs.",
+      "assignTo": "security-agent"
+    },
+    {
+      "title": "Review audit results",
+      "description": "Analyze findings, prioritize by severity, create fix plan.",
+      "assignTo": "reviewer-agent",
+      "dependsOn": ["Scan for vulnerabilities"]
+    }
+  ]
 }
 ```
 
-If the hook cancels, the schedule entry remains active and will try again at the next cron occurrence.
+### Scheduled one-time deploy
 
-## Plan State Requirements
+```json
+{
+  "name": "Release v2.0",
+  "schedule": "2026-03-15T14:00:00Z",
+  "tasks": [
+    {
+      "title": "Build release artifacts",
+      "assignTo": "build-agent"
+    },
+    {
+      "title": "Deploy to production",
+      "assignTo": "devops-agent",
+      "dependsOn": ["Build release artifacts"]
+    }
+  ]
+}
+```
 
-The Scheduler only triggers plans in `draft` or `completed` status:
+## Combining with Workflows
 
-- **draft** — normal first execution
-- **completed** — recurring plans that finished their last run
+Scheduled plans work with [Workflows](/features/workflows). Create a workflow, instantiate it with parameters, and the resulting plan can have a schedule:
 
-Plans in `active`, `failed`, or `cancelled` status are skipped on that tick. For recurring plans on `completed` status, the plan is reset to `draft` before execution.
+```bash
+# Create a plan from the security-audit workflow
+polpo workflow run security-audit --param module=src/auth --dry-run > plan.json
 
-## Events
+# Edit plan.json to add schedule
+# "schedule": "0 6 * * 1", "recurring": true
 
-| Event | Payload | Description |
-|-------|---------|-------------|
-| `schedule:created` | `{ scheduleId, planId, nextRunAt }` | A new schedule was registered |
-| `schedule:triggered` | `{ scheduleId, planId, expression }` | A schedule fired and plan execution started |
-| `schedule:completed` | `{ scheduleId, planId }` | A scheduled plan execution finished |
+# Import the scheduled plan
+polpo plan import plan.json
+```
 
-## Initialization
+## Cancelling a Scheduled Run
 
-On startup, the Scheduler scans all plans with a `schedule` field that are in `draft` status and registers them. Plans added later (via API or TUI) are registered when saved.
+The `before:schedule:trigger` [hook](/features/hooks) fires before each scheduled execution. Return a cancellation to skip that run — useful for maintenance windows or conditional logic:
 
-The check interval defaults to 30 seconds but can be configured via `checkIntervalMs` in the Scheduler constructor options.
+```json
+{
+  "hooks": {
+    "before:schedule:trigger": {
+      "command": "node scripts/check-maintenance-window.js"
+    }
+  }
+}
+```
+
+If the hook cancels, the schedule remains active — it will try again at the next cron occurrence. The run is skipped, not deleted.
+
+## Internals
+
+The scheduler is **tick-driven** — it runs on every Polpo tick (default every 30 seconds), checks all registered schedules, and triggers plan execution when a schedule is due.
+
+### Lifecycle
+
+1. **Registration** — on startup, Polpo scans all plans with a `schedule` field in `draft` status and registers them. Plans added later are registered when saved.
+2. **Check** — on every tick, the scheduler evaluates each active schedule. If `nextRunAt` is in the past, the plan is triggered.
+3. **Trigger** — the `before:schedule:trigger` hook runs (can cancel). If not cancelled, the plan is executed.
+4. **After execution** — for recurring plans, the plan resets to `draft` and the next run time is calculated. For one-shot plans, the schedule is disabled.
+
+### Plan State Requirements
+
+The scheduler only triggers plans in `draft` or `completed` status:
+
+- **`draft`** — normal first execution
+- **`completed`** — recurring plans that finished their last run
+
+Plans in `active`, `failed`, or `cancelled` status are skipped. A recurring plan that failed will not automatically re-trigger — you need to manually reset it to `draft` or fix and re-run it.
+
+### Events
+
+| Event | When | Payload |
+|-------|------|---------|
+| `schedule:created` | A schedule is registered | `scheduleId`, `planId`, `nextRunAt` |
+| `schedule:triggered` | A scheduled plan starts executing | `scheduleId`, `planId`, `expression` |
+| `schedule:completed` | A scheduled plan finishes | `scheduleId`, `planId` |
+
+See [Events reference](/reference/events) for the full event catalog.
+
+### Schedule Entry Fields
+
+Each schedule is tracked internally as a `ScheduleEntry`:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | Unique ID (`sched-{planId}`) |
+| `planId` | string | The plan to execute |
+| `expression` | string | Cron expression or ISO timestamp |
+| `recurring` | boolean | Whether this schedule repeats |
+| `enabled` | boolean | Whether the schedule is active |
+| `lastRunAt` | string? | When it last ran |
+| `nextRunAt` | string? | When it will run next |
+| `createdAt` | string | When the schedule was created |

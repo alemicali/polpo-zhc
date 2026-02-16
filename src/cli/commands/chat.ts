@@ -3,7 +3,7 @@ import chalk from "chalk";
 import { resolve } from "node:path";
 import { Orchestrator } from "../../core/orchestrator.js";
 import { buildChatSystemPrompt } from "../../llm/prompts.js";
-import { querySDKText } from "../../llm/query.js";
+import { queryOrchestratorText } from "../../llm/query.js";
 import type { SessionStore } from "../../core/session-store.js";
 
 const SESSION_TIMEOUT_MS = 30 * 60 * 1000; // 30 min
@@ -78,8 +78,7 @@ export function registerChatCommands(program: Command): void {
         );
 
         const fullPrompt = parts.join("\n");
-        const model = orchestrator.getConfig()?.settings?.orchestratorModel;
-        const response = await querySDKText(fullPrompt, orchestrator.getWorkDir(), model);
+        const response = (await queryOrchestratorText(fullPrompt, orchestrator.getWorkDir(), orchestrator.getConfig()?.settings?.orchestratorModel)).text;
 
         if (response) {
           // Persist assistant response

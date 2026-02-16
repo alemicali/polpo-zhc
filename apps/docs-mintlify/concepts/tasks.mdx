@@ -1,11 +1,27 @@
 ---
-title: "Task Lifecycle"
-description: "States, transitions, and phases of task execution"
+title: "Tasks"
+description: "The unit of work in Polpo — what they are, how they're defined, and how Polpo moves them to done."
 ---
 
-## State Machine
+A task is a single unit of work assigned to an agent. It has a title, a description of what needs to be done, and an agent responsible for doing it. Tasks live inside plans and can depend on other tasks.
 
-Every task in Polpo moves through a well-defined set of 7 states:
+```json
+{
+  "title": "Implement auth API",
+  "agent": "backend",
+  "description": "Create JWT-based authentication endpoints.",
+  "dependsOn": ["Design schema"],
+  "expectations": {
+    "criteria": "All endpoints return correct status codes. Tests pass."
+  }
+}
+```
+
+Tasks can carry expectations (what "done" looks like), dependencies (what must finish first), and assessment criteria (how the output is scored). If you don't specify expectations, the task completes when the agent finishes without crashing.
+
+## Lifecycle
+
+Every task moves through a well-defined set of 7 states:
 
 <Frame>
   <img src="/task-lifecycle.svg" alt="Task lifecycle state machine: pending → awaiting_approval → assigned → in_progress → review → done or failed, with retry loop" />
@@ -32,7 +48,7 @@ Within the `in_progress` state, tasks move through **phases** that track the cur
 | `execution` | Initial run — agent works on the task from scratch |
 | `review` | Assessment is evaluating the agent's work |
 | `fix` | Agent is making targeted corrections based on assessment feedback |
-| `clarification` | Agent asked a question; orchestrator is generating an answer |
+| `clarification` | Agent asked a question; Polpo is generating an answer |
 
 ### Fix Phase vs Full Retry
 
@@ -82,7 +98,7 @@ When assessment fails, Polpo first tries a **fix phase** — sending the agent s
 ### Deadlock Path
 
 1. Task is `pending` but depends on a `failed` task
-2. Orchestrator detects deadlock
+2. Polpo detects deadlock
 3. LLM evaluates: can the blocked task proceed without the dependency?
 4. **Absorb**: Task proceeds with modified description
 5. **Retry**: Failed dependency is retried

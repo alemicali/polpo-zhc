@@ -1,0 +1,103 @@
+---
+title: "Fly.io"
+description: "Deploy Polpo to Fly.io with persistent volumes."
+---
+
+## Overview
+
+[Fly.io](https://fly.io) runs Docker containers on edge servers worldwide. Polpo runs as a single machine with a persistent volume.
+
+## Deploy
+
+<Steps>
+
+1. **Install the Fly CLI**
+
+   ```bash
+   curl -L https://fly.io/install.sh | sh
+   fly auth login
+   ```
+
+2. **Create `fly.toml`**
+
+   In your project directory (or an empty directory):
+
+   ```toml
+   app = "polpo"
+   primary_region = "iad"
+
+   [build]
+     image = "ghcr.io/openpolpo/openpolpo:latest"
+
+   [env]
+     NODE_ENV = "production"
+
+   [http_service]
+     internal_port = 3000
+     force_https = true
+
+   [mounts]
+     source = "polpo_data"
+     destination = "/workspace"
+   ```
+
+3. **Create the app and volume**
+
+   ```bash
+   fly apps create polpo
+   fly volumes create polpo_data --region iad --size 1
+   ```
+
+4. **Set secrets**
+
+   ```bash
+   fly secrets set ANTHROPIC_API_KEY=sk-ant-...
+   # Add other provider keys as needed
+   ```
+
+5. **Deploy**
+
+   ```bash
+   fly deploy
+   ```
+
+</Steps>
+
+## Initialize
+
+After the first deploy, SSH in and init the workspace:
+
+```bash
+fly ssh console
+node /app/dist/cli/index.js init --dir /workspace
+exit
+```
+
+Or hit the API directly:
+
+```bash
+curl https://polpo.fly.dev/api/v1/health
+```
+
+## Scaling
+
+Polpo is a single-process orchestrator. **Run one machine per app.** Agent tasks are child processes within the same machine.
+
+```bash
+fly scale count 1
+fly scale vm shared-cpu-2x  # 2 vCPU, 512 MB — adjust for workload
+```
+
+For CPU-intensive agent workloads (many concurrent agents), scale up the VM size rather than the machine count.
+
+## Notes
+
+- The persistent volume is region-specific. Pick a region close to your LLM provider endpoints.
+- Fly.io auto-stops idle machines by default. Disable this for always-on orchestration:
+  ```toml
+  [http_service]
+    auto_stop_machines = "off"
+    auto_start_machines = true
+    min_machines_running = 1
+  ```
+- Fly.io supports custom domains via `fly certs add`.

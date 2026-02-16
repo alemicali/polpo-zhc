@@ -7,13 +7,7 @@ Polpo runs AI agents as subprocesses that can execute arbitrary code. This guide
 
 ## Environment Variable Filtering (safeEnv)
 
-### The Problem
-
-By default, child processes inherit the full `process.env` of their parent. This means every agent subprocess — including bash tool commands and MCP stdio servers — would have access to all API keys, tokens, and secrets in the environment.
-
-An agent could trivially read secrets via `env`, `echo $SECRET`, or any other shell command.
-
-### The Solution
+By default, child processes inherit the full `process.env` of their parent — every agent subprocess would have access to all API keys, tokens, and secrets in the environment.
 
 Polpo uses `safeEnv()` to create a **filtered copy** of `process.env` containing only system-essential variables. API keys and secrets are never passed to agent processes.
 
@@ -61,13 +55,7 @@ const mcpEnv = mcpSafeEnv({ SOME_CONFIG: "value" });
 
 ## JSON Condition DSL
 
-### Why Not eval()?
-
-Notification rules support conditions that filter which events trigger notifications. A naive approach would be `eval()` or `new Function()` to evaluate user-provided expressions — this would be a code injection vulnerability.
-
-### The Structured Approach
-
-Instead, Polpo uses a pure-data JSON condition format (`NotificationCondition`) that is evaluated without any string parsing or code execution:
+Notification rules support conditions that filter which events trigger notifications. Instead of `eval()` or `new Function()`, Polpo uses a pure-data JSON condition format (`NotificationCondition`) evaluated without any string parsing or code execution:
 
 ```json
 {

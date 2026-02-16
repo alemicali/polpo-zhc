@@ -1,0 +1,155 @@
+---
+title: "Installation"
+sidebarTitle: "Installation"
+description: "Install Polpo via npm, Docker, or from source."
+---
+
+## System requirements
+
+- **Node.js 18+** (22 recommended)
+- macOS, Linux, or Windows (WSL2 recommended)
+
+<Note>
+  API keys are **optional**. The default model is free and requires no key.
+</Note>
+
+<Tabs>
+  <Tab title="npm / pnpm">
+    ```bash
+    npm install -g openpolpo
+    ```
+
+    Or with pnpm:
+
+    ```bash
+    pnpm add -g openpolpo
+    ```
+
+    Then:
+
+    ```bash
+    polpo init
+    polpo
+    ```
+
+    `polpo init` creates the `.polpo/` directory with a default config and team. `polpo` launches the TUI where you can start chatting with Polpo.
+  </Tab>
+  <Tab title="Docker">
+    ```bash
+    docker run -d \
+      --name polpo \
+      -p 3000:3000 \
+      -v $(pwd):/workspace \
+      -e ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY \
+      ghcr.io/openpolpo/openpolpo:latest
+    ```
+
+    Polpo starts in server mode on port 3000. Your current directory is mounted as the workspace.
+
+    ### Docker Compose
+
+    ```yaml
+    services:
+      polpo:
+        image: ghcr.io/openpolpo/openpolpo:latest
+        ports:
+          - "3000:3000"
+        volumes:
+          - ./workspace:/workspace
+        environment:
+          - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+          - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+        restart: unless-stopped
+    ```
+
+    ```bash
+    docker compose up -d
+    ```
+
+    ### Volumes & ports
+
+    | Mount | Purpose |
+    |---|---|
+    | `/workspace` | Project directory. Must be persistent — contains all state, plans, and agent files. |
+
+    | Port | Description |
+    |---|---|
+    | `3000` | REST API, SSE streaming, WebSocket |
+
+    ### Health check
+
+    ```bash
+    curl http://localhost:3000/api/v1/health
+    ```
+
+    <Warning>
+      The `/workspace` volume contains all state. Use a named volume or bind mount to avoid data loss.
+    </Warning>
+  </Tab>
+  <Tab title="From Source">
+    Requires `pnpm 10+`.
+
+    ```bash
+    git clone https://github.com/openpolpo/openpolpo.git
+    cd openpolpo
+    pnpm install
+    pnpm run build
+    pnpm link --global   # makes `polpo` available system-wide
+    ```
+
+    Run without linking:
+
+    ```bash
+    node dist/cli/index.js init
+    node dist/cli/index.js        # TUI
+    node dist/cli/index.js serve  # Server mode
+    ```
+
+    ### Development
+
+    ```bash
+    pnpm run dev          # watch mode
+    pnpm test             # run tests
+    ```
+
+    See [CONTRIBUTING.md](https://github.com/openpolpo/openpolpo/blob/main/CONTRIBUTING.md) for guidelines.
+  </Tab>
+</Tabs>
+
+## Verify
+
+```bash
+polpo --version
+polpo --help
+```
+
+## Configure API keys
+
+The default model works without any key. To use a paid provider:
+
+<Tabs>
+  <Tab title="Anthropic">
+    ```bash
+    export ANTHROPIC_API_KEY=sk-ant-...
+    ```
+  </Tab>
+  <Tab title="OpenAI">
+    ```bash
+    export OPENAI_API_KEY=sk-...
+    ```
+  </Tab>
+  <Tab title="Google">
+    ```bash
+    export GEMINI_API_KEY=...
+    ```
+  </Tab>
+  <Tab title="Others">
+    ```bash
+    export GROQ_API_KEY=gsk_...
+    export MISTRAL_API_KEY=...
+    export OPENROUTER_API_KEY=sk-or-...
+    ```
+  </Tab>
+</Tabs>
+
+See [Providers & Models](/models/overview) for the full list of 22+ supported providers.

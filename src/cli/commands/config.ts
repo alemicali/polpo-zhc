@@ -57,7 +57,7 @@ export function registerConfigCommands(program: Command): void {
           `  autoCorrectExpectations ${s.autoCorrectExpectations ?? chalk.dim("default")}`
         );
         console.log(
-          `  orchestratorModel       ${s.orchestratorModel ?? chalk.dim("default")}`
+          `  orchestratorModel       ${typeof s.orchestratorModel === "string" ? s.orchestratorModel : s.orchestratorModel?.primary ?? chalk.dim("default")}`
         );
 
         // Agents table

@@ -43,12 +43,12 @@ When writing TypeScript code, follow these conventions:
 | `allowedTools` | No | Tools the agent should have when this skill is active |
 
 <Tip>
-The `name` field is optional. If you omit it, Polpo uses the directory name. This means skills installed from [skills.sh](/https://skills.sh) work out of the box — they only need `name` and `description` in frontmatter.
+The `name` field is optional. If you omit it, Polpo uses the directory name. This means skills installed from [skills.sh](https://skills.sh) work out of the box — they only need `name` and `description` in frontmatter.
 </Tip>
 
 ## Installing Skills
 
-Polpo can install skills directly from GitHub repositories, compatible with the [skills.sh](/https://skills.sh) ecosystem (5,000+ skills from Vercel, Anthropic, Expo, and more).
+Polpo can install skills directly from GitHub repositories, compatible with the [skills.sh](https://skills.sh) ecosystem (5,000+ skills from Vercel, Anthropic, Expo, and more).
 
 <Tabs>
   <Tab title="CLI">
@@ -203,7 +203,7 @@ Skills are a great way to keep agent instructions DRY. Instead of copy-pasting t
 
 ## skills.sh Compatibility
 
-Polpo is compatible with the [skills.sh](/https://skills.sh) ecosystem. `polpo skills add` clones a GitHub repository, discovers all `SKILL.md` files in standard locations (`skills/`, `.agents/skills/`, `.claude/skills/`, and any subdirectory), and copies them into Polpo's `.polpo/skills/` pool.
+Polpo is compatible with the [skills.sh](https://skills.sh) ecosystem. `polpo skills add` clones a GitHub repository, discovers all `SKILL.md` files in standard locations (`skills/`, `.agents/skills/`, `.claude/skills/`, and any subdirectory), and copies them into Polpo's `.polpo/skills/` pool.
 
 The key difference from other agents: skills.sh agents are single-agent tools (Claude Code, Cursor, Codex), so every installed skill is always active. Polpo adds **per-agent assignment** — you install skills into the shared pool, then assign them to the agents that need them.
 

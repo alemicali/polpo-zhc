@@ -1,0 +1,144 @@
+---
+title: "GitHub Copilot"
+sidebarTitle: "GitHub Copilot"
+description: "Use your GitHub Copilot subscription as a model provider."
+---
+
+GitHub Copilot can be used as an LLM provider in Polpo, letting you leverage your existing Copilot subscription. OAuth is the recommended setup — it's the simplest flow of all providers (no browser redirect needed).
+
+## Setup
+
+### API Key (Manual)
+
+Set the token directly:
+
+```bash
+export COPILOT_GITHUB_TOKEN=ghu_...
+```
+
+```json
+{
+  "providers": {
+    "github-copilot": "${COPILOT_GITHUB_TOKEN}"
+  }
+}
+```
+
+### Use it
+
+```json
+{
+  "agents": [
+    { "name": "coder", "model": "github-copilot:copilot-model" }
+  ]
+}
+```
+
+## Features
+
+| Feature | Supported |
+|---------|-----------|
+| Streaming | Yes |
+| Tool use | Yes |
+| OAuth (device code) | Yes |
+
+## Provider Details
+
+| | |
+|---|---|
+| **Provider ID** | `github-copilot` |
+| **Env variable** | `COPILOT_GITHUB_TOKEN` |
+| **API type** | Copilot API |
+
+## OAuth: Use Your Copilot Subscription
+
+The easiest way to get started — uses your existing GitHub Copilot subscription with no browser redirect or localhost server needed.
+
+### Supported Subscriptions
+
+| Plan | Works | Notes |
+|------|:-----:|-------|
+| Copilot Enterprise | Yes | Full model access |
+| Copilot Business | Yes | Full model access |
+| Copilot Individual | Yes | Standard model access |
+| No subscription | No | Copilot subscription required |
+
+### Login
+
+```bash
+polpo auth login github-copilot
+```
+
+GitHub Copilot uses a **Device Code** flow — the simplest of all OAuth providers:
+
+1. Polpo shows a device code and a URL
+2. Go to the URL in your browser and enter the code
+3. Polpo polls GitHub for authorization automatically — no callback server, no redirect
+
+```
+Logging in to GitHub Copilot...
+
+Go to https://github.com/login/device
+Enter code: ABCD-1234
+
+Waiting for authorization...
+
+Login successful!
+Profile saved as: github-copilot:default
+Stored in ~/.polpo/auth-profiles.json
+```
+
+<Tip>
+This is the only OAuth flow that works entirely in the terminal — no browser redirect, no localhost port, no manual URL paste. Just enter a code on GitHub and you're done.
+</Tip>
+
+### Token Refresh
+
+OAuth tokens expire. Polpo handles this automatically:
+
+- Before each API call, Polpo checks if the token is expired
+- If expired and a refresh token exists, it refreshes silently
+- If no refresh token is available, the profile is skipped and Polpo falls back to other credentials
+
+### Multiple Accounts & Profile Rotation
+
+You can log in with multiple GitHub accounts (e.g., personal + org):
+
+```
+github-copilot:default
+github-copilot:work-org
+```
+
+Polpo rotates between them: oldest `lastUsed` first, skipping profiles in cooldown or billing disable.
+
+### Billing Disable
+
+If your Copilot subscription quota is exceeded, the profile enters **billing disable** — a longer backoff (5h → 10h → 20h → 24h cap) than regular rate-limit cooldown. Other Copilot profiles or the `COPILOT_GITHUB_TOKEN` env var continue working normally.
+
+### Session Pinning
+
+Pin a specific Copilot profile for the session:
+
+```
+/model github-copilot/copilot-model@github-copilot:work-org
+```
+
+Reset with `/model reset`.
+
+### Resolution Order
+
+```
+1. polpo.json providers.github-copilot.apiKey   (config wins)
+2. COPILOT_GITHUB_TOKEN environment variable     (env var)
+3. Stored github-copilot OAuth profiles          (auto-refresh)
+```
+
+<Info>
+For the full authentication system — all OAuth providers, CLI commands, profile rotation algorithm, and security details — see the [Authentication guide](/models/authentication).
+</Info>
+
+## Notes
+
+- Available models depend on your Copilot subscription tier.
+- Copilot Enterprise typically offers access to more models than Individual.
+- The device code flow works well in SSH sessions and remote environments where opening a browser redirect is impractical.

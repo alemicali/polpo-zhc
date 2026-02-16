@@ -41,7 +41,7 @@ import {
   sleep,
 } from "./assessment-prompts.js";
 import type { AssessFn } from "./orchestrator-context.js";
-import { setProviderOverrides, validateProviderKeys } from "../llm/pi-client.js";
+import { setProviderOverrides, validateProviderKeys, setModelAllowlist } from "../llm/pi-client.js";
 import { startNotificationServer } from "./notification.js";
 import { HookRegistry } from "./hooks.js";
 import { ApprovalManager } from "./approval-manager.js";
@@ -151,6 +151,11 @@ export class Orchestrator extends TypedEmitter {
       setProviderOverrides(this.config.providers);
     }
 
+    // Apply model allowlist from settings
+    if (this.config.settings.modelAllowlist) {
+      setModelAllowlist(this.config.settings.modelAllowlist);
+    }
+
     // Validate API keys for all configured models
     this.validateProviders();
 
@@ -171,7 +176,13 @@ export class Orchestrator extends TypedEmitter {
     if (process.env.POLPO_MODEL) modelSpecs.push(process.env.POLPO_MODEL);
     // Orchestrator model
     if (this.config.settings.orchestratorModel) {
-      modelSpecs.push(this.config.settings.orchestratorModel);
+      const om = this.config.settings.orchestratorModel;
+      if (typeof om === "string") {
+        modelSpecs.push(om);
+      } else {
+        if (om.primary) modelSpecs.push(om.primary);
+        if (om.fallbacks) modelSpecs.push(...om.fallbacks);
+      }
     }
     // Judge model
     if (process.env.POLPO_JUDGE_MODEL) modelSpecs.push(process.env.POLPO_JUDGE_MODEL);
@@ -301,9 +312,10 @@ export class Orchestrator extends TypedEmitter {
 
     // Initialize quality controller (always available — zero-cost when unused)
     this.qualityController = new QualityController(ctx);
-    // Wire notification router so per-gate notifyChannels work
+    // Wire notification router so per-gate and per-checkpoint notifyChannels work
     if (this.notificationRouter) {
       this.qualityController.setNotificationRouter(this.notificationRouter);
+      this.planExec.setNotificationRouter(this.notificationRouter);
     }
     this.qualityController.init();
     this.planExec.setQualityController(this.qualityController);
@@ -349,9 +361,12 @@ export class Orchestrator extends TypedEmitter {
       providers: polpoConfig?.providers,
     };
 
-    // Apply provider overrides
+    // Apply provider overrides and allowlist
     if (this.config.providers) {
       setProviderOverrides(this.config.providers);
+    }
+    if (this.config.settings.modelAllowlist) {
+      setModelAllowlist(this.config.settings.modelAllowlist);
     }
 
     this.initManagers();
@@ -517,6 +532,23 @@ export class Orchestrator extends TypedEmitter {
   resumePlan(planId: string, opts?: { retryFailed?: boolean }): { retried: number; pending: number } { return this.planExec.resumePlan(planId, opts); }
   executePlan(planId: string): { tasks: Task[]; group: string } { return this.planExec.executePlan(planId); }
 
+  // ─── Checkpoints ────────────────────────────────────
+
+  /** Get all active (unresumed) checkpoints across all plan groups. */
+  getActiveCheckpoints() { return this.planExec.getActiveCheckpoints(); }
+
+  /** Resume a checkpoint by plan group name and checkpoint name. Returns true if resumed. */
+  resumeCheckpoint(group: string, checkpointName: string): boolean {
+    return this.planExec.resumeCheckpoint(group, checkpointName);
+  }
+
+  /** Resume a checkpoint by plan ID and checkpoint name. Returns true if resumed. */
+  resumeCheckpointByPlanId(planId: string, checkpointName: string): boolean {
+    const plan = this.planExec.getPlan(planId);
+    if (!plan) return false;
+    return this.planExec.resumeCheckpoint(plan.name, checkpointName);
+  }
+
   /** Stop the supervisor loop (non-graceful — use gracefulStop for clean shutdown) */
   stop(): void {
     this.stopped = true;
@@ -639,6 +671,9 @@ export class Orchestrator extends TypedEmitter {
       this.config.providers = polpoConfig.providers;
       setProviderOverrides(polpoConfig.providers);
     }
+    if (newSettings.modelAllowlist) {
+      setModelAllowlist(newSettings.modelAllowlist);
+    }
 
     // 3. Rebuild the OrchestratorContext so new subsystems get fresh references
     const ctx: OrchestratorContext = {
@@ -724,6 +759,7 @@ export class Orchestrator extends TypedEmitter {
     this.qualityController = new QualityController(ctx);
     if (this.notificationRouter) {
       this.qualityController.setNotificationRouter(this.notificationRouter);
+      this.planExec.setNotificationRouter(this.notificationRouter);
     }
     this.qualityController.init();
     this.planExec.setQualityController(this.qualityController);
@@ -875,11 +911,11 @@ export class Orchestrator extends TypedEmitter {
     // 2c. Scheduler checks (trigger due plans)
     this.scheduler?.check();
 
-    // 3. Spawn agents for ready tasks (skip tasks from cancelled/completed plans)
+    // 3. Spawn agents for ready tasks (skip tasks from cancelled/completed/paused plans)
     const ready = pending.filter(task => {
       if (task.group) {
         const plan = this.registry.getPlanByName?.(task.group);
-        if (plan && (plan.status === "cancelled" || plan.status === "completed")) return false;
+        if (plan && (plan.status === "cancelled" || plan.status === "completed" || plan.status === "paused")) return false;
 
         // Check quality gates — task may be blocked by a gate even if deps are done
         if (this.qualityController) {
@@ -895,6 +931,18 @@ export class Orchestrator extends TypedEmitter {
             if (blocking) return false; // Blocked by quality gate
           }
         }
+
+        // Check checkpoints — task may be blocked by a checkpoint awaiting human resume
+        const checkpoints = this.planExec.getCheckpoints(task.group);
+        if (checkpoints.length > 0) {
+          const blockingCp = this.planExec.getBlockingCheckpoint(
+            task.group,
+            task.title,
+            task.id,
+            tasks,
+          );
+          if (blockingCp) return false; // Blocked by checkpoint
+        }
       }
       return task.dependsOn.every(depId => {
         const dep = tasks.find(t => t.id === depId);
@@ -903,8 +951,9 @@ export class Orchestrator extends TypedEmitter {
     });
 
     // Check for deadlock: no tasks ready, none running, but some pending
-    // Don't consider it a deadlock if tasks are awaiting approval
-    if (ready.length === 0 && inProgress.length === 0 && pending.length > 0 && awaitingApproval.length === 0) {
+    // Don't consider it a deadlock if tasks are awaiting approval or blocked by checkpoints
+    const hasActiveCheckpoints = this.planExec.getActiveCheckpoints().length > 0;
+    if (ready.length === 0 && inProgress.length === 0 && pending.length > 0 && awaitingApproval.length === 0 && !hasActiveCheckpoints) {
       // Async resolution already in progress — wait for next tick
       if (isResolving()) return false;
 

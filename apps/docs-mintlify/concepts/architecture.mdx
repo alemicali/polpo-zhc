@@ -1,17 +1,17 @@
 ---
 title: "Architecture"
-description: "How Polpo orchestrates agents under the hood"
+description: "How Polpo manages agents under the hood"
 ---
 
 ## Overview
 
-Polpo follows a **supervisor architecture**: a central orchestrator manages agent lifecycles, task assignment, assessment, and error recovery. Agents are isolated processes that know nothing about each other — Polpo handles all coordination.
+Polpo follows a **supervisor architecture**: it manages agent lifecycles, task assignment, assessment, and error recovery. Agents are isolated processes that know nothing about each other — Polpo handles all coordination.
 
-The system is composed of four layers:
+Under the hood, Polpo is composed of four layers:
 
-1. **Interface layer** — CLI, TUI, Web UI, and REST API provide different ways to interact with the orchestrator
-2. **Orchestrator core** — the supervisor loop, task registry, plan executor, and all the managers (assessment, approvals, escalation, scheduling, etc.)
-3. **Runner layer** — detached subprocesses that host individual agents, communicating with the orchestrator via the file-based RunStore
+1. **Interface layer** — CLI, TUI, Web UI, and REST API provide different ways to talk to Polpo
+2. **Core** — the supervisor loop, task registry, plan executor, and all the managers (assessment, approvals, escalation, scheduling, etc.)
+3. **Runner layer** — detached subprocesses that host individual agents, communicating with Polpo via the file-based RunStore
 4. **Agent layer** — the actual AI agents (Claude, GPT, Gemini, etc.) running on the built-in engine
 
 <Frame>
@@ -39,7 +39,7 @@ interface AgentHandle {
 
 ## Supervisor Loop
 
-The orchestrator runs a **5-second tick loop** that:
+Polpo runs a **5-second tick loop** that:
 
 1. **Collects results** from terminated runners (via RunStore)
 2. **Assesses** completed tasks using the configured expectations
@@ -54,16 +54,16 @@ The orchestrator runs a **5-second tick loop** that:
 
 ## Detached Runners
 
-Each agent runs as a **detached subprocess** (`runner.ts`), completely independent of the orchestrator process:
+Each agent runs as a **detached subprocess** (`runner.ts`), completely independent of Polpo's main process:
 
 <Frame>
   <img src="/detached-runners.svg" alt="Detached runner communication flow: orchestrator writes config, spawns runner, runner initializes agent, writes results to RunStore" />
 </Frame>
 
 This architecture means:
-- **Crash resilience**: If the orchestrator crashes, runners keep working
+- **Crash resilience**: If Polpo crashes, runners keep working
 - **Process isolation**: One agent crashing doesn't affect others
-- **Orphan recovery**: On restart, the orchestrator reconnects to live runners
+- **Orphan recovery**: On restart, Polpo reconnects to live runners
 
 ## Event System
 
@@ -78,7 +78,6 @@ Polpo uses a **typed event emitter** with 55+ event types organized by category:
 | `deadlock:*` | detected, resolving, resolved, unresolvable | Deadlock resolution |
 | `plan:*` | saved, executed, completed, resumed, deleted | Plan lifecycle |
 | `session:*` | created, message:added | Chat sessions |
-| `bridge:*` | session:discovered, session:activity, session:completed | External sessions |
 | `approval:*` | requested, resolved, timeout | Approval gates |
 | `sla:*` | warning, violated, met | SLA monitoring |
 | `quality:*` | gate:passed, gate:failed, threshold:failed | Quality gates |
@@ -103,5 +102,5 @@ Events are consumed by the TUI, HTTP/SSE server, and WebSocket bridge. See [Even
 File-based stores are the default. SQLite and JSON are available as alternatives via configuration.
 
 <Note>
-File-based stores use atomic write operations to handle concurrent access from the orchestrator and multiple runner processes.
+File-based stores use atomic write operations to handle concurrent access from Polpo and multiple runner processes.
 </Note>

@@ -1,5 +1,5 @@
-export { querySDK, querySDKText } from "./query.js";
-export type { OnProgress } from "./query.js";
+export { querySDK, querySDKText, querySDKTextDetailed, querySDKStream, querySDKStreamDetailed, querySDKWithFallback, queryOrchestratorText } from "./query.js";
+export type { OnProgress, QueryResult } from "./query.js";
 export { withRetry, isTransientError } from "./retry.js";
 export type { RetryOptions } from "./retry.js";
 export { buildChatSystemPrompt, buildPlanSystemPrompt, buildTaskPrepPrompt, buildTeamGenPrompt } from "./prompts.js";
@@ -8,3 +8,20 @@ export {
   installSkills, removeSkill, parseSkillSource, listSkillsWithAssignments,
 } from "./skills.js";
 export type { SkillInfo, LoadedSkill, ParsedSource, FoundSkill, InstallResult, SkillWithAssignment } from "./skills.js";
+export {
+  // Model resolution
+  parseModelSpec, resolveModel, resolveModelSpec, resolveModelWithFallback, resolveModelWithFallbackAsync, resolveApiKey, resolveApiKeyAsync,
+  // Catalog
+  listProviders, listModels, getModelInfo, buildModelListingForPrompt,
+  // Cost tracking
+  estimateCost,
+  // Provider management
+  setProviderOverrides, getProviderOverrides, validateProviderKeys, validateProviderKeysDetailed,
+  // Cooldown
+  isProviderInCooldown, markProviderCooldown, clearProviderCooldown, getProviderCooldowns,
+  // Error classification
+  classifyProviderError,
+  // Model allowlist
+  setModelAllowlist, getModelAllowlist, isModelAllowed, enforceModelAllowlist,
+} from "./pi-client.js";
+export type { ParsedModelSpec, ModelInfo, CostEstimate, ProviderValidationResult } from "./pi-client.js";

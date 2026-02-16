@@ -8,6 +8,7 @@ import type { Orchestrator } from "../../core/orchestrator.js";
 import type { TUIStore } from "../store.js";
 import { seg, kickRun } from "../format.js";
 import { buildPlanSystemPrompt } from "../../llm/prompts.js";
+import { resolveModelSpec } from "../../llm/pi-client.js";
 import {
   generatePlanInteractive,
   continuePlanWithAnswers,
@@ -51,7 +52,7 @@ export async function createPlan(
 
     const systemPrompt = buildPlanSystemPrompt(polpo, state, polpo.getWorkDir());
     const userPrompt = `Generate a task plan for:\n"${prompt}"`;
-    const model = polpo.getConfig()?.settings?.orchestratorModel;
+    const model = resolveModelSpec(polpo.getConfig()?.settings?.orchestratorModel);
 
     const result = await generatePlanInteractive(
       systemPrompt,
@@ -272,7 +273,7 @@ async function refinePlan(
     })();
 
     const systemPrompt = buildPlanSystemPrompt(polpo, state, polpo.getWorkDir());
-    const model = polpo.getConfig()?.settings?.orchestratorModel;
+    const model = resolveModelSpec(polpo.getConfig()?.settings?.orchestratorModel);
 
     const planData = await refinePlanStructured(
       systemPrompt,
