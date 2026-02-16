@@ -6,7 +6,6 @@ import { Command } from "commander";
 import chalk from "chalk";
 import { resolve } from "node:path";
 import { Orchestrator } from "../../core/orchestrator.js";
-import "../../adapters/claude-sdk.js";
 
 async function initOrchestrator(configPath: string): Promise<Orchestrator> {
   const o = new Orchestrator(resolve(configPath));

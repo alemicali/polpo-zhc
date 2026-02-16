@@ -12,19 +12,9 @@ Gates are registered as **lifecycle hooks**. When a hook fires (e.g. `before:tas
 - **Auto gates** — check a condition expression. If the condition matches, the operation is blocked.
 - **Human gates** — pause the operation, transition the task to `awaiting_approval`, and wait for external resolution.
 
-```
-Task Lifecycle
-     │
-     ▼
- before:task:assign hook fires
-     │
-     ├── Auto gate: condition matches? → Block
-     │                                  → Pass (no match)
-     │
-     └── Human gate: condition matches? → Task → awaiting_approval
-                                        → Emit approval:requested
-                                        → Wait for approve/reject/timeout
-```
+<Frame>
+  <img src="/approval-gates.svg" alt="Approval gate evaluation flow: auto gate blocks or passes, human gate transitions to awaiting_approval" />
+</Frame>
 
 ## The `awaiting_approval` State
 

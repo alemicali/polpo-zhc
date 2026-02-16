@@ -1,0 +1,70 @@
+---
+title: "Email Tools"
+sidebarTitle: "Email"
+description: "2 tools to send and verify SMTP email"
+---
+
+Send emails and verify SMTP connectivity. Enable with `enableEmail: true` in agent config.
+
+<Note>
+Uses **nodemailer** for SMTP transport. Requires the following environment variables (or per-call parameter overrides): `SMTP_HOST`, `SMTP_PORT` (default `587`), `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`.
+</Note>
+
+---
+
+## `email_send` — Send Email
+
+Send an email via SMTP.
+
+### Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `to` | string \| string[] | yes | Recipient email address(es) |
+| `subject` | string | yes | Email subject line |
+| `body` | string | yes | Email body content |
+| `html` | boolean | no | Send as HTML email (auto-detected if omitted) |
+| `cc` | string \| string[] | no | CC recipient(s) |
+| `bcc` | string \| string[] | no | BCC recipient(s) |
+| `from` | string | no | Sender address (overrides `SMTP_FROM` env var) |
+| `reply_to` | string | no | Reply-to address |
+| `attachments` | array of `{path, filename?}` | no | File attachments. `path` is required, `filename` is optional |
+| `smtp_host` | string | no | SMTP host (overrides `SMTP_HOST` env var) |
+| `smtp_port` | number | no | SMTP port (overrides `SMTP_PORT` env var) |
+| `smtp_user` | string | no | SMTP username (overrides `SMTP_USER` env var) |
+| `smtp_pass` | string | no | SMTP password (overrides `SMTP_PASS` env var) |
+| `smtp_secure` | boolean | no | Use TLS (overrides auto-detection) |
+
+### Returns
+
+Confirmation with the message ID and accepted recipients.
+
+### Notes
+
+- Port **465** uses implicit TLS; all other ports use STARTTLS
+- When `html` is omitted, the body is auto-detected — if it contains HTML tags, it's sent as HTML
+- Attachments reference local file paths; the file content is read and attached at send time
+
+---
+
+## `email_verify` — Verify SMTP Connection
+
+Test that the SMTP connection and credentials are valid without sending an email.
+
+### Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `smtp_host` | string | no | SMTP host (overrides `SMTP_HOST` env var) |
+| `smtp_port` | number | no | SMTP port (overrides `SMTP_PORT` env var) |
+| `smtp_user` | string | no | SMTP username (overrides `SMTP_USER` env var) |
+| `smtp_pass` | string | no | SMTP password (overrides `SMTP_PASS` env var) |
+
+### Returns
+
+Success or failure message indicating whether the SMTP connection was established and authenticated.
+
+### Notes
+
+- Useful for validating credentials before attempting to send
+- Uses the same transport configuration as `email_send`

@@ -16,9 +16,9 @@ A **plan** is a group of related tasks that Polpo executes together. Plans are s
 
 ## Plan Lifecycle
 
-```
-draft → active → completed/failed/cancelled
-```
+<Frame>
+  <img src="/plan-lifecycle.svg" alt="Plan lifecycle: draft → active → completed / failed / cancelled" />
+</Frame>
 
 | Status | Description |
 |--------|-------------|
@@ -42,7 +42,6 @@ Plans are created via the TUI/CLI/API. Here's an example of the JSON structure:
       "team": [
         {
           "name": "auth-dev",
-          "adapter": "claude-sdk",
           "description": "Authentication specialist",
           "volatile": true
         }
@@ -121,7 +120,6 @@ The `team` section lets you define agents that exist only for this plan:
       "team": [
         {
           "name": "migration-expert",
-          "adapter": "claude-sdk",
           "description": "Database migration specialist",
           "volatile": true
         }

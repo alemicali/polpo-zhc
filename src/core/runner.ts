@@ -6,7 +6,7 @@
  * Lifecycle:
  *   1. Read --config <path> from args
  *   2. Open own SqliteRunStore connection
- *   3. Import adapters & spawn agent via adapter
+ *   3. Spawn agent via built-in engine
  *   4. Poll activity, write to RunStore
  *   5. Await handle.done, write result
  *   6. Cleanup & exit
@@ -15,13 +15,9 @@
 import { readFileSync, unlinkSync, appendFileSync, mkdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { FileRunStore } from "../stores/file-run-store.js";
-import { getAdapter } from "../adapters/registry.js";
 import { spawnEngine } from "../adapters/engine.js";
 import type { RunStore, RunRecord } from "./run-store.js";
 import type { RunnerConfig, TaskResult } from "./types.js";
-
-// Side-effect import: register external adapters (claude-sdk)
-import "../adapters/claude-sdk.js";
 import { notifyRunComplete } from "./notification.js";
 
 const ACTIVITY_POLL_MS = 1500;
@@ -68,7 +64,7 @@ class RunActivityLog {
     this.write({ ts: new Date().toISOString(), event: "activity", data: activity });
   }
 
-  /** Log a transcript entry from the adapter (assistant text, tool_use, tool_result, etc.) */
+  /** Log a transcript entry from the engine (assistant text, tool_use, tool_result, etc.) */
   logTranscript(entry: Record<string, unknown>): void {
     this.write({ ts: new Date().toISOString(), ...entry });
   }
@@ -103,7 +99,6 @@ async function main(): Promise<void> {
     taskId: config.taskId,
     pid: process.pid,
     agentName: config.agent.name,
-    adapterType: config.agent.adapter,
     status: "running",
     startedAt: now,
     updatedAt: now,
@@ -111,19 +106,12 @@ async function main(): Promise<void> {
     configPath: join(process.argv[process.argv.indexOf("--config") + 1]),
   };
   runStore.upsertRun(initialRecord);
-  actLog.logEvent("spawning", { adapter: config.agent.adapter, task: config.task.title });
+  actLog.logEvent("spawning", { task: config.task.title });
 
   let handle;
   try {
     const spawnCtx = { polpoDir: config.polpoDir };
-    if (config.agent.adapter) {
-      // External adapter (e.g. claude-sdk) — use the registry
-      const adapter = getAdapter(config.agent.adapter);
-      handle = adapter.spawn(config.agent, config.task, config.cwd, spawnCtx);
-    } else {
-      // No adapter specified — use Polpo's built-in engine
-      handle = spawnEngine(config.agent, config.task, config.cwd, spawnCtx);
-    }
+    handle = spawnEngine(config.agent, config.task, config.cwd, spawnCtx);
     // Wire transcript persistence — every agent message gets written to the run log
     handle.onTranscript = (entry) => actLog.logTranscript(entry);
     actLog.logEvent("spawned");
@@ -165,11 +153,11 @@ async function main(): Promise<void> {
     // Store auto-collected outcomes on the run record
     if (handle.outcomes && handle.outcomes.length > 0) {
       try { runStore.updateOutcomes(config.runId, handle.outcomes); } catch { /* best effort */ }
-      actLog.logEvent("outcomes", { count: handle.outcomes.length, types: handle.outcomes.map(o => o.type) });
+      actLog.logEvent("outcomes", { count: handle.outcomes.length, types: handle.outcomes.map((o: any) => o.type) });
     }
 
     // If we received SIGTERM (timeout/shutdown), force exitCode=1 regardless of
-    // what the adapter returned — an aborted task is not a successful task.
+    // what the engine returned — an aborted task is not a successful task.
     if (sigterm) {
       result.exitCode = 1;
       result.stderr = (result.stderr ? result.stderr + "\n" : "") + "Killed by SIGTERM (timeout or shutdown)";

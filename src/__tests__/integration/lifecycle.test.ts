@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { Orchestrator } from "../../core/orchestrator.js";
-import { registerAdapter } from "../../adapters/registry.js";
-import { InMemoryTaskStore, InMemoryRunStore, MockAdapter, createTestAgent } from "../fixtures.js";
+import { InMemoryTaskStore, InMemoryRunStore, createTestAgent } from "../fixtures.js";
 import type { TaskResult } from "../../core/types.js";
 
 // Mock child_process.spawn and writeFileSync since spawnForTask spawns a real subprocess
@@ -42,14 +41,11 @@ function simulateRunnerResult(
 describe("integration: lifecycle", () => {
   let store: InMemoryTaskStore;
   let runStore: InMemoryRunStore;
-  let mockAdapter: MockAdapter;
   let orchestrator: Orchestrator;
 
   beforeEach(async () => {
     store = new InMemoryTaskStore();
     runStore = new InMemoryRunStore();
-    mockAdapter = new MockAdapter();
-    registerAdapter("mock", () => mockAdapter);
 
     orchestrator = new Orchestrator({
       workDir: "/tmp/orchestra-integration-test",
@@ -66,7 +62,7 @@ describe("integration: lifecycle", () => {
     await orchestrator.initInteractive("integration-test", {
       name: "test-team",
       agents: [
-        createTestAgent({ name: "worker", adapter: "mock" }),
+        createTestAgent({ name: "worker" }),
       ],
     });
   });

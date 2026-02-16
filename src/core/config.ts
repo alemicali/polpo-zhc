@@ -30,9 +30,6 @@ export function validateAgents(agents: any[]): void {
     if (!agent.name || typeof agent.name !== "string") {
       throw new Error("Each agent must have a name");
     }
-    if (agent.adapter !== undefined && typeof agent.adapter !== "string") {
-      throw new Error(`Agent "${agent.name}": adapter must be a string`);
-    }
     // Validate allowedPaths
     if (agent.allowedPaths !== undefined) {
       if (!Array.isArray(agent.allowedPaths)) {

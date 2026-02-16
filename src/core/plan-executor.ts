@@ -23,7 +23,6 @@ interface PlanDocument {
   }>;
   team?: Array<{
     name: string;
-    adapter?: string;
     role?: string;
     model?: string;
     systemPrompt?: string;

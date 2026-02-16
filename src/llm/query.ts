@@ -1,8 +1,7 @@
 /**
  * LLM integration: query wrappers and structured extraction.
  *
- * Primary backend: pi-ai (multi-provider, works with any LLM).
- * Fallback: Claude Agent SDK for tool-using queries (queryWithTools).
+ * Backend: pi-ai (multi-provider, works with any LLM).
  */
 
 import { withRetry } from "./retry.js";
@@ -22,9 +21,8 @@ export async function querySDKText(prompt: string, _cwd: string, model?: string)
 }
 
 /**
- * Query with tool access via Claude Agent SDK.
- * Used for operations that need Claude Code built-in tools (Skill, Bash, etc.)
- * Falls back to text-only query if Claude SDK is not available.
+ * Query with tool access.
+ * Currently falls back to text-only query via pi-ai.
  */
 export async function querySDK(
   prompt: string,
@@ -33,74 +31,9 @@ export async function querySDK(
   onProgress?: OnProgress,
   model?: string,
 ): Promise<string> {
-  // If no tools needed, use pi-ai directly
-  if (!allowedTools || allowedTools.length === 0) {
-    return querySDKText(prompt, cwd, model);
-  }
-
-  // Try Claude SDK for tool-using queries
-  return withRetry(async () => {
-    let query: any;
-    try {
-      const sdk = await import("@anthropic-ai/claude-agent-sdk");
-      query = sdk.query;
-    } catch {
-      // Claude SDK not available — fall back to pi-ai text-only
-      return queryText(prompt, model);
-    }
-
-    let resultText = "";
-    const q = query({
-      prompt,
-      options: {
-        cwd,
-        permissionMode: "bypassPermissions" as any,
-        allowDangerouslySkipPermissions: true,
-        persistSession: false,
-        allowedTools,
-        model,
-      },
-    });
-
-    for await (const message of q) {
-      if (message.type === "assistant" && "message" in message) {
-        const assistantMsg = message as { type: "assistant"; message: { content: Array<{ type: string; text?: string; name?: string; input?: Record<string, unknown> }> } };
-        const content = assistantMsg.message.content;
-        if (Array.isArray(content)) {
-          for (const block of content) {
-            if (block.type === "text" && block.text) {
-              resultText = block.text;
-              if (onProgress) {
-                const firstLine = block.text.split("\n").find((l: string) => l.trim()) ?? "";
-                if (firstLine.trim()) onProgress(firstLine.trim().slice(0, 120));
-              }
-            }
-            if (block.type === "tool_use" && onProgress) {
-              const toolName = block.name ?? "tool";
-              const toolInput = block.input;
-              if (toolName === "Bash") {
-                const cmd = (toolInput?.command as string)?.slice(0, 80) ?? "";
-                onProgress(`[${toolName}] ${cmd}`);
-              } else if (toolName === "Skill") {
-                const skill = (toolInput?.skill as string) ?? "";
-                onProgress(`[Skill] ${skill}`);
-              } else {
-                onProgress(`[${toolName}]`);
-              }
-            }
-          }
-        }
-      }
-      if (message.type === "result" && "subtype" in message) {
-        const resultMsg = message as { type: "result"; subtype: string; result?: string };
-        if (resultMsg.subtype === "success" && resultMsg.result) {
-          resultText = resultMsg.result;
-        }
-      }
-    }
-
-    return resultText.trim();
-  }, { maxRetries: 2 });
+  // Tools are handled by the built-in engine at spawn time;
+  // for orchestrator-level queries, use text-only.
+  return querySDKText(prompt, cwd, model);
 }
 
 /**
@@ -117,4 +50,3 @@ export async function querySDKStream(
     return queryStream(prompt, model, onChunk);
   }, { maxRetries: 2 });
 }
-

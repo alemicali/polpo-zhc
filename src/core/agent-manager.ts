@@ -28,7 +28,7 @@ export class AgentManager {
     if (existing) throw new Error(`Agent "${agent.name}" already exists`);
     this.ctx.config.team.agents.push(agent);
     this.ctx.registry.setState({ team: this.ctx.config.team });
-    this.ctx.emitter.emit("log", { level: "info", message: `Agent added: ${agent.name} (${agent.adapter ?? "engine"})` });
+    this.ctx.emitter.emit("log", { level: "info", message: `Agent added: ${agent.name}` });
   }
 
   removeAgent(name: string): boolean {
@@ -48,7 +48,7 @@ export class AgentManager {
     const volatileAgent: AgentConfig = { ...agent, volatile: true, planGroup: group };
     this.ctx.config.team.agents.push(volatileAgent);
     this.ctx.registry.setState({ team: this.ctx.config.team });
-    this.ctx.emitter.emit("log", { level: "info", message: `Volatile agent added: ${agent.name} (${agent.adapter ?? "engine"}) for ${group}` });
+    this.ctx.emitter.emit("log", { level: "info", message: `Volatile agent added: ${agent.name} for ${group}` });
   }
 
   cleanupVolatileAgents(group: string): number {

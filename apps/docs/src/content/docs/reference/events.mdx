@@ -39,7 +39,7 @@ Events tracking agent process spawning, completion, and real-time activity.
 
 | Event | Description | Key Payload Fields |
 |-------|-------------|-------------------|
-| `agent:spawned` | Agent process launched for a task | `taskId`, `agentName`, `adapter?`, `taskTitle` |
+| `agent:spawned` | Agent process launched for a task | `taskId`, `agentName`, `taskTitle` |
 | `agent:finished` | Agent process exited | `taskId`, `agentName`, `exitCode`, `duration`, `sessionId?` |
 | `agent:activity` | Tool call or progress update from an agent | `taskId`, `agentName`, `tool?`, `file?`, `summary?` |
 

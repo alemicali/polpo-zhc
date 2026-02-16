@@ -4,14 +4,21 @@
  * Uses @mariozechner/pi-agent-core Agent class for the agentic loop,
  * with pi-ai for multi-provider LLM abstraction.
  * Works with any LLM provider (Anthropic, OpenAI, Google, Groq, etc.)
- *
- * This is Polpo's default execution engine. When no adapter is specified
- * on an agent, this engine is used directly (not through the adapter registry).
  */
 
-import type { AgentConfig, Task, TaskResult, TaskOutcome, OutcomeType } from "../core/types.js";
+import type { AgentConfig, AgentActivity, Task, TaskResult, TaskOutcome, OutcomeType } from "../core/types.js";
 import type { AgentHandle, SpawnContext } from "../core/adapter.js";
-import { createActivity } from "./registry.js";
+
+/** Create a fresh AgentActivity object */
+export function createActivity(): AgentActivity {
+  return {
+    filesCreated: [],
+    filesEdited: [],
+    toolCalls: 0,
+    totalTokens: 0,
+    lastUpdate: new Date().toISOString(),
+  };
+}
 import { Agent } from "@mariozechner/pi-agent-core";
 import type { AgentEvent } from "@mariozechner/pi-agent-core";
 import { resolveModel, resolveApiKey } from "../llm/pi-client.js";

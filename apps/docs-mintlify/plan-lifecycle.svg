@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 60" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="8" markerHeight="6" orient="auto-start-reverse">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#aaa"/>
+    </marker>
+  </defs>
+
+  <rect x="20" y="16" width="70" height="28" rx="14" fill="#f8f8f8" stroke="#888" stroke-width="1.2"/>
+  <text x="55" y="35" font-size="11" fill="#333" text-anchor="middle">draft</text>
+
+  <line x1="90" y1="30" x2="120" y2="30" stroke="#aaa" stroke-width="1.2" marker-end="url(#arrow)"/>
+
+  <rect x="120" y="16" width="70" height="28" rx="14" fill="#f8f8f8" stroke="#888" stroke-width="1.2"/>
+  <text x="155" y="35" font-size="11" fill="#333" text-anchor="middle">active</text>
+
+  <line x1="190" y1="30" x2="220" y2="30" stroke="#aaa" stroke-width="1.2" marker-end="url(#arrow)"/>
+
+  <!-- Terminal states -->
+  <rect x="220" y="5"  width="90" height="24" rx="12" fill="#f8f8f8" stroke="#888" stroke-width="1.2"/>
+  <text x="265" y="22" font-size="10" fill="#333" text-anchor="middle">completed</text>
+
+  <rect x="220" y="33" width="90" height="24" rx="12" fill="#f8f8f8" stroke="#bbb" stroke-width="1"/>
+  <text x="265" y="50" font-size="10" fill="#666" text-anchor="middle">failed</text>
+
+  <rect x="320" y="19" width="90" height="24" rx="12" fill="#f8f8f8" stroke="#bbb" stroke-width="1"/>
+  <text x="365" y="36" font-size="10" fill="#666" text-anchor="middle">cancelled</text>
+</svg>

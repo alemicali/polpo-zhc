@@ -4,7 +4,7 @@
  */
 
 import type { CommandAPI } from "./types.js";
-import type { AgentConfig, AdapterType } from "../../core/types.js";
+import type { AgentConfig } from "../../core/types.js";
 import { seg } from "../format.js";
 
 export function cmdTeam({ polpo, store, args }: CommandAPI) {
@@ -37,11 +37,10 @@ function teamList(polpo: import("../../core/orchestrator.js").Orchestrator, stor
     const parts = [
       seg("  "),
       seg(agent.name, "cyan", true),
-      seg(` (${agent.adapter})`, "gray"),
     ];
     if (agent.model) parts.push(seg(` ${agent.model}`, "gray", false, true));
     if (agent.role) parts.push(seg(` — ${agent.role}`, "gray", false, true));
-    store.log(`  ${agent.name} (${agent.adapter})`, parts);
+    store.log(`  ${agent.name}`, parts);
   }
 
   store.log("", [
@@ -56,58 +55,37 @@ function teamList(polpo: import("../../core/orchestrator.js").Orchestrator, stor
 }
 
 function teamAdd(polpo: import("../../core/orchestrator.js").Orchestrator, store: import("../store.js").TUIStore) {
-  // Step 1: Pick adapter type
-  const adapters: { label: string; value: string; description: string }[] = [
-    { label: "engine", value: "", description: "Polpo built-in engine (recommended)" },
-    { label: "claude-sdk", value: "claude-sdk", description: "Anthropic Claude Agent SDK" },
-  ];
-
   store.navigate({
-    id: "picker",
-    title: "Select adapter type",
-    items: adapters,
-    onSelect: (_idx, adapter) => {
-      // Step 2: Enter agent name via editor
-      store.navigate({
-        id: "editor",
-        title: "Agent name",
-        initial: "",
-        onSave: (name) => {
-          const trimmed = name.trim();
-          if (!trimmed) {
-            store.goMain();
-            store.log("Agent name cannot be empty", [seg("Agent name cannot be empty", "red")]);
-            return;
-          }
+    id: "editor",
+    title: "Agent name",
+    initial: "",
+    onSave: (name) => {
+      const trimmed = name.trim();
+      if (!trimmed) {
+        store.goMain();
+        store.log("Agent name cannot be empty", [seg("Agent name cannot be empty", "red")]);
+        return;
+      }
 
-          // Check duplicates
-          if (polpo.getAgents().find((a) => a.name === trimmed)) {
-            store.goMain();
-            store.log(`Agent "${trimmed}" already exists`, [seg(`Agent "${trimmed}" already exists`, "red")]);
-            return;
-          }
+      // Check duplicates
+      if (polpo.getAgents().find((a) => a.name === trimmed)) {
+        store.goMain();
+        store.log(`Agent "${trimmed}" already exists`, [seg(`Agent "${trimmed}" already exists`, "red")]);
+        return;
+      }
 
-          const agent: AgentConfig = {
-            name: trimmed,
-            ...(adapter ? { adapter: adapter as AdapterType } : {}),
-          };
+      const agent: AgentConfig = { name: trimmed };
 
-          polpo.addAgent(agent);
-          store.goMain();
-          store.log(`Added agent: ${trimmed}`, [
-            seg("+ ", "green"),
-            seg(trimmed, "cyan", true),
-            seg(` (${adapter || "engine"})`, "gray"),
-          ]);
-        },
-        onCancel: () => {
-          store.goMain();
-          store.log("Agent creation cancelled", [seg("Cancelled", "gray")]);
-        },
-      });
+      polpo.addAgent(agent);
+      store.goMain();
+      store.log(`Added agent: ${trimmed}`, [
+        seg("+ ", "green"),
+        seg(trimmed, "cyan", true),
+      ]);
     },
     onCancel: () => {
       store.goMain();
+      store.log("Agent creation cancelled", [seg("Cancelled", "gray")]);
     },
   });
 }
@@ -142,7 +120,7 @@ function teamRemove(
     items: agents.map((a) => ({
       label: a.name,
       value: a.name,
-      description: `${a.adapter}${a.model ? ` • ${a.model}` : ""}`,
+      description: `${a.role ?? ""}${a.model ? ` • ${a.model}` : ""}`,
     })),
     onSelect: (_idx, value) => {
       store.goMain();
@@ -223,7 +201,7 @@ function teamEdit(
     items: agents.map((a) => ({
       label: a.name,
       value: a.name,
-      description: `${a.adapter}${a.model ? ` • ${a.model}` : ""}`,
+      description: `${a.role ?? ""}${a.model ? ` • ${a.model}` : ""}`,
     })),
     onSelect: (_idx, value) => {
       const agent = agents.find((a) => a.name === value);

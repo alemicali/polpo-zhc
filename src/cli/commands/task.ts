@@ -16,9 +16,6 @@ import { resolve } from "node:path";
 import { Orchestrator } from "../../core/orchestrator.js";
 import type { Task, TaskStatus, TaskExpectation } from "../../core/types.js";
 
-// Register external adapters (side-effect imports)
-import "../../adapters/claude-sdk.js";
-
 // ── Helpers ──
 
 function findTask(tasks: Task[], idPrefix: string): Task | undefined {

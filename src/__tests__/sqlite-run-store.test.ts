@@ -24,7 +24,6 @@ function createTestRun(overrides: Partial<RunRecord> = {}): RunRecord {
     taskId: "task-1",
     pid: 12345,
     agentName: "agent-1",
-    adapterType: "mock",
     status: "running",
     startedAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),

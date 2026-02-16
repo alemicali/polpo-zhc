@@ -136,12 +136,6 @@ export interface TaskResult {
 
 // === Agent ===
 
-/**
- * Adapter type for external agent runtimes.
- * When not specified (undefined), Polpo's built-in engine (Pi Agent) is used.
- */
-export type AdapterType = "claude-sdk" | string;
-
 // === MCP Server Config ===
 
 /** Stdio-based MCP server — spawns a child process */
@@ -174,12 +168,10 @@ export type McpServerConfig =
 
 export interface AgentConfig {
   name: string;
-  /** External adapter. When omitted, Polpo's built-in engine is used. */
-  adapter?: AdapterType;
   role?: string;
   model?: string;
   allowedTools?: string[];
-  /** MCP servers to connect to. Works with both the built-in engine and claude-sdk adapter. */
+  /** MCP servers to connect to. */
   mcpServers?: Record<string, McpServerConfig>;
   /** Filesystem sandbox — directories the agent is allowed to access.
    *  When omitted, defaults to the project workDir. */
@@ -594,7 +586,6 @@ export interface UpdatePlanRequest {
 
 export interface AddAgentRequest {
   name: string;
-  adapter?: string;
   role?: string;
   model?: string;
   allowedTools?: string[];

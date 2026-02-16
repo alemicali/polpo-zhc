@@ -7,44 +7,9 @@ description: "States, transitions, and phases of task execution"
 
 Every task in Polpo moves through a well-defined set of 7 states:
 
-```
-                    ┌──────────┐
-                    │ pending  │
-                    └────┬─────┘
-                         │ approval required?
-              ┌──────────┴──────────┐
-              │ yes                 │ no
-   ┌──────────▼──────────┐         │
-   │ awaiting_approval   │         │
-   └──┬─────────────┬────┘         │
-      │ approved     │ rejected/   │
-      │              │ timeout     │
-      │         ┌────▼─────┐       │
-      │         │ failed   │       │
-      │         └──────────┘       │
-      │                            │
-      └────────────┬───────────────┘
-                   │ assigned to agent
-              ┌────▼─────┐
-              │ assigned │
-              └────┬─────┘
-                   │ runner spawned
-            ┌──────▼───────┐
-            │ in_progress  │
-            └──────┬───────┘
-                   │ agent finishes
-              ┌────▼─────┐
-        ┌─────│  review  │─────┐
-        │     └──────────┘     │
-        │ passed               │ failed
-   ┌────▼──┐            ┌─────▼───┐
-   │ done  │            │ failed  │
-   └───────┘            └────┬────┘
-                             │ retry
-                        ┌────▼─────┐
-                        │ pending  │
-                        └──────────┘
-```
+<Frame>
+  <img src="/task-lifecycle.svg" alt="Task lifecycle state machine: pending → awaiting_approval → assigned → in_progress → review → done or failed, with retry loop" />
+</Frame>
 
 ## States
 
@@ -73,9 +38,9 @@ Within the `in_progress` state, tasks move through **phases** that track the cur
 
 When assessment fails, Polpo first tries a **fix phase** — sending the agent specific feedback about what's wrong so it can make targeted corrections without starting over:
 
-```
-execution → review → [fail] → fix → review → [fail] → fix → review → [fail] → full retry
-```
+<Frame>
+  <img src="/fix-phase-flow.svg" alt="Fix phase retry cycle: execution → review → fail → fix → review → fail → fix → review → fail → full retry" />
+</Frame>
 
 - **Fix phase**: Agent receives per-dimension scores and feedback. Up to `maxFixAttempts` (default: 2) before falling back.
 - **Full retry**: Task resets to `pending` and starts execution from scratch. Up to `maxRetries` (default: 3) total.

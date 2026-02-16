@@ -399,8 +399,7 @@ export class TaskRunner {
         taskId: task.id,
         pid: child.pid ?? 0,
         agentName: agent.name,
-        adapterType: agent.adapter,
-        status: "running",
+      status: "running",
         startedAt: now,
         updatedAt: now,
         activity: { filesCreated: [], filesEdited: [], toolCalls: 0, totalTokens: 0, lastUpdate: now },
@@ -411,7 +410,6 @@ export class TaskRunner {
       this.ctx.emitter.emit("agent:spawned", {
         taskId: task.id,
         agentName: agent.name,
-        adapter: agent.adapter,
         taskTitle: task.title,
       });
     } catch (err: unknown) {

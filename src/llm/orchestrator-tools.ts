@@ -48,7 +48,7 @@ const getPlanTool: Tool = {
 
 const listAgentsTool: Tool = {
   name: "list_agents",
-  description: "List all configured agents with their roles and adapters.",
+  description: "List all configured agents with their roles and models.",
   parameters: Type.Object({}),
 };
 
@@ -460,7 +460,7 @@ function execListAgents(polpo: Orchestrator): string {
   const agents = polpo.getAgents();
   if (agents.length === 0) return "No agents configured.";
   const lines = agents.map(a =>
-    `• ${a.name} (${a.adapter ?? "engine"})${a.role ? ` — ${a.role}` : ""}${a.model ? ` [${a.model}]` : ""}`
+    `• ${a.name}${a.role ? ` — ${a.role}` : ""}${a.model ? ` [${a.model}]` : ""}`
   );
   return `${agents.length} agent(s):\n${lines.join("\n")}`;
 }

@@ -7,9 +7,9 @@ description: "LLM-powered detection and resolution of blocked tasks"
 
 A **deadlock** occurs when a task depends on another task that has permanently failed. The blocked task can never start because its dependency will never complete.
 
-```
-Task A (failed) ← Task B (pending, depends on A) ← Task C (pending, depends on B)
-```
+<Frame>
+  <img src="/deadlock-chain.svg" alt="Deadlock chain: Task A failed ← Task B pending (blocked) ← Task C pending (blocked)" />
+</Frame>
 
 Without intervention, tasks B and C would be stuck forever.
 

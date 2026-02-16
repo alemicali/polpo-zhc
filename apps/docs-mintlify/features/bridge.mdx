@@ -13,17 +13,9 @@ In teams where developers use AI coding agents interactively alongside orchestra
 
 The Bridge is composed of three components:
 
-```
-BridgeManager (facade)
-     │
-     ├── SessionWatcher
-     │     └── Polls filesystem for transcript files
-     │         (~/.claude/projects/<encoded-cwd>/*.jsonl)
-     │
-     └── SessionTracker
-           └── Parses transcripts, manages session lifecycle
-               (active → idle → completed)
-```
+<Frame>
+  <img src="/bridge-architecture.svg" alt="Bridge architecture: BridgeManager facade with SessionWatcher (filesystem polling) and SessionTracker (lifecycle management)" />
+</Frame>
 
 ### BridgeManager
 

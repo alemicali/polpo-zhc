@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 520 300" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="8" markerHeight="6" orient="auto-start-reverse">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#aaa"/>
+    </marker>
+  </defs>
+
+  <!-- Step 1: Agent output -->
+  <rect x="30" y="20" width="460" height="36" rx="5" fill="#f8f8f8" stroke="#888" stroke-width="1.2"/>
+  <text x="50" y="38" font-size="10" fill="#999" font-weight="500">Agent:</text>
+  <text x="100" y="38" font-size="10" fill="#333" font-style="italic">"Should I use JWT or session-based authentication?"</text>
+  <text x="50" y="50" font-size="9" fill="#bbb">phase → clarification</text>
+
+  <line x1="260" y1="56" x2="260" y2="80" stroke="#aaa" stroke-width="1" marker-end="url(#arrow)"/>
+
+  <!-- Step 2: Event -->
+  <rect x="100" y="80" width="320" height="28" rx="4" fill="none" stroke="#ccc" stroke-width="1" stroke-dasharray="4 2"/>
+  <text x="260" y="99" font-size="10" fill="#999" text-anchor="middle">task:question → "Should I use JWT or session-based auth?"</text>
+
+  <line x1="260" y1="108" x2="260" y2="132" stroke="#aaa" stroke-width="1" marker-end="url(#arrow)"/>
+
+  <!-- Step 3: Polpo generates answer -->
+  <rect x="30" y="132" width="460" height="60" rx="5" fill="#f8f8f8" stroke="#888" stroke-width="1.2"/>
+  <text x="50" y="152" font-size="10" fill="#999" font-weight="500">Polpo generates answer using project context:</text>
+  <text x="50" y="168" font-size="10" fill="#333">"Use JWT. The project uses a stateless API architecture.</text>
+  <text x="50" y="182" font-size="10" fill="#333">Implement with jsonwebtoken, store in httpOnly cookies."</text>
+
+  <line x1="260" y1="192" x2="260" y2="216" stroke="#aaa" stroke-width="1" marker-end="url(#arrow)"/>
+
+  <!-- Step 4: Event -->
+  <rect x="100" y="216" width="320" height="28" rx="4" fill="none" stroke="#ccc" stroke-width="1" stroke-dasharray="4 2"/>
+  <text x="260" y="235" font-size="10" fill="#999" text-anchor="middle">task:answered → answer injected</text>
+
+  <line x1="260" y1="244" x2="260" y2="268" stroke="#aaa" stroke-width="1" marker-end="url(#arrow)"/>
+
+  <!-- Step 5: Agent continues -->
+  <rect x="100" y="268" width="320" height="28" rx="14" fill="#f8f8f8" stroke="#888" stroke-width="1.2"/>
+  <text x="260" y="287" font-size="10" fill="#333" text-anchor="middle" font-weight="500">Agent receives answer and continues execution</text>
+</svg>

@@ -9,7 +9,7 @@ interface RunRow {
   task_id: string;
   pid: number;
   agent_name: string;
-  adapter_type: string;
+  adapter_type: string; // kept for backward compat with existing DBs
   session_id: string | null;
   status: string;
   started_at: string;
@@ -127,7 +127,6 @@ export class SqliteRunStore implements RunStore {
       taskId: row.task_id,
       pid: row.pid,
       agentName: row.agent_name,
-      adapterType: row.adapter_type,
       sessionId,
       status: row.status as RunStatus,
       startedAt: row.started_at,
@@ -145,7 +144,7 @@ export class SqliteRunStore implements RunStore {
       task_id: run.taskId,
       pid: run.pid,
       agent_name: run.agentName,
-      adapter_type: run.adapterType,
+      adapter_type: "engine", // legacy column, kept for backward compat
       session_id: run.sessionId ?? run.activity.sessionId ?? null,
       status: run.status,
       started_at: run.startedAt,

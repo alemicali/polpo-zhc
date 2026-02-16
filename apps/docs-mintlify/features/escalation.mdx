@@ -16,16 +16,9 @@ When a task fails repeatedly, Polpo's escalation chain progressively increases t
 
 Levels 0 and 1 are handled by the existing retry and fallback agent systems. The **EscalationManager** takes over from Level 2 onward, intercepting `maxRetries` failures via the `before:task:fail` lifecycle hook.
 
-```
-Task fails (maxRetries exhausted)
-     │
-     ▼
- before:task:fail hook
-     │
-     ├── Level 2: Orchestrator LLM reformulates → retry
-     │        ↓ (still fails)
-     └── Level 3: Human approval → awaiting_approval
-```
+<Frame>
+  <img src="/escalation-chain.svg" alt="Escalation chain: task fails → before:task:fail hook → Level 2 LLM reformulation → Level 3 human approval" />
+</Frame>
 
 ## How It Hooks In
 

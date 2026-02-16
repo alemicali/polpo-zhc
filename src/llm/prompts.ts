@@ -42,12 +42,6 @@ export function buildChatSystemPrompt(
     `- done: all checks passed`,
     `- failed: checks failed or agent errored; may be retried`,
     ``,
-    `## Engine & Adapters`,
-    ``,
-    `Agents are spawned via Polpo's built-in engine or external adapters:`,
-    `- Built-in engine (DEFAULT): When adapter is omitted, Polpo uses its own agentic engine (Pi Agent) with pi-ai. Multi-provider, supports all models below.`,
-    `- claude-sdk: External adapter — uses @anthropic-ai/claude-agent-sdk. Claude-only. Supports MCP servers via mcpServers config.`,
-    ``,
     `## Available Models & Providers`,
     ``,
     `Format: "provider:model" (e.g. "anthropic:claude-sonnet-4-5-20250929") or just "model" (auto-inferred from prefix).`,
@@ -91,7 +85,7 @@ export function buildChatSystemPrompt(
   ];
 
   for (const a of team.agents) {
-    let line = `  - ${a.name} (${a.adapter ?? "engine"}): ${a.role || "general"}`;
+    let line = `  - ${a.name}: ${a.role || "general"}`;
     if (a.skills?.length) line += ` [skills: ${a.skills.join(", ")}]`;
     if (a.systemPrompt) line += ` [has system prompt]`;
     parts.push(line);
@@ -262,7 +256,7 @@ export function buildPlanSystemPrompt(
     `- List tasks in dependency order (a task's dependencies MUST appear BEFORE it)`,
     `- Each task should be atomic — one clear objective per task`,
     `- Descriptions should be specific enough for an autonomous agent with no context of other tasks`,
-    `- Available agents: ${team.agents.filter(a => !a.volatile).map(a => `${a.name} (${a.adapter ?? "engine"}, ${a.role || "general"})`).join(", ")}`,
+    `- Available agents: ${team.agents.filter(a => !a.volatile).map(a => `${a.name} (${a.role || "general"})`).join(", ")}`,
     `- You can use existing agents OR define new volatile agents in the team: section`,
     `- Volatile agents are useful when the task needs specialized roles (e.g. "test-writer", "api-designer", "reviewer")`,
     `- For volatile agents, write a focused systemPrompt and assign relevant skills if available`,
@@ -447,11 +441,6 @@ export function buildTeamGenPrompt(
     `${installedSection}`,
     `Only search and install skills that are genuinely useful for the team's roles. Don't install irrelevant skills.`,
     ``,
-    `## Engine & Adapters`,
-    ``,
-    `- Built-in engine (DEFAULT): When adapter is omitted, Polpo uses its own engine. Multi-provider, supports all models below.`,
-    `- claude-sdk: External adapter — uses Claude Code SDK. Claude models only. Supports MCP servers.`,
-    ``,
     `## Available Models`,
     ``,
     `Format: "provider:model" or just the model name (provider auto-detected from prefix).`,
@@ -477,7 +466,6 @@ export function buildTeamGenPrompt(
     `  "team": [`,
     `    {`,
     `      "name": "agent-name",`,
-    `      "adapter": "claude-sdk",  // omit to use Polpo's built-in engine`,
     `      "model": "claude-sonnet-4-5-20250929",`,
     `      "role": "Clear description of what this agent does",`,
     `      "systemPrompt": "You are a specialized developer....",`,

@@ -14,10 +14,16 @@
   },
   "fonts": {
     "heading": {
-      "family": "Geist"
+      "family": "Monaspace Argon",
+      "source": "/fonts/MonaspaceArgon-Bold.woff",
+      "format": "woff",
+      "weight": 700
     },
     "body": {
-      "family": "Geist"
+      "family": "Monaspace Argon",
+      "source": "/fonts/MonaspaceArgon-Regular.woff",
+      "format": "woff",
+      "weight": 400
     }
   },
   "navbar": {
@@ -33,69 +39,91 @@
     }
   },
   "navigation": {
-    "groups": [
+    "tabs": [
       {
-        "group": "Getting Started",
-        "pages": [
-          "introduction",
-          "getting-started",
-          "guides/first-plan",
-          "configuration"
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Getting Started",
+            "pages": [
+              "introduction",
+              "getting-started",
+              "guides/first-plan",
+              "configuration"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/architecture",
+              "concepts/agents-and-teams",
+              "concepts/task-lifecycle",
+              "concepts/plans",
+              "concepts/providers-and-models"
+            ]
+          },
+          {
+            "group": "Features",
+            "pages": [
+              "features/tools-and-mcp",
+              "features/skills",
+              "features/workflows",
+              "features/assessment",
+              "features/hooks",
+              "features/notifications",
+              "features/approval-gates",
+              "features/escalation",
+              "features/scheduling",
+              "features/bridge",
+              "features/sessions",
+              "features/memory",
+              "features/deadlock-resolution",
+              "features/question-detection",
+              "features/resilience",
+              "features/security",
+              "features/writing-workflows"
+            ]
+          },
+          {
+            "group": "Usage",
+            "pages": [
+              "usage/cli",
+              "usage/tui",
+              "usage/server",
+              "usage/web-ui"
+            ]
+          },
+          {
+            "group": "Reference",
+            "pages": [
+              "reference/config",
+              "reference/events",
+              "reference/react-sdk",
+              "reference/store-backends",
+              "reference/coding-tools",
+              {
+                "group": "Extended Tools",
+                "pages": [
+                  "reference/tools/browser",
+                  "reference/tools/git",
+                  "reference/tools/http",
+                  "reference/tools/multifile",
+                  "reference/tools/deps",
+                  "reference/tools/excel",
+                  "reference/tools/pdf",
+                  "reference/tools/docx",
+                  "reference/tools/email",
+                  "reference/tools/audio",
+                  "reference/tools/image"
+                ]
+              }
+            ]
+          }
         ]
       },
       {
-        "group": "Core Concepts",
-        "pages": [
-          "concepts/architecture",
-          "concepts/agents-and-teams",
-          "concepts/task-lifecycle",
-          "concepts/plans",
-          "concepts/providers-and-models"
-        ]
-      },
-      {
-        "group": "Features",
-        "pages": [
-          "features/tools-and-mcp",
-          "features/skills",
-          "features/workflows",
-          "features/assessment",
-          "features/hooks",
-          "features/notifications",
-          "features/approval-gates",
-          "features/escalation",
-          "features/scheduling",
-          "features/bridge",
-          "features/sessions",
-          "features/memory",
-          "features/deadlock-resolution",
-          "features/question-detection",
-          "features/resilience",
-          "features/security",
-          "features/writing-workflows"
-        ]
-      },
-      {
-        "group": "Usage",
-        "pages": [
-          "usage/cli",
-          "usage/tui",
-          "usage/server",
-          "usage/web-ui"
-        ]
-      },
-      {
-        "group": "Reference",
-        "pages": [
-          "reference/config",
-          "reference/api",
-          "reference/events",
-          "reference/react-sdk",
-          "reference/adapters",
-          "reference/custom-adapter",
-          "reference/store-backends",
-          "reference/coding-tools"
-        ]
+        "tab": "API Reference",
+        "openapi": "openapi.json"
       }
     ]
   },

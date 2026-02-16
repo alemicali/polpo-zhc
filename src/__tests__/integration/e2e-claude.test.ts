@@ -2,7 +2,7 @@
  * End-to-end integration test using real Claude SDK.
  *
  * This test exercises the FULL framework pipeline:
- *   Orchestrator → Plan → Runner subprocess → Claude SDK adapter → Assessment → Cleanup
+ *   Orchestrator → Plan → Runner subprocess → Assessment → Cleanup
  *
  * Requires: ANTHROPIC_API_KEY in environment.
  * Run explicitly: INTEGRATION_TEST=1 npm test -- --run src/__tests__/integration/e2e-claude.test.ts
@@ -40,7 +40,6 @@ describe.runIf(RUN_E2E)("e2e: Claude SDK full pipeline", () => {
       agents: [
         {
           name: "claude",
-          adapter: "claude-sdk",
           model: "claude-sonnet-4-5-20250929",
           maxTurns: 20,
         },

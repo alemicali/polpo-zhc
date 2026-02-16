@@ -9,44 +9,7 @@ import { Aside } from '@astrojs/starlight/components';
 
 Every task in Polpo moves through a well-defined set of 7 states:
 
-```
-                    ┌──────────┐
-                    │ pending  │
-                    └────┬─────┘
-                         │ approval required?
-              ┌──────────┴──────────┐
-              │ yes                 │ no
-   ┌──────────▼──────────┐         │
-   │ awaiting_approval   │         │
-   └──┬─────────────┬────┘         │
-      │ approved     │ rejected/   │
-      │              │ timeout     │
-      │         ┌────▼─────┐       │
-      │         │ failed   │       │
-      │         └──────────┘       │
-      │                            │
-      └────────────┬───────────────┘
-                   │ assigned to agent
-              ┌────▼─────┐
-              │ assigned │
-              └────┬─────┘
-                   │ runner spawned
-            ┌──────▼───────┐
-            │ in_progress  │
-            └──────┬───────┘
-                   │ agent finishes
-              ┌────▼─────┐
-        ┌─────│  review  │─────┐
-        │     └──────────┘     │
-        │ passed               │ failed
-   ┌────▼──┐            ┌─────▼───┐
-   │ done  │            │ failed  │
-   └───────┘            └────┬────┘
-                             │ retry
-                        ┌────▼─────┐
-                        │ pending  │
-                        └──────────┘
-```
+![Task lifecycle state machine: pending → awaiting_approval → assigned → in_progress → review → done or failed, with retry loop](../../../assets/task-lifecycle.svg)
 
 ## States
 

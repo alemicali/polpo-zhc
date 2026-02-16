@@ -1,6 +1,64 @@
-import { Hono } from "hono";
+import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import type { ServerEnv } from "../app.js";
-import { SendNotificationSchema, parseBody } from "../schemas.js";
+import { SendNotificationSchema } from "../schemas.js";
+
+/* ── Route definitions ─────────────────────────────────────────────── */
+
+const listNotificationsRoute = createRoute({
+  method: "get",
+  path: "/",
+  tags: ["Notifications"],
+  summary: "List notification history",
+  request: {
+    query: z.object({
+      limit: z.string().optional(),
+      status: z.string().optional(),
+      channel: z.string().optional(),
+      rule: z.string().optional(),
+    }),
+  },
+  responses: {
+    200: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.any() }) } },
+      description: "Notification list",
+    },
+  },
+});
+
+const notificationStatsRoute = createRoute({
+  method: "get",
+  path: "/stats",
+  tags: ["Notifications"],
+  summary: "Notification summary counts",
+  responses: {
+    200: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.any() }) } },
+      description: "Notification stats",
+    },
+  },
+});
+
+const sendNotificationRoute = createRoute({
+  method: "post",
+  path: "/send",
+  tags: ["Notifications"],
+  summary: "Send a notification directly",
+  request: {
+    body: { content: { "application/json": { schema: SendNotificationSchema } } },
+  },
+  responses: {
+    200: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.any() }) } },
+      description: "Notification sent",
+    },
+    400: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string(), code: z.string() }) } },
+      description: "Not configured or send failed",
+    },
+  },
+});
+
+/* ── Handlers ──────────────────────────────────────────────────────── */
 
 /**
  * Notification history + direct send routes.
@@ -15,11 +73,11 @@ import { SendNotificationSchema, parseBody } from "../schemas.js";
  *   ?channel=<channelId>
  *   ?rule=<ruleId>
  */
-export function notificationRoutes(): Hono<ServerEnv> {
-  const app = new Hono<ServerEnv>();
+export function notificationRoutes(): OpenAPIHono<ServerEnv> {
+  const app = new OpenAPIHono<ServerEnv>();
 
   // GET /notifications — list notification history
-  app.get("/", (c) => {
+  app.openapi(listNotificationsRoute, (c) => {
     const orchestrator = c.get("orchestrator");
     const router = orchestrator.getNotificationRouter();
     const store = router?.getStore();
@@ -28,10 +86,11 @@ export function notificationRoutes(): Hono<ServerEnv> {
       return c.json({ ok: true, data: [], message: "Notification store not configured" });
     }
 
-    const limit = Math.min(parseInt(c.req.query("limit") ?? "100", 10) || 100, 500);
-    const status = c.req.query("status") as "sent" | "failed" | undefined;
-    const channel = c.req.query("channel");
-    const rule = c.req.query("rule");
+    const query = c.req.valid("query");
+    const limit = Math.min(parseInt(query.limit ?? "100", 10) || 100, 500);
+    const status = query.status as "sent" | "failed" | undefined;
+    const channel = query.channel;
+    const rule = query.rule;
 
     let data;
     if (status) {
@@ -48,7 +107,7 @@ export function notificationRoutes(): Hono<ServerEnv> {
   });
 
   // GET /notifications/stats — notification summary
-  app.get("/stats", (c) => {
+  app.openapi(notificationStatsRoute, (c) => {
     const orchestrator = c.get("orchestrator");
     const router = orchestrator.getNotificationRouter();
     const store = router?.getStore();
@@ -68,7 +127,7 @@ export function notificationRoutes(): Hono<ServerEnv> {
   });
 
   // POST /notifications/send — send a notification directly (with optional delay)
-  app.post("/send", async (c) => {
+  app.openapi(sendNotificationRoute, async (c) => {
     const orchestrator = c.get("orchestrator");
     const router = orchestrator.getNotificationRouter();
 
@@ -79,7 +138,7 @@ export function notificationRoutes(): Hono<ServerEnv> {
       );
     }
 
-    const body = parseBody(SendNotificationSchema, await c.req.json());
+    const body = c.req.valid("json");
 
     try {
       const result = await router.sendDirect({
@@ -90,7 +149,7 @@ export function notificationRoutes(): Hono<ServerEnv> {
         delayMs: body.delayMs,
       });
 
-      return c.json({ ok: true, data: result });
+      return c.json({ ok: true, data: result }, 200);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       return c.json(

@@ -19,8 +19,6 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Bot,
   Loader2,
-  Settings2,
-  Cpu,
   Wrench,
   RefreshCw,
   ChevronDown,
@@ -34,8 +32,6 @@ import {
   Hash,
   Shield,
   Users,
-  CheckCircle2,
-  XCircle,
   Layers,
   Infinity,
 } from "lucide-react";
@@ -45,72 +41,7 @@ import type { AgentConfig, AgentProcess, SkillInfo } from "@openpolpo/react-sdk"
 import { formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
 
-// ── Adapter config ──
 
-const adapterMeta: Record<
-  string,
-  {
-    icon: React.ElementType;
-    label: string;
-    color: string;
-    bg: string;
-    description: string;
-    features: { tools: boolean; skills: boolean; mcp: boolean; multiProvider: boolean; sessions: boolean };
-  }
-> = {
-  engine: {
-    icon: Cpu,
-    label: "Engine",
-    color: "text-blue-400",
-    bg: "bg-blue-500/10",
-    description: "Polpo's built-in Pi Agent engine. Multi-provider (Anthropic, OpenAI, Google, Groq). 7 built-in coding tools.",
-    features: { tools: true, skills: true, mcp: false, multiProvider: true, sessions: false },
-  },
-  "claude-sdk": {
-    icon: Bot,
-    label: "Claude SDK",
-    color: "text-violet-400",
-    bg: "bg-violet-500/10",
-    description: "Anthropic Claude Code SDK. Full tool suite, skills, MCP servers, session persistence.",
-    features: { tools: true, skills: true, mcp: true, multiProvider: false, sessions: true },
-  },
-};
-
-function getAdapterMeta(adapter?: string) {
-  const key = adapter ?? "engine";
-  return adapterMeta[key] ?? {
-    icon: Settings2,
-    label: key,
-    color: "text-zinc-400",
-    bg: "bg-zinc-500/10",
-    description: `Custom adapter: ${key}`,
-    features: { tools: false, skills: false, mcp: false, multiProvider: false, sessions: false },
-  };
-}
-
-// ── Feature dot ──
-
-function FeatureDot({ supported, label }: { supported: boolean; label: string }) {
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <div className="flex items-center gap-1.5 cursor-help">
-          {supported ? (
-            <CheckCircle2 className="h-3 w-3 text-emerald-500" />
-          ) : (
-            <XCircle className="h-3 w-3 text-zinc-600" />
-          )}
-          <span className={cn("text-[10px]", supported ? "text-foreground" : "text-muted-foreground/50")}>
-            {label}
-          </span>
-        </div>
-      </TooltipTrigger>
-      <TooltipContent className="text-xs">
-        {label}: {supported ? "Supported" : "Not available"}
-      </TooltipContent>
-    </Tooltip>
-  );
-}
 
 // ── Skills pool (project-level, collapsible) ──
 
@@ -230,13 +161,6 @@ function BaseTeamHeader({
   const activeCount = processes.filter(p => agents.some(a => a.name === p.agentName)).length;
   const utilization = agents.length > 0 ? Math.round((activeCount / agents.length) * 100) : 0;
 
-  // Adapter distribution (permanent only)
-  const adapterCounts = agents.reduce<Record<string, number>>((acc, a) => {
-    const key = a.adapter ?? "engine";
-    acc[key] = (acc[key] ?? 0) + 1;
-    return acc;
-  }, {});
-
   return (
     <div className="flex items-center gap-3 rounded-lg border border-border bg-card px-3 py-2">
       {/* Team name */}
@@ -266,37 +190,6 @@ function BaseTeamHeader({
           <span className="text-[11px] text-muted-foreground">Total</span>
           <span className="text-[11px] font-bold">{agents.length}</span>
         </div>
-      </div>
-
-      <div className="h-4 w-px bg-border" />
-
-      {/* Adapter breakdown */}
-      <div className="flex items-center gap-3">
-        {Object.entries(adapterCounts).map(([adapter, count]) => {
-          const meta = getAdapterMeta(adapter);
-          const Icon = meta.icon;
-          return (
-            <Tooltip key={adapter}>
-              <TooltipTrigger asChild>
-                <div className="flex items-center gap-1 cursor-help">
-                  <Icon className={cn("h-3 w-3", meta.color)} />
-                  <span className="text-[11px] font-bold">{count}</span>
-                  <span className="text-[10px] text-muted-foreground">{meta.label}</span>
-                </div>
-              </TooltipTrigger>
-              <TooltipContent className="text-xs max-w-64">
-                <p className="font-medium mb-1">{meta.description}</p>
-                <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[10px]">
-                  {meta.features.tools && <span className="text-emerald-400">Tools</span>}
-                  {meta.features.skills && <span className="text-emerald-400">Skills</span>}
-                  {meta.features.mcp && <span className="text-emerald-400">MCP</span>}
-                  {meta.features.multiProvider && <span className="text-emerald-400">Multi-provider</span>}
-                  {meta.features.sessions && <span className="text-emerald-400">Sessions</span>}
-                </div>
-              </TooltipContent>
-            </Tooltip>
-          );
-        })}
       </div>
 
       {/* Volatile teams */}
@@ -339,11 +232,6 @@ function VolatileTeamHeader({
   processes: AgentProcess[];
 }) {
   const activeCount = processes.filter(p => agents.some(a => a.name === p.agentName)).length;
-  const adapterCounts = agents.reduce<Record<string, number>>((acc, a) => {
-    const key = a.adapter ?? "engine";
-    acc[key] = (acc[key] ?? 0) + 1;
-    return acc;
-  }, {});
 
   return (
     <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 px-4 py-3">
@@ -369,18 +257,6 @@ function VolatileTeamHeader({
           <p className="text-[10px] text-muted-foreground mt-0.5">
             Volatile agents created for this plan &mdash; auto-removed on plan completion
           </p>
-        </div>
-        <div className="flex items-center gap-2 shrink-0">
-          {Object.entries(adapterCounts).map(([adapter, count]) => {
-            const meta = getAdapterMeta(adapter);
-            const Icon = meta.icon;
-            return (
-              <div key={adapter} className="flex items-center gap-1">
-                <Icon className={cn("h-3 w-3", meta.color)} />
-                <span className="text-[10px] font-bold">{count}</span>
-              </div>
-            );
-          })}
         </div>
       </div>
     </div>
@@ -496,8 +372,6 @@ function AgentCard({
   skillPool: Map<string, SkillInfo>;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const meta = getAdapterMeta(agent.adapter);
-  const AdapterIcon = meta.icon;
 
   const capabilityCount =
     (agent.allowedTools?.length ?? 0) +
@@ -512,9 +386,9 @@ function AgentCard({
       )}>
         <CollapsibleTrigger asChild>
           <div className="flex items-center gap-3 p-4 cursor-pointer">
-            {/* Adapter icon */}
-            <div className={cn("flex h-10 w-10 shrink-0 items-center justify-center rounded-lg", meta.bg)}>
-              <AdapterIcon className={cn("h-5 w-5", meta.color)} />
+            {/* Agent icon */}
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-blue-500/10">
+              <Bot className="h-5 w-5 text-blue-400" />
             </div>
 
             {/* Name + meta */}
@@ -528,9 +402,6 @@ function AgentCard({
                 )}
               </div>
               <div className="flex items-center gap-2 mt-0.5">
-                <Badge variant="outline" className={cn("text-[9px] py-0 px-1.5", meta.color)}>
-                  {meta.label}
-                </Badge>
                 {agent.model && (
                   <span className="text-[10px] text-muted-foreground font-mono truncate max-w-[200px]">
                     {agent.model}
@@ -718,20 +589,6 @@ function AgentCard({
               )}
             </div>
 
-            {/* Adapter features for this agent */}
-            <div>
-              <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-1.5 flex items-center gap-1">
-                <Settings2 className="h-3 w-3" /> Adapter Features
-              </p>
-              <div className="flex items-center gap-4">
-                <FeatureDot supported={meta.features.tools} label="Tools" />
-                <FeatureDot supported={meta.features.skills} label="Skills" />
-                <FeatureDot supported={meta.features.mcp} label="MCP" />
-                <FeatureDot supported={meta.features.multiProvider} label="Multi-provider" />
-                <FeatureDot supported={meta.features.sessions} label="Sessions" />
-              </div>
-            </div>
-
             {/* Metadata row */}
             <div className="flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
               {agent.maxTurns != null && (
@@ -791,7 +648,6 @@ export function AgentsPage() {
     const q = search.toLowerCase();
     return (
       a.name.toLowerCase().includes(q) ||
-      (a.adapter ?? "engine").toLowerCase().includes(q) ||
       (a.role ?? "").toLowerCase().includes(q) ||
       (a.model ?? "").toLowerCase().includes(q) ||
       (a.skills ?? []).some(s => s.toLowerCase().includes(q)) ||

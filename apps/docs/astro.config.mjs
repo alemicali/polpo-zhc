@@ -99,8 +99,6 @@ export default defineConfig({
             { label: "REST API", slug: "reference/api" },
             { label: "Events", slug: "reference/events" },
             { label: "React SDK", slug: "reference/react-sdk" },
-            { label: "Adapters", slug: "reference/adapters" },
-            { label: "Custom Adapter", slug: "reference/custom-adapter" },
             { label: "Store Backends", slug: "reference/store-backends" },
             { label: "Tools Reference", slug: "reference/coding-tools" },
           ],

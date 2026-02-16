@@ -1,0 +1,86 @@
+---
+title: "Multi-file Tools"
+sidebarTitle: "Multi-file"
+description: "3 batch file operation tools with path sandboxing"
+---
+
+Batch file operations for multi-file edits, regex replacements, and bulk renames. Enable with `enableMultifile: true` in agent config.
+
+<Note>
+Limits: **50 files** max per operation (`MAX_FILES`), **500 replacements** max per regex replace (`MAX_REPLACEMENTS`). All paths are sandbox-enforced.
+</Note>
+
+---
+
+## `multi_edit` — Batch File Edits
+
+Apply multiple find-and-replace edits across one or more files in a single atomic operation.
+
+### Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `edits` | array of `{path, old_text, new_text}` | yes | List of edits to apply (min 1, max 20) |
+
+### Returns
+
+Summary of all files modified and edits applied.
+
+### Notes
+
+- Uses a **two-phase** approach: all edits are validated first, then applied
+- If **any** validation fails (e.g. `old_text` not found), **no files are modified** — the entire operation is rolled back
+- Each edit object requires `path` (string), `old_text` (string), and `new_text` (string)
+
+---
+
+## `regex_replace` — Regex Find & Replace
+
+Apply a regex pattern replacement across multiple files.
+
+### Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `pattern` | string | yes | Regular expression pattern to match |
+| `replacement` | string | yes | Replacement string (supports capture group references like `$1`) |
+| `path` | string | no | Directory or file path to search in |
+| `include` | string | no | Glob pattern to filter files (e.g. `*.ts`) |
+| `dry_run` | boolean | no | Preview changes without applying them |
+
+### Returns
+
+List of files modified with match counts, or a preview when `dry_run` is enabled.
+
+### Notes
+
+- Maximum **50 files** and **500 total replacements** per invocation
+- In dry-run mode, shows the first **3 matches per file** with context
+- Replacement string supports regex capture group references (`$1`, `$2`, etc.)
+
+---
+
+## `bulk_rename` — Rename Files in Bulk
+
+Rename files matching a pattern within a directory.
+
+### Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `directory` | string | no | Directory to search in |
+| `pattern` | string | yes | Regex pattern to match against filenames |
+| `replacement` | string | yes | Replacement string for the matched portion |
+| `include` | string | no | Glob pattern to filter files |
+| `dry_run` | boolean | no | Preview renames without applying them |
+| `recursive` | boolean | no | Search subdirectories recursively (default `false`) |
+
+### Returns
+
+List of files renamed (old name to new name), or a preview when `dry_run` is enabled.
+
+### Notes
+
+- Maximum **50 files** per operation
+- Pattern is matched against filenames only (not full paths)
+- Set `recursive` to `true` to include files in subdirectories

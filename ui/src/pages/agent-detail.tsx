@@ -11,7 +11,6 @@ import {
   Bot,
   Loader2,
   Settings2,
-  Cpu,
   Wrench,
   ArrowLeft,
   RefreshCw,
@@ -41,49 +40,6 @@ import type { AgentConfig, AgentProcess, SkillInfo } from "@openpolpo/react-sdk"
 import { formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
 import { useState, useMemo } from "react";
-
-// ── Adapter meta (shared with agents.tsx, could be extracted) ──
-
-const adapterMeta: Record<
-  string,
-  {
-    icon: React.ElementType;
-    label: string;
-    color: string;
-    bg: string;
-    description: string;
-    features: { tools: boolean; skills: boolean; mcp: boolean; multiProvider: boolean; sessions: boolean };
-  }
-> = {
-  engine: {
-    icon: Cpu,
-    label: "Engine",
-    color: "text-blue-400",
-    bg: "bg-blue-500/10",
-    description: "Polpo's built-in Pi Agent engine. Multi-provider (Anthropic, OpenAI, Google, Groq). 7 built-in coding tools.",
-    features: { tools: true, skills: true, mcp: false, multiProvider: true, sessions: false },
-  },
-  "claude-sdk": {
-    icon: Bot,
-    label: "Claude SDK",
-    color: "text-violet-400",
-    bg: "bg-violet-500/10",
-    description: "Anthropic Claude Code SDK. Full tool suite, skills, MCP servers, session persistence.",
-    features: { tools: true, skills: true, mcp: true, multiProvider: false, sessions: true },
-  },
-};
-
-function getAdapterMeta(adapter?: string) {
-  const key = adapter ?? "engine";
-  return adapterMeta[key] ?? {
-    icon: Settings2,
-    label: key,
-    color: "text-zinc-400",
-    bg: "bg-zinc-500/10",
-    description: `Custom adapter: ${key}`,
-    features: { tools: false, skills: false, mcp: false, multiProvider: false, sessions: false },
-  };
-}
 
 // ── Enable flag meta ──
 
@@ -263,8 +219,6 @@ export function AgentDetailPage() {
     );
   }
 
-  const meta = getAdapterMeta(agent.adapter);
-  const AdapterIcon = meta.icon;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const agentAny = agent as unknown as Record<string, unknown>;
   const hasEnableFlags = enableFlags.some(f => agentAny[f.key] === true);
@@ -283,8 +237,8 @@ export function AgentDetailPage() {
 
         {/* ── Hero header ── */}
         <div className="flex items-start gap-4">
-          <div className={cn("flex h-14 w-14 shrink-0 items-center justify-center rounded-xl", meta.bg)}>
-            <AdapterIcon className={cn("h-7 w-7", meta.color)} />
+          <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-blue-500/10">
+            <Bot className="h-7 w-7 text-blue-400" />
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-3">
@@ -302,7 +256,6 @@ export function AgentDetailPage() {
               )}
             </div>
             <div className="flex items-center gap-3 mt-1">
-              <Badge variant="outline" className={cn("text-xs", meta.color)}>{meta.label}</Badge>
               {agent.model && (
                 <span className="text-xs text-muted-foreground font-mono">{agent.model}</span>
               )}
@@ -378,33 +331,6 @@ export function AgentDetailPage() {
             </div>
           </Section>
         )}
-
-        {/* ── Adapter Features ── */}
-        <Section title="Adapter Features" icon={Settings2}>
-          <div className="rounded-lg border border-border bg-muted/20 px-4 py-3">
-            <p className="text-xs text-muted-foreground mb-3">{meta.description}</p>
-            <div className="flex items-center gap-6">
-              {[
-                { supported: meta.features.tools, label: "Tools" },
-                { supported: meta.features.skills, label: "Skills" },
-                { supported: meta.features.mcp, label: "MCP" },
-                { supported: meta.features.multiProvider, label: "Multi-provider" },
-                { supported: meta.features.sessions, label: "Sessions" },
-              ].map(({ supported, label }) => (
-                <div key={label} className="flex items-center gap-1.5">
-                  {supported ? (
-                    <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
-                  ) : (
-                    <XCircle className="h-3.5 w-3.5 text-zinc-600" />
-                  )}
-                  <span className={cn("text-xs", supported ? "text-foreground" : "text-muted-foreground/50")}>
-                    {label}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </Section>
 
         {/* ── Tools ── */}
         {agent.allowedTools && agent.allowedTools.length > 0 && (
@@ -589,15 +515,6 @@ export function AgentDetailPage() {
                   {agent.maxConcurrency != null ? agent.maxConcurrency : (
                     <><Infinity className="h-4 w-4 inline" /> <span className="text-muted-foreground text-xs font-normal">Unlimited</span></>
                   )}
-                </p>
-              </div>
-
-              {/* Adapter */}
-              <div>
-                <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-0.5">Adapter</p>
-                <p className="text-sm font-medium flex items-center gap-1.5">
-                  <AdapterIcon className={cn("h-3.5 w-3.5", meta.color)} />
-                  {meta.label}
                 </p>
               </div>
 

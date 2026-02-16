@@ -5,11 +5,7 @@ description: All built-in tools — coding, browser, git, HTTP, and more
 
 import { Aside } from '@astrojs/starlight/components';
 
-The native adapter includes 7 built-in coding tools that agents can use to interact with the codebase.
-
-<Aside>
-These tools are available ONLY with the `native` adapter. The `claude-sdk` adapter uses Claude Code's own tool set.
-</Aside>
+Polpo includes 7 built-in coding tools that agents can use to interact with the codebase.
 
 ---
 
@@ -258,7 +254,6 @@ Restrict tools per-agent using `allowedTools` configuration:
   "agents": [
     {
       "name": "readonly-agent",
-      "adapter": "native",
       "allowedTools": ["read", "glob", "grep", "ls"]
     }
   ]

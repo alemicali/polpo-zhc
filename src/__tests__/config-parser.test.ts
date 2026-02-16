@@ -20,7 +20,7 @@ function minimalConfig() {
     team: {
       name: "test-team",
       agents: [
-        { name: "agent-1", adapter: "claude-sdk" },
+        { name: "agent-1" },
       ],
     },
     settings: {
@@ -54,7 +54,6 @@ describe("parseConfig (.polpo/polpo.json)", () => {
       expect(config.team.name).toBe("test-team");
       expect(config.team.agents).toHaveLength(1);
       expect(config.team.agents[0].name).toBe("agent-1");
-      expect(config.team.agents[0].adapter).toBe("claude-sdk");
       expect(config.tasks).toEqual([]); // tasks come from plans, not config
     });
 
@@ -87,9 +86,9 @@ describe("parseConfig (.polpo/polpo.json)", () => {
         team: {
           name: "multi-team",
           agents: [
-            { name: "coder", adapter: "claude-sdk" },
+            { name: "coder" },
             { name: "engine-dev" },
-            { name: "custom-dev", adapter: "custom-adapter" },
+            { name: "custom-dev" },
           ],
         },
       };
@@ -97,9 +96,7 @@ describe("parseConfig (.polpo/polpo.json)", () => {
       const config = await parseConfig(workDir);
 
       expect(config.team.agents).toHaveLength(3);
-      expect(config.team.agents[0].adapter).toBe("claude-sdk");
-      expect(config.team.agents[1].adapter).toBeUndefined();
-      expect(config.team.agents[2].adapter).toBe("custom-adapter");
+      expect(config.team.agents).toHaveLength(3);
     });
 
     it("defaults logLevel to 'normal' when settings are missing", async () => {
@@ -116,19 +113,6 @@ describe("parseConfig (.polpo/polpo.json)", () => {
       const workDir = writeConfig(cfg);
       const config = await parseConfig(workDir);
       expect(config.settings.workDir).toBe(".");
-    });
-
-    it("adapter is undefined when not specified (uses built-in engine)", async () => {
-      const cfg = {
-        ...minimalConfig(),
-        team: {
-          name: "team",
-          agents: [{ name: "dev" }],
-        },
-      };
-      const workDir = writeConfig(cfg);
-      const config = await parseConfig(workDir);
-      expect(config.team.agents[0].adapter).toBeUndefined();
     });
 
     it("accepts logLevel 'quiet'", async () => {
@@ -183,7 +167,7 @@ describe("parseConfig (.polpo/polpo.json)", () => {
         ...minimalConfig(),
         team: {
           name: "team",
-          agents: [{ adapter: "claude-sdk" }],
+          agents: [{}],
         },
       };
       const workDir = writeConfig(cfg);
@@ -210,7 +194,6 @@ describe("generatePolpoConfigDefault", () => {
     expect(config.team.name).toBe("default");
     expect(config.team.agents).toHaveLength(1);
     expect(config.team.agents[0].name).toBe("dev-1");
-    expect(config.team.agents[0].adapter).toBeUndefined();
     expect(config.settings.maxRetries).toBe(3);
     expect(config.settings.logLevel).toBe("normal");
   });

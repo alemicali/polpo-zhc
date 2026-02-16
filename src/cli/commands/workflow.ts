@@ -7,7 +7,6 @@ import chalk from "chalk";
 import { resolve } from "node:path";
 import { Orchestrator } from "../../core/orchestrator.js";
 import { discoverWorkflows, loadWorkflow, validateParams, instantiateWorkflow } from "../../core/workflow.js";
-import "../../adapters/claude-sdk.js";
 
 // ---------------------------------------------------------------------------
 // Helpers

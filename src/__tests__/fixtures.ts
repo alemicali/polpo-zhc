@@ -1,5 +1,5 @@
 import { nanoid } from "nanoid";
-import type { Task, TaskStatus, TaskOutcome, PolpoState, AgentConfig, AgentActivity, TaskResult, AgentHandle, AgentAdapter, TaskStore, RunStore, RunRecord, RunStatus } from "../core/index.js";
+import type { Task, TaskStatus, TaskOutcome, PolpoState, AgentConfig, AgentActivity, TaskResult, AgentHandle, TaskStore, RunStore, RunRecord, RunStatus } from "../core/index.js";
 import { assertValidTransition } from "../core/state-machine.js";
 
 // === InMemoryTaskStore ===
@@ -83,7 +83,7 @@ export class InMemoryTaskStore implements TaskStore {
   }
 }
 
-// === MockAdapter & MockHandle ===
+// === MockHandle ===
 
 export function createMockHandle(opts: {
   taskId: string;
@@ -103,29 +103,6 @@ export function createMockHandle(opts: {
     isAlive: () => alive,
     kill: () => { alive = false; },
   };
-}
-
-export class MockAdapter implements AgentAdapter {
-  readonly name = "mock";
-  public spawnCalls: Array<{ agent: AgentConfig; taskId: string }> = [];
-  public resultFn: (task: Task) => TaskResult = () => ({
-    exitCode: 0, stdout: "ok", stderr: "", duration: 50,
-  });
-
-  spawn(agent: AgentConfig, task: Task, _cwd: string): AgentHandle {
-    this.spawnCalls.push({ agent, taskId: task.id });
-    const result = this.resultFn(task);
-    return {
-      agentName: agent.name,
-      taskId: task.id,
-      startedAt: new Date().toISOString(),
-      pid: 0,
-      activity: createTestActivity(),
-      done: Promise.resolve(result),
-      isAlive: () => false, // finishes immediately
-      kill: () => {},
-    };
-  }
 }
 
 // === Factory Functions ===
@@ -151,7 +128,6 @@ export function createTestTask(overrides: Partial<Task> = {}): Task {
 export function createTestAgent(overrides: Partial<AgentConfig> = {}): AgentConfig {
   return {
     name: "test-agent",
-    adapter: "mock",
     ...overrides,
   };
 }

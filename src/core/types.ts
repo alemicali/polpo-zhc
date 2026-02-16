@@ -170,18 +170,8 @@ export interface TaskResult {
 
 // === Agent ===
 
-/**
- * Adapter type for external agent runtimes.
- * When not specified (undefined), Polpo's built-in engine (Pi Agent) is used.
- * "claude-sdk" delegates to Anthropic's Claude Code SDK.
- */
-export type AdapterType = "claude-sdk" | string;
-
 export interface AgentConfig {
   name: string;
-  /** External adapter to use. When omitted, Polpo's built-in engine (Pi Agent) is used.
-   *  Use "claude-sdk" to delegate to Claude Code. */
-  adapter?: AdapterType;
   role?: string;
   /** Model to use. Format: "provider:model" (e.g. "anthropic:claude-sonnet-4-5-20250929") or bare model ID (auto-inferred). */
   model?: string;
@@ -191,8 +181,7 @@ export interface AgentConfig {
    *  Paths can be absolute or relative to workDir. When set, all file tool operations
    *  and bash cwd are validated against these paths. When omitted, defaults to [workDir]. */
   allowedPaths?: string[];
-  /** MCP servers to connect to. Works with both the built-in engine and claude-sdk adapter.
-   *  Keys are server names, values are server configs (stdio or HTTP). */
+  /** MCP servers to connect to. Keys are server names, values are server configs (stdio or HTTP). */
   mcpServers?: Record<string, McpServerConfig>;
   /** System prompt appended to the agent's base prompt */
   systemPrompt?: string;

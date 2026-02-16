@@ -7,7 +7,7 @@ Every Polpo project has a **team** — a named group of agents that do the actua
 
 ## Agents
 
-An agent is a named worker with an adapter (how it runs), an optional model, and optional constraints on what tools and files it can access.
+An agent is a named worker with an optional model and optional constraints on what tools and files it can access.
 
 ```json
 {
@@ -16,9 +16,8 @@ An agent is a named worker with an adapter (how it runs), an optional model, and
     "agents": [
       {
         "name": "backend-dev",
-        "adapter": "claude-sdk",
         "role": "developer",
-        "model": "claude-sonnet-4-20250514",
+        "model": "anthropic:claude-sonnet-4-20250514",
         "allowedTools": ["read", "write", "edit", "bash", "glob", "grep"],
         "allowedPaths": ["./src", "./tests"],
         "maxTurns": 150,
@@ -41,7 +40,6 @@ An agent is a named worker with an adapter (how it runs), an optional model, and
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `name` | `string` | *required* | Unique agent identifier |
-| `adapter` | `string` | built-in engine | `"claude-sdk"` or any registered adapter |
 | `role` | `string` | — | Human-readable role description |
 | `model` | `string` | — | `"provider:model"` or bare model ID |
 | `allowedTools` | `string[]` | all 7 tools | Which coding tools this agent can use |
@@ -52,45 +50,25 @@ An agent is a named worker with an adapter (how it runs), an optional model, and
 | `maxTurns` | `number` | `150` | Maximum tool-use turns before the agent is stopped |
 | `maxConcurrency` | `number` | — | Per-agent concurrency limit |
 
-### Adapters
+### Built-in Engine
 
-Adapters control *how* an agent runs. Polpo ships with two:
+Polpo uses its **built-in engine** — a multi-provider LLM runtime powered by [pi-agent-core](https://github.com/nicepkg/pi-agent-core). It supports 18+ providers (OpenAI, Anthropic, Google, Groq, Mistral, Ollama, etc.) and runs in-process.
 
-<Tabs>
-  <Tab title="Built-in Engine (default)">
-    If you omit the `adapter` field, Polpo uses its **native engine** — a multi-provider LLM runtime powered by [pi-agent-core](/https://github.com/nicepkg/pi-agent-core). It supports 18+ providers (OpenAI, Anthropic, Google, Groq, Mistral, Ollama, etc.) and runs in-process.
+```json
+{
+  "name": "dev-1",
+  "model": "anthropic:claude-sonnet-4-20250514"
+}
+```
 
-    ```json
-    {
-      "name": "dev-1",
-      "model": "anthropic:claude-sonnet-4-20250514"
-    }
-    ```
-
-    The model format is `provider:model-id`. If you omit the provider prefix, Polpo resolves it from your configured providers.
-  </Tab>
-
-  <Tab title="Claude SDK">
-    The `claude-sdk` adapter uses Anthropic's official [Claude Agent SDK](/https://github.com/anthropic/claude-agent-sdk). It runs with full tool permissions, persistent sessions, and MCP support.
-
-    ```json
-    {
-      "name": "claude-agent",
-      "adapter": "claude-sdk",
-      "model": "claude-sonnet-4-20250514"
-    }
-    ```
-  </Tab>
-</Tabs>
-
-You can also **write your own adapter** — any object implementing the `AgentAdapter` interface. See the [Custom Adapter](/reference/custom-adapter) guide.
+The model format is `provider:model-id`. If you omit the provider prefix, Polpo resolves it from your configured providers.
 
 ### How Agents Run
 
 Each agent task runs as a **detached Node.js subprocess** (the "runner"). This is what makes Polpo crash-resilient:
 
 1. Orchestrator spawns a runner process per task
-2. Runner loads the adapter, creates the agent, and starts working
+2. Runner initializes the engine, creates the agent, and starts working
 3. Runner polls activity every 1.5s and writes it to the store
 4. If the orchestrator crashes, runners keep going — restart the orchestrator and it reconnects to live PIDs
 5. When the task is done, the runner writes the result and exits
@@ -189,7 +167,7 @@ While an agent is working, Polpo tracks its activity in real time:
 | `toolCalls` | Total number of tool calls so far |
 | `totalTokens` | Total tokens consumed |
 | `summary` | Agent's current status summary |
-| `sessionId` | Session ID for adapters that support persistent sessions |
+| `sessionId` | Session ID for transcript access |
 
 This data is visible in the TUI, the web dashboard, and the HTTP API (via `/api/state`).
 
@@ -211,4 +189,4 @@ When you initialize a new Polpo project (`polpo init`), it generates a minimal c
 }
 ```
 
-From there, add more agents, switch adapters, or define plans with volatile teams. The octopus is flexible.
+From there, add more agents, configure models, or define plans with volatile teams. The octopus is flexible.

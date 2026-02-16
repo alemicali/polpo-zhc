@@ -1,6 +1,106 @@
-import { Hono } from "hono";
+import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import type { ServerEnv } from "../app.js";
-import { ApproveRequestSchema, RejectRequestSchema, parseBody } from "../schemas.js";
+import { ApproveRequestSchema, RejectRequestSchema } from "../schemas.js";
+
+/* ── Route definitions ─────────────────────────────────────────────── */
+
+const listApprovalsRoute = createRoute({
+  method: "get",
+  path: "/",
+  tags: ["Approvals"],
+  summary: "List approval requests",
+  request: {
+    query: z.object({
+      status: z.string().optional(),
+      taskId: z.string().optional(),
+    }),
+  },
+  responses: {
+    200: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.any() }) } },
+      description: "Approval list",
+    },
+  },
+});
+
+const getApprovalRoute = createRoute({
+  method: "get",
+  path: "/{id}",
+  tags: ["Approvals"],
+  summary: "Get single approval request",
+  request: {
+    params: z.object({ id: z.string() }),
+  },
+  responses: {
+    200: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.any() }) } },
+      description: "Approval details",
+    },
+    404: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string(), code: z.string() }) } },
+      description: "Approval not found",
+    },
+  },
+});
+
+const approveRoute = createRoute({
+  method: "post",
+  path: "/{id}/approve",
+  tags: ["Approvals"],
+  summary: "Approve a pending request",
+  request: {
+    params: z.object({ id: z.string() }),
+    body: {
+      content: { "application/json": { schema: ApproveRequestSchema } },
+      required: false,
+    },
+  },
+  responses: {
+    200: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.any() }) } },
+      description: "Approval result",
+    },
+    404: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string(), code: z.string() }) } },
+      description: "Approval not found",
+    },
+    409: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string(), code: z.string() }) } },
+      description: "Already resolved",
+    },
+  },
+});
+
+const rejectRoute = createRoute({
+  method: "post",
+  path: "/{id}/reject",
+  tags: ["Approvals"],
+  summary: "Reject with feedback",
+  request: {
+    params: z.object({ id: z.string() }),
+    body: { content: { "application/json": { schema: RejectRequestSchema } } },
+  },
+  responses: {
+    200: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.any() }) } },
+      description: "Rejection result",
+    },
+    400: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string(), code: z.string() }) } },
+      description: "Bad request",
+    },
+    404: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string(), code: z.string() }) } },
+      description: "Approval not found",
+    },
+    409: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string(), code: z.string() }) } },
+      description: "Already resolved or max rejections reached",
+    },
+  },
+});
+
+/* ── Handlers ──────────────────────────────────────────────────────── */
 
 /**
  * Approval routes.
@@ -10,14 +110,15 @@ import { ApproveRequestSchema, RejectRequestSchema, parseBody } from "../schemas
  * POST /approvals/:id/approve — approve a pending request
  * POST /approvals/:id/reject  — reject with feedback (task retries with notes)
  */
-export function approvalRoutes(): Hono<ServerEnv> {
-  const app = new Hono<ServerEnv>();
+export function approvalRoutes(): OpenAPIHono<ServerEnv> {
+  const app = new OpenAPIHono<ServerEnv>();
 
   // GET /approvals — list all approval requests
-  app.get("/", (c) => {
+  app.openapi(listApprovalsRoute, (c) => {
     const orchestrator = c.get("orchestrator");
-    const status = c.req.query("status") as "pending" | "approved" | "rejected" | "timeout" | undefined;
-    const taskId = c.req.query("taskId");
+    const query = c.req.valid("query");
+    const status = query.status as "pending" | "approved" | "rejected" | "timeout" | undefined;
+    const taskId = query.taskId;
 
     let data;
     if (taskId) {
@@ -33,25 +134,26 @@ export function approvalRoutes(): Hono<ServerEnv> {
   });
 
   // GET /approvals/:id — get single approval request
-  app.get("/:id", (c) => {
+  app.openapi(getApprovalRoute, (c) => {
     const orchestrator = c.get("orchestrator");
-    const request = orchestrator.getApprovalRequest(c.req.param("id"));
+    const { id } = c.req.valid("param");
+    const request = orchestrator.getApprovalRequest(id);
     if (!request) {
       return c.json({ ok: false, error: "Approval request not found", code: "NOT_FOUND" }, 404);
     }
-    return c.json({ ok: true, data: request });
+    return c.json({ ok: true, data: request }, 200);
   });
 
   // POST /approvals/:id/approve — approve a pending request
-  app.post("/:id/approve", async (c) => {
+  app.openapi(approveRoute, async (c) => {
     const orchestrator = c.get("orchestrator");
-    const id = c.req.param("id");
+    const { id } = c.req.valid("param");
 
     // Body is optional — approve can work with no payload
     let resolvedBy: string | undefined;
     let note: string | undefined;
     try {
-      const body = parseBody(ApproveRequestSchema, await c.req.json());
+      const body = c.req.valid("json");
       resolvedBy = body.resolvedBy;
       note = body.note;
     } catch {
@@ -72,15 +174,15 @@ export function approvalRoutes(): Hono<ServerEnv> {
       }, 409);
     }
 
-    return c.json({ ok: true, data: result });
+    return c.json({ ok: true, data: result }, 200);
   });
 
   // POST /approvals/:id/reject — reject with feedback, task retries with notes
-  app.post("/:id/reject", async (c) => {
+  app.openapi(rejectRoute, async (c) => {
     const orchestrator = c.get("orchestrator");
-    const id = c.req.param("id");
+    const { id } = c.req.valid("param");
 
-    const body = parseBody(RejectRequestSchema, await c.req.json());
+    const body = c.req.valid("json");
     if (!body.feedback) {
       return c.json({ ok: false, error: "feedback is required for rejection", code: "BAD_REQUEST" }, 400);
     }
@@ -111,7 +213,7 @@ export function approvalRoutes(): Hono<ServerEnv> {
       return c.json({ ok: false, error: "Failed to reject request", code: "CONFLICT" }, 409);
     }
 
-    return c.json({ ok: true, data: result });
+    return c.json({ ok: true, data: result }, 200);
   });
 
   return app;

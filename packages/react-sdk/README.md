@@ -214,7 +214,6 @@ const availableAgents = useAgents({ available: true });
 ```typescript
 interface Agent {
   name: string;
-  adapter: string;
   description?: string;
   available: boolean;
   currentTask?: string;

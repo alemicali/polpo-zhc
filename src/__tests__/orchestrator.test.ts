@@ -2,8 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { rmSync, existsSync } from "node:fs";
 import { Orchestrator, buildRetryPrompt } from "../core/orchestrator.js";
 import { analyzeBlockedTasks } from "../core/deadlock-resolver.js";
-import { registerAdapter } from "../adapters/registry.js";
-import { InMemoryTaskStore, InMemoryRunStore, MockAdapter, createTestTask, createTestAgent, createTestActivity } from "./fixtures.js";
+import { InMemoryTaskStore, InMemoryRunStore, createTestTask, createTestAgent, createTestActivity } from "./fixtures.js";
 import type { TaskResult } from "../core/types.js";
 import type { RunRecord } from "../core/run-store.js";
 
@@ -16,7 +15,6 @@ function createTestRunRecord(overrides: Partial<RunRecord> = {}): RunRecord {
     taskId: "task-1",
     pid: 0,
     agentName: "agent-1",
-    adapterType: "mock",
     status: "running",
     startedAt: now,
     updatedAt: now,
@@ -29,7 +27,6 @@ function createTestRunRecord(overrides: Partial<RunRecord> = {}): RunRecord {
 describe("Orchestrator", () => {
   let store: InMemoryTaskStore;
   let runStore: InMemoryRunStore;
-  let mockAdapter: MockAdapter;
   let orchestrator: Orchestrator;
 
   afterEach(() => {
@@ -40,8 +37,6 @@ describe("Orchestrator", () => {
   beforeEach(async () => {
     store = new InMemoryTaskStore();
     runStore = new InMemoryRunStore();
-    mockAdapter = new MockAdapter();
-    registerAdapter("mock", () => mockAdapter);
 
     orchestrator = new Orchestrator({
       workDir: TEST_WORK_DIR,
@@ -57,7 +52,7 @@ describe("Orchestrator", () => {
 
     const team = {
       name: "test-team",
-      agents: [createTestAgent({ name: "agent-1", adapter: "mock" })],
+      agents: [createTestAgent({ name: "agent-1" })],
     };
     await orchestrator.initInteractive("test-project", team);
   });
@@ -224,17 +219,17 @@ describe("Orchestrator", () => {
 
   describe("agent management", () => {
     it("addAgent adds to team", () => {
-      orchestrator.addAgent(createTestAgent({ name: "new-agent", adapter: "mock" }));
+      orchestrator.addAgent(createTestAgent({ name: "new-agent" }));
       expect(orchestrator.getAgents().find(a => a.name === "new-agent")).toBeDefined();
     });
 
     it("addAgent throws for duplicate", () => {
-      expect(() => orchestrator.addAgent(createTestAgent({ name: "agent-1", adapter: "mock" })))
+      expect(() => orchestrator.addAgent(createTestAgent({ name: "agent-1" })))
         .toThrow("already exists");
     });
 
     it("removeAgent removes from team", () => {
-      orchestrator.addAgent(createTestAgent({ name: "to-remove", adapter: "mock" }));
+      orchestrator.addAgent(createTestAgent({ name: "to-remove" }));
       expect(orchestrator.removeAgent("to-remove")).toBe(true);
       expect(orchestrator.getAgents().find(a => a.name === "to-remove")).toBeUndefined();
     });
@@ -246,15 +241,15 @@ describe("Orchestrator", () => {
 
   describe("volatile agents", () => {
     it("addVolatileAgent marks agent as volatile", () => {
-      orchestrator.addVolatileAgent(createTestAgent({ name: "vol-1", adapter: "mock" }), "plan-1");
+      orchestrator.addVolatileAgent(createTestAgent({ name: "vol-1" }), "plan-1");
       const agent = orchestrator.getAgents().find(a => a.name === "vol-1");
       expect(agent?.volatile).toBe(true);
       expect(agent?.planGroup).toBe("plan-1");
     });
 
     it("cleanupVolatileAgents removes agents for group", () => {
-      orchestrator.addVolatileAgent(createTestAgent({ name: "vol-1", adapter: "mock" }), "plan-1");
-      orchestrator.addVolatileAgent(createTestAgent({ name: "vol-2", adapter: "mock" }), "plan-1");
+      orchestrator.addVolatileAgent(createTestAgent({ name: "vol-1" }), "plan-1");
+      orchestrator.addVolatileAgent(createTestAgent({ name: "vol-2" }), "plan-1");
       const removed = orchestrator.cleanupVolatileAgents("plan-1");
       expect(removed).toBe(2);
       expect(orchestrator.getAgents().find(a => a.name === "vol-1")).toBeUndefined();

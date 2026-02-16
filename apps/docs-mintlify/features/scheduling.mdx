@@ -9,16 +9,9 @@ Polpo's Scheduler enables time-based execution of plans using cron expressions o
 
 The Scheduler is **tick-driven** — it runs on every orchestrator tick, checks all registered schedules, and triggers plan execution when a schedule is due. There are no background timers; the orchestrator tick drives everything.
 
-```
-Orchestrator tick
-     │
-     ▼
- Scheduler.check()
-     │
-     ├── Schedule "0 2 * * *" → next run: 02:00 → now >= 02:00? → trigger
-     │
-     └── Schedule "2026-03-01T10:00:00Z" → one-shot → now >= time? → trigger
-```
+<Frame>
+  <img src="/scheduler-check.svg" alt="Scheduler tick-driven check: evaluates cron and one-shot schedules, triggers plan execution" />
+</Frame>
 
 ## Plan Scheduling
 
@@ -72,15 +65,9 @@ Set `recurring: true` to re-execute on every cron tick. After each execution com
 
 Polpo uses standard **5-field cron expressions**:
 
-```
-┌─────────── minute (0-59)
-│ ┌─────────── hour (0-23)
-│ │ ┌─────────── day of month (1-31)
-│ │ │ ┌─────────── month (1-12)
-│ │ │ │ ┌─────────── day of week (0-7, 0 and 7 = Sunday)
-│ │ │ │ │
-* * * * *
-```
+<Frame>
+  <img src="/cron-format.svg" alt="Cron expression format: 5 fields — minute, hour, day of month, month, day of week" />
+</Frame>
 
 ### Supported Syntax
 

@@ -3,6 +3,7 @@ import { mkdtemp, writeFile, mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Hono } from "hono";
+import type { Orchestrator } from "../core/orchestrator.js";
 // ── Test Setup ───────────────────────────────────────────────────────
 
 const PROJECT_ID = "test-api";
@@ -20,6 +21,7 @@ const POLPO_CONFIG = JSON.stringify({
 
 let tmpDir: string;
 let app: Hono;
+let orchestrator: Orchestrator;
 
 /**
  * Build the full API path for per-project routes.
@@ -51,7 +53,9 @@ beforeAll(async () => {
   const { createApp } = await import("../server/app.js");
 
   const pm = new ProjectManager();
-  pm.register({ id: PROJECT_ID, workDir: tmpDir });
+  await pm.register({ id: PROJECT_ID, workDir: tmpDir });
+
+  orchestrator = pm.get(PROJECT_ID)!;
 
   // Create Hono app without API key auth
   app = createApp(pm);
@@ -453,7 +457,6 @@ describe("Agents API", () => {
     expect(body.data.length).toBeGreaterThanOrEqual(1);
     const agent1 = body.data.find((a: any) => a.name === "agent-1");
     expect(agent1).toBeDefined();
-    expect(agent1.adapter).toBeUndefined();
   });
 
   test("POST /agents adds a new agent (201)", async () => {
@@ -542,9 +545,7 @@ describe("Agents API", () => {
   test("POST /agents with missing name is rejected", async () => {
     const res = await app.request(
       api("/agents"),
-      jsonReq("POST", {
-        adapter: "generic",
-      }),
+      jsonReq("POST", {}),
     );
     // Validation error: must not succeed
     expect(res.ok).toBe(false);
@@ -648,5 +649,517 @@ describe("Project routes", () => {
     const body = await res.json();
     expect(body.ok).toBe(false);
     expect(body.code).toBe("NOT_FOUND");
+  });
+});
+
+// ── Agents Detail & Processes ────────────────────────────────────────
+
+describe("Agents Detail API", () => {
+  test("GET /agents/:name returns 200 for existing agent", async () => {
+    const res = await app.request(api("/agents/agent-1"));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(body.data.name).toBe("agent-1");
+    expect(body.data.role).toBe("Test agent");
+  });
+
+  test("GET /agents/:name returns 404 for unknown agent", async () => {
+    const res = await app.request(api("/agents/nonexistent-agent"));
+    expect(res.status).toBe(404);
+    const body = await res.json();
+    expect(body.ok).toBe(false);
+    expect(body.code).toBe("NOT_FOUND");
+  });
+
+  test("GET /agents/processes returns 200 with empty array", async () => {
+    const res = await app.request(api("/agents/processes"));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(Array.isArray(body.data)).toBe(true);
+  });
+
+  test("GET /agents/processes/:taskId/activity returns 200 with empty array for unknown task", async () => {
+    const res = await app.request(api("/agents/processes/nonexistent-task/activity"));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(Array.isArray(body.data)).toBe(true);
+    expect(body.data.length).toBe(0);
+  });
+});
+
+// ── Plans Resume/Abort ───────────────────────────────────────────────
+
+describe("Plans Resume/Abort API", () => {
+  test("GET /plans/resumable returns 200 with array", async () => {
+    const res = await app.request(api("/plans/resumable"));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(Array.isArray(body.data)).toBe(true);
+  });
+
+  test("POST /plans/:id/abort returns 404 for unknown plan", async () => {
+    const res = await app.request(api("/plans/nonexistent-plan/abort"), { method: "POST" });
+    expect(res.status).toBe(404);
+    const body = await res.json();
+    expect(body.ok).toBe(false);
+    expect(body.code).toBe("NOT_FOUND");
+  });
+
+  test("POST /plans/:id/abort aborts an executed plan's tasks", async () => {
+    const PLAN_DATA = JSON.stringify({
+      tasks: [
+        { title: "Abort test 1", description: "Will be aborted", assignTo: "agent-1" },
+        { title: "Abort test 2", description: "Will be aborted too", assignTo: "agent-1" },
+      ],
+    });
+
+    // Create and execute plan
+    const createRes = await app.request(
+      api("/plans"),
+      jsonReq("POST", { data: PLAN_DATA, name: "abort-test" }),
+    );
+    const created = await createRes.json();
+    const planId = created.data.id;
+
+    await app.request(api(`/plans/${planId}/execute`), { method: "POST" });
+
+    // Abort
+    const res = await app.request(api(`/plans/${planId}/abort`), { method: "POST" });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(typeof body.data.aborted).toBe("number");
+    expect(body.data.aborted).toBeGreaterThanOrEqual(0);
+  });
+
+  test("POST /plans/:id/resume resumes an executed plan", async () => {
+    const PLAN_DATA = JSON.stringify({
+      tasks: [
+        { title: "Resume test 1", description: "Task one", assignTo: "agent-1" },
+        { title: "Resume test 2", description: "Task two", assignTo: "agent-1" },
+      ],
+    });
+
+    // Create and execute plan
+    const createRes = await app.request(
+      api("/plans"),
+      jsonReq("POST", { data: PLAN_DATA, name: "resume-test" }),
+    );
+    const created = await createRes.json();
+    const planId = created.data.id;
+
+    await app.request(api(`/plans/${planId}/execute`), { method: "POST" });
+
+    // Resume with empty body
+    const res = await app.request(
+      api(`/plans/${planId}/resume`),
+      jsonReq("POST", {}),
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(body.data).toHaveProperty("retried");
+    expect(body.data).toHaveProperty("pending");
+  });
+});
+
+// ── Config Reload ────────────────────────────────────────────────────
+
+describe("Config Reload API", () => {
+  test("POST /config/reload returns 200 with valid polpo.json", async () => {
+    const res = await app.request(api("/config/reload"), { method: "POST" });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(body.data.message).toContain("reloaded");
+  });
+
+  test("POST /config/reload returns 500 when polpo.json is invalid", async () => {
+    // Corrupt the config file
+    const configPath = join(tmpDir, ".polpo", "polpo.json");
+    await writeFile(configPath, "NOT VALID JSON!!!");
+
+    const res = await app.request(api("/config/reload"), { method: "POST" });
+    expect(res.status).toBe(500);
+    const body = await res.json();
+    expect(body.ok).toBe(false);
+
+    // Restore the valid config
+    await writeFile(configPath, POLPO_CONFIG);
+    await app.request(api("/config/reload"), { method: "POST" });
+  });
+});
+
+// ── Approvals API ────────────────────────────────────────────────────
+
+describe("Approvals API", () => {
+  test("GET /approvals returns 200 with empty array (no gates configured)", async () => {
+    const res = await app.request(api("/approvals"));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(Array.isArray(body.data)).toBe(true);
+    expect(body.data.length).toBe(0);
+  });
+
+  test("GET /approvals supports status filter", async () => {
+    const res = await app.request(api("/approvals?status=pending"));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(Array.isArray(body.data)).toBe(true);
+  });
+
+  test("GET /approvals/:id returns 404 for nonexistent request", async () => {
+    const res = await app.request(api("/approvals/nonexistent-id"));
+    expect(res.status).toBe(404);
+    const body = await res.json();
+    expect(body.ok).toBe(false);
+    expect(body.code).toBe("NOT_FOUND");
+  });
+
+  test("POST /approvals/:id/approve returns 404 for nonexistent request", async () => {
+    const res = await app.request(
+      api("/approvals/nonexistent-id/approve"),
+      jsonReq("POST", {}),
+    );
+    expect(res.status).toBe(404);
+    const body = await res.json();
+    expect(body.ok).toBe(false);
+    expect(body.code).toBe("NOT_FOUND");
+  });
+
+  test("POST /approvals/:id/reject returns 404 for nonexistent request", async () => {
+    const res = await app.request(
+      api("/approvals/nonexistent-id/reject"),
+      jsonReq("POST", { feedback: "nope" }),
+    );
+    expect(res.status).toBe(404);
+    const body = await res.json();
+    expect(body.ok).toBe(false);
+  });
+
+  test("POST /approvals/:id/reject returns 400 when feedback is missing", async () => {
+    const res = await app.request(
+      api("/approvals/any-id/reject"),
+      jsonReq("POST", { feedback: "" }),
+    );
+    // Zod validation rejects empty feedback (minLength 1)
+    expect(res.ok).toBe(false);
+    expect(res.status).toBeGreaterThanOrEqual(400);
+  });
+});
+
+// ── Notifications API ────────────────────────────────────────────────
+
+describe("Notifications API", () => {
+  test("GET /notifications returns 200 (no router = empty with message)", async () => {
+    const res = await app.request(api("/notifications"));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    // Without notifications config, data is empty array
+    expect(Array.isArray(body.data)).toBe(true);
+  });
+
+  test("GET /notifications supports query filters", async () => {
+    const res = await app.request(api("/notifications?status=sent&limit=10"));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+  });
+
+  test("GET /notifications/stats returns 200 with counts", async () => {
+    const res = await app.request(api("/notifications/stats"));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(body.data).toHaveProperty("total");
+    expect(body.data).toHaveProperty("sent");
+    expect(body.data).toHaveProperty("failed");
+    expect(body.data.total).toBe(0);
+  });
+
+  test("POST /notifications/send returns 400 when not configured", async () => {
+    const res = await app.request(
+      api("/notifications/send"),
+      jsonReq("POST", {
+        channel: "test",
+        title: "Test",
+        body: "Test body",
+      }),
+    );
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.ok).toBe(false);
+    expect(body.code).toBe("NOT_CONFIGURED");
+  });
+});
+
+// ── Workflows API ────────────────────────────────────────────────────
+
+describe("Workflows API", () => {
+  test("GET /workflows returns 200 with array", async () => {
+    const res = await app.request(api("/workflows"));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(Array.isArray(body.data)).toBe(true);
+  });
+
+  test("GET /workflows/:name returns 404 for nonexistent workflow", async () => {
+    const res = await app.request(api("/workflows/nonexistent-wf"));
+    expect(res.status).toBe(404);
+    const body = await res.json();
+    expect(body.ok).toBe(false);
+    expect(body.code).toBe("NOT_FOUND");
+  });
+
+  test("GET /workflows/:name returns 200 for existing workflow", async () => {
+    // Create a workflow in the temp dir
+    const wfDir = join(tmpDir, ".polpo", "workflows", "test-wf");
+    await mkdir(wfDir, { recursive: true });
+    await writeFile(join(wfDir, "workflow.json"), JSON.stringify({
+      name: "test-wf",
+      description: "A test workflow",
+      plan: {
+        tasks: [
+          { title: "{{taskName}}", description: "Do the thing", assignTo: "agent-1" },
+        ],
+      },
+      parameters: [
+        { name: "taskName", description: "Name of the task", required: true },
+      ],
+    }));
+
+    const res = await app.request(api("/workflows/test-wf"));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(body.data.name).toBe("test-wf");
+    expect(body.data.description).toBe("A test workflow");
+    expect(Array.isArray(body.data.parameters)).toBe(true);
+  });
+
+  test("POST /workflows/:name/run returns 404 for nonexistent workflow", async () => {
+    const res = await app.request(
+      api("/workflows/nonexistent-wf/run"),
+      jsonReq("POST", { params: {} }),
+    );
+    expect(res.status).toBe(404);
+    const body = await res.json();
+    expect(body.ok).toBe(false);
+    expect(body.code).toBe("NOT_FOUND");
+  });
+
+  test("POST /workflows/:name/run returns 400 when required params missing", async () => {
+    const res = await app.request(
+      api("/workflows/test-wf/run"),
+      jsonReq("POST", { params: {} }),
+    );
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.ok).toBe(false);
+    expect(body.code).toBe("VALIDATION_ERROR");
+  });
+
+  test("POST /workflows/:name/run executes workflow with valid params (201)", async () => {
+    const res = await app.request(
+      api("/workflows/test-wf/run"),
+      jsonReq("POST", { params: { taskName: "Build feature X" } }),
+    );
+    expect(res.status).toBe(201);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(body.data).toHaveProperty("plan");
+    expect(body.data).toHaveProperty("tasks");
+    expect(body.data).toHaveProperty("group");
+    expect(body.data.tasks).toBeGreaterThanOrEqual(1);
+  });
+});
+
+// ── Skills API ───────────────────────────────────────────────────────
+
+describe("Skills API", () => {
+  test("GET /skills returns 200 with array", async () => {
+    const res = await app.request(api("/skills"));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(Array.isArray(body.data)).toBe(true);
+  });
+
+  test("DELETE /skills/:name returns 404 for nonexistent skill", async () => {
+    const res = await app.request(api("/skills/nonexistent-skill"), { method: "DELETE" });
+    expect(res.status).toBe(404);
+    const body = await res.json();
+    expect(body.ok).toBe(false);
+    expect(body.code).toBe("NOT_FOUND");
+  });
+
+  test("POST /skills/:name/assign returns 404 for nonexistent skill", async () => {
+    const res = await app.request(
+      api("/skills/nonexistent-skill/assign"),
+      jsonReq("POST", { agent: "agent-1" }),
+    );
+    expect(res.status).toBe(404);
+    const body = await res.json();
+    expect(body.ok).toBe(false);
+    expect(body.code).toBe("NOT_FOUND");
+  });
+
+  test("skill lifecycle: install, list, assign, remove", async () => {
+    // Create a mock skill source
+    const sourceDir = join(tmpDir, "skill-source");
+    await mkdir(join(sourceDir, "test-skill"), { recursive: true });
+    await writeFile(join(sourceDir, "test-skill", "SKILL.md"), "---\nname: test-skill\ndescription: A test skill\n---\n\nDo things well.");
+
+    // Install
+    const installRes = await app.request(
+      api("/skills/add"),
+      jsonReq("POST", { source: sourceDir }),
+    );
+    expect(installRes.status).toBe(201);
+    const installBody = await installRes.json();
+    expect(installBody.ok).toBe(true);
+    expect(installBody.data.installed.length).toBeGreaterThanOrEqual(1);
+
+    // List — should include the installed skill
+    const listRes = await app.request(api("/skills"));
+    const listBody = await listRes.json();
+    const skill = listBody.data.find((s: any) => s.name === "test-skill");
+    expect(skill).toBeDefined();
+
+    // Assign to agent
+    const assignRes = await app.request(
+      api("/skills/test-skill/assign"),
+      jsonReq("POST", { agent: "agent-1" }),
+    );
+    expect(assignRes.status).toBe(200);
+    const assignBody = await assignRes.json();
+    expect(assignBody.ok).toBe(true);
+    expect(assignBody.data.skill).toBe("test-skill");
+    expect(assignBody.data.agent).toBe("agent-1");
+
+    // Remove
+    const removeRes = await app.request(api("/skills/test-skill"), { method: "DELETE" });
+    expect(removeRes.status).toBe(200);
+    const removeBody = await removeRes.json();
+    expect(removeBody.ok).toBe(true);
+    expect(removeBody.data.removed).toBe("test-skill");
+  });
+});
+
+// ── Logs API ─────────────────────────────────────────────────────────
+
+describe("Logs API", () => {
+  test("GET /logs returns 200 with session array", async () => {
+    const res = await app.request(api("/logs"));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(Array.isArray(body.data)).toBe(true);
+    // initInteractive starts a log session automatically
+    expect(body.data.length).toBeGreaterThanOrEqual(1);
+  });
+
+  test("GET /logs/:sessionId returns 200 with entries for valid session", async () => {
+    // Get the current session ID from the log store
+    const logStore = orchestrator.getLogStore()!;
+    const sessions = logStore.listSessions();
+    expect(sessions.length).toBeGreaterThanOrEqual(1);
+    const sessionId = sessions[0].id;
+
+    const res = await app.request(api(`/logs/${sessionId}`));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(Array.isArray(body.data)).toBe(true);
+  });
+});
+
+// ── Chat Sessions API ────────────────────────────────────────────────
+
+describe("Chat Sessions API", () => {
+  test("GET /chat/sessions returns 200 with sessions array", async () => {
+    const res = await app.request(api("/chat/sessions"));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(body.data).toHaveProperty("sessions");
+    expect(Array.isArray(body.data.sessions)).toBe(true);
+  });
+
+  test("GET /chat/sessions/:id/messages returns 404 for nonexistent session", async () => {
+    const res = await app.request(api("/chat/sessions/nonexistent-session/messages"));
+    expect(res.status).toBe(404);
+    const body = await res.json();
+    expect(body.ok).toBe(false);
+    expect(body.code).toBe("NOT_FOUND");
+  });
+
+  test("DELETE /chat/sessions/:id returns 404 for nonexistent session", async () => {
+    const res = await app.request(api("/chat/sessions/nonexistent-session"), { method: "DELETE" });
+    expect(res.status).toBe(404);
+    const body = await res.json();
+    expect(body.ok).toBe(false);
+    expect(body.code).toBe("NOT_FOUND");
+  });
+
+  test("session lifecycle: create, list, get messages, delete", async () => {
+    // Seed a session via orchestrator (avoids LLM dependency)
+    const sessionStore = orchestrator.getSessionStore()!;
+    const sessionId = sessionStore.create("Test session");
+    sessionStore.addMessage(sessionId, "user", "Hello from test");
+    sessionStore.addMessage(sessionId, "assistant", "Hi! How can I help?");
+
+    // List — should include our session
+    const listRes = await app.request(api("/chat/sessions"));
+    const listBody = await listRes.json();
+    const session = listBody.data.sessions.find((s: any) => s.id === sessionId);
+    expect(session).toBeDefined();
+
+    // Get messages
+    const msgRes = await app.request(api(`/chat/sessions/${sessionId}/messages`));
+    expect(msgRes.status).toBe(200);
+    const msgBody = await msgRes.json();
+    expect(msgBody.ok).toBe(true);
+    expect(msgBody.data).toHaveProperty("session");
+    expect(msgBody.data).toHaveProperty("messages");
+    expect(msgBody.data.messages.length).toBe(2);
+    expect(msgBody.data.messages[0].role).toBe("user");
+    expect(msgBody.data.messages[0].content).toBe("Hello from test");
+    expect(msgBody.data.messages[1].role).toBe("assistant");
+
+    // Delete
+    const deleteRes = await app.request(api(`/chat/sessions/${sessionId}`), { method: "DELETE" });
+    expect(deleteRes.status).toBe(200);
+    const deleteBody = await deleteRes.json();
+    expect(deleteBody.ok).toBe(true);
+    expect(deleteBody.data.deleted).toBe(true);
+
+    // Verify deleted
+    const verifyRes = await app.request(api(`/chat/sessions/${sessionId}/messages`));
+    expect(verifyRes.status).toBe(404);
+  });
+});
+
+// ── OpenAPI Spec ─────────────────────────────────────────────────────
+
+describe("OpenAPI Spec", () => {
+  test("GET /api/v1/openapi.json returns valid OpenAPI 3.1 spec", async () => {
+    const res = await app.request("/api/v1/openapi.json");
+    expect(res.status).toBe(200);
+    const spec = await res.json();
+    expect(spec.openapi).toBe("3.1.0");
+    expect(spec.info.title).toBe("Polpo API");
+    expect(spec.paths).toBeDefined();
+    expect(Object.keys(spec.paths).length).toBeGreaterThanOrEqual(40);
+    // Security scheme should be present
+    expect(spec.components.securitySchemes).toHaveProperty("bearerAuth");
   });
 });

@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 580 140" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="8" markerHeight="6" orient="auto-start-reverse">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#aaa"/>
+    </marker>
+  </defs>
+
+  <!-- Phase 1 -->
+  <rect x="20" y="20" width="140" height="100" rx="6" fill="none" stroke="#ccc" stroke-width="1.2" stroke-dasharray="5 3"/>
+  <text x="40" y="40" font-size="10" fill="#999" font-weight="500">Phase 1 Tasks</text>
+  <rect x="35" y="50" width="110" height="24" rx="4" fill="#f8f8f8" stroke="#bbb" stroke-width="1"/>
+  <text x="90" y="67" font-size="10" fill="#444" text-anchor="middle">task-a</text>
+  <rect x="35" y="82" width="110" height="24" rx="4" fill="#f8f8f8" stroke="#bbb" stroke-width="1"/>
+  <text x="90" y="99" font-size="10" fill="#444" text-anchor="middle">task-b</text>
+
+  <!-- Arrows to gate -->
+  <line x1="160" y1="62" x2="210" y2="70" stroke="#aaa" stroke-width="1" marker-end="url(#arrow)"/>
+  <line x1="160" y1="94" x2="210" y2="70" stroke="#aaa" stroke-width="1" marker-end="url(#arrow)"/>
+  <text x="180" y="55" font-size="8" fill="#bbb">completed</text>
+
+  <!-- Quality Gate -->
+  <rect x="210" y="35" width="160" height="70" rx="6" fill="#f8f8f8" stroke="#888" stroke-width="1.3"/>
+  <text x="290" y="58" font-size="11" fill="#333" text-anchor="middle" font-weight="600">Quality Gate</text>
+  <text x="290" y="75" font-size="10" fill="#666" text-anchor="middle">"review"</text>
+  <text x="290" y="92" font-size="9" fill="#999" text-anchor="middle">minScore: 4</text>
+
+  <!-- Arrow to Phase 2 -->
+  <line x1="370" y1="70" x2="420" y2="70" stroke="#aaa" stroke-width="1.2" marker-end="url(#arrow)"/>
+  <text x="395" y="62" font-size="8" fill="#bbb">passed</text>
+
+  <!-- Phase 2 -->
+  <rect x="420" y="20" width="140" height="100" rx="6" fill="none" stroke="#ccc" stroke-width="1.2" stroke-dasharray="5 3"/>
+  <text x="440" y="40" font-size="10" fill="#999" font-weight="500">Phase 2 Tasks</text>
+  <rect x="435" y="50" width="110" height="24" rx="4" fill="#f8f8f8" stroke="#bbb" stroke-width="1"/>
+  <text x="490" y="67" font-size="10" fill="#444" text-anchor="middle">task-c</text>
+  <rect x="435" y="82" width="110" height="24" rx="4" fill="#f8f8f8" stroke="#bbb" stroke-width="1"/>
+  <text x="490" y="99" font-size="10" fill="#444" text-anchor="middle">task-d</text>
+</svg>

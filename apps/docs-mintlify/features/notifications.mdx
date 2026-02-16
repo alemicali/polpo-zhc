@@ -13,16 +13,9 @@ The notification system has three layers:
 2. **Rules** — event pattern + optional condition + target channels
 3. **Router** — glue that listens to orchestrator events, evaluates rules, and dispatches
 
-```
-Orchestrator Events
-       │
-       ▼
- NotificationRouter
-       │
-       ├── Rule: "task:*" where status == "failed" → #slack-alerts
-       ├── Rule: "sla:**" → #ops-email
-       └── Rule: "escalation:human" → #telegram-oncall
-```
+<Frame>
+  <img src="/notification-routing.svg" alt="Notification routing: orchestrator events flow through NotificationRouter to Slack, Email, Telegram channels based on rules" />
+</Frame>
 
 ## Configuration
 
@@ -216,11 +209,9 @@ Global rules (configured in `settings.notifications.rules`) apply to every event
 
 ### Scope hierarchy
 
-```
-Global rules (settings.notifications.rules)
-  └── Plan-level rules (plan.notifications)
-        └── Task-level rules (task.notifications)
-```
+<Frame>
+  <img src="/notification-scopes.svg" alt="Notification rule scope hierarchy: global → plan-level → task-level" />
+</Frame>
 
 The most specific scope wins: if a task has scoped rules, those are used instead of global rules when processing events for that task. Similarly, plan-level rules override global rules for all events within that plan's execution.
 

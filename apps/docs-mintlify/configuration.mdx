@@ -16,7 +16,6 @@ Polpo is configured through a JSON file at `.polpo/polpo.json` in your project d
     "agents": [
       {
         "name": "agent-name",
-        "adapter": "native",
         "role": "Role description",
         "model": "opencode:big-pickle"
       }
@@ -40,7 +39,7 @@ Plans and tasks are managed dynamically via the TUI/CLI/API and stored in `.polp
 
 ## Agents
 
-Each agent entry defines a worker that can be assigned tasks. You specify a `name`, an `adapter` (native, claude-sdk, or generic), a `role` describing its expertise, and a `model` for the LLM to use.
+Each agent entry defines a worker that can be assigned tasks. You specify a `name`, a `role` describing its expertise, and a `model` for the LLM to use.
 
 ```json
 {
@@ -48,21 +47,13 @@ Each agent entry defines a worker that can be assigned tasks. You specify a `nam
     "agents": [
       {
         "name": "developer",
-        "adapter": "native",
         "model": "opencode:big-pickle",
-        "role": "Full-stack developer using Polpo's native engine"
+        "role": "Full-stack developer"
       },
       {
         "name": "architect",
-        "adapter": "claude-sdk",
-        "model": "claude-sonnet-4-5-20250929",
+        "model": "anthropic:claude-sonnet-4-5-20250929",
         "role": "Senior software architect who designs system components"
-      },
-      {
-        "name": "aider-dev",
-        "adapter": "generic",
-        "command": "aider --no-auto-commit --model gpt-4",
-        "role": "Aider-powered developer for code changes"
       }
     ]
   }

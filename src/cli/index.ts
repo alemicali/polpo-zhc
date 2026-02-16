@@ -9,9 +9,6 @@ import { generatePolpoConfigDefault, savePolpoConfig } from "../core/config.js";
 import { Orchestrator } from "../core/orchestrator.js";
 import type { PolpoState, Task, TaskStatus } from "../core/types.js";
 
-// Register external adapters (side-effect imports)
-import "../adapters/claude-sdk.js";
-
 import { registerTaskCommands } from "./commands/task.js";
 import { registerPlanCommands } from "./commands/plan.js";
 import { registerTeamCommands } from "./commands/team.js";
@@ -36,9 +33,9 @@ function wireConsoleEvents(orchestrator: Orchestrator): void {
     console.log(chalk.dim(`[${ts}]`) + ` ${chalk.cyan(`[${task.id}] Task added: ${task.title}`)}`);
   });
 
-  orchestrator.on("agent:spawned", ({ taskId, agentName, adapter, taskTitle }) => {
+  orchestrator.on("agent:spawned", ({ taskId, agentName, taskTitle }) => {
     const ts = new Date().toLocaleTimeString();
-    console.log(chalk.dim(`[${ts}]`) + ` ${chalk.blue(`[${taskId}] Spawning "${agentName}" (adapter: ${adapter}) for: ${taskTitle}`)}`);
+    console.log(chalk.dim(`[${ts}]`) + ` ${chalk.blue(`[${taskId}] Spawning "${agentName}" for: ${taskTitle}`)}`);
   });
 
   orchestrator.on("agent:finished", ({ taskId, exitCode, duration }) => {
@@ -426,9 +423,6 @@ program
     console.log(LOGO);
     const { basename } = await import("node:path");
     const { PolpoServer } = await import("../server/index.js");
-
-    // Register external adapters
-    await import("../adapters/claude-sdk.js");
 
     const workDir = resolve(opts.dir);
     const projectId = opts.projectId || basename(workDir);

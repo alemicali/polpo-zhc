@@ -76,7 +76,6 @@ export function reduceEvent(state: StoreState, sseEvent: SSEEvent): StoreState {
       const { taskId, agentName, taskTitle } = data as {
         taskId: string;
         agentName: string;
-        adapter: string;
         taskTitle: string;
       };
       const process: AgentProcess = {

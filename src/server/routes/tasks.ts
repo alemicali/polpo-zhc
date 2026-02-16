@@ -1,22 +1,173 @@
-import { Hono } from "hono";
+import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import type { ServerEnv } from "../app.js";
-import { CreateTaskSchema, UpdateTaskSchema, parseBody } from "../schemas.js";
+import { CreateTaskSchema, UpdateTaskSchema } from "../schemas.js";
+
+// ── Route definitions ─────────────────────────────────────────────────
+
+const listTasksRoute = createRoute({
+  method: "get",
+  path: "/",
+  tags: ["Tasks"],
+  summary: "List all tasks",
+  request: {
+    query: z.object({
+      status: z.string().optional(),
+      group: z.string().optional(),
+      assignTo: z.string().optional(),
+    }),
+  },
+  responses: {
+    200: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.array(z.any()) }) } },
+      description: "List of tasks",
+    },
+  },
+});
+
+const getTaskRoute = createRoute({
+  method: "get",
+  path: "/{taskId}",
+  tags: ["Tasks"],
+  summary: "Get a single task",
+  request: {
+    params: z.object({ taskId: z.string() }),
+  },
+  responses: {
+    200: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.any() }) } },
+      description: "Task details",
+    },
+    404: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string(), code: z.string() }) } },
+      description: "Task not found",
+    },
+  },
+});
+
+const createTaskRoute = createRoute({
+  method: "post",
+  path: "/",
+  tags: ["Tasks"],
+  summary: "Create a new task",
+  request: {
+    body: { content: { "application/json": { schema: CreateTaskSchema } } },
+  },
+  responses: {
+    201: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.any() }) } },
+      description: "Task created",
+    },
+  },
+});
+
+const updateTaskRoute = createRoute({
+  method: "patch",
+  path: "/{taskId}",
+  tags: ["Tasks"],
+  summary: "Update a task",
+  request: {
+    params: z.object({ taskId: z.string() }),
+    body: { content: { "application/json": { schema: UpdateTaskSchema } } },
+  },
+  responses: {
+    200: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.any() }) } },
+      description: "Task updated",
+    },
+    404: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string(), code: z.string() }) } },
+      description: "Task not found",
+    },
+  },
+});
+
+const deleteTaskRoute = createRoute({
+  method: "delete",
+  path: "/{taskId}",
+  tags: ["Tasks"],
+  summary: "Delete a task",
+  request: {
+    params: z.object({ taskId: z.string() }),
+  },
+  responses: {
+    200: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.object({ removed: z.boolean() }) }) } },
+      description: "Task removed",
+    },
+    404: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string(), code: z.string() }) } },
+      description: "Task not found",
+    },
+  },
+});
+
+const retryTaskRoute = createRoute({
+  method: "post",
+  path: "/{taskId}/retry",
+  tags: ["Tasks"],
+  summary: "Retry a failed task",
+  request: {
+    params: z.object({ taskId: z.string() }),
+  },
+  responses: {
+    200: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.object({ retried: z.boolean() }) }) } },
+      description: "Task retried",
+    },
+  },
+});
+
+const killTaskRoute = createRoute({
+  method: "post",
+  path: "/{taskId}/kill",
+  tags: ["Tasks"],
+  summary: "Kill a running task",
+  request: {
+    params: z.object({ taskId: z.string() }),
+  },
+  responses: {
+    200: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.object({ killed: z.boolean() }) }) } },
+      description: "Task killed",
+    },
+    404: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string(), code: z.string() }) } },
+      description: "Task not found",
+    },
+  },
+});
+
+const reassessTaskRoute = createRoute({
+  method: "post",
+  path: "/{taskId}/reassess",
+  tags: ["Tasks"],
+  summary: "Re-run task assessment",
+  request: {
+    params: z.object({ taskId: z.string() }),
+  },
+  responses: {
+    200: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.object({ reassessed: z.boolean() }) }) } },
+      description: "Task reassessed",
+    },
+  },
+});
+
+// ── Route handlers ────────────────────────────────────────────────────
 
 /**
  * Task CRUD + action routes.
  */
-export function taskRoutes(): Hono<ServerEnv> {
-  const app = new Hono<ServerEnv>();
+export function taskRoutes(): OpenAPIHono<ServerEnv> {
+  const app = new OpenAPIHono<ServerEnv>();
 
   // GET /tasks — list all tasks, optional filters
-  app.get("/", (c) => {
+  app.openapi(listTasksRoute, (c) => {
     const orchestrator = c.get("orchestrator");
     let tasks = orchestrator.getStore().getAllTasks();
 
     // Optional filters
-    const status = c.req.query("status");
-    const group = c.req.query("group");
-    const assignTo = c.req.query("assignTo");
+    const { status, group, assignTo } = c.req.valid("query");
 
     if (status) tasks = tasks.filter(t => t.status === status);
     if (group) tasks = tasks.filter(t => t.group === group);
@@ -26,19 +177,20 @@ export function taskRoutes(): Hono<ServerEnv> {
   });
 
   // GET /tasks/:taskId — get single task
-  app.get("/:taskId", (c) => {
+  app.openapi(getTaskRoute, (c) => {
     const orchestrator = c.get("orchestrator");
-    const task = orchestrator.getStore().getTask(c.req.param("taskId"));
+    const { taskId } = c.req.valid("param");
+    const task = orchestrator.getStore().getTask(taskId);
     if (!task) {
       return c.json({ ok: false, error: "Task not found", code: "NOT_FOUND" }, 404);
     }
-    return c.json({ ok: true, data: task });
+    return c.json({ ok: true, data: task }, 200);
   });
 
   // POST /tasks — create task
-  app.post("/", async (c) => {
+  app.openapi(createTaskRoute, async (c) => {
     const orchestrator = c.get("orchestrator");
-    const body = parseBody(CreateTaskSchema, await c.req.json());
+    const body = c.req.valid("json");
 
     const task = orchestrator.addTask({
       title: body.title,
@@ -57,10 +209,10 @@ export function taskRoutes(): Hono<ServerEnv> {
   });
 
   // PATCH /tasks/:taskId — update task description and/or assignment
-  app.patch("/:taskId", async (c) => {
+  app.openapi(updateTaskRoute, async (c) => {
     const orchestrator = c.get("orchestrator");
-    const taskId = c.req.param("taskId");
-    const body = parseBody(UpdateTaskSchema, await c.req.json());
+    const { taskId } = c.req.valid("param");
+    const body = c.req.valid("json");
 
     const task = orchestrator.getStore().getTask(taskId);
     if (!task) {
@@ -84,41 +236,44 @@ export function taskRoutes(): Hono<ServerEnv> {
     }
 
     const updated = orchestrator.getStore().getTask(taskId);
-    return c.json({ ok: true, data: updated });
+    return c.json({ ok: true, data: updated }, 200);
   });
 
   // DELETE /tasks/:taskId — remove task
-  app.delete("/:taskId", (c) => {
+  app.openapi(deleteTaskRoute, (c) => {
     const orchestrator = c.get("orchestrator");
-    const taskId = c.req.param("taskId");
+    const { taskId } = c.req.valid("param");
     const removed = orchestrator.deleteTask(taskId);
     if (!removed) {
       return c.json({ ok: false, error: "Task not found", code: "NOT_FOUND" }, 404);
     }
-    return c.json({ ok: true, data: { removed: true } });
+    return c.json({ ok: true, data: { removed: true } }, 200);
   });
 
   // POST /tasks/:taskId/retry — retry failed task
-  app.post("/:taskId/retry", (c) => {
+  app.openapi(retryTaskRoute, (c) => {
     const orchestrator = c.get("orchestrator");
-    orchestrator.retryTask(c.req.param("taskId"));
+    const { taskId } = c.req.valid("param");
+    orchestrator.retryTask(taskId);
     return c.json({ ok: true, data: { retried: true } });
   });
 
   // POST /tasks/:taskId/kill — kill running task
-  app.post("/:taskId/kill", (c) => {
+  app.openapi(killTaskRoute, (c) => {
     const orchestrator = c.get("orchestrator");
-    const killed = orchestrator.killTask(c.req.param("taskId"));
+    const { taskId } = c.req.valid("param");
+    const killed = orchestrator.killTask(taskId);
     if (!killed) {
       return c.json({ ok: false, error: "Task not found", code: "NOT_FOUND" }, 404);
     }
-    return c.json({ ok: true, data: { killed: true } });
+    return c.json({ ok: true, data: { killed: true } }, 200);
   });
 
   // POST /tasks/:taskId/reassess — re-run assessment
-  app.post("/:taskId/reassess", async (c) => {
+  app.openapi(reassessTaskRoute, async (c) => {
     const orchestrator = c.get("orchestrator");
-    await orchestrator.reassessTask(c.req.param("taskId"));
+    const { taskId } = c.req.valid("param");
+    await orchestrator.reassessTask(taskId);
     return c.json({ ok: true, data: { reassessed: true } });
   });
 

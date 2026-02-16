@@ -65,7 +65,6 @@ const PlanTaskSchema = Type.Object({
 
 const PlanTeamSchema = Type.Object({
   name: Type.String({ description: "Agent name (kebab-case)" }),
-  adapter: Type.Optional(Type.String({ description: "External adapter (e.g. 'claude-sdk'). Omit to use Polpo's built-in engine." })),
   model: Type.Optional(Type.String({ description: "Model spec: 'provider:model' or just 'model'. Default: opencode:big-pickle (free)" })),
   role: Type.Optional(Type.String({ description: "Agent role description" })),
   systemPrompt: Type.Optional(Type.String({ description: "System prompt appended to agent's base prompt" })),
@@ -182,7 +181,6 @@ export interface PlanTaskData {
 
 export interface PlanTeamData {
   name: string;
-  adapter?: string;
   model?: string;
   role?: string;
   systemPrompt?: string;
@@ -634,7 +632,6 @@ export function formatPlanRich(data: PlanData, termCols?: number): PlanSeg[][] {
     for (const a of data.team) {
       out.push([s("  "), s(a.name, "cyan", true), s(a.role ? ` — ${a.role}` : "", "gray")]);
       const meta: string[] = [];
-      if (a.adapter) meta.push(`adapter: ${a.adapter}`);
       if (a.model) meta.push(`model: ${a.model}`);
       if (a.skills?.length) meta.push(`skills: ${a.skills.join(", ")}`);
       if (meta.length) out.push([s(`    ${meta.join("  │  ")}`, "gray", false, true)]);

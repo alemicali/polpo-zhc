@@ -98,7 +98,7 @@ function createDefaultConfig(overrides?: Partial<PolpoConfig>): PolpoConfig {
     project: "test-project",
     team: {
       name: "test-team",
-      agents: [createTestAgent({ name: "dev", adapter: "mock" })],
+      agents: [createTestAgent({ name: "dev" })],
     },
     tasks: [],
     settings: {

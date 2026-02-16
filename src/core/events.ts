@@ -10,7 +10,7 @@ export interface PolpoEventMap {
   "task:removed": { taskId: string };
 
   // Agent lifecycle
-  "agent:spawned": { taskId: string; agentName: string; adapter?: string; taskTitle: string };
+  "agent:spawned": { taskId: string; agentName: string; taskTitle: string };
   "agent:finished": { taskId: string; agentName: string; exitCode: number; duration: number; sessionId?: string };
   "agent:activity": { taskId: string; agentName: string; tool?: string; file?: string; summary?: string };
 

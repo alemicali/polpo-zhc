@@ -1,8 +1,5 @@
 /**
  * MCP server configuration types.
- *
- * These are compatible with the claude-sdk adapter's McpServerConfig
- * so the same polpo.json config works for both adapters.
  */
 
 /** Stdio-based MCP server — spawns a child process */

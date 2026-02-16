@@ -1,4 +1,4 @@
-import { Hono } from "hono";
+import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import type { ServerEnv } from "../app.js";
 import {
   discoverWorkflows,
@@ -10,11 +10,24 @@ import {
 /**
  * Workflow routes — discover, inspect, and execute reusable workflow templates.
  */
-export function workflowRoutes(): Hono<ServerEnv> {
-  const app = new Hono<ServerEnv>();
+export function workflowRoutes(): OpenAPIHono<ServerEnv> {
+  const app = new OpenAPIHono<ServerEnv>();
 
   // GET /workflows — list available workflows
-  app.get("/", (c) => {
+  const listWorkflowsRoute = createRoute({
+    method: "get",
+    path: "/",
+    tags: ["Workflows"],
+    summary: "List available workflows",
+    responses: {
+      200: {
+        content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.array(z.any()) }) } },
+        description: "List of workflows",
+      },
+    },
+  });
+
+  app.openapi(listWorkflowsRoute, (c) => {
     const orchestrator = c.get("orchestrator");
     const cwd = orchestrator.getWorkDir();
     const polpoDir = orchestrator.getPolpoDir?.();
@@ -23,34 +36,87 @@ export function workflowRoutes(): Hono<ServerEnv> {
   });
 
   // GET /workflows/:name — get workflow details
-  app.get("/:name", (c) => {
+  const getWorkflowRoute = createRoute({
+    method: "get",
+    path: "/{name}",
+    tags: ["Workflows"],
+    summary: "Get workflow details",
+    request: {
+      params: z.object({ name: z.string() }),
+    },
+    responses: {
+      200: {
+        content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.any() }) } },
+        description: "Workflow details",
+      },
+      404: {
+        content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string(), code: z.string() }) } },
+        description: "Workflow not found",
+      },
+    },
+  });
+
+  app.openapi(getWorkflowRoute, (c) => {
     const orchestrator = c.get("orchestrator");
     const cwd = orchestrator.getWorkDir();
     const polpoDir = orchestrator.getPolpoDir?.();
-    const name = c.req.param("name");
+    const { name } = c.req.valid("param");
     const workflow = loadWorkflow(cwd, polpoDir, name);
 
     if (!workflow) {
       return c.json({ ok: false, error: "Workflow not found", code: "NOT_FOUND" }, 404);
     }
 
-    return c.json({ ok: true, data: workflow });
+    return c.json({ ok: true, data: workflow }, 200);
   });
 
   // POST /workflows/:name/run — execute workflow with parameters
-  app.post("/:name/run", async (c) => {
+  const runWorkflowRoute = createRoute({
+    method: "post",
+    path: "/{name}/run",
+    tags: ["Workflows"],
+    summary: "Execute workflow with parameters",
+    request: {
+      params: z.object({ name: z.string() }),
+      body: {
+        content: {
+          "application/json": {
+            schema: z.object({
+              params: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(),
+            }),
+          },
+        },
+      },
+    },
+    responses: {
+      201: {
+        content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.any() }) } },
+        description: "Workflow executed",
+      },
+      400: {
+        content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string(), code: z.string(), details: z.any() }) } },
+        description: "Parameter validation failed",
+      },
+      404: {
+        content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string(), code: z.string() }) } },
+        description: "Workflow not found",
+      },
+    },
+  });
+
+  app.openapi(runWorkflowRoute, (c) => {
     const orchestrator = c.get("orchestrator");
     const cwd = orchestrator.getWorkDir();
     const polpoDir = orchestrator.getPolpoDir?.();
-    const name = c.req.param("name");
+    const { name } = c.req.valid("param");
 
     const workflow = loadWorkflow(cwd, polpoDir, name);
     if (!workflow) {
       return c.json({ ok: false, error: "Workflow not found", code: "NOT_FOUND" }, 404);
     }
 
-    const body = await c.req.json<{ params?: Record<string, string | number | boolean> }>().catch(() => ({ params: {} }));
-    const params = body.params ?? {};
+    const body = c.req.valid("json");
+    const params = (body.params ?? {}) as Record<string, string | number | boolean>;
 
     // Validate parameters
     const validation = validateParams(workflow, params);

@@ -1,0 +1,69 @@
+---
+title: Word / DOCX Tools
+description: 2 tools to read and create Word documents
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Read and create Microsoft Word (`.docx`) documents. Enable with `enableDocx: true` in agent config.
+
+<Aside>
+Text output is capped at **50,000 characters** (`MAX_TEXT_OUTPUT`). Uses **mammoth** for reading and **docx** for creation.
+</Aside>
+
+---
+
+## `docx_read` — Read Word Document
+
+Extract content from a `.docx` file in text, Markdown, or HTML format.
+
+### Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `path` | string | yes | Path to the `.docx` file |
+| `format` | enum: `text` \| `markdown` \| `html` | no | Output format (default `text`) |
+
+### Returns
+
+Document content in the requested format, truncated at 50,000 characters.
+
+### Notes
+
+- **text** — plain text extraction (default)
+- **markdown** — converted from the HTML output using a basic HTML-to-Markdown converter
+- **html** — raw HTML as produced by mammoth
+
+---
+
+## `docx_create` — Create Word Document
+
+Create a new `.docx` file with structured content.
+
+### Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `path` | string | yes | Destination file path |
+| `title` | string | no | Document title (inserted as a `Title` style heading) |
+| `content` | array of content blocks | yes | Document content blocks (min 1) |
+
+Each content block has:
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `type` | enum: `heading` \| `paragraph` \| `bullet` \| `numbered` | yes | Block type |
+| `text` | string | yes | Text content |
+| `level` | number (1–6) | no | Heading level (only for `heading` type) |
+| `bold` | boolean | no | Bold formatting |
+| `italic` | boolean | no | Italic formatting |
+
+### Returns
+
+Confirmation with the file path and block count.
+
+### Notes
+
+- Headings use levels 1–6, matching standard Word heading styles
+- `bullet` creates unordered list items, `numbered` creates ordered list items
+- `bold` and `italic` can be combined on any block type

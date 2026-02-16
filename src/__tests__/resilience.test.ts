@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
 import { Orchestrator } from "../core/orchestrator.js";
-import { registerAdapter } from "../adapters/registry.js";
-import { InMemoryTaskStore, InMemoryRunStore, MockAdapter, createTestAgent, createTestActivity } from "./fixtures.js";
+import { InMemoryTaskStore, InMemoryRunStore, createTestAgent, createTestActivity } from "./fixtures.js";
 import type { RunRecord } from "../core/run-store.js";
 
 function createTestRunRecord(overrides: Partial<RunRecord> = {}): RunRecord {
@@ -11,7 +10,6 @@ function createTestRunRecord(overrides: Partial<RunRecord> = {}): RunRecord {
     taskId: "task-1",
     pid: 0,
     agentName: "agent-1",
-    adapterType: "mock",
     status: "running",
     startedAt: now,
     updatedAt: now,
@@ -24,14 +22,11 @@ function createTestRunRecord(overrides: Partial<RunRecord> = {}): RunRecord {
 describe("Orchestrator Resilience", () => {
   let store: InMemoryTaskStore;
   let runStore: InMemoryRunStore;
-  let mockAdapter: MockAdapter;
   let orchestrator: Orchestrator;
 
   beforeEach(async () => {
     store = new InMemoryTaskStore();
     runStore = new InMemoryRunStore();
-    mockAdapter = new MockAdapter();
-    registerAdapter("mock", () => mockAdapter);
 
     orchestrator = new Orchestrator({
       workDir: "/tmp/orchestra-resilience-test",
@@ -48,8 +43,8 @@ describe("Orchestrator Resilience", () => {
     const team = {
       name: "test-team",
       agents: [
-        createTestAgent({ name: "agent-1", adapter: "mock" }),
-        createTestAgent({ name: "agent-senior", adapter: "mock" }),
+        createTestAgent({ name: "agent-1" }),
+        createTestAgent({ name: "agent-senior" }),
       ],
     };
     await orchestrator.initInteractive("test-project", team);
@@ -549,7 +544,7 @@ describe("Orchestrator Resilience", () => {
       expect(() => orchestrator.recoverOrphanedTasks()).not.toThrow();
     });
 
-    it("skips processes with pid 0 (SDK adapter)", () => {
+    it("skips processes with pid 0 (in-process agent)", () => {
       const killCalls: number[] = [];
       vi.spyOn(process, "kill").mockImplementation(((pid: number) => {
         killCalls.push(pid);

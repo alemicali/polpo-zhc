@@ -31,7 +31,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Core orchestrator with 5-second supervisor loop, graceful shutdown, and orphan recovery
-- Adapter pattern: `claude-sdk` and generic CLI adapters with self-registration
 - Built-in engine (Pi Agent) with 7 coding tools, 18+ LLM providers, and MCP support
 - SQLite-backed state persistence with WAL mode and crash resilience
 - File and JSON store backends for tasks, runs, sessions, logs, and config

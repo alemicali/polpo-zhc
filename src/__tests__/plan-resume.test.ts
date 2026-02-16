@@ -3,8 +3,7 @@ import { mkdirSync, rmSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { Orchestrator } from "../core/orchestrator.js";
 import { SqliteTaskStore } from "../stores/sqlite-task-store.js";
-import { InMemoryRunStore, MockAdapter, createTestAgent } from "./fixtures.js";
-import { registerAdapter } from "../adapters/registry.js";
+import { InMemoryRunStore, createTestAgent } from "./fixtures.js";
 
 const TEST_DIR = join(process.cwd(), ".test-polpo-plan-resume");
 
@@ -19,8 +18,6 @@ describe("Plan resume (Orchestrator)", () => {
 
     store = new SqliteTaskStore(TEST_DIR);
     runStore = new InMemoryRunStore();
-    const mockAdapter = new MockAdapter();
-    registerAdapter("mock", () => mockAdapter);
 
     orchestrator = new Orchestrator({
       workDir: TEST_DIR,
@@ -36,7 +33,7 @@ describe("Plan resume (Orchestrator)", () => {
 
     await orchestrator.initInteractive("test-project", {
       name: "test-team",
-      agents: [createTestAgent({ name: "dev", adapter: "mock" })],
+      agents: [createTestAgent({ name: "dev" })],
     });
   });
 

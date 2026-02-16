@@ -63,7 +63,7 @@ export function createTask(
     items: agents.map((a) => ({
       label: a.name,
       value: a.name,
-      description: a.role ?? a.adapter,
+      description: a.role ?? a.name,
     })),
     hint: "↑↓ navigate  Enter select  Esc cancel  d = set default",
     onSelect: (_idx, value) => {

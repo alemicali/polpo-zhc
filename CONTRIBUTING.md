@@ -53,7 +53,7 @@ pnpm run build    # Production build (verify 0 errors)
 openpolpo/
 ├── src/                    # Core TypeScript source
 │   ├── core/               # Orchestrator, types, events, hooks, state machine
-│   ├── adapters/           # Agent runtime adapters
+│   ├── adapters/           # Built-in engine
 │   ├── assessment/         # G-Eval assessor and scoring
 │   ├── quality/            # Quality controller, SLA monitor
 │   ├── scheduling/         # Cron parser, plan scheduler
@@ -162,7 +162,7 @@ Before making significant architectural changes, please open an issue to discuss
 - **Config is JSON** — `.polpo/polpo.json`, never YAML
 - **Events are the backbone** — the `TypedEmitter` drives everything: TUI, SSE, WebSocket, notifications, logging
 - **Managers are decomposed** — each concern (tasks, agents, approvals, escalation, quality, SLA, scheduling) has its own manager class with a shared `OrchestratorContext`
-- **Adapters are pluggable** — the built-in engine is one adapter among many
+- **Built-in engine** — Pi Agent provides the agentic runtime
 
 ## Release Process
 

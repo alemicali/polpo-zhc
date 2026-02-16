@@ -1,0 +1,207 @@
+---
+title: Git Tools
+description: 7 structured git tools with safe environment
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+7 structured git tools that provide safe, structured access to git operations. All commands run through `bashSafeEnv()` to strip API keys and secrets from the shell environment, preventing accidental leakage in git commits or logs.
+
+**Global limits:** `MAX_OUTPUT` = 30,000 characters, `GIT_TIMEOUT` = 30,000ms.
+
+Enable with `enableGit: true` in agent config:
+
+```json
+{
+  "name": "dev-agent",
+  "enableGit": true
+}
+```
+
+---
+
+## `git_status`
+
+Get the current working tree status including branch info and file counts.
+
+### Parameters
+
+None.
+
+### Returns
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `branch` | string | Current branch name |
+| `ahead` | number | Commits ahead of upstream |
+| `behind` | number | Commits behind upstream |
+| `staged` | number | Number of staged files |
+| `modified` | number | Number of modified (unstaged) files |
+| `untracked` | number | Number of untracked files |
+
+### Notes
+
+- Always safe to call — read-only operation
+- Use before `git_commit` to verify what will be committed
+
+---
+
+## `git_diff`
+
+Show diffs for staged changes, unstaged changes, or changes against a specific commit or branch.
+
+### Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `staged` | boolean | no | Show staged changes only (`--cached`) |
+| `file` | string | no | Limit diff to a specific file path |
+| `commit` | string | no | Diff against a specific commit or branch (e.g., `HEAD~3`, `main`) |
+| `stat_only` | boolean | no | Show only the diffstat summary (`--stat`) |
+
+### Returns
+
+Diff text output. Truncated at 30,000 characters if the diff is large.
+
+### Notes
+
+- With no parameters, shows unstaged changes in the working tree
+- `staged: true` shows what would be included in the next commit
+- `commit` can be a SHA, branch name, tag, or relative ref like `HEAD~3`
+- Combine `file` with other parameters to narrow the diff scope
+- Large diffs are truncated at 30k characters with a notice appended
+
+---
+
+## `git_log`
+
+Show commit history with optional filters.
+
+### Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `count` | number | no | Number of commits to show (default: 10) |
+| `oneline` | boolean | no | Use `--oneline` format (default: true) |
+| `file` | string | no | Show only commits that touch this file |
+| `author` | string | no | Filter by author name or email |
+| `since` | string | no | Show commits after this date (e.g., `2024-01-01`, `2 weeks ago`) |
+| `branch` | string | no | Show log for a specific branch |
+
+### Returns
+
+Formatted log output. Default `oneline` format shows one commit per line as `<sha> <message>`.
+
+### Notes
+
+- Default returns the last 10 commits in oneline format
+- Set `oneline: false` for full commit details (author, date, message body)
+- `since` accepts any date format git understands (ISO dates, relative dates)
+- Combine filters freely — e.g., `author` + `since` + `file`
+
+---
+
+## `git_commit`
+
+Stage files and create a commit.
+
+### Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `message` | string | **yes** | Commit message |
+| `files` | string[] | no | Specific files to stage via `git add` before committing |
+| `all` | boolean | no | Run `git add -A` before committing (stage all changes) |
+
+### Returns
+
+Confirmation with the new commit SHA and summary.
+
+### Notes
+
+- If `files` is provided, runs `git add <file>...` before committing
+- If `all: true`, runs `git add -A` to stage all changes (new, modified, deleted)
+- If neither `files` nor `all` is set, commits only what is already staged
+- Use `git_status` first to verify what will be committed
+- The commit runs through `bashSafeEnv()` — API keys are stripped from the environment
+
+---
+
+## `git_branch`
+
+List, create, switch, or delete branches.
+
+### Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `action` | `"list"` \| `"create"` \| `"switch"` \| `"delete"` | **yes** | Branch operation to perform |
+| `name` | string | no | Branch name (required for `create`, `switch`, `delete`) |
+| `from` | string | no | Base ref to create the branch from (only for `create`) |
+
+### Returns
+
+- **list**: All local branches, current branch marked with `*`
+- **create**: Confirmation of new branch creation (also switches to it)
+- **switch**: Confirmation of branch switch
+- **delete**: Confirmation of branch deletion
+
+### Notes
+
+- `create` also checks out the new branch automatically
+- `from` defaults to `HEAD` if not specified
+- `delete` uses `git branch -d` (safe delete) — refuses to delete unmerged branches
+- Use `git branch -D` via the `bash` tool if you need to force-delete an unmerged branch
+
+---
+
+## `git_stash`
+
+Push, pop, list, or drop stashed changes.
+
+### Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `action` | `"push"` \| `"pop"` \| `"list"` \| `"drop"` | **yes** | Stash operation to perform |
+| `message` | string | no | Descriptive message for `push` (used with `git stash push -m`) |
+
+### Returns
+
+- **push**: Confirmation that changes were stashed
+- **pop**: Confirmation that the latest stash was applied and dropped
+- **list**: All stash entries with index and message
+- **drop**: Confirmation that the latest stash was dropped
+
+### Notes
+
+- `push` stashes all tracked changes (staged and unstaged)
+- `message` is only used with `push` — ignored for other actions
+- `pop` applies the most recent stash (`stash@{0}`) and removes it from the stash list
+- `drop` removes the most recent stash without applying it
+
+---
+
+## `git_show`
+
+Show the details and changes of a specific commit.
+
+### Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `commit` | string | no | Commit reference to show (default: `HEAD`) |
+| `file` | string | no | Limit output to a specific file's changes in that commit |
+| `stat_only` | boolean | no | Show only the diffstat summary (`--stat`) |
+
+### Returns
+
+Full commit details (author, date, message) and the diff of changes introduced. Truncated at 30,000 characters.
+
+### Notes
+
+- Defaults to `HEAD` if no commit is specified
+- `commit` accepts a SHA, tag, branch name, or relative ref
+- Use `stat_only: true` for a quick overview of which files changed
+- Large commits are truncated at 30k characters with a notice appended
+- Combine `file` + `stat_only` to check if a specific file was modified in a commit

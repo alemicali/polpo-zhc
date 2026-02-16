@@ -5,7 +5,6 @@ import { Orchestrator } from "../../core/orchestrator.js";
 import { buildChatSystemPrompt } from "../../llm/prompts.js";
 import { querySDKText } from "../../llm/query.js";
 import type { SessionStore } from "../../core/session-store.js";
-import "../../adapters/claude-sdk.js";
 
 const SESSION_TIMEOUT_MS = 30 * 60 * 1000; // 30 min
 const MAX_HISTORY = 20;

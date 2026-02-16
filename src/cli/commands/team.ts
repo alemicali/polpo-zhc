@@ -2,7 +2,7 @@ import { Command } from "commander";
 import chalk from "chalk";
 import { resolve, join } from "node:path";
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
-import type { AgentConfig, AdapterType, PolpoConfig } from "../../core/types.js";
+import type { AgentConfig, PolpoConfig } from "../../core/types.js";
 
 /** Resolve .polpo/polpo.json path from a working directory. */
 function resolvePolpoJson(workDir: string): string {
@@ -52,7 +52,6 @@ export function registerTeamCommands(program: Command): void {
 
         for (const agent of agents) {
           console.log(`  ${chalk.cyan(agent.name)}`);
-          if (agent.adapter) console.log(chalk.dim(`    adapter: ${agent.adapter}`));
           if (agent.model) console.log(chalk.dim(`    model:   ${agent.model}`));
           if (agent.role) console.log(chalk.dim(`    role:    ${agent.role}`));
         }
@@ -68,7 +67,6 @@ export function registerTeamCommands(program: Command): void {
     .command("add <name>")
     .description("Add an agent to the team")
     .option("-d, --dir <path>", "Working directory", ".")
-    .option("-A, --adapter <type>", "External adapter (e.g. claude-sdk). Omit to use built-in engine.")
     .option("-m, --model <model>", "Model ID")
     .option("-r, --role <role>", "Agent role description")
     .action(async (name: string, opts) => {
@@ -76,7 +74,6 @@ export function registerTeamCommands(program: Command): void {
         const agent: AgentConfig = {
           name,
         };
-        if (opts.adapter) agent.adapter = opts.adapter as AdapterType;
         if (opts.model) agent.model = opts.model;
         if (opts.role) agent.role = opts.role;
 
@@ -90,7 +87,7 @@ export function registerTeamCommands(program: Command): void {
         config.team.agents.push(agent);
         writePolpoConfig(opts.dir, config);
 
-        console.log(chalk.green(`Added agent "${name}" (adapter: ${agent.adapter})`));
+        console.log(chalk.green(`Added agent "${name}"`));
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
         console.error(chalk.red(`Error: ${message}`));

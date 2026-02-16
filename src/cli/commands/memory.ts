@@ -5,7 +5,6 @@ import { tmpdir } from "node:os";
 import { writeFile, readFile, unlink } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
 import { Orchestrator } from "../../core/orchestrator.js";
-import "../../adapters/claude-sdk.js";
 
 async function initOrchestrator(configPath: string): Promise<Orchestrator> {
   const o = new Orchestrator(resolve(configPath));

@@ -88,7 +88,6 @@ interface PlanTaskDef {
 
 interface PlanTeamDef {
   name: string;
-  adapter?: string;
   role?: string;
   model?: string;
   skills?: string[];
@@ -595,9 +594,6 @@ export function PlanDetailPage() {
                           {agent.role && <p className="text-xs text-muted-foreground">{agent.role}</p>}
                         </div>
                         <div className="flex items-center gap-2 ml-auto">
-                          {agent.adapter && (
-                            <Badge variant="secondary" className="text-[10px]">{agent.adapter}</Badge>
-                          )}
                           {agent.model && (
                             <Badge variant="outline" className="text-[10px] font-mono">{agent.model}</Badge>
                           )}

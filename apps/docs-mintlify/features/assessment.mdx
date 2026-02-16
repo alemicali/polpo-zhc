@@ -220,13 +220,9 @@ Without the expectation judge, the agent would be repeatedly retried for failing
 
 When a task fails assessment, the expectation judge evaluates whether the **expectations themselves** might be wrong:
 
-```
-Task fails assessment
-    │
-    ├── Agent did the work correctly?
-    │   ├── YES, expectations are wrong → correct expectations, re-assess
-    │   └── NO, agent needs to fix → normal retry/fix flow
-```
+<Frame>
+  <img src="/expectation-judge.svg" alt="Expectation judge: task fails assessment → agent did work correctly? → YES: correct expectations → NO: normal retry/fix" />
+</Frame>
 
 The judge LLM receives the task description, the agent's output, the failed expectations, and assessment feedback — then determines whether the expectations are realistic.
 
@@ -265,13 +261,9 @@ The expectation judge is most useful when plans are AI-generated. Human-written 
 
 Quality gates are checkpoints defined in plan documents that control task execution flow. A gate sits between two phases of tasks: it waits for `afterTasks` to complete, evaluates pass/fail criteria, and then either unblocks `blocksTasks` or halts the plan.
 
-```
-Phase 1 Tasks                Quality Gate              Phase 2 Tasks
-┌──────────┐                ┌────────────┐            ┌──────────┐
-│ task-a    │──completed──▶ │ "review"   │──passed──▶ │ task-c   │
-│ task-b    │──completed──▶ │ minScore:4 │            │ task-d   │
-└──────────┘                └────────────┘            └──────────┘
-```
+<Frame>
+  <img src="/quality-gate.svg" alt="Quality gate flow: Phase 1 tasks complete → quality gate (review, minScore:4) → passed → Phase 2 tasks unblocked" />
+</Frame>
 
 ### Gate Properties
 
@@ -366,16 +358,9 @@ The SLAMonitor tracks deadlines on tasks and plans, emitting warning and violati
 
 The monitor runs on the orchestrator tick loop, checking all active tasks and plans with deadlines at a configurable interval (default: 30 seconds).
 
-```
-Task created (with deadline)
-     │
-     ├── 80% of budget elapsed → sla:warning
-     │
-     ├── Deadline passed → sla:violated
-     │                     (optionally force-fail)
-     │
-     └── Task completes before deadline → sla:met
-```
+<Frame>
+  <img src="/sla-monitor.svg" alt="SLA monitor: task with deadline → 80% elapsed: warning → deadline passed: violated → completes in time: met" />
+</Frame>
 
 ### SLA Configuration
 

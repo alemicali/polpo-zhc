@@ -72,7 +72,6 @@ export interface UpdatePlanRequest {
 
 export interface AddAgentRequest {
   name: string;
-  adapter?: string;
   role?: string;
   model?: string;
   allowedTools?: string[];

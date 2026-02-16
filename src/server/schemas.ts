@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "@hono/zod-openapi";
 import { ApiHttpError } from "./middleware/error.js";
 
 // ── Outcome schemas ───────────────────────────────────────────────────
@@ -87,7 +87,6 @@ export const UpdatePlanSchema = z.object({
 
 export const AddAgentSchema = z.object({
   name: z.string().min(1),
-  adapter: z.string().min(1).optional(),
   role: z.string().optional(),
   model: z.string().optional(),
   allowedTools: z.array(z.string()).optional(),

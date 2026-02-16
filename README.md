@@ -32,7 +32,7 @@
 
 OpenPolpo coordinates teams of AI agents working together on complex software tasks. Define plans in JSON, assign tasks to specialized agents, and let Polpo handle orchestration, assessment, approval gates, notifications, and recovery.
 
-When no adapter is specified, Polpo uses its **built-in engine** (Pi Agent) — a full agentic loop with 7 coding tools, 18+ LLM providers, and MCP support. The `claude-sdk` adapter integrates with the Claude Agent SDK.
+Polpo includes a **built-in engine** (Pi Agent) — a full agentic loop with 7 coding tools, 18+ LLM providers, and MCP support.
 
 ## Quick Start
 
@@ -57,7 +57,6 @@ Creates a `.polpo/` directory with a `polpo.json` config file.
   "agents": [
     {
       "name": "backend-dev",
-      "adapter": "claude-sdk",
       "description": "Backend developer specializing in Node.js and databases"
     },
     {
@@ -85,8 +84,6 @@ Creates a `.polpo/` directory with a `polpo.json` config file.
   ]
 }
 ```
-
-When `adapter` is omitted, the built-in engine (Pi Agent) is used automatically.
 
 ### 4. Run
 
@@ -126,7 +123,6 @@ polpo serve        # HTTP API server (default: 127.0.0.1:3000)
 
 ### Developer Experience
 
-- **Multiple adapters** — built-in engine (Pi Agent), Claude SDK, and generic CLI adapter
 - **Multiple store backends** — File (default), JSON, and SQLite for tasks, runs, sessions, and logs
 - **MCP support** — connect external tool servers to any agent with automatic tool bridging
 - **Filesystem sandbox** — restrict agent file access via `allowedPaths`
@@ -152,8 +148,8 @@ polpo serve        # HTTP API server (default: 127.0.0.1:3000)
        │ (detached)│ │ (detached)│ │ (detached)│
        └─────┬────┘ └─────┬────┘ └─────┬────┘
              v             v             v
-       Built-in       Claude SDK    Built-in
-        Engine          Adapter      Engine
+        Built-in      Built-in      Built-in
+         Engine         Engine        Engine
 ```
 
 The orchestrator runs a supervisor loop every 5 seconds (`POLL_INTERVAL = 5000`), assigning pending tasks to agents, monitoring health, and driving the assessment pipeline.
@@ -181,7 +177,7 @@ openpolpo/
 ├── src/
 │   ├── core/               # Orchestrator, config, types, events, hooks, state machine
 │   │                       #   approval manager, escalation, task/plan managers
-│   ├── adapters/           # Built-in engine (Pi Agent) + Claude SDK adapter
+│   ├── adapters/           # Built-in engine (Pi Agent)
 │   ├── assessment/         # G-Eval assessor, scoring dimensions, fix phase
 │   ├── quality/            # Quality controller, SLA monitor
 │   ├── scheduling/         # Cron parser, plan scheduler
@@ -209,7 +205,7 @@ Full documentation is available at [openpolpo.dev](https://openpolpo.dev), inclu
 
 - Configuration reference (`polpo.json` schema)
 - API endpoint documentation
-- Adapter guides (built-in engine, Claude SDK)
+- Built-in engine guide
 - Assessment and quality pipeline details
 - Notification and escalation setup
 - Hook and event reference

@@ -3,7 +3,6 @@ import chalk from "chalk";
 import { resolve } from "node:path";
 import { Orchestrator } from "../../core/orchestrator.js";
 import { parseConfig } from "../../core/config.js";
-import "../../adapters/claude-sdk.js";
 
 async function initOrchestrator(configPath: string): Promise<Orchestrator> {
   const o = new Orchestrator(resolve(configPath));
@@ -68,10 +67,6 @@ export function registerConfigCommands(program: Command): void {
           6,
           ...config.team.agents.map((a) => a.name.length)
         );
-        const adapterWidth = Math.max(
-          8,
-          ...config.team.agents.map((a) => (a.adapter ?? "engine").length)
-        );
         const modelWidth = Math.max(
           6,
           ...config.team.agents.map((a) => (a.model ?? "-").length)
@@ -79,15 +74,14 @@ export function registerConfigCommands(program: Command): void {
 
         console.log(
           chalk.dim(
-            `  ${"NAME".padEnd(nameWidth)}  ${"ADAPTER".padEnd(adapterWidth)}  ${"MODEL".padEnd(modelWidth)}  ROLE`
+            `  ${"NAME".padEnd(nameWidth)}  ${"MODEL".padEnd(modelWidth)}  ROLE`
           )
         );
         for (const agent of config.team.agents) {
           const name = agent.name.padEnd(nameWidth);
-          const adapter = (agent.adapter ?? "engine").padEnd(adapterWidth);
           const model = (agent.model ?? "-").padEnd(modelWidth);
           const role = agent.role ?? "-";
-          console.log(`  ${chalk.cyan(name)}  ${adapter}  ${chalk.dim(model)}  ${chalk.dim(role)}`);
+          console.log(`  ${chalk.cyan(name)}  ${chalk.dim(model)}  ${chalk.dim(role)}`);
         }
 
         console.log();

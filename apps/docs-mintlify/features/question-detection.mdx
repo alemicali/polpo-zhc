@@ -68,28 +68,17 @@ After `maxQuestionRounds`, the task continues without further Q&A to prevent inf
 
 During Q&A, the task phase is `clarification`:
 
-```
-execution → clarification → execution → review
-```
+<Frame>
+  <img src="/question-phases.svg" alt="Question detection phase flow: execution → clarification → execution → review" />
+</Frame>
 
 The `questionRounds` counter on the task tracks how many Q&A rounds have occurred.
 
 ## Example Flow
 
-```
-Agent output: "Should I use JWT or session-based authentication?"
-
-task:question → { question: "Should I use JWT or session-based auth?" }
-
-Polpo generates answer using project context:
-  "Use JWT authentication. The project uses a stateless API architecture
-   (see memory.md). Implement with jsonwebtoken package, store tokens
-   in httpOnly cookies, and use a 1-hour expiry."
-
-task:answered → { question: "...", answer: "Use JWT authentication..." }
-
-Agent receives answer and continues execution.
-```
+<Frame>
+  <img src="/question-example.svg" alt="Question detection example: agent asks about JWT vs sessions, Polpo generates contextual answer, agent continues" />
+</Frame>
 
 <Note>
 Question detection only runs during the `execution` and `fix` phases. During `review`, agent output is treated as task completion, not a question.

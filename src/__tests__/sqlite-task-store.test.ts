@@ -177,7 +177,7 @@ describe("SqliteTaskStore", () => {
 
     it("persists team as JSON", () => {
       const store = makeStore();
-      const team = { name: "test-team", agents: [{ name: "dev", adapter: "claude-sdk", role: "dev" }] };
+      const team = { name: "test-team", agents: [{ name: "dev", role: "dev" }] };
       store.setState({ team });
       const state = store.getState();
       expect(state.team.name).toBe("test-team");
@@ -231,7 +231,7 @@ describe("SqliteTaskStore", () => {
     it("auto-migrates from state.json on first open", () => {
       const jsonState: PolpoState = {
         project: "migrated-project",
-        team: { name: "old-team", agents: [{ name: "dev", adapter: "generic" }] },
+        team: { name: "old-team", agents: [{ name: "dev" }] },
         tasks: [{
           id: "old-task-1",
           title: "Migrated task",

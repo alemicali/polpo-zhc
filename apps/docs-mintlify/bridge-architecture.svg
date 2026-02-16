@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 460 220" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="8" markerHeight="6" orient="auto-start-reverse">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#aaa"/>
+    </marker>
+  </defs>
+
+  <!-- BridgeManager -->
+  <rect x="130" y="20" width="200" height="36" rx="5" fill="#f8f8f8" stroke="#888" stroke-width="1.3"/>
+  <text x="230" y="43" font-size="12" fill="#333" text-anchor="middle" font-weight="500">BridgeManager</text>
+  <text x="230" y="16" font-size="9" fill="#aaa" text-anchor="middle" font-style="italic">facade</text>
+
+  <!-- Branches -->
+  <line x1="170" y1="56" x2="110" y2="90" stroke="#aaa" stroke-width="1.2" marker-end="url(#arrow)"/>
+  <line x1="290" y1="56" x2="350" y2="90" stroke="#aaa" stroke-width="1.2" marker-end="url(#arrow)"/>
+
+  <!-- SessionWatcher -->
+  <rect x="20" y="90" width="180" height="36" rx="5" fill="#f8f8f8" stroke="#888" stroke-width="1.2"/>
+  <text x="110" y="113" font-size="11" fill="#333" text-anchor="middle" font-weight="500">SessionWatcher</text>
+
+  <rect x="20" y="140" width="180" height="52" rx="4" fill="none" stroke="#ccc" stroke-width="1" stroke-dasharray="4 2"/>
+  <text x="110" y="158" font-size="9" fill="#999" text-anchor="middle">Polls filesystem for transcripts</text>
+  <text x="110" y="172" font-size="9" fill="#bbb" text-anchor="middle">~/.claude/projects/&lt;cwd&gt;/*.jsonl</text>
+  <line x1="110" y1="126" x2="110" y2="140" stroke="#ccc" stroke-width="1" marker-end="url(#arrow)"/>
+
+  <!-- SessionTracker -->
+  <rect x="260" y="90" width="180" height="36" rx="5" fill="#f8f8f8" stroke="#888" stroke-width="1.2"/>
+  <text x="350" y="113" font-size="11" fill="#333" text-anchor="middle" font-weight="500">SessionTracker</text>
+
+  <rect x="260" y="140" width="180" height="52" rx="4" fill="none" stroke="#ccc" stroke-width="1" stroke-dasharray="4 2"/>
+  <text x="350" y="158" font-size="9" fill="#999" text-anchor="middle">Parses transcripts, manages</text>
+  <text x="350" y="172" font-size="9" fill="#999" text-anchor="middle">lifecycle: active → idle → completed</text>
+  <line x1="350" y1="126" x2="350" y2="140" stroke="#ccc" stroke-width="1" marker-end="url(#arrow)"/>
+</svg>

@@ -1,0 +1,76 @@
+---
+title: Audio Tools
+description: 2 tools for speech-to-text and text-to-speech
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Transcribe audio to text (STT) and generate speech from text (TTS). Enable with `enableAudio: true` in agent config.
+
+<Aside>
+Maximum audio file size: **25 MB** (`MAX_AUDIO_SIZE`). Default timeout: **120 seconds**. Zero vendor SDK dependencies — all provider APIs are called via direct `fetch`.
+</Aside>
+
+**Providers:**
+- **Speech-to-text** — OpenAI Whisper (default), Deepgram Nova
+- **Text-to-speech** — OpenAI (default), ElevenLabs
+
+**Required environment variables** (depending on provider): `OPENAI_API_KEY`, `DEEPGRAM_API_KEY`, or `ELEVENLABS_API_KEY`.
+
+---
+
+## `audio_transcribe` — Speech to Text
+
+Transcribe an audio file to text using a speech-to-text provider.
+
+### Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `path` | string | yes | Path to the audio file |
+| `provider` | enum: `openai` \| `deepgram` | no | STT provider (default `openai`) |
+| `model` | string | no | Model name. OpenAI: `whisper-1` (default). Deepgram: `nova-3` (default) |
+| `language` | string | no | Language hint as ISO 639-1 code (e.g. `en`, `es`, `fr`) |
+| `prompt` | string | no | Prompt to guide transcription style (OpenAI only) |
+
+### Returns
+
+Transcribed text string.
+
+### Notes
+
+- Supported audio formats: **mp3**, **wav**, **flac**, **ogg**, **m4a**, **webm**
+- `prompt` is only supported by the OpenAI provider — it is ignored for Deepgram
+- `language` helps improve accuracy for non-English audio
+
+---
+
+## `audio_speak` — Text to Speech
+
+Generate an audio file from text using a text-to-speech provider.
+
+### Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `text` | string | yes | Text to convert to speech |
+| `path` | string | yes | Destination file path for the audio output |
+| `provider` | enum: `openai` \| `elevenlabs` | no | TTS provider (default `openai`) |
+| `model` | string | no | Model name (provider-specific defaults apply) |
+| `voice` | string | no | Voice selection (see below for options) |
+| `speed` | number | no | Playback speed, `0.25`–`4.0` (OpenAI only) |
+| `instructions` | string | no | Style instructions for the voice (`gpt-4o-mini-tts` model only) |
+
+### Returns
+
+Confirmation with the output file path, duration, and file size.
+
+### Notes
+
+- **OpenAI voices**: `alloy`, `echo`, `fable`, `onyx`, `nova`, `shimmer` (default `alloy`)
+- **ElevenLabs voices**: voice ID string (default `Rachel`)
+- **OpenAI output formats**: mp3, wav, flac, opus, aac, pcm
+- **ElevenLabs output formats**: mp3, wav, flac
+- Output format is determined by the file extension of `path`
+- `speed` is only supported by OpenAI — it is ignored for ElevenLabs
+- `instructions` is only supported with the `gpt-4o-mini-tts` model

@@ -54,7 +54,7 @@ The chat endpoint auto-resumes the latest session if it's less than 30 minutes o
 
 ## Agent Transcripts
 
-When Polpo spawns an agent, some adapters (like the Claude SDK adapter) create a **session transcript** — a JSONL file recording every message, tool call, and result in the agent's conversation.
+When Polpo spawns an agent, it creates a **session transcript** — a JSONL file recording every message, tool call, and result in the agent's conversation.
 
 ### Session Reader
 
@@ -77,7 +77,7 @@ Polpo can read agent transcripts to extract structured summaries:
 Each `AgentHandle` can carry a `sessionId`. When a task is running, you can use the `/inspect` TUI command or the [Bridge System](/features/bridge) to access the agent's transcript in real-time.
 
 <Tip>
-Agent transcripts are only available for adapters that support session persistence (like the Claude SDK adapter with `persistSession: true`). The generic adapter and native adapter don't create session transcripts — they capture stdout/stderr directly.
+Agent transcripts are recorded automatically for all agents. Full JSONL logs are written to `.polpo/logs/`.
 </Tip>
 
 ### Pruning
@@ -149,11 +149,11 @@ While an agent is working on a task, Polpo tracks its activity in real-time. Thi
 
 ### How Activity Flows
 
-```
-Agent (in runner) → polls every 1.5s → RunStore → orchestrator reads on tick → agent:activity event → TUI / Web UI
-```
+<Frame>
+  <img src="/activity-flow.svg" alt="Agent activity data flow: agent in runner → RunStore → orchestrator → agent:activity event → TUI / Web UI" />
+</Frame>
 
-1. The **runner** polls the adapter for activity every 1500ms
+1. The **runner** polls the engine for activity every 1500ms
 2. Changes are written to the **RunStore** (so the orchestrator can read them)
 3. The **orchestrator** reads activity on each tick (every 5s) and emits `agent:activity` events
 4. The **TUI** and **Web UI** consume these events for live updates
@@ -189,7 +189,7 @@ Subsequent lines are events:
 |------|-------------|
 | `_run` (header) | Run metadata: runId, taskId, agentName, startedAt, pid |
 | `activity` | Activity snapshot (deduplicated — only written when data changes) |
-| Transcript entries | Raw adapter messages (assistant text, tool_use, tool_result) |
+| Transcript entries | Raw engine messages (assistant text, tool_use, tool_result) |
 | Custom events | Lifecycle events logged via `logEvent()` |
 
 ### Viewing Run Logs

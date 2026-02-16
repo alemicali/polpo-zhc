@@ -21,10 +21,6 @@
     "./assessment": {
       "types": "./dist/assessment/index.d.ts",
       "import": "./dist/assessment/index.js"
-    },
-    "./adapters": {
-      "types": "./dist/adapters/index.d.ts",
-      "import": "./dist/adapters/index.js"
     }
   },
   "bin": {
@@ -41,7 +37,8 @@
     "dev": "tsc --watch",
     "dev:serve": "tsx --watch src/cli/index.ts serve",
     "start": "node dist/cli/index.js",
-    "test": "vitest"
+    "test": "vitest",
+    "generate:openapi": "node -e \"const{createApp}=require('./dist/server/app.js');const{ProjectManager}=require('./dist/server/project-manager.js');const pm=new ProjectManager();const app=createApp(pm);const fs=require('fs');app.fetch(new Request('http://localhost/api/v1/openapi.json')).then(r=>r.json()).then(j=>{fs.writeFileSync('apps/docs-mintlify/openapi.json',JSON.stringify(j,null,2));console.log('Generated openapi.json with',Object.keys(j.paths).length,'paths')})\""
   },
   "keywords": [
     "ai",
@@ -66,6 +63,7 @@
   },
   "dependencies": {
     "@hono/node-server": "^1.19.9",
+    "@hono/zod-openapi": "^1.2.2",
     "@mariozechner/pi-agent-core": "^0.52.12",
     "@mariozechner/pi-ai": "^0.52.12",
     "@modelcontextprotocol/sdk": "^1.26.0",
@@ -91,7 +89,6 @@
     "zustand": "^5.0.11"
   },
   "optionalDependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.2.34",
     "better-sqlite3": "^12.6.2"
   },
   "devDependencies": {

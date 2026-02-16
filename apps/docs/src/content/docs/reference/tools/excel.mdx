@@ -1,0 +1,113 @@
+---
+title: Excel & CSV Tools
+description: 4 tools to read, write, and query spreadsheets
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Read, write, and query spreadsheet files in CSV, TSV, and XLSX formats. Enable with `enableExcel: true` in agent config.
+
+<Aside>
+Limits: **200 rows** max output by default (`MAX_ROWS_OUTPUT`), **500 characters** max per cell (`MAX_CELL_LENGTH`). Powered by **exceljs**.
+</Aside>
+
+---
+
+## `excel_read` — Read Spreadsheet
+
+Read data from a spreadsheet file.
+
+### Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `path` | string | yes | Path to the file (`.csv`, `.tsv`, or `.xlsx`) |
+| `sheet` | string \| number | no | Sheet name or index (XLSX only) |
+| `range` | string | no | Cell range to read (e.g. `A1:D10`) |
+| `headers` | boolean | no | Treat the first row as headers (default `true` for CSV/TSV) |
+| `max_rows` | number | no | Maximum number of rows to return (default `200`) |
+
+### Returns
+
+Array of row objects (when headers are present) or array of arrays. Includes metadata about total row count if truncated.
+
+### Notes
+
+- Supports `.csv`, `.tsv`, and `.xlsx` file formats
+- Cell values longer than 500 characters are truncated
+- When `range` is specified, only cells within that range are returned
+
+---
+
+## `excel_write` — Write Spreadsheet
+
+Create or overwrite a spreadsheet file with the given data.
+
+### Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `path` | string | yes | Destination file path (`.csv`, `.tsv`, or `.xlsx`) |
+| `headers` | string[] | yes | Column header names |
+| `rows` | array of arrays | yes | Row data — each inner array corresponds to one row |
+| `sheet_name` | string | no | Name for the worksheet (default `Sheet1`, XLSX only) |
+
+### Returns
+
+Confirmation with the file path and row/column counts.
+
+### Notes
+
+- Columns are **auto-sized** to fit content
+- Supports `.csv`, `.tsv`, and `.xlsx` output formats
+- File format is determined by the file extension in `path`
+
+---
+
+## `excel_query` — Query Spreadsheet
+
+Filter, sort, and select columns from a spreadsheet without loading the entire file.
+
+### Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `path` | string | yes | Path to the spreadsheet file |
+| `sheet` | string \| number | no | Sheet name or index (XLSX only) |
+| `filter_column` | string | no | Column name to filter on |
+| `filter_value` | string | no | Value to match in the filter column |
+| `sort_column` | string | no | Column name to sort by |
+| `sort_desc` | boolean | no | Sort in descending order |
+| `columns` | string[] | no | Subset of columns to include in the output |
+| `limit` | number | no | Maximum rows to return (default `200`) |
+
+### Returns
+
+Filtered and sorted rows matching the query criteria.
+
+### Notes
+
+- Filtering is **case-insensitive substring** matching
+- Sorting is **numeric-aware** — numeric strings are compared as numbers, not lexicographically
+- Combine `filter_column` + `filter_value` with `sort_column` for powerful queries
+
+---
+
+## `excel_info` — Spreadsheet Info
+
+Get metadata about a spreadsheet file without reading its contents.
+
+### Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `path` | string | yes | Path to the spreadsheet file |
+
+### Returns
+
+Object with sheet names, row counts, column counts, and sheet visibility for each worksheet.
+
+### Notes
+
+- Works with `.csv`, `.tsv`, and `.xlsx` files
+- For CSV/TSV files, returns a single sheet entry with row and column counts

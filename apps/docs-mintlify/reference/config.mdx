@@ -24,7 +24,6 @@ description: "Complete field-by-field reference for .polpo/polpo.json"
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `name` | string | — | **Required.** Unique agent identifier |
-| `adapter` | string | — | Adapter type (e.g. `"claude-sdk"`). When omitted, the built-in engine is used |
 | `role` | string | — | Agent's role description |
 | `model` | string | — | LLM model. Format: `provider:model` (e.g. `"anthropic:claude-sonnet-4-5-20250929"`) or bare model ID |
 | `allowedTools` | string[] | — | Allowed tool names |
@@ -127,8 +126,7 @@ Stored in `.polpo/config.json` — separate from `polpo.json`, this stores proje
 | Field | Type | Description |
 |-------|------|-------------|
 | `project` | string | Project name |
-| `judge` | string | Adapter for assessment LLM |
-| `agent` | string | Default adapter for new agents |
+| `judge` | string | Model for assessment LLM |
 | `model` | string | Default model |
 
 ## Providers
@@ -217,8 +215,6 @@ See [Providers & Models](/concepts/providers-and-models) for supported providers
     },
     {
       "name": "script-runner",
-      "adapter": "generic",
-      "command": "python3 scripts/run.py {taskFile}",
       "role": "Script executor"
     }
   ],

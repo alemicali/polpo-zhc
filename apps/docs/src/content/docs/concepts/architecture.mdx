@@ -9,52 +9,24 @@ import { Aside } from '@astrojs/starlight/components';
 
 Polpo follows a **supervisor architecture**: a central orchestrator manages agent lifecycles, task assignment, assessment, and error recovery. Agents are isolated processes that know nothing about each other — Polpo handles all coordination.
 
-```
-┌──────────────────────────────────────────────────────────────┐
-│                        Orchestrator                          │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌────────────┐  │
-│  │ Task     │  │ Assessor │  │ Deadlock │  │ Approval   │  │
-│  │ Registry │  │ (G-Eval) │  │ Resolver │  │ Manager    │  │
-│  └──────────┘  └──────────┘  └──────────┘  └────────────┘  │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌────────────┐  │
-│  │ RunStore │  │ Memory   │  │ Events   │  │ Escalation │  │
-│  │ (File)   │  │ Store    │  │ Emitter  │  │ Manager    │  │
-│  └──────────┘  └──────────┘  └──────────┘  └────────────┘  │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌────────────┐  │
-│  │ Quality  │  │ SLA      │  │Scheduler │  │Notification│  │
-│  │Controller│  │ Monitor  │  │          │  │ Router     │  │
-│  └──────────┘  └──────────┘  └──────────┘  └────────────┘  │
-└──────────┬──────────┬──────────┬─────────────────────────────┘
-           │          │          │
-     ┌─────┴──┐  ┌───┴────┐  ┌─┴──────┐
-     │Runner 1│  │Runner 2│  │Runner N│
-     │(detach)│  │(detach)│  │(detach)│
-     └───┬────┘  └───┬────┘  └───┬────┘
-         │           │           │
-      ┌───┴───┐  ┌───┴───┐  ┌───┴───┐
-      │Agent A│  │Agent B│  │Agent C│
-      │       │  │       │  │       │
-      └───────┘  └───────┘  └───────┘
-```
+The system is composed of four layers:
 
-## Adapter Pattern
+1. **Interface layer** — CLI, TUI, Web UI, and REST API provide different ways to interact with the orchestrator
+2. **Orchestrator core** — the supervisor loop, task registry, plan executor, and all the managers (assessment, approvals, escalation, scheduling, etc.)
+3. **Runner layer** — detached subprocesses that host individual agents, communicating with the orchestrator via the file-based RunStore
+4. **Agent layer** — the actual AI agents (Claude, GPT, Codex, etc.) powered by the built-in engine
 
-Polpo uses an **adapter pattern** to support any agent type. Each adapter implements a simple interface:
+![Polpo architecture diagram showing the four layers: Interface, Orchestrator Core, Detached Runners, and Persistence](../../../assets/architecture.svg)
 
-```typescript
-interface AgentAdapter {
-  readonly name: string;
-  spawn(agent: AgentConfig, task: Task, cwd: string): AgentHandle;
-}
-```
+## Built-in Engine
 
-The `spawn()` method returns an `AgentHandle` that the orchestrator uses to monitor the agent:
+Polpo uses a built-in multi-provider LLM engine to run all agents. The engine supports 18+ providers (OpenAI, Anthropic, Google, Groq, Mistral, Ollama, etc.) and manages agent lifecycles through an `AgentHandle`:
 
 ```typescript
 interface AgentHandle {
   agentName: string;
   taskId: string;
-  pid: number;              // real process ID (0 if not applicable)
+  pid: number;              // real process ID
   sessionId?: string;       // optional session ID for transcript access
   activity: AgentActivity;  // live activity data (tools, files, progress)
   done: Promise<TaskResult>; // resolves when agent finishes
@@ -62,27 +34,6 @@ interface AgentHandle {
   kill(): void;
 }
 ```
-
-### Built-in Adapters
-
-Polpo ships with adapters for different agent types. Each adapter wraps a different execution model — from direct LLM SDK calls to arbitrary CLI commands. See [Adapters Reference](/reference/adapters/) for the full list and configuration options.
-
-### Registering Custom Adapters
-
-Adapters self-register via side-effect imports:
-
-```typescript
-import { registerAdapter } from "./adapter-registry.js";
-
-class MyAdapter implements AgentAdapter {
-  readonly name = "my-agent";
-  spawn(agent, task, cwd) { /* ... */ }
-}
-
-registerAdapter("my-agent", new MyAdapter());
-```
-
-See [Custom Adapter](/reference/custom-adapter/) for a full walkthrough.
 
 ## Supervisor Loop
 
@@ -103,20 +54,7 @@ The orchestrator runs a **5-second tick loop** that:
 
 Each agent runs as a **detached subprocess** (`runner.ts`), completely independent of the orchestrator process:
 
-```
-Orchestrator                    Runner (detached)
-     │                               │
-     ├── writes RunnerConfig ──────► │
-     ├── spawns runner process       │
-     │                               ├── imports adapter
-     │                               ├── spawns agent
-     │                               ├── polls activity
-     │                               ├── writes to RunStore
-     │                               └── exits when done
-     │
-     ├── reads RunStore ◄────────────┘
-     └── processes result
-```
+![Detached runner communication flow](../../../assets/detached-runners.svg)
 
 This architecture means:
 - **Crash resilience**: If the orchestrator crashes, runners keep working

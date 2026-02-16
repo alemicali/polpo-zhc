@@ -1,29 +1,57 @@
-import { Hono } from "hono";
+import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { join } from "node:path";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import type { ServerEnv } from "../app.js";
-import { AddAgentSchema, RenameTeamSchema, parseBody } from "../schemas.js";
+import { AddAgentSchema, RenameTeamSchema } from "../schemas.js";
 
 /**
  * Agent/team management routes.
  */
-export function agentRoutes(): Hono<ServerEnv> {
-  const app = new Hono<ServerEnv>();
+export function agentRoutes(): OpenAPIHono<ServerEnv> {
+  const app = new OpenAPIHono<ServerEnv>();
 
   // GET /agents — list agents
-  app.get("/", (c) => {
+  const listAgentsRoute = createRoute({
+    method: "get",
+    path: "/",
+    tags: ["Agents"],
+    summary: "List agents",
+    responses: {
+      200: {
+        content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.array(z.any()) }) } },
+        description: "List of agents",
+      },
+    },
+  });
+
+  app.openapi(listAgentsRoute, (c) => {
     const orchestrator = c.get("orchestrator");
     return c.json({ ok: true, data: orchestrator.getAgents() });
   });
 
   // POST /agents — add agent
-  app.post("/", async (c) => {
+  const addAgentRoute = createRoute({
+    method: "post",
+    path: "/",
+    tags: ["Agents"],
+    summary: "Add an agent",
+    request: {
+      body: { content: { "application/json": { schema: AddAgentSchema } } },
+    },
+    responses: {
+      201: {
+        content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.object({ added: z.boolean() }) }) } },
+        description: "Agent added",
+      },
+    },
+  });
+
+  app.openapi(addAgentRoute, (c) => {
     const orchestrator = c.get("orchestrator");
-    const body = parseBody(AddAgentSchema, await c.req.json());
+    const body = c.req.valid("json");
 
     orchestrator.addAgent({
       name: body.name,
-      adapter: body.adapter,
       role: body.role,
       model: body.model,
       allowedTools: body.allowedTools,
@@ -47,40 +75,119 @@ export function agentRoutes(): Hono<ServerEnv> {
   });
 
   // DELETE /agents/:name — remove agent
-  app.delete("/:name", (c) => {
+  const deleteAgentRoute = createRoute({
+    method: "delete",
+    path: "/{name}",
+    tags: ["Agents"],
+    summary: "Remove an agent",
+    request: {
+      params: z.object({ name: z.string() }),
+    },
+    responses: {
+      200: {
+        content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.object({ removed: z.boolean() }) }) } },
+        description: "Agent removed",
+      },
+      404: {
+        content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string(), code: z.string() }) } },
+        description: "Agent not found",
+      },
+    },
+  });
+
+  app.openapi(deleteAgentRoute, (c) => {
     const orchestrator = c.get("orchestrator");
-    const removed = orchestrator.removeAgent(c.req.param("name"));
+    const { name } = c.req.valid("param");
+    const removed = orchestrator.removeAgent(name);
     if (!removed) {
       return c.json({ ok: false, error: "Agent not found", code: "NOT_FOUND" }, 404);
     }
-    return c.json({ ok: true, data: { removed: true } });
+    return c.json({ ok: true, data: { removed: true } }, 200);
   });
 
   // GET /team — get team info
-  app.get("/team", (c) => {
+  const getTeamRoute = createRoute({
+    method: "get",
+    path: "/team",
+    tags: ["Agents"],
+    summary: "Get team info",
+    responses: {
+      200: {
+        content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.any() }) } },
+        description: "Team info",
+      },
+    },
+  });
+
+  app.openapi(getTeamRoute, (c) => {
     const orchestrator = c.get("orchestrator");
     return c.json({ ok: true, data: orchestrator.getTeam() });
   });
 
   // PATCH /team — rename team
-  app.patch("/team", async (c) => {
+  const renameTeamRoute = createRoute({
+    method: "patch",
+    path: "/team",
+    tags: ["Agents"],
+    summary: "Rename team",
+    request: {
+      body: { content: { "application/json": { schema: RenameTeamSchema } } },
+    },
+    responses: {
+      200: {
+        content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.any() }) } },
+        description: "Team renamed",
+      },
+    },
+  });
+
+  app.openapi(renameTeamRoute, (c) => {
     const orchestrator = c.get("orchestrator");
-    const body = parseBody(RenameTeamSchema, await c.req.json());
+    const body = c.req.valid("json");
     orchestrator.renameTeam(body.name);
     return c.json({ ok: true, data: orchestrator.getTeam() });
   });
 
   // GET /processes — active agent processes
-  app.get("/processes", (c) => {
+  const listProcessesRoute = createRoute({
+    method: "get",
+    path: "/processes",
+    tags: ["Agents"],
+    summary: "List active agent processes",
+    responses: {
+      200: {
+        content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.array(z.any()) }) } },
+        description: "Active processes",
+      },
+    },
+  });
+
+  app.openapi(listProcessesRoute, (c) => {
     const orchestrator = c.get("orchestrator");
     const state = orchestrator.getStore().getState();
     return c.json({ ok: true, data: state.processes || [] });
   });
 
   // GET /processes/:taskId/activity — activity history for a task (from run JSONL)
-  app.get("/processes/:taskId/activity", (c) => {
+  const getActivityRoute = createRoute({
+    method: "get",
+    path: "/processes/{taskId}/activity",
+    tags: ["Agents"],
+    summary: "Get activity history for a task",
+    request: {
+      params: z.object({ taskId: z.string() }),
+    },
+    responses: {
+      200: {
+        content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.array(z.any()) }) } },
+        description: "Activity entries",
+      },
+    },
+  });
+
+  app.openapi(getActivityRoute, (c) => {
     const orchestrator = c.get("orchestrator");
-    const taskId = c.req.param("taskId");
+    const { taskId } = c.req.valid("param");
     const logsDir = join(orchestrator.getPolpoDir(), "logs");
 
     if (!existsSync(logsDir)) {
@@ -128,14 +235,34 @@ export function agentRoutes(): Hono<ServerEnv> {
   });
 
   // GET /agents/:name — single agent detail (registered after static routes to avoid conflicts)
-  app.get("/:name", (c) => {
+  const getAgentRoute = createRoute({
+    method: "get",
+    path: "/{name}",
+    tags: ["Agents"],
+    summary: "Get single agent detail",
+    request: {
+      params: z.object({ name: z.string() }),
+    },
+    responses: {
+      200: {
+        content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.any() }) } },
+        description: "Agent detail",
+      },
+      404: {
+        content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string(), code: z.string() }) } },
+        description: "Agent not found",
+      },
+    },
+  });
+
+  app.openapi(getAgentRoute, (c) => {
     const orchestrator = c.get("orchestrator");
-    const name = c.req.param("name");
+    const { name } = c.req.valid("param");
     const agent = orchestrator.getAgents().find(a => a.name === name);
     if (!agent) {
       return c.json({ ok: false, error: "Agent not found", code: "NOT_FOUND" }, 404);
     }
-    return c.json({ ok: true, data: agent });
+    return c.json({ ok: true, data: agent }, 200);
   });
 
   return app;

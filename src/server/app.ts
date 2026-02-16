@@ -1,4 +1,4 @@
-import { Hono } from "hono";
+import { OpenAPIHono } from "@hono/zod-openapi";
 import { cors } from "hono/cors";
 import type { Orchestrator } from "../core/orchestrator.js";
 import type { ProjectManager } from "./project-manager.js";
@@ -33,8 +33,8 @@ export interface AppOptions {
 /**
  * Create the Hono app with all routes and middleware.
  */
-export function createApp(pm: ProjectManager, opts?: AppOptions): Hono {
-  const app = new Hono();
+export function createApp(pm: ProjectManager, opts?: AppOptions): OpenAPIHono {
+  const app = new OpenAPIHono();
 
   // Global middleware
   app.use("*", errorMiddleware());
@@ -57,7 +57,7 @@ export function createApp(pm: ProjectManager, opts?: AppOptions): Hono {
   app.route("/api/v1/health", healthRoutes());
 
   // Authenticated routes
-  const authed = new Hono();
+  const authed = new OpenAPIHono();
   if (opts?.apiKeys && opts.apiKeys.length > 0) {
     authed.use("*", authMiddleware(opts.apiKeys));
   }
@@ -66,7 +66,7 @@ export function createApp(pm: ProjectManager, opts?: AppOptions): Hono {
   authed.route("/projects", projectListRoutes(pm));
 
   // Per-project routes (authenticated + project context)
-  const projectApp = new Hono<ServerEnv>();
+  const projectApp = new OpenAPIHono<ServerEnv>();
   projectApp.use("*", projectMiddleware(pm));
 
   // Mount sub-routes
@@ -84,6 +84,27 @@ export function createApp(pm: ProjectManager, opts?: AppOptions): Hono {
 
   authed.route("/projects/:projectId", projectApp);
   app.route("/api/v1", authed);
+
+  // OpenAPI spec endpoint
+  app.doc("/api/v1/openapi.json", {
+    openapi: "3.1.0",
+    info: {
+      title: "Polpo API",
+      version: "1.0.0",
+      description: "REST API for the Polpo multi-agent orchestration framework. Manage projects, tasks, plans, agents, workflows, skills, notifications, and approvals.",
+    },
+    servers: [
+      { url: "http://localhost:3890", description: "Local development" },
+    ],
+    security: [{ bearerAuth: [] }],
+  });
+
+  // Register security scheme for OpenAPI docs
+  app.openAPIRegistry.registerComponent("securitySchemes", "bearerAuth", {
+    type: "http",
+    scheme: "bearer",
+    description: "API key passed as a Bearer token. Configure via the apiKeys field in polpo.json or the POLPO_API_KEY environment variable.",
+  });
 
   return app;
 }

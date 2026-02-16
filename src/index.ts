@@ -8,8 +8,7 @@ export type { OrchestratorOptions, AssessFn } from "./core/orchestrator.js";
 // Stores
 export { FileTaskStore, FileRunStore, JsonTaskStore, SqliteTaskStore } from "./stores/index.js";
 
-// Adapters & Engine
-export { registerAdapter, getAdapter, createActivity } from "./adapters/registry.js";
+// Engine
 export { spawnEngine } from "./adapters/engine.js";
 
 // Assessment

@@ -17,22 +17,9 @@ Three components work together for crash resilience:
 
 When Polpo spawns an agent, it doesn't run it in-process. Instead, it launches a **detached runner** as a separate Node.js process:
 
-```
-Orchestrator process          Runner process (detached)
-       │                              │
-       ├── writes config to temp file │
-       ├── spawn("node runner.js")    │
-       │   (detached: true,           │
-       │    stdio: "ignore")          │
-       │                              ├── reads config
-       │                              ├── imports adapter
-       │                              ├── spawns agent
-       │                              ├── polls for activity
-       │                              ├── writes results to RunStore
-       │                              └── exits when done
-       │
-       └── reads RunStore for results
-```
+<Frame>
+  <img src="/detached-runners.svg" alt="Detached runner communication flow: orchestrator writes config, spawns runner, runner initializes agent, writes results to RunStore" />
+</Frame>
 
 **Key properties:**
 - Runner process has its own PID and survives orchestrator crashes
@@ -66,22 +53,9 @@ Both the orchestrator and runners write to the same SQLite database with `busy_t
 
 When Polpo starts, it checks for orphaned processes:
 
-```
-Orchestrator restarts
-    │
-    ├── Read RunStore: find records with state="running"
-    │
-    ├── For each running record:
-    │   ├── Check if PID is alive (process.kill(pid, 0))
-    │   │
-    │   ├── PID alive → keep running, task stays in_progress
-    │   │   (runner will write results when done)
-    │   │
-    │   └── PID dead → mark as failed, retry task
-    │       (runner crashed or was killed)
-    │
-    └── Continue normal operation
-```
+<Frame>
+  <img src="/recovery-flow.svg" alt="Recovery flow: orchestrator restarts, reads RunStore, checks PIDs — alive processes keep running, dead processes get retried" />
+</Frame>
 
 This means:
 - If the **orchestrator** crashes, runners keep working. On restart, Polpo reconnects.
