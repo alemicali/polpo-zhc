@@ -20,6 +20,7 @@ import { registerLogsCommands } from "./commands/logs.js";
 import { registerConfigCommands } from "./commands/config.js";
 import { registerChatCommands } from "./commands/chat.js";
 import { registerWorkflowCommands } from "./commands/workflow.js";
+import { registerSkillsCommands } from "./commands/skills.js";
 
 /** Wire orchestrator events to console output with chalk formatting. */
 function wireConsoleEvents(orchestrator: Orchestrator): void {
@@ -558,5 +559,6 @@ registerLogsCommands(program);
 registerConfigCommands(program);
 registerChatCommands(program);
 registerWorkflowCommands(program);
+registerSkillsCommands(program);
 
 program.parse();

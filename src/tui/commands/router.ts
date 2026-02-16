@@ -15,6 +15,7 @@ import { cmdSessions } from "./sessions.js";
 import { cmdMemory } from "./memory.js";
 import { cmdLogs, cmdInspect } from "./logs.js";
 import { cmdWorkflows } from "./workflows.js";
+import { cmdSkills } from "./skills.js";
 
 type Handler = (api: CommandAPI) => void | Promise<void>;
 
@@ -32,6 +33,7 @@ const commands: Record<string, Handler> = {
   "/memory": cmdMemory,
   "/workflow": cmdWorkflows,
   "/workflows": cmdWorkflows,
+  "/skills": cmdSkills,
   "/logs": cmdLogs,
   "/inspect": cmdInspect,
   "/clear": ({ store }) => store.clearLines(),

@@ -7,7 +7,7 @@
  *
  * Filesystem layout:
  *
- *   .polpo/skills/               ← project skill pool
+ *   .polpo/skills/               ← shared skill pool (installed by `polpo skills add`)
  *     frontend-design/SKILL.md
  *     testing/SKILL.md
  *
@@ -18,26 +18,26 @@
  *     reviewer/skills/
  *       testing -> ../../../skills/testing
  *
- * Discovery also scans paths from the skills.sh ecosystem for cross-agent
- * compatibility:
+ * Discovery:
  *
  *   Project-level:
- *     .agents/skills/             ← OpenCode, Codex, Gemini CLI, Copilot, Amp
- *     .claude/skills/             ← Claude Code
+ *     .polpo/skills/              ← primary (managed by Polpo)
  *
  *   User-level:
- *     ~/.polpo/skills/            ← Polpo global
- *     ~/.config/opencode/skills/  ← OpenCode global
- *     ~/.config/agents/skills/    ← shared agents global (Amp, Codex, Gemini)
- *     ~/.claude/skills/           ← Claude Code global
+ *     ~/.polpo/skills/            ← global skills shared across all projects
  *
  * Assignment priority:
  *   1. .polpo/agents/<name>/skills/ (symlinks → hard enforcement)
  *   2. AgentConfig.skills[] names resolved against the pool (soft/config-based)
  */
 
-import { resolve, basename } from "node:path";
-import { readFileSync, readdirSync, existsSync, lstatSync, realpathSync, mkdirSync, symlinkSync } from "node:fs";
+import { resolve, basename, join } from "node:path";
+import {
+  readFileSync, readdirSync, existsSync, lstatSync, realpathSync,
+  mkdirSync, symlinkSync, rmSync, cpSync,
+} from "node:fs";
+import { homedir, tmpdir } from "node:os";
+import { execSync } from "node:child_process";
 import { parse as parseYaml } from "yaml";
 
 // ── Types ──
@@ -50,7 +50,7 @@ export interface SkillInfo {
   /** Tools required by this skill (informational, from frontmatter `allowed-tools`). */
   allowedTools?: string[];
   /** Where this skill was discovered from. */
-  source: "polpo" | "agents" | "claude" | "home";
+  source: "project" | "global";
   /** Absolute path to the skill directory. */
   path: string;
 }
@@ -136,21 +136,19 @@ function scanSkillsDir(dir: string, source: SkillInfo["source"]): SkillInfo[] {
 
 /**
  * Discover ALL available skills across all sources.
- * Returns deduplicated list (first occurrence wins).
+ * Returns deduplicated list (first occurrence wins by name).
  *
  * Search order:
- *   1. .polpo/skills/ (project pool — highest priority)
- *   2. .claude/skills/ (project-local Claude skills)
- *   3. ~/.claude/skills/ (user-level Claude skills)
+ *   1. <polpoDir>/skills/   — project-level pool (managed by `polpo skills add`)
+ *   2. ~/.polpo/skills/     — user-level global pool (shared across projects)
  */
 export function discoverSkills(cwd: string, polpoDir?: string): SkillInfo[] {
   const seen = new Set<string>();
   const all: SkillInfo[] = [];
 
   const dirs: Array<{ dir: string; source: SkillInfo["source"] }> = [
-    { dir: resolve(polpoDir ?? resolve(cwd, ".polpo"), "skills"), source: "polpo" },
-    { dir: resolve(cwd, ".claude", "skills"), source: "claude" },
-    { dir: resolve(process.env.HOME ?? "", ".claude", "skills"), source: "home" },
+    { dir: resolve(polpoDir ?? resolve(cwd, ".polpo"), "skills"), source: "project" },
+    { dir: resolve(homedir(), ".polpo", "skills"), source: "global" },
   ];
 
   for (const { dir, source } of dirs) {
@@ -186,7 +184,7 @@ export function loadAgentSkills(
 
   // Strategy 1: agent has a skills dir with symlinks → hard enforcement
   if (existsSync(agentSkillsDir)) {
-    const skills = scanSkillsDir(agentSkillsDir, "polpo");
+    const skills = scanSkillsDir(agentSkillsDir, "project");
     return skills.map(s => loadSkillContent(s)).filter((s): s is LoadedSkill => s !== null);
   }
 
@@ -255,4 +253,319 @@ export function buildSkillPrompt(skills: LoadedSkill[]): string {
   }
 
   return parts.join("\n");
+}
+
+// ── Installation (skills.sh compatible) ────────────────────────────────
+
+/**
+ * Parse a skill source input into a structured format.
+ *
+ * Supported formats:
+ *   - "owner/repo"                     → GitHub shorthand
+ *   - "https://github.com/owner/repo"  → Full GitHub URL
+ *   - "./local-path"                   → Local directory
+ */
+export interface ParsedSource {
+  type: "github" | "local";
+  /** For GitHub: the clone URL. For local: absolute path. */
+  url: string;
+  /** GitHub owner/repo slug (only for type: "github"). */
+  ownerRepo?: string;
+}
+
+export function parseSkillSource(input: string): ParsedSource {
+  // Local path
+  if (input.startsWith("/") || input.startsWith("./") || input.startsWith("../") || input === ".") {
+    return { type: "local", url: resolve(input) };
+  }
+
+  // Full GitHub URL
+  const ghUrlMatch = input.match(/github\.com\/([^/]+\/[^/]+)/);
+  if (ghUrlMatch) {
+    const ownerRepo = ghUrlMatch[1].replace(/\.git$/, "");
+    return {
+      type: "github",
+      url: `https://github.com/${ownerRepo}.git`,
+      ownerRepo,
+    };
+  }
+
+  // owner/repo shorthand
+  if (/^[^/]+\/[^/]+$/.test(input)) {
+    return {
+      type: "github",
+      url: `https://github.com/${input}.git`,
+      ownerRepo: input,
+    };
+  }
+
+  // Assume it's a git URL
+  return { type: "github", url: input };
+}
+
+/**
+ * Scan a directory tree for SKILL.md files.
+ * Returns an array of skill directories (parent of each SKILL.md).
+ *
+ * Searches known skill locations per the skills.sh spec:
+ *   - Root (if SKILL.md exists)
+ *   - skills/, .agents/skills/, .claude/skills/, .polpo/skills/
+ *   - Any other subdirectory with SKILL.md (recursive, max 3 levels)
+ */
+function findSkillDirsInRepo(repoDir: string): string[] {
+  const found: string[] = [];
+
+  // Check root
+  if (existsSync(join(repoDir, "SKILL.md"))) {
+    found.push(repoDir);
+  }
+
+  // Standard locations used by skills.sh repos
+  const standardDirs = [
+    "skills", ".agents/skills", ".claude/skills", ".polpo/skills",
+  ];
+
+  for (const rel of standardDirs) {
+    const dir = join(repoDir, rel);
+    if (!existsSync(dir)) continue;
+    for (const skill of scanSubdirs(dir)) {
+      found.push(skill);
+    }
+  }
+
+  // If nothing found in standard locations, recurse up to 3 levels
+  if (found.length === 0) {
+    deepScan(repoDir, 0, 3, found);
+  }
+
+  return found;
+}
+
+/** Scan immediate subdirectories for SKILL.md */
+function scanSubdirs(dir: string): string[] {
+  const results: string[] = [];
+  if (!existsSync(dir)) return results;
+  try {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (!entry.isDirectory() && !entry.isSymbolicLink()) continue;
+      const entryPath = resolve(dir, entry.name);
+      if (existsSync(join(entryPath, "SKILL.md"))) {
+        results.push(entryPath);
+      }
+    }
+  } catch { /* skip */ }
+  return results;
+}
+
+/** Recursive scan for SKILL.md up to maxDepth. */
+function deepScan(dir: string, depth: number, maxDepth: number, results: string[]): void {
+  if (depth > maxDepth) return;
+  try {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (entry.name.startsWith(".") && entry.name !== ".polpo" && entry.name !== ".agents") continue;
+      if (entry.name === "node_modules" || entry.name === ".git") continue;
+      if (!entry.isDirectory()) continue;
+      const entryPath = resolve(dir, entry.name);
+      if (existsSync(join(entryPath, "SKILL.md"))) {
+        results.push(entryPath);
+      } else {
+        deepScan(entryPath, depth + 1, maxDepth, results);
+      }
+    }
+  } catch { /* skip */ }
+}
+
+/** Minimal skill info extracted from a found SKILL.md during installation. */
+export interface FoundSkill {
+  /** Skill name (from frontmatter or directory name). */
+  name: string;
+  /** Description from frontmatter. */
+  description: string;
+  /** Absolute path to the skill directory. */
+  path: string;
+}
+
+/** Read SKILL.md from a directory and extract metadata. */
+function readFoundSkill(skillDir: string): FoundSkill | null {
+  const skillFile = join(skillDir, "SKILL.md");
+  if (!existsSync(skillFile)) return null;
+  try {
+    const raw = readFileSync(skillFile, "utf-8");
+    const fm = parseSkillFrontmatter(raw);
+    const dirName = basename(skillDir);
+    return {
+      name: fm?.name ?? dirName,
+      description: fm?.description ?? "",
+      path: skillDir,
+    };
+  } catch { return null; }
+}
+
+export interface InstallResult {
+  /** Skills successfully installed. */
+  installed: FoundSkill[];
+  /** Skills skipped (already exist). */
+  skipped: FoundSkill[];
+  /** Errors encountered. */
+  errors: string[];
+}
+
+/**
+ * Install skills from a source (GitHub repo or local path) into the
+ * project's .polpo/skills/ pool.
+ *
+ * @param source - GitHub owner/repo, full URL, or local path
+ * @param polpoDir - The .polpo directory path
+ * @param options.skillNames - Only install specific skill names (undefined = all)
+ * @param options.global - Install to ~/.polpo/skills/ instead of project
+ * @param options.force - Overwrite existing skills
+ */
+export function installSkills(
+  source: string,
+  polpoDir: string,
+  options: {
+    skillNames?: string[];
+    global?: boolean;
+    force?: boolean;
+  } = {},
+): InstallResult {
+  const result: InstallResult = { installed: [], skipped: [], errors: [] };
+  const parsed = parseSkillSource(source);
+
+  let sourceDir: string;
+  let clonedTmpDir: string | null = null;
+
+  // Resolve source to a local directory
+  if (parsed.type === "local") {
+    if (!existsSync(parsed.url)) {
+      result.errors.push(`Local path not found: ${parsed.url}`);
+      return result;
+    }
+    sourceDir = parsed.url;
+  } else {
+    // Clone to tmp
+    try {
+      clonedTmpDir = join(tmpdir(), `polpo-skills-${Date.now()}`);
+      execSync(`git clone --depth 1 --quiet "${parsed.url}" "${clonedTmpDir}"`, {
+        stdio: "pipe",
+        timeout: 60_000,
+      });
+      sourceDir = clonedTmpDir;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      result.errors.push(`Failed to clone ${parsed.url}: ${msg}`);
+      return result;
+    }
+  }
+
+  try {
+    // Discover skills in source
+    const skillDirs = findSkillDirsInRepo(sourceDir);
+    const found: FoundSkill[] = [];
+    for (const dir of skillDirs) {
+      const skill = readFoundSkill(dir);
+      if (skill) found.push(skill);
+    }
+
+    if (found.length === 0) {
+      result.errors.push(`No skills found in ${source}`);
+      return result;
+    }
+
+    // Filter by requested names
+    const toInstall = options.skillNames
+      ? found.filter(s => options.skillNames!.includes(s.name))
+      : found;
+
+    if (options.skillNames && toInstall.length === 0) {
+      result.errors.push(
+        `Requested skills not found: ${options.skillNames.join(", ")}. ` +
+        `Available: ${found.map(s => s.name).join(", ")}`,
+      );
+      return result;
+    }
+
+    // Target directory
+    const targetBase = options.global
+      ? join(homedir(), ".polpo", "skills")
+      : join(polpoDir, "skills");
+    mkdirSync(targetBase, { recursive: true });
+
+    // Install each skill
+    for (const skill of toInstall) {
+      const targetDir = join(targetBase, skill.name);
+
+      if (existsSync(targetDir) && !options.force) {
+        result.skipped.push(skill);
+        continue;
+      }
+
+      try {
+        // Remove existing if force
+        if (existsSync(targetDir)) {
+          rmSync(targetDir, { recursive: true, force: true });
+        }
+        // Copy skill directory
+        cpSync(skill.path, targetDir, { recursive: true });
+        result.installed.push(skill);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        result.errors.push(`Failed to install "${skill.name}": ${msg}`);
+      }
+    }
+  } finally {
+    // Cleanup cloned repo
+    if (clonedTmpDir && existsSync(clonedTmpDir)) {
+      try { rmSync(clonedTmpDir, { recursive: true, force: true }); } catch { /* best effort */ }
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Remove a skill from the pool.
+ * Returns true if removed, false if not found.
+ */
+export function removeSkill(polpoDir: string, name: string, global = false): boolean {
+  const targetBase = global
+    ? join(homedir(), ".polpo", "skills")
+    : join(polpoDir, "skills");
+  const targetDir = join(targetBase, name);
+
+  if (!existsSync(targetDir)) return false;
+  rmSync(targetDir, { recursive: true, force: true });
+  return true;
+}
+
+/**
+ * List skills installed in the pool with their per-agent assignments.
+ */
+export interface SkillWithAssignment extends SkillInfo {
+  /** Agents that have this skill assigned (via symlinks or config). */
+  assignedTo: string[];
+}
+
+export function listSkillsWithAssignments(cwd: string, polpoDir: string, agentNames: string[]): SkillWithAssignment[] {
+  const pool = discoverSkills(cwd, polpoDir);
+  const result: SkillWithAssignment[] = [];
+
+  for (const skill of pool) {
+    const assignedTo: string[] = [];
+
+    for (const agentName of agentNames) {
+      const agentSkillsDir = resolve(polpoDir, "agents", agentName, "skills");
+      if (!existsSync(agentSkillsDir)) continue;
+
+      // Check if this agent has this skill via symlink
+      const linkPath = resolve(agentSkillsDir, skill.name);
+      if (existsSync(linkPath)) {
+        assignedTo.push(agentName);
+      }
+    }
+
+    result.push({ ...skill, assignedTo });
+  }
+
+  return result;
 }
