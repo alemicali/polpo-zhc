@@ -1,11 +1,92 @@
 ---
-title: Logs & Activity
-description: Event logging, agent activity tracking, and per-run JSONL logs.
+title: Sessions & Observability
+description: Chat sessions, agent transcripts, event logging, and activity tracking.
 ---
 
 import { Aside } from '@astrojs/starlight/components';
 
-Polpo records everything that happens — orchestrator events, agent activity, and per-run transcripts. This data powers the TUI dashboard, the web UI, and post-mortem analysis.
+Polpo records everything — chat history, agent transcripts, event logs, and per-run activity. This data powers the TUI dashboard, the web UI, and post-mortem analysis.
+
+## Chat Sessions
+
+When you interact with Polpo via the TUI or REST API, your messages are persisted in **chat sessions**. This means you can close the terminal, reopen it, and your conversation history is still there.
+
+### How It Works
+
+1. When you send your first message, Polpo creates a new session
+2. The session title is set to the first 60 characters of your first message
+3. Every message (yours and Polpo's responses) is saved with a timestamp
+4. If you reopen the TUI within 30 minutes, the previous session is **automatically resumed**
+5. After 30 minutes of inactivity, a new session starts
+
+### Session Data
+
+Each session stores:
+
+| Field | Description |
+|-------|-------------|
+| `id` | Unique session ID |
+| `title` | First 60 chars of the first message |
+| `createdAt` | When the session started |
+| `updatedAt` | Last message timestamp |
+| `messageCount` | Total messages in the session |
+
+### TUI Commands
+
+| Command | Description |
+|---------|-------------|
+| `/sessions` | Browse past sessions, view messages, delete sessions |
+
+### REST API
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/chat` | Send a message (auto-creates or resumes a session) |
+
+The chat endpoint auto-resumes the latest session if it's less than 30 minutes old. Otherwise, it creates a new one.
+
+### Session Events
+
+| Event | When |
+|-------|------|
+| `session:created` | New chat session started |
+| `message:added` | Message saved to a session |
+
+---
+
+## Agent Transcripts
+
+When Polpo spawns an agent, some adapters (like the Claude SDK adapter) create a **session transcript** — a JSONL file recording every message, tool call, and result in the agent's conversation.
+
+### Session Reader
+
+Polpo can read agent transcripts to extract structured summaries:
+
+| Field | Description |
+|-------|-------------|
+| `sessionId` | Agent session ID |
+| `transcriptPath` | Path to the JSONL file |
+| `messageCount` | Total messages in the transcript |
+| `toolCalls` | List of tool names the agent called |
+| `filesCreated` | Files the agent created |
+| `filesEdited` | Files the agent edited |
+| `lastMessage` | Last assistant message (truncated to 300 chars) |
+| `todos` | TODO/FIXME items found in agent output |
+| `errors` | Errors encountered during execution |
+
+### Connecting Tasks to Transcripts
+
+Each `AgentHandle` can carry a `sessionId`. When a task is running, you can use the `/inspect` TUI command or the [Bridge System](/features/bridge/) to access the agent's transcript in real-time.
+
+<Aside type="tip">
+Agent transcripts are only available for adapters that support session persistence (like the Claude SDK adapter with `persistSession: true`). The generic adapter and native adapter don't create session transcripts — they capture stdout/stderr directly.
+</Aside>
+
+### Pruning
+
+Sessions accumulate over time. The `SessionStore` interface includes a `prune(keepSessions)` method that deletes all but the N most recent sessions. This can be called programmatically or through the TUI session manager.
+
+---
 
 ## Event Log
 
@@ -48,6 +129,8 @@ Events are grouped by session (one per Polpo start):
 High-frequency events like `orchestrator:tick` and `bridge:session:activity` are excluded from log persistence to avoid noise.
 </Aside>
 
+---
+
 ## Agent Activity Tracking
 
 While an agent is working on a task, Polpo tracks its activity in real-time. This data feeds the live dashboard, stale detection, and health checks.
@@ -80,6 +163,8 @@ Agent (in runner) → polls every 1.5s → RunStore → orchestrator reads on ti
 ### Stale Detection
 
 If `lastUpdate` hasn't changed for longer than `staleThreshold` (default: 5 minutes), the orchestrator emits an `agent:stale` event and may kill the agent.
+
+---
 
 ## Per-Run Activity Logs
 

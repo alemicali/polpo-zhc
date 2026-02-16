@@ -5,7 +5,7 @@ description: Command-line interface for Polpo
 
 import { Aside } from '@astrojs/starlight/components';
 
-Polpo provides six CLI commands: `init`, `run`, `status`, `serve`, `tui`, and `workflow`.
+Polpo provides seven CLI commands: `init`, `run`, `status`, `serve`, `tui`, `workflow`, and `skills`.
 
 ## `polpo init`
 
@@ -86,7 +86,7 @@ The server provides REST API, SSE streaming, and WebSocket support. See [Server 
 
 ## `polpo workflow`
 
-Manage and execute reusable [workflow templates](/concepts/workflows/).
+Manage and execute reusable [workflow templates](/features/workflows/).
 
 ```bash
 polpo workflow <subcommand> [options]
@@ -121,7 +121,50 @@ polpo workflow run code-review --param module=src/auth --param focus=security
 polpo workflow run code-review --param module=src/auth --dry-run
 ```
 
-See [Writing Workflows](/guides/writing-workflows/) for how to create your own.
+See [Writing Workflows](/features/writing-workflows/) for how to create your own.
+
+## `polpo skills`
+
+Manage the skill pool — install, list, remove, and assign skills to agents.
+
+```bash
+polpo skills <subcommand> [options]
+```
+
+### Subcommands
+
+| Subcommand | Description |
+|------------|-------------|
+| `add <source>` | Install skills from a GitHub repo or local path |
+| `list` | List skills in the pool with agent assignments |
+| `remove <name>` | Remove a skill from the pool |
+| `assign <skill> <agent>` | Assign a skill to an agent |
+
+### `polpo skills add`
+
+```bash
+polpo skills add <source> [options]
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `-d, --dir <path>` | `.` | Working directory |
+| `-s, --skill <names...>` | — | Install only specific skill names |
+| `-g, --global` | `false` | Install to `~/.polpo/skills/` (shared across projects) |
+| `-f, --force` | `false` | Overwrite existing skills |
+
+```bash
+# Install all skills from a repo
+polpo skills add vercel-labs/agent-skills
+
+# Install specific skills
+polpo skills add vercel-labs/agent-skills --skill frontend-design --skill web-design-guidelines
+
+# Assign to an agent after install
+polpo skills assign frontend-design frontend-dev
+```
+
+Compatible with the [skills.sh](https://skills.sh) ecosystem — any repo with `SKILL.md` files works. See [Skills](/features/skills/) for details.
 
 ## `polpo tui`
 

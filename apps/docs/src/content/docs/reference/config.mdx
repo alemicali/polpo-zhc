@@ -109,14 +109,14 @@ description: Complete field-by-field reference for .polpo/polpo.json
 | `defaultRetryPolicy` | RetryPolicy | — | Default retry policy for all tasks |
 | `enableVolatileTeams` | boolean | `true` | Allow volatile agents in plan `team:` sections |
 | `volatileCleanup` | string | `"on_complete"` | `"on_complete"` or `"manual"` |
-| `maxFixAttempts` | number | `2` | Max fix attempts before full retry. During the fix phase, agents receive targeted feedback to correct specific issues instead of starting over. After `maxFixAttempts` fail, the task falls back to a full retry. See [Escalation Chain](/orchestration/escalation/). |
-| `maxQuestionRounds` | number | `2` | Max auto-answer rounds per task. When an agent asks a question, the orchestrator LLM generates an answer using project context. After `maxQuestionRounds`, Q&A stops to prevent infinite loops. See [Question Detection](/guides/question-detection/). |
-| `maxResolutionAttempts` | number | `2` | Max deadlock resolution attempts per blocked task. When a task depends on a failed dependency, the orchestrator LLM evaluates whether to absorb the failure, retry the dependency, or fail the task. Each blocked task gets at most `maxResolutionAttempts` before being permanently failed. See [Deadlock Resolution](/guides/deadlock-resolution/). |
+| `maxFixAttempts` | number | `2` | Max fix attempts before full retry. During the fix phase, agents receive targeted feedback to correct specific issues instead of starting over. After `maxFixAttempts` fail, the task falls back to a full retry. See [Escalation Chain](/features/escalation/). |
+| `maxQuestionRounds` | number | `2` | Max auto-answer rounds per task. When an agent asks a question, the orchestrator LLM generates an answer using project context. After `maxQuestionRounds`, Q&A stops to prevent infinite loops. See [Question Detection](/features/question-detection/). |
+| `maxResolutionAttempts` | number | `2` | Max deadlock resolution attempts per blocked task. When a task depends on a failed dependency, the orchestrator LLM evaluates whether to absorb the failure, retry the dependency, or fail the task. Each blocked task gets at most `maxResolutionAttempts` before being permanently failed. See [Deadlock Resolution](/features/deadlock-resolution/). |
 | `orchestratorModel` | string | — | Model for orchestrator LLM calls |
-| `approvalGates` | ApprovalGate[] | — | Approval gate checkpoints. See [Approval Gates](/orchestration/approval-gates/) |
-| `notifications` | object | — | Notification routing configuration. See [Notifications](/orchestration/notifications/) |
-| `escalationPolicy` | object | — | Default escalation chain. See [Escalation](/orchestration/escalation/) |
-| `sla` | object | — | SLA monitoring configuration. See [Quality & SLA](/orchestration/quality-sla/) |
+| `approvalGates` | ApprovalGate[] | — | Approval gate checkpoints. See [Approval Gates](/features/approval-gates/) |
+| `notifications` | object | — | Notification routing configuration. See [Notifications](/features/notifications/) |
+| `escalationPolicy` | object | — | Default escalation chain. See [Escalation](/features/escalation/) |
+| `sla` | object | — | SLA monitoring configuration. See [Assessment & Quality](/features/assessment/) |
 | `enableScheduler` | boolean | auto | Enable the scheduling engine. Default: `true` if any plan has a schedule |
 | `defaultQualityThreshold` | number | — | Default quality threshold for plans (1-5). Plans below this score are marked failed |
 

@@ -530,12 +530,86 @@ Returns `404` if the workflow is not found, or `400` with `VALIDATION_ERROR` if 
 GET /skills
 ```
 
-Discovers available skills from `.polpo/skills/`, `.claude/skills/`, and `~/.claude/skills/`.
+Returns skills from the pool (`.polpo/skills/` and `~/.polpo/skills/`) with per-agent assignment info.
 
 **Response** `200`:
 ```json
-{ "ok": true, "data": [{ "name": "frontend-design", "description": "...", "path": "..." }] }
+{
+  "ok": true,
+  "data": [
+    {
+      "name": "frontend-design",
+      "description": "Create distinctive frontend interfaces",
+      "source": "project",
+      "path": "/path/to/.polpo/skills/frontend-design",
+      "assignedTo": ["frontend-dev"]
+    }
+  ]
+}
 ```
+
+### Install Skills
+
+```http
+POST /skills/add
+Content-Type: application/json
+
+{
+  "source": "vercel-labs/agent-skills",
+  "skillNames": ["frontend-design", "web-design-guidelines"],
+  "global": false,
+  "force": false
+}
+```
+
+Clones the repository, discovers `SKILL.md` files, and copies them into the pool. The `source` field accepts GitHub `owner/repo` shorthand, full URLs, or local paths. All other fields are optional.
+
+**Response** `201`:
+```json
+{
+  "ok": true,
+  "data": {
+    "installed": [{ "name": "frontend-design", "description": "...", "path": "..." }],
+    "skipped": [],
+    "errors": []
+  }
+}
+```
+
+Returns `400` if no skills could be installed.
+
+### Remove Skill
+
+```http
+DELETE /skills/:name
+```
+
+Removes a skill from the project pool. Add `?global=true` to remove from the global pool.
+
+**Response** `200`:
+```json
+{ "ok": true, "data": { "removed": "frontend-design" } }
+```
+
+Returns `404` if the skill is not found.
+
+### Assign Skill to Agent
+
+```http
+POST /skills/:name/assign
+Content-Type: application/json
+
+{ "agent": "frontend-dev" }
+```
+
+Creates a symlink from the agent's skill directory to the pool skill, so the skill is loaded when that agent spawns.
+
+**Response** `200`:
+```json
+{ "ok": true, "data": { "skill": "frontend-design", "agent": "frontend-dev" } }
+```
+
+Returns `404` if the skill is not found in the pool.
 
 ---
 
@@ -558,7 +632,7 @@ Returns the JSONL activity history for a specific task's run (tool calls, file e
 
 ## Notifications
 
-Manage notification history and send direct notifications. See also the [Notification System](/orchestration/notifications) guide.
+Manage notification history and send direct notifications. See also the [Notification System](/features/notifications/) guide.
 
 ### List Notification History
 

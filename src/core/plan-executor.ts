@@ -28,6 +28,17 @@ interface PlanDocument {
     model?: string;
     systemPrompt?: string;
     skills?: string[];
+    enableGit?: boolean;
+    enableBrowser?: boolean;
+    enableHttp?: boolean;
+    enableMultifile?: boolean;
+    enableDeps?: boolean;
+    enableExcel?: boolean;
+    enablePdf?: boolean;
+    enableDocx?: boolean;
+    enableEmail?: boolean;
+    enableAudio?: boolean;
+    enableImage?: boolean;
   }>;
   qualityGates?: PlanQualityGate[];
   /** Plan-level scoped notification rules — override or extend global rules. */
@@ -122,14 +133,8 @@ export class PlanExecutor {
         if (doc?.team && Array.isArray(doc.team)) {
           for (const a of doc.team) {
             if (!a.name) continue;
-            this.agentMgr.addVolatileAgent({
-              name: a.name,
-              adapter: a.adapter,
-              model: a.model,
-              role: a.role,
-              systemPrompt: a.systemPrompt,
-              skills: a.skills,
-            }, plan.name);
+            const { name, ...rest } = a;
+            this.agentMgr.addVolatileAgent({ name, ...rest }, plan.name);
           }
         }
       } catch (err) {
@@ -188,14 +193,8 @@ export class PlanExecutor {
     if (enableVolatile && doc.team && Array.isArray(doc.team)) {
       for (const a of doc.team) {
         if (!a.name) continue;
-        this.agentMgr.addVolatileAgent({
-          name: a.name,
-          adapter: a.adapter,
-          model: a.model,
-          role: a.role,
-          systemPrompt: a.systemPrompt,
-          skills: a.skills,
-        }, group);
+        const { name, ...rest } = a;
+        this.agentMgr.addVolatileAgent({ name, ...rest }, group);
       }
     }
 

@@ -44,36 +44,39 @@ export default defineConfig({
         { label: "Your First Plan", slug: "guides/first-plan" },
         { label: "Configuration", slug: "configuration" },
 
-        // ── Concepts ─────────────────────────────────────────
+        // ── Core Concepts ────────────────────────────────────
         {
-          label: "Concepts",
+          label: "Core Concepts",
           items: [
             { label: "Architecture", slug: "concepts/architecture" },
             { label: "Agents & Teams", slug: "concepts/agents-and-teams" },
             { label: "Task Lifecycle", slug: "concepts/task-lifecycle" },
             { label: "Plans & Dependencies", slug: "concepts/plans" },
-            { label: "Result Evaluation", slug: "concepts/assessment" },
-            { label: "Tools & MCP", slug: "concepts/tools-and-skills" },
-            { label: "Skills", slug: "concepts/skills" },
-            { label: "Workflows", slug: "concepts/workflows" },
-            { label: "Hooks", slug: "concepts/lifecycle-hooks" },
             { label: "Providers & Models", slug: "concepts/providers-and-models" },
-            { label: "Sessions", slug: "concepts/sessions" },
-            { label: "Logs & Activity", slug: "concepts/logs-and-activity" },
-            { label: "Memory", slug: "concepts/memory" },
           ],
         },
 
-        // ── Orchestration ────────────────────────────────────
+        // ── Features ─────────────────────────────────────────
         {
-          label: "Orchestration",
+          label: "Features",
           items: [
-            { label: "Notification System", slug: "orchestration/notifications" },
-            { label: "Approval Gates", slug: "orchestration/approval-gates" },
-            { label: "Escalation Chain", slug: "orchestration/escalation" },
-            { label: "Quality & SLA", slug: "orchestration/quality-sla" },
-            { label: "Scheduling", slug: "orchestration/scheduling" },
-            { label: "Bridge System", slug: "orchestration/bridge" },
+            { label: "Tools & MCP", slug: "features/tools-and-mcp" },
+            { label: "Skills", slug: "features/skills" },
+            { label: "Workflows", slug: "features/workflows" },
+            { label: "Assessment & Quality", slug: "features/assessment" },
+            { label: "Hooks", slug: "features/hooks" },
+            { label: "Notifications", slug: "features/notifications" },
+            { label: "Approval Gates", slug: "features/approval-gates" },
+            { label: "Escalation", slug: "features/escalation" },
+            { label: "Scheduling", slug: "features/scheduling" },
+            { label: "Bridge System", slug: "features/bridge" },
+            { label: "Sessions & Observability", slug: "features/sessions" },
+            { label: "Memory", slug: "features/memory" },
+            { label: "Deadlock Resolution", slug: "features/deadlock-resolution" },
+            { label: "Question Detection", slug: "features/question-detection" },
+            { label: "Crash Resilience", slug: "features/resilience" },
+            { label: "Security", slug: "features/security" },
+            { label: "Writing Workflows", slug: "features/writing-workflows" },
           ],
         },
 
@@ -88,21 +91,6 @@ export default defineConfig({
           ],
         },
 
-        // ── Guides ───────────────────────────────────────────
-        {
-          label: "Guides",
-          items: [
-            { label: "Custom Adapter", slug: "guides/custom-adapter" },
-            { label: "Crash Resilience", slug: "guides/resilience" },
-            { label: "Deadlock Resolution", slug: "guides/deadlock-resolution" },
-            { label: "Question Detection", slug: "guides/question-detection" },
-            { label: "Expectation Judge", slug: "guides/expectation-judge" },
-            { label: "Store Backends", slug: "guides/store-backends" },
-            { label: "Writing Workflows", slug: "guides/writing-workflows" },
-            { label: "Security", slug: "guides/security" },
-          ],
-        },
-
         // ── Reference ────────────────────────────────────────
         {
           label: "Reference",
@@ -112,6 +100,8 @@ export default defineConfig({
             { label: "Events", slug: "reference/events" },
             { label: "React SDK", slug: "reference/react-sdk" },
             { label: "Adapters", slug: "reference/adapters" },
+            { label: "Custom Adapter", slug: "reference/custom-adapter" },
+            { label: "Store Backends", slug: "reference/store-backends" },
             { label: "Tools Reference", slug: "reference/coding-tools" },
           ],
         },

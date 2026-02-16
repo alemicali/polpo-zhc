@@ -82,7 +82,7 @@ class MyAdapter implements AgentAdapter {
 registerAdapter("my-agent", new MyAdapter());
 ```
 
-See [Custom Adapter Guide](/guides/custom-adapter/) for a full walkthrough.
+See [Custom Adapter](/reference/custom-adapter/) for a full walkthrough.
 
 ## Supervisor Loop
 
@@ -93,7 +93,7 @@ The orchestrator runs a **5-second tick loop** that:
 3. **Retries** failed tasks (with fix phase for targeted corrections)
 4. **Spawns** new agents for pending tasks whose dependencies are met
 5. **Enforces health checks** — kills stale or timed-out agents
-6. **Detects deadlocks** — tasks blocked on failed dependencies ([Deadlock Resolution](/guides/deadlock-resolution/))
+6. **Detects deadlocks** — tasks blocked on failed dependencies ([Deadlock Resolution](/features/deadlock-resolution/))
 7. **Recovers orphans** — reconnects to live processes after a crash
 8. **Checks SLA deadlines** — emits warnings or violations when deadlines approach
 9. **Evaluates quality gates** — blocks plan progression until thresholds are met

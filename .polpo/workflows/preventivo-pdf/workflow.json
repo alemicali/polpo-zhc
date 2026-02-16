@@ -1,6 +1,6 @@
 {
   "name": "preventivo-pdf",
-  "description": "Genera un preventivo professionale in PDF a partire dai dati cliente e lo invia via Telegram. Crea il documento con layout formattato, calcola totali/IVA, produce il PDF e lo spedisce al canale Telegram configurato.",
+  "description": "Genera un preventivo professionale in PDF usando il tool pdf_create integrato e lo invia via Telegram.",
   "parameters": [
     {
       "name": "cliente",
@@ -55,49 +55,40 @@
     "team": [
       {
         "name": "doc-writer",
-        "role": "Document specialist — creates professional business documents with precise formatting and calculations"
+        "role": "Document specialist — uses the built-in pdf_create tool to generate professional PDF documents. Formats text content with clear sections, tables, and calculations.",
+        "enablePdf": true
       },
       {
         "name": "notifier",
-        "role": "Notification agent — handles delivery of documents via external channels"
+        "role": "Notification agent — handles delivery of documents via external channels like Telegram"
       }
     ],
     "tasks": [
       {
-        "title": "Genera preventivo per {{cliente}}",
-        "description": "Crea un preventivo professionale con i seguenti dati:\n\n**Cliente:** {{cliente}}\n**Email:** {{email_cliente}}\n**Servizi:** {{descrizione_lavoro}}\n**Importo netto:** €{{importo}}\n**IVA:** {{aliquota_iva}}%\n**Validità:** {{scadenza_giorni}} giorni\n**Note:** {{note}}\n\nIl preventivo deve includere:\n1. Header con logo/nome azienda e data\n2. Dati del cliente (nome, email)\n3. Tabella dettagliata dei servizi con importi\n4. Subtotale netto, IVA calcolata, totale lordo\n5. Condizioni di pagamento e validità\n6. Note aggiuntive se presenti\n7. Footer con riferimenti aziendali\n\nGenera il file come HTML ben formattato (preventivo.html) pronto per la conversione in PDF. Usa CSS inline per un layout pulito e professionale. Poi convertilo in PDF usando un tool disponibile e salva come preventivo-{{cliente}}.pdf.",
+        "title": "Genera preventivo PDF per {{cliente}}",
+        "description": "Usa il tool pdf_create per generare il preventivo come file PDF.\n\nDati del preventivo:\n- Cliente: {{cliente}}\n- Email: {{email_cliente}}\n- Servizi: {{descrizione_lavoro}}\n- Importo netto: €{{importo}}\n- IVA: {{aliquota_iva}}%\n- Validità: {{scadenza_giorni}} giorni\n- Note: {{note}}\n\nChiama il tool pdf_create con:\n- path: \"preventivo-{{cliente}}.pdf\"\n- title: \"Preventivo per {{cliente}}\"\n- author: \"Polpo System\"\n- pages: un array con le pagine del contenuto\n\nOrganizza il contenuto su 1-2 pagine con queste sezioni:\n\nPAGINA 1:\n```\nPREVENTIVO\nData: [data odierna]\nNumero: PREV-[timestamp]\n\n────────────────────────────\nDESTINATARIO\n{{cliente}}\n{{email_cliente}}\n────────────────────────────\n\nDESCRIZIONE SERVIZI\n{{descrizione_lavoro}}\n\n────────────────────────────\nRIEPILOGO ECONOMICO\n\nImponibile:          €{{importo}}\nIVA ({{aliquota_iva}}%):         €[calcola]\nTOTALE:              €[calcola]\n\n────────────────────────────\nCONDIZIONI\n- Pagamento: 30 giorni data fattura\n- Validità preventivo: {{scadenza_giorni}} giorni\n- Note: {{note}}\n────────────────────────────\n```\n\nCalcola IVA e totale lordo correttamente. Formatta i numeri con 2 decimali.\n\nIMPORTANTE: usa ESCLUSIVAMENTE il tool pdf_create. Non scrivere script, non installare pacchetti, non generare HTML.",
         "assignTo": "doc-writer",
         "expectations": [
           {
-            "type": "file_exists",
-            "paths": ["preventivo.html"]
-          },
-          {
             "type": "llm_review",
-            "criteria": "Il preventivo è completo, professionale, contiene tutti i dati richiesti (cliente, importi, IVA calcolata correttamente, scadenza) e ha un layout pulito",
+            "criteria": "È stato usato il tool pdf_create per generare un file PDF valido contenente tutti i dati del preventivo: cliente, email, descrizione servizi, importo netto, IVA calcolata correttamente, totale lordo, condizioni di pagamento e validità",
             "threshold": 3.5
           }
         ],
         "expectedOutcomes": [
           {
             "type": "file",
-            "label": "Preventivo HTML",
-            "path": "preventivo.html",
-            "mimeType": "text/html"
-          },
-          {
-            "type": "file",
             "label": "Preventivo PDF",
-            "description": "PDF generato dal preventivo",
+            "description": "PDF del preventivo generato con pdf_create",
             "mimeType": "application/pdf"
           }
         ]
       },
       {
         "title": "Invia preventivo {{cliente}} via Telegram",
-        "description": "Invia una notifica su Telegram (canale: {{telegram_channel}}) con:\n- Messaggio: \"Nuovo preventivo generato per {{cliente}} — €{{importo}} + IVA {{aliquota_iva}}%\"\n- Se disponibile, allega il file PDF del preventivo\n\nUsa il sistema di notifiche di Polpo (sendDirect) o il tool appropriato per inviare il messaggio al canale configurato.",
+        "description": "Invia una notifica su Telegram (canale: {{telegram_channel}}) con:\n- Messaggio: \"Nuovo preventivo generato per {{cliente}} — €{{importo}} + IVA {{aliquota_iva}}%\"\n\nUsa il sistema di notifiche di Polpo (sendDirect) o il tool appropriato per inviare il messaggio al canale configurato.",
         "assignTo": "notifier",
-        "dependsOn": ["Genera preventivo per {{cliente}}"],
+        "dependsOn": ["Genera preventivo PDF per {{cliente}}"],
         "expectations": [
           {
             "type": "llm_review",

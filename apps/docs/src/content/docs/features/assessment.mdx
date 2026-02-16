@@ -1,0 +1,458 @@
+---
+title: Assessment & Quality
+description: G-Eval LLM-as-judge scoring, expectation correction, quality gates, and SLA deadline monitoring
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+## Overview
+
+Polpo uses **G-Eval** (LLM-as-judge) to automatically assess completed tasks. Each task's output is evaluated against multiple dimensions, producing scores from 1-5 with chain-of-thought reasoning.
+
+The assessment system runs an internal **8-phase pipeline**:
+
+1. **Collect context** — gather task description, expectations, and agent output
+2. **File existence checks** — verify required files exist
+3. **Test/script execution** — run test commands and validation scripts
+4. **Diff analysis** — analyze files created and edited by the agent
+5. **LLM review** — G-Eval scoring across configured dimensions
+6. **Score aggregation** — compute weighted global score
+7. **Quality metrics collection** — record scores for quality gate evaluation and SLA tracking
+8. **Result determination** — pass/fail decision with feedback generation
+
+## Expectation Types
+
+Tasks can define four types of expectations:
+
+### `test` — Run a Test Command
+
+```json
+{
+  "expectations": [
+    {
+      "type": "test",
+      "command": "npm test"
+    }
+  ]
+}
+```
+
+Runs the command and checks the exit code. Exit code 0 = pass.
+
+### `file_exists` — Check File Presence
+
+```json
+{
+  "expectations": [
+    {
+      "type": "file_exists",
+      "paths": [
+        "src/routes/users.ts",
+        "src/routes/posts.ts"
+      ]
+    }
+  ]
+}
+```
+
+Verifies that the specified files exist in the working directory.
+
+### `script` — Run a Custom Script
+
+```json
+{
+  "expectations": [
+    {
+      "type": "script",
+      "command": "node scripts/validate-schema.js"
+    }
+  ]
+}
+```
+
+Similar to `test` but intended for custom validation scripts that check specific conditions.
+
+### `llm_review` — AI-Powered Code Review
+
+```json
+{
+  "expectations": [
+    {
+      "type": "llm_review",
+      "criteria": "Verify proper error handling and input validation",
+      "threshold": 3.5,
+      "dimensions": [
+        {
+          "name": "security",
+          "weight": 0.5,
+          "rubric": "No SQL injection, XSS, or authentication bypass vulnerabilities"
+        },
+        {
+          "name": "error_handling",
+          "weight": 0.5,
+          "rubric": "All error paths return proper HTTP status codes with messages"
+        }
+      ]
+    }
+  ]
+}
+```
+
+The most powerful expectation type. An LLM reviews the agent's work against configurable dimensions.
+
+## Default Dimensions
+
+When no custom dimensions are specified, Polpo uses these defaults:
+
+| Dimension | Weight | Description |
+|-----------|--------|-------------|
+| `correctness` | 0.35 | Task achieves its stated goals correctly |
+| `completeness` | 0.30 | All requirements in the description are addressed |
+| `code_quality` | 0.20 | Code is clean, readable, and maintainable |
+| `edge_cases` | 0.15 | Edge cases and error conditions are handled |
+
+## Scoring
+
+Each dimension is scored **1-5** with the following scale:
+
+| Score | Meaning |
+|-------|---------|
+| 1 | Completely wrong or missing |
+| 2 | Major issues, barely functional |
+| 3 | Acceptable but with notable gaps |
+| 4 | Good quality with minor issues |
+| 5 | Excellent, exceeds expectations |
+
+### Global Score
+
+The global score is a **weighted average** of all dimension scores:
+
+```
+globalScore = Σ (dimension.score × dimension.weight)
+```
+
+Tasks pass when `globalScore >= threshold` (default: 3.0).
+
+### Chain-of-Thought Reasoning
+
+For each dimension, the LLM generates step-by-step reasoning before scoring:
+
+```json
+{
+  "dimension": "correctness",
+  "score": 4,
+  "reasoning": "The API endpoints correctly implement CRUD operations. GET /users returns paginated results. POST /users validates required fields. However, the PATCH endpoint doesn't handle partial updates correctly — it requires all fields.",
+  "weight": 0.35
+}
+```
+
+This reasoning is included in retry/fix feedback so agents know exactly what to improve.
+
+## Assessment Flow
+
+```
+Task completes → Run expectations in order:
+  1. file_exists checks
+  2. test/script commands
+  3. llm_review (if earlier checks pass)
+→ Aggregate results
+→ Collect quality metrics
+→ Pass: task → done
+→ Fail: task → fix phase (or retry)
+```
+
+<Aside>
+Expectations are evaluated in order. If a `file_exists` or `test` check fails, the `llm_review` is skipped to save API calls. The agent receives specific feedback about which check failed.
+</Aside>
+
+## Retry with Feedback
+
+When assessment fails, the feedback includes:
+
+- **Which expectations failed** and why
+- **Per-dimension scores** with reasoning
+- **Specific suggestions** for improvement
+- **Original task description** (preserved across retries)
+
+The fix phase sends this feedback to the agent so it can make targeted corrections without starting from scratch.
+
+## Custom Rubrics
+
+For fine-grained control, define custom rubrics per dimension:
+
+```json
+{
+  "dimensions": [
+    {
+      "name": "performance",
+      "weight": 0.5,
+      "rubric": {
+        "1": "O(n²) or worse algorithms, no caching",
+        "2": "Basic functionality but poor algorithmic choices",
+        "3": "Reasonable performance, standard patterns",
+        "4": "Good performance with appropriate caching",
+        "5": "Optimal algorithms, efficient caching, lazy loading"
+      }
+    }
+  ]
+}
+```
+
+## Retry and Fix Phase
+
+When assessment fails, Polpo uses a multi-stage retry system:
+
+1. **Fix phase** — Send targeted feedback to the agent (up to `maxFixAttempts` attempts)
+2. **Full retry** — Reset and start from scratch (up to `maxRetries` attempts)
+3. **Escalation** — Switch to a different agent or model if configured via the [escalation policy](/features/escalation/)
+
+---
+
+## Expectation Judge
+
+Sometimes the **expectations** (acceptance criteria) are wrong, not the agent's work. For example:
+
+- A test command that was incorrect in the plan
+- A file path that doesn't match the actual project structure
+- An LLM review threshold that's too strict for the task scope
+
+Without the expectation judge, the agent would be repeatedly retried for failing criteria that can never be met.
+
+### How Detection Works
+
+When a task fails assessment, the expectation judge evaluates whether the **expectations themselves** might be wrong:
+
+```
+Task fails assessment
+    │
+    ├── Agent did the work correctly?
+    │   ├── YES, expectations are wrong → correct expectations, re-assess
+    │   └── NO, agent needs to fix → normal retry/fix flow
+```
+
+The judge LLM receives the task description, the agent's output, the failed expectations, and assessment feedback — then determines whether the expectations are realistic.
+
+### Correction Types
+
+The judge can fix test commands, file paths, and score thresholds:
+
+```json
+// Test command fix
+{ "type": "test", "command": "npm test -- --grep users" }
+→ { "type": "test", "command": "npm test -- --grep \"user management\"" }
+
+// File path fix
+{ "type": "file_exists", "paths": ["src/routes/users.ts"] }
+→ { "type": "file_exists", "paths": ["src/api/users.ts"] }
+
+// Threshold adjustment
+{ "type": "llm_review", "threshold": 4.5 }
+→ { "type": "llm_review", "threshold": 3.5 }
+```
+
+### Safeguards
+
+- **Only runs on first failure** — doesn't keep correcting on subsequent retries
+- **Conservative** — when in doubt, doesn't correct (lets the normal retry flow handle it)
+- **Audit trail** — the `assessment:corrected` event logs what was changed
+- **Original preserved** — `task.originalDescription` is never modified
+
+<Aside type="tip">
+The expectation judge is most useful when plans are AI-generated. Human-written expectations are typically more accurate, but AI-generated plans may include test commands or file paths that don't match the actual project structure.
+</Aside>
+
+---
+
+## Quality Gates
+
+Quality gates are checkpoints defined in plan documents that control task execution flow. A gate sits between two phases of tasks: it waits for `afterTasks` to complete, evaluates pass/fail criteria, and then either unblocks `blocksTasks` or halts the plan.
+
+```
+Phase 1 Tasks                Quality Gate              Phase 2 Tasks
+┌──────────┐                ┌────────────┐            ┌──────────┐
+│ task-a    │──completed──▶ │ "review"   │──passed──▶ │ task-c   │
+│ task-b    │──completed──▶ │ minScore:4 │            │ task-d   │
+└──────────┘                └────────────┘            └──────────┘
+```
+
+### Gate Properties
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `name` | `string` | Gate identifier |
+| `afterTasks` | `string[]` | Tasks that must complete before evaluation |
+| `blocksTasks` | `string[]` | Tasks blocked until this gate passes |
+| `minScore` | `number` | Minimum average score of `afterTasks` to pass (1-5 scale) |
+| `requireAllPassed` | `boolean` | All `afterTasks` must have status `done` (not `failed`) |
+| `notifyChannels` | `string[]` | Notification channels to alert on pass/fail |
+
+### Gate Configuration in Plans
+
+```json
+{
+  "name": "Build Feature X",
+  "tasks": [
+    { "title": "Implement core module", "assignTo": "backend-agent" },
+    { "title": "Write unit tests", "assignTo": "test-agent" },
+    { "title": "Integration testing", "assignTo": "test-agent" },
+    { "title": "Deploy to staging", "assignTo": "devops-agent" }
+  ],
+  "qualityGates": [
+    {
+      "name": "code-review",
+      "afterTasks": ["Implement core module", "Write unit tests"],
+      "blocksTasks": ["Integration testing"],
+      "minScore": 4.0,
+      "requireAllPassed": true,
+      "notifyChannels": ["slack-alerts"]
+    },
+    {
+      "name": "integration-check",
+      "afterTasks": ["Integration testing"],
+      "blocksTasks": ["Deploy to staging"],
+      "requireAllPassed": true
+    }
+  ]
+}
+```
+
+### Gate Evaluation
+
+Gates are evaluated by the PlanExecutor when checking if blocked tasks can proceed:
+
+1. Checks that all `afterTasks` are in a terminal state (done or failed)
+2. If `requireAllPassed` is set, verifies none of the `afterTasks` failed
+3. If `minScore` is set, computes the average assessment score across `afterTasks` and compares against the threshold
+
+Gates are evaluated at most once — after passing, they are cached and not re-evaluated.
+
+### Plan Quality Threshold
+
+Plans can define a `qualityThreshold` — a minimum weighted average score across all completed tasks:
+
+```json
+{
+  "name": "Release Pipeline",
+  "qualityThreshold": 3.5,
+  "tasks": [
+    { "title": "Critical path", "priority": 2.0, "assignTo": "agent-a" },
+    { "title": "Nice-to-have", "priority": 0.5, "assignTo": "agent-b" }
+  ]
+}
+```
+
+If the weighted average score falls below the threshold, a `quality:threshold:failed` event is emitted.
+
+### Quality Metrics
+
+The QualityController aggregates metrics per entity (task, agent, or plan):
+
+| Metric | Description |
+|--------|-------------|
+| `totalAssessments` | Total assessments run |
+| `passedAssessments` | Assessments that passed |
+| `avgScore` | Average global score (1-5) |
+| `minScore` / `maxScore` | Score range |
+| `dimensionScores` | Per-dimension average scores |
+| `totalRetries` | Total retries consumed |
+| `totalFixes` | Total fix attempts consumed |
+| `deadlinesMet` / `deadlinesMissed` | SLA tracking |
+
+---
+
+## SLA Monitor
+
+The SLAMonitor tracks deadlines on tasks and plans, emitting warning and violation events as deadlines approach or pass.
+
+### How It Works
+
+The monitor runs on the orchestrator tick loop, checking all active tasks and plans with deadlines at a configurable interval (default: 30 seconds).
+
+```
+Task created (with deadline)
+     │
+     ├── 80% of budget elapsed → sla:warning
+     │
+     ├── Deadline passed → sla:violated
+     │                     (optionally force-fail)
+     │
+     └── Task completes before deadline → sla:met
+```
+
+### SLA Configuration
+
+```json
+{
+  "settings": {
+    "sla": {
+      "warningThreshold": 0.8,
+      "checkIntervalMs": 30000,
+      "warningChannels": ["slack-alerts"],
+      "violationChannels": ["slack-alerts", "pagerduty"],
+      "violationAction": "notify"
+    }
+  }
+}
+```
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `warningThreshold` | `number` | `0.8` | Fraction of deadline elapsed before warning (0-1) |
+| `checkIntervalMs` | `number` | `30000` | Check interval in milliseconds |
+| `warningChannels` | `string[]` | `[]` | Channels for warning notifications |
+| `violationChannels` | `string[]` | `[]` | Channels for violation notifications |
+| `violationAction` | `"notify" \| "fail"` | `"notify"` | Action on violation |
+
+<Aside type="caution">
+The `"fail"` violation action immediately transitions the task to `failed` status, bypassing normal retry and escalation flows. Use with care.
+</Aside>
+
+---
+
+## Configuration
+
+```json
+{
+  "settings": {
+    "maxFixAttempts": 2,
+    "maxRetries": 3,
+    "orchestratorModel": "claude-sonnet-4-5-20250929"
+  }
+}
+```
+
+Override per-task:
+
+```json
+{
+  "tasks": [
+    {
+      "title": "Critical API endpoint",
+      "agent": "backend-dev",
+      "description": "...",
+      "maxRetries": 5,
+      "expectations": [
+        {
+          "type": "llm_review",
+          "threshold": 4.0,
+          "dimensions": []
+        }
+      ]
+    }
+  ]
+}
+```
+
+See [Configuration Reference](/reference/config/) for the full schema.
+
+## Events
+
+| Event | Payload | Description |
+|-------|---------|-------------|
+| `assessment:corrected` | `{ taskId, corrections }` | Expectations auto-corrected |
+| `quality:gate:passed` | `{ planId, gateName, avgScore? }` | A quality gate passed |
+| `quality:gate:failed` | `{ planId, gateName, reason, avgScore? }` | A quality gate failed |
+| `quality:threshold:failed` | `{ planId, avgScore, threshold }` | Plan did not meet its quality threshold |
+| `sla:warning` | `{ entityId, entityType, deadline, elapsed, remaining, percentUsed }` | Approaching deadline |
+| `sla:violated` | `{ entityId, entityType, deadline, overdueMs }` | Deadline exceeded |
+| `sla:met` | `{ entityId, entityType, deadline, marginMs }` | Completed before deadline |

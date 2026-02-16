@@ -48,7 +48,7 @@ An agent is a named worker with an adapter (how it runs), an optional model, and
 | `model` | `string` | — | `"provider:model"` or bare model ID |
 | `allowedTools` | `string[]` | all 7 tools | Which coding tools this agent can use |
 | `allowedPaths` | `string[]` | project root | Filesystem sandbox — agent can only access these directories |
-| `mcpServers` | `object` | — | MCP server connections (see [Tools & Skills](/concepts/tools-and-skills/)) |
+| `mcpServers` | `object` | — | MCP server connections (see [Tools & MCP](/features/tools-and-mcp/)) |
 | `systemPrompt` | `string` | — | Custom system prompt prepended to the default orchestration contract |
 | `skills` | `string[]` | — | Named skills to load (markdown files with instructions) |
 | `maxTurns` | `number` | `150` | Maximum tool-use turns before the agent is stopped |
@@ -85,7 +85,7 @@ Adapters control *how* an agent runs. Polpo ships with two:
   </TabItem>
 </Tabs>
 
-You can also **write your own adapter** — any object implementing the `AgentAdapter` interface. See the [Custom Adapter guide](/guides/custom-adapter/).
+You can also **write your own adapter** — any object implementing the `AgentAdapter` interface. See the [Custom Adapter](/reference/custom-adapter/) guide.
 
 ### How Agents Run
 

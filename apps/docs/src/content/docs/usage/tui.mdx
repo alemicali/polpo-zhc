@@ -72,7 +72,30 @@ The current mode is shown in the input prompt. Switch modes with the correspondi
 /workflow code-review module=src/auth focus=security
 ```
 
-See [Workflows](/concepts/workflows/) for details on the workflow system.
+See [Workflows](/features/workflows/) for details on the workflow system.
+
+### Skills
+
+| Command | Description |
+|---------|-------------|
+| `/skills` | Browse installed skills via interactive picker |
+| `/skills list` | Show a summary of skills with agent assignments |
+| `/skills add <source>` | Install skills from a GitHub repo or local path |
+| `/skills assign <skill> <agent>` | Assign a skill to an agent |
+| `/skills remove <name>` | Remove a skill from the pool |
+
+```
+# Browse skills interactively
+/skills
+
+# Install skills from a repo
+/skills add vercel-labs/agent-skills
+
+# Assign to an agent
+/skills assign frontend-design frontend-dev
+```
+
+See [Skills](/features/skills/) for details on the skill system.
 
 In plan mode, type a natural language description and Polpo will:
 1. Generate a plan with AI

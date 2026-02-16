@@ -94,6 +94,9 @@ export interface PolpoEventMap {
   "notification:sent": { ruleId: string; channel: string; event: string };
   "notification:failed": { ruleId: string; channel: string; error: string };
 
+  // Config
+  "config:reloaded": { timestamp: string };
+
   // General
   "log": { level: "info" | "warn" | "error" | "debug"; message: string };
 }

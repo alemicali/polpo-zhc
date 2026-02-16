@@ -1,5 +1,6 @@
 import { resolve } from "node:path";
-import { mkdirSync, existsSync } from "node:fs";
+import { mkdirSync, existsSync, watch, type FSWatcher } from "node:fs";
+import { join } from "node:path";
 import type { Server } from "node:net";
 import { parseConfig, loadPolpoConfig } from "./config.js";
 import { FileTaskStore } from "../stores/file-task-store.js";
@@ -91,6 +92,8 @@ export class Orchestrator extends TypedEmitter {
   private qualityController?: QualityController;
   private scheduler?: Scheduler;
   private telegramPoller?: TelegramCallbackPoller;
+  private configWatcher?: FSWatcher;
+  private configReloadTimer?: ReturnType<typeof setTimeout>;
 
   // Managers
   private agentMgr!: AgentManager;
@@ -364,6 +367,34 @@ export class Orchestrator extends TypedEmitter {
     if (recovered > 0) {
       this.emit("log", { level: "warn", message: `Recovered ${recovered} orphaned task(s) from previous session` });
     }
+
+    // Watch polpo.json for changes and auto-reload
+    this.startConfigWatcher();
+  }
+
+  /**
+   * Watch `.polpo/polpo.json` for changes and auto-reload the config.
+   * Uses a 500ms debounce to avoid reloading multiple times on rapid saves.
+   */
+  private startConfigWatcher(): void {
+    const configPath = join(this.polpoDir, "polpo.json");
+    if (!existsSync(configPath)) return;
+
+    try {
+      this.configWatcher = watch(configPath, () => {
+        // Debounce: wait 500ms after the last change event
+        if (this.configReloadTimer) clearTimeout(this.configReloadTimer);
+        this.configReloadTimer = setTimeout(() => {
+          this.emit("log", { level: "info", message: "[watch] polpo.json changed on disk — auto-reloading config" });
+          this.reloadConfig();
+        }, 500);
+      });
+
+      this.emit("log", { level: "info", message: "[watch] Watching polpo.json for changes" });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.emit("log", { level: "warn", message: `[watch] Failed to watch polpo.json: ${msg}` });
+    }
   }
 
   // ── Task Management (delegates to TaskManager) ──
@@ -546,6 +577,8 @@ export class Orchestrator extends TypedEmitter {
 
     // Clear process list in state and close stores
     this.registry.setState({ processes: [], completedAt: new Date().toISOString() });
+    if (this.configReloadTimer) clearTimeout(this.configReloadTimer);
+    this.configWatcher?.close();
     this.telegramPoller?.stop();
     this.notificationServer?.close();
     this.approvalMgr?.dispose();
@@ -560,6 +593,153 @@ export class Orchestrator extends TypedEmitter {
     await this.hookRegistry.runAfter("orchestrator:shutdown", {});
     this.logStore?.close();
     this.sessionStore?.close();
+  }
+
+  // ── Config Hot Reload ──
+
+  /**
+   * Reload polpo.json at runtime without restarting the server.
+   * Disposes optional subsystems (notifications, approvals, escalation, SLA,
+   * quality, scheduler, telegram poller) and re-initializes them from the
+   * freshly-read config.  Core managers (agents, tasks, plans, runner,
+   * assessor) and stores are left untouched — live state is preserved.
+   *
+   * Returns `true` if the config was successfully reloaded.
+   */
+  reloadConfig(): boolean {
+    const polpoConfig = loadPolpoConfig(this.polpoDir);
+    if (!polpoConfig) {
+      this.emit("log", { level: "warn", message: "[reload] polpo.json not found or unparseable — skipping reload" });
+      return false;
+    }
+
+    this.emit("log", { level: "info", message: "[reload] Reloading configuration..." });
+
+    // 1. Dispose optional subsystems
+    this.telegramPoller?.stop();
+    this.telegramPoller = undefined;
+    this.scheduler?.dispose();
+    this.scheduler = undefined;
+    this.qualityController?.dispose();
+    this.qualityController = undefined;
+    this.slaMonitor?.dispose();
+    this.slaMonitor = undefined;
+    this.escalationMgr?.dispose();
+    this.escalationMgr = undefined;
+    this.notificationRouter?.dispose();
+    this.notificationRouter = undefined;
+    this.approvalMgr?.dispose();
+    this.approvalMgr = undefined;
+
+    // 2. Update config in-place (preserves the shared reference in OrchestratorContext)
+    const newSettings = polpoConfig.settings ?? this.config.settings;
+    this.config.settings = newSettings;
+    if (polpoConfig.team) this.config.team = polpoConfig.team;
+    if (polpoConfig.providers) {
+      this.config.providers = polpoConfig.providers;
+      setProviderOverrides(polpoConfig.providers);
+    }
+
+    // 3. Rebuild the OrchestratorContext so new subsystems get fresh references
+    const ctx: OrchestratorContext = {
+      emitter: this,
+      registry: this.registry,
+      runStore: this.runStore,
+      memoryStore: this.memoryStore,
+      logStore: this.logStore,
+      sessionStore: this.sessionStore,
+      hooks: this.hookRegistry,
+      config: this.config,
+      workDir: this.workDir,
+      polpoDir: this.polpoDir,
+      assessFn: this.assessFn,
+    };
+
+    // 4. Re-initialize optional subsystems from new config
+
+    // Approval gates
+    if (this.config.settings.approvalGates && this.config.settings.approvalGates.length > 0) {
+      const approvalStore = new FileApprovalStore(this.polpoDir);
+      this.approvalMgr = new ApprovalManager(ctx, approvalStore);
+      this.approvalMgr.init();
+    }
+
+    // Notification router
+    if (this.config.settings.notifications) {
+      this.notificationRouter = new NotificationRouter(this);
+      this.notificationRouter.init(this.config.settings.notifications);
+      const notifStore = new FileNotificationStore(this.polpoDir);
+      this.notificationRouter.setStore(notifStore);
+      this.notificationRouter.start();
+
+      // Restore scope resolver
+      this.notificationRouter.setScopeResolver((data: unknown) => {
+        if (!data || typeof data !== "object") return undefined;
+        const d = data as Record<string, unknown>;
+        const taskId = (d.taskId as string | undefined)
+          ?? ((d.task as Record<string, unknown> | undefined)?.id as string | undefined);
+        const group = (d.group as string | undefined)
+          ?? (taskId ? this.registry.getTask(taskId)?.group : undefined);
+        const taskNotifications = taskId
+          ? this.registry.getTask(taskId)?.notifications
+          : undefined;
+        let planNotifications: ScopedNotificationRules | undefined;
+        if (group) {
+          const plan = this.registry.getPlanByName?.(group);
+          planNotifications = plan?.notifications;
+        } else if (d.planId) {
+          const plan = this.registry.getPlan?.(d.planId as string);
+          planNotifications = plan?.notifications;
+        }
+        return { taskNotifications, planNotifications };
+      });
+    }
+
+    // Wire notification router to approval manager
+    if (this.approvalMgr && this.notificationRouter) {
+      this.approvalMgr.setNotificationRouter(this.notificationRouter);
+      this.notificationRouter.setOutcomeResolver((taskId: string) => {
+        const task = this.registry.getTask(taskId);
+        return task?.outcomes;
+      });
+      this.startTelegramApprovalPoller();
+    }
+
+    // Escalation manager
+    if (this.config.settings.escalationPolicy) {
+      this.escalationMgr = new EscalationManager(ctx, this.approvalMgr);
+      this.escalationMgr.init();
+    }
+
+    // SLA monitor
+    if (this.config.settings.sla) {
+      this.slaMonitor = new SLAMonitor(ctx, this.config.settings.sla);
+      if (this.notificationRouter) {
+        this.slaMonitor.setNotificationRouter(this.notificationRouter);
+      }
+      this.slaMonitor.init();
+    }
+
+    // Quality controller (always available)
+    this.qualityController = new QualityController(ctx);
+    if (this.notificationRouter) {
+      this.qualityController.setNotificationRouter(this.notificationRouter);
+    }
+    this.qualityController.init();
+    this.planExec.setQualityController(this.qualityController);
+
+    // Scheduler
+    const hasScheduledPlans = (this.config.settings.enableScheduler !== false) &&
+      (this.registry.getAllPlans?.() ?? []).some(p => !!p.schedule);
+    if (this.config.settings.enableScheduler || hasScheduledPlans) {
+      this.scheduler = new Scheduler(ctx);
+      this.scheduler.setExecutor((planId) => this.planExec.executePlan(planId));
+      this.scheduler.init();
+    }
+
+    this.emit("log", { level: "info", message: "[reload] Configuration reloaded successfully" });
+    this.emit("config:reloaded", { timestamp: new Date().toISOString() });
+    return true;
   }
 
   /**
