@@ -132,6 +132,11 @@ export const RejectRequestSchema = z.object({
   note: z.string().optional(),
 });
 
+export const ReviseRequestSchema = z.object({
+  feedback: z.string().min(1),
+  resolvedBy: z.string().optional(),
+});
+
 // ── Memory schema ─────────────────────────────────────────────────────
 
 export const UpdateMemorySchema = z.object({

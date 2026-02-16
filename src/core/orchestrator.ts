@@ -345,6 +345,12 @@ export class Orchestrator extends TypedEmitter {
   rejectRequest(requestId: string, resolvedBy?: string, note?: string): ApprovalRequest | null {
     return this.approvalMgr?.reject(requestId, resolvedBy, note) ?? null;
   }
+  reviseRequest(requestId: string, feedback: string, resolvedBy?: string): ApprovalRequest | null {
+    return this.approvalMgr?.revise(requestId, feedback, resolvedBy) ?? null;
+  }
+  canReviseRequest(requestId: string): { allowed: boolean; revisionCount: number; maxRevisions: number } {
+    return this.approvalMgr?.canRevise(requestId) ?? { allowed: false, revisionCount: 0, maxRevisions: 0 };
+  }
   getPendingApprovals(): ApprovalRequest[] {
     return this.approvalMgr?.getPending() ?? [];
   }

@@ -4,6 +4,7 @@ import type { AgentManager } from "./agent-manager.js";
 import type { Plan, PlanStatus, PlanReport, Task, TaskExpectation, ExpectedOutcome, PlanQualityGate } from "./types.js";
 import type { QualityController } from "../quality/quality-controller.js";
 import { sanitizeExpectations } from "./schemas.js";
+import { validateProviderKeys } from "../llm/pi-client.js";
 
 interface PlanDocument {
   tasks?: Array<{
@@ -190,6 +191,34 @@ export class PlanExecutor {
           systemPrompt: a.systemPrompt,
           skills: a.skills,
         }, group);
+      }
+    }
+
+    // Validate API keys for all agents referenced in the plan
+    const allAgents = this.agentMgr.getAgents();
+    const referencedModels: string[] = [];
+    for (const t of doc.tasks) {
+      const agentName = t.assignTo || this.ctx.config.team.agents[0]?.name;
+      const agent = allAgents.find(a => a.name === agentName);
+      if (agent?.model) {
+        referencedModels.push(agent.model);
+      } else if (!agent) {
+        throw new Error(
+          `Plan references agent "${agentName}" (task "${t.title}") but no such agent exists. ` +
+          `Available agents: ${allAgents.map(a => a.name).join(", ")}`
+        );
+      }
+    }
+    if (referencedModels.length > 0) {
+      const missing = validateProviderKeys(referencedModels);
+      if (missing.length > 0) {
+        const details = missing
+          .map(m => `${m.provider} (model: ${m.modelSpec})`)
+          .join(", ");
+        throw new Error(
+          `Missing API keys for providers: ${details}. ` +
+          `Set the corresponding environment variables or add them to polpo.json providers section.`
+        );
       }
     }
 

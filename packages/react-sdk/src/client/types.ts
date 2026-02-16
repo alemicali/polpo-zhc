@@ -59,6 +59,35 @@ export interface RetryPolicy {
 
 export type TaskPhase = "execution" | "review" | "fix" | "clarification";
 
+// === Outcomes ===
+
+export type OutcomeType = "file" | "text" | "url" | "json" | "media";
+
+export interface TaskOutcome {
+  id: string;
+  type: OutcomeType;
+  label: string;
+  path?: string;
+  mimeType?: string;
+  size?: number;
+  text?: string;
+  url?: string;
+  data?: unknown;
+  producedBy?: string;
+  producedAt?: string;
+  tags?: string[];
+}
+
+export interface ExpectedOutcome {
+  type: OutcomeType;
+  label: string;
+  description?: string;
+  path?: string;
+  mimeType?: string;
+  required?: boolean;
+  tags?: string[];
+}
+
 export interface Task {
   id: string;
   title: string;
@@ -80,6 +109,8 @@ export interface Task {
   resolutionAttempts?: number;
   originalDescription?: string;
   sessionId?: string;
+  expectedOutcomes?: ExpectedOutcome[];
+  outcomes?: TaskOutcome[];
   createdAt: string;
   updatedAt: string;
 }
@@ -240,9 +271,11 @@ export interface PlanReport {
     score?: number;
     filesCreated: string[];
     filesEdited: string[];
+    outcomes?: TaskOutcome[];
   }[];
   filesCreated: string[];
   filesEdited: string[];
+  outcomes?: TaskOutcome[];
   avgScore?: number;
 }
 

@@ -41,6 +41,12 @@ import {
   Check,
   FileCode,
   Scale,
+  Package,
+  Image,
+  FileAudio,
+  Link2,
+  FileJson,
+  File,
 } from "lucide-react";
 import { MessageResponse } from "@/components/ai-elements/message";
 import { useTask, useProcesses, useTaskActivity, usePolpo } from "@openpolpo/react-sdk";
@@ -235,26 +241,26 @@ function ActivityEntry({ entry }: { entry: RunActivityEntry }) {
     <Collapsible open={open} onOpenChange={setOpen}>
       <CollapsibleTrigger asChild>
         <div className={cn(
-          "flex items-center gap-2 px-3 py-2 rounded-md cursor-pointer transition-colors",
+          "flex items-center gap-2.5 px-3 py-2.5 rounded-md cursor-pointer transition-colors",
           open ? "bg-muted/40" : "hover:bg-muted/20"
         )}>
-          <div className={cn("h-1.5 w-1.5 rounded-full shrink-0", style.dot)} />
-          <Icon className={cn("h-3 w-3 shrink-0", style.color)} />
-          <Badge variant="outline" className="text-[9px] font-mono px-1.5 py-0 shrink-0">
+          <div className={cn("h-2 w-2 rounded-full shrink-0", style.dot)} />
+          <Icon className={cn("h-4 w-4 shrink-0", style.color)} />
+          <Badge variant="outline" className="text-xs font-mono px-2 py-0.5 shrink-0">
             {eventLabel}
           </Badge>
-          <span className="text-[11px] text-muted-foreground ml-auto shrink-0">
+          <span className="text-sm text-muted-foreground ml-auto shrink-0">
             {entry.ts ? new Date(entry.ts).toLocaleTimeString() : ""}
           </span>
           {hasPayload && (
-            <ChevronDown className={cn("h-3 w-3 text-muted-foreground transition-transform shrink-0", open && "rotate-180")} />
+            <ChevronDown className={cn("h-3.5 w-3.5 text-muted-foreground transition-transform shrink-0", open && "rotate-180")} />
           )}
         </div>
       </CollapsibleTrigger>
       {hasPayload && (
         <CollapsibleContent>
-          <div className="ml-7 mr-2 mb-1">
-            <pre className="text-[11px] bg-muted/30 rounded px-3 py-2 whitespace-pre-wrap font-mono overflow-x-auto text-muted-foreground max-h-48 overflow-y-auto">
+          <div className="ml-7 mr-2 mb-0.5">
+            <pre className="text-sm bg-muted/30 rounded px-3 py-2 whitespace-pre-wrap font-mono overflow-x-auto text-muted-foreground max-h-56 overflow-y-auto leading-normal">
               {entry.text ?? JSON.stringify(entry.data, null, 2)}
             </pre>
           </div>
@@ -264,8 +270,10 @@ function ActivityEntry({ entry }: { entry: RunActivityEntry }) {
   );
 }
 
-function ActivityPanel({ taskId }: { taskId: string }) {
-  const { entries, isLoading, error, refetch } = useTaskActivity(taskId);
+function ActivityPanel({ taskId, isActive }: { taskId: string; isActive?: boolean }) {
+  const { entries, isLoading, error, refetch } = useTaskActivity(taskId, {
+    pollIntervalMs: isActive ? 1000 : 0,
+  });
 
   const stats = entries.reduce((acc, e) => {
     if (e.event === "activity") acc.snapshots++;
@@ -293,27 +301,27 @@ function ActivityPanel({ taskId }: { taskId: string }) {
   }
 
   return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between">
+    <div className="flex flex-col flex-1 min-h-0 gap-3">
+      <div className="flex items-center justify-between shrink-0">
         <div className="flex items-center gap-3">
           {stats.snapshots > 0 && (
-            <span className="text-xs text-muted-foreground flex items-center gap-1">
-              <Hash className="h-3 w-3" /> {stats.snapshots} snapshots
+            <span className="text-sm text-muted-foreground flex items-center gap-1">
+              <Hash className="h-3.5 w-3.5" /> {stats.snapshots} snapshots
             </span>
           )}
           {stats.tools > 0 && (
-            <span className="text-xs text-muted-foreground flex items-center gap-1">
-              <Wrench className="h-3 w-3" /> {stats.tools} tools
+            <span className="text-sm text-muted-foreground flex items-center gap-1">
+              <Wrench className="h-3.5 w-3.5" /> {stats.tools} tools
             </span>
           )}
           {stats.outputs > 0 && (
-            <span className="text-xs text-muted-foreground flex items-center gap-1">
-              <Terminal className="h-3 w-3" /> {stats.outputs} outputs
+            <span className="text-sm text-muted-foreground flex items-center gap-1">
+              <Terminal className="h-3.5 w-3.5" /> {stats.outputs} outputs
             </span>
           )}
           {stats.errors > 0 && (
-            <span className="text-xs text-red-400 flex items-center gap-1">
-              <XCircle className="h-3 w-3" /> {stats.errors} errors
+            <span className="text-sm text-red-400 flex items-center gap-1">
+              <XCircle className="h-3.5 w-3.5" /> {stats.errors} errors
             </span>
           )}
         </div>
@@ -321,9 +329,9 @@ function ActivityPanel({ taskId }: { taskId: string }) {
           <RefreshCw className="h-3.5 w-3.5" />
         </Button>
       </div>
-      <ScrollArea className="h-[calc(100vh-24rem)]">
+      <ScrollArea className="flex-1 min-h-0">
         <div className="space-y-0.5 pr-2">
-          {entries.map((entry, i) => (
+          {[...entries].reverse().map((entry, i) => (
             <ActivityEntry key={i} entry={entry} />
           ))}
         </div>
@@ -622,6 +630,94 @@ export function TaskDetailPage() {
                 </Card>
               )}
 
+              {/* Outcomes (produced artifacts) */}
+              {(task.outcomes?.length ?? 0) > 0 && (
+                <Card>
+                  <CardContent className="pt-4">
+                    <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-3 flex items-center gap-1">
+                      <Package className="h-3 w-3" /> Outcomes ({task.outcomes!.length})
+                    </p>
+                    <div className="space-y-2">
+                      {task.outcomes!.map((o) => {
+                        const OutcomeIcon = o.type === "media"
+                          ? (o.mimeType?.startsWith("image/") ? Image : o.mimeType?.startsWith("audio/") ? FileAudio : File)
+                          : o.type === "url" ? Link2
+                          : o.type === "json" ? FileJson
+                          : o.type === "text" ? FileText
+                          : File;
+                        return (
+                          <div key={o.id} className="rounded-md border border-border p-3 space-y-1">
+                            <div className="flex items-center gap-2">
+                              <OutcomeIcon className="h-4 w-4 text-muted-foreground shrink-0" />
+                              <span className="text-sm font-medium">{o.label}</span>
+                              <Badge variant="outline" className="text-[9px]">{o.type}</Badge>
+                              {o.mimeType && (
+                                <span className="text-[10px] text-muted-foreground font-mono">{o.mimeType}</span>
+                              )}
+                              {o.size != null && (
+                                <span className="text-[10px] text-muted-foreground ml-auto">
+                                  {o.size > 1024 * 1024
+                                    ? `${(o.size / 1024 / 1024).toFixed(1)} MB`
+                                    : `${(o.size / 1024).toFixed(1)} KB`}
+                                </span>
+                              )}
+                            </div>
+                            {o.path && (
+                              <code className="block text-[11px] bg-muted/40 rounded px-2 py-1 font-mono text-muted-foreground truncate">
+                                {o.path}
+                              </code>
+                            )}
+                            {o.url && (
+                              <a href={o.url} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-400 hover:underline truncate block">
+                                {o.url}
+                              </a>
+                            )}
+                            {o.text && (
+                              <p className="text-xs text-muted-foreground line-clamp-3">{o.text}</p>
+                            )}
+                            {o.producedBy && (
+                              <span className="text-[10px] text-muted-foreground">
+                                via <code className="font-mono">{o.producedBy}</code>
+                                {o.producedAt && <> at {new Date(o.producedAt).toLocaleTimeString()}</>}
+                              </span>
+                            )}
+                            {o.tags && o.tags.length > 0 && (
+                              <div className="flex gap-1">
+                                {o.tags.map(t => (
+                                  <Badge key={t} variant="secondary" className="text-[8px]">{t}</Badge>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Expected Outcomes (declared, not yet produced) */}
+              {(task.expectedOutcomes?.length ?? 0) > 0 && !(task.outcomes?.length) && (
+                <Card>
+                  <CardContent className="pt-4">
+                    <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-3 flex items-center gap-1">
+                      <Package className="h-3 w-3" /> Expected Outcomes ({task.expectedOutcomes!.length})
+                    </p>
+                    <div className="space-y-2">
+                      {task.expectedOutcomes!.map((o, i) => (
+                        <div key={i} className="flex items-center gap-2 rounded-md border border-dashed border-border/50 p-2.5">
+                          <Badge variant="outline" className="text-[9px]">{o.type}</Badge>
+                          <span className="text-xs font-medium">{o.label}</span>
+                          {o.required && <Badge variant="secondary" className="text-[8px]">required</Badge>}
+                          {o.description && <span className="text-[10px] text-muted-foreground truncate">{o.description}</span>}
+                          {o.path && <code className="text-[10px] font-mono text-muted-foreground ml-auto">{o.path}</code>}
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
               {/* Metrics */}
               {task.metrics.length > 0 && (
                 <Card>
@@ -859,7 +955,7 @@ export function TaskDetailPage() {
 
         {/* Activity tab */}
         <TabsContent value="activity" className="mt-4 flex-1 min-h-0">
-          <ActivityPanel taskId={task.id} />
+          <ActivityPanel taskId={task.id} isActive={task.status === "in_progress" || task.status === "assigned"} />
         </TabsContent>
 
         {/* Output tab */}

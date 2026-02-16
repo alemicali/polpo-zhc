@@ -150,6 +150,8 @@ export interface Task {
   expectedOutcomes?: ExpectedOutcome[];
   /** Actual outcomes produced at runtime (auto-collected + explicit). */
   outcomes?: TaskOutcome[];
+  /** Number of approval revision rounds this task has gone through. */
+  revisionCount?: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -509,9 +511,11 @@ export interface ApprovalGate {
   timeoutAction?: "approve" | "reject";
   /** Priority within the same hook point. Lower = first. Default: 100. */
   priority?: number;
+  /** Max revision rounds before only approve/reject is allowed. Default: 3. */
+  maxRevisions?: number;
 }
 
-export type ApprovalStatus = "pending" | "approved" | "rejected" | "timeout";
+export type ApprovalStatus = "pending" | "approved" | "rejected" | "revised" | "timeout";
 
 export interface ApprovalRequest {
   /** Unique request ID. */

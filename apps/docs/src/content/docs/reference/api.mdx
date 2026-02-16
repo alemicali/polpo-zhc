@@ -475,7 +475,7 @@ Manage approval requests created by [approval gates](/concepts/approvals).
 GET /approvals?status=pending&taskId=task-1
 ```
 
-Both query params are optional filters. Valid `status` values: `pending`, `approved`, `rejected`, `timeout`.
+Both query params are optional filters. Valid `status` values: `pending`, `approved`, `rejected`, `revised`, `timeout`.
 
 **Response** `200`:
 ```json
@@ -519,6 +519,32 @@ Both fields are optional. On success, the blocked task transitions from `awaitin
 **Response** `200`: Updated `ApprovalRequest` with `status: "approved"`.
 
 Returns `404` if the request does not exist, or `409` if already resolved.
+
+### Revise Request
+
+```http
+POST /approvals/:id/revise
+Content-Type: application/json
+
+{
+  "feedback": "The auth middleware is missing rate limiting. Add it before the JWT check.",
+  "resolvedBy": "alice"
+}
+```
+
+`feedback` is **required** — it tells the agent what to fix. `resolvedBy` is optional.
+
+On revision:
+1. The approval request is marked as `"revised"`
+2. The feedback is appended to the task description so the agent sees it
+3. The task's `revisionCount` is incremented
+4. The task transitions back to `assigned` and the agent re-spawns with the updated instructions
+
+**Response** `200`: Updated `ApprovalRequest` with `status: "revised"`.
+
+Returns `404` if the request does not exist, `409` if already resolved or max revisions reached.
+
+Each approval gate has a `maxRevisions` limit (default: 3). Once reached, the only options are approve or reject.
 
 ### Reject Request
 

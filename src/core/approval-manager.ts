@@ -142,6 +142,92 @@ export class ApprovalManager {
   }
 
   /**
+   * Revise a pending request: send the task back for rework with feedback.
+   *
+   * The task's description is appended with the revision feedback,
+   * `revisionCount` is incremented on the task, and the task transitions
+   * back to `assigned` so the agent re-spawns with the new instructions.
+   *
+   * Returns the updated request, or `null` if:
+   * - Request not found or already resolved
+   * - No taskId on the request
+   * - Max revisions exceeded (check with `canRevise()` first)
+   */
+  revise(requestId: string, feedback: string, resolvedBy?: string): ApprovalRequest | null {
+    const request = this.store.get(requestId);
+    if (!request || request.status !== "pending") return null;
+    if (!request.taskId) return null;
+
+    // Check max revisions
+    const gate = this.ctx.config.settings.approvalGates?.find(g => g.id === request.gateId);
+    const maxRevisions = gate?.maxRevisions ?? 3;
+    const task = this.ctx.registry.getTask(request.taskId);
+    if (!task) return null;
+
+    const currentCount = task.revisionCount ?? 0;
+    if (currentCount >= maxRevisions) return null;
+
+    // 1. Mark request as revised
+    request.status = "revised";
+    request.resolvedAt = new Date().toISOString();
+    request.resolvedBy = resolvedBy ?? "user";
+    request.note = feedback;
+    this.store.upsert(request);
+
+    // 2. Clear timeout timer
+    this.clearTimer(requestId);
+
+    // 3. Increment revisionCount on the task
+    const newCount = currentCount + 1;
+    this.ctx.registry.updateTask(request.taskId, {
+      revisionCount: newCount,
+    });
+
+    // 4. Append feedback to task description
+    const separator = "\n\n---\n";
+    const feedbackBlock = `**Revision #${newCount} feedback:** ${feedback}`;
+    const updatedDescription = task.description + separator + feedbackBlock;
+    this.ctx.registry.updateTask(request.taskId, {
+      description: updatedDescription,
+    });
+
+    // 5. Emit event
+    this.ctx.emitter.emit("approval:revised", {
+      requestId,
+      taskId: request.taskId,
+      feedback,
+      revisionCount: newCount,
+      resolvedBy: request.resolvedBy,
+    });
+
+    // 6. Transition task back to assigned (triggers re-spawn)
+    try {
+      this.ctx.registry.transition(request.taskId, "assigned");
+    } catch {
+      // Task may have been modified externally
+    }
+
+    return request;
+  }
+
+  /**
+   * Check whether a request can be revised (not at max revisions).
+   */
+  canRevise(requestId: string): { allowed: boolean; revisionCount: number; maxRevisions: number } {
+    const request = this.store.get(requestId);
+    if (!request || request.status !== "pending" || !request.taskId) {
+      return { allowed: false, revisionCount: 0, maxRevisions: 0 };
+    }
+
+    const gate = this.ctx.config.settings.approvalGates?.find(g => g.id === request.gateId);
+    const maxRevisions = gate?.maxRevisions ?? 3;
+    const task = this.ctx.registry.getTask(request.taskId);
+    const currentCount = task?.revisionCount ?? 0;
+
+    return { allowed: currentCount < maxRevisions, revisionCount: currentCount, maxRevisions };
+  }
+
+  /**
    * Resolve a pending request (approve or reject).
    */
   private resolve(

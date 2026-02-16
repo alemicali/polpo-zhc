@@ -67,6 +67,7 @@ export interface PolpoEventMap {
   // Approval gates
   "approval:requested": { requestId: string; gateId: string; gateName: string; taskId?: string; planId?: string };
   "approval:resolved": { requestId: string; status: "approved" | "rejected"; resolvedBy?: string };
+  "approval:revised": { requestId: string; taskId?: string; feedback: string; revisionCount: number; resolvedBy?: string };
   "approval:timeout": { requestId: string; action: "approve" | "reject" };
 
   // Escalation

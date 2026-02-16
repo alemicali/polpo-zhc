@@ -186,11 +186,11 @@ function SkillsPool({
                     ))}
                   </div>
                 )}
-                {skill.allowedTools && skill.allowedTools.length > 0 && (
+                {Array.isArray(skill.allowedTools) && skill.allowedTools.length > 0 && (
                   <div className="flex items-center gap-1 pt-0.5">
                     <Wrench className="h-2.5 w-2.5 text-muted-foreground" />
                     {skill.allowedTools.slice(0, 4).map(t => (
-                      <Badge key={t} variant="outline" className="text-[8px] py-0 px-1 font-mono">{t}</Badge>
+                      <Badge key={t} variant="outline" className="text-[8px] py-0 px-1 font-mono">{String(t)}</Badge>
                     ))}
                     {skill.allowedTools.length > 4 && (
                       <span className="text-[8px] text-muted-foreground">+{skill.allowedTools.length - 4}</span>

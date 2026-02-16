@@ -7,6 +7,7 @@ import type { OrchestratorContext } from "./orchestrator-context.js";
 import type { Task, TaskResult, RunnerConfig } from "./types.js";
 import type { RunRecord } from "./run-store.js";
 import { getSocketPath } from "./notification.js";
+import { validateProviderKeys } from "../llm/pi-client.js";
 
 /**
  * Spawns, monitors, and collects results from agent runner subprocesses.
@@ -212,6 +213,22 @@ export class TaskRunner {
       this.ctx.registry.transition(task.id, "in_progress");
       this.ctx.registry.transition(task.id, "failed");
       return;
+    }
+
+    // Fail fast if the agent's model provider has no API key
+    if (agent.model) {
+      const missing = validateProviderKeys([agent.model]);
+      if (missing.length > 0) {
+        const detail = missing.map(m => `${m.provider} (${m.modelSpec})`).join(", ");
+        this.ctx.emitter.emit("log", {
+          level: "error",
+          message: `[${task.id}] Missing API key for ${detail} — cannot spawn agent "${agent.name}"`,
+        });
+        this.ctx.registry.transition(task.id, "assigned");
+        this.ctx.registry.transition(task.id, "in_progress");
+        this.ctx.registry.transition(task.id, "failed");
+        return;
+      }
     }
 
     // Run before:task:spawn hook (sync — tick loop is synchronous)

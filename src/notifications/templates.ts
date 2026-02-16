@@ -94,6 +94,8 @@ export function defaultTitle(ctx: TemplateContext): string {
       return `${emoji} Approval Required: ${str(data, "gateName")}`;
     case "approval:resolved":
       return `${emoji} Approval ${str(data, "status")}`;
+    case "approval:revised":
+      return `${emoji} Revision Requested (#${num(data, "revisionCount")})`;
     case "approval:timeout":
       return `${emoji} Approval Timed Out (action: ${str(data, "action")})`;
 
@@ -169,6 +171,11 @@ export function defaultBody(ctx: TemplateContext): string {
       lines.push(`Gate **${str(data, "gateName")}** requires approval.`);
       if (str(data, "taskId")) lines.push(`Task: ${str(data, "taskId")}`);
       if (str(data, "planId")) lines.push(`Plan: ${str(data, "planId")}`);
+      break;
+    case "approval:revised":
+      lines.push(`Task sent back for revision (#${num(data, "revisionCount")}).`);
+      if (str(data, "taskId")) lines.push(`Task: ${str(data, "taskId")}`);
+      if (str(data, "feedback")) lines.push(`Feedback: ${str(data, "feedback")}`);
       break;
     case "escalation:human":
       lines.push(str(data, "message"));

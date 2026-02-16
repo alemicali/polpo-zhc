@@ -182,8 +182,8 @@ function TaskCard({
           <Icon className={cn(compact ? "h-3 w-3" : "h-3.5 w-3.5", cfg.color, task.status === "in_progress" && "animate-spin")} />
         </div>
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-1.5">
-            <span className={cn("font-medium truncate", compact ? "text-xs" : "text-sm")}>{task.title}</span>
+          <div className="flex items-center gap-1.5 min-w-0">
+            <span className={cn("font-medium", compact ? "text-xs line-clamp-2" : "text-sm line-clamp-2")}>{task.title}</span>
             {phase && (
               <Badge variant="outline" className={cn("text-[8px] gap-0.5 px-1 py-0 shrink-0", phase.color)}>
                 <phase.icon className="h-2 w-2" />

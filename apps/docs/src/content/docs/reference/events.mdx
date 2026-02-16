@@ -1,6 +1,6 @@
 ---
 title: Events Reference
-description: All 55 Polpo event types organized by category with typed payloads
+description: All 56 Polpo event types organized by category with typed payloads
 ---
 
 import { Aside } from '@astrojs/starlight/components';
@@ -193,6 +193,7 @@ Events for human-in-the-loop approval workflows.
 |-------|-------------|-------------------|
 | `approval:requested` | Approval request created | `requestId`, `gateId`, `gateName`, `taskId?`, `planId?` |
 | `approval:resolved` | Approval resolved | `requestId`, `status: "approved" \| "rejected"`, `resolvedBy?` |
+| `approval:revised` | Task sent back for rework | `requestId`, `taskId?`, `feedback`, `revisionCount`, `resolvedBy?` |
 | `approval:timeout` | Approval timed out | `requestId`, `action: "approve" \| "reject"` |
 
 ---

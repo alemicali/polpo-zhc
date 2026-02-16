@@ -14,7 +14,7 @@ const ALL_EVENTS: PolpoEvent[] = [
   "task:recovered",
   "plan:saved", "plan:executed", "plan:completed", "plan:resumed", "plan:deleted",
   "session:created", "message:added",
-  "approval:requested", "approval:resolved", "approval:timeout",
+  "approval:requested", "approval:resolved", "approval:revised", "approval:timeout",
   "escalation:triggered", "escalation:resolved", "escalation:human",
   "sla:warning", "sla:violated", "sla:met",
   "quality:gate:passed", "quality:gate:failed", "quality:threshold:failed",

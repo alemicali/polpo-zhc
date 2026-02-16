@@ -32,6 +32,9 @@ export function selectTasks(state: StoreState, filter?: TaskFilter): Task[] {
     tasks = tasks.filter((t) => t.assignTo === filter.assignTo);
   }
 
+  // Default sort: most recently updated first
+  tasks.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+
   lastTasksMap = state.tasks;
   lastTaskFilter = filterKey;
   lastTaskResult = tasks;

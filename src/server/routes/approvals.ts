@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import type { ServerEnv } from "../app.js";
-import { ApproveRequestSchema, RejectRequestSchema, parseBody } from "../schemas.js";
+import { ApproveRequestSchema, RejectRequestSchema, ReviseRequestSchema, parseBody } from "../schemas.js";
 
 /**
  * Approval routes.
@@ -70,6 +70,42 @@ export function approvalRoutes(): Hono<ServerEnv> {
         error: `Request already resolved with status: ${existing.status}`,
         code: "CONFLICT",
       }, 409);
+    }
+
+    return c.json({ ok: true, data: result });
+  });
+
+  // POST /approvals/:id/revise — send task back for rework with feedback
+  app.post("/:id/revise", async (c) => {
+    const orchestrator = c.get("orchestrator");
+    const id = c.req.param("id");
+
+    const body = parseBody(ReviseRequestSchema, await c.req.json());
+
+    // Check if revision is allowed (max revisions)
+    const check = orchestrator.canReviseRequest(id);
+    if (!check.allowed) {
+      const existing = orchestrator.getApprovalRequest(id);
+      if (!existing) {
+        return c.json({ ok: false, error: "Approval request not found", code: "NOT_FOUND" }, 404);
+      }
+      if (existing.status !== "pending") {
+        return c.json({
+          ok: false,
+          error: `Request already resolved with status: ${existing.status}`,
+          code: "CONFLICT",
+        }, 409);
+      }
+      return c.json({
+        ok: false,
+        error: `Max revisions reached (${check.revisionCount}/${check.maxRevisions}). Use approve or reject instead.`,
+        code: "CONFLICT",
+      }, 409);
+    }
+
+    const result = orchestrator.reviseRequest(id, body.feedback, body.resolvedBy);
+    if (!result) {
+      return c.json({ ok: false, error: "Failed to revise request", code: "CONFLICT" }, 409);
     }
 
     return c.json({ ok: true, data: result });

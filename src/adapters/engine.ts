@@ -304,8 +304,9 @@ const OUTCOME_TOOLS: Record<string, { type: OutcomeType; labelPrefix: string }> 
   pdf_merge:        { type: "file",   labelPrefix: "Merged PDF" },
   docx_create:      { type: "file",   labelPrefix: "Word Document" },
   http_download:    { type: "file",   labelPrefix: "Downloaded File" },
-  audio_transcribe: { type: "text",   labelPrefix: "Transcription" },
-  image_analyze:    { type: "text",   labelPrefix: "Image Analysis" },
+  audio_transcribe:    { type: "text",   labelPrefix: "Transcription" },
+  image_analyze:       { type: "text",   labelPrefix: "Image Analysis" },
+  browser_screenshot:  { type: "media",  labelPrefix: "Screenshot" },
 };
 
 /** MIME type inference from file extension. */
