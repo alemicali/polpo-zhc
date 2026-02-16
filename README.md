@@ -216,6 +216,8 @@ Full documentation is available at [openpolpo.dev](https://openpolpo.dev), inclu
 
 ## Contributing
 
+We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for setup instructions, coding standards, and PR guidelines.
+
 ```bash
 git clone https://github.com/openpolpo/openpolpo.git
 cd openpolpo
@@ -224,14 +226,13 @@ pnpm run build
 pnpm run test -- --run
 ```
 
-1. Fork the repository
-2. Create a feature branch: `git checkout -b feat/my-feature`
-3. Build and test: `pnpm run build && pnpm run test -- --run`
-4. Push and open a Pull Request
+## Security
+
+If you discover a security vulnerability, please report it responsibly. See [SECURITY.md](SECURITY.md) for details.
 
 ## License
 
-MIT
+[MIT](LICENSE)
 
 ---
 

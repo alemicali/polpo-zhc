@@ -6,7 +6,7 @@ import {
 } from "../core/state-machine.js";
 import type { TaskStatus } from "../core/types.js";
 
-const ALL_STATUSES: TaskStatus[] = ["pending", "assigned", "in_progress", "review", "done", "failed"];
+const ALL_STATUSES: TaskStatus[] = ["pending", "awaiting_approval", "assigned", "in_progress", "review", "done", "failed"];
 
 describe("state-machine", () => {
   describe("VALID_TRANSITIONS", () => {
@@ -20,20 +20,20 @@ describe("state-machine", () => {
       expect(VALID_TRANSITIONS.pending).toEqual(["assigned", "awaiting_approval"]);
     });
 
-    it("awaiting_approval can go to assigned or failed", () => {
-      expect(VALID_TRANSITIONS.awaiting_approval).toEqual(["assigned", "failed"]);
+    it("awaiting_approval can go to assigned, failed, or done", () => {
+      expect(VALID_TRANSITIONS.awaiting_approval).toEqual(["assigned", "failed", "done"]);
     });
 
-    it("assigned can only go to in_progress", () => {
-      expect(VALID_TRANSITIONS.assigned).toEqual(["in_progress"]);
+    it("assigned can go to in_progress or awaiting_approval", () => {
+      expect(VALID_TRANSITIONS.assigned).toEqual(["in_progress", "awaiting_approval"]);
     });
 
-    it("in_progress can go to review or failed", () => {
-      expect(VALID_TRANSITIONS.in_progress).toEqual(["review", "failed"]);
+    it("in_progress can go to review, failed, or awaiting_approval", () => {
+      expect(VALID_TRANSITIONS.in_progress).toEqual(["review", "failed", "awaiting_approval"]);
     });
 
-    it("review can go to done or failed", () => {
-      expect(VALID_TRANSITIONS.review).toEqual(["done", "failed"]);
+    it("review can go to done, failed, or awaiting_approval", () => {
+      expect(VALID_TRANSITIONS.review).toEqual(["done", "failed", "awaiting_approval"]);
     });
 
     it("done is terminal (no transitions)", () => {
