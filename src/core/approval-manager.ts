@@ -3,6 +3,7 @@ import type { OrchestratorContext } from "./orchestrator-context.js";
 import type { ApprovalStore } from "./approval-store.js";
 import type { ApprovalGate, ApprovalRequest, ApprovalStatus } from "./types.js";
 import type { LifecycleHook, HookPayloads } from "./hooks.js";
+import type { NotificationRouter } from "../notifications/index.js";
 
 /**
  * Manages approval gates — both automatic (condition-based) and human (blocking).
@@ -16,11 +17,18 @@ import type { LifecycleHook, HookPayloads } from "./hooks.js";
  */
 export class ApprovalManager {
   private timers = new Map<string, ReturnType<typeof setTimeout>>();
+  private notificationRouter?: NotificationRouter;
+  private registeredGateRules = new Set<string>();
 
   constructor(
     private ctx: OrchestratorContext,
     private store: ApprovalStore,
   ) {}
+
+  /** Wire the notification router so per-gate notifyChannels work. */
+  setNotificationRouter(router: NotificationRouter): void {
+    this.notificationRouter = router;
+  }
 
   /**
    * Initialize: register hooks for all configured approval gates.
@@ -51,10 +59,56 @@ export class ApprovalManager {
   }
 
   /**
+   * Register dynamic notification rules for a gate's notifyChannels (once per gate).
+   * Same pattern as QualityController.ensureGateNotificationRules().
+   */
+  private ensureGateNotificationRules(gate: ApprovalGate): void {
+    if (!this.notificationRouter) return;
+    if (!gate.notifyChannels || gate.notifyChannels.length === 0) return;
+    if (this.registeredGateRules.has(gate.id)) return;
+
+    this.registeredGateRules.add(gate.id);
+
+    // Rule for approval requested
+    this.notificationRouter.addRule({
+      id: `approval-req-${gate.id}`,
+      name: `Approval "${gate.name}" Requested (auto)`,
+      events: ["approval:requested"],
+      condition: { field: "gateId", op: "==", value: gate.id },
+      channels: gate.notifyChannels,
+      severity: "warning",
+      includeOutcomes: gate.includeOutcomes,
+      outcomeFilter: ["media", "file"],
+      maxAttachmentSize: 10 * 1024 * 1024,
+    });
+
+    // Rule for approval resolved
+    this.notificationRouter.addRule({
+      id: `approval-res-${gate.id}`,
+      name: `Approval "${gate.name}" Resolved (auto)`,
+      events: ["approval:resolved"],
+      channels: gate.notifyChannels,
+      severity: "info",
+    });
+
+    // Rule for approval timeout
+    this.notificationRouter.addRule({
+      id: `approval-timeout-${gate.id}`,
+      name: `Approval "${gate.name}" Timed Out (auto)`,
+      events: ["approval:timeout"],
+      channels: gate.notifyChannels,
+      severity: "critical",
+    });
+  }
+
+  /**
    * Register a single gate as a "before" hook.
    */
   private registerGate(gate: ApprovalGate): void {
     const hook = gate.hook as LifecycleHook;
+
+    // Register dynamic notification rules for this gate's notifyChannels
+    this.ensureGateNotificationRules(gate);
 
     this.ctx.hooks.register({
       hook,
@@ -259,7 +313,11 @@ export class ApprovalManager {
     if (request.taskId) {
       try {
         if (status === "approved") {
-          this.ctx.registry.transition(request.taskId, "assigned");
+          // If the gate was on task:complete, the task was already reviewed/completed
+          // and should go directly to done (not re-assigned for execution).
+          const gate = this.ctx.config.settings.approvalGates?.find(g => g.id === request.gateId);
+          const targetStatus = gate?.hook === "task:complete" ? "done" : "assigned";
+          this.ctx.registry.transition(request.taskId, targetStatus as any);
         } else {
           this.ctx.registry.transition(request.taskId, "failed");
         }

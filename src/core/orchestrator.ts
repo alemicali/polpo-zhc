@@ -46,6 +46,8 @@ import { ApprovalManager } from "./approval-manager.js";
 import { FileApprovalStore } from "../stores/file-approval-store.js";
 import { NotificationRouter } from "../notifications/index.js";
 import { FileNotificationStore } from "../stores/file-notification-store.js";
+import { TelegramCallbackPoller } from "../notifications/channels/telegram.js";
+import type { ApprovalCallbackResolver } from "../notifications/channels/telegram.js";
 import { EscalationManager } from "./escalation-manager.js";
 import { SLAMonitor } from "../quality/sla-monitor.js";
 import { QualityController } from "../quality/quality-controller.js";
@@ -87,6 +89,7 @@ export class Orchestrator extends TypedEmitter {
   private slaMonitor?: SLAMonitor;
   private qualityController?: QualityController;
   private scheduler?: Scheduler;
+  private telegramPoller?: TelegramCallbackPoller;
 
   // Managers
   private agentMgr!: AgentManager;
@@ -231,6 +234,20 @@ export class Orchestrator extends TypedEmitter {
       const notifStore = new FileNotificationStore(this.polpoDir);
       this.notificationRouter.setStore(notifStore);
       this.notificationRouter.start();
+    }
+
+    // Wire notification router to approval manager (must happen after both are created)
+    if (this.approvalMgr && this.notificationRouter) {
+      this.approvalMgr.setNotificationRouter(this.notificationRouter);
+
+      // Set outcome resolver so approval notifications can include task outcomes
+      this.notificationRouter.setOutcomeResolver((taskId: string) => {
+        const task = this.registry.getTask(taskId);
+        return task?.outcomes;
+      });
+
+      // Start Telegram callback poller for interactive approval buttons
+      this.startTelegramApprovalPoller();
     }
 
     // Initialize escalation manager if configured
@@ -501,6 +518,7 @@ export class Orchestrator extends TypedEmitter {
 
     // Clear process list in state and close stores
     this.registry.setState({ processes: [], completedAt: new Date().toISOString() });
+    this.telegramPoller?.stop();
     this.notificationServer?.close();
     this.approvalMgr?.dispose();
     this.notificationRouter?.dispose();
@@ -524,6 +542,51 @@ export class Orchestrator extends TypedEmitter {
    * (shutdown interrupts are not real failures).
    */
   recoverOrphanedTasks(): number { return this.runner.recoverOrphanedTasks(); }
+
+  /**
+   * Start a Telegram callback poller if a telegram channel + approval gates are configured.
+   * The poller listens for inline keyboard button presses and routes them
+   * to the ApprovalManager for approve/reject/revise actions.
+   */
+  private startTelegramApprovalPoller(): void {
+    if (!this.approvalMgr || !this.notificationRouter) return;
+
+    // Find the Telegram channel instance from notification config
+    const telegramConfigKey = Object.keys(this.config.settings.notifications?.channels ?? {})
+      .find(k => this.config.settings.notifications?.channels[k]?.type === "telegram");
+    if (!telegramConfigKey) return;
+
+    const ch = this.notificationRouter!.getChannel(telegramConfigKey);
+    if (!ch || ch.type !== "telegram") return;
+    const telegramChannel = ch as import("../notifications/channels/telegram.js").TelegramChannel;
+
+    const botToken = telegramChannel.getBotToken();
+    const chatId = telegramChannel.getChatId();
+    const approvalMgr = this.approvalMgr;
+
+    const poller = new TelegramCallbackPoller(botToken, chatId);
+
+    const resolver: ApprovalCallbackResolver = {
+      approve: async (requestId, resolvedBy) => {
+        const result = approvalMgr.approve(requestId, resolvedBy);
+        return result ? { ok: true } : { ok: false, error: "Not found or already resolved" };
+      },
+      reject: async (requestId, resolvedBy) => {
+        const result = approvalMgr.reject(requestId, resolvedBy);
+        return result ? { ok: true } : { ok: false, error: "Not found or already resolved" };
+      },
+      revise: async (requestId, feedback, resolvedBy) => {
+        const result = approvalMgr.revise(requestId, feedback, resolvedBy);
+        return result ? { ok: true } : { ok: false, error: "Not found, already resolved, or max revisions reached" };
+      },
+    };
+
+    poller.setResolver(resolver);
+    poller.start(2000); // Poll every 2 seconds
+    this.telegramPoller = poller;
+
+    this.emit("log", { level: "info", message: "Telegram approval callback poller started" });
+  }
 
   private seedTasks(): void {
     this.taskMgr.seedTasks();

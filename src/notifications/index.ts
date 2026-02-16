@@ -35,8 +35,21 @@ export class NotificationRouter {
   private started = false;
   /** Optional persistent store for notification history. */
   private store?: NotificationStore;
+  /** Optional callback to resolve task outcomes by taskId (for approval events etc.) */
+  private outcomeResolver?: (taskId: string) => TaskOutcome[] | undefined;
 
   constructor(private emitter: TypedEmitter) {}
+
+  /** Set a callback that resolves task outcomes by taskId.
+   *  Used when the event payload doesn't include outcomes directly (e.g. approval:requested). */
+  setOutcomeResolver(resolver: (taskId: string) => TaskOutcome[] | undefined): void {
+    this.outcomeResolver = resolver;
+  }
+
+  /** Get a channel instance by ID. */
+  getChannel(channelId: string): NotificationChannel | undefined {
+    return this.channels.get(channelId);
+  }
 
   /** Set the notification store for persisting notification history. */
   setStore(store: NotificationStore): void {
@@ -252,13 +265,22 @@ export class NotificationRouter {
    *   - plan:completed → data.report.outcomes
    *   - Direct outcomes array on data
    */
-  private loadAttachments(
+   private loadAttachments(
     data: unknown,
     typeFilter?: OutcomeType[],
     maxSize?: number,
   ): OutcomeAttachment[] {
     const maxBytes = maxSize ?? 10 * 1024 * 1024; // default 10MB
-    const outcomes = extractOutcomes(data);
+    let outcomes = extractOutcomes(data);
+
+    // Fallback: if no outcomes in the payload but we have a taskId, resolve from registry
+    if (outcomes.length === 0 && this.outcomeResolver && data && typeof data === "object") {
+      const taskId = (data as Record<string, unknown>).taskId as string | undefined;
+      if (taskId) {
+        outcomes = this.outcomeResolver(taskId) ?? [];
+      }
+    }
+
     if (outcomes.length === 0) return [];
 
     const attachments: OutcomeAttachment[] = [];

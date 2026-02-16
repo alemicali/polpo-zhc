@@ -329,7 +329,7 @@ function ActivityPanel({ taskId, isActive }: { taskId: string; isActive?: boolea
           <RefreshCw className="h-3.5 w-3.5" />
         </Button>
       </div>
-      <ScrollArea className="flex-1 min-h-0">
+      <ScrollArea className="h-[calc(100vh-16rem)]">
         <div className="space-y-0.5 pr-2">
           {[...entries].reverse().map((entry, i) => (
             <ActivityEntry key={i} entry={entry} />

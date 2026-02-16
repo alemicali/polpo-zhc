@@ -3,10 +3,10 @@ import type { TaskStatus } from "./types.js";
 /** Valid state transitions for the task state machine. */
 export const VALID_TRANSITIONS: Readonly<Record<TaskStatus, readonly TaskStatus[]>> = {
   pending: ["assigned", "awaiting_approval"],
-  awaiting_approval: ["assigned", "failed"],
-  assigned: ["in_progress"],
-  in_progress: ["review", "failed"],
-  review: ["done", "failed"],
+  awaiting_approval: ["assigned", "failed", "done"],
+  assigned: ["in_progress", "awaiting_approval"],
+  in_progress: ["review", "failed", "awaiting_approval"],
+  review: ["done", "failed", "awaiting_approval"],
   done: [],
   failed: ["pending"],
 } as const;

@@ -513,6 +513,8 @@ export interface ApprovalGate {
   priority?: number;
   /** Max revision rounds before only approve/reject is allowed. Default: 3. */
   maxRevisions?: number;
+  /** Include task outcomes as attachments in the approval notification. */
+  includeOutcomes?: boolean;
 }
 
 export type ApprovalStatus = "pending" | "approved" | "rejected" | "revised" | "timeout";
