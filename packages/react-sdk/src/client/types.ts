@@ -412,6 +412,47 @@ export interface QualityMetrics {
   updatedAt: string;
 }
 
+// === Workflows ===
+
+export interface WorkflowParameter {
+  /** Parameter name — used as {{name}} in the plan template. */
+  name: string;
+  /** Human-readable description. */
+  description: string;
+  /** Value type. Default: "string". */
+  type?: "string" | "number" | "boolean";
+  /** Whether the parameter must be provided. Default: false. */
+  required?: boolean;
+  /** Default value when not provided. */
+  default?: string | number | boolean;
+  /** Allowed values (enum constraint). */
+  enum?: (string | number)[];
+}
+
+/** Lightweight workflow metadata (no plan body). */
+export interface WorkflowInfo {
+  name: string;
+  description: string;
+  parameters: WorkflowParameter[];
+  /** Absolute path to the workflow directory. */
+  path: string;
+}
+
+/** Full workflow definition including the plan template. */
+export interface WorkflowDefinition {
+  name: string;
+  description: string;
+  plan: Record<string, unknown>;
+  parameters?: WorkflowParameter[];
+}
+
+/** Result of running a workflow. */
+export interface WorkflowRunResult {
+  plan: Plan;
+  tasks: number;
+  group: string;
+}
+
 // === Config ===
 
 export interface PolpoSettings {

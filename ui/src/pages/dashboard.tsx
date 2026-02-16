@@ -337,6 +337,7 @@ function RecentTasks({ tasks }: { tasks: Task[] }) {
                 in_progress: { icon: Loader2, color: "text-blue-500" },
                 review: { icon: Eye, color: "text-amber-500" },
                 pending: { icon: Clock, color: "text-zinc-400" },
+                awaiting_approval: { icon: Clock, color: "text-amber-400" },
                 assigned: { icon: Clock, color: "text-violet-400" },
               }[task.status] ?? { icon: Clock, color: "text-muted-foreground" };
 

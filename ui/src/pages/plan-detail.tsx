@@ -128,6 +128,7 @@ const statusStyles: Record<PlanStatus, { color: string; bg: string; label: strin
 
 const taskStatusConfig: Record<TaskStatus, { icon: React.ElementType; color: string; label: string }> = {
   pending: { icon: Clock, color: "text-zinc-400", label: "Queued" },
+  awaiting_approval: { icon: Clock, color: "text-amber-400", label: "Awaiting Approval" },
   assigned: { icon: Clock, color: "text-violet-400", label: "Assigned" },
   in_progress: { icon: Loader2, color: "text-blue-400", label: "Running" },
   review: { icon: Eye, color: "text-amber-400", label: "Review" },

@@ -18,8 +18,18 @@
  *     reviewer/skills/
  *       testing -> ../../../skills/testing
  *
- * Discovery also scans .claude/skills/ (project-local + user-home) for
- * compatibility with the Claude skill ecosystem.
+ * Discovery also scans paths from the skills.sh ecosystem for cross-agent
+ * compatibility:
+ *
+ *   Project-level:
+ *     .agents/skills/             ← OpenCode, Codex, Gemini CLI, Copilot, Amp
+ *     .claude/skills/             ← Claude Code
+ *
+ *   User-level:
+ *     ~/.polpo/skills/            ← Polpo global
+ *     ~/.config/opencode/skills/  ← OpenCode global
+ *     ~/.config/agents/skills/    ← shared agents global (Amp, Codex, Gemini)
+ *     ~/.claude/skills/           ← Claude Code global
  *
  * Assignment priority:
  *   1. .polpo/agents/<name>/skills/ (symlinks → hard enforcement)
@@ -40,7 +50,7 @@ export interface SkillInfo {
   /** Tools required by this skill (informational, from frontmatter `allowed-tools`). */
   allowedTools?: string[];
   /** Where this skill was discovered from. */
-  source: "polpo" | "claude" | "home";
+  source: "polpo" | "agents" | "claude" | "home";
   /** Absolute path to the skill directory. */
   path: string;
 }
@@ -52,17 +62,27 @@ export interface LoadedSkill extends SkillInfo {
 
 // ── Parsing ──
 
-/** Parse SKILL.md YAML frontmatter. Returns null if no valid frontmatter found. */
-export function parseSkillFrontmatter(content: string): { name: string; description: string; allowedTools?: string[] } | null {
+/**
+ * Parse SKILL.md YAML frontmatter.
+ * Returns null if no frontmatter block found at all.
+ *
+ * Note: `name` is NOT required in frontmatter — the skills.sh spec only
+ * requires `name` + `description`, but the name can fall back to the
+ * directory name at the caller site. We return `name` as undefined when
+ * the frontmatter doesn't contain it.
+ */
+export function parseSkillFrontmatter(content: string): { name?: string; description: string; allowedTools?: string[] } | null {
   const match = content.match(/^---\n([\s\S]*?)\n---/);
   if (!match) return null;
   try {
     const fm = parseYaml(match[1]);
-    if (!fm?.name) return null;
+    if (!fm || typeof fm !== "object") return null;
+    // Must have at least name or description to be considered a valid skill
+    if (!fm.name && !fm.description) return null;
     return {
-      name: fm.name,
+      name: fm.name ?? undefined,
       description: fm.description ?? "",
-      allowedTools: fm["allowed-tools"],
+      allowedTools: fm["allowed-tools"] ?? fm.allowedTools,
     };
   } catch { return null; }
 }

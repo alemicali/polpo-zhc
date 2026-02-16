@@ -19,6 +19,7 @@ export { useTaskActivity } from "./hooks/use-task-activity.js";
 export { useSkills } from "./hooks/use-skills.js";
 export { useNotifications } from "./hooks/use-notifications.js";
 export { useApprovals } from "./hooks/use-approvals.js";
+export { useWorkflows } from "./hooks/use-workflows.js";
 
 // Client (re-export for convenience)
 export { PolpoClient } from "./client/polpo-client.js";
@@ -78,6 +79,10 @@ export type {
   ApprovalStatus,
   ScheduleEntry,
   QualityMetrics,
+  WorkflowParameter,
+  WorkflowInfo,
+  WorkflowDefinition,
+  WorkflowRunResult,
 } from "./client/types.js";
 
 export type { ConnectionStatus } from "./client/event-source.js";
