@@ -102,6 +102,11 @@ export class FileRunStore implements RunStore {
   completeRun(runId: string, status: RunStatus, result: TaskResult): void {
     const run = this.readRun(runId);
     if (!run) return;
+    // Don't let a later write overwrite a run already in terminal state.
+    // This prevents the runner process from clobbering the orchestrator's
+    // "killed" status with a stale "completed" result (race condition).
+    const terminal: RunStatus[] = ["completed", "failed", "killed"];
+    if (terminal.includes(run.status)) return;
     run.status = status;
     run.result = result;
     run.updatedAt = new Date().toISOString();

@@ -174,6 +174,12 @@ export class SqliteRunStore implements RunStore {
   }
 
   completeRun(runId: string, status: RunStatus, result: TaskResult): void {
+    // Don't overwrite a run already in terminal state (race condition guard)
+    const existing = this.getRun(runId);
+    if (existing) {
+      const terminal: RunStatus[] = ["completed", "failed", "killed"];
+      if (terminal.includes(existing.status)) return;
+    }
     this.completeRunStmt.run({
       id: runId,
       status,

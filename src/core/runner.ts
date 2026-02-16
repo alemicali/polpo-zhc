@@ -168,6 +168,12 @@ async function main(): Promise<void> {
       actLog.logEvent("outcomes", { count: handle.outcomes.length, types: handle.outcomes.map(o => o.type) });
     }
 
+    // If we received SIGTERM (timeout/shutdown), force exitCode=1 regardless of
+    // what the adapter returned — an aborted task is not a successful task.
+    if (sigterm) {
+      result.exitCode = 1;
+      result.stderr = (result.stderr ? result.stderr + "\n" : "") + "Killed by SIGTERM (timeout or shutdown)";
+    }
     const status = sigterm ? "killed" : (result.exitCode === 0 ? "completed" : "failed");
     actLog.logEvent("done", { status, exitCode: result.exitCode, duration: result.duration });
     runStore.completeRun(config.runId, status, result);

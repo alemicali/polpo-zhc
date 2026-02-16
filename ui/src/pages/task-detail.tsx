@@ -219,7 +219,9 @@ function ActivityEntry({ entry }: { entry: RunActivityEntry }) {
   if (entry._run) return null;
 
   const eventLabel = entry.event ?? entry.type ?? "unknown";
-  const hasPayload = entry.data != null || entry.text;
+  // tool_result entries store output in "content", not "text" or "data"
+  const entryContent = entry.text ?? (entry as Record<string, unknown>).content as string | undefined;
+  const hasPayload = entry.data != null || entryContent;
 
   const getStyle = () => {
     if (entry.event === "activity") return { icon: Activity, color: "text-blue-400", dot: "bg-blue-500" };
@@ -261,7 +263,7 @@ function ActivityEntry({ entry }: { entry: RunActivityEntry }) {
         <CollapsibleContent>
           <div className="ml-7 mr-2 mb-0.5">
             <pre className="text-sm bg-muted/30 rounded px-3 py-2 whitespace-pre-wrap font-mono overflow-x-auto text-muted-foreground max-h-56 overflow-y-auto leading-normal">
-              {entry.text ?? JSON.stringify(entry.data, null, 2)}
+              {entryContent ?? JSON.stringify(entry.data, null, 2)}
             </pre>
           </div>
         </CollapsibleContent>
@@ -332,7 +334,7 @@ function ActivityPanel({ taskId, isActive }: { taskId: string; isActive?: boolea
       <ScrollArea className="h-[calc(100vh-16rem)]">
         <div className="space-y-0.5 pr-2">
           {[...entries].reverse().map((entry, i) => (
-            <ActivityEntry key={i} entry={entry} />
+            <ActivityEntry key={`${entry.ts}-${entry.type ?? entry.event}-${i}`} entry={entry} />
           ))}
         </div>
       </ScrollArea>

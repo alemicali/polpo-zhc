@@ -40,6 +40,12 @@ export class TaskRunner {
         } catch { /* task may already be gone */ }
       }
       if (run.result) {
+        // A killed run must never be treated as successful — force exitCode=1
+        // even if the adapter resolved cleanly before the kill took effect.
+        if (run.status === "killed" && run.result.exitCode === 0) {
+          run.result.exitCode = 1;
+          run.result.stderr = (run.result.stderr ? run.result.stderr + "\n" : "") + "Run was killed (timeout or shutdown)";
+        }
         onResult(run.taskId, run.result);
       }
       this.ctx.runStore.deleteRun(run.id);
