@@ -121,9 +121,6 @@ export class TelegramChannel implements NotificationChannel {
           { text: "✅ Approve", callback_data: `approve:${requestId}` },
           { text: "❌ Reject", callback_data: `reject:${requestId}` },
         ],
-        [
-          { text: "✏️ Revise with feedback", callback_data: `revise:${requestId}` },
-        ],
       ],
     };
   }
@@ -344,16 +341,11 @@ export class TelegramCallbackPoller {
         : `❌ Error: ${result.error}`;
       await this.sendReply(chatId, msg);
     } else if (action === "reject") {
-      const result = await this.resolver.reject(requestId, "telegram-user");
-      const msg = result.ok
-        ? "❌ Rejected"
-        : `❌ Error: ${result.error}`;
-      await this.sendReply(chatId, msg);
-    } else if (action === "revise") {
-      // Enter revise mode — wait for next text message as feedback
+      // Reject always requires a reason — enter feedback mode, then revise
+      // (a reject without explanation is useless to the agent)
       this.pendingRevise.set(chatId, requestId);
-      await this.sendReply(chatId,
-        "✏️ <b>Revision requested</b>\n\nSend your feedback as the next message. The task will be re-executed with your notes.",
+      await this.sendForceReply(chatId,
+        "❌ <b>Rejected — tell the agent why</b>\n\nReply with your feedback. The task will be re-executed with your notes.",
       );
     }
   }
@@ -392,6 +384,25 @@ export class TelegramCallbackPoller {
         chat_id: chatId,
         text,
         parse_mode: "HTML",
+      }),
+    }).catch(() => {});
+  }
+
+  /** Send a message with ForceReply — opens the reply input automatically in the Telegram client. */
+  private async sendForceReply(chatId: string, text: string): Promise<void> {
+    const url = `https://api.telegram.org/bot${this.botToken}/sendMessage`;
+    await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        chat_id: chatId,
+        text,
+        parse_mode: "HTML",
+        reply_markup: {
+          force_reply: true,
+          selective: true,
+          input_field_placeholder: "Describe what needs to change...",
+        },
       }),
     }).catch(() => {});
   }
