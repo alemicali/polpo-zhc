@@ -13,6 +13,10 @@ export default defineConfig({
         dark: "./src/assets/logo-dark.svg",
         replacesTitle: true,
       },
+      components: {
+        PageFrame: "./src/components/PageFrame.astro",
+        Sidebar: "./src/components/Sidebar.astro",
+      },
       head: [
         {
           tag: "style",
@@ -33,27 +37,16 @@ export default defineConfig({
           href: "https://github.com/openpolpo/openpolpo",
         },
       ],
-      plugins: [
-        starlightThemeSix({
-          navLinks: [
-            { label: "Docs", link: "/introduction" },
-            { label: "API", link: "/reference/api" },
-            { label: "GitHub", link: "https://github.com/openpolpo/openpolpo", attrs: { target: "_blank" } },
-          ],
-          footerText:
-            "Built with tentacles and [Starlight](https://starlight.astro.build). [Open source](https://github.com/openpolpo/openpolpo), obviously.",
-        }),
-      ],
       sidebar: [
-        // ── Getting Started ─────────────────────────────────────
+        // ── Getting Started ──────────────────────────────────
         { label: "Introduction", slug: "introduction" },
         { label: "Installation & Setup", slug: "getting-started" },
         { label: "Your First Plan", slug: "guides/first-plan" },
         { label: "Configuration", slug: "configuration" },
 
-        // ── Core Concepts ───────────────────────────────────────
+        // ── Concepts ─────────────────────────────────────────
         {
-          label: "Core Concepts",
+          label: "Concepts",
           items: [
             { label: "Architecture", slug: "concepts/architecture" },
             { label: "Agents & Teams", slug: "concepts/agents-and-teams" },
@@ -70,14 +63,11 @@ export default defineConfig({
           ],
         },
 
-        // ── Orchestration ────────────────────────────────────────
+        // ── Orchestration ────────────────────────────────────
         {
           label: "Orchestration",
           items: [
-            {
-              label: "Notification System",
-              slug: "orchestration/notifications",
-            },
+            { label: "Notification System", slug: "orchestration/notifications" },
             { label: "Approval Gates", slug: "orchestration/approval-gates" },
             { label: "Escalation Chain", slug: "orchestration/escalation" },
             { label: "Quality & SLA", slug: "orchestration/quality-sla" },
@@ -86,7 +76,7 @@ export default defineConfig({
           ],
         },
 
-        // ── Usage ───────────────────────────────────────────────
+        // ── Usage ────────────────────────────────────────────
         {
           label: "Usage",
           items: [
@@ -97,7 +87,7 @@ export default defineConfig({
           ],
         },
 
-        // ── Guides ──────────────────────────────────────────────
+        // ── Guides ───────────────────────────────────────────
         {
           label: "Guides",
           items: [
@@ -111,7 +101,7 @@ export default defineConfig({
           ],
         },
 
-        // ── Reference ───────────────────────────────────────────
+        // ── Reference ────────────────────────────────────────
         {
           label: "Reference",
           items: [
@@ -123,8 +113,17 @@ export default defineConfig({
             { label: "Tools Reference", slug: "reference/coding-tools" },
           ],
         },
-
-
+      ],
+      plugins: [
+        starlightThemeSix({
+          navLinks: [
+            { label: "Docs", link: "/introduction" },
+            { label: "API", link: "/reference/api" },
+            { label: "GitHub", link: "https://github.com/openpolpo/openpolpo", attrs: { target: "_blank" } },
+          ],
+          footerText:
+            "Built with tentacles and [Starlight](https://starlight.astro.build). [Open source](https://github.com/openpolpo/openpolpo), obviously.",
+        }),
       ],
     }),
   ],
