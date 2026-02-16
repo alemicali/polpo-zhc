@@ -1,0 +1,68 @@
+{
+  "name": "security-audit",
+  "description": "Security audit: scan for vulnerabilities, analyze, and fix",
+  "parameters": [
+    {
+      "name": "scope",
+      "description": "Directory or module to audit",
+      "type": "string",
+      "required": true
+    },
+    {
+      "name": "test_command",
+      "description": "Command to run tests after fixes",
+      "type": "string",
+      "default": "pnpm run test"
+    },
+    {
+      "name": "severity",
+      "description": "Minimum severity to address",
+      "type": "string",
+      "default": "medium",
+      "enum": ["low", "medium", "high", "critical"]
+    }
+  ],
+  "plan": {
+    "team": [
+      {
+        "name": "auditor",
+        "role": "Security auditor — identifies vulnerabilities, injection vectors, auth issues, data exposure",
+        "enableGit": true
+      },
+      {
+        "name": "fixer",
+        "role": "Security engineer — implements fixes with minimal surface area changes",
+        "enableGit": true
+      }
+    ],
+    "tasks": [
+      {
+        "title": "Security scan of {{scope}}",
+        "description": "Perform a security audit of {{scope}}. Minimum severity: {{severity}}.\n\nCheck for:\n- Injection vulnerabilities (SQL, XSS, command injection, path traversal)\n- Authentication/authorization issues\n- Data exposure (secrets in code, excessive logging, unmasked PII)\n- Dependency vulnerabilities (check package.json/lock files)\n- Unsafe deserialization, eval, or dynamic code execution\n- Missing input validation or sanitization\n- Insecure defaults or configurations\n\nWrite findings to security-report.md with severity, file:line, and remediation steps.",
+        "assignTo": "auditor",
+        "expectations": [
+          { "type": "file_exists", "paths": ["security-report.md"] },
+          {
+            "type": "llm_review",
+            "criteria": "Audit is thorough, findings are real (not false positives), each has severity rating and specific remediation steps",
+            "threshold": 3.5
+          }
+        ]
+      },
+      {
+        "title": "Fix security issues",
+        "description": "Based on security-report.md, fix all issues with severity >= {{severity}} in {{scope}}.\n\nRules:\n- Address the root cause, not just symptoms\n- Minimal change surface\n- Don't break existing functionality\n- Add input validation where missing\n- All tests must still pass",
+        "assignTo": "fixer",
+        "dependsOn": ["Security scan of {{scope}}"],
+        "expectations": [
+          { "type": "test", "command": "{{test_command}}" },
+          {
+            "type": "llm_review",
+            "criteria": "All identified security issues at or above the target severity are properly fixed without introducing regressions",
+            "threshold": 4.0
+          }
+        ]
+      }
+    ]
+  }
+}

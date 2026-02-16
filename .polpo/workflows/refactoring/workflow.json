@@ -1,0 +1,59 @@
+{
+  "name": "refactoring",
+  "description": "Safe refactoring workflow: analyze, refactor, validate with tests",
+  "parameters": [
+    {
+      "name": "module",
+      "description": "Module or directory to refactor",
+      "type": "string",
+      "required": true
+    },
+    {
+      "name": "goal",
+      "description": "Refactoring goal (e.g., 'extract shared utils', 'reduce complexity', 'improve types')",
+      "type": "string",
+      "required": true
+    },
+    {
+      "name": "test_command",
+      "description": "Command to run tests",
+      "type": "string",
+      "default": "pnpm run test"
+    }
+  ],
+  "plan": {
+    "team": [
+      {
+        "name": "refactorer",
+        "role": "Senior engineer focused on clean, incremental refactoring with full test coverage",
+        "enableGit": true,
+        "enableMultifile": true
+      }
+    ],
+    "tasks": [
+      {
+        "title": "Analyze {{module}} for refactoring",
+        "description": "Analyze {{module}} with the goal: {{goal}}\n\nProduce a refactoring plan in refactor-plan.md:\n1. Current state assessment (complexity, coupling, duplication)\n2. Proposed changes (ordered by risk, lowest first)\n3. Files affected with estimated impact\n4. Risks and mitigation strategies\n5. Verify all tests pass before any changes",
+        "assignTo": "refactorer",
+        "expectations": [
+          { "type": "file_exists", "paths": ["refactor-plan.md"] },
+          { "type": "test", "command": "{{test_command}}" }
+        ]
+      },
+      {
+        "title": "Execute refactoring",
+        "description": "Execute the refactoring plan for {{module}}. Goal: {{goal}}\n\nRules:\n- Follow the plan from refactor-plan.md\n- Make incremental changes, verify tests pass after each step\n- Preserve all existing behavior (pure refactoring, no feature changes)\n- Update imports and references across the codebase",
+        "assignTo": "refactorer",
+        "dependsOn": ["Analyze {{module}} for refactoring"],
+        "expectations": [
+          { "type": "test", "command": "{{test_command}}" },
+          {
+            "type": "llm_review",
+            "criteria": "Refactoring achieves the stated goal, all tests pass, no behavior changes, code is cleaner",
+            "threshold": 3.5
+          }
+        ]
+      }
+    ]
+  }
+}

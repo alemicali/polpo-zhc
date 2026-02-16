@@ -1,0 +1,75 @@
+{
+  "name": "bug-fix",
+  "description": "Structured bug fix workflow: reproduce, fix, test, verify",
+  "parameters": [
+    {
+      "name": "issue",
+      "description": "Bug description or issue reference",
+      "type": "string",
+      "required": true
+    },
+    {
+      "name": "test_command",
+      "description": "Command to run tests",
+      "type": "string",
+      "default": "pnpm run test"
+    },
+    {
+      "name": "scope",
+      "description": "Affected area of the codebase",
+      "type": "string",
+      "default": "."
+    }
+  ],
+  "plan": {
+    "team": [
+      {
+        "name": "debugger",
+        "role": "Senior debugger — reproduces issues, identifies root cause, writes minimal fix",
+        "enableGit": true
+      },
+      {
+        "name": "verifier",
+        "role": "Verification specialist — reviews fix correctness and test coverage",
+        "enableGit": true
+      }
+    ],
+    "tasks": [
+      {
+        "title": "Reproduce and diagnose",
+        "description": "Investigate bug: {{issue}}\n\nScope: {{scope}}\n\n1. Read the relevant code to understand the expected behavior\n2. Identify the root cause (not just symptoms)\n3. Write a failing test that reproduces the bug if possible\n4. Document findings in diagnosis.md with file:line references",
+        "assignTo": "debugger",
+        "expectations": [
+          { "type": "file_exists", "paths": ["diagnosis.md"] },
+          {
+            "type": "llm_review",
+            "criteria": "Root cause is clearly identified with specific file:line references, and a reproduction path is documented",
+            "threshold": 3.5
+          }
+        ]
+      },
+      {
+        "title": "Implement fix",
+        "description": "Based on the diagnosis, implement a minimal, targeted fix for: {{issue}}\n\nRules:\n- Fix the root cause, not symptoms\n- Minimal change surface — don't refactor unrelated code\n- Add or update tests to cover the fixed behavior\n- All existing tests must still pass",
+        "assignTo": "debugger",
+        "dependsOn": ["Reproduce and diagnose"],
+        "expectations": [
+          { "type": "test", "command": "{{test_command}}" }
+        ]
+      },
+      {
+        "title": "Verify fix",
+        "description": "Review the fix for: {{issue}}\n\nVerify:\n1. The fix addresses the root cause identified in diagnosis.md\n2. The change is minimal and doesn't introduce side effects\n3. Test coverage is adequate for the fix\n4. Edge cases are handled",
+        "assignTo": "verifier",
+        "dependsOn": ["Implement fix"],
+        "expectations": [
+          {
+            "type": "llm_review",
+            "criteria": "Fix correctly addresses the root cause, is minimal, and has adequate test coverage",
+            "threshold": 4.0
+          }
+        ]
+      }
+    ]
+  }
+}

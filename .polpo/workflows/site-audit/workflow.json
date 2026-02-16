@@ -1,0 +1,99 @@
+{
+  "name": "site-audit",
+  "description": "Esegue un audit tecnico completo di un sito web: performance, SEO, accessibilità e sicurezza. Genera un report dettagliato con score e raccomandazioni.",
+  "parameters": [
+    {
+      "name": "url",
+      "description": "URL del sito da analizzare (es. https://example.com)",
+      "type": "string",
+      "required": true
+    },
+    {
+      "name": "focus",
+      "description": "Area di focus principale dell'audit",
+      "type": "string",
+      "default": "all",
+      "enum": ["all", "performance", "seo", "accessibility", "security"]
+    },
+    {
+      "name": "depth",
+      "description": "Numero massimo di pagine da analizzare",
+      "type": "number",
+      "default": 5
+    },
+    {
+      "name": "telegram_channel",
+      "description": "Canale Telegram per il report finale",
+      "type": "string",
+      "default": "telegram"
+    }
+  ],
+  "plan": {
+    "team": [
+      {
+        "name": "auditor",
+        "role": "Web auditor specializzato in analisi tecnica di siti web — performance, SEO, accessibilità, sicurezza"
+      },
+      {
+        "name": "reporter",
+        "role": "Technical writer — sintetizza analisi tecniche in report chiari e azionabili"
+      }
+    ],
+    "tasks": [
+      {
+        "title": "Crawl e analisi tecnica di {{url}}",
+        "description": "Analizza il sito {{url}} con focus su: {{focus}}.\n\nEsegui le seguenti verifiche (fino a {{depth}} pagine):\n\n**Performance:**\n- Tempo di caricamento e TTFB\n- Dimensione delle risorse (JS, CSS, immagini)\n- Richieste HTTP totali\n- Compressione gzip/brotli\n- Caching headers\n\n**SEO:**\n- Meta tags (title, description, og:*)\n- Struttura headings (H1-H6)\n- Sitemap.xml e robots.txt\n- URL structure e canonical tags\n- Immagini senza alt text\n\n**Accessibilità:**\n- Contrasto colori\n- ARIA labels\n- Navigazione da tastiera\n- Semantic HTML\n\n**Sicurezza:**\n- HTTPS e certificato SSL\n- Security headers (CSP, HSTS, X-Frame-Options)\n- Mixed content\n\nSalva i risultati raw in audit-data.json con score per ogni categoria (0-100).",
+        "assignTo": "auditor",
+        "expectations": [
+          {
+            "type": "file_exists",
+            "paths": ["audit-data.json"]
+          },
+          {
+            "type": "llm_review",
+            "criteria": "L'analisi è approfondita, copre tutte le aree richieste, include metriche quantitative e identifica problemi specifici con riferimenti",
+            "threshold": 3.5
+          }
+        ]
+      },
+      {
+        "title": "Genera report audit per {{url}}",
+        "description": "Partendo dai dati in audit-data.json, genera un report professionale in Markdown (audit-report.md) per il sito {{url}}.\n\nIl report deve includere:\n1. **Executive Summary** — score complessivo e situazione in breve\n2. **Score per area** — tabella con score 0-100 per ogni categoria analizzata\n3. **Problemi critici** — lista dei problemi più urgenti con severity (alta/media/bassa)\n4. **Raccomandazioni** — azioni concrete ordinate per priorità e impatto stimato\n5. **Dettaglio tecnico** — findings specifici con evidenze\n\nUsa emoji per severity: 🔴 critico, 🟡 medio, 🟢 ok.\nIncludi una riga di sommario adatta per Telegram (max 200 chars).",
+        "assignTo": "reporter",
+        "dependsOn": ["Crawl e analisi tecnica di {{url}}"],
+        "expectations": [
+          {
+            "type": "file_exists",
+            "paths": ["audit-report.md"]
+          },
+          {
+            "type": "llm_review",
+            "criteria": "Il report è chiaro, ben strutturato, contiene score quantitativi, raccomandazioni azionabili e un executive summary efficace",
+            "threshold": 4.0
+          }
+        ],
+        "expectedOutcomes": [
+          {
+            "type": "file",
+            "label": "Audit Report",
+            "path": "audit-report.md",
+            "mimeType": "text/markdown"
+          }
+        ]
+      }
+    ],
+    "notifications": {
+      "rules": [
+        {
+          "id": "audit-completato",
+          "name": "Audit completato",
+          "events": ["plan:completed"],
+          "channels": ["{{telegram_channel}}"],
+          "severity": "info",
+          "template": "Audit completato per {{url}}"
+        }
+      ],
+      "inherit": true
+    }
+  }
+}

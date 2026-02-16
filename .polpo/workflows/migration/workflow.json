@@ -1,0 +1,66 @@
+{
+  "name": "migration",
+  "description": "Code migration workflow: analyze impact, migrate, verify",
+  "parameters": [
+    {
+      "name": "from",
+      "description": "What to migrate from (e.g., 'React 18', 'Express 4', 'CommonJS')",
+      "type": "string",
+      "required": true
+    },
+    {
+      "name": "to",
+      "description": "What to migrate to (e.g., 'React 19', 'Hono', 'ESM')",
+      "type": "string",
+      "required": true
+    },
+    {
+      "name": "scope",
+      "description": "Directory or module scope for the migration",
+      "type": "string",
+      "default": "."
+    },
+    {
+      "name": "test_command",
+      "description": "Command to run tests",
+      "type": "string",
+      "default": "pnpm run test"
+    }
+  ],
+  "plan": {
+    "team": [
+      {
+        "name": "migrator",
+        "role": "Migration specialist — methodical, incremental migration with zero data loss",
+        "enableGit": true,
+        "enableMultifile": true,
+        "enableDeps": true
+      }
+    ],
+    "tasks": [
+      {
+        "title": "Analyze migration impact",
+        "description": "Analyze what is needed to migrate from {{from}} to {{to}} in {{scope}}.\n\nProduce migration-plan.md:\n1. Breaking changes between {{from}} and {{to}}\n2. Files affected with specific changes needed\n3. Dependency updates required\n4. Migration order (least-dependent files first)\n5. Risk assessment and rollback strategy\n6. Verify current tests pass before starting",
+        "assignTo": "migrator",
+        "expectations": [
+          { "type": "file_exists", "paths": ["migration-plan.md"] },
+          { "type": "test", "command": "{{test_command}}" }
+        ]
+      },
+      {
+        "title": "Execute migration",
+        "description": "Execute the migration from {{from}} to {{to}} following migration-plan.md.\n\nRules:\n- Follow the planned migration order\n- Update dependencies first, then code\n- Update imports, types, and API calls\n- Keep changes compilable at each step\n- All tests must pass after migration",
+        "assignTo": "migrator",
+        "dependsOn": ["Analyze migration impact"],
+        "expectations": [
+          { "type": "test", "command": "{{test_command}}" },
+          {
+            "type": "llm_review",
+            "criteria": "Migration is complete, all references to the old API/library are removed, code compiles, and tests pass",
+            "threshold": 4.0
+          }
+        ]
+      }
+    ]
+  }
+}

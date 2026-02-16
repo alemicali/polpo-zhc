@@ -1,0 +1,58 @@
+{
+  "name": "test-coverage",
+  "description": "Improve test coverage for a module: analyze gaps, write tests, verify",
+  "parameters": [
+    {
+      "name": "module",
+      "description": "Module or directory to improve coverage for",
+      "type": "string",
+      "required": true
+    },
+    {
+      "name": "test_command",
+      "description": "Command to run tests",
+      "type": "string",
+      "default": "pnpm run test"
+    },
+    {
+      "name": "framework",
+      "description": "Test framework in use",
+      "type": "string",
+      "default": "vitest",
+      "enum": ["vitest", "jest", "mocha", "node:test"]
+    }
+  ],
+  "plan": {
+    "team": [
+      {
+        "name": "test-engineer",
+        "role": "Test engineering specialist — writes thorough, maintainable tests",
+        "enableGit": true
+      }
+    ],
+    "tasks": [
+      {
+        "title": "Analyze test coverage for {{module}}",
+        "description": "Analyze the current test coverage of {{module}}:\n1. Identify which functions/branches/edge cases lack tests\n2. Prioritize by risk (public API first, critical paths, error handling)\n3. Check existing test patterns and conventions ({{framework}})\n4. Write coverage-analysis.md with specific gaps and priorities",
+        "assignTo": "test-engineer",
+        "expectations": [
+          { "type": "file_exists", "paths": ["coverage-analysis.md"] }
+        ]
+      },
+      {
+        "title": "Write missing tests",
+        "description": "Based on coverage-analysis.md, write tests for {{module}} using {{framework}}:\n- Follow existing test conventions and patterns\n- Cover the highest-priority gaps first\n- Include edge cases and error paths\n- Tests should be readable and maintainable\n- All tests (new and existing) must pass",
+        "assignTo": "test-engineer",
+        "dependsOn": ["Analyze test coverage for {{module}}"],
+        "expectations": [
+          { "type": "test", "command": "{{test_command}}" },
+          {
+            "type": "llm_review",
+            "criteria": "New tests cover the identified gaps, follow project conventions, test meaningful behavior (not implementation details), and all pass",
+            "threshold": 3.5
+          }
+        ]
+      }
+    ]
+  }
+}

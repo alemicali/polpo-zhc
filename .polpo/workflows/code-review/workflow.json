@@ -1,0 +1,84 @@
+{
+  "name": "code-review",
+  "description": "Deep code review of a module: analysis, fixes, and verification",
+  "parameters": [
+    {
+      "name": "module",
+      "description": "Module or directory to review",
+      "type": "string",
+      "required": true
+    },
+    {
+      "name": "test_command",
+      "description": "Command to run tests",
+      "type": "string",
+      "default": "pnpm run test"
+    },
+    {
+      "name": "focus",
+      "description": "Review focus area",
+      "type": "string",
+      "default": "general",
+      "enum": ["general", "performance", "security", "readability", "types"]
+    }
+  ],
+  "plan": {
+    "team": [
+      {
+        "name": "analyst",
+        "role": "Senior code analyst — identifies issues, patterns, and improvement opportunities",
+        "enableGit": true
+      },
+      {
+        "name": "reviewer",
+        "role": "QA reviewer — verifies changes don't introduce regressions",
+        "enableGit": true
+      }
+    ],
+    "tasks": [
+      {
+        "title": "Analyze {{module}}",
+        "description": "Perform a deep {{focus}} review of the {{module}} module. Identify code smells, complexity hotspots, pattern violations, type safety issues, and improvement opportunities. Write findings to analysis-report.md with specific file:line references.",
+        "assignTo": "analyst",
+        "expectations": [
+          { "type": "file_exists", "paths": ["analysis-report.md"] },
+          {
+            "type": "llm_review",
+            "criteria": "The analysis is thorough, covers all key aspects, and provides actionable recommendations with specific file:line references",
+            "threshold": 3.5
+          }
+        ]
+      },
+      {
+        "title": "Apply critical fixes",
+        "description": "Based on the analysis report, apply the most critical fixes to {{module}}. Focus on: correctness bugs, type safety issues, and clear anti-patterns. Do NOT refactor for style — only fix real problems.",
+        "assignTo": "analyst",
+        "dependsOn": ["Analyze {{module}}"],
+        "expectations": [
+          { "type": "test", "command": "{{test_command}}" }
+        ]
+      },
+      {
+        "title": "Verify changes",
+        "description": "Review all changes applied to {{module}}. Verify: (1) each fix addresses a real issue from the analysis, (2) no regressions introduced, (3) code quality improved. Write a brief verification summary.",
+        "assignTo": "reviewer",
+        "dependsOn": ["Apply critical fixes"],
+        "expectations": [
+          {
+            "type": "llm_review",
+            "criteria": "The verification confirms all changes are correct, no regressions were introduced, and code quality improved",
+            "threshold": 4.0
+          }
+        ]
+      }
+    ],
+    "qualityGates": [
+      {
+        "name": "analysis-quality",
+        "afterTasks": ["Analyze {{module}}"],
+        "blocksTasks": ["Apply critical fixes"],
+        "minScore": 3.5
+      }
+    ]
+  }
+}

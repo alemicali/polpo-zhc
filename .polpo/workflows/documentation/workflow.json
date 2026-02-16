@@ -1,0 +1,60 @@
+{
+  "name": "documentation",
+  "description": "Generate or update documentation for a module",
+  "parameters": [
+    {
+      "name": "module",
+      "description": "Module or directory to document",
+      "type": "string",
+      "required": true
+    },
+    {
+      "name": "output",
+      "description": "Output file path for documentation",
+      "type": "string",
+      "default": "docs/api.md"
+    },
+    {
+      "name": "style",
+      "description": "Documentation style",
+      "type": "string",
+      "default": "reference",
+      "enum": ["reference", "tutorial", "guide", "changelog"]
+    }
+  ],
+  "plan": {
+    "team": [
+      {
+        "name": "documenter",
+        "role": "Technical writer — produces clear, accurate, well-structured documentation"
+      },
+      {
+        "name": "doc-reviewer",
+        "role": "Documentation reviewer — checks accuracy, completeness, and clarity"
+      }
+    ],
+    "tasks": [
+      {
+        "title": "Analyze and document {{module}}",
+        "description": "Analyze {{module}} and write {{style}} documentation.\n\nOutput: {{output}}\n\nFor reference docs: document all public exports, interfaces, functions, parameters, return types, and usage examples.\nFor tutorial docs: write a step-by-step guide with working code examples.\nFor guide docs: explain architecture, design decisions, and how things connect.\nFor changelog docs: summarize recent changes with migration notes.\n\nBase documentation on actual code — do not hallucinate APIs.",
+        "assignTo": "documenter",
+        "expectations": [
+          { "type": "file_exists", "paths": ["{{output}}"] }
+        ]
+      },
+      {
+        "title": "Review documentation",
+        "description": "Review the documentation at {{output}} for {{module}}:\n1. Verify all code examples are correct and would compile/run\n2. Check that all public APIs are documented\n3. Verify accuracy against actual source code\n4. Check for clarity, completeness, and consistency\n5. Fix any issues found directly in the documentation",
+        "assignTo": "doc-reviewer",
+        "dependsOn": ["Analyze and document {{module}}"],
+        "expectations": [
+          {
+            "type": "llm_review",
+            "criteria": "Documentation is accurate, complete, well-structured, and all code examples are correct",
+            "threshold": 4.0
+          }
+        ]
+      }
+    ]
+  }
+}

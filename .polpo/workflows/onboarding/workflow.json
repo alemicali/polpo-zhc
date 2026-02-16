@@ -1,0 +1,60 @@
+{
+  "name": "onboarding",
+  "description": "Codebase onboarding: generate architecture overview, setup guide, and key concepts walkthrough",
+  "parameters": [
+    {
+      "name": "repo_path",
+      "description": "Path to the repository to analyze",
+      "type": "string",
+      "default": "."
+    },
+    {
+      "name": "audience",
+      "description": "Who the onboarding is for",
+      "type": "string",
+      "default": "new-developer",
+      "enum": ["new-developer", "contributor", "reviewer", "manager"]
+    }
+  ],
+  "plan": {
+    "team": [
+      {
+        "name": "explorer",
+        "role": "Codebase archaeologist — explores and maps unfamiliar codebases systematically"
+      }
+    ],
+    "tasks": [
+      {
+        "title": "Map codebase structure",
+        "description": "Explore {{repo_path}} and create a comprehensive codebase map:\n\n1. Project structure overview (directories, key files, entry points)\n2. Tech stack (languages, frameworks, build tools, dependencies)\n3. Architecture diagram (high-level components and data flow)\n4. Key abstractions and patterns used\n5. Configuration files and their purpose\n\nWrite to onboarding/01-architecture.md. Target audience: {{audience}}.",
+        "assignTo": "explorer",
+        "expectations": [
+          { "type": "file_exists", "paths": ["onboarding/01-architecture.md"] }
+        ]
+      },
+      {
+        "title": "Create development setup guide",
+        "description": "Based on {{repo_path}}, create a step-by-step development setup guide:\n\n1. Prerequisites (runtime, tools, accounts)\n2. Installation steps\n3. Configuration (env vars, config files)\n4. How to run the project locally\n5. How to run tests\n6. Common development tasks\n7. Troubleshooting common issues\n\nWrite to onboarding/02-setup-guide.md. Target audience: {{audience}}.",
+        "assignTo": "explorer",
+        "dependsOn": ["Map codebase structure"],
+        "expectations": [
+          { "type": "file_exists", "paths": ["onboarding/02-setup-guide.md"] }
+        ]
+      },
+      {
+        "title": "Document key concepts and flows",
+        "description": "Document the most important concepts and data flows in {{repo_path}}:\n\n1. Core domain concepts and terminology\n2. Main user flows (trace through the code)\n3. Data model and state management\n4. API surface (if applicable)\n5. Extension points and customization\n6. Where to start reading the code\n\nWrite to onboarding/03-key-concepts.md. Target audience: {{audience}}.",
+        "assignTo": "explorer",
+        "dependsOn": ["Map codebase structure"],
+        "expectations": [
+          { "type": "file_exists", "paths": ["onboarding/03-key-concepts.md"] },
+          {
+            "type": "llm_review",
+            "criteria": "Onboarding documentation is accurate, well-structured, provides clear starting points, and would genuinely help a new team member get productive quickly",
+            "threshold": 3.5
+          }
+        ]
+      }
+    ]
+  }
+}

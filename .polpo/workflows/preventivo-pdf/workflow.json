@@ -1,0 +1,124 @@
+{
+  "name": "preventivo-pdf",
+  "description": "Genera un preventivo professionale in PDF a partire dai dati cliente e lo invia via Telegram. Crea il documento con layout formattato, calcola totali/IVA, produce il PDF e lo spedisce al canale Telegram configurato.",
+  "parameters": [
+    {
+      "name": "cliente",
+      "description": "Nome del cliente o azienda destinataria",
+      "type": "string",
+      "required": true
+    },
+    {
+      "name": "email_cliente",
+      "description": "Email del cliente (inserita nel preventivo)",
+      "type": "string",
+      "required": true
+    },
+    {
+      "name": "descrizione_lavoro",
+      "description": "Descrizione dei servizi/prodotti da preventivare",
+      "type": "string",
+      "required": true
+    },
+    {
+      "name": "importo",
+      "description": "Importo totale netto in euro (senza IVA)",
+      "type": "number",
+      "required": true
+    },
+    {
+      "name": "aliquota_iva",
+      "description": "Aliquota IVA in percentuale",
+      "type": "number",
+      "default": 22
+    },
+    {
+      "name": "scadenza_giorni",
+      "description": "Validità del preventivo in giorni",
+      "type": "number",
+      "default": 30
+    },
+    {
+      "name": "note",
+      "description": "Note aggiuntive da inserire nel preventivo",
+      "type": "string",
+      "default": ""
+    },
+    {
+      "name": "telegram_channel",
+      "description": "ID del canale Telegram su cui inviare il PDF",
+      "type": "string",
+      "default": "telegram"
+    }
+  ],
+  "plan": {
+    "team": [
+      {
+        "name": "doc-writer",
+        "role": "Document specialist — creates professional business documents with precise formatting and calculations"
+      },
+      {
+        "name": "notifier",
+        "role": "Notification agent — handles delivery of documents via external channels"
+      }
+    ],
+    "tasks": [
+      {
+        "title": "Genera preventivo per {{cliente}}",
+        "description": "Crea un preventivo professionale con i seguenti dati:\n\n**Cliente:** {{cliente}}\n**Email:** {{email_cliente}}\n**Servizi:** {{descrizione_lavoro}}\n**Importo netto:** €{{importo}}\n**IVA:** {{aliquota_iva}}%\n**Validità:** {{scadenza_giorni}} giorni\n**Note:** {{note}}\n\nIl preventivo deve includere:\n1. Header con logo/nome azienda e data\n2. Dati del cliente (nome, email)\n3. Tabella dettagliata dei servizi con importi\n4. Subtotale netto, IVA calcolata, totale lordo\n5. Condizioni di pagamento e validità\n6. Note aggiuntive se presenti\n7. Footer con riferimenti aziendali\n\nGenera il file come HTML ben formattato (preventivo.html) pronto per la conversione in PDF. Usa CSS inline per un layout pulito e professionale. Poi convertilo in PDF usando un tool disponibile e salva come preventivo-{{cliente}}.pdf.",
+        "assignTo": "doc-writer",
+        "expectations": [
+          {
+            "type": "file_exists",
+            "paths": ["preventivo.html"]
+          },
+          {
+            "type": "llm_review",
+            "criteria": "Il preventivo è completo, professionale, contiene tutti i dati richiesti (cliente, importi, IVA calcolata correttamente, scadenza) e ha un layout pulito",
+            "threshold": 3.5
+          }
+        ],
+        "expectedOutcomes": [
+          {
+            "type": "file",
+            "label": "Preventivo HTML",
+            "path": "preventivo.html",
+            "mimeType": "text/html"
+          },
+          {
+            "type": "file",
+            "label": "Preventivo PDF",
+            "description": "PDF generato dal preventivo",
+            "mimeType": "application/pdf"
+          }
+        ]
+      },
+      {
+        "title": "Invia preventivo {{cliente}} via Telegram",
+        "description": "Invia una notifica su Telegram (canale: {{telegram_channel}}) con:\n- Messaggio: \"Nuovo preventivo generato per {{cliente}} — €{{importo}} + IVA {{aliquota_iva}}%\"\n- Se disponibile, allega il file PDF del preventivo\n\nUsa il sistema di notifiche di Polpo (sendDirect) o il tool appropriato per inviare il messaggio al canale configurato.",
+        "assignTo": "notifier",
+        "dependsOn": ["Genera preventivo per {{cliente}}"],
+        "expectations": [
+          {
+            "type": "llm_review",
+            "criteria": "La notifica Telegram è stata inviata correttamente con il messaggio che include il nome del cliente e l'importo",
+            "threshold": 3.0
+          }
+        ]
+      }
+    ],
+    "notifications": {
+      "rules": [
+        {
+          "id": "preventivo-completato",
+          "name": "Preventivo completato",
+          "events": ["plan:completed"],
+          "channels": ["{{telegram_channel}}"],
+          "severity": "info",
+          "template": "Workflow preventivo per {{cliente}} completato"
+        }
+      ],
+      "inherit": true
+    }
+  }
+}
