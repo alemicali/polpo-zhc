@@ -263,7 +263,7 @@ function ApprovalCard({
             </div>
 
             {/* Resolution info */}
-            {request.resolvedAt && (
+            {!!request.resolvedAt && (
               <div className="flex items-center gap-3 mt-1 flex-wrap">
                 {request.resolvedBy && (
                   <span className="text-[10px] text-muted-foreground flex items-center gap-1">
@@ -286,7 +286,7 @@ function ApprovalCard({
             )}
 
             {/* Payload preview */}
-            {request.payload && (
+            {request.payload != null && (
               <details className="mt-2 group/payload">
                 <summary className="text-[10px] text-muted-foreground cursor-pointer hover:text-foreground transition-colors">
                   View payload

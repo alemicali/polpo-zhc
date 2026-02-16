@@ -127,5 +127,16 @@ export function agentRoutes(): Hono<ServerEnv> {
     }
   });
 
+  // GET /agents/:name — single agent detail (registered after static routes to avoid conflicts)
+  app.get("/:name", (c) => {
+    const orchestrator = c.get("orchestrator");
+    const name = c.req.param("name");
+    const agent = orchestrator.getAgents().find(a => a.name === name);
+    if (!agent) {
+      return c.json({ ok: false, error: "Agent not found", code: "NOT_FOUND" }, 404);
+    }
+    return c.json({ ok: true, data: agent });
+  });
+
   return app;
 }

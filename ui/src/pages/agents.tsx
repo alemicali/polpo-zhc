@@ -1,5 +1,6 @@
 import { useState, useMemo } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Link } from "react-router-dom";
+import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,7 +16,6 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Separator } from "@/components/ui/separator";
 import {
   Bot,
   Loader2,
@@ -37,9 +37,7 @@ import {
   CheckCircle2,
   XCircle,
   Layers,
-  Server,
   Infinity,
-  BookOpen,
 } from "lucide-react";
 import { MessageResponse } from "@/components/ai-elements/message";
 import { useAgents, useProcesses, useSkills } from "@openpolpo/react-sdk";
@@ -114,7 +112,7 @@ function FeatureDot({ supported, label }: { supported: boolean; label: string })
   );
 }
 
-// ── Skills pool (project-level) ──
+// ── Skills pool (project-level, collapsible) ──
 
 function SkillsPool({
   skills,
@@ -123,6 +121,8 @@ function SkillsPool({
   skills: SkillInfo[];
   agents: AgentConfig[];
 }) {
+  const [open, setOpen] = useState(false);
+
   if (skills.length === 0) return null;
 
   // Build usage map: skill name → agent names using it
@@ -139,19 +139,25 @@ function SkillsPool({
     return map;
   }, [skills, agents]);
 
+  const assignedCount = [...usageMap.values()].filter(v => v.length > 0).length;
+
   return (
-    <Card>
-      <CardHeader className="pb-2">
-        <CardTitle className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
-          <BookOpen className="h-3.5 w-3.5" /> Project Skills
-          <Badge variant="secondary" className="text-[9px] ml-1">{skills.length}</Badge>
-          <span className="font-normal text-[10px] ml-2">
-            Discovered from <code className="font-mono">.claude/skills/</code> &mdash; claude-sdk adapter only
-          </span>
-        </CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+    <Collapsible open={open} onOpenChange={setOpen}>
+      <CollapsibleTrigger asChild>
+        <button className="w-full flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 hover:bg-muted/30 transition-colors cursor-pointer text-left">
+          <Sparkles className="h-3.5 w-3.5 text-violet-400 shrink-0" />
+          <span className="text-xs font-medium">Skills</span>
+          <Badge variant="secondary" className="text-[9px]">{skills.length}</Badge>
+          {assignedCount > 0 && (
+            <span className="text-[10px] text-muted-foreground">
+              {assignedCount} assigned
+            </span>
+          )}
+          <ChevronDown className={cn("h-3.5 w-3.5 text-muted-foreground ml-auto transition-transform", open && "rotate-180")} />
+        </button>
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 pt-2">
           {skills.map((skill) => {
             const users = usageMap.get(skill.name) ?? [];
             return (
@@ -201,12 +207,12 @@ function SkillsPool({
             );
           })}
         </div>
-      </CardContent>
-    </Card>
+      </CollapsibleContent>
+    </Collapsible>
   );
 }
 
-// ── Base team header ──
+// ── Base team header (compact bar) ──
 
 function BaseTeamHeader({
   teamName,
@@ -232,82 +238,92 @@ function BaseTeamHeader({
   }, {});
 
   return (
-    <Card>
-      <CardContent className="pt-5 pb-4">
-        <div className="space-y-3">
-          {/* Team name + description */}
-          <div className="flex items-center gap-2.5">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10">
-              <Users className="h-4 w-4 text-primary" />
-            </div>
-            <div className="flex-1">
-              <div className="flex items-center gap-2">
-                <h3 className="text-base font-semibold">{teamName}</h3>
-                <Badge variant="secondary" className="text-[9px]">Base Team</Badge>
-              </div>
-              {teamDescription && (
-                <p className="text-xs text-muted-foreground">{teamDescription}</p>
-              )}
-            </div>
-            {volatileGroupCount > 0 && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <div className="flex items-center gap-1.5 cursor-help">
-                    <Zap className="h-3.5 w-3.5 text-amber-400" />
-                    <span className="text-xs font-bold">{volatileGroupCount}</span>
-                    <span className="text-[10px] text-muted-foreground">plan team{volatileGroupCount !== 1 ? "s" : ""}</span>
-                  </div>
-                </TooltipTrigger>
-                <TooltipContent className="text-xs max-w-60">
-                  Volatile teams created by plans. Each plan can spawn its own agents that are auto-cleaned when the plan completes.
-                </TooltipContent>
-              </Tooltip>
-            )}
-          </div>
+    <div className="flex items-center gap-3 rounded-lg border border-border bg-card px-3 py-2">
+      {/* Team name */}
+      <div className="flex items-center gap-2 shrink-0">
+        <Users className="h-3.5 w-3.5 text-primary" />
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="text-sm font-semibold cursor-default">{teamName}</span>
+          </TooltipTrigger>
+          {teamDescription && (
+            <TooltipContent className="text-xs max-w-60">{teamDescription}</TooltipContent>
+          )}
+        </Tooltip>
+      </div>
 
-          {/* Stats row */}
-          <div className="flex items-center gap-6">
-            <div className="flex items-center gap-1.5">
-              <div className={cn("h-2 w-2 rounded-full", activeCount > 0 ? "bg-blue-500 animate-pulse" : "bg-zinc-600")} />
-              <span className="text-xs text-muted-foreground">Active</span>
-              <span className="text-xs font-bold">{activeCount}</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <div className="h-2 w-2 rounded-full bg-emerald-500" />
-              <span className="text-xs text-muted-foreground">Agents</span>
-              <span className="text-xs font-bold">{agents.length}</span>
-            </div>
-            <div className="h-4 w-px bg-border" />
-            {/* Adapter breakdown */}
-            <div className="flex items-center gap-3">
-              {Object.entries(adapterCounts).map(([adapter, count]) => {
-                const meta = getAdapterMeta(adapter);
-                const Icon = meta.icon;
-                return (
-                  <Tooltip key={adapter}>
-                    <TooltipTrigger asChild>
-                      <div className="flex items-center gap-1.5 cursor-help">
-                        <Icon className={cn("h-3.5 w-3.5", meta.color)} />
-                        <span className="text-xs font-bold">{count}</span>
-                        <span className="text-[10px] text-muted-foreground">{meta.label}</span>
-                      </div>
-                    </TooltipTrigger>
-                    <TooltipContent className="text-xs max-w-60">{meta.description}</TooltipContent>
-                  </Tooltip>
-                );
-              })}
-            </div>
-          </div>
+      <div className="h-4 w-px bg-border" />
 
-          {/* Utilization */}
-          <div className="flex items-center gap-3 max-w-xs">
-            <span className="text-[10px] text-muted-foreground shrink-0">Utilization</span>
-            <Progress value={utilization} className="h-1.5 flex-1" />
-            <span className="text-[10px] font-mono w-8 text-right">{utilization}%</span>
-          </div>
+      {/* Agent counts */}
+      <div className="flex items-center gap-4">
+        <div className="flex items-center gap-1.5">
+          <div className={cn("h-1.5 w-1.5 rounded-full", activeCount > 0 ? "bg-blue-500 animate-pulse" : "bg-zinc-600")} />
+          <span className="text-[11px] text-muted-foreground">Active</span>
+          <span className="text-[11px] font-bold">{activeCount}</span>
         </div>
-      </CardContent>
-    </Card>
+        <div className="flex items-center gap-1.5">
+          <div className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+          <span className="text-[11px] text-muted-foreground">Total</span>
+          <span className="text-[11px] font-bold">{agents.length}</span>
+        </div>
+      </div>
+
+      <div className="h-4 w-px bg-border" />
+
+      {/* Adapter breakdown */}
+      <div className="flex items-center gap-3">
+        {Object.entries(adapterCounts).map(([adapter, count]) => {
+          const meta = getAdapterMeta(adapter);
+          const Icon = meta.icon;
+          return (
+            <Tooltip key={adapter}>
+              <TooltipTrigger asChild>
+                <div className="flex items-center gap-1 cursor-help">
+                  <Icon className={cn("h-3 w-3", meta.color)} />
+                  <span className="text-[11px] font-bold">{count}</span>
+                  <span className="text-[10px] text-muted-foreground">{meta.label}</span>
+                </div>
+              </TooltipTrigger>
+              <TooltipContent className="text-xs max-w-64">
+                <p className="font-medium mb-1">{meta.description}</p>
+                <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[10px]">
+                  {meta.features.tools && <span className="text-emerald-400">Tools</span>}
+                  {meta.features.skills && <span className="text-emerald-400">Skills</span>}
+                  {meta.features.mcp && <span className="text-emerald-400">MCP</span>}
+                  {meta.features.multiProvider && <span className="text-emerald-400">Multi-provider</span>}
+                  {meta.features.sessions && <span className="text-emerald-400">Sessions</span>}
+                </div>
+              </TooltipContent>
+            </Tooltip>
+          );
+        })}
+      </div>
+
+      {/* Volatile teams */}
+      {volatileGroupCount > 0 && (
+        <>
+          <div className="h-4 w-px bg-border" />
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div className="flex items-center gap-1 cursor-help">
+                <Zap className="h-3 w-3 text-amber-400" />
+                <span className="text-[11px] font-bold">{volatileGroupCount}</span>
+                <span className="text-[10px] text-muted-foreground">plan team{volatileGroupCount !== 1 ? "s" : ""}</span>
+              </div>
+            </TooltipTrigger>
+            <TooltipContent className="text-xs max-w-60">
+              Volatile teams created by plans. Auto-cleaned when the plan completes.
+            </TooltipContent>
+          </Tooltip>
+        </>
+      )}
+
+      {/* Utilization bar */}
+      <div className="flex items-center gap-2 ml-auto shrink-0">
+        <Progress value={utilization} className="h-1.5 w-20" />
+        <span className="text-[10px] font-mono text-muted-foreground w-7 text-right">{utilization}%</span>
+      </div>
+    </div>
   );
 }
 
@@ -371,48 +387,7 @@ function VolatileTeamHeader({
   );
 }
 
-// ── Adapter feature matrix ──
 
-function AdapterFeatureMatrix({ agents }: { agents: AgentConfig[] }) {
-  const usedAdapters = [...new Set(agents.map(a => a.adapter ?? "engine"))];
-  if (usedAdapters.length <= 1) return null;
-
-  return (
-    <Card>
-      <CardHeader className="pb-2">
-        <CardTitle className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
-          <Server className="h-3.5 w-3.5" /> Adapter Capabilities
-        </CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div className="grid gap-4" style={{ gridTemplateColumns: `repeat(${usedAdapters.length}, 1fr)` }}>
-          {usedAdapters.map(adapter => {
-            const meta = getAdapterMeta(adapter);
-            const Icon = meta.icon;
-            const f = meta.features;
-            return (
-              <div key={adapter} className="space-y-2">
-                <div className="flex items-center gap-2">
-                  <div className={cn("flex h-6 w-6 items-center justify-center rounded", meta.bg)}>
-                    <Icon className={cn("h-3.5 w-3.5", meta.color)} />
-                  </div>
-                  <span className="text-xs font-medium">{meta.label}</span>
-                </div>
-                <div className="space-y-1">
-                  <FeatureDot supported={f.tools} label="Built-in Tools" />
-                  <FeatureDot supported={f.skills} label="Skills" />
-                  <FeatureDot supported={f.mcp} label="MCP Servers" />
-                  <FeatureDot supported={f.multiProvider} label="Multi-provider" />
-                  <FeatureDot supported={f.sessions} label="Sessions" />
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
 
 // ── Live activity panel (inside agent card) ──
 
@@ -602,6 +577,13 @@ function AgentCard({
               {capabilityCount > 0 && (
                 <span className="text-[10px] text-muted-foreground">{capabilityCount} capabilities</span>
               )}
+              <Link
+                to={`/agents/${encodeURIComponent(agent.name)}`}
+                className="text-[10px] text-muted-foreground hover:text-foreground transition-colors"
+                onClick={(e) => e.stopPropagation()}
+              >
+                Details
+              </Link>
               <ChevronDown className={cn("h-4 w-4 text-muted-foreground transition-transform", expanded && "rotate-180")} />
             </div>
           </div>
@@ -776,62 +758,16 @@ function AgentCard({
   );
 }
 
-// ── Adapter group section ──
-
-function AdapterGroup({
-  adapter,
-  agents,
-  processes,
-  skillPool,
-}: {
-  adapter: string;
-  agents: AgentConfig[];
-  processes: AgentProcess[];
-  skillPool: Map<string, SkillInfo>;
-}) {
-  const meta = getAdapterMeta(adapter);
-  const Icon = meta.icon;
-  const activeInGroup = agents.filter(a => processes.some(p => p.agentName === a.name)).length;
-
-  return (
-    <div className="space-y-2">
-      <div className="flex items-center gap-2">
-        <div className={cn("flex h-5 w-5 items-center justify-center rounded", meta.bg)}>
-          <Icon className={cn("h-3 w-3", meta.color)} />
-        </div>
-        <span className="text-xs font-medium">{meta.label}</span>
-        <Badge variant="secondary" className="text-[9px]">{agents.length}</Badge>
-        {activeInGroup > 0 && (
-          <Badge variant="outline" className="text-[9px] text-blue-400 border-blue-500/30">
-            {activeInGroup} active
-          </Badge>
-        )}
-        <Separator className="flex-1" />
-      </div>
-      <div className="space-y-2">
-        {agents.map((agent) => (
-          <AgentCard
-            key={agent.name}
-            agent={agent}
-            process={processes.find((p) => p.agentName === agent.name)}
-            skillPool={skillPool}
-          />
-        ))}
-      </div>
-    </div>
-  );
-}
-
 // ── Main page ──
 
-type ViewMode = "teams" | "adapters" | "flat";
+type AgentTab = "permanent" | "volatile";
 
 export function AgentsPage() {
   const { agents, team, isLoading: loading, refetch } = useAgents();
   const { processes } = useProcesses();
   const { skills, refetch: refetchSkills } = useSkills();
   const [search, setSearch] = useState("");
-  const [view, setView] = useState<ViewMode>("teams");
+  const [tab, setTab] = useState<AgentTab>("permanent");
 
   // Build skill pool map for enriched tooltips
   const skillPool = useMemo(() => {
@@ -848,8 +784,9 @@ export function AgentsPage() {
     );
   }
 
-  // Filter
-  const filtered = agents.filter((a) => {
+  // Filter by tab (permanent vs volatile) then by search
+  const tabAgents = agents.filter(a => tab === "permanent" ? !a.volatile : !!a.volatile);
+  const filtered = tabAgents.filter((a) => {
     if (!search) return true;
     const q = search.toLowerCase();
     return (
@@ -862,32 +799,14 @@ export function AgentsPage() {
     );
   });
 
-  // Split: permanent vs volatile
-  const permanentAgents = filtered.filter(a => !a.volatile);
-  const volatileAgents = filtered.filter(a => a.volatile);
-
-  // Group volatile by planGroup
-  const volatileGroups = volatileAgents.reduce<Record<string, AgentConfig[]>>((acc, a) => {
-    const group = a.planGroup ?? "unknown";
-    if (!acc[group]) acc[group] = [];
-    acc[group].push(a);
+  // Group volatile by planGroup (only relevant for volatile tab)
+  const volatileGroups = filtered.reduce<Record<string, AgentConfig[]>>((acc, a) => {
+    if (!a.planGroup) return acc;
+    if (!acc[a.planGroup]) acc[a.planGroup] = [];
+    acc[a.planGroup].push(a);
     return acc;
   }, {});
   const volatileGroupNames = Object.keys(volatileGroups).sort();
-
-  // For adapter view: group all filtered agents by adapter
-  const adapterGroups = filtered.reduce<Record<string, AgentConfig[]>>((acc, a) => {
-    const key = a.adapter ?? "engine";
-    if (!acc[key]) acc[key] = [];
-    acc[key].push(a);
-    return acc;
-  }, {});
-  const adapterOrder = ["engine", "claude-sdk"];
-  const sortedAdapters = Object.keys(adapterGroups).sort((a, b) => {
-    const ia = adapterOrder.indexOf(a);
-    const ib = adapterOrder.indexOf(b);
-    return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
-  });
 
   // Total volatile groups (unfiltered) for the header badge
   const allVolatileGroups = new Set(agents.filter(a => a.volatile && a.planGroup).map(a => a.planGroup!));
@@ -910,110 +829,87 @@ export function AgentsPage() {
       {/* Skills pool */}
       <SkillsPool skills={skills} agents={agents} />
 
-      {/* Feature matrix (only if multiple adapters across all agents) */}
-      <AdapterFeatureMatrix agents={agents} />
-
       {/* Toolbar */}
       <div className="flex items-center justify-between">
-        <div className="relative w-72">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="Search agents, skills, adapters..."
-            className="pl-9"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
+        <div className="flex items-center gap-3">
+          {/* Permanent / Volatile tabs */}
+          <div className="flex items-center rounded-lg border border-border bg-muted/30 p-0.5">
+            <button
+              className={cn(
+                "flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
+                tab === "permanent"
+                  ? "bg-background text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              )}
+              onClick={() => setTab("permanent")}
+            >
+              <Users className="h-3 w-3" />
+              Permanent
+              <Badge variant="secondary" className="text-[9px] ml-0.5">{agents.filter(a => !a.volatile).length}</Badge>
+            </button>
+            <button
+              className={cn(
+                "flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
+                tab === "volatile"
+                  ? "bg-background text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              )}
+              onClick={() => setTab("volatile")}
+            >
+              <Zap className="h-3 w-3" />
+              Volatile
+              <Badge variant="secondary" className="text-[9px] ml-0.5">{agents.filter(a => a.volatile).length}</Badge>
+            </button>
+          </div>
+
+          {/* Search */}
+          <div className="relative w-64">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder="Search agents..."
+              className="pl-9 h-8"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant={view === "teams" ? "secondary" : "ghost"}
-                size="sm"
-                className="h-8 px-2.5"
-                onClick={() => setView("teams")}
-              >
-                <Users className="h-3.5 w-3.5" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent className="text-xs">Group by team</TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant={view === "adapters" ? "secondary" : "ghost"}
-                size="sm"
-                className="h-8 px-2.5"
-                onClick={() => setView("adapters")}
-              >
-                <Layers className="h-3.5 w-3.5" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent className="text-xs">Group by adapter</TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant={view === "flat" ? "secondary" : "ghost"}
-                size="sm"
-                className="h-8 px-2.5"
-                onClick={() => setView("flat")}
-              >
-                <Bot className="h-3.5 w-3.5" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent className="text-xs">Flat list</TooltipContent>
-          </Tooltip>
-          <Button variant="outline" size="sm" onClick={handleRefresh}>
-            <RefreshCw className="h-3.5 w-3.5" />
-          </Button>
-        </div>
+        <Button variant="outline" size="sm" onClick={handleRefresh}>
+          <RefreshCw className="h-3.5 w-3.5" />
+        </Button>
       </div>
 
       {/* Agent list */}
-      <ScrollArea className="flex-1 min-h-0">
-        <div className="space-y-5 pr-4 pb-2">
+      <ScrollArea className="flex-1 min-h-0 -mx-1">
+        <div className="space-y-5 px-1 pr-5 pb-2">
           {filtered.length === 0 ? (
             <Card>
               <CardContent className="flex flex-col items-center justify-center py-16 text-muted-foreground">
                 <Bot className="h-12 w-12 mb-4 opacity-40" />
                 <p className="text-sm font-medium">
-                  {search ? "No agents match your search" : "No agents configured"}
+                  {search ? "No agents match your search" : tab === "volatile" ? "No volatile agents" : "No agents configured"}
                 </p>
                 <p className="text-xs mt-1 text-center max-w-xs">
                   {search
                     ? "Try a different search term"
-                    : "Agents are configured in the team section of .polpo/polpo.json or created dynamically by plans."}
+                    : tab === "volatile"
+                    ? "Volatile agents are created dynamically by plans and auto-removed on completion."
+                    : "Agents are configured in the team section of .polpo/polpo.json."}
                 </p>
               </CardContent>
             </Card>
-          ) : view === "teams" ? (
+          ) : tab === "permanent" ? (
+            <div className="space-y-2">
+              {filtered.map((agent) => (
+                <AgentCard
+                  key={agent.name}
+                  agent={agent}
+                  process={processes.find((p) => p.agentName === agent.name)}
+                  skillPool={skillPool}
+                />
+              ))}
+            </div>
+          ) : (
             <>
-              {/* Permanent (base) team */}
-              {permanentAgents.length > 0 && (
-                <section className="space-y-2">
-                  <div className="flex items-center gap-2">
-                    <div className="flex h-5 w-5 items-center justify-center rounded bg-emerald-500/10">
-                      <Users className="h-3 w-3 text-emerald-400" />
-                    </div>
-                    <span className="text-xs font-medium">Permanent Agents</span>
-                    <Badge variant="secondary" className="text-[9px]">{permanentAgents.length}</Badge>
-                    <Separator className="flex-1" />
-                  </div>
-                  <div className="space-y-2">
-                    {permanentAgents.map((agent) => (
-                      <AgentCard
-                        key={agent.name}
-                        agent={agent}
-                        process={processes.find((p) => p.agentName === agent.name)}
-                        skillPool={skillPool}
-                      />
-                    ))}
-                  </div>
-                </section>
-              )}
-
-              {/* Volatile teams — one section per planGroup */}
               {volatileGroupNames.map(group => (
                 <section key={group} className="space-y-2">
                   <VolatileTeamHeader
@@ -1033,26 +929,20 @@ export function AgentsPage() {
                   </div>
                 </section>
               ))}
+              {/* Ungrouped volatile agents (no planGroup) */}
+              {filtered.filter(a => !a.planGroup).length > 0 && (
+                <div className="space-y-2">
+                  {filtered.filter(a => !a.planGroup).map((agent) => (
+                    <AgentCard
+                      key={agent.name}
+                      agent={agent}
+                      process={processes.find((p) => p.agentName === agent.name)}
+                      skillPool={skillPool}
+                    />
+                  ))}
+                </div>
+              )}
             </>
-          ) : view === "adapters" ? (
-            sortedAdapters.map(adapter => (
-              <AdapterGroup
-                key={adapter}
-                adapter={adapter}
-                agents={adapterGroups[adapter]}
-                processes={processes}
-                skillPool={skillPool}
-              />
-            ))
-          ) : (
-            filtered.map((agent) => (
-              <AgentCard
-                key={agent.name}
-                agent={agent}
-                process={processes.find((p) => p.agentName === agent.name)}
-                skillPool={skillPool}
-              />
-            ))
           )}
         </div>
       </ScrollArea>

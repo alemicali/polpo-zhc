@@ -9,6 +9,7 @@ export { useTask } from "./hooks/use-task.js";
 export { usePlans } from "./hooks/use-plans.js";
 export { usePlan } from "./hooks/use-plan.js";
 export { useAgents } from "./hooks/use-agents.js";
+export { useAgent } from "./hooks/use-agent.js";
 export { useProcesses } from "./hooks/use-processes.js";
 export { useEvents } from "./hooks/use-events.js";
 export { useStats } from "./hooks/use-stats.js";

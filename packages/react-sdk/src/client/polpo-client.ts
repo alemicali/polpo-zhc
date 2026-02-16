@@ -186,6 +186,10 @@ export class PolpoClient {
     return this.get<AgentConfig[]>("/agents");
   }
 
+  getAgent(name: string): Promise<AgentConfig> {
+    return this.get<AgentConfig>(`/agents/${encodeURIComponent(name)}`);
+  }
+
   addAgent(req: AddAgentRequest): Promise<{ added: boolean }> {
     return this.post<{ added: boolean }>("/agents", req);
   }

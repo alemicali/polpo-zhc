@@ -191,6 +191,30 @@ export interface AgentConfig {
   maxConcurrency?: number;
   volatile?: boolean;
   planGroup?: string;
+
+  // Extended tool categories (opt-in)
+  /** Enable browser automation tools (browser_navigate, browser_click, etc.) */
+  enableBrowser?: boolean;
+  /** Enable HTTP/fetch tools (http_fetch, http_download) */
+  enableHttp?: boolean;
+  /** Enable structured git tools (git_status, git_diff, git_log, etc.) */
+  enableGit?: boolean;
+  /** Enable multi-file editing tools (multi_edit, regex_replace, bulk_rename) */
+  enableMultifile?: boolean;
+  /** Enable dependency management tools (dep_install, dep_add, etc.) */
+  enableDeps?: boolean;
+  /** Enable Excel/CSV tools (excel_read, excel_write, etc.) */
+  enableExcel?: boolean;
+  /** Enable PDF tools (pdf_read, pdf_create, pdf_merge, pdf_info) */
+  enablePdf?: boolean;
+  /** Enable Word/DOCX tools (docx_read, docx_create) */
+  enableDocx?: boolean;
+  /** Enable email tools (email_send, email_verify) */
+  enableEmail?: boolean;
+  /** Enable audio tools (audio_transcribe, audio_speak) */
+  enableAudio?: boolean;
+  /** Enable image tools (image_generate, image_analyze) */
+  enableImage?: boolean;
 }
 
 export interface AgentActivity {
@@ -577,6 +601,24 @@ export interface AddAgentRequest {
   systemPrompt?: string;
   skills?: string[];
   maxTurns?: number;
+  /** Max concurrent tasks for this agent. */
+  maxConcurrency?: number;
+  /** MCP servers to connect to. */
+  mcpServers?: Record<string, McpServerConfig>;
+  /** Filesystem sandbox — directories the agent is allowed to access. */
+  allowedPaths?: string[];
+  // Extended tool categories (opt-in)
+  enableBrowser?: boolean;
+  enableHttp?: boolean;
+  enableGit?: boolean;
+  enableMultifile?: boolean;
+  enableDeps?: boolean;
+  enableExcel?: boolean;
+  enablePdf?: boolean;
+  enableDocx?: boolean;
+  enableEmail?: boolean;
+  enableAudio?: boolean;
+  enableImage?: boolean;
 }
 
 // === SSE ===
@@ -676,7 +718,7 @@ export interface SkillInfo {
   description: string;
   allowedTools?: string[];
   /** Where this skill was discovered from. */
-  source: "polpo" | "claude" | "home";
+  source: "project" | "global" | "polpo" | "claude" | "home";
   /** Absolute path to the skill directory. */
   path: string;
 }

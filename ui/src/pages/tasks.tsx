@@ -333,7 +333,7 @@ function KanbanBoard({
 
             {/* Column body */}
             <ScrollArea className="flex-1 min-h-0">
-              <div className="space-y-1.5 px-1 pr-3">
+              <div className="space-y-1.5 px-1 pr-3 pb-1">
                 {colTasks.length === 0 ? (
                   <div className="flex items-center justify-center py-8 text-muted-foreground">
                     <p className="text-[10px]">No tasks</p>
@@ -422,8 +422,8 @@ function ListView({
       </div>
 
       {/* Task list */}
-      <ScrollArea className="flex-1 min-h-0">
-        <div className="space-y-1.5 pr-4">
+      <ScrollArea className="flex-1 min-h-0 -mx-1">
+        <div className="space-y-1.5 px-1 pr-5 pb-1">
           {filtered.length === 0 ? (
             <Card>
               <CardContent className="flex flex-col items-center justify-center py-12 text-muted-foreground">
