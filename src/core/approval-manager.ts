@@ -25,9 +25,20 @@ export class ApprovalManager {
     private store: ApprovalStore,
   ) {}
 
-  /** Wire the notification router so per-gate notifyChannels work. */
+  /** Wire the notification router so per-gate notifyChannels work.
+   *  Must be called AFTER init() — retroactively registers notification rules
+   *  for all gates that have notifyChannels configured. */
   setNotificationRouter(router: NotificationRouter): void {
     this.notificationRouter = router;
+
+    // init() already ran before the router was available, so
+    // ensureGateNotificationRules() was a no-op. Re-run for all gates now.
+    const gates = this.ctx.config.settings.approvalGates;
+    if (gates) {
+      for (const gate of gates) {
+        this.ensureGateNotificationRules(gate);
+      }
+    }
   }
 
   /**
