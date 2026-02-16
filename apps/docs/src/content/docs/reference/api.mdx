@@ -431,6 +431,97 @@ DELETE /chat/sessions/:sessionId
 
 ---
 
+## Workflows
+
+### List Workflows
+
+```http
+GET /workflows
+```
+
+Discovers available workflows from `.polpo/workflows/` and `~/.polpo/workflows/`.
+
+**Response** `200`:
+```json
+{
+  "ok": true,
+  "data": [
+    {
+      "name": "code-review",
+      "description": "Deep code review of a module",
+      "parameters": [
+        { "name": "module", "type": "string", "required": true, "description": "Module to review" }
+      ],
+      "path": "/path/to/.polpo/workflows/code-review"
+    }
+  ]
+}
+```
+
+### Get Workflow
+
+```http
+GET /workflows/:name
+```
+
+Returns the full workflow definition including the plan template.
+
+**Response** `200`:
+```json
+{
+  "ok": true,
+  "data": {
+    "name": "code-review",
+    "description": "Deep code review of a module",
+    "parameters": [ ... ],
+    "plan": { ... }
+  }
+}
+```
+
+Returns `404` if the workflow is not found.
+
+### Execute Workflow
+
+```http
+POST /workflows/:name/run
+Content-Type: application/json
+
+{
+  "params": {
+    "module": "src/auth",
+    "focus": "security"
+  }
+}
+```
+
+Validates parameters, instantiates the workflow template, saves the resulting plan, and executes it.
+
+**Response** `201`:
+```json
+{
+  "ok": true,
+  "data": {
+    "plan": { "id": "plan-abc123", ... },
+    "tasks": 3,
+    "group": "code-review"
+  }
+}
+```
+
+Returns `404` if the workflow is not found, or `400` with `VALIDATION_ERROR` if parameters fail validation:
+
+```json
+{
+  "ok": false,
+  "error": "Parameter validation failed",
+  "code": "VALIDATION_ERROR",
+  "details": ["Missing required parameter: module"]
+}
+```
+
+---
+
 ## Skills
 
 ### List Skills
@@ -462,6 +553,105 @@ Returns the JSONL activity history for a specific task's run (tool calls, file e
 ```json
 { "ok": true, "data": [{ "type": "activity", "tool": "Edit", "file": "src/app.ts", "timestamp": "..." }] }
 ```
+
+---
+
+## Notifications
+
+Manage notification history and send direct notifications. See also the [Notification System](/orchestration/notifications) guide.
+
+### List Notification History
+
+```http
+GET /notifications?limit=100&status=sent&channel=telegram-oncall&rule=failed-tasks
+```
+
+All query params are optional filters.
+
+| Param | Description |
+|-------|-------------|
+| `limit` | Max records to return (default: 100) |
+| `status` | Filter by `sent` or `failed` |
+| `channel` | Filter by channel ID |
+| `rule` | Filter by rule ID |
+
+**Response** `200`:
+```json
+{
+  "ok": true,
+  "data": [
+    {
+      "id": "notif_abc123",
+      "timestamp": "2025-01-15T10:30:00Z",
+      "ruleId": "failed-tasks",
+      "ruleName": "Notify on task failure",
+      "channel": "slack-alerts",
+      "channelType": "slack",
+      "status": "sent",
+      "title": "Task Failed",
+      "body": "Task \"Run tests\" has failed",
+      "severity": "critical",
+      "sourceEvent": "task:transition",
+      "attachmentCount": 0
+    }
+  ]
+}
+```
+
+### Get Notification Stats
+
+```http
+GET /notifications/stats
+```
+
+**Response** `200`:
+```json
+{
+  "ok": true,
+  "data": {
+    "total": 42,
+    "sent": 39,
+    "failed": 3
+  }
+}
+```
+
+### Send Direct Notification
+
+```http
+POST /notifications/send
+Content-Type: application/json
+
+{
+  "channel": "telegram-oncall",
+  "title": "Deployment Complete",
+  "body": "Version 2.0.1 deployed to production",
+  "severity": "info",
+  "delayMs": 5000
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `channel` | string | Yes | Channel ID from your configuration |
+| `title` | string | Yes | Notification title |
+| `body` | string | Yes | Notification body (HTML supported for Telegram) |
+| `severity` | string | No | `info`, `warning`, or `critical` (default: `info`) |
+| `delayMs` | number | No | Delay in milliseconds before sending |
+
+**Response** `200`:
+```json
+{
+  "ok": true,
+  "data": {
+    "id": "notif_def456",
+    "scheduledAt": "2025-01-15T10:30:00.000Z",
+    "firesAt": "2025-01-15T10:30:05.000Z"
+  }
+}
+```
+
+When `delayMs` is set, the notification is scheduled with an in-memory `setTimeout`. The `firesAt` field indicates when it will fire.
 
 ---
 

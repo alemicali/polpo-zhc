@@ -8,6 +8,7 @@
 
 export type TaskStatus =
   | "pending"
+  | "awaiting_approval"
   | "assigned"
   | "in_progress"
   | "review"
@@ -109,8 +110,16 @@ export interface Task {
   resolutionAttempts?: number;
   originalDescription?: string;
   sessionId?: string;
+  /** Absolute deadline (ISO timestamp). */
+  deadline?: string;
+  /** Priority weight for quality scoring. Default: 1.0 */
+  priority?: number;
   expectedOutcomes?: ExpectedOutcome[];
   outcomes?: TaskOutcome[];
+  /** Number of approval revision rounds. */
+  revisionCount?: number;
+  /** Scoped notification rules for this task. */
+  notifications?: ScopedNotificationRules;
   createdAt: string;
   updatedAt: string;
 }
@@ -255,6 +264,16 @@ export interface Plan {
   data: string;
   prompt?: string;
   status: PlanStatus;
+  /** Absolute deadline (ISO timestamp). */
+  deadline?: string;
+  /** Cron expression or ISO timestamp for scheduled execution. */
+  schedule?: string;
+  /** Re-execute on every schedule trigger. Default: false (one-shot). */
+  recurring?: boolean;
+  /** Minimum average score for the plan to pass. */
+  qualityThreshold?: number;
+  /** Plan-level scoped notification rules. */
+  notifications?: ScopedNotificationRules;
   createdAt: string;
   updatedAt: string;
 }
@@ -277,6 +296,120 @@ export interface PlanReport {
   filesEdited: string[];
   outcomes?: TaskOutcome[];
   avgScore?: number;
+}
+
+// === Notifications ===
+
+export type NotificationSeverity = "info" | "warning" | "critical";
+export type NotificationChannelType = "slack" | "email" | "telegram" | "webhook";
+export type NotificationStatus = "sent" | "failed";
+
+export interface NotificationRule {
+  id: string;
+  name: string;
+  events: string[];
+  condition?: unknown;
+  channels: string[];
+  severity?: NotificationSeverity;
+  template?: string;
+  cooldownMs?: number;
+  includeOutcomes?: boolean;
+  outcomeFilter?: OutcomeType[];
+  maxAttachmentSize?: number;
+}
+
+export interface ScopedNotificationRules {
+  rules: NotificationRule[];
+  /** If true, rules are added on top of parent scope. If false (default), they replace. */
+  inherit?: boolean;
+}
+
+export interface NotificationRecord {
+  id: string;
+  timestamp: string;
+  ruleId: string;
+  ruleName: string;
+  channel: string;
+  channelType: string;
+  status: NotificationStatus;
+  error?: string;
+  title: string;
+  body: string;
+  severity: NotificationSeverity;
+  sourceEvent: string;
+  attachmentCount: number;
+  attachmentTypes?: OutcomeType[];
+}
+
+export interface NotificationStats {
+  total: number;
+  sent: number;
+  failed: number;
+}
+
+export interface SendNotificationRequest {
+  channel: string;
+  title: string;
+  body: string;
+  severity?: NotificationSeverity;
+  delayMs?: number;
+}
+
+export interface SendNotificationResult {
+  id: string;
+  scheduledAt: string;
+  firesAt: string;
+}
+
+// === Approval Gates ===
+
+export type ApprovalGateHandler = "auto" | "human";
+export type ApprovalStatus = "pending" | "approved" | "rejected" | "timeout";
+
+export interface ApprovalRequest {
+  id: string;
+  gateId: string;
+  gateName: string;
+  taskId?: string;
+  planId?: string;
+  status: ApprovalStatus;
+  payload: unknown;
+  requestedAt: string;
+  resolvedAt?: string;
+  resolvedBy?: string;
+  note?: string;
+}
+
+// === Scheduling ===
+
+export interface ScheduleEntry {
+  id: string;
+  planId: string;
+  expression: string;
+  recurring: boolean;
+  enabled: boolean;
+  lastRunAt?: string;
+  nextRunAt?: string;
+  deadlineOffsetMs?: number;
+  createdAt: string;
+}
+
+// === Quality & SLA ===
+
+export interface QualityMetrics {
+  entityId: string;
+  entityType: "task" | "agent" | "plan";
+  totalAssessments: number;
+  passedAssessments: number;
+  avgScore?: number;
+  minScore?: number;
+  maxScore?: number;
+  dimensionScores: Record<string, number>;
+  totalRetries: number;
+  totalFixes: number;
+  deadlinesMet: number;
+  deadlinesMissed: number;
+  updatedAt: string;
 }
 
 // === Config ===
@@ -366,10 +499,12 @@ export interface CreateTaskRequest {
   description: string;
   assignTo: string;
   expectations?: TaskExpectation[];
+  expectedOutcomes?: ExpectedOutcome[];
   dependsOn?: string[];
   group?: string;
   maxDuration?: number;
   retryPolicy?: RetryPolicy;
+  notifications?: ScopedNotificationRules;
 }
 
 export interface UpdateTaskRequest {
@@ -383,6 +518,7 @@ export interface CreatePlanRequest {
   prompt?: string;
   name?: string;
   status?: PlanStatus;
+  notifications?: ScopedNotificationRules;
 }
 
 export interface UpdatePlanRequest {
@@ -461,12 +597,27 @@ export interface RunActivityEntry {
   ts?: string;
   /** Event type: "spawning", "spawned", "activity", "sigterm", "done", "error" */
   event?: string;
-  /** Transcript type: "stdout", "tool_use", "tool_result", "assistant", etc. */
+  /** Transcript type: "stdout", "tool_use", "tool_result", "assistant", "error", "result" */
   type?: string;
-  /** Agent output text (for stdout/transcript entries) */
+  /** Agent output text (for stdout/assistant entries) */
   text?: string;
   /** Payload data (activity snapshot, lifecycle info, etc.) */
   data?: unknown;
+
+  // ── tool_use fields ──
+  /** Tool name (present on tool_use and tool_result entries) */
+  tool?: string;
+  /** Tool call ID (present on tool_use and tool_result entries) */
+  toolId?: string;
+  /** Tool input arguments (present on tool_use entries) */
+  input?: Record<string, unknown>;
+
+  // ── tool_result fields ──
+  /** Tool output content (present on tool_result entries) */
+  content?: string;
+  /** Whether the tool call errored (present on tool_result entries) */
+  isError?: boolean;
+
   /** Present on the header line only */
   _run?: boolean;
   runId?: string;

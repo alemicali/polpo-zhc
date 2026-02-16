@@ -11,6 +11,8 @@ import {
   FileText,
   FolderOpen,
   Columns2,
+  Bell,
+  ShieldCheck,
 } from "lucide-react";
 import { usePolpo } from "@openpolpo/react-sdk";
 import { useProjectInfo } from "@/hooks/use-polpo";
@@ -30,6 +32,8 @@ const nav = [
   { to: "/chat", icon: MessageSquare, label: "Chat" },
   { to: "/memory", icon: Brain, label: "Memory" },
   { to: "/logs", icon: FileText, label: "Logs" },
+  { to: "/notifications", icon: Bell, label: "Notifications" },
+  { to: "/approvals", icon: ShieldCheck, label: "Approvals" },
 ] as const;
 
 const statusConfig: Record<string, { color: string; pulse: boolean; label: string }> = {

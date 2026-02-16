@@ -62,6 +62,7 @@ const statusConfig: Record<
   { icon: React.ElementType; color: string; bg: string; label: string }
 > = {
   pending: { icon: Clock, color: "text-zinc-400", bg: "bg-zinc-500/10", label: "Queued" },
+  awaiting_approval: { icon: Clock, color: "text-amber-400", bg: "bg-amber-500/10", label: "Awaiting Approval" },
   assigned: { icon: Clock, color: "text-violet-400", bg: "bg-violet-500/10", label: "Assigned" },
   in_progress: { icon: Loader2, color: "text-blue-400", bg: "bg-blue-500/10", label: "Running" },
   review: { icon: Eye, color: "text-amber-400", bg: "bg-amber-500/10", label: "Review" },
@@ -218,10 +219,30 @@ function ActivityEntry({ entry }: { entry: RunActivityEntry }) {
   const [open, setOpen] = useState(false);
   if (entry._run) return null;
 
+  // Determine what to show in the collapsed row and in the expanded body
+  const isToolUse = entry.type === "tool_use";
+  const isToolResult = entry.type === "tool_result";
+  const isAssistant = entry.type === "assistant";
+
   const eventLabel = entry.event ?? entry.type ?? "unknown";
-  // tool_result entries store output in "content", not "text" or "data"
-  const entryContent = entry.text ?? (entry as Record<string, unknown>).content as string | undefined;
-  const hasPayload = entry.data != null || entryContent;
+
+  // Build expandable content depending on entry type
+  let expandContent: string | undefined;
+  if (isToolUse && entry.input) {
+    expandContent = JSON.stringify(entry.input, null, 2);
+  } else if (isToolResult) {
+    expandContent = entry.content ?? entry.text;
+  } else if (isAssistant) {
+    expandContent = entry.text;
+  } else if (entry.data != null) {
+    expandContent = JSON.stringify(entry.data, null, 2);
+  } else if (entry.text) {
+    expandContent = entry.text;
+  } else if (entry.content) {
+    expandContent = entry.content;
+  }
+
+  const hasPayload = expandContent != null && expandContent.length > 0;
 
   const getStyle = () => {
     if (entry.event === "activity") return { icon: Activity, color: "text-blue-400", dot: "bg-blue-500" };
@@ -230,14 +251,35 @@ function ActivityEntry({ entry }: { entry: RunActivityEntry }) {
     if (entry.event === "error") return { icon: XCircle, color: "text-red-400", dot: "bg-red-500" };
     if (entry.event === "sigterm") return { icon: XCircle, color: "text-amber-400", dot: "bg-amber-500" };
     if (entry.type === "stdout") return { icon: Terminal, color: "text-emerald-400", dot: "bg-emerald-500" };
-    if (entry.type === "tool_use") return { icon: Wrench, color: "text-violet-400", dot: "bg-violet-500" };
-    if (entry.type === "tool_result") return { icon: CheckCircle2, color: "text-blue-400", dot: "bg-blue-500" };
-    if (entry.type === "assistant") return { icon: Bot, color: "text-sky-400", dot: "bg-sky-500" };
+    if (isToolUse) return { icon: Wrench, color: "text-violet-400", dot: "bg-violet-500" };
+    if (isToolResult && entry.isError) return { icon: XCircle, color: "text-red-400", dot: "bg-red-500" };
+    if (isToolResult) return { icon: CheckCircle2, color: "text-emerald-400", dot: "bg-emerald-500" };
+    if (isAssistant) return { icon: Bot, color: "text-sky-400", dot: "bg-sky-500" };
     return { icon: FileText, color: "text-zinc-400", dot: "bg-zinc-500" };
   };
 
   const style = getStyle();
   const Icon = style.icon;
+
+  // Inline summary for the collapsed row
+  let inlineSummary: string | undefined;
+  if (isToolUse && entry.tool) {
+    // Show tool name + short arg hint
+    const args = entry.input;
+    const hint = args
+      ? Object.entries(args)
+          .filter(([, v]) => typeof v === "string" && (v as string).length < 80)
+          .map(([k, v]) => `${k}=${JSON.stringify(v)}`)
+          .slice(0, 2)
+          .join(", ")
+      : "";
+    inlineSummary = hint ? `${hint}` : undefined;
+  } else if (isToolResult && entry.tool) {
+    const preview = (entry.content ?? entry.text ?? "").slice(0, 80).replace(/\n/g, " ");
+    inlineSummary = preview || undefined;
+  } else if (isAssistant && entry.text) {
+    inlineSummary = entry.text.slice(0, 100).replace(/\n/g, " ");
+  }
 
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
@@ -251,6 +293,21 @@ function ActivityEntry({ entry }: { entry: RunActivityEntry }) {
           <Badge variant="outline" className="text-xs font-mono px-2 py-0.5 shrink-0">
             {eventLabel}
           </Badge>
+          {/* Tool name badge for tool_use / tool_result */}
+          {entry.tool && (
+            <Badge variant="secondary" className={cn(
+              "text-[10px] font-mono px-1.5 py-0 shrink-0",
+              isToolResult && entry.isError && "text-red-400 border-red-400/30"
+            )}>
+              {entry.tool}
+            </Badge>
+          )}
+          {/* Inline summary */}
+          {inlineSummary && (
+            <span className="text-xs text-muted-foreground truncate min-w-0">
+              {inlineSummary}
+            </span>
+          )}
           <span className="text-sm text-muted-foreground ml-auto shrink-0">
             {entry.ts ? new Date(entry.ts).toLocaleTimeString() : ""}
           </span>
@@ -262,8 +319,13 @@ function ActivityEntry({ entry }: { entry: RunActivityEntry }) {
       {hasPayload && (
         <CollapsibleContent>
           <div className="ml-7 mr-2 mb-0.5">
-            <pre className="text-sm bg-muted/30 rounded px-3 py-2 whitespace-pre-wrap font-mono overflow-x-auto text-muted-foreground max-h-56 overflow-y-auto leading-normal">
-              {entryContent ?? JSON.stringify(entry.data, null, 2)}
+            <pre className={cn(
+              "text-sm rounded px-3 py-2 whitespace-pre-wrap font-mono overflow-x-auto max-h-56 overflow-y-auto leading-normal",
+              isToolResult && entry.isError
+                ? "bg-red-500/5 text-red-400/80"
+                : "bg-muted/30 text-muted-foreground"
+            )}>
+              {expandContent}
             </pre>
           </div>
         </CollapsibleContent>
@@ -272,18 +334,42 @@ function ActivityEntry({ entry }: { entry: RunActivityEntry }) {
   );
 }
 
+type ActivityFilter = "all" | "conversation" | "tools" | "lifecycle";
+
 function ActivityPanel({ taskId, isActive }: { taskId: string; isActive?: boolean }) {
+  const [filter, setFilter] = useState<ActivityFilter>("conversation");
   const { entries, isLoading, error, refetch } = useTaskActivity(taskId, {
     pollIntervalMs: isActive ? 1000 : 0,
   });
 
   const stats = entries.reduce((acc, e) => {
     if (e.event === "activity") acc.snapshots++;
-    if (e.type === "stdout") acc.outputs++;
+    if (e.type === "assistant") acc.assistant++;
     if (e.type === "tool_use") acc.tools++;
-    if (e.event === "error") acc.errors++;
+    if (e.type === "tool_result") acc.results++;
+    if (e.event === "error" || e.type === "error") acc.errors++;
+    if (e.event === "spawning" || e.event === "spawned" || e.event === "done" || e.event === "sigterm") acc.lifecycle++;
     return acc;
-  }, { snapshots: 0, outputs: 0, tools: 0, errors: 0 });
+  }, { snapshots: 0, assistant: 0, tools: 0, results: 0, errors: 0, lifecycle: 0 });
+
+  // Filter entries based on the active filter
+  const filteredEntries = entries.filter((e) => {
+    if (e._run) return false; // always hide header
+    if (filter === "all") return true;
+    if (filter === "conversation") {
+      // Show assistant text, tool_use, tool_result, errors — hide activity snapshots & lifecycle
+      return e.type === "assistant" || e.type === "tool_use" || e.type === "tool_result"
+        || e.type === "error" || e.type === "result" || e.event === "error";
+    }
+    if (filter === "tools") {
+      return e.type === "tool_use" || e.type === "tool_result";
+    }
+    if (filter === "lifecycle") {
+      return e.event === "spawning" || e.event === "spawned" || e.event === "done"
+        || e.event === "sigterm" || e.event === "error" || e.event === "activity";
+    }
+    return true;
+  });
 
   if (isLoading) {
     return (
@@ -304,25 +390,31 @@ function ActivityPanel({ taskId, isActive }: { taskId: string; isActive?: boolea
 
   return (
     <div className="flex flex-col flex-1 min-h-0 gap-3">
+      {/* Filter bar + stats */}
       <div className="flex items-center justify-between shrink-0">
-        <div className="flex items-center gap-3">
-          {stats.snapshots > 0 && (
-            <span className="text-sm text-muted-foreground flex items-center gap-1">
-              <Hash className="h-3.5 w-3.5" /> {stats.snapshots} snapshots
-            </span>
-          )}
-          {stats.tools > 0 && (
-            <span className="text-sm text-muted-foreground flex items-center gap-1">
-              <Wrench className="h-3.5 w-3.5" /> {stats.tools} tools
-            </span>
-          )}
-          {stats.outputs > 0 && (
-            <span className="text-sm text-muted-foreground flex items-center gap-1">
-              <Terminal className="h-3.5 w-3.5" /> {stats.outputs} outputs
-            </span>
-          )}
+        <div className="flex items-center gap-1.5">
+          {(
+            [
+              { key: "conversation", label: "Conversation", icon: Bot, count: stats.assistant + stats.tools + stats.results },
+              { key: "tools", label: "Tools", icon: Wrench, count: stats.tools },
+              { key: "lifecycle", label: "Lifecycle", icon: Activity, count: stats.lifecycle + stats.snapshots },
+              { key: "all", label: "All", icon: Hash, count: entries.filter(e => !e._run).length },
+            ] as const
+          ).map(({ key, label, icon: FIcon, count }) => (
+            <Button
+              key={key}
+              variant={filter === key ? "secondary" : "ghost"}
+              size="sm"
+              className={cn("text-xs h-7 px-2.5 gap-1.5", filter === key && "font-medium")}
+              onClick={() => setFilter(key)}
+            >
+              <FIcon className="h-3 w-3" />
+              {label}
+              <span className="text-[10px] text-muted-foreground">{count}</span>
+            </Button>
+          ))}
           {stats.errors > 0 && (
-            <span className="text-sm text-red-400 flex items-center gap-1">
+            <span className="text-xs text-red-400 flex items-center gap-1 ml-2">
               <XCircle className="h-3.5 w-3.5" /> {stats.errors} errors
             </span>
           )}
@@ -333,7 +425,7 @@ function ActivityPanel({ taskId, isActive }: { taskId: string; isActive?: boolea
       </div>
       <ScrollArea className="h-[calc(100vh-16rem)]">
         <div className="space-y-0.5 pr-2">
-          {[...entries].reverse().map((entry, i) => (
+          {[...filteredEntries].reverse().map((entry, i) => (
             <ActivityEntry key={`${entry.ts}-${entry.type ?? entry.event}-${i}`} entry={entry} />
           ))}
         </div>

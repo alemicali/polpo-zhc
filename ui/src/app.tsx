@@ -14,6 +14,8 @@ const ActivityPage = lazy(() => import("@/pages/activity").then(m => ({ default:
 const ChatPage = lazy(() => import("@/pages/chat").then(m => ({ default: m.ChatPage })));
 const MemoryPage = lazy(() => import("@/pages/memory").then(m => ({ default: m.MemoryPage })));
 const LogsPage = lazy(() => import("@/pages/logs").then(m => ({ default: m.LogsPage })));
+const NotificationsPage = lazy(() => import("@/pages/notifications").then(m => ({ default: m.NotificationsPage })));
+const ApprovalsPage = lazy(() => import("@/pages/approvals").then(m => ({ default: m.ApprovalsPage })));
 
 function PageLoader() {
   return (
@@ -38,6 +40,8 @@ export function App() {
         <Route path="chat" element={<Suspense fallback={<PageLoader />}><ChatPage /></Suspense>} />
         <Route path="memory" element={<Suspense fallback={<PageLoader />}><MemoryPage /></Suspense>} />
         <Route path="logs" element={<Suspense fallback={<PageLoader />}><LogsPage /></Suspense>} />
+        <Route path="notifications" element={<Suspense fallback={<PageLoader />}><NotificationsPage /></Suspense>} />
+        <Route path="approvals" element={<Suspense fallback={<PageLoader />}><ApprovalsPage /></Suspense>} />
       </Route>
     </Routes>
   );

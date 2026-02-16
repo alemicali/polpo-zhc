@@ -211,3 +211,200 @@ The notification system emits its own events:
 <Aside type="tip">
 Use `testChannels()` on the NotificationRouter to verify all configured channels are reachable before starting the orchestrator.
 </Aside>
+
+## Scoped Notification Rules
+
+Global rules (configured in `settings.notifications.rules`) apply to every event by default. You can **override or extend** these rules at the **plan** and **task** level using scoped notification rules.
+
+### Scope hierarchy
+
+```
+Global rules (settings.notifications.rules)
+  └── Plan-level rules (plan.notifications)
+        └── Task-level rules (task.notifications)
+```
+
+The most specific scope wins: if a task has scoped rules, those are used instead of global rules when processing events for that task. Similarly, plan-level rules override global rules for all events within that plan's execution.
+
+### Replacement vs. inheritance
+
+By default, scoped rules **replace** the global rules for matching events. If you set `inherit: true`, the scoped rules are **added on top** of the parent scope instead.
+
+```json
+{
+  "notifications": {
+    "rules": [
+      {
+        "id": "task-fail-slack",
+        "name": "Notify Slack on task failure",
+        "events": ["task:transition"],
+        "condition": { "field": "to", "op": "==", "value": "failed" },
+        "channels": ["slack-alerts"],
+        "severity": "critical"
+      }
+    ],
+    "inherit": false
+  }
+}
+```
+
+With `inherit: false` (the default), only the rules in this scope are used — global rules are ignored for events matching this scope.
+
+```json
+{
+  "notifications": {
+    "rules": [
+      {
+        "id": "extra-telegram",
+        "name": "Also ping Telegram",
+        "events": ["task:transition"],
+        "channels": ["telegram-oncall"],
+        "severity": "warning"
+      }
+    ],
+    "inherit": true
+  }
+}
+```
+
+With `inherit: true`, the scoped rules are added on top of global rules. Both the global Slack notification and this Telegram notification would fire.
+
+### Setting scoped rules via API
+
+When creating tasks or plans via the REST API, include a `notifications` field:
+
+```bash
+# Task with scoped notification rules
+curl -X POST http://localhost:3890/api/v1/projects/my-project/tasks \
+  -H "Content-Type: application/json" \
+  -d '{
+    "title": "Critical migration",
+    "description": "Run database migration",
+    "assignTo": "db-agent",
+    "notifications": {
+      "rules": [{
+        "id": "migration-alert",
+        "name": "Migration status",
+        "events": ["task:transition"],
+        "channels": ["telegram-oncall", "slack-alerts"],
+        "severity": "critical"
+      }],
+      "inherit": false
+    }
+  }'
+```
+
+```bash
+# Plan with scoped notification rules
+curl -X POST http://localhost:3890/api/v1/projects/my-project/plans \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Release v2.0",
+    "data": "...",
+    "notifications": {
+      "rules": [{
+        "id": "release-updates",
+        "name": "Release progress",
+        "events": ["task:*", "plan:*"],
+        "channels": ["slack-releases"],
+        "severity": "info"
+      }],
+      "inherit": true
+    }
+  }'
+```
+
+### Scope resolution logic
+
+When an event fires, the router resolves which rules to use:
+
+1. If the event is associated with a **task** that has `notifications`, use those rules (respecting `inherit`).
+2. Otherwise, if the event is associated with a **plan** that has `notifications`, use those rules (respecting `inherit`).
+3. Otherwise, use **global** rules from `settings.notifications.rules`.
+
+## Send Direct API
+
+The `POST /notifications/send` endpoint lets you send a one-off notification to any configured channel, bypassing rules entirely. This is useful for manual alerts, testing, or custom integrations.
+
+### Request
+
+```bash
+curl -X POST http://localhost:3890/api/v1/projects/my-project/notifications/send \
+  -H "Content-Type: application/json" \
+  -d '{
+    "channel": "telegram-oncall",
+    "title": "Deployment Complete",
+    "body": "Version 2.0.1 deployed to production",
+    "severity": "info",
+    "delayMs": 5000
+  }'
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `channel` | string | Yes | Channel ID from your configuration |
+| `title` | string | Yes | Notification title |
+| `body` | string | Yes | Notification body (HTML supported for Telegram) |
+| `severity` | string | No | `info`, `warning`, or `critical` (default: `info`) |
+| `delayMs` | number | No | Delay in milliseconds before sending (in-memory timer) |
+
+### Response
+
+```json
+{
+  "ok": true,
+  "data": {
+    "id": "notif_abc123",
+    "scheduledAt": "2025-01-15T10:30:00.000Z",
+    "firesAt": "2025-01-15T10:30:05.000Z"
+  }
+}
+```
+
+When `delayMs` is set, the notification is scheduled with an in-memory `setTimeout`. The `firesAt` field indicates when the notification will actually be dispatched. Note that delayed notifications are **not persisted** — if the server restarts, scheduled notifications are lost.
+
+<Aside type="caution">
+Delayed notifications use in-memory timers and are not persisted. They will be lost if the server restarts before they fire.
+</Aside>
+
+## REST API Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/notifications` | List notification history (supports `?limit`, `?status`, `?channel`, `?rule` query params) |
+| `GET` | `/notifications/stats` | Get aggregate stats (total, sent, failed) |
+| `POST` | `/notifications/send` | Send a direct notification to a channel |
+
+## React SDK
+
+The `@openpolpo/react-sdk` provides the `useNotifications` hook for accessing notification data in the UI:
+
+```tsx
+import { useNotifications } from "@openpolpo/react-sdk";
+
+function NotificationsPanel() {
+  const { notifications, stats, sendNotification, refetch, loading } = useNotifications({
+    limit: 100,
+    status: "sent",
+  });
+
+  const handleSend = async () => {
+    await sendNotification({
+      channel: "telegram-oncall",
+      title: "Manual Alert",
+      body: "Something needs attention",
+      severity: "warning",
+    });
+  };
+
+  return (
+    <div>
+      <p>Total: {stats?.total} | Sent: {stats?.sent} | Failed: {stats?.failed}</p>
+      {notifications.map(n => (
+        <div key={n.id}>{n.title} — {n.status}</div>
+      ))}
+      <button onClick={handleSend}>Send Alert</button>
+    </div>
+  );
+}
+```

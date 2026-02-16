@@ -17,6 +17,8 @@ export { useLogs } from "./hooks/use-logs.js";
 export { useSessions } from "./hooks/use-sessions.js";
 export { useTaskActivity } from "./hooks/use-task-activity.js";
 export { useSkills } from "./hooks/use-skills.js";
+export { useNotifications } from "./hooks/use-notifications.js";
+export { useApprovals } from "./hooks/use-approvals.js";
 
 // Client (re-export for convenience)
 export { PolpoClient } from "./client/polpo-client.js";
@@ -64,6 +66,18 @@ export type {
   ChatMessage,
   ChatResponse,
   SkillInfo,
+  NotificationRule,
+  NotificationRecord,
+  NotificationStats,
+  NotificationSeverity,
+  NotificationStatus,
+  ScopedNotificationRules,
+  SendNotificationRequest,
+  SendNotificationResult,
+  ApprovalRequest,
+  ApprovalStatus,
+  ScheduleEntry,
+  QualityMetrics,
 } from "./client/types.js";
 
 export type { ConnectionStatus } from "./client/event-source.js";

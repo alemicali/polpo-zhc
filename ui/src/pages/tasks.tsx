@@ -56,6 +56,7 @@ const statusConfig: Record<
   { icon: React.ElementType; color: string; bg: string; label: string }
 > = {
   pending: { icon: Clock, color: "text-zinc-400", bg: "bg-zinc-500/10", label: "Queued" },
+  awaiting_approval: { icon: Clock, color: "text-amber-400", bg: "bg-amber-500/10", label: "Awaiting Approval" },
   assigned: { icon: Clock, color: "text-violet-400", bg: "bg-violet-500/10", label: "Assigned" },
   in_progress: { icon: Loader2, color: "text-blue-400", bg: "bg-blue-500/10", label: "Running" },
   review: { icon: Eye, color: "text-amber-400", bg: "bg-amber-500/10", label: "Review" },

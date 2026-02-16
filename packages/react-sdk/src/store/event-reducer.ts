@@ -259,6 +259,48 @@ export function reduceEvent(state: StoreState, sseEvent: SSEEvent): StoreState {
       return { ...next, plans };
     }
 
+    // ── Approval gates ──────────────────────────────────────
+
+    case "approval:requested":
+    case "approval:resolved":
+    case "approval:rejected":
+    case "approval:timeout":
+      return next;
+
+    // ── Notifications ─────────────────────────────────────────
+
+    case "notification:sent":
+    case "notification:failed":
+      return next;
+
+    // ── Scheduling ────────────────────────────────────────────
+
+    case "schedule:triggered":
+    case "schedule:created":
+    case "schedule:completed":
+      return next;
+
+    // ── Escalation ────────────────────────────────────────────
+
+    case "escalation:triggered":
+    case "escalation:resolved":
+    case "escalation:human":
+      return next;
+
+    // ── SLA ───────────────────────────────────────────────────
+
+    case "sla:warning":
+    case "sla:violated":
+    case "sla:met":
+      return next;
+
+    // ── Quality gates ─────────────────────────────────────────
+
+    case "quality:gate:passed":
+    case "quality:gate:failed":
+    case "quality:threshold:failed":
+      return next;
+
     // ── Log ───────────────────────────────────────────────────
 
     case "log":

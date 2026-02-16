@@ -25,6 +25,12 @@ import type {
   ChatResponse,
   RunActivityEntry,
   SkillInfo,
+  NotificationRecord,
+  NotificationStats,
+  SendNotificationRequest,
+  SendNotificationResult,
+  ApprovalRequest,
+  ApprovalStatus,
 } from "./types.js";
 
 export interface PolpoClientConfig {
@@ -275,6 +281,52 @@ export class PolpoClient {
 
   refinePlan(currentData: string, prompt: string, feedback: string): Promise<{ json: string; planData: unknown }> {
     return this.post<{ json: string; planData: unknown }>("/chat/refine-plan", { currentData, prompt, feedback });
+  }
+
+  // ── Notifications ────────────────────────────────────────
+
+  /** List notification history. */
+  getNotifications(opts?: { limit?: number; status?: string; channel?: string; rule?: string }): Promise<NotificationRecord[]> {
+    const params = new URLSearchParams();
+    if (opts?.limit) params.set("limit", String(opts.limit));
+    if (opts?.status) params.set("status", opts.status);
+    if (opts?.channel) params.set("channel", opts.channel);
+    if (opts?.rule) params.set("rule", opts.rule);
+    const qs = params.toString();
+    return this.get<NotificationRecord[]>(`/notifications${qs ? `?${qs}` : ""}`);
+  }
+
+  /** Get notification stats (total, sent, failed). */
+  getNotificationStats(): Promise<NotificationStats> {
+    return this.get<NotificationStats>("/notifications/stats");
+  }
+
+  /** Send a notification directly to a channel (with optional delay). */
+  sendNotification(req: SendNotificationRequest): Promise<SendNotificationResult> {
+    return this.post<SendNotificationResult>("/notifications/send", req);
+  }
+
+  // ── Approvals ───────────────────────────────────────────
+
+  /** List approval requests. */
+  getApprovals(status?: ApprovalStatus): Promise<ApprovalRequest[]> {
+    const qs = status ? `?status=${status}` : "";
+    return this.get<ApprovalRequest[]>(`/approvals${qs}`);
+  }
+
+  /** Get pending approval requests. */
+  getPendingApprovals(): Promise<ApprovalRequest[]> {
+    return this.get<ApprovalRequest[]>("/approvals/pending");
+  }
+
+  /** Approve a request. */
+  approveRequest(requestId: string, opts?: { resolvedBy?: string; note?: string }): Promise<ApprovalRequest> {
+    return this.post<ApprovalRequest>(`/approvals/${requestId}/approve`, opts);
+  }
+
+  /** Reject a request with feedback. */
+  rejectRequest(requestId: string, feedback: string, resolvedBy?: string): Promise<ApprovalRequest> {
+    return this.post<ApprovalRequest>(`/approvals/${requestId}/reject`, { feedback, resolvedBy });
   }
 
   // ── Static ───────────────────────────────────────────────
