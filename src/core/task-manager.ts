@@ -1,5 +1,5 @@
 import type { OrchestratorContext } from "./orchestrator-context.js";
-import type { Task, TaskExpectation, ExpectedOutcome, RetryPolicy, ReviewContext } from "./types.js";
+import type { Task, TaskExpectation, ExpectedOutcome, RetryPolicy, ReviewContext, ScopedNotificationRules } from "./types.js";
 import { setAssessment } from "./types.js";
 import { sanitizeExpectations } from "./schemas.js";
 
@@ -21,6 +21,7 @@ export class TaskManager {
     group?: string;
     maxDuration?: number;
     retryPolicy?: RetryPolicy;
+    notifications?: ScopedNotificationRules;
   }): Task {
     if (!this.ctx.registry) throw new Error("Orchestrator not initialized");
 
@@ -35,6 +36,7 @@ export class TaskManager {
       group: opts.group,
       maxDuration: opts.maxDuration,
       retryPolicy: opts.retryPolicy,
+      notifications: opts.notifications,
     });
     if (hookResult.cancelled) {
       throw new Error(`Task creation blocked by hook: ${hookResult.cancelReason ?? "no reason"}`);
@@ -57,6 +59,7 @@ export class TaskManager {
       maxRetries: this.ctx.config.settings.maxRetries,
       maxDuration: hookData.maxDuration,
       retryPolicy: hookData.retryPolicy,
+      notifications: hookData.notifications,
     });
     this.ctx.emitter.emit("task:created", { task });
 

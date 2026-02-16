@@ -26,6 +26,7 @@ interface TaskRow {
   resolution_attempts: number;
   original_description: string | null;
   session_id: string | null;
+  notifications: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -45,6 +46,7 @@ interface PlanRow {
   data: string;
   prompt: string | null;
   status: string;
+  notifications: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -94,8 +96,8 @@ export class SqliteTaskStore implements TaskStore {
 
     // Prepare statements
     this.insertTaskStmt = this.db.prepare(`
-      INSERT INTO tasks (id, title, description, assign_to, "group", depends_on, status, retries, max_retries, max_duration, retry_policy, expectations, metrics, result, phase, fix_attempts, original_description, session_id, created_at, updated_at)
-      VALUES (@id, @title, @description, @assign_to, @group, @depends_on, @status, @retries, @max_retries, @max_duration, @retry_policy, @expectations, @metrics, @result, @phase, @fix_attempts, @original_description, @session_id, @created_at, @updated_at)
+      INSERT INTO tasks (id, title, description, assign_to, "group", depends_on, status, retries, max_retries, max_duration, retry_policy, expectations, metrics, result, phase, fix_attempts, original_description, session_id, notifications, created_at, updated_at)
+      VALUES (@id, @title, @description, @assign_to, @group, @depends_on, @status, @retries, @max_retries, @max_duration, @retry_policy, @expectations, @metrics, @result, @phase, @fix_attempts, @original_description, @session_id, @notifications, @created_at, @updated_at)
     `);
     this.getTaskStmt = this.db.prepare(`SELECT * FROM tasks WHERE id = ?`);
     this.getAllTasksStmt = this.db.prepare(`SELECT * FROM tasks ORDER BY created_at ASC`);
@@ -112,8 +114,8 @@ export class SqliteTaskStore implements TaskStore {
 
     // Plan statements
     this.insertPlanStmt = this.db.prepare(`
-      INSERT INTO plans (id, name, data, prompt, status, created_at, updated_at)
-      VALUES (@id, @name, @data, @prompt, @status, @created_at, @updated_at)
+      INSERT INTO plans (id, name, data, prompt, status, notifications, created_at, updated_at)
+      VALUES (@id, @name, @data, @prompt, @status, @notifications, @created_at, @updated_at)
     `);
     this.getPlanStmt = this.db.prepare(`SELECT * FROM plans WHERE id = ?`);
     this.getPlanByNameStmt = this.db.prepare(`SELECT * FROM plans WHERE name = ?`);
@@ -186,6 +188,8 @@ export class SqliteTaskStore implements TaskStore {
       `ALTER TABLE tasks ADD COLUMN original_description TEXT`,
       `ALTER TABLE tasks ADD COLUMN resolution_attempts INTEGER NOT NULL DEFAULT 0`,
       `ALTER TABLE tasks ADD COLUMN session_id TEXT`,
+      `ALTER TABLE tasks ADD COLUMN notifications TEXT`,
+      `ALTER TABLE plans ADD COLUMN notifications TEXT`,
       `ALTER TABLE plans RENAME COLUMN yaml TO data`,
     ];
     for (const sql of migrations) {
@@ -244,6 +248,7 @@ export class SqliteTaskStore implements TaskStore {
       resolutionAttempts: row.resolution_attempts ?? 0,
       originalDescription: row.original_description ?? undefined,
       sessionId: row.session_id ?? undefined,
+      notifications: safeJsonParse(row.notifications, undefined),
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     };
@@ -270,6 +275,7 @@ export class SqliteTaskStore implements TaskStore {
       resolution_attempts: task.resolutionAttempts ?? 0,
       original_description: task.originalDescription ?? null,
       session_id: task.sessionId ?? null,
+      notifications: task.notifications ? JSON.stringify(task.notifications) : null,
       created_at: task.createdAt,
       updated_at: task.updatedAt,
     };
@@ -405,6 +411,7 @@ export class SqliteTaskStore implements TaskStore {
     if (updates.resolutionAttempts !== undefined) { setClauses.push("resolution_attempts = @resolution_attempts"); params.resolution_attempts = updates.resolutionAttempts; }
     if (updates.originalDescription !== undefined) { setClauses.push("original_description = @original_description"); params.original_description = updates.originalDescription ?? null; }
     if (updates.sessionId !== undefined) { setClauses.push("session_id = @session_id"); params.session_id = updates.sessionId ?? null; }
+    if (updates.notifications !== undefined) { setClauses.push("notifications = @notifications"); params.notifications = updates.notifications ? JSON.stringify(updates.notifications) : null; }
     if (updates.createdAt !== undefined) { setClauses.push("created_at = @created_at"); params.created_at = updates.createdAt; }
 
     const sql = `UPDATE tasks SET ${setClauses.join(", ")} WHERE id = @id`;
@@ -457,6 +464,7 @@ export class SqliteTaskStore implements TaskStore {
       data: row.data,
       prompt: row.prompt ?? undefined,
       status: row.status as PlanStatus,
+      notifications: safeJsonParse(row.notifications, undefined),
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     };
@@ -476,6 +484,7 @@ export class SqliteTaskStore implements TaskStore {
       data: newPlan.data,
       prompt: newPlan.prompt ?? null,
       status: newPlan.status,
+      notifications: newPlan.notifications ? JSON.stringify(newPlan.notifications) : null,
       created_at: newPlan.createdAt,
       updated_at: newPlan.updatedAt,
     });
@@ -508,6 +517,7 @@ export class SqliteTaskStore implements TaskStore {
     if (updates.data !== undefined) { setClauses.push("data = @data"); params.data = updates.data; }
     if (updates.prompt !== undefined) { setClauses.push("prompt = @prompt"); params.prompt = updates.prompt ?? null; }
     if (updates.status !== undefined) { setClauses.push("status = @status"); params.status = updates.status; }
+    if (updates.notifications !== undefined) { setClauses.push("notifications = @notifications"); params.notifications = updates.notifications ? JSON.stringify(updates.notifications) : null; }
 
     const sql = `UPDATE plans SET ${setClauses.join(", ")} WHERE id = @id`;
     this.db.prepare(sql).run(params);

@@ -152,6 +152,8 @@ export interface Task {
   outcomes?: TaskOutcome[];
   /** Number of approval revision rounds this task has gone through. */
   revisionCount?: number;
+  /** Scoped notification rules — override or extend global/plan rules for this task. */
+  notifications?: ScopedNotificationRules;
   createdAt: string;
   updatedAt: string;
 }
@@ -349,6 +351,8 @@ export interface Plan {
   recurring?: boolean;
   /** Minimum average score for the plan to be considered successful. */
   qualityThreshold?: number;
+  /** Scoped notification rules — override or extend global rules for tasks in this plan. */
+  notifications?: ScopedNotificationRules;
   createdAt: string;
   updatedAt: string;
 }
@@ -639,6 +643,22 @@ export interface NotificationRule {
 export interface NotificationsConfig {
   channels: Record<string, NotificationChannelConfig>;
   rules: NotificationRule[];
+}
+
+/**
+ * Scoped notification rules — can be attached to a Task or Plan to override
+ * or extend the global notification rules.
+ *
+ * Precedence: task > plan > global.
+ * - Default: more-specific scope **replaces** global rules for matching events.
+ * - With `inherit: true`: scoped rules are **added** on top of the parent scope.
+ */
+export interface ScopedNotificationRules {
+  /** Notification rules for this scope. */
+  rules: NotificationRule[];
+  /** If true, these rules are added on top of the parent scope (plan or global).
+   *  If false (default), they replace parent rules for matching events. */
+  inherit?: boolean;
 }
 
 // === Escalation ===

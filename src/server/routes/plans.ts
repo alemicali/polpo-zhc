@@ -40,6 +40,7 @@ export function planRoutes(): Hono<ServerEnv> {
       prompt: body.prompt,
       name: body.name,
       status: body.status,
+      notifications: body.notifications,
     });
 
     return c.json({ ok: true, data: plan }, 201);

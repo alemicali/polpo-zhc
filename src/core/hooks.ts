@@ -1,4 +1,4 @@
-import type { Task, AgentConfig, Plan, PlanReport, TaskResult, AssessmentResult, TaskExpectation, ExpectedOutcome, RetryPolicy } from "./types.js";
+import type { Task, AgentConfig, Plan, PlanReport, TaskResult, AssessmentResult, TaskExpectation, ExpectedOutcome, RetryPolicy, ScopedNotificationRules } from "./types.js";
 
 // ─── Lifecycle Hook Points ───────────────────────────
 
@@ -38,6 +38,7 @@ export interface HookPayloads {
     group?: string;
     maxDuration?: number;
     retryPolicy?: RetryPolicy;
+    notifications?: ScopedNotificationRules;
   };
   "task:spawn": {
     task: Task;

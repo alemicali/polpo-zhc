@@ -1,7 +1,7 @@
 import { nanoid } from "nanoid";
 import { readFileSync, existsSync, statSync } from "node:fs";
 import type { TypedEmitter, PolpoEvent, PolpoEventMap } from "../core/events.js";
-import type { NotificationsConfig, NotificationRule, NotificationChannelConfig, NotificationCondition, TaskOutcome, OutcomeType } from "../core/types.js";
+import type { NotificationsConfig, NotificationRule, NotificationChannelConfig, NotificationCondition, TaskOutcome, OutcomeType, ScopedNotificationRules } from "../core/types.js";
 import type { NotificationChannel, Notification, OutcomeAttachment } from "./types.js";
 import type { NotificationStore, NotificationRecord } from "../core/notification-store.js";
 import { defaultTitle, defaultBody, applyTemplate } from "./templates.js";
@@ -37,6 +37,9 @@ export class NotificationRouter {
   private store?: NotificationStore;
   /** Optional callback to resolve task outcomes by taskId (for approval events etc.) */
   private outcomeResolver?: (taskId: string) => TaskOutcome[] | undefined;
+  /** Optional callback to resolve scoped notification rules from event payload.
+   *  Returns task-level and plan-level notifications for scope resolution. */
+  private scopeResolver?: (data: unknown) => { taskNotifications?: ScopedNotificationRules; planNotifications?: ScopedNotificationRules } | undefined;
 
   constructor(private emitter: TypedEmitter) {}
 
@@ -44,6 +47,12 @@ export class NotificationRouter {
    *  Used when the event payload doesn't include outcomes directly (e.g. approval:requested). */
   setOutcomeResolver(resolver: (taskId: string) => TaskOutcome[] | undefined): void {
     this.outcomeResolver = resolver;
+  }
+
+  /** Set a callback that resolves scoped notification rules from event data.
+   *  Used to look up task.notifications / plan.notifications for scope resolution. */
+  setScopeResolver(resolver: (data: unknown) => { taskNotifications?: ScopedNotificationRules; planNotifications?: ScopedNotificationRules } | undefined): void {
+    this.scopeResolver = resolver;
   }
 
   /** Get a channel instance by ID. */
@@ -123,14 +132,28 @@ export class NotificationRouter {
   }
 
   /**
-   * Handle an incoming event — match against rules and dispatch notifications.
+   * Handle an incoming event — resolve scoped rules and dispatch notifications.
+   *
+   * Uses resolveRules() to determine the effective rule set based on
+   * task > plan > global scope precedence.
    */
   private handleEvent(event: string, data: unknown): void {
-    for (const rule of this.rules) {
-      // Check if event matches any of the rule's patterns
-      const matches = rule.events.some(pattern => matchGlob(pattern, event));
-      if (!matches) continue;
+    // Resolve scoped rules: task > plan > global
+    let taskNotifications: ScopedNotificationRules | undefined;
+    let planNotifications: ScopedNotificationRules | undefined;
+    if (this.scopeResolver) {
+      try {
+        const scope = this.scopeResolver(data);
+        taskNotifications = scope?.taskNotifications;
+        planNotifications = scope?.planNotifications;
+      } catch {
+        // Scope resolution failed — fall back to global rules only
+      }
+    }
 
+    const effectiveRules = this.resolveRules(event, taskNotifications, planNotifications);
+
+    for (const rule of effectiveRules) {
       // Check optional JSON condition (pure data — no eval)
       if (rule.condition) {
         try {
@@ -370,14 +393,194 @@ export class NotificationRouter {
     return [...this.channels.keys()];
   }
 
+  // ── Scoped rule resolution ─────────────────────────────────────────
+
   /**
-   * Cleanup: remove all event listeners.
+   * Resolve effective rules for an event, considering task > plan > global scope.
+   *
+   * Precedence:
+   * 1. If the task has scoped rules matching this event, use those.
+   *    - With `inherit: true`: task rules + parent (plan or global).
+   *    - Without: task rules only.
+   * 2. Else if the plan has scoped rules matching this event, use those.
+   *    - With `inherit: true`: plan rules + global.
+   *    - Without: plan rules only.
+   * 3. Else: use global rules (this.rules).
+   */
+  resolveRules(
+    event: string,
+    taskNotifications?: ScopedNotificationRules,
+    planNotifications?: ScopedNotificationRules,
+  ): NotificationRule[] {
+    const globalMatching = this.rules.filter(r =>
+      r.events.some(p => matchGlob(p, event))
+    );
+
+    // Check task scope
+    if (taskNotifications?.rules?.length) {
+      const taskMatching = taskNotifications.rules.filter(r =>
+        r.events.some(p => matchGlob(p, event))
+      );
+      if (taskMatching.length > 0) {
+        if (taskNotifications.inherit) {
+          // Task inherits from plan or global
+          const parent = planNotifications?.rules?.length
+            ? this.resolvePlanRules(event, planNotifications, globalMatching)
+            : globalMatching;
+          return [...taskMatching, ...parent];
+        }
+        return taskMatching;
+      }
+    }
+
+    // Check plan scope
+    if (planNotifications?.rules?.length) {
+      const planMatching = this.resolvePlanRules(event, planNotifications, globalMatching);
+      if (planMatching.length > 0) return planMatching;
+    }
+
+    // Fall back to global
+    return globalMatching;
+  }
+
+  private resolvePlanRules(
+    event: string,
+    planNotifications: ScopedNotificationRules,
+    globalMatching: NotificationRule[],
+  ): NotificationRule[] {
+    const planMatching = planNotifications.rules.filter(r =>
+      r.events.some(p => matchGlob(p, event))
+    );
+    if (planMatching.length > 0) {
+      return planNotifications.inherit
+        ? [...planMatching, ...globalMatching]
+        : planMatching;
+    }
+    return [];
+  }
+
+  // ── Direct send (on-demand, with optional delay) ──────────────────
+
+  /** Pending delay timers for cleanup on dispose. */
+  private delayTimers = new Set<ReturnType<typeof setTimeout>>();
+
+  /**
+   * Send a notification directly to a channel, bypassing event-driven rules.
+   * Optionally schedule it with a delay (in-memory setTimeout).
+   *
+   * Returns a promise that resolves when the notification is sent (or scheduled).
+   */
+  async sendDirect(opts: {
+    channel: string;
+    title: string;
+    body: string;
+    severity?: "info" | "warning" | "critical";
+    delayMs?: number;
+  }): Promise<{ id: string; scheduledAt: string; firesAt: string }> {
+    const ch = this.channels.get(opts.channel);
+    if (!ch) throw new Error(`Channel "${opts.channel}" not found`);
+
+    const now = new Date();
+    const firesAt = new Date(now.getTime() + (opts.delayMs ?? 0));
+    const notifId = nanoid();
+
+    const doSend = async () => {
+      const notification: Notification = {
+        id: notifId,
+        channel: opts.channel,
+        title: opts.title,
+        body: opts.body,
+        severity: opts.severity ?? "info",
+        sourceEvent: "direct:send",
+        sourceData: { delayMs: opts.delayMs ?? 0 },
+        ruleId: "direct",
+        timestamp: new Date().toISOString(),
+      };
+
+      try {
+        await ch.send(notification);
+        this.emitter.emit("notification:sent", {
+          ruleId: "direct",
+          channel: opts.channel,
+          event: "direct:send",
+        });
+        // Persist
+        if (this.store) {
+          const record: NotificationRecord = {
+            id: notification.id,
+            timestamp: notification.timestamp,
+            ruleId: "direct",
+            ruleName: "Direct Send",
+            channel: opts.channel,
+            channelType: ch.type,
+            status: "sent",
+            title: notification.title,
+            body: notification.body,
+            severity: notification.severity,
+            sourceEvent: "direct:send",
+            attachmentCount: 0,
+          };
+          this.store.append(record);
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.emitter.emit("notification:failed", {
+          ruleId: "direct",
+          channel: opts.channel,
+          error: msg,
+        });
+        if (this.store) {
+          const record: NotificationRecord = {
+            id: notification.id,
+            timestamp: notification.timestamp,
+            ruleId: "direct",
+            ruleName: "Direct Send",
+            channel: opts.channel,
+            channelType: ch.type,
+            status: "failed",
+            title: notification.title,
+            body: notification.body,
+            severity: notification.severity,
+            sourceEvent: "direct:send",
+            attachmentCount: 0,
+            error: msg,
+          };
+          this.store.append(record);
+        }
+      }
+    };
+
+    if (opts.delayMs && opts.delayMs > 0) {
+      const timer = setTimeout(() => {
+        this.delayTimers.delete(timer);
+        doSend();
+      }, opts.delayMs);
+      this.delayTimers.add(timer);
+    } else {
+      await doSend();
+    }
+
+    return {
+      id: notifId,
+      scheduledAt: now.toISOString(),
+      firesAt: firesAt.toISOString(),
+    };
+  }
+
+  /**
+   * Cleanup: remove all event listeners and cancel pending delay timers.
    */
   dispose(): void {
     for (const { event, fn } of this.listeners) {
       this.emitter.off(event as PolpoEvent, fn as (payload: PolpoEventMap[PolpoEvent]) => void);
     }
     this.listeners.length = 0;
+
+    // Cancel all pending delayed notifications
+    for (const timer of this.delayTimers) {
+      clearTimeout(timer);
+    }
+    this.delayTimers.clear();
   }
 
   /**

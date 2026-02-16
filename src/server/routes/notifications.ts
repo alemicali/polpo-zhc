@@ -1,13 +1,15 @@
 import { Hono } from "hono";
 import type { ServerEnv } from "../app.js";
+import { SendNotificationSchema, parseBody } from "../schemas.js";
 
 /**
- * Notification history routes.
+ * Notification history + direct send routes.
  *
- * GET /notifications           — list all notifications (most recent first)
- * GET /notifications/stats     — summary counts (total, sent, failed)
+ * GET  /notifications           — list all notifications (most recent first)
+ * GET  /notifications/stats     — summary counts (total, sent, failed)
+ * POST /notifications/send      — send a notification directly (with optional delay)
  *
- * Query params:
+ * Query params (GET /notifications):
  *   ?limit=N         — max records (default 100, max 500)
  *   ?status=sent|failed
  *   ?channel=<channelId>
@@ -63,6 +65,39 @@ export function notificationRoutes(): Hono<ServerEnv> {
         failed: store.count("failed"),
       },
     });
+  });
+
+  // POST /notifications/send — send a notification directly (with optional delay)
+  app.post("/send", async (c) => {
+    const orchestrator = c.get("orchestrator");
+    const router = orchestrator.getNotificationRouter();
+
+    if (!router) {
+      return c.json(
+        { ok: false, error: "Notification system not configured", code: "NOT_CONFIGURED" },
+        400,
+      );
+    }
+
+    const body = parseBody(SendNotificationSchema, await c.req.json());
+
+    try {
+      const result = await router.sendDirect({
+        channel: body.channel,
+        title: body.title,
+        body: body.body,
+        severity: body.severity,
+        delayMs: body.delayMs,
+      });
+
+      return c.json({ ok: true, data: result });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return c.json(
+        { ok: false, error: msg, code: "SEND_FAILED" },
+        400,
+      );
+    }
   });
 
   return app;

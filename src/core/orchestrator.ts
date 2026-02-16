@@ -26,6 +26,7 @@ import type {
   Plan,
   PlanStatus,
   RetryPolicy,
+  ScopedNotificationRules,
 } from "./types.js";
 import { AgentManager } from "./agent-manager.js";
 import { TaskManager } from "./task-manager.js";
@@ -234,6 +235,35 @@ export class Orchestrator extends TypedEmitter {
       const notifStore = new FileNotificationStore(this.polpoDir);
       this.notificationRouter.setStore(notifStore);
       this.notificationRouter.start();
+
+      // Set scope resolver so the router can resolve task/plan-level notification rules
+      this.notificationRouter.setScopeResolver((data: unknown) => {
+        if (!data || typeof data !== "object") return undefined;
+        const d = data as Record<string, unknown>;
+
+        // Extract taskId from common event payload shapes
+        const taskId = (d.taskId as string | undefined)
+          ?? ((d.task as Record<string, unknown> | undefined)?.id as string | undefined);
+
+        // Extract planId / group
+        const group = (d.group as string | undefined)
+          ?? (taskId ? this.registry.getTask(taskId)?.group : undefined);
+
+        const taskNotifications = taskId
+          ? this.registry.getTask(taskId)?.notifications
+          : undefined;
+
+        let planNotifications: import("./types.js").ScopedNotificationRules | undefined;
+        if (group) {
+          const plan = this.registry.getPlanByName?.(group);
+          planNotifications = plan?.notifications;
+        } else if (d.planId) {
+          const plan = this.registry.getPlan?.(d.planId as string);
+          planNotifications = plan?.notifications;
+        }
+
+        return { taskNotifications, planNotifications };
+      });
     }
 
     // Wire notification router to approval manager (must happen after both are created)
@@ -342,6 +372,7 @@ export class Orchestrator extends TypedEmitter {
     title: string; description: string; assignTo: string;
     expectations?: TaskExpectation[]; expectedOutcomes?: ExpectedOutcome[];
     dependsOn?: string[]; group?: string; maxDuration?: number; retryPolicy?: RetryPolicy;
+    notifications?: ScopedNotificationRules;
   }): Task { return this.taskMgr.addTask(opts); }
   updateTaskDescription(taskId: string, description: string): void { this.taskMgr.updateTaskDescription(taskId, description); }
   updateTaskAssignment(taskId: string, agentName: string): void { this.taskMgr.updateTaskAssignment(taskId, agentName); }
@@ -395,7 +426,7 @@ export class Orchestrator extends TypedEmitter {
 
   // ─── Plan Management (delegates to PlanExecutor) ──
 
-  savePlan(opts: { data: string; prompt?: string; name?: string; status?: PlanStatus }): Plan { return this.planExec.savePlan(opts); }
+  savePlan(opts: { data: string; prompt?: string; name?: string; status?: PlanStatus; notifications?: ScopedNotificationRules }): Plan { return this.planExec.savePlan(opts); }
   getPlan(planId: string): Plan | undefined { return this.planExec.getPlan(planId); }
   getPlanByName(name: string): Plan | undefined { return this.planExec.getPlanByName(name); }
   getAllPlans(): Plan[] { return this.planExec.getAllPlans(); }

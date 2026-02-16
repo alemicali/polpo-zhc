@@ -50,6 +50,7 @@ export function taskRoutes(): Hono<ServerEnv> {
       group: body.group,
       maxDuration: body.maxDuration,
       retryPolicy: body.retryPolicy,
+      notifications: body.notifications,
     });
 
     return c.json({ ok: true, data: task }, 201);
@@ -74,6 +75,12 @@ export function taskRoutes(): Hono<ServerEnv> {
     }
     if (body.expectations !== undefined) {
       orchestrator.updateTaskExpectations(taskId, body.expectations);
+    }
+    if (body.retries !== undefined || body.maxRetries !== undefined) {
+      const patch: Record<string, number> = {};
+      if (body.retries !== undefined) patch.retries = body.retries;
+      if (body.maxRetries !== undefined) patch.maxRetries = body.maxRetries;
+      orchestrator.getStore().updateTask(taskId, patch);
     }
 
     const updated = orchestrator.getStore().getTask(taskId);

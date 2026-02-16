@@ -1,7 +1,7 @@
 import type { OrchestratorContext } from "./orchestrator-context.js";
 import type { TaskManager } from "./task-manager.js";
 import type { AgentManager } from "./agent-manager.js";
-import type { Plan, PlanStatus, PlanReport, Task, TaskExpectation, ExpectedOutcome, PlanQualityGate } from "./types.js";
+import type { Plan, PlanStatus, PlanReport, Task, TaskExpectation, ExpectedOutcome, PlanQualityGate, ScopedNotificationRules } from "./types.js";
 import type { QualityController } from "../quality/quality-controller.js";
 import { sanitizeExpectations } from "./schemas.js";
 import { validateProviderKeys } from "../llm/pi-client.js";
@@ -18,6 +18,8 @@ interface PlanDocument {
     maxRetries?: number;
     maxDuration?: number;
     retryPolicy?: { escalateAfter?: number; fallbackAgent?: string };
+    /** Per-task scoped notification rules. */
+    notifications?: ScopedNotificationRules;
   }>;
   team?: Array<{
     name: string;
@@ -28,6 +30,8 @@ interface PlanDocument {
     skills?: string[];
   }>;
   qualityGates?: PlanQualityGate[];
+  /** Plan-level scoped notification rules — override or extend global rules. */
+  notifications?: ScopedNotificationRules;
 }
 
 /**
@@ -56,7 +60,7 @@ export class PlanExecutor {
     return this.gatesByGroup.get(group) ?? [];
   }
 
-  savePlan(opts: { data: string; prompt?: string; name?: string; status?: PlanStatus }): Plan {
+  savePlan(opts: { data: string; prompt?: string; name?: string; status?: PlanStatus; notifications?: ScopedNotificationRules }): Plan {
     if (!this.ctx.registry.savePlan) throw new Error("Store does not support plans");
     const name = opts.name ?? this.ctx.registry.nextPlanName?.() ?? `plan-${Date.now()}`;
     const plan = this.ctx.registry.savePlan({
@@ -64,6 +68,7 @@ export class PlanExecutor {
       data: opts.data,
       prompt: opts.prompt,
       status: opts.status ?? "draft",
+      notifications: opts.notifications,
     });
     this.ctx.emitter.emit("plan:saved", { planId: plan.id, name: plan.name, status: plan.status });
     return plan;
@@ -250,6 +255,7 @@ export class PlanExecutor {
         group,
         maxDuration: t.maxDuration,
         retryPolicy: t.retryPolicy,
+        notifications: t.notifications,
       });
       titleToId.set(t.title, task.id);
       tasks.push(task);
@@ -260,8 +266,13 @@ export class PlanExecutor {
       this.gatesByGroup.set(group, doc.qualityGates);
     }
 
-    // Mark plan as active
-    this.ctx.registry.updatePlan?.(planId, { status: "active" });
+    // Persist plan-level notifications from document onto the Plan record
+    if (doc.notifications) {
+      this.ctx.registry.updatePlan?.(planId, { status: "active", notifications: doc.notifications });
+    } else {
+      // Mark plan as active
+      this.ctx.registry.updatePlan?.(planId, { status: "active" });
+    }
     this.ctx.emitter.emit("plan:executed", { planId, group, taskCount: tasks.length });
 
     return { tasks, group };

@@ -13,6 +13,27 @@ const ExpectedOutcomeSchema = z.object({
   tags: z.array(z.string()).optional(),
 });
 
+// ── Notification rule schema (shared for scoped rules) ────────────────
+
+const NotificationRuleSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  events: z.array(z.string().min(1)).min(1),
+  condition: z.any().optional(),
+  channels: z.array(z.string().min(1)).min(1),
+  severity: z.enum(["info", "warning", "critical"]).optional(),
+  template: z.string().optional(),
+  cooldownMs: z.number().int().min(0).optional(),
+  includeOutcomes: z.boolean().optional(),
+  outcomeFilter: z.array(z.enum(["file", "text", "url", "json", "media"])).optional(),
+  maxAttachmentSize: z.number().int().min(0).optional(),
+});
+
+const ScopedNotificationRulesSchema = z.object({
+  rules: z.array(NotificationRuleSchema),
+  inherit: z.boolean().optional(),
+});
+
 // ── Task schemas ──────────────────────────────────────────────────────
 
 export const CreateTaskSchema = z.object({
@@ -31,12 +52,15 @@ export const CreateTaskSchema = z.object({
       escalateModel: z.string().optional(),
     })
     .optional(),
+  notifications: ScopedNotificationRulesSchema.optional(),
 });
 
 export const UpdateTaskSchema = z.object({
   description: z.string().min(1).optional(),
   assignTo: z.string().min(1).optional(),
   expectations: z.array(z.any()).optional(),
+  retries: z.number().int().min(0).optional(),
+  maxRetries: z.number().int().min(0).optional(),
 });
 
 // ── Plan schemas ──────────────────────────────────────────────────────
@@ -48,6 +72,7 @@ export const CreatePlanSchema = z.object({
   status: z
     .enum(["draft", "active", "completed", "failed", "cancelled"])
     .optional(),
+  notifications: ScopedNotificationRulesSchema.optional(),
 });
 
 export const UpdatePlanSchema = z.object({
@@ -118,6 +143,16 @@ export const RefinePlanSchema = z.object({
   currentData: z.string().min(1),
   prompt: z.string().optional().default(""),
   feedback: z.string().min(1),
+});
+
+// ── Direct notification schema ─────────────────────────────────────────
+
+export const SendNotificationSchema = z.object({
+  channel: z.string().min(1),
+  title: z.string().min(1),
+  body: z.string().min(1),
+  severity: z.enum(["info", "warning", "critical"]).optional(),
+  delayMs: z.number().int().min(0).optional(),
 });
 
 // ── Approval schemas ──────────────────────────────────────────────────
