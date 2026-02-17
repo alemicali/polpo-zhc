@@ -3,10 +3,36 @@
  */
 
 import type { Orchestrator } from "../core/orchestrator.js";
-import type { PolpoState } from "../core/types.js";
+import type { AgentConfig, PolpoState } from "../core/types.js";
 import { discoverSkills } from "./skills.js";
 import { buildModelListingForPrompt } from "./pi-client.js";
 import { readSystemContext } from "./orchestrator-tools.js";
+
+/**
+ * Describe what tools/capabilities an agent has based on its config flags.
+ * Used in the orchestrator prompt so it knows what each agent can do
+ * and can write task descriptions that reference the correct tools.
+ */
+function describeAgentCapabilities(agent: AgentConfig): string {
+  const caps: string[] = ["read, write, edit, bash, glob, grep, ls"];
+  const toolMap: [keyof AgentConfig, string][] = [
+    ["enableBrowser", "browser_navigate/screenshot/click/fill/eval (18 browser tools)"],
+    ["enablePdf", "pdf_create, pdf_read, pdf_merge, pdf_info"],
+    ["enableExcel", "excel_write, excel_read, excel_query, excel_info"],
+    ["enableDocx", "docx_create, docx_read"],
+    ["enableAudio", "audio_speak (TTS), audio_transcribe (STT)"],
+    ["enableImage", "image_generate, image_analyze"],
+    ["enableHttp", "http_fetch, http_download"],
+    ["enableGit", "git_status/diff/log/commit/branch/stash/show"],
+    ["enableDeps", "dep_install/add/remove/outdated/audit/info"],
+    ["enableMultifile", "multi_edit, regex_replace, bulk_rename"],
+    ["enableEmail", "email_send, email_verify"],
+  ];
+  for (const [flag, desc] of toolMap) {
+    if (agent[flag as keyof AgentConfig]) caps.push(desc);
+  }
+  return caps.join(" | ");
+}
 
 /** Build the system prompt for chat mode responses */
 export function buildChatSystemPrompt(
@@ -285,6 +311,17 @@ export function buildChatSystemPrompt(
     `for complex work). Don't explain. Don't hedge. Create the task with a good description`,
     `and proper expectations, and the supervisor loop handles the rest.`,
     ``,
+    `CRITICAL — When writing task descriptions, you MUST tell agents which tools to use:`,
+    `- For PDFs: "Use the pdf_create tool" (NOT "write a Python script")`,
+    `- For spreadsheets: "Use the excel_write tool" (NOT "write a Node script with exceljs")`,
+    `- For Word docs: "Use the docx_create tool"`,
+    `- For screenshots: "Use browser_navigate then browser_screenshot"`,
+    `- For audio: "Use audio_speak" for TTS, "Use audio_transcribe" for STT`,
+    `- For images: "Use image_generate"`,
+    `Agents have these tools built-in. If they use bash scripts instead, the output files`,
+    `WON'T be tracked as outcomes and WON'T be attached to notifications (Telegram, Slack, etc.).`,
+    `Check the agent's capabilities in the "Tools:" line above to know what each agent can do.`,
+    ``,
     `For reactive automation ("when X happens, do Y"), use watch_task for task-specific triggers,`,
     `or add_notification_rule with actions for event-based triggers.`,
     ``,
@@ -334,6 +371,8 @@ export function buildChatSystemPrompt(
   for (const a of team.agents) {
     let line = `  - ${a.name}: ${a.role || "general"} (${a.model || "default model"})`;
     if (a.skills?.length) line += ` [skills: ${a.skills.join(", ")}]`;
+    const caps = describeAgentCapabilities(a);
+    if (caps) line += `\n    Tools: ${caps}`;
     parts.push(line);
   }
 

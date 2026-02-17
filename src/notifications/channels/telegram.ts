@@ -402,11 +402,20 @@ export class TelegramCallbackPoller {
 
     // ── Gateway mode: route ALL messages through the ChannelGateway ──
     if (this.gateway) {
+      // Send typing immediately and keep refreshing every 4s until we respond
       await this.sendChatAction(chatId, "typing");
-      const response = await this.gateway.handleInboundMessage(
-        senderId, chatId, text, senderName, String(message.message_id),
-      );
-      if (response) await this.sendReply(chatId, markdownToHtml(response));
+      const typingInterval = setInterval(() => {
+        this.sendChatAction(chatId, "typing").catch(() => {});
+      }, 4000);
+
+      try {
+        const response = await this.gateway.handleInboundMessage(
+          senderId, chatId, text, senderName, String(message.message_id),
+        );
+        if (response) await this.sendReply(chatId, markdownToHtml(response));
+      } finally {
+        clearInterval(typingInterval);
+      }
       return;
     }
 

@@ -351,6 +351,7 @@ import { createDocxTools, ALL_DOCX_TOOL_NAMES } from "./docx-tools.js";
 import { createEmailTools, ALL_EMAIL_TOOL_NAMES } from "./email-tools.js";
 import { createAudioTools, ALL_AUDIO_TOOL_NAMES } from "./audio-tools.js";
 import { createImageTools, ALL_IMAGE_TOOL_NAMES } from "./image-tools.js";
+import { createOutcomeTools, ALL_OUTCOME_TOOL_NAMES } from "./outcome-tools.js";
 
 export type { BrowserToolName } from "./browser-tools.js";
 export type { HttpToolName } from "./http-tools.js";
@@ -363,6 +364,7 @@ export type { DocxToolName } from "./docx-tools.js";
 export type { EmailToolName } from "./email-tools.js";
 export type { AudioToolName } from "./audio-tools.js";
 export type { ImageToolName } from "./image-tools.js";
+export type { OutcomeToolName } from "./outcome-tools.js";
 
 /** All known tool names across all categories */
 export type ExtendedToolName = CodingToolName
@@ -376,7 +378,8 @@ export type ExtendedToolName = CodingToolName
   | import("./docx-tools.js").DocxToolName
   | import("./email-tools.js").EmailToolName
   | import("./audio-tools.js").AudioToolName
-  | import("./image-tools.js").ImageToolName;
+  | import("./image-tools.js").ImageToolName
+  | import("./outcome-tools.js").OutcomeToolName;
 
 /** All available tool names for documentation/config validation */
 export const ALL_EXTENDED_TOOL_NAMES: string[] = [
@@ -392,6 +395,7 @@ export const ALL_EXTENDED_TOOL_NAMES: string[] = [
   ...ALL_EMAIL_TOOL_NAMES,
   ...ALL_AUDIO_TOOL_NAMES,
   ...ALL_IMAGE_TOOL_NAMES,
+  ...ALL_OUTCOME_TOOL_NAMES,
 ];
 
 export interface CreateAllToolsOptions {
@@ -501,6 +505,10 @@ export function createAllTools(options: CreateAllToolsOptions): AgentTool<any>[]
   if (options.enableImage || categoryRequested(ALL_IMAGE_TOOL_NAMES)) {
     tools.push(...createImageTools(cwd, allowedPaths, allowedTools));
   }
+
+  // Outcome registration tool — always included with extended tools so agents
+  // can explicitly declare artifacts regardless of how they were produced
+  tools.push(...createOutcomeTools(cwd, allowedPaths, allowedTools));
 
   return tools;
 }
