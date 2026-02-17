@@ -21,7 +21,7 @@ export function createActivity(): AgentActivity {
 }
 import { Agent } from "@mariozechner/pi-agent-core";
 import type { AgentEvent } from "@mariozechner/pi-agent-core";
-import { resolveModel, resolveApiKey, enforceModelAllowlist } from "../llm/pi-client.js";
+import { resolveModel, resolveApiKeyAsync, enforceModelAllowlist } from "../llm/pi-client.js";
 import { createCodingTools, createAllTools } from "../tools/coding-tools.js";
 import { loadAgentSkills, buildSkillPrompt } from "../llm/skills.js";
 import { McpClientManager } from "../mcp/client.js";
@@ -164,7 +164,7 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
 
   // Create the pi-agent-core Agent (starts with coding tools only; MCP tools added before prompt)
   const agent = new Agent({
-    getApiKey: (provider: string) => resolveApiKey(provider),
+    getApiKey: (provider: string) => resolveApiKeyAsync(provider),
     initialState: {
       systemPrompt: buildSystemPrompt(agentConfig, cwd, ctx?.polpoDir),
       model,

@@ -19,6 +19,9 @@ import {
   type KnownProvider,
   type Usage,
 } from "@mariozechner/pi-ai";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { homedir } from "node:os";
 import type { ProviderConfig, ModelConfig, ModelAllowlistEntry } from "../core/types.js";
 
 // ─── Constants ──────────────────────────────────────
@@ -395,11 +398,32 @@ export function validateProviderKeys(
     if (seen.has(provider)) continue;
     seen.add(provider);
 
-    if (!resolveApiKey(provider)) {
+    if (!resolveApiKey(provider) && !hasOAuthProfiles(provider)) {
       missing.push({ provider, modelSpec: spec });
     }
   }
   return missing;
+}
+
+/**
+ * Check if there are any stored OAuth profiles for a provider (synchronous).
+ * Used by the sync validation path so OAuth-based providers (openai-codex,
+ * github-copilot, anthropic, etc.) aren't rejected before spawn.
+ *
+ * Reads the auth-profiles.json file directly to avoid async module imports.
+ */
+function hasOAuthProfiles(provider: string): boolean {
+  try {
+    const dir = process.env.POLPO_STATE_DIR || join(homedir(), ".polpo");
+    const raw = readFileSync(join(dir, "auth-profiles.json"), "utf-8");
+    const data = JSON.parse(raw);
+    if (!data?.profiles || typeof data.profiles !== "object") return false;
+    return Object.values(data.profiles).some(
+      (p: any) => p?.provider === provider,
+    );
+  } catch {
+    return false;
+  }
 }
 
 /**
