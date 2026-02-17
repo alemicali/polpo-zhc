@@ -255,7 +255,7 @@ export class PlanExecutor {
     return this.ctx.registry.getAllPlans?.() ?? [];
   }
 
-  updatePlan(planId: string, updates: { data?: string; status?: PlanStatus; name?: string }): Plan {
+  updatePlan(planId: string, updates: Partial<Omit<Plan, "id">>): Plan {
     if (!this.ctx.registry.updatePlan) throw new Error("Store does not support plans");
     return this.ctx.registry.updatePlan(planId, updates);
   }

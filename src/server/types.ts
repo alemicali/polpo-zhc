@@ -128,38 +128,4 @@ export interface ProjectEntry {
   autoStart?: boolean;
 }
 
-// === WebSocket Protocol ===
 
-export interface WSSubscribeMessage {
-  type: "subscribe";
-  events?: PolpoEvent[];
-}
-
-export interface WSUnsubscribeMessage {
-  type: "unsubscribe";
-  events?: PolpoEvent[];
-}
-
-export interface WSCommandMessage {
-  type: "command";
-  action: string;
-  params: Record<string, unknown>;
-}
-
-export type WSClientMessage = WSSubscribeMessage | WSUnsubscribeMessage | WSCommandMessage;
-
-export interface WSServerEvent {
-  type: "event";
-  event: PolpoEvent;
-  data: unknown;
-  id: string;
-  timestamp: string;
-}
-
-export interface WSServerError {
-  type: "error";
-  error: string;
-  code: ErrorCode;
-}
-
-export type WSServerMessage = WSServerEvent | WSServerError;

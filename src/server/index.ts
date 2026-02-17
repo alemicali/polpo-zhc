@@ -80,7 +80,6 @@ export class PolpoServer {
 export { createApp } from "./app.js";
 export { ProjectManager } from "./project-manager.js";
 export { SSEBridge } from "./sse-bridge.js";
-export { WSBridge } from "./ws-bridge.js";
 export type {
   ServerConfig,
   ProjectEntry,

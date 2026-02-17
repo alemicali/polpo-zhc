@@ -465,6 +465,16 @@ program
     await startInkTUI(opts.dir);
   });
 
+// polpo tui2 (pi-tui based interactive mode)
+program
+  .command("tui2")
+  .description("Launch the pi-tui based interactive TUI")
+  .option("-d, --dir <path>", "Working directory", ".")
+  .action(async (opts) => {
+    const { startPiTUI } = await import("../tui2/tui.js");
+    await startPiTUI(resolve(opts.dir));
+  });
+
 // Register subcommand groups
 registerTaskCommands(program);
 registerPlanCommands(program);

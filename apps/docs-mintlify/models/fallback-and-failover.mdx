@@ -250,7 +250,7 @@ Fallback works on top of Polpo's existing retry system. The full error handling 
 1. **Retry** — `withRetry` retries transient network errors (up to 2 times)
 2. **Failover** — `queryTextWithFallback` switches providers on classified errors
 3. **Cooldown** — Failed providers are temporarily skipped
-4. **Escalation** — After repeated task failures, the orchestrator switches to a more capable model
+4. **Escalation** — After repeated task failures, Polpo switches to a more capable model
 
 <Note>
 When using `querySDKWithFallback`, the retry count is reduced to 1 (instead of 2) since the fallback mechanism already provides resilience against provider failures.

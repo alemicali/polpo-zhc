@@ -1,0 +1,163 @@
+---
+title: "Channel Gateway"
+description: "Inbound messaging — route messages from external channels to the orchestrator"
+---
+
+The Channel Gateway is the inbound counterpart to [Notifications](/features/notifications). While notifications push alerts _from_ Polpo to external channels, the gateway accepts messages _into_ Polpo from those same channels — turning messaging apps into full control interfaces.
+
+<Note>
+Notifications = Polpo talks to you (outbound). Gateway = you talk to Polpo (inbound).
+</Note>
+
+## Architecture
+
+<Frame>
+  <img src="/channel-gateway.svg" alt="Channel Gateway architecture: messaging channels flow through adapters into ChannelGateway, which branches to PeerStore, slash commands, and the completions loop" />
+</Frame>
+
+The gateway is **channel-agnostic**. Each messaging platform has a thin adapter that translates platform-specific messages into a common `InboundMessage` format. The gateway handles everything else: identity, authorization, session management, command routing, and the agentic conversation loop.
+
+### Components
+
+| Component | Responsibility |
+|-----------|----------------|
+| **ChannelGateway** | Core message router — DM policy, slash commands, chat completions |
+| **PeerStore** | Peer identity, allowlist, pairing, session mapping, presence |
+| **TelegramGatewayAdapter** | Bridges Telegram polling to the gateway |
+| **Channel adapters** (future) | WhatsApp, Slack, Discord — same pattern |
+
+## Enabling the Gateway
+
+Add a `gateway` block to any notification channel in your config:
+
+```json
+{
+  "settings": {
+    "notifications": {
+      "channels": {
+        "telegram": {
+          "type": "telegram",
+          "botToken": "${TELEGRAM_BOT_TOKEN}",
+          "chatId": "-1001234567890",
+          "gateway": {
+            "enableInbound": true,
+            "dmPolicy": "pairing"
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+The same channel handles both outbound notifications and inbound messages. When `gateway.enableInbound` is `true`, the poller routes all incoming messages through the gateway instead of ignoring them.
+
+### Gateway Config
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enableInbound` | boolean | `false` | Enable inbound message processing |
+| `dmPolicy` | string | `"allowlist"` | Authorization policy (see below) |
+| `allowFrom` | string[] | `[]` | Pre-authorized peer IDs. `["*"]` allows everyone |
+| `sessionIdleMinutes` | number | `60` | Auto-reset session after idle period |
+
+## Message Flow
+
+When a message arrives:
+
+1. **Peer upsert** — the sender's identity is recorded or updated in the PeerStore
+2. **Presence update** — the sender is marked as active
+3. **DM policy check** — is this peer authorized to message?
+4. **Pending rejection check** — is this a reply to a rejection prompt?
+5. **Slash command check** — does the message start with `/`?
+6. **Chat completions** — free-text is forwarded to the orchestrator's agentic loop
+
+## Slash Commands
+
+The gateway provides built-in commands for common operations:
+
+| Command | Description |
+|---------|-------------|
+| `/help` | Show available commands |
+| `/status` | Project status — task counts, active agents, connected peers |
+| `/tasks` | List tasks with status |
+| `/plans` | List plans |
+| `/agents` | List agents with active/idle status |
+| `/approve [ID]` | List pending approvals, or approve a specific one |
+| `/reject ID [reason]` | Reject with feedback |
+| `/new` | Reset conversation session |
+| `/pair CODE` | Approve a pairing request (authorized peers only) |
+
+Unknown commands (e.g. `/unknown`) fall through to the chat handler, so they're processed as free text.
+
+## Free-Text Chat
+
+Non-command messages enter the orchestrator's completions loop — the same one used by the TUI, REST API, and Web UI. The gateway:
+
+1. Gets or creates a session for the peer
+2. Loads conversation history from the session store
+3. Builds a system prompt with project context and peer identity
+4. Runs a multi-turn agentic loop (up to 15 tool-call turns)
+5. Stores the response and sends it back
+
+Each peer gets an isolated session. Sessions auto-expire after `sessionIdleMinutes` of inactivity.
+
+## Approval Integration
+
+The gateway integrates with [Approval Gates](/features/approval-gates) in two ways:
+
+### Inline buttons (Telegram)
+
+When an approval notification is sent via Telegram, it includes **Approve** and **Reject** buttons. Pressing a button triggers `handleApprovalCallback()` in the gateway.
+
+### Slash commands
+
+Peers can also manage approvals via `/approve` and `/reject`:
+
+```
+/approve                    — list all pending approvals
+/approve req-abc123         — approve a specific request
+/reject req-abc123 bad code — reject with inline feedback
+/reject req-abc123          — reject, then send feedback in next message
+```
+
+## Events
+
+The gateway emits events via the orchestrator's typed emitter:
+
+| Event | Payload | Description |
+|-------|---------|-------------|
+| `gateway:started` | `{ channels }` | Gateway activated |
+| `gateway:stopped` | `{}` | Gateway deactivated |
+| `peer:paired` | `{ peer, channel }` | New peer completed pairing |
+| `peer:message` | `{ peerId, channel, text, sessionId }` | Peer sent a message |
+| `peer:blocked` | `{ peerId, channel, reason }` | Message blocked by DM policy |
+| `peer:presence` | `{ peerId, channel, status }` | Peer came online or went offline |
+
+These events flow through SSE to the Web UI and React SDK, and can trigger notification rules like any other Polpo event.
+
+## REST API
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/peers` | List known peers (optional `?channel=telegram` filter) |
+| `GET` | `/peers/presence` | Currently active peers |
+| `GET` | `/peers/allowlist` | Current allowlist |
+| `POST` | `/peers/allowlist` | Add peer to allowlist `{"peerId": "telegram:123"}` |
+| `DELETE` | `/peers/allowlist/:id` | Remove from allowlist |
+| `POST` | `/peers/pair` | Approve a pairing code `{"code": "ABC123"}` |
+| `POST` | `/peers/link` | Link peer identities `{"peerId": "...", "linkedTo": "..."}` |
+
+## Adding New Channels
+
+The gateway is designed for easy extension. To add a new messaging platform:
+
+1. **Create an adapter** that implements the message translation (see `TelegramGatewayAdapter` for reference)
+2. **Wire it** to the platform's message source (polling, webhook, WebSocket)
+3. **Register it** in the orchestrator startup
+
+The adapter only needs to translate platform-specific messages into the common `InboundMessage` format — the gateway handles everything else.
+
+<Tip>
+The gateway is opt-in and backward-compatible. Existing notification-only setups continue to work unchanged. The gateway only activates when `gateway.enableInbound` is set to `true`.
+</Tip>

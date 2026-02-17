@@ -70,7 +70,8 @@
               "usage/cli",
               "usage/tui",
               "usage/server",
-              "usage/web-ui"
+              "usage/web-ui",
+              "usage/telegram"
             ]
           },
           {
@@ -96,7 +97,9 @@
               "concepts/tasks",
               "concepts/plans",
               "features/memory",
-              "features/sessions"
+              "features/sessions",
+              "features/channel-gateway",
+              "features/peer-identity"
             ]
           },
           {
@@ -135,7 +138,8 @@
           {
             "group": "Quality & Recovery",
             "pages": [
-              "features/assessment",
+              "features/review",
+              "features/scoring",
               "features/escalation",
               "features/deadlock-resolution",
               "features/resilience"
@@ -201,15 +205,10 @@
           {
             "group": "Core",
             "pages": [
+              "reference/cli",
               "reference/config",
               "reference/events",
               "reference/store-backends"
-            ]
-          },
-          {
-            "group": "Development",
-            "pages": [
-              "reference/react-sdk"
             ]
           },
           {
@@ -228,12 +227,19 @@
               "reference/tools/audio",
               "reference/tools/image"
             ]
+          },
+          {
+            "group": "Development",
+            "pages": [
+              "reference/react-sdk"
+            ]
+          },
+          {
+            "group": "REST API",
+            "root": "reference/rest-api",
+            "openapi": "openapi.json"
           }
         ]
-      },
-      {
-        "tab": "API Reference",
-        "openapi": "openapi.json"
       }
     ]
   },
@@ -255,8 +261,8 @@
       "destination": "/features/workflows"
     },
     {
-      "source": "/features/bridge",
-      "destination": "/features/sessions"
+      "source": "/features/assessment",
+      "destination": "/features/review"
     }
   ],
   "footer": {

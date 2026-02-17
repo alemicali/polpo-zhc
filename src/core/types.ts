@@ -582,6 +582,97 @@ export interface ApprovalRequest {
   note?: string;
 }
 
+// === Channel Gateway & Peer Identity ===
+
+/** Supported messaging channel types for inbound message routing. */
+export type ChannelType = "telegram" | "whatsapp" | "slack" | "discord" | "webchat";
+
+/**
+ * Peer identity — represents a person talking to the bot from a messaging channel.
+ * Inspired by OpenClaw's session key model but adapted for orchestrator use-cases.
+ *
+ * A peer is identified by their channel-specific ID (e.g., Telegram chatId, WhatsApp phone).
+ * Identity links allow the same person on multiple channels to share a session.
+ */
+export interface PeerIdentity {
+  /** Canonical peer ID (format: "channel:externalId", e.g. "telegram:123456789"). */
+  id: string;
+  /** Channel type. */
+  channel: ChannelType;
+  /** Channel-specific external ID (chatId, phone number, user ID, etc.). */
+  externalId: string;
+  /** Display name (from channel profile, if available). */
+  displayName?: string;
+  /** When this peer was first seen. */
+  firstSeenAt: string;
+  /** When this peer last sent a message. */
+  lastSeenAt: string;
+  /** Linked canonical identity — allows cross-channel session sharing.
+   *  If set, this peer shares sessions with the peer identified by this ID. */
+  linkedTo?: string;
+}
+
+/**
+ * DM access policy — controls who can message the bot.
+ * Modeled after OpenClaw's 4-tier DM security model.
+ */
+export type DmPolicy = "pairing" | "allowlist" | "open" | "disabled";
+
+/** Pairing request — pending approval for a new peer to talk to the bot. */
+export interface PairingRequest {
+  /** Unique request ID. */
+  id: string;
+  /** Peer requesting access. */
+  peerId: string;
+  /** Channel type. */
+  channel: ChannelType;
+  /** Channel-specific external ID. */
+  externalId: string;
+  /** Display name of the requester. */
+  displayName?: string;
+  /** Short pairing code sent to the user. */
+  code: string;
+  /** When the request was created. */
+  createdAt: string;
+  /** When the request expires (1 hour from creation). */
+  expiresAt: string;
+  /** Whether the request has been resolved. */
+  resolved: boolean;
+}
+
+/**
+ * Channel gateway configuration — extends notification channel config
+ * with inbound message handling settings.
+ */
+export interface ChannelGatewayConfig {
+  /** DM access policy. Default: "allowlist". */
+  dmPolicy?: DmPolicy;
+  /** Allowlist of external IDs that can message the bot.
+   *  Use "*" to allow all (only with dmPolicy="open"). */
+  allowFrom?: string[];
+  /** Enable inbound message routing (chat with orchestrator). Default: false. */
+  enableInbound?: boolean;
+  /** Session idle timeout in minutes before creating a new session. Default: 60. */
+  sessionIdleMinutes?: number;
+}
+
+/**
+ * Presence entry — lightweight, ephemeral tracking of connected peers.
+ * Inspired by OpenClaw's in-memory presence with TTL.
+ */
+export interface PresenceEntry {
+  /** Peer ID (format: "channel:externalId"). */
+  peerId: string;
+  /** Display name. */
+  displayName?: string;
+  /** Channel type. */
+  channel: ChannelType;
+  /** Last activity timestamp (ISO). */
+  lastActivityAt: string;
+  /** What the peer is doing ("idle" | "chatting" | "approving"). */
+  activity: "idle" | "chatting" | "approving";
+}
+
 // === Notification System ===
 
 export type NotificationChannelType = "slack" | "email" | "telegram" | "webhook";
@@ -610,6 +701,8 @@ export interface NotificationChannelConfig {
   port?: number;
   /** SMTP from address. */
   from?: string;
+  /** Channel gateway config — enables inbound message routing for this channel. */
+  gateway?: ChannelGatewayConfig;
 }
 
 export type NotificationSeverity = "info" | "warning" | "critical";
@@ -672,7 +765,53 @@ export interface NotificationRule {
   outcomeFilter?: OutcomeType[];
   /** Max file size per attachment in bytes. Files larger than this are skipped. Default: 10MB. */
   maxAttachmentSize?: number;
+  /** Action triggers — executed when the rule fires, in addition to sending notifications. */
+  actions?: NotificationAction[];
 }
+
+// === Notification Action Triggers ===
+
+/** Action types that can be triggered by notification rules. */
+export type NotificationActionType = "create_task" | "execute_plan" | "run_script" | "send_notification";
+
+/** Base action interface. */
+interface NotificationActionBase {
+  type: NotificationActionType;
+}
+
+/** Create a task when the rule fires. */
+export interface CreateTaskAction extends NotificationActionBase {
+  type: "create_task";
+  title: string;
+  description: string;
+  assignTo: string;
+  expectations?: TaskExpectation[];
+}
+
+/** Execute an existing plan when the rule fires. */
+export interface ExecutePlanAction extends NotificationActionBase {
+  type: "execute_plan";
+  planId: string;
+}
+
+/** Run a shell script when the rule fires. */
+export interface RunScriptAction extends NotificationActionBase {
+  type: "run_script";
+  command: string;
+  /** Max execution time in ms. Default: 30000. */
+  timeoutMs?: number;
+}
+
+/** Send an additional notification to different channels. */
+export interface SendNotificationAction extends NotificationActionBase {
+  type: "send_notification";
+  channel: string;
+  title: string;
+  body: string;
+  severity?: NotificationSeverity;
+}
+
+export type NotificationAction = CreateTaskAction | ExecutePlanAction | RunScriptAction | SendNotificationAction;
 
 export interface NotificationsConfig {
   channels: Record<string, NotificationChannelConfig>;
@@ -820,6 +959,26 @@ export interface ScheduleEntry {
   deadlineOffsetMs?: number;
   /** Created at. */
   createdAt: string;
+}
+
+// === Task Watchers ===
+
+/** A watcher that fires an action when a task reaches a target status. */
+export interface TaskWatcher {
+  /** Unique watcher ID. */
+  id: string;
+  /** Task ID to watch. */
+  taskId: string;
+  /** Target status to trigger on. */
+  targetStatus: TaskStatus;
+  /** Action to execute when triggered. */
+  action: NotificationAction;
+  /** Whether the watcher has already fired. */
+  fired: boolean;
+  /** Created at (ISO). */
+  createdAt: string;
+  /** Fired at (ISO). */
+  firedAt?: string;
 }
 
 // === Extended Settings ===

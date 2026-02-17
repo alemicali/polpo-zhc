@@ -1,0 +1,470 @@
+---
+title: "CLI"
+description: "Complete reference for every polpo command, flag, and subcommand"
+---
+
+Running `polpo` with no arguments launches the [TUI](/usage/tui). All commands that interact with a project accept `-d, --dir <path>` to set the working directory (defaults to `.`).
+
+## polpo init
+
+Initialize Polpo in the current project. Creates `.polpo/` with `polpo.json`, `logs/`, and `assessments/`.
+
+```bash
+polpo init
+```
+
+## polpo run
+
+Execute pending tasks. Streams color-coded status updates and exits when all tasks are done or failed.
+
+```bash
+polpo run [-d <path>]
+```
+
+## polpo status
+
+Show current task status as a live dashboard with progress bar, per-task status, agent activity, scores, and failure reasons.
+
+```bash
+polpo status [-d <path>] [-w]
+```
+
+| Flag | Description |
+|------|-------------|
+| `-w, --watch` | Auto-refresh every 2 seconds |
+
+## polpo serve
+
+Start the HTTP API server with REST, SSE, and WebSocket support.
+
+```bash
+polpo serve [-p <port>] [-H <host>] [-d <path>] [--api-key <key>] [--project-id <id>]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-p, --port` | `3000` | Port to listen on |
+| `-H, --host` | `127.0.0.1` | Host to bind to |
+| `--api-key` | — | API key for authentication |
+| `--project-id` | dir name | Project ID |
+
+## polpo tui
+
+Launch the interactive TUI. This is the default command.
+
+```bash
+polpo tui [-d <path>]
+polpo          # same thing
+```
+
+## polpo chat
+
+Send a one-shot message to the Polpo assistant about your project. Maintains session history (30-minute timeout, max 20 messages).
+
+```bash
+polpo chat <message...> [-d <path>]
+```
+
+---
+
+## polpo task
+
+Manage tasks.
+
+### task list
+
+```bash
+polpo task list [-d <path>] [--status <status>] [--group <group>]
+```
+
+| Flag | Description |
+|------|-------------|
+| `--status` | Filter by task status |
+| `--group` | Filter by plan group |
+
+### task show
+
+```bash
+polpo task show <taskId> [-d <path>]
+```
+
+Shows title, status, agent, group, dependencies, retries, description, result (stdout/stderr), and assessment scores. `<taskId>` supports prefix matching.
+
+### task add
+
+```bash
+polpo task add <description...> [-d <path>] [-a <agent>] [--no-prep]
+```
+
+| Flag | Description |
+|------|-------------|
+| `-a, --agent` | Assign to a specific agent |
+| `--no-prep` | Skip LLM task-prep, create directly |
+
+### task retry
+
+```bash
+polpo task retry <taskId> [-d <path>]
+```
+
+### task kill
+
+```bash
+polpo task kill <taskId> [-d <path>]
+```
+
+### task reassess
+
+Re-run assessment on a completed task.
+
+```bash
+polpo task reassess <taskId> [-d <path>]
+```
+
+### task delete
+
+```bash
+polpo task delete <taskId> [-d <path>]
+```
+
+---
+
+## polpo plan
+
+Manage execution plans.
+
+### plan list
+
+```bash
+polpo plan list [-d <path>]
+```
+
+### plan show
+
+```bash
+polpo plan show <planId> [-d <path>]
+```
+
+Shows name, status, prompt, timestamps, and raw plan data. `<planId>` accepts ID or name.
+
+### plan create
+
+Generate a plan from a prompt using the LLM.
+
+```bash
+polpo plan create <prompt...> [-d <path>] [--execute] [--save]
+```
+
+| Flag | Description |
+|------|-------------|
+| `--execute` | Execute immediately after creation |
+| `--save` | Save as draft (default when `--execute` is not given) |
+
+### plan execute
+
+```bash
+polpo plan execute <planId> [-d <path>]
+```
+
+### plan resume
+
+```bash
+polpo plan resume <planId> [-d <path>] [--no-retry-failed]
+```
+
+| Flag | Description |
+|------|-------------|
+| `--no-retry-failed` | Do not retry failed tasks |
+
+### plan delete
+
+```bash
+polpo plan delete <planId> [-d <path>]
+```
+
+### plan abort
+
+Abort all tasks in a plan group.
+
+```bash
+polpo plan abort <group> [-d <path>]
+```
+
+---
+
+## polpo team
+
+Manage the agent team.
+
+### team list
+
+```bash
+polpo team list [-d <path>]
+```
+
+### team add
+
+```bash
+polpo team add <name> [-d <path>] [-m <model>] [-r <role>]
+```
+
+| Flag | Description |
+|------|-------------|
+| `-m, --model` | Model ID |
+| `-r, --role` | Agent role description |
+
+### team remove
+
+```bash
+polpo team remove <name> [-d <path>]
+```
+
+### team rename
+
+```bash
+polpo team rename <newName> [-d <path>]
+```
+
+---
+
+## polpo memory
+
+View and manage project memory.
+
+### memory show
+
+```bash
+polpo memory show [-d <path>]
+```
+
+### memory set
+
+Replace the entire project memory.
+
+```bash
+polpo memory set <content...> [-d <path>]
+```
+
+### memory append
+
+Append a line to the project memory.
+
+```bash
+polpo memory append <line...> [-d <path>]
+```
+
+### memory edit
+
+Open project memory in `$EDITOR` (defaults to `vi`).
+
+```bash
+polpo memory edit [-d <path>]
+```
+
+---
+
+## polpo logs
+
+View persistent event logs.
+
+### logs list
+
+```bash
+polpo logs list [-d <path>]
+```
+
+### logs show
+
+```bash
+polpo logs show [sessionId] [-d <path>] [-n <limit>] [--event <pattern>]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-n, --limit` | `50` | Max entries to show |
+| `--event` | — | Filter by event name (substring match) |
+
+If `sessionId` is omitted, uses the current active session.
+
+---
+
+## polpo config
+
+Configuration management.
+
+### config show
+
+```bash
+polpo config show [-d <path>]
+```
+
+Shows project name, version, team, settings, and agents table.
+
+### config validate
+
+```bash
+polpo config validate [-d <path>]
+```
+
+Validates `.polpo/polpo.json`. Exits with code 0 on valid, 1 on invalid.
+
+---
+
+## polpo workflow
+
+Manage reusable workflow templates.
+
+### workflow list
+
+```bash
+polpo workflow list [-d <path>]
+```
+
+### workflow show
+
+```bash
+polpo workflow show <name> [-d <path>]
+```
+
+### workflow run
+
+```bash
+polpo workflow run <name> [-d <path>] [-p key=value...] [--dry-run]
+```
+
+| Flag | Description |
+|------|-------------|
+| `-p, --param` | Parameters as `key=value` pairs (repeatable) |
+| `--dry-run` | Show the instantiated plan without executing |
+
+### workflow validate
+
+Validate a workflow definition (checks fields, tasks, placeholders, unused params).
+
+```bash
+polpo workflow validate <name> [-d <path>]
+```
+
+---
+
+## polpo skills
+
+Manage the skill pool.
+
+### skills add
+
+Install skills from a GitHub repo or local path.
+
+```bash
+polpo skills add <source> [-d <path>] [-s <names...>] [-g] [-f]
+```
+
+| Flag | Description |
+|------|-------------|
+| `-s, --skill` | Install only specific skill names |
+| `-g, --global` | Install to `~/.polpo/skills/` (shared across projects) |
+| `-f, --force` | Overwrite existing skills |
+
+### skills list
+
+```bash
+polpo skills list [-d <path>]
+polpo skills ls               # alias
+```
+
+### skills remove
+
+```bash
+polpo skills remove <name> [-d <path>] [-g]
+polpo skills rm <name>         # alias
+```
+
+| Flag | Description |
+|------|-------------|
+| `-g, --global` | Remove from `~/.polpo/skills/` |
+
+### skills assign
+
+Assign a skill to an agent (creates symlink).
+
+```bash
+polpo skills assign <skill> <agent> [-d <path>]
+```
+
+---
+
+## polpo auth
+
+Manage OAuth authentication for LLM providers.
+
+### auth login
+
+```bash
+polpo auth login [provider]
+```
+
+If `provider` is omitted, shows an interactive picker.
+
+### auth status
+
+Show all stored OAuth profiles and their status (active/expired, expiry, email, last used).
+
+```bash
+polpo auth status
+```
+
+### auth logout
+
+```bash
+polpo auth logout [provider] [--all]
+```
+
+| Flag | Description |
+|------|-------------|
+| `--all` | Remove all stored credentials |
+
+---
+
+## polpo models
+
+Manage models and LLM providers.
+
+### models list
+
+```bash
+polpo models list [--provider <name>] [--all] [--json] [--plain]
+```
+
+| Flag | Description |
+|------|-------------|
+| `--provider` | Filter by provider name |
+| `--all` | Show all models (not just top 5 per provider) |
+| `--json` | Output as JSON |
+| `--plain` | One model per line, `provider:id` format |
+
+### models status
+
+Show resolved model configuration, fallback chain, per-provider auth status, and active cooldowns.
+
+```bash
+polpo models status [-d <path>] [--json] [--check] [--plain]
+```
+
+| Flag | Description |
+|------|-------------|
+| `--json` | Output as JSON |
+| `--check` | Exit code 1 if auth missing/expired, 2 if expiring soon |
+| `--plain` | Print only the resolved primary model |
+
+### models scan
+
+Scan for locally running model servers (Ollama, vLLM, LM Studio, LocalAI, LiteLLM Proxy, TGI).
+
+```bash
+polpo models scan [--json] [--timeout <ms>]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--json` | — | Output as JSON |
+| `--timeout` | `3000` | Connection timeout per endpoint (ms) |

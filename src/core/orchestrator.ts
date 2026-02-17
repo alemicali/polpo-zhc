@@ -50,11 +50,16 @@ import { NotificationRouter } from "../notifications/index.js";
 import { FileNotificationStore } from "../stores/file-notification-store.js";
 import { TelegramCallbackPoller } from "../notifications/channels/telegram.js";
 import type { ApprovalCallbackResolver } from "../notifications/channels/telegram.js";
+import { ChannelGateway } from "../notifications/channel-gateway.js";
+import { TelegramGatewayAdapter } from "../notifications/telegram-gateway-adapter.js";
+import { FilePeerStore } from "./peer-store.js";
+import type { PeerStore } from "./peer-store.js";
 import { EscalationManager } from "./escalation-manager.js";
 import { SLAMonitor } from "../quality/sla-monitor.js";
 import { QualityController } from "../quality/quality-controller.js";
 import { Scheduler } from "../scheduling/scheduler.js";
-import type { ApprovalRequest, ApprovalStatus } from "./types.js";
+import { TaskWatcherManager } from "./task-watcher.js";
+import type { ApprovalRequest, ApprovalStatus, NotificationAction } from "./types.js";
 
 // Re-export for backward compatibility (consumed by core/index.ts and external modules)
 export { buildFixPrompt, buildRetryPrompt };
@@ -91,7 +96,10 @@ export class Orchestrator extends TypedEmitter {
   private slaMonitor?: SLAMonitor;
   private qualityController?: QualityController;
   private scheduler?: Scheduler;
+  private watcherMgr?: TaskWatcherManager;
   private telegramPoller?: TelegramCallbackPoller;
+  private peerStore?: PeerStore;
+  private channelGateway?: ChannelGateway;
   private configWatcher?: FSWatcher;
   private configReloadTimer?: ReturnType<typeof setTimeout>;
 
@@ -105,9 +113,12 @@ export class Orchestrator extends TypedEmitter {
   getWorkDir(): string { return this.workDir; }
   getHooks(): HookRegistry { return this.hookRegistry; }
   getNotificationRouter(): NotificationRouter | undefined { return this.notificationRouter; }
+  getPeerStore(): PeerStore | undefined { return this.peerStore; }
+  getChannelGateway(): ChannelGateway | undefined { return this.channelGateway; }
   getSLAMonitor(): SLAMonitor | undefined { return this.slaMonitor; }
   getQualityController(): QualityController | undefined { return this.qualityController; }
   getScheduler(): Scheduler | undefined { return this.scheduler; }
+  getWatcherManager(): TaskWatcherManager | undefined { return this.watcherMgr; }
 
   constructor(workDirOrOptions?: string | OrchestratorOptions) {
     super();
@@ -292,6 +303,9 @@ export class Orchestrator extends TypedEmitter {
 
       // Start Telegram callback poller for interactive approval buttons
       this.startTelegramApprovalPoller();
+    } else if (this.notificationRouter && this.hasTelegramGatewayEnabled()) {
+      // Start Telegram poller even without approval gates when gateway inbound is enabled
+      this.startTelegramApprovalPoller();
     }
 
     // Initialize escalation manager if configured
@@ -320,14 +334,75 @@ export class Orchestrator extends TypedEmitter {
     this.qualityController.init();
     this.planExec.setQualityController(this.qualityController);
 
-    // Initialize scheduler if enabled or any plan has a schedule
-    const hasScheduledPlans = (this.config.settings.enableScheduler !== false) &&
-      (this.registry.getAllPlans?.() ?? []).some(p => !!p.schedule);
-    if (this.config.settings.enableScheduler || hasScheduledPlans) {
+    // Initialize scheduler (always available — zero cost when no schedules exist)
+    if (this.config.settings.enableScheduler !== false) {
       this.scheduler = new Scheduler(ctx);
       this.scheduler.setExecutor((planId) => this.planExec.executePlan(planId));
       this.scheduler.init();
     }
+
+    // Build the shared action executor (used by notification rules and task watchers)
+    const actionExecutor = this.buildActionExecutor(ctx);
+
+    // Wire action executor to notification router
+    if (this.notificationRouter) {
+      this.notificationRouter.setActionExecutor(actionExecutor);
+    }
+
+    // Initialize task watcher manager (always available — zero cost when no watchers)
+    this.watcherMgr = new TaskWatcherManager(this);
+    this.watcherMgr.setActionExecutor(actionExecutor);
+    this.watcherMgr.start();
+  }
+
+  /**
+   * Build the action executor callback — handles create_task, execute_plan,
+   * run_script, send_notification actions triggered by notification rules
+   * or task watchers.
+   */
+  private buildActionExecutor(ctx: OrchestratorContext): (action: NotificationAction) => Promise<string> {
+    return async (action: NotificationAction): Promise<string> => {
+      switch (action.type) {
+        case "create_task": {
+          const task = this.addTask({
+            title: action.title,
+            description: action.description,
+            assignTo: action.assignTo,
+            expectations: action.expectations,
+          });
+          return `Task created: [${task.id}] "${task.title}" → ${task.assignTo}`;
+        }
+        case "execute_plan": {
+          const plan = this.registry.getPlan?.(action.planId);
+          if (!plan) throw new Error(`Plan "${action.planId}" not found`);
+          const result = this.planExec.executePlan(action.planId);
+          return `Plan "${plan.name}" executed: ${result.tasks.length} tasks created`;
+        }
+        case "run_script": {
+          const { execSync } = await import("node:child_process");
+          const timeout = action.timeoutMs ?? 30_000;
+          const result = execSync(action.command, {
+            cwd: ctx.workDir,
+            timeout,
+            stdio: ["ignore", "pipe", "pipe"],
+            maxBuffer: 5 * 1024 * 1024,
+          });
+          return `Script completed: ${result.toString().trim().slice(0, 200)}`;
+        }
+        case "send_notification": {
+          if (!this.notificationRouter) throw new Error("Notification router not available");
+          const result = await this.notificationRouter.sendDirect({
+            channel: action.channel,
+            title: action.title,
+            body: action.body,
+            severity: action.severity,
+          });
+          return `Notification sent: ${result.id}`;
+        }
+        default:
+          throw new Error(`Unknown action type: ${(action as { type: string }).type}`);
+      }
+    };
   }
 
   /**
@@ -476,7 +551,7 @@ export class Orchestrator extends TypedEmitter {
   getPlan(planId: string): Plan | undefined { return this.planExec.getPlan(planId); }
   getPlanByName(name: string): Plan | undefined { return this.planExec.getPlanByName(name); }
   getAllPlans(): Plan[] { return this.planExec.getAllPlans(); }
-  updatePlan(planId: string, updates: { data?: string; status?: PlanStatus; name?: string }): Plan { return this.planExec.updatePlan(planId, updates); }
+  updatePlan(planId: string, updates: Partial<Omit<Plan, "id">>): Plan { return this.planExec.updatePlan(planId, updates); }
   deletePlan(planId: string): boolean { return this.planExec.deletePlan(planId); }
 
   // ─── Project Memory ──────────────────────────────────
@@ -792,8 +867,17 @@ export class Orchestrator extends TypedEmitter {
    * The poller listens for inline keyboard button presses and routes them
    * to the ApprovalManager for approve/reject/revise actions.
    */
+  /** Check if any Telegram channel has gateway.enableInbound set to true. */
+  private hasTelegramGatewayEnabled(): boolean {
+    const channels = this.config.settings.notifications?.channels;
+    if (!channels) return false;
+    return Object.values(channels).some(
+      ch => ch.type === "telegram" && ch.gateway?.enableInbound,
+    );
+  }
+
   private startTelegramApprovalPoller(): void {
-    if (!this.approvalMgr || !this.notificationRouter) return;
+    if (!this.notificationRouter) return;
 
     // Find the Telegram channel instance from notification config
     const telegramConfigKey = Object.keys(this.config.settings.notifications?.channels ?? {})
@@ -806,26 +890,59 @@ export class Orchestrator extends TypedEmitter {
 
     const botToken = telegramChannel.getBotToken();
     const chatId = telegramChannel.getChatId();
-    const approvalMgr = this.approvalMgr;
 
     const poller = new TelegramCallbackPoller(botToken, chatId);
 
-    const resolver: ApprovalCallbackResolver = {
-      approve: async (requestId, resolvedBy) => {
-        const result = approvalMgr.approve(requestId, resolvedBy);
-        return result ? { ok: true } : { ok: false, error: "Not found or already resolved" };
-      },
-      reject: async (requestId, feedback, resolvedBy) => {
-        const result = approvalMgr.reject(requestId, feedback, resolvedBy);
-        return result ? { ok: true } : { ok: false, error: "Not found, already resolved, or max rejections reached" };
-      },
-    };
+    // Build approval resolver (if approval manager is available)
+    const approvalMgr = this.approvalMgr;
+    let resolver: ApprovalCallbackResolver | undefined;
+    if (approvalMgr) {
+      resolver = {
+        approve: async (requestId, resolvedBy) => {
+          const result = approvalMgr.approve(requestId, resolvedBy);
+          return result ? { ok: true } : { ok: false, error: "Not found or already resolved" };
+        },
+        reject: async (requestId, feedback, resolvedBy) => {
+          const result = approvalMgr.reject(requestId, feedback, resolvedBy);
+          return result ? { ok: true } : { ok: false, error: "Not found, already resolved, or max rejections reached" };
+        },
+      };
+      poller.setResolver(resolver);
+    }
 
-    poller.setResolver(resolver);
+    // Check if inbound gateway is enabled for this Telegram channel
+    const channelConfig = this.config.settings.notifications?.channels[telegramConfigKey];
+    if (channelConfig?.gateway?.enableInbound) {
+      // Initialize peer store
+      this.peerStore = new FilePeerStore(this.polpoDir);
+
+      // Create ChannelGateway with typing indicator support
+      this.channelGateway = new ChannelGateway({
+        orchestrator: this,
+        peerStore: this.peerStore,
+        sessionStore: this.sessionStore,
+        channelConfig,
+        approvalResolver: resolver,
+        onTyping: (chatId) => poller.sendTyping(chatId),
+      });
+
+      // Send partial responses as separate Telegram messages during multi-turn tool loops
+      this.channelGateway.setPartialResponseHandler((chatId, text) => poller.sendPartial(chatId, text));
+
+      // Attach gateway adapter to poller
+      const adapter = new TelegramGatewayAdapter(this.channelGateway);
+      poller.setGateway(adapter);
+
+      this.emit("log", {
+        level: "info",
+        message: `Telegram channel gateway started (dmPolicy: ${channelConfig.gateway.dmPolicy ?? "allowlist"}, inbound: enabled)`,
+      });
+    }
+
     poller.start(2000); // Poll every 2 seconds
     this.telegramPoller = poller;
 
-    this.emit("log", { level: "info", message: "Telegram approval callback poller started" });
+    this.emit("log", { level: "info", message: "Telegram callback poller started" });
   }
 
   private seedTasks(): void {

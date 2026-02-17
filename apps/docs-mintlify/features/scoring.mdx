@@ -176,7 +176,7 @@ The QualityController aggregates metrics per entity (task, agent, or plan):
 
 The SLAMonitor tracks deadlines on tasks and plans, emitting warning and violation events as deadlines approach or pass.
 
-The monitor runs on the orchestrator tick loop, checking all active tasks and plans with deadlines at a configurable interval (default: 30 seconds).
+The monitor runs on Polpo's tick loop, checking all active tasks and plans with deadlines at a configurable interval (default: 30 seconds).
 
 <Frame>
   <img src="/sla-monitor.svg" alt="SLA monitor: task with deadline → 80% elapsed: warning → deadline passed: violated → completes in time: met" />

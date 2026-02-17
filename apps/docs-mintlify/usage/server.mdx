@@ -9,7 +9,7 @@ description: "HTTP API server with SSE and WebSocket streaming"
 polpo serve --port 3890 --api-key my-secret
 ```
 
-The server provides a REST API, Server-Sent Events (SSE), and WebSocket streaming.
+The server provides a REST API, an OpenAI-compatible chat endpoint, Server-Sent Events (SSE), and WebSocket streaming.
 
 ## Base URL
 
@@ -99,16 +99,33 @@ When `--api-key` is set, all requests must include the key:
 | `GET` | `/memory` | Get project memory |
 | `PUT` | `/memory` | Update project memory |
 
-### Chat / AI Generation
+### Chat (OpenAI-compatible)
+
+The primary way to talk to Polpo programmatically:
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `POST` | `/chat` | Chat about project state |
-| `POST` | `/chat/generate-plan` | Generate plan from prompt |
-| `POST` | `/chat/prepare-task` | LLM-enriched task preparation |
-| `POST` | `/chat/generate-team` | Generate team from description |
-| `POST` | `/chat/refine-team` | Refine team with feedback |
-| `POST` | `/chat/refine-plan` | Refine plan with feedback |
+| `POST` | `/v1/chat/completions` | Talk to Polpo (OpenAI-compatible, streaming + non-streaming) |
+
+This endpoint accepts standard OpenAI-format messages and returns responses in OpenAI format. Polpo runs its full tool loop internally (37 tools) — you describe what you need, Polpo handles the rest. Supports `"stream": true` for SSE streaming.
+
+```bash
+curl http://localhost:3890/v1/chat/completions \
+  -H "Authorization: Bearer my-secret" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "messages": [{"role": "user", "content": "Create a plan to build a REST API for user management"}],
+    "stream": false
+  }'
+```
+
+### Sessions
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/chat/sessions` | List all sessions |
+| `GET` | `/chat/sessions/:id/messages` | Get messages for a session |
+| `DELETE` | `/chat/sessions/:id` | Delete a session |
 
 ### Logs
 

@@ -731,7 +731,54 @@ export interface ChatMessage {
   ts: string;
 }
 
-export interface ChatResponse {
-  response: string;
-  sessionId: string;
+// === Chat Completions types (OpenAI-compatible) ===
+
+export interface ChatCompletionMessage {
+  role: "system" | "user" | "assistant";
+  content: string;
+}
+
+export interface ChatCompletionRequest {
+  messages: ChatCompletionMessage[];
+  stream?: boolean;
+  /** Polpo extension: target a specific project by ID. If omitted, uses the first registered project. */
+  project?: string;
+  /** Ignored — Polpo uses its configured orchestrator model. */
+  model?: string;
+}
+
+export interface ChatCompletionChoice {
+  index: number;
+  message: { role: "assistant"; content: string };
+  finish_reason: "stop" | "length";
+}
+
+export interface ChatCompletionResponse {
+  id: string;
+  object: "chat.completion";
+  created: number;
+  model: string;
+  choices: ChatCompletionChoice[];
+  usage: {
+    prompt_tokens: number;
+    completion_tokens: number;
+    total_tokens: number;
+  };
+}
+
+export interface ChatCompletionChunkDelta {
+  role?: string;
+  content?: string;
+}
+
+export interface ChatCompletionChunk {
+  id: string;
+  object: "chat.completion.chunk";
+  created: number;
+  model: string;
+  choices: Array<{
+    index: number;
+    delta: ChatCompletionChunkDelta;
+    finish_reason: string | null;
+  }>;
 }

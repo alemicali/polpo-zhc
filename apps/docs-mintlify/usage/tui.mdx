@@ -26,15 +26,15 @@ The TUI has 6 tabs, navigable with keyboard:
 
 ## Input Modes
 
-The Chat tab has three input modes that determine how free-text input (non-slash-command) is handled:
+The Chat tab supports three input modes that control how free-text input is handled:
 
 | Mode | Command | Behavior |
 |------|---------|----------|
-| **Task** | `/task` | Free text creates a new task |
+| **Chat** | `/chat` | Free text is a conversation with Polpo — it can create tasks, generate plans, manage the team, and answer questions using its 37 built-in tools |
+| **Task** | `/task` | Free text creates a new task directly |
 | **Plan** | `/plan` | Free text generates a plan with AI |
-| **Chat** | `/chat` | Free text is conversational Q&A with the orchestrator |
 
-The current mode is shown in the input prompt. Switch modes with the corresponding slash command.
+The default mode is Chat. Polpo handles most requests conversationally — use Task and Plan modes as shortcuts when you know exactly what you want.
 
 ## Slash Commands
 
@@ -127,8 +127,8 @@ In plan mode, type a natural language description and Polpo will:
 | Command | Description |
 |---------|-------------|
 | `/help` | Show all available commands |
-| `/chat` | Switch to chat mode |
-| `/task` | Switch to task mode |
+| `/chat` | Switch to chat mode (default) |
+| `/task` | Switch to task mode (shortcut for direct task creation) |
 | `/clear` | Clear the stream output |
 | `/quit` | Exit Polpo |
 

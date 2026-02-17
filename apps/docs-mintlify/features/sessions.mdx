@@ -7,7 +7,7 @@ Polpo records everything — chat history, agent transcripts, event logs, and pe
 
 ## Chat Sessions
 
-When you interact with Polpo via the TUI or REST API, your messages are persisted in **chat sessions**. This means you can close the terminal, reopen it, and your conversation history is still there.
+When you interact with Polpo via the TUI, the OpenAI-compatible endpoint (`POST /v1/chat/completions`), or the REST API, your messages are persisted in **chat sessions**. This means you can close the terminal, reopen it, and your conversation history is still there.
 
 ### How It Works
 
@@ -39,9 +39,12 @@ Each session stores:
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `POST` | `/chat` | Send a message (auto-creates or resumes a session) |
+| `POST` | `/v1/chat/completions` | Talk to Polpo (OpenAI-compatible, primary endpoint) |
+| `GET` | `/chat/sessions` | List all sessions |
+| `GET` | `/chat/sessions/:id/messages` | Get messages for a session |
+| `DELETE` | `/chat/sessions/:id` | Delete a session |
 
-The chat endpoint auto-resumes the latest session if it's less than 30 minutes old. Otherwise, it creates a new one.
+The TUI auto-resumes the latest session if it's less than 30 minutes old. Otherwise, it creates a new one.
 
 ### Session Events
 
@@ -88,7 +91,7 @@ Sessions accumulate over time. The `SessionStore` interface includes a `prune(ke
 
 ## Event Log
 
-Every event emitted by the orchestrator is captured in a persistent **LogStore**. Each time Polpo starts, it creates a new logging session.
+Every event Polpo emits is captured in a persistent **LogStore**. Each time Polpo starts, it creates a new logging session.
 
 ### Log Entries
 
@@ -154,19 +157,19 @@ While an agent is working on a task, Polpo tracks its activity in real-time. Thi
 </Frame>
 
 1. The **runner** polls the engine for activity every 1500ms
-2. Changes are written to the **RunStore** (so the orchestrator can read them)
-3. The **orchestrator** reads activity on each tick (every 5s) and emits `agent:activity` events
+2. Changes are written to the **RunStore** (so Polpo can read them)
+3. **Polpo** reads activity on each tick (every 5s) and emits `agent:activity` events
 4. The **TUI** and **Web UI** consume these events for live updates
 
 ### Stale Detection
 
-If `lastUpdate` hasn't changed for longer than `staleThreshold` (default: 5 minutes), the orchestrator emits an `agent:stale` event and may kill the agent.
+If `lastUpdate` hasn't changed for longer than `staleThreshold` (default: 5 minutes), Polpo emits an `agent:stale` event and may kill the agent.
 
 ---
 
 ## Per-Run Activity Logs
 
-Every runner writes a detailed **JSONL activity log** to `.polpo/logs/run-<runId>.jsonl`. This is a more granular record than the orchestrator event log — it captures individual tool calls, transcript messages, and activity snapshots.
+Every runner writes a detailed **JSONL activity log** to `.polpo/logs/run-<runId>.jsonl`. This is a more granular record than Polpo's event log — it captures individual tool calls, transcript messages, and activity snapshots.
 
 ### File Format
 

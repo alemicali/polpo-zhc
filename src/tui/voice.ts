@@ -15,7 +15,7 @@ import { mkdirSync, unlinkSync, readFileSync, statSync } from "node:fs";
 import { resolveApiKey } from "../llm/pi-client.js";
 import { safeEnv } from "../tools/safe-env.js";
 
-const DEFAULT_MODEL = "gpt-4o-mini-transcribe";
+const DEFAULT_MODEL = "gpt-4o-transcribe";
 const DEFAULT_LANG = "auto";
 const API_URL = "https://api.openai.com/v1/audio/transcriptions";
 
@@ -109,21 +109,31 @@ export async function transcribe(filePath: string): Promise<string> {
   const fileBuffer = readFileSync(filePath);
   const boundary = `----PolpoVoice${randomBytes(8).toString("hex")}`;
 
+  // Infer mime type from file extension
+  const ext = filePath.split(".").pop()?.toLowerCase() ?? "wav";
+  const MIME_MAP: Record<string, string> = {
+    wav: "audio/wav", ogg: "audio/ogg", oga: "audio/ogg",
+    mp3: "audio/mpeg", m4a: "audio/mp4", mp4: "audio/mp4",
+    webm: "audio/webm", flac: "audio/flac",
+  };
+  const mimeType = MIME_MAP[ext] ?? "audio/wav";
+  const filename = `recording.${ext}`;
+
   const parts: Buffer[] = [];
   const addField = (name: string, value: string) => {
     parts.push(Buffer.from(
       `--${boundary}\r\nContent-Disposition: form-data; name="${name}"\r\n\r\n${value}\r\n`,
     ));
   };
-  const addFile = (name: string, filename: string, buf: Buffer) => {
+  const addFile = (name: string, fname: string, buf: Buffer, contentType: string) => {
     parts.push(Buffer.from(
-      `--${boundary}\r\nContent-Disposition: form-data; name="${name}"; filename="${filename}"\r\nContent-Type: audio/wav\r\n\r\n`,
+      `--${boundary}\r\nContent-Disposition: form-data; name="${name}"; filename="${fname}"\r\nContent-Type: ${contentType}\r\n\r\n`,
     ));
     parts.push(buf);
     parts.push(Buffer.from("\r\n"));
   };
 
-  addFile("file", "recording.wav", fileBuffer);
+  addFile("file", filename, fileBuffer, mimeType);
   addField("model", model);
   if (language && language !== "auto") {
     addField("language", language);

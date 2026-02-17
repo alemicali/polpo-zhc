@@ -9,8 +9,8 @@ Polpo follows a **supervisor architecture**: it manages agent lifecycles, task a
 
 Under the hood, Polpo is composed of four layers:
 
-1. **Interface layer** — CLI, TUI, Web UI, and REST API provide different ways to talk to Polpo
-2. **Core** — the supervisor loop, task registry, plan executor, and all the managers (assessment, approvals, escalation, scheduling, etc.)
+1. **Interface layer** — CLI, TUI, Web UI, OpenAI-compatible chat endpoint (`/v1/chat/completions`), and REST API provide different ways to talk to Polpo
+2. **Core** — the supervisor loop, task registry, plan executor, system context (`.polpo/system-context.md`), project memory, and all the managers (assessment, approvals, escalation, scheduling, etc.)
 3. **Runner layer** — detached subprocesses that host individual agents, communicating with Polpo via the file-based RunStore
 4. **Agent layer** — the actual AI agents (Claude, GPT, Gemini, etc.) running on the built-in engine
 
@@ -22,7 +22,7 @@ Under the hood, Polpo is composed of four layers:
 
 All agents run on Polpo's **built-in engine** — a multi-provider LLM runtime powered by pi-agent-core. The engine handles agent spawning, tool execution, and activity tracking.
 
-Each agent run produces an `AgentHandle` that the orchestrator uses to monitor the agent:
+Each agent run produces an `AgentHandle` that Polpo uses to monitor the agent:
 
 ```typescript
 interface AgentHandle {
@@ -86,7 +86,7 @@ Polpo uses a **typed event emitter** with 55+ event types organized by category:
 | `notification:*` | sent, failed | Notification delivery |
 | `log` | — | General log messages |
 
-Events are consumed by the TUI, HTTP/SSE server, and WebSocket bridge. See [Events Reference](/reference/events) for full payload details.
+Events are consumed by the TUI, HTTP/SSE server, and notifications. See [Events Reference](/reference/events) for full payload details.
 
 ## Persistence
 
@@ -97,6 +97,7 @@ Events are consumed by the TUI, HTTP/SSE server, and WebSocket bridge. See [Even
 | Log Store | File-based store (default) | Persistent event log |
 | Plan Store | File-based store (default) | Plan definitions and status |
 | Memory | File (`.polpo/memory.md`) | Project context for agents |
+| System Context | File (`.polpo/system-context.md`) | Standing instructions for Polpo (injected into every conversation) |
 | Runner configs | JSON (`.polpo/tmp/`) | Temporary config for detached runners |
 
 File-based stores are the default. SQLite and JSON are available as alternatives via configuration.

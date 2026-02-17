@@ -385,8 +385,25 @@ export class TaskRunner {
     try {
       writeFileSync(configPath, JSON.stringify(runnerConfig, null, 2));
 
-      const runnerPath = join(dirname(fileURLToPath(import.meta.url)), "runner.js");
-      const child = cpSpawn(process.execPath, [runnerPath, "--config", configPath], {
+      // Resolve runner path: prefer compiled .js, fall back to .ts via tsx (dev mode)
+      const baseDir = dirname(fileURLToPath(import.meta.url));
+      const runnerJs = join(baseDir, "runner.js");
+      const runnerTs = join(baseDir, "runner.ts");
+      const useTs = !existsSync(runnerJs) && existsSync(runnerTs);
+      const runnerPath = useTs ? runnerTs : runnerJs;
+
+      let spawnArgs: string[];
+      if (useTs) {
+        // Dev mode: use tsx to run TypeScript directly.
+        // Resolve tsx the same way npx does — find the CLI entry point.
+        const tsxCli = join(baseDir, "../../node_modules/tsx/dist/cli.mjs");
+        spawnArgs = existsSync(tsxCli)
+          ? [process.execPath, tsxCli, runnerPath, "--config", configPath]
+          : [process.execPath, runnerPath, "--config", configPath]; // fallback
+      } else {
+        spawnArgs = [process.execPath, runnerPath, "--config", configPath];
+      }
+      const child = cpSpawn(spawnArgs[0], spawnArgs.slice(1), {
         detached: true,
         stdio: "ignore",
         cwd: this.ctx.workDir,

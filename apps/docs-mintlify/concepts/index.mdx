@@ -3,11 +3,11 @@ title: "Core Concepts"
 description: "Agents, tasks, and plans — the three building blocks of Polpo."
 ---
 
-When you talk to Polpo, everything revolves around three core primitives.
+Polpo is an AI agent that manages a team of other AI agents. You talk to Polpo, and it plans, delegates, reviews, and delivers. Everything revolves around three core primitives.
 
 ## Agents
 
-An agent is a named AI worker. You give it a model, a role, and optionally constrain which tools and files it can access. Agents are grouped into a **team** — your project's workforce.
+An agent is a named AI worker on Polpo's team. You give it a model, a role, and optionally constrain which tools and files it can access. Agents are grouped into a **team** — your project's workforce. They don't know about each other — Polpo handles all coordination.
 
 ```json
 {
@@ -19,8 +19,6 @@ An agent is a named AI worker. You give it a model, a role, and optionally const
   }
 }
 ```
-
-Agents run as detached subprocesses. They don't know about each other — Polpo handles all coordination.
 
 See [Agents](/concepts/agents) and [Teams](/concepts/teams) for the full reference.
 

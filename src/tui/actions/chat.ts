@@ -210,17 +210,11 @@ export async function startChat(
           { text: toolDesc, color: isError ? "red" : "green", dim: isError },
         ]);
 
-        // Handle switch_mode — update TUI input mode
-        if (call.name === "switch_mode" && result.startsWith("__switch_mode:")) {
-          const mode = result.split(":")[1] as "chat" | "plan" | "task";
-          store.setInputMode(mode);
-        }
-
         messages.push({
           role: "toolResult",
           toolCallId: call.id,
           toolName: call.name,
-          content: [{ type: "text", text: result.startsWith("__switch_mode:") ? `Switched to ${call.arguments.mode} mode.` : result }],
+          content: [{ type: "text", text: result }],
           isError,
           timestamp: Date.now(),
         });

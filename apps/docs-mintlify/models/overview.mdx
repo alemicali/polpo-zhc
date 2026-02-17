@@ -4,7 +4,7 @@ sidebarTitle: "Overview"
 description: "How Polpo resolves models, maps providers, and manages the LLM abstraction layer"
 ---
 
-Polpo is **fully provider-agnostic**. Every agent can use a different model from a different provider, the orchestrator runs on its own model, and you can configure fallback chains, cost limits, and custom endpoints — all from a single config file.
+Polpo is **fully provider-agnostic**. Every agent on the team can use a different model from a different provider, Polpo itself runs on its own model, and you can configure fallback chains, cost limits, and custom endpoints — all from a single config file.
 
 Under the hood, Polpo uses the [`@mariozechner/pi-ai`](https://github.com/nicolo-ribaudo/pi-ai) library which provides a unified interface to **22+ LLM providers** and hundreds of models, with built-in cost tracking, streaming, and OAuth support.
 
@@ -77,9 +77,9 @@ Polpo resolves which model to use through a layered system. Each layer can overr
 }
 ```
 
-### For the Orchestrator
+### For Polpo Itself
 
-The orchestrator uses its own model for plan generation, question detection, deadlock resolution, escalation decisions, and chat mode:
+Polpo uses its own model for conversations (via `/v1/chat/completions` and TUI chat), plan generation, question detection, deadlock resolution, and escalation decisions:
 
 1. `settings.orchestratorModel` in `polpo.json`
 2. `POLPO_MODEL` environment variable

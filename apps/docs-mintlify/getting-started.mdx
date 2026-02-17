@@ -53,7 +53,39 @@ description: "From zero to running agents in under 2 minutes."
    polpo serve --port 3000
    ```
 
-   Full REST API at `http://localhost:3000/api/v1/` — create tasks, execute plans, stream events via SSE.
+   OpenAI-compatible chat at `http://localhost:3000/v1/chat/completions` — talk to Polpo like any other LLM. Full REST API at `/api/v1/` for direct task, plan, and agent management.
+
+5. **Connect Telegram** (recommended)
+
+   Control Polpo from your phone. Create a bot via [@BotFather](https://t.me/botfather), then add the gateway to `.polpo/polpo.json`:
+
+   ```json
+   {
+     "settings": {
+       "notifications": {
+         "channels": {
+           "telegram": {
+             "type": "telegram",
+             "botToken": "${TELEGRAM_BOT_TOKEN}",
+             "chatId": "YOUR_CHAT_ID",
+             "gateway": {
+               "enableInbound": true,
+               "dmPolicy": "allowlist",
+               "allowFrom": ["YOUR_TELEGRAM_USER_ID"]
+             }
+           }
+         }
+       }
+     }
+   }
+   ```
+
+   ```bash
+   export TELEGRAM_BOT_TOKEN=123456:ABC-DEF...
+   polpo serve
+   ```
+
+   Now message your bot — send commands like `/status` and `/tasks`, approve work with `/approve`, or just chat naturally. See the full [Telegram setup guide](/usage/telegram).
 
 </Steps>
 

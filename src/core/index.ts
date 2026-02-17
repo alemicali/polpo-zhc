@@ -33,6 +33,10 @@ export type {
 // Approval
 export { ApprovalManager } from "./approval-manager.js";
 
+// Peer Identity & Channel Gateway
+export { FilePeerStore } from "./peer-store.js";
+export type { PeerStore } from "./peer-store.js";
+
 // Escalation
 export { EscalationManager } from "./escalation-manager.js";
 
@@ -43,6 +47,9 @@ export { QualityController } from "../quality/quality-controller.js";
 // Scheduling
 export { Scheduler } from "../scheduling/scheduler.js";
 export { parseCron, matchesCron, nextCronOccurrence, isCronExpression } from "../scheduling/cron.js";
+
+// Task Watchers
+export { TaskWatcherManager } from "./task-watcher.js";
 
 // Workflows
 export { discoverWorkflows, loadWorkflow, validateParams, instantiateWorkflow } from "./workflow.js";

@@ -111,39 +111,6 @@ export const RenameTeamSchema = z.object({
   name: z.string().min(1),
 });
 
-// ── Chat schemas ──────────────────────────────────────────────────────
-
-export const ChatMessageSchema = z.object({
-  message: z.string().min(1),
-  sessionId: z.string().optional(),
-});
-
-export const GeneratePlanSchema = z.object({
-  prompt: z.string().min(1),
-});
-
-export const PrepareTaskSchema = z.object({
-  description: z.string().min(1),
-  assignTo: z.string().min(1),
-  group: z.string().optional(),
-});
-
-export const GenerateTeamSchema = z.object({
-  description: z.string().min(1),
-});
-
-export const RefineTeamSchema = z.object({
-  currentData: z.string().min(1),
-  description: z.string().optional().default(""),
-  feedback: z.string().min(1),
-});
-
-export const RefinePlanSchema = z.object({
-  currentData: z.string().min(1),
-  prompt: z.string().optional().default(""),
-  feedback: z.string().min(1),
-});
-
 // ── Direct notification schema ─────────────────────────────────────────
 
 export const SendNotificationSchema = z.object({

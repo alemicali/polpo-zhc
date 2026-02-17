@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import type { Task, TaskStatus, DimensionScore, PlanStatus, PlanReport } from "./types.js";
+import type { Task, TaskStatus, DimensionScore, PlanStatus, PlanReport, ChannelType, PeerIdentity } from "./types.js";
 import type { LogStore } from "./log-store.js";
 
 export interface PolpoEventMap {
@@ -91,6 +91,22 @@ export interface PolpoEventMap {
 
   // Config
   "config:reloaded": { timestamp: string };
+
+  // Channel gateway & peers
+  "gateway:started": { channels: ChannelType[] };
+  "gateway:stopped": Record<string, never>;
+  "peer:paired": { peer: PeerIdentity; channel: ChannelType };
+  "peer:message": { peerId: string; channel: ChannelType; text: string; sessionId: string };
+  "peer:blocked": { peerId: string; channel: ChannelType; reason: string };
+  "peer:presence": { peerId: string; channel: ChannelType; status: "online" | "offline" };
+
+  // Task watchers
+  "watcher:created": { watcherId: string; taskId: string; targetStatus: TaskStatus };
+  "watcher:fired": { watcherId: string; taskId: string; targetStatus: TaskStatus; actionType: string };
+  "watcher:removed": { watcherId: string };
+
+  // Notification rule actions
+  "action:triggered": { ruleId: string; actionType: string; result?: string; error?: string };
 
   // General
   "log": { level: "info" | "warn" | "error" | "debug"; message: string };
