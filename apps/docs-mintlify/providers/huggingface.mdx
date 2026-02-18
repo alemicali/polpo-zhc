@@ -1,0 +1,66 @@
+---
+title: "Hugging Face"
+sidebarTitle: "Hugging Face"
+description: "Open models hosted on the Hugging Face Inference API."
+---
+
+Hugging Face provides hosted inference for thousands of open-source models. Use it to access any model on the HF Hub without running it locally.
+
+## Setup
+
+Get your token from [Hugging Face Settings](https://huggingface.co/settings/tokens).
+
+```bash
+export HF_TOKEN=hf_...
+```
+
+### Config
+
+```json
+{
+  "providers": {
+    "huggingface": "${HF_TOKEN}"
+  }
+}
+```
+
+### Use it
+
+```json
+{
+  "agents": [
+    { "name": "coder", "model": "huggingface:meta-llama/Llama-3.1-70B-Instruct" }
+  ]
+}
+```
+
+The `hf:` prefix auto-infers to the `huggingface` provider:
+
+```json
+{
+  "model": "hf:meta-llama/Llama-3.1-70B-Instruct"
+}
+```
+
+## Features
+
+| Feature | Supported |
+|---------|-----------|
+| Streaming | Yes |
+| Tool use | Model-dependent |
+| Vision (images) | Model-dependent |
+
+## Provider Details
+
+| | |
+|---|---|
+| **Provider ID** | `huggingface` |
+| **Env variable** | `HF_TOKEN` |
+| **API type** | Hugging Face Inference |
+| **Auto-infer prefix** | `hf:` |
+
+## Notes
+
+- Model IDs use the HuggingFace format: `org/model-name`.
+- Not all models on HF Hub support the Inference API. Check the model card for availability.
+- Free tier has rate limits. For production use, consider a [HF Pro subscription](https://huggingface.co/pricing) or [Inference Endpoints](https://huggingface.co/inference-endpoints).

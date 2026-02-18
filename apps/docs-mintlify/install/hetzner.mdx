@@ -1,0 +1,179 @@
+---
+title: "Hetzner"
+description: "Deploy Polpo on a Hetzner Cloud server with Docker and systemd."
+---
+
+## Overview
+
+[Hetzner Cloud](https://www.hetzner.com/cloud) offers high-performance VPS starting at ~$4/month with excellent European network. Polpo runs well on even the smallest instances.
+
+## Recommended specs
+
+| Workload | Instance | vCPU | RAM | Cost |
+|---|---|---|---|---|
+| Light (1-3 agents) | CX22 | 2 | 4 GB | ~$4/mo |
+| Medium (4-8 agents) | CX32 | 4 | 8 GB | ~$7/mo |
+| Heavy (8+ concurrent) | CX42 | 8 | 16 GB | ~$15/mo |
+
+## Deploy with Docker
+
+<Steps>
+
+1. **Create a server**
+
+   In the [Hetzner Cloud Console](https://console.hetzner.cloud), create a new server:
+   - **Image:** Ubuntu 24.04
+   - **Type:** CX22 or higher
+   - **Location:** Pick the closest to your LLM provider (Nuremberg/Falkenstein for EU, Ashburn for US)
+   - **SSH key:** Add your public key
+
+2. **SSH in and install Docker**
+
+   ```bash
+   ssh root@YOUR_SERVER_IP
+   curl -fsSL https://get.docker.com | sh
+   ```
+
+3. **Create workspace**
+
+   ```bash
+   mkdir -p /opt/polpo/workspace
+   cd /opt/polpo
+   ```
+
+4. **Create `docker-compose.yml`**
+
+   ```yaml
+   services:
+     polpo:
+       image: ghcr.io/openpolpo/openpolpo:latest
+       ports:
+         - "3000:3000"
+       volumes:
+         - ./workspace:/workspace
+       environment:
+         - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+         - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+       restart: unless-stopped
+   ```
+
+5. **Set API keys**
+
+   Create `/opt/polpo/.env`:
+
+   ```bash
+   ANTHROPIC_API_KEY=sk-ant-...
+   ```
+
+6. **Start**
+
+   ```bash
+   docker compose up -d
+   ```
+
+</Steps>
+
+## Deploy without Docker
+
+If you prefer running Node.js directly:
+
+<Steps>
+
+1. **Install Node.js 22**
+
+   ```bash
+   curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+   apt-get install -y nodejs git
+   ```
+
+2. **Install Polpo**
+
+   ```bash
+   npm install -g openpolpo
+   mkdir -p /opt/polpo/workspace
+   cd /opt/polpo/workspace
+   polpo init
+   ```
+
+3. **Create systemd service**
+
+   Create `/etc/systemd/system/polpo.service`:
+
+   ```ini
+   [Unit]
+   Description=Polpo Agent Orchestrator
+   After=network.target
+
+   [Service]
+   Type=simple
+   WorkingDirectory=/opt/polpo/workspace
+   EnvironmentFile=/opt/polpo/.env
+   ExecStart=/usr/bin/node /usr/lib/node_modules/openpolpo/dist/cli/index.js serve --host 0.0.0.0 --port 3000 --dir /opt/polpo/workspace
+   Restart=always
+   RestartSec=5
+
+   [Install]
+   WantedBy=multi-user.target
+   ```
+
+4. **Enable and start**
+
+   ```bash
+   systemctl daemon-reload
+   systemctl enable polpo
+   systemctl start polpo
+   ```
+
+</Steps>
+
+## SSL with Caddy
+
+[Caddy](https://caddyserver.com) is the simplest way to get automatic HTTPS on Hetzner:
+
+```bash
+apt install -y debian-keyring debian-archive-keyring apt-transport-https
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | tee /etc/apt/sources.list.d/caddy-stable.list
+apt update && apt install caddy
+```
+
+Create `/etc/caddy/Caddyfile`:
+
+```
+polpo.yourdomain.com {
+    reverse_proxy localhost:3000
+}
+```
+
+```bash
+systemctl reload caddy
+```
+
+Caddy automatically provisions Let's Encrypt certificates. Point your domain's DNS A record to the Hetzner server IP.
+
+## Hetzner Firewall
+
+In the Cloud Console, create a firewall rule:
+
+| Direction | Protocol | Port | Source |
+|---|---|---|---|
+| Inbound | TCP | 22 | Your IP |
+| Inbound | TCP | 80, 443 | Any |
+
+Attach it to your server. This blocks direct access to port 3000 from the internet — all traffic goes through Caddy.
+
+## Volumes (optional)
+
+For larger workspaces, attach a Hetzner Volume:
+
+```bash
+# In the Cloud Console: create a volume, attach to server
+# It appears as /dev/sdb or similar
+
+mkfs.ext4 /dev/sdb
+mkdir -p /opt/polpo/workspace
+mount /dev/sdb /opt/polpo/workspace
+
+# Persist across reboots
+echo '/dev/sdb /opt/polpo/workspace ext4 defaults 0 2' >> /etc/fstab
+```

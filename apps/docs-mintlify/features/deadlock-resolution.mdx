@@ -3,8 +3,6 @@ title: "Deadlock Resolution"
 description: "LLM-powered detection and resolution of blocked tasks"
 ---
 
-## The Problem
-
 A **deadlock** occurs when a task depends on another task that has permanently failed. The blocked task can never start because its dependency will never complete.
 
 <Frame>
@@ -15,7 +13,7 @@ Without intervention, tasks B and C would be stuck forever.
 
 ## Detection
 
-On every tick (5s), the orchestrator scans for deadlocks:
+On every tick (5s), Polpo scans for deadlocks:
 
 1. Find all `pending` tasks
 2. Check if any depend on `failed` tasks (with max retries exhausted)
@@ -25,7 +23,7 @@ This triggers the `deadlock:detected` event with the list of blocked task IDs.
 
 ## LLM Resolution
 
-Polpo uses an LLM to evaluate each deadlocked task and decide the best action:
+Polpo evaluates each deadlocked task with an LLM and decides the best action:
 
 ### Strategy: Absorb
 

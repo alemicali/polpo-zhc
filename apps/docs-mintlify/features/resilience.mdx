@@ -9,7 +9,7 @@ Polpo is designed to survive crashes without losing work. This guide explains th
 
 Three components work together for crash resilience:
 
-1. **Detached runners** — agent processes run independently of the orchestrator
+1. **Detached runners** — agent processes run independently of Polpo's main process
 2. **RunStore** — SQLite-backed registry of running processes
 3. **Orphan recovery** — automatic reconnection on restart
 
@@ -22,8 +22,8 @@ When Polpo spawns an agent, it doesn't run it in-process. Instead, it launches a
 </Frame>
 
 **Key properties:**
-- Runner process has its own PID and survives orchestrator crashes
-- Uses `detached: true` + `unref()` so the orchestrator can exit without killing it
+- Runner process has its own PID and survives Polpo crashes
+- Uses `detached: true` + `unref()` so Polpo can exit without killing it
 - Config is passed via a temporary JSON file in `.polpo/tmp/`
 - Results are written to SQLite (RunStore), not IPC
 
@@ -47,7 +47,7 @@ interface RunRecord {
 }
 ```
 
-Both the orchestrator and runners write to the same SQLite database with `busy_timeout=5000` to handle concurrent access.
+Both Polpo and its runners write to the same SQLite database with `busy_timeout=5000` to handle concurrent access.
 
 ## Recovery Flow
 
@@ -58,8 +58,8 @@ When Polpo starts, it checks for orphaned processes:
 </Frame>
 
 This means:
-- If the **orchestrator** crashes, runners keep working. On restart, Polpo reconnects.
-- If a **runner** crashes, the orchestrator detects the dead PID and retries the task.
+- If **Polpo** crashes, runners keep working. On restart, Polpo reconnects.
+- If a **runner** crashes, Polpo detects the dead PID and retries the task.
 - If **both** crash, on restart the dead PIDs trigger retries.
 
 ## Graceful Shutdown

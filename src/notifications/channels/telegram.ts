@@ -1,6 +1,9 @@
 import type { NotificationChannel, Notification, OutcomeAttachment } from "../types.js";
 import type { NotificationChannelConfig } from "../../core/types.js";
-import { basename } from "node:path";
+import { basename, join } from "node:path";
+import { mkdirSync, writeFileSync, unlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { randomBytes } from "node:crypto";
 
 /**
  * Telegram notification channel — sends messages via Bot API.
@@ -269,6 +272,7 @@ export class TelegramCallbackPoller {
   private timer?: ReturnType<typeof setInterval>;
   private pendingRevise = new Map<string, string>(); // chatId → requestId (waiting for feedback text)
   private resolver?: ApprovalCallbackResolver;
+  private gateway?: TelegramGatewayHandler;
 
   constructor(botToken: string, chatId: string) {
     this.botToken = botToken;
@@ -277,6 +281,12 @@ export class TelegramCallbackPoller {
 
   setResolver(resolver: ApprovalCallbackResolver): void {
     this.resolver = resolver;
+  }
+
+  /** Attach a ChannelGateway handler for full inbound message routing.
+   *  When set, non-approval messages are forwarded to the gateway instead of being ignored. */
+  setGateway(handler: TelegramGatewayHandler): void {
+    this.gateway = handler;
   }
 
   start(intervalMs = 2000): void {
@@ -314,17 +324,24 @@ export class TelegramCallbackPoller {
 
         if (update.callback_query) {
           await this.handleCallback(update.callback_query);
-        } else if (update.message?.text) {
-          await this.handleTextMessage(update.message);
+        } else if (update.message) {
+          const msg = update.message;
+          const msgKeys = Object.keys(msg).filter(k => !["message_id", "chat", "from", "date"].includes(k));
+          console.error(`[polpo/telegram] update ${update.update_id}: keys=[${msgKeys.join(",")}]` +
+            (msg.voice ? ` voice=${msg.voice.mime_type}` : "") +
+            (msg.audio ? ` audio=${msg.audio.mime_type}` : "") +
+            (msg.document ? ` document=${msg.document.mime_type} file_name=${(msg.document as any).file_name}` : "") +
+            (msg.text ? ` text="${msg.text.slice(0, 40)}"` : ""));
+          await this.handleMessage(update.message);
         }
       }
-    } catch {
-      // Silently retry on next interval
+    } catch (err) {
+      console.error(`[polpo/telegram] Poll error: ${err instanceof Error ? err.stack : String(err)}`);
     }
   }
 
   private async handleCallback(query: TelegramCallbackQuery): Promise<void> {
-    if (!this.resolver || !query.data) return;
+    if (!query.data) return;
 
     const [action, requestId] = query.data.split(":", 2);
     if (!action || !requestId) return;
@@ -333,6 +350,20 @@ export class TelegramCallbackPoller {
     await this.answerCallback(query.id);
 
     const chatId = String(query.message?.chat?.id ?? this.chatId);
+    const senderId = String(query.from?.id ?? query.message?.chat?.id ?? this.chatId);
+    const senderName = query.from?.first_name;
+
+    // If gateway is available, route through it for identity tracking
+    if (this.gateway) {
+      const response = await this.gateway.handleApprovalCallback(
+        action, requestId, chatId, senderId, senderName,
+      );
+      if (response) await this.sendReply(chatId, markdownToHtml(response));
+      return;
+    }
+
+    // Fallback: original approval-only logic
+    if (!this.resolver) return;
 
     if (action === "approve") {
       const result = await this.resolver.approve(requestId, "telegram-user");
@@ -341,8 +372,6 @@ export class TelegramCallbackPoller {
         : `❌ Error: ${result.error}`;
       await this.sendReply(chatId, msg);
     } else if (action === "reject") {
-      // Reject always requires a reason — enter feedback mode, then revise
-      // (a reject without explanation is useless to the agent)
       this.pendingRevise.set(chatId, requestId);
       await this.sendForceReply(chatId,
         "❌ <b>Rejected — tell the agent why</b>\n\nReply with your feedback. The task will be re-executed with your notes.",
@@ -350,20 +379,142 @@ export class TelegramCallbackPoller {
     }
   }
 
-  private async handleTextMessage(message: TelegramMessage): Promise<void> {
-    if (!this.resolver || !message.text) return;
-
+  private async handleMessage(message: TelegramMessage): Promise<void> {
     const chatId = String(message.chat.id);
+    const senderId = String(message.from?.id ?? message.chat.id);
+    const senderName = message.from?.first_name;
+
+    // ── Extract text from voice/audio messages via transcription ──
+    let text = message.text ?? message.caption;
+
+    // Documents with audio mime types (e.g. WhatsApp voice forwarded to Telegram)
+    const audioDocument = message.document?.mime_type?.startsWith("audio/") ? message.document : undefined;
+    const voiceFile = message.voice ?? message.audio ?? message.video_note ?? audioDocument;
+
+    if (!text && voiceFile) {
+      try {
+        await this.sendChatAction(chatId, "typing");
+        const transcribed = await this.transcribeVoice(voiceFile.file_id, voiceFile.mime_type);
+        if (!transcribed?.trim()) {
+          await this.sendReply(chatId, `<i>Non sono riuscito a capire il vocale (trascrizione vuota).</i>`);
+          return;
+        }
+        text = `[The user sent a voice message. It has already been transcribed for you — the following is the exact transcription. Respond to its content directly, do NOT say you cannot hear or transcribe audio.]\n${transcribed}`;
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        await this.sendReply(chatId,
+          `<i>Non sono riuscito a trascrivere il vocale: ${escapeHtml(errMsg)}</i>`);
+        return;
+      }
+    }
+
+    if (!text) return; // No usable content
+
+    // ── Gateway mode: route ALL messages through the ChannelGateway ──
+    if (this.gateway) {
+      // Send typing immediately and keep refreshing every 4s until we respond
+      await this.sendChatAction(chatId, "typing");
+      const typingInterval = setInterval(() => {
+        this.sendChatAction(chatId, "typing").catch(() => {});
+      }, 4000);
+
+      try {
+        const response = await this.gateway.handleInboundMessage(
+          senderId, chatId, text, senderName, String(message.message_id),
+        );
+        if (response) await this.sendReply(chatId, markdownToHtml(response));
+      } finally {
+        clearInterval(typingInterval);
+      }
+      return;
+    }
+
+    // ── Legacy mode: only handle pending rejection feedback ──
+    if (!this.resolver) return;
+
     const requestId = this.pendingRevise.get(chatId);
-    if (!requestId) return; // Not waiting for feedback
+    if (!requestId) return;
 
     this.pendingRevise.delete(chatId);
 
-    const result = await this.resolver.reject(requestId, message.text, "telegram-user");
+    const result = await this.resolver.reject(requestId, text, "telegram-user");
     const msg = result.ok
-      ? `❌ Rejected — task will retry with your feedback:\n<i>${escapeHtml(message.text)}</i>`
+      ? `❌ Rejected — task will retry with your feedback:\n<i>${escapeHtml(text)}</i>`
       : `❌ Error: ${result.error}`;
     await this.sendReply(chatId, msg);
+  }
+
+  /**
+   * Download a file from Telegram and transcribe it using OpenAI STT.
+   *
+   * Telegram voice messages are OGG Opus (.oga) which is NOT in OpenAI's
+   * supported formats (mp3, mp4, mpeg, mpga, m4a, wav, webm).
+   * We convert to mp3 via ffmpeg before sending to the API.
+   */
+  private async transcribeVoice(fileId: string, mimeType?: string): Promise<string> {
+    // 1. Get file path from Telegram
+    const fileInfoUrl = `https://api.telegram.org/bot${this.botToken}/getFile`;
+    const fileInfoRes = await fetch(fileInfoUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file_id: fileId }),
+    });
+    if (!fileInfoRes.ok) throw new Error(`Telegram getFile failed: ${fileInfoRes.status}`);
+    const fileInfo = await fileInfoRes.json() as { ok: boolean; result?: { file_path?: string } };
+    if (!fileInfo.ok || !fileInfo.result?.file_path) throw new Error("Could not get file path from Telegram");
+
+    // 2. Download the file
+    const downloadUrl = `https://api.telegram.org/file/bot${this.botToken}/${fileInfo.result.file_path}`;
+    const downloadRes = await fetch(downloadUrl);
+    if (!downloadRes.ok) throw new Error(`Download failed: ${downloadRes.status}`);
+    const buffer = Buffer.from(await downloadRes.arrayBuffer());
+
+    if (buffer.length < 100) throw new Error("Audio too short");
+
+    // 3. Save the original file
+    const tmpId = randomBytes(6).toString("hex");
+    const MIME_EXT: Record<string, string> = {
+      "audio/mpeg": ".mp3", "audio/mp3": ".mp3",
+      "audio/mp4": ".m4a", "audio/m4a": ".m4a", "audio/x-m4a": ".m4a", "audio/aac": ".m4a",
+      "audio/wav": ".wav", "audio/x-wav": ".wav", "audio/wave": ".wav",
+      "audio/webm": ".webm",
+      "audio/ogg": ".oga", "audio/x-opus+ogg": ".oga",
+      "audio/flac": ".flac", "audio/x-flac": ".flac",
+    };
+    const origExt = (mimeType && MIME_EXT[mimeType]) ?? ".oga";
+    const origPath = join(tmpdir(), `polpo-voice-${tmpId}${origExt}`);
+    writeFileSync(origPath, buffer);
+
+    // 4. Convert to mp3 if not already a supported format
+    //    OpenAI supports: mp3, mp4, mpeg, mpga, m4a, wav, webm
+    const SUPPORTED = new Set([".mp3", ".mp4", ".m4a", ".wav", ".webm", ".mpeg", ".mpga"]);
+    let transcribePath = origPath;
+
+    if (!SUPPORTED.has(origExt)) {
+      const mp3Path = join(tmpdir(), `polpo-voice-${tmpId}.mp3`);
+      const { execSync } = await import("node:child_process");
+      try {
+        execSync(`ffmpeg -i "${origPath}" -y -ar 16000 -ac 1 -b:a 64k "${mp3Path}"`, {
+          stdio: "ignore",
+          timeout: 15_000,
+        });
+        transcribePath = mp3Path;
+      } catch (err) {
+        // ffmpeg failed — try sending original anyway
+      }
+    }
+
+    try {
+      // 5. Transcribe using the shared transcribe function
+      const { transcribe } = await import("../../tui/voice.js");
+      const text = await transcribe(transcribePath);
+      return text;
+    } finally {
+      try { unlinkSync(origPath); } catch { /* cleanup */ }
+      if (transcribePath !== origPath) {
+        try { unlinkSync(transcribePath); } catch { /* cleanup */ }
+      }
+    }
   }
 
   private async answerCallback(callbackQueryId: string): Promise<void> {
@@ -372,6 +523,25 @@ export class TelegramCallbackPoller {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ callback_query_id: callbackQueryId }),
+    }).catch(() => {});
+  }
+
+  /** Send typing indicator to a chat. */
+  async sendTyping(chatId: string): Promise<void> {
+    await this.sendChatAction(chatId, "typing");
+  }
+
+  /** Send a partial response as a separate message (for multi-turn tool loops). */
+  async sendPartial(chatId: string, text: string): Promise<void> {
+    await this.sendReply(chatId, markdownToHtml(text));
+  }
+
+  private async sendChatAction(chatId: string, action: "typing" | "upload_photo" | "upload_document" = "typing"): Promise<void> {
+    const url = `https://api.telegram.org/bot${this.botToken}/sendChatAction`;
+    await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: chatId, action }),
     }).catch(() => {});
   }
 
@@ -408,6 +578,28 @@ export class TelegramCallbackPoller {
   }
 }
 
+/**
+ * Gateway handler interface — bridges TelegramCallbackPoller to ChannelGateway.
+ * This decouples the Telegram polling logic from the gateway routing logic.
+ */
+export interface TelegramGatewayHandler {
+  handleInboundMessage(
+    senderId: string,
+    chatId: string,
+    text: string,
+    senderName?: string,
+    messageId?: string,
+  ): Promise<string | undefined>;
+
+  handleApprovalCallback(
+    action: string,
+    requestId: string,
+    chatId: string,
+    senderId: string,
+    senderName?: string,
+  ): Promise<string | undefined>;
+}
+
 // ─── Types for callback resolver ───────────
 
 export interface ApprovalCallbackResult {
@@ -433,16 +625,44 @@ interface TelegramUpdate {
   message?: TelegramMessage;
 }
 
+interface TelegramUser {
+  id: number;
+  is_bot: boolean;
+  first_name: string;
+  last_name?: string;
+  username?: string;
+}
+
 interface TelegramCallbackQuery {
   id: string;
   data?: string;
   message?: TelegramMessage;
+  from?: TelegramUser;
+}
+
+interface TelegramFile {
+  file_id: string;
+  file_unique_id: string;
+  file_size?: number;
+  duration?: number;
+  mime_type?: string;
 }
 
 interface TelegramMessage {
   message_id: number;
   chat: { id: number };
+  from?: TelegramUser;
   text?: string;
+  /** Voice message (.ogg opus) */
+  voice?: TelegramFile;
+  /** Audio file (music, etc.) */
+  audio?: TelegramFile & { title?: string; performer?: string };
+  /** Round video note */
+  video_note?: TelegramFile;
+  /** File attachment (document). Audio files forwarded from WhatsApp arrive as documents. */
+  document?: TelegramFile & { file_name?: string };
+  /** Caption text (on media messages) */
+  caption?: string;
 }
 
 // ─── Utility functions ─────────────────────

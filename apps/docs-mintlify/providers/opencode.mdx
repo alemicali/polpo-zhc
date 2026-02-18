@@ -1,0 +1,50 @@
+---
+title: "OpenCode"
+sidebarTitle: "OpenCode"
+description: "Polpo's free default provider — no API key required."
+---
+
+OpenCode is the default provider when no model is configured. It's free and requires no API key, making it the easiest way to try Polpo without any setup.
+
+## Setup
+
+No setup needed. OpenCode works out of the box.
+
+If you want to use a specific API key:
+
+```bash
+export OPENCODE_API_KEY=...  # optional
+```
+
+### Use it
+
+```json
+{
+  "agents": [
+    { "name": "coder", "model": "opencode:big-pickle" }
+  ]
+}
+```
+
+Or just don't configure any model — Polpo defaults to `opencode:big-pickle`.
+
+## Models
+
+| Model | Cost | Best for |
+|-------|------|----------|
+| `big-pickle` | Free | Trying Polpo, basic tasks |
+
+## Provider Details
+
+| | |
+|---|---|
+| **Provider ID** | `opencode` |
+| **Env variable** | `OPENCODE_API_KEY` (optional) |
+| **API type** | OpenCode API |
+| **Auto-infer prefix** | `big-pickle` |
+
+## Notes
+
+- This is the **default model** — if you don't configure anything, Polpo uses `opencode:big-pickle`.
+- Good for trying Polpo out and verifying your setup works before adding paid providers.
+- For production workloads, switch to a more capable provider like [Anthropic](/providers/anthropic) or [OpenAI](/providers/openai).

@@ -1,0 +1,85 @@
+---
+title: "vLLM"
+sidebarTitle: "vLLM"
+description: "High-throughput inference engine with OpenAI-compatible serving."
+---
+
+[vLLM](https://vllm.readthedocs.io/) is a high-throughput inference engine for LLMs. It's optimized for production serving with features like continuous batching, PagedAttention, and tensor parallelism.
+
+## Quick Start
+
+```bash
+pip install vllm
+vllm serve Qwen/Qwen2.5-Coder-32B-Instruct --port 8000
+```
+
+### Config
+
+```json
+{
+  "providers": {
+    "vllm": {
+      "baseUrl": "http://localhost:8000/v1",
+      "api": "openai-completions",
+      "models": [
+        {
+          "id": "Qwen/Qwen2.5-Coder-32B-Instruct",
+          "name": "Qwen 2.5 Coder 32B",
+          "contextWindow": 131072,
+          "maxTokens": 8192,
+          "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 }
+        }
+      ]
+    }
+  }
+}
+```
+
+### Use it
+
+```json
+{
+  "agents": [
+    { "name": "local-coder", "model": "vllm:Qwen/Qwen2.5-Coder-32B-Instruct" }
+  ]
+}
+```
+
+<Note>
+The model ID must exactly match the model name you used when starting the vLLM server.
+</Note>
+
+## Auto-Discovery
+
+```bash
+polpo models scan
+```
+
+Scans `localhost:8000` for running vLLM instances and lists available models.
+
+## Provider Details
+
+| | |
+|---|---|
+| **Provider ID** | `vllm` (custom) |
+| **Default port** | `8000` |
+| **API type** | `openai-completions` |
+| **Base URL** | `http://localhost:8000/v1` |
+| **API key** | Not required |
+| **Cost** | Free (self-hosted) |
+
+## When to Use vLLM vs. Ollama
+
+| | Ollama | vLLM |
+|---|---|---|
+| Setup | One command | Python + pip |
+| Model management | Built-in (`ollama pull`) | Manual (HuggingFace paths) |
+| Throughput | Good | Higher (continuous batching) |
+| Multi-GPU | Limited | Tensor parallelism |
+| Best for | Development, single user | Production, high throughput |
+
+## Notes
+
+- vLLM supports tensor parallelism across multiple GPUs — ideal for serving large models (70B+) in production.
+- For multi-model serving, run multiple vLLM instances on different ports and configure each as a separate provider.
+- vLLM's OpenAI-compatible endpoint supports tool calling, making it fully compatible with Polpo's agent system.

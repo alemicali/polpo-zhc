@@ -1,0 +1,50 @@
+---
+title: "Kimi (Moonshot)"
+sidebarTitle: "Kimi / Moonshot"
+description: "Kimi's code-specialized models from Moonshot AI."
+---
+
+Kimi (from Moonshot AI) provides code-specialized models, particularly the K2 model which is strong at code generation and understanding.
+
+## Setup
+
+```bash
+export KIMI_API_KEY=...
+```
+
+### Config
+
+```json
+{
+  "providers": {
+    "kimi-coding": "${KIMI_API_KEY}"
+  }
+}
+```
+
+### Use it
+
+```json
+{
+  "agents": [
+    { "name": "coder", "model": "kimi-coding:kimi-k2" }
+  ]
+}
+```
+
+Polpo auto-infers `kimi-coding` from the `kimi-` prefix.
+
+## Models
+
+| Model | Best for |
+|-------|----------|
+| `kimi-k2` | Code generation and understanding |
+
+## Provider Details
+
+| | |
+|---|---|
+| **Provider ID** | `kimi-coding` |
+| **Env variable** | `KIMI_API_KEY` |
+| **API type** | Kimi API |
+| **Auto-infer prefix** | `kimi-` |

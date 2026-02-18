@@ -1,0 +1,346 @@
+---
+title: "Custom Providers"
+sidebarTitle: "Custom Providers"
+description: "Connect Ollama, vLLM, LM Studio, and any OpenAI/Anthropic-compatible endpoint"
+---
+
+Beyond the 22 built-in providers, Polpo supports **any OpenAI-compatible or Anthropic-compatible API** as a custom provider. This covers self-hosted models (Ollama, vLLM, LM Studio), private inference servers, and enterprise gateways.
+
+## How Custom Providers Work
+
+A custom provider is any entry in the `providers` config that includes a `baseUrl` and optionally an `api` compatibility mode and `models` list:
+
+```json
+{
+  "providers": {
+    "my-custom-provider": {
+      "apiKey": "optional-key",
+      "baseUrl": "http://localhost:8080/v1",
+      "api": "openai-completions",
+      "models": [
+        {
+          "id": "my-model",
+          "name": "My Custom Model",
+          "contextWindow": 32768,
+          "maxTokens": 4096
+        }
+      ]
+    }
+  }
+}
+```
+
+Then reference it like any other provider:
+
+```json
+{
+  "agents": [
+    { "name": "local-coder", "model": "my-custom-provider:my-model" }
+  ]
+}
+```
+
+## API Compatibility Modes
+
+Custom endpoints must be compatible with one of these API formats:
+
+| Mode | Description | Compatible With |
+|------|-------------|-----------------|
+| `openai-completions` | OpenAI Chat Completions API (`/v1/chat/completions`) | Ollama, vLLM, LM Studio, LiteLLM, text-generation-inference, LocalAI, FastChat |
+| `openai-responses` | OpenAI Responses API (newer format) | OpenAI-direct, some proxies |
+| `anthropic-messages` | Anthropic Messages API (`/v1/messages`) | Anthropic proxies, AWS Bedrock wrappers |
+
+If you don't specify `api`, Polpo uses the provider's default. For custom providers, you almost always want `openai-completions`.
+
+## Custom Model Definitions
+
+Since custom providers aren't in the pi-ai catalog, Polpo needs model metadata to be defined inline:
+
+```typescript
+interface CustomModelDef {
+  /** Model ID used in API calls. */
+  id: string;
+  /** Human-readable name. */
+  name: string;
+  /** Supports extended thinking / reasoning. Default: false */
+  reasoning?: boolean;
+  /** Supported input types. Default: ["text"] */
+  input?: ("text" | "image")[];
+  /** Cost per million tokens. Default: all zeros (free/local). */
+  cost?: { input: number; output: number; cacheRead: number; cacheWrite: number };
+  /** Context window size in tokens. Default: 200000 */
+  contextWindow?: number;
+  /** Max output tokens. Default: 8192 */
+  maxTokens?: number;
+}
+```
+
+If you don't define `models`, Polpo will still route requests to the endpoint — but cost tracking and model metadata won't be available.
+
+---
+
+## Ollama
+
+[Ollama](https://ollama.com) serves local models with an OpenAI-compatible API.
+
+### Setup
+
+```bash
+# Install Ollama
+curl -fsSL https://ollama.com/install.sh | sh
+
+# Pull a model
+ollama pull qwen2.5-coder:32b
+```
+
+### Configuration
+
+```json
+{
+  "providers": {
+    "ollama": {
+      "baseUrl": "http://localhost:11434/v1",
+      "api": "openai-completions",
+      "models": [
+        {
+          "id": "qwen2.5-coder:32b",
+          "name": "Qwen 2.5 Coder 32B",
+          "reasoning": false,
+          "input": ["text"],
+          "contextWindow": 131072,
+          "maxTokens": 8192,
+          "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 }
+        },
+        {
+          "id": "llama3.1:70b",
+          "name": "Llama 3.1 70B",
+          "reasoning": false,
+          "input": ["text"],
+          "contextWindow": 131072,
+          "maxTokens": 4096,
+          "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 }
+        },
+        {
+          "id": "deepseek-coder-v2:16b",
+          "name": "DeepSeek Coder V2 16B",
+          "reasoning": false,
+          "input": ["text"],
+          "contextWindow": 65536,
+          "maxTokens": 4096,
+          "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 }
+        }
+      ]
+    }
+  },
+  "agents": [
+    { "name": "local-coder", "model": "ollama:qwen2.5-coder:32b" }
+  ]
+}
+```
+
+<Tip>
+Ollama defaults to port 11434. The `/v1` suffix is required for OpenAI-compatible API access.
+</Tip>
+
+### Recommended Ollama Models
+
+| Model | Size | Best For |
+|-------|------|----------|
+| `qwen2.5-coder:32b` | 32B | Best open coding model |
+| `qwen2.5-coder:7b` | 7B | Fast coding, lower quality |
+| `llama3.1:70b` | 70B | General purpose, strong reasoning |
+| `llama3.1:8b` | 8B | Fast general purpose |
+| `deepseek-coder-v2:16b` | 16B | Good code generation |
+| `codestral:22b` | 22B | Mistral's code model |
+
+---
+
+## vLLM
+
+[vLLM](https://vllm.readthedocs.io/) is a high-throughput inference engine with OpenAI-compatible serving.
+
+### Setup
+
+```bash
+pip install vllm
+vllm serve Qwen/Qwen2.5-Coder-32B-Instruct --port 8000
+```
+
+### Configuration
+
+```json
+{
+  "providers": {
+    "vllm": {
+      "baseUrl": "http://localhost:8000/v1",
+      "api": "openai-completions",
+      "models": [
+        {
+          "id": "Qwen/Qwen2.5-Coder-32B-Instruct",
+          "name": "Qwen 2.5 Coder 32B",
+          "reasoning": false,
+          "input": ["text"],
+          "contextWindow": 131072,
+          "maxTokens": 8192,
+          "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 }
+        }
+      ]
+    }
+  }
+}
+```
+
+<Note>
+With vLLM, the model ID must match the exact model name you used when starting the server. Check `vllm serve --help` for serving options.
+</Note>
+
+---
+
+## LM Studio
+
+[LM Studio](https://lmstudio.ai/) provides a GUI for running local models with an OpenAI-compatible server.
+
+### Setup
+
+1. Download and install LM Studio
+2. Load a model in the GUI
+3. Start the local server (Settings > Local Server > Start)
+
+### Configuration
+
+```json
+{
+  "providers": {
+    "lmstudio": {
+      "baseUrl": "http://localhost:1234/v1",
+      "api": "openai-completions",
+      "models": [
+        {
+          "id": "qwen2.5-coder-32b-instruct",
+          "name": "Qwen 2.5 Coder 32B",
+          "contextWindow": 131072,
+          "maxTokens": 8192,
+          "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 }
+        }
+      ]
+    }
+  }
+}
+```
+
+---
+
+## LiteLLM Proxy
+
+[LiteLLM](https://github.com/BerriAI/litellm) is a proxy that unifies 100+ LLM providers behind a single OpenAI-compatible endpoint.
+
+### Configuration
+
+```json
+{
+  "providers": {
+    "litellm": {
+      "apiKey": "${LITELLM_MASTER_KEY}",
+      "baseUrl": "http://localhost:4000",
+      "api": "openai-completions",
+      "models": [
+        {
+          "id": "gpt-4o",
+          "name": "GPT-4o (via LiteLLM)",
+          "reasoning": false,
+          "input": ["text", "image"],
+          "contextWindow": 128000,
+          "maxTokens": 16384,
+          "cost": { "input": 2.5, "output": 10, "cacheRead": 0, "cacheWrite": 0 }
+        },
+        {
+          "id": "claude-sonnet",
+          "name": "Claude Sonnet (via LiteLLM)",
+          "reasoning": true,
+          "input": ["text", "image"],
+          "contextWindow": 200000,
+          "maxTokens": 8192,
+          "cost": { "input": 3, "output": 15, "cacheRead": 0.3, "cacheWrite": 0 }
+        }
+      ]
+    }
+  }
+}
+```
+
+---
+
+## text-generation-inference (TGI)
+
+Hugging Face's [TGI](https://github.com/huggingface/text-generation-inference) serves models with OpenAI-compatible endpoints.
+
+### Configuration
+
+```json
+{
+  "providers": {
+    "tgi": {
+      "baseUrl": "http://localhost:8080/v1",
+      "api": "openai-completions",
+      "models": [
+        {
+          "id": "tgi-model",
+          "name": "TGI Model",
+          "contextWindow": 32768,
+          "maxTokens": 4096,
+          "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 }
+        }
+      ]
+    }
+  }
+}
+```
+
+---
+
+## Using Custom Providers with Fallback
+
+Custom providers work with fallback chains. A common pattern is to try a local model first, then fall back to a cloud provider:
+
+```json
+{
+  "providers": {
+    "ollama": {
+      "baseUrl": "http://localhost:11434/v1",
+      "api": "openai-completions",
+      "models": [
+        { "id": "qwen2.5-coder:32b", "name": "Qwen 2.5 Coder 32B", "contextWindow": 131072, "maxTokens": 8192 }
+      ]
+    },
+    "anthropic": "${ANTHROPIC_API_KEY}"
+  },
+  "settings": {
+    "orchestratorModel": {
+      "primary": "ollama:qwen2.5-coder:32b",
+      "fallbacks": ["anthropic:claude-sonnet-4-5-20250929"]
+    }
+  }
+}
+```
+
+This tries the free local model first. If Ollama is down or the model is too slow, it falls back to Claude.
+
+## Tips
+
+<AccordionGroup>
+  <Accordion title="Model IDs must match exactly">
+    The `id` in your custom model definition must exactly match what the server expects. For Ollama, it's the tag name (`qwen2.5-coder:32b`). For vLLM, it's the full HuggingFace model path (`Qwen/Qwen2.5-Coder-32B-Instruct`).
+  </Accordion>
+
+  <Accordion title="Cost tracking for local models">
+    Set all cost fields to `0` for local models. This prevents cost tracking from showing misleading numbers. If you're running on rented GPU infrastructure, you can estimate cost per token and fill in the values for accurate tracking.
+  </Accordion>
+
+  <Accordion title="Context window matters">
+    Set `contextWindow` accurately for your model. Polpo uses this to decide whether to truncate prompts. If you set it too high, the model may receive prompts that exceed its actual capacity and produce errors.
+  </Accordion>
+
+  <Accordion title="Vision support">
+    If your local model supports images (e.g. LLaVA, Qwen-VL), set `input: ["text", "image"]` in the model definition and configure it as your `imageModel`.
+  </Accordion>
+</AccordionGroup>

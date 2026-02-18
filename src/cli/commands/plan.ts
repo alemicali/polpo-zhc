@@ -6,6 +6,7 @@ import { Command } from "commander";
 import chalk from "chalk";
 import { resolve } from "node:path";
 import { Orchestrator } from "../../core/orchestrator.js";
+import { resolveModelSpec } from "../../llm/pi-client.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -130,7 +131,7 @@ export function registerPlanCommands(program: Command): void {
 
         const systemPrompt = buildPlanSystemPrompt(orchestrator, state, orchestrator.getWorkDir());
         const userPrompt = `Generate a task plan for:\n"${prompt}"`;
-        const model = orchestrator.getConfig()?.settings?.orchestratorModel;
+        const model = resolveModelSpec(orchestrator.getConfig()?.settings?.orchestratorModel);
 
         console.log(chalk.dim("  Generating plan..."));
         const planData = await generatePlan(systemPrompt, userPrompt, model);

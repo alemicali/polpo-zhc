@@ -5,8 +5,6 @@ description: "Hybrid auto/human approval system for task lifecycle control"
 
 Approval gates let you insert checkpoints into the task lifecycle that either automatically evaluate a condition or block execution until a human approves or rejects.
 
-## How It Works
-
 Gates are registered as **lifecycle hooks**. When a hook fires (e.g. `before:task:assign`), the gate evaluates:
 
 - **Auto gates** — check a condition expression. If the condition matches, the operation is blocked.

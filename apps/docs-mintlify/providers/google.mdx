@@ -1,0 +1,181 @@
+---
+title: "Google (Gemini)"
+sidebarTitle: "Google Gemini"
+description: "Gemini models via Google AI Studio — massive context windows and strong reasoning."
+---
+
+Google's Gemini models are available through Google AI Studio. They offer some of the largest context windows in the industry (1M+ tokens), making them excellent for tasks that involve large codebases.
+
+## Setup
+
+Get your API key from [Google AI Studio](https://aistudio.google.com/apikey).
+
+```bash
+export GEMINI_API_KEY=AIza...
+```
+
+### Config
+
+```json
+{
+  "providers": {
+    "google": "${GEMINI_API_KEY}"
+  }
+}
+```
+
+### Use it
+
+```json
+{
+  "agents": [
+    { "name": "coder", "model": "google:gemini-2.5-pro" }
+  ]
+}
+```
+
+Polpo auto-infers `google` from the `gemini-` prefix.
+
+## Models
+
+| Model | Best for | Context | Reasoning |
+|-------|----------|---------|-----------|
+| `gemini-2.5-pro` | Complex reasoning, large codebases | 1M+ | Yes |
+| `gemini-2.5-flash` | Fast and cheap, good quality | 1M+ | Yes |
+| `gemini-2.0-flash` | Previous generation, very fast | 1M | No |
+
+<Note>
+Gemini's 1M+ token context window means it can process entire codebases in a single prompt. This makes it a strong choice for architecture-level tasks and cross-file refactoring.
+</Note>
+
+## Features
+
+| Feature | Supported |
+|---------|-----------|
+| Streaming | Yes |
+| Tool use | Yes |
+| Vision (images) | Yes |
+| Reasoning | Yes (2.5 Pro, 2.5 Flash) |
+
+## Pricing
+
+| Model | Input (per 1M tokens) | Output (per 1M tokens) |
+|-------|----------------------|----------------------|
+| `gemini-2.5-pro` | $1.25 | $10.00 |
+| `gemini-2.5-flash` | $0.15 | $0.60 |
+| `gemini-2.0-flash` | $0.10 | $0.40 |
+
+## Provider Details
+
+| | |
+|---|---|
+| **Provider ID** | `google` |
+| **Env variable** | `GEMINI_API_KEY` |
+| **API type** | Gemini API |
+| **Auto-infer prefix** | `gemini-` |
+
+## OAuth: Use Your Google Account
+
+You can use your **Google account** to access Gemini models directly — no API key needed. Google offers two OAuth flows that both give access to the same Gemini models.
+
+### Gemini CLI Flow
+
+```bash
+polpo auth login google-gemini-cli
+```
+
+Uses **Auth Code + PKCE** with a localhost callback on port **8085**:
+
+1. Polpo opens a browser for Google OAuth consent
+2. Authorize with your Google account
+3. The callback server on `localhost:8085` captures the token automatically
+4. If the callback fails, paste the redirect URL manually
+
+```
+Logging in to Google Gemini CLI...
+
+Opening browser for Google OAuth...
+Waiting for callback on localhost:8085...
+
+Login successful!
+Profile saved as: google-gemini-cli:user@gmail.com
+Stored in ~/.polpo/auth-profiles.json
+```
+
+### Antigravity Flow
+
+An alternative Google OAuth flow on a different port:
+
+```bash
+polpo auth login google-antigravity
+```
+
+Same **Auth Code + PKCE** flow, but the callback server runs on port **51121**. Useful if port 8085 is taken.
+
+```
+Logging in to Google Antigravity...
+
+Opening browser for Google OAuth...
+Waiting for callback on localhost:51121...
+
+Login successful!
+Profile saved as: google-antigravity:user@gmail.com
+Stored in ~/.polpo/auth-profiles.json
+```
+
+<Tip>
+Both flows access the same Gemini models. Choose whichever port is available on your machine. If you log in with both, Polpo treats them as separate profiles and rotates between them.
+</Tip>
+
+### Token Refresh
+
+OAuth tokens expire. Polpo handles this automatically:
+
+- Before each API call, Polpo checks if the token is expired
+- If expired and a refresh token exists, it refreshes silently via Google Cloud token refresh
+- If no refresh token is available, the profile is skipped and Polpo falls back to other credentials
+
+### Multiple Accounts & Profile Rotation
+
+You can log in with multiple Google accounts and even mix flows:
+
+```
+google-gemini-cli:personal@gmail.com
+google-gemini-cli:work@company.com
+google-antigravity:personal@gmail.com
+```
+
+Polpo rotates between all Google profiles: oldest `lastUsed` first, skipping profiles in cooldown or billing disable.
+
+### Billing Disable
+
+If your Google account quota is exceeded, the profile enters **billing disable** — a longer backoff (5h → 10h → 20h → 24h cap) than regular rate-limit cooldown. Other Google profiles or the `GEMINI_API_KEY` continue working normally.
+
+### Session Pinning
+
+Pin a specific Google profile for the session:
+
+```
+/model google/gemini-2.5-pro@google-gemini-cli:personal@gmail.com
+```
+
+Reset with `/model reset`.
+
+### Resolution Order
+
+```
+1. polpo.json providers.google.apiKey       (config wins)
+2. GEMINI_API_KEY environment variable       (env var)
+3. Stored google-gemini-cli OAuth profiles   (auto-refresh)
+4. Stored google-antigravity OAuth profiles  (auto-refresh)
+```
+
+<Info>
+For the full authentication system — all OAuth providers, CLI commands, profile rotation algorithm, and security details — see the [Authentication guide](/models/authentication).
+</Info>
+
+## Notes
+
+- Gemini 2.5 Pro is cost-effective compared to Claude Opus or GPT o3 while offering competitive quality for coding tasks.
+- The massive context window makes Gemini a natural choice for the orchestrator model when you need it to reason across many files.
+- For enterprise use with VPC-SC, CMEK, or data residency requirements, use [Google Vertex AI](/providers/google-vertex) instead.

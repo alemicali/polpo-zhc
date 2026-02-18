@@ -1,0 +1,226 @@
+---
+title: "Cost Tracking"
+sidebarTitle: "Cost Tracking"
+description: "Per-call cost estimation, token usage tracking, and cost optimization"
+---
+
+Polpo tracks **per-call cost** for every LLM interaction using pricing data from the `@mariozechner/pi-ai` model catalog. Every model in the catalog includes up-to-date pricing for input tokens, output tokens, cache reads, and cache writes.
+
+## How Cost Tracking Works
+
+Every query through Polpo's LLM layer returns usage data alongside the response:
+
+```typescript
+import { querySDKTextDetailed } from "polpo/llm";
+
+const result = await querySDKTextDetailed(
+  "Refactor this function for readability",
+  "/path/to/workdir",
+  "anthropic:claude-sonnet-4-5-20250929"
+);
+
+console.log(result.text);     // The response
+console.log(result.usage);    // { inputTokens: 1250, outputTokens: 450, ... }
+console.log(result.costUsd);  // 0.00875 (in USD)
+```
+
+### Usage Object
+
+The `usage` field returned by pi-ai contains:
+
+| Field | Description |
+|-------|-------------|
+| `inputTokens` | Number of input tokens processed |
+| `outputTokens` | Number of output tokens generated |
+| `cacheReadTokens` | Tokens served from provider cache |
+| `cacheWriteTokens` | Tokens written to provider cache |
+
+### Cost Calculation
+
+Cost is calculated using the model's pricing metadata:
+
+```typescript
+import { estimateCost, resolveModel } from "polpo/llm";
+
+const model = resolveModel("anthropic:claude-sonnet-4-5-20250929");
+const cost = estimateCost(model, {
+  inputTokens: 10000,
+  outputTokens: 2000,
+  cacheReadTokens: 5000,
+  cacheWriteTokens: 0,
+});
+
+console.log(cost);
+// → {
+//   inputCost: 0.03,
+//   outputCost: 0.03,
+//   cacheReadCost: 0.0015,
+//   cacheWriteCost: 0,
+//   totalCost: 0.0615,
+//   currency: "USD"
+// }
+```
+
+## Detailed vs Simple Queries
+
+Polpo provides two query patterns:
+
+### Simple (text only)
+
+```typescript
+import { querySDKText } from "polpo/llm";
+
+// Returns just the text string — no usage or cost data
+const text = await querySDKText(prompt, cwd, model);
+```
+
+### Detailed (with metadata)
+
+```typescript
+import { querySDKTextDetailed, querySDKStreamDetailed } from "polpo/llm";
+
+// Returns text + usage + cost + model metadata
+const result = await querySDKTextDetailed(prompt, cwd, model);
+result.text;     // string
+result.usage;    // Usage | undefined
+result.costUsd;  // number | undefined
+result.model;    // Model object with full metadata
+
+// Streaming variant
+const streamResult = await querySDKStreamDetailed(prompt, cwd, model, (delta) => {
+  process.stdout.write(delta);
+});
+```
+
+### With Fallback
+
+```typescript
+import { querySDKWithFallback } from "polpo/llm";
+
+const result = await querySDKWithFallback(prompt, cwd, {
+  primary: "anthropic:claude-sonnet-4-5-20250929",
+  fallbacks: ["openai:gpt-4o"]
+});
+
+result.usedSpec;  // Which model was actually used
+result.costUsd;   // Cost based on the model that actually ran
+```
+
+## Cost by Provider
+
+Reference pricing for popular models (as of catalog data):
+
+### Anthropic
+
+| Model | Input $/1M | Output $/1M | Cache Read $/1M |
+|-------|-----------|-------------|-----------------|
+| `claude-opus-4-6` | $15.00 | $75.00 | $1.50 |
+| `claude-sonnet-4-5-20250929` | $3.00 | $15.00 | $0.30 |
+| `claude-haiku-4-5-20251001` | $0.80 | $4.00 | $0.08 |
+
+### OpenAI
+
+| Model | Input $/1M | Output $/1M |
+|-------|-----------|-------------|
+| `gpt-4o` | $2.50 | $10.00 |
+| `gpt-4o-mini` | $0.15 | $0.60 |
+| `o3` | $10.00 | $40.00 |
+| `o4-mini` | $1.10 | $4.40 |
+
+### Google
+
+| Model | Input $/1M | Output $/1M |
+|-------|-----------|-------------|
+| `gemini-2.5-pro` | $1.25 | $10.00 |
+| `gemini-2.5-flash` | $0.15 | $0.60 |
+
+### Free Models
+
+| Model | Cost |
+|-------|------|
+| `opencode:big-pickle` | Free |
+| Any Ollama/vLLM local model | Free |
+
+<Note>
+Pricing data comes from the pi-ai catalog and may not reflect the latest changes from providers. Always check the provider's official pricing page for the most current rates.
+</Note>
+
+## Cost Optimization Strategies
+
+### 1. Use the Right Model for the Job
+
+Don't use `claude-opus-4-6` for formatting tasks. Match model capability to task complexity:
+
+```json
+{
+  "agents": [
+    { "name": "architect", "model": "anthropic:claude-opus-4-6" },
+    { "name": "coder", "model": "anthropic:claude-sonnet-4-5-20250929" },
+    { "name": "formatter", "model": "anthropic:claude-haiku-4-5-20251001" }
+  ]
+}
+```
+
+### 2. Use Local Models for Simple Tasks
+
+For boilerplate, formatting, linting fixes — use a local model:
+
+```json
+{
+  "providers": {
+    "ollama": {
+      "baseUrl": "http://localhost:11434/v1",
+      "api": "openai-completions"
+    }
+  },
+  "agents": [
+    { "name": "simple-tasks", "model": "ollama:qwen2.5-coder:7b" }
+  ]
+}
+```
+
+### 3. Use Fallback Chains with Cost Awareness
+
+Put cheaper models in the fallback chain:
+
+```json
+{
+  "settings": {
+    "orchestratorModel": {
+      "primary": "anthropic:claude-sonnet-4-5-20250929",
+      "fallbacks": [
+        "google:gemini-2.5-flash",
+        "opencode:big-pickle"
+      ]
+    }
+  }
+}
+```
+
+### 4. Use the Model Allowlist
+
+Restrict which models can be used to prevent accidental expensive model usage:
+
+```json
+{
+  "settings": {
+    "modelAllowlist": {
+      "anthropic:claude-sonnet-4-5-20250929": { "alias": "Sonnet" },
+      "anthropic:claude-haiku-4-5-20251001": { "alias": "Haiku" },
+      "groq:llama-3.3-70b": { "alias": "Llama" }
+    }
+  }
+}
+```
+
+### 5. Leverage Prompt Caching
+
+Models that support prompt caching (Anthropic, OpenAI) can significantly reduce costs for repeated similar prompts. The cache read cost is typically 90% cheaper than regular input pricing.
+
+Cache read pricing:
+
+| Model | Regular Input | Cache Read | Savings |
+|-------|--------------|------------|---------|
+| Claude Sonnet 4.5 | $3.00/1M | $0.30/1M | 90% |
+| Claude Opus 4 | $15.00/1M | $1.50/1M | 90% |
+| Claude Haiku 4.5 | $0.80/1M | $0.08/1M | 90% |

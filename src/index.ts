@@ -22,12 +22,8 @@ export { parseConfig, loadPolpoConfig, savePolpoConfig, generatePolpoConfigDefau
 // Session reader
 export { readSessionSummary, readSessionSummaryFromPath, getRecentMessages, findTranscriptPath } from "./core/session-reader.js";
 
-// Bridge
-export { BridgeManager } from "./bridge/index.js";
-export type { BridgeConfig, BridgeSessionState, BridgeSessionStatus } from "./bridge/types.js";
-
 // Server
-export { PolpoServer, createApp, ProjectManager, SSEBridge, WSBridge } from "./server/index.js";
+export { PolpoServer, createApp, ProjectManager, SSEBridge } from "./server/index.js";
 export type {
   ServerConfig,
   ProjectEntry,

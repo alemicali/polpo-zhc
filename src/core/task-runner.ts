@@ -364,18 +364,68 @@ export class TaskRunner {
     }
     const configPath = join(tmpDir, `run-${runId}.json`);
 
-    // Inject project memory into task description for agent context
-    const taskWithMemory = { ...task };
+    // Inject context into task description for agent awareness.
+    // Context is prepended using XML-like tags that the agent prompt can reference.
+    const taskWithContext = { ...task };
+    const contextParts: string[] = [];
+
+    // 1. Project memory (persistent cross-session knowledge)
     const memory = this.ctx.memoryStore?.get() ?? "";
     if (memory) {
-      taskWithMemory.description = `<project-memory>\n${memory}\n</project-memory>\n\n${task.description}`;
+      contextParts.push(`<project-memory>\n${memory}\n</project-memory>`);
+    }
+
+    // 2. System context (standing instructions from .polpo/system-context.md)
+    try {
+      const systemContextPath = join(this.ctx.polpoDir, "system-context.md");
+      if (existsSync(systemContextPath)) {
+        const systemContext = readFileSync(systemContextPath, "utf-8").trim();
+        if (systemContext) {
+          contextParts.push(`<system-context>\n${systemContext}\n</system-context>`);
+        }
+      }
+    } catch { /* best effort */ }
+
+    // 3. Plan context — if this task belongs to a plan, include the plan goal and sibling tasks
+    if (task.group && this.ctx.registry.getPlanByName) {
+      try {
+        const plan = this.ctx.registry.getPlanByName(task.group);
+        const planParts: string[] = [];
+
+        // Original user prompt that generated this plan (the "why")
+        if (plan?.prompt) {
+          planParts.push(`Plan goal: ${plan.prompt}`);
+        }
+
+        // Sibling tasks — just titles and statuses for awareness, not full descriptions
+        const allTasks = this.ctx.registry.getAllTasks();
+        const siblings = allTasks.filter(t => t.group === task.group && t.id !== task.id);
+        if (siblings.length > 0) {
+          planParts.push(`Other tasks in this plan:`);
+          for (const s of siblings) {
+            const marker = s.status === "done" ? "[done]"
+              : s.status === "in_progress" ? "[in progress]"
+              : s.status === "failed" ? "[failed]"
+              : "[pending]";
+            planParts.push(`  ${marker} "${s.title}" → ${s.assignTo}`);
+          }
+        }
+
+        if (planParts.length > 0) {
+          contextParts.push(`<plan-context>\n${planParts.join("\n")}\n</plan-context>`);
+        }
+      } catch { /* best effort — plan may have been deleted */ }
+    }
+
+    if (contextParts.length > 0) {
+      taskWithContext.description = contextParts.join("\n\n") + "\n\n" + task.description;
     }
 
     const runnerConfig: RunnerConfig = {
       runId,
       taskId: task.id,
       agent,
-      task: taskWithMemory,
+      task: taskWithContext,
       polpoDir: this.ctx.polpoDir,
       cwd: this.ctx.workDir,
       storage: this.ctx.config.settings.storage,
@@ -385,8 +435,25 @@ export class TaskRunner {
     try {
       writeFileSync(configPath, JSON.stringify(runnerConfig, null, 2));
 
-      const runnerPath = join(dirname(fileURLToPath(import.meta.url)), "runner.js");
-      const child = cpSpawn(process.execPath, [runnerPath, "--config", configPath], {
+      // Resolve runner path: prefer compiled .js, fall back to .ts via tsx (dev mode)
+      const baseDir = dirname(fileURLToPath(import.meta.url));
+      const runnerJs = join(baseDir, "runner.js");
+      const runnerTs = join(baseDir, "runner.ts");
+      const useTs = !existsSync(runnerJs) && existsSync(runnerTs);
+      const runnerPath = useTs ? runnerTs : runnerJs;
+
+      let spawnArgs: string[];
+      if (useTs) {
+        // Dev mode: use tsx to run TypeScript directly.
+        // Resolve tsx the same way npx does — find the CLI entry point.
+        const tsxCli = join(baseDir, "../../node_modules/tsx/dist/cli.mjs");
+        spawnArgs = existsSync(tsxCli)
+          ? [process.execPath, tsxCli, runnerPath, "--config", configPath]
+          : [process.execPath, runnerPath, "--config", configPath]; // fallback
+      } else {
+        spawnArgs = [process.execPath, runnerPath, "--config", configPath];
+      }
+      const child = cpSpawn(spawnArgs[0], spawnArgs.slice(1), {
         detached: true,
         stdio: "ignore",
         cwd: this.ctx.workDir,

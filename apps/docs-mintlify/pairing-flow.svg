@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 520 240" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="8" markerHeight="6" orient="auto-start-reverse">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#aaa"/>
+    </marker>
+  </defs>
+
+  <!-- Column headers -->
+  <text x="80" y="18" font-size="11" fill="#666" text-anchor="middle" font-weight="500">Unknown User</text>
+  <text x="260" y="18" font-size="11" fill="#666" text-anchor="middle" font-weight="500">Polpo Bot</text>
+  <text x="440" y="18" font-size="11" fill="#666" text-anchor="middle" font-weight="500">Admin</text>
+
+  <!-- Vertical lines -->
+  <line x1="80" y1="28" x2="80" y2="225" stroke="#ddd" stroke-width="1"/>
+  <line x1="260" y1="28" x2="260" y2="225" stroke="#ddd" stroke-width="1"/>
+  <line x1="440" y1="28" x2="440" y2="225" stroke="#ddd" stroke-width="1"/>
+
+  <!-- Step 1: User messages -->
+  <line x1="90" y1="50" x2="248" y2="50" stroke="#aaa" stroke-width="1.2" marker-end="url(#arrow)"/>
+  <rect x="110" y="38" width="120" height="22" rx="4" fill="#f8f8f8" stroke="#bbb" stroke-width="1"/>
+  <text x="170" y="53" font-size="9" fill="#444" text-anchor="middle">"Hello!"</text>
+
+  <!-- Step 2: Bot replies with code -->
+  <line x1="250" y1="85" x2="92" y2="85" stroke="#aaa" stroke-width="1.2" marker-end="url(#arrow)"/>
+  <rect x="108" y="73" width="140" height="22" rx="4" fill="#f8f8f8" stroke="#bbb" stroke-width="1"/>
+  <text x="178" y="88" font-size="9" fill="#444" text-anchor="middle">Code: ABC123</text>
+
+  <!-- Step 3: User tells admin -->
+  <line x1="90" y1="120" x2="428" y2="120" stroke="#ccc" stroke-width="1" stroke-dasharray="4 2" marker-end="url(#arrow)"/>
+  <rect x="190" y="108" width="140" height="22" rx="4" fill="none" stroke="#ccc" stroke-width="1" stroke-dasharray="4 2"/>
+  <text x="260" y="123" font-size="9" fill="#999" text-anchor="middle">shares code out-of-band</text>
+
+  <!-- Step 4: Admin approves -->
+  <line x1="430" y1="155" x2="272" y2="155" stroke="#aaa" stroke-width="1.2" marker-end="url(#arrow)"/>
+  <rect x="310" y="143" width="120" height="22" rx="4" fill="#f8f8f8" stroke="#bbb" stroke-width="1"/>
+  <text x="370" y="158" font-size="9" fill="#444" text-anchor="middle">/pair ABC123</text>
+
+  <!-- Step 5: Bot confirms to admin -->
+  <line x1="270" y1="185" x2="428" y2="185" stroke="#aaa" stroke-width="1.2" marker-end="url(#arrow)"/>
+  <rect x="300" y="173" width="120" height="22" rx="4" fill="#f8f8f8" stroke="#bbb" stroke-width="1"/>
+  <text x="360" y="188" font-size="9" fill="#444" text-anchor="middle">Approved!</text>
+
+  <!-- Step 6: User can now chat -->
+  <line x1="90" y1="215" x2="248" y2="215" stroke="#aaa" stroke-width="1.2" marker-end="url(#arrow)"/>
+  <rect x="105" y="203" width="130" height="22" rx="4" fill="#f8f8f8" stroke="#888" stroke-width="1.2"/>
+  <text x="170" y="218" font-size="9" fill="#333" text-anchor="middle" font-weight="500">Can chat freely</text>
+</svg>

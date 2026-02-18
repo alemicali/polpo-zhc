@@ -1,0 +1,98 @@
+---
+title: "Groq"
+sidebarTitle: "Groq"
+description: "Ultra-fast inference for open models — Llama, Mixtral, and more."
+---
+
+Groq runs open-source models on custom LPU (Language Processing Unit) hardware, delivering some of the fastest inference speeds available. Ideal for tasks where latency matters more than peak model quality.
+
+## Setup
+
+Get your API key from [GroqCloud](https://console.groq.com/).
+
+```bash
+export GROQ_API_KEY=gsk_...
+```
+
+### Config
+
+```json
+{
+  "providers": {
+    "groq": "${GROQ_API_KEY}"
+  }
+}
+```
+
+### Use it
+
+```json
+{
+  "agents": [
+    { "name": "fast-worker", "model": "groq:llama-3.3-70b" }
+  ]
+}
+```
+
+Polpo auto-infers `groq` from the `llama-` prefix.
+
+## Models
+
+| Model | Best for | Context | Speed |
+|-------|----------|---------|-------|
+| `llama-3.3-70b` | Best open model on Groq, strong general quality | 128K | Very fast |
+| `llama-3.1-8b` | Simple tasks, formatting, boilerplate | 128K | Extremely fast |
+| `mixtral-8x7b` | Mixture-of-experts, good for diverse tasks | 32K | Fast |
+
+## Features
+
+| Feature | Supported |
+|---------|-----------|
+| Streaming | Yes |
+| Tool use | Yes |
+| Vision (images) | No |
+| Reasoning | No |
+
+## Pricing
+
+Groq pricing is competitive and changes frequently. Check [groq.com/pricing](https://groq.com/pricing) for current rates.
+
+Generally, Groq is 5-10x cheaper than equivalent models on other providers due to their custom hardware.
+
+## Provider Details
+
+| | |
+|---|---|
+| **Provider ID** | `groq` |
+| **Env variable** | `GROQ_API_KEY` |
+| **API type** | OpenAI-compatible |
+| **Auto-infer prefix** | `llama-` |
+
+## Use Case: Fast Worker Pattern
+
+Groq is excellent for the "fast-worker" agent pattern. Assign it tasks where speed matters more than peak quality:
+
+```json
+{
+  "agents": [
+    {
+      "name": "fast-worker",
+      "model": "groq:llama-3.3-70b",
+      "role": "Quick tasks, boilerplate, formatting, simple refactoring"
+    },
+    {
+      "name": "senior-dev",
+      "model": "anthropic:claude-sonnet-4-5-20250929",
+      "role": "Complex implementation and architecture"
+    }
+  ]
+}
+```
+
+The fast worker handles the simple tasks while the more capable model handles the complex ones. This reduces both cost and overall execution time.
+
+## Notes
+
+- Groq has rate limits that vary by model and account tier. For high-volume workloads, monitor your usage.
+- The Llama 3.3 70B on Groq often completes in under 2 seconds — fast enough that agent coordination overhead becomes the bottleneck, not inference.
+- Groq doesn't support vision models currently. For image-related tasks, use a different provider.

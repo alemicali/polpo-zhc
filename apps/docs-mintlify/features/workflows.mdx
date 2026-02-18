@@ -1,13 +1,9 @@
 ---
 title: "Workflows"
-description: "Parameterized, reusable plan templates that encode repeatable engineering processes."
+description: "Parameterized, reusable plan templates — define a process once, run it with different parameters."
 ---
 
-Workflows are **parameterized plan templates** — JSON files that define a complete [Plan](/concepts/plans) with `{{placeholder}}` parameters. When you execute a workflow, Polpo substitutes your parameters, saves the result as a standard Plan, and runs it. Think of them as GitHub Actions reusable workflows, but for multi-agent orchestration.
-
-## Why Workflows?
-
-Plans are powerful, but writing a full plan JSON every time you want to do a code review or fix a bug is tedious. Workflows solve this by letting you define a process **once** and reuse it with different parameters:
+Workflows are **parameterized plan templates** — JSON files that define a complete [Plan](/concepts/plans) with `{{placeholder}}` parameters. When you execute a workflow, Polpo substitutes your parameters, saves the result as a standard Plan, and runs it.
 
 ```bash
 # Review the auth module, focusing on security
@@ -17,7 +13,57 @@ polpo workflow run code-review --param module=src/auth --param focus=security
 polpo workflow run bug-fix --param issue="Login fails when email has + character"
 ```
 
-The key insight: **a workflow is data, not code**. It's a JSON file on disk. When executed, it becomes a regular Plan — no new runtime concepts, no special execution path.
+A workflow is data, not code — a JSON file on disk. When executed, it becomes a regular Plan with no new runtime concepts or special execution path.
+
+## Quick Start
+
+<Steps>
+
+1. **Create the workflow directory**
+
+   ```bash
+   mkdir -p .polpo/workflows/my-workflow
+   ```
+
+2. **Create `workflow.json`**
+
+   ```json
+   {
+     "name": "my-workflow",
+     "description": "What this workflow does in one sentence",
+     "parameters": [
+       {
+         "name": "target",
+         "description": "The module or file to operate on",
+         "type": "string",
+         "required": true
+       }
+     ],
+     "plan": {
+       "tasks": [
+         {
+           "title": "Do the thing to {{target}}",
+           "description": "Detailed instructions for the agent about what to do with {{target}}.",
+           "assignTo": "default"
+         }
+       ]
+     }
+   }
+   ```
+
+3. **Validate it**
+
+   ```bash
+   polpo workflow validate my-workflow
+   ```
+
+4. **Run it**
+
+   ```bash
+   polpo workflow run my-workflow --param target=src/auth
+   ```
+
+</Steps>
 
 ## Anatomy of a Workflow
 
@@ -31,7 +77,7 @@ A workflow lives in a directory with a `workflow.json` file:
     workflow.json
 ```
 
-The `workflow.json` has three top-level fields:
+The `workflow.json` has three required fields and one optional:
 
 ```json
 {
@@ -44,7 +90,7 @@ The `workflow.json` has three top-level fields:
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `name` | string | Yes | Workflow identifier (kebab-case) |
+| `name` | string | Yes | Workflow identifier (kebab-case, must match directory name) |
 | `description` | string | Yes | Human-readable summary |
 | `parameters` | array | No | Declared parameters (see below) |
 | `plan` | object | Yes | Plan template — same shape as a PlanDocument, with `{{placeholders}}` |
@@ -89,9 +135,29 @@ Constrain a parameter to specific values:
 }
 ```
 
-## Plan Template
+### Parameter Design Tips
 
-The `plan` field is a standard Plan structure — teams, tasks, dependencies, expectations, quality gates — with `{{placeholder}}` tokens wherever you want parameter substitution:
+- **Make the minimum required.** Only mark parameters `required` if the workflow literally cannot function without them. Everything else should have a sensible `default`.
+- **Use enums for constrained choices.** If a parameter only makes sense with specific values, declare them.
+- **Use descriptive names.** The parameter `name` appears in CLI output, TUI pickers, and error messages. `test_command` is better than `tc`.
+- **Document defaults in `description`.** Mention what happens when the parameter isn't provided:
+
+```json
+{
+  "name": "test_command",
+  "description": "Command to run tests (defaults to 'pnpm run test')",
+  "type": "string",
+  "default": "pnpm run test"
+}
+```
+
+## Writing the Plan Template
+
+The `plan` field is a standard Plan structure — teams, tasks, dependencies, expectations, quality gates — with `{{placeholder}}` tokens wherever you want parameter substitution.
+
+### Teams
+
+Define volatile agents specific to this workflow:
 
 ```json
 {
@@ -99,21 +165,37 @@ The `plan` field is a standard Plan structure — teams, tasks, dependencies, ex
     "team": [
       {
         "name": "analyst",
-        "role": "Senior code analyst",
+        "role": "Senior code analyst — identifies issues and improvement opportunities",
+        "enableGit": true
+      },
+      {
+        "name": "fixer",
+        "role": "Implementation specialist — applies targeted fixes",
         "enableGit": true
       }
     ],
-    "tasks": [
-      {
-        "title": "Analyze {{module}}",
-        "description": "Perform a deep {{focus}} review of {{module}}.",
-        "assignTo": "analyst",
-        "expectations": [
-          { "type": "test", "command": "{{test_command}}" }
-        ]
-      }
-    ]
+    "tasks": [ ... ]
   }
+}
+```
+
+<Tip>
+You can omit the `team` field entirely if you want the workflow to use the project's existing agents. Just reference them by name in `assignTo`.
+</Tip>
+
+### Tasks with Placeholders
+
+Placeholders work in any string value within the plan:
+
+```json
+{
+  "title": "Analyze {{module}}",
+  "description": "Review {{module}} with focus on {{focus}}.",
+  "assignTo": "analyst",
+  "dependsOn": ["Setup {{module}}"],
+  "expectations": [
+    { "type": "test", "command": "{{test_command}}" }
+  ]
 }
 ```
 
@@ -122,6 +204,81 @@ Placeholders work anywhere in the plan JSON — titles, descriptions, commands, 
 <Note>
 Every placeholder in the plan **must** correspond to a declared parameter (or have a default). Polpo will throw an error if any `{{placeholder}}` remains unreplaced after substitution.
 </Note>
+
+### Dependencies
+
+Task dependencies work the same as in regular Plans — reference tasks by title:
+
+```json
+{
+  "tasks": [
+    {
+      "title": "Diagnose {{issue}}",
+      "assignTo": "debugger"
+    },
+    {
+      "title": "Fix {{issue}}",
+      "assignTo": "debugger",
+      "dependsOn": ["Diagnose {{issue}}"]
+    },
+    {
+      "title": "Verify fix",
+      "assignTo": "verifier",
+      "dependsOn": ["Fix {{issue}}"]
+    }
+  ]
+}
+```
+
+<Warning>
+Placeholders in `dependsOn` must match the **template** title of the dependency — use `"Diagnose {{issue}}"`, not the resolved `"Diagnose Login bug"`. Both sides get substituted at the same time.
+</Warning>
+
+### Expectations
+
+Add assessment criteria to ensure quality:
+
+```json
+{
+  "expectations": [
+    {
+      "type": "file_exists",
+      "paths": ["analysis-report.md"]
+    },
+    {
+      "type": "test",
+      "command": "{{test_command}}"
+    },
+    {
+      "type": "llm_review",
+      "criteria": "The analysis is thorough with specific file:line references",
+      "threshold": 3.5
+    }
+  ]
+}
+```
+
+See [Review](/features/review) for all expectation types.
+
+### Quality Gates
+
+Block progression until quality thresholds are met:
+
+```json
+{
+  "plan": {
+    "qualityGates": [
+      {
+        "name": "analysis-quality",
+        "afterTasks": ["Analyze {{module}}"],
+        "blocksTasks": ["Apply fixes"],
+        "minScore": 3.5
+      }
+    ],
+    "tasks": [ ... ]
+  }
+}
+```
 
 ## Discovery
 
@@ -198,6 +355,112 @@ The workflow system adds zero runtime overhead — once instantiated, the plan e
   </Tab>
 </Tabs>
 
+## Validation
+
+Always validate before running:
+
+```bash
+polpo workflow validate code-review
+```
+
+The validator checks:
+
+- Required fields (`name`, `description`, `plan`) are present
+- The plan has at least one task
+- All `{{placeholders}}` in the plan have matching parameter declarations
+- All declared parameters are actually used somewhere in the plan
+
+## Example: Full Workflow
+
+Here's a complete workflow that performs a focused code review:
+
+```json
+{
+  "name": "code-review",
+  "description": "Deep code review of a module: analysis, fixes, and verification",
+  "parameters": [
+    {
+      "name": "module",
+      "description": "Module or directory to review",
+      "type": "string",
+      "required": true
+    },
+    {
+      "name": "test_command",
+      "description": "Command to run tests",
+      "type": "string",
+      "default": "pnpm run test"
+    },
+    {
+      "name": "focus",
+      "description": "Review focus area",
+      "type": "string",
+      "default": "general",
+      "enum": ["general", "performance", "security", "readability", "types"]
+    }
+  ],
+  "plan": {
+    "team": [
+      {
+        "name": "analyst",
+        "role": "Senior code analyst — identifies issues, patterns, and improvement opportunities",
+        "enableGit": true
+      },
+      {
+        "name": "reviewer",
+        "role": "QA reviewer — verifies changes don't introduce regressions",
+        "enableGit": true
+      }
+    ],
+    "tasks": [
+      {
+        "title": "Analyze {{module}}",
+        "description": "Perform a deep {{focus}} review of the {{module}} module. Identify code smells, complexity hotspots, pattern violations, type safety issues, and improvement opportunities. Write findings to analysis-report.md with specific file:line references.",
+        "assignTo": "analyst",
+        "expectations": [
+          { "type": "file_exists", "paths": ["analysis-report.md"] },
+          {
+            "type": "llm_review",
+            "criteria": "The analysis is thorough, covers all key aspects, and provides actionable recommendations with specific file:line references",
+            "threshold": 3.5
+          }
+        ]
+      },
+      {
+        "title": "Apply critical fixes",
+        "description": "Based on the analysis report, apply the most critical fixes to {{module}}. Focus on: correctness bugs, type safety issues, and clear anti-patterns. Do NOT refactor for style — only fix real problems.",
+        "assignTo": "analyst",
+        "dependsOn": ["Analyze {{module}}"],
+        "expectations": [
+          { "type": "test", "command": "{{test_command}}" }
+        ]
+      },
+      {
+        "title": "Verify changes",
+        "description": "Review all changes applied to {{module}}. Verify: (1) each fix addresses a real issue from the analysis, (2) no regressions introduced, (3) code quality improved. Write a brief verification summary.",
+        "assignTo": "reviewer",
+        "dependsOn": ["Apply critical fixes"],
+        "expectations": [
+          {
+            "type": "llm_review",
+            "criteria": "The verification confirms all changes are correct, no regressions were introduced, and code quality improved",
+            "threshold": 4.0
+          }
+        ]
+      }
+    ],
+    "qualityGates": [
+      {
+        "name": "analysis-quality",
+        "afterTasks": ["Analyze {{module}}"],
+        "blocksTasks": ["Apply critical fixes"],
+        "minScore": 3.5
+      }
+    ]
+  }
+}
+```
+
 ## Built-in Workflows
 
 Polpo ships with 8 ready-to-use workflows:
@@ -213,6 +476,20 @@ Polpo ships with 8 ready-to-use workflows:
 | `migration` | Database or API migration workflow | `from` (required), `to` (required), `test_command` |
 | `onboarding` | Generate onboarding docs for a codebase | `module` (required), `audience` |
 
+## Sharing Workflows
+
+### Project-level
+
+Put workflows in `.polpo/workflows/` — they're committed to version control and shared with your team.
+
+### User-level
+
+Put workflows in `~/.polpo/workflows/` — they're available across all your projects. Good for personal productivity workflows.
+
+### Override precedence
+
+If a project and user-level workflow share the same name, the project-level one wins. This lets teams override a personal workflow with a standardized version.
+
 ## Workflows vs Skills vs Plans
 
 | Dimension | Skills | Workflows | Plans |
@@ -224,3 +501,11 @@ Polpo ships with 8 ready-to-use workflows:
 | **Runtime impact** | Affects how the agent thinks | None — becomes a standard Plan | Drives task execution |
 
 Skills make agents smarter. Workflows make processes repeatable. Plans are the execution unit.
+
+## Tips
+
+- **Start simple.** A workflow with one task and one parameter is still useful. You can add complexity later.
+- **Use quality gates for multi-step workflows.** They prevent wasted work when an early step produces poor results.
+- **Write detailed task descriptions.** The agent only sees the resolved description — make it clear what "success" looks like.
+- **Test with `--dry-run`.** The CLI's `--dry-run` flag shows the fully instantiated plan without executing, so you can verify placeholders resolve correctly.
+- **Validate after editing.** Run `polpo workflow validate <name>` to catch placeholder/parameter mismatches early.

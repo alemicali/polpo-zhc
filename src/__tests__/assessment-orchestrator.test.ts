@@ -9,7 +9,7 @@ import type { RunRecord } from "../core/run-store.js";
 
 // Mock external LLM modules — these must be mocked before importing the class
 vi.mock("../llm/query.js", () => ({
-  querySDKText: vi.fn().mockResolvedValue("{}"),
+  queryOrchestratorText: vi.fn().mockResolvedValue({ text: "{}", usage: undefined, costUsd: undefined }),
 }));
 
 vi.mock("../llm/answer-generator.js", () => ({
@@ -27,7 +27,7 @@ vi.mock("../core/question-detector.js", async (importOriginal) => {
 });
 
 // Import mocked modules so we can configure them per test
-import { querySDKText } from "../llm/query.js";
+import { queryOrchestratorText } from "../llm/query.js";
 import { generateAnswer } from "../llm/answer-generator.js";
 import { classifyAsQuestion } from "../core/question-detector.js";
 
@@ -193,7 +193,7 @@ describe("AssessmentOrchestrator", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     (classifyAsQuestion as Mock).mockResolvedValue({ isQuestion: false, question: "" });
-    (querySDKText as Mock).mockResolvedValue("{}");
+    (queryOrchestratorText as Mock).mockResolvedValue({ text: "{}", usage: undefined, costUsd: undefined });
     (generateAnswer as Mock).mockResolvedValue("Here is the answer.");
   });
 
@@ -784,14 +784,14 @@ describe("AssessmentOrchestrator", () => {
         .mockResolvedValueOnce(passingAssessment);
 
       // Mock LLM judge to correct the expectation
-      (querySDKText as Mock).mockResolvedValue(JSON.stringify({
+      (queryOrchestratorText as Mock).mockResolvedValue({ text: JSON.stringify({
         corrections: [{
           type: "file_exists",
           verdict: "expectation_wrong",
           reason: "File was created at a different path",
           fix: { paths: ["src/bar.ts"] },
         }],
-      }));
+      }), usage: undefined, costUsd: undefined });
 
       const task = addReviewTask(h, {
         expectations: [{ type: "file_exists", paths: ["src/foo.ts"], confidence: "estimated" }],
@@ -814,7 +814,7 @@ describe("AssessmentOrchestrator", () => {
 
       // Should have emitted correction event
       expect(correctedEvents.length).toBeGreaterThanOrEqual(1);
-      expect(querySDKText).toHaveBeenCalled();
+      expect(queryOrchestratorText).toHaveBeenCalled();
     });
 
     it("does not judge firm expectations", async () => {
@@ -838,8 +838,8 @@ describe("AssessmentOrchestrator", () => {
         expect(fixEvents).toHaveLength(1);
       });
 
-      // querySDKText should NOT be called for judging (firm expectations skip the judge)
-      expect(querySDKText).not.toHaveBeenCalled();
+      // queryOrchestratorText should NOT be called for judging (firm expectations skip the judge)
+      expect(queryOrchestratorText).not.toHaveBeenCalled();
     });
 
     it("skips judge when globalScore is very low (<2.5)", async () => {
@@ -866,7 +866,7 @@ describe("AssessmentOrchestrator", () => {
       });
 
       // Judge should not be called when score is very low
-      expect(querySDKText).not.toHaveBeenCalled();
+      expect(queryOrchestratorText).not.toHaveBeenCalled();
     });
   });
 
@@ -916,9 +916,9 @@ describe("AssessmentOrchestrator", () => {
 
       // The code should attempt auto-correct/judge because file_exists defaults to "estimated"
       // Mock the judge to return work_wrong so it falls through
-      (querySDKText as Mock).mockResolvedValue(JSON.stringify({
+      (queryOrchestratorText as Mock).mockResolvedValue({ text: JSON.stringify({
         corrections: [{ type: "file_exists", verdict: "work_wrong", reason: "Agent didn't create the file" }],
-      }));
+      }), usage: undefined, costUsd: undefined });
 
       const fixEvents: any[] = [];
       h.emitter.on("task:fix", (e) => fixEvents.push(e));
@@ -931,8 +931,8 @@ describe("AssessmentOrchestrator", () => {
         expect(fixEvents).toHaveLength(1);
       });
 
-      // querySDKText should have been called (judge was invoked)
-      expect(querySDKText).toHaveBeenCalled();
+      // queryOrchestratorText should have been called (judge was invoked)
+      expect(queryOrchestratorText).toHaveBeenCalled();
     });
 
     it("test type defaults to firm confidence", async () => {
@@ -957,7 +957,7 @@ describe("AssessmentOrchestrator", () => {
       });
 
       // Judge should NOT be called because test defaults to firm
-      expect(querySDKText).not.toHaveBeenCalled();
+      expect(queryOrchestratorText).not.toHaveBeenCalled();
     });
   });
 

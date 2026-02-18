@@ -1,9 +1,9 @@
 ---
-title: "Notification System"
+title: "Notifications"
 description: "Event-driven notification routing with channels, conditions, and templates"
 ---
 
-Polpo includes an event-driven **NotificationRouter** that subscribes to orchestrator events, matches them against configurable rules, and dispatches notifications to external channels.
+Polpo can notify you about anything that happens — task failures, SLA warnings, plan completions. It subscribes to internal events, matches them against configurable rules, and dispatches notifications to external channels.
 
 ## Architecture
 
@@ -76,16 +76,31 @@ Notifications are configured under `settings.notifications` in your Polpo config
 
 ## Channel Adapters
 
-Each channel type requires specific configuration fields:
+Polpo supports four notification channels. Each has its own configuration page with setup instructions, payload formats, and attachment behavior.
+
+<CardGroup cols={2}>
+  <Card title="Slack" icon="slack" iconType="brands" href="/notifications/slack">
+    Incoming Webhooks with rich attachments and optional Bot Token file uploads
+  </Card>
+  <Card title="Telegram" icon="telegram" iconType="brands" href="/notifications/telegram">
+    Bot API with HTML formatting, file attachments, and interactive approval buttons
+  </Card>
+  <Card title="Email" icon="envelope" href="/notifications/email">
+    Resend, SendGrid, or SMTP with dual plain text and HTML delivery
+  </Card>
+  <Card title="Webhook" icon="webhook" href="/notifications/webhook">
+    Generic JSON POST to any HTTP endpoint with base64-encoded attachments
+  </Card>
+</CardGroup>
 
 | Channel | Required Fields | Description |
 |---------|----------------|-------------|
 | `slack` | `webhookUrl` | Posts to a Slack incoming webhook |
 | `telegram` | `botToken`, `chatId` | Sends via Telegram Bot API |
-| `email` | `provider`, `to`, `host`, `port`, `from` | SMTP email delivery |
+| `email` | `provider`, `to`, `host`/`port` or `apiKey` | Email delivery via Resend, SendGrid, or SMTP |
 | `webhook` | `url` | Generic HTTP POST with JSON payload |
 
-The `webhook` type also accepts optional `headers` for authentication. API keys and tokens support `${ENV_VAR}` syntax for environment variable references.
+API keys, tokens, and URLs support `${ENV_VAR}` syntax for environment variable references.
 
 ## Event Pattern Matching
 
@@ -200,7 +215,7 @@ The notification system emits its own events:
 | `notification:failed` | `{ ruleId, channel, error }` | Channel delivery failed |
 
 <Tip>
-Use `testChannels()` on the NotificationRouter to verify all configured channels are reachable before starting the orchestrator.
+Use `testChannels()` on the NotificationRouter to verify all configured channels are reachable before starting Polpo.
 </Tip>
 
 ## Scoped Notification Rules

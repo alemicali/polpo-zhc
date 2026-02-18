@@ -3,9 +3,9 @@
  * Used by the orchestrator to auto-resolve clarification requests.
  */
 
-import { querySDKText } from "./query.js";
+import { queryOrchestratorText } from "./query.js";
 import type { Orchestrator } from "../core/orchestrator.js";
-import type { Task } from "../core/types.js";
+import type { Task, ModelConfig } from "../core/types.js";
 
 /**
  * Generate an answer to an agent's question using project memory,
@@ -16,7 +16,7 @@ export async function generateAnswer(
   task: Task,
   question: string,
   cwd: string,
-  model?: string,
+  model?: string | ModelConfig,
 ): Promise<string> {
   const memory = orchestrator.getMemory();
   const state = orchestrator.getStore().getState();
@@ -27,7 +27,7 @@ export async function generateAnswer(
     : [];
 
   const prompt = buildAnswerPrompt(memory, task, siblings, question);
-  return querySDKText(prompt, cwd, model);
+  return (await queryOrchestratorText(prompt, cwd, model)).text;
 }
 
 function buildAnswerPrompt(

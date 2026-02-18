@@ -21,7 +21,7 @@ export function createActivity(): AgentActivity {
 }
 import { Agent } from "@mariozechner/pi-agent-core";
 import type { AgentEvent } from "@mariozechner/pi-agent-core";
-import { resolveModel, resolveApiKey } from "../llm/pi-client.js";
+import { resolveModel, resolveApiKeyAsync, enforceModelAllowlist } from "../llm/pi-client.js";
 import { createCodingTools, createAllTools } from "../tools/coding-tools.js";
 import { loadAgentSkills, buildSkillPrompt } from "../llm/skills.js";
 import { McpClientManager } from "../mcp/client.js";
@@ -35,6 +35,12 @@ function buildSystemPrompt(agent: AgentConfig, cwd: string, polpoDir?: string): 
   const parts = [
     "You are a coding agent managed by Polpo, an AI agent orchestrator.",
     "Complete your assigned task autonomously. Make reasonable decisions and proceed without asking questions.",
+    "",
+    "Your task description may include context tags:",
+    "- <project-memory> — persistent project knowledge from previous sessions",
+    "- <system-context> — standing instructions from the project owner",
+    "- <plan-context> — the plan goal and other tasks being worked on in parallel",
+    "Use this context to make better decisions, but focus on YOUR assigned task.",
   ];
   if (agent.systemPrompt) parts.push("", agent.systemPrompt);
 
@@ -81,6 +87,28 @@ function buildPrompt(task: Task): string {
     `- NEVER use "lsof" or "netstat" to check if a server is running. Use "curl" instead.`,
     `- NEVER use "tail -f", "watch", or any command that runs forever.`,
     `- If a command times out, do NOT retry the same command. Analyze why it hung and fix the approach.`,
+    ``,
+    `CRITICAL — Outcome tracking:`,
+    `When you produce artifacts (files, reports, data), the orchestrator attaches them to`,
+    `task-done notifications (Telegram, Slack, etc.). Some tools auto-track outcomes, but`,
+    `if you generate files via bash scripts or external tools, you MUST register them explicitly.`,
+    ``,
+    `The register_outcome tool lets you declare any artifact as a task outcome:`,
+    `  register_outcome({type: 'file', label: 'Sales Report', path: 'output/report.pdf'})`,
+    `  register_outcome({type: 'media', label: 'Chart', path: 'charts/revenue.png'})`,
+    `  register_outcome({type: 'url', label: 'Staging Deploy', url: 'https://staging.example.com'})`,
+    `  register_outcome({type: 'text', label: 'Summary', text: 'Revenue increased 23%...'})`,
+    ``,
+    `Auto-tracked tools (no need to register_outcome for these):`,
+    `  pdf_create, excel_write, docx_create, audio_speak, image_generate,`,
+    `  browser_screenshot, http_download, audio_transcribe, image_analyze`,
+    ``,
+    `RULES:`,
+    `  - Prefer dedicated tools (pdf_create, excel_write, docx_create) when they fit your needs`,
+    `  - If you MUST use bash to generate files (e.g. complex PDF via Python), ALWAYS call`,
+    `    register_outcome afterward so the orchestrator can track and notify the result`,
+    `  - For browser screenshots: navigate to the page first, then use browser_screenshot`,
+    `  - The "write" tool auto-tracks outcomes for known binary extensions (pdf, xlsx, images, etc.)`,
   );
   return parts.join("\n");
 }
@@ -95,6 +123,11 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
   const activity = createActivity();
   const start = Date.now();
   let alive = true;
+
+  // Enforce model allowlist (throws if model not allowed)
+  if (agentConfig.model) {
+    enforceModelAllowlist(agentConfig.model);
+  }
 
   // Resolve model
   const model = resolveModel(agentConfig.model);
@@ -131,7 +164,7 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
 
   // Create the pi-agent-core Agent (starts with coding tools only; MCP tools added before prompt)
   const agent = new Agent({
-    getApiKey: (provider: string) => resolveApiKey(provider),
+    getApiKey: (provider: string) => resolveApiKeyAsync(provider),
     initialState: {
       systemPrompt: buildSystemPrompt(agentConfig, cwd, ctx?.polpoDir),
       model,
@@ -353,7 +386,54 @@ function guessMime(filePath: string): string | undefined {
  *   used for text-type outcomes where the text is in content rather than details.
  */
 function collectOutcome(toolName: string, details: Record<string, unknown>, contentText?: string): TaskOutcome | undefined {
-  const spec = OUTCOME_TOOLS[toolName];
+  // register_outcome tool — agent explicitly declares an outcome with full control
+  if (toolName === "register_outcome" && details.outcomeType && details.outcomeLabel) {
+    const outcome: TaskOutcome = {
+      id: nanoid(),
+      type: details.outcomeType as OutcomeType,
+      label: details.outcomeLabel as string,
+      producedBy: "register_outcome",
+      producedAt: new Date().toISOString(),
+    };
+    if (details.path) {
+      outcome.path = details.path as string;
+      outcome.mimeType = (details.outcomeMimeType as string) ?? guessMime(details.path as string);
+      if (details.outcomeSize !== undefined) outcome.size = details.outcomeSize as number;
+    }
+    if (details.outcomeText) outcome.text = details.outcomeText as string;
+    if (details.outcomeUrl) outcome.url = details.outcomeUrl as string;
+    if (details.outcomeData !== undefined) outcome.data = details.outcomeData;
+    if (details.outcomeTags) outcome.tags = details.outcomeTags as string[];
+    return outcome;
+  }
+
+  let spec = OUTCOME_TOOLS[toolName];
+
+  // For generic file-writing tools (write, bash), infer outcome from file extension
+  if (!spec && (toolName === "write" || toolName === "bash")) {
+    const path = details.path as string | undefined;
+    if (path) {
+      const ext = path.slice(path.lastIndexOf(".")).toLowerCase();
+      if ([".pdf"].includes(ext)) {
+        spec = { type: "file", labelPrefix: "PDF Document" };
+      } else if ([".xlsx", ".xls", ".csv"].includes(ext)) {
+        spec = { type: "file", labelPrefix: "Spreadsheet" };
+      } else if ([".docx"].includes(ext)) {
+        spec = { type: "file", labelPrefix: "Word Document" };
+      } else if ([".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg"].includes(ext)) {
+        spec = { type: "media", labelPrefix: "Image" };
+      } else if ([".mp3", ".wav", ".ogg", ".flac", ".m4a"].includes(ext)) {
+        spec = { type: "media", labelPrefix: "Audio" };
+      } else if ([".mp4", ".webm", ".mov"].includes(ext)) {
+        spec = { type: "media", labelPrefix: "Video" };
+      } else if ([".html", ".htm"].includes(ext)) {
+        spec = { type: "file", labelPrefix: "HTML Page" };
+      } else if ([".zip", ".tar", ".gz"].includes(ext)) {
+        spec = { type: "file", labelPrefix: "Archive" };
+      }
+    }
+  }
+
   if (!spec) return undefined;
 
   const path = details.path as string | undefined;

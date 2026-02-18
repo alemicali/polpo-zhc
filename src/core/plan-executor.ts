@@ -1,7 +1,7 @@
 import type { OrchestratorContext } from "./orchestrator-context.js";
 import type { TaskManager } from "./task-manager.js";
 import type { AgentManager } from "./agent-manager.js";
-import type { Plan, PlanStatus, PlanReport, Task, TaskExpectation, ExpectedOutcome, PlanQualityGate, ScopedNotificationRules } from "./types.js";
+import type { Plan, PlanStatus, PlanReport, Task, TaskExpectation, ExpectedOutcome, PlanQualityGate, PlanCheckpoint, ScopedNotificationRules } from "./types.js";
 import type { QualityController } from "../quality/quality-controller.js";
 import { sanitizeExpectations } from "./schemas.js";
 import { validateProviderKeys } from "../llm/pi-client.js";
@@ -40,6 +40,8 @@ interface PlanDocument {
     enableImage?: boolean;
   }>;
   qualityGates?: PlanQualityGate[];
+  /** Checkpoints — planned stopping points for human-in-the-loop review. */
+  checkpoints?: PlanCheckpoint[];
   /** Plan-level scoped notification rules — override or extend global rules. */
   notifications?: ScopedNotificationRules;
 }
@@ -51,8 +53,18 @@ export class PlanExecutor {
   private cleanedGroups = new Set<string>();
   /** Quality gates parsed from plan documents, keyed by plan group name */
   private gatesByGroup = new Map<string, PlanQualityGate[]>();
+  /** Checkpoints parsed from plan documents, keyed by plan group name */
+  private checkpointsByGroup = new Map<string, PlanCheckpoint[]>();
+  /** Checkpoints that have been reached and are waiting for resume, keyed by "group:name" */
+  private activeCheckpoints = new Map<string, { checkpoint: PlanCheckpoint; reachedAt: string }>();
+  /** Checkpoints that have been resumed (so they don't re-trigger), keyed by "group:name" */
+  private resumedCheckpoints = new Set<string>();
   /** Optional quality controller — set by orchestrator after init */
   private qualityCtrl?: QualityController;
+  /** Optional notification router — for checkpoint notification rules */
+  private notificationRouter?: import("../notifications/index.js").NotificationRouter;
+  /** Track which checkpoint notification rules have been registered (by cpKey) */
+  private registeredCheckpointRules = new Set<string>();
 
   constructor(
     private ctx: OrchestratorContext,
@@ -65,9 +77,156 @@ export class PlanExecutor {
     this.qualityCtrl = ctrl;
   }
 
+  /** Set the notification router — enables per-checkpoint channel routing. */
+  setNotificationRouter(router: import("../notifications/index.js").NotificationRouter): void {
+    this.notificationRouter = router;
+  }
+
   /** Get quality gates for a plan group. Returns empty array if none defined. */
   getQualityGates(group: string): PlanQualityGate[] {
     return this.gatesByGroup.get(group) ?? [];
+  }
+
+  /** Get checkpoints for a plan group. Returns empty array if none defined. */
+  getCheckpoints(group: string): PlanCheckpoint[] {
+    return this.checkpointsByGroup.get(group) ?? [];
+  }
+
+  /**
+   * Check if a task is blocked by an active (unresumed) checkpoint.
+   * Returns the blocking checkpoint if found, undefined if the task can proceed.
+   */
+  getBlockingCheckpoint(
+    group: string,
+    taskTitle: string,
+    taskId: string,
+    tasks: Task[],
+  ): { checkpoint: PlanCheckpoint; reachedAt: string } | undefined {
+    const checkpoints = this.checkpointsByGroup.get(group);
+    if (!checkpoints) return undefined;
+
+    for (const cp of checkpoints) {
+      // Task must be in blocksTasks
+      if (!cp.blocksTasks.includes(taskTitle) && !cp.blocksTasks.includes(taskId)) {
+        continue;
+      }
+
+      const cpKey = `${group}:${cp.name}`;
+
+      // Already resumed — don't block
+      if (this.resumedCheckpoints.has(cpKey)) continue;
+
+      // Check if all afterTasks are done
+      const afterTasks = tasks.filter(
+        t => cp.afterTasks.includes(t.title) || cp.afterTasks.includes(t.id),
+      );
+      const allDone = afterTasks.length >= cp.afterTasks.length &&
+        afterTasks.every(t => t.status === "done" || t.status === "failed");
+
+      if (!allDone) {
+        // afterTasks not finished yet — checkpoint not reached, don't block (deps will block naturally)
+        continue;
+      }
+
+      // Checkpoint reached — activate it if not already active
+      if (!this.activeCheckpoints.has(cpKey)) {
+        const reachedAt = new Date().toISOString();
+        this.activeCheckpoints.set(cpKey, { checkpoint: cp, reachedAt });
+
+        // Pause the plan
+        const plan = this.ctx.registry.getPlanByName?.(group);
+        if (plan && plan.status === "active") {
+          this.ctx.registry.updatePlan?.(plan.id, { status: "paused" });
+        }
+
+        // Register notification rules for this checkpoint's channels
+        this.ensureCheckpointNotificationRules(cpKey, cp);
+
+        // Emit event (picked up by notification router if rules are configured)
+        this.ctx.emitter.emit("checkpoint:reached", {
+          planId: plan?.id,
+          group,
+          checkpointName: cp.name,
+          message: cp.message,
+          afterTasks: cp.afterTasks,
+          blocksTasks: cp.blocksTasks,
+          reachedAt,
+        });
+      }
+
+      // Return the blocking checkpoint
+      const active = this.activeCheckpoints.get(cpKey)!;
+      return active;
+    }
+
+    return undefined;
+  }
+
+  /**
+   * Resume a checkpoint, unblocking its blocksTasks.
+   * Returns true if the checkpoint was active and is now resumed, false if not found.
+   */
+  resumeCheckpoint(group: string, checkpointName: string): boolean {
+    const cpKey = `${group}:${checkpointName}`;
+    const active = this.activeCheckpoints.get(cpKey);
+    if (!active) return false;
+
+    this.resumedCheckpoints.add(cpKey);
+    this.activeCheckpoints.delete(cpKey);
+
+    // Un-pause the plan (back to active)
+    const plan = this.ctx.registry.getPlanByName?.(group);
+    if (plan && plan.status === "paused") {
+      this.ctx.registry.updatePlan?.(plan.id, { status: "active" });
+    }
+
+    this.ctx.emitter.emit("checkpoint:resumed", {
+      planId: plan?.id,
+      group,
+      checkpointName,
+    });
+
+    return true;
+  }
+
+  /** Get all active (unresumed) checkpoints across all plan groups. */
+  getActiveCheckpoints(): Array<{ group: string; checkpointName: string; checkpoint: PlanCheckpoint; reachedAt: string }> {
+    const result: Array<{ group: string; checkpointName: string; checkpoint: PlanCheckpoint; reachedAt: string }> = [];
+    for (const [cpKey, data] of this.activeCheckpoints) {
+      const [group, ...nameParts] = cpKey.split(":");
+      const checkpointName = nameParts.join(":");
+      result.push({ group, checkpointName, checkpoint: data.checkpoint, reachedAt: data.reachedAt });
+    }
+    return result;
+  }
+
+  /** Register dynamic notification rules for a checkpoint's notifyChannels (once per checkpoint). */
+  private ensureCheckpointNotificationRules(cpKey: string, cp: PlanCheckpoint): void {
+    if (!this.notificationRouter) return;
+    if (!cp.notifyChannels || cp.notifyChannels.length === 0) return;
+    if (this.registeredCheckpointRules.has(cpKey)) return;
+
+    this.registeredCheckpointRules.add(cpKey);
+
+    // Rule for checkpoint reached
+    this.notificationRouter.addRule({
+      id: `checkpoint-reached-${cpKey}`,
+      name: `Checkpoint "${cp.name}" Reached (auto-registered)`,
+      events: ["checkpoint:reached"],
+      condition: { field: "checkpointName", op: "==", value: cp.name },
+      channels: cp.notifyChannels,
+      severity: "warning",
+    });
+
+    // Rule for checkpoint resumed
+    this.notificationRouter.addRule({
+      id: `checkpoint-resumed-${cpKey}`,
+      name: `Checkpoint "${cp.name}" Resumed (auto-registered)`,
+      events: ["checkpoint:resumed"],
+      condition: { field: "checkpointName", op: "==", value: cp.name },
+      channels: cp.notifyChannels,
+      severity: "info",
+    });
   }
 
   savePlan(opts: { data: string; prompt?: string; name?: string; status?: PlanStatus; notifications?: ScopedNotificationRules }): Plan {
@@ -96,7 +255,7 @@ export class PlanExecutor {
     return this.ctx.registry.getAllPlans?.() ?? [];
   }
 
-  updatePlan(planId: string, updates: { data?: string; status?: PlanStatus; name?: string }): Plan {
+  updatePlan(planId: string, updates: Partial<Omit<Plan, "id">>): Plan {
     if (!this.ctx.registry.updatePlan) throw new Error("Store does not support plans");
     return this.ctx.registry.updatePlan(planId, updates);
   }
@@ -264,6 +423,11 @@ export class PlanExecutor {
       this.gatesByGroup.set(group, doc.qualityGates);
     }
 
+    // Parse and store checkpoints from plan document
+    if (doc.checkpoints && Array.isArray(doc.checkpoints) && doc.checkpoints.length > 0) {
+      this.checkpointsByGroup.set(group, doc.checkpoints);
+    }
+
     // Persist plan-level notifications from document onto the Plan record
     if (doc.notifications) {
       this.ctx.registry.updatePlan?.(planId, { status: "active", notifications: doc.notifications });
@@ -330,8 +494,16 @@ export class PlanExecutor {
         // Aggregate plan metrics
         this.qualityCtrl?.aggregatePlanMetrics(plan.id, groupTasks);
 
-        // Clean up gate cache
+        // Clean up gate and checkpoint caches
         this.gatesByGroup.delete(group);
+        this.checkpointsByGroup.delete(group);
+        // Clean up active/resumed checkpoint entries for this group
+        for (const key of [...this.activeCheckpoints.keys()]) {
+          if (key.startsWith(`${group}:`)) this.activeCheckpoints.delete(key);
+        }
+        for (const key of [...this.resumedCheckpoints]) {
+          if (key.startsWith(`${group}:`)) this.resumedCheckpoints.delete(key);
+        }
       }
     }
   }

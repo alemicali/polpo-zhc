@@ -1,0 +1,16 @@
+services:
+  polpo:
+    build: .
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./workspace:/workspace
+    environment:
+      # At minimum, set one LLM provider key.
+      # The default model (opencode:big-pickle) is free — no key needed.
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      # Override the default model (optional)
+      # - POLPO_MODEL=anthropic:claude-sonnet-4-5-20250929
+    restart: unless-stopped

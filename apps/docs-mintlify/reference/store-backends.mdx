@@ -3,7 +3,7 @@ title: "Store Backends"
 description: "File, JSON, and SQLite persistence backends for Polpo"
 ---
 
-Polpo uses a pluggable store layer for persisting tasks, runs, plans, sessions, memory, logs, and approval state. All stores implement a common interface and are selected at orchestrator construction time.
+Polpo persists tasks, runs, plans, sessions, memory, logs, and approval state using a pluggable store layer. All stores implement a common interface and can be swapped via configuration.
 
 ## TaskStore Interface
 
@@ -140,5 +140,5 @@ const orchestrator = new Orchestrator({
 ```
 
 <Note>
-All stores share the same `.polpo/` directory by convention. The directory is created automatically when the orchestrator starts.
+All stores share the same `.polpo/` directory by convention. The directory is created automatically when Polpo starts.
 </Note>

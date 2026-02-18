@@ -3,8 +3,8 @@
  * Hybrid approach: cheap sync heuristic pre-filter + async LLM classifier.
  */
 
-import { querySDKText } from "../llm/query.js";
-import type { TaskResult, AgentActivity } from "./types.js";
+import { queryOrchestratorText } from "../llm/query.js";
+import type { TaskResult, AgentActivity, ModelConfig } from "./types.js";
 
 /**
  * Sync heuristic pre-filter: cheap check for likely question outputs.
@@ -38,7 +38,7 @@ export function looksLikeQuestion(result: TaskResult, activity?: AgentActivity):
 export async function classifyAsQuestion(
   stdout: string,
   cwd: string,
-  model?: string,
+  model?: string | ModelConfig,
 ): Promise<{ isQuestion: boolean; question: string }> {
   const prompt = [
     `Analyze this AI coding agent output. Did the agent COMPLETE the assigned task, or is it asking a question / requesting clarification instead of working?`,
@@ -54,7 +54,7 @@ export async function classifyAsQuestion(
     `{"isQuestion": false, "question": ""}`,
   ].join("\n");
 
-  const response = await querySDKText(prompt, cwd, model);
+  const response = (await queryOrchestratorText(prompt, cwd, model)).text;
   try {
     const cleaned = response.replace(/```json?\n?/g, "").replace(/```/g, "").trim();
     const parsed = JSON.parse(cleaned);

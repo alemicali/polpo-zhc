@@ -58,7 +58,7 @@ export function findTranscriptPath(sessionId: string, cwd: string): string | nul
 /**
  * Read and summarize a session transcript from an absolute path.
  * Extracts tool calls, files touched, TODOs, errors, and last message.
- * Used by both readSessionSummary() (Polpo-spawned sessions) and the bridge (external sessions).
+ * Used by readSessionSummary() for Polpo-spawned sessions.
  */
 export function readSessionSummaryFromPath(transcriptPath: string): SessionSummary | null {
   // Derive sessionId from filename: /path/to/<sessionId>.jsonl → sessionId

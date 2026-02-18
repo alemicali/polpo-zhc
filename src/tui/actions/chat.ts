@@ -9,7 +9,7 @@ import type { Orchestrator } from "../../core/orchestrator.js";
 import type { TUIStore } from "../store.js";
 import type { SessionStore } from "../../core/session-store.js";
 import { seg, parseMarkdown } from "../format.js";
-import { resolveModel, resolveApiKey } from "../../llm/pi-client.js";
+import { resolveModel, resolveApiKey, resolveModelSpec } from "../../llm/pi-client.js";
 import { buildChatSystemPrompt } from "../../llm/prompts.js";
 import { streamSimple, type Message } from "@mariozechner/pi-ai";
 import {
@@ -73,7 +73,7 @@ export async function startChat(
     // Add current user message
     messages.push({ role: "user", content: message, timestamp: Date.now() });
 
-    const model = polpo.getConfig()?.settings?.orchestratorModel;
+    const model = resolveModelSpec(polpo.getConfig()?.settings?.orchestratorModel);
     const m = resolveModel(model);
     const apiKey = resolveApiKey(m.provider);
     const streamOpts = apiKey ? { apiKey } : undefined;
@@ -210,17 +210,11 @@ export async function startChat(
           { text: toolDesc, color: isError ? "red" : "green", dim: isError },
         ]);
 
-        // Handle switch_mode — update TUI input mode
-        if (call.name === "switch_mode" && result.startsWith("__switch_mode:")) {
-          const mode = result.split(":")[1] as "chat" | "plan" | "task";
-          store.setInputMode(mode);
-        }
-
         messages.push({
           role: "toolResult",
           toolCallId: call.id,
           toolName: call.name,
-          content: [{ type: "text", text: result.startsWith("__switch_mode:") ? `Switched to ${call.arguments.mode} mode.` : result }],
+          content: [{ type: "text", text: result }],
           isError,
           timestamp: Date.now(),
         });

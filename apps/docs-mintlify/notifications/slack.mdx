@@ -1,0 +1,85 @@
+---
+title: "Slack"
+description: "Send notifications to Slack channels via Incoming Webhooks."
+---
+
+The Slack adapter posts notifications to a Slack channel using an [Incoming Webhook](https://api.slack.com/messaging/webhooks). Optionally, if you provide a Bot Token, file attachments are uploaded as real Slack files.
+
+## Configuration
+
+```json
+{
+  "settings": {
+    "notifications": {
+      "channels": {
+        "slack-alerts": {
+          "type": "slack",
+          "webhookUrl": "https://hooks.slack.com/services/T00/B00/xxx"
+        }
+      }
+    }
+  }
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|:--------:|-------------|
+| `type` | `"slack"` | Yes | Channel type |
+| `webhookUrl` | string | Yes | Slack Incoming Webhook URL |
+| `apiKey` | string | No | Slack Bot Token — enables real file uploads via `files.upload` |
+
+Both `webhookUrl` and `apiKey` support `${ENV_VAR}` syntax:
+
+```json
+{
+  "type": "slack",
+  "webhookUrl": "${SLACK_WEBHOOK_URL}",
+  "apiKey": "${SLACK_BOT_TOKEN}"
+}
+```
+
+## Message Format
+
+Messages use Slack's rich attachment format with a color-coded sidebar:
+
+| Severity | Color |
+|----------|-------|
+| `info` | Green (`#36a64f`) |
+| `warning` | Goldenrod (`#daa520`) |
+| `critical` | Red (`#ff0000`) |
+
+Each message includes the notification title, body, a footer with the source event name, and a timestamp.
+
+## Attachments
+
+When a notification rule has `includeOutcomes: true`, task outcomes (files, logs) are attached to the Slack message.
+
+**Without Bot Token** — attachments are rendered as follow-up text messages. File content is shown in code blocks (truncated to 2800 characters). File metadata (name, size) is included.
+
+**With Bot Token** — binary files are uploaded to Slack via the `files.upload` API as real downloadable files, each with a title and comment.
+
+## Connectivity Test
+
+The `test()` check validates that the webhook URL hostname contains `slack.com` or `hooks.slack.com`. It does not make a network call — to verify end-to-end delivery, use the [Send Direct API](/features/notifications#send-direct-api).
+
+## Setup
+
+<Steps>
+
+1. **Create a Slack App** at [api.slack.com/apps](https://api.slack.com/apps)
+
+2. **Enable Incoming Webhooks** in the app settings
+
+3. **Add a webhook** to your target channel — copy the webhook URL
+
+4. **Add to Polpo config**:
+   ```json
+   {
+     "type": "slack",
+     "webhookUrl": "https://hooks.slack.com/services/T00/B00/xxx"
+   }
+   ```
+
+5. **(Optional)** For file upload support, add a Bot Token with `files:write` scope
+
+</Steps>

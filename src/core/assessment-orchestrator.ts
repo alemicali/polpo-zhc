@@ -6,7 +6,8 @@ import { setAssessment } from "./types.js";
 import { buildFixPrompt, buildRetryPrompt, buildJudgePrompt, type JudgeVerdict, type JudgeCorrection } from "./assessment-prompts.js";
 import { looksLikeQuestion, classifyAsQuestion } from "./question-detector.js";
 import { generateAnswer } from "../llm/answer-generator.js";
-import { querySDKText } from "../llm/query.js";
+import { queryOrchestratorText } from "../llm/query.js";
+// resolveModelSpec no longer needed — queryOrchestratorText handles ModelConfig directly
 import type { Orchestrator } from "./orchestrator.js";
 
 /**
@@ -459,7 +460,7 @@ export class AssessmentOrchestrator {
 
     let response: string;
     try {
-      response = await querySDKText(prompt, this.ctx.workDir, this.ctx.config.settings.orchestratorModel);
+      response = (await queryOrchestratorText(prompt, this.ctx.workDir, this.ctx.config.settings.orchestratorModel)).text;
     } catch { /* LLM query failed */
       return false;
     }

@@ -1,0 +1,50 @@
+---
+title: "Core Concepts"
+description: "Agents, tasks, and plans — the three building blocks of Polpo."
+---
+
+Polpo is an AI agent that manages a team of other AI agents. You talk to Polpo, and it plans, delegates, reviews, and delivers. Everything revolves around three core primitives.
+
+## Agents
+
+An agent is a named AI worker on Polpo's team. You give it a model, a role, and optionally constrain which tools and files it can access. Agents are grouped into a **team** — your project's workforce. They don't know about each other — Polpo handles all coordination.
+
+```json
+{
+  "team": {
+    "agents": [
+      { "name": "backend", "model": "anthropic:claude-sonnet-4-20250514", "role": "developer" },
+      { "name": "reviewer", "model": "openai:gpt-4o", "role": "code reviewer" }
+    ]
+  }
+}
+```
+
+See [Agents](/concepts/agents) and [Teams](/concepts/teams) for the full reference.
+
+## Tasks
+
+A task is a unit of work assigned to an agent. Every task moves through a state machine: `pending` → `assigned` → `in_progress` → `review` → `done` or `failed`.
+
+When a task fails assessment, it enters a **fix phase** — the agent receives targeted feedback and corrects its work without starting over. After exhausting fix attempts, a full retry kicks in. After exhausting retries, escalation takes over.
+
+See [Tasks](/concepts/tasks) for states, phases, and transitions.
+
+## Plans
+
+A plan is a group of tasks with dependencies. You can ask Polpo to generate one from a description, or define them as JSON files in `.polpo/plans/`. Polpo resolves the dependency graph, parallelizes what it can, and sequences the rest.
+
+```json
+{
+  "group": "feature-auth",
+  "tasks": [
+    { "title": "Design schema", "agent": "backend" },
+    { "title": "Implement API", "agent": "backend", "dependsOn": ["Design schema"] },
+    { "title": "Write tests", "agent": "reviewer", "dependsOn": ["Implement API"] }
+  ]
+}
+```
+
+Plans can include quality gates, scheduling, deadlines, and volatile teams scoped to the plan.
+
+See [Plans](/concepts/plans) for the full format and lifecycle.

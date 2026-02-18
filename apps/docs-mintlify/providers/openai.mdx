@@ -1,0 +1,185 @@
+---
+title: "OpenAI"
+sidebarTitle: "OpenAI"
+description: "GPT and o-series models — multimodal, reasoning, and fast inference."
+---
+
+OpenAI provides the GPT family and o-series reasoning models. Access via API key or through OpenAI Codex OAuth.
+
+## Setup
+
+Get your API key from the [OpenAI Platform](https://platform.openai.com/api-keys).
+
+```bash
+export OPENAI_API_KEY=sk-...
+```
+
+### Config
+
+```json
+{
+  "providers": {
+    "openai": "${OPENAI_API_KEY}"
+  }
+}
+```
+
+### Use it
+
+```json
+{
+  "agents": [
+    { "name": "coder", "model": "openai:gpt-4o" }
+  ]
+}
+```
+
+Polpo auto-infers `openai` from `gpt-`, `o1-`, `o3-`, `o4-`, `chatgpt-`, and `codex-` prefixes.
+
+## Models
+
+| Model | Best for | Context | Reasoning |
+|-------|----------|---------|-----------|
+| `gpt-4o` | Multimodal flagship — text, vision, audio | 128K | No |
+| `gpt-4.1` | Latest GPT iteration, improved instruction following | 1M | No |
+| `o3` | Deep reasoning, complex logic and math | 200K | Yes |
+| `o4-mini` | Fast reasoning at lower cost | 200K | Yes |
+| `gpt-4o-mini` | Cheap and fast for simple tasks | 128K | No |
+
+<Tip>
+The **o-series models** (o3, o4-mini) use chain-of-thought reasoning. They're slower but significantly better at complex logic, math, and multi-step planning. Good choice for the orchestrator model or a reviewer agent.
+</Tip>
+
+## Features
+
+| Feature | Supported |
+|---------|-----------|
+| Streaming | Yes |
+| Tool use | Yes |
+| Vision (images) | Yes (GPT-4o, GPT-4.1) |
+| Reasoning | Yes (o3, o4-mini) |
+
+## Pricing
+
+| Model | Input (per 1M tokens) | Output (per 1M tokens) |
+|-------|----------------------|----------------------|
+| `gpt-4o` | $2.50 | $10.00 |
+| `gpt-4.1` | $2.00 | $8.00 |
+| `o3` | $10.00 | $40.00 |
+| `o4-mini` | $1.10 | $4.40 |
+| `gpt-4o-mini` | $0.15 | $0.60 |
+
+## Provider Details
+
+| | |
+|---|---|
+| **Provider ID** | `openai` |
+| **Env variable** | `OPENAI_API_KEY` |
+| **API type** | OpenAI Responses API |
+| **Auto-infer prefixes** | `gpt-`, `o1-`, `o3-`, `o4-`, `chatgpt-`, `codex-` |
+| **Base URL override** | Supported |
+
+## OAuth: Use Your ChatGPT Subscription (Codex)
+
+If you have a **ChatGPT Plus or Pro subscription**, you can use it directly via the OpenAI Codex OAuth flow — no separate API key or billing account needed.
+
+### Supported Subscriptions
+
+| Plan | Works | Notes |
+|------|:-----:|-------|
+| ChatGPT Pro | Yes | Highest rate limits |
+| ChatGPT Plus | Yes | Standard rate limits |
+| ChatGPT Free | No | Insufficient API access |
+
+### Login
+
+```bash
+polpo auth login openai-codex
+```
+
+OpenAI Codex uses an **Auth Code + PKCE** flow with a localhost callback server:
+
+1. Polpo opens a browser window for authorization
+2. Log in with your OpenAI/ChatGPT account
+3. The callback server on `localhost:1455` captures the token automatically
+4. If the callback fails, you can paste the redirect URL manually
+
+```
+Logging in to OpenAI Codex (ChatGPT Plus/Pro)...
+
+Opening browser for authorization...
+Waiting for callback on localhost:1455...
+
+Login successful!
+Profile saved as: openai-codex:user@gmail.com
+Stored in ~/.polpo/auth-profiles.json
+```
+
+<Warning>
+Port **1455** must be available on your machine. If another service is using it, the callback will fail — in that case, paste the redirect URL manually when prompted.
+</Warning>
+
+### Provider ID
+
+When using Codex OAuth, the provider ID is `openai-codex` (not `openai`):
+
+```json
+{
+  "agents": [
+    { "name": "coder", "model": "openai-codex:gpt-4o" }
+  ]
+}
+```
+
+The same OpenAI models are available through both `openai` (API key) and `openai-codex` (OAuth). Polpo resolves whichever has a valid credential.
+
+### Token Refresh
+
+OAuth tokens expire. Polpo handles this automatically:
+
+- Before each API call, Polpo checks if the token is expired
+- If expired and a refresh token exists, it refreshes silently
+- If no refresh token is available, the profile is skipped and Polpo falls back to other credentials
+
+### Multiple Accounts & Profile Rotation
+
+You can log in with multiple OpenAI accounts. Each gets its own profile:
+
+```
+openai-codex:user@personal.com
+openai-codex:user@work.com
+```
+
+Polpo rotates between them using the same algorithm as all providers: oldest `lastUsed` first, skipping profiles in cooldown or billing disable.
+
+### Billing Disable
+
+If your ChatGPT subscription quota is exceeded, the profile enters **billing disable** — a longer backoff (5h → 10h → 20h → 24h cap) than regular rate-limit cooldown. Other Codex profiles or `openai` API keys continue working normally.
+
+### Session Pinning
+
+Pin a specific Codex profile for the session:
+
+```
+/model openai-codex/gpt-4o@openai-codex:user@work.com
+```
+
+Reset with `/model reset`.
+
+### Resolution Order
+
+```
+1. polpo.json providers.openai.apiKey       (config wins)
+2. OPENAI_API_KEY environment variable       (env var)
+3. Stored openai-codex OAuth profiles        (auto-refresh)
+```
+
+<Info>
+For the full authentication system — all OAuth providers, CLI commands, profile rotation algorithm, and security details — see the [Authentication guide](/models/authentication).
+</Info>
+
+## Notes
+
+- GPT-4.1 has a 1M token context window — useful for large codebase tasks.
+- Use `gpt-4o-mini` for the "fast-worker" pattern: assign it formatting, boilerplate, and simple refactoring where speed and cost matter more than peak quality.
+- o3 is the strongest reasoning model from OpenAI — consider it for reviewer agents and complex planning tasks.

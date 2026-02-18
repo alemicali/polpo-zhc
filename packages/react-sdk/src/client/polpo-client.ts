@@ -22,7 +22,9 @@ import type {
   LogEntry,
   ChatSession,
   ChatMessage,
-  ChatResponse,
+  ChatCompletionRequest,
+  ChatCompletionResponse,
+  ChatCompletionChunk,
   RunActivityEntry,
   SkillInfo,
   NotificationRecord,
@@ -250,10 +252,87 @@ export class PolpoClient {
     return this.get<RunActivityEntry[]>(`/agents/processes/${taskId}/activity`);
   }
 
-  // ── Chat / LLM ────────────────────────────────────────────
+  // ── Chat Completions (OpenAI-compatible) ─────────────────
 
-  chat(message: string, sessionId?: string): Promise<ChatResponse> {
-    return this.post<ChatResponse>("/chat", { message, sessionId });
+  /**
+   * Talk to Polpo via the OpenAI-compatible chat completions endpoint.
+   * Non-streaming mode — returns the full response.
+   */
+  async chatCompletions(req: ChatCompletionRequest): Promise<ChatCompletionResponse> {
+    const url = `${this.baseUrl}/v1/chat/completions`;
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+    if (this.headers["x-api-key"]) {
+      headers["Authorization"] = `Bearer ${this.headers["x-api-key"]}`;
+    }
+    const res = await this.fetchFn(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ ...req, stream: false, project: req.project ?? this.projectId }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: { message: res.statusText } }));
+      throw new PolpoApiError(
+        (err as any).error?.message ?? "Chat completions failed",
+        res.status === 401 ? "AUTH_REQUIRED" : "INTERNAL_ERROR",
+        res.status,
+      );
+    }
+    return (await res.json()) as ChatCompletionResponse;
+  }
+
+  /**
+   * Talk to Polpo via the OpenAI-compatible chat completions endpoint.
+   * Streaming mode — returns an async generator of chunks.
+   */
+  async *chatCompletionsStream(req: ChatCompletionRequest): AsyncGenerator<ChatCompletionChunk, void, unknown> {
+    const url = `${this.baseUrl}/v1/chat/completions`;
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+    if (this.headers["x-api-key"]) {
+      headers["Authorization"] = `Bearer ${this.headers["x-api-key"]}`;
+    }
+    const res = await this.fetchFn(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ ...req, stream: true, project: req.project ?? this.projectId }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: { message: res.statusText } }));
+      throw new PolpoApiError(
+        (err as any).error?.message ?? "Chat completions failed",
+        res.status === 401 ? "AUTH_REQUIRED" : "INTERNAL_ERROR",
+        res.status,
+      );
+    }
+    const reader = res.body?.getReader();
+    if (!reader) throw new PolpoApiError("No response body", "INTERNAL_ERROR", 500);
+
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed || !trimmed.startsWith("data: ")) continue;
+        const data = trimmed.slice(6);
+        if (data === "[DONE]") return;
+        try {
+          yield JSON.parse(data) as ChatCompletionChunk;
+        } catch {
+          // skip malformed chunks
+        }
+      }
+    }
   }
 
   // ── Sessions ────────────────────────────────────────────
@@ -268,26 +347,6 @@ export class PolpoClient {
 
   deleteSession(sessionId: string): Promise<{ deleted: boolean }> {
     return this.del<{ deleted: boolean }>(`/chat/sessions/${sessionId}`);
-  }
-
-  generatePlan(prompt: string): Promise<{ json: string; planData: unknown }> {
-    return this.post<{ json: string; planData: unknown }>("/chat/generate-plan", { prompt });
-  }
-
-  prepareTask(description: string, assignTo: string): Promise<{ taskData: unknown }> {
-    return this.post<{ taskData: unknown }>("/chat/prepare-task", { description, assignTo });
-  }
-
-  generateTeam(description: string): Promise<{ teamData: unknown }> {
-    return this.post<{ teamData: unknown }>("/chat/generate-team", { description });
-  }
-
-  refineTeam(currentData: string, description: string, feedback: string): Promise<{ teamData: unknown }> {
-    return this.post<{ teamData: unknown }>("/chat/refine-team", { currentData, description, feedback });
-  }
-
-  refinePlan(currentData: string, prompt: string, feedback: string): Promise<{ json: string; planData: unknown }> {
-    return this.post<{ json: string; planData: unknown }>("/chat/refine-plan", { currentData, prompt, feedback });
   }
 
   // ── Notifications ────────────────────────────────────────

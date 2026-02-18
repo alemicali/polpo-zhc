@@ -1,0 +1,66 @@
+---
+title: "xAI"
+sidebarTitle: "xAI (Grok)"
+description: "Grok models from xAI — fast, capable, and competitively priced."
+---
+
+xAI provides the Grok model family. Grok models offer strong general capability with competitive pricing.
+
+## Setup
+
+Get your API key from the [xAI Console](https://console.x.ai/).
+
+```bash
+export XAI_API_KEY=xai-...
+```
+
+### Config
+
+```json
+{
+  "providers": {
+    "xai": "${XAI_API_KEY}"
+  }
+}
+```
+
+### Use it
+
+```json
+{
+  "agents": [
+    { "name": "coder", "model": "xai:grok-3" }
+  ]
+}
+```
+
+Polpo auto-infers `xai` from the `grok-` prefix.
+
+## Models
+
+| Model | Best for | Context |
+|-------|----------|---------|
+| `grok-3` | Strong general-purpose model | 131K |
+| `grok-3-mini` | Faster, lighter version | 131K |
+
+## Features
+
+| Feature | Supported |
+|---------|-----------|
+| Streaming | Yes |
+| Tool use | Yes |
+| Vision (images) | No |
+
+## Provider Details
+
+| | |
+|---|---|
+| **Provider ID** | `xai` |
+| **Env variable** | `XAI_API_KEY` |
+| **API type** | OpenAI-compatible |
+| **Auto-infer prefix** | `grok-` |
+
+## Notes
+
+- Grok models use an OpenAI-compatible API, so they work reliably with Polpo's tool calling system.
+- Competitively priced compared to similar-tier models from OpenAI and Anthropic.

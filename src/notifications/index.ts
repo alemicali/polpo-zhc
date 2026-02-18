@@ -1,7 +1,7 @@
 import { nanoid } from "nanoid";
 import { readFileSync, existsSync, statSync } from "node:fs";
 import type { TypedEmitter, PolpoEvent, PolpoEventMap } from "../core/events.js";
-import type { NotificationsConfig, NotificationRule, NotificationChannelConfig, NotificationCondition, TaskOutcome, OutcomeType, ScopedNotificationRules } from "../core/types.js";
+import type { NotificationsConfig, NotificationRule, NotificationChannelConfig, NotificationCondition, TaskOutcome, OutcomeType, ScopedNotificationRules, NotificationAction } from "../core/types.js";
 import type { NotificationChannel, Notification, OutcomeAttachment } from "./types.js";
 import type { NotificationStore, NotificationRecord } from "../core/notification-store.js";
 import { defaultTitle, defaultBody, applyTemplate } from "./templates.js";
@@ -37,6 +37,8 @@ export class NotificationRouter {
   private store?: NotificationStore;
   /** Optional callback to resolve task outcomes by taskId (for approval events etc.) */
   private outcomeResolver?: (taskId: string) => TaskOutcome[] | undefined;
+  /** Optional callback to execute notification actions (create_task, execute_plan, etc.) */
+  private actionExecutor?: (action: NotificationAction) => Promise<string>;
   /** Optional callback to resolve scoped notification rules from event payload.
    *  Returns task-level and plan-level notifications for scope resolution. */
   private scopeResolver?: (data: unknown) => { taskNotifications?: ScopedNotificationRules; planNotifications?: ScopedNotificationRules } | undefined;
@@ -58,6 +60,12 @@ export class NotificationRouter {
   /** Get a channel instance by ID. */
   getChannel(channelId: string): NotificationChannel | undefined {
     return this.channels.get(channelId);
+  }
+
+  /** Set a callback that executes notification actions (create_task, execute_plan, etc.).
+   *  Injected by the orchestrator to avoid circular dependencies. */
+  setActionExecutor(executor: (action: NotificationAction) => Promise<string>): void {
+    this.actionExecutor = executor;
   }
 
   /** Set the notification store for persisting notification history. */
@@ -243,6 +251,26 @@ export class NotificationRouter {
         this.persist(notification, rule, channel.type, "failed", attachments.length, attachments, msg);
       });
     }
+
+    // Execute action triggers (if any)
+    if (rule.actions?.length && this.actionExecutor) {
+      for (const action of rule.actions) {
+        this.actionExecutor(action).then((result) => {
+          this.emitter.emit("action:triggered", {
+            ruleId: rule.id,
+            actionType: action.type,
+            result,
+          });
+        }).catch((err) => {
+          const msg = err instanceof Error ? err.message : String(err);
+          this.emitter.emit("action:triggered", {
+            ruleId: rule.id,
+            actionType: action.type,
+            error: msg,
+          });
+        });
+      }
+    }
   }
 
   /** Persist a notification record to the store (if configured). */
@@ -377,6 +405,17 @@ export class NotificationRouter {
     if (this.started) {
       this.subscribePatterns(rule.events);
     }
+  }
+
+  /**
+   * Remove a notification rule by ID.
+   * Returns true if found and removed.
+   */
+  removeRule(ruleId: string): boolean {
+    const idx = this.rules.findIndex(r => r.id === ruleId);
+    if (idx === -1) return false;
+    this.rules.splice(idx, 1);
+    return true;
   }
 
   /**
@@ -671,6 +710,10 @@ function getAllEventNames(): string[] {
     "schedule:triggered", "schedule:created", "schedule:completed",
     // Notifications
     "notification:sent", "notification:failed",
+    // Task watchers
+    "watcher:created", "watcher:fired", "watcher:removed",
+    // Notification rule actions
+    "action:triggered",
     // General
     "log",
   ];

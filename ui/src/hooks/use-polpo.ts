@@ -6,18 +6,18 @@
  * useSessions.
  *
  * This file provides hooks the SDK doesn't cover:
- * - useChat — session-aware chat with message history + calls client.chat()
+ * - useChat — session-aware chat with streaming via /v1/chat/completions
  * - useProjectInfo — fetches project info (name, workDir) from the API
  */
 
 import { useState, useCallback, useEffect, useRef } from "react";
 import { usePolpo, useSessions, PolpoClient } from "@openpolpo/react-sdk";
-import type { ProjectInfo, ChatMessage } from "@openpolpo/react-sdk";
+import type { ProjectInfo, ChatMessage, ChatCompletionMessage } from "@openpolpo/react-sdk";
 import { config } from "@/lib/config";
 
-// ── useChat (session-aware) ──
+// ── useChat (session-aware + streaming) ──
 // Builds on the SDK's useSessions hook for session management,
-// adds message state + client.chat() for the messaging layer.
+// uses chatCompletionsStream() for real-time streaming responses.
 
 export function useChat() {
   const { client } = usePolpo();
@@ -34,6 +34,8 @@ export function useChat() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const initialLoadDone = useRef(false);
+  /** Conversation history sent to the completions endpoint */
+  const conversationRef = useRef<ChatCompletionMessage[]>([]);
 
   // Auto-select most recent session on first load
   useEffect(() => {
@@ -52,8 +54,14 @@ export function useChat() {
       try {
         const msgs = await getMessages(id);
         setMessages(msgs);
+        // Rebuild conversation history from loaded messages
+        conversationRef.current = msgs.map((m) => ({
+          role: m.role as "user" | "assistant",
+          content: m.content,
+        }));
       } catch {
         setMessages([]);
+        conversationRef.current = [];
       }
     },
     [setSessionId, getMessages]
@@ -63,9 +71,10 @@ export function useChat() {
   const newSession = useCallback(() => {
     setSessionId(null);
     setMessages([]);
+    conversationRef.current = [];
   }, [setSessionId]);
 
-  // Send a message
+  // Send a message (streaming)
   const send = useCallback(
     async (message: string) => {
       // Optimistic user message
@@ -76,36 +85,60 @@ export function useChat() {
         ts: new Date().toISOString(),
       };
       setMessages((prev) => [...prev, userMsg]);
-      setIsLoading(true);
-      try {
-        const data = await client.chat(message, sessionId ?? undefined);
-        const assistantMsg: ChatMessage = {
-          id: `temp-${Date.now()}-a`,
-          role: "assistant",
-          content: data.response,
-          ts: new Date().toISOString(),
-        };
-        setMessages((prev) => [...prev, assistantMsg]);
 
-        // Track session
-        if (data.sessionId && data.sessionId !== sessionId) {
-          setSessionId(data.sessionId);
-          // Refresh session list (new session may have been created)
-          refetchSessions();
+      // Add to conversation history
+      conversationRef.current.push({ role: "user", content: message });
+
+      // Create placeholder for streaming assistant response
+      const assistantId = `temp-${Date.now()}-a`;
+      const assistantMsg: ChatMessage = {
+        id: assistantId,
+        role: "assistant",
+        content: "",
+        ts: new Date().toISOString(),
+      };
+      setMessages((prev) => [...prev, assistantMsg]);
+      setIsLoading(true);
+
+      try {
+        const stream = client.chatCompletionsStream({
+          messages: conversationRef.current,
+        });
+
+        let fullContent = "";
+
+        for await (const chunk of stream) {
+          const delta = chunk.choices[0]?.delta;
+          if (delta?.content) {
+            fullContent += delta.content;
+            // Update the streaming message in-place
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === assistantId ? { ...m, content: fullContent } : m
+              )
+            );
+          }
         }
+
+        // Add completed response to conversation history
+        conversationRef.current.push({ role: "assistant", content: fullContent });
+
+        // Refresh session list (server may have created a new session)
+        refetchSessions();
       } catch (e) {
-        const errMsg: ChatMessage = {
-          id: `temp-${Date.now()}-e`,
-          role: "assistant",
-          content: `Error: ${(e as Error).message}`,
-          ts: new Date().toISOString(),
-        };
-        setMessages((prev) => [...prev, errMsg]);
+        // Replace the streaming placeholder with an error
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantId
+              ? { ...m, content: `Error: ${(e as Error).message}` }
+              : m
+          )
+        );
       } finally {
         setIsLoading(false);
       }
     },
-    [client, sessionId, setSessionId, refetchSessions]
+    [client, refetchSessions]
   );
 
   // Delete a session — clear messages if active
@@ -115,6 +148,7 @@ export function useChat() {
         await sdkDeleteSession(id);
         if (sessionId === id) {
           setMessages([]);
+          conversationRef.current = [];
         }
       } catch {
         // silent
@@ -126,6 +160,7 @@ export function useChat() {
   const clear = useCallback(() => {
     setMessages([]);
     setSessionId(null);
+    conversationRef.current = [];
   }, [setSessionId]);
 
   return {

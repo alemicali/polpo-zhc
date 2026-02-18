@@ -91,7 +91,7 @@ Plans can also define volatile teams (agents scoped to a single plan) and qualit
 
 ## Settings
 
-The `settings` object controls orchestrator behavior — retry limits, tick interval, log level, stale detection thresholds, and more:
+The `settings` object controls Polpo's behavior — retry limits, tick interval, log level, stale detection thresholds, and more:
 
 ```json
 {
@@ -109,16 +109,16 @@ The `settings` object controls orchestrator behavior — retry limits, tick inte
 
 ## Optional Systems
 
-Polpo includes several optional systems that can be enabled in the config:
+Polpo has several optional capabilities that can be enabled in the config:
 
 | System | Config Key | Learn More |
 |--------|------------|------------|
 | Approval gates | `approvalGates` | [Approval Gates](/features/approval-gates) |
 | Notifications | `notifications` | [Notifications](/features/notifications) |
 | Escalation | `escalationPolicy` | [Escalation Chain](/features/escalation) |
-| SLA monitoring | `sla` | [Assessment & Quality](/features/assessment) |
+| SLA monitoring | `sla` | [Scoring](/features/scoring) |
 | Scheduling | `enableScheduler` | [Scheduling](/features/scheduling) |
-| Quality threshold | `defaultQualityThreshold` | [Assessment & Quality](/features/assessment) |
+| Quality threshold | `defaultQualityThreshold` | [Scoring](/features/scoring) |
 
 ## Environment Variables
 

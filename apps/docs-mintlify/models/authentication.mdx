@@ -1,0 +1,447 @@
+---
+title: "Authentication"
+description: "OAuth login, API keys, auth profiles, profile rotation, billing disable, and session stickiness"
+---
+
+Polpo supports two ways to authenticate with LLM providers: **API keys** (traditional) and **OAuth login** (use your existing subscription). OAuth lets you use your Claude Max, ChatGPT Plus, GitHub Copilot, or Google account without provisioning separate API keys.
+
+## Authentication Methods
+
+### API Keys
+
+The traditional approach. Set an environment variable or configure it in `polpo.json`:
+
+<CodeGroup>
+```bash Environment Variable
+export ANTHROPIC_API_KEY=sk-ant-...
+```
+
+```json polpo.json
+{
+  "providers": {
+    "anthropic": {
+      "apiKey": "sk-ant-..."
+    }
+  }
+}
+```
+
+```json polpo.json (env reference)
+{
+  "providers": {
+    "anthropic": {
+      "apiKey": "${ANTHROPIC_API_KEY}"
+    }
+  }
+}
+```
+</CodeGroup>
+
+### OAuth Login
+
+Use your existing subscription (Claude Pro/Max, ChatGPT Plus/Pro, GitHub Copilot, Google) directly. No separate API key needed.
+
+```bash
+polpo auth login anthropic
+```
+
+Polpo opens a browser, you authorize, and credentials are stored securely in `~/.polpo/auth-profiles.json` with automatic token refresh.
+
+<Info>
+OAuth credentials are encrypted at rest with **0600 file permissions** (owner read/write only) and the `~/.polpo/` directory uses **0700 permissions** (owner only). Writes are atomic (temp file + rename) to prevent corruption.
+</Info>
+
+## OAuth Providers
+
+Five providers support OAuth login. Each provider page has a complete, self-contained OAuth guide — the summary below gives you the quick reference.
+
+| Provider | Subscription | Flow | Port | Provider Guide |
+|----------|-------------|------|:----:|:--------------:|
+| **Anthropic** | Claude Pro / Max | Auth code + PKCE | — (manual paste) | [Anthropic](/providers/anthropic#oauth-use-your-claude-subscription) |
+| **OpenAI Codex** | ChatGPT Plus / Pro | Auth code + PKCE | 1455 | [OpenAI](/providers/openai#oauth-use-your-chatgpt-subscription-codex) |
+| **GitHub Copilot** | Copilot Individual / Business / Enterprise | Device code | — (no server) | [GitHub Copilot](/providers/github-copilot#oauth-use-your-copilot-subscription) |
+| **Google Gemini CLI** | Google account | Auth code + PKCE | 8085 | [Google Gemini](/providers/google#gemini-cli-flow) |
+| **Google Antigravity** | Google account | Auth code + PKCE | 51121 | [Google Gemini](/providers/google#antigravity-flow) |
+
+### Anthropic (Claude Max)
+
+The most common use case. Your Claude Max subscription gives you high-rate API access without a separate billing account.
+
+```bash
+polpo auth login anthropic
+```
+
+1. Polpo prints a URL — open it in your browser
+2. Authorize with your Anthropic account
+3. Copy the authorization code (format: `code#state`)
+4. Paste it back in the terminal
+
+<Card title="Full Anthropic OAuth guide" icon="arrow-right" href="/providers/anthropic#oauth-use-your-claude-subscription">
+  Supported subscriptions, token refresh, multiple accounts, billing disable, and session pinning for Anthropic.
+</Card>
+
+### OpenAI Codex (ChatGPT Plus/Pro)
+
+```bash
+polpo auth login openai-codex
+```
+
+Opens a browser window. After authorization, the callback server on `localhost:1455` captures the code automatically. If the callback fails, you can paste the redirect URL manually.
+
+<Card title="Full OpenAI Codex OAuth guide" icon="arrow-right" href="/providers/openai#oauth-use-your-chatgpt-subscription-codex">
+  Supported subscriptions, provider ID differences, token refresh, and session pinning for OpenAI Codex.
+</Card>
+
+### GitHub Copilot
+
+The simplest flow — no browser redirect needed:
+
+```bash
+polpo auth login github-copilot
+```
+
+1. Polpo shows a device code and a URL
+2. Go to the URL, enter the code
+3. Polpo polls for authorization automatically
+
+<Card title="Full GitHub Copilot OAuth guide" icon="arrow-right" href="/providers/github-copilot#oauth-use-your-copilot-subscription">
+  Supported subscriptions, device code flow details, multiple accounts, and session pinning for GitHub Copilot.
+</Card>
+
+### Google Gemini CLI / Antigravity
+
+```bash
+polpo auth login google-gemini-cli
+polpo auth login google-antigravity
+```
+
+Both use browser + localhost callback. Gemini CLI uses port 8085, Antigravity uses port 51121. Both give access to the same Gemini models.
+
+<Card title="Full Google OAuth guide" icon="arrow-right" href="/providers/google#oauth-use-your-google-account">
+  Both Gemini CLI and Antigravity flows, multiple accounts, token refresh, and session pinning for Google.
+</Card>
+
+## CLI Commands
+
+### `polpo auth login [provider]`
+
+Login to an OAuth provider. Without a provider argument, shows an interactive picker:
+
+```bash
+# Interactive picker
+polpo auth login
+
+# Direct provider
+polpo auth login anthropic
+polpo auth login github-copilot
+```
+
+### `polpo auth status`
+
+Show all stored auth profiles and their status:
+
+```bash
+polpo auth status
+```
+
+```
+Auth Profiles (~/.polpo/auth-profiles.json)
+
+  * anthropic:user@example.com
+    Provider: anthropic
+    Type: oauth
+    Status: active
+    Expires: 1/15/2026, 3:45:00 PM
+    Email: user@example.com
+    Last used: 1/14/2026, 10:30:00 AM
+
+  ~ openai-codex:default
+    Provider: openai-codex
+    Type: oauth
+    Status: expired (auto-refresh available)
+    Expires: 1/10/2026, 8:00:00 AM
+    Last used: 1/9/2026, 5:15:00 PM
+```
+
+Status icons:
+- `*` (green) -- active, ready to use
+- `~` (yellow) -- expired but auto-refresh available
+- `x` (red) -- expired, no refresh token, re-login required
+
+### `polpo auth logout [provider]`
+
+Remove stored credentials:
+
+```bash
+# Remove all profiles for a provider
+polpo auth logout anthropic
+
+# Remove ALL stored credentials
+polpo auth logout --all
+```
+
+## API Key Resolution Order
+
+When Polpo needs an API key for a provider, it checks these sources in order:
+
+```
+1. polpo.json providers.{provider}.apiKey    (explicit config)
+2. Environment variable (ANTHROPIC_API_KEY)  (env var)
+3. Stored OAuth profiles                     (auto-refresh)
+```
+
+The first source that returns a key wins. This means:
+
+- **Config overrides everything** -- if you set `apiKey` in `polpo.json`, OAuth profiles are ignored for that provider
+- **Env vars override OAuth** -- useful for CI/CD where you use a service API key
+- **OAuth is the fallback** -- perfect for local development where you just want to use your subscription
+
+<Tip>
+For production, use environment variables or config. For local development, `polpo auth login` is the fastest way to get started -- especially if you already have a Claude Max subscription.
+</Tip>
+
+## Auth Profiles
+
+### Profile IDs
+
+Each stored credential gets a profile ID in the format `provider:identifier`:
+
+```
+anthropic:user@example.com    (email from OAuth)
+anthropic:default             (no email available)
+github-copilot:default        (device code, no email)
+openai-codex:user@gmail.com   (email from OAuth)
+```
+
+You can have **multiple profiles per provider** (e.g., personal + work accounts). Polpo uses profile rotation to select the best one.
+
+### Profile Rotation
+
+When multiple profiles exist for a provider, Polpo selects the best one using this algorithm:
+
+1. **OAuth profiles before API key profiles** -- OAuth gets priority because it supports auto-refresh
+2. **Oldest `lastUsed` first** -- round-robin to distribute usage evenly across profiles
+3. **Skip profiles in cooldown** -- transient errors (rate limit, auth failure) trigger temporary cooldown
+4. **Skip billing-disabled profiles** -- insufficient credits trigger a longer disable period
+
+This is the same rotation algorithm used by OpenClaw, ensuring fair distribution and automatic failover between credentials.
+
+### Token Refresh
+
+OAuth tokens expire. Polpo handles this automatically:
+
+- Before each API call, Polpo checks if the token is expired
+- If expired **and a refresh token exists**, it refreshes automatically
+- If expired **and no refresh token** -- the profile is skipped with a warning, and Polpo tries the next profile or falls back to other auth methods
+- Refreshed tokens are saved back to `auth-profiles.json`
+
+<Warning>
+Expired tokens without a refresh token are **never used**. If you see warnings about expired profiles, run `polpo auth login <provider>` to re-authenticate.
+</Warning>
+
+## Billing Disable
+
+Billing errors (insufficient credits, quota exceeded) are handled separately from transient errors like rate limits. This is because billing issues are persistent -- retrying in 1 minute won't help if your credits are depleted.
+
+### How It Works
+
+When a billing error is detected:
+
+1. The profile is marked as **billing-disabled** with a longer backoff
+2. The initial disable period is **5 hours**
+3. On subsequent billing failures, the period **doubles**: 5h -> 10h -> 20h -> **24h cap**
+4. The billing error counter resets after **24 hours** without a billing failure
+
+### vs. Regular Cooldown
+
+| | Regular Cooldown | Billing Disable |
+|---|---|---|
+| **Triggers** | Rate limit, auth error, server error | Insufficient credits, quota exceeded |
+| **Backoff** | 1min -> 5min -> 25min -> 1h | 5h -> 10h -> 20h -> 24h |
+| **Assumption** | Transient -- will resolve quickly | Persistent -- needs payment or plan upgrade |
+| **Profile impact** | Deprioritized in rotation | Moved to end of rotation queue |
+
+Both mechanisms work at the **profile level**, not the provider level. If one API key is rate-limited but another has quota, Polpo automatically rotates to the working one.
+
+### Configuration
+
+Billing disable timing can be configured in `polpo.json`:
+
+```json
+{
+  "settings": {
+    "billingDisable": {
+      "billingBackoffHours": 5,
+      "billingMaxHours": 24,
+      "failureWindowHours": 24
+    }
+  }
+}
+```
+
+## Session Stickiness
+
+When a model is selected for a session (chat, task execution), Polpo can **pin** the auth profile to that session. This avoids switching models or credentials mid-conversation.
+
+### Auto-Pin (Soft)
+
+By default, Polpo auto-pins the first profile it uses in a session. If that profile enters cooldown or billing disable, Polpo **rotates to another available profile** transparently.
+
+### User-Pin (Hard)
+
+When you explicitly select a model and profile via `/model`, it's a **hard pin**. If the pinned profile fails, Polpo does NOT rotate to another profile -- it fails over to the next model in the fallback chain instead. This ensures you stay on the exact credential you chose.
+
+```
+/model anthropic/claude-opus-4-6@anthropic:user@example.com
+```
+
+This pins both the model and the auth profile. The pin persists until:
+- You run `/model reset` or `/model default`
+- The session is reset
+
+## The `/model` Command
+
+Switch models and profiles during a chat session:
+
+| Command | Action |
+|---------|--------|
+| `/model` or `/model list` | Show available models as a numbered list |
+| `/model 3` | Select model #3 from the list |
+| `/model anthropic/claude-opus-4-6` | Switch to a specific provider and model |
+| `/model anthropic:claude-opus-4-6` | Same thing, with colon separator |
+| `/model claude-opus-4-6` | Auto-infer provider from model name |
+| `/model status` | Show current model, fallbacks, and auth status |
+| `/model reset` or `/model default` | Clear override, return to default model |
+| `/model claude-opus-4-6@anthropic:user@example.com` | Switch model AND pin a specific auth profile |
+
+### Allowlist Enforcement
+
+If a `modelAllowlist` is configured in `polpo.json`, `/model` only allows selecting models in the list:
+
+```json
+{
+  "settings": {
+    "modelAllowlist": {
+      "anthropic:claude-sonnet-4-20250514": { "alias": "Sonnet" },
+      "anthropic:claude-haiku-4-20250414": { "alias": "Haiku" },
+      "openai:gpt-4o": { "alias": "GPT-4o" }
+    }
+  }
+}
+```
+
+## `polpo models` CLI
+
+### `polpo models list`
+
+List all available models from the pi-ai catalog:
+
+```bash
+# All providers with top models
+polpo models list
+
+# All models for a specific provider
+polpo models list --provider anthropic
+
+# All models (not truncated)
+polpo models list --all
+
+# Machine-readable output
+polpo models list --plain
+polpo models list --json
+```
+
+### `polpo models status`
+
+Show resolved model configuration, fallbacks, and auth status:
+
+```bash
+polpo models status
+```
+
+```
+Model Configuration
+
+  * Primary: anthropic:claude-sonnet-4-20250514
+    Claude Sonnet 4 | 200k ctx | reasoning
+
+  Fallback chain:
+    1. openai:gpt-4o
+    2. opencode:big-pickle
+
+  Provider Auth:
+
+    anthropic: env + oauth (2 profiles)
+    openai: env
+    opencode: env
+```
+
+Options:
+- `--json` -- full JSON output (for CI/automation)
+- `--check` -- exit code 1 if auth missing, 2 if expiring soon (for CI health checks)
+- `--plain` -- print only the resolved primary model spec
+- `-d <path>` -- specify working directory
+
+### `polpo models scan`
+
+Scan for locally running model servers:
+
+```bash
+polpo models scan
+```
+
+```
+Scanning for local model servers...
+
+  * Ollama (http://localhost:11434)
+    llama3.2:latest
+    qwen2.5-coder:7b
+    codestral:latest
+
+  * LM Studio (http://localhost:1234)
+    lmstudio-community/Meta-Llama-3.1-8B-Instruct-GGUF
+
+  Found 2 servers with 4 models.
+
+  To use a local model, add to polpo.json:
+    "providers": { "ollama": { "baseUrl": "http://localhost:11434/v1", "api": "openai-completions" } }
+    "orchestratorModel": "ollama:llama3.2"
+```
+
+Supported servers: Ollama, vLLM, LM Studio, LocalAI, LiteLLM Proxy, TGI.
+
+Options:
+- `--json` -- JSON output
+- `--timeout <ms>` -- connection timeout per endpoint (default: 3000ms)
+
+## Security
+
+### File Permissions
+
+- `~/.polpo/` directory: **0700** (owner only)
+- `auth-profiles.json`: **0600** (owner read/write only)
+- Permissions are enforced on every read/write; if they're wrong, Polpo fixes them automatically
+
+### Atomic Writes
+
+Credential files are written atomically: data goes to a temp file first, then renamed in place. This prevents corruption from crashes or power loss.
+
+### Input Validation
+
+- Profile IDs are validated against a strict regex (alphanumeric, hyphens, underscores, dots, `@`)
+- Prototype pollution prevention: `__proto__`, `constructor`, and similar keys are rejected
+- Provider names must be lowercase alphanumeric with hyphens/underscores (max 64 chars)
+- Tokens are validated for length (max 16KB) and control characters before storage
+
+### Path Safety
+
+If `POLPO_STATE_DIR` is set, it must be:
+- An absolute path
+- Not pointing to sensitive system directories (`/etc`, `/usr`, `/proc`, etc.)
+- Resolved path must match input (no `..` traversal tricks)
+
+Invalid paths are ignored with a warning, falling back to `~/.polpo/`.
+
+### Error Sanitization
+
+Error messages from OAuth flows are sanitized before display. Long tokens, URL query parameters, and credentials are redacted to prevent accidental leakage in logs or terminal output.

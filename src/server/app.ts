@@ -17,6 +17,8 @@ import { approvalRoutes } from "./routes/approvals.js";
 import { workflowRoutes } from "./routes/workflows.js";
 import { configRoutes } from "./routes/config.js";
 import { projectListRoutes, projectDetailRoutes } from "./routes/projects.js";
+import { completionRoutes } from "./routes/completions.js";
+import { peerRoutes } from "./routes/peers.js";
 
 export type ServerEnv = {
   Variables: {
@@ -56,6 +58,9 @@ export function createApp(pm: ProjectManager, opts?: AppOptions): OpenAPIHono {
   // Health (no auth, no project context)
   app.route("/api/v1/health", healthRoutes());
 
+  // OpenAI-compatible chat completions — Polpo's primary conversational interface
+  app.route("/v1/chat/completions", completionRoutes(pm, opts?.apiKeys));
+
   // Authenticated routes
   const authed = new OpenAPIHono();
   if (opts?.apiKeys && opts.apiKeys.length > 0) {
@@ -80,6 +85,7 @@ export function createApp(pm: ProjectManager, opts?: AppOptions): OpenAPIHono {
   projectApp.route("/approvals", approvalRoutes());
   projectApp.route("/workflows", workflowRoutes());
   projectApp.route("/config", configRoutes());
+  projectApp.route("/peers", peerRoutes());
   projectApp.route("/", projectDetailRoutes());
 
   authed.route("/projects/:projectId", projectApp);
@@ -91,7 +97,7 @@ export function createApp(pm: ProjectManager, opts?: AppOptions): OpenAPIHono {
     info: {
       title: "Polpo API",
       version: "1.0.0",
-      description: "REST API for the Polpo multi-agent orchestration framework. Manage projects, tasks, plans, agents, workflows, skills, notifications, and approvals.",
+      description: "REST API for Polpo — an AI agent that manages teams of AI coding agents. Manage projects, tasks, plans, agents, workflows, skills, notifications, and approvals. For conversational interaction, use the OpenAI-compatible POST /v1/chat/completions endpoint.",
     },
     servers: [
       { url: "http://localhost:3890", description: "Local development" },

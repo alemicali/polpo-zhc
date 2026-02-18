@@ -3,7 +3,7 @@
   "info": {
     "title": "Polpo API",
     "version": "1.0.0",
-    "description": "REST API for the Polpo multi-agent orchestration framework. Manage projects, tasks, plans, agents, workflows, skills, notifications, and approvals."
+    "description": "REST API for Polpo — an AI agent that manages teams of AI coding agents. Manage projects, tasks, plans, agents, workflows, skills, notifications, and approvals. For conversational interaction, use the OpenAI-compatible POST /v1/chat/completions endpoint."
   },
   "servers": [
     {
@@ -68,6 +68,245 @@
                   "required": [
                     "ok",
                     "data"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/chat/completions": {
+      "post": {
+        "tags": [
+          "Chat Completions"
+        ],
+        "summary": "Talk to Polpo (OpenAI-compatible)",
+        "description": "Polpo's primary conversational interface. Send messages in OpenAI format, receive responses in OpenAI format. Polpo runs its full 37-tool agentic loop internally — you describe what you need, Polpo handles the rest. Supports streaming (SSE) and non-streaming modes.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "messages": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "role": {
+                          "type": "string",
+                          "enum": [
+                            "system",
+                            "user",
+                            "assistant"
+                          ],
+                          "description": "Message role. System messages are appended as additional context (Polpo has its own system prompt)."
+                        },
+                        "content": {
+                          "type": "string",
+                          "description": "Message content"
+                        }
+                      },
+                      "required": [
+                        "role",
+                        "content"
+                      ]
+                    },
+                    "minItems": 1,
+                    "description": "Conversation messages in OpenAI format"
+                  },
+                  "stream": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "If true, returns an SSE stream of OpenAI-format chunks. If false, returns a complete response."
+                  },
+                  "model": {
+                    "type": "string",
+                    "description": "Ignored. Polpo uses its configured orchestrator model."
+                  },
+                  "temperature": {
+                    "type": "number",
+                    "description": "Ignored. Reserved for future use."
+                  },
+                  "max_tokens": {
+                    "type": "integer",
+                    "description": "Ignored. Reserved for future use."
+                  },
+                  "project": {
+                    "type": "string",
+                    "description": "Polpo extension: target a specific project by ID. If omitted, uses the first registered project."
+                  }
+                },
+                "required": [
+                  "messages"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Chat completion response (non-streaming). When stream=true, returns text/event-stream with OpenAI-format chunks ending with data: [DONE].",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "description": "Unique completion ID (chatcmpl-...)"
+                    },
+                    "object": {
+                      "type": "string",
+                      "enum": [
+                        "chat.completion"
+                      ]
+                    },
+                    "created": {
+                      "type": "integer",
+                      "description": "Unix timestamp"
+                    },
+                    "model": {
+                      "type": "string",
+                      "enum": [
+                        "polpo"
+                      ]
+                    },
+                    "choices": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "index": {
+                            "type": "integer"
+                          },
+                          "message": {
+                            "type": "object",
+                            "properties": {
+                              "role": {
+                                "type": "string",
+                                "enum": [
+                                  "assistant"
+                                ]
+                              },
+                              "content": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "role",
+                              "content"
+                            ]
+                          },
+                          "finish_reason": {
+                            "type": "string",
+                            "enum": [
+                              "stop",
+                              "length"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "index",
+                          "message",
+                          "finish_reason"
+                        ]
+                      }
+                    },
+                    "usage": {
+                      "type": "object",
+                      "properties": {
+                        "prompt_tokens": {
+                          "type": "integer"
+                        },
+                        "completion_tokens": {
+                          "type": "integer"
+                        },
+                        "total_tokens": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "prompt_tokens",
+                        "completion_tokens",
+                        "total_tokens"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "object",
+                    "created",
+                    "model",
+                    "choices",
+                    "usage"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request (missing messages or no project available)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "message": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        },
+                        "code": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "message",
+                        "type"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "message": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        },
+                        "code": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "message",
+                        "type"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
                   ]
                 }
               }
@@ -1331,6 +1570,125 @@
         }
       }
     },
+    "/api/v1/projects/{projectId}/plans/checkpoints": {
+      "get": {
+        "tags": [
+          "Plans"
+        ],
+        "summary": "List all active checkpoints",
+        "responses": {
+          "200": {
+            "description": "List of active checkpoints",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "nullable": true
+                      }
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/projects/{projectId}/plans/{planId}/checkpoints/{checkpointName}/resume": {
+      "post": {
+        "tags": [
+          "Plans"
+        ],
+        "summary": "Resume a checkpoint",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "planId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "checkpointName",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Checkpoint resumed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "resumed": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "resumed"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Checkpoint not found or not active",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/projects/{projectId}/plans/{planId}/abort": {
       "post": {
         "tags": [
@@ -1856,275 +2214,10 @@
         }
       }
     },
-    "/api/v1/projects/{projectId}/chat": {
-      "post": {
-        "tags": [
-          "Chat"
-        ],
-        "summary": "Q&A about Polpo state",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "message": {
-                    "type": "string",
-                    "minLength": 1
-                  },
-                  "sessionId": {
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "message"
-                ]
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Chat response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "ok": {
-                      "type": "boolean"
-                    },
-                    "data": {
-                      "nullable": true
-                    }
-                  },
-                  "required": [
-                    "ok"
-                  ]
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/projects/{projectId}/chat/generate-plan": {
-      "post": {
-        "tags": [
-          "Chat"
-        ],
-        "summary": "Generate plan from natural language",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "prompt": {
-                    "type": "string",
-                    "minLength": 1
-                  }
-                },
-                "required": [
-                  "prompt"
-                ]
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Generated plan",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "ok": {
-                      "type": "boolean"
-                    },
-                    "data": {
-                      "nullable": true
-                    }
-                  },
-                  "required": [
-                    "ok"
-                  ]
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/projects/{projectId}/chat/prepare-task": {
-      "post": {
-        "tags": [
-          "Chat"
-        ],
-        "summary": "LLM-enriched task preparation",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "description": {
-                    "type": "string",
-                    "minLength": 1
-                  },
-                  "assignTo": {
-                    "type": "string",
-                    "minLength": 1
-                  },
-                  "group": {
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "description",
-                  "assignTo"
-                ]
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Prepared task data",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "ok": {
-                      "type": "boolean"
-                    },
-                    "data": {
-                      "nullable": true
-                    }
-                  },
-                  "required": [
-                    "ok"
-                  ]
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/projects/{projectId}/chat/generate-team": {
-      "post": {
-        "tags": [
-          "Chat"
-        ],
-        "summary": "AI team generation",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "description": {
-                    "type": "string",
-                    "minLength": 1
-                  }
-                },
-                "required": [
-                  "description"
-                ]
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Generated team data",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "ok": {
-                      "type": "boolean"
-                    },
-                    "data": {
-                      "nullable": true
-                    }
-                  },
-                  "required": [
-                    "ok"
-                  ]
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/projects/{projectId}/chat/refine-team": {
-      "post": {
-        "tags": [
-          "Chat"
-        ],
-        "summary": "Refine generated team with feedback",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "currentData": {
-                    "type": "string",
-                    "minLength": 1
-                  },
-                  "description": {
-                    "type": "string",
-                    "default": ""
-                  },
-                  "feedback": {
-                    "type": "string",
-                    "minLength": 1
-                  }
-                },
-                "required": [
-                  "currentData",
-                  "feedback"
-                ]
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Refined team data",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "ok": {
-                      "type": "boolean"
-                    },
-                    "data": {
-                      "nullable": true
-                    }
-                  },
-                  "required": [
-                    "ok"
-                  ]
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/v1/projects/{projectId}/chat/sessions": {
       "get": {
         "tags": [
-          "Chat"
+          "Chat Sessions"
         ],
         "summary": "List chat sessions",
         "responses": {
@@ -2155,7 +2248,7 @@
     "/api/v1/projects/{projectId}/chat/sessions/{id}/messages": {
       "get": {
         "tags": [
-          "Chat"
+          "Chat Sessions"
         ],
         "summary": "Get messages for a session",
         "parameters": [
@@ -2248,7 +2341,7 @@
     "/api/v1/projects/{projectId}/chat/sessions/{id}": {
       "delete": {
         "tags": [
-          "Chat"
+          "Chat Sessions"
         ],
         "summary": "Delete a session",
         "parameters": [
@@ -2330,64 +2423,6 @@
                     "ok",
                     "error",
                     "code"
-                  ]
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/projects/{projectId}/chat/refine-plan": {
-      "post": {
-        "tags": [
-          "Chat"
-        ],
-        "summary": "Refine generated plan with feedback",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "currentData": {
-                    "type": "string",
-                    "minLength": 1
-                  },
-                  "prompt": {
-                    "type": "string",
-                    "default": ""
-                  },
-                  "feedback": {
-                    "type": "string",
-                    "minLength": 1
-                  }
-                },
-                "required": [
-                  "currentData",
-                  "feedback"
-                ]
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Refined plan",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "ok": {
-                      "type": "boolean"
-                    },
-                    "data": {
-                      "nullable": true
-                    }
-                  },
-                  "required": [
-                    "ok"
                   ]
                 }
               }

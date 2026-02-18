@@ -1,9 +1,9 @@
 ---
-title: "Events Reference"
+title: "Events"
 description: "All 56 Polpo event types organized by category with typed payloads"
 ---
 
-Polpo uses a typed event emitter (`TypedEmitter`) that wraps Node's `EventEmitter` with type-safe `emit`/`on`/`once`/`off`. Events are streamed via SSE and WebSocket to all connected clients and optionally persisted to a log store.
+Polpo emits typed events for everything it does — task transitions, agent activity, assessments, deadlocks, notifications, and more. Events are streamed via SSE and WebSocket to all connected clients and optionally persisted to a log store.
 
 <Note>
 Events marked with **Not persisted** are excluded from the log store because they fire too frequently. All other events are automatically persisted when a `LogStore` is attached.
@@ -168,18 +168,6 @@ Events for the conversational chat interface.
 |-------|-------------|-------------------|
 | `session:created` | New chat session created | `sessionId`, `title?` |
 | `message:added` | Message added to a session | `sessionId`, `messageId`, `role: "user" \| "assistant"` |
-
----
-
-## Bridge
-
-Events for passive session discovery (monitoring external coding sessions). The `bridge:session:activity` event is **not persisted** due to high frequency.
-
-| Event | Description | Key Payload Fields |
-|-------|-------------|-------------------|
-| `bridge:session:discovered` | External session found | `sessionId`, `projectPath`, `transcriptPath` |
-| `bridge:session:activity` | Session activity update (**Not persisted**) | `sessionId`, `projectPath`, `messageCount`, `toolCalls`, `filesCreated`, `filesEdited`, `lastMessage` |
-| `bridge:session:completed` | External session finished | `sessionId`, `projectPath`, `summary: SessionSummary \| null`, `duration` |
 
 ---
 

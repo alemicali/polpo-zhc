@@ -45,7 +45,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - API key authentication with timing-safe comparison
 - Zod runtime validation on all API endpoints
 - Retry utility with exponential backoff and jitter for LLM calls
-- CLI with `run`, `init`, `status`, `serve`, and `bridge` commands
+- CLI with `run`, `init`, `status`, and `serve` commands
 - Ink-based TUI with Zustand state management
 - React SDK with SSE-based hooks (`useTasks`, `usePlans`, `useAgents`, etc.)
 - Vite + React web dashboard with shadcn/ui

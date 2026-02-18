@@ -64,7 +64,6 @@ openpolpo/
 │   ├── llm/                # LLM queries and prompts
 │   ├── tui/                # Terminal UI (Ink)
 │   ├── server/             # HTTP API (Hono), SSE, WebSocket
-│   ├── bridge/             # Passive session discovery
 │   └── cli/                # CLI entry point
 ├── ui/                     # Web monitoring dashboard (Vite + React)
 ├── apps/docs/              # Documentation site (Astro + Starlight)

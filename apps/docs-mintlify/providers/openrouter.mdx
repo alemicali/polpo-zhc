@@ -1,0 +1,78 @@
+---
+title: "OpenRouter"
+sidebarTitle: "OpenRouter"
+description: "Meta-gateway to hundreds of models — DeepSeek, Meta, Cohere, and more."
+---
+
+OpenRouter is a unified API that routes to dozens of LLM providers. It gives you access to models that Polpo doesn't have direct integrations for — including DeepSeek, Cohere, AI21, and many others.
+
+## Setup
+
+Get your API key from [OpenRouter](https://openrouter.ai/keys).
+
+```bash
+export OPENROUTER_API_KEY=sk-or-...
+```
+
+### Config
+
+```json
+{
+  "providers": {
+    "openrouter": "${OPENROUTER_API_KEY}"
+  }
+}
+```
+
+### Use it
+
+```json
+{
+  "agents": [
+    { "name": "coder", "model": "openrouter:deepseek/deepseek-chat-v3-0324" }
+  ]
+}
+```
+
+Polpo auto-infers `openrouter` from the `deepseek-` prefix.
+
+## Popular Models via OpenRouter
+
+| Model | Provider | Best for |
+|-------|----------|----------|
+| `deepseek/deepseek-chat-v3-0324` | DeepSeek | Strong coding, very cheap |
+| `deepseek/deepseek-reasoner` | DeepSeek | Reasoning tasks |
+| `meta-llama/llama-3.3-70b-instruct` | Meta | Open-source general purpose |
+| `cohere/command-a` | Cohere | Enterprise RAG and search |
+
+Use OpenRouter's model ID format (with `/`) after the `openrouter:` prefix.
+
+## Features
+
+| Feature | Supported |
+|---------|-----------|
+| Streaming | Yes |
+| Tool use | Yes (model-dependent) |
+| Vision (images) | Yes (model-dependent) |
+
+## Provider Details
+
+| | |
+|---|---|
+| **Provider ID** | `openrouter` |
+| **Env variable** | `OPENROUTER_API_KEY` |
+| **API type** | OpenAI-compatible |
+| **Auto-infer prefix** | `deepseek-` |
+
+## When to Use OpenRouter
+
+- You want access to **DeepSeek** models (not available as a direct Polpo provider).
+- You want to try models from providers that Polpo doesn't integrate with directly.
+- You want a single API key for multiple providers.
+- You want automatic fallback routing that OpenRouter provides.
+
+## Notes
+
+- OpenRouter adds a small markup to the underlying provider's pricing.
+- Model availability and pricing on OpenRouter changes frequently. Check [openrouter.ai/models](https://openrouter.ai/models) for the latest.
+- Some models on OpenRouter have usage limits or require credits. Check your account's rate limits.

@@ -116,7 +116,7 @@ polpo serve        # HTTP API server (default: 127.0.0.1:3000)
 ### Interfaces
 
 - **REST API** — Hono-based HTTP server with Zod-validated endpoints
-- **SSE + WebSocket** — real-time event streaming with glob-based filtering (`task:*`, `agent:*`)
+- **SSE** — real-time event streaming with reconnection support
 - **Terminal UI** — Ink-based TUI with Dashboard, Tasks, Plans, Agents, Logs, and Chat tabs
 - **Web UI** — Vite + React monitoring dashboard with shadcn/ui (see `ui/`)
 - **React SDK** — type-safe hooks with SSE-backed push updates (see `packages/react-sdk/`)
@@ -127,7 +127,7 @@ polpo serve        # HTTP API server (default: 127.0.0.1:3000)
 - **MCP support** — connect external tool servers to any agent with automatic tool bridging
 - **Filesystem sandbox** — restrict agent file access via `allowedPaths`
 - **Skills system** — reusable agent instructions in `.polpo/skills/`, auto-injected into system prompts
-- **55+ typed events** — organized across 19 categories, consumed by TUI, SSE, WebSocket, and notifications
+- **55+ typed events** — organized across 19 categories, consumed by TUI, SSE, and notifications
 - **Security** — `safeEnv` strips secrets from subprocesses, no-eval condition DSL, localhost-only default binding
 
 ## Architecture
@@ -187,8 +187,7 @@ openpolpo/
 │   ├── stores/             # File, JSON, SQLite stores (tasks, runs, sessions, logs, config)
 │   ├── llm/                # LLM queries, prompts, plan generation, skills
 │   ├── tui/                # Terminal UI (Ink) + TUI commands
-│   ├── server/             # Hono HTTP API, SSE bridge, WebSocket bridge, routes
-│   ├── bridge/             # Passive session discovery for external agents
+│   ├── server/             # Hono HTTP API, SSE bridge, routes
 │   ├── cli/                # Commander CLI entry point + subcommands
 │   └── index.ts            # Barrel exports
 ├── ui/                     # Vite + React monitoring dashboard

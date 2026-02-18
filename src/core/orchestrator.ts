@@ -41,7 +41,7 @@ import {
   sleep,
 } from "./assessment-prompts.js";
 import type { AssessFn } from "./orchestrator-context.js";
-import { setProviderOverrides, validateProviderKeys } from "../llm/pi-client.js";
+import { setProviderOverrides, validateProviderKeys, setModelAllowlist } from "../llm/pi-client.js";
 import { startNotificationServer } from "./notification.js";
 import { HookRegistry } from "./hooks.js";
 import { ApprovalManager } from "./approval-manager.js";
@@ -50,11 +50,16 @@ import { NotificationRouter } from "../notifications/index.js";
 import { FileNotificationStore } from "../stores/file-notification-store.js";
 import { TelegramCallbackPoller } from "../notifications/channels/telegram.js";
 import type { ApprovalCallbackResolver } from "../notifications/channels/telegram.js";
+import { ChannelGateway } from "../notifications/channel-gateway.js";
+import { TelegramGatewayAdapter } from "../notifications/telegram-gateway-adapter.js";
+import { FilePeerStore } from "./peer-store.js";
+import type { PeerStore } from "./peer-store.js";
 import { EscalationManager } from "./escalation-manager.js";
 import { SLAMonitor } from "../quality/sla-monitor.js";
 import { QualityController } from "../quality/quality-controller.js";
 import { Scheduler } from "../scheduling/scheduler.js";
-import type { ApprovalRequest, ApprovalStatus } from "./types.js";
+import { TaskWatcherManager } from "./task-watcher.js";
+import type { ApprovalRequest, ApprovalStatus, NotificationAction } from "./types.js";
 
 // Re-export for backward compatibility (consumed by core/index.ts and external modules)
 export { buildFixPrompt, buildRetryPrompt };
@@ -91,7 +96,10 @@ export class Orchestrator extends TypedEmitter {
   private slaMonitor?: SLAMonitor;
   private qualityController?: QualityController;
   private scheduler?: Scheduler;
+  private watcherMgr?: TaskWatcherManager;
   private telegramPoller?: TelegramCallbackPoller;
+  private peerStore?: PeerStore;
+  private channelGateway?: ChannelGateway;
   private configWatcher?: FSWatcher;
   private configReloadTimer?: ReturnType<typeof setTimeout>;
 
@@ -105,9 +113,12 @@ export class Orchestrator extends TypedEmitter {
   getWorkDir(): string { return this.workDir; }
   getHooks(): HookRegistry { return this.hookRegistry; }
   getNotificationRouter(): NotificationRouter | undefined { return this.notificationRouter; }
+  getPeerStore(): PeerStore | undefined { return this.peerStore; }
+  getChannelGateway(): ChannelGateway | undefined { return this.channelGateway; }
   getSLAMonitor(): SLAMonitor | undefined { return this.slaMonitor; }
   getQualityController(): QualityController | undefined { return this.qualityController; }
   getScheduler(): Scheduler | undefined { return this.scheduler; }
+  getWatcherManager(): TaskWatcherManager | undefined { return this.watcherMgr; }
 
   constructor(workDirOrOptions?: string | OrchestratorOptions) {
     super();
@@ -151,6 +162,11 @@ export class Orchestrator extends TypedEmitter {
       setProviderOverrides(this.config.providers);
     }
 
+    // Apply model allowlist from settings
+    if (this.config.settings.modelAllowlist) {
+      setModelAllowlist(this.config.settings.modelAllowlist);
+    }
+
     // Validate API keys for all configured models
     this.validateProviders();
 
@@ -171,7 +187,13 @@ export class Orchestrator extends TypedEmitter {
     if (process.env.POLPO_MODEL) modelSpecs.push(process.env.POLPO_MODEL);
     // Orchestrator model
     if (this.config.settings.orchestratorModel) {
-      modelSpecs.push(this.config.settings.orchestratorModel);
+      const om = this.config.settings.orchestratorModel;
+      if (typeof om === "string") {
+        modelSpecs.push(om);
+      } else {
+        if (om.primary) modelSpecs.push(om.primary);
+        if (om.fallbacks) modelSpecs.push(...om.fallbacks);
+      }
     }
     // Judge model
     if (process.env.POLPO_JUDGE_MODEL) modelSpecs.push(process.env.POLPO_JUDGE_MODEL);
@@ -281,6 +303,9 @@ export class Orchestrator extends TypedEmitter {
 
       // Start Telegram callback poller for interactive approval buttons
       this.startTelegramApprovalPoller();
+    } else if (this.notificationRouter && this.hasTelegramGatewayEnabled()) {
+      // Start Telegram poller even without approval gates when gateway inbound is enabled
+      this.startTelegramApprovalPoller();
     }
 
     // Initialize escalation manager if configured
@@ -301,21 +326,83 @@ export class Orchestrator extends TypedEmitter {
 
     // Initialize quality controller (always available — zero-cost when unused)
     this.qualityController = new QualityController(ctx);
-    // Wire notification router so per-gate notifyChannels work
+    // Wire notification router so per-gate and per-checkpoint notifyChannels work
     if (this.notificationRouter) {
       this.qualityController.setNotificationRouter(this.notificationRouter);
+      this.planExec.setNotificationRouter(this.notificationRouter);
     }
     this.qualityController.init();
     this.planExec.setQualityController(this.qualityController);
 
-    // Initialize scheduler if enabled or any plan has a schedule
-    const hasScheduledPlans = (this.config.settings.enableScheduler !== false) &&
-      (this.registry.getAllPlans?.() ?? []).some(p => !!p.schedule);
-    if (this.config.settings.enableScheduler || hasScheduledPlans) {
+    // Initialize scheduler (always available — zero cost when no schedules exist)
+    if (this.config.settings.enableScheduler !== false) {
       this.scheduler = new Scheduler(ctx);
       this.scheduler.setExecutor((planId) => this.planExec.executePlan(planId));
       this.scheduler.init();
     }
+
+    // Build the shared action executor (used by notification rules and task watchers)
+    const actionExecutor = this.buildActionExecutor(ctx);
+
+    // Wire action executor to notification router
+    if (this.notificationRouter) {
+      this.notificationRouter.setActionExecutor(actionExecutor);
+    }
+
+    // Initialize task watcher manager (always available — zero cost when no watchers)
+    this.watcherMgr = new TaskWatcherManager(this);
+    this.watcherMgr.setActionExecutor(actionExecutor);
+    this.watcherMgr.start();
+  }
+
+  /**
+   * Build the action executor callback — handles create_task, execute_plan,
+   * run_script, send_notification actions triggered by notification rules
+   * or task watchers.
+   */
+  private buildActionExecutor(ctx: OrchestratorContext): (action: NotificationAction) => Promise<string> {
+    return async (action: NotificationAction): Promise<string> => {
+      switch (action.type) {
+        case "create_task": {
+          const task = this.addTask({
+            title: action.title,
+            description: action.description,
+            assignTo: action.assignTo,
+            expectations: action.expectations,
+          });
+          return `Task created: [${task.id}] "${task.title}" → ${task.assignTo}`;
+        }
+        case "execute_plan": {
+          const plan = this.registry.getPlan?.(action.planId);
+          if (!plan) throw new Error(`Plan "${action.planId}" not found`);
+          const result = this.planExec.executePlan(action.planId);
+          return `Plan "${plan.name}" executed: ${result.tasks.length} tasks created`;
+        }
+        case "run_script": {
+          const { execSync } = await import("node:child_process");
+          const timeout = action.timeoutMs ?? 30_000;
+          const result = execSync(action.command, {
+            cwd: ctx.workDir,
+            timeout,
+            stdio: ["ignore", "pipe", "pipe"],
+            maxBuffer: 5 * 1024 * 1024,
+          });
+          return `Script completed: ${result.toString().trim().slice(0, 200)}`;
+        }
+        case "send_notification": {
+          if (!this.notificationRouter) throw new Error("Notification router not available");
+          const result = await this.notificationRouter.sendDirect({
+            channel: action.channel,
+            title: action.title,
+            body: action.body,
+            severity: action.severity,
+          });
+          return `Notification sent: ${result.id}`;
+        }
+        default:
+          throw new Error(`Unknown action type: ${(action as { type: string }).type}`);
+      }
+    };
   }
 
   /**
@@ -349,9 +436,12 @@ export class Orchestrator extends TypedEmitter {
       providers: polpoConfig?.providers,
     };
 
-    // Apply provider overrides
+    // Apply provider overrides and allowlist
     if (this.config.providers) {
       setProviderOverrides(this.config.providers);
+    }
+    if (this.config.settings.modelAllowlist) {
+      setModelAllowlist(this.config.settings.modelAllowlist);
     }
 
     this.initManagers();
@@ -461,7 +551,7 @@ export class Orchestrator extends TypedEmitter {
   getPlan(planId: string): Plan | undefined { return this.planExec.getPlan(planId); }
   getPlanByName(name: string): Plan | undefined { return this.planExec.getPlanByName(name); }
   getAllPlans(): Plan[] { return this.planExec.getAllPlans(); }
-  updatePlan(planId: string, updates: { data?: string; status?: PlanStatus; name?: string }): Plan { return this.planExec.updatePlan(planId, updates); }
+  updatePlan(planId: string, updates: Partial<Omit<Plan, "id">>): Plan { return this.planExec.updatePlan(planId, updates); }
   deletePlan(planId: string): boolean { return this.planExec.deletePlan(planId); }
 
   // ─── Project Memory ──────────────────────────────────
@@ -516,6 +606,23 @@ export class Orchestrator extends TypedEmitter {
   getResumablePlans(): Plan[] { return this.planExec.getResumablePlans(); }
   resumePlan(planId: string, opts?: { retryFailed?: boolean }): { retried: number; pending: number } { return this.planExec.resumePlan(planId, opts); }
   executePlan(planId: string): { tasks: Task[]; group: string } { return this.planExec.executePlan(planId); }
+
+  // ─── Checkpoints ────────────────────────────────────
+
+  /** Get all active (unresumed) checkpoints across all plan groups. */
+  getActiveCheckpoints() { return this.planExec.getActiveCheckpoints(); }
+
+  /** Resume a checkpoint by plan group name and checkpoint name. Returns true if resumed. */
+  resumeCheckpoint(group: string, checkpointName: string): boolean {
+    return this.planExec.resumeCheckpoint(group, checkpointName);
+  }
+
+  /** Resume a checkpoint by plan ID and checkpoint name. Returns true if resumed. */
+  resumeCheckpointByPlanId(planId: string, checkpointName: string): boolean {
+    const plan = this.planExec.getPlan(planId);
+    if (!plan) return false;
+    return this.planExec.resumeCheckpoint(plan.name, checkpointName);
+  }
 
   /** Stop the supervisor loop (non-graceful — use gracefulStop for clean shutdown) */
   stop(): void {
@@ -639,6 +746,9 @@ export class Orchestrator extends TypedEmitter {
       this.config.providers = polpoConfig.providers;
       setProviderOverrides(polpoConfig.providers);
     }
+    if (newSettings.modelAllowlist) {
+      setModelAllowlist(newSettings.modelAllowlist);
+    }
 
     // 3. Rebuild the OrchestratorContext so new subsystems get fresh references
     const ctx: OrchestratorContext = {
@@ -724,6 +834,7 @@ export class Orchestrator extends TypedEmitter {
     this.qualityController = new QualityController(ctx);
     if (this.notificationRouter) {
       this.qualityController.setNotificationRouter(this.notificationRouter);
+      this.planExec.setNotificationRouter(this.notificationRouter);
     }
     this.qualityController.init();
     this.planExec.setQualityController(this.qualityController);
@@ -756,8 +867,17 @@ export class Orchestrator extends TypedEmitter {
    * The poller listens for inline keyboard button presses and routes them
    * to the ApprovalManager for approve/reject/revise actions.
    */
+  /** Check if any Telegram channel has gateway.enableInbound set to true. */
+  private hasTelegramGatewayEnabled(): boolean {
+    const channels = this.config.settings.notifications?.channels;
+    if (!channels) return false;
+    return Object.values(channels).some(
+      ch => ch.type === "telegram" && ch.gateway?.enableInbound,
+    );
+  }
+
   private startTelegramApprovalPoller(): void {
-    if (!this.approvalMgr || !this.notificationRouter) return;
+    if (!this.notificationRouter) return;
 
     // Find the Telegram channel instance from notification config
     const telegramConfigKey = Object.keys(this.config.settings.notifications?.channels ?? {})
@@ -770,26 +890,59 @@ export class Orchestrator extends TypedEmitter {
 
     const botToken = telegramChannel.getBotToken();
     const chatId = telegramChannel.getChatId();
-    const approvalMgr = this.approvalMgr;
 
     const poller = new TelegramCallbackPoller(botToken, chatId);
 
-    const resolver: ApprovalCallbackResolver = {
-      approve: async (requestId, resolvedBy) => {
-        const result = approvalMgr.approve(requestId, resolvedBy);
-        return result ? { ok: true } : { ok: false, error: "Not found or already resolved" };
-      },
-      reject: async (requestId, feedback, resolvedBy) => {
-        const result = approvalMgr.reject(requestId, feedback, resolvedBy);
-        return result ? { ok: true } : { ok: false, error: "Not found, already resolved, or max rejections reached" };
-      },
-    };
+    // Build approval resolver (if approval manager is available)
+    const approvalMgr = this.approvalMgr;
+    let resolver: ApprovalCallbackResolver | undefined;
+    if (approvalMgr) {
+      resolver = {
+        approve: async (requestId, resolvedBy) => {
+          const result = approvalMgr.approve(requestId, resolvedBy);
+          return result ? { ok: true } : { ok: false, error: "Not found or already resolved" };
+        },
+        reject: async (requestId, feedback, resolvedBy) => {
+          const result = approvalMgr.reject(requestId, feedback, resolvedBy);
+          return result ? { ok: true } : { ok: false, error: "Not found, already resolved, or max rejections reached" };
+        },
+      };
+      poller.setResolver(resolver);
+    }
 
-    poller.setResolver(resolver);
+    // Check if inbound gateway is enabled for this Telegram channel
+    const channelConfig = this.config.settings.notifications?.channels[telegramConfigKey];
+    if (channelConfig?.gateway?.enableInbound) {
+      // Initialize peer store
+      this.peerStore = new FilePeerStore(this.polpoDir);
+
+      // Create ChannelGateway with typing indicator support
+      this.channelGateway = new ChannelGateway({
+        orchestrator: this,
+        peerStore: this.peerStore,
+        sessionStore: this.sessionStore,
+        channelConfig,
+        approvalResolver: resolver,
+        onTyping: (chatId) => poller.sendTyping(chatId),
+      });
+
+      // Send partial responses as separate Telegram messages during multi-turn tool loops
+      this.channelGateway.setPartialResponseHandler((chatId, text) => poller.sendPartial(chatId, text));
+
+      // Attach gateway adapter to poller
+      const adapter = new TelegramGatewayAdapter(this.channelGateway);
+      poller.setGateway(adapter);
+
+      this.emit("log", {
+        level: "info",
+        message: `Telegram channel gateway started (dmPolicy: ${channelConfig.gateway.dmPolicy ?? "allowlist"}, inbound: enabled)`,
+      });
+    }
+
     poller.start(2000); // Poll every 2 seconds
     this.telegramPoller = poller;
 
-    this.emit("log", { level: "info", message: "Telegram approval callback poller started" });
+    this.emit("log", { level: "info", message: "Telegram callback poller started" });
   }
 
   private seedTasks(): void {
@@ -875,11 +1028,11 @@ export class Orchestrator extends TypedEmitter {
     // 2c. Scheduler checks (trigger due plans)
     this.scheduler?.check();
 
-    // 3. Spawn agents for ready tasks (skip tasks from cancelled/completed plans)
+    // 3. Spawn agents for ready tasks (skip tasks from cancelled/completed/paused plans)
     const ready = pending.filter(task => {
       if (task.group) {
         const plan = this.registry.getPlanByName?.(task.group);
-        if (plan && (plan.status === "cancelled" || plan.status === "completed")) return false;
+        if (plan && (plan.status === "cancelled" || plan.status === "completed" || plan.status === "paused")) return false;
 
         // Check quality gates — task may be blocked by a gate even if deps are done
         if (this.qualityController) {
@@ -895,6 +1048,18 @@ export class Orchestrator extends TypedEmitter {
             if (blocking) return false; // Blocked by quality gate
           }
         }
+
+        // Check checkpoints — task may be blocked by a checkpoint awaiting human resume
+        const checkpoints = this.planExec.getCheckpoints(task.group);
+        if (checkpoints.length > 0) {
+          const blockingCp = this.planExec.getBlockingCheckpoint(
+            task.group,
+            task.title,
+            task.id,
+            tasks,
+          );
+          if (blockingCp) return false; // Blocked by checkpoint
+        }
       }
       return task.dependsOn.every(depId => {
         const dep = tasks.find(t => t.id === depId);
@@ -903,8 +1068,9 @@ export class Orchestrator extends TypedEmitter {
     });
 
     // Check for deadlock: no tasks ready, none running, but some pending
-    // Don't consider it a deadlock if tasks are awaiting approval
-    if (ready.length === 0 && inProgress.length === 0 && pending.length > 0 && awaitingApproval.length === 0) {
+    // Don't consider it a deadlock if tasks are awaiting approval or blocked by checkpoints
+    const hasActiveCheckpoints = this.planExec.getActiveCheckpoints().length > 0;
+    if (ready.length === 0 && inProgress.length === 0 && pending.length > 0 && awaitingApproval.length === 0 && !hasActiveCheckpoints) {
       // Async resolution already in progress — wait for next tick
       if (isResolving()) return false;
 

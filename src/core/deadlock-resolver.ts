@@ -7,9 +7,9 @@
  * chain should be failed.
  */
 
-import type { Task } from "./types.js";
+import type { Task, ModelConfig } from "./types.js";
 import type { Orchestrator } from "./orchestrator.js";
-import { querySDKText } from "../llm/query.js";
+import { queryOrchestratorText } from "../llm/query.js";
 
 // ── Types ─────────────────────────────────────────────
 
@@ -189,10 +189,10 @@ async function classifyBlockage(
   allTasks: Task[],
   memory: string,
   cwd: string,
-  model?: string,
+  model?: string | ModelConfig,
 ): Promise<ResolutionDecision> {
   const prompt = buildResolutionPrompt(blockedTask, failedDep, allTasks, memory);
-  const response = await querySDKText(prompt, cwd, model);
+  const response = (await queryOrchestratorText(prompt, cwd, model)).text;
 
   try {
     const cleaned = response.replace(/```json?\n?/g, "").replace(/```/g, "").trim();

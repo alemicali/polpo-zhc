@@ -14,6 +14,7 @@ import { Command } from "commander";
 import chalk from "chalk";
 import { resolve } from "node:path";
 import { Orchestrator } from "../../core/orchestrator.js";
+import { resolveModelSpec } from "../../llm/pi-client.js";
 import type { Task, TaskStatus, TaskExpectation } from "../../core/types.js";
 
 // ── Helpers ──
@@ -260,7 +261,7 @@ export function registerTaskCommands(program: Command): void {
             console.log(chalk.dim("  Preparing task with AI..."));
 
             const systemPrompt = buildTaskPrepPrompt(orchestrator, state, orchestrator.getWorkDir(), description, agentName);
-            const model = orchestrator.getConfig()?.settings?.orchestratorModel;
+            const model = resolveModelSpec(orchestrator.getConfig()?.settings?.orchestratorModel);
             const prepTask = await generateTaskPrep(systemPrompt, description, model);
 
             // Build expectations from validated data

@@ -40,7 +40,7 @@ function configView(
     ["Stale threshold", s.staleThreshold ? `${(s.staleThreshold / 60000).toFixed(0)}min` : "5min"],
     ["Volatile teams", s.enableVolatileTeams !== false ? "enabled" : "disabled"],
     ["Auto-correct", s.autoCorrectExpectations !== false ? "enabled" : "disabled"],
-    ["Polpo model", s.orchestratorModel ?? "(default)"],
+    ["Polpo model", typeof s.orchestratorModel === "string" ? s.orchestratorModel : s.orchestratorModel?.primary ?? "(default)"],
   ];
 
   store.log("Configuration:", [seg("Configuration:", undefined, true)]);
@@ -71,7 +71,7 @@ function configEdit(
   const fields = [
     { label: `logLevel: ${s.logLevel}`, value: "logLevel", description: "quiet | normal | verbose" },
     { label: `maxRetries: ${s.maxRetries}`, value: "maxRetries", description: "Max task retries" },
-    { label: `orchestratorModel: ${s.orchestratorModel ?? "(default)"}`, value: "orchestratorModel", description: "Model for LLM calls" },
+    { label: `orchestratorModel: ${typeof s.orchestratorModel === "string" ? s.orchestratorModel : s.orchestratorModel?.primary ?? "(default)"}`, value: "orchestratorModel", description: "Model for LLM calls" },
     { label: `autoCorrect: ${s.autoCorrectExpectations !== false}`, value: "autoCorrectExpectations", description: "Auto-correct expectations" },
     { label: `enableVolatileTeams: ${s.enableVolatileTeams !== false}`, value: "enableVolatileTeams", description: "Allow plan-defined agents" },
   ];

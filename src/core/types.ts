@@ -324,7 +324,7 @@ export interface ReviewContext {
 
 // === Plan ===
 
-export type PlanStatus = "draft" | "active" | "completed" | "failed" | "cancelled";
+export type PlanStatus = "draft" | "active" | "paused" | "completed" | "failed" | "cancelled";
 
 export interface Plan {
   id: string;
@@ -395,8 +395,47 @@ export interface PolpoFileConfig {
 export interface ProviderConfig {
   /** API key (direct value or "${ENV_VAR}" reference). */
   apiKey?: string;
-  /** Override base URL for the provider (e.g. custom proxy). */
+  /** Override base URL for the provider (e.g. custom proxy, Ollama, vLLM). */
   baseUrl?: string;
+  /** API compatibility mode for custom endpoints. */
+  api?: "openai-completions" | "openai-responses" | "anthropic-messages";
+  /** Custom model definitions for this provider (used with custom endpoints). */
+  models?: CustomModelDef[];
+}
+
+/** Custom model definition for non-catalog providers (Ollama, vLLM, LM Studio, etc.) */
+export interface CustomModelDef {
+  /** Model ID used in API calls. */
+  id: string;
+  /** Human-readable name. */
+  name: string;
+  /** Whether the model supports extended thinking / reasoning. */
+  reasoning?: boolean;
+  /** Supported input types. Default: ["text"] */
+  input?: ("text" | "image")[];
+  /** Cost per million tokens. Default: all zeros (free/local). */
+  cost?: { input: number; output: number; cacheRead: number; cacheWrite: number };
+  /** Context window size in tokens. Default: 200000 */
+  contextWindow?: number;
+  /** Max output tokens. Default: 8192 */
+  maxTokens?: number;
+}
+
+// === Model Config (primary + fallbacks) ===
+
+export interface ModelConfig {
+  /** Primary model spec (e.g. "anthropic:claude-opus-4-6"). */
+  primary?: string;
+  /** Ordered fallback models — tried when primary fails. */
+  fallbacks?: string[];
+}
+
+/** Model allowlist entry with optional alias. */
+export interface ModelAllowlistEntry {
+  /** Display alias for this model (e.g. "Sonnet", "GPT"). */
+  alias?: string;
+  /** Per-model parameter overrides. */
+  params?: Record<string, unknown>;
 }
 
 // === Config (.polpo/polpo.json) ===
@@ -431,8 +470,14 @@ export interface PolpoSettings {
   maxResolutionAttempts?: number;
   /** Auto-correct correctable expectations (e.g. file_exists paths) on assessment failure. Default: true */
   autoCorrectExpectations?: boolean;
-  /** Model for orchestrator LLM calls (question detection, deadlock, plans). */
-  orchestratorModel?: string;
+  /** Model for orchestrator LLM calls (question detection, deadlock, plans).
+   *  Can be a simple string ("anthropic:claude-opus-4-6") or a ModelConfig with fallbacks. */
+  orchestratorModel?: string | ModelConfig;
+  /** Image-capable model for tasks that need vision (falls back to orchestratorModel). */
+  imageModel?: string;
+  /** Model allowlist — when set, only these models can be used.
+   *  Keys are model specs (e.g. "anthropic:claude-opus-4-6"), values are aliases/params. */
+  modelAllowlist?: Record<string, ModelAllowlistEntry>;
   /** Storage backend for tasks, plans, and runs. Default: "file" (filesystem JSON). */
   storage?: "file" | "sqlite";
   /** Max assessment retries when all reviewers fail before falling back to fix/retry. Default: 1 */
@@ -537,6 +582,97 @@ export interface ApprovalRequest {
   note?: string;
 }
 
+// === Channel Gateway & Peer Identity ===
+
+/** Supported messaging channel types for inbound message routing. */
+export type ChannelType = "telegram" | "whatsapp" | "slack" | "discord" | "webchat";
+
+/**
+ * Peer identity — represents a person talking to the bot from a messaging channel.
+ * Inspired by OpenClaw's session key model but adapted for orchestrator use-cases.
+ *
+ * A peer is identified by their channel-specific ID (e.g., Telegram chatId, WhatsApp phone).
+ * Identity links allow the same person on multiple channels to share a session.
+ */
+export interface PeerIdentity {
+  /** Canonical peer ID (format: "channel:externalId", e.g. "telegram:123456789"). */
+  id: string;
+  /** Channel type. */
+  channel: ChannelType;
+  /** Channel-specific external ID (chatId, phone number, user ID, etc.). */
+  externalId: string;
+  /** Display name (from channel profile, if available). */
+  displayName?: string;
+  /** When this peer was first seen. */
+  firstSeenAt: string;
+  /** When this peer last sent a message. */
+  lastSeenAt: string;
+  /** Linked canonical identity — allows cross-channel session sharing.
+   *  If set, this peer shares sessions with the peer identified by this ID. */
+  linkedTo?: string;
+}
+
+/**
+ * DM access policy — controls who can message the bot.
+ * Modeled after OpenClaw's 4-tier DM security model.
+ */
+export type DmPolicy = "pairing" | "allowlist" | "open" | "disabled";
+
+/** Pairing request — pending approval for a new peer to talk to the bot. */
+export interface PairingRequest {
+  /** Unique request ID. */
+  id: string;
+  /** Peer requesting access. */
+  peerId: string;
+  /** Channel type. */
+  channel: ChannelType;
+  /** Channel-specific external ID. */
+  externalId: string;
+  /** Display name of the requester. */
+  displayName?: string;
+  /** Short pairing code sent to the user. */
+  code: string;
+  /** When the request was created. */
+  createdAt: string;
+  /** When the request expires (1 hour from creation). */
+  expiresAt: string;
+  /** Whether the request has been resolved. */
+  resolved: boolean;
+}
+
+/**
+ * Channel gateway configuration — extends notification channel config
+ * with inbound message handling settings.
+ */
+export interface ChannelGatewayConfig {
+  /** DM access policy. Default: "allowlist". */
+  dmPolicy?: DmPolicy;
+  /** Allowlist of external IDs that can message the bot.
+   *  Use "*" to allow all (only with dmPolicy="open"). */
+  allowFrom?: string[];
+  /** Enable inbound message routing (chat with orchestrator). Default: false. */
+  enableInbound?: boolean;
+  /** Session idle timeout in minutes before creating a new session. Default: 60. */
+  sessionIdleMinutes?: number;
+}
+
+/**
+ * Presence entry — lightweight, ephemeral tracking of connected peers.
+ * Inspired by OpenClaw's in-memory presence with TTL.
+ */
+export interface PresenceEntry {
+  /** Peer ID (format: "channel:externalId"). */
+  peerId: string;
+  /** Display name. */
+  displayName?: string;
+  /** Channel type. */
+  channel: ChannelType;
+  /** Last activity timestamp (ISO). */
+  lastActivityAt: string;
+  /** What the peer is doing ("idle" | "chatting" | "approving"). */
+  activity: "idle" | "chatting" | "approving";
+}
+
 // === Notification System ===
 
 export type NotificationChannelType = "slack" | "email" | "telegram" | "webhook";
@@ -565,6 +701,8 @@ export interface NotificationChannelConfig {
   port?: number;
   /** SMTP from address. */
   from?: string;
+  /** Channel gateway config — enables inbound message routing for this channel. */
+  gateway?: ChannelGatewayConfig;
 }
 
 export type NotificationSeverity = "info" | "warning" | "critical";
@@ -627,7 +765,53 @@ export interface NotificationRule {
   outcomeFilter?: OutcomeType[];
   /** Max file size per attachment in bytes. Files larger than this are skipped. Default: 10MB. */
   maxAttachmentSize?: number;
+  /** Action triggers — executed when the rule fires, in addition to sending notifications. */
+  actions?: NotificationAction[];
 }
+
+// === Notification Action Triggers ===
+
+/** Action types that can be triggered by notification rules. */
+export type NotificationActionType = "create_task" | "execute_plan" | "run_script" | "send_notification";
+
+/** Base action interface. */
+interface NotificationActionBase {
+  type: NotificationActionType;
+}
+
+/** Create a task when the rule fires. */
+export interface CreateTaskAction extends NotificationActionBase {
+  type: "create_task";
+  title: string;
+  description: string;
+  assignTo: string;
+  expectations?: TaskExpectation[];
+}
+
+/** Execute an existing plan when the rule fires. */
+export interface ExecutePlanAction extends NotificationActionBase {
+  type: "execute_plan";
+  planId: string;
+}
+
+/** Run a shell script when the rule fires. */
+export interface RunScriptAction extends NotificationActionBase {
+  type: "run_script";
+  command: string;
+  /** Max execution time in ms. Default: 30000. */
+  timeoutMs?: number;
+}
+
+/** Send an additional notification to different channels. */
+export interface SendNotificationAction extends NotificationActionBase {
+  type: "send_notification";
+  channel: string;
+  title: string;
+  body: string;
+  severity?: NotificationSeverity;
+}
+
+export type NotificationAction = CreateTaskAction | ExecutePlanAction | RunScriptAction | SendNotificationAction;
 
 export interface NotificationsConfig {
   channels: Record<string, NotificationChannelConfig>;
@@ -694,6 +878,24 @@ export interface PlanQualityGate {
   notifyChannels?: string[];
 }
 
+/** Checkpoint defined within a plan — planned stopping point for human review.
+ *
+ * Unlike approval gates (which ask yes/no and auto-resume on approval),
+ * checkpoints unconditionally pause the plan until explicitly resumed.
+ * Use checkpoints for human-in-the-loop review at defined milestones. */
+export interface PlanCheckpoint {
+  /** Checkpoint name (used in events and notifications). */
+  name: string;
+  /** Tasks that must be completed before this checkpoint triggers. */
+  afterTasks: string[];
+  /** Tasks that are blocked until the checkpoint is resumed. */
+  blocksTasks: string[];
+  /** Notification channels to alert when the checkpoint is reached. */
+  notifyChannels?: string[];
+  /** Optional message included in the notification when the checkpoint triggers. */
+  message?: string;
+}
+
 /** SLA configuration for deadline monitoring. */
 export interface SLAConfig {
   /** Percentage of deadline elapsed before emitting a warning (0-1). Default: 0.8 */
@@ -757,6 +959,26 @@ export interface ScheduleEntry {
   deadlineOffsetMs?: number;
   /** Created at. */
   createdAt: string;
+}
+
+// === Task Watchers ===
+
+/** A watcher that fires an action when a task reaches a target status. */
+export interface TaskWatcher {
+  /** Unique watcher ID. */
+  id: string;
+  /** Task ID to watch. */
+  taskId: string;
+  /** Target status to trigger on. */
+  targetStatus: TaskStatus;
+  /** Action to execute when triggered. */
+  action: NotificationAction;
+  /** Whether the watcher has already fired. */
+  fired: boolean;
+  /** Created at (ISO). */
+  createdAt: string;
+  /** Fired at (ISO). */
+  firedAt?: string;
 }
 
 // === Extended Settings ===

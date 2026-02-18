@@ -12,7 +12,7 @@
 
 import { Type } from "@sinclair/typebox";
 import { completeSimple, type Tool, type Message } from "@mariozechner/pi-ai";
-import { resolveModel, resolveApiKey } from "./pi-client.js";
+import { resolveModel, resolveApiKeyAsync } from "./pi-client.js";
 import { withRetry } from "./retry.js";
 import { sanitizeExpectations } from "../core/schemas.js";
 
@@ -245,7 +245,7 @@ export async function generatePlan(
 ): Promise<PlanData> {
   return withRetry(async () => {
     const m = resolveModel(model);
-    const apiKey = resolveApiKey(m.provider);
+    const apiKey = await resolveApiKeyAsync(m.provider);
 
     const messages: Message[] = [
       { role: "user", content: userPrompt, timestamp: Date.now() },
@@ -303,7 +303,7 @@ async function _runPlanStep(
   onTokens?: (tokens: number) => void,
 ): Promise<GeneratePlanResult> {
   const m = resolveModel(model);
-  const apiKey = resolveApiKey(m.provider);
+  const apiKey = await resolveApiKeyAsync(m.provider);
 
   const response = await completeSimple(m, {
     systemPrompt,
@@ -454,7 +454,7 @@ export async function generateTaskPrep(
 ): Promise<PlanTaskData> {
   return withRetry(async () => {
     const m = resolveModel(model);
-    const apiKey = resolveApiKey(m.provider);
+    const apiKey = await resolveApiKeyAsync(m.provider);
 
     const messages: Message[] = [
       { role: "user", content: userPrompt, timestamp: Date.now() },
@@ -507,7 +507,7 @@ export async function generateTeam(
 ): Promise<PlanTeamData[]> {
   return withRetry(async () => {
     const m = resolveModel(model);
-    const apiKey = resolveApiKey(m.provider);
+    const apiKey = await resolveApiKeyAsync(m.provider);
 
     const messages: Message[] = [
       { role: "user", content: userPrompt, timestamp: Date.now() },

@@ -20,6 +20,10 @@ const ALL_EVENTS: PolpoEvent[] = [
   "quality:gate:passed", "quality:gate:failed", "quality:threshold:failed",
   "schedule:triggered", "schedule:created", "schedule:completed",
   "notification:sent", "notification:failed",
+  "gateway:started", "gateway:stopped",
+  "peer:paired", "peer:message", "peer:blocked", "peer:presence",
+  "watcher:created", "watcher:fired", "watcher:removed",
+  "action:triggered",
   "log",
 ];
 
@@ -47,8 +51,6 @@ export class SSEBridge {
   private maxBufferSize = 1000;
   private eventCounter = 0;
   private disposeFn: (() => void) | null = null;
-  /** Listeners for new events (used by WS bridge). */
-  private externalListeners = new Set<(event: string, data: unknown, eventId: string) => void>();
 
   constructor(private orchestrator: Orchestrator) {}
 
@@ -75,12 +77,7 @@ export class SSEBridge {
           }
         }
 
-        // Notify external listeners (WS bridge)
-        for (const listener of this.externalListeners) {
-          try {
-            listener(event, data, eventId);
-          } catch { /* best-effort: non-critical */ }
-        }
+
       };
       this.orchestrator.on(event, fn);
       handlers.push({ event, fn });
@@ -119,22 +116,6 @@ export class SSEBridge {
     this.clients.delete(clientId);
   }
 
-  /** Register an external listener for all events (used by WS bridge). */
-  onEvent(listener: (event: string, data: unknown, eventId: string) => void): void {
-    this.externalListeners.add(listener);
-  }
-
-  /** Unregister an external listener. */
-  offEvent(listener: (event: string, data: unknown, eventId: string) => void): void {
-    this.externalListeners.delete(listener);
-  }
-
-  /** Get recent buffered events (for initial WS sync). */
-  getBufferedEvents(sinceId?: string): BufferedEvent[] {
-    if (!sinceId) return [...this.eventBuffer];
-    const idx = this.eventBuffer.findIndex(e => e.id === sinceId);
-    return idx >= 0 ? this.eventBuffer.slice(idx + 1) : [...this.eventBuffer];
-  }
 
   get clientCount(): number {
     return this.clients.size;
@@ -147,6 +128,5 @@ export class SSEBridge {
       try { client.close(); } catch { /* already closed */ }
     }
     this.clients.clear();
-    this.externalListeners.clear();
   }
 }
