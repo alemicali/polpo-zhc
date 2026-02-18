@@ -325,11 +325,18 @@ export class TelegramCallbackPoller {
         if (update.callback_query) {
           await this.handleCallback(update.callback_query);
         } else if (update.message) {
+          const msg = update.message;
+          const msgKeys = Object.keys(msg).filter(k => !["message_id", "chat", "from", "date"].includes(k));
+          console.error(`[polpo/telegram] update ${update.update_id}: keys=[${msgKeys.join(",")}]` +
+            (msg.voice ? ` voice=${msg.voice.mime_type}` : "") +
+            (msg.audio ? ` audio=${msg.audio.mime_type}` : "") +
+            (msg.document ? ` document=${msg.document.mime_type} file_name=${(msg.document as any).file_name}` : "") +
+            (msg.text ? ` text="${msg.text.slice(0, 40)}"` : ""));
           await this.handleMessage(update.message);
         }
       }
-    } catch {
-      // Silently retry on next interval
+    } catch (err) {
+      console.error(`[polpo/telegram] Poll error: ${err instanceof Error ? err.stack : String(err)}`);
     }
   }
 
@@ -379,7 +386,10 @@ export class TelegramCallbackPoller {
 
     // ── Extract text from voice/audio messages via transcription ──
     let text = message.text ?? message.caption;
-    const voiceFile = message.voice ?? message.audio ?? message.video_note;
+
+    // Documents with audio mime types (e.g. WhatsApp voice forwarded to Telegram)
+    const audioDocument = message.document?.mime_type?.startsWith("audio/") ? message.document : undefined;
+    const voiceFile = message.voice ?? message.audio ?? message.video_note ?? audioDocument;
 
     if (!text && voiceFile) {
       try {
@@ -463,7 +473,15 @@ export class TelegramCallbackPoller {
 
     // 3. Save the original file
     const tmpId = randomBytes(6).toString("hex");
-    const origExt = mimeType === "audio/mpeg" ? ".mp3" : mimeType === "audio/mp4" ? ".m4a" : ".oga";
+    const MIME_EXT: Record<string, string> = {
+      "audio/mpeg": ".mp3", "audio/mp3": ".mp3",
+      "audio/mp4": ".m4a", "audio/m4a": ".m4a", "audio/x-m4a": ".m4a", "audio/aac": ".m4a",
+      "audio/wav": ".wav", "audio/x-wav": ".wav", "audio/wave": ".wav",
+      "audio/webm": ".webm",
+      "audio/ogg": ".oga", "audio/x-opus+ogg": ".oga",
+      "audio/flac": ".flac", "audio/x-flac": ".flac",
+    };
+    const origExt = (mimeType && MIME_EXT[mimeType]) ?? ".oga";
     const origPath = join(tmpdir(), `polpo-voice-${tmpId}${origExt}`);
     writeFileSync(origPath, buffer);
 
@@ -641,6 +659,8 @@ interface TelegramMessage {
   audio?: TelegramFile & { title?: string; performer?: string };
   /** Round video note */
   video_note?: TelegramFile;
+  /** File attachment (document). Audio files forwarded from WhatsApp arrive as documents. */
+  document?: TelegramFile & { file_name?: string };
   /** Caption text (on media messages) */
   caption?: string;
 }
