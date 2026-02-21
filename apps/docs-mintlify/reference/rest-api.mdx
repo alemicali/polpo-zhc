@@ -10,7 +10,7 @@ Polpo exposes a REST API when running in server mode (`polpo serve`). All endpoi
 The primary way to talk to Polpo programmatically — an OpenAI-compatible endpoint that accepts standard messages and runs Polpo's full 37-tool agentic loop internally. Supports streaming (SSE) and non-streaming.
 
 ```bash
-curl http://localhost:3890/v1/chat/completions \
+curl http://localhost:3000/v1/chat/completions \
   -H "Authorization: Bearer my-secret" \
   -H "Content-Type: application/json" \
   -d '{

@@ -76,7 +76,7 @@ Polpo can install skills directly from GitHub repositories, compatible with the 
 
   <Tab title="HTTP API">
     ```bash
-    curl -X POST http://localhost:3890/api/v1/projects/my-project/skills/add \
+    curl -X POST http://localhost:3000/api/v1/projects/my-project/skills/add \
       -H "Content-Type: application/json" \
       -d '{ "source": "vercel-labs/agent-skills", "skillNames": ["frontend-design"] }'
     ```
@@ -165,13 +165,13 @@ Skills that aren't loaded for a particular agent are still mentioned by name —
   <Tab title="HTTP API">
     ```bash
     # List skills
-    curl http://localhost:3890/api/v1/projects/my-project/skills
+    curl http://localhost:3000/api/v1/projects/my-project/skills
 
     # Remove a skill
-    curl -X DELETE http://localhost:3890/api/v1/projects/my-project/skills/frontend-design
+    curl -X DELETE http://localhost:3000/api/v1/projects/my-project/skills/frontend-design
 
     # Assign to agent
-    curl -X POST http://localhost:3890/api/v1/projects/my-project/skills/react-patterns/assign \
+    curl -X POST http://localhost:3000/api/v1/projects/my-project/skills/react-patterns/assign \
       -H "Content-Type: application/json" \
       -d '{ "agent": "frontend-dev" }'
     ```

@@ -118,9 +118,54 @@
   * {
     @apply border-border outline-ring/50;
   }
+  html, body, #root {
+    height: 100dvh;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  html {
+    /* Prevent iOS rubber-banding beyond the app shell */
+    overflow: hidden;
+  }
   body {
     @apply bg-background text-foreground;
+    overscroll-behavior: none;
+    /* Remove blue tap highlight on mobile WebKit */
+    -webkit-tap-highlight-color: transparent;
   }
+  button, a, [role="button"] {
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+  /* Prevent text selection on nav/interactive elements (feels more native) */
+  nav, [role="tablist"] {
+    -webkit-user-select: none;
+    user-select: none;
+  }
+}
+
+/* Safe area utilities — require viewport-fit=cover in <meta viewport> */
+.pt-safe { padding-top: env(safe-area-inset-top); }
+.pb-safe { padding-bottom: env(safe-area-inset-bottom); }
+.pl-safe { padding-left: env(safe-area-inset-left); }
+.pr-safe { padding-right: env(safe-area-inset-right); }
+.px-safe {
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+}
+.mt-safe { margin-top: env(safe-area-inset-top); }
+.mb-safe { margin-bottom: env(safe-area-inset-bottom); }
+
+/* Bottom padding accounting for bottom nav (4rem) + safe area */
+.pb-bottom-nav {
+  padding-bottom: calc(4.5rem + env(safe-area-inset-bottom, 0px));
+}
+
+.scrollbar-none {
+  scrollbar-width: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
 }
 
 /* Scrollbar styling for dark mode */

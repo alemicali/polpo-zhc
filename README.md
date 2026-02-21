@@ -23,67 +23,80 @@
 
 ---
 
-OpenPolpo coordinates teams of AI agents working together on complex software tasks. Define plans in JSON, assign tasks to specialized agents, and let Polpo handle orchestration, assessment, approval gates, notifications, and recovery.
+OpenPolpo coordinates teams of AI agents working together on complex software tasks. Define plans, assign tasks to specialized agents, and let Polpo handle orchestration, assessment, approval gates, notifications, and recovery.
 
-Polpo includes a **built-in engine** (Pi Agent) — a full agentic loop with 7 coding tools, 18+ LLM providers, and MCP support.
+Polpo includes a **built-in engine** (Pi Agent) — a full agentic loop with 7 coding tools, 18+ LLM providers, and MCP support. No API key needed — the default model is free.
 
 ## Quick Start
 
-### 1. Install
+### Path 1: Chat with an agent (30 seconds)
 
 ```bash
 npm install -g openpolpo
+mkdir my-project && cd my-project
+polpo init
+polpo
 ```
 
-### 2. Initialize
+That's it. You're in the interactive TUI. Type what you need, hit Enter, and the agent does it.
+
+### Path 2: Orchestrate a team (5 minutes)
+
+**1. Install and init**
 
 ```bash
+npm install -g openpolpo
+mkdir my-project && cd my-project
 polpo init
 ```
 
-Creates a `.polpo/` directory with a `polpo.json` config file.
-
-### 3. Configure agents and a plan
+**2. Configure your team** in `.polpo/polpo.json`:
 
 ```json
 {
-  "agents": [
-    {
-      "name": "backend-dev",
-      "description": "Backend developer specializing in Node.js and databases"
-    },
-    {
-      "name": "frontend-dev",
-      "description": "Frontend developer specializing in React and TypeScript"
-    }
-  ],
-  "plans": [
-    {
-      "group": "build-mvp",
-      "tasks": [
-        {
-          "title": "Create database schema",
-          "assignTo": "backend-dev",
-          "description": "Design and implement SQLite schema for users and posts"
-        },
-        {
-          "title": "Build React components",
-          "assignTo": "frontend-dev",
-          "description": "Create reusable UI components with shadcn/ui",
-          "dependsOn": ["Create database schema"]
-        }
-      ]
-    }
-  ]
+  "project": "my-project",
+  "team": {
+    "name": "default",
+    "agents": [
+      {
+        "name": "backend-dev",
+        "role": "Backend developer specializing in Node.js and databases"
+      },
+      {
+        "name": "frontend-dev",
+        "role": "Frontend developer specializing in React and TypeScript"
+      }
+    ]
+  },
+  "settings": {
+    "maxRetries": 3,
+    "workDir": ".",
+    "logLevel": "normal"
+  }
 }
 ```
 
-### 4. Run
+**3. Create a plan**
 
 ```bash
-polpo              # Interactive terminal UI
-polpo run          # Headless execution
-polpo serve        # HTTP API server (default: 127.0.0.1:3000)
+polpo plan create "Build a REST API with SQLite database and Express endpoints"
+```
+
+Polpo uses AI to generate a plan with tasks, dependencies, and agent assignments. Review it, then:
+
+**4. Execute**
+
+```bash
+polpo run
+```
+
+Polpo assigns tasks to agents, respects dependencies, scores every result with LLM judges, retries what fails, and reports when it's done.
+
+**5. Monitor** (optional)
+
+```bash
+polpo status -w    # Live dashboard in another terminal
+polpo serve        # HTTP API + Web UI at http://localhost:3000
 ```
 
 ## Features
@@ -145,7 +158,7 @@ polpo serve        # HTTP API server (default: 127.0.0.1:3000)
          Engine         Engine        Engine
 ```
 
-The orchestrator runs a supervisor loop every 5 seconds (`POLL_INTERVAL = 5000`), assigning pending tasks to agents, monitoring health, and driving the assessment pipeline.
+The orchestrator runs a supervisor loop every 5 seconds, assigning pending tasks to agents, monitoring health, and driving the assessment pipeline.
 
 ### Task State Machine
 
@@ -185,10 +198,10 @@ openpolpo/
 │   └── index.ts            # Barrel exports
 ├── ui/                     # Vite + React monitoring dashboard
 ├── apps/
-│   └── docs/               # Astro + Starlight documentation site
+│   └── docs-mintlify/      # Mintlify documentation site
 ├── packages/
 │   └── react-sdk/          # React hooks + SSE client (@openpolpo/react-sdk)
-└── polpo.json              # Your project configuration
+└── .polpo/polpo.json       # Your project configuration
 ```
 
 ## Documentation

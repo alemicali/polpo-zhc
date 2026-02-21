@@ -279,7 +279,7 @@ When creating tasks or plans via the REST API, include a `notifications` field:
 
 ```bash
 # Task with scoped notification rules
-curl -X POST http://localhost:3890/api/v1/projects/my-project/tasks \
+curl -X POST http://localhost:3000/api/v1/projects/my-project/tasks \
   -H "Content-Type: application/json" \
   -d '{
     "title": "Critical migration",
@@ -300,7 +300,7 @@ curl -X POST http://localhost:3890/api/v1/projects/my-project/tasks \
 
 ```bash
 # Plan with scoped notification rules
-curl -X POST http://localhost:3890/api/v1/projects/my-project/plans \
+curl -X POST http://localhost:3000/api/v1/projects/my-project/plans \
   -H "Content-Type: application/json" \
   -d '{
     "name": "Release v2.0",
@@ -333,7 +333,7 @@ The `POST /notifications/send` endpoint lets you send a one-off notification to 
 ### Request
 
 ```bash
-curl -X POST http://localhost:3890/api/v1/projects/my-project/notifications/send \
+curl -X POST http://localhost:3000/api/v1/projects/my-project/notifications/send \
   -H "Content-Type: application/json" \
   -d '{
     "channel": "telegram-oncall",

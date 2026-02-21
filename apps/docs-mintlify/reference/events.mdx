@@ -266,7 +266,7 @@ events.onmessage = (e) => {
 ### WebSocket
 
 ```javascript
-const ws = new WebSocket('ws://localhost:3890/api/v1/projects/my-project/ws');
+const ws = new WebSocket('ws://localhost:3000/api/v1/projects/my-project/ws');
 ws.send(JSON.stringify({ type: 'subscribe', pattern: 'task:*' }));
 ws.onmessage = (e) => {
   const { event, data } = JSON.parse(e.data);

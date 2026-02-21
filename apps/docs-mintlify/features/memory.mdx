@@ -33,7 +33,7 @@ Navigate to **Memory** in the sidebar. Click **Create Memory** to start from a t
 ### Via API
 
 ```bash
-curl -X PUT http://localhost:3890/api/v1/projects/my-project/memory \
+curl -X PUT http://localhost:3000/api/v1/projects/my-project/memory \
   -H "Content-Type: application/json" \
   -d '{"content": "# Project Memory\n\n## Build\n./node_modules/.bin/tsc"}'
 ```

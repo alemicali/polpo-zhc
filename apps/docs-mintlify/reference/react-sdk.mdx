@@ -23,7 +23,7 @@ import { PolpoProvider } from "@openpolpo/react-sdk";
 function App() {
   return (
     <PolpoProvider
-      baseURL="http://localhost:3890"
+      baseUrl="http://localhost:3000"
       projectId="my-project"
       apiKey="optional-key"
     >
@@ -37,10 +37,12 @@ function App() {
 
 | Prop | Type | Required | Description |
 |------|------|----------|-------------|
-| `baseURL` | string | yes | Polpo server URL |
+| `baseUrl` | string | yes | Polpo server URL |
 | `projectId` | string | yes | Project ID |
 | `apiKey` | string | no | API key for authentication |
 | `children` | ReactNode | yes | Child components |
+| `autoConnect` | boolean | no | Auto-connect to SSE on mount (default: `true`) |
+| `eventFilter` | string[] | no | Glob patterns to filter SSE events |
 
 ---
 
@@ -79,7 +81,7 @@ const { tasks, isLoading, error, createTask, deleteTask, retryTask, refetch } = 
 | `createTask` | `(opts) => Promise<Task>` | Create a new task |
 | `deleteTask` | `(id) => Promise<void>` | Delete a task |
 | `retryTask` | `(id) => Promise<void>` | Retry a failed task |
-| `refetch` | `() => void` | Force refetch |
+| `refetch` | `() => Promise<void>` | Force refetch |
 
 ---
 
@@ -102,7 +104,10 @@ const { task, isLoading, error, updateTask, deleteTask, killTask, reassessTask, 
 | Field | Type | Description |
 |-------|------|-------------|
 | `task` | `Task \| undefined` | Task object |
+| `isLoading` | `boolean` | Initial load in progress |
+| `error` | `Error \| null` | Fetch error |
 | `updateTask` | `(opts) => Promise<Task>` | Update description, assignment, expectations |
+| `deleteTask` | `() => Promise<void>` | Delete the task |
 | `killTask` | `() => Promise<void>` | Kill running agent |
 | `reassessTask` | `() => Promise<void>` | Re-run assessment |
 | `retryTask` | `() => Promise<void>` | Retry failed task |
@@ -114,7 +119,7 @@ const { task, isLoading, error, updateTask, deleteTask, killTask, reassessTask, 
 List plans with management actions.
 
 ```tsx
-const { plans, isLoading, createPlan, executePlan, resumePlan, abortPlan, deletePlan } = usePlans();
+const { plans, isLoading, createPlan, updatePlan, executePlan, resumePlan, abortPlan, deletePlan, refetch } = usePlans();
 ```
 
 ### Returns
@@ -122,21 +127,45 @@ const { plans, isLoading, createPlan, executePlan, resumePlan, abortPlan, delete
 | Field | Type | Description |
 |-------|------|-------------|
 | `plans` | `Plan[]` | All plans |
+| `isLoading` | `boolean` | Initial load in progress |
+| `error` | `Error \| null` | Fetch error |
 | `createPlan` | `(opts) => Promise<Plan>` | Save new plan |
+| `updatePlan` | `(id, opts) => Promise<Plan>` | Update plan metadata |
 | `executePlan` | `(id) => Promise<{ tasks: Task[] }>` | Execute a draft plan |
 | `resumePlan` | `(id, opts?) => Promise` | Resume failed plan |
 | `abortPlan` | `(id) => Promise<{ aborted: number }>` | Abort active plan |
 | `deletePlan` | `(id) => Promise<void>` | Delete plan |
+| `refetch` | `() => Promise<void>` | Force refetch |
 
 ---
 
 ## usePlan
 
-Single plan with actions.
+Single plan with actions and completion report.
 
 ```tsx
-const { plan, executePlan, resumePlan, abortPlan, deletePlan } = usePlan("plan-1");
+const { plan, report, isLoading, error, updatePlan, executePlan, resumePlan, abortPlan, deletePlan } = usePlan("plan-1");
 ```
+
+### Parameters
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `planId` | string | Plan ID to subscribe to |
+
+### Returns
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `plan` | `Plan \| undefined` | Plan object |
+| `report` | `PlanReport \| undefined` | Completion report (populated from `plan:completed` SSE event) |
+| `isLoading` | `boolean` | Initial load in progress |
+| `error` | `Error \| null` | Fetch error |
+| `updatePlan` | `(opts) => Promise<Plan>` | Update plan metadata |
+| `executePlan` | `() => Promise<{ tasks: Task[] }>` | Execute the plan |
+| `resumePlan` | `(opts?) => Promise` | Resume failed plan |
+| `abortPlan` | `() => Promise<{ aborted: number }>` | Abort active plan |
+| `deletePlan` | `() => Promise<void>` | Delete plan |
 
 ---
 
@@ -145,7 +174,7 @@ const { plan, executePlan, resumePlan, abortPlan, deletePlan } = usePlan("plan-1
 Team and agent management.
 
 ```tsx
-const { agents, team, isLoading, addAgent, removeAgent, renameTeam } = useAgents();
+const { agents, team, isLoading, addAgent, removeAgent, renameTeam, refetch } = useAgents();
 ```
 
 ### Returns
@@ -154,9 +183,37 @@ const { agents, team, isLoading, addAgent, removeAgent, renameTeam } = useAgents
 |-------|------|-------------|
 | `agents` | `AgentConfig[]` | All agents |
 | `team` | `Team \| null` | Team info |
+| `isLoading` | `boolean` | Initial load in progress |
+| `error` | `Error \| null` | Fetch error |
 | `addAgent` | `(opts) => Promise<void>` | Register new agent |
 | `removeAgent` | `(name) => Promise<void>` | Remove agent |
 | `renameTeam` | `(name) => Promise<void>` | Rename the team |
+| `refetch` | `() => Promise<void>` | Force refetch |
+
+---
+
+## useAgent
+
+Single agent by name.
+
+```tsx
+const { agent, isLoading, error, refetch } = useAgent("backend-dev");
+```
+
+### Parameters
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `name` | string | Agent name |
+
+### Returns
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `agent` | `AgentConfig \| null` | Agent configuration |
+| `isLoading` | `boolean` | Initial load in progress |
+| `error` | `Error \| null` | Fetch error |
+| `refetch` | `() => Promise<void>` | Force refetch |
 
 ---
 
@@ -165,7 +222,7 @@ const { agents, team, isLoading, addAgent, removeAgent, renameTeam } = useAgents
 Active agent processes.
 
 ```tsx
-const { processes, isLoading } = useProcesses();
+const { processes, isLoading, error, refetch } = useProcesses();
 ```
 
 ### Returns
@@ -173,6 +230,9 @@ const { processes, isLoading } = useProcesses();
 | Field | Type | Description |
 |-------|------|-------------|
 | `processes` | `AgentProcess[]` | Active processes with PID, activity, alive status |
+| `isLoading` | `boolean` | Initial load in progress |
+| `error` | `Error \| null` | Fetch error |
+| `refetch` | `() => Promise<void>` | Force refetch |
 
 `AgentProcess` fields:
 - `agentName`, `pid`, `taskId`, `startedAt`, `alive`
@@ -205,11 +265,11 @@ const { events } = useEvents(["task:*", "assessment:*"], 100);
 
 ## useStats
 
-Aggregated statistics.
+Aggregated statistics. Returns `null` when not yet connected.
 
 ```tsx
 const stats = useStats();
-// stats: { pending, running, done, failed, queued }
+// stats: { pending, running, done, failed, queued } | null
 ```
 
 ---
@@ -227,8 +287,9 @@ const { memory, isLoading, saveMemory, refetch } = useMemory();
 | Field | Type | Description |
 |-------|------|-------------|
 | `memory` | `{ exists: boolean, content: string } \| null` | Memory state |
+| `isLoading` | `boolean` | Initial load in progress |
 | `saveMemory` | `(content: string) => Promise<void>` | Save memory |
-| `refetch` | `() => void` | Force refetch |
+| `refetch` | `() => Promise<void>` | Force refetch |
 
 ---
 
@@ -248,6 +309,85 @@ const { skills, isLoading, error, refetch } = useSkills();
 | `isLoading` | `boolean` | Initial load in progress |
 | `error` | `Error \| null` | Fetch error |
 | `refetch` | `() => Promise<void>` | Force refetch |
+
+---
+
+## useNotifications
+
+Notification records and sending.
+
+```tsx
+const { notifications, stats, sendNotification, loading, refetch } = useNotifications({
+  limit: 50,
+  status: "sent",
+  channel: "slack",
+});
+```
+
+### Parameters
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `opts.limit` | number | Max notifications to fetch |
+| `opts.status` | string | Filter by status |
+| `opts.channel` | string | Filter by channel |
+
+### Returns
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `notifications` | `NotificationRecord[]` | Notification records |
+| `stats` | `NotificationStats \| null` | Aggregate stats (sent, failed, pending counts) |
+| `sendNotification` | `(req) => Promise<SendNotificationResult>` | Send a notification |
+| `loading` | `boolean` | Initial load in progress |
+| `refetch` | `() => void` | Force refetch |
+
+---
+
+## useApprovals
+
+Approval gate management.
+
+```tsx
+const { approvals, pending, approve, reject, loading, refetch } = useApprovals();
+```
+
+### Parameters
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `status` | ApprovalStatus | Optional: filter by approval status |
+
+### Returns
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `approvals` | `ApprovalRequest[]` | All approval requests |
+| `pending` | `ApprovalRequest[]` | Only pending approvals |
+| `approve` | `(id, opts?) => Promise<void>` | Approve a request (`opts: { resolvedBy?, note? }`) |
+| `reject` | `(id, feedback, resolvedBy?) => Promise<void>` | Reject a request |
+| `loading` | `boolean` | Initial load in progress |
+| `refetch` | `() => void` | Force refetch |
+
+---
+
+## useWorkflows
+
+Workflow discovery and execution.
+
+```tsx
+const { workflows, loading, getWorkflow, runWorkflow, refetch } = useWorkflows();
+```
+
+### Returns
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `workflows` | `WorkflowInfo[]` | Available workflows |
+| `loading` | `boolean` | Initial load in progress |
+| `getWorkflow` | `(name) => Promise<WorkflowDefinition>` | Fetch full workflow definition |
+| `runWorkflow` | `(name, params?) => Promise<WorkflowRunResult>` | Execute a workflow |
+| `refetch` | `() => void` | Force refetch |
 
 ---
 
@@ -280,6 +420,9 @@ Per-task activity history from run logs.
 
 ```tsx
 const { entries, isLoading, error, refetch } = useTaskActivity("task-1");
+
+// With auto-polling
+const { entries } = useTaskActivity("task-1", { pollIntervalMs: 5000 });
 ```
 
 ### Parameters
@@ -287,6 +430,7 @@ const { entries, isLoading, error, refetch } = useTaskActivity("task-1");
 | Param | Type | Description |
 |-------|------|-------------|
 | `taskId` | `string \| null` | Task ID to fetch activity for. Pass `null` to skip. |
+| `options.pollIntervalMs` | number | Auto-poll interval in ms (optional) |
 
 ### Returns
 
@@ -304,7 +448,7 @@ const { entries, isLoading, error, refetch } = useTaskActivity("task-1");
 Event log sessions and entries.
 
 ```tsx
-const { sessions, isLoading, getLogEntries } = useLogs();
+const { sessions, isLoading, getLogEntries, refetch } = useLogs();
 ```
 
 ### Returns
@@ -319,13 +463,30 @@ const { sessions, isLoading, getLogEntries } = useLogs();
 
 ---
 
+## Imports
+
+The SDK supports subpath exports for tree-shaking:
+
+```tsx
+// Full import
+import { PolpoProvider, useTasks, usePlans } from "@openpolpo/react-sdk";
+
+// Direct client import (no React dependency)
+import { PolpoClient } from "@openpolpo/react-sdk/client";
+
+// Individual hook imports
+import { useTasks } from "@openpolpo/react-sdk/hooks/use-tasks";
+```
+
+---
+
 ## Architecture
 
 The SDK uses `useSyncExternalStore` for push-based state management:
 
-1. **PolpoClient** — HTTP client with automatic request deduplication (internal class name)
+1. **PolpoClient** — HTTP client with automatic request deduplication
 2. **EventSourceManager** — SSE with auto-reconnect and exponential backoff
-3. **PolpoStore** — Central state with `reduceEvent()` for 55 event types (internal class name)
+3. **PolpoStore** — Central state with `reduceEvent()` for 55+ event types
 4. **Memoized selectors** — WeakMap-cached selectors for each hook
 5. **Microtask batching** — `queueMicrotask` for batched re-renders
 

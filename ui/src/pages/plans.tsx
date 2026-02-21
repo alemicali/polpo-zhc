@@ -91,7 +91,7 @@ function PlanRow({
 
   return (
     <div
-      className="group flex items-center gap-4 p-4 rounded-lg border border-border bg-card transition-colors hover:border-border/80 cursor-pointer"
+      className="group flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 p-4 rounded-lg border border-border bg-card transition-colors hover:border-border/80 cursor-pointer"
       onClick={onClick}
     >
       {/* Status icon */}

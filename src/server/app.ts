@@ -100,7 +100,7 @@ export function createApp(pm: ProjectManager, opts?: AppOptions): OpenAPIHono {
       description: "REST API for Polpo — an AI agent that manages teams of AI coding agents. Manage projects, tasks, plans, agents, workflows, skills, notifications, and approvals. For conversational interaction, use the OpenAI-compatible POST /v1/chat/completions endpoint.",
     },
     servers: [
-      { url: "http://localhost:3890", description: "Local development" },
+      { url: "http://localhost:3000", description: "Local development" },
     ],
     security: [{ bearerAuth: [] }],
   });

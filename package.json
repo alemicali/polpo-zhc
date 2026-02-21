@@ -34,10 +34,16 @@
   ],
   "scripts": {
     "build": "tsc",
+    "build:all": "tsc && pnpm --filter @openpolpo/react-sdk build && pnpm --filter ui build",
+    "build:sdk": "pnpm --filter @openpolpo/react-sdk build",
+    "build:ui": "pnpm --filter ui build",
     "dev": "tsc --watch",
     "dev:serve": "tsx --watch src/cli/index.ts serve",
+    "dev:ui": "pnpm --filter ui dev",
     "start": "node dist/cli/index.js",
     "test": "vitest",
+    "lint": "pnpm --filter ui lint",
+    "clean": "rm -rf dist packages/react-sdk/dist ui/dist",
     "generate:openapi": "node -e \"const{createApp}=require('./dist/server/app.js');const{ProjectManager}=require('./dist/server/project-manager.js');const pm=new ProjectManager();const app=createApp(pm);const fs=require('fs');app.fetch(new Request('http://localhost/api/v1/openapi.json')).then(r=>r.json()).then(j=>{fs.writeFileSync('apps/docs-mintlify/openapi.json',JSON.stringify(j,null,2));console.log('Generated openapi.json with',Object.keys(j.paths).length,'paths')})\""
   },
   "keywords": [
@@ -84,7 +90,6 @@
     "nodemailer": "^8.0.1",
     "pdf-lib": "^1.17.1",
     "react": "^18.3.1",
-    "sox": "^0.1.0",
     "yaml": "^2.7.0",
     "zod": "^4.3.6",
     "zustand": "^5.0.11"

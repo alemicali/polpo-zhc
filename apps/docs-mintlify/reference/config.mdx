@@ -7,17 +7,19 @@ description: "Complete field-by-field reference for .polpo/polpo.json"
 
 ```json
 {
-  "version": "1",
   "project": "my-project",
   "team": {
     "name": "My Team",
     "agents": []
   },
-  "tasks": [],
   "settings": {},
   "providers": {}
 }
 ```
+
+<Note>
+Plans and tasks are stored separately in `.polpo/plans/` and `.polpo/tasks/` — they are not part of the config file. Use `polpo plan create`, the TUI, or the API to manage them.
+</Note>
 
 ## Agent Fields
 
@@ -48,6 +50,8 @@ description: "Complete field-by-field reference for .polpo/polpo.json"
 | `enableImage` | boolean | `false` | Enable AI image generation and vision analysis tools |
 
 ## Task Fields
+
+Tasks are created inside plans (via CLI, TUI, or API). Each task has these fields:
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
@@ -121,7 +125,7 @@ description: "Complete field-by-field reference for .polpo/polpo.json"
 
 ## ProjectConfig Fields
 
-Stored in `.polpo/config.json` — separate from `polpo.json`, this stores project-level defaults:
+Stored in `.polpo/config.json` — separate from `polpo.json`, this stores project-level defaults set via `polpo config set`:
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -196,71 +200,32 @@ See [Providers & Models](/models/overview) for supported providers and model res
 
 ```json
 {
+  "project": "my-project",
+  "team": {
+    "name": "my-team",
+    "agents": [
+      {
+        "name": "architect",
+        "role": "Senior architect",
+        "model": "anthropic:claude-sonnet-4-5-20250929",
+        "maxTurns": 200,
+        "systemPrompt": "Always consider performance implications"
+      },
+      {
+        "name": "developer",
+        "role": "Full-stack developer",
+        "skills": ["frontend-design"]
+      },
+      {
+        "name": "script-runner",
+        "role": "Script executor"
+      }
+    ]
+  },
   "providers": {
     "anthropic": "${ANTHROPIC_API_KEY}",
     "openai": "${OPENAI_API_KEY}"
   },
-  "agents": [
-    {
-      "name": "architect",
-      "role": "Senior architect",
-      "model": "anthropic:claude-sonnet-4-5-20250929",
-      "maxTurns": 200,
-      "systemPrompt": "Always consider performance implications"
-    },
-    {
-      "name": "developer",
-      "role": "Full-stack developer",
-      "skills": ["frontend-design"]
-    },
-    {
-      "name": "script-runner",
-      "role": "Script executor"
-    }
-  ],
-  "plans": [
-    {
-      "group": "build-feature",
-      "team": [
-        {
-          "name": "specialist",
-          "role": "Feature specialist",
-          "volatile": true
-        }
-      ],
-      "tasks": [
-        {
-          "title": "Design database schema",
-          "agent": "architect",
-          "description": "Design normalized schema for user management"
-        },
-        {
-          "title": "Implement API",
-          "agent": "developer",
-          "description": "Build Express REST API",
-          "dependencies": ["Design database schema"],
-          "maxDuration": 3600000,
-          "retryPolicy": {
-            "escalateAfter": 2,
-            "fallbackAgent": "architect"
-          },
-          "expectations": [
-            { "type": "file_exists", "paths": ["src/routes.ts", "src/db.ts"] },
-            { "type": "test", "command": "npm test" },
-            {
-              "type": "llm_review",
-              "criteria": "Verify security and error handling",
-              "threshold": 4.0,
-              "dimensions": [
-                { "name": "security", "weight": 0.6, "description": "No vulnerabilities" },
-                { "name": "error_handling", "weight": 0.4, "description": "Proper error responses" }
-              ]
-            }
-          ]
-        }
-      ]
-    }
-  ],
   "settings": {
     "maxRetries": 3,
     "workDir": ".",

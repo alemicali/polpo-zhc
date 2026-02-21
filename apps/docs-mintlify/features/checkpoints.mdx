@@ -61,10 +61,10 @@ When a checkpoint is active, the plan shows status `paused`. Resume it through a
   <Tab title="HTTP API">
     ```bash
     # List active checkpoints
-    curl http://localhost:3890/api/v1/projects/my-project/plans/checkpoints
+    curl http://localhost:3000/api/v1/projects/my-project/plans/checkpoints
 
     # Resume a checkpoint
-    curl -X POST http://localhost:3890/api/v1/projects/my-project/plans/{planId}/checkpoints/review-analysis/resume
+    curl -X POST http://localhost:3000/api/v1/projects/my-project/plans/{planId}/checkpoints/review-analysis/resume
     ```
   </Tab>
 

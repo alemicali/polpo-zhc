@@ -3,8 +3,6 @@ title: "CLI"
 description: "Command-line interface for Polpo"
 ---
 
-Polpo provides seven CLI commands: `init`, `run`, `status`, `serve`, `tui`, `workflow`, and `skills`.
-
 ## `polpo init`
 
 Initialize Polpo in the current project.
@@ -15,7 +13,23 @@ polpo init
 
 Creates:
 - `.polpo/polpo.json` — configuration file with your team setup
-- `.polpo/` — runtime directory for plans, state, logs, and assessments
+- `.polpo/logs/` — log directory
+- `.polpo/assessments/` — assessment results directory
+
+## `polpo` / `polpo tui`
+
+Launch the interactive terminal UI. This is the **default command** — running `polpo` without arguments starts the TUI.
+
+```bash
+polpo [options]
+polpo tui [options]
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `-d, --dir <path>` | `.` | Path to working directory |
+
+See [TUI Usage](/usage/tui) for details on features and commands.
 
 ## `polpo run`
 
@@ -74,13 +88,75 @@ polpo serve [options]
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `-p, --port <port>` | `3890` | Port to listen on |
+| `-p, --port <port>` | `3000` | Port to listen on |
 | `-H, --host <host>` | `127.0.0.1` | Host to bind to |
 | `-d, --dir <path>` | `.` | Path to working directory |
 | `--api-key <key>` | — | API key for authentication (optional) |
 | `--project-id <id>` | dir name | Project ID |
 
 The server provides REST API, SSE streaming, and WebSocket support. See [Server Usage](/usage/server) for details.
+
+## `polpo plan`
+
+Manage execution plans.
+
+```bash
+polpo plan <subcommand> [options]
+```
+
+| Subcommand | Description |
+|------------|-------------|
+| `list` | List all plans |
+| `show <planId>` | Show plan details |
+| `create <prompt>` | Create a new plan with AI generation |
+| `execute <planId>` | Execute a plan (create and run its tasks) |
+| `resume <planId>` | Resume a paused or failed plan |
+| `delete <planId>` | Delete a plan |
+| `abort <planId>` | Abort all tasks in a plan |
+
+```bash
+# Generate a plan from a prompt
+polpo plan create "Build a REST API with auth and tests"
+
+# List plans
+polpo plan list
+
+# Execute a specific plan
+polpo plan execute <plan-id>
+```
+
+## `polpo task`
+
+Manage individual tasks.
+
+```bash
+polpo task <subcommand> [options]
+```
+
+| Subcommand | Description |
+|------------|-------------|
+| `list` | List all tasks (filter with `--status` or `--group`) |
+| `show <id>` | Show task details |
+| `add <description>` | Create a new task |
+| `retry <id>` | Retry a failed task |
+| `kill <id>` | Kill a running task |
+| `reassess <id>` | Re-run assessment on a completed task |
+| `delete <id>` | Remove a task |
+
+## `polpo team`
+
+Manage the agent team.
+
+```bash
+polpo team <subcommand> [options]
+```
+
+| Subcommand | Description |
+|------------|-------------|
+| `list` | List all agents |
+| `add <name>` | Add an agent (`--model`, `--role`) |
+| `remove <name>` | Remove an agent |
+| `rename <newName>` | Rename the team |
 
 ## `polpo workflow`
 
@@ -89,8 +165,6 @@ Manage and execute reusable [workflow templates](/features/workflows).
 ```bash
 polpo workflow <subcommand> [options]
 ```
-
-### Subcommands
 
 | Subcommand | Description |
 |------------|-------------|
@@ -129,8 +203,6 @@ Manage the skill pool — install, list, remove, and assign skills to agents.
 polpo skills <subcommand> [options]
 ```
 
-### Subcommands
-
 | Subcommand | Description |
 |------------|-------------|
 | `add <source>` | Install skills from a GitHub repo or local path |
@@ -138,46 +210,29 @@ polpo skills <subcommand> [options]
 | `remove <name>` | Remove a skill from the pool |
 | `assign <skill> <agent>` | Assign a skill to an agent |
 
-### `polpo skills add`
-
-```bash
-polpo skills add <source> [options]
-```
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `-d, --dir <path>` | `.` | Working directory |
-| `-s, --skill <names...>` | — | Install only specific skill names |
-| `-g, --global` | `false` | Install to `~/.polpo/skills/` (shared across projects) |
-| `-f, --force` | `false` | Overwrite existing skills |
-
 ```bash
 # Install all skills from a repo
 polpo skills add vercel-labs/agent-skills
 
 # Install specific skills
-polpo skills add vercel-labs/agent-skills --skill frontend-design --skill web-design-guidelines
+polpo skills add vercel-labs/agent-skills --skill frontend-design
 
-# Assign to an agent after install
+# Assign to an agent
 polpo skills assign frontend-design frontend-dev
 ```
 
 Compatible with the [skills.sh](https://skills.sh) ecosystem — any repo with `SKILL.md` files works. See [Skills](/features/skills) for details.
 
-## `polpo tui`
+## Other Commands
 
-Launch the interactive terminal UI. This is the **default command** — running `polpo` without arguments starts the TUI.
-
-```bash
-polpo tui [options]
-polpo          # same as polpo tui
-```
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `-d, --dir <path>` | `.` | Path to working directory |
-
-See [TUI Usage](/usage/tui) for details on features and commands.
+| Command | Description |
+|---------|-------------|
+| `polpo memory [get\|set\|append]` | Project memory management |
+| `polpo logs [list\|show\|clear]` | Log management |
+| `polpo config [show\|set\|reload]` | Configuration management |
+| `polpo chat` | Chat/conversation commands |
+| `polpo auth` | Authentication management |
+| `polpo models` | Model listing and management |
 
 ## Global Options
 
@@ -188,5 +243,5 @@ All commands accept the `-d` / `--dir` flag to specify the working directory. Po
 polpo run -d /path/to/my-project
 
 # Serve from a specific project
-polpo serve -d ./projects/api-service --port 3890
+polpo serve -d ./projects/api-service --port 8080
 ```

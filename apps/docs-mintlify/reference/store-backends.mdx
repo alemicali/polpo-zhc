@@ -1,9 +1,9 @@
 ---
 title: "Store Backends"
-description: "File, JSON, and SQLite persistence backends for Polpo"
+description: "File and SQLite persistence backends for Polpo"
 ---
 
-Polpo persists tasks, runs, plans, sessions, memory, logs, and approval state using a pluggable store layer. All stores implement a common interface and can be swapped via configuration.
+Polpo persists tasks, runs, plans, sessions, memory, logs, notifications, and approval state using a pluggable store layer. All stores implement a common interface and can be swapped via configuration.
 
 ## TaskStore Interface
 
@@ -55,77 +55,79 @@ File-based stores persist data as individual files in the `.polpo/` directory. T
 
 | Store | Purpose | Location |
 |-------|---------|----------|
-| `FileTaskStore` | Tasks and plans | `.polpo/tasks.json` |
+| `FileTaskStore` | Tasks and plans | `.polpo/tasks/<id>.json` + `.polpo/plans/<id>.json` |
 | `FileRunStore` | Execution run history | `.polpo/runs/` |
 | `FileMemoryStore` | Project memory | `.polpo/memory.md` |
 | `FileLogStore` | Event log persistence | `.polpo/logs/` |
 | `FileSessionStore` | Chat sessions | `.polpo/sessions/` |
-| `FileApprovalStore` | Approval gate state | `.polpo/approvals/` |
+| `FileApprovalStore` | Approval gate state | `.polpo/approvals.json` |
+| `FileNotificationStore` | Notification records | `.polpo/notifications.json` |
 
-```typescript
-import { FileTaskStore, FileRunStore, FileMemoryStore } from "polpo/stores";
+The `FileTaskStore` uses a multi-file layout: each task and plan is stored as a separate JSON file, plus a `_meta.json` metadata file.
+
+```
+.polpo/
+├── tasks/
+│   ├── <taskId>.json
+│   └── ...
+├── plans/
+│   ├── <planId>.json
+│   └── ...
+└── _meta.json
 ```
 
 **Pros:** Zero config, human-readable files, easy to inspect and debug.
 **Cons:** No concurrent access safety, can degrade with very large task sets.
 
-### JSON Stores
-
-JSON stores persist data as a single JSON file. The `JsonConfigStore` (aliased as `PolpoConfigStore`) manages the `polpo.json` configuration file.
-
-| Store | Purpose | Location |
-|-------|---------|----------|
-| `JsonTaskStore` | Tasks and plans (single file) | `.polpo/tasks.json` |
-| `JsonConfigStore` | Project configuration | `polpo.json` |
-
-```typescript
-import { JsonTaskStore, JsonConfigStore } from "polpo/stores";
-```
-
-**Pros:** Portable (single file), easy to version control.
-**Cons:** Entire file rewritten on every update, no concurrent access.
-
 ### SQLite Stores
 
-SQLite stores use an embedded database for higher concurrency and better query performance.
+SQLite stores use an embedded database for higher concurrency and better query performance. All SQLite stores share the same database file.
 
 | Store | Purpose | Location |
 |-------|---------|----------|
-| `SqliteTaskStore` | Tasks and plans | `.polpo/polpo.db` |
-| `SqliteRunStore` | Execution run history | `.polpo/polpo.db` |
-| `SqliteSessionStore` | Chat sessions | `.polpo/polpo.db` |
+| `SqliteTaskStore` | Tasks and plans | `.polpo/state.db` |
+| `SqliteRunStore` | Execution run history | `.polpo/state.db` |
+| `SqliteSessionStore` | Chat sessions | `.polpo/state.db` |
+| `SqliteNotificationStore` | Notification records | `.polpo/state.db` |
 
 ```typescript
-import { SqliteTaskStore, SqliteRunStore, SqliteSessionStore } from "polpo/stores";
+import { SqliteTaskStore, SqliteRunStore, SqliteSessionStore } from "openpolpo/stores";
 ```
 
 **Pros:** Safe concurrent access, better performance at scale, transactional integrity.
-**Cons:** Requires `better-sqlite3` dependency, database file is not human-readable.
+**Cons:** Requires `better-sqlite3` dependency (in `optionalDependencies`), database file is not human-readable.
+
+### Configuration Stores
+
+| Store | Purpose | Location |
+|-------|---------|----------|
+| `JsonConfigStore` | Project configuration | `.polpo/polpo.json` |
+
+The `JsonConfigStore` (aliased as `PolpoConfigStore`) manages the `polpo.json` configuration file. It is always used regardless of the storage backend setting.
 
 ## Choosing a Backend
 
 | Scenario | Recommended Backend |
 |----------|-------------------|
 | Getting started / single user | File (default) |
-| Version-controlled project state | JSON |
 | Multiple concurrent orchestrators | SQLite |
-| CI/CD pipelines | JSON or SQLite |
+| CI/CD pipelines | SQLite |
 | Large task sets (100+ tasks) | SQLite |
 | Debugging / inspecting state | File |
 
 ## Configuration
 
-Store selection happens at orchestrator construction time. By default, Polpo uses file-based stores. The store backend is determined by the project configuration:
+Set the storage backend in `.polpo/polpo.json`:
 
 ```json
 {
   "settings": {
-    "store": "sqlite"
+    "storage": "sqlite"
   }
 }
 ```
 
-Supported values: `"file"` (default), `"json"`, `"sqlite"`.
+Supported values: `"file"` (default) and `"sqlite"`.
 
 When using the programmatic API, you can pass stores directly:
 
@@ -134,11 +136,11 @@ import { Orchestrator, SqliteTaskStore, SqliteRunStore } from "openpolpo";
 
 const orchestrator = new Orchestrator({
   workDir: "./my-project",
-  taskStore: new SqliteTaskStore(".polpo/polpo.db"),
-  runStore: new SqliteRunStore(".polpo/polpo.db"),
+  taskStore: new SqliteTaskStore(".polpo"),
+  runStore: new SqliteRunStore(join(".polpo", "state.db")),
 });
 ```
 
 <Note>
-All stores share the same `.polpo/` directory by convention. The directory is created automatically when Polpo starts.
+All stores share the same `.polpo/` directory by convention. The directory is created automatically by `polpo init`.
 </Note>

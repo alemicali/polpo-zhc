@@ -6,7 +6,7 @@ description: "HTTP API server with SSE and WebSocket streaming"
 ## Starting the Server
 
 ```bash
-polpo serve --port 3890 --api-key my-secret
+polpo serve --port 3000 --api-key my-secret
 ```
 
 The server provides a REST API, an OpenAI-compatible chat endpoint, Server-Sent Events (SSE), and WebSocket streaming.
@@ -14,7 +14,7 @@ The server provides a REST API, an OpenAI-compatible chat endpoint, Server-Sent 
 ## Base URL
 
 ```
-http://localhost:3890/api/v1/projects/:projectId
+http://localhost:3000/api/v1/projects/:projectId
 ```
 
 All endpoints are scoped to a project. The project ID defaults to the working directory name.
@@ -26,14 +26,14 @@ When `--api-key` is set, all requests must include the key:
 <Tabs>
   <Tab title="Header">
     ```bash
-    curl -H "X-API-Key: my-secret" http://localhost:3890/api/v1/projects
+    curl -H "X-API-Key: my-secret" http://localhost:3000/api/v1/projects
     ```
   </Tab>
   <Tab title="Query Parameter">
     ```javascript
     // For EventSource (can't set headers)
     const events = new EventSource(
-      'http://localhost:3890/api/v1/projects/my-project/events?apiKey=my-secret'
+      'http://localhost:3000/api/v1/projects/my-project/events?apiKey=my-secret'
     );
     ```
   </Tab>
@@ -110,7 +110,7 @@ The primary way to talk to Polpo programmatically:
 This endpoint accepts standard OpenAI-format messages and returns responses in OpenAI format. Polpo runs its full tool loop internally (37 tools) — you describe what you need, Polpo handles the rest. Supports `"stream": true` for SSE streaming.
 
 ```bash
-curl http://localhost:3890/v1/chat/completions \
+curl http://localhost:3000/v1/chat/completions \
   -H "Authorization: Bearer my-secret" \
   -H "Content-Type: application/json" \
   -d '{
@@ -146,7 +146,7 @@ Subscribe to real-time events:
 
 ```javascript
 const events = new EventSource(
-  'http://localhost:3890/api/v1/projects/my-project/events'
+  'http://localhost:3000/api/v1/projects/my-project/events'
 );
 
 events.onmessage = (e) => {
@@ -162,7 +162,7 @@ SSE supports `Last-Event-ID` for reconnection. The server maintains a circular b
 ```javascript
 // Resume from event 42
 const events = new EventSource(
-  'http://localhost:3890/api/v1/projects/my-project/events?lastEventId=42'
+  'http://localhost:3000/api/v1/projects/my-project/events?lastEventId=42'
 );
 ```
 
@@ -172,7 +172,7 @@ WebSocket provides the same event stream with optional filtering:
 
 ```javascript
 const ws = new WebSocket(
-  'ws://localhost:3890/api/v1/projects/my-project/ws'
+  'ws://localhost:3000/api/v1/projects/my-project/ws'
 );
 
 // Filter events with glob patterns

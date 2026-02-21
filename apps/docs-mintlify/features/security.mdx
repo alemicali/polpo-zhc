@@ -112,8 +112,8 @@ Fields use dot-path notation resolved on the event payload (e.g. `"task.status"`
 The Polpo server binds to `127.0.0.1` by default — it is **not** accessible from other machines on the network:
 
 ```bash
-polpo serve --port 3890
-# Binds to 127.0.0.1:3890 (localhost only)
+polpo serve --port 3000
+# Binds to 127.0.0.1:3000 (localhost only)
 ```
 
 ### Binding to 0.0.0.0
@@ -121,7 +121,7 @@ polpo serve --port 3890
 If you need to expose the server to the network (e.g., for remote dashboards), you can override the host:
 
 ```bash
-polpo serve --host 0.0.0.0 --port 3890
+polpo serve --host 0.0.0.0 --port 3000
 ```
 
 <Warning>
@@ -131,7 +131,7 @@ When binding to `0.0.0.0`, the server is accessible to **anyone** on the network
 {
   "server": {
     "host": "0.0.0.0",
-    "port": 3890,
+    "port": 3000,
     "apiKeys": ["your-secret-key-here"]
   }
 }

@@ -5,7 +5,7 @@ description: "Define multi-task execution plans"
 
 ## What is a Plan?
 
-A **plan** is a group of related tasks that Polpo executes together. Plans are stored as JSON in `.polpo/plans/*.json` and can include:
+A **plan** is a group of related tasks that Polpo executes together. Plans are stored as JSON in `.polpo/plans/` and can include:
 
 - Multiple tasks with dependencies
 - Volatile teams (temporary agents scoped to the plan)
@@ -28,59 +28,78 @@ A **plan** is a group of related tasks that Polpo executes together. Plans are s
 | `failed` | One or more tasks failed after exhausting retries |
 | `cancelled` | Plan was manually aborted |
 
-## Plan Format
+## Creating Plans
 
-Plans are created via the TUI/CLI/API. Here's an example of the JSON structure:
+Plans are created via CLI, TUI, or API — not by editing the config file.
+
+<Tabs>
+  <Tab title="CLI">
+    ```bash
+    # Generate a plan with AI
+    polpo plan create "Build a REST API with auth, rate limiting, and tests"
+
+    # Review the plan
+    polpo plan list
+    polpo plan show <plan-id>
+
+    # Execute it
+    polpo plan execute <plan-id>
+    ```
+  </Tab>
+
+  <Tab title="TUI">
+    ```
+    /plan
+    ```
+    The TUI plan command lets you create plans from templates or generate them with AI.
+  </Tab>
+
+  <Tab title="HTTP API">
+    ```bash
+    curl -X POST http://localhost:3000/api/v1/projects/my-project/plans \
+      -H "Content-Type: application/json" \
+      -d '{"prompt": "Build a REST API with auth"}'
+
+    curl -X POST http://localhost:3000/api/v1/projects/my-project/plans/<plan-id>/execute
+    ```
+  </Tab>
+</Tabs>
+
+## Plan Task Format
+
+Each task inside a plan uses these fields:
 
 ```json
 {
-  "plans": [
+  "title": "Implement JWT middleware",
+  "description": "Build Express middleware for JWT authentication.",
+  "assignTo": "auth-dev",
+  "dependsOn": ["Design auth schema"],
+  "expectations": [
     {
-      "group": "feature-auth",
-      "deadline": "2025-12-31T23:59:59Z",
-      "qualityThreshold": 3.5,
-      "team": [
-        {
-          "name": "auth-dev",
-          "description": "Authentication specialist",
-          "volatile": true
-        }
-      ],
-      "tasks": [
-        {
-          "title": "Design auth schema",
-          "agent": "auth-dev",
-          "description": "Design the database schema for user authentication: users table with email, password_hash, role; sessions table with token, expiry, user_id. Create migration files in src/db/migrations/."
-        },
-        {
-          "title": "Implement JWT middleware",
-          "agent": "auth-dev",
-          "description": "Build Express middleware for JWT authentication. Must verify tokens on protected routes.",
-          "dependsOn": ["Design auth schema"]
-        },
-        {
-          "title": "Write auth tests",
-          "agent": "auth-dev",
-          "description": "Write integration tests for the auth system",
-          "dependsOn": ["Implement JWT middleware"],
-          "expectations": [
-            {
-              "type": "test",
-              "command": "npm test -- --grep auth",
-              "weight": 0.6
-            },
-            {
-              "type": "llm_review",
-              "prompt": "Verify tests cover login, logout, token refresh, and invalid tokens",
-              "weight": 0.4
-            }
-          ]
-        }
-      ]
+      "type": "test",
+      "command": "npm test -- --grep auth",
+      "weight": 0.6
+    },
+    {
+      "type": "llm_review",
+      "prompt": "Verify tests cover login, logout, token refresh, and invalid tokens",
+      "weight": 0.4
     }
   ]
 }
 ```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `title` | string | Short task title (used as dependency reference) |
+| `description` | string | Detailed instructions for the agent |
+| `assignTo` | string | Agent name from your team. Defaults to first agent if omitted |
+| `dependsOn` | string[] | Titles of tasks that must finish first |
+| `expectations` | array | Assessment criteria |
+| `maxRetries` | number | Override default retry limit |
+| `maxDuration` | number | Timeout in ms |
+| `retryPolicy` | object | Escalation settings (`escalateAfter`, `fallbackAgent`) |
 
 ## Dependencies
 
@@ -91,12 +110,12 @@ Tasks can depend on other tasks by referencing their titles using the `dependsOn
   "tasks": [
     {
       "title": "Build database layer",
-      "agent": "backend-dev",
+      "assignTo": "backend-dev",
       "description": "Create SQLite database with users and posts tables"
     },
     {
       "title": "Build REST API",
-      "agent": "backend-dev",
+      "assignTo": "backend-dev",
       "description": "Create Express routes for CRUD operations",
       "dependsOn": ["Build database layer"]
     }
@@ -110,27 +129,22 @@ Dependencies are matched by **task title** within the same plan group. A task wo
 
 ## Volatile Teams
 
-The `team` section lets you define agents that exist only for this plan:
+Plans can define agents that exist only for that plan:
 
 ```json
 {
-  "plans": [
+  "team": [
     {
-      "group": "one-off-migration",
-      "team": [
-        {
-          "name": "migration-expert",
-          "description": "Database migration specialist",
-          "volatile": true
-        }
-      ],
-      "tasks": [
-        {
-          "title": "Migrate legacy data",
-          "agent": "migration-expert",
-          "description": "Convert old JSON files to new format"
-        }
-      ]
+      "name": "migration-expert",
+      "role": "Database migration specialist",
+      "volatile": true
+    }
+  ],
+  "tasks": [
+    {
+      "title": "Migrate legacy data",
+      "assignTo": "migration-expert",
+      "description": "Convert old JSON files to new format"
     }
   ]
 }
@@ -154,12 +168,10 @@ When the plan completes (all tasks done or failed), Polpo automatically removes 
 
 ## Quality Gates
 
-Quality gates block plan progression until preceding tasks meet a score threshold. Define checkpoints within a plan:
+Quality gates block plan progression until preceding tasks meet a score threshold:
 
 ```json
 {
-  "group": "build-feature",
-  "qualityThreshold": 3.5,
   "qualityGates": [
     {
       "name": "design-review",
@@ -173,11 +185,11 @@ Quality gates block plan progression until preceding tasks meet a score threshol
     }
   ],
   "tasks": [
-    { "title": "Design API schema", "agent": "architect", "description": "..." },
-    { "title": "Design database schema", "agent": "architect", "description": "..." },
-    { "title": "Implement API endpoints", "agent": "backend-dev", "description": "...", "dependsOn": ["Design API schema"] },
-    { "title": "Implement database layer", "agent": "backend-dev", "description": "...", "dependsOn": ["Design database schema"] },
-    { "title": "Write integration tests", "agent": "backend-dev", "description": "...", "dependsOn": ["Implement API endpoints", "Implement database layer"] }
+    { "title": "Design API schema", "assignTo": "architect", "description": "..." },
+    { "title": "Design database schema", "assignTo": "architect", "description": "..." },
+    { "title": "Implement API endpoints", "assignTo": "backend-dev", "description": "...", "dependsOn": ["Design API schema"] },
+    { "title": "Implement database layer", "assignTo": "backend-dev", "description": "...", "dependsOn": ["Design database schema"] },
+    { "title": "Write integration tests", "assignTo": "backend-dev", "description": "...", "dependsOn": ["Implement API endpoints", "Implement database layer"] }
   ]
 }
 ```
@@ -190,13 +202,12 @@ Plans can be scheduled using cron expressions:
 
 ```json
 {
-  "group": "nightly-audit",
   "schedule": "0 2 * * *",
   "recurring": true,
   "tasks": [
     {
       "title": "Run security audit",
-      "agent": "security-dev",
+      "assignTo": "security-dev",
       "description": "Scan codebase for vulnerabilities and generate report"
     }
   ]
@@ -215,6 +226,13 @@ Scheduling requires `"enableScheduler": true` in the top-level config. The `sche
 Plans can be executed via:
 
 <Tabs>
+  <Tab title="CLI">
+    ```bash
+    polpo plan execute <plan-id>
+    polpo run    # executes all pending plans
+    ```
+  </Tab>
+
   <Tab title="TUI">
     ```
     /plan
@@ -222,16 +240,9 @@ Plans can be executed via:
     The TUI plan command lets you create plans from templates or generate them with AI.
   </Tab>
 
-  <Tab title="CLI">
-    ```bash
-    polpo run --plan feature-auth
-    ```
-    Execute a specific plan group.
-  </Tab>
-
   <Tab title="HTTP API">
     ```bash
-    curl -X POST http://localhost:3890/api/v1/projects/my-project/plans/plan-id/execute
+    curl -X POST http://localhost:3000/api/v1/projects/my-project/plans/<plan-id>/execute
     ```
   </Tab>
 
@@ -269,6 +280,12 @@ Plan completion triggers the `plan:completed` event with the full report.
 ## AI-Generated Plans
 
 Polpo can generate plans from natural language prompts:
+
+```bash
+polpo plan create "Build a REST API with authentication, rate limiting, and tests"
+```
+
+Or interactively in the TUI:
 
 ```
 /plan

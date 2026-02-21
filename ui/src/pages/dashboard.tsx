@@ -24,20 +24,16 @@ import {
   ListChecks,
   Bot,
   Map,
-  Activity,
   CheckCircle2,
   Clock,
   AlertTriangle,
   Loader2,
   ArrowRight,
   Zap,
-  MessageSquare,
   Star,
   Eye,
   Hammer,
   HelpCircle,
-  FileText,
-  Brain,
 } from "lucide-react";
 import { useTasks, usePlans, useProcesses, useAgents, useStats } from "@openpolpo/react-sdk";
 import type { Task, AgentProcess, PolpoStats } from "@openpolpo/react-sdk";
@@ -156,7 +152,7 @@ function TaskProgress({ tasks }: { tasks: Task[] }) {
   }
 
   return (
-    <Card className="col-span-2">
+    <Card className="lg:col-span-2">
       <CardHeader className="pb-2">
         <div className="flex items-center justify-between">
           <div>
@@ -309,7 +305,7 @@ function RecentTasks({ tasks }: { tasks: Task[] }) {
     .slice(0, 8);
 
   return (
-    <Card className="col-span-2">
+    <Card className="lg:col-span-2">
       <CardHeader className="flex flex-row items-center justify-between pb-3">
         <div>
           <CardTitle className="text-sm font-medium">Recent Activity</CardTitle>
@@ -417,7 +413,7 @@ export function DashboardPage() {
       <LiveTicker stats={stats} />
 
       {/* Stats row */}
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 lg:gap-4">
         <StatCard
           title="Total Tasks"
           value={tasks.length}
@@ -452,47 +448,12 @@ export function DashboardPage() {
       </div>
 
       {/* Main content */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <TaskProgress tasks={tasks} />
         <ActiveAgents processes={processes} />
       </div>
 
-      <div className="grid grid-cols-3 gap-4">
-        <RecentTasks tasks={tasks} />
-        {/* Quick navigation — monitoring only, no CRUD */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-sm font-medium">Quick Navigation</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            <Link to="/tasks" className="block">
-              <Button variant="outline" className="w-full justify-start gap-2">
-                <ListChecks className="h-4 w-4" /> Inspect Tasks
-              </Button>
-            </Link>
-            <Link to="/chat" className="block">
-              <Button variant="outline" className="w-full justify-start gap-2">
-                <MessageSquare className="h-4 w-4" /> Chat with Polpo
-              </Button>
-            </Link>
-            <Link to="/activity" className="block">
-              <Button variant="outline" className="w-full justify-start gap-2">
-                <Activity className="h-4 w-4" /> Event Stream
-              </Button>
-            </Link>
-            <Link to="/logs" className="block">
-              <Button variant="outline" className="w-full justify-start gap-2">
-                <FileText className="h-4 w-4" /> Session Logs
-              </Button>
-            </Link>
-            <Link to="/memory" className="block">
-              <Button variant="outline" className="w-full justify-start gap-2">
-                <Brain className="h-4 w-4" /> Project Memory
-              </Button>
-            </Link>
-          </CardContent>
-        </Card>
-      </div>
+      <RecentTasks tasks={tasks} />
     </div>
   );
 }

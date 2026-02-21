@@ -8,12 +8,15 @@ A task is a single unit of work assigned to an agent. It has a title, a descript
 ```json
 {
   "title": "Implement auth API",
-  "agent": "backend",
+  "assignTo": "backend",
   "description": "Create JWT-based authentication endpoints.",
   "dependsOn": ["Design schema"],
-  "expectations": {
-    "criteria": "All endpoints return correct status codes. Tests pass."
-  }
+  "expectations": [
+    {
+      "type": "llm_review",
+      "criteria": "All endpoints return correct status codes. Tests pass."
+    }
+  ]
 }
 ```
 

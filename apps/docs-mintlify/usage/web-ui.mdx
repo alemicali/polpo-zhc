@@ -12,7 +12,7 @@ Polpo comes with a modern web dashboard built with Vite, React 19, and shadcn/ui
 1. **Start the Polpo server**
 
    ```bash
-   polpo serve --port 3890
+   polpo serve --port 3000
    ```
 
 2. **Install web UI dependencies**
@@ -27,7 +27,7 @@ Polpo comes with a modern web dashboard built with Vite, React 19, and shadcn/ui
    Create `ui/.env.local`:
 
    ```env
-   VITE_POLPO_URL=http://localhost:3890
+   VITE_POLPO_URL=http://localhost:3000
    ```
 
 4. **Start the dev server**
@@ -116,7 +116,7 @@ import {
 function App() {
   return (
     <PolpoProvider
-      baseURL="http://localhost:3890"
+      baseURL="http://localhost:3000"
       projectId="my-project"
       apiKey="optional-key"
     >

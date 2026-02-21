@@ -33,8 +33,12 @@ export function Header() {
   const { theme, resolved, setTheme } = useTheme();
 
   return (
-    <header className="flex h-14 shrink-0 items-center justify-between border-b border-border bg-background px-6">
-      <h2 className="text-lg font-semibold">{title}</h2>
+    <header className="flex h-14 shrink-0 items-center justify-between border-b border-border bg-background px-4 lg:px-6 pt-safe">
+      <div className="flex items-center gap-2 lg:hidden">
+        <span className="text-lg">🐙</span>
+        <span className="text-sm font-semibold">{title}</span>
+      </div>
+      <h2 className="hidden lg:block text-lg font-semibold">{title}</h2>
       <div className="flex items-center gap-3 text-xs text-muted-foreground">
         <DropdownMenu>
           <DropdownMenuTrigger asChild>

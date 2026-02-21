@@ -791,7 +791,7 @@ function HistoryView() {
   }
 
   return (
-    <div className="grid grid-cols-[300px_1fr] gap-4 flex-1 min-h-0">
+    <div className="flex flex-col lg:grid lg:grid-cols-[300px_1fr] gap-4 flex-1 min-h-0">
       {/* Left: Session list */}
       <Card className="flex flex-col overflow-hidden">
         <CardHeader className="pb-3 shrink-0">

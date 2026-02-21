@@ -196,7 +196,9 @@ export function ChatPage() {
     deleteSession,
   } = useChat();
 
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(() => {
+    return typeof window !== "undefined" && window.innerWidth >= 1024;
+  });
 
   const handleSubmit = useCallback(
     async (message: PromptInputMessage) => {
@@ -209,16 +211,18 @@ export function ChatPage() {
   const isEmpty = messages.length === 0;
 
   return (
-    <div className="flex -mx-6 -my-6 flex-1 min-h-0">
-      {/* Session sidebar */}
+    <div className="flex -m-4 lg:-mx-6 lg:-my-6 flex-1 min-h-0">
+      {/* Session sidebar — hidden on mobile */}
       {sidebarOpen && (
-        <SessionSidebar
-          sessions={sessions}
-          activeSessionId={sessionId}
-          onSelect={loadSession}
-          onNew={newSession}
-          onDelete={deleteSession}
-        />
+        <div className="hidden lg:flex">
+          <SessionSidebar
+            sessions={sessions}
+            activeSessionId={sessionId}
+            onSelect={loadSession}
+            onNew={newSession}
+            onDelete={deleteSession}
+          />
+        </div>
       )}
 
       {/* Main chat area */}
@@ -274,7 +278,7 @@ export function ChatPage() {
                   I can manage your tasks, create execution plans, monitor agents,
                   and help you orchestrate your AI coding team.
                 </p>
-                <div className="grid grid-cols-2 gap-3 max-w-xl w-full">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-xl w-full px-4">
                   {suggestions.map((s) => (
                     <button
                       key={s.title}

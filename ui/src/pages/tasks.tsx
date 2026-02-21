@@ -406,7 +406,7 @@ function ListView({
   return (
     <div className="flex flex-col flex-1 min-h-0 gap-3">
       {/* Tab bar */}
-      <div className="flex items-center gap-1 shrink-0 overflow-x-auto">
+      <div className="flex items-center gap-1 shrink-0 overflow-x-auto scrollbar-none pb-1">
         {tabs.map((t) => (
           <Button
             key={t.value}
@@ -540,9 +540,9 @@ export function TasksPage() {
   return (
     <div className="flex flex-col flex-1 min-h-0 gap-3">
       {/* Toolbar */}
-      <div className="flex items-center gap-3 shrink-0">
+      <div className="flex flex-wrap items-center gap-2 lg:gap-3 shrink-0">
         {/* Search */}
-        <div className="relative w-64">
+        <div className="relative w-full sm:w-64">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
           <Input
             placeholder="Search tasks..."

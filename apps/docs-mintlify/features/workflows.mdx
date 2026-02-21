@@ -342,13 +342,13 @@ The workflow system adds zero runtime overhead — once instantiated, the plan e
   <Tab title="HTTP API">
     ```bash
     # List workflows
-    curl http://localhost:3890/api/v1/projects/my-project/workflows
+    curl http://localhost:3000/api/v1/projects/my-project/workflows
 
     # Get workflow details
-    curl http://localhost:3890/api/v1/projects/my-project/workflows/code-review
+    curl http://localhost:3000/api/v1/projects/my-project/workflows/code-review
 
     # Execute with parameters
-    curl -X POST http://localhost:3890/api/v1/projects/my-project/workflows/code-review/run \
+    curl -X POST http://localhost:3000/api/v1/projects/my-project/workflows/code-review/run \
       -H "Content-Type: application/json" \
       -d '{ "params": { "module": "src/auth", "focus": "security" } }'
     ```
