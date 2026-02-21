@@ -158,25 +158,25 @@ polpo team <subcommand> [options]
 | `remove <name>` | Remove an agent |
 | `rename <newName>` | Rename the team |
 
-## `polpo workflow`
+## `polpo template`
 
-Manage and execute reusable [workflow templates](/features/workflows).
+Manage and execute reusable [plan templates](/features/templates).
 
 ```bash
-polpo workflow <subcommand> [options]
+polpo template <subcommand> [options]
 ```
 
 | Subcommand | Description |
 |------------|-------------|
-| `list` | List all available workflows |
-| `show <name>` | Show workflow details, parameters, and plan template |
-| `run <name>` | Execute a workflow with parameters |
-| `validate <name>` | Validate a workflow definition |
+| `list` | List all available templates |
+| `show <name>` | Show template details, parameters, and plan body |
+| `run <name>` | Execute a template with parameters |
+| `validate <name>` | Validate a template definition |
 
-### `polpo workflow run`
+### `polpo template run`
 
 ```bash
-polpo workflow run <name> [options]
+polpo template run <name> [options]
 ```
 
 | Option | Default | Description |
@@ -187,13 +187,13 @@ polpo workflow run <name> [options]
 
 ```bash
 # Run a code review on the auth module
-polpo workflow run code-review --param module=src/auth --param focus=security
+polpo template run code-review --param module=src/auth --param focus=security
 
 # Preview what the plan would look like
-polpo workflow run code-review --param module=src/auth --dry-run
+polpo template run code-review --param module=src/auth --dry-run
 ```
 
-See [Writing Workflows](/features/writing-workflows) for how to create your own.
+See [Writing Templates](/features/writing-templates) for how to create your own.
 
 ## `polpo skills`
 

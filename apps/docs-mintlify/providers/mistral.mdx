@@ -38,11 +38,17 @@ Polpo auto-infers `mistral` from `mistral-`, `codestral-`, and `devstral-` prefi
 
 ## Models
 
-| Model | Best for | Context |
-|-------|----------|---------|
-| `mistral-large` | Flagship general-purpose model | 128K |
-| `codestral-latest` | Code generation and completion | 256K |
-| `devstral-small` | Lightweight code assistant | 128K |
+| Model | Best for | Context | Reasoning | Vision |
+|-------|----------|---------|-----------|--------|
+| `mistral-large-latest` | Flagship general-purpose (MoE, 675B total) | 256K | No | Yes |
+| `mistral-medium-latest` | Medium tier, good balance | 128K | No | Yes |
+| `mistral-small-latest` | Small, fast and cheap | 128K | No | Yes |
+| `codestral-latest` | Code generation and completion | 256K | No | No |
+| `magistral-medium-latest` | Reasoning model (chain-of-thought) | 128K | Yes | No |
+| `magistral-small-latest` | Smaller reasoning model | 128K | Yes | No |
+| `devstral-latest` | Developer-focused code assistant | 128K | No | No |
+
+**Also available:** `pixtral-large-latest` (vision), `pixtral-12b` (vision), `ministral-8b-latest`, `ministral-3b-latest`
 
 ## Features
 
@@ -50,8 +56,8 @@ Polpo auto-infers `mistral` from `mistral-`, `codestral-`, and `devstral-` prefi
 |---------|-----------|
 | Streaming | Yes |
 | Tool use | Yes |
-| Vision (images) | No |
-| Reasoning | No |
+| Vision (images) | Yes (Large, Medium, Small, Pixtral) |
+| Reasoning | Yes (Magistral) |
 
 ## Provider Details
 
@@ -65,5 +71,7 @@ Polpo auto-infers `mistral` from `mistral-`, `codestral-`, and `devstral-` prefi
 ## Notes
 
 - Codestral has a 256K token context window — one of the largest among code-specialized models.
-- Devstral Small is a good budget option for code tasks where you don't need the full power of Codestral.
+- Magistral models bring chain-of-thought reasoning to Mistral's lineup — good for complex logic tasks.
+- Mistral Large is a 675B-parameter MoE model (41B active) with vision support.
+- Devstral is a good budget option for code tasks where you don't need the full power of Codestral.
 - Mistral models tend to be fast and cost-effective compared to similarly-sized models from other providers.

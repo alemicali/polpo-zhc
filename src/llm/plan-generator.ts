@@ -65,7 +65,7 @@ const PlanTaskSchema = Type.Object({
 
 const PlanTeamSchema = Type.Object({
   name: Type.String({ description: "Agent name (kebab-case)" }),
-  model: Type.Optional(Type.String({ description: "Model spec: 'provider:model' or just 'model'. Default: opencode:big-pickle (free)" })),
+  model: Type.Optional(Type.String({ description: "Model spec: 'provider:model' or just 'model'. Uses agent's configured model when omitted." })),
   role: Type.Optional(Type.String({ description: "Agent role description" })),
   systemPrompt: Type.Optional(Type.String({ description: "System prompt appended to agent's base prompt" })),
   skills: Type.Optional(Type.Array(Type.String(), { description: "Skill names" })),

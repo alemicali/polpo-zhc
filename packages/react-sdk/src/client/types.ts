@@ -428,9 +428,9 @@ export interface QualityMetrics {
   updatedAt: string;
 }
 
-// === Workflows ===
+// === Templates ===
 
-export interface WorkflowParameter {
+export interface TemplateParameter {
   /** Parameter name — used as {{name}} in the plan template. */
   name: string;
   /** Human-readable description. */
@@ -445,25 +445,25 @@ export interface WorkflowParameter {
   enum?: (string | number)[];
 }
 
-/** Lightweight workflow metadata (no plan body). */
-export interface WorkflowInfo {
+/** Lightweight template metadata (no plan body). */
+export interface TemplateInfo {
   name: string;
   description: string;
-  parameters: WorkflowParameter[];
-  /** Absolute path to the workflow directory. */
+  parameters: TemplateParameter[];
+  /** Absolute path to the template directory. */
   path: string;
 }
 
-/** Full workflow definition including the plan template. */
-export interface WorkflowDefinition {
+/** Full template definition including the plan template. */
+export interface TemplateDefinition {
   name: string;
   description: string;
   plan: Record<string, unknown>;
-  parameters?: WorkflowParameter[];
+  parameters?: TemplateParameter[];
 }
 
-/** Result of running a workflow. */
-export interface WorkflowRunResult {
+/** Result of running a template. */
+export interface TemplateRunResult {
   plan: Plan;
   tasks: number;
   group: string;

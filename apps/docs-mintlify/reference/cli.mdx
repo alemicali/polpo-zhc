@@ -310,26 +310,26 @@ Validates `.polpo/polpo.json`. Exits with code 0 on valid, 1 on invalid.
 
 ---
 
-## polpo workflow
+## polpo template
 
-Manage reusable workflow templates.
+Manage reusable plan templates.
 
-### workflow list
+### template list
 
 ```bash
-polpo workflow list [-d <path>]
+polpo template list [-d <path>]
 ```
 
-### workflow show
+### template show
 
 ```bash
-polpo workflow show <name> [-d <path>]
+polpo template show <name> [-d <path>]
 ```
 
-### workflow run
+### template run
 
 ```bash
-polpo workflow run <name> [-d <path>] [-p key=value...] [--dry-run]
+polpo template run <name> [-d <path>] [-p key=value...] [--dry-run]
 ```
 
 | Flag | Description |
@@ -337,12 +337,12 @@ polpo workflow run <name> [-d <path>] [-p key=value...] [--dry-run]
 | `-p, --param` | Parameters as `key=value` pairs (repeatable) |
 | `--dry-run` | Show the instantiated plan without executing |
 
-### workflow validate
+### template validate
 
-Validate a workflow definition (checks fields, tasks, placeholders, unused params).
+Validate a template definition (checks fields, tasks, placeholders, unused params).
 
 ```bash
-polpo workflow validate <name> [-d <path>]
+polpo template validate <name> [-d <path>]
 ```
 
 ---

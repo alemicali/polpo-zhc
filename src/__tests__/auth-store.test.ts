@@ -484,14 +484,14 @@ describe("Session Overrides", () => {
 
   describe("resolveSessionModel", () => {
     it("returns default when no override", () => {
-      const result = resolveSessionModel("no-session", "opencode:big-pickle");
-      expect(result.spec).toBe("opencode:big-pickle");
+      const result = resolveSessionModel("no-session", "anthropic:claude-haiku-4-5-20251001");
+      expect(result.spec).toBe("anthropic:claude-haiku-4-5-20251001");
       expect(result.overridden).toBe(false);
     });
 
     it("returns override when set", () => {
       applySessionModelOverride("session-2", { provider: "anthropic", model: "claude-opus-4-6" });
-      const result = resolveSessionModel("session-2", "opencode:big-pickle");
+      const result = resolveSessionModel("session-2", "anthropic:claude-haiku-4-5-20251001");
       expect(result.spec).toBe("anthropic:claude-opus-4-6");
       expect(result.overridden).toBe(true);
     });
@@ -503,7 +503,7 @@ describe("Session Overrides", () => {
         "anthropic:user@test.com",
         "user",
       );
-      const result = resolveSessionModel("session-3", "opencode:big-pickle");
+      const result = resolveSessionModel("session-3", "anthropic:claude-haiku-4-5-20251001");
       expect(result.pinnedProfileId).toBe("anthropic:user@test.com");
       expect(result.pinnedSource).toBe("user");
     });

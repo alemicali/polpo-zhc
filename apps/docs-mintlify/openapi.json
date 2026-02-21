@@ -3,7 +3,7 @@
   "info": {
     "title": "Polpo API",
     "version": "1.0.0",
-    "description": "REST API for Polpo — an AI agent that manages teams of AI coding agents. Manage projects, tasks, plans, agents, workflows, skills, notifications, and approvals. For conversational interaction, use the OpenAI-compatible POST /v1/chat/completions endpoint."
+    "description": "REST API for Polpo — an AI agent that manages teams of AI coding agents. Manage projects, tasks, plans, agents, templates, skills, notifications, and approvals. For conversational interaction, use the OpenAI-compatible POST /v1/chat/completions endpoint."
   },
   "servers": [
     {
@@ -3290,15 +3290,15 @@
         }
       }
     },
-    "/api/v1/projects/{projectId}/workflows": {
+    "/api/v1/projects/{projectId}/templates": {
       "get": {
         "tags": [
-          "Workflows"
+          "Templates"
         ],
-        "summary": "List available workflows",
+        "summary": "List available templates",
         "responses": {
           "200": {
-            "description": "List of workflows",
+            "description": "List of templates",
             "content": {
               "application/json": {
                 "schema": {
@@ -3325,12 +3325,12 @@
         }
       }
     },
-    "/api/v1/projects/{projectId}/workflows/{name}": {
+    "/api/v1/projects/{projectId}/templates/{name}": {
       "get": {
         "tags": [
-          "Workflows"
+          "Templates"
         ],
-        "summary": "Get workflow details",
+        "summary": "Get template details",
         "parameters": [
           {
             "schema": {
@@ -3343,7 +3343,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Workflow details",
+            "description": "Template details",
             "content": {
               "application/json": {
                 "schema": {
@@ -3364,7 +3364,7 @@
             }
           },
           "404": {
-            "description": "Workflow not found",
+            "description": "Template not found",
             "content": {
               "application/json": {
                 "schema": {
@@ -3392,12 +3392,12 @@
         }
       }
     },
-    "/api/v1/projects/{projectId}/workflows/{name}/run": {
+    "/api/v1/projects/{projectId}/templates/{name}/run": {
       "post": {
         "tags": [
-          "Workflows"
+          "Templates"
         ],
-        "summary": "Execute workflow with parameters",
+        "summary": "Execute template with parameters",
         "parameters": [
           {
             "schema": {
@@ -3437,7 +3437,7 @@
         },
         "responses": {
           "201": {
-            "description": "Workflow executed",
+            "description": "Template executed",
             "content": {
               "application/json": {
                 "schema": {
@@ -3487,7 +3487,7 @@
             }
           },
           "404": {
-            "description": "Workflow not found",
+            "description": "Template not found",
             "content": {
               "application/json": {
                 "schema": {

@@ -9,7 +9,7 @@ import { cmdChat, cmdPlanMode, cmdTaskMode } from "./modes.js";
 import { cmdSessions } from "./sessions.js";
 import { cmdMemory } from "./memory.js";
 import { cmdLogs, cmdInspect } from "./logs.js";
-import { cmdWorkflow } from "./workflows.js";
+import { cmdTemplate } from "./templates.js";
 import { cmdSkills } from "./skills.js";
 import { cmdCheckpoints } from "./checkpoints.js";
 import { cmdApprovals } from "./approvals.js";
@@ -31,8 +31,10 @@ const COMMAND_MAP: Record<string, (api: CommandAPI) => Promise<void> | void> = {
   memory: cmdMemory,
   logs: cmdLogs,
   inspect: cmdInspect,
-  workflow: cmdWorkflow,
-  workflows: cmdWorkflow,
+  template: cmdTemplate,
+  templates: cmdTemplate,
+  workflow: cmdTemplate,
+  workflows: cmdTemplate,
   skills: cmdSkills,
   checkpoints: cmdCheckpoints,
   approvals: cmdApprovals,

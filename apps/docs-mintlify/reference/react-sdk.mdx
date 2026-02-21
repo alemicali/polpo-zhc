@@ -371,22 +371,22 @@ const { approvals, pending, approve, reject, loading, refetch } = useApprovals()
 
 ---
 
-## useWorkflows
+## useTemplates
 
-Workflow discovery and execution.
+Template discovery and execution.
 
 ```tsx
-const { workflows, loading, getWorkflow, runWorkflow, refetch } = useWorkflows();
+const { templates, loading, getTemplate, runTemplate, refetch } = useTemplates();
 ```
 
 ### Returns
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `workflows` | `WorkflowInfo[]` | Available workflows |
+| `templates` | `TemplateInfo[]` | Available templates |
 | `loading` | `boolean` | Initial load in progress |
-| `getWorkflow` | `(name) => Promise<WorkflowDefinition>` | Fetch full workflow definition |
-| `runWorkflow` | `(name, params?) => Promise<WorkflowRunResult>` | Execute a workflow |
+| `getTemplate` | `(name) => Promise<TemplateDefinition>` | Fetch full template definition |
+| `runTemplate` | `(name, params?) => Promise<TemplateRunResult>` | Execute a template |
 | `refetch` | `() => void` | Force refetch |
 
 ---

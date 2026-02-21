@@ -51,6 +51,6 @@ export { parseCron, matchesCron, nextCronOccurrence, isCronExpression } from "..
 // Task Watchers
 export { TaskWatcherManager } from "./task-watcher.js";
 
-// Workflows
-export { discoverWorkflows, loadWorkflow, validateParams, instantiateWorkflow } from "./workflow.js";
-export type { WorkflowParameter, WorkflowDefinition, WorkflowInfo, ValidationResult } from "./workflow.js";
+// Templates
+export { discoverTemplates, loadTemplate, validateParams, instantiateTemplate } from "./template.js";
+export type { TemplateParameter, TemplateDefinition, TemplateInfo, ValidationResult } from "./template.js";

@@ -199,9 +199,9 @@ See [Notifications](/features/notifications) for channel configuration.
 | `checkpoint:reached` | A checkpoint is triggered (all `afterTasks` done) | `planId`, `group`, `checkpointName`, `message`, `afterTasks`, `blocksTasks`, `reachedAt` |
 | `checkpoint:resumed` | A checkpoint is manually resumed | `planId`, `group`, `checkpointName` |
 
-## Checkpoints in Workflows
+## Checkpoints in Templates
 
-Checkpoints work in [Workflows](/features/workflows) — use `{{placeholders}}` in task titles referenced by `afterTasks` and `blocksTasks`:
+Checkpoints work in [Templates](/features/templates) — use `{{placeholders}}` in task titles referenced by `afterTasks` and `blocksTasks`:
 
 ```json
 {

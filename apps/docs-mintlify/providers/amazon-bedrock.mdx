@@ -33,7 +33,7 @@ export AWS_REGION=us-east-1
 ```json
 {
   "agents": [
-    { "name": "coder", "model": "amazon-bedrock:us.anthropic.claude-sonnet-4-5-20250929-v2:0" }
+    { "name": "coder", "model": "amazon-bedrock:us.anthropic.claude-sonnet-4-6-v2:0" }
   ]
 }
 ```
@@ -44,13 +44,13 @@ Bedrock model IDs use a different format with a region prefix:
 
 | Model | ID on Bedrock |
 |-------|--------------|
-| Claude Sonnet | `us.anthropic.claude-sonnet-4-5-20250929-v2:0` |
+| Claude Sonnet | `us.anthropic.claude-sonnet-4-6-v2:0` |
 | Claude Haiku | `us.anthropic.claude-haiku-4-5-20251001-v1:0` |
 | Llama 3.1 70B | `us.meta.llama3-1-70b-instruct-v1:0` |
 | Mistral Large | `mistral.mistral-large-2407-v1:0` |
 
 <Note>
-The `us.` and `eu.` prefixes in model IDs auto-infer to the `amazon-bedrock` provider. You can write `us.anthropic.claude-sonnet-4-5-20250929-v2:0` without the provider prefix.
+The `us.` and `eu.` prefixes in model IDs auto-infer to the `amazon-bedrock` provider. You can write `us.anthropic.claude-sonnet-4-6-v2:0` without the provider prefix.
 </Note>
 
 ## Features

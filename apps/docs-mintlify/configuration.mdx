@@ -17,7 +17,7 @@ Polpo is configured through a JSON file at `.polpo/polpo.json` in your project d
       {
         "name": "agent-name",
         "role": "Role description",
-        "model": "opencode:big-pickle"
+        "model": "anthropic:claude-sonnet-4-6"
       }
     ]
   },
@@ -47,12 +47,12 @@ Each agent entry defines a worker that can be assigned tasks. You specify a `nam
     "agents": [
       {
         "name": "developer",
-        "model": "opencode:big-pickle",
+        "model": "anthropic:claude-sonnet-4-6",
         "role": "Full-stack developer"
       },
       {
         "name": "architect",
-        "model": "anthropic:claude-sonnet-4-5-20250929",
+        "model": "anthropic:claude-sonnet-4-6",
         "role": "Senior software architect who designs system components"
       }
     ]
@@ -123,7 +123,7 @@ The `settings` object controls Polpo's behavior — retry limits, tick interval,
     "staleThreshold": 300000,
     "logLevel": "normal",
     "workDir": ".",
-    "orchestratorModel": "claude-sonnet-4-5-20250929"
+    "orchestratorModel": "claude-sonnet-4-6"
   }
 }
 ```
@@ -149,8 +149,8 @@ ANTHROPIC_API_KEY=sk-ant-...
 OPENAI_API_KEY=sk-...
 
 # Optional: customize orchestrator LLM
-POLPO_MODEL=anthropic:claude-sonnet-4-5-20250929
-POLPO_JUDGE_MODEL=anthropic:claude-sonnet-4-5-20250929
+POLPO_MODEL=anthropic:claude-sonnet-4-6
+POLPO_JUDGE_MODEL=anthropic:claude-sonnet-4-6
 
 # Optional: server authentication
 API_KEY=your-secret-key

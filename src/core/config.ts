@@ -175,15 +175,23 @@ export async function parseConfig(workDir: string): Promise<PolpoConfig> {
 
 // --- Default config generator ---
 
-export function generatePolpoConfigDefault(projectName: string): PolpoFileConfig {
+export function generatePolpoConfigDefault(
+  projectName: string,
+  options?: { model?: string; teamName?: string; agentName?: string; agentRole?: string },
+): PolpoFileConfig {
+  const agent: Record<string, unknown> = {
+    name: options?.agentName ?? "dev-1",
+    role: options?.agentRole ?? "developer",
+  };
+  if (options?.model) {
+    agent.model = options.model;
+  }
   return {
     project: projectName,
     team: {
-      name: "default",
-      description: "Default Polpo team",
-      agents: [
-        { name: "dev-1", role: "developer" },
-      ],
+      name: options?.teamName ?? "default",
+      description: `${options?.teamName ?? "Default"} Polpo team`,
+      agents: [agent as any],
     },
     settings: { ...DEFAULT_SETTINGS },
   };

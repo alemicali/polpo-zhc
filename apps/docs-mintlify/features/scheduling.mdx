@@ -179,13 +179,13 @@ Shorthand aliases like `@daily`, `@weekly`, `@monthly` are not supported — use
 }
 ```
 
-## Combining with Workflows
+## Combining with Templates
 
-Scheduled plans work with [Workflows](/features/workflows). Create a workflow, instantiate it with parameters, and the resulting plan can have a schedule:
+Scheduled plans work with [Templates](/features/templates). Create a template, instantiate it with parameters, and the resulting plan can have a schedule:
 
 ```bash
-# Create a plan from the security-audit workflow
-polpo workflow run security-audit --param module=src/auth --dry-run > plan.json
+# Create a plan from the security-audit template
+polpo template run security-audit --param module=src/auth --dry-run > plan.json
 
 # Edit plan.json to add schedule
 # "schedule": "0 6 * * 1", "recurring": true

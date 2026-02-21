@@ -15,7 +15,7 @@ export const COMMANDS = [
   { command: "/memory", description: "View/edit project memory" },
   { command: "/logs", description: "View event logs" },
   { command: "/inspect", description: "Inspect current session" },
-  { command: "/workflow", description: "Discover and run workflows" },
+  { command: "/template", description: "Discover and run plan templates" },
   { command: "/skills", description: "Manage agent skills" },
   { command: "/checkpoints", description: "List/resume plan checkpoints" },
   { command: "/approvals", description: "Manage approval gates" },

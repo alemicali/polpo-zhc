@@ -48,14 +48,17 @@ You can also write `claude-sonnet-4-5-20250929` without the prefix — Polpo aut
 
 ## Models
 
-| Model | Best for | Context | Reasoning |
-|-------|----------|---------|-----------|
-| `claude-opus-4-6` | Complex multi-step tasks, architecture, hard problems | 200K | Yes |
-| `claude-sonnet-4-5-20250929` | Best balance of quality and speed — recommended default | 200K | Yes |
-| `claude-haiku-4-5-20251001` | Fast and cheap — boilerplate, formatting, simple refactoring | 200K | No |
+| Model | Best for | Context | Reasoning | Vision |
+|-------|----------|---------|-----------|--------|
+| `claude-opus-4-6` | Most capable — complex architecture, hard problems | 200K | Yes | Yes |
+| `claude-sonnet-4-6` | Latest balanced model — fast, strong coding | 200K | Yes | Yes |
+| `claude-sonnet-4-5-20250929` | Previous gen balanced — still excellent | 200K | Yes | Yes |
+| `claude-haiku-4-5-20251001` | Fast and cheap — boilerplate, formatting, simple refactoring | 200K | Yes | Yes |
+
+**Also available:** `claude-opus-4-5`, `claude-opus-4-1`, `claude-sonnet-4-0`, `claude-3-7-sonnet-20250219`, `claude-3-5-sonnet-20241022`, `claude-3-5-haiku-20241022`
 
 <Tip>
-**Recommended default.** Claude Sonnet is the best starting point for most Polpo workloads. Use Opus for complex architecture tasks and Haiku for high-volume simple tasks.
+**Recommended default.** Claude Sonnet 4.6 is the best starting point for most Polpo workloads. Use Opus for complex architecture tasks and Haiku for high-volume simple tasks.
 </Tip>
 
 ## Features
@@ -65,7 +68,7 @@ You can also write `claude-sonnet-4-5-20250929` without the prefix — Polpo aut
 | Streaming | Yes |
 | Tool use | Yes |
 | Vision (images) | Yes |
-| Extended thinking (reasoning) | Yes (Opus, Sonnet) |
+| Extended thinking (reasoning) | Yes (all current models) |
 | Prompt caching | Yes |
 
 ## Prompt Caching
@@ -79,6 +82,7 @@ Cost savings from caching can be significant for agent workloads where the syste
 | Model | Input (per 1M tokens) | Output (per 1M tokens) |
 |-------|----------------------|----------------------|
 | `claude-opus-4-6` | $15.00 | $75.00 |
+| `claude-sonnet-4-6` | $3.00 | $15.00 |
 | `claude-sonnet-4-5-20250929` | $3.00 | $15.00 |
 | `claude-haiku-4-5-20251001` | $0.80 | $4.00 |
 

@@ -14,7 +14,7 @@ import { cmdChat, cmdPlanMode, cmdTaskMode } from "./chat.js";
 import { cmdSessions } from "./sessions.js";
 import { cmdMemory } from "./memory.js";
 import { cmdLogs, cmdInspect } from "./logs.js";
-import { cmdWorkflows } from "./workflows.js";
+import { cmdTemplates } from "./templates.js";
 import { cmdSkills } from "./skills.js";
 
 type Handler = (api: CommandAPI) => void | Promise<void>;
@@ -31,8 +31,10 @@ const commands: Record<string, Handler> = {
   "/task": cmdTaskMode,
   "/sessions": cmdSessions,
   "/memory": cmdMemory,
-  "/workflow": cmdWorkflows,
-  "/workflows": cmdWorkflows,
+  "/template": cmdTemplates,
+  "/templates": cmdTemplates,
+  "/workflow": cmdTemplates,
+  "/workflows": cmdTemplates,
   "/skills": cmdSkills,
   "/logs": cmdLogs,
   "/inspect": cmdInspect,

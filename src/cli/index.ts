@@ -5,7 +5,7 @@ import { mkdir, access, readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { Command } from "commander";
 import chalk from "chalk";
-import { generatePolpoConfigDefault, savePolpoConfig } from "../core/config.js";
+// generatePolpoConfigDefault + savePolpoConfig used via dynamic import in setup.ts
 import { Orchestrator } from "../core/orchestrator.js";
 import type { PolpoState, Task, TaskStatus } from "../core/types.js";
 
@@ -16,10 +16,11 @@ import { registerMemoryCommands } from "./commands/memory.js";
 import { registerLogsCommands } from "./commands/logs.js";
 import { registerConfigCommands } from "./commands/config.js";
 import { registerChatCommands } from "./commands/chat.js";
-import { registerWorkflowCommands } from "./commands/workflow.js";
+import { registerTemplateCommands } from "./commands/template.js";
 import { registerSkillsCommands } from "./commands/skills.js";
 import { registerAuthCommands } from "./commands/auth.js";
 import { registerModelsCommands } from "./commands/models.js";
+import { registerSetupCommand } from "./commands/setup.js";
 
 /** Wire orchestrator events to console output with chalk formatting. */
 function wireConsoleEvents(orchestrator: Orchestrator): void {
@@ -146,20 +147,19 @@ program
     await mkdir(resolve(polpoDir, "logs"), { recursive: true });
     await mkdir(resolve(polpoDir, "assessments"), { recursive: true });
 
-    // Create .polpo/polpo.json (persistent project config)
+    // Create .polpo/polpo.json via setup wizard (or non-interactive fallback)
     const polpoJsonPath = resolve(polpoDir, "polpo.json");
     try {
       await access(polpoJsonPath);
-      console.log(chalk.yellow("  .polpo/polpo.json already exists, skipping."));
+      console.log(chalk.yellow("  .polpo/polpo.json already exists."));
+      console.log(chalk.dim("  Run 'polpo setup' to reconfigure.\n"));
     } catch {
-      const projectName = cwd.split("/").pop() || "my-project";
-      savePolpoConfig(polpoDir, generatePolpoConfigDefault(projectName));
-      console.log(chalk.green("  Created .polpo/polpo.json"));
+      const { runSetupWizard } = await import("./commands/setup.js");
+      await runSetupWizard({ polpoDir });
     }
 
     console.log(chalk.green("\n  Polpo initialized!"));
-    console.log(chalk.dim("  Edit .polpo/polpo.json for team & settings."));
-    console.log(chalk.dim("  Then run: polpo tui\n"));
+    console.log(chalk.dim("  Run: polpo tui\n"));
   });
 
 // polpo run
@@ -483,9 +483,10 @@ registerMemoryCommands(program);
 registerLogsCommands(program);
 registerConfigCommands(program);
 registerChatCommands(program);
-registerWorkflowCommands(program);
+registerTemplateCommands(program);
 registerSkillsCommands(program);
 registerAuthCommands(program);
 registerModelsCommands(program);
+registerSetupCommand(program);
 
 program.parse();

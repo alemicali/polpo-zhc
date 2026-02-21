@@ -33,9 +33,9 @@ import type {
   SendNotificationResult,
   ApprovalRequest,
   ApprovalStatus,
-  WorkflowInfo,
-  WorkflowDefinition,
-  WorkflowRunResult,
+  TemplateInfo,
+  TemplateDefinition,
+  TemplateRunResult,
 } from "./types.js";
 
 export interface PolpoClientConfig {
@@ -395,21 +395,21 @@ export class PolpoClient {
     return this.post<ApprovalRequest>(`/approvals/${requestId}/reject`, { feedback, resolvedBy });
   }
 
-  // ── Workflows ────────────────────────────────────────────
+  // ── Templates ────────────────────────────────────────────
 
-  /** List available workflows discovered from disk. */
-  getWorkflows(): Promise<WorkflowInfo[]> {
-    return this.get<WorkflowInfo[]>("/workflows");
+  /** List available templates discovered from disk. */
+  getTemplates(): Promise<TemplateInfo[]> {
+    return this.get<TemplateInfo[]>("/templates");
   }
 
-  /** Get full workflow definition including the plan template. */
-  getWorkflow(name: string): Promise<WorkflowDefinition> {
-    return this.get<WorkflowDefinition>(`/workflows/${encodeURIComponent(name)}`);
+  /** Get full template definition including the plan template. */
+  getTemplate(name: string): Promise<TemplateDefinition> {
+    return this.get<TemplateDefinition>(`/templates/${encodeURIComponent(name)}`);
   }
 
-  /** Run a workflow with parameters. Returns the created plan + task count. */
-  runWorkflow(name: string, params?: Record<string, string | number | boolean>): Promise<WorkflowRunResult> {
-    return this.post<WorkflowRunResult>(`/workflows/${encodeURIComponent(name)}/run`, { params });
+  /** Run a template with parameters. Returns the created plan + task count. */
+  runTemplate(name: string, params?: Record<string, string | number | boolean>): Promise<TemplateRunResult> {
+    return this.post<TemplateRunResult>(`/templates/${encodeURIComponent(name)}/run`, { params });
   }
 
   // ── Static ───────────────────────────────────────────────

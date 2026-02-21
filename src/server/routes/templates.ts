@@ -1,81 +1,81 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import type { ServerEnv } from "../app.js";
 import {
-  discoverWorkflows,
-  loadWorkflow,
+  discoverTemplates,
+  loadTemplate,
   validateParams,
-  instantiateWorkflow,
-} from "../../core/workflow.js";
+  instantiateTemplate,
+} from "../../core/template.js";
 
 /**
- * Workflow routes — discover, inspect, and execute reusable workflow templates.
+ * Template routes — discover, inspect, and execute reusable plan templates.
  */
-export function workflowRoutes(): OpenAPIHono<ServerEnv> {
+export function templateRoutes(): OpenAPIHono<ServerEnv> {
   const app = new OpenAPIHono<ServerEnv>();
 
-  // GET /workflows — list available workflows
-  const listWorkflowsRoute = createRoute({
+  // GET /templates — list available templates
+  const listTemplatesRoute = createRoute({
     method: "get",
     path: "/",
-    tags: ["Workflows"],
-    summary: "List available workflows",
+    tags: ["Templates"],
+    summary: "List available templates",
     responses: {
       200: {
         content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.array(z.any()) }) } },
-        description: "List of workflows",
+        description: "List of templates",
       },
     },
   });
 
-  app.openapi(listWorkflowsRoute, (c) => {
+  app.openapi(listTemplatesRoute, (c) => {
     const orchestrator = c.get("orchestrator");
     const cwd = orchestrator.getWorkDir();
     const polpoDir = orchestrator.getPolpoDir?.();
-    const workflows = discoverWorkflows(cwd, polpoDir);
-    return c.json({ ok: true, data: workflows });
+    const templates = discoverTemplates(cwd, polpoDir);
+    return c.json({ ok: true, data: templates });
   });
 
-  // GET /workflows/:name — get workflow details
-  const getWorkflowRoute = createRoute({
+  // GET /templates/:name — get template details
+  const getTemplateRoute = createRoute({
     method: "get",
     path: "/{name}",
-    tags: ["Workflows"],
-    summary: "Get workflow details",
+    tags: ["Templates"],
+    summary: "Get template details",
     request: {
       params: z.object({ name: z.string() }),
     },
     responses: {
       200: {
         content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.any() }) } },
-        description: "Workflow details",
+        description: "Template details",
       },
       404: {
         content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string(), code: z.string() }) } },
-        description: "Workflow not found",
+        description: "Template not found",
       },
     },
   });
 
-  app.openapi(getWorkflowRoute, (c) => {
+  app.openapi(getTemplateRoute, (c) => {
     const orchestrator = c.get("orchestrator");
     const cwd = orchestrator.getWorkDir();
     const polpoDir = orchestrator.getPolpoDir?.();
     const { name } = c.req.valid("param");
-    const workflow = loadWorkflow(cwd, polpoDir, name);
+    const template = loadTemplate(cwd, polpoDir, name);
 
-    if (!workflow) {
-      return c.json({ ok: false, error: "Workflow not found", code: "NOT_FOUND" }, 404);
+    if (!template) {
+      return c.json({ ok: false, error: "Template not found", code: "NOT_FOUND" }, 404);
     }
 
-    return c.json({ ok: true, data: workflow }, 200);
+    return c.json({ ok: true, data: template }, 200);
   });
 
-  // POST /workflows/:name/run — execute workflow with parameters
-  const runWorkflowRoute = createRoute({
+  // POST /templates/:name/run — execute template with parameters
+  const runTemplateRoute = createRoute({
     method: "post",
     path: "/{name}/run",
-    tags: ["Workflows"],
-    summary: "Execute workflow with parameters",
+    tags: ["Templates"],
+    summary: "Execute template with parameters",
     request: {
       params: z.object({ name: z.string() }),
       body: {
@@ -91,7 +91,7 @@ export function workflowRoutes(): OpenAPIHono<ServerEnv> {
     responses: {
       201: {
         content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.any() }) } },
-        description: "Workflow executed",
+        description: "Template executed",
       },
       400: {
         content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string(), code: z.string(), details: z.any() }) } },
@@ -99,27 +99,27 @@ export function workflowRoutes(): OpenAPIHono<ServerEnv> {
       },
       404: {
         content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string(), code: z.string() }) } },
-        description: "Workflow not found",
+        description: "Template not found",
       },
     },
   });
 
-  app.openapi(runWorkflowRoute, (c) => {
+  app.openapi(runTemplateRoute, (c) => {
     const orchestrator = c.get("orchestrator");
     const cwd = orchestrator.getWorkDir();
     const polpoDir = orchestrator.getPolpoDir?.();
     const { name } = c.req.valid("param");
 
-    const workflow = loadWorkflow(cwd, polpoDir, name);
-    if (!workflow) {
-      return c.json({ ok: false, error: "Workflow not found", code: "NOT_FOUND" }, 404);
+    const template = loadTemplate(cwd, polpoDir, name);
+    if (!template) {
+      return c.json({ ok: false, error: "Template not found", code: "NOT_FOUND" }, 404);
     }
 
     const body = c.req.valid("json");
     const params = (body.params ?? {}) as Record<string, string | number | boolean>;
 
     // Validate parameters
-    const validation = validateParams(workflow, params);
+    const validation = validateParams(template, params);
     if (!validation.valid) {
       return c.json({
         ok: false,
@@ -130,7 +130,7 @@ export function workflowRoutes(): OpenAPIHono<ServerEnv> {
     }
 
     // Instantiate
-    const instance = instantiateWorkflow(workflow, validation.resolved);
+    const instance = instantiateTemplate(template, validation.resolved);
 
     // Save as plan and execute
     const plan = orchestrator.savePlan({

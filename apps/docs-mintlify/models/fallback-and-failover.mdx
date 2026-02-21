@@ -14,11 +14,11 @@ Instead of specifying a single model string, you can use a `ModelConfig` object 
 {
   "settings": {
     "orchestratorModel": {
-      "primary": "anthropic:claude-sonnet-4-5-20250929",
+      "primary": "anthropic:claude-sonnet-4-6",
       "fallbacks": [
         "openai:gpt-4o",
         "google:gemini-2.5-pro",
-        "opencode:big-pickle"
+        "groq:llama-3.3-70b-versatile"
       ]
     }
   }
@@ -107,7 +107,7 @@ Polpo classifies every provider error to determine the correct response:
 import { classifyProviderError } from "polpo/llm";
 
 try {
-  await queryText("hello", "anthropic:claude-sonnet-4-5-20250929");
+  await queryText("hello", "anthropic:claude-sonnet-4-6");
 } catch (err) {
   const classified = classifyProviderError(err);
   // → { shouldCooldown: true, shouldFailover: true, reason: "rate_limit" }
@@ -133,7 +133,7 @@ The `queryTextWithFallback` function combines fallback chains with cooldown mana
 import { queryTextWithFallback } from "polpo/llm";
 
 const result = await queryTextWithFallback("Explain this code...", {
-  primary: "anthropic:claude-sonnet-4-5-20250929",
+  primary: "anthropic:claude-sonnet-4-6",
   fallbacks: ["openai:gpt-4o", "google:gemini-2.5-pro"]
 });
 

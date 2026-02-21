@@ -212,14 +212,14 @@ Missing API keys emit warnings but don't block startup. The error will surface w
     }
   },
   "agents": [
-    { "name": "coder", "model": "anthropic:claude-sonnet-4-5-20250929" },
+    { "name": "coder", "model": "anthropic:claude-sonnet-4-6" },
     { "name": "reviewer", "model": "openai:o3" },
-    { "name": "fast-worker", "model": "groq:llama-3.3-70b" },
+    { "name": "fast-worker", "model": "groq:llama-3.3-70b-versatile" },
     { "name": "local", "model": "ollama:qwen2.5-coder:32b" }
   ],
   "settings": {
     "orchestratorModel": {
-      "primary": "anthropic:claude-sonnet-4-5-20250929",
+      "primary": "anthropic:claude-sonnet-4-6",
       "fallbacks": ["openai:gpt-4o", "google:gemini-2.5-pro"]
     }
   }

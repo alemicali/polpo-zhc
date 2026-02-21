@@ -1,0 +1,142 @@
+---
+title: "Setup"
+description: "The interactive setup wizard — model, provider, and team configuration."
+---
+
+`polpo init` runs the setup wizard automatically the first time. You can re-run it anytime with `polpo setup` to change your configuration.
+
+## What the wizard does
+
+The wizard walks you through 4 steps:
+
+<Steps>
+
+1. **Project name**
+
+   Defaults to the current directory name. This identifies the project in logs, the Web UI, and the REST API.
+
+   ```
+   Polpo Setup
+
+   Project name [my-project]: _
+   ```
+
+2. **Detect providers**
+
+   Polpo scans your environment for API keys (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, etc.) and any stored OAuth profiles from `polpo auth login`.
+
+   ```
+   Detecting providers...
+     ✓ anthropic (env: ANTHROPIC_API_KEY)
+     ✓ google (OAuth profile)
+   ```
+
+   If no providers are detected, the wizard offers to enter an API key on the spot or skip and configure later.
+
+3. **Select a model**
+
+   Based on detected providers, the wizard shows recommended models:
+
+   ```
+   Select a model for your agents:
+
+     1. anthropic:claude-sonnet-4-6 — Claude Sonnet 4.6 (latest, balanced)
+     2. anthropic:claude-sonnet-4-5-20250929 — Claude Sonnet 4.5 (balanced)
+     3. anthropic:claude-haiku-4-5-20251001 — Claude Haiku 4.5 (fast)
+     4. google:gemini-2.5-flash — Gemini 2.5 Flash (fast)
+     5. google:gemini-2.5-pro — Gemini 2.5 Pro (balanced)
+     6. Enter custom model
+
+   Select (1-6): _
+   ```
+
+   Choose a recommended model or enter any `provider:model` string. See [Providers & Models](/models/overview) for the full list of 22+ supported providers.
+
+4. **Team configuration**
+
+   Name your team and your first agent:
+
+   ```
+   Team name [default]: _
+   Agent name [dev-1]: _
+   Agent role [developer]: _
+   ```
+
+   This creates a single-agent team. You can [add more agents](/guides/build-your-team) later.
+
+</Steps>
+
+The wizard writes `.polpo/polpo.json` and prints a summary:
+
+```
+Setup complete!
+
+  Project: my-project
+  Model:   anthropic:claude-sonnet-4-6
+  Team:    default
+  Agent:   dev-1 (developer)
+
+  Config saved to .polpo/polpo.json
+```
+
+## Re-running setup
+
+Run `polpo setup` at any time to reconfigure. Existing values are shown as defaults — press Enter to keep them.
+
+## Non-interactive mode (CI/CD)
+
+When stdin is not a TTY (e.g., in CI pipelines), the wizard skips prompts and uses:
+
+- `POLPO_MODEL` env var for the model
+- Directory name for the project name
+- Default team (`dev-1` / `developer`)
+
+```bash
+# CI example
+export POLPO_MODEL=anthropic:claude-sonnet-4-6
+polpo init  # writes config non-interactively
+polpo run   # execute plans
+```
+
+If `POLPO_MODEL` is not set, the config is written without a model and agents will fail with a clear error message asking you to configure one.
+
+## OAuth alternative
+
+Instead of API keys, you can use your existing subscriptions (Claude Pro/Max, ChatGPT Plus/Pro, GitHub Copilot, Google account):
+
+```bash
+polpo auth login anthropic       # Claude Pro/Max
+polpo auth login openai-codex    # ChatGPT Plus/Pro
+polpo auth login github-copilot  # GitHub Copilot
+polpo auth login google-gemini-cli  # Google account
+```
+
+OAuth profiles are detected automatically by the setup wizard. See [Authentication](/models/authentication) for details.
+
+## Config file reference
+
+The wizard generates a standard `.polpo/polpo.json`:
+
+```json
+{
+  "project": "my-project",
+  "team": {
+    "name": "default",
+    "description": "Default Polpo team",
+    "agents": [
+      {
+        "name": "dev-1",
+        "role": "developer",
+        "model": "anthropic:claude-sonnet-4-6"
+      }
+    ]
+  },
+  "settings": {
+    "maxRetries": 3,
+    "workDir": ".",
+    "logLevel": "normal"
+  }
+}
+```
+
+For the full list of configuration options, see [Configuration](/configuration) and [Configuration Reference](/reference/config).

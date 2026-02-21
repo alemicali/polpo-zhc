@@ -900,32 +900,32 @@ describe("Notifications API", () => {
   });
 });
 
-// ── Workflows API ────────────────────────────────────────────────────
+// ── Templates API ────────────────────────────────────────────────────
 
-describe("Workflows API", () => {
-  test("GET /workflows returns 200 with array", async () => {
-    const res = await app.request(api("/workflows"));
+describe("Templates API", () => {
+  test("GET /templates returns 200 with array", async () => {
+    const res = await app.request(api("/templates"));
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.ok).toBe(true);
     expect(Array.isArray(body.data)).toBe(true);
   });
 
-  test("GET /workflows/:name returns 404 for nonexistent workflow", async () => {
-    const res = await app.request(api("/workflows/nonexistent-wf"));
+  test("GET /templates/:name returns 404 for nonexistent template", async () => {
+    const res = await app.request(api("/templates/nonexistent-wf"));
     expect(res.status).toBe(404);
     const body = await res.json();
     expect(body.ok).toBe(false);
     expect(body.code).toBe("NOT_FOUND");
   });
 
-  test("GET /workflows/:name returns 200 for existing workflow", async () => {
-    // Create a workflow in the temp dir
-    const wfDir = join(tmpDir, ".polpo", "workflows", "test-wf");
+  test("GET /templates/:name returns 200 for existing template", async () => {
+    // Create a template in the temp dir
+    const wfDir = join(tmpDir, ".polpo", "templates", "test-wf");
     await mkdir(wfDir, { recursive: true });
-    await writeFile(join(wfDir, "workflow.json"), JSON.stringify({
+    await writeFile(join(wfDir, "template.json"), JSON.stringify({
       name: "test-wf",
-      description: "A test workflow",
+      description: "A test template",
       plan: {
         tasks: [
           { title: "{{taskName}}", description: "Do the thing", assignTo: "agent-1" },
@@ -936,18 +936,18 @@ describe("Workflows API", () => {
       ],
     }));
 
-    const res = await app.request(api("/workflows/test-wf"));
+    const res = await app.request(api("/templates/test-wf"));
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.ok).toBe(true);
     expect(body.data.name).toBe("test-wf");
-    expect(body.data.description).toBe("A test workflow");
+    expect(body.data.description).toBe("A test template");
     expect(Array.isArray(body.data.parameters)).toBe(true);
   });
 
-  test("POST /workflows/:name/run returns 404 for nonexistent workflow", async () => {
+  test("POST /templates/:name/run returns 404 for nonexistent template", async () => {
     const res = await app.request(
-      api("/workflows/nonexistent-wf/run"),
+      api("/templates/nonexistent-wf/run"),
       jsonReq("POST", { params: {} }),
     );
     expect(res.status).toBe(404);
@@ -956,9 +956,9 @@ describe("Workflows API", () => {
     expect(body.code).toBe("NOT_FOUND");
   });
 
-  test("POST /workflows/:name/run returns 400 when required params missing", async () => {
+  test("POST /templates/:name/run returns 400 when required params missing", async () => {
     const res = await app.request(
-      api("/workflows/test-wf/run"),
+      api("/templates/test-wf/run"),
       jsonReq("POST", { params: {} }),
     );
     expect(res.status).toBe(400);
@@ -967,9 +967,9 @@ describe("Workflows API", () => {
     expect(body.code).toBe("VALIDATION_ERROR");
   });
 
-  test("POST /workflows/:name/run executes workflow with valid params (201)", async () => {
+  test("POST /templates/:name/run executes template with valid params (201)", async () => {
     const res = await app.request(
-      api("/workflows/test-wf/run"),
+      api("/templates/test-wf/run"),
       jsonReq("POST", { params: { taskName: "Build feature X" } }),
     );
     expect(res.status).toBe(201);

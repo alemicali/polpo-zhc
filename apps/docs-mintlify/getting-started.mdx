@@ -3,9 +3,12 @@ title: "Quickstart"
 description: "From zero to running agents in under 2 minutes."
 ---
 
-## Path 1: Chat with an agent (30 seconds)
+Three commands: install, init, launch. You'll have an AI agent running in your project in under 2 minutes.
 
-The fastest way to start. One agent, zero config, free model.
+{/* TODO: replace with actual screenshot/gif of the TUI in action */}
+<Frame>
+  <img src="/polpo-banner.png" alt="Polpo TUI" />
+</Frame>
 
 <Steps>
 
@@ -37,7 +40,12 @@ The fastest way to start. One agent, zero config, free model.
    polpo init
    ```
 
-   This creates `.polpo/polpo.json` with a default agent (`dev-1`) and the free `opencode:big-pickle` model. No API key needed.
+   The [setup wizard](/guides/setup) walks you through 4 steps:
+   - **Detect providers** — scans your env for API keys and OAuth profiles
+   - **Pick a model** — shows recommended models from your detected providers
+   - **Name your team** — creates your first agent with a role
+
+   You need at least one API key (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, etc.) or an OAuth login (`polpo auth login`). See [Providers & Models](/models/overview) for 22+ supported providers.
 
 3. **Launch**
 
@@ -49,135 +57,37 @@ The fastest way to start. One agent, zero config, free model.
 
 </Steps>
 
-That's it. One agent, one command. If this is all you need, you're done.
+That's it. One agent, one command, you're live.
 
----
+## Scale up
 
-## Path 2: Orchestrate a team (5 minutes)
+When you're ready for more, Polpo orchestrates full teams of agents working in parallel with dependencies and automated quality checks:
 
-Multiple agents, task plans with dependencies, automated assessment. This is where Polpo shines.
+- **[Build Your Team](/guides/build-your-team)** — Add specialist agents, configure roles and models
+- **[Your First Plan](/guides/first-plan)** — Create multi-task plans with dependencies and automated assessment
+- **[Talk from Anywhere](/usage/telegram)** — Control Polpo from Telegram, Slack, or email
 
-<Steps>
+## What happens under the hood
 
-1. **Install and init**
-
-   ```bash
-   npm install -g openpolpo
-   mkdir my-api && cd my-api
-   polpo init
-   ```
-
-2. **Configure your team**
-
-   Edit `.polpo/polpo.json` to define your agents:
-
-   ```json
-   {
-     "project": "my-api",
-     "team": {
-       "name": "api-team",
-       "agents": [
-         {
-           "name": "backend-dev",
-           "role": "Backend developer specializing in Node.js, Express, and SQLite"
-         },
-         {
-           "name": "frontend-dev",
-           "role": "Frontend developer specializing in React and TypeScript"
-         }
-       ]
-     },
-     "settings": {
-       "maxRetries": 3,
-       "workDir": ".",
-       "logLevel": "normal"
-     }
-   }
-   ```
-
-   <Note>
-     The default model (`opencode:big-pickle`) is free and works without an API key. To use Claude, GPT-4, or Gemini instead, set `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `GEMINI_API_KEY` in your environment, then add `"model": "anthropic:claude-sonnet-4-5-20250929"` to any agent. See [Providers & Models](/models/overview) for 22+ supported providers.
-   </Note>
-
-3. **Create a plan**
-
-   Use AI to generate a plan from a prompt:
-
-   ```bash
-   polpo plan create "Build a REST API with SQLite database, Express routes for users and posts, and input validation"
-   ```
-
-   Polpo generates a plan with tasks, assigns them to your agents, and sets up dependencies automatically. You can review it with:
-
-   ```bash
-   polpo plan list
-   polpo plan show <plan-id>
-   ```
-
-   Or create plans interactively in the TUI with the `/plan` command.
-
-4. **Run**
-
-   ```bash
-   polpo run
-   ```
-
-   You'll see output like:
-
-   ```
-   [14:00:01] Polpo started — my-api
-   [14:00:01] Team agents: backend-dev, frontend-dev
-
-   [14:00:02] [task-1] Task added: Create database layer
-   [14:00:02] [task-2] Task added: Build REST endpoints
-   [14:00:02] [task-1] Spawning "backend-dev" for: Create database layer
-   [14:24:15] [task-1] PASSED (score: 4.2/5)
-   [14:24:15] [task-1] DONE — Create database layer
-   [14:24:17] [task-2] Spawning "backend-dev" for: Build REST endpoints
-   [14:25:30] [task-2] PASSED (score: 4.0/5)
-   [14:25:30] [task-2] DONE — Build REST endpoints
-
-       All 2 tasks completed! (1m29s)
-   ```
-
-5. **Monitor** (optional)
-
-   In a second terminal:
-
-   ```bash
-   polpo status -w
-   ```
-
-   Or start the HTTP server for the Web UI and REST API:
-
-   ```bash
-   polpo serve
-   # API at http://localhost:3000/api/v1/
-   ```
-
-</Steps>
-
-## What just happened?
-
-1. **Plan** — Polpo's AI generated a plan with tasks, dependencies, and agent assignments
-2. **Assign** — The orchestrator assigned each task to the right agent, respecting dependencies
-3. **Execute** — Detached runner processes spawned agents with coding tools (read, write, edit, bash, glob, grep, ls)
-4. **Assess** — Three LLM judges scored each result on correctness, completeness, code quality, and edge cases
+1. **Plan** — AI generates tasks with dependencies and agent assignments
+2. **Assign** — The orchestrator assigns each task to the right agent, respecting dependencies
+3. **Execute** — Detached runner processes spawn agents with coding tools (read, write, edit, bash, glob, grep, ls)
+4. **Assess** — Three LLM judges score each result on correctness, completeness, code quality, and edge cases
 5. **Done** — Tasks that pass move to `done`. Tasks that fail get feedback and retry automatically
 
 ## What's next
 
 <CardGroup cols={2}>
+  <Card title="Build Your Team" icon="users" href="/guides/build-your-team">
+    Add specialist agents, configure roles and constraints.
+  </Card>
   <Card title="Your First Plan" icon="map" href="/guides/first-plan">
-    Deep dive: write a plan from scratch, add dependencies and expectations.
-  </Card>
-  <Card title="Configuration" icon="gear" href="/configuration">
-    Teams, models, settings, providers.
-  </Card>
-  <Card title="Install & Deploy" icon="rocket" href="/install/index">
-    Docker, Hetzner, AWS, GCP, Railway, Fly.io.
+    Multi-task plans with dependencies and automated assessment.
   </Card>
   <Card title="Talk from Anywhere" icon="comments" href="/usage/telegram">
-    Telegram, Slack, email — talk to Polpo from any channel.
+    Telegram, Slack, email — talk to Polpo with the apps you already use.
+  </Card>
+  <Card title="Configuration" icon="gear" href="/configuration">
+    Fine-tune retries, quality thresholds, notifications, and provider settings.
   </Card>
 </CardGroup>

@@ -67,9 +67,9 @@ export { createEmailTools, ALL_EMAIL_TOOL_NAMES } from "./tools/email-tools.js";
 export { createAudioTools, ALL_AUDIO_TOOL_NAMES } from "./tools/audio-tools.js";
 export { createImageTools, ALL_IMAGE_TOOL_NAMES } from "./tools/image-tools.js";
 
-// Workflows
-export { discoverWorkflows, loadWorkflow, validateParams, instantiateWorkflow } from "./core/workflow.js";
-export type { WorkflowParameter, WorkflowDefinition, WorkflowInfo, ValidationResult } from "./core/workflow.js";
+// Templates
+export { discoverTemplates, loadTemplate, validateParams, instantiateTemplate } from "./core/template.js";
+export type { TemplateParameter, TemplateDefinition, TemplateInfo, ValidationResult } from "./core/template.js";
 
 // Quality Layer
 export { SLAMonitor } from "./quality/sla-monitor.js";

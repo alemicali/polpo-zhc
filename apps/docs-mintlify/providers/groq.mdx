@@ -29,7 +29,7 @@ export GROQ_API_KEY=gsk_...
 ```json
 {
   "agents": [
-    { "name": "fast-worker", "model": "groq:llama-3.3-70b" }
+    { "name": "fast-worker", "model": "groq:llama-3.3-70b-versatile" }
   ]
 }
 ```
@@ -38,11 +38,16 @@ Polpo auto-infers `groq` from the `llama-` prefix.
 
 ## Models
 
-| Model | Best for | Context | Speed |
-|-------|----------|---------|-------|
-| `llama-3.3-70b` | Best open model on Groq, strong general quality | 128K | Very fast |
-| `llama-3.1-8b` | Simple tasks, formatting, boilerplate | 128K | Extremely fast |
-| `mixtral-8x7b` | Mixture-of-experts, good for diverse tasks | 32K | Fast |
+| Model | Best for | Context | Reasoning |
+|-------|----------|---------|-----------|
+| `llama-3.3-70b-versatile` | Best open model on Groq, strong general quality | 128K | No |
+| `llama-3.1-8b-instant` | Simple tasks, formatting, boilerplate | 128K | No |
+| `deepseek-r1-distill-llama-70b` | Open-source reasoning | 128K | Yes |
+| `qwen/qwen3-32b` | Strong open reasoning model | 128K | Yes |
+| `openai/gpt-oss-120b` | Large open model, high quality | — | Yes |
+| `openai/gpt-oss-20b` | Smaller open model, fast | — | Yes |
+
+**Also available:** `meta-llama/llama-4-scout-17b-16e-instruct`, `mistral-saba-24b`, `gemma2-9b-it`
 
 ## Features
 
@@ -50,8 +55,8 @@ Polpo auto-infers `groq` from the `llama-` prefix.
 |---------|-----------|
 | Streaming | Yes |
 | Tool use | Yes |
-| Vision (images) | No |
-| Reasoning | No |
+| Vision (images) | Yes (Llama 4 Scout) |
+| Reasoning | Yes (DeepSeek R1, Qwen 3, GPT-OSS) |
 
 ## Pricing
 
@@ -77,12 +82,12 @@ Groq is excellent for the "fast-worker" agent pattern. Assign it tasks where spe
   "agents": [
     {
       "name": "fast-worker",
-      "model": "groq:llama-3.3-70b",
+      "model": "groq:llama-3.3-70b-versatile",
       "role": "Quick tasks, boilerplate, formatting, simple refactoring"
     },
     {
       "name": "senior-dev",
-      "model": "anthropic:claude-sonnet-4-5-20250929",
+      "model": "anthropic:claude-sonnet-4-6",
       "role": "Complex implementation and architecture"
     }
   ]
@@ -95,4 +100,5 @@ The fast worker handles the simple tasks while the more capable model handles th
 
 - Groq has rate limits that vary by model and account tier. For high-volume workloads, monitor your usage.
 - The Llama 3.3 70B on Groq often completes in under 2 seconds — fast enough that agent coordination overhead becomes the bottleneck, not inference.
-- Groq doesn't support vision models currently. For image-related tasks, use a different provider.
+- Groq now hosts reasoning models (DeepSeek R1, Qwen 3, GPT-OSS) — strong open alternatives at high speed.
+- Llama 4 Scout (MoE) supports vision inputs.

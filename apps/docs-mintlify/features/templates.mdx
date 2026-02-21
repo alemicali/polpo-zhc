@@ -1,36 +1,36 @@
 ---
-title: "Workflows"
+title: "Templates"
 description: "Parameterized, reusable plan templates — define a process once, run it with different parameters."
 ---
 
-Workflows are **parameterized plan templates** — JSON files that define a complete [Plan](/concepts/plans) with `{{placeholder}}` parameters. When you execute a workflow, Polpo substitutes your parameters, saves the result as a standard Plan, and runs it.
+Templates are **parameterized plan templates** — JSON files that define a complete [Plan](/concepts/plans) with `{{placeholder}}` parameters. When you execute a template, Polpo substitutes your parameters, saves the result as a standard Plan, and runs it.
 
 ```bash
 # Review the auth module, focusing on security
-polpo workflow run code-review --param module=src/auth --param focus=security
+polpo template run code-review --param module=src/auth --param focus=security
 
 # Fix a specific bug
-polpo workflow run bug-fix --param issue="Login fails when email has + character"
+polpo template run bug-fix --param issue="Login fails when email has + character"
 ```
 
-A workflow is data, not code — a JSON file on disk. When executed, it becomes a regular Plan with no new runtime concepts or special execution path.
+A template is data, not code — a JSON file on disk. When executed, it becomes a regular Plan with no new runtime concepts or special execution path.
 
 ## Quick Start
 
 <Steps>
 
-1. **Create the workflow directory**
+1. **Create the template directory**
 
    ```bash
-   mkdir -p .polpo/workflows/my-workflow
+   mkdir -p .polpo/templates/my-template
    ```
 
-2. **Create `workflow.json`**
+2. **Create `template.json`**
 
    ```json
    {
-     "name": "my-workflow",
-     "description": "What this workflow does in one sentence",
+     "name": "my-template",
+     "description": "What this template does in one sentence",
      "parameters": [
        {
          "name": "target",
@@ -54,30 +54,30 @@ A workflow is data, not code — a JSON file on disk. When executed, it becomes 
 3. **Validate it**
 
    ```bash
-   polpo workflow validate my-workflow
+   polpo template validate my-template
    ```
 
 4. **Run it**
 
    ```bash
-   polpo workflow run my-workflow --param target=src/auth
+   polpo template run my-template --param target=src/auth
    ```
 
 </Steps>
 
-## Anatomy of a Workflow
+## Anatomy of a Template
 
-A workflow lives in a directory with a `workflow.json` file:
+A template lives in a directory with a `template.json` file:
 
 ```
-.polpo/workflows/
+.polpo/templates/
   code-review/
-    workflow.json
+    template.json
   bug-fix/
-    workflow.json
+    template.json
 ```
 
-The `workflow.json` has three required fields and one optional:
+The `template.json` has three required fields and one optional:
 
 ```json
 {
@@ -90,10 +90,10 @@ The `workflow.json` has three required fields and one optional:
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `name` | string | Yes | Workflow identifier (kebab-case, must match directory name) |
+| `name` | string | Yes | Template identifier (kebab-case, must match directory name) |
 | `description` | string | Yes | Human-readable summary |
 | `parameters` | array | No | Declared parameters (see below) |
-| `plan` | object | Yes | Plan template — same shape as a PlanDocument, with `{{placeholders}}` |
+| `plan` | object | Yes | Plan body — same shape as a PlanDocument, with `{{placeholders}}` |
 
 ## Parameters
 
@@ -137,7 +137,7 @@ Constrain a parameter to specific values:
 
 ### Parameter Design Tips
 
-- **Make the minimum required.** Only mark parameters `required` if the workflow literally cannot function without them. Everything else should have a sensible `default`.
+- **Make the minimum required.** Only mark parameters `required` if the template literally cannot function without them. Everything else should have a sensible `default`.
 - **Use enums for constrained choices.** If a parameter only makes sense with specific values, declare them.
 - **Use descriptive names.** The parameter `name` appears in CLI output, TUI pickers, and error messages. `test_command` is better than `tc`.
 - **Document defaults in `description`.** Mention what happens when the parameter isn't provided:
@@ -157,7 +157,7 @@ The `plan` field is a standard Plan structure — teams, tasks, dependencies, ex
 
 ### Teams
 
-Define volatile agents specific to this workflow:
+Define volatile agents specific to this template:
 
 ```json
 {
@@ -180,7 +180,7 @@ Define volatile agents specific to this workflow:
 ```
 
 <Tip>
-You can omit the `team` field entirely if you want the workflow to use the project's existing agents. Just reference them by name in `assignTo`.
+You can omit the `team` field entirely if you want the template to use the project's existing agents. Just reference them by name in `assignTo`.
 </Tip>
 
 ### Tasks with Placeholders
@@ -282,73 +282,73 @@ Block progression until quality thresholds are met:
 
 ## Discovery
 
-Polpo discovers workflows from three locations, in priority order (first match wins by name):
+Polpo discovers templates from three locations, in priority order (first match wins by name):
 
 | Priority | Location | Scope |
 |----------|----------|-------|
-| 1 | `<polpoDir>/workflows/` | Project-level |
-| 2 | `<cwd>/.polpo/workflows/` | Fallback (if polpoDir differs) |
-| 3 | `~/.polpo/workflows/` | User-level (shared across projects) |
+| 1 | `<polpoDir>/templates/` | Project-level |
+| 2 | `<cwd>/.polpo/templates/` | Fallback (if polpoDir differs) |
+| 3 | `~/.polpo/templates/` | User-level (shared across projects) |
 
-Each workflow is a **directory** containing a `workflow.json` file. Directories without a valid `workflow.json` are silently skipped.
+Each template is a **directory** containing a `template.json` file. Directories without a valid `template.json` are silently skipped.
 
-If two workflows share the same `name`, the higher-priority location wins. This lets you override a user-level workflow with a project-specific version.
+If two templates share the same `name`, the higher-priority location wins. This lets you override a user-level template with a project-specific version.
 
 ## Execution Flow
 
-When you run a workflow, four things happen:
+When you run a template, four things happen:
 
-1. **Load** — the workflow definition is loaded from disk
+1. **Load** — the template definition is loaded from disk
 2. **Validate** — parameters are checked against declared types, enums, and required flags. Defaults are applied.
 3. **Instantiate** — all `{{placeholder}}` tokens are replaced with resolved values. The result is validated as legal JSON.
 4. **Execute** — the instantiated plan is saved via `savePlan()` and executed via `executePlan()` — from here on it's a standard Plan
 
 ```
-workflow.json + params → validation → substitution → PlanDocument → executePlan()
+template.json + params → validation → substitution → PlanDocument → executePlan()
 ```
 
-The workflow system adds zero runtime overhead — once instantiated, the plan executes through the exact same path as any manually created plan. Same task lifecycle, same assessment, same quality gates, same hooks.
+The template system adds zero runtime overhead — once instantiated, the plan executes through the exact same path as any manually created plan. Same task lifecycle, same assessment, same quality gates, same hooks.
 
-## Running Workflows
+## Running Templates
 
 <Tabs>
   <Tab title="CLI">
     ```bash
-    # List available workflows
-    polpo workflow list
+    # List available templates
+    polpo template list
 
     # Show details and parameters
-    polpo workflow show code-review
+    polpo template show code-review
 
     # Run with parameters
-    polpo workflow run code-review --param module=src/auth --param focus=security
+    polpo template run code-review --param module=src/auth --param focus=security
 
     # Dry run — see the instantiated plan without executing
-    polpo workflow run code-review --param module=src/auth --dry-run
+    polpo template run code-review --param module=src/auth --dry-run
 
-    # Validate a workflow definition
-    polpo workflow validate code-review
+    # Validate a template definition
+    polpo template validate code-review
     ```
   </Tab>
 
   <Tab title="TUI">
     ```
-    /workflow              → interactive picker
-    /workflow list         → inline summary
-    /workflow code-review module=src/auth focus=security
+    /template              → interactive picker
+    /template list         → inline summary
+    /template code-review module=src/auth focus=security
     ```
   </Tab>
 
   <Tab title="HTTP API">
     ```bash
-    # List workflows
-    curl http://localhost:3000/api/v1/projects/my-project/workflows
+    # List templates
+    curl http://localhost:3000/api/v1/projects/my-project/templates
 
-    # Get workflow details
-    curl http://localhost:3000/api/v1/projects/my-project/workflows/code-review
+    # Get template details
+    curl http://localhost:3000/api/v1/projects/my-project/templates/code-review
 
     # Execute with parameters
-    curl -X POST http://localhost:3000/api/v1/projects/my-project/workflows/code-review/run \
+    curl -X POST http://localhost:3000/api/v1/projects/my-project/templates/code-review/run \
       -H "Content-Type: application/json" \
       -d '{ "params": { "module": "src/auth", "focus": "security" } }'
     ```
@@ -360,7 +360,7 @@ The workflow system adds zero runtime overhead — once instantiated, the plan e
 Always validate before running:
 
 ```bash
-polpo workflow validate code-review
+polpo template validate code-review
 ```
 
 The validator checks:
@@ -370,9 +370,9 @@ The validator checks:
 - All `{{placeholders}}` in the plan have matching parameter declarations
 - All declared parameters are actually used somewhere in the plan
 
-## Example: Full Workflow
+## Example: Full Template
 
-Here's a complete workflow that performs a focused code review:
+Here's a complete template that performs a focused code review:
 
 ```json
 {
@@ -461,11 +461,11 @@ Here's a complete workflow that performs a focused code review:
 }
 ```
 
-## Built-in Workflows
+## Built-in Templates
 
-Polpo ships with 8 ready-to-use workflows:
+Polpo ships with 8 ready-to-use templates:
 
-| Workflow | Description | Key Parameters |
+| Template | Description | Key Parameters |
 |----------|-------------|----------------|
 | `code-review` | Deep code review with analysis, fixes, and verification | `module` (required), `focus`, `test_command` |
 | `bug-fix` | Structured bug fix: reproduce, fix, test, verify | `issue` (required), `scope`, `test_command` |
@@ -473,39 +473,39 @@ Polpo ships with 8 ready-to-use workflows:
 | `test-coverage` | Improve test coverage for a module | `module` (required), `target_coverage`, `test_command` |
 | `documentation` | Generate or improve documentation | `module` (required), `style`, `scope` |
 | `security-audit` | Security audit with vulnerability assessment | `module` (required), `severity`, `test_command` |
-| `migration` | Database or API migration workflow | `from` (required), `to` (required), `test_command` |
+| `migration` | Database or API migration template | `from` (required), `to` (required), `test_command` |
 | `onboarding` | Generate onboarding docs for a codebase | `module` (required), `audience` |
 
-## Sharing Workflows
+## Sharing Templates
 
 ### Project-level
 
-Put workflows in `.polpo/workflows/` — they're committed to version control and shared with your team.
+Put templates in `.polpo/templates/` — they're committed to version control and shared with your team.
 
 ### User-level
 
-Put workflows in `~/.polpo/workflows/` — they're available across all your projects. Good for personal productivity workflows.
+Put templates in `~/.polpo/templates/` — they're available across all your projects. Good for personal productivity templates.
 
 ### Override precedence
 
-If a project and user-level workflow share the same name, the project-level one wins. This lets teams override a personal workflow with a standardized version.
+If a project and user-level template share the same name, the project-level one wins. This lets teams override a personal template with a standardized version.
 
-## Workflows vs Skills vs Plans
+## Templates vs Skills vs Plans
 
-| Dimension | Skills | Workflows | Plans |
+| Dimension | Skills | Templates | Plans |
 |-----------|--------|-----------|-------|
 | **Layer** | Prompt | Orchestration | Execution |
-| **Format** | Markdown (`SKILL.md`) | JSON (`workflow.json`) | JSON (`.polpo/plans/`) |
+| **Format** | Markdown (`SKILL.md`) | JSON (`template.json`) | JSON (`.polpo/plans/`) |
 | **What it does** | Injects instructions into agent's system prompt | Generates a Plan from a parameterized template | Defines tasks, agents, and dependencies to execute |
 | **Reusability** | Assigned to agents across tasks | Instantiated with different parameters | Single-use (one execution) |
 | **Runtime impact** | Affects how the agent thinks | None — becomes a standard Plan | Drives task execution |
 
-Skills make agents smarter. Workflows make processes repeatable. Plans are the execution unit.
+Skills make agents smarter. Templates make processes repeatable. Plans are the execution unit.
 
 ## Tips
 
-- **Start simple.** A workflow with one task and one parameter is still useful. You can add complexity later.
-- **Use quality gates for multi-step workflows.** They prevent wasted work when an early step produces poor results.
+- **Start simple.** A template with one task and one parameter is still useful. You can add complexity later.
+- **Use quality gates for multi-step templates.** They prevent wasted work when an early step produces poor results.
 - **Write detailed task descriptions.** The agent only sees the resolved description — make it clear what "success" looks like.
 - **Test with `--dry-run`.** The CLI's `--dry-run` flag shows the fully instantiated plan without executing, so you can verify placeholders resolve correctly.
-- **Validate after editing.** Run `polpo workflow validate <name>` to catch placeholder/parameter mismatches early.
+- **Validate after editing.** Run `polpo template validate <name>` to catch placeholder/parameter mismatches early.

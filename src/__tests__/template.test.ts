@@ -2,27 +2,27 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import {
-  discoverWorkflows,
-  loadWorkflow,
+  discoverTemplates,
+  loadTemplate,
   validateParams,
-  instantiateWorkflow,
-} from "../core/workflow.js";
-import type { WorkflowDefinition } from "../core/workflow.js";
+  instantiateTemplate,
+} from "../core/template.js";
+import type { TemplateDefinition } from "../core/template.js";
 
-const TMP = "/tmp/polpo-workflow-test";
+const TMP = "/tmp/polpo-template-test";
 const POLPO_DIR = join(TMP, ".polpo");
-const WORKFLOWS_DIR = join(POLPO_DIR, "workflows");
+const TEMPLATES_DIR = join(POLPO_DIR, "templates");
 
-function writeWorkflow(name: string, def: object): void {
-  const dir = join(WORKFLOWS_DIR, name);
+function writeTemplate(name: string, def: object): void {
+  const dir = join(TEMPLATES_DIR, name);
   mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, "workflow.json"), JSON.stringify(def, null, 2));
+  writeFileSync(join(dir, "template.json"), JSON.stringify(def, null, 2));
 }
 
-function makeWorkflow(overrides?: Partial<WorkflowDefinition>): WorkflowDefinition {
+function makeTemplate(overrides?: Partial<TemplateDefinition>): TemplateDefinition {
   return {
-    name: "test-workflow",
-    description: "A test workflow",
+    name: "test-template",
+    description: "A test template",
     parameters: [
       { name: "module", description: "Module to process", type: "string", required: true },
       { name: "depth", description: "Analysis depth", type: "string", default: "normal", enum: ["quick", "normal", "deep"] },
@@ -44,7 +44,7 @@ function makeWorkflow(overrides?: Partial<WorkflowDefinition>): WorkflowDefiniti
 
 beforeEach(() => {
   rmSync(TMP, { recursive: true, force: true });
-  mkdirSync(WORKFLOWS_DIR, { recursive: true });
+  mkdirSync(TEMPLATES_DIR, { recursive: true });
 });
 
 afterEach(() => {
@@ -53,84 +53,84 @@ afterEach(() => {
 
 // ── Discovery ──────────────────────────────────────────────────────────
 
-describe("discoverWorkflows", () => {
-  it("discovers workflows from polpoDir/workflows/", () => {
-    writeWorkflow("code-review", makeWorkflow({ name: "code-review", description: "Code review" }));
-    writeWorkflow("bug-fix", makeWorkflow({ name: "bug-fix", description: "Bug fix" }));
+describe("discoverTemplates", () => {
+  it("discovers templates from polpoDir/templates/", () => {
+    writeTemplate("code-review", makeTemplate({ name: "code-review", description: "Code review" }));
+    writeTemplate("bug-fix", makeTemplate({ name: "bug-fix", description: "Bug fix" }));
 
-    const workflows = discoverWorkflows(TMP, POLPO_DIR);
-    expect(workflows).toHaveLength(2);
-    expect(workflows.map(w => w.name).sort()).toEqual(["bug-fix", "code-review"]);
+    const templates = discoverTemplates(TMP, POLPO_DIR);
+    expect(templates).toHaveLength(2);
+    expect(templates.map(w => w.name).sort()).toEqual(["bug-fix", "code-review"]);
   });
 
-  it("returns empty array when no workflows exist", () => {
-    const workflows = discoverWorkflows(TMP, POLPO_DIR);
-    expect(workflows).toHaveLength(0);
+  it("returns empty array when no templates exist", () => {
+    const templates = discoverTemplates(TMP, POLPO_DIR);
+    expect(templates).toHaveLength(0);
   });
 
-  it("skips directories without workflow.json", () => {
-    mkdirSync(join(WORKFLOWS_DIR, "empty-dir"), { recursive: true });
-    writeWorkflow("valid", makeWorkflow({ name: "valid" }));
+  it("skips directories without template.json", () => {
+    mkdirSync(join(TEMPLATES_DIR, "empty-dir"), { recursive: true });
+    writeTemplate("valid", makeTemplate({ name: "valid" }));
 
-    const workflows = discoverWorkflows(TMP, POLPO_DIR);
-    expect(workflows).toHaveLength(1);
-    expect(workflows[0].name).toBe("valid");
+    const templates = discoverTemplates(TMP, POLPO_DIR);
+    expect(templates).toHaveLength(1);
+    expect(templates[0].name).toBe("valid");
   });
 
   it("skips invalid JSON files", () => {
-    const dir = join(WORKFLOWS_DIR, "bad-json");
+    const dir = join(TEMPLATES_DIR, "bad-json");
     mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, "workflow.json"), "not valid json{{{");
-    writeWorkflow("valid", makeWorkflow({ name: "valid" }));
+    writeFileSync(join(dir, "template.json"), "not valid json{{{");
+    writeTemplate("valid", makeTemplate({ name: "valid" }));
 
-    const workflows = discoverWorkflows(TMP, POLPO_DIR);
-    expect(workflows).toHaveLength(1);
+    const templates = discoverTemplates(TMP, POLPO_DIR);
+    expect(templates).toHaveLength(1);
   });
 
-  it("skips workflows missing required fields", () => {
-    writeWorkflow("no-plan", { name: "no-plan", description: "Has no plan" });
-    writeWorkflow("valid", makeWorkflow({ name: "valid" }));
+  it("skips templates missing required fields", () => {
+    writeTemplate("no-plan", { name: "no-plan", description: "Has no plan" });
+    writeTemplate("valid", makeTemplate({ name: "valid" }));
 
-    const workflows = discoverWorkflows(TMP, POLPO_DIR);
-    expect(workflows).toHaveLength(1);
-    expect(workflows[0].name).toBe("valid");
+    const templates = discoverTemplates(TMP, POLPO_DIR);
+    expect(templates).toHaveLength(1);
+    expect(templates[0].name).toBe("valid");
   });
 
   it("deduplicates by name (first wins)", () => {
-    writeWorkflow("dupe", makeWorkflow({ name: "dupe", description: "First occurrence" }));
+    writeTemplate("dupe", makeTemplate({ name: "dupe", description: "First occurrence" }));
 
     // Create a second location under an alternative polpo dir
     const altPolpoDir = join(TMP, "alt-polpo");
-    const altWorkflowsDir = join(altPolpoDir, "workflows", "dupe");
-    mkdirSync(altWorkflowsDir, { recursive: true });
+    const altTemplatesDir = join(altPolpoDir, "templates", "dupe");
+    mkdirSync(altTemplatesDir, { recursive: true });
     writeFileSync(
-      join(altWorkflowsDir, "workflow.json"),
-      JSON.stringify(makeWorkflow({ name: "dupe", description: "Second occurrence" })),
+      join(altTemplatesDir, "template.json"),
+      JSON.stringify(makeTemplate({ name: "dupe", description: "Second occurrence" })),
     );
 
     // Project-level (POLPO_DIR) should win over alternative dir
-    // discoverWorkflows scans polpoDir first, so the first occurrence should be from POLPO_DIR
-    const workflows = discoverWorkflows(TMP, POLPO_DIR);
-    expect(workflows).toHaveLength(1);
-    expect(workflows[0].description).toBe("First occurrence");
+    // discoverTemplates scans polpoDir first, so the first occurrence should be from POLPO_DIR
+    const templates = discoverTemplates(TMP, POLPO_DIR);
+    expect(templates).toHaveLength(1);
+    expect(templates[0].description).toBe("First occurrence");
   });
 });
 
-// ── loadWorkflow ───────────────────────────────────────────────────────
+// ── loadTemplate ───────────────────────────────────────────────────────
 
-describe("loadWorkflow", () => {
-  it("loads a full workflow definition by name", () => {
-    writeWorkflow("my-wf", makeWorkflow({ name: "my-wf" }));
+describe("loadTemplate", () => {
+  it("loads a full template definition by name", () => {
+    writeTemplate("my-wf", makeTemplate({ name: "my-wf" }));
 
-    const wf = loadWorkflow(TMP, POLPO_DIR, "my-wf");
+    const wf = loadTemplate(TMP, POLPO_DIR, "my-wf");
     expect(wf).not.toBeNull();
     expect(wf!.name).toBe("my-wf");
     expect(wf!.plan).toBeDefined();
     expect((wf!.plan as { tasks: unknown[] }).tasks).toHaveLength(1);
   });
 
-  it("returns null for non-existent workflow", () => {
-    const wf = loadWorkflow(TMP, POLPO_DIR, "nope");
+  it("returns null for non-existent template", () => {
+    const wf = loadTemplate(TMP, POLPO_DIR, "nope");
     expect(wf).toBeNull();
   });
 });
@@ -138,7 +138,7 @@ describe("loadWorkflow", () => {
 // ── validateParams ─────────────────────────────────────────────────────
 
 describe("validateParams", () => {
-  const wf = makeWorkflow();
+  const wf = makeTemplate();
 
   it("validates required params", () => {
     const result = validateParams(wf, {});
@@ -185,7 +185,7 @@ describe("validateParams", () => {
   });
 
   it("validates boolean type coercion", () => {
-    const boolWf = makeWorkflow({
+    const boolWf = makeTemplate({
       parameters: [
         { name: "verbose", description: "Verbose mode", type: "boolean", default: false },
       ],
@@ -197,20 +197,20 @@ describe("validateParams", () => {
     expect(validateParams(boolWf, { verbose: "1" as unknown as string }).resolved.verbose).toBe(true);
   });
 
-  it("handles workflow with no parameters", () => {
-    const noParamWf = makeWorkflow({ parameters: [] });
+  it("handles template with no parameters", () => {
+    const noParamWf = makeTemplate({ parameters: [] });
     const result = validateParams(noParamWf, {});
     expect(result.valid).toBe(true);
     expect(Object.keys(result.resolved)).toHaveLength(0);
   });
 });
 
-// ── instantiateWorkflow ────────────────────────────────────────────────
+// ── instantiateTemplate ────────────────────────────────────────────────
 
-describe("instantiateWorkflow", () => {
+describe("instantiateTemplate", () => {
   it("replaces placeholders in the plan", () => {
-    const wf = makeWorkflow();
-    const result = instantiateWorkflow(wf, { module: "src/core", depth: "deep", retries: 3 });
+    const wf = makeTemplate();
+    const result = instantiateTemplate(wf, { module: "src/core", depth: "deep", retries: 3 });
 
     const plan = JSON.parse(result.data);
     expect(plan.tasks[0].title).toBe("Analyze src/core");
@@ -219,16 +219,16 @@ describe("instantiateWorkflow", () => {
   });
 
   it("generates a descriptive prompt", () => {
-    const wf = makeWorkflow();
-    const result = instantiateWorkflow(wf, { module: "src/core", depth: "deep", retries: 3 });
+    const wf = makeTemplate();
+    const result = instantiateTemplate(wf, { module: "src/core", depth: "deep", retries: 3 });
 
-    expect(result.prompt).toContain("workflow:test-workflow");
+    expect(result.prompt).toContain("template:test-template");
     expect(result.prompt).toContain("module=src/core");
-    expect(result.name).toBe("test-workflow");
+    expect(result.name).toBe("test-template");
   });
 
   it("throws on unreplaced placeholders", () => {
-    const wf = makeWorkflow({
+    const wf = makeTemplate({
       plan: {
         tasks: [{
           title: "Process {{module}} with {{missing_param}}",
@@ -238,21 +238,21 @@ describe("instantiateWorkflow", () => {
     });
 
     expect(() => {
-      instantiateWorkflow(wf, { module: "src" });
+      instantiateTemplate(wf, { module: "src" });
     }).toThrow("Unreplaced placeholders");
   });
 
   it("produces valid JSON after substitution", () => {
-    const wf = makeWorkflow();
-    const result = instantiateWorkflow(wf, { module: "src/core", depth: "normal", retries: 2 });
+    const wf = makeTemplate();
+    const result = instantiateTemplate(wf, { module: "src/core", depth: "normal", retries: 2 });
 
     expect(() => JSON.parse(result.data)).not.toThrow();
   });
 
   it("handles special characters in parameter values", () => {
-    const wf = makeWorkflow();
+    const wf = makeTemplate();
     // Values with quotes/special chars should be safe because we replace inside a JSON string
-    const result = instantiateWorkflow(wf, {
+    const result = instantiateTemplate(wf, {
       module: "src/core",
       depth: "normal",
       retries: 2,
@@ -262,7 +262,7 @@ describe("instantiateWorkflow", () => {
   });
 
   it("handles empty resolved params", () => {
-    const wf = makeWorkflow({
+    const wf = makeTemplate({
       parameters: [],
       plan: {
         tasks: [{
@@ -273,8 +273,8 @@ describe("instantiateWorkflow", () => {
       },
     });
 
-    const result = instantiateWorkflow(wf, {});
-    expect(result.prompt).toBe("workflow:test-workflow");
+    const result = instantiateTemplate(wf, {});
+    expect(result.prompt).toBe("template:test-template");
     const plan = JSON.parse(result.data);
     expect(plan.tasks[0].title).toBe("Simple task");
   });

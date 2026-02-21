@@ -38,10 +38,16 @@ Polpo auto-infers `xai` from the `grok-` prefix.
 
 ## Models
 
-| Model | Best for | Context |
-|-------|----------|---------|
-| `grok-3` | Strong general-purpose model | 131K |
-| `grok-3-mini` | Faster, lighter version | 131K |
+| Model | Best for | Context | Reasoning | Vision |
+|-------|----------|---------|-----------|--------|
+| `grok-4` | Frontier — most capable Grok | 2M | Yes | Yes |
+| `grok-4-1-fast-reasoning` | Fast reasoning with tool calling | 2M | Yes | Yes |
+| `grok-4-1-fast-non-reasoning` | Fast, instant responses | 2M | No | Yes |
+| `grok-3` | Strong general-purpose model | 131K | No | No |
+| `grok-3-mini` | Smaller, faster reasoning | 131K | Yes | No |
+| `grok-code-fast-1` | Agentic coding, fast and economical | — | Yes | No |
+
+**Also available:** `grok-3-fast`, `grok-2-vision-1212`
 
 ## Features
 
@@ -49,7 +55,18 @@ Polpo auto-infers `xai` from the `grok-` prefix.
 |---------|-----------|
 | Streaming | Yes |
 | Tool use | Yes |
-| Vision (images) | No |
+| Vision (images) | Yes (Grok 4, Grok 2 Vision) |
+| Reasoning | Yes (Grok 4, Grok 3 Mini, Grok Code) |
+
+## Pricing
+
+| Model | Input (per 1M tokens) | Output (per 1M tokens) |
+|-------|----------------------|----------------------|
+| `grok-4` | $3.00 | $15.00 |
+| `grok-4-1-fast-reasoning` | $0.20 | $0.50 |
+| `grok-3` | $3.00 | $15.00 |
+| `grok-3-mini` | $0.30 | $0.50 |
+| `grok-code-fast-1` | $0.20 | $1.50 |
 
 ## Provider Details
 
@@ -63,4 +80,6 @@ Polpo auto-infers `xai` from the `grok-` prefix.
 ## Notes
 
 - Grok models use an OpenAI-compatible API, so they work reliably with Polpo's tool calling system.
+- Grok 4 has a 2M token context window — among the largest available.
+- `grok-code-fast-1` is optimized for agentic coding with fast, economical reasoning.
 - Competitively priced compared to similar-tier models from OpenAI and Anthropic.

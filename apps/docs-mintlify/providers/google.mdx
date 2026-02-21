@@ -38,11 +38,16 @@ Polpo auto-infers `google` from the `gemini-` prefix.
 
 ## Models
 
-| Model | Best for | Context | Reasoning |
-|-------|----------|---------|-----------|
-| `gemini-2.5-pro` | Complex reasoning, large codebases | 1M+ | Yes |
-| `gemini-2.5-flash` | Fast and cheap, good quality | 1M+ | Yes |
-| `gemini-2.0-flash` | Previous generation, very fast | 1M | No |
+| Model | Best for | Context | Reasoning | Vision |
+|-------|----------|---------|-----------|--------|
+| `gemini-3-pro-preview` | Latest — state-of-art reasoning and agentic coding | 1M+ | Yes | Yes |
+| `gemini-3-flash-preview` | Fast Gemini 3 variant | 1M+ | Yes | Yes |
+| `gemini-2.5-pro` | Complex reasoning, large codebases (GA) | 1M+ | Yes | Yes |
+| `gemini-2.5-flash` | Fast and cheap, good quality (GA) | 1M+ | Yes | Yes |
+| `gemini-2.5-flash-lite` | Lowest latency/cost in 2.5 family | 1M+ | Yes | Yes |
+| `gemini-2.0-flash` | Previous generation, very fast | 1M | No | Yes |
+
+**Also available:** `gemini-1.5-pro`, `gemini-1.5-flash`, `gemini-1.5-flash-8b`, `gemini-2.0-flash-lite`
 
 <Note>
 Gemini's 1M+ token context window means it can process entire codebases in a single prompt. This makes it a strong choice for architecture-level tasks and cross-file refactoring.
@@ -55,14 +60,17 @@ Gemini's 1M+ token context window means it can process entire codebases in a sin
 | Streaming | Yes |
 | Tool use | Yes |
 | Vision (images) | Yes |
-| Reasoning | Yes (2.5 Pro, 2.5 Flash) |
+| Reasoning | Yes (Gemini 3.x, 2.5 Pro, 2.5 Flash) |
 
 ## Pricing
 
 | Model | Input (per 1M tokens) | Output (per 1M tokens) |
 |-------|----------------------|----------------------|
+| `gemini-3-pro-preview` | Preview pricing — check Google AI Studio |
+| `gemini-3-flash-preview` | Preview pricing — check Google AI Studio |
 | `gemini-2.5-pro` | $1.25 | $10.00 |
 | `gemini-2.5-flash` | $0.15 | $0.60 |
+| `gemini-2.5-flash-lite` | $0.075 | $0.30 |
 | `gemini-2.0-flash` | $0.10 | $0.40 |
 
 ## Provider Details

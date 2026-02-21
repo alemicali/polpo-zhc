@@ -54,23 +54,23 @@ The default mode is Chat. Polpo handles most requests conversationally — use T
 | `/plans` | Browse, create, execute, and resume plans via interactive picker |
 | `/plan` | Switch to plan mode (free text generates plans with AI) |
 
-### Workflows
+### Templates
 
 | Command | Description |
 |---------|-------------|
-| `/workflow` | Browse available workflows via interactive picker |
-| `/workflow list` | Show a summary of all available workflows |
-| `/workflow <name> [key=value ...]` | Execute a workflow with parameters |
+| `/template` | Browse available templates via interactive picker |
+| `/template list` | Show a summary of all available templates |
+| `/template <name> [key=value ...]` | Execute a template with parameters |
 
 ```
-# Browse and select a workflow interactively
-/workflow
+# Browse and select a template interactively
+/template
 
 # Run a code review directly
-/workflow code-review module=src/auth focus=security
+/template code-review module=src/auth focus=security
 ```
 
-See [Workflows](/features/workflows) for details on the workflow system.
+See [Templates](/features/templates) for details on the template system.
 
 ### Skills
 

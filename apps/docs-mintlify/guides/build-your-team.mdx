@@ -1,0 +1,128 @@
+---
+title: "Build Your Team"
+description: "Configure multiple agents with specialized roles."
+---
+
+After `polpo init` you have one default agent. This guide shows how to build a full team — multiple agents with different roles, models, and constraints.
+
+## Add agents to your config
+
+Edit `.polpo/polpo.json`:
+
+```json
+{
+  "project": "my-project",
+  "team": {
+    "name": "my-team",
+    "agents": [
+      {
+        "name": "backend-dev",
+        "role": "Backend developer specializing in Node.js, Express, and databases",
+        "model": "anthropic:claude-sonnet-4-6"
+      },
+      {
+        "name": "frontend-dev",
+        "role": "Frontend developer specializing in React and TypeScript",
+        "model": "anthropic:claude-sonnet-4-6"
+      },
+      {
+        "name": "reviewer",
+        "role": "Senior code reviewer focused on architecture and best practices",
+        "model": "anthropic:claude-sonnet-4-6"
+      }
+    ]
+  }
+}
+```
+
+Or run `polpo setup` to reconfigure your team interactively.
+
+## Agent options
+
+Each agent supports these fields:
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `name` | `string` | *required* | Unique identifier |
+| `role` | `string` | — | What this agent does (included in its system prompt) |
+| `model` | `string` | — | `"provider:model"` format. See [Providers](/models/overview) |
+| `allowedTools` | `string[]` | all tools | Restrict which coding tools the agent can use |
+| `allowedPaths` | `string[]` | project root | Filesystem sandbox — agent can only access these paths |
+| `systemPrompt` | `string` | — | Custom instructions prepended to the default prompt |
+| `skills` | `string[]` | — | Named skill files to load |
+| `maxTurns` | `number` | `150` | Maximum tool-use turns before the agent is stopped |
+| `enableBrowser` | `boolean` | `false` | Give the agent browser access |
+| `mcpServers` | `object` | — | MCP server connections |
+
+<Tip>
+  The `role` field matters. Polpo includes it in the agent's system prompt, so be specific: "Backend developer specializing in Node.js and PostgreSQL" works better than just "developer".
+</Tip>
+
+## Manage teams from the TUI
+
+Inside the TUI you can manage your team without editing JSON:
+
+```
+/team                    # view current team
+/team add <name> <role>  # add an agent
+/team remove <name>      # remove an agent
+```
+
+The `/team` command also supports **AI team generation** — describe your project and Polpo suggests the right agents.
+
+## Volatile teams
+
+Plans can define their own temporary agents that exist only for that plan's duration. Useful for one-off specialists:
+
+```json
+{
+  "group": "data-migration",
+  "team": [
+    {
+      "name": "db-specialist",
+      "role": "PostgreSQL migration expert",
+      "model": "anthropic:claude-sonnet-4-6"
+    }
+  ],
+  "tasks": [
+    {
+      "title": "Write migration scripts",
+      "assignTo": "db-specialist",
+      "description": "Create SQL migrations for the new schema"
+    }
+  ]
+}
+```
+
+Volatile agents are created when the plan starts and removed when it completes. See [Teams](/concepts/teams) for details.
+
+## Different models per agent
+
+You can mix providers and models across agents:
+
+```json
+{
+  "agents": [
+    {
+      "name": "planner",
+      "role": "System architect who designs before coding",
+      "model": "anthropic:claude-sonnet-4-6"
+    },
+    {
+      "name": "coder",
+      "role": "Fast implementation developer",
+      "model": "groq:llama-3.3-70b-versatile"
+    }
+  ]
+}
+```
+
+Polpo resolves each agent's model independently. Set `POLPO_MODEL` as a fallback for agents without an explicit model.
+
+## Next steps
+
+Your team is ready. Now create a plan to put them to work:
+
+<Card title="Your First Plan" icon="map" href="/guides/first-plan">
+  Create a multi-task plan with dependencies and automated assessment.
+</Card>

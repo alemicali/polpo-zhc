@@ -202,7 +202,13 @@ export class Orchestrator extends TypedEmitter {
       if (agent.model) modelSpecs.push(agent.model);
     }
 
-    if (modelSpecs.length === 0) return;
+    if (modelSpecs.length === 0) {
+      this.emit("log", {
+        level: "warn",
+        message: "No model configured for any agent. Agent spawning will fail. Run 'polpo setup' or set POLPO_MODEL env var.",
+      });
+      return;
+    }
 
     const missing = validateProviderKeys(modelSpecs);
     if (missing.length > 0) {

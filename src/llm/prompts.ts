@@ -740,7 +740,7 @@ export function buildPlanSystemPrompt(
       `- Available skills: ${availableSkills.map(s => `${s.name} (${s.description})`).join(", ")}`,
       `- Only assign skills that are relevant to the volatile agent's role`,
     ] : []),
-    `- Use different models strategically: big-pickle (free default), Haiku (fast/cheap), Sonnet (standard), Opus (complex reasoning)`,
+    `- Use different models strategically: Haiku (fast/cheap), Sonnet (standard), Opus (complex reasoning)`,
     `- Add expectations where appropriate — tests for code, file_exists for creation, llm_review for quality`,
     `- CRITICAL: Every expectation MUST include its required fields:`,
     `  - type: test → MUST have command (non-empty string)`,

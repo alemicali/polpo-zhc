@@ -1,138 +1,81 @@
 ---
 title: "Your First Plan"
-description: "Step-by-step tutorial to create and run a multi-task plan"
+description: "Create and run a multi-task plan with dependencies and automated assessment."
 ---
 
-This guide walks you through creating a multi-task plan, executing it, and monitoring the results.
+This guide walks you through creating a multi-task plan, executing it, and understanding the results. It assumes you've already [set up your project](/getting-started) and [configured your team](/guides/build-your-team).
 
-## What We'll Build
+## Create a plan
 
-A simple API project with two tasks:
-1. A backend developer creates the database layer
-2. The same developer builds REST endpoints on top of it
+Use AI to generate a plan from a prompt:
 
-<Steps>
+```bash
+polpo plan create "Build a blog API: first create a SQLite database layer with users and posts tables, then build Express REST endpoints on top of it"
+```
 
-1. **Initialize Polpo**
+Polpo generates tasks, assigns them to your agents, and sets up dependencies automatically. Review it:
 
-   ```bash
-   mkdir my-api-project && cd my-api-project
-   polpo init
-   ```
+```bash
+polpo plan list
+polpo plan show <plan-id>
+```
 
-2. **Set your API key** (optional)
+The plan will contain tasks like:
 
-   The default model (`opencode:big-pickle`) is free and works without any key. To use Claude instead:
+```
+Task 1: Create database layer
+  assignTo: backend-dev
+  dependsOn: []
 
-   ```bash
-   export ANTHROPIC_API_KEY=sk-ant-...
-   ```
+Task 2: Build REST endpoints
+  assignTo: backend-dev
+  dependsOn: ["Create database layer"]
+```
 
-3. **Configure your team**
+<Tip>
+  You can also create plans in the TUI with `/plan`, which offers AI generation and manual editing.
+</Tip>
 
-   Edit `.polpo/polpo.json`:
+## Run the plan
 
-   ```json
-   {
-     "project": "my-api-project",
-     "team": {
-       "name": "api-team",
-       "agents": [
-         {
-           "name": "api-dev",
-           "role": "Backend developer specializing in Node.js, Express, and SQLite. Writes clean, well-tested code with proper error handling."
-         }
-       ]
-     },
-     "settings": {
-       "maxRetries": 3,
-       "workDir": ".",
-       "logLevel": "normal"
-     }
-   }
-   ```
+```bash
+polpo run
+```
 
-   <Note>
-   Plans and tasks are **not** defined in `polpo.json`. The config file only contains team and settings. Plans are created via the CLI or TUI and stored in `.polpo/plans/`.
-   </Note>
+You'll see output like:
 
-4. **Create the plan**
+```
+[14:00:01] Polpo started — my-project
+[14:00:01] Team agents: backend-dev, frontend-dev
 
-   Use AI to generate a plan:
+[14:00:02] [task-1] Task added: Create database layer
+[14:00:02] [task-2] Task added: Build REST endpoints
+[14:00:02] [task-1] Spawning "backend-dev" for: Create database layer
+[14:24:15] [task-1] PASSED (score: 4.2/5)
+[14:24:15] [task-1] DONE — Create database layer
+[14:24:17] [task-2] Spawning "backend-dev" for: Build REST endpoints
+[14:25:30] [task-2] PASSED (score: 4.0/5)
+[14:25:30] [task-2] DONE — Build REST endpoints
 
-   ```bash
-   polpo plan create "Build a blog API: first create a SQLite database layer with users and posts tables, then build Express REST endpoints on top of it. The API task depends on the database task."
-   ```
+    All 2 tasks completed! (1m29s)
+```
 
-   This creates a plan in `.polpo/plans/` with tasks, dependencies, and agent assignments. Review it:
+## Monitor progress
 
-   ```bash
-   polpo plan list
-   polpo plan show <plan-id>
-   ```
+In a second terminal:
 
-   The plan will contain tasks like:
+```bash
+polpo status -w
+```
 
-   ```
-   Task 1: Create database layer
-     assignTo: api-dev
-     dependsOn: []
+This shows a live dashboard with task status, agent activity, and scores. Or start the HTTP server for the Web UI:
 
-   Task 2: Build REST endpoints
-     assignTo: api-dev
-     dependsOn: ["Create database layer"]
-   ```
+```bash
+polpo serve
+# API at http://localhost:3000/api/v1/
+```
 
-   <Tip>
-   You can also create plans interactively in the TUI using the `/plan` command, which offers AI generation and manual editing.
-   </Tip>
-
-5. **Run the plan**
-
-   ```bash
-   polpo run
-   ```
-
-   You'll see output like:
-
-   ```
-   [14:00:01] Polpo started — my-api-project
-   [14:00:01] Team agents: api-dev
-
-   [14:00:02] [task-1] Task added: Create database layer
-   [14:00:02] [task-2] Task added: Build REST endpoints
-   [14:00:02] [task-1] Spawning "api-dev" for: Create database layer
-   ```
-
-6. **Monitor progress**
-
-   Open a second terminal and watch:
-
-   ```bash
-   polpo status -w
-   ```
-
-   This shows a live dashboard with task status, agent activity, and scores.
-
-7. **Review results**
-
-   When complete, you'll see:
-
-   ```
-   [14:02:30] [task-1] PASSED (score: 4.2/5)
-   [14:02:30] [task-1] DONE — Create database layer
-   [14:02:32] [task-2] Spawning "api-dev" for: Build REST endpoints
-   [14:03:45] [task-2] PASSED (score: 4.0/5)
-   [14:03:45] [task-2] DONE — Build REST endpoints
-
-       All 2 tasks completed! (3m44s)
-   ```
-
-</Steps>
-
-## Understanding the Output
-
-### Assessment Scores
+## Assessment scores
 
 Each task gets scored on 4 dimensions (1-5):
 
@@ -143,37 +86,33 @@ Each task gets scored on 4 dimensions (1-5):
 | Code Quality | 20% | Is the code clean and maintainable? |
 | Edge Cases | 15% | Are error conditions handled? |
 
-A task **passes** when the weighted average score is >= 3.0 (configurable).
+A task **passes** when the weighted average score is >= 3.0 (configurable via `defaultQualityThreshold`).
 
-### What If a Task Fails?
+## What if a task fails?
 
-If assessment fails, Polpo automatically:
+Polpo handles failures automatically:
+
 1. Sends detailed feedback to the agent (per-dimension scores + reasoning)
 2. Enters **fix phase** — agent makes targeted corrections
 3. Re-assesses up to `maxFixAttempts` (default: 2) times
 4. Falls back to **full retry** if fixes aren't enough
 5. Gives up after `maxRetries` (default: 3) total attempts
 
-## Plan Task Fields Reference
+## Plan task fields
 
-When plans are generated by AI or created via the API, each task uses these fields:
+Each task in a plan uses these fields:
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `title` | string | Short task title (used for dependency references) |
 | `description` | string | Detailed instructions for the agent |
-| `assignTo` | string | Agent name from your team config |
+| `assignTo` | string | Agent name from your team |
 | `dependsOn` | string[] | Titles of tasks that must finish first |
 | `expectations` | array | Assessment criteria (optional) |
 | `maxRetries` | number | Override default retry limit (optional) |
 
-## Next Steps
+## Next steps
 
-- **Add more agents**: Different specialists for different aspects of the project
-- **Custom expectations**: Add test commands, file checks, and LLM review criteria
-- **Dependencies**: Build complex task graphs with `dependsOn`
-- **Volatile teams**: Create temporary specialist agents scoped to a single plan
-
-<Note>
-For interactive monitoring, use `polpo tui` instead of `polpo run`. The TUI provides real-time dashboards, chat, and plan management.
-</Note>
+- **[Plans & Dependencies](/concepts/plans)** — Advanced plan features: volatile teams, quality gates, complex dependency graphs
+- **[Scoring](/features/scoring)** — Customize assessment dimensions and thresholds
+- **[Configuration](/configuration)** — Full settings reference

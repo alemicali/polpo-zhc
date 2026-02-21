@@ -44,7 +44,7 @@ export function cmdSkills({ polpo, store, args }: CommandAPI) {
   }
 }
 
-function getWorkflowPaths(polpo: import("../../core/orchestrator.js").Orchestrator) {
+function getPolpoPaths(polpo: import("../../core/orchestrator.js").Orchestrator) {
   return {
     cwd: polpo.getWorkDir(),
     polpoDir: polpo.getPolpoDir?.() ?? resolve(polpo.getWorkDir(), ".polpo"),
@@ -65,7 +65,7 @@ function skillsListInline(
   polpo: import("../../core/orchestrator.js").Orchestrator,
   store: import("../store.js").TUIStore,
 ) {
-  const { cwd, polpoDir } = getWorkflowPaths(polpo);
+  const { cwd, polpoDir } = getPolpoPaths(polpo);
   const agentNames = getAgentNames(polpoDir);
   const skills = listSkillsWithAssignments(cwd, polpoDir, agentNames);
 
@@ -96,7 +96,7 @@ function skillsPicker(
   polpo: import("../../core/orchestrator.js").Orchestrator,
   store: import("../store.js").TUIStore,
 ) {
-  const { cwd, polpoDir } = getWorkflowPaths(polpo);
+  const { cwd, polpoDir } = getPolpoPaths(polpo);
   const agentNames = getAgentNames(polpoDir);
   const skills = listSkillsWithAssignments(cwd, polpoDir, agentNames);
 
@@ -174,7 +174,7 @@ function skillsAdd(
   source: string,
   extraArgs: string[],
 ) {
-  const { polpoDir } = getWorkflowPaths(polpo);
+  const { polpoDir } = getPolpoPaths(polpo);
 
   // Parse optional --skill names from extra args
   const skillNames: string[] = [];
@@ -232,7 +232,7 @@ function skillsAssign(
   skillName: string,
   agentName: string,
 ) {
-  const { cwd, polpoDir } = getWorkflowPaths(polpo);
+  const { cwd, polpoDir } = getPolpoPaths(polpo);
   const pool = discoverSkills(cwd, polpoDir);
   const skill = pool.find(s => s.name === skillName);
 
@@ -264,7 +264,7 @@ function skillsRemove(
   store: import("../store.js").TUIStore,
   name: string,
 ) {
-  const { polpoDir } = getWorkflowPaths(polpo);
+  const { polpoDir } = getPolpoPaths(polpo);
   const removed = removeSkill(polpoDir, name);
 
   if (removed) {

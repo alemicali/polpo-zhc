@@ -27,7 +27,7 @@ Plans and tasks are stored separately in `.polpo/plans/` and `.polpo/tasks/` —
 |-------|------|---------|-------------|
 | `name` | string | — | **Required.** Unique agent identifier |
 | `role` | string | — | Agent's role description |
-| `model` | string | — | LLM model. Format: `provider:model` (e.g. `"anthropic:claude-sonnet-4-5-20250929"`) or bare model ID |
+| `model` | string | — | LLM model. Format: `provider:model` (e.g. `"anthropic:claude-sonnet-4-6"`) or bare model ID |
 | `allowedTools` | string[] | — | Allowed tool names |
 | `allowedPaths` | string[] | `[workDir]` | Filesystem sandbox — directories the agent can access. Absolute or relative to `workDir` |
 | `mcpServers` | object | — | MCP server configuration. Keys are server names, values are stdio or HTTP configs |
@@ -165,7 +165,7 @@ See [Providers & Models](/models/overview) for supported providers and model res
 
 | Variable | Description |
 |----------|-------------|
-| `POLPO_MODEL` | Global default model override (e.g. `anthropic:claude-sonnet-4-5-20250929`) |
+| `POLPO_MODEL` | Global default model override (e.g. `anthropic:claude-sonnet-4-6`) |
 | `POLPO_JUDGE_MODEL` | Model for LLM-as-Judge assessment reviews |
 | `POLPO_STT_MODEL` | Speech-to-text model (default: `gpt-4o-mini-transcribe`) |
 | `API_KEY` | Server authentication key (for HTTP API) |
@@ -183,7 +183,7 @@ See [Providers & Models](/models/overview) for supported providers and model res
 | `OPENROUTER_API_KEY` | OpenRouter |
 | `CEREBRAS_API_KEY` | Cerebras |
 | `HF_TOKEN` | Hugging Face |
-| `OPENCODE_API_KEY` | OpenCode (free default) |
+| `OPENCODE_API_KEY` | OpenCode (free tier) |
 | `DEEPGRAM_API_KEY` | Deepgram (audio transcription) |
 | `ELEVENLABS_API_KEY` | ElevenLabs (text-to-speech) |
 | `REPLICATE_API_TOKEN` | Replicate (image generation) |
@@ -207,7 +207,7 @@ See [Providers & Models](/models/overview) for supported providers and model res
       {
         "name": "architect",
         "role": "Senior architect",
-        "model": "anthropic:claude-sonnet-4-5-20250929",
+        "model": "anthropic:claude-sonnet-4-6",
         "maxTurns": 200,
         "systemPrompt": "Always consider performance implications"
       },
@@ -238,7 +238,7 @@ See [Providers & Models](/models/overview) for supported providers and model res
     "maxQuestionRounds": 2,
     "autoCorrectExpectations": true,
     "defaultQualityThreshold": 3.0,
-    "orchestratorModel": "claude-sonnet-4-5-20250929"
+    "orchestratorModel": "claude-sonnet-4-6"
   }
 }
 ```

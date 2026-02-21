@@ -15,7 +15,7 @@ Models are specified as a **`provider:model`** string:
 ```json
 {
   "name": "architect",
-  "model": "anthropic:claude-sonnet-4-5-20250929"
+  "model": "anthropic:claude-sonnet-4-6"
 }
 ```
 
@@ -27,7 +27,7 @@ If you omit the provider prefix, Polpo **infers it** from the model name:
 
 ```json
 {
-  "model": "claude-sonnet-4-5-20250929"
+  "model": "claude-sonnet-4-6"
 }
 ```
 
@@ -50,7 +50,7 @@ The inference engine matches on known prefixes:
 | `hf:` | `huggingface` |
 | `big-pickle` | `opencode` |
 
-Anything that doesn't match falls back to the `opencode` provider.
+If the model name doesn't match any known prefix, you must specify the provider explicitly.
 
 <Tip>
 For clarity and to avoid ambiguity, always use the explicit `provider:model` format in production configurations. Auto-inference is a convenience for quick prototyping.
@@ -64,14 +64,12 @@ Polpo resolves which model to use through a layered system. Each layer can overr
 
 1. Agent's `model` field in the config
 2. `POLPO_MODEL` environment variable
-3. `opencode:big-pickle` (free default)
-
 ```json
 {
   "agents": [
     {
       "name": "coder",
-      "model": "anthropic:claude-sonnet-4-5-20250929"
+      "model": "anthropic:claude-sonnet-4-6"
     }
   ]
 }
@@ -83,12 +81,10 @@ Polpo uses its own model for conversations (via `/v1/chat/completions` and TUI c
 
 1. `settings.orchestratorModel` in `polpo.json`
 2. `POLPO_MODEL` environment variable
-3. `opencode:big-pickle` (free default)
-
 ```json
 {
   "settings": {
-    "orchestratorModel": "anthropic:claude-sonnet-4-5-20250929"
+    "orchestratorModel": "anthropic:claude-sonnet-4-6"
   }
 }
 ```
@@ -99,7 +95,7 @@ The orchestrator model can also be a [ModelConfig with fallbacks](/models/fallba
 {
   "settings": {
     "orchestratorModel": {
-      "primary": "anthropic:claude-sonnet-4-5-20250929",
+      "primary": "anthropic:claude-sonnet-4-6",
       "fallbacks": ["openai:gpt-4o", "google:gemini-2.5-pro"]
     }
   }
@@ -111,7 +107,7 @@ The orchestrator model can also be a [ModelConfig with fallbacks](/models/fallba
 The assessment system's LLM-as-Judge uses a separate model that can be overridden independently:
 
 ```bash
-POLPO_JUDGE_MODEL=anthropic:claude-sonnet-4-5-20250929
+POLPO_JUDGE_MODEL=anthropic:claude-sonnet-4-6
 ```
 
 When not set, it uses the same resolution chain as the orchestrator model.
@@ -194,7 +190,7 @@ Each agent can use a completely different provider. A single plan can mix Anthro
     },
     {
       "name": "coder",
-      "model": "anthropic:claude-sonnet-4-5-20250929",
+      "model": "anthropic:claude-sonnet-4-6",
       "role": "Implementation"
     },
     {
@@ -204,7 +200,7 @@ Each agent can use a completely different provider. A single plan can mix Anthro
     },
     {
       "name": "fast-worker",
-      "model": "groq:llama-3.3-70b",
+      "model": "groq:llama-3.3-70b-versatile",
       "role": "Quick tasks, boilerplate"
     },
     {
@@ -221,4 +217,4 @@ Each agent can use a completely different provider. A single plan can mix Anthro
 
 ## Default Model
 
-When no model is configured anywhere, Polpo uses **`opencode:big-pickle`** — a free model that requires no API key. It's good for trying Polpo out without any setup, but you'll want to switch to a real provider for production work.
+When no model is configured, Polpo will prompt you to configure one via `polpo setup`. Set a model on your agents or use the `POLPO_MODEL` env var.

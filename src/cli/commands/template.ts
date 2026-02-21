@@ -1,12 +1,12 @@
 /**
- * CLI workflow subcommands — list, show, run, validate.
+ * CLI template subcommands — list, show, run, validate.
  */
 
 import { Command } from "commander";
 import chalk from "chalk";
 import { resolve } from "node:path";
 import { Orchestrator } from "../../core/orchestrator.js";
-import { discoverWorkflows, loadWorkflow, validateParams, instantiateWorkflow } from "../../core/workflow.js";
+import { discoverTemplates, loadTemplate, validateParams, instantiateTemplate } from "../../core/template.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -44,36 +44,36 @@ function parseParamFlags(raw: string[]): Record<string, string> {
 // Registration
 // ---------------------------------------------------------------------------
 
-export function registerWorkflowCommands(program: Command): void {
-  const wf = program
-    .command("workflow")
-    .description("Manage reusable workflow templates");
+export function registerTemplateCommands(program: Command): void {
+  const tpl = program
+    .command("template")
+    .description("Manage reusable plan templates");
 
-  // ---- workflow list ------------------------------------------------------
-  wf
+  // ---- template list ------------------------------------------------------
+  tpl
     .command("list")
-    .description("List available workflows")
+    .description("List available templates")
     .option("-d, --dir <path>", "Working directory", ".")
     .action((opts) => {
       try {
         const cwd = resolve(opts.dir);
-        const workflows = discoverWorkflows(cwd, getPolpoDir(opts.dir));
+        const templates = discoverTemplates(cwd, getPolpoDir(opts.dir));
 
-        if (workflows.length === 0) {
-          console.log(chalk.dim("  No workflows found."));
-          console.log(chalk.dim("  Create workflows in .polpo/workflows/<name>/workflow.json"));
+        if (templates.length === 0) {
+          console.log(chalk.dim("  No templates found."));
+          console.log(chalk.dim("  Create templates in .polpo/templates/<name>/template.json"));
           return;
         }
 
-        for (const w of workflows) {
-          const paramList = w.parameters.length > 0
-            ? chalk.dim(` (${w.parameters.map(p => p.required ? p.name : `${p.name}?`).join(", ")})`)
+        for (const t of templates) {
+          const paramList = t.parameters.length > 0
+            ? chalk.dim(` (${t.parameters.map(p => p.required ? p.name : `${p.name}?`).join(", ")})`)
             : "";
           console.log(
-            `  ${chalk.bold(w.name)}${paramList}`,
+            `  ${chalk.bold(t.name)}${paramList}`,
           );
           console.log(
-            `    ${chalk.dim(w.description)}`,
+            `    ${chalk.dim(t.description)}`,
           );
         }
       } catch (err: unknown) {
@@ -83,28 +83,28 @@ export function registerWorkflowCommands(program: Command): void {
       }
     });
 
-  // ---- workflow show <name> -----------------------------------------------
-  wf
+  // ---- template show <name> -----------------------------------------------
+  tpl
     .command("show <name>")
-    .description("Show workflow details and parameters")
+    .description("Show template details and parameters")
     .option("-d, --dir <path>", "Working directory", ".")
     .action((name: string, opts) => {
       try {
         const cwd = resolve(opts.dir);
-        const workflow = loadWorkflow(cwd, getPolpoDir(opts.dir), name);
+        const template = loadTemplate(cwd, getPolpoDir(opts.dir), name);
 
-        if (!workflow) {
-          console.error(chalk.red(`Workflow not found: ${name}`));
+        if (!template) {
+          console.error(chalk.red(`Template not found: ${name}`));
           process.exit(1);
         }
 
-        console.log(chalk.bold(`  Name:        `) + workflow.name);
-        console.log(chalk.bold(`  Description: `) + workflow.description);
+        console.log(chalk.bold(`  Name:        `) + template.name);
+        console.log(chalk.bold(`  Description: `) + template.description);
 
-        if (workflow.parameters && workflow.parameters.length > 0) {
+        if (template.parameters && template.parameters.length > 0) {
           console.log();
           console.log(chalk.bold(`  Parameters:`));
-          for (const p of workflow.parameters) {
+          for (const p of template.parameters) {
             const req = p.required ? chalk.red("*") : " ";
             const type = chalk.dim(`(${p.type ?? "string"})`);
             const def = p.default !== undefined ? chalk.dim(` default: ${p.default}`) : "";
@@ -117,7 +117,7 @@ export function registerWorkflowCommands(program: Command): void {
         console.log();
         console.log(chalk.dim("  --- Plan Template ---"));
         console.log();
-        console.log(JSON.stringify(workflow.plan, null, 2));
+        console.log(JSON.stringify(template.plan, null, 2));
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
         console.error(chalk.red(`Error: ${msg}`));
@@ -125,10 +125,10 @@ export function registerWorkflowCommands(program: Command): void {
       }
     });
 
-  // ---- workflow run <name> [--param key=value ...] -------------------------
-  wf
+  // ---- template run <name> [--param key=value ...] -------------------------
+  tpl
     .command("run <name>")
-    .description("Execute a workflow with parameters")
+    .description("Execute a template with parameters")
     .option("-d, --dir <path>", "Working directory", ".")
     .option("-p, --param <params...>", "Parameters as key=value pairs")
     .option("--dry-run", "Show the instantiated plan without executing")
@@ -136,13 +136,13 @@ export function registerWorkflowCommands(program: Command): void {
       try {
         const cwd = resolve(opts.dir);
         const polpoDir = getPolpoDir(opts.dir);
-        const workflow = loadWorkflow(cwd, polpoDir, name);
+        const template = loadTemplate(cwd, polpoDir, name);
 
-        if (!workflow) {
-          console.error(chalk.red(`Workflow not found: ${name}`));
-          const available = discoverWorkflows(cwd, polpoDir);
+        if (!template) {
+          console.error(chalk.red(`Template not found: ${name}`));
+          const available = discoverTemplates(cwd, polpoDir);
           if (available.length > 0) {
-            console.log(chalk.dim(`\n  Available workflows: ${available.map(w => w.name).join(", ")}`));
+            console.log(chalk.dim(`\n  Available templates: ${available.map(t => t.name).join(", ")}`));
           }
           process.exit(1);
         }
@@ -151,7 +151,7 @@ export function registerWorkflowCommands(program: Command): void {
         const rawParams = parseParamFlags(opts.param ?? []);
 
         // Validate
-        const validation = validateParams(workflow, rawParams);
+        const validation = validateParams(template, rawParams);
         if (!validation.valid) {
           console.error(chalk.red("  Parameter errors:"));
           for (const err of validation.errors) {
@@ -161,7 +161,7 @@ export function registerWorkflowCommands(program: Command): void {
         }
 
         // Instantiate
-        const instance = instantiateWorkflow(workflow, validation.resolved);
+        const instance = instantiateTemplate(template, validation.resolved);
 
         if (opts.dryRun) {
           console.log(chalk.dim("  --- Dry Run: Instantiated Plan ---"));
@@ -181,7 +181,7 @@ export function registerWorkflowCommands(program: Command): void {
 
         const result = orchestrator.executePlan(plan.id);
         console.log(
-          chalk.green(`  Workflow "${workflow.name}" executed — ${result.tasks.length} task(s), group: ${result.group}`),
+          chalk.green(`  Template "${template.name}" executed — ${result.tasks.length} task(s), group: ${result.group}`),
         );
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -190,38 +190,38 @@ export function registerWorkflowCommands(program: Command): void {
       }
     });
 
-  // ---- workflow validate <name> -------------------------------------------
-  wf
+  // ---- template validate <name> -------------------------------------------
+  tpl
     .command("validate <name>")
-    .description("Validate a workflow definition")
+    .description("Validate a template definition")
     .option("-d, --dir <path>", "Working directory", ".")
     .action((name: string, opts) => {
       try {
         const cwd = resolve(opts.dir);
-        const workflow = loadWorkflow(cwd, getPolpoDir(opts.dir), name);
+        const template = loadTemplate(cwd, getPolpoDir(opts.dir), name);
 
-        if (!workflow) {
-          console.error(chalk.red(`Workflow not found: ${name}`));
+        if (!template) {
+          console.error(chalk.red(`Template not found: ${name}`));
           process.exit(1);
         }
 
         const errors: string[] = [];
 
         // Check required fields
-        if (!workflow.name) errors.push("Missing field: name");
-        if (!workflow.description) errors.push("Missing field: description");
-        if (!workflow.plan) errors.push("Missing field: plan");
+        if (!template.name) errors.push("Missing field: name");
+        if (!template.description) errors.push("Missing field: description");
+        if (!template.plan) errors.push("Missing field: plan");
 
         // Check plan has tasks
-        const plan = workflow.plan as { tasks?: unknown[] };
+        const plan = template.plan as { tasks?: unknown[] };
         if (!plan.tasks || !Array.isArray(plan.tasks) || plan.tasks.length === 0) {
           errors.push("Plan must have at least one task");
         }
 
         // Check all placeholders have matching parameters
-        const json = JSON.stringify(workflow.plan);
+        const json = JSON.stringify(template.plan);
         const placeholders = json.match(/\{\{([^}]+)\}\}/g) ?? [];
-        const paramNames = new Set((workflow.parameters ?? []).map(p => p.name));
+        const paramNames = new Set((template.parameters ?? []).map(p => p.name));
         const undeclared = [...new Set(placeholders.map(m => m.slice(2, -2)))]
           .filter(name => !paramNames.has(name));
         if (undeclared.length > 0) {
@@ -229,7 +229,7 @@ export function registerWorkflowCommands(program: Command): void {
         }
 
         // Check parameters with no matching placeholder
-        for (const p of workflow.parameters ?? []) {
+        for (const p of template.parameters ?? []) {
           if (!json.includes(`{{${p.name}}}`)) {
             errors.push(`Parameter "${p.name}" is declared but never used in the plan template`);
           }
@@ -243,10 +243,10 @@ export function registerWorkflowCommands(program: Command): void {
           process.exit(1);
         }
 
-        console.log(chalk.green(`  Workflow "${workflow.name}" is valid.`));
-        console.log(chalk.dim(`    ${(workflow.parameters ?? []).length} parameter(s)`));
+        console.log(chalk.green(`  Template "${template.name}" is valid.`));
+        console.log(chalk.dim(`    ${(template.parameters ?? []).length} parameter(s)`));
         console.log(chalk.dim(`    ${(plan.tasks as unknown[]).length} task(s)`));
-        const teamSize = (workflow.plan as { team?: unknown[] }).team?.length ?? 0;
+        const teamSize = (template.plan as { team?: unknown[] }).team?.length ?? 0;
         if (teamSize > 0) console.log(chalk.dim(`    ${teamSize} volatile agent(s)`));
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);

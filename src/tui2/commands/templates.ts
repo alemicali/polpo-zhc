@@ -5,32 +5,32 @@ import { kickRun } from "../format.js";
 import { PickerOverlay } from "../overlays/picker.js";
 import { ViewerOverlay } from "../overlays/viewer.js";
 import {
-  discoverWorkflows,
-  loadWorkflow,
+  discoverTemplates,
+  loadTemplate,
   validateParams,
-  instantiateWorkflow,
-} from "../../core/workflow.js";
+  instantiateTemplate,
+} from "../../core/template.js";
 
-export async function cmdWorkflow(api: CommandAPI): Promise<void> {
+export async function cmdTemplate(api: CommandAPI): Promise<void> {
   const { polpo, tui, args } = api;
   const workDir = polpo.getWorkDir();
   const polpoDir = polpo.getPolpoDir();
 
-  const workflows = discoverWorkflows(workDir, polpoDir);
-  if (workflows.length === 0) {
+  const templates = discoverTemplates(workDir, polpoDir);
+  if (templates.length === 0) {
     tui.logSystem(
-      "No workflows found. Place .yaml files in .polpo/workflows/",
+      "No templates found. Place .yaml files in .polpo/templates/",
     );
     tui.requestRender();
     return;
   }
 
-  // Direct execution: /workflow <name> [k=v ...]
+  // Direct execution: /template <name> [k=v ...]
   if (args.length > 0 && args[0] !== "list") {
     const name = args[0]!;
-    const wf = loadWorkflow(workDir, polpoDir, name);
-    if (!wf) {
-      tui.logSystem(`Workflow not found: ${name}`);
+    const tpl = loadTemplate(workDir, polpoDir, name);
+    if (!tpl) {
+      tui.logSystem(`Template not found: ${name}`);
       tui.requestRender();
       return;
     }
@@ -40,7 +40,7 @@ export async function cmdWorkflow(api: CommandAPI): Promise<void> {
       const [k, ...v] = arg.split("=");
       if (k && v.length > 0) params[k] = v.join("=");
     }
-    const validation = validateParams(wf, params);
+    const validation = validateParams(tpl, params);
     if (!validation.valid) {
       tui.logSystem(
         `Validation errors:\n  ${validation.errors.join("\n  ")}`,
@@ -48,7 +48,7 @@ export async function cmdWorkflow(api: CommandAPI): Promise<void> {
       tui.requestRender();
       return;
     }
-    const plan = instantiateWorkflow(wf, validation.resolved);
+    const plan = instantiateTemplate(tpl, validation.resolved);
     const saved = polpo.savePlan({
       data: plan.data,
       name: plan.name,
@@ -56,33 +56,33 @@ export async function cmdWorkflow(api: CommandAPI): Promise<void> {
     });
     polpo.executePlan(saved.id);
     kickRun(polpo);
-    tui.logSystem(`Workflow "${name}" executed as plan "${plan.name}"`);
+    tui.logSystem(`Template "${name}" executed as plan "${plan.name}"`);
     tui.requestRender();
     return;
   }
 
   // Picker
-  const items = workflows.map((w) => ({
-    value: w.name,
-    label: w.name,
-    description: w.description ?? "",
+  const items = templates.map((t) => ({
+    value: t.name,
+    label: t.name,
+    description: t.description ?? "",
   }));
 
   const picker = new PickerOverlay({
-    title: "Workflows",
+    title: "Templates",
     items,
     onSelect: (item) => {
       tui.hideOverlay();
-      const wf = loadWorkflow(workDir, polpoDir, item.value);
-      if (!wf) return;
+      const tpl = loadTemplate(workDir, polpoDir, item.value);
+      if (!tpl) return;
 
       const lines: string[] = [];
-      lines.push(chalk.bold(wf.name));
-      if (wf.description) lines.push(wf.description);
+      lines.push(chalk.bold(tpl.name));
+      if (tpl.description) lines.push(tpl.description);
       lines.push("");
-      if (wf.parameters && wf.parameters.length > 0) {
+      if (tpl.parameters && tpl.parameters.length > 0) {
         lines.push(chalk.bold("Parameters:"));
-        for (const p of wf.parameters) {
+        for (const p of tpl.parameters) {
           const req = p.required ? theme.error("*") : "";
           const def =
             p.default !== undefined
@@ -95,10 +95,10 @@ export async function cmdWorkflow(api: CommandAPI): Promise<void> {
       }
       lines.push("");
       lines.push(chalk.bold("Usage:"));
-      lines.push(`  /workflow ${wf.name} key=value ...`);
+      lines.push(`  /template ${tpl.name} key=value ...`);
 
       const viewer = new ViewerOverlay({
-        title: `Workflow: ${wf.name}`,
+        title: `Template: ${tpl.name}`,
         content: lines.join("\n"),
         onClose: () => tui.hideOverlay(),
       });

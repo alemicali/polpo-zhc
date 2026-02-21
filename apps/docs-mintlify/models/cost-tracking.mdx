@@ -16,7 +16,7 @@ import { querySDKTextDetailed } from "polpo/llm";
 const result = await querySDKTextDetailed(
   "Refactor this function for readability",
   "/path/to/workdir",
-  "anthropic:claude-sonnet-4-5-20250929"
+  "anthropic:claude-sonnet-4-6"
 );
 
 console.log(result.text);     // The response
@@ -42,7 +42,7 @@ Cost is calculated using the model's pricing metadata:
 ```typescript
 import { estimateCost, resolveModel } from "polpo/llm";
 
-const model = resolveModel("anthropic:claude-sonnet-4-5-20250929");
+const model = resolveModel("anthropic:claude-sonnet-4-6");
 const cost = estimateCost(model, {
   inputTokens: 10000,
   outputTokens: 2000,
@@ -98,7 +98,7 @@ const streamResult = await querySDKStreamDetailed(prompt, cwd, model, (delta) =>
 import { querySDKWithFallback } from "polpo/llm";
 
 const result = await querySDKWithFallback(prompt, cwd, {
-  primary: "anthropic:claude-sonnet-4-5-20250929",
+  primary: "anthropic:claude-sonnet-4-6",
   fallbacks: ["openai:gpt-4o"]
 });
 
@@ -115,7 +115,7 @@ Reference pricing for popular models (as of catalog data):
 | Model | Input $/1M | Output $/1M | Cache Read $/1M |
 |-------|-----------|-------------|-----------------|
 | `claude-opus-4-6` | $15.00 | $75.00 | $1.50 |
-| `claude-sonnet-4-5-20250929` | $3.00 | $15.00 | $0.30 |
+| `claude-sonnet-4-6` | $3.00 | $15.00 | $0.30 |
 | `claude-haiku-4-5-20251001` | $0.80 | $4.00 | $0.08 |
 
 ### OpenAI
@@ -155,7 +155,7 @@ Don't use `claude-opus-4-6` for formatting tasks. Match model capability to task
 {
   "agents": [
     { "name": "architect", "model": "anthropic:claude-opus-4-6" },
-    { "name": "coder", "model": "anthropic:claude-sonnet-4-5-20250929" },
+    { "name": "coder", "model": "anthropic:claude-sonnet-4-6" },
     { "name": "formatter", "model": "anthropic:claude-haiku-4-5-20251001" }
   ]
 }
@@ -187,10 +187,10 @@ Put cheaper models in the fallback chain:
 {
   "settings": {
     "orchestratorModel": {
-      "primary": "anthropic:claude-sonnet-4-5-20250929",
+      "primary": "anthropic:claude-sonnet-4-6",
       "fallbacks": [
         "google:gemini-2.5-flash",
-        "opencode:big-pickle"
+        "groq:llama-3.3-70b-versatile"
       ]
     }
   }
@@ -205,9 +205,9 @@ Restrict which models can be used to prevent accidental expensive model usage:
 {
   "settings": {
     "modelAllowlist": {
-      "anthropic:claude-sonnet-4-5-20250929": { "alias": "Sonnet" },
+      "anthropic:claude-sonnet-4-6": { "alias": "Sonnet" },
       "anthropic:claude-haiku-4-5-20251001": { "alias": "Haiku" },
-      "groq:llama-3.3-70b": { "alias": "Llama" }
+      "groq:llama-3.3-70b-versatile": { "alias": "Llama" }
     }
   }
 }

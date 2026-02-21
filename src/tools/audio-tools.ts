@@ -8,8 +8,8 @@
  * Architecture: direct fetch() to provider REST APIs — zero vendor SDK dependencies.
  *
  * Supported providers:
- *   STT: openai (Whisper), deepgram
- *   TTS: openai (gpt-4o-mini-tts / tts-1), elevenlabs
+ *   STT: openai (Whisper), deepgram (Nova)
+ *   TTS: openai (gpt-4o-mini-tts / tts-1), deepgram (Aura), elevenlabs
  *
  * Environment variables:
  *   OPENAI_API_KEY    — required for openai provider
@@ -266,9 +266,10 @@ const AudioSpeakSchema = Type.Object({
   path: Type.String({ description: "Output file path (e.g. 'output.mp3'). Format inferred from extension." }),
   provider: Type.Optional(Type.Union([
     Type.Literal("openai"),
+    Type.Literal("deepgram"),
     Type.Literal("elevenlabs"),
   ], { description: "TTS provider (default: openai)" })),
-  model: Type.Optional(Type.String({ description: "Model name. OpenAI: 'tts-1' (default), 'tts-1-hd', 'gpt-4o-mini-tts'. ElevenLabs: 'eleven_multilingual_v2' (default)." })),
+  model: Type.Optional(Type.String({ description: "Model name. OpenAI: 'tts-1' (default), 'tts-1-hd', 'gpt-4o-mini-tts'. Deepgram: 'aura-2-en' (default). ElevenLabs: 'eleven_multilingual_v2' (default)." })),
   voice: Type.Optional(Type.String({ description: "Voice name/ID. OpenAI: alloy, echo, fable, onyx, nova, shimmer (default: alloy). ElevenLabs: voice ID." })),
   speed: Type.Optional(Type.Number({ description: "Playback speed 0.25-4.0 (OpenAI only, default: 1.0)" })),
   instructions: Type.Optional(Type.String({ description: "Voice style instructions (OpenAI gpt-4o-mini-tts only, e.g. 'Speak in a cheerful tone')" })),
@@ -280,8 +281,8 @@ function createSpeakTool(cwd: string, sandbox: string[]): AgentTool<typeof Audio
     label: "Text to Speech",
     description: "Generate speech audio from text using text-to-speech AI. " +
       "Output format is inferred from file extension (mp3, wav, flac, opus, aac, pcm). " +
-      "Providers: openai (default), elevenlabs. " +
-      "Requires OPENAI_API_KEY or ELEVENLABS_API_KEY env var.",
+      "Providers: openai (default), deepgram (Aura), elevenlabs. " +
+      "Requires OPENAI_API_KEY, DEEPGRAM_API_KEY, or ELEVENLABS_API_KEY env var.",
     parameters: AudioSpeakSchema,
     async execute(_id, params, signal) {
       const filePath = resolve(cwd, params.path);
@@ -292,6 +293,8 @@ function createSpeakTool(cwd: string, sandbox: string[]): AgentTool<typeof Audio
       try {
         if (provider === "openai") {
           return await speakOpenAI(filePath, params, signal);
+        } else if (provider === "deepgram") {
+          return await speakDeepgram(filePath, params, signal);
         } else {
           return await speakElevenLabs(filePath, params, signal);
         }
@@ -361,6 +364,55 @@ async function speakOpenAI(
       model,
       voice,
       format: responseFormat,
+      path: filePath,
+      bytes: buffer.byteLength,
+      textLength: params.text.length,
+    },
+  };
+}
+
+async function speakDeepgram(
+  filePath: string,
+  params: { text: string; model?: string },
+  signal?: AbortSignal,
+): Promise<ToolResult> {
+  const apiKey = requireEnv("DEEPGRAM_API_KEY");
+  const model = params.model ?? "aura-2-en";
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT);
+  if (signal) signal.addEventListener("abort", () => controller.abort(), { once: true });
+
+  const response = await fetch(
+    `https://api.deepgram.com/v1/speak?model=${encodeURIComponent(model)}`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Token ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ text: params.text }),
+      signal: controller.signal,
+    },
+  );
+
+  clearTimeout(timer);
+
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(`Deepgram TTS API ${response.status}: ${errText}`);
+  }
+
+  const buffer = Buffer.from(await response.arrayBuffer());
+  mkdirSync(dirname(filePath), { recursive: true });
+  writeFileSync(filePath, buffer);
+
+  return {
+    content: [{ type: "text", text: `Speech audio saved: ${filePath} (${(buffer.byteLength / 1024).toFixed(1)} KB, model: ${model})` }],
+    details: {
+      provider: "deepgram",
+      model,
+      format: "mp3",
       path: filePath,
       bytes: buffer.byteLength,
       textLength: params.text.length,

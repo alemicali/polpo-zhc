@@ -1,21 +1,21 @@
 /**
- * Workflow system — parameterized, reusable plan templates.
+ * Template system — parameterized, reusable plan templates.
  *
- * A workflow is a JSON file (workflow.json) that defines a PlanDocument with
+ * A template is a JSON file (template.json) that defines a PlanDocument with
  * placeholder parameters ({{name}}). When executed, parameters are resolved
  * and the result is saved + executed as a standard Plan.
  *
  * Discovery paths (in priority order, first occurrence wins):
- *   1. <polpoDir>/workflows/          — project-level workflows
- *   2. <cwd>/.polpo/workflows/        — alias for polpoDir when polpoDir != .polpo
- *   3. ~/.polpo/workflows/            — user-level workflows
+ *   1. <polpoDir>/templates/          — project-level templates
+ *   2. <cwd>/.polpo/templates/        — alias for polpoDir when polpoDir != .polpo
+ *   3. ~/.polpo/templates/            — user-level templates
  *
  * File layout:
- *   .polpo/workflows/
+ *   .polpo/templates/
  *     code-review/
- *       workflow.json
+ *       template.json
  *     bug-fix/
- *       workflow.json
+ *       template.json
  */
 
 import { readdirSync, readFileSync, existsSync, realpathSync, statSync } from "node:fs";
@@ -24,7 +24,7 @@ import { homedir } from "node:os";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
-export interface WorkflowParameter {
+export interface TemplateParameter {
   /** Parameter name — used as {{name}} in the plan template. */
   name: string;
   /** Human-readable description. */
@@ -39,32 +39,32 @@ export interface WorkflowParameter {
   enum?: (string | number)[];
 }
 
-export interface WorkflowDefinition {
-  /** Workflow identifier (kebab-case). */
+export interface TemplateDefinition {
+  /** Template identifier (kebab-case). */
   name: string;
   /** Human-readable description. */
   description: string;
   /** Parameterized plan template — same shape as PlanDocument. */
   plan: Record<string, unknown>;
   /** Declared parameters. */
-  parameters?: WorkflowParameter[];
+  parameters?: TemplateParameter[];
 }
 
 /** Lightweight metadata returned by discovery (no plan body). */
-export interface WorkflowInfo {
+export interface TemplateInfo {
   name: string;
   description: string;
-  parameters: WorkflowParameter[];
-  /** Absolute path to the workflow directory. */
+  parameters: TemplateParameter[];
+  /** Absolute path to the template directory. */
   path: string;
 }
 
 // ── Discovery ──────────────────────────────────────────────────────────
 
-function scanWorkflowDir(dir: string): WorkflowInfo[] {
+function scanTemplateDir(dir: string): TemplateInfo[] {
   if (!existsSync(dir)) return [];
 
-  const results: WorkflowInfo[] = [];
+  const results: TemplateInfo[] = [];
 
   let entries: string[];
   try {
@@ -91,13 +91,13 @@ function scanWorkflowDir(dir: string): WorkflowInfo[] {
       continue;
     }
 
-    // Must contain workflow.json
-    const workflowFile = join(realPath, "workflow.json");
-    if (!existsSync(workflowFile)) continue;
+    // Must contain template.json
+    const templateFile = join(realPath, "template.json");
+    if (!existsSync(templateFile)) continue;
 
     try {
-      const raw = readFileSync(workflowFile, "utf-8");
-      const def = JSON.parse(raw) as Partial<WorkflowDefinition>;
+      const raw = readFileSync(templateFile, "utf-8");
+      const def = JSON.parse(raw) as Partial<TemplateDefinition>;
 
       if (!def.name || !def.description || !def.plan) continue;
 
@@ -116,34 +116,34 @@ function scanWorkflowDir(dir: string): WorkflowInfo[] {
 }
 
 /**
- * Discover all available workflows from known locations.
+ * Discover all available templates from known locations.
  * Returns deduplicated list (first occurrence wins by name).
  */
-export function discoverWorkflows(cwd: string, polpoDir?: string): WorkflowInfo[] {
+export function discoverTemplates(cwd: string, polpoDir?: string): TemplateInfo[] {
   const seen = new Set<string>();
-  const results: WorkflowInfo[] = [];
+  const results: TemplateInfo[] = [];
 
   const dirs: string[] = [];
 
-  // 1. Project-level: <polpoDir>/workflows/
+  // 1. Project-level: <polpoDir>/templates/
   if (polpoDir) {
-    dirs.push(join(polpoDir, "workflows"));
+    dirs.push(join(polpoDir, "templates"));
   }
 
   // 2. Fallback if polpoDir is not the default .polpo
   const defaultPolpoDir = join(cwd, ".polpo");
   if (!polpoDir || resolve(polpoDir) !== resolve(defaultPolpoDir)) {
-    dirs.push(join(defaultPolpoDir, "workflows"));
+    dirs.push(join(defaultPolpoDir, "templates"));
   }
 
-  // 3. User-level: ~/.polpo/workflows/
-  dirs.push(join(homedir(), ".polpo", "workflows"));
+  // 3. User-level: ~/.polpo/templates/
+  dirs.push(join(homedir(), ".polpo", "templates"));
 
   for (const dir of dirs) {
-    for (const wf of scanWorkflowDir(dir)) {
-      if (!seen.has(wf.name)) {
-        seen.add(wf.name);
-        results.push(wf);
+    for (const tpl of scanTemplateDir(dir)) {
+      if (!seen.has(tpl.name)) {
+        seen.add(tpl.name);
+        results.push(tpl);
       }
     }
   }
@@ -152,18 +152,18 @@ export function discoverWorkflows(cwd: string, polpoDir?: string): WorkflowInfo[
 }
 
 /**
- * Load a full workflow definition by name.
+ * Load a full template definition by name.
  * Returns null if not found.
  */
-export function loadWorkflow(cwd: string, polpoDir: string | undefined, name: string): WorkflowDefinition | null {
-  const workflows = discoverWorkflows(cwd, polpoDir);
-  const info = workflows.find(w => w.name === name);
+export function loadTemplate(cwd: string, polpoDir: string | undefined, name: string): TemplateDefinition | null {
+  const templates = discoverTemplates(cwd, polpoDir);
+  const info = templates.find(t => t.name === name);
   if (!info) return null;
 
-  const workflowFile = join(info.path, "workflow.json");
+  const templateFile = join(info.path, "template.json");
   try {
-    const raw = readFileSync(workflowFile, "utf-8");
-    return JSON.parse(raw) as WorkflowDefinition;
+    const raw = readFileSync(templateFile, "utf-8");
+    return JSON.parse(raw) as TemplateDefinition;
   } catch {
     return null;
   }
@@ -179,16 +179,16 @@ export interface ValidationResult {
 }
 
 /**
- * Validate user-provided parameters against the workflow definition.
+ * Validate user-provided parameters against the template definition.
  * Applies defaults, checks required fields, types, and enum constraints.
  */
 export function validateParams(
-  workflow: WorkflowDefinition,
+  template: TemplateDefinition,
   params: Record<string, string | number | boolean>,
 ): ValidationResult {
   const errors: string[] = [];
   const resolved: Record<string, string | number | boolean> = {};
-  const defs = workflow.parameters ?? [];
+  const defs = template.parameters ?? [];
 
   for (const def of defs) {
     const value = params[def.name];
@@ -251,18 +251,18 @@ export function validateParams(
 // ── Instantiation ──────────────────────────────────────────────────────
 
 /**
- * Instantiate a workflow with resolved parameters.
+ * Instantiate a template with resolved parameters.
  *
  * 1. Serializes the plan to JSON string
  * 2. Replaces all {{placeholder}} with parameter values
  * 3. Re-parses the JSON to validate structural integrity
  * 4. Returns the plan data string ready for planExecutor.savePlan()
  */
-export function instantiateWorkflow(
-  workflow: WorkflowDefinition,
+export function instantiateTemplate(
+  template: TemplateDefinition,
   resolved: Record<string, string | number | boolean>,
 ): { name: string; data: string; prompt: string } {
-  let json = JSON.stringify(workflow.plan);
+  let json = JSON.stringify(template.plan);
 
   // Replace all {{param}} placeholders
   for (const [key, value] of Object.entries(resolved)) {
@@ -275,7 +275,7 @@ export function instantiateWorkflow(
   const unreplaced = json.match(/\{\{([^}]+)\}\}/g);
   if (unreplaced) {
     const names = [...new Set(unreplaced.map(m => m.slice(2, -2)))];
-    throw new Error(`Unreplaced placeholders in workflow "${workflow.name}": ${names.join(", ")}`);
+    throw new Error(`Unreplaced placeholders in template "${template.name}": ${names.join(", ")}`);
   }
 
   // Validate the resulting JSON is still valid
@@ -283,7 +283,7 @@ export function instantiateWorkflow(
     JSON.parse(json);
   } catch (err) {
     throw new Error(
-      `Workflow "${workflow.name}" produced invalid JSON after parameter substitution: ${err instanceof Error ? err.message : String(err)}`,
+      `Template "${template.name}" produced invalid JSON after parameter substitution: ${err instanceof Error ? err.message : String(err)}`,
     );
   }
 
@@ -291,7 +291,7 @@ export function instantiateWorkflow(
   const paramDesc = Object.entries(resolved)
     .map(([k, v]) => `${k}=${v}`)
     .join(", ");
-  const prompt = `workflow:${workflow.name}${paramDesc ? ` (${paramDesc})` : ""}`;
+  const prompt = `template:${template.name}${paramDesc ? ` (${paramDesc})` : ""}`;
 
-  return { name: workflow.name, data: json, prompt };
+  return { name: template.name, data: json, prompt };
 }

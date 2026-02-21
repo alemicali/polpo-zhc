@@ -60,6 +60,8 @@
             "group": "First Steps",
             "pages": [
               "install/index",
+              "guides/setup",
+              "guides/build-your-team",
               "guides/first-plan",
               "configuration"
             ]
@@ -112,7 +114,7 @@
           {
             "group": "Plan Execution",
             "pages": [
-              "features/workflows",
+              "features/templates",
               "features/scheduling",
               "features/hooks",
               {
@@ -258,7 +260,11 @@
     },
     {
       "source": "/features/writing-workflows",
-      "destination": "/features/workflows"
+      "destination": "/features/templates"
+    },
+    {
+      "source": "/features/workflows",
+      "destination": "/features/templates"
     },
     {
       "source": "/features/assessment",

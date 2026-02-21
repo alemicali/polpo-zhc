@@ -111,7 +111,11 @@ export function registerModelsCommands(parent: Command): void {
       // Resolve the primary model
       const modelSpec = config?.settings?.orchestratorModel;
       const primarySpec = resolveModelSpec(modelSpec);
-      const primary = primarySpec || process.env.POLPO_MODEL || "opencode:big-pickle";
+      const primary = primarySpec || process.env.POLPO_MODEL;
+      if (!primary) {
+        console.log(chalk.yellow("\n  No default model configured. Run 'polpo setup' to set one.\n"));
+        return;
+      }
 
       if (opts.plain) {
         console.log(primary);

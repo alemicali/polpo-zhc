@@ -1,26 +1,26 @@
 ---
-title: "Writing Workflows"
-description: "Step-by-step guide to creating custom reusable workflow templates."
+title: "Writing Templates"
+description: "Step-by-step guide to creating custom reusable plan templates."
 ---
 
-This guide walks you through creating a custom workflow from scratch. If you haven't read the [Workflows](/features/workflows) page yet, start there for the big picture.
+This guide walks you through creating a custom template from scratch. If you haven't read the [Templates](/features/templates) page yet, start there for the big picture.
 
 ## Quick Start
 
 <Steps>
 
-1. **Create the workflow directory**
+1. **Create the template directory**
 
    ```bash
-   mkdir -p .polpo/workflows/my-workflow
+   mkdir -p .polpo/templates/my-template
    ```
 
-2. **Create `workflow.json`**
+2. **Create `template.json`**
 
    ```json
    {
-     "name": "my-workflow",
-     "description": "What this workflow does in one sentence",
+     "name": "my-template",
+     "description": "What this template does in one sentence",
      "parameters": [
        {
          "name": "target",
@@ -44,22 +44,22 @@ This guide walks you through creating a custom workflow from scratch. If you hav
 3. **Validate it**
 
    ```bash
-   polpo workflow validate my-workflow
+   polpo template validate my-template
    ```
 
 4. **Run it**
 
    ```bash
-   polpo workflow run my-workflow --param target=src/auth
+   polpo template run my-template --param target=src/auth
    ```
 
 </Steps>
 
 That's the whole process. The rest of this guide covers best practices and advanced patterns.
 
-## Workflow Structure
+## Template Structure
 
-Every workflow has three required fields and one optional:
+Every template has three required fields and one optional:
 
 ```json
 {
@@ -74,9 +74,9 @@ The `name` must match the directory name. The `plan` field is a standard [PlanDo
 
 ## Designing Parameters
 
-Good parameters make workflows flexible without making them complicated. Some guidelines:
+Good parameters make templates flexible without making them complicated. Some guidelines:
 
-**Make the minimum required.** Only mark parameters `required` if the workflow literally cannot function without them. Everything else should have a sensible `default`.
+**Make the minimum required.** Only mark parameters `required` if the template literally cannot function without them. Everything else should have a sensible `default`.
 
 **Use enums for constrained choices.** If a parameter only makes sense with specific values, declare them:
 
@@ -109,7 +109,7 @@ The `plan` field is where the real work happens. It uses the same structure as a
 
 ### Teams
 
-Define volatile agents specific to this workflow:
+Define volatile agents specific to this template:
 
 ```json
 {
@@ -132,7 +132,7 @@ Define volatile agents specific to this workflow:
 ```
 
 <Tip>
-You can omit the `team` field entirely if you want the workflow to use the project's existing agents. Just reference them by name in `assignTo`.
+You can omit the `team` field entirely if you want the template to use the project's existing agents. Just reference them by name in `assignTo`.
 </Tip>
 
 ### Tasks with Placeholders
@@ -226,9 +226,9 @@ Block progression until quality thresholds are met:
 }
 ```
 
-## Example: Full Workflow
+## Example: Full Template
 
-Here's a complete workflow that performs a focused code review:
+Here's a complete template that performs a focused code review:
 
 ```json
 {
@@ -322,7 +322,7 @@ Here's a complete workflow that performs a focused code review:
 Always validate before running:
 
 ```bash
-polpo workflow validate code-review
+polpo template validate code-review
 ```
 
 The validator checks:
@@ -332,24 +332,24 @@ The validator checks:
 - All `{{placeholders}}` in the plan have matching parameter declarations
 - All declared parameters are actually used somewhere in the plan
 
-## Sharing Workflows
+## Sharing Templates
 
 ### Project-level
 
-Put workflows in `.polpo/workflows/` — they're committed to version control and shared with your team.
+Put templates in `.polpo/templates/` — they're committed to version control and shared with your team.
 
 ### User-level
 
-Put workflows in `~/.polpo/workflows/` — they're available across all your projects. Good for personal productivity workflows.
+Put templates in `~/.polpo/templates/` — they're available across all your projects. Good for personal productivity templates.
 
 ### Override precedence
 
-If a project and user-level workflow share the same name, the project-level one wins. This lets teams override a personal workflow with a standardized version.
+If a project and user-level template share the same name, the project-level one wins. This lets teams override a personal template with a standardized version.
 
 ## Tips
 
-- **Start simple.** A workflow with one task and one parameter is still useful. You can add complexity later.
-- **Use quality gates for multi-step workflows.** They prevent wasted work when an early step produces poor results.
+- **Start simple.** A template with one task and one parameter is still useful. You can add complexity later.
+- **Use quality gates for multi-step templates.** They prevent wasted work when an early step produces poor results.
 - **Write detailed task descriptions.** The agent only sees the resolved description — make it clear what "success" looks like.
 - **Test with `--dry-run`.** The CLI's `--dry-run` flag shows the fully instantiated plan without executing, so you can verify placeholders resolve correctly.
-- **Validate after editing.** Run `polpo workflow validate <name>` to catch placeholder/parameter mismatches early.
+- **Validate after editing.** Run `polpo template validate <name>` to catch placeholder/parameter mismatches early.

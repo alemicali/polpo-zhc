@@ -38,13 +38,33 @@ Polpo auto-infers `openai` from `gpt-`, `o1-`, `o3-`, `o4-`, `chatgpt-`, and `co
 
 ## Models
 
+### GPT-5 Series
+
 | Model | Best for | Context | Reasoning |
 |-------|----------|---------|-----------|
-| `gpt-4o` | Multimodal flagship — text, vision, audio | 128K | No |
-| `gpt-4.1` | Latest GPT iteration, improved instruction following | 1M | No |
-| `o3` | Deep reasoning, complex logic and math | 200K | Yes |
-| `o4-mini` | Fast reasoning at lower cost | 200K | Yes |
+| `gpt-5.2` | Latest flagship — fast reasoning, strong coding | — | Yes |
+| `gpt-5.1` | Great for coding and agentic tasks | — | Yes |
+| `gpt-5` | Flagship general-purpose | — | Yes |
+| `gpt-5-mini` | Smaller 5-series, cost-effective | — | Yes |
+
+### GPT-4 Series
+
+| Model | Best for | Context | Reasoning |
+|-------|----------|---------|-----------|
+| `gpt-4o` | Multimodal — text, vision, audio | 128K | No |
+| `gpt-4.1` | Improved instruction following | 1M | No |
 | `gpt-4o-mini` | Cheap and fast for simple tasks | 128K | No |
+
+### O-Series (Reasoning)
+
+| Model | Best for | Context | Reasoning |
+|-------|----------|---------|-----------|
+| `o3` | Deep reasoning, complex logic and math | 200K | Yes |
+| `o3-pro` | More compute for harder problems | 200K | Yes |
+| `o4-mini` | Fast reasoning at lower cost | 200K | Yes |
+| `o3-mini` | Small reasoning model | 200K | Yes |
+
+**Also available:** `gpt-5-nano`, `gpt-5-pro`, `gpt-5.1-codex`, `gpt-5.1-codex-max`, `gpt-5.2-codex`, `gpt-4.1-mini`, `gpt-4.1-nano`, `codex-mini-latest`
 
 <Tip>
 The **o-series models** (o3, o4-mini) use chain-of-thought reasoning. They're slower but significantly better at complex logic, math, and multi-step planning. Good choice for the orchestrator model or a reviewer agent.
@@ -56,13 +76,15 @@ The **o-series models** (o3, o4-mini) use chain-of-thought reasoning. They're sl
 |---------|-----------|
 | Streaming | Yes |
 | Tool use | Yes |
-| Vision (images) | Yes (GPT-4o, GPT-4.1) |
-| Reasoning | Yes (o3, o4-mini) |
+| Vision (images) | Yes (GPT-4o, GPT-4.1, GPT-5.x) |
+| Reasoning | Yes (o-series, GPT-5.x) |
 
 ## Pricing
 
 | Model | Input (per 1M tokens) | Output (per 1M tokens) |
 |-------|----------------------|----------------------|
+| `gpt-5.2` | $1.75 | $14.00 |
+| `gpt-5` | $2.00 | $8.00 |
 | `gpt-4o` | $2.50 | $10.00 |
 | `gpt-4.1` | $2.00 | $8.00 |
 | `o3` | $10.00 | $40.00 |
@@ -180,6 +202,8 @@ For the full authentication system — all OAuth providers, CLI commands, profil
 
 ## Notes
 
+- The GPT-5 series represents OpenAI's latest generation with built-in reasoning and vision.
 - GPT-4.1 has a 1M token context window — useful for large codebase tasks.
 - Use `gpt-4o-mini` for the "fast-worker" pattern: assign it formatting, boilerplate, and simple refactoring where speed and cost matter more than peak quality.
-- o3 is the strongest reasoning model from OpenAI — consider it for reviewer agents and complex planning tasks.
+- o3 is the strongest standalone reasoning model from OpenAI — consider it for reviewer agents and complex planning tasks.
+- Codex variants (`gpt-5.1-codex`, `gpt-5.2-codex`) are optimized for long-running agentic coding tasks.

@@ -60,13 +60,14 @@ Every model in the catalog carries these fields:
 
 | Use Case | Recommended Model | Why |
 |----------|-------------------|-----|
-| **Free default** | `opencode:big-pickle` | No API key needed, good for experiments |
-| **Best all-round** | `anthropic:claude-sonnet-4-5-20250929` | Strong coding, follows instructions well |
+| **Best all-round** | `anthropic:claude-sonnet-4-6` | Latest Claude, strong coding and reasoning |
 | **Most capable** | `anthropic:claude-opus-4-6` | Complex architecture, multi-step reasoning |
 | **Fast + cheap** | `anthropic:claude-haiku-4-5-20251001` | Quick tasks, boilerplate generation |
 | **Deep reasoning** | `openai:o3` | Code review, complex logic problems |
-| **Fast inference** | `groq:llama-3.3-70b` | High throughput, lower quality ceiling |
+| **Latest GPT** | `openai:gpt-5.2` | Newest OpenAI flagship with reasoning |
+| **Fast inference** | `groq:llama-3.3-70b-versatile` | High throughput, lower quality ceiling |
 | **Long context** | `google:gemini-2.5-pro` | Large codebases, 1M+ token context |
+| **Latest Gemini** | `google:gemini-3-pro-preview` | State-of-art reasoning and agentic coding |
 | **Code generation** | `mistral:codestral-latest` | Specialized code model |
 | **Budget reasoning** | `openai:o4-mini` | Reasoning at lower cost |
 | **Self-hosted** | `ollama:qwen2.5-coder:32b` | Zero API cost, full privacy |
@@ -85,7 +86,7 @@ A recommended multi-agent team configuration:
     },
     {
       "name": "coder",
-      "model": "anthropic:claude-sonnet-4-5-20250929",
+      "model": "anthropic:claude-sonnet-4-6",
       "role": "Implementation — best balance of speed and quality"
     },
     {
@@ -95,7 +96,7 @@ A recommended multi-agent team configuration:
     },
     {
       "name": "fast-worker",
-      "model": "groq:llama-3.3-70b",
+      "model": "groq:llama-3.3-70b-versatile",
       "role": "Boilerplate, formatting, simple refactoring — speed matters"
     },
     {
@@ -105,7 +106,7 @@ A recommended multi-agent team configuration:
     }
   ],
   "settings": {
-    "orchestratorModel": "anthropic:claude-sonnet-4-5-20250929"
+    "orchestratorModel": "anthropic:claude-sonnet-4-6"
   }
 }
 ```
@@ -115,9 +116,9 @@ A recommended multi-agent team configuration:
 | Tier | Models | Input $/1M | Output $/1M | Best For |
 |------|--------|------------|-------------|----------|
 | **Free** | `opencode:big-pickle` | $0 | $0 | Testing, experiments |
-| **Budget** | `claude-haiku-4-5`, `gpt-4o-mini`, `gemini-2.5-flash` | $0.25 - $1 | $1 - $4 | High-volume simple tasks |
-| **Standard** | `claude-sonnet-4-5`, `gpt-4o`, `gemini-2.5-pro` | $2 - $5 | $8 - $15 | General coding, daily work |
-| **Premium** | `claude-opus-4`, `o3`, `gpt-4.1` | $10 - $15 | $40 - $60 | Complex architecture, review |
+| **Budget** | `claude-haiku-4-5`, `gpt-4o-mini`, `gemini-2.5-flash`, `o4-mini` | $0.15 - $1 | $0.60 - $5 | High-volume simple tasks |
+| **Standard** | `claude-sonnet-4-6`, `gpt-5.2`, `gpt-4o`, `gemini-2.5-pro` | $1.75 - $5 | $8 - $15 | General coding, daily work |
+| **Premium** | `claude-opus-4-6`, `o3`, `grok-4` | $3 - $15 | $15 - $75 | Complex architecture, review |
 | **Local** | Ollama, vLLM, LM Studio | $0 | $0 | Privacy, offline, custom models |
 
 ## Model Capabilities
@@ -126,22 +127,23 @@ A recommended multi-agent team configuration:
 
 Models with `reasoning: true` support extended thinking, where the model generates a chain-of-thought before producing the final answer. These are best for complex tasks:
 
-- `anthropic:claude-opus-4-6` (reasoning)
-- `anthropic:claude-sonnet-4-5-20250929` (reasoning)
-- `openai:o3` (reasoning)
-- `openai:o4-mini` (reasoning)
-- `google:gemini-2.5-pro` (reasoning)
-- `google:gemini-2.5-flash` (reasoning)
+- `anthropic:claude-opus-4-6`, `claude-sonnet-4-6`, `claude-sonnet-4-5` (extended thinking)
+- `openai:o3`, `o3-pro`, `o4-mini` (chain-of-thought)
+- `openai:gpt-5.2`, `gpt-5.1`, `gpt-5` (built-in reasoning)
+- `google:gemini-3-pro-preview`, `gemini-2.5-pro`, `gemini-2.5-flash` (thinking)
+- `xai:grok-4`, `grok-3-mini`, `grok-code-fast-1` (reasoning)
+- `mistral:magistral-medium-latest`, `magistral-small-latest` (chain-of-thought)
+- `groq:deepseek-r1-distill-llama-70b`, `qwen/qwen3-32b` (open reasoning)
 
 ### Vision Models
 
 Models with `input: ["text", "image"]` can process images:
 
-- `anthropic:claude-sonnet-4-5-20250929`
-- `anthropic:claude-opus-4-6`
-- `openai:gpt-4o`
-- `google:gemini-2.5-pro`
-- `google:gemini-2.5-flash`
+- `anthropic:claude-opus-4-6`, `claude-sonnet-4-6`, `claude-haiku-4-5`
+- `openai:gpt-4o`, `gpt-4.1`, `gpt-5.2`
+- `google:gemini-3-pro-preview`, `gemini-2.5-pro`, `gemini-2.5-flash`
+- `xai:grok-4`, `grok-4-1-fast-reasoning`
+- `mistral:mistral-large-latest`, `pixtral-large-latest`
 
 Use the `imageModel` setting to designate a vision-capable model for image analysis tasks:
 
@@ -157,13 +159,16 @@ Use the `imageModel` setting to designate a vision-capable model for image analy
 
 | Model | Context Window | Notes |
 |-------|---------------|-------|
-| `google:gemini-2.5-pro` | 1,048,576 | Largest available |
-| `google:gemini-2.5-flash` | 1,048,576 | Same as Pro |
-| `anthropic:claude-sonnet-4-5-20250929` | 200,000 | Standard for Claude |
+| `xai:grok-4` | 2,000,000 | Largest available |
+| `google:gemini-2.5-pro` | 1,048,576 | Largest Gemini |
+| `google:gemini-3-pro-preview` | 1,048,576 | Latest Gemini |
+| `openai:gpt-4.1` | 1,000,000 | Largest GPT-4 |
+| `mistral:codestral-latest` | 256,000 | Code-specialized |
+| `anthropic:claude-sonnet-4-6` | 200,000 | Standard for Claude |
 | `anthropic:claude-opus-4-6` | 200,000 | Standard for Claude |
-| `openai:gpt-4o` | 128,000 | Standard for GPT |
-| `openai:o3` | 200,000 | Extended for reasoning |
-| `groq:llama-3.3-70b` | 131,072 | Open model |
+| `openai:o3` | 200,000 | Reasoning |
+| `openai:gpt-4o` | 128,000 | Standard GPT |
+| `groq:llama-3.3-70b-versatile` | 131,072 | Open model |
 
 ## Model Allowlist
 
@@ -233,13 +238,13 @@ Model Configuration
 
   Fallback chain:
     1. openai:gpt-4o
-    2. opencode:big-pickle
+    2. groq:llama-3.3-70b-versatile
 
   Provider Auth:
 
     anthropic: env + oauth (2 profiles)
     openai: env
-    opencode: env
+    groq: env
 ```
 
 Use `--check` in CI to verify auth is working (exit code 1 = missing, 2 = expiring):

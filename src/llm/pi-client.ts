@@ -26,8 +26,6 @@ import type { ProviderConfig, ModelConfig, ModelAllowlistEntry } from "../core/t
 
 // ─── Constants ──────────────────────────────────────
 
-const DEFAULT_MODEL = "opencode:big-pickle";
-
 /**
  * Prefix-based inference map for bare model IDs (without provider prefix).
  * Used ONLY when the user writes "claude-opus-4-6" instead of "anthropic:claude-opus-4-6".
@@ -73,6 +71,32 @@ const PREFIX_MAP: [string, KnownProvider][] = [
   // OpenCode
   ["big-pickle", "opencode"],
 ];
+
+// ─── Provider → env var map (shared with setup wizard) ──
+
+/** Map provider names to their standard environment variable for API keys. */
+export const PROVIDER_ENV_MAP: Record<string, string> = {
+  "openai": "OPENAI_API_KEY",
+  "anthropic": "ANTHROPIC_API_KEY",
+  "google": "GEMINI_API_KEY",
+  "groq": "GROQ_API_KEY",
+  "cerebras": "CEREBRAS_API_KEY",
+  "xai": "XAI_API_KEY",
+  "openrouter": "OPENROUTER_API_KEY",
+  "vercel-ai-gateway": "AI_GATEWAY_API_KEY",
+  "zai": "ZAI_API_KEY",
+  "mistral": "MISTRAL_API_KEY",
+  "minimax": "MINIMAX_API_KEY",
+  "minimax-cn": "MINIMAX_CN_API_KEY",
+  "huggingface": "HF_TOKEN",
+  "opencode": "OPENCODE_API_KEY",
+  "kimi-coding": "KIMI_API_KEY",
+  "azure-openai-responses": "AZURE_OPENAI_API_KEY",
+  "github-copilot": "COPILOT_GITHUB_TOKEN",
+  "amazon-bedrock": "AWS_ACCESS_KEY_ID",
+  "google-vertex": "GOOGLE_CLOUD_PROJECT",
+  "openai-codex": "OPENAI_API_KEY",
+};
 
 // ─── Provider override management ───────────────────
 
@@ -174,10 +198,16 @@ export interface ParsedModelSpec {
  *   "provider:model" — explicit (e.g. "anthropic:claude-opus-4-6")
  *   "model-id"       — auto-inferred from prefix map
  *
- * Falls back to POLPO_MODEL env var, then DEFAULT_MODEL.
+ * Falls back to POLPO_MODEL env var. Throws if no model is available.
  */
 export function parseModelSpec(spec?: string): ParsedModelSpec {
-  const s = spec || process.env.POLPO_MODEL || DEFAULT_MODEL;
+  const s = spec || process.env.POLPO_MODEL;
+  if (!s) {
+    throw new Error(
+      "No model configured. Set a model on your agent in .polpo/polpo.json, " +
+      "set the POLPO_MODEL env var, or run 'polpo setup'."
+    );
+  }
 
   // Explicit "provider:model" format
   const colonIdx = s.indexOf(":");
@@ -198,8 +228,10 @@ export function parseModelSpec(spec?: string): ParsedModelSpec {
     }
   }
 
-  // Default to opencode provider
-  return { provider: "opencode", modelId: s };
+  // Unknown bare model ID — cannot infer provider
+  throw new Error(
+    `Cannot infer provider for model "${s}". Use "provider:model" format (e.g. "anthropic:${s}").`
+  );
 }
 
 /**
@@ -435,30 +467,6 @@ export function validateProviderKeysDetailed(
   const results: ProviderValidationResult[] = [];
   const seen = new Set<string>();
 
-  // Map provider names to their standard env vars
-  const ENV_VAR_MAP: Record<string, string> = {
-    "openai": "OPENAI_API_KEY",
-    "anthropic": "ANTHROPIC_API_KEY",
-    "google": "GEMINI_API_KEY",
-    "groq": "GROQ_API_KEY",
-    "cerebras": "CEREBRAS_API_KEY",
-    "xai": "XAI_API_KEY",
-    "openrouter": "OPENROUTER_API_KEY",
-    "vercel-ai-gateway": "AI_GATEWAY_API_KEY",
-    "zai": "ZAI_API_KEY",
-    "mistral": "MISTRAL_API_KEY",
-    "minimax": "MINIMAX_API_KEY",
-    "minimax-cn": "MINIMAX_CN_API_KEY",
-    "huggingface": "HF_TOKEN",
-    "opencode": "OPENCODE_API_KEY",
-    "kimi-coding": "KIMI_API_KEY",
-    "azure-openai-responses": "AZURE_OPENAI_API_KEY",
-    "github-copilot": "COPILOT_GITHUB_TOKEN",
-    "amazon-bedrock": "AWS_ACCESS_KEY_ID",
-    "google-vertex": "GOOGLE_CLOUD_PROJECT",
-    "openai-codex": "OPENAI_API_KEY",
-  };
-
   for (const spec of modelSpecs) {
     const { provider } = parseModelSpec(spec);
     if (seen.has(provider)) continue;
@@ -468,7 +476,7 @@ export function validateProviderKeysDetailed(
       provider,
       modelSpec: spec,
       hasKey: !!resolveApiKey(provider),
-      envVar: ENV_VAR_MAP[provider],
+      envVar: PROVIDER_ENV_MAP[provider],
     });
   }
   return results;
@@ -527,7 +535,7 @@ export function buildModelListingForPrompt(): string {
   }, 0);
 
   lines.push(`- ... and ${allProviders.length} total providers with ${totalModels}+ models (use "provider:model" format)`);
-  lines.push(`Default model (when none specified): opencode:big-pickle (FREE)`);
+  lines.push(`Configure your default model in .polpo/polpo.json or via the POLPO_MODEL env var.`);
 
   return lines.join("\n");
 }
@@ -544,7 +552,10 @@ export function buildModelListingForPrompt(): string {
  */
 export function resolveModelWithFallback(config: ModelConfig): { model: Model<Api>; spec: string } {
   // Try primary
-  const primary = config.primary || DEFAULT_MODEL;
+  const primary = config.primary;
+  if (!primary) {
+    throw new Error("No primary model configured. Run 'polpo setup' or set POLPO_MODEL env var.");
+  }
   const { provider: primaryProvider } = parseModelSpec(primary);
   if (resolveApiKey(primaryProvider)) {
     try {
@@ -581,7 +592,10 @@ export function resolveModelWithFallback(config: ModelConfig): { model: Model<Ap
  */
 export async function resolveModelWithFallbackAsync(config: ModelConfig): Promise<{ model: Model<Api>; spec: string }> {
   // Try primary
-  const primary = config.primary || DEFAULT_MODEL;
+  const primary = config.primary;
+  if (!primary) {
+    throw new Error("No primary model configured. Run 'polpo setup' or set POLPO_MODEL env var.");
+  }
   const { provider: primaryProvider } = parseModelSpec(primary);
   if (await resolveApiKeyAsync(primaryProvider)) {
     try {
@@ -849,7 +863,10 @@ export async function queryTextWithFallback(
   prompt: string,
   modelConfig: ModelConfig,
 ): Promise<{ text: string; usage?: Usage; model: Model<Api>; usedSpec: string }> {
-  const specs = [modelConfig.primary || DEFAULT_MODEL, ...(modelConfig.fallbacks || [])];
+  if (!modelConfig.primary) {
+    throw new Error("No primary model configured. Run 'polpo setup' or set POLPO_MODEL env var.");
+  }
+  const specs = [modelConfig.primary, ...(modelConfig.fallbacks || [])];
 
   let lastError: unknown;
 
