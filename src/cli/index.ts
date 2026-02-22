@@ -21,6 +21,10 @@ import { registerSkillsCommands } from "./commands/skills.js";
 import { registerAuthCommands } from "./commands/auth.js";
 import { registerModelsCommands } from "./commands/models.js";
 import { registerSetupCommand } from "./commands/setup.js";
+import { registerBrowserCommands } from "./commands/browser-profile.js";
+import { registerScheduleCommands } from "./commands/schedule.js";
+import { registerAgentOnboardCommands } from "./commands/agent-onboard.js";
+import { ensureSetup } from "./ensure-setup.js";
 
 /** Wire orchestrator events to console output with chalk formatting. */
 function wireConsoleEvents(orchestrator: Orchestrator): void {
@@ -461,8 +465,10 @@ program
   .description("Launch the interactive TUI (default)")
   .option("-d, --dir <path>", "Working directory", ".")
   .action(async (opts) => {
+    const dir = resolve(opts.dir);
+    await ensureSetup(dir);
     const { startInkTUI } = await import("../tui/app.js");
-    await startInkTUI(opts.dir);
+    await startInkTUI(dir);
   });
 
 // polpo tui2 (pi-tui based interactive mode)
@@ -471,8 +477,10 @@ program
   .description("Launch the pi-tui based interactive TUI")
   .option("-d, --dir <path>", "Working directory", ".")
   .action(async (opts) => {
+    const dir = resolve(opts.dir);
+    await ensureSetup(dir);
     const { startPiTUI } = await import("../tui2/tui.js");
-    await startPiTUI(resolve(opts.dir));
+    await startPiTUI(dir);
   });
 
 // Register subcommand groups
@@ -488,5 +496,8 @@ registerSkillsCommands(program);
 registerAuthCommands(program);
 registerModelsCommands(program);
 registerSetupCommand(program);
+registerBrowserCommands(program);
+registerScheduleCommands(program);
+registerAgentOnboardCommands(program);
 
 program.parse();

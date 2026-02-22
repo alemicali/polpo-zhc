@@ -8,6 +8,7 @@
 
 import type { AgentConfig, AgentActivity, Task, TaskResult, TaskOutcome, OutcomeType } from "../core/types.js";
 import type { AgentHandle, SpawnContext } from "../core/adapter.js";
+import { resolveAgentVault } from "../vault/index.js";
 
 /** Create a fresh AgentActivity object */
 export function createActivity(): AgentActivity {
@@ -21,6 +22,7 @@ export function createActivity(): AgentActivity {
 }
 import { Agent } from "@mariozechner/pi-agent-core";
 import type { AgentEvent } from "@mariozechner/pi-agent-core";
+import { join } from "node:path";
 import { resolveModel, resolveApiKeyAsync, enforceModelAllowlist } from "../llm/pi-client.js";
 import { createCodingTools, createAllTools } from "../tools/coding-tools.js";
 import { loadAgentSkills, buildSkillPrompt } from "../llm/skills.js";
@@ -42,6 +44,40 @@ function buildSystemPrompt(agent: AgentConfig, cwd: string, polpoDir?: string): 
     "- <plan-context> — the plan goal and other tasks being worked on in parallel",
     "Use this context to make better decisions, but focus on YOUR assigned task.",
   ];
+  // Identity block
+  if (agent.identity) {
+    parts.push("", "## Your Identity");
+    if (agent.identity.displayName) parts.push(`- Name: ${agent.identity.displayName}`);
+    if (agent.identity.title) parts.push(`- Title: ${agent.identity.title}`);
+    if (agent.identity.company) parts.push(`- Company: ${agent.identity.company}`);
+    if (agent.identity.email) parts.push(`- Email: ${agent.identity.email}`);
+    if (agent.identity.bio) parts.push(`- Bio: ${agent.identity.bio}`);
+    if (agent.identity.timezone) parts.push(`- Timezone: ${agent.identity.timezone}`);
+    parts.push("Use this identity when communicating externally (emails, messages, etc.).");
+  }
+
+  // Responsibilities (detailed, richer than role)
+  if (agent.identity?.responsibilities?.length) {
+    parts.push("", "## Your Responsibilities");
+    for (const r of agent.identity.responsibilities) {
+      parts.push(`- ${r}`);
+    }
+    parts.push("Focus on these responsibilities. Escalate if something falls outside your scope.");
+  }
+
+  // Tone / personality
+  if (agent.identity?.tone) {
+    parts.push("", "## Communication Style");
+    parts.push(agent.identity.tone);
+  }
+
+  // Hierarchy — who this agent reports to
+  if (agent.reportsTo) {
+    parts.push("", "## Organization");
+    parts.push(`You report to: ${agent.reportsTo}`);
+    parts.push("If you encounter blockers or decisions outside your authority, escalate to your manager.");
+  }
+
   if (agent.systemPrompt) parts.push("", agent.systemPrompt);
 
   // Load and inject skills
@@ -138,25 +174,15 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
     agentConfig.enableMultifile || agentConfig.enableDeps || agentConfig.enableExcel ||
     agentConfig.enablePdf || agentConfig.enableDocx || agentConfig.enableEmail ||
     agentConfig.enableAudio || agentConfig.enableImage;
-  const codingTools = hasExtended
-    ? createAllTools({
-        cwd,
-        allowedTools: agentConfig.allowedTools,
-        allowedPaths: agentConfig.allowedPaths,
-        browserSession: agentConfig.name,
-        enableBrowser: agentConfig.enableBrowser,
-        enableHttp: agentConfig.enableHttp,
-        enableGit: agentConfig.enableGit,
-        enableMultifile: agentConfig.enableMultifile,
-        enableDeps: agentConfig.enableDeps,
-        enableExcel: agentConfig.enableExcel,
-        enablePdf: agentConfig.enablePdf,
-        enableDocx: agentConfig.enableDocx,
-        enableEmail: agentConfig.enableEmail,
-        enableAudio: agentConfig.enableAudio,
-        enableImage: agentConfig.enableImage,
-      })
-    : createCodingTools(cwd, agentConfig.allowedTools, agentConfig.allowedPaths);
+
+  // Derive browser profile directory for Playwright persistent context
+  const polpoDir = ctx?.polpoDir ?? join(cwd, ".polpo");
+  const browserProfileDir = agentConfig.browserEngine === "playwright"
+    ? join(polpoDir, "browser-profiles", agentConfig.browserProfile || agentConfig.name)
+    : undefined;
+
+  // Start with core coding tools (sync); extended tools loaded async in the run phase
+  const codingTools = createCodingTools(cwd, agentConfig.allowedTools, agentConfig.allowedPaths);
 
   // MCP client manager — initialized later (async) if mcpServers are configured
   let mcpManager: McpClientManager | null = null;
@@ -277,6 +303,35 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
   // Run the agent and capture result
   handle.done = (async (): Promise<TaskResult> => {
     try {
+      // Resolve agent vault credentials
+      const vault = resolveAgentVault(agentConfig.vault);
+
+      // Resolve extended tools (async — Playwright import) and MCP servers before prompting
+      let allTools = codingTools;
+      if (hasExtended) {
+        allTools = await createAllTools({
+          cwd,
+          allowedTools: agentConfig.allowedTools,
+          allowedPaths: agentConfig.allowedPaths,
+          browserSession: agentConfig.name,
+          browserEngine: agentConfig.browserEngine,
+          browserProfileDir,
+          enableBrowser: agentConfig.enableBrowser,
+          enableHttp: agentConfig.enableHttp,
+          enableGit: agentConfig.enableGit,
+          enableMultifile: agentConfig.enableMultifile,
+          enableDeps: agentConfig.enableDeps,
+          enableExcel: agentConfig.enableExcel,
+          enablePdf: agentConfig.enablePdf,
+          enableDocx: agentConfig.enableDocx,
+          enableEmail: agentConfig.enableEmail,
+          enableAudio: agentConfig.enableAudio,
+          enableImage: agentConfig.enableImage,
+          vault,
+        });
+        agent.setTools(allTools);
+      }
+
       // Connect to MCP servers if configured (async — must happen before prompt)
       if (hasMcp) {
         mcpManager = new McpClientManager(cwd);
@@ -287,8 +342,8 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
         );
         const mcpTools = mcpManager.getTools();
         if (mcpTools.length > 0) {
-          // Merge MCP tools with coding tools and update the agent
-          agent.setTools([...codingTools, ...mcpTools]);
+          // Merge all tools (coding + extended) with MCP tools
+          agent.setTools([...allTools, ...mcpTools]);
         }
       }
 
@@ -332,6 +387,11 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
       // Always disconnect MCP servers on completion/failure
       if (mcpManager) {
         await mcpManager.close().catch(() => {});
+      }
+      // Close Playwright browser context (preserves profile data on disk)
+      if (browserProfileDir) {
+        const { cleanupPlaywrightContext } = await import("../tools/playwright-browser-tools.js");
+        await cleanupPlaywrightContext(browserProfileDir).catch(() => {});
       }
     }
   })();

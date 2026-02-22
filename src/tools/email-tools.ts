@@ -1,29 +1,27 @@
 /**
- * Email tools for sending messages via SMTP.
+ * Email tools for sending and reading messages via SMTP/IMAP.
  *
  * Provides tools for agents to:
- * - Send emails with HTML or plain text
+ * - Send emails with HTML or plain text (SMTP)
  * - Add attachments from local files
  * - Send to multiple recipients (to, cc, bcc)
+ * - List, read, and search emails (IMAP)
  *
- * Uses `nodemailer` for SMTP transport.
- * SMTP configuration is passed via environment variables or tool parameters.
+ * Credential resolution order:
+ *   1. Tool parameters (explicit overrides)
+ *   2. Agent vault (per-agent credentials from polpo.json)
+ *   3. Environment variables (global fallback)
  *
- * Required env vars for SMTP:
- *   SMTP_HOST - SMTP server hostname
- *   SMTP_PORT - SMTP port (default: 587)
- *   SMTP_USER - SMTP username
- *   SMTP_PASS - SMTP password
- *   SMTP_FROM - Default sender address
- *
- * Or pass connection details directly in tool parameters.
+ * SMTP env vars: SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM
+ * IMAP env vars: IMAP_HOST, IMAP_PORT, IMAP_USER, IMAP_PASS
  */
 
 import { readFileSync, existsSync } from "node:fs";
 import { resolve, basename } from "node:path";
 import { Type } from "@sinclair/typebox";
-import type { AgentTool, AgentToolResult } from "@mariozechner/pi-agent-core";
+import type { AgentTool } from "@mariozechner/pi-agent-core";
 import { resolveAllowedPaths, assertPathAllowed } from "./path-sandbox.js";
+import type { ResolvedVault } from "../vault/index.js";
 
 // ─── Tool: email_send ───
 
@@ -37,7 +35,7 @@ const EmailSendSchema = Type.Object({
   html: Type.Optional(Type.Boolean({ description: "Treat body as HTML (default: auto-detect)" })),
   cc: Type.Optional(Type.Union([Type.String(), Type.Array(Type.String())], { description: "CC recipients" })),
   bcc: Type.Optional(Type.Union([Type.String(), Type.Array(Type.String())], { description: "BCC recipients" })),
-  from: Type.Optional(Type.String({ description: "Sender address (overrides SMTP_FROM env var)" })),
+  from: Type.Optional(Type.String({ description: "Sender address (overrides vault/env)" })),
   reply_to: Type.Optional(Type.String({ description: "Reply-to address" })),
   attachments: Type.Optional(Type.Array(
     Type.Object({
@@ -46,39 +44,39 @@ const EmailSendSchema = Type.Object({
     }),
     { description: "File attachments" },
   )),
-  // SMTP config overrides (optional - defaults to env vars)
-  smtp_host: Type.Optional(Type.String({ description: "SMTP host (overrides SMTP_HOST env var)" })),
-  smtp_port: Type.Optional(Type.Number({ description: "SMTP port (overrides SMTP_PORT env var)" })),
-  smtp_user: Type.Optional(Type.String({ description: "SMTP user (overrides SMTP_USER env var)" })),
-  smtp_pass: Type.Optional(Type.String({ description: "SMTP password (overrides SMTP_PASS env var)" })),
+  // SMTP config overrides (optional - defaults to vault then env vars)
+  smtp_host: Type.Optional(Type.String({ description: "SMTP host (overrides vault/env)" })),
+  smtp_port: Type.Optional(Type.Number({ description: "SMTP port (overrides vault/env)" })),
+  smtp_user: Type.Optional(Type.String({ description: "SMTP user (overrides vault/env)" })),
+  smtp_pass: Type.Optional(Type.String({ description: "SMTP password (overrides vault/env)" })),
   smtp_secure: Type.Optional(Type.Boolean({ description: "Use TLS (default: true for port 465, STARTTLS for others)" })),
 });
 
-function createEmailSendTool(cwd: string, sandbox: string[]): AgentTool<typeof EmailSendSchema> {
+function createEmailSendTool(cwd: string, sandbox: string[], vault?: ResolvedVault): AgentTool<typeof EmailSendSchema> {
   return {
     name: "email_send",
     label: "Send Email",
     description: "Send an email via SMTP. Supports HTML content, multiple recipients (to/cc/bcc), " +
-      "file attachments, and reply-to. Configure SMTP via environment variables (SMTP_HOST, SMTP_PORT, " +
-      "SMTP_USER, SMTP_PASS, SMTP_FROM) or pass parameters directly.",
+      "file attachments, and reply-to. Credentials are resolved from: tool params > agent vault > env vars.",
     parameters: EmailSendSchema,
     async execute(_id, params) {
-      // Resolve SMTP config from params or env
-      const host = params.smtp_host ?? process.env.SMTP_HOST;
-      const port = params.smtp_port ?? Number(process.env.SMTP_PORT ?? "587");
-      const user = params.smtp_user ?? process.env.SMTP_USER;
-      const pass = params.smtp_pass ?? process.env.SMTP_PASS;
-      const from = params.from ?? process.env.SMTP_FROM;
+      // Resolve SMTP config: tool params > vault > env vars
+      const vaultSmtp = vault?.getSmtp();
+      const host = params.smtp_host ?? vaultSmtp?.host ?? process.env.SMTP_HOST;
+      const port = params.smtp_port ?? vaultSmtp?.port ?? Number(process.env.SMTP_PORT ?? "587");
+      const user = params.smtp_user ?? vaultSmtp?.user ?? process.env.SMTP_USER;
+      const pass = params.smtp_pass ?? vaultSmtp?.pass ?? process.env.SMTP_PASS;
+      const from = params.from ?? vaultSmtp?.from ?? process.env.SMTP_FROM;
 
       if (!host) {
         return {
-          content: [{ type: "text", text: "Error: SMTP host not configured. Set SMTP_HOST env var or pass smtp_host parameter." }],
+          content: [{ type: "text", text: "Error: SMTP host not configured. Set SMTP_HOST env var, configure vault, or pass smtp_host parameter." }],
           details: { error: "no_smtp_host" },
         };
       }
       if (!from) {
         return {
-          content: [{ type: "text", text: "Error: Sender address not configured. Set SMTP_FROM env var or pass 'from' parameter." }],
+          content: [{ type: "text", text: "Error: Sender address not configured. Set SMTP_FROM env var, configure vault, or pass 'from' parameter." }],
           details: { error: "no_from" },
         };
       }
@@ -86,7 +84,7 @@ function createEmailSendTool(cwd: string, sandbox: string[]): AgentTool<typeof E
       try {
         const nodemailer = await import("nodemailer");
 
-        const secure = params.smtp_secure ?? (port === 465);
+        const secure = params.smtp_secure ?? vaultSmtp?.secure ?? (port === 465);
         const transporter = nodemailer.default.createTransport({
           host,
           port,
@@ -156,34 +154,35 @@ function createEmailSendTool(cwd: string, sandbox: string[]): AgentTool<typeof E
 // ─── Tool: email_verify ───
 
 const EmailVerifySchema = Type.Object({
-  smtp_host: Type.Optional(Type.String({ description: "SMTP host (overrides SMTP_HOST env var)" })),
+  smtp_host: Type.Optional(Type.String({ description: "SMTP host (overrides vault/env)" })),
   smtp_port: Type.Optional(Type.Number({ description: "SMTP port" })),
   smtp_user: Type.Optional(Type.String({ description: "SMTP user" })),
   smtp_pass: Type.Optional(Type.String({ description: "SMTP password" })),
 });
 
-function createEmailVerifyTool(): AgentTool<typeof EmailVerifySchema> {
+function createEmailVerifyTool(vault?: ResolvedVault): AgentTool<typeof EmailVerifySchema> {
   return {
     name: "email_verify",
     label: "Verify SMTP",
     description: "Verify SMTP connection and credentials. Use to check that email is properly configured before sending.",
     parameters: EmailVerifySchema,
     async execute(_id, params) {
-      const host = params.smtp_host ?? process.env.SMTP_HOST;
-      const port = params.smtp_port ?? Number(process.env.SMTP_PORT ?? "587");
-      const user = params.smtp_user ?? process.env.SMTP_USER;
-      const pass = params.smtp_pass ?? process.env.SMTP_PASS;
+      const vaultSmtp = vault?.getSmtp();
+      const host = params.smtp_host ?? vaultSmtp?.host ?? process.env.SMTP_HOST;
+      const port = params.smtp_port ?? vaultSmtp?.port ?? Number(process.env.SMTP_PORT ?? "587");
+      const user = params.smtp_user ?? vaultSmtp?.user ?? process.env.SMTP_USER;
+      const pass = params.smtp_pass ?? vaultSmtp?.pass ?? process.env.SMTP_PASS;
 
       if (!host) {
         return {
-          content: [{ type: "text", text: "Error: SMTP host not configured. Set SMTP_HOST env var or pass smtp_host parameter." }],
+          content: [{ type: "text", text: "Error: SMTP host not configured. Set SMTP_HOST env var, configure vault, or pass smtp_host parameter." }],
           details: { error: "no_smtp_host", verified: false },
         };
       }
 
       try {
         const nodemailer = await import("nodemailer");
-        const secure = port === 465;
+        const secure = vaultSmtp?.secure ?? (port === 465);
         const transporter = nodemailer.default.createTransport({
           host,
           port,
@@ -207,11 +206,266 @@ function createEmailVerifyTool(): AgentTool<typeof EmailVerifySchema> {
   };
 }
 
+// ─── IMAP Tools ───
+
+/** Helper: connect to IMAP server using vault or env vars */
+async function connectImap(vault?: ResolvedVault) {
+  const vaultImap = vault?.getImap();
+  const host = vaultImap?.host ?? process.env.IMAP_HOST;
+  const port = vaultImap?.port ?? Number(process.env.IMAP_PORT ?? "993");
+  const user = vaultImap?.user ?? process.env.IMAP_USER;
+  const pass = vaultImap?.pass ?? process.env.IMAP_PASS;
+  const tls = vaultImap?.tls ?? true;
+
+  if (!host) throw new Error("IMAP host not configured. Set IMAP_HOST env var or configure vault.");
+  if (!user) throw new Error("IMAP user not configured. Set IMAP_USER env var or configure vault.");
+
+  const { ImapFlow } = await import("imapflow");
+  const client = new ImapFlow({
+    host,
+    port,
+    secure: tls,
+    auth: { user, pass: pass ?? "" },
+    logger: false as any,
+  });
+  await client.connect();
+  return client;
+}
+
+// ─── Tool: email_list ───
+
+const EmailListSchema = Type.Object({
+  folder: Type.Optional(Type.String({ description: "Mail folder (default: INBOX)" })),
+  limit: Type.Optional(Type.Number({ description: "Max emails to return (default: 20)" })),
+  unseen_only: Type.Optional(Type.Boolean({ description: "Only show unread emails (default: false)" })),
+});
+
+function createEmailListTool(vault?: ResolvedVault): AgentTool<typeof EmailListSchema> {
+  return {
+    name: "email_list",
+    label: "List Emails",
+    description: "List recent emails from the inbox (or specified folder). Returns subject, from, date, and UID for each message. Use email_read to get full content.",
+    parameters: EmailListSchema,
+    async execute(_id, params) {
+      try {
+        const client = await connectImap(vault);
+        const folder = params.folder ?? "INBOX";
+        const limit = params.limit ?? 20;
+
+        const lock = await client.getMailboxLock(folder);
+        try {
+          const messages: string[] = [];
+          let count = 0;
+
+          // Fetch recent messages (newest first)
+          const searchCriteria = params.unseen_only ? { seen: false } : { all: true };
+          const searchResult = await client.search(searchCriteria, { uid: true });
+          const uids = Array.isArray(searchResult) ? searchResult : [];
+
+          // Get the last N UIDs
+          const targetUids = uids.slice(-limit).reverse();
+
+          for (const uid of targetUids) {
+            const msg = await client.fetchOne(String(uid), { envelope: true, uid: true, flags: true }, { uid: true }) as any;
+            if (!msg?.envelope) continue;
+
+            const env = msg.envelope;
+            const fromAddr = env.from?.[0] ? `${env.from[0].name ?? ""} <${env.from[0].address ?? ""}>`.trim() : "unknown";
+            const date = env.date ? new Date(env.date).toISOString() : "unknown";
+            const unread = !msg.flags?.has("\\Seen") ? " [UNREAD]" : "";
+
+            messages.push(`UID: ${msg.uid} | ${date} | From: ${fromAddr} | Subject: ${env.subject ?? "(no subject)"}${unread}`);
+            count++;
+          }
+
+          return {
+            content: [{ type: "text", text: messages.length > 0 ? `${folder} — ${count} message(s):\n\n${messages.join("\n")}` : `${folder} — no messages found` }],
+            details: { folder, count },
+          };
+        } finally {
+          lock.release();
+          await client.logout();
+        }
+      } catch (err: any) {
+        return {
+          content: [{ type: "text", text: `IMAP error: ${err.message}` }],
+          details: { error: err.message },
+        };
+      }
+    },
+  };
+}
+
+// ─── Tool: email_read ───
+
+const EmailReadSchema = Type.Object({
+  uid: Type.Number({ description: "Email UID (from email_list)" }),
+  folder: Type.Optional(Type.String({ description: "Mail folder (default: INBOX)" })),
+  mark_read: Type.Optional(Type.Boolean({ description: "Mark as read after fetching (default: true)" })),
+});
+
+function createEmailReadTool(vault?: ResolvedVault): AgentTool<typeof EmailReadSchema> {
+  return {
+    name: "email_read",
+    label: "Read Email",
+    description: "Read the full content of an email by UID. Returns headers and body text.",
+    parameters: EmailReadSchema,
+    async execute(_id, params) {
+      try {
+        const client = await connectImap(vault);
+        const folder = params.folder ?? "INBOX";
+        const markRead = params.mark_read ?? true;
+
+        const lock = await client.getMailboxLock(folder);
+        try {
+          const msg = await client.fetchOne(String(params.uid), {
+            envelope: true,
+            source: true,
+            uid: true,
+            flags: true,
+          }, { uid: true }) as any;
+
+          if (!msg) {
+            return {
+              content: [{ type: "text", text: `Email UID ${params.uid} not found in ${folder}` }],
+              details: { error: "not_found", uid: params.uid },
+            };
+          }
+
+          const env = msg.envelope;
+          const fromAddr = env?.from?.[0] ? `${env.from[0].name ?? ""} <${env.from[0].address ?? ""}>`.trim() : "unknown";
+          const toAddr = env?.to?.map((a: any) => `${a.name ?? ""} <${a.address ?? ""}>`.trim()).join(", ") ?? "unknown";
+          const date = env?.date ? new Date(env.date).toISOString() : "unknown";
+
+          // Extract text body from source
+          let bodyText = "";
+          if (msg.source) {
+            const source = msg.source.toString("utf-8");
+            // Simple extraction: look for text after headers
+            const headerEnd = source.indexOf("\r\n\r\n");
+            if (headerEnd >= 0) {
+              bodyText = source.slice(headerEnd + 4);
+              // If it's too long, truncate
+              if (bodyText.length > 10000) {
+                bodyText = bodyText.slice(0, 10000) + "\n... (truncated)";
+              }
+            }
+          }
+
+          // Mark as read if requested
+          if (markRead) {
+            try {
+              await client.messageFlagsAdd(String(params.uid), ["\\Seen"], { uid: true });
+            } catch { /* best-effort */ }
+          }
+
+          const parts = [
+            `From: ${fromAddr}`,
+            `To: ${toAddr}`,
+            `Date: ${date}`,
+            `Subject: ${env?.subject ?? "(no subject)"}`,
+            `UID: ${msg.uid}`,
+            ``,
+            bodyText || "(empty body)",
+          ];
+
+          return {
+            content: [{ type: "text", text: parts.join("\n") }],
+            details: { uid: params.uid, subject: env?.subject },
+          };
+        } finally {
+          lock.release();
+          await client.logout();
+        }
+      } catch (err: any) {
+        return {
+          content: [{ type: "text", text: `IMAP error: ${err.message}` }],
+          details: { error: err.message },
+        };
+      }
+    },
+  };
+}
+
+// ─── Tool: email_search ───
+
+const EmailSearchSchema = Type.Object({
+  from: Type.Optional(Type.String({ description: "Search by sender address" })),
+  subject: Type.Optional(Type.String({ description: "Search by subject (substring)" })),
+  since: Type.Optional(Type.String({ description: "Search emails since date (YYYY-MM-DD)" })),
+  body: Type.Optional(Type.String({ description: "Search by body text (substring)" })),
+  folder: Type.Optional(Type.String({ description: "Mail folder (default: INBOX)" })),
+  limit: Type.Optional(Type.Number({ description: "Max results (default: 20)" })),
+});
+
+function createEmailSearchTool(vault?: ResolvedVault): AgentTool<typeof EmailSearchSchema> {
+  return {
+    name: "email_search",
+    label: "Search Emails",
+    description: "Search emails by sender, subject, date, or body text. Returns matching messages with UID, subject, from, and date.",
+    parameters: EmailSearchSchema,
+    async execute(_id, params) {
+      if (!params.from && !params.subject && !params.since && !params.body) {
+        return {
+          content: [{ type: "text", text: "Error: provide at least one search criterion (from, subject, since, or body)" }],
+          details: { error: "no_criteria" },
+        };
+      }
+
+      try {
+        const client = await connectImap(vault);
+        const folder = params.folder ?? "INBOX";
+        const limit = params.limit ?? 20;
+
+        const lock = await client.getMailboxLock(folder);
+        try {
+          // Build search query
+          const query: Record<string, any> = {};
+          if (params.from) query.from = params.from;
+          if (params.subject) query.subject = params.subject;
+          if (params.since) query.since = params.since;
+          if (params.body) query.body = params.body;
+
+          const searchResult = await client.search(query, { uid: true });
+          const uids = Array.isArray(searchResult) ? searchResult : [];
+          const targetUids = uids.slice(-limit).reverse();
+
+          const messages: string[] = [];
+          for (const uid of targetUids) {
+            const msg = await client.fetchOne(String(uid), { envelope: true, uid: true, flags: true }, { uid: true }) as any;
+            if (!msg?.envelope) continue;
+
+            const env = msg.envelope;
+            const fromAddr = env.from?.[0] ? `${env.from[0].name ?? ""} <${env.from[0].address ?? ""}>`.trim() : "unknown";
+            const date = env.date ? new Date(env.date).toISOString() : "unknown";
+            const unread = !msg.flags?.has("\\Seen") ? " [UNREAD]" : "";
+
+            messages.push(`UID: ${msg.uid} | ${date} | From: ${fromAddr} | Subject: ${env.subject ?? "(no subject)"}${unread}`);
+          }
+
+          return {
+            content: [{ type: "text", text: messages.length > 0 ? `Search results (${messages.length}):\n\n${messages.join("\n")}` : "No emails found matching your criteria" }],
+            details: { folder, count: messages.length, query: params },
+          };
+        } finally {
+          lock.release();
+          await client.logout();
+        }
+      } catch (err: any) {
+        return {
+          content: [{ type: "text", text: `IMAP error: ${err.message}` }],
+          details: { error: err.message },
+        };
+      }
+    },
+  };
+}
+
 // ─── Factory ───
 
-export type EmailToolName = "email_send" | "email_verify";
+export type EmailToolName = "email_send" | "email_verify" | "email_list" | "email_read" | "email_search";
 
-export const ALL_EMAIL_TOOL_NAMES: EmailToolName[] = ["email_send", "email_verify"];
+export const ALL_EMAIL_TOOL_NAMES: EmailToolName[] = ["email_send", "email_verify", "email_list", "email_read", "email_search"];
 
 /**
  * Create email tools.
@@ -219,13 +473,17 @@ export const ALL_EMAIL_TOOL_NAMES: EmailToolName[] = ["email_send", "email_verif
  * @param cwd - Working directory (for resolving attachment paths)
  * @param allowedPaths - Sandbox paths
  * @param allowedTools - Optional filter
+ * @param vault - Resolved vault credentials (per-agent SMTP/IMAP)
  */
-export function createEmailTools(cwd: string, allowedPaths?: string[], allowedTools?: string[]): AgentTool<any>[] {
+export function createEmailTools(cwd: string, allowedPaths?: string[], allowedTools?: string[], vault?: ResolvedVault): AgentTool<any>[] {
   const sandbox = resolveAllowedPaths(cwd, allowedPaths);
 
   const factories: Record<EmailToolName, () => AgentTool<any>> = {
-    email_send: () => createEmailSendTool(cwd, sandbox),
-    email_verify: () => createEmailVerifyTool(),
+    email_send: () => createEmailSendTool(cwd, sandbox, vault),
+    email_verify: () => createEmailVerifyTool(vault),
+    email_list: () => createEmailListTool(vault),
+    email_read: () => createEmailReadTool(vault),
+    email_search: () => createEmailSearchTool(vault),
   };
 
   const names = allowedTools

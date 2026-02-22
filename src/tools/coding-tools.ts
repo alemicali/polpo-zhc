@@ -349,6 +349,7 @@ import { createExcelTools, ALL_EXCEL_TOOL_NAMES } from "./excel-tools.js";
 import { createPdfTools, ALL_PDF_TOOL_NAMES } from "./pdf-tools.js";
 import { createDocxTools, ALL_DOCX_TOOL_NAMES } from "./docx-tools.js";
 import { createEmailTools, ALL_EMAIL_TOOL_NAMES } from "./email-tools.js";
+import type { ResolvedVault } from "../vault/index.js";
 import { createAudioTools, ALL_AUDIO_TOOL_NAMES } from "./audio-tools.js";
 import { createImageTools, ALL_IMAGE_TOOL_NAMES } from "./image-tools.js";
 import { createOutcomeTools, ALL_OUTCOME_TOOL_NAMES } from "./outcome-tools.js";
@@ -405,9 +406,13 @@ export interface CreateAllToolsOptions {
   allowedTools?: string[];
   /** Filesystem sandbox paths */
   allowedPaths?: string[];
-  /** Browser session name for isolation (default: "default") */
+  /** Browser session name for isolation (default: "default"). Used with agent-browser engine. */
   browserSession?: string;
-  /** Enable browser tools (requires agent-browser installed). Default: false — must be explicitly enabled. */
+  /** Browser engine: "agent-browser" (default) or "playwright" (persistent profiles). */
+  browserEngine?: "agent-browser" | "playwright";
+  /** Profile directory for Playwright persistent context. Required when browserEngine is "playwright". */
+  browserProfileDir?: string;
+  /** Enable browser tools. Default: false — must be explicitly enabled. */
   enableBrowser?: boolean;
   /** Enable HTTP/fetch tools. Default: false — must be explicitly enabled. */
   enableHttp?: boolean;
@@ -429,6 +434,8 @@ export interface CreateAllToolsOptions {
   enableAudio?: boolean;
   /** Enable image tools for generation/vision (requires OPENAI_API_KEY / REPLICATE_API_TOKEN / ANTHROPIC_API_KEY). Default: false. */
   enableImage?: boolean;
+  /** Resolved vault credentials for the agent */
+  vault?: ResolvedVault;
 }
 
 /**
@@ -440,7 +447,7 @@ export interface CreateAllToolsOptions {
  * When allowedTools is provided, it acts as a filter across ALL categories — any tool whose name
  * appears in allowedTools will be included (and its category auto-enabled).
  */
-export function createAllTools(options: CreateAllToolsOptions): AgentTool<any>[] {
+export async function createAllTools(options: CreateAllToolsOptions): Promise<AgentTool<any>[]> {
   const { cwd, allowedTools, allowedPaths, browserSession } = options;
   const tools: AgentTool<any>[] = [];
 
@@ -451,9 +458,15 @@ export function createAllTools(options: CreateAllToolsOptions): AgentTool<any>[]
   // Core coding tools (always included unless filtered out)
   tools.push(...createCodingTools(cwd, allowedTools, allowedPaths));
 
-  // Browser tools
+  // Browser tools — Playwright (persistent profiles) or agent-browser (CLI)
   if (options.enableBrowser || categoryRequested(ALL_BROWSER_TOOL_NAMES)) {
-    tools.push(...createBrowserTools(cwd, browserSession, allowedTools));
+    if (options.browserEngine === "playwright" && options.browserProfileDir) {
+      // Lazy import — playwright-core is optional
+      const { createPlaywrightBrowserTools } = await import("./playwright-browser-tools.js");
+      tools.push(...createPlaywrightBrowserTools(cwd, options.browserProfileDir, allowedTools));
+    } else {
+      tools.push(...createBrowserTools(cwd, browserSession, allowedTools));
+    }
   }
 
   // HTTP tools
@@ -493,7 +506,7 @@ export function createAllTools(options: CreateAllToolsOptions): AgentTool<any>[]
 
   // Email tools
   if (options.enableEmail || categoryRequested(ALL_EMAIL_TOOL_NAMES)) {
-    tools.push(...createEmailTools(cwd, allowedPaths, allowedTools));
+    tools.push(...createEmailTools(cwd, allowedPaths, allowedTools, options.vault));
   }
 
   // Audio tools (STT/TTS)

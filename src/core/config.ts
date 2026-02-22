@@ -62,6 +62,69 @@ export function validateAgents(agents: any[]): void {
         }
       }
     }
+    // Validate browser engine
+    if (agent.browserEngine !== undefined) {
+      if (agent.browserEngine !== "agent-browser" && agent.browserEngine !== "playwright") {
+        throw new Error(`Agent "${agent.name}": browserEngine must be "agent-browser" or "playwright"`);
+      }
+      // Auto-enable browser tools when engine is set
+      if (!agent.enableBrowser) agent.enableBrowser = true;
+    }
+    // Validate browser profile name
+    if (agent.browserProfile !== undefined) {
+      if (typeof agent.browserProfile !== "string" || !/^[a-zA-Z0-9_-]+$/.test(agent.browserProfile)) {
+        throw new Error(`Agent "${agent.name}": browserProfile must contain only letters, numbers, hyphens, underscores`);
+      }
+    }
+    // Validate vault entries
+    if (agent.vault) {
+      if (typeof agent.vault !== "object" || Array.isArray(agent.vault)) {
+        throw new Error(`Agent "${agent.name}": vault must be an object`);
+      }
+      const validVaultTypes = ["smtp", "imap", "oauth", "api_key", "login", "custom"];
+      for (const [service, entry] of Object.entries(agent.vault)) {
+        const e = entry as Record<string, unknown>;
+        if (!e.type || !validVaultTypes.includes(e.type as string)) {
+          throw new Error(`Agent "${agent.name}": vault entry "${service}" has invalid type "${e.type}" (must be one of: ${validVaultTypes.join(", ")})`);
+        }
+        if (!e.credentials || typeof e.credentials !== "object" || Array.isArray(e.credentials)) {
+          throw new Error(`Agent "${agent.name}": vault entry "${service}" must have a credentials object`);
+        }
+      }
+    }
+    // Validate identity
+    if (agent.identity) {
+      if (agent.identity.responsibilities && !Array.isArray(agent.identity.responsibilities)) {
+        throw new Error(`Agent "${agent.name}": identity.responsibilities must be an array`);
+      }
+    }
+    // Validate reportsTo — self-reference
+    if (agent.reportsTo === agent.name) {
+      throw new Error(`Agent "${agent.name}": cannot report to itself`);
+    }
+  }
+
+  // Second pass: validate reportsTo references existing agents
+  const agentNames = new Set(agents.map((a: any) => a.name as string));
+  for (const agent of agents) {
+    if (agent.reportsTo && !agentNames.has(agent.reportsTo)) {
+      throw new Error(`Agent "${agent.name}": reportsTo "${agent.reportsTo}" does not match any agent`);
+    }
+  }
+
+  // Detect circular reportsTo chains
+  for (const agent of agents) {
+    if (!agent.reportsTo) continue;
+    const visited = new Set<string>();
+    let current = agent.name;
+    while (current) {
+      if (visited.has(current)) {
+        throw new Error(`Agent "${agent.name}": circular reportsTo chain detected (${[...visited, current].join(" → ")})`);
+      }
+      visited.add(current);
+      const next = agents.find((a: any) => a.name === current);
+      current = next?.reportsTo;
+    }
   }
 }
 
@@ -186,6 +249,10 @@ export function generatePolpoConfigDefault(
   if (options?.model) {
     agent.model = options.model;
   }
+  const settings: Record<string, unknown> = { ...DEFAULT_SETTINGS };
+  if (options?.model) {
+    settings.orchestratorModel = options.model;
+  }
   return {
     project: projectName,
     team: {
@@ -193,6 +260,6 @@ export function generatePolpoConfigDefault(
       description: `${options?.teamName ?? "Default"} Polpo team`,
       agents: [agent as any],
     },
-    settings: { ...DEFAULT_SETTINGS },
+    settings: settings as any,
   };
 }

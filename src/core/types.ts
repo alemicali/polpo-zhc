@@ -168,6 +168,34 @@ export interface TaskResult {
   assessmentHistory?: AssessmentResult[];
 }
 
+// === Agent Identity & Vault ===
+
+/** Agent identity — who this agent is and how it behaves */
+export interface AgentIdentity {
+  displayName?: string;      // "Alice Chen"
+  title?: string;            // "Social Media Manager"
+  company?: string;          // "Acme Corp"
+  email?: string;            // Primary email address (also default SMTP from)
+  bio?: string;              // Brief persona description
+  timezone?: string;         // "Europe/Rome"
+
+  /** Detailed list of responsibilities — richer than `role` */
+  responsibilities?: string[];
+
+  /** Communication tone/personality — injected in system prompt */
+  tone?: string;
+}
+
+/** Vault credential entry */
+export interface VaultEntry {
+  /** Service type for semantic meaning */
+  type: "smtp" | "imap" | "oauth" | "api_key" | "login" | "custom";
+  /** Human-readable label */
+  label?: string;
+  /** Credential fields — values can be literals or ${ENV_VAR} references */
+  credentials: Record<string, string>;
+}
+
 // === Agent ===
 
 export interface AgentConfig {
@@ -183,6 +211,13 @@ export interface AgentConfig {
   allowedPaths?: string[];
   /** MCP servers to connect to. Keys are server names, values are server configs (stdio or HTTP). */
   mcpServers?: Record<string, McpServerConfig>;
+  /** Agent's identity — persona, responsibilities, communication style */
+  identity?: AgentIdentity;
+  /** Per-agent credential vault — keyed by service name */
+  vault?: Record<string, VaultEntry>;
+  /** Agent this one reports to — org chart hierarchy for escalation.
+   *  When a task fails or needs a decision, escalates up the chain. */
+  reportsTo?: string;
   /** System prompt appended to the agent's base prompt */
   systemPrompt?: string;
   /** Installed skill names (e.g. "find-skills", "frontend-design") */
@@ -198,12 +233,19 @@ export interface AgentConfig {
 
   // ── Extended tool categories (opt-in) ──
 
-  /** Enable browser automation tools (requires agent-browser installed).
+  /** Enable browser automation tools.
    *  Tools: browser_navigate, browser_snapshot, browser_click, browser_fill, browser_type,
    *  browser_press, browser_screenshot, browser_get, browser_select, browser_hover,
    *  browser_scroll, browser_wait, browser_eval, browser_close, browser_back, browser_forward,
    *  browser_reload, browser_tabs */
   enableBrowser?: boolean;
+  /** Browser engine: "agent-browser" (default, uses agent-browser CLI) or "playwright" (persistent profiles via Playwright).
+   *  Requires playwright-core when set to "playwright". */
+  browserEngine?: "agent-browser" | "playwright";
+  /** Browser profile name for persistent context (cookies, auth, localStorage).
+   *  Defaults to agent name. Only used with browserEngine: "playwright".
+   *  Profiles stored in .polpo/browser-profiles/<name>/. */
+  browserProfile?: string;
   /** Enable HTTP/fetch tools for API calls and web requests.
    *  Tools: http_fetch, http_download */
   enableHttp?: boolean;

@@ -620,12 +620,15 @@ export class AssessmentOrchestrator {
       }
 
       // Check if we should escalate to a different agent
+      // fallbackAgent resolution: explicit policy > agent.reportsTo (org chart)
       let assignTo = current.assignTo;
+      const currentAgent = this.ctx.config.team.agents.find(a => a.name === current.assignTo);
+      const effectiveFallback = policy?.fallbackAgent ?? currentAgent?.reportsTo;
       if (policy?.escalateAfter !== undefined && nextAttempt >= policy.escalateAfter) {
-        if (policy.fallbackAgent) {
-          const fallback = this.ctx.config.team.agents.find(a => a.name === policy.fallbackAgent);
+        if (effectiveFallback) {
+          const fallback = this.ctx.config.team.agents.find(a => a.name === effectiveFallback);
           if (fallback) {
-            assignTo = policy.fallbackAgent;
+            assignTo = effectiveFallback;
             this.ctx.emitter.emit("log", { level: "info", message: `[${taskId}] Escalating to ${assignTo} (attempt ${nextAttempt})` });
           }
         }
