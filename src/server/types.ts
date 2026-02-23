@@ -78,8 +78,14 @@ export interface AddAgentRequest {
   systemPrompt?: string;
   skills?: string[];
   maxTurns?: number;
+  // Identity, vault, hierarchy
+  identity?: import("../core/types.js").AgentIdentity;
+  vault?: Record<string, import("../core/types.js").VaultEntry>;
+  reportsTo?: string;
   // Extended tool categories
   enableBrowser?: boolean;
+  browserEngine?: "agent-browser" | "playwright";
+  browserProfile?: string;
   enableHttp?: boolean;
   enableGit?: boolean;
   enableMultifile?: boolean;

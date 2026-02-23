@@ -3,17 +3,37 @@ title: "Teams"
 description: "How agents are grouped into teams and managed."
 ---
 
-A team is a named group of agents that work together on a project. You define the team once in your config, and Polpo assigns tasks to its members.
+A team is a named group of agents that work together on a project — like a company department. Each agent has a **role**, an **identity** (who they are, how they communicate), **credentials** (vault), and a place in the **org chart** (`reportsTo`).
 
 ```json
 {
   "team": {
-    "name": "api-builders",
-    "description": "Team for the REST API project",
+    "name": "marketing",
+    "description": "Marketing department",
     "agents": [
-      { "name": "dev-1", "role": "developer" },
-      { "name": "dev-2", "role": "developer" },
-      { "name": "reviewer", "role": "reviewer", "model": "anthropic:claude-sonnet-4-20250514" }
+      {
+        "name": "marco",
+        "role": "team lead",
+        "identity": { "displayName": "Marco Rossi", "title": "Marketing Director" }
+      },
+      {
+        "name": "alice",
+        "role": "social media manager",
+        "reportsTo": "marco",
+        "identity": {
+          "displayName": "Alice Chen",
+          "title": "Social Media Manager",
+          "tone": "Professional but warm. Uses first names.",
+          "personality": "Empathetic, data-driven, creative with content."
+        },
+        "enableEmail": true
+      },
+      {
+        "name": "bob",
+        "role": "content writer",
+        "reportsTo": "marco",
+        "identity": { "displayName": "Bob Smith", "title": "Content Writer" }
+      }
     ]
   }
 }
@@ -42,6 +62,22 @@ orchestrator.renameTeam("new-name");
 ```
 
 Or via the TUI, which has built-in commands for team management.
+
+## Org Chart and Escalation
+
+Use `reportsTo` to build a hierarchy within the team. This drives **automatic escalation** — when an agent's task fails and no explicit `fallbackAgent` is set, Polpo escalates to the agent's manager.
+
+```
+marco (Marketing Director)
+├── alice (Social Media Manager)  [email, browser]
+└── bob (Content Writer)
+```
+
+View the org chart: `polpo agent list`. View an agent's full profile: `polpo agent show alice`.
+
+<Tip>
+Teams with `reportsTo` hierarchies work like company departments: the lead supervises, individual contributors do the work, and escalation flows upward automatically.
+</Tip>
 
 ## Volatile Teams
 

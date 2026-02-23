@@ -1,14 +1,20 @@
 ---
 title: "Email Tools"
 sidebarTitle: "Email"
-description: "2 tools to send and verify SMTP email"
+description: "5 tools to send, read, and search email via SMTP and IMAP"
 ---
 
-Send emails and verify SMTP connectivity. Enable with `enableEmail: true` in agent config.
+Send, read, and search emails. Enable with `enableEmail: true` in agent config.
 
 <Note>
-Uses **nodemailer** for SMTP transport. Requires the following environment variables (or per-call parameter overrides): `SMTP_HOST`, `SMTP_PORT` (default `587`), `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`.
+**SMTP** (send): Uses **nodemailer**. Credentials from agent vault (`"email"` entry with type `"smtp"`), env vars (`SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`), or per-call parameter overrides.
+
+**IMAP** (read/search): Uses **imapflow**. Credentials from agent vault (`"email-inbox"` entry with type `"imap"`) or env vars (`IMAP_HOST`, `IMAP_PORT`, `IMAP_USER`, `IMAP_PASS`).
 </Note>
+
+<Tip>
+The easiest way to configure email credentials is through the **onboarding wizard**: `polpo agent onboard <name>`. Step 4 walks you through SMTP and IMAP setup, creates vault entries with `${ENV_VAR}` references, and sets `enableEmail: true` automatically. See [Onboarding walkthrough](/guides/build-your-team#onboard-your-agents).
+</Tip>
 
 ---
 
@@ -26,13 +32,13 @@ Send an email via SMTP.
 | `html` | boolean | no | Send as HTML email (auto-detected if omitted) |
 | `cc` | string \| string[] | no | CC recipient(s) |
 | `bcc` | string \| string[] | no | BCC recipient(s) |
-| `from` | string | no | Sender address (overrides `SMTP_FROM` env var) |
+| `from` | string | no | Sender address (overrides vault/env) |
 | `reply_to` | string | no | Reply-to address |
-| `attachments` | array of `{path, filename?}` | no | File attachments. `path` is required, `filename` is optional |
-| `smtp_host` | string | no | SMTP host (overrides `SMTP_HOST` env var) |
-| `smtp_port` | number | no | SMTP port (overrides `SMTP_PORT` env var) |
-| `smtp_user` | string | no | SMTP username (overrides `SMTP_USER` env var) |
-| `smtp_pass` | string | no | SMTP password (overrides `SMTP_PASS` env var) |
+| `attachments` | array of `{path, filename?}` | no | File attachments |
+| `smtp_host` | string | no | SMTP host (overrides vault/env) |
+| `smtp_port` | number | no | SMTP port (overrides vault/env) |
+| `smtp_user` | string | no | SMTP username (overrides vault/env) |
+| `smtp_pass` | string | no | SMTP password (overrides vault/env) |
 | `smtp_secure` | boolean | no | Use TLS (overrides auto-detection) |
 
 ### Returns
@@ -41,9 +47,9 @@ Confirmation with the message ID and accepted recipients.
 
 ### Notes
 
+- Credential resolution order: tool parameters > agent vault > environment variables
 - Port **465** uses implicit TLS; all other ports use STARTTLS
 - When `html` is omitted, the body is auto-detected — if it contains HTML tags, it's sent as HTML
-- Attachments reference local file paths; the file content is read and attached at send time
 
 ---
 
@@ -55,16 +61,65 @@ Test that the SMTP connection and credentials are valid without sending an email
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `smtp_host` | string | no | SMTP host (overrides `SMTP_HOST` env var) |
-| `smtp_port` | number | no | SMTP port (overrides `SMTP_PORT` env var) |
-| `smtp_user` | string | no | SMTP username (overrides `SMTP_USER` env var) |
-| `smtp_pass` | string | no | SMTP password (overrides `SMTP_PASS` env var) |
+| `smtp_host` | string | no | SMTP host (overrides vault/env) |
+| `smtp_port` | number | no | SMTP port (overrides vault/env) |
+| `smtp_user` | string | no | SMTP username (overrides vault/env) |
+| `smtp_pass` | string | no | SMTP password (overrides vault/env) |
 
 ### Returns
 
 Success or failure message indicating whether the SMTP connection was established and authenticated.
 
-### Notes
+---
 
-- Useful for validating credentials before attempting to send
-- Uses the same transport configuration as `email_send`
+## `email_list` — List Emails
+
+List recent emails from an IMAP mailbox.
+
+### Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `folder` | string | no | Mailbox folder (default: `"INBOX"`) |
+| `limit` | number | no | Max emails to return (default: 20) |
+| `unseen_only` | boolean | no | Only return unread emails (default: false) |
+
+### Returns
+
+List of emails with UID, subject, from address, date, and read/unread status.
+
+---
+
+## `email_read` — Read Email
+
+Read a single email by its UID.
+
+### Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `uid` | number | yes | Email UID (from `email_list`) |
+| `folder` | string | no | Mailbox folder (default: `"INBOX"`) |
+| `mark_read` | boolean | no | Mark as read after fetching (default: true) |
+
+### Returns
+
+Full email content: subject, from, to, date, and text/HTML body.
+
+---
+
+## `email_search` — Search Emails
+
+Search emails by criteria.
+
+### Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `query` | string | yes | Search query — matched against subject, from, and body |
+| `folder` | string | no | Mailbox folder (default: `"INBOX"`) |
+| `limit` | number | no | Max results (default: 20) |
+
+### Returns
+
+List of matching emails with UID, subject, from, and date.

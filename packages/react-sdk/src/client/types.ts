@@ -166,6 +166,41 @@ export type McpServerConfig =
   | McpSseServerConfig
   | McpHttpServerConfig;
 
+// === Agent Identity & Vault ===
+
+/** Agent identity — who this agent is and how it behaves */
+/** A structured responsibility area */
+export interface AgentResponsibility {
+  area: string;
+  description: string;
+  priority?: "critical" | "high" | "medium" | "low";
+}
+
+export interface AgentIdentity {
+  displayName?: string;
+  title?: string;
+  company?: string;
+  email?: string;
+  bio?: string;
+  timezone?: string;
+  /** Responsibilities — simple strings or structured objects with area/description/priority */
+  responsibilities?: (string | AgentResponsibility)[];
+  /** Communication tone — HOW the agent communicates */
+  tone?: string;
+  /** Personality traits — WHO the agent IS as a persona */
+  personality?: string;
+}
+
+/** Vault credential entry */
+export interface VaultEntry {
+  /** Service type for semantic meaning */
+  type: "smtp" | "imap" | "oauth" | "api_key" | "login" | "custom";
+  /** Human-readable label */
+  label?: string;
+  /** Credential fields — values can be literals or ${ENV_VAR} references */
+  credentials: Record<string, string>;
+}
+
 export interface AgentConfig {
   name: string;
   role?: string;
@@ -176,6 +211,12 @@ export interface AgentConfig {
   /** Filesystem sandbox — directories the agent is allowed to access.
    *  When omitted, defaults to the project workDir. */
   allowedPaths?: string[];
+  /** Agent's identity — persona, responsibilities, communication style */
+  identity?: AgentIdentity;
+  /** Per-agent credential vault — keyed by service name */
+  vault?: Record<string, VaultEntry>;
+  /** Agent this one reports to — org chart hierarchy for escalation */
+  reportsTo?: string;
   systemPrompt?: string;
   skills?: string[];
   maxTurns?: number;
@@ -187,6 +228,10 @@ export interface AgentConfig {
   // Extended tool categories (opt-in)
   /** Enable browser automation tools (browser_navigate, browser_click, etc.) */
   enableBrowser?: boolean;
+  /** Browser engine: "agent-browser" (default) or "playwright" (persistent profiles) */
+  browserEngine?: "agent-browser" | "playwright";
+  /** Browser profile name for persistent context (cookies, auth). Only with browserEngine: "playwright". */
+  browserProfile?: string;
   /** Enable HTTP/fetch tools (http_fetch, http_download) */
   enableHttp?: boolean;
   /** Enable structured git tools (git_status, git_diff, git_log, etc.) */
@@ -201,7 +246,7 @@ export interface AgentConfig {
   enablePdf?: boolean;
   /** Enable Word/DOCX tools (docx_read, docx_create) */
   enableDocx?: boolean;
-  /** Enable email tools (email_send, email_verify) */
+  /** Enable email tools (email_send, email_verify, email_list, email_read, email_search) */
   enableEmail?: boolean;
   /** Enable audio tools (audio_transcribe, audio_speak) */
   enableAudio?: boolean;

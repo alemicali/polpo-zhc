@@ -31,6 +31,9 @@ Plans and tasks are stored separately in `.polpo/plans/` and `.polpo/tasks/` —
 | `allowedTools` | string[] | — | Allowed tool names |
 | `allowedPaths` | string[] | `[workDir]` | Filesystem sandbox — directories the agent can access. Absolute or relative to `workDir` |
 | `mcpServers` | object | — | MCP server configuration. Keys are server names, values are stdio or HTTP configs |
+| `identity` | AgentIdentity | — | Agent's identity — persona, responsibilities, communication style. See [Identity](#agentidentity-fields) |
+| `vault` | Record\<string, VaultEntry\> | — | Per-agent credential vault, keyed by service name. See [Vault](#vaultentry-fields) |
+| `reportsTo` | string | — | Agent this one reports to — org chart hierarchy for escalation. Must match another agent's `name` |
 | `systemPrompt` | string | — | Additional system prompt appended to base |
 | `skills` | string[] | — | Installed skill names (e.g. `"frontend-design"`) |
 | `maxTurns` | number | `150` | Max conversation turns before stopping |
@@ -38,6 +41,8 @@ Plans and tasks are stored separately in `.polpo/plans/` and `.polpo/tasks/` —
 | `volatile` | boolean | `false` | Auto-cleanup when plan completes |
 | `planGroup` | string | — | Plan group this volatile agent belongs to |
 | `enableBrowser` | boolean | `false` | Enable browser automation tools (18 tools, requires `agent-browser`) |
+| `browserEngine` | string | `"agent-browser"` | Browser engine: `"agent-browser"` (CLI) or `"playwright"` (persistent profiles via Playwright) |
+| `browserProfile` | string | agent name | Profile name for Playwright persistent context. Only used with `browserEngine: "playwright"` |
 | `enableHttp` | boolean | `false` | Enable HTTP fetch/download tools |
 | `enableGit` | boolean | `false` | Enable structured git tools |
 | `enableMultifile` | boolean | `false` | Enable batch file editing tools |
@@ -45,9 +50,106 @@ Plans and tasks are stored separately in `.polpo/plans/` and `.polpo/tasks/` —
 | `enableExcel` | boolean | `false` | Enable Excel/CSV tools |
 | `enablePdf` | boolean | `false` | Enable PDF tools |
 | `enableDocx` | boolean | `false` | Enable Word/DOCX tools |
-| `enableEmail` | boolean | `false` | Enable email tools (requires SMTP env vars) |
+| `enableEmail` | boolean | `false` | Enable email tools (SMTP send + IMAP read). Credentials from vault or env vars |
 | `enableAudio` | boolean | `false` | Enable speech-to-text and text-to-speech tools |
 | `enableImage` | boolean | `false` | Enable AI image generation and vision analysis tools |
+
+## AgentIdentity Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `displayName` | string | Human name (e.g. "Alice Chen") — used in external communications |
+| `title` | string | Job title (e.g. "Social Media Manager") |
+| `company` | string | Company name |
+| `email` | string | Primary email address (also default SMTP `from`) |
+| `bio` | string | Brief persona description |
+| `timezone` | string | IANA timezone (e.g. "Europe/Rome") |
+| `responsibilities` | (string \| AgentResponsibility)[] | Agent's responsibilities — simple strings or structured objects with area, description, and priority |
+| `tone` | string | Communication style — HOW the agent communicates (register, format, length) |
+| `personality` | string | Personality traits — WHO the agent IS (character, approach, values) |
+
+### AgentResponsibility Fields
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `area` | string | yes | Responsibility area (e.g. "Customer Relations", "Content Creation") |
+| `description` | string | yes | What the agent does in this area |
+| `priority` | string | no | `"critical"`, `"high"`, `"medium"`, or `"low"` — affects how the agent prioritizes work |
+
+## VaultEntry Fields
+
+Each vault entry represents a set of credentials for a service.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `type` | string | **Required.** One of: `"smtp"`, `"imap"`, `"oauth"`, `"api_key"`, `"login"`, `"custom"` |
+| `label` | string | Human-readable label (e.g. "Work email") |
+| `credentials` | Record\<string, string\> | **Required.** Key-value credential fields. Values can reference env vars: `"${ALICE_SMTP_PASS}"` |
+
+<Info>
+Vault credentials support `${ENV_VAR}` syntax — at runtime, Polpo resolves them from environment variables. This keeps secrets out of `polpo.json`.
+</Info>
+
+### Example: Agent with Identity and Vault
+
+```json
+{
+  "name": "alice",
+  "role": "social media manager",
+  "reportsTo": "marco",
+  "identity": {
+    "displayName": "Alice Chen",
+    "title": "Social Media Manager",
+    "company": "Acme Corp",
+    "email": "alice@acme.com",
+    "timezone": "Europe/Rome",
+    "responsibilities": [
+      {
+        "area": "Social Media Management",
+        "description": "Create, schedule, and publish content across all company social media platforms (Twitter, LinkedIn, Instagram). Track engagement metrics weekly.",
+        "priority": "high"
+      },
+      {
+        "area": "Customer Relations",
+        "description": "Monitor brand mentions and respond to customer inquiries within 2 hours. Escalate complaints to the team lead.",
+        "priority": "critical"
+      },
+      {
+        "area": "Content Calendar",
+        "description": "Maintain a 2-week rolling content calendar. Coordinate with the content writer for blog cross-promotion.",
+        "priority": "medium"
+      }
+    ],
+    "tone": "Professional but approachable. Uses first names. Keeps emails under 3 paragraphs. Ends messages with a clear call-to-action. Uses bullet points for lists. Avoids jargon when writing to customers.",
+    "personality": "Empathetic and detail-oriented. Anticipates customer concerns before they escalate. Prefers data-backed decisions — always cites engagement metrics. Creative with content ideas but disciplined with deadlines. Collaborative by nature, regularly checks in with teammates."
+  },
+  "vault": {
+    "email": {
+      "type": "smtp",
+      "label": "Work email (SMTP)",
+      "credentials": {
+        "host": "smtp.gmail.com",
+        "port": "587",
+        "user": "${ALICE_SMTP_USER}",
+        "pass": "${ALICE_SMTP_PASS}",
+        "from": "alice@acme.com"
+      }
+    },
+    "email-inbox": {
+      "type": "imap",
+      "label": "Work email (IMAP)",
+      "credentials": {
+        "host": "imap.gmail.com",
+        "port": "993",
+        "user": "${ALICE_IMAP_USER}",
+        "pass": "${ALICE_IMAP_PASS}"
+      }
+    }
+  },
+  "enableEmail": true,
+  "enableBrowser": true
+}
+```
 
 ## Task Fields
 

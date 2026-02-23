@@ -85,6 +85,30 @@ export const UpdatePlanSchema = z.object({
 
 // ── Agent schemas ─────────────────────────────────────────────────────
 
+const AgentResponsibilitySchema = z.object({
+  area: z.string(),
+  description: z.string(),
+  priority: z.enum(["critical", "high", "medium", "low"]).optional(),
+});
+
+const AgentIdentitySchema = z.object({
+  displayName: z.string().optional(),
+  title: z.string().optional(),
+  company: z.string().optional(),
+  email: z.string().optional(),
+  bio: z.string().optional(),
+  timezone: z.string().optional(),
+  responsibilities: z.array(z.union([z.string(), AgentResponsibilitySchema])).optional(),
+  tone: z.string().optional(),
+  personality: z.string().optional(),
+});
+
+const VaultEntrySchema = z.object({
+  type: z.enum(["smtp", "imap", "oauth", "api_key", "login", "custom"]),
+  label: z.string().optional(),
+  credentials: z.record(z.string(), z.string()),
+});
+
 export const AddAgentSchema = z.object({
   name: z.string().min(1),
   role: z.string().optional(),
@@ -93,8 +117,14 @@ export const AddAgentSchema = z.object({
   systemPrompt: z.string().optional(),
   skills: z.array(z.string()).optional(),
   maxTurns: z.number().int().positive().optional(),
+  // Identity, vault, hierarchy
+  identity: AgentIdentitySchema.optional(),
+  vault: z.record(z.string(), VaultEntrySchema).optional(),
+  reportsTo: z.string().optional(),
   // Extended tool categories
   enableBrowser: z.boolean().optional(),
+  browserEngine: z.enum(["agent-browser", "playwright"]).optional(),
+  browserProfile: z.string().optional(),
   enableHttp: z.boolean().optional(),
   enableGit: z.boolean().optional(),
   enableMultifile: z.boolean().optional(),

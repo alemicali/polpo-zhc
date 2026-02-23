@@ -227,6 +227,46 @@ polpo team rename <newName> [-d <path>]
 
 ---
 
+## polpo agent
+
+Agent identity and management commands.
+
+### agent onboard
+
+```bash
+polpo agent onboard <name> [-d <path>]
+```
+
+Interactive wizard to set up an agent's full profile. Walks through 5 steps:
+
+1. **Identity** — display name, title, company, email, timezone, bio
+2. **Persona** — structured responsibilities (area + description + priority), communication tone, personality traits
+3. **Hierarchy** — `reportsTo` assignment (org chart parent for escalation)
+4. **Email** — SMTP vault entry (send) and IMAP vault entry (read), sets `enableEmail: true`
+5. **Vault** — additional credentials (API keys, OAuth tokens, logins, custom)
+
+All changes are saved to `.polpo/polpo.json`. Run again to update an existing agent's profile.
+
+See [Onboarding walkthrough](/guides/build-your-team#onboard-your-agents) for detailed examples of each step.
+
+### agent list
+
+```bash
+polpo agent list [-d <path>]
+```
+
+Show all agents as an org chart tree with roles, enabled tools, and vault status.
+
+### agent show
+
+```bash
+polpo agent show <name> [-d <path>]
+```
+
+Detailed view of an agent: identity, vault (credentials masked), and enabled features.
+
+---
+
 ## polpo memory
 
 View and manage project memory.

@@ -3,35 +3,114 @@ title: "Agents"
 description: "How agents are configured and how they run."
 ---
 
-An agent is a named AI worker on Polpo's team. Each agent gets a model, a role, and optional constraints on tools and file access. Agents don't know about each other — Polpo coordinates everything.
+An agent is a named AI worker on Polpo's team. Each agent gets a model, a role, an **identity** (who they are, how they communicate), a **credential vault** (what services they can access), and a place in the **org chart** (who they report to).
 
 ```json
 {
-  "name": "backend-dev",
-  "role": "developer",
-  "model": "anthropic:claude-sonnet-4-20250514",
-  "allowedTools": ["read", "write", "edit", "bash", "glob", "grep"],
-  "allowedPaths": ["./src", "./tests"],
-  "maxTurns": 150,
-  "systemPrompt": "You are a senior backend developer. Focus on clean, tested code.",
-  "skills": ["typescript-patterns"]
+  "name": "alice",
+  "role": "social media manager",
+  "model": "anthropic:claude-sonnet-4-6",
+  "reportsTo": "marco",
+  "identity": {
+    "displayName": "Alice Chen",
+    "title": "Social Media Manager",
+    "company": "Acme Corp",
+    "email": "alice@acme.com",
+    "responsibilities": [
+      { "area": "Social Media", "description": "Manage all company social accounts", "priority": "high" },
+      { "area": "Customer Relations", "description": "Respond to inquiries within 2 hours", "priority": "critical" }
+    ],
+    "tone": "Professional but warm. Uses first names. Keeps emails under 3 paragraphs.",
+    "personality": "Empathetic and detail-oriented. Data-driven — always cites metrics."
+  },
+  "vault": {
+    "email": {
+      "type": "smtp",
+      "credentials": { "host": "smtp.gmail.com", "user": "${ALICE_SMTP_USER}", "pass": "${ALICE_SMTP_PASS}" }
+    }
+  },
+  "enableEmail": true,
+  "allowedPaths": ["./content", "./reports"]
 }
 ```
 
 ## Config Reference
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `name` | `string` | *required* | Unique agent identifier |
-| `role` | `string` | — | Human-readable role description |
-| `model` | `string` | — | `"provider:model"` or bare model ID |
-| `allowedTools` | `string[]` | all 7 tools | Which coding tools this agent can use |
-| `allowedPaths` | `string[]` | project root | Filesystem sandbox — agent can only access these directories |
-| `mcpServers` | `object` | — | MCP server connections (see [Tools & MCP](/features/tools-and-mcp)) |
-| `systemPrompt` | `string` | — | Custom system prompt prepended to the default orchestration contract |
-| `skills` | `string[]` | — | Named skills to load (markdown files with instructions) |
-| `maxTurns` | `number` | `150` | Maximum tool-use turns before the agent is stopped |
-| `maxConcurrency` | `number` | — | Per-agent concurrency limit |
+See [Configuration](/reference/config#agent-fields) for the full field-by-field reference. Key fields:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | `string` | **Required.** Unique agent identifier |
+| `role` | `string` | Role description (included in system prompt) |
+| `model` | `string` | `"provider:model"` or bare model ID |
+| `identity` | `AgentIdentity` | Persona: name, title, responsibilities, tone, personality |
+| `vault` | `Record<string, VaultEntry>` | Per-agent credentials (SMTP, IMAP, OAuth, API keys) |
+| `reportsTo` | `string` | Org chart parent — used for automatic escalation |
+| `allowedTools` | `string[]` | Which tools this agent can use |
+| `allowedPaths` | `string[]` | Filesystem sandbox |
+| `mcpServers` | `object` | MCP server connections |
+| `maxTurns` | `number` | Max tool-use turns (default: 150) |
+
+## Identity
+
+An agent's identity defines **who it is** — not just what it does. Polpo injects identity fields into the agent's system prompt:
+
+- **Display name, title, company** — used when the agent writes emails or external messages
+- **Responsibilities** — structured by area with priority levels, so the agent knows what to focus on and what to escalate. Supports both simple strings (`"Manage social media"`) and structured objects (`{ "area": "...", "description": "...", "priority": "high" }`)
+- **Tone** — communication style: HOW the agent communicates (register, format, length preferences)
+- **Personality** — character traits: WHO the agent IS (approach, values, working style)
+- **Timezone** — for time-aware decisions
+
+<Tip>
+**Tone vs. Personality**: Tone controls the *form* of communication — "Professional but warm. Keeps emails under 3 paragraphs. Uses bullet points." Personality controls the *substance* — "Empathetic and detail-oriented. Anticipates concerns. Prefers data-backed decisions." Together, they produce consistent, realistic agent behavior.
+</Tip>
+
+### Onboarding
+
+While you can write identity JSON by hand, the recommended approach is the **onboarding wizard**:
+
+```bash
+polpo agent onboard alice
+```
+
+This interactive CLI walks through 5 steps — identity, persona (responsibilities + tone + personality), hierarchy, email, and additional vault credentials — and writes everything to `.polpo/polpo.json`.
+
+After onboarding, verify the result:
+
+```bash
+polpo agent show alice    # full profile with masked credentials
+polpo agent list          # org chart tree
+```
+
+<Card title="Onboarding walkthrough" icon="arrow-right" href="/guides/build-your-team#onboard-your-agents">
+  Step-by-step guide with example output for each stage.
+</Card>
+
+## Credential Vault
+
+Each agent can have its own set of credentials for different services. Vault entries use `${ENV_VAR}` references to keep secrets out of the config file:
+
+```json
+"vault": {
+  "email": { "type": "smtp", "credentials": { "user": "${ALICE_SMTP_USER}", "pass": "${ALICE_SMTP_PASS}" } },
+  "twitter": { "type": "oauth", "credentials": { "api_key": "${TWITTER_KEY}" } },
+  "crm": { "type": "login", "credentials": { "url": "https://crm.example.com", "username": "alice", "password": "${CRM_PASS}" } }
+}
+```
+
+At runtime, Polpo resolves `${ENV_VAR}` from environment variables and passes the credentials to the agent's tools. Credential resolution order: tool parameters > vault > environment variables.
+
+## Hierarchy (reportsTo)
+
+The `reportsTo` field creates an org chart. When a task fails and the retry policy has no explicit `fallbackAgent`, Polpo automatically escalates to the agent's manager:
+
+```
+marco (Team Lead)
+├── alice (Social Media Manager)
+└── bob (Backend Developer)
+```
+
+View the hierarchy with `polpo agent list`.
 
 ## Built-in Engine
 

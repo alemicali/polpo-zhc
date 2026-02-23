@@ -46,12 +46,16 @@ Each agent supports these fields:
 | `name` | `string` | *required* | Unique identifier |
 | `role` | `string` | — | What this agent does (included in its system prompt) |
 | `model` | `string` | — | `"provider:model"` format. See [Providers](/models/overview) |
+| `identity` | `AgentIdentity` | — | Persona: name, title, responsibilities, tone, personality. See [Identity](#agent-identity-and-persona) |
+| `vault` | `Record<string, VaultEntry>` | — | Per-agent credentials (SMTP, IMAP, OAuth, API keys). See [Vault](#per-agent-credentials-vault) |
+| `reportsTo` | `string` | — | Org chart parent — automatic escalation on failure. See [Org chart](#org-chart-reportsto) |
 | `allowedTools` | `string[]` | all tools | Restrict which coding tools the agent can use |
 | `allowedPaths` | `string[]` | project root | Filesystem sandbox — agent can only access these paths |
 | `systemPrompt` | `string` | — | Custom instructions prepended to the default prompt |
 | `skills` | `string[]` | — | Named skill files to load |
 | `maxTurns` | `number` | `150` | Maximum tool-use turns before the agent is stopped |
 | `enableBrowser` | `boolean` | `false` | Give the agent browser access |
+| `enableEmail` | `boolean` | `false` | Give the agent email tools (5 tools, requires vault credentials) |
 | `mcpServers` | `object` | — | MCP server connections |
 
 <Tip>
@@ -118,6 +122,208 @@ You can mix providers and models across agents:
 ```
 
 Polpo resolves each agent's model independently. Set `POLPO_MODEL` as a fallback for agents without an explicit model.
+
+## Agent identity and persona
+
+Give agents a rich identity — name, title, responsibilities, communication style, and personality traits. Polpo injects all of this into the agent's system prompt so it behaves consistently.
+
+```json
+{
+  "name": "alice",
+  "role": "social media manager",
+  "identity": {
+    "displayName": "Alice Chen",
+    "title": "Social Media Manager",
+    "company": "Acme Corp",
+    "email": "alice@acme.com",
+    "responsibilities": [
+      {
+        "area": "Social Media Management",
+        "description": "Create and publish content across all platforms. Track engagement metrics.",
+        "priority": "high"
+      },
+      {
+        "area": "Customer Relations",
+        "description": "Respond to customer inquiries within 2 hours. Escalate complaints.",
+        "priority": "critical"
+      }
+    ],
+    "tone": "Professional but warm. Uses first names. Keeps emails under 3 paragraphs. Uses bullet points for lists.",
+    "personality": "Empathetic and detail-oriented. Anticipates customer concerns. Prefers data-backed decisions — always cites engagement metrics."
+  }
+}
+```
+
+**Responsibilities** support both simple strings (`"Manage social media"`) and structured objects with `area`, `description`, and `priority`. The structured format is recommended — it helps the agent prioritize work and understand scope boundaries.
+
+**Tone** defines HOW the agent communicates — register, format, length. **Personality** defines WHO the agent IS — character traits, working style, decision approach. Together they produce realistic, consistent behavior.
+
+You can edit the JSON manually, or use the interactive onboarding wizard (recommended).
+
+## Onboard your agents
+
+Instead of writing JSON by hand, `polpo agent onboard` walks you through every aspect of an agent's setup in a guided wizard.
+
+```bash
+polpo agent onboard alice
+```
+
+The wizard runs through 5 steps:
+
+<Steps>
+
+1. **Identity** — The agent's public persona.
+
+   ```
+   Step 1: Identity
+
+   Display name (e.g. Alice Chen): Alice Chen
+   Job title [social media manager]: Social Media Manager
+   Company: Acme Corp
+   Email: alice@acme.com
+   Timezone (e.g. Europe/Rome): America/New_York
+   Bio (optional): Manages Acme's social presence across all platforms.
+   ```
+
+   These fields are injected into the agent's system prompt and used when it writes emails or external messages. The `email` field also serves as the default SMTP `from` address.
+
+2. **Persona** — Responsibilities, tone, and personality.
+
+   ```
+   Step 2: Persona
+
+   Use structured responsibilities (area + description + priority)? (Y/n): Y
+   Enter responsibilities (empty area to finish):
+     Area: Social Media Management
+     Description: Create and publish content across all platforms
+     Priority: 1. (skip)  2. critical  3. high  4. medium  5. low
+     Choice [1]: 3
+
+     Area: Customer Relations
+     Description: Respond to inquiries within 2h, escalate complaints
+     Priority: Choice [1]: 2
+
+     Area:
+
+   Communication tone: Professional but warm. Uses first names. Keeps emails under 3 paragraphs.
+   Personality traits: Empathetic and detail-oriented. Data-driven. Creative but disciplined.
+   ```
+
+   **Structured responsibilities** (recommended) give each area a name, description, and priority. The agent uses priority to decide what to focus on first. You can also enter simple one-line strings if you prefer.
+
+   **Tone** controls the *form* of communication — length, register, format preferences. **Personality** controls the *substance* — character traits, decision-making approach, working style.
+
+3. **Hierarchy** — Org chart placement.
+
+   ```
+   Step 3: Hierarchy
+
+   Reports to:
+     1. (none — top-level)
+     2. marco
+   Choice [1]: 2
+   ```
+
+   Sets `reportsTo` for automatic escalation. If the agent's task fails, Polpo escalates to its manager. See [Escalation](/features/escalation).
+
+4. **Email** — SMTP and IMAP vault configuration.
+
+   ```
+   Step 4: Email
+
+   Enable email tools? (y/N): y
+   Configure SMTP (send)? (Y/n): Y
+     SMTP host [smtp.gmail.com]: smtp.gmail.com
+     SMTP port [587]: 587
+     SMTP user (e.g. ${ALICE_SMTP_USER}): ${ALICE_SMTP_USER}
+     SMTP pass (e.g. ${ALICE_SMTP_PASS}): ${ALICE_SMTP_PASS}
+     From address [alice@acme.com]: alice@acme.com
+
+   Configure IMAP (read)? (Y/n): Y
+     IMAP host [imap.gmail.com]: imap.gmail.com
+     ...
+   ```
+
+   This creates vault entries (type `"smtp"` and `"imap"`) and sets `enableEmail: true`. Use `${ENV_VAR}` syntax for secrets — Polpo resolves them at runtime from environment variables.
+
+   Enabling email gives the agent 5 tools: `email_send`, `email_verify`, `email_list`, `email_read`, `email_search`. See [Email Tools](/reference/tools/email).
+
+5. **Vault** — Additional credentials.
+
+   ```
+   Step 5: Additional Credentials
+
+   Add a vault entry (API key, login, etc.)? (y/N): y
+     Service name: twitter
+     Credential type: 1. api_key  2. oauth  3. login  4. custom
+     Choice [1]: 1
+     Label [twitter]: Twitter API
+     Enter credential fields (empty key to stop):
+       Key: api_key
+       Value: ${TWITTER_API_KEY}
+       Key:
+   ```
+
+   Add vault entries for any service the agent needs — API keys, OAuth tokens, login credentials. Each entry gets a `type` for semantic meaning and `${ENV_VAR}` references for secrets.
+
+</Steps>
+
+The wizard saves everything to `.polpo/polpo.json`. Run it again anytime to update an agent's configuration.
+
+### Verify the result
+
+After onboarding, inspect the agent:
+
+```bash
+polpo agent show alice    # detailed view (credentials masked)
+polpo agent list          # org chart with all agents
+```
+
+<Tip>
+**Workflow**: Use `polpo init` → `polpo setup` to create your project and first agent, then `polpo agent onboard <name>` to set up each agent's identity, credentials, and persona. The setup wizard handles the *project*; onboarding handles the *agent*.
+</Tip>
+
+## Org chart (reportsTo)
+
+Build a hierarchy so Polpo knows who to escalate to when tasks fail:
+
+```json
+{
+  "agents": [
+    { "name": "marco", "role": "team lead" },
+    { "name": "alice", "role": "developer", "reportsTo": "marco" },
+    { "name": "bob", "role": "developer", "reportsTo": "marco" }
+  ]
+}
+```
+
+When alice's task fails and the retry policy has no explicit `fallbackAgent`, Polpo automatically escalates to `marco`. View the org chart with `polpo agent list`.
+
+## Per-agent credentials (vault)
+
+Each agent can have its own credentials for email, APIs, logins, etc. Secrets use `${ENV_VAR}` references:
+
+```json
+{
+  "name": "alice",
+  "vault": {
+    "email": {
+      "type": "smtp",
+      "label": "Work email",
+      "credentials": {
+        "host": "smtp.gmail.com",
+        "port": "587",
+        "user": "${ALICE_SMTP_USER}",
+        "pass": "${ALICE_SMTP_PASS}",
+        "from": "alice@acme.com"
+      }
+    }
+  },
+  "enableEmail": true
+}
+```
+
+See [Configuration](/reference/config#vaultentry-fields) for all vault entry types.
 
 ## Next steps
 

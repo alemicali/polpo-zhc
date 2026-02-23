@@ -1,6 +1,6 @@
 ---
 title: "Tools & MCP"
-description: "7 core coding tools, 11 extended tool categories (52 tools total), filesystem sandboxing, and MCP server connections."
+description: "7 core coding tools, 11 extended tool categories (55 tools total), filesystem sandboxing, and MCP server connections."
 ---
 
 Agents need tools to do their job. Polpo gives every agent a set of **coding tools** for reading, writing, and searching code — **11 extended tool categories** for browser automation, git, HTTP, documents, and more — plus the ability to connect to external **MCP servers** for additional capabilities.
@@ -41,7 +41,7 @@ This agent can browse code but can't write, edit, or run commands — useful for
 
 ## Extended Tools
 
-Beyond the 7 core tools, Polpo offers **11 optional tool categories** with **52 extended tools** total. Each category is enabled per-agent with a config flag.
+Beyond the 7 core tools, Polpo offers **11 optional tool categories** with **55 extended tools** total. Each category is enabled per-agent with a config flag.
 
 ### Browser (18 tools)
 
@@ -155,18 +155,20 @@ Tools: `docx_read`, `docx_create`.
   Full parameter schemas and usage for Word document tools.
 </Card>
 
-### Email (2 tools)
+### Email (5 tools)
 
-Send emails via SMTP — useful for notification agents or report distribution.
+Send, read, and search emails via SMTP and IMAP — useful for communication agents, notification bots, or inbox monitoring.
 
 ```json
-{ "name": "notifier", "enableEmail": true }
+{ "name": "alice", "enableEmail": true }
 ```
 
-Tools: `email_send`, `email_send_html`.
+Tools: `email_send`, `email_verify`, `email_list`, `email_read`, `email_search`.
+
+Email tools require SMTP/IMAP credentials. The easiest way to set them up is through the [onboarding wizard](/guides/build-your-team#onboard-your-agents) (`polpo agent onboard alice`), which creates vault entries with `${ENV_VAR}` references. Credentials can also be set via environment variables (`SMTP_HOST`, `IMAP_HOST`, etc.) or tool parameter overrides.
 
 <Card title="Email tools reference" icon="arrow-right" href="/reference/tools/email">
-  Full parameter schemas and usage for email tools.
+  Full parameter schemas, credential resolution, and usage for all 5 email tools.
 </Card>
 
 ### Audio (2 tools)
@@ -209,7 +211,7 @@ Tools: `image_generate`, `image_analyze`.
 | [Excel/CSV](/reference/tools/excel) | 4 | `enableExcel` | Read, write, and query spreadsheets |
 | [PDF](/reference/tools/pdf) | 4 | `enablePdf` | Read, create, merge, inspect PDFs |
 | [Word/DOCX](/reference/tools/docx) | 2 | `enableDocx` | Read and create Word documents |
-| [Email](/reference/tools/email) | 2 | `enableEmail` | Send emails via SMTP |
+| [Email](/reference/tools/email) | 5 | `enableEmail` | Send, read, and search emails via SMTP + IMAP |
 | [Audio](/reference/tools/audio) | 2 | `enableAudio` | Speech-to-text and text-to-speech |
 | [Image](/reference/tools/image) | 2 | `enableImage` | AI image generation and analysis |
 

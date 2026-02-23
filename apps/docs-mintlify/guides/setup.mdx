@@ -140,3 +140,13 @@ The wizard generates a standard `.polpo/polpo.json`:
 ```
 
 For the full list of configuration options, see [Configuration](/configuration) and [Configuration Reference](/reference/config).
+
+## Next: onboard your agents
+
+The setup wizard creates a basic agent with a name and role. To give it a full identity — persona, responsibilities, credentials, hierarchy — use the **onboarding wizard**:
+
+```bash
+polpo agent onboard dev-1
+```
+
+This adds identity fields (display name, title, tone, personality), structured responsibilities, vault credentials (email, APIs, logins), and org chart placement. See [Build Your Team](/guides/build-your-team#onboard-your-agents) for the full walkthrough.

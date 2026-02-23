@@ -11,7 +11,7 @@ import readline from "node:readline";
 import type { Command } from "commander";
 import chalk from "chalk";
 import { loadPolpoConfig, savePolpoConfig } from "../../core/config.js";
-import type { AgentConfig, AgentIdentity, VaultEntry } from "../../core/types.js";
+import type { AgentConfig, AgentIdentity, AgentResponsibility, VaultEntry } from "../../core/types.js";
 
 // ── Readline helpers ──
 
@@ -84,10 +84,11 @@ export function registerAgentOnboardCommands(program: Command): void {
       // ── 2. Persona ──
       console.log(chalk.cyan("\n  Step 2: Persona\n"));
       const existingResp = agentCfg.identity?.responsibilities ?? [];
-      const responsibilities: string[] = [];
+      const responsibilities: (string | AgentResponsibility)[] = [];
 
       if (existingResp.length > 0) {
-        console.log(chalk.dim(`  Current responsibilities: ${existingResp.join(", ")}`));
+        const respDisplay = existingResp.map(r => typeof r === "string" ? r : `${r.area}: ${r.description}`).join(", ");
+        console.log(chalk.dim(`  Current responsibilities: ${respDisplay}`));
         const replace = await askYesNo("Replace existing responsibilities?", false);
         if (!replace) {
           responsibilities.push(...existingResp);
@@ -95,15 +96,38 @@ export function registerAgentOnboardCommands(program: Command): void {
       }
 
       if (responsibilities.length === 0 || existingResp.length === 0) {
-        console.log(chalk.dim("  Enter responsibilities (one per line, empty to finish):"));
-        while (true) {
-          const r = await ask("    > ");
-          if (!r) break;
-          responsibilities.push(r);
+        const useStructured = await askYesNo("Use structured responsibilities (area + description + priority)?", true);
+
+        if (useStructured) {
+          console.log(chalk.dim("  Enter responsibilities (empty area to finish):"));
+          while (true) {
+            const area = await ask("    Area (e.g. Customer Relations): ");
+            if (!area) break;
+            const desc = await ask("    Description: ");
+            if (!desc) break;
+            const prioChoices = ["(skip)", "critical", "high", "medium", "low"];
+            const prioIdx = await pickOne("Priority:", prioChoices);
+            const prio = prioIdx === 0 ? undefined : prioChoices[prioIdx] as "critical" | "high" | "medium" | "low";
+            responsibilities.push({ area, description: desc, ...(prio ? { priority: prio } : {}) });
+          }
+        } else {
+          console.log(chalk.dim("  Enter responsibilities (one per line, empty to finish):"));
+          while (true) {
+            const r = await ask("    > ");
+            if (!r) break;
+            responsibilities.push(r);
+          }
         }
       }
 
-      const tone = await askDefault("Communication tone/style", agentCfg.identity?.tone ?? "");
+      const tone = await askDefault(
+        "Communication tone (e.g. Professional but warm. Uses first names. Keeps emails under 3 paragraphs.)",
+        agentCfg.identity?.tone ?? "",
+      );
+      const personality = await askDefault(
+        "Personality traits (e.g. Detail-oriented and empathetic. Anticipates concerns. Data-driven.)",
+        agentCfg.identity?.personality ?? "",
+      );
 
       // ── 3. Hierarchy ──
       console.log(chalk.cyan("\n  Step 3: Hierarchy\n"));
@@ -185,6 +209,7 @@ export function registerAgentOnboardCommands(program: Command): void {
       if (bio) identity.bio = bio;
       if (responsibilities.length > 0) identity.responsibilities = responsibilities;
       if (tone) identity.tone = tone;
+      if (personality) identity.personality = personality;
 
       const updated: Record<string, unknown> = { ...agentCfg };
       if (Object.keys(identity).length > 0) updated.identity = identity;
@@ -283,9 +308,17 @@ export function registerAgentOnboardCommands(program: Command): void {
         if (id.bio) console.log(`    Bio: ${id.bio}`);
         if (id.responsibilities?.length) {
           console.log("    Responsibilities:");
-          for (const r of id.responsibilities) console.log(`      - ${r}`);
+          for (const r of id.responsibilities) {
+            if (typeof r === "string") {
+              console.log(`      - ${r}`);
+            } else {
+              const prio = r.priority ? chalk.dim(` [${r.priority}]`) : "";
+              console.log(`      - ${chalk.bold(r.area)}${prio}: ${r.description}`);
+            }
+          }
         }
         if (id.tone) console.log(`    Tone: ${id.tone}`);
+        if (id.personality) console.log(`    Personality: ${id.personality}`);
       }
 
       if (agentCfg.vault && Object.keys(agentCfg.vault).length > 0) {
