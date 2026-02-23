@@ -40,4 +40,8 @@ export interface AgentHandle {
 export interface SpawnContext {
   /** Absolute path to the .polpo directory. Used for skill loading, logs, etc. */
   polpoDir: string;
+  /** Email domain allowlist — restricts email_send tool to these domains. */
+  emailAllowedDomains?: string[];
+  /** MCP tool allowlist — keys are server names, values are allowed tool names. */
+  mcpToolAllowlist?: Record<string, string[]>;
 }

@@ -11,6 +11,7 @@
  */
 
 import { resolve, sep } from "node:path";
+import { realpathSync } from "node:fs";
 
 /**
  * Resolve allowedPaths to absolute paths, normalizing relative paths against cwd.
@@ -29,7 +30,9 @@ export function resolveAllowedPaths(cwd: string, allowedPaths?: string[]): strin
  * (e.g. `/home/user/project-evil` should NOT match `/home/user/project`).
  */
 export function isPathAllowed(filePath: string, allowedPaths: string[]): boolean {
-  const resolved = resolve(filePath);
+  let resolved = resolve(filePath);
+  // Resolve symlinks to prevent symlink-based sandbox escape
+  try { resolved = realpathSync(resolved); } catch { /* file may not exist yet — use logical path */ }
   for (const allowed of allowedPaths) {
     const normalizedAllowed = resolve(allowed);
     // Exact match

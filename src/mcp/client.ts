@@ -43,10 +43,16 @@ export class McpClientManager {
   /**
    * Connect to all configured MCP servers and discover their tools.
    * Servers that fail to connect are logged and skipped (non-fatal).
+   *
+   * @param mcpServers - Server configurations keyed by server name
+   * @param log - Optional log function for status messages
+   * @param toolAllowlist - Optional allowlist: keys are server names, values are allowed tool names.
+   *   When set for a server, only listed tools are exposed. Unlisted servers are unrestricted.
    */
   async connectAll(
     mcpServers: Record<string, McpServerConfig>,
     log?: (msg: string) => void,
+    toolAllowlist?: Record<string, string[]>,
   ): Promise<void> {
     const entries = Object.entries(mcpServers);
     if (entries.length === 0) return;
@@ -62,8 +68,18 @@ export class McpClientManager {
         const { tools: mcpTools } = await server.client.listTools();
         emit(`[mcp] ${name}: connected, ${mcpTools.length} tool(s) discovered`);
 
+        // Apply tool allowlist filtering for this server
+        const allowedNames = toolAllowlist?.[name];
+        const filteredTools = allowedNames
+          ? mcpTools.filter(t => {
+              const allowed = allowedNames.includes(t.name);
+              if (!allowed) emit(`[mcp] ${name}: tool "${t.name}" blocked by allowlist`);
+              return allowed;
+            })
+          : mcpTools;
+
         // Bridge each MCP tool to AgentTool format
-        for (const tool of mcpTools) {
+        for (const tool of filteredTools) {
           this.tools.push(
             bridgeMcpTool(name, tool, server.client),
           );

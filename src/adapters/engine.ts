@@ -33,7 +33,7 @@ import { nanoid } from "nanoid";
 /**
  * Build the system prompt for the agent, including loaded skills.
  */
-function buildSystemPrompt(agent: AgentConfig, cwd: string, polpoDir?: string): string {
+export function buildSystemPrompt(agent: AgentConfig, cwd: string, polpoDir?: string): string {
   const parts = [
     "You are a coding agent managed by Polpo, an AI agent orchestrator.",
     "Complete your assigned task autonomously. Make reasonable decisions and proceed without asking questions.",
@@ -56,19 +56,30 @@ function buildSystemPrompt(agent: AgentConfig, cwd: string, polpoDir?: string): 
     parts.push("Use this identity when communicating externally (emails, messages, etc.).");
   }
 
-  // Responsibilities (detailed, richer than role)
+  // Responsibilities (detailed, richer than role) — supports both strings and structured objects
   if (agent.identity?.responsibilities?.length) {
     parts.push("", "## Your Responsibilities");
     for (const r of agent.identity.responsibilities) {
-      parts.push(`- ${r}`);
+      if (typeof r === "string") {
+        parts.push(`- ${r}`);
+      } else {
+        const prio = r.priority ? ` [${r.priority}]` : "";
+        parts.push(`- **${r.area}**${prio}: ${r.description}`);
+      }
     }
     parts.push("Focus on these responsibilities. Escalate if something falls outside your scope.");
   }
 
-  // Tone / personality
+  // Communication tone — HOW the agent communicates
   if (agent.identity?.tone) {
     parts.push("", "## Communication Style");
     parts.push(agent.identity.tone);
+  }
+
+  // Personality — WHO the agent IS
+  if (agent.identity?.personality) {
+    parts.push("", "## Personality");
+    parts.push(agent.identity.personality);
   }
 
   // Hierarchy — who this agent reports to
@@ -328,6 +339,7 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
           enableAudio: agentConfig.enableAudio,
           enableImage: agentConfig.enableImage,
           vault,
+          emailAllowedDomains: agentConfig.emailAllowedDomains ?? ctx?.emailAllowedDomains,
         });
         agent.setTools(allTools);
       }
@@ -339,6 +351,7 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
         await mcpManager.connectAll(
           agentConfig.mcpServers as Record<string, McpServerConfig>,
           log,
+          ctx?.mcpToolAllowlist,
         );
         const mcpTools = mcpManager.getTools();
         if (mcpTools.length > 0) {

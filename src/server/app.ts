@@ -5,6 +5,7 @@ import type { ProjectManager } from "./project-manager.js";
 import { authMiddleware } from "./middleware/auth.js";
 import { projectMiddleware } from "./middleware/project.js";
 import { errorMiddleware } from "./middleware/error.js";
+import { rateLimitMiddleware } from "./middleware/rate-limit.js";
 import { healthRoutes } from "./routes/health.js";
 import { taskRoutes } from "./routes/tasks.js";
 import { planRoutes } from "./routes/plans.js";
@@ -40,6 +41,7 @@ export function createApp(pm: ProjectManager, opts?: AppOptions): OpenAPIHono {
 
   // Global middleware
   app.use("*", errorMiddleware());
+  app.use("*", rateLimitMiddleware());
 
   if (opts?.corsOrigins && opts.corsOrigins.length > 0) {
     app.use("*", cors({ origin: opts.corsOrigins }));

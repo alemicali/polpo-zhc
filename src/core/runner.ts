@@ -19,6 +19,7 @@ import { spawnEngine } from "../adapters/engine.js";
 import type { RunStore, RunRecord } from "./run-store.js";
 import type { RunnerConfig, TaskResult } from "./types.js";
 import { notifyRunComplete } from "./notification.js";
+import { sanitizeTranscriptEntry } from "../server/security.js";
 
 const ACTIVITY_POLL_MS = 1500;
 
@@ -66,7 +67,7 @@ class RunActivityLog {
 
   /** Log a transcript entry from the engine (assistant text, tool_use, tool_result, etc.) */
   logTranscript(entry: Record<string, unknown>): void {
-    this.write({ ts: new Date().toISOString(), ...entry });
+    this.write({ ts: new Date().toISOString(), ...sanitizeTranscriptEntry(entry) });
   }
 
   /** Log a lifecycle event */
@@ -110,7 +111,11 @@ async function main(): Promise<void> {
 
   let handle;
   try {
-    const spawnCtx = { polpoDir: config.polpoDir };
+    const spawnCtx = {
+      polpoDir: config.polpoDir,
+      emailAllowedDomains: config.emailAllowedDomains,
+      mcpToolAllowlist: config.mcpToolAllowlist,
+    };
     handle = spawnEngine(config.agent, config.task, config.cwd, spawnCtx);
     // Wire transcript persistence — every agent message gets written to the run log
     handle.onTranscript = (entry) => actLog.logTranscript(entry);

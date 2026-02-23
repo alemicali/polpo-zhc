@@ -1,5 +1,6 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import type { ServerEnv } from "../app.js";
+import { redactPolpoConfig } from "../security.js";
 
 // ── Route definitions ─────────────────────────────────────────────────
 
@@ -66,20 +67,7 @@ export function configRoutes(): OpenAPIHono<ServerEnv> {
       return c.json({ ok: false, error: "No configuration loaded" }, 404);
     }
 
-    // Redact sensitive provider keys
-    const redacted = {
-      ...config,
-      providers: config.providers
-        ? Object.fromEntries(
-            Object.entries(config.providers).map(([k, v]) => [
-              k,
-              { ...v, apiKey: v.apiKey ? `${v.apiKey.slice(0, 8)}...` : undefined },
-            ]),
-          )
-        : undefined,
-    };
-
-    return c.json({ ok: true, data: redacted }, 200);
+    return c.json({ ok: true, data: redactPolpoConfig(config) }, 200);
   });
 
   return app;

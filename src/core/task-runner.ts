@@ -430,10 +430,12 @@ export class TaskRunner {
       cwd: this.ctx.workDir,
       storage: this.ctx.config.settings.storage,
       notifySocket: getSocketPath(this.ctx.polpoDir),
+      emailAllowedDomains: agent.emailAllowedDomains ?? this.ctx.config.settings.emailAllowedDomains,
+      mcpToolAllowlist: this.ctx.config.settings.mcpToolAllowlist,
     };
 
     try {
-      writeFileSync(configPath, JSON.stringify(runnerConfig, null, 2));
+      writeFileSync(configPath, JSON.stringify(runnerConfig, null, 2), { mode: 0o600 });
 
       // Resolve runner path: prefer compiled .js, fall back to .ts via tsx (dev mode)
       const baseDir = dirname(fileURLToPath(import.meta.url));

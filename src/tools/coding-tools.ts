@@ -436,6 +436,8 @@ export interface CreateAllToolsOptions {
   enableImage?: boolean;
   /** Resolved vault credentials for the agent */
   vault?: ResolvedVault;
+  /** Allowed recipient email domains for email_send. */
+  emailAllowedDomains?: string[];
 }
 
 /**
@@ -506,7 +508,7 @@ export async function createAllTools(options: CreateAllToolsOptions): Promise<Ag
 
   // Email tools
   if (options.enableEmail || categoryRequested(ALL_EMAIL_TOOL_NAMES)) {
-    tools.push(...createEmailTools(cwd, allowedPaths, allowedTools, options.vault));
+    tools.push(...createEmailTools(cwd, allowedPaths, allowedTools, options.vault, options.emailAllowedDomains));
   }
 
   // Audio tools (STT/TTS)

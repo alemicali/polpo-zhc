@@ -15,6 +15,7 @@ import { resolve, dirname } from "node:path";
 import { Type } from "@sinclair/typebox";
 import type { AgentTool, AgentToolResult } from "@mariozechner/pi-agent-core";
 import { resolveAllowedPaths, assertPathAllowed } from "./path-sandbox.js";
+import { assertUrlAllowed } from "./ssrf-guard.js";
 
 const MAX_RESPONSE_BYTES = 100_000;
 const DEFAULT_TIMEOUT = 30_000;
@@ -50,6 +51,15 @@ function createHttpFetchTool(): AgentTool<typeof HttpFetchSchema> {
         return {
           content: [{ type: "text", text: "Error: URL must start with http:// or https://" }],
           details: { error: "invalid_url" },
+        };
+      }
+
+      try {
+        assertUrlAllowed(url);
+      } catch (err: any) {
+        return {
+          content: [{ type: "text", text: `Error: ${err.message}` }],
+          details: { error: "ssrf_blocked" },
         };
       }
 
@@ -150,6 +160,15 @@ function createHttpDownloadTool(cwd: string, sandbox: string[]): AgentTool<typeo
         return {
           content: [{ type: "text", text: "Error: URL must start with http:// or https://" }],
           details: { error: "invalid_url" },
+        };
+      }
+
+      try {
+        assertUrlAllowed(url);
+      } catch (err: any) {
+        return {
+          content: [{ type: "text", text: `Error: ${err.message}` }],
+          details: { error: "ssrf_blocked" },
         };
       }
 

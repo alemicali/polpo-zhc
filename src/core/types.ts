@@ -171,6 +171,16 @@ export interface TaskResult {
 // === Agent Identity & Vault ===
 
 /** Agent identity — who this agent is and how it behaves */
+/** A structured responsibility area */
+export interface AgentResponsibility {
+  /** Responsibility area (e.g. "Customer Relations", "Content Creation") */
+  area: string;
+  /** What the agent does in this area */
+  description: string;
+  /** Priority level — affects how the agent prioritizes competing tasks */
+  priority?: "critical" | "high" | "medium" | "low";
+}
+
 export interface AgentIdentity {
   displayName?: string;      // "Alice Chen"
   title?: string;            // "Social Media Manager"
@@ -179,11 +189,17 @@ export interface AgentIdentity {
   bio?: string;              // Brief persona description
   timezone?: string;         // "Europe/Rome"
 
-  /** Detailed list of responsibilities — richer than `role` */
-  responsibilities?: string[];
+  /** Responsibilities — simple strings or structured objects with area/description/priority.
+   *  Structured format is preferred for clarity. */
+  responsibilities?: (string | AgentResponsibility)[];
 
-  /** Communication tone/personality — injected in system prompt */
+  /** Communication tone — HOW the agent communicates.
+   *  Examples: "Professional but warm", "Concise and data-driven", "Casual and friendly" */
   tone?: string;
+
+  /** Personality traits — WHO the agent IS as a persona.
+   *  Examples: "Detail-oriented and empathetic", "Creative problem-solver" */
+  personality?: string;
 }
 
 /** Vault credential entry */
@@ -276,6 +292,10 @@ export interface AgentConfig {
   /** Enable image tools for generation and vision analysis.
    *  Tools: image_generate, image_analyze. Requires OPENAI_API_KEY/REPLICATE_API_TOKEN/ANTHROPIC_API_KEY env vars. */
   enableImage?: boolean;
+  /** Allowed recipient email domains for email_send (e.g. ["acme.com", "partner.io"]).
+   *  When set, emails can only be sent to addresses in these domains.
+   *  When omitted, all domains are allowed (backwards compatible). */
+  emailAllowedDomains?: string[];
 }
 
 export interface AgentActivity {
@@ -421,6 +441,10 @@ export interface RunnerConfig {
   storage?: "file" | "sqlite";
   /** UDS path for push-notifying the orchestrator on completion. */
   notifySocket?: string;
+  /** Email domain allowlist (from settings or agent config). */
+  emailAllowedDomains?: string[];
+  /** MCP tool allowlist — keys are server names, values are allowed tool names. */
+  mcpToolAllowlist?: Record<string, string[]>;
 }
 
 // === Polpo File Config (.polpo/polpo.json — persistent project configuration) ===
@@ -538,6 +562,11 @@ export interface PolpoSettings {
   enableScheduler?: boolean;
   /** Default quality threshold for plans (1-5). Plans below this score are marked failed. */
   defaultQualityThreshold?: number;
+  /** Allowed recipient email domains — applies to all agents (can be overridden per-agent). */
+  emailAllowedDomains?: string[];
+  /** MCP tool allowlist — keys are server names, values are arrays of allowed tool names.
+   *  When set for a server, only listed tools are exposed to agents. Unlisted servers are unrestricted. */
+  mcpToolAllowlist?: Record<string, string[]>;
 }
 
 // === Polpo State (persisted in .polpo/state.json) ===

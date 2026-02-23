@@ -52,7 +52,23 @@ const EmailSendSchema = Type.Object({
   smtp_secure: Type.Optional(Type.Boolean({ description: "Use TLS (default: true for port 465, STARTTLS for others)" })),
 });
 
-function createEmailSendTool(cwd: string, sandbox: string[], vault?: ResolvedVault): AgentTool<typeof EmailSendSchema> {
+/**
+ * Validate that all recipient addresses are in allowed domains.
+ * Throws if any address has a domain not in the allowlist.
+ */
+function validateRecipientDomains(addresses: string | string[], allowedDomains: string[]): void {
+  const addrs = Array.isArray(addresses) ? addresses : [addresses];
+  for (const addr of addrs) {
+    const atIdx = addr.lastIndexOf("@");
+    if (atIdx < 0) continue; // malformed — let SMTP reject it
+    const domain = addr.slice(atIdx + 1).toLowerCase().trim();
+    if (!allowedDomains.some(d => d.toLowerCase() === domain)) {
+      throw new Error(`Recipient domain "${domain}" is not in the allowed domains: ${allowedDomains.join(", ")}`);
+    }
+  }
+}
+
+function createEmailSendTool(cwd: string, sandbox: string[], vault?: ResolvedVault, emailAllowedDomains?: string[]): AgentTool<typeof EmailSendSchema> {
   return {
     name: "email_send",
     label: "Send Email",
@@ -79,6 +95,20 @@ function createEmailSendTool(cwd: string, sandbox: string[], vault?: ResolvedVau
           content: [{ type: "text", text: "Error: Sender address not configured. Set SMTP_FROM env var, configure vault, or pass 'from' parameter." }],
           details: { error: "no_from" },
         };
+      }
+
+      // Validate recipient domains against allowlist
+      if (emailAllowedDomains && emailAllowedDomains.length > 0) {
+        try {
+          validateRecipientDomains(params.to, emailAllowedDomains);
+          if (params.cc) validateRecipientDomains(params.cc, emailAllowedDomains);
+          if (params.bcc) validateRecipientDomains(params.bcc, emailAllowedDomains);
+        } catch (err: any) {
+          return {
+            content: [{ type: "text", text: `Error: ${err.message}` }],
+            details: { error: "recipient_domain_blocked" },
+          };
+        }
       }
 
       try {
@@ -474,12 +504,13 @@ export const ALL_EMAIL_TOOL_NAMES: EmailToolName[] = ["email_send", "email_verif
  * @param allowedPaths - Sandbox paths
  * @param allowedTools - Optional filter
  * @param vault - Resolved vault credentials (per-agent SMTP/IMAP)
+ * @param emailAllowedDomains - Allowed recipient email domains (omit for unrestricted)
  */
-export function createEmailTools(cwd: string, allowedPaths?: string[], allowedTools?: string[], vault?: ResolvedVault): AgentTool<any>[] {
+export function createEmailTools(cwd: string, allowedPaths?: string[], allowedTools?: string[], vault?: ResolvedVault, emailAllowedDomains?: string[]): AgentTool<any>[] {
   const sandbox = resolveAllowedPaths(cwd, allowedPaths);
 
   const factories: Record<EmailToolName, () => AgentTool<any>> = {
-    email_send: () => createEmailSendTool(cwd, sandbox, vault),
+    email_send: () => createEmailSendTool(cwd, sandbox, vault, emailAllowedDomains),
     email_verify: () => createEmailVerifyTool(vault),
     email_list: () => createEmailListTool(vault),
     email_read: () => createEmailReadTool(vault),

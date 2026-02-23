@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import type { ServerEnv } from "../app.js";
 import { AddAgentSchema, RenameTeamSchema } from "../schemas.js";
+import { redactAgentConfig, redactTeam, sanitizeTranscriptEntry } from "../security.js";
 
 /**
  * Agent/team management routes.
@@ -26,7 +27,7 @@ export function agentRoutes(): OpenAPIHono<ServerEnv> {
 
   app.openapi(listAgentsRoute, (c) => {
     const orchestrator = c.get("orchestrator");
-    return c.json({ ok: true, data: orchestrator.getAgents() });
+    return c.json({ ok: true, data: orchestrator.getAgents().map(redactAgentConfig) });
   });
 
   // POST /agents — add agent
@@ -58,7 +59,12 @@ export function agentRoutes(): OpenAPIHono<ServerEnv> {
       systemPrompt: body.systemPrompt,
       skills: body.skills,
       maxTurns: body.maxTurns,
+      identity: body.identity,
+      vault: body.vault as any,
+      reportsTo: body.reportsTo,
       enableBrowser: body.enableBrowser,
+      browserEngine: body.browserEngine,
+      browserProfile: body.browserProfile,
       enableHttp: body.enableHttp,
       enableGit: body.enableGit,
       enableMultifile: body.enableMultifile,
@@ -121,7 +127,7 @@ export function agentRoutes(): OpenAPIHono<ServerEnv> {
 
   app.openapi(getTeamRoute, (c) => {
     const orchestrator = c.get("orchestrator");
-    return c.json({ ok: true, data: orchestrator.getTeam() });
+    return c.json({ ok: true, data: redactTeam(orchestrator.getTeam()) });
   });
 
   // PATCH /team — rename team
@@ -145,7 +151,7 @@ export function agentRoutes(): OpenAPIHono<ServerEnv> {
     const orchestrator = c.get("orchestrator");
     const body = c.req.valid("json");
     orchestrator.renameTeam(body.name);
-    return c.json({ ok: true, data: orchestrator.getTeam() });
+    return c.json({ ok: true, data: redactTeam(orchestrator.getTeam()) });
   });
 
   // GET /processes — active agent processes
@@ -227,7 +233,8 @@ export function agentRoutes(): OpenAPIHono<ServerEnv> {
       const lines = readFileSync(logPath, "utf-8").split("\n").filter(Boolean);
       const entries = lines
         .map(line => { try { return JSON.parse(line); } catch { return null; } })
-        .filter(Boolean);
+        .filter(Boolean)
+        .map(sanitizeTranscriptEntry);
       return c.json({ ok: true, data: entries });
     } catch {
       return c.json({ ok: true, data: [] });
@@ -262,7 +269,7 @@ export function agentRoutes(): OpenAPIHono<ServerEnv> {
     if (!agent) {
       return c.json({ ok: false, error: "Agent not found", code: "NOT_FOUND" }, 404);
     }
-    return c.json({ ok: true, data: agent }, 200);
+    return c.json({ ok: true, data: redactAgentConfig(agent) }, 200);
   });
 
   return app;

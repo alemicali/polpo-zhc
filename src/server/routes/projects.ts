@@ -2,6 +2,7 @@ import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import type { ServerEnv } from "../app.js";
 import type { ProjectManager } from "../project-manager.js";
 import { UpdateMemorySchema } from "../schemas.js";
+import { redactPolpoState, redactPolpoConfig, sanitizeTranscriptEntry } from "../security.js";
 
 // ── Route definitions ─────────────────────────────────────────────────
 
@@ -131,14 +132,14 @@ export function projectDetailRoutes(): OpenAPIHono<ServerEnv> {
   // GET /state — full state snapshot
   app.openapi(getStateRoute, (c) => {
     const orchestrator = c.get("orchestrator");
-    return c.json({ ok: true, data: orchestrator.getStore().getState() });
+    return c.json({ ok: true, data: redactPolpoState(orchestrator.getStore().getState()) });
   });
 
   // GET /config — orchestrator config
   app.openapi(getProjectConfigRoute, (c) => {
     const orchestrator = c.get("orchestrator");
     const config = orchestrator.getConfig();
-    return c.json({ ok: true, data: config });
+    return c.json({ ok: true, data: config ? redactPolpoConfig(config) : config });
   });
 
   // GET /memory — project memory
@@ -179,7 +180,7 @@ export function projectDetailRoutes(): OpenAPIHono<ServerEnv> {
       return c.json({ ok: false, error: "Log store not available", code: "NOT_FOUND" }, 404);
     }
     const { sessionId } = c.req.valid("param");
-    const entries = logStore.getSessionEntries(sessionId);
+    const entries = logStore.getSessionEntries(sessionId).map(e => sanitizeTranscriptEntry(e as unknown as Record<string, unknown>));
     return c.json({ ok: true, data: entries }, 200);
   });
 
