@@ -56,7 +56,6 @@ export type {
   PolpoState,
   PolpoConfig,
   PolpoSettings,
-  ProjectInfo,
   SSEEvent,
   CreateTaskRequest,
   UpdateTaskRequest,

@@ -2,6 +2,7 @@ import type { TaskStatus } from "./types.js";
 
 /** Valid state transitions for the task state machine. */
 export const VALID_TRANSITIONS: Readonly<Record<TaskStatus, readonly TaskStatus[]>> = {
+  draft: ["pending"],
   pending: ["assigned", "awaiting_approval"],
   awaiting_approval: ["assigned", "failed", "done", "pending"],
   assigned: ["in_progress", "awaiting_approval"],

@@ -167,13 +167,13 @@ export class FileTaskStore implements TaskStore {
   }
 
   addTask(
-    task: Omit<Task, "id" | "status" | "retries" | "createdAt" | "updatedAt">,
+    task: Omit<Task, "id" | "status" | "retries" | "createdAt" | "updatedAt"> & { status?: TaskStatus },
   ): Task {
     const now = new Date().toISOString();
     const newTask: Task = {
       ...task,
       id: nanoid(),
-      status: "pending",
+      status: task.status ?? "pending",
       retries: 0,
       createdAt: now,
       updatedAt: now,

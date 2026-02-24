@@ -15,7 +15,7 @@
 /ui/ @openpolpo/maintainers
 
 # Documentation
-/apps/docs/ @openpolpo/maintainers
+/docs/ @openpolpo/maintainers
 
 # CI/CD and project config
 /.github/ @openpolpo/maintainers

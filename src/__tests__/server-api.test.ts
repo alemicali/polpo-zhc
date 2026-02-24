@@ -6,8 +6,6 @@ import type { Hono } from "hono";
 import type { Orchestrator } from "../core/orchestrator.js";
 // ── Test Setup ───────────────────────────────────────────────────────
 
-const PROJECT_ID = "test-api";
-
 const POLPO_CONFIG = JSON.stringify({
   project: "test-api",
   team: {
@@ -24,11 +22,11 @@ let app: Hono;
 let orchestrator: Orchestrator;
 
 /**
- * Build the full API path for per-project routes.
- * Routes are mounted at /api/v1/projects/:projectId/...
+ * Build the full API path.
+ * Routes are mounted at /api/v1/...
  */
 function api(path: string): string {
-  return `/api/v1/projects/${PROJECT_ID}${path}`;
+  return `/api/v1${path}`;
 }
 
 /** Shorthand for JSON POST/PATCH/PUT requests. */
@@ -48,17 +46,21 @@ beforeAll(async () => {
   await mkdir(join(tmpDir, ".polpo"), { recursive: true });
   await writeFile(join(tmpDir, ".polpo", "polpo.json"), POLPO_CONFIG);
 
-  // Dynamically import server modules (ESM)
-  const { ProjectManager } = await import("../server/project-manager.js");
+  const { Orchestrator: OrchestratorClass } = await import("../core/orchestrator.js");
+  const { SSEBridge } = await import("../server/sse-bridge.js");
   const { createApp } = await import("../server/app.js");
 
-  const pm = new ProjectManager();
-  await pm.register({ id: PROJECT_ID, workDir: tmpDir });
+  orchestrator = new OrchestratorClass(tmpDir);
+  await orchestrator.initInteractive("test-api", {
+    name: "api-team",
+    agents: [{ name: "agent-1", role: "Test agent" }],
+  });
 
-  orchestrator = pm.get(PROJECT_ID)!;
+  const sseBridge = new SSEBridge(orchestrator);
+  sseBridge.start();
 
   // Create Hono app without API key auth
-  app = createApp(pm);
+  app = createApp(orchestrator, sseBridge);
 });
 
 afterAll(async () => {
@@ -606,22 +608,9 @@ describe("Memory API", () => {
   });
 });
 
-// ── Project-level routes ─────────────────────────────────────────────
+// ── State routes ─────────────────────────────────────────────────────
 
-describe("Project routes", () => {
-  test("GET /projects lists registered projects", async () => {
-    const res = await app.request("/api/v1/projects");
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body.ok).toBe(true);
-    expect(Array.isArray(body.data)).toBe(true);
-    const proj = body.data.find((p: any) => p.id === PROJECT_ID);
-    expect(proj).toBeDefined();
-    // Project name comes from initInteractive or basename(workDir)
-    expect(typeof proj.name).toBe("string");
-    expect(proj.name.length).toBeGreaterThan(0);
-  });
-
+describe("State routes", () => {
   test("GET /state returns full state snapshot", async () => {
     const res = await app.request(api("/state"));
     expect(res.status).toBe(200);
@@ -632,8 +621,8 @@ describe("Project routes", () => {
     expect(typeof body.data.project).toBe("string");
   });
 
-  test("GET /config returns orchestrator config", async () => {
-    const res = await app.request(api("/config"));
+  test("GET /orchestrator-config returns orchestrator config", async () => {
+    const res = await app.request(api("/orchestrator-config"));
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.ok).toBe(true);
@@ -641,14 +630,6 @@ describe("Project routes", () => {
     expect(body.data).toHaveProperty("project");
     expect(body.data).toHaveProperty("team");
     expect(body.data).toHaveProperty("settings");
-  });
-
-  test("unknown project ID returns 404", async () => {
-    const res = await app.request("/api/v1/projects/nonexistent/tasks");
-    expect(res.status).toBe(404);
-    const body = await res.json();
-    expect(body.ok).toBe(false);
-    expect(body.code).toBe("NOT_FOUND");
   });
 });
 

@@ -1,0 +1,76 @@
+{
+  "name": "documentation",
+  "description": "Generate or improve documentation for a module",
+  "parameters": [
+    {
+      "name": "module",
+      "description": "Module or directory to document",
+      "type": "string",
+      "required": true
+    },
+    {
+      "name": "style",
+      "description": "Documentation style",
+      "type": "string",
+      "default": "technical",
+      "enum": ["technical", "tutorial", "api-reference", "guide"]
+    },
+    {
+      "name": "scope",
+      "description": "What to document",
+      "type": "string",
+      "default": "full",
+      "enum": ["full", "public-api", "internals", "usage-examples"]
+    }
+  ],
+  "plan": {
+    "team": [
+      {
+        "name": "writer",
+        "role": "Technical writer — produces clear, accurate documentation with practical examples",
+        "enableGit": true
+      },
+      {
+        "name": "reviewer",
+        "role": "Documentation reviewer — verifies accuracy, completeness, and clarity",
+        "enableGit": true
+      }
+    ],
+    "tasks": [
+      {
+        "title": "Analyze {{module}} for documentation",
+        "description": "Read and understand {{module}} thoroughly. Identify: (1) public API surface, (2) key concepts and data flows, (3) configuration options, (4) common usage patterns. Create an outline for {{style}} documentation with {{scope}} scope. Write the outline to docs-outline.md.",
+        "assignTo": "writer",
+        "expectations": [
+          { "type": "file_exists", "paths": ["docs-outline.md"] }
+        ]
+      },
+      {
+        "title": "Write documentation for {{module}}",
+        "description": "Based on the outline, write {{style}} documentation for {{module}} (scope: {{scope}}). Include: (1) overview and purpose, (2) API reference with type signatures, (3) working code examples, (4) common patterns and gotchas. Write to docs/{{module}}.md.",
+        "assignTo": "writer",
+        "dependsOn": ["Analyze {{module}} for documentation"],
+        "expectations": [
+          {
+            "type": "llm_review",
+            "criteria": "Documentation is accurate, complete for the stated scope, includes working examples, and is clearly written",
+            "threshold": 3.5
+          }
+        ]
+      },
+      {
+        "title": "Review documentation for {{module}}",
+        "description": "Review the documentation for {{module}}. Check: (1) technical accuracy — do examples actually work? (2) completeness — are there gaps? (3) clarity — would a new developer understand this? (4) consistency — does it match the codebase?",
+        "assignTo": "reviewer",
+        "dependsOn": ["Write documentation for {{module}}"],
+        "expectations": [
+          {
+            "type": "llm_review",
+            "criteria": "The review confirms accuracy, identifies any gaps, and the documentation meets professional standards",
+            "threshold": 4.0
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,85 @@
+{
+  "name": "migration",
+  "description": "Database or API migration with planning, implementation, and validation",
+  "parameters": [
+    {
+      "name": "from",
+      "description": "Current state or version to migrate from (e.g., 'Express v4', 'MySQL', 'REST API v1')",
+      "type": "string",
+      "required": true
+    },
+    {
+      "name": "to",
+      "description": "Target state or version to migrate to (e.g., 'Hono', 'PostgreSQL', 'REST API v2')",
+      "type": "string",
+      "required": true
+    },
+    {
+      "name": "test_command",
+      "description": "Command to run tests (defaults to 'pnpm run test')",
+      "type": "string",
+      "default": "pnpm run test"
+    }
+  ],
+  "plan": {
+    "team": [
+      {
+        "name": "planner",
+        "role": "Migration architect — plans safe, incremental migration strategies with rollback steps",
+        "enableGit": true
+      },
+      {
+        "name": "migrator",
+        "role": "Migration engineer — executes migration steps while maintaining backward compatibility",
+        "enableGit": true
+      }
+    ],
+    "tasks": [
+      {
+        "title": "Plan migration from {{from}} to {{to}}",
+        "description": "Create a detailed migration plan from {{from}} to {{to}}. Document: (1) current usage of {{from}} across the codebase, (2) breaking changes between {{from}} and {{to}}, (3) step-by-step migration order (incremental, not big-bang), (4) rollback strategy for each step, (5) data migration requirements if any. Write to migration-plan.md.",
+        "assignTo": "planner",
+        "expectations": [
+          { "type": "file_exists", "paths": ["migration-plan.md"] },
+          {
+            "type": "llm_review",
+            "criteria": "The migration plan is incremental, includes rollback strategies, and identifies all breaking changes",
+            "threshold": 3.5
+          }
+        ]
+      },
+      {
+        "title": "Execute migration from {{from}} to {{to}}",
+        "description": "Execute the migration from {{from}} to {{to}} following the migration plan. Apply changes incrementally. After each step: (1) run tests, (2) verify backward compatibility where required, (3) document what changed. Keep both {{from}} and {{to}} working during transition where possible.",
+        "assignTo": "migrator",
+        "dependsOn": ["Plan migration from {{from}} to {{to}}"],
+        "expectations": [
+          { "type": "test", "command": "{{test_command}}" }
+        ]
+      },
+      {
+        "title": "Validate migration to {{to}}",
+        "description": "Validate the completed migration from {{from}} to {{to}}. Check: (1) all functionality works with {{to}}, (2) no references to {{from}} remain (unless intentional), (3) all tests pass, (4) performance is acceptable. Write results to migration-validation.md.",
+        "assignTo": "planner",
+        "dependsOn": ["Execute migration from {{from}} to {{to}}"],
+        "expectations": [
+          { "type": "test", "command": "{{test_command}}" },
+          { "type": "file_exists", "paths": ["migration-validation.md"] },
+          {
+            "type": "llm_review",
+            "criteria": "The migration is complete, all functionality works, and no unintentional references to the old system remain",
+            "threshold": 4.0
+          }
+        ]
+      }
+    ],
+    "qualityGates": [
+      {
+        "name": "plan-quality",
+        "afterTasks": ["Plan migration from {{from}} to {{to}}"],
+        "blocksTasks": ["Execute migration from {{from}} to {{to}}"],
+        "minScore": 3.5
+      }
+    ]
+  }
+}

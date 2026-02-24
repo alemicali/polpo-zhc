@@ -19,7 +19,7 @@ import { readFileSync, writeFileSync, mkdirSync, copyFileSync, existsSync } from
 import { dirname, join } from 'node:path';
 
 const SRC = './apps/docs/src/content/docs';
-const DEST = './apps/docs-mintlify';
+const DEST = './docs';
 
 // All files to convert (relative to SRC)
 const FILES = [

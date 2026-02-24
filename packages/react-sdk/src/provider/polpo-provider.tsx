@@ -7,7 +7,8 @@ import { PolpoContext } from "./polpo-context.js";
 
 export interface PolpoProviderProps {
   baseUrl: string;
-  projectId: string;
+  /** @deprecated No longer used. Kept for backwards compatibility. */
+  projectId?: string;
   apiKey?: string;
   children: ReactNode;
   autoConnect?: boolean;
@@ -16,20 +17,19 @@ export interface PolpoProviderProps {
 
 export function PolpoProvider({
   baseUrl,
-  projectId,
   apiKey,
   children,
   autoConnect = true,
   eventFilter,
 }: PolpoProviderProps) {
-  const configKey = `${baseUrl}|${projectId}|${apiKey ?? ""}`;
+  const configKey = `${baseUrl}|${apiKey ?? ""}`;
   const storeRef = useRef<PolpoStore>(null as unknown as PolpoStore);
   const clientRef = useRef<PolpoClient>(null as unknown as PolpoClient);
   const lastConfigKey = useRef("");
 
   if (lastConfigKey.current !== configKey) {
     lastConfigKey.current = configKey;
-    clientRef.current = new PolpoClient({ baseUrl, projectId, apiKey });
+    clientRef.current = new PolpoClient({ baseUrl, apiKey });
     storeRef.current = new PolpoStore();
   }
 

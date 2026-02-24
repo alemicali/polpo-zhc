@@ -88,6 +88,7 @@ export function reduceEvent(state: StoreState, sseEvent: SSEEvent): StoreState {
           filesCreated: [],
           filesEdited: [],
           toolCalls: 0,
+          totalTokens: 0,
           lastUpdate: new Date().toISOString(),
           summary: `Working on: ${taskTitle}`,
         },

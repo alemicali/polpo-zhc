@@ -1,0 +1,62 @@
+{
+  "name": "onboarding",
+  "description": "Generate onboarding documentation for a codebase or module",
+  "parameters": [
+    {
+      "name": "module",
+      "description": "Module or codebase area to create onboarding docs for",
+      "type": "string",
+      "required": true
+    },
+    {
+      "name": "audience",
+      "description": "Target audience for the onboarding docs",
+      "type": "string",
+      "default": "new-developer",
+      "enum": ["new-developer", "senior-developer", "non-technical", "contributor"]
+    }
+  ],
+  "plan": {
+    "team": [
+      {
+        "name": "explorer",
+        "role": "Codebase explorer — reads code thoroughly and builds mental models of architecture and data flows",
+        "enableGit": true
+      },
+      {
+        "name": "writer",
+        "role": "Technical writer — creates clear, approachable onboarding materials for the target audience",
+        "enableGit": true
+      }
+    ],
+    "tasks": [
+      {
+        "title": "Map architecture of {{module}}",
+        "description": "Explore {{module}} and create an architecture map. Document: (1) directory structure and file organization, (2) key abstractions and their relationships, (3) data flow through the system, (4) entry points and public API, (5) dependencies (internal and external), (6) configuration and environment requirements. Write to architecture-map.md.",
+        "assignTo": "explorer",
+        "expectations": [
+          { "type": "file_exists", "paths": ["architecture-map.md"] },
+          {
+            "type": "llm_review",
+            "criteria": "The architecture map accurately represents the codebase structure and would help a newcomer understand the system",
+            "threshold": 3.5
+          }
+        ]
+      },
+      {
+        "title": "Write onboarding guide for {{module}}",
+        "description": "Based on the architecture map, create an onboarding guide for {{module}} targeted at {{audience}}. Include: (1) project overview and purpose, (2) setup instructions (prerequisites, install, build, test), (3) architecture walkthrough with diagrams, (4) key concepts explained with examples, (5) common development workflows, (6) where to find things, (7) debugging tips. Write to onboarding-guide.md.",
+        "assignTo": "writer",
+        "dependsOn": ["Map architecture of {{module}}"],
+        "expectations": [
+          { "type": "file_exists", "paths": ["onboarding-guide.md"] },
+          {
+            "type": "llm_review",
+            "criteria": "The onboarding guide is clear, accurate, practical, and appropriate for the target audience. A newcomer could follow it to become productive.",
+            "threshold": 4.0
+          }
+        ]
+      }
+    ]
+  }
+}

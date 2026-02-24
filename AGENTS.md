@@ -24,10 +24,8 @@ openpolpo/
 ├── packages/
 │   └── react-sdk/        # @openpolpo/react-sdk — React hooks + SSE client
 ├── ui/                   # Vite + React SPA dashboard
-├── apps/
-│   └── docs-mintlify/    # Mintlify documentation site
-└── templates/
-    └── polpo.yml         # Default plan template
+├── docs/                 # Mintlify documentation site
+└── templates/            # Built-in plan templates (JSON)
 ```
 
 ## Build Commands
@@ -85,7 +83,7 @@ pnpm test -- --run     # Single run (no watch)
 1. **Always compile** after modifying any `.ts` file: `./node_modules/.bin/tsc`
 2. If you changed server routes, regenerate OpenAPI spec: `pnpm run generate:openapi`
 3. If you changed core types, check downstream: React SDK, server routes, TUI, CLI
-4. If you changed config schema, update `apps/docs-mintlify/configuration.mdx`
+4. If you changed config schema, update `docs/configuration.mdx`
 
 ## File Patterns
 

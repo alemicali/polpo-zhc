@@ -55,6 +55,7 @@ const statusConfig: Record<
   TaskStatus,
   { icon: React.ElementType; color: string; bg: string; label: string }
 > = {
+  draft: { icon: FileEdit, color: "text-zinc-500", bg: "bg-zinc-500/10", label: "Draft" },
   pending: { icon: Clock, color: "text-zinc-400", bg: "bg-zinc-500/10", label: "Queued" },
   awaiting_approval: { icon: Clock, color: "text-amber-400", bg: "bg-amber-500/10", label: "Awaiting Approval" },
   assigned: { icon: Clock, color: "text-violet-400", bg: "bg-violet-500/10", label: "Assigned" },
@@ -74,6 +75,7 @@ const phaseConfig: Record<string, { icon: React.ElementType; label: string; colo
 // ── Kanban columns (ordering) ──
 
 const kanbanColumns: { status: TaskStatus | "queued"; label: string; filter: (t: Task) => boolean }[] = [
+  { status: "draft", label: "Draft", filter: (t) => t.status === "draft" },
   { status: "queued", label: "Queued", filter: (t) => t.status === "pending" || t.status === "assigned" },
   { status: "in_progress", label: "Running", filter: (t) => t.status === "in_progress" },
   { status: "review", label: "Review", filter: (t) => t.status === "review" },
@@ -152,21 +154,32 @@ function TaskCard({
   task,
   process,
   compact,
+  allTasks,
   onRetry,
   onKill,
+  onQueue,
   onClick,
 }: {
   task: Task;
   process?: AgentProcess;
   compact?: boolean;
+  allTasks?: Task[];
   onRetry: () => void;
   onKill: () => void;
+  onQueue?: () => void;
   onClick: () => void;
 }) {
   const cfg = statusConfig[task.status];
   const Icon = cfg.icon;
   const assessment = task.result?.assessment;
   const phase = task.phase && task.phase !== "execution" ? phaseConfig[task.phase] : null;
+
+  // Check if task is blocked by unresolved dependencies
+  const unresolvedDeps = task.dependsOn.filter((depId) => {
+    const dep = allTasks?.find(t => t.id === depId);
+    return !dep || dep.status !== "done";
+  });
+  const isBlocked = unresolvedDeps.length > 0 && (task.status === "pending" || task.status === "assigned");
 
   return (
     <div
@@ -234,12 +247,25 @@ function TaskCard({
           {task.dependsOn.length > 0 && (
             <Tooltip>
               <TooltipTrigger asChild>
-                <Badge variant="outline" className="text-[9px] px-1 py-0 cursor-help">
-                  <GitBranch className="h-2 w-2 mr-0.5" />{task.dependsOn.length}
+                <Badge
+                  variant={isBlocked ? "destructive" : "outline"}
+                  className={cn("text-[9px] px-1 py-0 cursor-help", isBlocked && "bg-amber-500/15 text-amber-500 border-amber-500/30 hover:bg-amber-500/20")}
+                >
+                  <GitBranch className="h-2 w-2 mr-0.5" />
+                  {isBlocked ? `Blocked (${unresolvedDeps.length})` : task.dependsOn.length}
                 </Badge>
               </TooltipTrigger>
-              <TooltipContent className="text-xs">
-                Depends on: {task.dependsOn.join(", ")}
+              <TooltipContent className="text-xs max-w-xs">
+                <p className="font-medium mb-1">{isBlocked ? "Waiting for:" : "Depends on:"}</p>
+                {task.dependsOn.map((depId) => {
+                  const dep = allTasks?.find(t => t.id === depId);
+                  const done = dep?.status === "done";
+                  return (
+                    <p key={depId} className={done ? "text-muted-foreground line-through" : ""}>
+                      {done ? "✓" : "○"} {dep ? dep.title : depId}
+                    </p>
+                  );
+                })}
               </TooltipContent>
             </Tooltip>
           )}
@@ -282,6 +308,11 @@ function TaskCard({
 
       {/* Inline actions — only on hover, stop propagation */}
       <div className="flex items-center gap-1 mt-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+        {task.status === "draft" && onQueue && (
+          <Button variant="ghost" size="sm" className="h-5 px-1.5 text-[10px] text-muted-foreground hover:text-blue-400" onClick={(e) => { e.stopPropagation(); onQueue(); }}>
+            <Zap className="h-2.5 w-2.5 mr-0.5" /> Queue
+          </Button>
+        )}
         {task.status === "failed" && (
           <Button variant="ghost" size="sm" className="h-5 px-1.5 text-[10px] text-muted-foreground hover:text-amber-400" onClick={(e) => { e.stopPropagation(); onRetry(); }}>
             <RotateCcw className="h-2.5 w-2.5 mr-0.5" /> Retry
@@ -304,12 +335,14 @@ function KanbanBoard({
   processes,
   onRetry,
   onKill,
+  onQueue,
   onClick,
 }: {
   tasks: Task[];
   processes: AgentProcess[];
   onRetry: (id: string) => void;
   onKill: (id: string) => void;
+  onQueue: (id: string) => void;
   onClick: (id: string) => void;
 }) {
   return (
@@ -345,8 +378,10 @@ function KanbanBoard({
                       task={task}
                       process={processes.find(p => p.taskId === task.id)}
                       compact
+                      allTasks={tasks}
                       onRetry={() => onRetry(task.id)}
                       onKill={() => onKill(task.id)}
+                      onQueue={() => onQueue(task.id)}
                       onClick={() => onClick(task.id)}
                     />
                   ))
@@ -367,12 +402,14 @@ function ListView({
   processes,
   onRetry,
   onKill,
+  onQueue,
   onClick,
 }: {
   tasks: Task[];
   processes: AgentProcess[];
   onRetry: (id: string) => void;
   onKill: (id: string) => void;
+  onQueue: (id: string) => void;
   onClick: (id: string) => void;
 }) {
   const [tab, setTab] = useState("all");
@@ -444,8 +481,10 @@ function ListView({
                 key={task.id}
                 task={task}
                 process={processes.find(p => p.taskId === task.id)}
+                allTasks={tasks}
                 onRetry={() => onRetry(task.id)}
                 onKill={() => onKill(task.id)}
+                onQueue={() => onQueue(task.id)}
                 onClick={() => onClick(task.id)}
               />
             ))
@@ -487,6 +526,7 @@ export function TasksPage() {
   };
 
   const killTask = async (id: string) => { await client.killTask(id); refetch(); };
+  const queueTask = async (id: string) => { await client.queueTask(id); refetch(); };
 
   const handleAction = async (action: (id: string) => Promise<void>, id: string, label: string) => {
     try {
@@ -643,6 +683,7 @@ export function TasksPage() {
           processes={processes}
           onRetry={(id) => handleAction(retryTask, id, "retried")}
           onKill={(id) => handleAction(killTask, id, "killed")}
+          onQueue={(id) => handleAction(queueTask, id, "queued")}
           onClick={(id) => navigate(`/tasks/${id}`)}
         />
       ) : (
@@ -651,6 +692,7 @@ export function TasksPage() {
           processes={processes}
           onRetry={(id) => handleAction(retryTask, id, "retried")}
           onKill={(id) => handleAction(killTask, id, "killed")}
+          onQueue={(id) => handleAction(queueTask, id, "queued")}
           onClick={(id) => navigate(`/tasks/${id}`)}
         />
       )}

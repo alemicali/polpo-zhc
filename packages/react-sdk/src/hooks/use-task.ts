@@ -12,6 +12,7 @@ export interface UseTaskReturn {
   killTask: () => Promise<void>;
   reassessTask: () => Promise<void>;
   retryTask: () => Promise<void>;
+  queueTask: () => Promise<void>;
 }
 
 export function useTask(taskId: string): UseTaskReturn {
@@ -79,5 +80,9 @@ export function useTask(taskId: string): UseTaskReturn {
     await client.retryTask(taskId);
   }, [client, taskId]);
 
-  return { task, isLoading, error, updateTask, deleteTask, killTask, reassessTask, retryTask };
+  const queueTask = useCallback(async () => {
+    await client.queueTask(taskId);
+  }, [client, taskId]);
+
+  return { task, isLoading, error, updateTask, deleteTask, killTask, reassessTask, retryTask, queueTask };
 }

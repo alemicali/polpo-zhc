@@ -15,9 +15,8 @@ import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { streamSSE } from "hono/streaming";
 import { nanoid } from "nanoid";
 import type { Orchestrator } from "../../core/orchestrator.js";
-import type { ProjectManager } from "../project-manager.js";
 import { buildChatSystemPrompt } from "../../llm/prompts.js";
-import { resolveModel, resolveApiKey, resolveModelSpec } from "../../llm/pi-client.js";
+import { resolveModel, resolveApiKeyAsync, resolveModelSpec } from "../../llm/pi-client.js";
 import { streamSimple, type Message } from "@mariozechner/pi-ai";
 import {
   ALL_ORCHESTRATOR_TOOLS,
@@ -52,7 +51,7 @@ const completionRequestSchema = z.object({
     description: "Ignored. Reserved for future use.",
   }),
   project: z.string().optional().openapi({
-    description: "Polpo extension: target a specific project by ID. If omitted, uses the first registered project.",
+    description: "Deprecated. Ignored.",
   }),
 });
 
@@ -131,15 +130,6 @@ const chatCompletionsRoute = createRoute({
 
 // ── Helpers ────────────────────────────────────────────────────────────
 
-function resolveOrchestrator(pm: ProjectManager, projectHint?: string): Orchestrator | null {
-  if (projectHint) {
-    return pm.get(projectHint) ?? null;
-  }
-  const projects = pm.list();
-  if (projects.length === 0) return null;
-  return pm.get(projects[0].id) ?? null;
-}
-
 function convertMessages(messages: z.infer<typeof messageSchema>[]): { piMessages: Message[]; extraSystemParts: string[] } {
   const piMessages: Message[] = [];
   const extraSystemParts: string[] = [];
@@ -196,7 +186,7 @@ function completionResponse(id: string, content: string, promptTokens: number, c
 
 // ── Route factory ──────────────────────────────────────────────────────
 
-export function completionRoutes(pm: ProjectManager, apiKeys?: string[]): OpenAPIHono {
+export function completionRoutes(orchestrator: Orchestrator, apiKeys?: string[]): OpenAPIHono {
   const app = new OpenAPIHono();
 
   app.openapi(chatCompletionsRoute, async (c) => {
@@ -211,12 +201,6 @@ export function completionRoutes(pm: ProjectManager, apiKeys?: string[]): OpenAP
 
     // ── Parse body ──
     const body = c.req.valid("json");
-
-    // ── Resolve orchestrator ──
-    const orchestrator = resolveOrchestrator(pm, body.project);
-    if (!orchestrator) {
-      return c.json({ error: { message: "No project available. Register a project first.", type: "invalid_request_error" } }, 400);
-    }
 
     // ── Build context ──
     const state = (() => {
@@ -233,7 +217,7 @@ export function completionRoutes(pm: ProjectManager, apiKeys?: string[]): OpenAP
     // ── Resolve model ──
     const modelSpec = resolveModelSpec(orchestrator.getConfig()?.settings?.orchestratorModel);
     const m = resolveModel(modelSpec);
-    const apiKey = resolveApiKey(m.provider);
+    const apiKey = await resolveApiKeyAsync(m.provider as string);
     const streamOpts = apiKey ? { apiKey } : undefined;
 
     const completionId = `chatcmpl-${nanoid(24)}`;
@@ -254,12 +238,20 @@ export function completionRoutes(pm: ProjectManager, apiKeys?: string[]): OpenAP
           }, streamOpts);
 
           let turnText = "";
+          let streamError: string | undefined;
 
           for await (const event of piStream) {
             if (event.type === "text_delta") {
               turnText += event.delta;
               await stream.writeSSE({ data: sseChunk(completionId, { content: event.delta }) });
+            } else if (event.type === "error") {
+              streamError = (event as any).error?.errorMessage ?? "Model returned an error";
             }
+          }
+
+          if (streamError) {
+            await stream.writeSSE({ data: sseChunk(completionId, { content: `\n\nError: ${streamError}` }) });
+            break;
           }
 
           const response = await piStream.result();
@@ -302,10 +294,17 @@ export function completionRoutes(pm: ProjectManager, apiKeys?: string[]): OpenAP
         }, streamOpts);
 
         let turnText = "";
+        let streamError: string | undefined;
         for await (const event of piStream) {
           if (event.type === "text_delta") {
             turnText += event.delta;
+          } else if (event.type === "error") {
+            streamError = (event as any).error?.errorMessage ?? "Model returned an error";
           }
+        }
+
+        if (streamError) {
+          return c.json({ error: { message: streamError, type: "upstream_error" } }, 502 as any);
         }
 
         const response = await piStream.result();

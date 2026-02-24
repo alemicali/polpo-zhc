@@ -1,9 +1,8 @@
 import { OpenAPIHono } from "@hono/zod-openapi";
 import { cors } from "hono/cors";
 import type { Orchestrator } from "../core/orchestrator.js";
-import type { ProjectManager } from "./project-manager.js";
+import type { SSEBridge } from "./sse-bridge.js";
 import { authMiddleware } from "./middleware/auth.js";
-import { projectMiddleware } from "./middleware/project.js";
 import { errorMiddleware } from "./middleware/error.js";
 import { rateLimitMiddleware } from "./middleware/rate-limit.js";
 import { healthRoutes } from "./routes/health.js";
@@ -17,14 +16,13 @@ import { notificationRoutes } from "./routes/notifications.js";
 import { approvalRoutes } from "./routes/approvals.js";
 import { templateRoutes } from "./routes/templates.js";
 import { configRoutes } from "./routes/config.js";
-import { projectListRoutes, projectDetailRoutes } from "./routes/projects.js";
+import { stateRoutes } from "./routes/state.js";
 import { completionRoutes } from "./routes/completions.js";
 import { peerRoutes } from "./routes/peers.js";
 
 export type ServerEnv = {
   Variables: {
     orchestrator: Orchestrator;
-    projectId: string;
   };
 };
 
@@ -35,8 +33,9 @@ export interface AppOptions {
 
 /**
  * Create the Hono app with all routes and middleware.
+ * Single-orchestrator architecture — no project concept.
  */
-export function createApp(pm: ProjectManager, opts?: AppOptions): OpenAPIHono {
+export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts?: AppOptions): OpenAPIHono {
   const app = new OpenAPIHono();
 
   // Global middleware
@@ -57,40 +56,38 @@ export function createApp(pm: ProjectManager, opts?: AppOptions): OpenAPIHono {
     }));
   }
 
-  // Health (no auth, no project context)
+  // Health (no auth)
   app.route("/api/v1/health", healthRoutes());
 
-  // OpenAI-compatible chat completions — Polpo's primary conversational interface
-  app.route("/v1/chat/completions", completionRoutes(pm, opts?.apiKeys));
+  // OpenAI-compatible chat completions
+  app.route("/v1/chat/completions", completionRoutes(orchestrator, opts?.apiKeys));
 
   // Authenticated routes
-  const authed = new OpenAPIHono();
+  const authed = new OpenAPIHono<ServerEnv>();
   if (opts?.apiKeys && opts.apiKeys.length > 0) {
     authed.use("*", authMiddleware(opts.apiKeys));
   }
 
-  // Project listing (authenticated but no project context)
-  authed.route("/projects", projectListRoutes(pm));
+  // Inject single orchestrator into all routes
+  authed.use("*", async (c, next) => {
+    c.set("orchestrator", orchestrator);
+    return next();
+  });
 
-  // Per-project routes (authenticated + project context)
-  const projectApp = new OpenAPIHono<ServerEnv>();
-  projectApp.use("*", projectMiddleware(pm));
+  // Mount all routes directly (no project prefix)
+  authed.route("/tasks", taskRoutes());
+  authed.route("/plans", planRoutes());
+  authed.route("/agents", agentRoutes());
+  authed.route("/events", eventRoutes(sseBridge));
+  authed.route("/chat", chatRoutes());
+  authed.route("/skills", skillRoutes());
+  authed.route("/notifications", notificationRoutes());
+  authed.route("/approvals", approvalRoutes());
+  authed.route("/templates", templateRoutes());
+  authed.route("/config", configRoutes());
+  authed.route("/peers", peerRoutes());
+  authed.route("/", stateRoutes());
 
-  // Mount sub-routes
-  projectApp.route("/tasks", taskRoutes());
-  projectApp.route("/plans", planRoutes());
-  projectApp.route("/agents", agentRoutes());
-  projectApp.route("/events", eventRoutes(pm));
-  projectApp.route("/chat", chatRoutes());
-  projectApp.route("/skills", skillRoutes());
-  projectApp.route("/notifications", notificationRoutes());
-  projectApp.route("/approvals", approvalRoutes());
-  projectApp.route("/templates", templateRoutes());
-  projectApp.route("/config", configRoutes());
-  projectApp.route("/peers", peerRoutes());
-  projectApp.route("/", projectDetailRoutes());
-
-  authed.route("/projects/:projectId", projectApp);
   app.route("/api/v1", authed);
 
   // OpenAPI spec endpoint
@@ -99,7 +96,7 @@ export function createApp(pm: ProjectManager, opts?: AppOptions): OpenAPIHono {
     info: {
       title: "Polpo API",
       version: "1.0.0",
-      description: "REST API for Polpo — an AI agent that manages teams of AI coding agents. Manage projects, tasks, plans, agents, templates, skills, notifications, and approvals. For conversational interaction, use the OpenAI-compatible POST /v1/chat/completions endpoint.",
+      description: "REST API for Polpo — an AI agent that manages teams of AI coding agents. Manage tasks, plans, agents, templates, skills, notifications, and approvals. For conversational interaction, use the OpenAI-compatible POST /v1/chat/completions endpoint.",
     },
     servers: [
       { url: "http://localhost:3000", description: "Local development" },

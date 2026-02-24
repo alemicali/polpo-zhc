@@ -49,7 +49,7 @@ import {
   File,
 } from "lucide-react";
 import { MessageResponse } from "@/components/ai-elements/message";
-import { useTask, useProcesses, useTaskActivity, usePolpo } from "@openpolpo/react-sdk";
+import { useTask, useTasks, useProcesses, useTaskActivity } from "@openpolpo/react-sdk";
 import type { TaskStatus, DimensionScore, CheckResult, EvalDimension, AssessmentResult, AssessmentTrigger, AgentProcess, RunActivityEntry } from "@openpolpo/react-sdk";
 import { toast } from "sonner";
 import { formatDistanceToNow, format } from "date-fns";
@@ -61,6 +61,7 @@ const statusConfig: Record<
   TaskStatus,
   { icon: React.ElementType; color: string; bg: string; label: string }
 > = {
+  draft: { icon: FileEdit, color: "text-zinc-500", bg: "bg-zinc-500/10", label: "Draft" },
   pending: { icon: Clock, color: "text-zinc-400", bg: "bg-zinc-500/10", label: "Queued" },
   awaiting_approval: { icon: Clock, color: "text-amber-400", bg: "bg-amber-500/10", label: "Awaiting Approval" },
   assigned: { icon: Clock, color: "text-violet-400", bg: "bg-violet-500/10", label: "Assigned" },
@@ -337,7 +338,7 @@ function ActivityEntry({ entry }: { entry: RunActivityEntry }) {
 type ActivityFilter = "all" | "conversation" | "tools" | "lifecycle";
 
 function ActivityPanel({ taskId, isActive }: { taskId: string; isActive?: boolean }) {
-  const [filter, setFilter] = useState<ActivityFilter>("conversation");
+  const [filter, setFilter] = useState<ActivityFilter>("all");
   const { entries, isLoading, error, refetch } = useTaskActivity(taskId, {
     pollIntervalMs: isActive ? 1000 : 0,
   });
@@ -353,11 +354,13 @@ function ActivityPanel({ taskId, isActive }: { taskId: string; isActive?: boolea
   }, { snapshots: 0, assistant: 0, tools: 0, results: 0, errors: 0, lifecycle: 0 });
 
   // Filter entries based on the active filter
+  // Activity snapshots (event: "activity") are always hidden — they're internal telemetry
+  // already visible in the Overview tab (filesCreated, toolCalls, totalTokens, etc.)
   const filteredEntries = entries.filter((e) => {
     if (e._run) return false; // always hide header
+    if (e.event === "activity") return false; // always hide activity snapshots
     if (filter === "all") return true;
     if (filter === "conversation") {
-      // Show assistant text, tool_use, tool_result, errors — hide activity snapshots & lifecycle
       return e.type === "assistant" || e.type === "tool_use" || e.type === "tool_result"
         || e.type === "error" || e.type === "result" || e.event === "error";
     }
@@ -366,7 +369,7 @@ function ActivityPanel({ taskId, isActive }: { taskId: string; isActive?: boolea
     }
     if (filter === "lifecycle") {
       return e.event === "spawning" || e.event === "spawned" || e.event === "done"
-        || e.event === "sigterm" || e.event === "error" || e.event === "activity";
+        || e.event === "sigterm" || e.event === "error";
     }
     return true;
   });
@@ -395,10 +398,10 @@ function ActivityPanel({ taskId, isActive }: { taskId: string; isActive?: boolea
         <div className="flex items-center gap-1.5">
           {(
             [
+              { key: "all", label: "All", icon: Hash, count: entries.filter(e => !e._run && e.event !== "activity").length },
               { key: "conversation", label: "Conversation", icon: Bot, count: stats.assistant + stats.tools + stats.results },
               { key: "tools", label: "Tools", icon: Wrench, count: stats.tools },
-              { key: "lifecycle", label: "Lifecycle", icon: Activity, count: stats.lifecycle + stats.snapshots },
-              { key: "all", label: "All", icon: Hash, count: entries.filter(e => !e._run).length },
+              { key: "lifecycle", label: "Lifecycle", icon: Activity, count: stats.lifecycle },
             ] as const
           ).map(({ key, label, icon: FIcon, count }) => (
             <Button
@@ -506,10 +509,18 @@ function AssessmentHistoryRow({ assessment, index }: { assessment: AssessmentRes
 export function TaskDetailPage() {
   const { taskId } = useParams<{ taskId: string }>();
   const navigate = useNavigate();
-  const { task, isLoading, error, retryTask, killTask, reassessTask } = useTask(taskId ?? "");
+  const { task, isLoading, error, retryTask, killTask, reassessTask, queueTask } = useTask(taskId ?? "");
+  const { tasks: allTasks } = useTasks();
   const { processes } = useProcesses();
-  const { client: _ } = usePolpo();
 
+  // Resolve dependsOn IDs to task titles
+  const depTitleMap: Record<string, string> = {};
+  if (task?.dependsOn) {
+    for (const depId of task.dependsOn) {
+      const dep = allTasks.find(t => t.id === depId);
+      if (dep) depTitleMap[depId] = dep.title;
+    }
+  }
   const process = task ? processes.find(p => p.taskId === task.id) : undefined;
 
   const handleAction = async (action: () => Promise<unknown>, label: string) => {
@@ -590,6 +601,11 @@ export function TaskDetailPage() {
           </div>
         </div>
         <div className="flex items-center gap-2 shrink-0">
+          {task.status === "draft" && (
+            <Button variant="outline" size="sm" onClick={() => handleAction(queueTask, "Queued")}>
+              <Zap className="h-3.5 w-3.5 mr-1.5" /> Queue
+            </Button>
+          )}
           {task.status === "failed" && (
             <Button variant="outline" size="sm" onClick={() => handleAction(retryTask, "Retried")}>
               <RotateCcw className="h-3.5 w-3.5 mr-1.5" /> Retry
@@ -881,12 +897,28 @@ export function TaskDetailPage() {
                     {task.dependsOn.length > 0 && (
                       <div className="col-span-2">
                         <span className="text-xs text-muted-foreground flex items-center gap-1 mb-1">
-                          <GitBranch className="h-3 w-3" /> Dependencies
+                          <GitBranch className="h-3 w-3" /> Dependencies ({task.dependsOn.length})
                         </span>
-                        <div className="flex flex-wrap gap-1">
-                          {task.dependsOn.map((dep) => (
-                            <Badge key={dep} variant="secondary" className="text-[10px] font-mono">{dep}</Badge>
-                          ))}
+                        <div className="flex flex-col gap-1">
+                          {task.dependsOn.map((dep) => {
+                            const depTitle = depTitleMap[dep];
+                            const depTask = allTasks.find(t => t.id === dep);
+                            return (
+                              <button
+                                key={dep}
+                                onClick={() => navigate(`/tasks/${dep}`)}
+                                className="flex items-center gap-2 text-left text-xs hover:bg-muted/50 rounded px-2 py-1 transition-colors"
+                              >
+                                <GitBranch className="h-3 w-3 text-muted-foreground shrink-0" />
+                                <span className="truncate">{depTitle || dep}</span>
+                                {depTask && (
+                                  <Badge variant="outline" className="text-[9px] px-1 py-0 shrink-0">
+                                    {depTask.status}
+                                  </Badge>
+                                )}
+                              </button>
+                            );
+                          })}
                         </div>
                       </div>
                     )}

@@ -41,10 +41,10 @@ All 589+ tests must pass before submitting a PR. The test suite runs in ~7 secon
 
 ### Documentation Site
 
+The docs use [Mintlify](https://mintlify.com/) and live in `docs/`.
+
 ```bash
-cd apps/docs
-pnpm run dev      # Dev server on localhost:4321
-pnpm run build    # Production build (verify 0 errors)
+npx mintlify dev docs   # Dev server on localhost:3333
 ```
 
 ## Project Structure
@@ -66,7 +66,7 @@ openpolpo/
 │   ├── server/             # HTTP API (Hono), SSE, WebSocket
 │   └── cli/                # CLI entry point
 ├── ui/                     # Web monitoring dashboard (Vite + React)
-├── apps/docs/              # Documentation site (Astro + Starlight)
+├── docs/                   # Documentation site (Mintlify)
 ├── packages/react-sdk/     # React hooks + SSE client
 └── polpo.json              # Example project configuration
 ```
@@ -118,7 +118,7 @@ Open a [GitHub Issue](https://github.com/openpolpo/openpolpo/issues/new) with th
 
 - **Focused** — one feature or fix per PR. Don't mix refactoring with new features.
 - **Tested** — new code has tests, existing tests still pass.
-- **Documented** — if you add a public API, config option, or event, update the docs in `apps/docs/`.
+- **Documented** — if you add a public API, config option, or event, update the docs in `docs/`.
 - **Backwards-compatible** — don't break existing configs. New features should be opt-in.
 
 ## Coding Standards
@@ -148,7 +148,7 @@ Open a [GitHub Issue](https://github.com/openpolpo/openpolpo/issues/new) with th
 
 ### Documentation
 
-- Docs are in `apps/docs/src/content/docs/` as `.mdx` files
+- Docs are in `docs/` as `.mdx` files
 - All config examples use **JSON** (never YAML)
 - All code samples must be accurate and tested
 - Keep numbers accurate (event count, tool count, hook count)

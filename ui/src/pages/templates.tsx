@@ -39,11 +39,11 @@ import {
   Asterisk,
   Code2,
 } from "lucide-react";
-import { useWorkflows } from "@openpolpo/react-sdk";
+import { useTemplates } from "@openpolpo/react-sdk";
 import type {
-  WorkflowInfo,
-  WorkflowDefinition,
-  WorkflowParameter,
+  TemplateInfo,
+  TemplateDefinition,
+  TemplateParameter,
 } from "@openpolpo/react-sdk";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -63,7 +63,7 @@ function ParamField({
   value,
   onChange,
 }: {
-  param: WorkflowParameter;
+  param: TemplateParameter;
   value: string;
   onChange: (v: string) => void;
 }) {
@@ -143,20 +143,20 @@ function ParamField({
   );
 }
 
-// ── Run workflow dialog ──
+// ── Run template dialog ──
 
-function RunWorkflowDialog({
-  workflow,
+function RunTemplateDialog({
+  template,
   open,
   onOpenChange,
   onRun,
 }: {
-  workflow: WorkflowInfo;
+  template: TemplateInfo;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onRun: (name: string, params: Record<string, string | number | boolean>) => Promise<void>;
 }) {
-  const params = workflow.parameters ?? [];
+  const params = template.parameters ?? [];
   const [values, setValues] = useState<Record<string, string>>(() => {
     const init: Record<string, string> = {};
     for (const p of params) {
@@ -188,7 +188,7 @@ function RunWorkflowDialog({
         else if (p.type === "boolean") resolved[p.name] = raw === "true";
         else resolved[p.name] = raw;
       }
-      await onRun(workflow.name, resolved);
+      await onRun(template.name, resolved);
       onOpenChange(false);
     } catch {
       // error handled by caller
@@ -203,16 +203,16 @@ function RunWorkflowDialog({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-sm">
             <Play className="h-4 w-4 text-emerald-400" />
-            Run "{workflow.name}"
+            Run "{template.name}"
           </DialogTitle>
         </DialogHeader>
 
-        <p className="text-xs text-muted-foreground">{workflow.description}</p>
+        <p className="text-xs text-muted-foreground">{template.description}</p>
 
         {params.length === 0 ? (
           <div className="flex items-center gap-2 py-4 text-xs text-muted-foreground">
             <Settings2 className="h-4 w-4" />
-            This workflow takes no parameters
+            This template takes no parameters
           </div>
         ) : (
           <div className="space-y-3 pt-2">
@@ -252,7 +252,7 @@ function RunWorkflowDialog({
             ) : (
               <Play className="h-3.5 w-3.5" />
             )}
-            Run Workflow
+            Run Template
           </Button>
         </div>
       </DialogContent>
@@ -260,14 +260,14 @@ function RunWorkflowDialog({
   );
 }
 
-// ── Workflow definition viewer dialog ──
+// ── Template definition viewer dialog ──
 
 function DefinitionDialog({
   definition,
   open,
   onOpenChange,
 }: {
-  definition: WorkflowDefinition | null;
+  definition: TemplateDefinition | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
@@ -293,18 +293,18 @@ function DefinitionDialog({
   );
 }
 
-// ── Workflow card ──
+// ── Template card ──
 
-function WorkflowCard({
-  workflow,
+function TemplateCard({
+  template,
   onRun,
   onInspect,
 }: {
-  workflow: WorkflowInfo;
+  template: TemplateInfo;
   onRun: () => void;
   onInspect: () => void;
 }) {
-  const params = workflow.parameters ?? [];
+  const params = template.parameters ?? [];
   const requiredParams = params.filter((p) => p.required);
 
   return (
@@ -319,7 +319,7 @@ function WorkflowCard({
           {/* Content */}
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2">
-              <span className="text-sm font-semibold">{workflow.name}</span>
+              <span className="text-sm font-semibold">{template.name}</span>
               <Badge variant="secondary" className="text-[9px] gap-1 px-1.5 py-0">
                 <Hash className="h-2 w-2" />
                 {params.length} param{params.length !== 1 ? "s" : ""}
@@ -332,7 +332,7 @@ function WorkflowCard({
               )}
             </div>
             <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
-              {workflow.description}
+              {template.description}
             </p>
 
             {/* Parameter tags */}
@@ -373,7 +373,7 @@ function WorkflowCard({
             <div className="flex items-center gap-1 mt-2">
               <FolderOpen className="h-2.5 w-2.5 text-muted-foreground/50" />
               <span className="text-[9px] font-mono text-muted-foreground/50 truncate">
-                {workflow.path}
+                {template.path}
               </span>
             </div>
           </div>
@@ -412,39 +412,39 @@ function WorkflowCard({
 
 // ── Main page ──
 
-export function WorkflowsPage() {
+export function TemplatesPage() {
   const navigate = useNavigate();
-  const { workflows, loading, refetch, getWorkflow, runWorkflow } = useWorkflows();
+  const { templates, loading, refetch, getTemplate, runTemplate } = useTemplates();
   const [search, setSearch] = useState("");
 
   // Run dialog state
-  const [runTarget, setRunTarget] = useState<WorkflowInfo | null>(null);
+  const [runTarget, setRunTarget] = useState<TemplateInfo | null>(null);
 
   // Inspect dialog state
   const [inspecting, setInspecting] = useState(false);
-  const [definition, setDefinition] = useState<WorkflowDefinition | null>(null);
+  const [definition, setDefinition] = useState<TemplateDefinition | null>(null);
   const [inspectLoading, setInspectLoading] = useState(false);
 
   const filtered = useMemo(() => {
-    if (!search) return workflows;
+    if (!search) return templates;
     const q = search.toLowerCase();
-    return workflows.filter(
+    return templates.filter(
       (w) =>
         w.name.toLowerCase().includes(q) ||
         w.description.toLowerCase().includes(q) ||
         w.parameters.some((p) => p.name.toLowerCase().includes(q))
     );
-  }, [workflows, search]);
+  }, [templates, search]);
 
   const handleInspect = async (name: string) => {
     setInspecting(true);
     setInspectLoading(true);
     setDefinition(null);
     try {
-      const def = await getWorkflow(name);
+      const def = await getTemplate(name);
       setDefinition(def);
     } catch (e) {
-      toast.error(`Failed to load workflow: ${(e as Error).message}`);
+      toast.error(`Failed to load template: ${(e as Error).message}`);
       setInspecting(false);
     } finally {
       setInspectLoading(false);
@@ -456,9 +456,9 @@ export function WorkflowsPage() {
     params: Record<string, string | number | boolean>
   ) => {
     try {
-      const result = await runWorkflow(name, params);
+      const result = await runTemplate(name, params);
       toast.success(
-        `Workflow "${name}" started — ${result.tasks} task${result.tasks !== 1 ? "s" : ""} created`
+        `Template "${name}" started — ${result.tasks} task${result.tasks !== 1 ? "s" : ""} created`
       );
       // Navigate to the created plan
       navigate(`/plans/${result.plan.id}`);
@@ -483,7 +483,7 @@ export function WorkflowsPage() {
         <div className="relative w-72">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
           <Input
-            placeholder="Search workflows..."
+            placeholder="Search templates..."
             className="pl-9 h-8 text-sm"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
@@ -493,7 +493,7 @@ export function WorkflowsPage() {
         <div className="flex-1" />
 
         <Badge variant="secondary" className="text-xs shrink-0">
-          {filtered.length} workflow{filtered.length !== 1 ? "s" : ""}
+          {filtered.length} template{filtered.length !== 1 ? "s" : ""}
         </Badge>
 
         <Button variant="outline" size="sm" className="h-8 gap-1.5" onClick={refetch}>
@@ -501,21 +501,21 @@ export function WorkflowsPage() {
         </Button>
       </div>
 
-      {/* Workflow list */}
+      {/* Template list */}
       {filtered.length === 0 ? (
         <Card className="flex-1">
           <CardContent className="flex flex-col items-center justify-center py-20 text-muted-foreground">
             <Workflow className="h-12 w-12 mb-4 opacity-30" />
             <p className="text-sm font-medium">
-              {workflows.length === 0
-                ? "No workflows found"
-                : "No matching workflows"}
+              {templates.length === 0
+                ? "No templates found"
+                : "No matching templates"}
             </p>
             <p className="text-xs mt-1 text-center max-w-sm">
-              {workflows.length === 0 ? (
+              {templates.length === 0 ? (
                 <>
-                  Workflows are parameterized plan templates.
-                  Create a <code className="text-[10px] bg-muted rounded px-1">.polpo/workflows/my-workflow/workflow.json</code> file to get started.
+                  Templates are parameterized plan definitions.
+                  Create a <code className="text-[10px] bg-muted rounded px-1">.polpo/templates/my-template/template.json</code> file to get started.
                 </>
               ) : (
                 "Try adjusting your search"
@@ -527,9 +527,9 @@ export function WorkflowsPage() {
         <ScrollArea className="flex-1 min-h-0">
           <div className="space-y-2 pr-4">
             {filtered.map((w) => (
-              <WorkflowCard
+              <TemplateCard
                 key={w.name}
-                workflow={w}
+                template={w}
                 onRun={() => setRunTarget(w)}
                 onInspect={() => handleInspect(w.name)}
               />
@@ -540,8 +540,8 @@ export function WorkflowsPage() {
 
       {/* Run dialog */}
       {runTarget && (
-        <RunWorkflowDialog
-          workflow={runTarget}
+        <RunTemplateDialog
+          template={runTarget}
           open={true}
           onOpenChange={(open) => { if (!open) setRunTarget(null); }}
           onRun={handleRun}

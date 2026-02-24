@@ -31,6 +31,7 @@ async function initOrchestrator(configPath: string): Promise<Orchestrator> {
 
 function statusIcon(status: TaskStatus): string {
   switch (status) {
+    case "draft":              return chalk.gray("\u270E");    // ✎
     case "pending":            return chalk.gray("\u25CB");   // ○
     case "awaiting_approval":  return chalk.yellow("\u23F3"); // ⏳
     case "assigned":           return chalk.cyan("\u25CE");    // ◎

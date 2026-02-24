@@ -4,6 +4,7 @@ export type { McpServerConfig } from "../mcp/types.js";
 // === Task ===
 
 export type TaskStatus =
+  | "draft"
   | "pending"
   | "awaiting_approval"
   | "assigned"

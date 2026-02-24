@@ -49,7 +49,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Ink-based TUI with Zustand state management
 - React SDK with SSE-based hooks (`useTasks`, `usePlans`, `useAgents`, etc.)
 - Vite + React web dashboard with shadcn/ui
-- Astro + Starlight documentation site
+- Mintlify documentation site
 - MCP client manager with automatic tool bridging and server-name prefixing
 - Filesystem sandbox (`allowedPaths`) and `safeEnv` secret stripping
 - Skills system with project-level pool and per-agent symlinks

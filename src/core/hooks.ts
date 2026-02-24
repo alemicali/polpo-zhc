@@ -39,6 +39,7 @@ export interface HookPayloads {
     maxDuration?: number;
     retryPolicy?: RetryPolicy;
     notifications?: ScopedNotificationRules;
+    draft?: boolean;
   };
   "task:spawn": {
     task: Task;

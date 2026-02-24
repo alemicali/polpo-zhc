@@ -2,8 +2,7 @@ import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { streamSSE } from "hono/streaming";
 import { nanoid } from "nanoid";
 import type { ServerEnv } from "../app.js";
-import type { ProjectManager } from "../project-manager.js";
-import type { SSEClient } from "../sse-bridge.js";
+import type { SSEBridge, SSEClient } from "../sse-bridge.js";
 
 // ── Route definitions ─────────────────────────────────────────────────
 
@@ -13,7 +12,7 @@ const _sseEventStreamRoute = createRoute({
   path: "/",
   tags: ["Events"],
   summary: "SSE event stream",
-  description: "Server-Sent Events stream for real-time project events. Supports Last-Event-ID header for replay and ?filter= query parameter for event filtering.",
+  description: "Server-Sent Events stream for real-time events. Supports Last-Event-ID header for replay and ?filter= query parameter for event filtering.",
   request: {
     query: z.object({
       filter: z.string().optional(),
@@ -29,20 +28,14 @@ const _sseEventStreamRoute = createRoute({
 // ── Route handlers ────────────────────────────────────────────────────
 
 /**
- * SSE streaming + WebSocket event routes.
+ * SSE streaming event routes.
  */
-export function eventRoutes(pm: ProjectManager): OpenAPIHono<ServerEnv> {
+export function eventRoutes(sseBridge: SSEBridge): OpenAPIHono<ServerEnv> {
   const app = new OpenAPIHono<ServerEnv>();
 
   // GET /events — SSE event stream
   // NOTE: SSE streaming cannot use app.openapi() because it returns a streaming response, not JSON.
   app.get("/", (c) => {
-    const projectId = c.get("projectId");
-    const sseBridge = pm.getSSEBridge(projectId);
-    if (!sseBridge) {
-      return c.json({ ok: false, error: "Project not found", code: "NOT_FOUND" }, 404);
-    }
-
     const lastEventId = c.req.header("last-event-id");
     const filterParam = c.req.query("filter");
     const filters = filterParam ? filterParam.split(",").map(f => f.trim()) : null;

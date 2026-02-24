@@ -7,13 +7,12 @@
  *
  * This file provides hooks the SDK doesn't cover:
  * - useChat — session-aware chat with streaming via /v1/chat/completions
- * - useProjectInfo — fetches project info (name, workDir) from the API
+ * - useProjectInfo — fetches project name from orchestrator state
  */
 
 import { useState, useCallback, useEffect, useRef } from "react";
-import { usePolpo, useSessions, PolpoClient } from "@openpolpo/react-sdk";
-import type { ProjectInfo, ChatMessage, ChatCompletionMessage } from "@openpolpo/react-sdk";
-import { config } from "@/lib/config";
+import { usePolpo, useSessions } from "@openpolpo/react-sdk";
+import type { ChatMessage, ChatCompletionMessage } from "@openpolpo/react-sdk";
 
 // ── useChat (session-aware + streaming) ──
 // Builds on the SDK's useSessions hook for session management,
@@ -37,16 +36,6 @@ export function useChat() {
   /** Conversation history sent to the completions endpoint */
   const conversationRef = useRef<ChatCompletionMessage[]>([]);
 
-  // Auto-select most recent session on first load
-  useEffect(() => {
-    if (initialLoadDone.current || sessionsLoading) return;
-    initialLoadDone.current = true;
-    if (sessions.length > 0) {
-      const latest = sessions[0]; // sorted by updatedAt desc from server
-      loadSession(latest.id);
-    }
-  }, [sessions, sessionsLoading]);
-
   // Load a specific session's messages
   const loadSession = useCallback(
     async (id: string) => {
@@ -66,6 +55,16 @@ export function useChat() {
     },
     [setSessionId, getMessages]
   );
+
+  // Auto-select most recent session on first load
+  useEffect(() => {
+    if (initialLoadDone.current || sessionsLoading) return;
+    initialLoadDone.current = true;
+    if (sessions.length > 0) {
+      const latest = sessions[0]; // sorted by updatedAt desc from server
+      loadSession(latest.id);
+    }
+  }, [sessions, sessionsLoading, loadSession]);
 
   // Start a new empty session
   const newSession = useCallback(() => {
@@ -180,38 +179,31 @@ export function useChat() {
 // ── useProjectInfo ──
 
 export function useProjectInfo() {
-  const [info, setInfo] = useState<{
-    project: string;
-    workDir: string;
-  } | null>(null);
+  const { client } = usePolpo();
+  const [info, setInfo] = useState<{ project: string } | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
 
-    (async () => {
-      try {
-        const projects = await PolpoClient.listProjects(
-          config.baseUrl,
-          config.apiKey
-        );
-        if (!cancelled && projects.length > 0) {
-          const proj =
-            projects.find((p: ProjectInfo) => p.id === config.projectId) ??
-            projects[0];
-          setInfo({ project: proj.name, workDir: proj.workDir });
+    client
+      .getState()
+      .then((state) => {
+        if (!cancelled && state.project) {
+          setInfo({ project: state.project });
         }
-      } catch {
+      })
+      .catch(() => {
         // silent
-      } finally {
+      })
+      .finally(() => {
         if (!cancelled) setLoading(false);
-      }
-    })();
+      });
 
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [client]);
 
   return { info, loading };
 }

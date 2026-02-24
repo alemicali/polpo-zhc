@@ -107,31 +107,14 @@ export interface SSEEvent {
   timestamp: string;
 }
 
-// === Project ===
-
-export interface ProjectInfo {
-  id: string;
-  name: string;
-  workDir: string;
-  status: "running" | "stopped" | "idle";
-  taskCount: number;
-  agentCount: number;
-}
-
 // === Server Config ===
 
 export interface ServerConfig {
   port: number;
   host: string;
-  apiKeys?: string[];
-  projects: ProjectEntry[];
-  corsOrigins?: string[];
-}
-
-export interface ProjectEntry {
-  id: string;
   workDir: string;
+  apiKeys?: string[];
+  corsOrigins?: string[];
+  /** Start the supervisor loop on server start. Default: true. */
   autoStart?: boolean;
 }
-
-

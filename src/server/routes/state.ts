@@ -1,28 +1,14 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import type { ServerEnv } from "../app.js";
-import type { ProjectManager } from "../project-manager.js";
 import { UpdateMemorySchema } from "../schemas.js";
 import { redactPolpoState, redactPolpoConfig, sanitizeTranscriptEntry } from "../security.js";
 
 // ── Route definitions ─────────────────────────────────────────────────
 
-const listProjectsRoute = createRoute({
-  method: "get",
-  path: "/",
-  tags: ["Projects"],
-  summary: "List all registered projects",
-  responses: {
-    200: {
-      content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.any() }) } },
-      description: "List of projects",
-    },
-  },
-});
-
 const getStateRoute = createRoute({
   method: "get",
   path: "/state",
-  tags: ["Projects"],
+  tags: ["State"],
   summary: "Get full state snapshot",
   responses: {
     200: {
@@ -32,10 +18,10 @@ const getStateRoute = createRoute({
   },
 });
 
-const getProjectConfigRoute = createRoute({
+const getConfigRoute = createRoute({
   method: "get",
-  path: "/config",
-  tags: ["Projects"],
+  path: "/orchestrator-config",
+  tags: ["State"],
   summary: "Get orchestrator config",
   responses: {
     200: {
@@ -49,11 +35,11 @@ const getMemoryRoute = createRoute({
   method: "get",
   path: "/memory",
   tags: ["Memory"],
-  summary: "Get project memory",
+  summary: "Get memory",
   responses: {
     200: {
       content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.object({ exists: z.boolean(), content: z.any() }) }) } },
-      description: "Project memory",
+      description: "Memory content",
     },
   },
 });
@@ -62,7 +48,7 @@ const updateMemoryRoute = createRoute({
   method: "put",
   path: "/memory",
   tags: ["Memory"],
-  summary: "Update project memory",
+  summary: "Update memory",
   request: {
     body: { content: { "application/json": { schema: UpdateMemorySchema } } },
   },
@@ -110,23 +96,9 @@ const getLogSessionRoute = createRoute({
 // ── Route handlers ────────────────────────────────────────────────────
 
 /**
- * Project listing, state, config, memory, logs routes.
+ * State, config, memory, and logs routes.
  */
-export function projectListRoutes(pm: ProjectManager): OpenAPIHono {
-  const app = new OpenAPIHono();
-
-  // GET / — list all registered projects
-  app.openapi(listProjectsRoute, (c) => {
-    return c.json({ ok: true, data: pm.list() });
-  });
-
-  return app;
-}
-
-/**
- * Per-project state access routes (mounted under /projects/:projectId/).
- */
-export function projectDetailRoutes(): OpenAPIHono<ServerEnv> {
+export function stateRoutes(): OpenAPIHono<ServerEnv> {
   const app = new OpenAPIHono<ServerEnv>();
 
   // GET /state — full state snapshot
@@ -135,14 +107,14 @@ export function projectDetailRoutes(): OpenAPIHono<ServerEnv> {
     return c.json({ ok: true, data: redactPolpoState(orchestrator.getStore().getState()) });
   });
 
-  // GET /config — orchestrator config
-  app.openapi(getProjectConfigRoute, (c) => {
+  // GET /orchestrator-config — orchestrator config
+  app.openapi(getConfigRoute, (c) => {
     const orchestrator = c.get("orchestrator");
     const config = orchestrator.getConfig();
     return c.json({ ok: true, data: config ? redactPolpoConfig(config) : config });
   });
 
-  // GET /memory — project memory
+  // GET /memory — memory
   app.openapi(getMemoryRoute, (c) => {
     const orchestrator = c.get("orchestrator");
     return c.json({
@@ -154,7 +126,7 @@ export function projectDetailRoutes(): OpenAPIHono<ServerEnv> {
     });
   });
 
-  // PUT /memory — update project memory
+  // PUT /memory — update memory
   app.openapi(updateMemoryRoute, async (c) => {
     const orchestrator = c.get("orchestrator");
     const body = c.req.valid("json");

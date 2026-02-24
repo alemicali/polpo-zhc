@@ -91,6 +91,7 @@ export class ChannelGateway {
   private channelConfig: NotificationChannelConfig;
   private approvalResolver?: ApprovalCallbackResolver;
   private pendingRevise = new Map<string, string>(); // chatId → approvalRequestId
+  private recentMessageIds = new Set<string>(); // dedup guard for duplicate polls
   private onTyping?: (chatId: string) => Promise<void>;
   private onPartialResponse?: (chatId: string, text: string) => Promise<void>;
 
@@ -122,6 +123,18 @@ export class ChannelGateway {
    */
   async handleMessage(msg: InboundMessage): Promise<string | undefined> {
     if (!this.gatewayConfig.enableInbound) return undefined;
+
+    // Dedup: skip if we've already processed this exact message
+    if (msg.messageId) {
+      const dedupKey = `${msg.channel}:${msg.messageId}`;
+      if (this.recentMessageIds.has(dedupKey)) return undefined;
+      this.recentMessageIds.add(dedupKey);
+      // Cap the set to prevent unbounded growth
+      if (this.recentMessageIds.size > 500) {
+        const first = this.recentMessageIds.values().next().value!;
+        this.recentMessageIds.delete(first);
+      }
+    }
 
     const peerId = `${msg.channel}:${msg.externalId}`;
 
@@ -365,7 +378,7 @@ export class ChannelGateway {
 
   // ── Chat handler (free-text → orchestrator completions) ───────────
 
-  private async handleChat(msg: InboundMessage, peerId: string): Promise<string> {
+  private async handleChat(msg: InboundMessage, peerId: string): Promise<string | undefined> {
     try {
       // Get or create session
       let sessionId = this.peerStore.getSessionId(peerId);
@@ -428,6 +441,7 @@ export class ChannelGateway {
       const MAX_TURNS = 15;
       const messages: Message[] = [...piMessages];
       let finalText = "";
+      let sentPartials = false;
 
 
 
@@ -440,10 +454,17 @@ export class ChannelGateway {
         }, streamOpts);
 
         let turnText = "";
+        let streamError: string | undefined;
         for await (const event of piStream) {
           if (event.type === "text_delta") {
             turnText += event.delta;
+          } else if (event.type === "error") {
+            streamError = (event as any).error?.errorMessage ?? "Model error";
           }
+        }
+
+        if (streamError) {
+          return `Error: ${streamError}`;
         }
 
         const response = await piStream.result();
@@ -464,6 +485,7 @@ export class ChannelGateway {
         // There are tool calls — send partial text as a separate message if present
         if (turnText.trim() && this.onPartialResponse) {
           await this.onPartialResponse(msg.chatId, turnText);
+          sentPartials = true;
           // Don't add to finalText since it was already sent
         } else {
           finalText += turnText;
@@ -496,6 +518,8 @@ export class ChannelGateway {
         finalText = finalText.slice(0, 3990) + "\n\n... (truncated)";
       }
 
+      // If all text was already sent as partials, nothing left to return
+      if (!finalText && sentPartials) return undefined;
       return finalText || "I processed your request but have nothing to say.";
     } catch (error) {
       const errMsg = error instanceof Error ? error.message : String(error);

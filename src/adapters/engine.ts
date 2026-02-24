@@ -186,9 +186,13 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
     agentConfig.enablePdf || agentConfig.enableDocx || agentConfig.enableEmail ||
     agentConfig.enableAudio || agentConfig.enableImage;
 
-  // Derive browser profile directory for Playwright persistent context
+  // Derive browser profile / state directory
   const polpoDir = ctx?.polpoDir ?? join(cwd, ".polpo");
   const browserProfileDir = agentConfig.browserEngine === "playwright"
+    ? join(polpoDir, "browser-profiles", agentConfig.browserProfile || agentConfig.name)
+    : undefined;
+  // For agent-browser: persistent state directory (same path convention as Playwright profiles)
+  const browserStateDir = agentConfig.browserEngine !== "playwright" && agentConfig.enableBrowser
     ? join(polpoDir, "browser-profiles", agentConfig.browserProfile || agentConfig.name)
     : undefined;
 
@@ -327,6 +331,7 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
           browserSession: agentConfig.name,
           browserEngine: agentConfig.browserEngine,
           browserProfileDir,
+          browserStateDir,
           enableBrowser: agentConfig.enableBrowser,
           enableHttp: agentConfig.enableHttp,
           enableGit: agentConfig.enableGit,
@@ -405,6 +410,11 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
       if (browserProfileDir) {
         const { cleanupPlaywrightContext } = await import("../tools/playwright-browser-tools.js");
         await cleanupPlaywrightContext(browserProfileDir).catch(() => {});
+      }
+      // Save agent-browser state and close session
+      if (browserStateDir) {
+        const { cleanupAgentBrowserSession } = await import("../tools/browser-tools.js");
+        await cleanupAgentBrowserSession(agentConfig.name, browserStateDir).catch(() => {});
       }
     }
   })();

@@ -40,6 +40,8 @@ export const CreateTaskSchema = z.object({
   title: z.string().min(1),
   description: z.string().min(1),
   assignTo: z.string().min(1),
+  /** Create task as draft (won't be picked up by orchestrator until moved to pending). Default: false. */
+  draft: z.boolean().optional(),
   expectations: z.array(z.any()).optional(),
   expectedOutcomes: z.array(ExpectedOutcomeSchema).optional(),
   dependsOn: z.array(z.string()).optional(),

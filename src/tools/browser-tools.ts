@@ -16,11 +16,75 @@
 
 import { execSync, spawn as spawnChild } from "node:child_process";
 import { resolve, join } from "node:path";
+import { existsSync, mkdirSync } from "node:fs";
 import { Type } from "@sinclair/typebox";
 import type { AgentTool, AgentToolResult } from "@mariozechner/pi-agent-core";
 
 const MAX_OUTPUT_BYTES = 50_000;
 const DEFAULT_TIMEOUT = 30_000;
+
+// ─── State Persistence ───
+
+/** Track whether state has been loaded for a given session, so we only load once. */
+const loadedSessions = new Set<string>();
+
+/**
+ * Load saved browser state (cookies, localStorage, sessionStorage) for a session.
+ * Called once before the first navigation.
+ */
+function loadBrowserState(session: string, stateDir: string): void {
+  if (loadedSessions.has(session)) return;
+  loadedSessions.add(session);
+  const stateFile = join(stateDir, "state.json");
+  if (!existsSync(stateFile)) return;
+  try {
+    execSync(`agent-browser --session ${session} state load ${stateFile}`, {
+      encoding: "utf-8",
+      timeout: 15_000,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+  } catch {
+    // Silently ignore — state file may be stale or incompatible
+  }
+}
+
+/**
+ * Save browser state to disk for future sessions.
+ * Called on browser_close and on agent exit cleanup.
+ */
+function saveBrowserState(session: string, stateDir: string): void {
+  if (!existsSync(stateDir)) mkdirSync(stateDir, { recursive: true });
+  const stateFile = join(stateDir, "state.json");
+  try {
+    execSync(`agent-browser --session ${session} state save ${stateFile}`, {
+      encoding: "utf-8",
+      timeout: 15_000,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+  } catch {
+    // Silently ignore — browser may already be closed
+  }
+}
+
+/**
+ * Cleanup an agent-browser session: save state and close the session.
+ * Called by the engine on agent exit.
+ */
+export async function cleanupAgentBrowserSession(session: string, stateDir?: string): Promise<void> {
+  if (stateDir) {
+    saveBrowserState(session, stateDir);
+  }
+  try {
+    execSync(`agent-browser --session ${session} close`, {
+      encoding: "utf-8",
+      timeout: 10_000,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+  } catch {
+    // Already closed
+  }
+  loadedSessions.delete(session);
+}
 
 // ─── Helpers ───
 
@@ -122,13 +186,15 @@ const BrowserNavigateSchema = Type.Object({
   url: Type.String({ description: "URL to navigate to (e.g. 'https://example.com')" }),
 });
 
-function createBrowserNavigateTool(session: string): AgentTool<typeof BrowserNavigateSchema> {
+function createBrowserNavigateTool(session: string, stateDir?: string): AgentTool<typeof BrowserNavigateSchema> {
   return {
     name: "browser_navigate",
     label: "Browser Navigate",
     description: "Open a URL in the browser. Launches the browser if not already running.",
     parameters: BrowserNavigateSchema,
     async execute(_id, params, signal) {
+      // Auto-load persisted state on first navigation
+      if (stateDir) loadBrowserState(session, stateDir);
       const result = await execBrowserAsync(["open", params.url], { session, signal });
       return browserResult(result);
     },
@@ -417,13 +483,16 @@ function createBrowserEvalTool(session: string): AgentTool<typeof BrowserEvalSch
 
 const BrowserCloseSchema = Type.Object({});
 
-function createBrowserCloseTool(session: string): AgentTool<typeof BrowserCloseSchema> {
+function createBrowserCloseTool(session: string, stateDir?: string): AgentTool<typeof BrowserCloseSchema> {
   return {
     name: "browser_close",
     label: "Browser Close",
     description: "Close the browser session. Call this when done with browser interactions to free resources.",
     parameters: BrowserCloseSchema,
     async execute(_id, _params, signal) {
+      // Save state before closing so the next session can restore it
+      if (stateDir) saveBrowserState(session, stateDir);
+      loadedSessions.delete(session);
       const result = await execBrowserAsync(["close"], { session, signal });
       return browserResult(result);
     },
@@ -535,14 +604,18 @@ export const ALL_BROWSER_TOOL_NAMES: BrowserToolName[] = [
  * @param cwd - Working directory for resolving relative file paths (screenshots)
  * @param session - Browser session name for isolation (default: agent name or "default")
  * @param allowedTools - Optional filter: only include tools with these names
+ * @param stateDir - Directory to persist browser state (cookies, localStorage). If provided,
+ *                   state is auto-loaded on first navigation and saved on browser_close/agent exit.
+ *                   Typically `.polpo/browser-profiles/<agent>/`.
  */
 export function createBrowserTools(
   cwd: string,
   session: string = "default",
   allowedTools?: string[],
+  stateDir?: string,
 ): AgentTool<any>[] {
   const factories: Record<BrowserToolName, () => AgentTool<any>> = {
-    browser_navigate: () => createBrowserNavigateTool(session),
+    browser_navigate: () => createBrowserNavigateTool(session, stateDir),
     browser_snapshot: () => createBrowserSnapshotTool(session),
     browser_click: () => createBrowserClickTool(session),
     browser_fill: () => createBrowserFillTool(session),
@@ -555,7 +628,7 @@ export function createBrowserTools(
     browser_scroll: () => createBrowserScrollTool(session),
     browser_wait: () => createBrowserWaitTool(session),
     browser_eval: () => createBrowserEvalTool(session),
-    browser_close: () => createBrowserCloseTool(session),
+    browser_close: () => createBrowserCloseTool(session, stateDir),
     browser_back: () => createBrowserBackTool(session),
     browser_forward: () => createBrowserForwardTool(session),
     browser_reload: () => createBrowserReloadTool(session),

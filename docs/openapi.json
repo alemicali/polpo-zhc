@@ -3,7 +3,7 @@
   "info": {
     "title": "Polpo API",
     "version": "1.0.0",
-    "description": "REST API for Polpo — an AI agent that manages teams of AI coding agents. Manage projects, tasks, plans, agents, templates, skills, notifications, and approvals. For conversational interaction, use the OpenAI-compatible POST /v1/chat/completions endpoint."
+    "description": "REST API for Polpo — an AI agent that manages teams of AI coding agents. Manage tasks, plans, agents, templates, skills, notifications, and approvals. For conversational interaction, use the OpenAI-compatible POST /v1/chat/completions endpoint."
   },
   "servers": [
     {
@@ -135,7 +135,7 @@
                   },
                   "project": {
                     "type": "string",
-                    "description": "Polpo extension: target a specific project by ID. If omitted, uses the first registered project."
+                    "description": "Deprecated. Ignored."
                   }
                 },
                 "required": [
@@ -315,38 +315,7 @@
         }
       }
     },
-    "/api/v1/projects": {
-      "get": {
-        "tags": [
-          "Projects"
-        ],
-        "summary": "List all registered projects",
-        "responses": {
-          "200": {
-            "description": "List of projects",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "ok": {
-                      "type": "boolean"
-                    },
-                    "data": {
-                      "nullable": true
-                    }
-                  },
-                  "required": [
-                    "ok"
-                  ]
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/projects/{projectId}/tasks": {
+    "/api/v1/tasks": {
       "get": {
         "tags": [
           "Tasks"
@@ -428,6 +397,9 @@
                   "assignTo": {
                     "type": "string",
                     "minLength": 1
+                  },
+                  "draft": {
+                    "type": "boolean"
                   },
                   "expectations": {
                     "type": "array",
@@ -630,7 +602,7 @@
         }
       }
     },
-    "/api/v1/projects/{projectId}/tasks/{taskId}": {
+    "/api/v1/tasks/{taskId}": {
       "get": {
         "tags": [
           "Tasks"
@@ -869,7 +841,7 @@
         }
       }
     },
-    "/api/v1/projects/{projectId}/tasks/{taskId}/retry": {
+    "/api/v1/tasks/{taskId}/retry": {
       "post": {
         "tags": [
           "Tasks"
@@ -919,7 +891,7 @@
         }
       }
     },
-    "/api/v1/projects/{projectId}/tasks/{taskId}/kill": {
+    "/api/v1/tasks/{taskId}/kill": {
       "post": {
         "tags": [
           "Tasks"
@@ -995,7 +967,7 @@
         }
       }
     },
-    "/api/v1/projects/{projectId}/tasks/{taskId}/reassess": {
+    "/api/v1/tasks/{taskId}/reassess": {
       "post": {
         "tags": [
           "Tasks"
@@ -1045,7 +1017,83 @@
         }
       }
     },
-    "/api/v1/projects/{projectId}/plans": {
+    "/api/v1/tasks/{taskId}/queue": {
+      "post": {
+        "tags": [
+          "Tasks"
+        ],
+        "summary": "Queue a draft task (transition draft → pending)",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "taskId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Task queued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "queued": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "queued"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Task not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/plans": {
       "get": {
         "tags": [
           "Plans"
@@ -1230,7 +1278,7 @@
         }
       }
     },
-    "/api/v1/projects/{projectId}/plans/resumable": {
+    "/api/v1/plans/resumable": {
       "get": {
         "tags": [
           "Plans"
@@ -1265,7 +1313,7 @@
         }
       }
     },
-    "/api/v1/projects/{projectId}/plans/{planId}": {
+    "/api/v1/plans/{planId}": {
       "get": {
         "tags": [
           "Plans"
@@ -1473,7 +1521,7 @@
         }
       }
     },
-    "/api/v1/projects/{projectId}/plans/{planId}/execute": {
+    "/api/v1/plans/{planId}/execute": {
       "post": {
         "tags": [
           "Plans"
@@ -1514,7 +1562,7 @@
         }
       }
     },
-    "/api/v1/projects/{projectId}/plans/{planId}/resume": {
+    "/api/v1/plans/{planId}/resume": {
       "post": {
         "tags": [
           "Plans"
@@ -1570,7 +1618,7 @@
         }
       }
     },
-    "/api/v1/projects/{projectId}/plans/checkpoints": {
+    "/api/v1/plans/checkpoints": {
       "get": {
         "tags": [
           "Plans"
@@ -1605,7 +1653,7 @@
         }
       }
     },
-    "/api/v1/projects/{projectId}/plans/{planId}/checkpoints/{checkpointName}/resume": {
+    "/api/v1/plans/{planId}/checkpoints/{checkpointName}/resume": {
       "post": {
         "tags": [
           "Plans"
@@ -1689,7 +1737,7 @@
         }
       }
     },
-    "/api/v1/projects/{projectId}/plans/{planId}/abort": {
+    "/api/v1/plans/{planId}/abort": {
       "post": {
         "tags": [
           "Plans"
@@ -1765,7 +1813,7 @@
         }
       }
     },
-    "/api/v1/projects/{projectId}/agents": {
+    "/api/v1/agents": {
       "get": {
         "tags": [
           "Agents"
@@ -1864,10 +1912,41 @@
                       "responsibilities": {
                         "type": "array",
                         "items": {
-                          "type": "string"
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "area": {
+                                  "type": "string"
+                                },
+                                "description": {
+                                  "type": "string"
+                                },
+                                "priority": {
+                                  "type": "string",
+                                  "enum": [
+                                    "critical",
+                                    "high",
+                                    "medium",
+                                    "low"
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "area",
+                                "description"
+                              ]
+                            }
+                          ]
                         }
                       },
                       "tone": {
+                        "type": "string"
+                      },
+                      "personality": {
                         "type": "string"
                       }
                     }
@@ -1992,7 +2071,7 @@
         }
       }
     },
-    "/api/v1/projects/{projectId}/agents/{name}": {
+    "/api/v1/agents/{name}": {
       "delete": {
         "tags": [
           "Agents"
@@ -2133,7 +2212,7 @@
         }
       }
     },
-    "/api/v1/projects/{projectId}/agents/team": {
+    "/api/v1/agents/team": {
       "get": {
         "tags": [
           "Agents"
@@ -2211,7 +2290,7 @@
         }
       }
     },
-    "/api/v1/projects/{projectId}/agents/processes": {
+    "/api/v1/agents/processes": {
       "get": {
         "tags": [
           "Agents"
@@ -2246,7 +2325,7 @@
         }
       }
     },
-    "/api/v1/projects/{projectId}/agents/processes/{taskId}/activity": {
+    "/api/v1/agents/processes/{taskId}/activity": {
       "get": {
         "tags": [
           "Agents"
@@ -2291,7 +2370,7 @@
         }
       }
     },
-    "/api/v1/projects/{projectId}/chat/sessions": {
+    "/api/v1/chat/sessions": {
       "get": {
         "tags": [
           "Chat Sessions"
@@ -2322,7 +2401,7 @@
         }
       }
     },
-    "/api/v1/projects/{projectId}/chat/sessions/{id}/messages": {
+    "/api/v1/chat/sessions/{id}/messages": {
       "get": {
         "tags": [
           "Chat Sessions"
@@ -2415,7 +2494,7 @@
         }
       }
     },
-    "/api/v1/projects/{projectId}/chat/sessions/{id}": {
+    "/api/v1/chat/sessions/{id}": {
       "delete": {
         "tags": [
           "Chat Sessions"
@@ -2508,7 +2587,7 @@
         }
       }
     },
-    "/api/v1/projects/{projectId}/skills": {
+    "/api/v1/skills": {
       "get": {
         "tags": [
           "Skills"
@@ -2543,7 +2622,7 @@
         }
       }
     },
-    "/api/v1/projects/{projectId}/skills/add": {
+    "/api/v1/skills/add": {
       "post": {
         "tags": [
           "Skills"
@@ -2625,7 +2704,7 @@
         }
       }
     },
-    "/api/v1/projects/{projectId}/skills/{name}": {
+    "/api/v1/skills/{name}": {
       "delete": {
         "tags": [
           "Skills"
@@ -2709,7 +2788,7 @@
         }
       }
     },
-    "/api/v1/projects/{projectId}/skills/{name}/assign": {
+    "/api/v1/skills/{name}/assign": {
       "post": {
         "tags": [
           "Skills"
@@ -2807,7 +2886,7 @@
         }
       }
     },
-    "/api/v1/projects/{projectId}/notifications": {
+    "/api/v1/notifications": {
       "get": {
         "tags": [
           "Notifications"
@@ -2872,7 +2951,7 @@
         }
       }
     },
-    "/api/v1/projects/{projectId}/notifications/stats": {
+    "/api/v1/notifications/stats": {
       "get": {
         "tags": [
           "Notifications"
@@ -2903,7 +2982,7 @@
         }
       }
     },
-    "/api/v1/projects/{projectId}/notifications/send": {
+    "/api/v1/notifications/send": {
       "post": {
         "tags": [
           "Notifications"
@@ -3000,7 +3079,7 @@
         }
       }
     },
-    "/api/v1/projects/{projectId}/approvals": {
+    "/api/v1/approvals": {
       "get": {
         "tags": [
           "Approvals"
@@ -3049,7 +3128,7 @@
         }
       }
     },
-    "/api/v1/projects/{projectId}/approvals/{id}": {
+    "/api/v1/approvals/{id}": {
       "get": {
         "tags": [
           "Approvals"
@@ -3116,7 +3195,7 @@
         }
       }
     },
-    "/api/v1/projects/{projectId}/approvals/{id}/approve": {
+    "/api/v1/approvals/{id}/approve": {
       "post": {
         "tags": [
           "Approvals"
@@ -3227,7 +3306,7 @@
         }
       }
     },
-    "/api/v1/projects/{projectId}/approvals/{id}/reject": {
+    "/api/v1/approvals/{id}/reject": {
       "post": {
         "tags": [
           "Approvals"
@@ -3367,7 +3446,7 @@
         }
       }
     },
-    "/api/v1/projects/{projectId}/templates": {
+    "/api/v1/templates": {
       "get": {
         "tags": [
           "Templates"
@@ -3402,7 +3481,7 @@
         }
       }
     },
-    "/api/v1/projects/{projectId}/templates/{name}": {
+    "/api/v1/templates/{name}": {
       "get": {
         "tags": [
           "Templates"
@@ -3469,7 +3548,7 @@
         }
       }
     },
-    "/api/v1/projects/{projectId}/templates/{name}/run": {
+    "/api/v1/templates/{name}/run": {
       "post": {
         "tags": [
           "Templates"
@@ -3592,7 +3671,7 @@
         }
       }
     },
-    "/api/v1/projects/{projectId}/config/reload": {
+    "/api/v1/config/reload": {
       "post": {
         "tags": [
           "Config"
@@ -3654,15 +3733,15 @@
         }
       }
     },
-    "/api/v1/projects/{projectId}/config": {
+    "/api/v1/config": {
       "get": {
         "tags": [
-          "Projects"
+          "Config"
         ],
-        "summary": "Get orchestrator config",
+        "summary": "Get current configuration (redacted)",
         "responses": {
           "200": {
-            "description": "Orchestrator config",
+            "description": "Current configuration",
             "content": {
               "application/json": {
                 "schema": {
@@ -3681,11 +3760,33 @@
                 }
               }
             }
+          },
+          "404": {
+            "description": "No configuration loaded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
           }
         }
       }
     },
-    "/api/v1/projects/{projectId}/peers": {
+    "/api/v1/peers": {
       "get": {
         "tags": [
           "Peers"
@@ -3748,7 +3849,7 @@
         }
       }
     },
-    "/api/v1/projects/{projectId}/peers/presence": {
+    "/api/v1/peers/presence": {
       "get": {
         "tags": [
           "Peers"
@@ -3801,7 +3902,7 @@
         }
       }
     },
-    "/api/v1/projects/{projectId}/peers/allowlist": {
+    "/api/v1/peers/allowlist": {
       "get": {
         "tags": [
           "Peers"
@@ -3944,7 +4045,7 @@
         }
       }
     },
-    "/api/v1/projects/{projectId}/peers/allowlist/{peerId}": {
+    "/api/v1/peers/allowlist/{peerId}": {
       "delete": {
         "tags": [
           "Peers"
@@ -4007,7 +4108,7 @@
         }
       }
     },
-    "/api/v1/projects/{projectId}/peers/pair": {
+    "/api/v1/peers/pair": {
       "post": {
         "tags": [
           "Peers"
@@ -4099,7 +4200,7 @@
         }
       }
     },
-    "/api/v1/projects/{projectId}/peers/link": {
+    "/api/v1/peers/link": {
       "post": {
         "tags": [
           "Peers"
@@ -4195,10 +4296,10 @@
         }
       }
     },
-    "/api/v1/projects/{projectId}/state": {
+    "/api/v1/state": {
       "get": {
         "tags": [
-          "Projects"
+          "State"
         ],
         "summary": "Get full state snapshot",
         "responses": {
@@ -4226,15 +4327,46 @@
         }
       }
     },
-    "/api/v1/projects/{projectId}/memory": {
+    "/api/v1/orchestrator-config": {
+      "get": {
+        "tags": [
+          "State"
+        ],
+        "summary": "Get orchestrator config",
+        "responses": {
+          "200": {
+            "description": "Orchestrator config",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/memory": {
       "get": {
         "tags": [
           "Memory"
         ],
-        "summary": "Get project memory",
+        "summary": "Get memory",
         "responses": {
           "200": {
-            "description": "Project memory",
+            "description": "Memory content",
             "content": {
               "application/json": {
                 "schema": {
@@ -4272,7 +4404,7 @@
         "tags": [
           "Memory"
         ],
-        "summary": "Update project memory",
+        "summary": "Update memory",
         "requestBody": {
           "content": {
             "application/json": {
@@ -4324,7 +4456,7 @@
         }
       }
     },
-    "/api/v1/projects/{projectId}/logs": {
+    "/api/v1/logs": {
       "get": {
         "tags": [
           "Logs"
@@ -4355,7 +4487,7 @@
         }
       }
     },
-    "/api/v1/projects/{projectId}/logs/{sessionId}": {
+    "/api/v1/logs/{sessionId}": {
       "get": {
         "tags": [
           "Logs"

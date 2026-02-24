@@ -13,6 +13,7 @@ import { Type } from "@sinclair/typebox";
 import type { AgentTool, AgentToolResult } from "@mariozechner/pi-agent-core";
 import { resolveAllowedPaths, assertPathAllowed } from "./path-sandbox.js";
 import { bashSafeEnv } from "./safe-env.js";
+import { createOutcomeTools as createOutcomeToolsCore } from "./outcome-tools.js";
 
 const MAX_READ_LINES = 500;
 const MAX_OUTPUT_BYTES = 30_000;
@@ -306,6 +307,41 @@ function createLsTool(cwd: string, sandbox: string[]): AgentTool<typeof LsSchema
   };
 }
 
+// === Tool name matching (wildcard support) ===
+
+/**
+ * Check if a tool name matches an allowed pattern.
+ * Supports exact match and trailing wildcard: "browser_*" matches "browser_navigate".
+ */
+export function matchToolPattern(pattern: string, toolName: string): boolean {
+  const p = pattern.toLowerCase();
+  const n = toolName.toLowerCase();
+  if (p === n) return true;
+  if (p.endsWith("*")) {
+    return n.startsWith(p.slice(0, -1));
+  }
+  return false;
+}
+
+/**
+ * Expand wildcard patterns in an allowedTools list against all known tool names.
+ * E.g. ["browser_*", "http_fetch"] → ["browser_navigate", "browser_click", ..., "http_fetch"].
+ * Non-wildcard entries pass through as-is (even if not in allNames — factory will just skip them).
+ */
+export function expandToolWildcards(allowedTools: string[], allNames: readonly string[]): string[] {
+  const result = new Set<string>();
+  for (const pattern of allowedTools) {
+    if (pattern.includes("*")) {
+      for (const name of allNames) {
+        if (matchToolPattern(pattern, name)) result.add(name);
+      }
+    } else {
+      result.add(pattern.toLowerCase());
+    }
+  }
+  return [...result];
+}
+
 // === Factory ===
 
 /** Tool name to filter by in allowedTools config */
@@ -335,7 +371,12 @@ export function createCodingTools(cwd: string, allowedTools?: string[], allowedP
     ? ALL_TOOL_NAMES.filter(n => allowedTools.some(a => a.toLowerCase() === n))
     : ALL_TOOL_NAMES;
 
-  return names.map(n => factories[n]());
+  const tools = names.map(n => factories[n]());
+
+  // register_outcome is always included — agents must always be able to declare artifacts
+  tools.push(...createOutcomeToolsCore(cwd, allowedPaths, allowedTools));
+
+  return tools;
 }
 
 // === Extended Tools Factory ===
@@ -412,6 +453,8 @@ export interface CreateAllToolsOptions {
   browserEngine?: "agent-browser" | "playwright";
   /** Profile directory for Playwright persistent context. Required when browserEngine is "playwright". */
   browserProfileDir?: string;
+  /** State directory for agent-browser persistent state (cookies, localStorage). Typically `.polpo/browser-profiles/<agent>/`. */
+  browserStateDir?: string;
   /** Enable browser tools. Default: false — must be explicitly enabled. */
   enableBrowser?: boolean;
   /** Enable HTTP/fetch tools. Default: false — must be explicitly enabled. */
@@ -450,10 +493,17 @@ export interface CreateAllToolsOptions {
  * appears in allowedTools will be included (and its category auto-enabled).
  */
 export async function createAllTools(options: CreateAllToolsOptions): Promise<AgentTool<any>[]> {
-  const { cwd, allowedTools, allowedPaths, browserSession } = options;
+  const { cwd, allowedPaths, browserSession } = options;
   const tools: AgentTool<any>[] = [];
 
-  // Helper: check if any tool from a category is in the allowedTools list
+  // Expand wildcards in allowedTools once — e.g. "browser_*" → all 18 browser tool names.
+  // This way individual factory functions don't need wildcard awareness.
+  const rawAllowed = options.allowedTools;
+  const allowedTools = rawAllowed
+    ? expandToolWildcards(rawAllowed, ALL_EXTENDED_TOOL_NAMES)
+    : undefined;
+
+  // Helper: check if any tool from a category is in the (expanded) allowedTools list
   const categoryRequested = (names: readonly string[]) =>
     allowedTools?.some(a => names.some(n => n === a.toLowerCase()));
 
@@ -467,7 +517,7 @@ export async function createAllTools(options: CreateAllToolsOptions): Promise<Ag
       const { createPlaywrightBrowserTools } = await import("./playwright-browser-tools.js");
       tools.push(...createPlaywrightBrowserTools(cwd, options.browserProfileDir, allowedTools));
     } else {
-      tools.push(...createBrowserTools(cwd, browserSession, allowedTools));
+      tools.push(...createBrowserTools(cwd, browserSession, allowedTools, options.browserStateDir));
     }
   }
 

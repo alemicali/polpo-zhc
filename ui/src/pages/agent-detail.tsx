@@ -25,7 +25,7 @@ import {
   CheckCircle2,
   XCircle,
   Layers,
-  Infinity,
+  Infinity as InfinityIcon,
   FolderOpen,
   Terminal,
   Globe,
@@ -219,7 +219,6 @@ export function AgentDetailPage() {
     );
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const agentAny = agent as unknown as Record<string, unknown>;
   const hasEnableFlags = enableFlags.some(f => agentAny[f.key] === true);
   const mcpEntries = agent.mcpServers ? Object.entries(agent.mcpServers) : [];
@@ -513,7 +512,7 @@ export function AgentDetailPage() {
                 <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-0.5">Max Concurrency</p>
                 <p className="text-sm font-mono font-bold flex items-center gap-1">
                   {agent.maxConcurrency != null ? agent.maxConcurrency : (
-                    <><Infinity className="h-4 w-4 inline" /> <span className="text-muted-foreground text-xs font-normal">Unlimited</span></>
+                    <><InfinityIcon className="h-4 w-4 inline" /> <span className="text-muted-foreground text-xs font-normal">Unlimited</span></>
                   )}
                 </p>
               </div>

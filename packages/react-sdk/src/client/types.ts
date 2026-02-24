@@ -7,6 +7,7 @@
 // === Task ===
 
 export type TaskStatus =
+  | "draft"
   | "pending"
   | "awaiting_approval"
   | "assigned"
@@ -75,7 +76,7 @@ export interface TaskOutcome {
   url?: string;
   data?: unknown;
   producedBy?: string;
-  producedAt?: string;
+  producedAt: string;
   tags?: string[];
 }
 
@@ -260,7 +261,7 @@ export interface AgentActivity {
   filesCreated: string[];
   filesEdited: string[];
   toolCalls: number;
-  totalTokens?: number;
+  totalTokens: number;
   lastUpdate: string;
   summary?: string;
   sessionId?: string;
@@ -317,7 +318,7 @@ export interface AssessmentResult {
 
 // === Plan ===
 
-export type PlanStatus = "draft" | "active" | "completed" | "failed" | "cancelled";
+export type PlanStatus = "draft" | "active" | "paused" | "completed" | "failed" | "cancelled";
 
 export interface Plan {
   id: string;
@@ -528,7 +529,21 @@ export interface PolpoSettings {
   maxFixAttempts?: number;
   maxQuestionRounds?: number;
   maxResolutionAttempts?: number;
+  autoCorrectExpectations?: boolean;
   orchestratorModel?: string;
+  imageModel?: string;
+  modelAllowlist?: Record<string, { alias?: string; maxTokens?: number }>;
+  storage?: "file" | "sqlite";
+  maxAssessmentRetries?: number;
+  maxConcurrency?: number;
+  approvalGates?: Array<Record<string, unknown>>;
+  notifications?: Record<string, unknown>;
+  escalationPolicy?: Record<string, unknown>;
+  sla?: Record<string, unknown>;
+  enableScheduler?: boolean;
+  defaultQualityThreshold?: number;
+  emailAllowedDomains?: string[];
+  mcpToolAllowlist?: Record<string, string[]>;
 }
 
 export interface PolpoConfig {
@@ -562,15 +577,6 @@ export interface PolpoConfig {
 
 // === API ===
 
-export interface ProjectInfo {
-  id: string;
-  name: string;
-  workDir: string;
-  status: "running" | "stopped" | "idle";
-  taskCount: number;
-  agentCount: number;
-}
-
 export type ErrorCode =
   | "NOT_FOUND"
   | "INVALID_STATE"
@@ -600,6 +606,8 @@ export interface CreateTaskRequest {
   title: string;
   description: string;
   assignTo: string;
+  /** Create task as draft (won't be picked up until queued). Default: false. */
+  draft?: boolean;
   expectations?: TaskExpectation[];
   expectedOutcomes?: ExpectedOutcome[];
   dependsOn?: string[];
@@ -643,6 +651,14 @@ export interface AddAgentRequest {
   mcpServers?: Record<string, McpServerConfig>;
   /** Filesystem sandbox — directories the agent is allowed to access. */
   allowedPaths?: string[];
+  /** Agent identity (display name, bio, avatar). */
+  identity?: AgentIdentity;
+  /** Vault credentials. */
+  vault?: Record<string, VaultEntry>;
+  /** Org chart: who this agent reports to. */
+  reportsTo?: string;
+  /** Allowed email recipient domains (overrides global setting). */
+  emailAllowedDomains?: string[];
   // Extended tool categories (opt-in)
   enableBrowser?: boolean;
   enableHttp?: boolean;

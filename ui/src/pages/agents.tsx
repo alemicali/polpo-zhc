@@ -33,7 +33,7 @@ import {
   Shield,
   Users,
   Layers,
-  Infinity,
+  Infinity as InfinityIcon,
 } from "lucide-react";
 import { MessageResponse } from "@/components/ai-elements/message";
 import { useAgents, useProcesses, useSkills } from "@openpolpo/react-sdk";
@@ -54,8 +54,6 @@ function SkillsPool({
 }) {
   const [open, setOpen] = useState(false);
 
-  if (skills.length === 0) return null;
-
   // Build usage map: skill name → agent names using it
   const usageMap = useMemo(() => {
     const map = new Map<string, string[]>();
@@ -69,6 +67,8 @@ function SkillsPool({
     }
     return map;
   }, [skills, agents]);
+
+  if (skills.length === 0) return null;
 
   const assignedCount = [...usageMap.values()].filter(v => v.length > 0).length;
 
@@ -599,7 +599,7 @@ function AgentCard({
               )}
               {agent.maxConcurrency == null && (
                 <span className="flex items-center gap-1">
-                  Concurrency: <Infinity className="h-3 w-3 inline" />
+                  Concurrency: <InfinityIcon className="h-3 w-3 inline" />
                 </span>
               )}
               {agent.volatile && <span className="text-amber-400">Volatile (auto-cleanup on plan complete)</span>}

@@ -42,9 +42,10 @@
     "dev:ui": "pnpm --filter ui dev",
     "start": "node dist/cli/index.js",
     "test": "vitest",
+    "typecheck": "./node_modules/.bin/tsc --noEmit",
     "lint": "pnpm --filter ui lint",
     "clean": "rm -rf dist packages/react-sdk/dist ui/dist",
-    "generate:openapi": "node -e \"const{createApp}=require('./dist/server/app.js');const{ProjectManager}=require('./dist/server/project-manager.js');const pm=new ProjectManager();const app=createApp(pm);const fs=require('fs');app.fetch(new Request('http://localhost/api/v1/openapi.json')).then(r=>r.json()).then(j=>{fs.writeFileSync('apps/docs-mintlify/openapi.json',JSON.stringify(j,null,2));console.log('Generated openapi.json with',Object.keys(j.paths).length,'paths')})\""
+    "generate:openapi": "node -e \"const{createApp}=require('./dist/server/app.js');const app=createApp(null,null);const fs=require('fs');app.fetch(new Request('http://localhost/api/v1/openapi.json')).then(r=>r.json()).then(j=>{fs.writeFileSync('docs/openapi.json',JSON.stringify(j,null,2));console.log('Generated openapi.json with',Object.keys(j.paths).length,'paths')})\""
   },
   "keywords": [
     "ai",
@@ -109,9 +110,7 @@
     "vitest": "^3.0.4"
   },
   "pnpm": {
-    "overrides": {
-      "react": "18.3.1"
-    },
+    "overrides": {},
     "onlyBuiltDependencies": [
       "@swc/core",
       "better-sqlite3",

@@ -153,6 +153,26 @@ const reassessTaskRoute = createRoute({
   },
 });
 
+const queueTaskRoute = createRoute({
+  method: "post",
+  path: "/{taskId}/queue",
+  tags: ["Tasks"],
+  summary: "Queue a draft task (transition draft → pending)",
+  request: {
+    params: z.object({ taskId: z.string() }),
+  },
+  responses: {
+    200: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.object({ queued: z.boolean() }) }) } },
+      description: "Task queued",
+    },
+    404: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string(), code: z.string() }) } },
+      description: "Task not found",
+    },
+  },
+});
+
 // ── Route handlers ────────────────────────────────────────────────────
 
 /**
@@ -203,6 +223,7 @@ export function taskRoutes(): OpenAPIHono<ServerEnv> {
       maxDuration: body.maxDuration,
       retryPolicy: body.retryPolicy,
       notifications: body.notifications,
+      draft: body.draft,
     });
 
     return c.json({ ok: true, data: task }, 201);
@@ -275,6 +296,21 @@ export function taskRoutes(): OpenAPIHono<ServerEnv> {
     const { taskId } = c.req.valid("param");
     await orchestrator.reassessTask(taskId);
     return c.json({ ok: true, data: { reassessed: true } });
+  });
+
+  // POST /tasks/:taskId/queue — transition draft → pending
+  app.openapi(queueTaskRoute, (c) => {
+    const orchestrator = c.get("orchestrator");
+    const { taskId } = c.req.valid("param");
+    const task = orchestrator.getStore().getTask(taskId);
+    if (!task) {
+      return c.json({ ok: false, error: "Task not found", code: "NOT_FOUND" }, 404);
+    }
+    if (task.status !== "draft") {
+      return c.json({ ok: false, error: `Task is not in draft state (current: ${task.status})`, code: "INVALID_STATE" }, 404);
+    }
+    orchestrator.getStore().transition(taskId, "pending");
+    return c.json({ ok: true, data: { queued: true } }, 200);
   });
 
   return app;

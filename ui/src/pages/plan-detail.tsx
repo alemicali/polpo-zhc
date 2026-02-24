@@ -120,12 +120,14 @@ function parsePlanData(data: string): ParsedPlan | null {
 const statusStyles: Record<PlanStatus, { color: string; bg: string; label: string; icon: React.ElementType }> = {
   draft: { color: "text-zinc-400", bg: "bg-zinc-500/10", label: "Draft", icon: Clock },
   active: { color: "text-blue-400", bg: "bg-blue-500/10", label: "Running", icon: Loader2 },
+  paused: { color: "text-amber-400", bg: "bg-amber-500/10", label: "Paused", icon: Clock },
   completed: { color: "text-emerald-400", bg: "bg-emerald-500/10", label: "Completed", icon: CheckCircle2 },
   failed: { color: "text-red-400", bg: "bg-red-500/10", label: "Failed", icon: AlertTriangle },
   cancelled: { color: "text-zinc-500", bg: "bg-zinc-500/10", label: "Cancelled", icon: XCircle },
 };
 
 const taskStatusConfig: Record<TaskStatus, { icon: React.ElementType; color: string; label: string }> = {
+  draft: { icon: Clock, color: "text-zinc-500", label: "Draft" },
   pending: { icon: Clock, color: "text-zinc-400", label: "Queued" },
   awaiting_approval: { icon: Clock, color: "text-amber-400", label: "Awaiting Approval" },
   assigned: { icon: Clock, color: "text-violet-400", label: "Assigned" },
@@ -149,7 +151,7 @@ export function PlanDetailPage() {
   const { plan, report, isLoading, error, executePlan, resumePlan, abortPlan } = usePlan(planId ?? "");
   const { tasks: allTasks } = useTasks();
 
-  const parsed = useMemo(() => plan ? parsePlanData(plan.data) : null, [plan?.data]);
+  const parsed = useMemo(() => plan ? parsePlanData(plan.data) : null, [plan]);
 
   // Match live tasks to this plan's group
   const planGroup = plan?.name;

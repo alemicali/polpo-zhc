@@ -17,7 +17,7 @@ const MemoryPage = lazy(() => import("@/pages/memory").then(m => ({ default: m.M
 
 const NotificationsPage = lazy(() => import("@/pages/notifications").then(m => ({ default: m.NotificationsPage })));
 const ApprovalsPage = lazy(() => import("@/pages/approvals").then(m => ({ default: m.ApprovalsPage })));
-const WorkflowsPage = lazy(() => import("@/pages/workflows").then(m => ({ default: m.WorkflowsPage })));
+const TemplatesPage = lazy(() => import("@/pages/templates").then(m => ({ default: m.TemplatesPage })));
 
 function PageLoader() {
   return (
@@ -45,7 +45,7 @@ export function App() {
         <Route path="logs" element={<Navigate to="/activity" replace />} />
         <Route path="notifications" element={<Suspense fallback={<PageLoader />}><NotificationsPage /></Suspense>} />
         <Route path="approvals" element={<Suspense fallback={<PageLoader />}><ApprovalsPage /></Suspense>} />
-        <Route path="workflows" element={<Suspense fallback={<PageLoader />}><WorkflowsPage /></Suspense>} />
+        <Route path="templates" element={<Suspense fallback={<PageLoader />}><TemplatesPage /></Suspense>} />
       </Route>
     </Routes>
   );

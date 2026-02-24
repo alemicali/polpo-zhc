@@ -46,7 +46,7 @@ export async function startChat(
     // Dynamic imports to avoid heavy loading at startup
     const { streamSimple } = await import("@mariozechner/pi-ai");
     const { buildChatSystemPrompt } = await import("../../llm/prompts.js");
-    const { resolveModel, resolveApiKey, resolveModelSpec } = await import("../../llm/pi-client.js");
+    const { resolveModel, resolveApiKeyAsync, resolveModelSpec } = await import("../../llm/pi-client.js");
     const {
       ALL_ORCHESTRATOR_TOOLS,
       needsApproval,
@@ -87,7 +87,7 @@ export async function startChat(
 
     const model = resolveModelSpec(polpo.getConfig()?.settings?.orchestratorModel);
     const m = resolveModel(model);
-    const apiKey = resolveApiKey(m.provider);
+    const apiKey = await resolveApiKeyAsync(m.provider as string);
     const streamOpts = apiKey ? { apiKey } : undefined;
 
     // ── Agentic tool loop with streaming ──

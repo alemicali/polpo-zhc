@@ -10,7 +10,7 @@ export interface TaskStore {
   setState(partial: Partial<PolpoState>): void;
 
   // Task CRUD
-  addTask(task: Omit<Task, "id" | "status" | "retries" | "createdAt" | "updatedAt">): Task;
+  addTask(task: Omit<Task, "id" | "status" | "retries" | "createdAt" | "updatedAt"> & { status?: TaskStatus }): Task;
   getTask(taskId: string): Task | undefined;
   getAllTasks(): Task[];
   updateTask(taskId: string, updates: Partial<Omit<Task, "id" | "status">>): Task;

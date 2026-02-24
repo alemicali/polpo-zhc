@@ -499,7 +499,7 @@ export class Orchestrator extends TypedEmitter {
     title: string; description: string; assignTo: string;
     expectations?: TaskExpectation[]; expectedOutcomes?: ExpectedOutcome[];
     dependsOn?: string[]; group?: string; maxDuration?: number; retryPolicy?: RetryPolicy;
-    notifications?: ScopedNotificationRules;
+    notifications?: ScopedNotificationRules; draft?: boolean;
   }): Task { return this.taskMgr.addTask(opts); }
   updateTaskDescription(taskId: string, description: string): void { this.taskMgr.updateTaskDescription(taskId, description); }
   updateTaskAssignment(taskId: string, agentName: string): void { this.taskMgr.updateTaskAssignment(taskId, agentName); }
@@ -885,6 +885,12 @@ export class Orchestrator extends TypedEmitter {
   private startTelegramApprovalPoller(): void {
     if (!this.notificationRouter) return;
 
+    // Stop any existing poller to prevent duplicate polling
+    if (this.telegramPoller) {
+      this.telegramPoller.stop();
+      this.telegramPoller = undefined;
+    }
+
     // Find the Telegram channel instance from notification config
     const telegramConfigKey = Object.keys(this.config.settings.notifications?.channels ?? {})
       .find(k => this.config.settings.notifications?.channels[k]?.type === "telegram");
@@ -1011,10 +1017,12 @@ export class Orchestrator extends TypedEmitter {
     const awaitingApproval = tasks.filter(t => t.status === "awaiting_approval");
     const inProgress = tasks.filter(t => t.status === "in_progress" || t.status === "assigned" || t.status === "review");
 
-    // Check if all tasks are terminal (done or failed)
+    // Check if all active tasks are terminal (done or failed)
+    // draft tasks are excluded — they don't participate in orchestration
     // awaiting_approval tasks are NOT terminal — they're waiting for human action
-    const terminal = tasks.filter(t => t.status === "done" || t.status === "failed");
-    if (terminal.length === tasks.length) {
+    const activeTasks = tasks.filter(t => t.status !== "draft");
+    const terminal = activeTasks.filter(t => t.status === "done" || t.status === "failed");
+    if (activeTasks.length > 0 && terminal.length === activeTasks.length) {
       // Must run cleanup BEFORE returning — assessment transitions happen async
       // between ticks, so this may be the first tick that sees all tasks terminal.
       this.planExec.cleanupCompletedGroups(tasks);

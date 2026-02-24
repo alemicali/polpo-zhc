@@ -19,7 +19,7 @@ export async function cmdTemplate(api: CommandAPI): Promise<void> {
   const templates = discoverTemplates(workDir, polpoDir);
   if (templates.length === 0) {
     tui.logSystem(
-      "No templates found. Place .yaml files in .polpo/templates/",
+      "No templates found. Place template.json files in .polpo/templates/<name>/",
     );
     tui.requestRender();
     return;

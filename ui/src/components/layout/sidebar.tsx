@@ -5,10 +5,8 @@ import {
   ListChecks,
   Map,
   Bot,
-  Activity,
   MessageSquare,
   Brain,
-  FolderOpen,
   Columns2,
   Bell,
   ShieldCheck,
@@ -25,13 +23,12 @@ import {
 
 const nav = [
   { to: "/dashboard", icon: LayoutDashboard, label: "Mission Control" },
+  { to: "/chat", icon: MessageSquare, label: "Chat" },
   { to: "/plans", icon: Map, label: "Plans" },
   { to: "/tasks", icon: ListChecks, label: "Tasks" },
   { to: "/agents", icon: Bot, label: "Agents" },
-  { to: "/activity", icon: Activity, label: "Activity" },
-  { to: "/chat", icon: MessageSquare, label: "Chat" },
   { to: "/memory", icon: Brain, label: "Memory" },
-  { to: "/workflows", icon: Workflow, label: "Workflows" },
+  { to: "/templates", icon: Workflow, label: "Templates" },
   { to: "/notifications", icon: Bell, label: "Notifications" },
   { to: "/approvals", icon: ShieldCheck, label: "Approvals" },
 ] as const;
@@ -192,26 +189,17 @@ export function Sidebar() {
             </TooltipTrigger>
             <TooltipContent side="right" className="text-xs">
               <p>{status.label}</p>
-              {info?.workDir && (
-                <p className="font-mono text-muted-foreground mt-0.5">{info.workDir}</p>
+              {info?.project && (
+                <p className="text-muted-foreground mt-0.5">{info.project}</p>
               )}
             </TooltipContent>
           </Tooltip>
         ) : (
           <>
-            {info?.workDir && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <div className="flex items-center gap-2 text-[10px] text-muted-foreground truncate cursor-default">
-                    <FolderOpen className="h-3 w-3 shrink-0" />
-                    <span className="truncate">{info.workDir}</span>
-                  </div>
-                </TooltipTrigger>
-                <TooltipContent side="top" className="text-xs max-w-xs">
-                  <p className="font-medium">{info.project}</p>
-                  <p className="font-mono text-muted-foreground">{info.workDir}</p>
-                </TooltipContent>
-              </Tooltip>
+            {info?.project && (
+              <div className="text-[10px] text-muted-foreground truncate">
+                {info.project}
+              </div>
             )}
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               <div

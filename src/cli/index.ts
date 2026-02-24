@@ -2,8 +2,26 @@
 
 import { resolve } from "node:path";
 import { mkdir, access, readFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { Command } from "commander";
+
+// Load .env files (project-local, then .polpo/.env)
+for (const envPath of [".env", ".polpo/.env"]) {
+  try {
+    const abs = resolve(envPath);
+    if (existsSync(abs)) {
+      for (const line of readFileSync(abs, "utf-8").split("\n")) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith("#")) continue;
+        const eq = trimmed.indexOf("=");
+        if (eq === -1) continue;
+        const key = trimmed.slice(0, eq).trim();
+        const val = trimmed.slice(eq + 1).trim().replace(/^["']|["']$/g, "");
+        if (!process.env[key]) process.env[key] = val;
+      }
+    }
+  } catch { /* ignore */ }
+}
 import chalk from "chalk";
 // generatePolpoConfigDefault + savePolpoConfig used via dynamic import in setup.ts
 import { Orchestrator } from "../core/orchestrator.js";
@@ -223,23 +241,27 @@ program
 
       const getIcon = (status: TaskStatus) => {
         switch (status) {
-          case "pending":     return chalk.gray("○");
-          case "assigned":    return chalk.cyan(pulse);
-          case "in_progress": return chalk.yellow(spin);
-          case "review":      return chalk.magenta(spin);
-          case "done":        return chalk.green("●");
-          case "failed":      return chalk.red("✗");
+          case "draft":             return chalk.gray("✎");
+          case "pending":           return chalk.gray("○");
+          case "awaiting_approval": return chalk.yellow("⏳");
+          case "assigned":          return chalk.cyan(pulse);
+          case "in_progress":       return chalk.yellow(spin);
+          case "review":            return chalk.magenta(spin);
+          case "done":              return chalk.green("●");
+          case "failed":            return chalk.red("✗");
         }
       };
 
       const getLabel = (status: TaskStatus) => {
         switch (status) {
-          case "pending":     return chalk.gray("PENDING   ");
-          case "assigned":    return chalk.cyan("ASSIGNED  ");
-          case "in_progress": return chalk.yellow.bold("RUNNING   ");
-          case "review":      return chalk.magenta.bold("REVIEW    ");
-          case "done":        return chalk.green("DONE      ");
-          case "failed":      return chalk.red.bold("FAILED    ");
+          case "draft":             return chalk.gray("DRAFT     ");
+          case "pending":           return chalk.gray("PENDING   ");
+          case "awaiting_approval": return chalk.yellow("APPROVAL  ");
+          case "assigned":          return chalk.cyan("ASSIGNED  ");
+          case "in_progress":       return chalk.yellow.bold("RUNNING   ");
+          case "review":            return chalk.magenta.bold("REVIEW    ");
+          case "done":              return chalk.green("DONE      ");
+          case "failed":            return chalk.red.bold("FAILED    ");
         }
       };
 
@@ -424,14 +446,11 @@ program
   .option("-H, --host <host>", "Host to bind to", "127.0.0.1")
   .option("-d, --dir <path>", "Working directory", ".")
   .option("--api-key <key>", "API key for authentication (optional)")
-  .option("--project-id <id>", "Project ID (defaults to directory name)")
   .action(async (opts) => {
     console.log(LOGO);
-    const { basename } = await import("node:path");
     const { PolpoServer } = await import("../server/index.js");
 
     const workDir = resolve(opts.dir);
-    const projectId = opts.projectId || basename(workDir);
     const port = parseInt(opts.port, 10);
 
     const apiKeys = opts.apiKey ? [opts.apiKey] : [];
@@ -452,8 +471,8 @@ program
     const server = new PolpoServer({
       port,
       host: opts.host,
+      workDir,
       apiKeys,
-      projects: [{ id: projectId, workDir, autoStart: true }],
     });
 
     await server.start();

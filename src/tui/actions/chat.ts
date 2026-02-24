@@ -9,7 +9,7 @@ import type { Orchestrator } from "../../core/orchestrator.js";
 import type { TUIStore } from "../store.js";
 import type { SessionStore } from "../../core/session-store.js";
 import { seg, parseMarkdown } from "../format.js";
-import { resolveModel, resolveApiKey, resolveModelSpec } from "../../llm/pi-client.js";
+import { resolveModel, resolveApiKeyAsync, resolveModelSpec } from "../../llm/pi-client.js";
 import { buildChatSystemPrompt } from "../../llm/prompts.js";
 import { streamSimple, type Message } from "@mariozechner/pi-ai";
 import {
@@ -75,7 +75,7 @@ export async function startChat(
 
     const model = resolveModelSpec(polpo.getConfig()?.settings?.orchestratorModel);
     const m = resolveModel(model);
-    const apiKey = resolveApiKey(m.provider);
+    const apiKey = await resolveApiKeyAsync(m.provider as string);
     const streamOpts = apiKey ? { apiKey } : undefined;
 
     // Prepare output line — plain text, updated chunk by chunk

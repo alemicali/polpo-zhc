@@ -7,7 +7,6 @@ import type {
   Team,
   PolpoState,
   PolpoConfig,
-  ProjectInfo,
   HealthResponse,
   TaskFilters,
   CreateTaskRequest,
@@ -40,14 +39,14 @@ import type {
 
 export interface PolpoClientConfig {
   baseUrl: string;
-  projectId: string;
+  /** @deprecated No longer used. Kept for backwards compatibility. */
+  projectId?: string;
   apiKey?: string;
   fetch?: typeof globalThis.fetch;
 }
 
 export class PolpoClient {
   private readonly baseUrl: string;
-  private readonly projectId: string;
   private readonly headers: Record<string, string>;
   private readonly fetchFn: typeof globalThis.fetch;
   /** In-flight GET deduplication */
@@ -55,7 +54,6 @@ export class PolpoClient {
 
   constructor(config: PolpoClientConfig) {
     this.baseUrl = config.baseUrl.replace(/\/$/, "");
-    this.projectId = config.projectId;
     this.fetchFn = config.fetch ?? globalThis.fetch.bind(globalThis);
     this.headers = {};
     if (config.apiKey) {
@@ -65,8 +63,8 @@ export class PolpoClient {
 
   // ── Helpers ──────────────────────────────────────────────
 
-  private projectUrl(path: string): string {
-    return `${this.baseUrl}/api/v1/projects/${this.projectId}${path}`;
+  private apiUrl(path: string): string {
+    return `${this.baseUrl}/api/v1${path}`;
   }
 
   private async request<T>(method: string, url: string, body?: unknown): Promise<T> {
@@ -83,7 +81,7 @@ export class PolpoClient {
   }
 
   private get<T>(path: string): Promise<T> {
-    const url = this.projectUrl(path);
+    const url = this.apiUrl(path);
     const existing = this.inflight.get(url);
     if (existing) return existing as Promise<T>;
 
@@ -94,15 +92,15 @@ export class PolpoClient {
   }
 
   private post<T>(path: string, body?: unknown): Promise<T> {
-    return this.request<T>("POST", this.projectUrl(path), body);
+    return this.request<T>("POST", this.apiUrl(path), body);
   }
 
   private patch<T>(path: string, body: unknown): Promise<T> {
-    return this.request<T>("PATCH", this.projectUrl(path), body);
+    return this.request<T>("PATCH", this.apiUrl(path), body);
   }
 
   private del<T>(path: string): Promise<T> {
-    return this.request<T>("DELETE", this.projectUrl(path));
+    return this.request<T>("DELETE", this.apiUrl(path));
   }
 
   // ── Tasks ────────────────────────────────────────────────
@@ -142,6 +140,10 @@ export class PolpoClient {
 
   reassessTask(taskId: string): Promise<{ reassessed: boolean }> {
     return this.post<{ reassessed: boolean }>(`/tasks/${taskId}/reassess`);
+  }
+
+  queueTask(taskId: string): Promise<{ queued: boolean }> {
+    return this.post<{ queued: boolean }>(`/tasks/${taskId}/queue`);
   }
 
   // ── Plans ────────────────────────────────────────────────
@@ -219,7 +221,7 @@ export class PolpoClient {
   }
 
   getConfig(): Promise<PolpoConfig> {
-    return this.get<PolpoConfig>("/config");
+    return this.get<PolpoConfig>("/orchestrator-config");
   }
 
   getMemory(): Promise<{ exists: boolean; content: string }> {
@@ -227,7 +229,7 @@ export class PolpoClient {
   }
 
   saveMemory(content: string): Promise<{ saved: boolean }> {
-    return this.request<{ saved: boolean }>("PUT", this.projectUrl("/memory"), { content });
+    return this.request<{ saved: boolean }>("PUT", this.apiUrl("/memory"), { content });
   }
 
   getLogs(): Promise<LogSession[]> {
@@ -269,7 +271,7 @@ export class PolpoClient {
     const res = await this.fetchFn(url, {
       method: "POST",
       headers,
-      body: JSON.stringify({ ...req, stream: false, project: req.project ?? this.projectId }),
+      body: JSON.stringify({ ...req, stream: false }),
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({ error: { message: res.statusText } }));
@@ -297,7 +299,7 @@ export class PolpoClient {
     const res = await this.fetchFn(url, {
       method: "POST",
       headers,
-      body: JSON.stringify({ ...req, stream: true, project: req.project ?? this.projectId }),
+      body: JSON.stringify({ ...req, stream: true }),
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({ error: { message: res.statusText } }));
@@ -414,18 +416,6 @@ export class PolpoClient {
 
   // ── Static ───────────────────────────────────────────────
 
-  static async listProjects(
-    baseUrl: string,
-    apiKey?: string,
-  ): Promise<ProjectInfo[]> {
-    const headers: Record<string, string> = { "Content-Type": "application/json" };
-    if (apiKey) headers["x-api-key"] = apiKey;
-    const res = await fetch(`${baseUrl.replace(/\/$/, "")}/api/v1/projects`, { headers });
-    const json = (await res.json()) as ApiResult<ProjectInfo[]>;
-    if (!json.ok) throw new PolpoApiError(json.error, json.code, res.status);
-    return json.data;
-  }
-
   static async health(baseUrl: string): Promise<HealthResponse> {
     const res = await fetch(`${baseUrl.replace(/\/$/, "")}/api/v1/health`);
     const json = (await res.json()) as ApiResult<HealthResponse>;
@@ -439,6 +429,6 @@ export class PolpoClient {
     if (filter?.length) params.set("filter", filter.join(","));
     if (this.headers["x-api-key"]) params.set("apiKey", this.headers["x-api-key"]);
     const qs = params.toString();
-    return `${this.projectUrl("/events")}${qs ? `?${qs}` : ""}`;
+    return `${this.apiUrl("/events")}${qs ? `?${qs}` : ""}`;
   }
 }

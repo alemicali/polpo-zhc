@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="apps/docs-mintlify/polpo-banner.png" alt="Polpo — your AI agent that runs the team" width="680" />
+  <img src="docs/polpo-banner.png" alt="Polpo — your AI agent that runs the team" width="680" />
 </p>
 
 <p align="center">
@@ -197,8 +197,7 @@ openpolpo/
 │   ├── cli/                # Commander CLI entry point + subcommands
 │   └── index.ts            # Barrel exports
 ├── ui/                     # Vite + React monitoring dashboard
-├── apps/
-│   └── docs-mintlify/      # Mintlify documentation site
+├── docs/                   # Mintlify documentation site
 ├── packages/
 │   └── react-sdk/          # React hooks + SSE client (@openpolpo/react-sdk)
 └── .polpo/polpo.json       # Your project configuration

@@ -259,11 +259,14 @@ export function resolveModel(spec?: string): Model<Api> {
 
   // 1. Try pi-ai built-in catalog first
   try {
-    const model = getModel(provider as KnownProvider, modelId as never) as Model<Api>;
-    if (override?.baseUrl) {
-      return { ...model, baseUrl: override.baseUrl };
+    const model = getModel(provider as KnownProvider, modelId as never) as Model<Api> | undefined;
+    if (model) {
+      if (override?.baseUrl) {
+        return { ...model, baseUrl: override.baseUrl };
+      }
+      return model;
     }
-    return model;
+    // Model not found in catalog — fall through to custom provider logic
   } catch {
     // Not in catalog — fall through to custom provider logic
   }
@@ -304,8 +307,18 @@ export function resolveModel(spec?: string): Model<Api> {
     } as Model<Api>;
   }
 
-  // 4. Unknown provider with no override — let pi-ai throw a descriptive error
-  return getModel(provider as KnownProvider, modelId as never) as Model<Api>;
+  // 4. Unknown provider with no override — try pi-ai, but guard against undefined return
+  try {
+    const model = getModel(provider as KnownProvider, modelId as never) as Model<Api> | undefined;
+    if (model) return model;
+  } catch {
+    // Fall through to error
+  }
+
+  throw new Error(
+    `Model "${modelId}" not found for provider "${provider}". ` +
+    `Use "polpo models list ${provider}" to see available models, or configure a custom model in providers.`,
+  );
 }
 
 // ─── Model Catalog ──────────────────────────────────

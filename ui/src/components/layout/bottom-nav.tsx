@@ -6,7 +6,6 @@ import {
   Map,
   ListChecks,
   Bot,
-  Activity,
   Brain,
   Bell,
   ShieldCheck,
@@ -31,11 +30,10 @@ const primaryNav = [
 ];
 
 const secondaryNav = [
-  { to: "/activity", icon: Activity, label: "Activity" },
   { to: "/memory", icon: Brain, label: "Memory" },
   { to: "/notifications", icon: Bell, label: "Notifications" },
   { to: "/approvals", icon: ShieldCheck, label: "Approvals" },
-  { to: "/workflows", icon: Workflow, label: "Workflows" },
+  { to: "/templates", icon: Workflow, label: "Templates" },
 ];
 
 export function BottomNav() {
