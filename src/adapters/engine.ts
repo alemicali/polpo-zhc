@@ -203,13 +203,16 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
   let mcpManager: McpClientManager | null = null;
   const hasMcp = agentConfig.mcpServers && Object.keys(agentConfig.mcpServers).length > 0;
 
+  // Resolve reasoning level: agent config > global settings (via SpawnContext) > "off"
+  const thinkingLevel = agentConfig.reasoning ?? ctx?.reasoning ?? "off";
+
   // Create the pi-agent-core Agent (starts with coding tools only; MCP tools added before prompt)
   const agent = new Agent({
     getApiKey: (provider: string) => resolveApiKeyAsync(provider),
     initialState: {
       systemPrompt: buildSystemPrompt(agentConfig, cwd, ctx?.polpoDir),
       model,
-      thinkingLevel: "off",
+      thinkingLevel,
       tools: codingTools,
       messages: [],
       isStreaming: false,

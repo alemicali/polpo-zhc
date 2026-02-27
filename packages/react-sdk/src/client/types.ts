@@ -548,33 +548,32 @@ export interface PolpoSettings {
   mcpToolAllowlist?: Record<string, string[]>;
 }
 
-export interface PolpoConfig {
-  version: string;
-  project: string;
-  team: Team;
-  tasks: Omit<Task, "status" | "retries" | "result" | "createdAt" | "updatedAt">[];
-  settings: PolpoSettings;
-}
-
-export interface PolpoState {
-  project: string;
-  team: Team;
-  tasks: Task[];
-  processes: AgentProcess[];
-  startedAt?: string;
-  completedAt?: string;
-}
-
 export interface ProviderConfig {
   apiKey?: string;
   baseUrl?: string;
 }
 
 export interface PolpoConfig {
+  version: string;
   project: string;
-  team: Team;
+  teams: Team[];
+  tasks: Omit<Task, "status" | "retries" | "result" | "createdAt" | "updatedAt">[];
   settings: PolpoSettings;
   providers?: Record<string, ProviderConfig>;
+}
+
+export interface PolpoState {
+  project: string;
+  teams: Team[];
+  tasks: Task[];
+  processes: AgentProcess[];
+  startedAt?: string;
+  completedAt?: string;
+}
+
+export interface AddTeamRequest {
+  name: string;
+  description?: string;
 }
 
 // === API ===
@@ -792,6 +791,8 @@ export interface ChatMessage {
   role: "user" | "assistant";
   content: string;
   ts: string;
+  /** Tool calls executed during this assistant message (only for role=assistant) */
+  toolCalls?: ToolCallEvent[];
 }
 
 // === Chat Completions types (OpenAI-compatible) ===
@@ -808,12 +809,16 @@ export interface ChatCompletionRequest {
   project?: string;
   /** Ignored — Polpo uses its configured orchestrator model. */
   model?: string;
+  /** Session ID for conversation persistence. If omitted, server auto-selects or creates one. */
+  sessionId?: string;
 }
 
 export interface ChatCompletionChoice {
   index: number;
   message: { role: "assistant"; content: string };
-  finish_reason: "stop" | "length";
+  finish_reason: "stop" | "length" | "ask_user";
+  /** Present when finish_reason is "ask_user" — structured questions for the user. */
+  ask_user?: AskUserPayload;
 }
 
 export interface ChatCompletionResponse {
@@ -834,6 +839,23 @@ export interface ChatCompletionChunkDelta {
   content?: string;
 }
 
+// === Tool Call streaming ===
+
+export type ToolCallState = "calling" | "completed" | "error";
+
+export interface ToolCallEvent {
+  /** Tool call ID from the LLM */
+  id: string;
+  /** Tool name (e.g. "create_task", "get_status") */
+  name: string;
+  /** Tool input arguments (present when state is "calling") */
+  arguments?: Record<string, unknown>;
+  /** Tool execution result (present when state is "completed" or "error") */
+  result?: string;
+  /** Current state of the tool call */
+  state: ToolCallState;
+}
+
 export interface ChatCompletionChunk {
   id: string;
   object: "chat.completion.chunk";
@@ -843,5 +865,43 @@ export interface ChatCompletionChunk {
     index: number;
     delta: ChatCompletionChunkDelta;
     finish_reason: string | null;
+    /** Present when finish_reason is "ask_user" — structured questions for the user. */
+    ask_user?: AskUserPayload;
+    /** Present when the server is executing a tool call. */
+    tool_call?: ToolCallEvent;
   }>;
+}
+
+// === Ask User (structured clarification questions) ===
+
+export interface AskUserOption {
+  label: string;
+  description?: string;
+}
+
+export interface AskUserQuestion {
+  /** Unique question key for matching answers */
+  id: string;
+  /** The full question text */
+  question: string;
+  /** Short label for compact display (max 30 chars) */
+  header?: string;
+  /** Pre-populated selectable options */
+  options: AskUserOption[];
+  /** Allow selecting multiple options (default: false) */
+  multiple?: boolean;
+  /** Show custom text input (default: true) */
+  custom?: boolean;
+}
+
+export interface AskUserPayload {
+  questions: AskUserQuestion[];
+}
+
+export interface AskUserAnswer {
+  questionId: string;
+  /** Labels of selected options */
+  selected: string[];
+  /** Custom text typed by user */
+  customText?: string;
 }

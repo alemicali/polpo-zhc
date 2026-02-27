@@ -39,8 +39,8 @@ export function registerTeamCommands(program: Command): void {
     .action(async (opts) => {
       try {
         const config = readPolpoConfig(opts.dir);
-        const teamName = config.team?.name ?? "default";
-        const agents = config.team?.agents ?? [];
+        const teamName = config.teams?.[0]?.name ?? "default";
+        const agents = config.teams?.[0]?.agents ?? [];
 
         console.log(chalk.bold(`Team: ${teamName}`) + chalk.dim(` (${agents.length} agent${agents.length !== 1 ? "s" : ""})`));
         console.log();
@@ -52,8 +52,9 @@ export function registerTeamCommands(program: Command): void {
 
         for (const agent of agents) {
           console.log(`  ${chalk.cyan(agent.name)}`);
-          if (agent.model) console.log(chalk.dim(`    model:   ${agent.model}`));
-          if (agent.role) console.log(chalk.dim(`    role:    ${agent.role}`));
+          if (agent.model) console.log(chalk.dim(`    model:      ${agent.model}`));
+          if (agent.role) console.log(chalk.dim(`    role:       ${agent.role}`));
+          if (agent.reportsTo) console.log(chalk.dim(`    reportsTo:  ${agent.reportsTo}`));
         }
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
@@ -69,6 +70,7 @@ export function registerTeamCommands(program: Command): void {
     .option("-d, --dir <path>", "Working directory", ".")
     .option("-m, --model <model>", "Model ID")
     .option("-r, --role <role>", "Agent role description")
+    .option("--reports-to <agent>", "Agent this one reports to (org chart hierarchy)")
     .action(async (name: string, opts) => {
       try {
         const agent: AgentConfig = {
@@ -76,15 +78,16 @@ export function registerTeamCommands(program: Command): void {
         };
         if (opts.model) agent.model = opts.model;
         if (opts.role) agent.role = opts.role;
+        if (opts.reportsTo) agent.reportsTo = opts.reportsTo;
 
         const config = readPolpoConfig(opts.dir);
-        if (!config.team) {
-          config.team = { name: "default", agents: [] };
+        if (!config.teams || config.teams.length === 0) {
+          config.teams = [{ name: "default", agents: [] }];
         }
-        if (config.team.agents.find(a => a.name === name)) {
+        if (config.teams[0].agents.find(a => a.name === name)) {
           throw new Error(`Agent "${name}" already exists`);
         }
-        config.team.agents.push(agent);
+        config.teams[0].agents.push(agent);
         writePolpoConfig(opts.dir, config);
 
         console.log(chalk.green(`Added agent "${name}"`));
@@ -103,10 +106,10 @@ export function registerTeamCommands(program: Command): void {
     .action(async (name: string, opts) => {
       try {
         const config = readPolpoConfig(opts.dir);
-        if (!config.team?.agents) throw new Error("No team in config");
-        const idx = config.team.agents.findIndex(a => a.name === name);
+        if (!config.teams?.[0]?.agents) throw new Error("No team in config");
+        const idx = config.teams[0].agents.findIndex(a => a.name === name);
         if (idx === -1) throw new Error(`Agent "${name}" not found`);
-        config.team.agents.splice(idx, 1);
+        config.teams[0].agents.splice(idx, 1);
         writePolpoConfig(opts.dir, config);
 
         console.log(chalk.green(`Removed agent "${name}"`));
@@ -125,10 +128,10 @@ export function registerTeamCommands(program: Command): void {
     .action(async (newName: string, opts) => {
       try {
         const config = readPolpoConfig(opts.dir);
-        if (!config.team) {
-          config.team = { name: newName, agents: [] };
+        if (!config.teams || config.teams.length === 0) {
+          config.teams = [{ name: newName, agents: [] }];
         } else {
-          config.team.name = newName;
+          config.teams[0].name = newName;
         }
         writePolpoConfig(opts.dir, config);
 

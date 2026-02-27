@@ -42,8 +42,9 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
   app.use("*", errorMiddleware());
   app.use("*", rateLimitMiddleware());
 
+  const corsExposeHeaders = ["x-session-id"];
   if (opts?.corsOrigins && opts.corsOrigins.length > 0) {
-    app.use("*", cors({ origin: opts.corsOrigins }));
+    app.use("*", cors({ origin: opts.corsOrigins, exposeHeaders: corsExposeHeaders }));
   } else {
     // Default: restrict to localhost origins only
     app.use("*", cors({
@@ -53,6 +54,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
         "http://127.0.0.1:3000", "http://127.0.0.1:3001",
         "http://127.0.0.1:5173", "http://127.0.0.1:5174", "http://127.0.0.1:5175",
       ],
+      exposeHeaders: corsExposeHeaders,
     }));
   }
 

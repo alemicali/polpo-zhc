@@ -47,6 +47,7 @@
     "dev:docs": "cd docs && npx mintlify@latest dev",
     "dev:all": "pnpm build:sdk && concurrently -n server,ui,docs -c blue,green,magenta \"pnpm dev:serve\" \"pnpm dev:ui\" \"pnpm dev:docs\"",
     "start": "node dist/cli/index.js",
+    "start:all": "pnpm build:all && node dist/cli/index.js serve -p 3890",
     "test": "vitest",
     "typecheck": "./node_modules/.bin/tsc --noEmit",
     "lint": "pnpm --filter ui lint",

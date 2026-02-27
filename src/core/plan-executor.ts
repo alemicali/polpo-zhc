@@ -360,7 +360,7 @@ export class PlanExecutor {
     const allAgents = this.agentMgr.getAgents();
     const referencedModels: string[] = [];
     for (const t of doc.tasks) {
-      const agentName = t.assignTo || this.ctx.config.team.agents[0]?.name;
+      const agentName = t.assignTo || allAgents[0]?.name;
       const agent = allAgents.find(a => a.name === agentName);
       if (agent?.model) {
         referencedModels.push(agent.model);
@@ -405,7 +405,7 @@ export class PlanExecutor {
       const task = this.taskMgr.addTask({
         title: t.title,
         description: t.description || t.title,
-        assignTo: t.assignTo || this.ctx.config.team.agents[0]?.name || "default",
+        assignTo: t.assignTo || this.agentMgr.getAgents()[0]?.name || "default",
         dependsOn: deps,
         expectations,
         expectedOutcomes: t.expectedOutcomes,

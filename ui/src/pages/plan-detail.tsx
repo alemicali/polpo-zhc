@@ -169,12 +169,17 @@ export function PlanDetailPage() {
   const totalCount = parsed?.tasks.length ?? 0;
   const progress = totalCount > 0 ? Math.round((doneCount / totalCount) * 100) : 0;
 
+  const [actionPending, setActionPending] = useState<string | null>(null);
   const handleAction = async (action: () => Promise<unknown>, label: string) => {
+    if (actionPending) return;
+    setActionPending(label);
     try {
       await action();
       toast.success(label);
     } catch (e) {
       toast.error((e as Error).message);
+    } finally {
+      setActionPending(null);
     }
   };
 
@@ -243,18 +248,18 @@ export function PlanDetailPage() {
             </div>
           )}
           {plan.status === "draft" && (
-            <Button size="sm" onClick={() => handleAction(executePlan, "Plan executed")}>
-              <Play className="h-3.5 w-3.5 mr-1.5" /> Execute
+            <Button size="sm" disabled={!!actionPending} onClick={() => handleAction(executePlan, "Plan executed")}>
+              {actionPending === "Plan executed" ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Play className="h-3.5 w-3.5 mr-1.5" />} Execute
             </Button>
           )}
           {(plan.status === "active" || plan.status === "failed") && (
-            <Button variant="outline" size="sm" onClick={() => handleAction(() => resumePlan(), "Plan resumed")}>
-              <RotateCcw className="h-3.5 w-3.5 mr-1.5" /> Resume
+            <Button variant="outline" size="sm" disabled={!!actionPending} onClick={() => handleAction(() => resumePlan(), "Plan resumed")}>
+              {actionPending === "Plan resumed" ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5 mr-1.5" />} Resume
             </Button>
           )}
           {plan.status === "active" && (
-            <Button variant="outline" size="sm" className="text-red-400 hover:text-red-500" onClick={() => handleAction(abortPlan, "Plan aborted")}>
-              <XCircle className="h-3.5 w-3.5 mr-1.5" /> Abort
+            <Button variant="outline" size="sm" className="text-red-400 hover:text-red-500" disabled={!!actionPending} onClick={() => handleAction(abortPlan, "Plan aborted")}>
+              {actionPending === "Plan aborted" ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <XCircle className="h-3.5 w-3.5 mr-1.5" />} Abort
             </Button>
           )}
         </div>

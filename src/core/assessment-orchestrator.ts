@@ -2,7 +2,7 @@ import { join, basename } from "node:path";
 import { existsSync, readdirSync } from "node:fs";
 import type { OrchestratorContext } from "./orchestrator-context.js";
 import type { Task, TaskResult, AssessmentResult, TaskExpectation, ReviewContext } from "./types.js";
-import { setAssessment } from "./types.js";
+import { setAssessment, findAgent } from "./types.js";
 import { buildFixPrompt, buildRetryPrompt, buildJudgePrompt, type JudgeVerdict, type JudgeCorrection } from "./assessment-prompts.js";
 import { looksLikeQuestion, classifyAsQuestion } from "./question-detector.js";
 import { generateAnswer } from "../llm/answer-generator.js";
@@ -155,8 +155,9 @@ export class AssessmentOrchestrator {
   ): Promise<AssessmentResult> {
     const maxRetries = this.ctx.config.settings.maxAssessmentRetries ?? 1;
 
+    const reasoning = this.ctx.config.settings.reasoning;
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
-      const assessment = await this.ctx.assessFn(task, cwd, progressCb, context);
+      const assessment = await this.ctx.assessFn(task, cwd, progressCb, context, reasoning);
 
       // Check if failure is due to all evaluators failing (not low scores)
       const allEvalsFailed = !assessment.passed && assessment.checks.some(
@@ -174,7 +175,7 @@ export class AssessmentOrchestrator {
     }
 
     // Unreachable — satisfies TypeScript
-    return this.ctx.assessFn(task, cwd, progressCb, context);
+    return this.ctx.assessFn(task, cwd, progressCb, context, reasoning);
   }
 
   /**
@@ -402,7 +403,7 @@ export class AssessmentOrchestrator {
         filesCreated: activity?.filesCreated,
         filesEdited: activity?.filesEdited,
       };
-      const newAssessment = await this.ctx.assessFn(current, this.ctx.workDir, progressCb, reCtx);
+      const newAssessment = await this.ctx.assessFn(current, this.ctx.workDir, progressCb, reCtx, this.ctx.config.settings.reasoning);
       setAssessment(result, newAssessment, "auto-correct");
       this.ctx.registry.updateTask(taskId, { result });
 
@@ -520,7 +521,7 @@ export class AssessmentOrchestrator {
         filesCreated: activity?.filesCreated,
         filesEdited: activity?.filesEdited,
       };
-      const newAssessment = await this.ctx.assessFn(current, this.ctx.workDir, progressCb, judgeCtx);
+      const newAssessment = await this.ctx.assessFn(current, this.ctx.workDir, progressCb, judgeCtx, this.ctx.config.settings.reasoning);
       setAssessment(result, newAssessment, "judge");
       this.ctx.registry.updateTask(taskId, { result });
 
@@ -622,11 +623,11 @@ export class AssessmentOrchestrator {
       // Check if we should escalate to a different agent
       // fallbackAgent resolution: explicit policy > agent.reportsTo (org chart)
       let assignTo = current.assignTo;
-      const currentAgent = this.ctx.config.team.agents.find(a => a.name === current.assignTo);
+      const currentAgent = findAgent(this.ctx.config.teams, current.assignTo);
       const effectiveFallback = policy?.fallbackAgent ?? currentAgent?.reportsTo;
       if (policy?.escalateAfter !== undefined && nextAttempt >= policy.escalateAfter) {
         if (effectiveFallback) {
-          const fallback = this.ctx.config.team.agents.find(a => a.name === effectiveFallback);
+          const fallback = findAgent(this.ctx.config.teams, effectiveFallback);
           if (fallback) {
             assignTo = effectiveFallback;
             this.ctx.emitter.emit("log", { level: "info", message: `[${taskId}] Escalating to ${assignTo} (attempt ${nextAttempt})` });

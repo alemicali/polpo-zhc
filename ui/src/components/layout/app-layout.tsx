@@ -12,7 +12,7 @@ export function AppLayout() {
       </div>
       <div className="flex flex-1 flex-col overflow-hidden">
         <Header />
-        <main className="flex-1 flex flex-col overflow-hidden p-4 lg:p-8 pb-bottom-nav lg:pb-8">
+        <main className="flex-1 flex flex-col min-h-0 overflow-hidden p-4 lg:p-6 pb-2 lg:pb-3">
           <Outlet />
         </main>
       </div>

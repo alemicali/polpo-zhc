@@ -95,7 +95,7 @@ function FeatureFlag({ label, enabled }: { label: string; enabled?: boolean }) {
 
 export function ConfigPage() {
   const { config, isLoading, error, refetch } = useConfig();
-  const { agents, team } = useAgents();
+  const { agents, teams } = useAgents();
   const [activeSection, setActiveSection] = useState<SectionId>("general");
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -150,44 +150,33 @@ export function ConfigPage() {
   };
 
   return (
-    <div className="flex flex-1 min-h-0 -m-4 lg:-mx-6 lg:-my-6">
-      {/* ── Section nav (desktop) ── */}
-      <nav className="hidden lg:flex w-48 flex-col border-r border-border/30 bg-card/40 py-4 px-2 shrink-0">
-        <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-widest px-3 mb-3">
-          Sections
-        </p>
-        {sections.map(({ id, label, icon: Icon }) => (
-          <button
-            key={id}
-            onClick={() => scrollTo(id)}
-            className={cn(
-              "flex items-center gap-2 rounded-md px-3 py-2 text-xs transition-colors text-left cursor-pointer",
-              activeSection === id
-                ? "bg-accent/60 text-accent-foreground font-medium"
-                : "text-muted-foreground hover:bg-accent/20 hover:text-foreground"
-            )}
-          >
-            <Icon className="h-3.5 w-3.5 shrink-0" />
-            {label}
-          </button>
-        ))}
-        <div className="mt-auto px-3 pt-4">
-          <Button variant="outline" size="sm" className="w-full text-xs" onClick={refetch}>
-            <RefreshCw className="h-3 w-3 mr-1.5" /> Reload
-          </Button>
+    <div className="flex flex-col flex-1 min-h-0 gap-4">
+      {/* ── Horizontal tab bar ── */}
+      <div className="flex items-center gap-2 shrink-0">
+        <div className="flex items-center gap-1 overflow-x-auto scrollbar-none flex-1 pb-0.5">
+          {sections.map(({ id, label, icon: Icon }) => (
+            <button
+              key={id}
+              onClick={() => scrollTo(id)}
+              className={cn(
+                "flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer",
+                activeSection === id
+                  ? "bg-accent text-accent-foreground shadow-sm"
+                  : "text-muted-foreground hover:bg-accent/40 hover:text-foreground"
+              )}
+            >
+              <Icon className="h-3.5 w-3.5 shrink-0" />
+              {label}
+            </button>
+          ))}
         </div>
-      </nav>
+        <Button variant="outline" size="sm" className="h-8 shrink-0" onClick={refetch}>
+          <RefreshCw className="h-3.5 w-3.5" />
+        </Button>
+      </div>
 
       {/* ── Content ── */}
-      <div ref={scrollRef} className="flex-1 overflow-auto p-4 lg:p-6 space-y-8 pb-bottom-nav lg:pb-6">
-
-        {/* Mobile header */}
-        <div className="flex items-center justify-between lg:hidden">
-          <h1 className="text-lg font-semibold">Configuration</h1>
-          <Button variant="outline" size="sm" onClick={refetch}>
-            <RefreshCw className="h-3.5 w-3.5" />
-          </Button>
-        </div>
+      <div ref={scrollRef} className="flex-1 overflow-auto space-y-8 pb-bottom-nav lg:pb-2">
 
         {/* ═══ GENERAL ═══ */}
         <SectionAnchor id="general" icon={Hash} label="General">
@@ -196,8 +185,8 @@ export function ConfigPage() {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8">
                 <div className="divide-y divide-border/20">
                   <KV label="Project" mono>{config.project}</KV>
-                  <KV label="Team" mono>{team?.name ?? config.team.name}</KV>
-                  {team?.description && <KV label="Description">{team.description}</KV>}
+                  <KV label="Teams" mono>{teams.map(t => t.name).join(", ") || config.teams?.[0]?.name || "default"}</KV>
+                  {teams[0]?.description && <KV label="Description">{teams[0].description}</KV>}
                 </div>
                 <div className="divide-y divide-border/20">
                   <KV label="Agents">{agents.length} configured</KV>

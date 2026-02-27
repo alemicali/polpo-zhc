@@ -8,6 +8,8 @@ import { seg, statusIcon, statusColor } from "../format.js";
 export function cmdStatus({ polpo, store }: CommandAPI) {
   const state = polpo.getStore().getState();
   const team = polpo.getTeam();
+  const teamName = team?.name ?? "default";
+  const agentCount = team?.agents.length ?? 0;
   const tasks = state.tasks;
 
   const counts = {
@@ -22,10 +24,10 @@ export function cmdStatus({ polpo, store }: CommandAPI) {
     seg("Project: ", "gray"),
     seg(state.project, undefined, true),
   ]);
-  store.log(`Team: ${team.name} (${team.agents.length} agents)`, [
+  store.log(`Team: ${teamName} (${agentCount} agents)`, [
     seg("Team: ", "gray"),
-    seg(team.name, undefined, true),
-    seg(` (${team.agents.length} agents)`, "gray"),
+    seg(teamName, undefined, true),
+    seg(` (${agentCount} agents)`, "gray"),
   ]);
   store.log(
     `Tasks: ${tasks.length} total`,

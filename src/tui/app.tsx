@@ -95,8 +95,8 @@ function useOrchestratorInit(workDir: string) {
 
     boot.then(() => {
       const config = orc.getConfig();
-      if (config?.team.agents[0]) {
-        store.setDefaultAgent(config.team.agents[0].name);
+      if (config?.teams[0]?.agents[0]) {
+        store.setDefaultAgent(config.teams[0].agents[0].name);
       }
 
       // Restore previous session messages into the stream

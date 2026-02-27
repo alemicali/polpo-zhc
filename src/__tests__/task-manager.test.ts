@@ -96,10 +96,10 @@ function createDefaultConfig(overrides?: Partial<PolpoConfig>): PolpoConfig {
   return {
     version: "1",
     project: "test-project",
-    team: {
+    teams: [{
       name: "test-team",
       agents: [createTestAgent({ name: "dev" })],
-    },
+    }],
     tasks: [],
     settings: {
       maxRetries: 2,

@@ -25,11 +25,12 @@ export function cmdTeam({ polpo, store, args }: CommandAPI) {
 
 function teamList(polpo: import("../../core/orchestrator.js").Orchestrator, store: import("../store.js").TUIStore) {
   const team = polpo.getTeam();
-  const agents = team.agents;
+  const teamName = team?.name ?? "default";
+  const agents = team?.agents ?? [];
 
-  store.log(`Team: ${team.name} (${agents.length} agents)`, [
+  store.log(`Team: ${teamName} (${agents.length} agents)`, [
     seg("Team: ", "gray"),
-    seg(team.name, undefined, true),
+    seg(teamName, undefined, true),
     seg(` (${agents.length} agents)`, "gray"),
   ]);
 
@@ -40,6 +41,7 @@ function teamList(polpo: import("../../core/orchestrator.js").Orchestrator, stor
     ];
     if (agent.model) parts.push(seg(` ${agent.model}`, "gray", false, true));
     if (agent.role) parts.push(seg(` — ${agent.role}`, "gray", false, true));
+    if (agent.reportsTo) parts.push(seg(` → ${agent.reportsTo}`, "gray"));
     store.log(`  ${agent.name}`, parts);
   }
 
@@ -149,6 +151,7 @@ function teamEdit(
     const fields = [
       { label: `model: ${agent.model ?? "(none)"}`, value: "model" },
       { label: `role: ${agent.role ?? "(none)"}`, value: "role" },
+      { label: `reportsTo: ${agent.reportsTo ?? "(none)"}`, value: "reportsTo" },
       { label: `systemPrompt: ${agent.systemPrompt ? "set" : "(none)"}`, value: "systemPrompt" },
       { label: `maxTurns: ${agent.maxTurns ?? "default"}`, value: "maxTurns" },
     ];
@@ -220,11 +223,12 @@ function teamRename(
     store.navigate({
       id: "editor",
       title: "New team name",
-      initial: polpo.getTeam().name,
+      initial: polpo.getTeam()?.name ?? "default",
       onSave: (value) => {
         store.goMain();
         if (value.trim()) {
-          polpo.renameTeam(value.trim());
+          const oldName = polpo.getTeam()?.name ?? "default";
+          polpo.renameTeam(oldName, value.trim());
           store.log(`Team renamed to: ${value.trim()}`, [
             seg("Team: ", "gray"),
             seg(value.trim(), undefined, true),
@@ -236,7 +240,8 @@ function teamRename(
     return;
   }
 
-  polpo.renameTeam(newName.trim());
+  const oldName = polpo.getTeam()?.name ?? "default";
+  polpo.renameTeam(oldName, newName.trim());
   store.log(`Team renamed to: ${newName.trim()}`, [
     seg("Team: ", "gray"),
     seg(newName.trim(), undefined, true),

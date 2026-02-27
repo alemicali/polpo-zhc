@@ -1,6 +1,6 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { resolve, join } from "node:path";
-import type { PolpoFileConfig, PolpoSettings, PolpoConfig, ProviderConfig, ModelConfig } from "./types.js";
+import type { PolpoFileConfig, PolpoFileConfigRaw, PolpoSettings, PolpoConfig, ProviderConfig, ModelConfig, Team } from "./types.js";
 
 const DEFAULT_SETTINGS: PolpoSettings = {
   maxRetries: 3,
@@ -14,8 +14,29 @@ export function loadPolpoConfig(polpoDir: string): PolpoFileConfig | undefined {
   const filePath = join(polpoDir, "polpo.json");
   if (!existsSync(filePath)) return undefined;
   try {
-    return JSON.parse(readFileSync(filePath, "utf-8")) as PolpoFileConfig;
+    const raw = JSON.parse(readFileSync(filePath, "utf-8")) as PolpoFileConfigRaw;
+    return migrateToMultiTeam(raw);
   } catch { return undefined; }
+}
+
+/** Migrate old singular `team` config to new `teams` array. */
+function migrateToMultiTeam(raw: PolpoFileConfigRaw): PolpoFileConfig {
+  let teams: Team[];
+  if (raw.teams && raw.teams.length > 0) {
+    teams = raw.teams;
+  } else if (raw.team) {
+    // Legacy: singular team → wrap in array
+    teams = [raw.team];
+  } else {
+    teams = [{ name: "default", agents: [] }];
+  }
+
+  return {
+    project: raw.project,
+    teams,
+    settings: raw.settings as PolpoSettings ?? { maxRetries: 3, workDir: ".", logLevel: "normal" },
+    providers: raw.providers,
+  };
 }
 
 export function savePolpoConfig(polpoDir: string, config: PolpoFileConfig): void {
@@ -217,8 +238,22 @@ export async function parseConfig(workDir: string): Promise<PolpoConfig> {
     throw new Error(`No configuration found: missing .polpo/polpo.json in ${workDir}. Run 'polpo init' first.`);
   }
 
-  if (polpoConfig.team?.agents) {
-    validateAgents(polpoConfig.team.agents);
+  // Validate all agents across all teams
+  for (const team of polpoConfig.teams) {
+    if (team.agents?.length) {
+      validateAgents(team.agents);
+    }
+  }
+
+  // Check for duplicate agent names across teams
+  const allNames = new Set<string>();
+  for (const team of polpoConfig.teams) {
+    for (const agent of team.agents) {
+      if (allNames.has(agent.name)) {
+        throw new Error(`Duplicate agent name "${agent.name}" across teams. Agent names must be globally unique.`);
+      }
+      allNames.add(agent.name);
+    }
   }
 
   const settings = parseSettings(polpoConfig.settings ?? {});
@@ -229,7 +264,7 @@ export async function parseConfig(workDir: string): Promise<PolpoConfig> {
   return {
     version: "1",
     project: polpoConfig.project,
-    team: polpoConfig.team,
+    teams: polpoConfig.teams,
     tasks: [],
     settings,
     providers: providers && Object.keys(providers).length > 0 ? providers : undefined,
@@ -255,11 +290,11 @@ export function generatePolpoConfigDefault(
   }
   return {
     project: projectName,
-    team: {
+    teams: [{
       name: options?.teamName ?? "default",
       description: `${options?.teamName ?? "Default"} Polpo team`,
       agents: [agent as any],
-    },
+    }],
     settings: settings as any,
   };
 }

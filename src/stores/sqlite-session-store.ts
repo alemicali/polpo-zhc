@@ -2,7 +2,7 @@ import { createDatabase, type PolpoDatabase, type PolpoStatement } from "./sqlit
 import { mkdirSync, existsSync } from "node:fs";
 import { dirname } from "node:path";
 import { nanoid } from "nanoid";
-import type { SessionStore, Session, Message, MessageRole } from "../core/session-store.js";
+import type { SessionStore, Session, Message, MessageRole, ToolCallInfo } from "../core/session-store.js";
 
 interface SessionRow {
   id: string;
@@ -18,6 +18,7 @@ interface MessageRow {
   role: string;
   content: string;
   ts: string;
+  tool_calls: string | null;
 }
 
 export class SqliteSessionStore implements SessionStore {
@@ -103,10 +104,18 @@ export class SqliteSessionStore implements SessionStore {
         role TEXT NOT NULL,
         content TEXT NOT NULL,
         ts TEXT NOT NULL,
+        tool_calls TEXT,
         FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
       );
       CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, ts);
     `);
+
+    // Migration: add tool_calls column to existing databases
+    try {
+      this.db.exec(`ALTER TABLE messages ADD COLUMN tool_calls TEXT`);
+    } catch {
+      // Column already exists — ignore
+    }
   }
 
   private rowToSession(row: SessionRow): Session {
@@ -120,12 +129,18 @@ export class SqliteSessionStore implements SessionStore {
   }
 
   private rowToMessage(row: MessageRow): Message {
-    return {
+    const msg: Message = {
       id: row.id,
       role: row.role as MessageRole,
       content: row.content,
       ts: row.ts,
     };
+    if (row.tool_calls) {
+      try {
+        msg.toolCalls = JSON.parse(row.tool_calls) as ToolCallInfo[];
+      } catch { /* corrupt JSON — skip */ }
+    }
+    return msg;
   }
 
   create(title?: string): string {
@@ -155,6 +170,20 @@ export class SqliteSessionStore implements SessionStore {
       updated_at: ts,
     });
     return { id, role, content, ts };
+  }
+
+  updateMessage(sessionId: string, messageId: string, content: string, toolCalls?: ToolCallInfo[]): boolean {
+    const toolCallsJson = toolCalls && toolCalls.length > 0 ? JSON.stringify(toolCalls) : null;
+    const result = this.db.prepare(
+      `UPDATE messages SET content = @content, tool_calls = @tool_calls WHERE id = @id AND session_id = @session_id`
+    ).run({ id: messageId, session_id: sessionId, content, tool_calls: toolCallsJson });
+    if (result.changes > 0) {
+      this.updateSessionStmt.run({
+        id: sessionId,
+        updated_at: new Date().toISOString(),
+      });
+    }
+    return result.changes > 0;
   }
 
   getMessages(sessionId: string): Message[] {

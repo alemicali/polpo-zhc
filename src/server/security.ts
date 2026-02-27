@@ -58,7 +58,7 @@ export function redactTeam(team: Team): Team {
 export function redactPolpoState(state: PolpoState): PolpoState {
   return {
     ...state,
-    team: redactTeam(state.team),
+    teams: state.teams.map(redactTeam),
   };
 }
 
@@ -68,9 +68,9 @@ export function redactPolpoState(state: PolpoState): PolpoState {
 export function redactPolpoConfig<T extends PolpoConfig | PolpoFileConfig>(config: T): T {
   const result: any = { ...config };
 
-  // Redact team
-  if (result.team) {
-    result.team = redactTeam(result.team);
+  // Redact teams
+  if (result.teams) {
+    result.teams = result.teams.map(redactTeam);
   }
 
   // Redact provider API keys

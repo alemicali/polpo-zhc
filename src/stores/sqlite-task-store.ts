@@ -211,7 +211,9 @@ export class SqliteTaskStore implements TaskStore {
 
       this.db.transaction(() => {
         if (state.project) this.upsertMetaStmt.run("project", state.project);
-        if (state.team) this.upsertMetaStmt.run("team", JSON.stringify(state.team));
+        // Migrate legacy: state may have singular `team` or new `teams`
+        const teams = (state as any).teams ?? ((state as any).team ? [(state as any).team] : []);
+        if (teams.length > 0) this.upsertMetaStmt.run("teams", JSON.stringify(teams));
         if (state.startedAt) this.upsertMetaStmt.run("startedAt", state.startedAt);
         if (state.completedAt) this.upsertMetaStmt.run("completedAt", state.completedAt);
 
@@ -303,9 +305,21 @@ export class SqliteTaskStore implements TaskStore {
     const tasks = (this.getAllTasksStmt.all() as TaskRow[]).map(r => this.rowToTask(r));
     const processes = (this.getAllProcessesStmt.all() as ProcessRow[]).map(r => this.rowToProcess(r));
 
+    // Support both legacy "team" key and new "teams" key
+    const teamsRow = this.getMetaStmt.get("teams") as { value: string } | undefined;
+    let teams: Team[];
+    if (teamsRow) {
+      teams = JSON.parse(teamsRow.value) as Team[];
+    } else if (teamRow) {
+      // Legacy migration: singular team → array
+      teams = [JSON.parse(teamRow.value) as Team];
+    } else {
+      teams = [{ name: "", agents: [] }];
+    }
+
     const state: PolpoState = {
       project: projectRow?.value ?? "",
-      team: teamRow ? JSON.parse(teamRow.value) as Team : { name: "", agents: [] },
+      teams,
       tasks,
       processes,
     };
@@ -319,8 +333,8 @@ export class SqliteTaskStore implements TaskStore {
       if (partial.project !== undefined) {
         this.upsertMetaStmt.run("project", partial.project);
       }
-      if (partial.team !== undefined) {
-        this.upsertMetaStmt.run("team", JSON.stringify(partial.team));
+      if (partial.teams !== undefined) {
+        this.upsertMetaStmt.run("teams", JSON.stringify(partial.teams));
       }
       if (partial.startedAt !== undefined) {
         this.upsertMetaStmt.run("startedAt", partial.startedAt);

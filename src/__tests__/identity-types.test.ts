@@ -15,10 +15,10 @@ function writeConfig(config: object): string {
 function baseConfig(agentOverrides: object = {}) {
   return {
     project: "identity-test",
-    team: {
+    teams: [{
       name: "test-team",
       agents: [{ name: "agent-1", ...agentOverrides }],
-    },
+    }],
     settings: { maxRetries: 3, workDir: ".", logLevel: "normal" },
   };
 }
@@ -32,7 +32,7 @@ describe("Config parsing — identity, responsibilities, vault", () => {
       identity: { responsibilities: ["Code review", "Bug fixes"] },
     }));
     const config = await parseConfig(workDir);
-    const agent = config.team.agents[0];
+    const agent = config.teams[0].agents[0];
     expect(agent.identity?.responsibilities).toEqual(["Code review", "Bug fixes"]);
   });
 
@@ -45,7 +45,7 @@ describe("Config parsing — identity, responsibilities, vault", () => {
       },
     }));
     const config = await parseConfig(workDir);
-    const resp = config.team.agents[0].identity?.responsibilities;
+    const resp = config.teams[0].agents[0].identity?.responsibilities;
     expect(resp).toHaveLength(1);
     expect(resp![0]).toEqual({ area: "Frontend", description: "Build UI", priority: "high" });
   });
@@ -60,7 +60,7 @@ describe("Config parsing — identity, responsibilities, vault", () => {
       },
     }));
     const config = await parseConfig(workDir);
-    const resp = config.team.agents[0].identity?.responsibilities;
+    const resp = config.teams[0].agents[0].identity?.responsibilities;
     expect(resp).toHaveLength(2);
     expect(resp![0]).toBe("General tasks");
     expect(typeof resp![1]).toBe("object");
@@ -71,7 +71,7 @@ describe("Config parsing — identity, responsibilities, vault", () => {
       identity: { personality: "Detail-oriented and empathetic" },
     }));
     const config = await parseConfig(workDir);
-    expect(config.team.agents[0].identity?.personality).toBe("Detail-oriented and empathetic");
+    expect(config.teams[0].agents[0].identity?.personality).toBe("Detail-oriented and empathetic");
   });
 
   it("parses tone + personality together", async () => {
@@ -82,7 +82,7 @@ describe("Config parsing — identity, responsibilities, vault", () => {
       },
     }));
     const config = await parseConfig(workDir);
-    const agent = config.team.agents[0];
+    const agent = config.teams[0].agents[0];
     expect(agent.identity?.tone).toBe("Professional but warm");
     expect(agent.identity?.personality).toBe("Creative problem-solver");
   });
@@ -102,7 +102,7 @@ describe("Config parsing — identity, responsibilities, vault", () => {
       },
     }));
     const config = await parseConfig(workDir);
-    const id = config.team.agents[0].identity!;
+    const id = config.teams[0].agents[0].identity!;
     expect(id.displayName).toBe("Alice Chen");
     expect(id.title).toBe("CTO");
     expect(id.company).toBe("Acme Corp");
@@ -124,7 +124,7 @@ describe("Config parsing — identity, responsibilities, vault", () => {
       },
     }));
     const config = await parseConfig(workDir);
-    const vault = config.team.agents[0].vault!;
+    const vault = config.teams[0].agents[0].vault!;
     expect(vault.email).toBeDefined();
     expect(vault.email.type).toBe("smtp");
     expect(vault.email.credentials.host).toBe("smtp.example.com");
@@ -133,17 +133,17 @@ describe("Config parsing — identity, responsibilities, vault", () => {
   it("parses reportsTo", async () => {
     const workDir = writeConfig({
       project: "identity-test",
-      team: {
+      teams: [{
         name: "test-team",
         agents: [
           { name: "manager" },
           { name: "worker", reportsTo: "manager" },
         ],
-      },
+      }],
       settings: { maxRetries: 3, workDir: ".", logLevel: "normal" },
     });
     const config = await parseConfig(workDir);
-    expect(config.team.agents[1].reportsTo).toBe("manager");
+    expect(config.teams[0].agents[1].reportsTo).toBe("manager");
   });
 
   it("rejects reportsTo self-reference", async () => {

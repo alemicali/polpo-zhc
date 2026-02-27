@@ -348,7 +348,7 @@ program
 
       // Header
       console.log(`\n  ${headerIcon} ${LOGO_MINI} ${headerIcon}`);
-      console.log(chalk.dim(`    ${state.project || "project"} | Team: ${state.team.name || "-"} | Agents: ${state.team.agents.map(a => a.name).join(", ") || "-"}`));
+      console.log(chalk.dim(`    ${state.project || "project"} | Teams: ${state.teams.map(t => t.name).join(", ") || "-"} | Agents: ${state.teams.flatMap(t => t.agents).map(a => a.name).join(", ") || "-"}`));
       console.log(chalk.dim(`    Elapsed: ${totalElapsed}`));
 
       // Progress bar

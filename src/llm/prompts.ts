@@ -40,7 +40,7 @@ export function buildChatSystemPrompt(
   state: PolpoState | null,
   _workDir?: string,
 ): string {
-  const team = orchestrator.getTeam();
+  const teams = orchestrator.getTeams();
   const config = orchestrator.getConfig();
   const memory = orchestrator.getMemory();
   const polpoDir = orchestrator.getPolpoDir();
@@ -413,6 +413,26 @@ export function buildChatSystemPrompt(
     `When the user says "ricorda che..." — decide: is it a project fact → append_memory,`,
     `or a behavioral instruction → append_system_context.`,
     ``,
+    `### Asking clarifying questions`,
+    ``,
+    `**Tool**: ask_user`,
+    `When the user's request is ambiguous, has multiple valid interpretations, or you need`,
+    `preferences before proceeding, call ask_user. Each question has pre-populated options`,
+    `the user can pick from (plus free text input). Examples:`,
+    `- "manda su telegram" — ambiguous: do they want a notification rule, a one-shot send,`,
+    `  or a watcher? → ask_user with options.`,
+    `- "deploy this" — where? staging/production/preview? → ask_user with options.`,
+    `- "crea un agente per i test" — what kind of tests? unit/integration/e2e? → ask_user.`,
+    ``,
+    `Rules:`,
+    `- Do NOT ask for information you can infer from context or memory.`,
+    `- Do NOT ask obvious questions — if there's one clear interpretation, just do it.`,
+    `- Pre-populate options with the most likely choices. Be concise (1-5 words per label).`,
+    `- The system adds "Type your own answer" automatically — do NOT include "Other" as an option.`,
+    `- If you recommend one option, put it first and add "(Recommended)" to its label.`,
+    `- After receiving answers, proceed immediately — don't summarize the answers back.`,
+    `- Max 5 questions per ask_user call. Prefer fewer, more focused questions.`,
+    ``,
     `---`,
     ``,
     `### How to act on requests`,
@@ -457,9 +477,9 @@ export function buildChatSystemPrompt(
     ``,
     `### polpo.json configuration`,
     ``,
-    `Top-level keys: \`project\`, \`team\`, \`settings\`, \`providers\` (optional).`,
+    `Top-level keys: \`project\`, \`teams\` (array), \`settings\`, \`providers\` (optional).`,
     ``,
-    `**team.agents[]** — each agent has: name (required), role, model (\`"provider:model"\` format),`,
+    `**teams[].agents[]** — each agent has: name (required, globally unique), role, model (\`"provider:model"\` format),`,
     `systemPrompt, skills[], allowedPaths[], maxTurns (default 150), maxConcurrency,`,
     `and feature flags: enableBrowser, enableExcel, enablePdf, enableDocx, enableEmail,`,
     `enableAudio, enableImage, enableHttp, enableGit, enableMultifile, enableDeps.`,
@@ -551,16 +571,22 @@ export function buildChatSystemPrompt(
     `## Current state`,
     ``,
     `Project: ${state?.project || config?.project || "polpo-interactive"}`,
-    `Team: ${team.name}`,
-    `Agents:`,
+    `Teams: ${teams.length}`,
   );
 
-  for (const a of team.agents) {
-    let line = `  - ${a.name}: ${a.role || "general"} (${a.model || "default model"})`;
-    if (a.skills?.length) line += ` [skills: ${a.skills.join(", ")}]`;
-    const caps = describeAgentCapabilities(a);
-    if (caps) line += `\n    Tools: ${caps}`;
-    parts.push(line);
+  for (const team of teams) {
+    parts.push(``, `### Team: ${team.name}`);
+    if (team.description) parts.push(`Description: ${team.description}`);
+    parts.push(`Agents:`);
+    for (const a of team.agents) {
+      let line = `  - ${a.name}: ${a.role || "general"} (${a.model || "default model"})`;
+      if (a.reportsTo) line += ` → reports to: ${a.reportsTo}`;
+      if (a.skills?.length) line += ` [skills: ${a.skills.join(", ")}]`;
+      const caps = describeAgentCapabilities(a);
+      if (caps) line += `\n    Tools: ${caps}`;
+      parts.push(line);
+    }
+    if (team.agents.length === 0) parts.push(`  (no agents)`);
   }
 
   if (state?.tasks && state.tasks.length > 0) {
@@ -669,7 +695,8 @@ export function buildPlanSystemPrompt(
   workDir: string,
 ): string {
   const orchestraKnowledge = buildChatSystemPrompt(orchestrator, state, workDir);
-  const team = orchestrator.getTeam();
+  const teams = orchestrator.getTeams();
+  const allAgents = teams.flatMap(t => t.agents);
   const availableSkills = discoverSkills(workDir, orchestrator.getPolpoDir());
 
   return [
@@ -732,7 +759,7 @@ export function buildPlanSystemPrompt(
     `- List tasks in dependency order (a task's dependencies MUST appear BEFORE it)`,
     `- Each task should be atomic — one clear objective per task`,
     `- Descriptions should be specific enough for an autonomous agent with no context of other tasks`,
-    `- Available agents: ${team.agents.filter(a => !a.volatile).map(a => `${a.name} (${a.role || "general"})`).join(", ")}`,
+    `- Available agents: ${allAgents.filter(a => !a.volatile).map(a => `${a.name} (${a.role || "general"})`).join(", ")}`,
     `- You can use existing agents OR define new volatile agents in the team: section`,
     `- Volatile agents are useful when the task needs specialized roles (e.g. "test-writer", "api-designer", "reviewer")`,
     `- For volatile agents, write a focused systemPrompt and assign relevant skills if available`,
@@ -889,7 +916,7 @@ export function buildTeamGenPrompt(
   workDir: string,
   description: string,
 ): string {
-  const currentTeam = orchestrator.getTeam();
+  const currentTeams = orchestrator.getTeams();
   const alreadyInstalled = discoverSkills(workDir, orchestrator.getPolpoDir());
   const installedSection = alreadyInstalled.length > 0
     ? `Already installed skills: ${alreadyInstalled.map(s => s.name).join(", ")}`
@@ -923,8 +950,10 @@ export function buildTeamGenPrompt(
     ``,
     `## Current Team`,
     ``,
-    `Team name: ${currentTeam.name}`,
-    `Agents: ${currentTeam.agents.length > 0 ? currentTeam.agents.map(a => `${a.name} (${a.role || "general"})`).join(", ") : "none"}`,
+    `Teams: ${currentTeams.length}`,
+    ...(currentTeams.map(t =>
+      `Team "${t.name}": ${t.agents.length > 0 ? t.agents.map(a => `${a.name} (${a.role || "general"})`).join(", ") : "none"}`
+    )),
     ``,
     `## Output Format`,
     ``,
@@ -939,7 +968,8 @@ export function buildTeamGenPrompt(
     `      "model": "claude-sonnet-4-5-20250929",`,
     `      "role": "Clear description of what this agent does",`,
     `      "systemPrompt": "You are a specialized developer....",`,
-    `      "skills": ["skill-name"]`,
+    `      "skills": ["skill-name"],`,
+    `      "reportsTo": "manager-agent-name"`,
     `    }`,
     `  ]`,
     `}`,
@@ -950,7 +980,8 @@ export function buildTeamGenPrompt(
     `- Use kebab-case for agent names (e.g. "frontend-dev", "test-writer", "api-designer")`,
     `- Choose models strategically: Haiku for simple tasks, Sonnet for standard, Opus for complex`,
     `- Include 2-6 agents typically — match the complexity of the user's needs`,
-    `- Consider including a "reviewer" agent for quality assurance if appropriate`,
+    `- Consider including a "reviewer" or "lead" agent for quality assurance if appropriate`,
+    `- Use reportsTo to define org chart hierarchy (e.g. junior agents report to a lead). Omit for top-level agents`,
     `- Write a concise, focused systemPrompt for each agent that defines its specialization and constraints`,
     `- Only assign skills that are actually installed (either pre-existing or just installed by you)`,
     `- If no skills are relevant, omit the skills field`,

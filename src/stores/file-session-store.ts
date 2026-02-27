@@ -3,13 +3,14 @@ import {
   mkdirSync,
   appendFileSync,
   readFileSync,
+  writeFileSync,
   readdirSync,
   unlinkSync,
   statSync,
 } from "node:fs";
 import { join } from "node:path";
 import { nanoid } from "nanoid";
-import type { SessionStore, Session, Message, MessageRole } from "../core/session-store.js";
+import type { SessionStore, Session, Message, MessageRole, ToolCallInfo } from "../core/session-store.js";
 
 /**
  * File-backed SessionStore.
@@ -56,6 +57,33 @@ export class FileSessionStore implements SessionStore {
     } catch { /* best-effort: non-critical */
     }
     return message;
+  }
+
+  updateMessage(sessionId: string, messageId: string, content: string, toolCalls?: ToolCallInfo[]): boolean {
+    const file = this.sessionFile(sessionId);
+    if (!existsSync(file)) return false;
+    try {
+      const raw = readFileSync(file, "utf-8");
+      const lines = raw.split("\n").filter(Boolean);
+      let found = false;
+      const updated = lines.map((line) => {
+        const obj = JSON.parse(line);
+        if (!obj._session && obj.id === messageId) {
+          found = true;
+          const patched: Record<string, unknown> = { ...obj, content };
+          if (toolCalls && toolCalls.length > 0) {
+            patched.toolCalls = toolCalls;
+          }
+          return JSON.stringify(patched);
+        }
+        return line;
+      });
+      if (!found) return false;
+      writeFileSync(file, updated.join("\n") + "\n", "utf-8");
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   getMessages(sessionId: string): Message[] {

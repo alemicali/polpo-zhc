@@ -23,7 +23,7 @@ export { useApprovals } from "./hooks/use-approvals.js";
 export { useTemplates } from "./hooks/use-templates.js";
 
 // Client (re-export for convenience)
-export { PolpoClient } from "./client/polpo-client.js";
+export { PolpoClient, ChatCompletionStream } from "./client/polpo-client.js";
 export { PolpoApiError } from "./client/errors.js";
 
 // Types
@@ -62,6 +62,7 @@ export type {
   CreatePlanRequest,
   UpdatePlanRequest,
   AddAgentRequest,
+  AddTeamRequest,
   TaskFilters,
   LogSession,
   LogEntry,
@@ -74,6 +75,12 @@ export type {
   ChatCompletionChoice,
   ChatCompletionChunk,
   ChatCompletionChunkDelta,
+  ToolCallState,
+  ToolCallEvent,
+  AskUserOption,
+  AskUserQuestion,
+  AskUserPayload,
+  AskUserAnswer,
   SkillInfo,
   NotificationRule,
   NotificationRecord,

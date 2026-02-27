@@ -12,7 +12,8 @@
 
 import { Type } from "@sinclair/typebox";
 import { completeSimple, type Tool, type Message } from "@mariozechner/pi-ai";
-import { resolveModel, resolveApiKeyAsync } from "./pi-client.js";
+import { resolveModel, resolveApiKeyAsync, buildStreamOpts } from "./pi-client.js";
+import type { ReasoningLevel } from "../core/types.js";
 import { withRetry } from "./retry.js";
 import { sanitizeExpectations } from "../core/schemas.js";
 
@@ -242,6 +243,7 @@ export async function generatePlan(
   userPrompt: string,
   model?: string,
   onTokens?: (tokens: number) => void,
+  reasoning?: ReasoningLevel,
 ): Promise<PlanData> {
   return withRetry(async () => {
     const m = resolveModel(model);
@@ -255,7 +257,7 @@ export async function generatePlan(
       systemPrompt,
       messages,
       tools: [submitPlanTool],
-    }, apiKey ? { apiKey } : undefined);
+    }, buildStreamOpts(apiKey, reasoning));
 
     // Track tokens if callback provided
     if (onTokens && "usage" in response && response.usage && typeof response.usage === "object") {
@@ -301,6 +303,7 @@ async function _runPlanStep(
   tools: Tool[],
   model?: string,
   onTokens?: (tokens: number) => void,
+  reasoning?: ReasoningLevel,
 ): Promise<GeneratePlanResult> {
   const m = resolveModel(model);
   const apiKey = await resolveApiKeyAsync(m.provider);
@@ -309,7 +312,7 @@ async function _runPlanStep(
     systemPrompt,
     messages,
     tools,
-  }, apiKey ? { apiKey } : undefined);
+  }, buildStreamOpts(apiKey, reasoning));
 
   // Track tokens if callback provided
   if (onTokens && "usage" in response && response.usage && typeof response.usage === "object") {
@@ -365,12 +368,13 @@ export async function generatePlanInteractive(
   userPrompt: string,
   model?: string,
   onTokens?: (tokens: number) => void,
+  reasoning?: ReasoningLevel,
 ): Promise<GeneratePlanResult> {
   return withRetry(async () => {
     const messages: Message[] = [
       { role: "user", content: userPrompt, timestamp: Date.now() },
     ];
-    return _runPlanStep(systemPrompt, messages, [askUserTool, submitPlanTool], model, onTokens);
+    return _runPlanStep(systemPrompt, messages, [askUserTool, submitPlanTool], model, onTokens, reasoning);
   }, { maxRetries: 2 });
 }
 
@@ -384,6 +388,7 @@ export async function continuePlanWithAnswers(
   answers: UserAnswer[],
   model?: string,
   onTokens?: (tokens: number) => void,
+  reasoning?: ReasoningLevel,
 ): Promise<GeneratePlanResult> {
   // Find the last ask_user tool call to get its ID
   const messages = [...previousMessages];
@@ -413,7 +418,7 @@ export async function continuePlanWithAnswers(
     timestamp: Date.now(),
   } as any);
 
-  return _runPlanStep(systemPrompt, messages, [askUserTool, submitPlanTool], model, onTokens);
+  return _runPlanStep(systemPrompt, messages, [askUserTool, submitPlanTool], model, onTokens, reasoning);
 }
 
 /**
@@ -426,6 +431,7 @@ export async function refinePlanStructured(
   feedback: string,
   model?: string,
   onTokens?: (tokens: number) => void,
+  reasoning?: ReasoningLevel,
 ): Promise<PlanData> {
   const userPrompt = [
     `Original request: "${originalPrompt}"`,
@@ -438,7 +444,7 @@ export async function refinePlanStructured(
     "Revise the plan based on the feedback. Call the submit_plan tool with the updated plan.",
   ].join("\n");
 
-  return generatePlan(systemPrompt, userPrompt, model, onTokens);
+  return generatePlan(systemPrompt, userPrompt, model, onTokens, reasoning);
 }
 
 /**
@@ -451,6 +457,7 @@ export async function generateTaskPrep(
   userPrompt: string,
   model?: string,
   onTokens?: (tokens: number) => void,
+  reasoning?: ReasoningLevel,
 ): Promise<PlanTaskData> {
   return withRetry(async () => {
     const m = resolveModel(model);
@@ -464,7 +471,7 @@ export async function generateTaskPrep(
       systemPrompt,
       messages,
       tools: [submitTaskTool],
-    }, apiKey ? { apiKey } : undefined);
+    }, buildStreamOpts(apiKey, reasoning));
 
     // Track tokens if callback provided
     if (onTokens && "usage" in response && response.usage && typeof response.usage === "object") {
@@ -504,6 +511,7 @@ export async function generateTeam(
   systemPrompt: string,
   userPrompt: string,
   model?: string,
+  reasoning?: ReasoningLevel,
 ): Promise<PlanTeamData[]> {
   return withRetry(async () => {
     const m = resolveModel(model);
@@ -517,7 +525,7 @@ export async function generateTeam(
       systemPrompt,
       messages,
       tools: [submitTeamTool],
-    }, apiKey ? { apiKey } : undefined);
+    }, buildStreamOpts(apiKey, reasoning));
 
     // Extract from tool call (primary path)
     const toolCall = response.content.find(
@@ -550,6 +558,7 @@ export async function refineTeam(
   currentTeamJson: string,
   feedback: string,
   model?: string,
+  reasoning?: ReasoningLevel,
 ): Promise<PlanTeamData[]> {
   const userPrompt = [
     "Current team:",
@@ -560,7 +569,7 @@ export async function refineTeam(
     "Revise the team based on the feedback. Call the submit_team tool with the updated team.",
   ].join("\n");
 
-  return generateTeam(systemPrompt, userPrompt, model);
+  return generateTeam(systemPrompt, userPrompt, model, reasoning);
 }
 
 /**

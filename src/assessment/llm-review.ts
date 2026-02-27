@@ -1,10 +1,22 @@
 /**
  * G-Eval LLM-as-Judge review using pi-ai.
  *
- * Runs 3 independent reviewers in parallel with their own tool loop:
- * LLM call → tool execution → LLM call → ... → submit_review
+ * Architecture: 2-phase review for reliability.
  *
- * Tools: read_file, glob, grep, submit_review (all implemented natively).
+ * Phase 1 — EXPLORATION (tool loop)
+ *   The reviewer explores the codebase using read_file, glob, grep.
+ *   No submit_review tool is available — the LLM just investigates freely.
+ *   After exploration, we collect all assistant text as the "analysis".
+ *
+ * Phase 2 — SCORING (forced structured output)
+ *   A separate LLM call receives the full analysis from Phase 1
+ *   and MUST call submit_review. We force this via toolChoice where
+ *   supported, and via strong prompting + retry as fallback.
+ *
+ * This separation makes the system robust: exploration failures don't
+ * block scoring, and scoring failures are isolated from exploration.
+ *
+ * Runs 3 independent reviewers in parallel (multi-evaluator consensus).
  */
 
 import { readFileSync } from "node:fs";
@@ -14,8 +26,9 @@ import { Type } from "@sinclair/typebox";
 import type { TaskExpectation, DimensionScore, CheckResult, ReviewContext } from "../core/types.js";
 import { DEFAULT_DIMENSIONS, buildRubricSection, computeWeightedScore, computeMedianScores } from "./scoring.js";
 import { withRetry } from "../llm/retry.js";
-import { resolveModel } from "../llm/pi-client.js";
-import { completeSimple, type AssistantMessage, type Message, type Tool } from "@mariozechner/pi-ai";
+import { resolveModel, resolveApiKeyAsync, buildStreamOpts } from "../llm/pi-client.js";
+import type { ReasoningLevel } from "../core/types.js";
+import { complete, completeSimple, type AssistantMessage, type Message, type Tool } from "@mariozechner/pi-ai";
 
 export type LLMQueryFn = (prompt: string, cwd: string) => Promise<string>;
 
@@ -24,7 +37,7 @@ interface ReviewPayload {
   summary: string;
 }
 
-// === Review Tools (native, no SDK dependency) ===
+// ── Tool Definitions ───────────────────────────────────────────────────
 
 const readFileTool: Tool = {
   name: "read_file",
@@ -52,13 +65,12 @@ const grepTool: Tool = {
   }),
 };
 
+const EXPLORATION_TOOLS: Tool[] = [readFileTool, globTool, grepTool];
+
 const submitReviewTool: Tool = {
   name: "submit_review",
-  description: `Submit your final structured code review. You MUST call this tool exactly once
-after you have finished reading and analyzing all relevant code files.
-Each dimension must be scored 1-5 based on the rubric provided in the prompt.
-Each reasoning MUST include specific file:line references as evidence.
-Do NOT output the review as plain text — use this tool.`,
+  description: `Submit your final structured code review scores. You MUST call this tool with scores for every dimension.
+Each dimension must be scored 1-5 based on the rubric. Each reasoning MUST include specific file:line references.`,
   parameters: Type.Object({
     scores: Type.Array(Type.Object({
       dimension: Type.String({ description: "Dimension name from the rubric" }),
@@ -74,14 +86,12 @@ Do NOT output the review as plain text — use this tool.`,
   }),
 };
 
-const REVIEW_TOOLS: Tool[] = [readFileTool, globTool, grepTool, submitReviewTool];
+// ── Tool Execution ─────────────────────────────────────────────────────
 
-/** Execute a review tool call and return text content. */
-function executeReviewTool(
+function executeExplorationTool(
   toolName: string,
   args: Record<string, any>,
   cwd: string,
-  reviewRef: { result: ReviewPayload | null },
 ): string {
   switch (toolName) {
     case "read_file": {
@@ -120,107 +130,75 @@ function executeReviewTool(
         return "No matches found";
       }
     }
-    case "submit_review": {
-      reviewRef.result = args as ReviewPayload;
-      return "Review submitted successfully.";
-    }
     default:
       return `Unknown tool: ${toolName}`;
   }
 }
 
-// === Prompt Builder ===
+// ── Phase 1: Exploration ───────────────────────────────────────────────
 
-function buildReviewPrompt(
-  criteria: string,
-  rubricSection: string,
-  dimNames: string,
-  context?: ReviewContext,
-): string {
-  const contextSection = context ? `
-TASK CONTEXT:
-Title: ${context.taskTitle}
-Description: ${context.taskDescription}
-${context.filesCreated?.length ? `\nFiles created by agent: ${context.filesCreated.join(", ")}` : ""}${context.filesEdited?.length ? `\nFiles edited by agent: ${context.filesEdited.join(", ")}` : ""}
-${context.agentOutput ? `\nAGENT OUTPUT (last 2000 chars):\n${context.agentOutput.slice(-2000)}` : ""}
-` : "";
+const MAX_EXPLORATION_TURNS = 20;
+const NUDGE_AT_TURN = 15;
 
-  return `You are a senior code reviewer performing a structured G-Eval evaluation.
-
-ACCEPTANCE CRITERIA:
-${criteria}
-${contextSection}
-EVALUATION DIMENSIONS AND RUBRICS:
-${rubricSection}
-
-INSTRUCTIONS:
-1. Use read_file, glob, and grep tools to explore the codebase and find relevant files.
-2. Read the code carefully and understand what it does relative to the acceptance criteria.
-3. For EACH dimension (${dimNames}), follow this process:
-   a. Think step-by-step about how the code performs on this dimension.
-   b. Reference the rubric to determine the appropriate score (1-5).
-   c. Write a brief chain-of-thought reasoning citing specific code evidence.
-   d. Each reasoning MUST include at least one specific file:line reference.
-      Example: "correctness: 4/5 — \`src/auth/jwt.ts:45\` validates token expiry correctly but \`src/middleware/auth.ts:12\` doesn't handle refresh tokens"
-   e. Optionally provide structured evidence entries with file, line, and note.
-4. After evaluating all dimensions, call the submit_review tool with your scores and summary.
-
-IMPORTANT:
-- You MUST call the submit_review tool to deliver your review.
-- You MUST evaluate ALL dimensions: ${dimNames}
-- Each score must be an integer from 1 to 5.
-- Be strict but fair — apply the rubric literally.
-- Scores without specific code evidence (file:line references) should be considered unreliable.`;
-}
-
-// === Single Review Runner (pi-ai tool loop) ===
-
-const MAX_REVIEW_TURNS = 30;
-
-async function runSingleReview(
+/**
+ * Phase 1: Let the reviewer freely explore the codebase.
+ * Returns the accumulated analysis text from all assistant messages.
+ */
+async function runExploration(
   reviewPrompt: string,
   cwd: string,
-  model?: string,
+  model: string | undefined,
   onProgress?: (msg: string) => void,
-): Promise<ReviewPayload | null> {
+  reasoning?: ReasoningLevel,
+): Promise<{ analysis: string; filesRead: string[] }> {
   const m = resolveModel(model);
-  const reviewRef: { result: ReviewPayload | null } = { result: null };
+  const apiKey = await resolveApiKeyAsync(m.provider as string);
+  const opts = buildStreamOpts(apiKey, reasoning);
+
+  const filesRead: string[] = [];
 
   const messages: Message[] = [
     { role: "user", content: reviewPrompt, timestamp: Date.now() },
   ];
 
-  for (let turn = 0; turn < MAX_REVIEW_TURNS; turn++) {
+  for (let turn = 0; turn < MAX_EXPLORATION_TURNS; turn++) {
+    // Nudge at turn threshold to wrap up exploration
+    if (turn === NUDGE_AT_TURN) {
+      messages.push({
+        role: "user",
+        content: "You have explored enough. Please finish reading any last critical files. After this, you will be asked to submit your scores.",
+        timestamp: Date.now(),
+      });
+    }
+
     const response = await completeSimple(m, {
-      systemPrompt: "You are a thorough code reviewer. Use tools to explore the codebase before submitting your review.",
+      systemPrompt: "You are a thorough code reviewer. Use tools to explore the codebase. Focus on finding evidence for each evaluation dimension. Do NOT attempt to output scores as text — you will be given a dedicated scoring step after exploration.",
       messages,
-      tools: REVIEW_TOOLS,
-    });
+      tools: EXPLORATION_TOOLS,
+    }, opts);
 
     messages.push(response);
 
-    // Extract tool calls
     const toolCalls = response.content.filter(
       (c): c is { type: "toolCall"; id: string; name: string; arguments: Record<string, any> } =>
         c.type === "toolCall"
     );
 
-    if (toolCalls.length === 0) break; // Agent done, no more tools
+    // No more tool calls — exploration is done
+    if (toolCalls.length === 0) break;
 
-    // Execute each tool call
     for (const call of toolCalls) {
-      if (call.name === "read_file" && onProgress) {
-        const file = String(call.arguments?.path ?? "").split("/").pop();
-        onProgress(`Reading ${file}`);
-      } else if (call.name === "glob" && onProgress) {
-        onProgress(`Searching ${call.arguments?.pattern}`);
-      } else if (call.name === "grep" && onProgress) {
-        onProgress(`Grep: ${String(call.arguments?.pattern ?? "").slice(0, 30)}`);
-      } else if (call.name === "submit_review" && onProgress) {
-        onProgress("Submitting review scores...");
+      if (call.name === "read_file") {
+        const file = String(call.arguments?.path ?? "");
+        filesRead.push(file);
+        onProgress?.(`Reading ${file.split("/").pop()}`);
+      } else if (call.name === "glob") {
+        onProgress?.(`Searching ${call.arguments?.pattern}`);
+      } else if (call.name === "grep") {
+        onProgress?.(`Grep: ${String(call.arguments?.pattern ?? "").slice(0, 30)}`);
       }
 
-      const resultText = executeReviewTool(call.name, call.arguments, cwd, reviewRef);
+      const resultText = executeExplorationTool(call.name, call.arguments, cwd);
       messages.push({
         role: "toolResult",
         toolCallId: call.id,
@@ -230,26 +208,163 @@ async function runSingleReview(
         timestamp: Date.now(),
       });
     }
-
-    // If review was submitted, we're done
-    if (reviewRef.result) break;
   }
 
-  if (reviewRef.result?.scores && Array.isArray(reviewRef.result.scores) && reviewRef.result.scores.length > 0) {
-    return reviewRef.result;
+  // Collect all assistant text as the analysis
+  const analysisBlocks: string[] = [];
+  for (const msg of messages) {
+    if (msg.role !== "assistant") continue;
+    const assistantMsg = msg as AssistantMessage;
+    for (const block of assistantMsg.content) {
+      if (block.type === "text" && block.text.trim()) {
+        analysisBlocks.push(block.text);
+      }
+    }
   }
 
-  // Try to extract from the last assistant text as fallback
-  const lastAssistant = [...messages].reverse().find(m => m.role === "assistant") as AssistantMessage | undefined;
-  if (lastAssistant) {
-    const textBlocks = lastAssistant.content.filter((c): c is { type: "text"; text: string } => c.type === "text");
+  return {
+    analysis: analysisBlocks.join("\n\n") || "The reviewer explored the codebase but produced no written analysis.",
+    filesRead,
+  };
+}
+
+// ── Phase 2: Scoring ───────────────────────────────────────────────────
+
+const SCORING_SYSTEM_PROMPT = `You are a code review scorer. You have received a detailed analysis of code from Phase 1.
+Your ONLY job is to convert this analysis into structured scores by calling the submit_review tool.
+You MUST call submit_review exactly once. Do NOT output text — ONLY call the tool.`;
+
+/**
+ * Phase 2: Given the exploration analysis, force the model to produce
+ * structured scores via the submit_review tool.
+ *
+ * Strategy:
+ * 1. Try with toolChoice forced to submit_review (provider-specific)
+ * 2. If that fails or isn't supported, try with strong prompting (no toolChoice)
+ * 3. If model outputs text instead of tool call, try parsing JSON from text
+ */
+async function runScoring(
+  analysis: string,
+  rubricSection: string,
+  dimNames: string,
+  model: string | undefined,
+  onProgress?: (msg: string) => void,
+  reasoning?: ReasoningLevel,
+): Promise<ReviewPayload | null> {
+  const m = resolveModel(model);
+  const apiKey = await resolveApiKeyAsync(m.provider as string);
+
+  const scoringPrompt = `Based on the following code analysis, score each dimension and call submit_review.
+
+ANALYSIS FROM CODE EXPLORATION:
+${analysis.slice(0, 12000)}
+
+EVALUATION DIMENSIONS AND RUBRICS:
+${rubricSection}
+
+DIMENSIONS TO SCORE: ${dimNames}
+
+RULES:
+- Score each dimension 1-5 as an integer.
+- Your reasoning MUST reference specific file:line evidence from the analysis above.
+- Call the submit_review tool with ALL dimension scores and a summary.
+- Do NOT output text. ONLY call submit_review.`;
+
+  const messages: Message[] = [
+    { role: "user", content: scoringPrompt, timestamp: Date.now() },
+  ];
+
+  const context = {
+    systemPrompt: SCORING_SYSTEM_PROMPT,
+    messages,
+    tools: [submitReviewTool],
+  };
+
+  // Build reasoning option for scoring (reasoning helps produce better structured evaluations)
+  const reasoningVal = reasoning && reasoning !== "off" ? reasoning : undefined;
+
+  // Attempt 1: Force toolChoice (works on Anthropic, OpenAI completions, Bedrock)
+  onProgress?.("Scoring with forced tool choice...");
+  try {
+    const response = await complete(m, context, {
+      apiKey,
+      toolChoice: { type: "tool", name: "submit_review" },
+      ...(reasoningVal ? { reasoning: reasoningVal } : {}),
+    } as any);
+
+    const payload = extractSubmitReview(response);
+    if (payload) return payload;
+  } catch {
+    // toolChoice not supported by this provider, or call failed — fall through
+  }
+
+  // Attempt 2: Try again without toolChoice, rely on strong prompting
+  onProgress?.("Scoring with prompt-based enforcement...");
+  try {
+    const response = await completeSimple(m, context, buildStreamOpts(apiKey, reasoning));
+
+    // Check for tool call
+    const payload = extractSubmitReview(response);
+    if (payload) return payload;
+
+    // Check for text-based JSON fallback
+    const textBlocks = response.content
+      .filter((c): c is { type: "text"; text: string } => c.type === "text");
     const fullText = textBlocks.map(b => b.text).join("\n");
-    return tryParseReviewJSON(fullText);
+    const parsed = tryParseReviewJSON(fullText);
+    if (parsed) return parsed;
+  } catch {
+    // scoring call failed entirely
+  }
+
+  // Attempt 3: Minimal retry with even more explicit prompt
+  onProgress?.("Final scoring attempt...");
+  try {
+    const forcefulMessages: Message[] = [
+      {
+        role: "user",
+        content: `You MUST call the submit_review tool NOW with scores for these dimensions: ${dimNames}.
+Based on this analysis: ${analysis.slice(0, 6000)}
+
+Call submit_review immediately. No text output.`,
+        timestamp: Date.now(),
+      },
+    ];
+    const response = await completeSimple(m, {
+      systemPrompt: "Call submit_review immediately with the scores. No other output.",
+      messages: forcefulMessages,
+      tools: [submitReviewTool],
+    }, buildStreamOpts(apiKey, reasoning));
+
+    const payload = extractSubmitReview(response);
+    if (payload) return payload;
+
+    // Last resort: parse text
+    const textBlocks = response.content
+      .filter((c): c is { type: "text"; text: string } => c.type === "text");
+    const parsed = tryParseReviewJSON(textBlocks.map(b => b.text).join("\n"));
+    if (parsed) return parsed;
+  } catch {
+    // all attempts exhausted
   }
 
   return null;
 }
 
+/** Extract ReviewPayload from a submit_review tool call in the response. */
+function extractSubmitReview(response: AssistantMessage): ReviewPayload | null {
+  for (const block of response.content) {
+    if (block.type === "toolCall" && block.name === "submit_review") {
+      const args = block.arguments as Record<string, any>;
+      if (args?.scores && Array.isArray(args.scores) && args.scores.length > 0) {
+        return args as ReviewPayload;
+      }
+    }
+  }
+  return null;
+}
+
+/** Try to extract a ReviewPayload from free-text JSON output. */
 function tryParseReviewJSON(output: string): ReviewPayload | null {
   let text = output.trim();
   const fenceMatch = text.match(/```(?:json)?\s*\n?([\s\S]*?)\n?\s*```/);
@@ -265,7 +380,101 @@ function tryParseReviewJSON(output: string): ReviewPayload | null {
   return null;
 }
 
-// === CheckResult Builder (unchanged) ===
+// ── Combined Single Review (Phase 1 + Phase 2) ────────────────────────
+
+async function runSingleReview(
+  explorationPrompt: string,
+  rubricSection: string,
+  dimNames: string,
+  cwd: string,
+  model: string | undefined,
+  onProgress?: (msg: string) => void,
+  reasoning?: ReasoningLevel,
+): Promise<ReviewPayload | null> {
+  // Phase 1: Explore
+  onProgress?.("Phase 1: Exploring codebase...");
+  const { analysis, filesRead } = await runExploration(explorationPrompt, cwd, model, onProgress, reasoning);
+  onProgress?.(`Exploration complete — read ${filesRead.length} files, ${analysis.length} chars of analysis.`);
+
+  // Phase 2: Score
+  onProgress?.("Phase 2: Producing structured scores...");
+  const payload = await runScoring(analysis, rubricSection, dimNames, model, onProgress, reasoning);
+
+  if (payload) {
+    onProgress?.(`Scoring complete — ${payload.scores.length} dimensions scored.`);
+  } else {
+    onProgress?.("Scoring failed — reviewer could not produce structured scores.");
+  }
+
+  return payload;
+}
+
+// ── Single Review with Retry ───────────────────────────────────────────
+
+async function runSingleReviewWithRetry(
+  explorationPrompt: string,
+  rubricSection: string,
+  dimNames: string,
+  cwd: string,
+  model: string | undefined,
+  onProgress?: (msg: string) => void,
+  reasoning?: ReasoningLevel,
+): Promise<ReviewPayload | null> {
+  try {
+    return await withRetry(
+      async () => {
+        const result = await runSingleReview(explorationPrompt, rubricSection, dimNames, cwd, model, onProgress, reasoning);
+        if (!result) throw new Error("Reviewer produced no structured result after Phase 1 + Phase 2");
+        return result;
+      },
+      { maxRetries: 1, initialDelayMs: 2000, checkTransient: false },
+    );
+  } catch (err) {
+    onProgress?.(`Reviewer failed: ${err instanceof Error ? err.message : String(err)}`);
+    return null;
+  }
+}
+
+// ── Prompt Builder (Phase 1 only — no submit_review instructions) ──────
+
+function buildExplorationPrompt(
+  criteria: string,
+  rubricSection: string,
+  dimNames: string,
+  context?: ReviewContext,
+): string {
+  const contextSection = context ? `
+TASK CONTEXT:
+Title: ${context.taskTitle}
+Description: ${context.taskDescription}
+${context.filesCreated?.length ? `\nFiles created by agent: ${context.filesCreated.join(", ")}` : ""}${context.filesEdited?.length ? `\nFiles edited by agent: ${context.filesEdited.join(", ")}` : ""}
+${context.agentOutput ? `\nAGENT OUTPUT (last 2000 chars):\n${context.agentOutput.slice(-2000)}` : ""}
+` : "";
+
+  return `You are a senior code reviewer performing a G-Eval evaluation.
+Your task is to EXPLORE the codebase and build a detailed analysis for each evaluation dimension.
+
+ACCEPTANCE CRITERIA:
+${criteria}
+${contextSection}
+EVALUATION DIMENSIONS:
+${rubricSection}
+
+INSTRUCTIONS:
+1. Use read_file, glob, and grep tools to explore the codebase and find relevant files.
+2. Read the code carefully and understand what it does relative to the acceptance criteria.
+3. For EACH dimension (${dimNames}), write your analysis noting:
+   - Specific file:line references as evidence
+   - How the code performs on this dimension
+   - What score (1-5) you would give based on the rubric
+4. Be thorough — read all relevant files before concluding.
+
+OUTPUT:
+Write your analysis as free text. Include specific file:line references for each dimension.
+You will be asked to submit structured scores in a separate step after exploration.`;
+}
+
+// ── CheckResult Builder ────────────────────────────────────────────────
 
 function buildCheckResult(
   parsed: ReviewPayload,
@@ -305,46 +514,23 @@ function buildCheckResult(
   };
 }
 
-// === Single Review with Retry ===
-
-async function runSingleReviewWithRetry(
-  reviewPrompt: string,
-  cwd: string,
-  model?: string,
-  onProgress?: (msg: string) => void,
-): Promise<ReviewPayload | null> {
-  try {
-    return await withRetry(
-      async () => {
-        const result = await runSingleReview(reviewPrompt, cwd, model, onProgress);
-        if (!result) throw new Error("Reviewer produced no result");
-        return result;
-      },
-      { maxRetries: 2, initialDelayMs: 2000, checkTransient: false },
-    );
-  } catch {
-    return null;
-  }
-}
-
-// === Main Entry Point ===
+// ── Main Entry Point ───────────────────────────────────────────────────
 
 /**
- * Run a G-Eval LLM-as-Judge review.
+ * Run a G-Eval LLM-as-Judge review (2-phase architecture).
+ *
+ * Phase 1: Each reviewer explores the codebase with tools (read_file, glob, grep).
+ * Phase 2: A forced scoring call extracts structured scores from the analysis.
  *
  * Runs 3 independent reviewers in parallel (multi-evaluator consensus).
  * Falls back to single-reviewer if <2 succeed.
- * Each reviewer gets one retry on failure before being counted as failed.
- *
- * SAFETY NET: if all evaluators fail, the task is NOT marked as failed.
- * Evaluator failures default to passed=true so a successful task is never
- * blocked by a broken reviewer.
  */
 export async function runLLMReview(
   expectation: TaskExpectation,
   cwd: string,
   onProgress?: (msg: string) => void,
   context?: ReviewContext,
+  reasoning?: ReasoningLevel,
 ): Promise<CheckResult> {
   const criteria = expectation.criteria || "Code should be correct, well-structured, and meet the task requirements.";
   const dimensions = expectation.dimensions ?? DEFAULT_DIMENSIONS;
@@ -352,23 +538,30 @@ export async function runLLMReview(
 
   const dimNames = dimensions.map(d => d.name).join(", ");
   const rubricSection = buildRubricSection(dimensions);
-  const reviewPrompt = buildReviewPrompt(criteria, rubricSection, dimNames, context);
+  const explorationPrompt = buildExplorationPrompt(criteria, rubricSection, dimNames, context);
 
-  // Use orchestrator model for reviews (configurable via env or default)
   const reviewModel = process.env.POLPO_JUDGE_MODEL || process.env.POLPO_MODEL || undefined;
+  // Judge reasoning: explicit param > POLPO_JUDGE_REASONING env var > undefined
+  const judgeReasoning = reasoning ?? (process.env.POLPO_JUDGE_REASONING as ReasoningLevel | undefined);
 
-  onProgress?.("Starting 3 independent review agents...");
+  onProgress?.("Starting 3 independent review agents (2-phase: explore → score)...");
 
   const settled = await Promise.allSettled([
-    runSingleReviewWithRetry(reviewPrompt, cwd, reviewModel, onProgress),
-    runSingleReviewWithRetry(reviewPrompt, cwd, reviewModel, onProgress),
-    runSingleReviewWithRetry(reviewPrompt, cwd, reviewModel, onProgress),
+    runSingleReviewWithRetry(explorationPrompt, rubricSection, dimNames, cwd, reviewModel, onProgress, judgeReasoning),
+    runSingleReviewWithRetry(explorationPrompt, rubricSection, dimNames, cwd, reviewModel, onProgress, judgeReasoning),
+    runSingleReviewWithRetry(explorationPrompt, rubricSection, dimNames, cwd, reviewModel, onProgress, judgeReasoning),
   ]);
 
   const successfulReviews: ReviewPayload[] = [];
+  const failures: string[] = [];
   for (const result of settled) {
     if (result.status === "fulfilled" && result.value) {
       successfulReviews.push(result.value);
+    } else {
+      const reason = result.status === "rejected"
+        ? (result.reason instanceof Error ? result.reason.message : String(result.reason))
+        : "Reviewer returned null";
+      failures.push(reason);
     }
   }
 
@@ -383,10 +576,14 @@ export async function runLLMReview(
     return buildCheckResult(successfulReviews[0], dimensions, threshold);
   }
 
+  const failureDetail = failures.length > 0
+    ? `\n\nFailure reasons:\n${failures.map((f, i) => `  Reviewer ${i + 1}: ${f}`).join("\n")}`
+    : "";
+
   return {
     type: "llm_review",
     passed: false,
     message: "Review failed — all evaluators failed to produce results",
-    details: "All 3 reviewers failed to produce structured output after retries. Task marked as failed for safety.",
+    details: `All 3 reviewers failed to produce structured output after 2-phase review with retries. Task marked as failed for safety.${failureDetail}`,
   };
 }

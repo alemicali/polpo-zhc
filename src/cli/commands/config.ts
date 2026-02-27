@@ -32,11 +32,13 @@ export function registerConfigCommands(program: Command): void {
 
         console.log(chalk.bold("\n  Project: ") + config.project);
         console.log(chalk.bold("  Version: ") + config.version);
-        console.log(
-          chalk.bold("  Team:    ") +
-            config.team.name +
-            chalk.dim(` (${config.team.agents.length} agents)`)
-        );
+        for (const t of config.teams) {
+          console.log(
+            chalk.bold("  Team:    ") +
+              t.name +
+              chalk.dim(` (${t.agents.length} agents)`)
+          );
+        }
 
         // Settings
         const s = config.settings;
@@ -63,13 +65,14 @@ export function registerConfigCommands(program: Command): void {
         // Agents table
         console.log(chalk.bold("\n  Agents"));
         console.log(chalk.dim("  ────────────────────────────────────"));
+        const allAgents = config.teams.flatMap((t) => t.agents);
         const nameWidth = Math.max(
           6,
-          ...config.team.agents.map((a) => a.name.length)
+          ...allAgents.map((a) => a.name.length)
         );
         const modelWidth = Math.max(
           6,
-          ...config.team.agents.map((a) => (a.model ?? "-").length)
+          ...allAgents.map((a) => (a.model ?? "-").length)
         );
 
         console.log(
@@ -77,7 +80,7 @@ export function registerConfigCommands(program: Command): void {
             `  ${"NAME".padEnd(nameWidth)}  ${"MODEL".padEnd(modelWidth)}  ROLE`
           )
         );
-        for (const agent of config.team.agents) {
+        for (const agent of allAgents) {
           const name = agent.name.padEnd(nameWidth);
           const model = (agent.model ?? "-").padEnd(modelWidth);
           const role = agent.role ?? "-";
@@ -102,7 +105,7 @@ export function registerConfigCommands(program: Command): void {
         const config = await parseConfig(workDir);
         console.log(chalk.green("\n  \u2713 Configuration valid"));
         console.log(chalk.dim(`    Project: ${config.project}`));
-        console.log(chalk.dim(`    Agents:  ${config.team.agents.length}`));
+        console.log(chalk.dim(`    Agents:  ${config.teams.flatMap((t) => t.agents).length}`));
         console.log();
         process.exit(0);
       } catch (err: any) {

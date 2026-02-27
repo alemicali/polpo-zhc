@@ -945,7 +945,7 @@ export function AgentDetailPage() {
                     </div>
 
                     {/* Browser config details */}
-                    {agentAny.enableBrowser && (agent.browserEngine || agent.browserProfile) && (
+                    {!!agentAny.enableBrowser && !!(agent.browserEngine || agent.browserProfile) && (
                       <div className="mt-3 flex items-center gap-3 text-[11px] text-muted-foreground px-1">
                         {agent.browserEngine && (
                           <span>Engine: <code className="font-mono text-foreground">{agent.browserEngine}</code></span>
@@ -957,7 +957,7 @@ export function AgentDetailPage() {
                     )}
 
                     {/* Email domain restrictions */}
-                    {agentAny.enableEmail && agent.emailAllowedDomains && agent.emailAllowedDomains.length > 0 && (
+                    {!!agentAny.enableEmail && agent.emailAllowedDomains && agent.emailAllowedDomains.length > 0 && (
                       <div className="mt-3 px-1">
                         <p className="text-[10px] text-muted-foreground mb-1">Allowed email domains:</p>
                         <div className="flex flex-wrap gap-1">

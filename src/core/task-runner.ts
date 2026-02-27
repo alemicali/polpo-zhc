@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { nanoid } from "nanoid";
 import type { OrchestratorContext } from "./orchestrator-context.js";
 import type { Task, TaskResult, RunnerConfig } from "./types.js";
+import { findAgent } from "./types.js";
 import type { RunRecord } from "./run-store.js";
 import { getSocketPath } from "./notification.js";
 import { validateProviderKeys } from "../llm/pi-client.js";
@@ -314,7 +315,7 @@ export class TaskRunner {
   }
 
   spawnForTask(task: Task): void {
-    const agent = this.ctx.config.team.agents.find(a => a.name === task.assignTo);
+    const agent = findAgent(this.ctx.config.teams, task.assignTo);
     if (!agent) {
       this.ctx.emitter.emit("log", { level: "error", message: `No agent "${task.assignTo}" for task "${task.title}"` });
       this.ctx.registry.transition(task.id, "assigned");
@@ -432,6 +433,7 @@ export class TaskRunner {
       notifySocket: getSocketPath(this.ctx.polpoDir),
       emailAllowedDomains: agent.emailAllowedDomains ?? this.ctx.config.settings.emailAllowedDomains,
       mcpToolAllowlist: this.ctx.config.settings.mcpToolAllowlist,
+      reasoning: this.ctx.config.settings.reasoning,
     };
 
     try {

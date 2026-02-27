@@ -12,7 +12,7 @@ export function cmdStatus(api: CommandAPI): void {
   const lines: string[] = [];
   lines.push(theme.bold("Status"));
   lines.push(`  Project: ${chalk.bold(state.project ?? config?.project ?? "unknown")}`);
-  lines.push(`  Team: ${chalk.bold(state.team?.name ?? config?.team?.name ?? "default")} (${agents.length} agents)`);
+  lines.push(`  Team: ${chalk.bold(state.teams?.[0]?.name ?? config?.teams?.[0]?.name ?? "default")} (${agents.length} agents)`);
 
   // Task counts
   const counts: Record<string, number> = {};

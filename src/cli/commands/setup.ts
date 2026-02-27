@@ -244,9 +244,9 @@ export async function runSetupWizard(options?: SetupOptions): Promise<void> {
 
   // ── Step 4: Team configuration ──
   console.log();
-  const defaultTeamName = existing?.team?.name ?? "default";
-  const defaultAgentName = existing?.team?.agents?.[0]?.name ?? "dev-1";
-  const defaultAgentRole = existing?.team?.agents?.[0]?.role ?? "developer";
+  const defaultTeamName = existing?.teams?.[0]?.name ?? "default";
+  const defaultAgentName = existing?.teams?.[0]?.agents?.[0]?.name ?? "dev-1";
+  const defaultAgentRole = existing?.teams?.[0]?.agents?.[0]?.role ?? "developer";
 
   const teamName = await promptWithDefault("Team name", defaultTeamName);
   const agentName = await promptWithDefault("Agent name", defaultAgentName);

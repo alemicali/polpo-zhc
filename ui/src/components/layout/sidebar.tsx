@@ -5,7 +5,7 @@ import {
   ListChecks,
   Map,
   Bot,
-  MessageSquare,
+  MessageCircle,
   Brain,
   Columns2,
   Bell,
@@ -24,7 +24,7 @@ import {
 
 const nav = [
   { to: "/dashboard", icon: LayoutDashboard, label: "Mission Control" },
-  { to: "/chat", icon: MessageSquare, label: "Chat" },
+  { to: "/chat", icon: MessageCircle, label: "Chat" },
   { to: "/plans", icon: Map, label: "Plans" },
   { to: "/tasks", icon: ListChecks, label: "Tasks" },
   { to: "/agents", icon: Bot, label: "Agents" },
@@ -89,12 +89,12 @@ export function Sidebar() {
   return (
     <aside
       className={cn(
-        "relative flex h-full flex-col border-r border-sidebar-border bg-sidebar deep-sea-bg transition-all duration-300 ease-out",
+        "relative flex h-full flex-col border-r border-border/40 bg-muted/50 transition-all duration-300 ease-out",
         collapsed ? "w-[56px]" : "w-64"
       )}
     >
       {/* Logo area */}
-      <div className="relative flex h-16 items-center border-b border-sidebar-border group">
+      <div className="relative flex h-14 items-center border-b border-border/40 group">
         {collapsed ? (
           <div className="flex w-full items-center justify-center">
             <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary/10 text-lg">
@@ -102,10 +102,10 @@ export function Sidebar() {
             </div>
             <button
               onClick={() => setCollapsed(false)}
-              className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-sidebar/90 backdrop-blur-sm cursor-pointer"
+              className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-muted/90 backdrop-blur-sm cursor-pointer"
               aria-label="Expand sidebar"
             >
-              <Columns2 className="h-4 w-4 text-sidebar-foreground" />
+              <Columns2 className="h-4 w-4 text-foreground" />
             </button>
           </div>
         ) : (
@@ -115,13 +115,13 @@ export function Sidebar() {
                 🐙
               </div>
               <div>
-                <h1 className="text-sm font-bold tracking-tight text-sidebar-foreground">Polpo</h1>
+                <h1 className="text-sm font-bold tracking-tight text-foreground">Polpo</h1>
                 <p className="text-[10px] tracking-wide uppercase text-muted-foreground/70">Agent Wrangler</p>
               </div>
             </div>
             <button
               onClick={() => setCollapsed(true)}
-              className="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground hover:text-sidebar-foreground hover:bg-sidebar-accent/50 transition-all cursor-pointer"
+              className="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-all cursor-pointer"
               aria-label="Collapse sidebar"
             >
               <Columns2 className="h-4 w-4" />
@@ -145,8 +145,8 @@ export function Sidebar() {
                 ? "justify-center h-10 w-10"
                 : "gap-3 px-3 py-2.5 text-[13px] font-medium",
               isActive
-                ? "bg-sidebar-accent text-sidebar-accent-foreground shadow-sm"
-                : "text-muted-foreground hover:bg-sidebar-accent/40 hover:text-sidebar-foreground"
+                ? "bg-accent text-accent-foreground shadow-sm"
+                : "text-muted-foreground hover:bg-accent/40 hover:text-foreground"
             );
 
           return collapsed ? (
@@ -186,7 +186,7 @@ export function Sidebar() {
       {/* Footer — connection + project */}
       <div
         className={cn(
-          "border-t border-sidebar-border space-y-2",
+          "border-t border-border/40 space-y-2",
           collapsed ? "p-0 py-3 flex flex-col items-center" : "px-4 py-3"
         )}
       >

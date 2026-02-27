@@ -4,7 +4,7 @@ import type { RunStore } from "./run-store.js";
 import type { MemoryStore } from "./memory-store.js";
 import type { LogStore } from "./log-store.js";
 import type { SessionStore } from "./session-store.js";
-import type { PolpoConfig, Task, AssessmentResult, ReviewContext } from "./types.js";
+import type { PolpoConfig, Task, AssessmentResult, ReviewContext, ReasoningLevel } from "./types.js";
 import type { HookRegistry } from "./hooks.js";
 
 export type AssessFn = (
@@ -12,6 +12,7 @@ export type AssessFn = (
   cwd: string,
   onProgress?: (msg: string) => void,
   context?: ReviewContext,
+  reasoning?: ReasoningLevel,
 ) => Promise<AssessmentResult>;
 
 /**

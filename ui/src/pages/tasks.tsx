@@ -41,10 +41,12 @@ import {
   LayoutList,
   Columns3,
   Map,
+  Users,
   Check,
 } from "lucide-react";
-import { useTasks, usePolpo, useProcesses, usePlans } from "@lumea-labs/polpo-react";
+import { useTasks, usePolpo, useProcesses, usePlans, useAgents } from "@lumea-labs/polpo-react";
 import type { Task, TaskStatus, AgentProcess } from "@lumea-labs/polpo-react";
+import { useAsyncAction } from "@/hooks/use-polpo";
 import { toast } from "sonner";
 import { formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -139,6 +141,71 @@ function PlanFilter({
             size="sm"
             className="w-full mt-1 text-xs"
             onClick={() => plans.forEach(p => { if (selected.has(p.name)) onToggle(p.name); })}
+          >
+            Clear all
+          </Button>
+        )}
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+// ── Team filter popover ──
+
+function TeamFilter({
+  teams,
+  selected,
+  onToggle,
+}: {
+  teams: { name: string }[];
+  selected: Set<string>;
+  onToggle: (name: string) => void;
+}) {
+  const hasFilter = selected.size > 0;
+
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button variant={hasFilter ? "default" : "outline"} size="sm" className="gap-1.5">
+          <Users className="h-3.5 w-3.5" />
+          Teams
+          {hasFilter && (
+            <Badge variant="secondary" className="text-[9px] ml-1">{selected.size}</Badge>
+          )}
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-56 p-2" align="start">
+        <div className="space-y-1 max-h-64 overflow-y-auto">
+          {teams.length === 0 ? (
+            <p className="text-xs text-muted-foreground text-center py-3">No teams</p>
+          ) : (
+            teams.map((t) => (
+              <button
+                key={t.name}
+                className={cn(
+                  "flex items-center gap-2 w-full rounded-md px-2 py-1.5 text-left text-sm transition-colors",
+                  selected.has(t.name) ? "bg-accent text-accent-foreground" : "hover:bg-muted"
+                )}
+                onClick={() => onToggle(t.name)}
+              >
+                <div className={cn(
+                  "flex h-4 w-4 shrink-0 items-center justify-center rounded border",
+                  selected.has(t.name) ? "bg-primary border-primary" : "border-muted-foreground/30"
+                )}>
+                  {selected.has(t.name) && <Check className="h-3 w-3 text-primary-foreground" />}
+                </div>
+                <Users className="h-3 w-3 text-muted-foreground shrink-0" />
+                <span className="truncate">{t.name}</span>
+              </button>
+            ))
+          )}
+        </div>
+        {hasFilter && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="w-full mt-1 text-xs"
+            onClick={() => teams.forEach(t => { if (selected.has(t.name)) onToggle(t.name); })}
           >
             Clear all
           </Button>
@@ -505,11 +572,13 @@ export function TasksPage() {
   const { processes } = useProcesses();
   const { client } = usePolpo();
   const { plans } = usePlans();
+  const { teams } = useAgents();
   const [search, setSearch] = useState("");
   const [viewMode, setViewMode] = useState<ViewMode>(() => {
     return (localStorage.getItem("polpo-tasks-view") as ViewMode) ?? "list";
   });
   const [selectedPlans, setSelectedPlans] = useState<Set<string>>(new Set());
+  const [selectedTeams, setSelectedTeams] = useState<Set<string>>(new Set());
 
   const setView = (mode: ViewMode) => {
     setViewMode(mode);
@@ -525,8 +594,32 @@ export function TasksPage() {
     });
   };
 
+  const toggleTeam = (name: string) => {
+    setSelectedTeams(prev => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
+  };
+
+  // Map agent name → team name for team filtering
+  const agentTeamMap = useMemo(() => {
+    const m: Record<string, string> = {};
+    for (const team of teams) {
+      for (const agent of team.agents) {
+        m[agent.name] = team.name;
+      }
+    }
+    return m;
+  }, [teams]);
+
   const killTask = async (id: string) => { await client.killTask(id); refetch(); };
   const queueTask = async (id: string) => { await client.queueTask(id); refetch(); };
+
+  const [handleRefresh, isRefreshing] = useAsyncAction(async () => {
+    await refetch();
+  });
 
   const handleAction = async (action: (id: string) => Promise<void>, id: string, label: string) => {
     try {
@@ -538,12 +631,17 @@ export function TasksPage() {
     }
   };
 
-  // Filtered tasks by search + plan filter
+  // Filtered tasks by search + plan filter + team filter
   const filtered = useMemo(() => {
     return tasks.filter(t => {
       // Plan filter
       if (selectedPlans.size > 0 && !selectedPlans.has(t.group ?? "")) {
         return false;
+      }
+      // Team filter
+      if (selectedTeams.size > 0) {
+        const agentTeam = agentTeamMap[t.assignTo];
+        if (!agentTeam || !selectedTeams.has(agentTeam)) return false;
       }
       // Search filter
       if (search) {
@@ -556,7 +654,7 @@ export function TasksPage() {
       }
       return true;
     });
-  }, [tasks, search, selectedPlans]);
+  }, [tasks, search, selectedPlans, selectedTeams, agentTeamMap]);
 
   // Unique plan names for the filter
   const planOptions = useMemo((): { name: string; id: string }[] => {
@@ -599,6 +697,15 @@ export function TasksPage() {
           onToggle={togglePlan}
         />
 
+        {/* Team filter */}
+        {teams.length > 1 && (
+          <TeamFilter
+            teams={teams}
+            selected={selectedTeams}
+            onToggle={toggleTeam}
+          />
+        )}
+
         {/* Spacer */}
         <div className="flex-1" />
 
@@ -623,18 +730,18 @@ export function TasksPage() {
         </div>
 
         {/* Refresh */}
-        <Button variant="outline" size="sm" className="h-7" onClick={refetch}>
-          <RefreshCw className="h-3.5 w-3.5" />
+        <Button variant="outline" size="sm" className="h-7" onClick={handleRefresh} disabled={isRefreshing}>
+          <RefreshCw className={cn("h-3.5 w-3.5", isRefreshing && "animate-spin")} />
         </Button>
       </div>
 
       {/* Active filter indicators */}
-      {selectedPlans.size > 0 && (
-        <div className="flex items-center gap-2 shrink-0">
+      {(selectedPlans.size > 0 || selectedTeams.size > 0) && (
+        <div className="flex items-center gap-2 shrink-0 flex-wrap">
           <span className="text-[10px] text-muted-foreground">Filtering by:</span>
           {Array.from(selectedPlans).map((name) => (
             <Badge
-              key={name}
+              key={`plan-${name}`}
               variant="secondary"
               className="text-[10px] gap-1 cursor-pointer bg-primary/10 text-primary hover:bg-destructive/20"
               onClick={() => togglePlan(name)}
@@ -644,11 +751,23 @@ export function TasksPage() {
               <XCircle className="h-2.5 w-2.5" />
             </Badge>
           ))}
+          {Array.from(selectedTeams).map((name) => (
+            <Badge
+              key={`team-${name}`}
+              variant="secondary"
+              className="text-[10px] gap-1 cursor-pointer bg-violet-500/10 text-violet-400 hover:bg-destructive/20"
+              onClick={() => toggleTeam(name)}
+            >
+              <Users className="h-2.5 w-2.5" />
+              {name}
+              <XCircle className="h-2.5 w-2.5" />
+            </Badge>
+          ))}
           <Button
             variant="ghost"
             size="sm"
             className="h-5 px-1.5 text-[10px] text-muted-foreground"
-            onClick={() => setSelectedPlans(new Set())}
+            onClick={() => { setSelectedPlans(new Set()); setSelectedTeams(new Set()); }}
           >
             Clear all
           </Button>
@@ -659,7 +778,7 @@ export function TasksPage() {
       <div className="flex items-center gap-2 shrink-0">
         <span className="text-xs text-muted-foreground">
           {filtered.length} task{filtered.length !== 1 ? "s" : ""}
-          {selectedPlans.size > 0 && ` (filtered from ${tasks.length})`}
+          {(selectedPlans.size > 0 || selectedTeams.size > 0) && ` (filtered from ${tasks.length})`}
         </span>
       </div>
 

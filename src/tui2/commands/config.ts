@@ -77,7 +77,7 @@ export function cmdConfig(api: CommandAPI): void {
   const lines: string[] = [];
   lines.push(theme.bold("Configuration"));
   lines.push(`  Project: ${config?.project ?? "unknown"}`);
-  lines.push(`  Team: ${config?.team?.name ?? "default"}`);
+  lines.push(`  Team: ${config?.teams?.[0]?.name ?? "default"}`);
   lines.push(`  Max Retries: ${settings?.maxRetries ?? 3}`);
   lines.push(`  Log Level: ${settings?.logLevel ?? "normal"}`);
   lines.push(`  Task Timeout: ${settings?.taskTimeout ?? 600000}ms`);

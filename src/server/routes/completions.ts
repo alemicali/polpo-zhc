@@ -16,12 +16,15 @@ import { streamSSE } from "hono/streaming";
 import { nanoid } from "nanoid";
 import type { Orchestrator } from "../../core/orchestrator.js";
 import { buildChatSystemPrompt } from "../../llm/prompts.js";
-import { resolveModel, resolveApiKeyAsync, resolveModelSpec } from "../../llm/pi-client.js";
+import { resolveModel, resolveApiKeyAsync, resolveModelSpec, buildStreamOpts } from "../../llm/pi-client.js";
 import { streamSimple, type Message } from "@mariozechner/pi-ai";
 import {
   ALL_ORCHESTRATOR_TOOLS,
   executeOrchestratorTool,
+  isInteractive,
 } from "../../llm/orchestrator-tools.js";
+import type { AskUserQuestion } from "../../core/types.js";
+import type { ToolCallInfo } from "../../core/session-store.js";
 
 const MAX_TURNS = 20;
 
@@ -151,7 +154,12 @@ function convertMessages(messages: z.infer<typeof messageSchema>[]): { piMessage
   return { piMessages, extraSystemParts };
 }
 
-function sseChunk(id: string, delta: { content?: string; role?: string }, finishReason: string | null = null): string {
+function sseChunk(
+  id: string,
+  delta: { content?: string; role?: string },
+  finishReason: string | null = null,
+  extra?: Record<string, unknown>,
+): string {
   return JSON.stringify({
     id,
     object: "chat.completion.chunk",
@@ -161,6 +169,7 @@ function sseChunk(id: string, delta: { content?: string; role?: string }, finish
       index: 0,
       delta,
       finish_reason: finishReason,
+      ...extra,
     }],
   });
 }
@@ -215,21 +224,178 @@ export function completionRoutes(orchestrator: Orchestrator, apiKeys?: string[])
       : systemPrompt;
 
     // ── Resolve model ──
-    const modelSpec = resolveModelSpec(orchestrator.getConfig()?.settings?.orchestratorModel);
+    const settings = orchestrator.getConfig()?.settings;
+    const modelSpec = resolveModelSpec(settings?.orchestratorModel);
     const m = resolveModel(modelSpec);
     const apiKey = await resolveApiKeyAsync(m.provider as string);
-    const streamOpts = apiKey ? { apiKey } : undefined;
+    const reasoning = settings?.reasoning;
+    const streamOpts = buildStreamOpts(apiKey, reasoning);
 
     const completionId = `chatcmpl-${nanoid(24)}`;
+
+    // ── Session persistence ──
+    const sessionStore = orchestrator.getSessionStore();
+    let sessionId: string | null = c.req.header("x-session-id") ?? null;
+    if (sessionStore) {
+      if (!sessionId) {
+        // Reuse latest session if recent (< 30 min), otherwise create new
+        const latest = sessionStore.getLatestSession();
+        const timeout = 30 * 60 * 1000;
+        if (latest && Date.now() - new Date(latest.updatedAt).getTime() < timeout) {
+          sessionId = latest.id;
+        } else {
+          const firstUserMsg = body.messages.find(m => m.role === "user");
+          sessionId = sessionStore.create(firstUserMsg?.content.slice(0, 60));
+        }
+      }
+      // Persist user message (only the last one — earlier messages are already persisted)
+      const lastUserMsg = [...body.messages].reverse().find(m => m.role === "user");
+      if (lastUserMsg && sessionId) {
+        sessionStore.addMessage(sessionId, "user", lastUserMsg.content);
+      }
+    }
+
+    // Expose session ID to the client so it can track which session is active
+    if (sessionId) {
+      c.header("x-session-id", sessionId);
+    }
 
     if (body.stream) {
       // ── Streaming mode ──
       return streamSSE(c, async (stream) => {
         await stream.writeSSE({ data: sseChunk(completionId, { role: "assistant" }) });
 
+        // Reserve a placeholder message in the store BEFORE streaming.
+        // This guarantees the assistant message exists even if the client disconnects.
+        let assistantMsgId: string | null = null;
+        if (sessionStore && sessionId) {
+          const placeholder = sessionStore.addMessage(sessionId, "assistant", "");
+          assistantMsgId = placeholder.id;
+        }
+
         const messages: Message[] = [...piMessages];
         let finalText = "";
+        const toolCallsAccum: ToolCallInfo[] = [];
 
+        try {
+          for (let turn = 0; turn < MAX_TURNS; turn++) {
+            const piStream = streamSimple(m, {
+              systemPrompt: fullSystemPrompt,
+              messages,
+              tools: ALL_ORCHESTRATOR_TOOLS,
+            }, streamOpts);
+
+            let turnText = "";
+            let streamError: string | undefined;
+
+            for await (const event of piStream) {
+              if (event.type === "text_delta") {
+                turnText += event.delta;
+                await stream.writeSSE({ data: sseChunk(completionId, { content: event.delta }) });
+              } else if (event.type === "error") {
+                streamError = (event as any).error?.errorMessage ?? "Model returned an error";
+              }
+            }
+
+            if (streamError) {
+              finalText += `\n\nError: ${streamError}`;
+              await stream.writeSSE({ data: sseChunk(completionId, { content: `\n\nError: ${streamError}` }) });
+              break;
+            }
+
+            const response = await piStream.result();
+            messages.push(response);
+            finalText += turnText;
+
+            const toolCalls = response.content.filter(
+              (cc): cc is { type: "toolCall"; id: string; name: string; arguments: Record<string, any> } =>
+                cc.type === "toolCall"
+            );
+
+            if (toolCalls.length === 0) break;
+
+            // Check for ask_user — intercept and pause the stream
+            const askUserCall = toolCalls.find(tc => isInteractive(tc.name));
+            if (askUserCall) {
+              const questions = (askUserCall.arguments as any)?.questions as AskUserQuestion[] ?? [];
+
+              // Emit the ask_user chunk with questions, then stop
+              await stream.writeSSE({
+                data: sseChunk(completionId, {}, "ask_user", { ask_user: { questions } }),
+              });
+              await stream.writeSSE({ data: "[DONE]" });
+              return; // finally block will persist whatever finalText we have
+            }
+
+            for (const call of toolCalls) {
+              // Notify client that a tool is being called
+              await stream.writeSSE({
+                data: sseChunk(completionId, {}, null, {
+                  tool_call: { id: call.id, name: call.name, arguments: call.arguments, state: "calling" },
+                }),
+              });
+
+              const result = executeOrchestratorTool(call.name, call.arguments, orchestrator);
+              const isError = result.startsWith("Error:");
+
+              // Accumulate for persistence
+              toolCallsAccum.push({
+                id: call.id,
+                name: call.name,
+                arguments: call.arguments,
+                result,
+                state: isError ? "error" : "completed",
+              });
+
+              // Notify client with tool result
+              await stream.writeSSE({
+                data: sseChunk(completionId, {}, null, {
+                  tool_call: { id: call.id, name: call.name, result, state: isError ? "error" : "completed" },
+                }),
+              });
+
+              messages.push({
+                role: "toolResult",
+                toolCallId: call.id,
+                toolName: call.name,
+                content: [{ type: "text", text: result }],
+                isError,
+                timestamp: Date.now(),
+              });
+            }
+          }
+
+          await stream.writeSSE({ data: sseChunk(completionId, {}, "stop") });
+          await stream.writeSSE({ data: "[DONE]" });
+        } finally {
+          // Always persist the assistant response — even on disconnect.
+          // Update the placeholder message with whatever text was accumulated, plus tool calls.
+          if (sessionStore && sessionId && assistantMsgId) {
+            if (finalText.trim()) {
+              sessionStore.updateMessage(sessionId, assistantMsgId, finalText.trim(), toolCallsAccum);
+            }
+            // If finalText is empty (LLM never responded), remove the empty placeholder
+            // by setting content to a marker that indicates an interrupted response
+            else {
+              sessionStore.updateMessage(sessionId, assistantMsgId, "[Response interrupted]", toolCallsAccum);
+            }
+          }
+        }
+      }) as any;
+    } else {
+      // ── Non-streaming mode ──
+      // Reserve placeholder so the message is visible even if the request is interrupted
+      let assistantMsgId: string | null = null;
+      if (sessionStore && sessionId) {
+        const placeholder = sessionStore.addMessage(sessionId, "assistant", "");
+        assistantMsgId = placeholder.id;
+      }
+
+      const messages: Message[] = [...piMessages];
+      let finalText = "";
+      const toolCallsAccum: ToolCallInfo[] = [];
+
+      try {
         for (let turn = 0; turn < MAX_TURNS; turn++) {
           const piStream = streamSimple(m, {
             systemPrompt: fullSystemPrompt,
@@ -239,19 +405,16 @@ export function completionRoutes(orchestrator: Orchestrator, apiKeys?: string[])
 
           let turnText = "";
           let streamError: string | undefined;
-
           for await (const event of piStream) {
             if (event.type === "text_delta") {
               turnText += event.delta;
-              await stream.writeSSE({ data: sseChunk(completionId, { content: event.delta }) });
             } else if (event.type === "error") {
               streamError = (event as any).error?.errorMessage ?? "Model returned an error";
             }
           }
 
           if (streamError) {
-            await stream.writeSSE({ data: sseChunk(completionId, { content: `\n\nError: ${streamError}` }) });
-            break;
+            return c.json({ error: { message: streamError, type: "upstream_error" } }, 502 as any);
           }
 
           const response = await piStream.result();
@@ -265,75 +428,67 @@ export function completionRoutes(orchestrator: Orchestrator, apiKeys?: string[])
 
           if (toolCalls.length === 0) break;
 
+          // Check for ask_user — return questions to client
+          const askUserCall = toolCalls.find(tc => isInteractive(tc.name));
+          if (askUserCall) {
+            const questions = (askUserCall.arguments as any)?.questions as AskUserQuestion[] ?? [];
+            return c.json({
+              id: completionId,
+              object: "chat.completion" as const,
+              created: Math.floor(Date.now() / 1000),
+              model: "polpo" as const,
+              choices: [{
+                index: 0,
+                message: { role: "assistant" as const, content: finalText },
+                finish_reason: "ask_user" as const,
+                ask_user: { questions },
+              }],
+              usage: {
+                prompt_tokens: Math.ceil(fullSystemPrompt.length / 4),
+                completion_tokens: Math.ceil(finalText.length / 4),
+                total_tokens: Math.ceil(fullSystemPrompt.length / 4) + Math.ceil(finalText.length / 4),
+              },
+            });
+            // Note: finally block persists finalText
+          }
+
           for (const call of toolCalls) {
             const result = executeOrchestratorTool(call.name, call.arguments, orchestrator);
+            const isError = result.startsWith("Error:");
+
+            // Accumulate for persistence
+            toolCallsAccum.push({
+              id: call.id,
+              name: call.name,
+              arguments: call.arguments,
+              result,
+              state: isError ? "error" : "completed",
+            });
+
             messages.push({
               role: "toolResult",
               toolCallId: call.id,
               toolName: call.name,
               content: [{ type: "text", text: result }],
-              isError: result.startsWith("Error:"),
+              isError,
               timestamp: Date.now(),
             });
           }
         }
 
-        await stream.writeSSE({ data: sseChunk(completionId, {}, "stop") });
-        await stream.writeSSE({ data: "[DONE]" });
-      }) as any;
-    } else {
-      // ── Non-streaming mode ──
-      const messages: Message[] = [...piMessages];
-      let finalText = "";
-
-      for (let turn = 0; turn < MAX_TURNS; turn++) {
-        const piStream = streamSimple(m, {
-          systemPrompt: fullSystemPrompt,
-          messages,
-          tools: ALL_ORCHESTRATOR_TOOLS,
-        }, streamOpts);
-
-        let turnText = "";
-        let streamError: string | undefined;
-        for await (const event of piStream) {
-          if (event.type === "text_delta") {
-            turnText += event.delta;
-          } else if (event.type === "error") {
-            streamError = (event as any).error?.errorMessage ?? "Model returned an error";
+        const promptTokens = Math.ceil(fullSystemPrompt.length / 4);
+        const completionTokens = Math.ceil(finalText.length / 4);
+        return c.json(completionResponse(completionId, finalText, promptTokens, completionTokens));
+      } finally {
+        // Always persist the final text + tool calls — even on early return (ask_user) or error
+        if (sessionStore && sessionId && assistantMsgId) {
+          if (finalText.trim()) {
+            sessionStore.updateMessage(sessionId, assistantMsgId, finalText.trim(), toolCallsAccum);
+          } else {
+            sessionStore.updateMessage(sessionId, assistantMsgId, "[Response interrupted]", toolCallsAccum);
           }
         }
-
-        if (streamError) {
-          return c.json({ error: { message: streamError, type: "upstream_error" } }, 502 as any);
-        }
-
-        const response = await piStream.result();
-        messages.push(response);
-        finalText += turnText;
-
-        const toolCalls = response.content.filter(
-          (cc): cc is { type: "toolCall"; id: string; name: string; arguments: Record<string, any> } =>
-            cc.type === "toolCall"
-        );
-
-        if (toolCalls.length === 0) break;
-
-        for (const call of toolCalls) {
-          const result = executeOrchestratorTool(call.name, call.arguments, orchestrator);
-          messages.push({
-            role: "toolResult",
-            toolCallId: call.id,
-            toolName: call.name,
-            content: [{ type: "text", text: result }],
-            isError: result.startsWith("Error:"),
-            timestamp: Date.now(),
-          });
-        }
       }
-
-      const promptTokens = Math.ceil(fullSystemPrompt.length / 4);
-      const completionTokens = Math.ceil(finalText.length / 4);
-      return c.json(completionResponse(completionId, finalText, promptTokens, completionTokens));
     }
   });
 

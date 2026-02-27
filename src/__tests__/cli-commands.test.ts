@@ -251,13 +251,13 @@ describe("CLI: team operations", () => {
   });
 
   test("team rename — changes team name", () => {
-    o.renameTeam("new-team-name");
-    const team = o.getTeam();
+    o.renameTeam("test-team", "new-team-name");
+    const team = o.getTeam()!;
     expect(team.name).toBe("new-team-name");
   });
 
   test("team getTeam — returns team info", () => {
-    const team = o.getTeam();
+    const team = o.getTeam()!;
     expect(team).toBeDefined();
     expect(team.name).toBe("new-team-name"); // renamed in previous test
     expect(Array.isArray(team.agents)).toBe(true);
@@ -328,21 +328,21 @@ describe("CLI: config operations", () => {
     const config = o.getConfig();
     expect(config).toBeDefined();
     expect(config!.project).toBe("test-cli");
-    expect(config!.team.name).toBe("test-team");
-    expect(config!.team.agents.length).toBeGreaterThanOrEqual(1);
+    expect(config!.teams[0].name).toBe("test-team");
+    expect(config!.teams[0].agents.length).toBeGreaterThanOrEqual(1);
   });
 
   test("config validate — valid config succeeds", async () => {
     // parseConfig reads from .polpo/polpo.json — write it first
     savePolpoConfig(join(tempDir, ".polpo"), {
       project: "test-cli",
-      team: VALID_TEAM,
+      teams: [VALID_TEAM],
       settings: { maxRetries: 2, workDir: ".", logLevel: "normal" },
     });
     const config = await parseConfig(tempDir);
     expect(config.version).toBe("1");
     expect(config.project).toBe("test-cli");
-    expect(config.team.name).toBe("test-team");
+    expect(config.teams[0].name).toBe("test-team");
   });
 
   test("config validate — missing config fails", async () => {

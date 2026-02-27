@@ -2,7 +2,7 @@ import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { join } from "node:path";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import type { ServerEnv } from "../app.js";
-import { AddAgentSchema, RenameTeamSchema } from "../schemas.js";
+import { AddAgentSchema, RenameTeamSchema, AddTeamSchema } from "../schemas.js";
 import { redactAgentConfig, redactTeam, sanitizeTranscriptEntry } from "../security.js";
 
 /**
@@ -50,6 +50,7 @@ export function agentRoutes(): OpenAPIHono<ServerEnv> {
   app.openapi(addAgentRoute, (c) => {
     const orchestrator = c.get("orchestrator");
     const body = c.req.valid("json");
+    const teamName = c.req.query("team");
 
     orchestrator.addAgent({
       name: body.name,
@@ -75,7 +76,7 @@ export function agentRoutes(): OpenAPIHono<ServerEnv> {
       enableEmail: body.enableEmail,
       enableAudio: body.enableAudio,
       enableImage: body.enableImage,
-    });
+    }, teamName);
 
     return c.json({ ok: true, data: { added: true } }, 201);
   });
@@ -111,7 +112,27 @@ export function agentRoutes(): OpenAPIHono<ServerEnv> {
     return c.json({ ok: true, data: { removed: true } }, 200);
   });
 
-  // GET /team — get team info
+  // GET /teams — get all teams
+  const getTeamsRoute = createRoute({
+    method: "get",
+    path: "/teams",
+    tags: ["Agents"],
+    summary: "List all teams",
+    responses: {
+      200: {
+        content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.array(z.any()) }) } },
+        description: "All teams",
+      },
+    },
+  });
+
+  app.openapi(getTeamsRoute, (c) => {
+    const orchestrator = c.get("orchestrator");
+    const teams = orchestrator.getTeams();
+    return c.json({ ok: true, data: teams.map(redactTeam) });
+  });
+
+  // GET /team — get single team (default or by ?name= query)
   const getTeamRoute = createRoute({
     method: "get",
     path: "/team",
@@ -127,7 +148,64 @@ export function agentRoutes(): OpenAPIHono<ServerEnv> {
 
   app.openapi(getTeamRoute, (c) => {
     const orchestrator = c.get("orchestrator");
-    return c.json({ ok: true, data: redactTeam(orchestrator.getTeam()) });
+    const name = c.req.query("name");
+    const team = orchestrator.getTeam(name);
+    return c.json({ ok: true, data: team ? redactTeam(team) : null });
+  });
+
+  // POST /teams — add a new team
+  const addTeamRoute = createRoute({
+    method: "post",
+    path: "/teams",
+    tags: ["Agents"],
+    summary: "Add a team",
+    request: {
+      body: { content: { "application/json": { schema: AddTeamSchema } } },
+    },
+    responses: {
+      201: {
+        content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.object({ added: z.boolean() }) }) } },
+        description: "Team added",
+      },
+    },
+  });
+
+  app.openapi(addTeamRoute, (c) => {
+    const orchestrator = c.get("orchestrator");
+    const body = c.req.valid("json");
+    orchestrator.addTeam({ name: body.name, description: body.description, agents: [] });
+    return c.json({ ok: true, data: { added: true } }, 201);
+  });
+
+  // DELETE /teams/:name — remove a team
+  const deleteTeamRoute = createRoute({
+    method: "delete",
+    path: "/teams/{name}",
+    tags: ["Agents"],
+    summary: "Remove a team",
+    request: {
+      params: z.object({ name: z.string() }),
+    },
+    responses: {
+      200: {
+        content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.object({ removed: z.boolean() }) }) } },
+        description: "Team removed",
+      },
+      404: {
+        content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string(), code: z.string() }) } },
+        description: "Team not found",
+      },
+    },
+  });
+
+  app.openapi(deleteTeamRoute, (c) => {
+    const orchestrator = c.get("orchestrator");
+    const { name } = c.req.valid("param");
+    const removed = orchestrator.removeTeam(name);
+    if (!removed) {
+      return c.json({ ok: false, error: "Team not found", code: "NOT_FOUND" }, 404);
+    }
+    return c.json({ ok: true, data: { removed: true } }, 200);
   });
 
   // PATCH /team — rename team
@@ -150,8 +228,9 @@ export function agentRoutes(): OpenAPIHono<ServerEnv> {
   app.openapi(renameTeamRoute, (c) => {
     const orchestrator = c.get("orchestrator");
     const body = c.req.valid("json");
-    orchestrator.renameTeam(body.name);
-    return c.json({ ok: true, data: redactTeam(orchestrator.getTeam()) });
+    orchestrator.renameTeam(body.oldName, body.name);
+    const updatedTeam = orchestrator.getTeam(body.name);
+    return c.json({ ok: true, data: updatedTeam ? redactTeam(updatedTeam) : null });
   });
 
   // GET /processes — active agent processes

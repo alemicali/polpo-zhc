@@ -12,6 +12,7 @@ import type {
   CheckResult,
   MetricResult,
   ReviewContext,
+  ReasoningLevel,
 } from "../core/types.js";
 import { runLLMReview } from "./llm-review.js";
 
@@ -23,6 +24,7 @@ export async function runCheck(
   cwd: string,
   onProgress?: (msg: string) => void,
   context?: ReviewContext,
+  reasoning?: ReasoningLevel,
 ): Promise<CheckResult> {
   switch (expectation.type) {
     case "test": {
@@ -127,7 +129,7 @@ export async function runCheck(
     }
 
     case "llm_review": {
-      return await runLLMReview(expectation, cwd, onProgress, context);
+      return await runLLMReview(expectation, cwd, onProgress, context, reasoning);
     }
   }
 }
@@ -168,9 +170,10 @@ export async function assessTask(
   cwd: string,
   onProgress?: (msg: string) => void,
   context?: ReviewContext,
+  reasoning?: ReasoningLevel,
 ): Promise<AssessmentResult> {
   const checks = await Promise.all(
-    task.expectations.map((exp) => runCheck(exp, cwd, onProgress, context))
+    task.expectations.map((exp) => runCheck(exp, cwd, onProgress, context, reasoning))
   );
   const metrics = await Promise.all(
     task.metrics.map((m) => runMetric(m, cwd))

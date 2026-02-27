@@ -67,10 +67,12 @@ const listAgentsTool: Tool = {
   parameters: Type.Object({}),
 };
 
-const getTeamTool: Tool = {
-  name: "get_team",
-  description: "Get full team info: name, description, and all agents with their configuration.",
-  parameters: Type.Object({}),
+const getTeamsTool: Tool = {
+  name: "get_teams",
+  description: "Get all teams with their agents and configuration. Optionally filter by team name.",
+  parameters: Type.Object({
+    name: Type.Optional(Type.String({ description: "Filter by team name (optional)" })),
+  }),
 };
 
 const getMemoryTool: Tool = {
@@ -261,14 +263,16 @@ const deletePlanTool: Tool = {
 
 const addAgentTool: Tool = {
   name: "add_agent",
-  description: "Add a new agent to the team.",
+  description: "Add a new agent to a team. If no team is specified, adds to the default (first) team.",
   parameters: Type.Object({
-    name: Type.String({ description: "Agent name (unique identifier)" }),
+    name: Type.String({ description: "Agent name (unique identifier, must be globally unique across all teams)" }),
     role: Type.Optional(Type.String({ description: "Agent role description (e.g. 'Frontend developer')" })),
     model: Type.Optional(Type.String({ description: "LLM model (e.g. 'claude-sonnet-4-5-20250929', 'gpt-4o')" })),
     systemPrompt: Type.Optional(Type.String({ description: "Custom system prompt for this agent" })),
     skills: Type.Optional(Type.Array(Type.String(), { description: "Skill names to assign" })),
     allowedPaths: Type.Optional(Type.Array(Type.String(), { description: "Filesystem paths this agent can access" })),
+    reportsTo: Type.Optional(Type.String({ description: "Name of the agent this one reports to (org chart hierarchy, e.g. 'lead-dev')" })),
+    team: Type.Optional(Type.String({ description: "Team name to add the agent to (default: first team)" })),
   }),
 };
 
@@ -282,7 +286,7 @@ const removeAgentTool: Tool = {
 
 const updateAgentTool: Tool = {
   name: "update_agent",
-  description: "Update an existing agent's configuration (model, role, system prompt, skills, paths).",
+  description: "Update an existing agent's configuration (model, role, system prompt, skills, paths, hierarchy).",
   parameters: Type.Object({
     name: Type.String({ description: "Agent name to update" }),
     role: Type.Optional(Type.String({ description: "New role description" })),
@@ -290,13 +294,38 @@ const updateAgentTool: Tool = {
     systemPrompt: Type.Optional(Type.String({ description: "New system prompt" })),
     skills: Type.Optional(Type.Array(Type.String(), { description: "New skill list (replaces existing)" })),
     allowedPaths: Type.Optional(Type.Array(Type.String(), { description: "New allowed paths (replaces existing)" })),
+    reportsTo: Type.Optional(Type.String({ description: "Name of the agent this one reports to (org chart hierarchy). Use empty string to remove." })),
+  }),
+};
+
+const listTeamsTool: Tool = {
+  name: "list_teams",
+  description: "List all teams with their agent counts.",
+  parameters: Type.Object({}),
+};
+
+const addTeamTool: Tool = {
+  name: "add_team",
+  description: "Create a new team.",
+  parameters: Type.Object({
+    name: Type.String({ description: "Team name (must be unique)" }),
+    description: Type.Optional(Type.String({ description: "Team description" })),
+  }),
+};
+
+const removeTeamTool: Tool = {
+  name: "remove_team",
+  description: "Remove a team and all its agents. Cannot remove the last team.",
+  parameters: Type.Object({
+    name: Type.String({ description: "Team name to remove" }),
   }),
 };
 
 const renameTeamTool: Tool = {
   name: "rename_team",
-  description: "Rename the team.",
+  description: "Rename a team. Specify the current name and the new name.",
   parameters: Type.Object({
+    oldName: Type.String({ description: "Current team name" }),
     name: Type.String({ description: "New team name" }),
   }),
 };
@@ -502,6 +531,32 @@ const appendSystemContextTool: Tool = {
 };
 
 // ═══════════════════════════════════════════════════════
+//  INTERACTIVE TOOLS
+// ═══════════════════════════════════════════════════════
+
+const askUserTool: Tool = {
+  name: "ask_user",
+  description: `Ask the user clarifying questions when something is ambiguous or you need preferences.
+Each question has pre-populated options the user can pick from, plus a free-text custom input.
+Use this ONLY when you genuinely need information to proceed — do NOT ask obvious questions.
+The user can select from options or type a custom answer. Supports single and multiple selection.
+After receiving answers, continue with the task using the clarified information.`,
+  parameters: Type.Object({
+    questions: Type.Array(Type.Object({
+      id: Type.String({ description: "Unique question key (e.g. 'deploy-target', 'notification-channel')" }),
+      question: Type.String({ description: "The full question text" }),
+      header: Type.Optional(Type.String({ description: "Short label for compact display (max 30 chars)" })),
+      options: Type.Array(Type.Object({
+        label: Type.String({ description: "Option display text (1-5 words, concise)" }),
+        description: Type.Optional(Type.String({ description: "Extra context explaining this option" })),
+      }), { minItems: 2, description: "Pre-built selectable options. A 'Type your own answer' custom input is added automatically — do NOT include catch-all options like 'Other'." }),
+      multiple: Type.Optional(Type.Boolean({ description: "Allow selecting multiple options (default: false)" })),
+      custom: Type.Optional(Type.Boolean({ description: "Show custom text input (default: true). Set to false for strict choice-only questions." })),
+    }), { minItems: 1, maxItems: 5, description: "Questions to ask the user" }),
+  }),
+};
+
+// ═══════════════════════════════════════════════════════
 //  TOOL COLLECTIONS
 // ═══════════════════════════════════════════════════════
 
@@ -520,7 +575,7 @@ export const WRITE_TOOLS = new Set([
   // Plan
   "create_plan", "update_plan", "execute_plan", "resume_plan", "abort_plan", "delete_plan",
   // Team
-  "add_agent", "remove_agent", "update_agent", "rename_team",
+  "add_agent", "remove_agent", "update_agent", "rename_team", "add_team", "remove_team",
   // Approvals & Checkpoints
   "approve_request", "reject_request", "resume_checkpoint",
   // Scheduling
@@ -533,14 +588,21 @@ export const WRITE_TOOLS = new Set([
   "reload_config", "save_memory", "append_memory", "append_system_context",
 ]);
 
+/** Tools that pause the conversation to collect user input. */
+export const INTERACTIVE_TOOLS = new Set(["ask_user"]);
+
 export function needsApproval(toolName: string): boolean {
   return WRITE_TOOLS.has(toolName);
+}
+
+export function isInteractive(toolName: string): boolean {
+  return INTERACTIVE_TOOLS.has(toolName);
 }
 
 export const ALL_ORCHESTRATOR_TOOLS: Tool[] = [
   // Read (15)
   getStatusTool, listTasksTool, getTaskTool, listPlansTool, getPlanTool,
-  listAgentsTool, getTeamTool, getMemoryTool, getConfigTool,
+  listAgentsTool, getTeamsTool, getMemoryTool, getConfigTool,
   listApprovalsTool, listCheckpointsTool, getLogsTool,
   listSchedulesTool, listNotificationRulesTool, listWatchersTool,
   // Task (8)
@@ -548,8 +610,8 @@ export const ALL_ORCHESTRATOR_TOOLS: Tool[] = [
   retryTaskTool, killTaskTool, reassessTaskTool, forceFailTaskTool,
   // Plan (6)
   createPlanTool, updatePlanTool, executePlanTool, resumePlanTool, abortPlanTool, deletePlanTool,
-  // Team (4)
-  addAgentTool, removeAgentTool, updateAgentTool, renameTeamTool,
+  // Team (7)
+  listTeamsTool, addAgentTool, removeAgentTool, updateAgentTool, renameTeamTool, addTeamTool, removeTeamTool,
   // Approvals & Checkpoints (3)
   approveRequestTool, rejectRequestTool, resumeCheckpointTool,
   // Scheduling (3 write + 1 read above)
@@ -560,6 +622,8 @@ export const ALL_ORCHESTRATOR_TOOLS: Tool[] = [
   watchTaskTool, removeWatcherTool,
   // Config & Self (4)
   reloadConfigTool, saveMemoryTool, appendMemoryTool, appendSystemContextTool,
+  // Interactive (1)
+  askUserTool,
 ];
 
 /** Tool action labels for the approval prompt title. */
@@ -582,6 +646,8 @@ const TOOL_LABELS: Record<string, string> = {
   remove_agent: "Remove Agent",
   update_agent: "Update Agent",
   rename_team: "Rename Team",
+  add_team: "Add Team",
+  remove_team: "Remove Team",
   approve_request: "Approve Request",
   reject_request: "Reject Request",
   resume_checkpoint: "Resume Checkpoint",
@@ -621,7 +687,7 @@ export function executeOrchestratorTool(
       case "list_plans":       return execListPlans(polpo, args);
       case "get_plan":         return execGetPlan(polpo, args);
       case "list_agents":      return execListAgents(polpo);
-      case "get_team":         return execGetTeam(polpo);
+      case "get_teams":        return execGetTeams(polpo, args);
       case "get_memory":       return execGetMemory(polpo);
       case "get_config":       return execGetConfig(polpo);
       case "list_approvals":   return execListApprovals(polpo, args);
@@ -647,10 +713,13 @@ export function executeOrchestratorTool(
       case "delete_plan":      return execDeletePlan(polpo, args);
 
       // ── Team ──
+      case "list_teams":       return execListTeams(polpo);
       case "add_agent":        return execAddAgent(polpo, args);
       case "remove_agent":     return execRemoveAgent(polpo, args);
       case "update_agent":     return execUpdateAgent(polpo, args);
       case "rename_team":      return execRenameTeam(polpo, args);
+      case "add_team":         return execAddTeam(polpo, args);
+      case "remove_team":      return execRemoveTeam(polpo, args);
 
       // ── Approvals & Checkpoints ──
       case "approve_request":    return execApproveRequest(polpo, args);
@@ -679,6 +748,10 @@ export function executeOrchestratorTool(
       case "save_memory":          return execSaveMemory(polpo, args);
       case "append_memory":        return execAppendMemory(polpo, args);
       case "append_system_context": return execAppendSystemContext(polpo, args);
+
+      // ── Interactive (handled by the calling loop, not here) ──
+      case "ask_user":
+        return "Questions sent to user. Waiting for answers.";
 
       default:
         return `Unknown tool: ${toolName}`;
@@ -841,16 +914,26 @@ function execGetStatus(polpo: Orchestrator): string {
   const tasks = state.tasks;
   const processes = state.processes;
   const agents = polpo.getAgents();
-  const team = polpo.getTeam();
+  const teams = polpo.getTeams();
 
   const counts: Record<string, number> = {};
   for (const t of tasks) counts[t.status] = (counts[t.status] || 0) + 1;
 
+  const teamSummary = teams.map(t => `${t.name} (${t.agents.length})`).join(", ");
   const lines: string[] = [
     `Project: ${state.project}`,
-    `Team: ${team.name} (${agents.length} agents)`,
+    `Teams: ${teams.length} — ${teamSummary}`,
+    `Agents: ${agents.length} total`,
     `Tasks: ${tasks.length} total`,
   ];
+  // Show org hierarchy per team
+  for (const team of teams) {
+    const hierarchy = team.agents.filter(a => a.reportsTo);
+    if (hierarchy.length > 0) {
+      lines.push(`  ${team.name} hierarchy:`);
+      for (const a of hierarchy) lines.push(`    ${a.name} → ${a.reportsTo}`);
+    }
+  }
   for (const [status, count] of Object.entries(counts)) lines.push(`  ${status}: ${count}`);
 
   const alive = processes.filter(p => p.alive);
@@ -932,6 +1015,7 @@ function execListAgents(polpo: Orchestrator): string {
     const parts = [`• ${a.name}`];
     if (a.role) parts.push(`— ${a.role}`);
     if (a.model) parts.push(`[${a.model}]`);
+    if (a.reportsTo) parts.push(`→ reports to: ${a.reportsTo}`);
     if (a.skills?.length) parts.push(`skills: ${a.skills.join(", ")}`);
     if (a.systemPrompt) parts.push("(has system prompt)");
     return parts.join(" ");
@@ -939,9 +1023,14 @@ function execListAgents(polpo: Orchestrator): string {
   return `${agents.length} agent(s):\n${lines.join("\n")}`;
 }
 
-function execGetTeam(polpo: Orchestrator): string {
-  const team = polpo.getTeam();
-  return JSON.stringify(team, null, 2);
+function execGetTeams(polpo: Orchestrator, args: Record<string, unknown>): string {
+  if (args.name) {
+    const team = polpo.getTeam(args.name as string);
+    if (!team) return `Error: Team "${args.name}" not found.`;
+    return JSON.stringify(team, null, 2);
+  }
+  const teams = polpo.getTeams();
+  return JSON.stringify(teams, null, 2);
 }
 
 function execGetMemory(polpo: Orchestrator): string {
@@ -1163,6 +1252,7 @@ function execAddAgent(polpo: Orchestrator, args: Record<string, unknown>): strin
   if (existing.find(a => a.name === args.name)) {
     return `Error: Agent "${args.name}" already exists. Use update_agent to modify.`;
   }
+  const teamName = args.team as string | undefined;
   polpo.addAgent({
     name: args.name as string,
     role: args.role as string | undefined,
@@ -1170,8 +1260,9 @@ function execAddAgent(polpo: Orchestrator, args: Record<string, unknown>): strin
     systemPrompt: args.systemPrompt as string | undefined,
     skills: args.skills as string[] | undefined,
     allowedPaths: args.allowedPaths as string[] | undefined,
-  });
-  return `Agent "${args.name}" added to team.`;
+    reportsTo: args.reportsTo as string | undefined,
+  }, teamName);
+  return `Agent "${args.name}" added to ${teamName ? `team "${teamName}"` : "the first team"}.`;
 }
 
 function execRemoveAgent(polpo: Orchestrator, args: Record<string, unknown>): string {
@@ -1187,6 +1278,13 @@ function execUpdateAgent(polpo: Orchestrator, args: Record<string, unknown>): st
 
   // Remove and re-add with updated fields
   polpo.removeAgent(name);
+
+  // Handle reportsTo: empty string clears it, undefined keeps existing
+  let reportsTo = existing.reportsTo;
+  if (typeof args.reportsTo === "string") {
+    reportsTo = args.reportsTo.trim() || undefined;
+  }
+
   polpo.addAgent({
     ...existing,
     role: (args.role as string | undefined) ?? existing.role,
@@ -1194,14 +1292,46 @@ function execUpdateAgent(polpo: Orchestrator, args: Record<string, unknown>): st
     systemPrompt: (args.systemPrompt as string | undefined) ?? existing.systemPrompt,
     skills: (args.skills as string[] | undefined) ?? existing.skills,
     allowedPaths: (args.allowedPaths as string[] | undefined) ?? existing.allowedPaths,
+    reportsTo,
   });
   const changes = Object.keys(args).filter(k => k !== "name").join(", ");
   return `Agent "${name}" updated: ${changes}`;
 }
 
+function execListTeams(polpo: Orchestrator): string {
+  const teams = polpo.getTeams();
+  if (teams.length === 0) return "No teams configured.";
+  const lines = teams.map(t => `- ${t.name}: ${t.agents.length} agent(s)${t.description ? ` — ${t.description}` : ""}`);
+  return `${teams.length} team(s):\n${lines.join("\n")}`;
+}
+
+function execAddTeam(polpo: Orchestrator, args: Record<string, unknown>): string {
+  const name = args.name as string;
+  const existing = polpo.getTeam(name);
+  if (existing) return `Error: Team "${name}" already exists.`;
+  polpo.addTeam({
+    name,
+    description: args.description as string | undefined,
+    agents: [],
+  });
+  return `Team "${name}" created.`;
+}
+
+function execRemoveTeam(polpo: Orchestrator, args: Record<string, unknown>): string {
+  const name = args.name as string;
+  const teams = polpo.getTeams();
+  if (teams.length <= 1) return "Error: Cannot remove the last team.";
+  const removed = polpo.removeTeam(name);
+  return removed ? `Team "${name}" removed.` : `Error: Team "${name}" not found.`;
+}
+
 function execRenameTeam(polpo: Orchestrator, args: Record<string, unknown>): string {
-  polpo.renameTeam(args.name as string);
-  return `Team renamed to "${args.name}".`;
+  const oldName = args.oldName as string;
+  const newName = args.name as string;
+  const team = polpo.getTeam(oldName);
+  if (!team) return `Error: Team "${oldName}" not found.`;
+  polpo.renameTeam(oldName, newName);
+  return `Team "${oldName}" renamed to "${newName}".`;
 }
 
 // ═══════════════════════════════════════════════════════

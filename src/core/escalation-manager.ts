@@ -1,5 +1,6 @@
 import type { OrchestratorContext } from "./orchestrator-context.js";
 import type { Task, TaskResult, EscalationPolicy, EscalationLevel } from "./types.js";
+import { findAgent } from "./types.js";
 import type { ApprovalManager } from "./approval-manager.js";
 // resolveModelSpec no longer needed — queryOrchestratorText handles ModelConfig directly
 
@@ -135,7 +136,7 @@ export class EscalationManager {
     }
 
     // Verify agent exists
-    const agent = this.ctx.config.team.agents.find(a => a.name === targetAgent);
+    const agent = findAgent(this.ctx.config.teams, targetAgent);
     if (!agent) {
       this.ctx.emitter.emit("log", {
         level: "warn",

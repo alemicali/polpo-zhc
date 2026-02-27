@@ -198,8 +198,10 @@ export class Orchestrator extends TypedEmitter {
     // Judge model
     if (process.env.POLPO_JUDGE_MODEL) modelSpecs.push(process.env.POLPO_JUDGE_MODEL);
     // Per-agent models
-    for (const agent of this.config.team.agents) {
-      if (agent.model) modelSpecs.push(agent.model);
+    for (const team of this.config.teams) {
+      for (const agent of team.agents) {
+        if (agent.model) modelSpecs.push(agent.model);
+      }
     }
 
     if (modelSpecs.length === 0) {
@@ -415,7 +417,8 @@ export class Orchestrator extends TypedEmitter {
    * Initialize for interactive/TUI mode.
    * Creates .polpo dir and a minimal config from provided team info.
    */
-  async initInteractive(project: string, team: Team): Promise<void> {
+  async initInteractive(project: string, teams: Team | Team[]): Promise<void> {
+    const teamsArray = Array.isArray(teams) ? teams : [teams];
     if (!existsSync(this.polpoDir)) {
       mkdirSync(this.polpoDir, { recursive: true });
     }
@@ -436,7 +439,7 @@ export class Orchestrator extends TypedEmitter {
     this.config = {
       version: "1",
       project: polpoConfig?.project ?? project,
-      team: polpoConfig?.team ?? team,
+      teams: polpoConfig?.teams ?? teamsArray,
       tasks: [],
       settings,
       providers: polpoConfig?.providers,
@@ -454,7 +457,7 @@ export class Orchestrator extends TypedEmitter {
     this.interactive = true;
     this.registry.setState({
       project,
-      team,
+      teams: teamsArray,
       startedAt: new Date().toISOString(),
     });
 
@@ -542,10 +545,13 @@ export class Orchestrator extends TypedEmitter {
   // ── Agent Management (delegates to AgentManager) ──
 
   getAgents(): AgentConfig[] { return this.agentMgr.getAgents(); }
-  getTeam(): Team { return this.agentMgr.getTeam(); }
+  getTeams(): Team[] { return this.agentMgr.getTeams(); }
+  getTeam(name?: string): Team | undefined { return this.agentMgr.getTeam(name); }
   getConfig(): PolpoConfig | null { return this.config; }
-  renameTeam(newName: string): void { this.agentMgr.renameTeam(newName); }
-  addAgent(agent: AgentConfig): void { this.agentMgr.addAgent(agent); }
+  addTeam(team: Team): void { this.agentMgr.addTeam(team); }
+  removeTeam(name: string): boolean { return this.agentMgr.removeTeam(name); }
+  renameTeam(oldName: string, newName: string): void { this.agentMgr.renameTeam(oldName, newName); }
+  addAgent(agent: AgentConfig, teamName?: string): void { this.agentMgr.addAgent(agent, teamName); }
   removeAgent(name: string): boolean { return this.agentMgr.removeAgent(name); }
   addVolatileAgent(agent: AgentConfig, group: string): void { this.agentMgr.addVolatileAgent(agent, group); }
   cleanupVolatileAgents(group: string): number { return this.agentMgr.cleanupVolatileAgents(group); }
@@ -747,7 +753,7 @@ export class Orchestrator extends TypedEmitter {
     // 2. Update config in-place (preserves the shared reference in OrchestratorContext)
     const newSettings = polpoConfig.settings ?? this.config.settings;
     this.config.settings = newSettings;
-    if (polpoConfig.team) this.config.team = polpoConfig.team;
+    if (polpoConfig.teams) this.config.teams = polpoConfig.teams;
     if (polpoConfig.providers) {
       this.config.providers = polpoConfig.providers;
       setProviderOverrides(polpoConfig.providers);
@@ -962,7 +968,7 @@ export class Orchestrator extends TypedEmitter {
     // Also set initial state for non-interactive mode
     this.registry.setState({
       project: this.config.project,
-      team: this.config.team,
+      teams: this.config.teams,
       startedAt: new Date().toISOString(),
     });
   }
@@ -979,7 +985,7 @@ export class Orchestrator extends TypedEmitter {
 
     this.emit("orchestrator:started", {
       project: this.config.project,
-      agents: this.config.team.agents.map(a => a.name),
+      agents: this.agentMgr.getAgents().map((a: AgentConfig) => a.name),
     });
 
     this.stopped = false;
@@ -1137,7 +1143,7 @@ export class Orchestrator extends TypedEmitter {
 
       // Per-agent concurrency limit
       const agentName = task.assignTo;
-      const agentConfig = this.config.team.agents.find(a => a.name === agentName);
+      const agentConfig = this.agentMgr.findAgent(agentName);
       if (agentConfig?.maxConcurrency) {
         if ((agentActiveCounts.get(agentName) ?? 0) >= agentConfig.maxConcurrency) {
           queued++;

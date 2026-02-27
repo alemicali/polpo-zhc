@@ -73,10 +73,12 @@ export async function startChat(
     // Add current user message
     messages.push({ role: "user", content: message, timestamp: Date.now() });
 
-    const model = resolveModelSpec(polpo.getConfig()?.settings?.orchestratorModel);
+    const settings = polpo.getConfig()?.settings;
+    const model = resolveModelSpec(settings?.orchestratorModel);
     const m = resolveModel(model);
     const apiKey = await resolveApiKeyAsync(m.provider as string);
-    const streamOpts = apiKey ? { apiKey } : undefined;
+    const { buildStreamOpts } = await import("../../llm/pi-client.js");
+    const streamOpts = buildStreamOpts(apiKey, settings?.reasoning);
 
     // Prepare output line — plain text, updated chunk by chunk
     const ts = new Date().toISOString();

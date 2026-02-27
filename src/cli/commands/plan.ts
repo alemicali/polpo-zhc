@@ -131,10 +131,11 @@ export function registerPlanCommands(program: Command): void {
 
         const systemPrompt = buildPlanSystemPrompt(orchestrator, state, orchestrator.getWorkDir());
         const userPrompt = `Generate a task plan for:\n"${prompt}"`;
-        const model = resolveModelSpec(orchestrator.getConfig()?.settings?.orchestratorModel);
+        const settings = orchestrator.getConfig()?.settings;
+        const model = resolveModelSpec(settings?.orchestratorModel);
 
         console.log(chalk.dim("  Generating plan..."));
-        const planData = await generatePlan(systemPrompt, userPrompt, model);
+        const planData = await generatePlan(systemPrompt, userPrompt, model, undefined, settings?.reasoning);
         const json = planDataToJson(planData);
 
         const planName = slugify(planData.name);

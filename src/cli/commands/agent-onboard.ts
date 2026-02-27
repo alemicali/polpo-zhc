@@ -63,13 +63,18 @@ export function registerAgentOnboardCommands(program: Command): void {
         process.exit(1);
       }
 
-      const agentIdx = config.team.agents.findIndex(a => a.name === name);
+      const defaultTeam = config.teams?.[0];
+      if (!defaultTeam) {
+        console.log(chalk.red("No team configured. Run 'polpo init' first."));
+        process.exit(1);
+      }
+      const agentIdx = defaultTeam.agents.findIndex(a => a.name === name);
       if (agentIdx < 0) {
-        console.log(chalk.red(`Agent "${name}" not found. Available: ${config.team.agents.map(a => a.name).join(", ")}`));
+        console.log(chalk.red(`Agent "${name}" not found. Available: ${defaultTeam.agents.map(a => a.name).join(", ")}`));
         process.exit(1);
       }
 
-      const agentCfg = config.team.agents[agentIdx] as AgentConfig;
+      const agentCfg = defaultTeam.agents[agentIdx] as AgentConfig;
       console.log(chalk.bold(`\n  Onboarding agent: ${name}\n`));
 
       // ── 1. Identity ──
@@ -131,7 +136,7 @@ export function registerAgentOnboardCommands(program: Command): void {
 
       // ── 3. Hierarchy ──
       console.log(chalk.cyan("\n  Step 3: Hierarchy\n"));
-      const otherAgents = config.team.agents.filter(a => a.name !== name).map(a => a.name);
+      const otherAgents = defaultTeam.agents.filter(a => a.name !== name).map(a => a.name);
       let reportsTo: string | undefined = agentCfg.reportsTo;
 
       if (otherAgents.length > 0) {
@@ -218,7 +223,7 @@ export function registerAgentOnboardCommands(program: Command): void {
       else delete updated.reportsTo;
       if (enableEmail) updated.enableEmail = true;
 
-      config.team.agents[agentIdx] = updated as any;
+      defaultTeam.agents[agentIdx] = updated as any;
       savePolpoConfig(polpoDir, config);
 
       console.log(chalk.green(`\n  Agent "${name}" onboarded successfully!`));
@@ -239,13 +244,14 @@ export function registerAgentOnboardCommands(program: Command): void {
         process.exit(1);
       }
 
-      const agents = config.team.agents as AgentConfig[];
+      const defaultTeam = config.teams?.[0];
+      const agents = (defaultTeam?.agents ?? []) as AgentConfig[];
       if (agents.length === 0) {
         console.log(chalk.dim("  No agents configured."));
         return;
       }
 
-      console.log(chalk.bold(`\n  Team: ${config.team.name ?? "default"}\n`));
+      console.log(chalk.bold(`\n  Team: ${defaultTeam?.name ?? "default"}\n`));
 
       const roots = agents.filter(a => !a.reportsTo);
       const childrenOf = (name: string) => agents.filter(a => a.reportsTo === name);
@@ -286,9 +292,10 @@ export function registerAgentOnboardCommands(program: Command): void {
         process.exit(1);
       }
 
-      const agentCfg = config.team.agents.find(a => a.name === name) as AgentConfig | undefined;
+      const defaultTeam = config.teams?.[0];
+      const agentCfg = defaultTeam?.agents?.find(a => a.name === name) as AgentConfig | undefined;
       if (!agentCfg) {
-        console.log(chalk.red(`Agent "${name}" not found. Available: ${config.team.agents.map(a => a.name).join(", ")}`));
+        console.log(chalk.red(`Agent "${name}" not found. Available: ${(defaultTeam?.agents ?? []).map(a => a.name).join(", ")}`));
         process.exit(1);
       }
 

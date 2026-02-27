@@ -38,6 +38,7 @@ import {
 } from "lucide-react";
 import { useApprovals } from "@lumea-labs/polpo-react";
 import type { ApprovalRequest, ApprovalStatus } from "@lumea-labs/polpo-react";
+import { useAsyncAction } from "@/hooks/use-polpo";
 import { formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -204,10 +205,12 @@ function ApprovalCard({
   request,
   onApprove,
   onReject,
+  disabled,
 }: {
   request: ApprovalRequest;
   onApprove: (id: string) => void;
   onReject: (id: string) => void;
+  disabled?: boolean;
 }) {
   const cfg = approvalStatusConfig[request.status];
   const StatusIcon = cfg.icon;
@@ -313,15 +316,17 @@ function ApprovalCard({
               <Button
                 size="sm"
                 className="h-8 gap-1.5 bg-teal-600 hover:bg-teal-700 text-white"
+                disabled={disabled}
                 onClick={() => onApprove(request.id)}
               >
-                <ThumbsUp className="h-3.5 w-3.5" />
+                {disabled ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ThumbsUp className="h-3.5 w-3.5" />}
                 Approve
               </Button>
               <Button
                 variant="outline"
                 size="sm"
                 className="h-8 gap-1.5 text-rose-400 border-rose-500/30 hover:bg-rose-500/10 hover:text-rose-300"
+                disabled={disabled}
                 onClick={() => onReject(request.id)}
               >
                 <ThumbsDown className="h-3.5 w-3.5" />
@@ -343,6 +348,9 @@ export function ApprovalsPage() {
   const [tab, setTab] = useState<"pending" | "all" | "approved" | "rejected">("pending");
   const [rejectTarget, setRejectTarget] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [handleRefresh, isRefreshing] = useAsyncAction(async () => {
+    await refetch();
+  });
 
   const handleApprove = async (id: string) => {
     setSubmitting(true);
@@ -494,8 +502,8 @@ export function ApprovalsPage() {
           />
         </div>
 
-        <Button variant="outline" size="sm" className="h-8 gap-1.5" onClick={refetch}>
-          <RefreshCw className="h-3.5 w-3.5" />
+        <Button variant="outline" size="sm" className="h-8 gap-1.5" onClick={handleRefresh} disabled={isRefreshing}>
+          <RefreshCw className={cn("h-3.5 w-3.5", isRefreshing && "animate-spin")} />
         </Button>
       </div>
 
@@ -541,6 +549,7 @@ export function ApprovalsPage() {
                 request={req}
                 onApprove={handleApprove}
                 onReject={(id) => setRejectTarget(id)}
+                disabled={submitting}
               />
             ))}
           </div>

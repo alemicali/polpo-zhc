@@ -32,6 +32,7 @@ import {
 } from "lucide-react";
 import { usePlans, useTasks } from "@lumea-labs/polpo-react";
 import type { Plan, PlanStatus } from "@lumea-labs/polpo-react";
+import { useAsyncAction } from "@/hooks/use-polpo";
 import { toast } from "sonner";
 import { formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -205,6 +206,10 @@ export function PlansPage() {
 
   const { tasks } = useTasks();
 
+  const [handleRefresh, isRefreshing] = useAsyncAction(async () => {
+    await refetch();
+  });
+
   const handleAction = async (action: () => Promise<unknown>, label: string) => {
     try {
       await action();
@@ -263,8 +268,8 @@ export function PlansPage() {
             </Badge>
           )}
         </div>
-        <Button variant="outline" size="sm" onClick={refetch} className="hover:bg-accent/50">
-          <RefreshCw className="h-3.5 w-3.5" />
+        <Button variant="outline" size="sm" onClick={handleRefresh} disabled={isRefreshing} className="hover:bg-accent/50">
+          <RefreshCw className={cn("h-3.5 w-3.5", isRefreshing && "animate-spin")} />
         </Button>
       </div>
 

@@ -52,13 +52,15 @@ export async function createPlan(
 
     const systemPrompt = buildPlanSystemPrompt(polpo, state, polpo.getWorkDir());
     const userPrompt = `Generate a task plan for:\n"${prompt}"`;
-    const model = resolveModelSpec(polpo.getConfig()?.settings?.orchestratorModel);
+    const settings = polpo.getConfig()?.settings;
+    const model = resolveModelSpec(settings?.orchestratorModel);
 
     const result = await generatePlanInteractive(
       systemPrompt,
       userPrompt,
       model,
       (tokens) => store.updateProcessingTokens(tokens),
+      settings?.reasoning,
     );
 
     store.setProcessing(false);
@@ -273,7 +275,8 @@ async function refinePlan(
     })();
 
     const systemPrompt = buildPlanSystemPrompt(polpo, state, polpo.getWorkDir());
-    const model = resolveModelSpec(polpo.getConfig()?.settings?.orchestratorModel);
+    const settings2 = polpo.getConfig()?.settings;
+    const model = resolveModelSpec(settings2?.orchestratorModel);
 
     const planData = await refinePlanStructured(
       systemPrompt,
@@ -282,6 +285,7 @@ async function refinePlan(
       feedback,
       model,
       (tokens) => store.updateProcessingTokens(tokens),
+      settings2?.reasoning,
     );
 
     store.setProcessing(false);

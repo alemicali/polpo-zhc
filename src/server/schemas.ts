@@ -140,7 +140,13 @@ export const AddAgentSchema = z.object({
 });
 
 export const RenameTeamSchema = z.object({
+  oldName: z.string().min(1),
   name: z.string().min(1),
+});
+
+export const AddTeamSchema = z.object({
+  name: z.string().min(1),
+  description: z.string().optional(),
 });
 
 // ── Direct notification schema ─────────────────────────────────────────

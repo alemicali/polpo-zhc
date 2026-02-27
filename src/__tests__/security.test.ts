@@ -96,16 +96,16 @@ describe("redactPolpoState", () => {
   it("redacts team.agents in state", () => {
     const state: PolpoState = {
       project: "test",
-      team: {
+      teams: [{
         name: "t",
         agents: [{ name: "x", vault: { db: { type: "login", credentials: { password: "abc" } } } }],
-      },
+      }],
       tasks: [],
       processes: [],
     };
 
     const result = redactPolpoState(state);
-    expect(result.team.agents[0].vault!.db.credentials.password).toBe("***");
+    expect(result.teams[0].agents[0].vault!.db.credentials.password).toBe("***");
     expect(result.project).toBe("test");
   });
 });
@@ -117,10 +117,10 @@ describe("redactPolpoConfig", () => {
     const config = {
       version: "1",
       project: "test",
-      team: {
+      teams: [{
         name: "t",
         agents: [{ name: "a", vault: { s: { type: "smtp" as const, credentials: { pass: "x" } } } }],
-      },
+      }],
       tasks: [],
       settings: { maxRetries: 3, workDir: ".", logLevel: "normal" as const },
       providers: {
@@ -133,7 +133,7 @@ describe("redactPolpoConfig", () => {
     const result = redactPolpoConfig(config);
 
     // Team redacted
-    expect(result.team.agents[0].vault!.s.credentials.pass).toBe("***");
+    expect(result.teams[0].agents[0].vault!.s.credentials.pass).toBe("***");
 
     // Provider keys redacted
     expect(result.providers!.anthropic.apiKey).toBe("***");
@@ -147,7 +147,7 @@ describe("redactPolpoConfig", () => {
     const config = {
       version: "1",
       project: "test",
-      team: { name: "t", agents: [] },
+      teams: [{ name: "t", agents: [] }],
       tasks: [],
       settings: { maxRetries: 1, workDir: ".", logLevel: "quiet" as const },
     } as PolpoConfig;

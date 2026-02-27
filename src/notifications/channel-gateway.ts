@@ -33,7 +33,7 @@ import type {
   ChannelType,
   NotificationChannelConfig,
 } from "../core/types.js";
-import { resolveModel, resolveApiKey, resolveModelSpec } from "../llm/pi-client.js";
+import { resolveModel, resolveApiKey, resolveModelSpec, buildStreamOpts } from "../llm/pi-client.js";
 import { buildChatSystemPrompt } from "../llm/prompts.js";
 import { streamSimple, type Message } from "@mariozechner/pi-ai";
 import {
@@ -432,10 +432,11 @@ export class ChannelGateway {
         : "";
 
       // Resolve model
-      const modelSpec = resolveModelSpec(this.orchestrator.getConfig()?.settings?.orchestratorModel);
+      const settings = this.orchestrator.getConfig()?.settings;
+      const modelSpec = resolveModelSpec(settings?.orchestratorModel);
       const m = resolveModel(modelSpec);
       const apiKey = resolveApiKey(m.provider);
-      const streamOpts = apiKey ? { apiKey } : undefined;
+      const streamOpts = buildStreamOpts(apiKey, settings?.reasoning);
 
       // Run the agentic loop (non-streaming for messaging)
       const MAX_TURNS = 15;

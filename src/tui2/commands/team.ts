@@ -166,7 +166,8 @@ export async function cmdTeam(api: CommandAPI): Promise<void> {
   if (sub === "rename") {
     const newName = args.slice(1).join(" ").trim();
     if (newName) {
-      polpo.renameTeam(newName);
+      const oldName = polpo.getTeam()?.name ?? "default";
+      polpo.renameTeam(oldName, newName);
       tui.logSystem(`Team renamed to: ${newName}`);
       tui.requestRender();
       return;
@@ -174,13 +175,14 @@ export async function cmdTeam(api: CommandAPI): Promise<void> {
     const currentTeam = polpo.getTeam();
     const overlay = new EditorOverlay({
       title: "Rename Team",
-      initialText: currentTeam.name,
+      initialText: currentTeam?.name ?? "default",
       tui: tui.tuiInstance,
       onSave: (name) => {
         tui.hideOverlay();
         const trimmed = name.trim();
         if (trimmed) {
-          polpo.renameTeam(trimmed);
+          const currentName = polpo.getTeam()?.name ?? "default";
+          polpo.renameTeam(currentName, trimmed);
           tui.logSystem(`Team renamed to: ${trimmed}`);
         }
         tui.requestRender();
@@ -267,9 +269,10 @@ async function generateTeamAction(
     const { resolveModelSpec } = await import("../../llm/pi-client.js");
 
     const systemPrompt = buildTeamGenPrompt(polpo, polpo.getWorkDir(), description);
-    const model = resolveModelSpec(polpo.getConfig()?.settings?.orchestratorModel);
+    const settings = polpo.getConfig()?.settings;
+    const model = resolveModelSpec(settings?.orchestratorModel);
 
-    const team = await generateTeam(systemPrompt, description, model);
+    const team = await generateTeam(systemPrompt, description, model, settings?.reasoning);
 
     tui.setProcessing(false);
     tui.setStreaming(false);
@@ -396,10 +399,11 @@ async function refineTeamAction(
     const { resolveModelSpec } = await import("../../llm/pi-client.js");
 
     const systemPrompt = buildTeamGenPrompt(polpo, polpo.getWorkDir(), description);
-    const model = resolveModelSpec(polpo.getConfig()?.settings?.orchestratorModel);
+    const settings2 = polpo.getConfig()?.settings;
+    const model = resolveModelSpec(settings2?.orchestratorModel);
     const currentJson = JSON.stringify(currentTeam, null, 2);
 
-    const refined = await refineTeam(systemPrompt, currentJson, feedback, model);
+    const refined = await refineTeam(systemPrompt, currentJson, feedback, model, settings2?.reasoning);
 
     tui.setProcessing(false);
     tui.setStreaming(false);

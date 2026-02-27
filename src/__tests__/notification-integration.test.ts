@@ -16,7 +16,7 @@ function createMinimalConfig(): PolpoConfig {
   return {
     version: "1",
     project: "test",
-    team: { name: "test-team", agents: [{ name: "test-agent" }] },
+    teams: [{ name: "test-team", agents: [{ name: "test-agent" }] }],
     tasks: [],
     settings: { maxRetries: 2, workDir: "/tmp/test", logLevel: "quiet" },
   };

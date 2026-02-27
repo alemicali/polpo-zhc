@@ -527,6 +527,7 @@ describe("Agents API", () => {
     const res = await app.request(
       api("/agents/team"),
       jsonReq("PATCH", {
+        oldName: "api-team",
         name: "renamed-team",
       }),
     );
@@ -539,6 +540,7 @@ describe("Agents API", () => {
     await app.request(
       api("/agents/team"),
       jsonReq("PATCH", {
+        oldName: "renamed-team",
         name: "api-team",
       }),
     );
@@ -617,7 +619,7 @@ describe("State routes", () => {
     const body = await res.json();
     expect(body.ok).toBe(true);
     expect(body.data).toHaveProperty("project");
-    expect(body.data).toHaveProperty("team");
+    expect(body.data).toHaveProperty("teams");
     expect(typeof body.data.project).toBe("string");
   });
 
@@ -628,7 +630,7 @@ describe("State routes", () => {
     expect(body.ok).toBe(true);
     expect(body.data).toHaveProperty("version");
     expect(body.data).toHaveProperty("project");
-    expect(body.data).toHaveProperty("team");
+    expect(body.data).toHaveProperty("teams");
     expect(body.data).toHaveProperty("settings");
   });
 });

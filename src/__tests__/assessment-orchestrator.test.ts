@@ -122,7 +122,7 @@ function createMinimalConfig(): PolpoConfig {
   return {
     version: "1",
     project: "test",
-    team: { name: "test-team", agents: [{ name: "test-agent" }] },
+    teams: [{ name: "test-team", agents: [{ name: "test-agent" }] }],
     tasks: [],
     settings: {
       maxRetries: 2,
@@ -601,7 +601,7 @@ describe("AssessmentOrchestrator", () => {
 
     it("escalates to fallback agent after escalateAfter retries", async () => {
       const h = createHarness();
-      h.ctx.config.team.agents.push({ name: "senior-agent" });
+      h.ctx.config.teams[0].agents.push({ name: "senior-agent" });
 
       // Task already has 1 retry, maxRetries is 3, escalateAfter is 2
       const task = addReviewTask(h, {

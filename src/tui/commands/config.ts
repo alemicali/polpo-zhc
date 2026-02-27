@@ -33,7 +33,7 @@ function configView(
   const lines: [string, string][] = [
     ["Project", config.project],
     ["Version", config.version],
-    ["Team", `${config.team.name} (${config.team.agents.length} agents)`],
+    ["Team", `${config.teams[0]?.name ?? "default"} (${config.teams[0]?.agents.length ?? 0} agents)`],
     ["Max retries", `${s.maxRetries}`],
     ["Log level", s.logLevel],
     ["Task timeout", s.taskTimeout ? `${(s.taskTimeout / 60000).toFixed(0)}min` : "30min"],
@@ -102,7 +102,7 @@ function configEdit(
             if (polpoDir) {
               savePolpoConfig(polpoDir, {
                 project: config.project,
-                team: config.team,
+                teams: config.teams,
                 settings: config.settings,
                 providers: config.providers,
               });

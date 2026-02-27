@@ -1,6 +1,11 @@
 import type { McpServerConfig } from "../mcp/types.js";
 export type { McpServerConfig } from "../mcp/types.js";
 
+// === Reasoning / Thinking ===
+
+/** Reasoning level for LLM calls (maps to pi-ai ThinkingLevel). */
+export type ReasoningLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+
 // === Task ===
 
 export type TaskStatus =
@@ -243,6 +248,10 @@ export interface AgentConfig {
   maxTurns?: number;
   /** Max concurrent tasks for this agent. Default: unlimited (undefined). */
   maxConcurrency?: number;
+  /** Reasoning / deep thinking level for this agent's LLM calls.
+   *  "off" disables thinking (default). Higher levels = more reasoning tokens = better quality but slower + more expensive.
+   *  Falls back to the global `settings.reasoning` when not set. */
+  reasoning?: ReasoningLevel;
   /** Volatile agent — created for a specific plan, auto-removed when plan completes */
   volatile?: boolean;
   /** Plan group this volatile agent belongs to */
@@ -385,6 +394,40 @@ export interface ReviewContext {
   filesEdited?: string[];
 }
 
+// === Ask User (structured clarification questions) ===
+
+export interface AskUserOption {
+  label: string;
+  description?: string;
+}
+
+export interface AskUserQuestion {
+  /** Unique question key for matching answers (e.g. "auth-method") */
+  id: string;
+  /** The question text */
+  question: string;
+  /** Short label for compact display (max 30 chars) */
+  header?: string;
+  /** Pre-populated selectable options */
+  options: AskUserOption[];
+  /** Allow selecting multiple options (default: false) */
+  multiple?: boolean;
+  /** Whether to add a "Type your own answer" custom input (default: true) */
+  custom?: boolean;
+}
+
+export interface AskUserAnswer {
+  questionId: string;
+  /** Labels of selected options */
+  selected: string[];
+  /** Custom text typed by user (if custom input was used) */
+  customText?: string;
+}
+
+export interface AskUserRequest {
+  questions: AskUserQuestion[];
+}
+
 // === Plan ===
 
 export type PlanStatus = "draft" | "active" | "paused" | "completed" | "failed" | "cancelled";
@@ -446,14 +489,28 @@ export interface RunnerConfig {
   emailAllowedDomains?: string[];
   /** MCP tool allowlist — keys are server names, values are allowed tool names. */
   mcpToolAllowlist?: Record<string, string[]>;
+  /** Global reasoning level from settings — used as fallback for agents that don't specify one. */
+  reasoning?: ReasoningLevel;
 }
 
 // === Polpo File Config (.polpo/polpo.json — persistent project configuration) ===
 
 export interface PolpoFileConfig {
   project: string;
-  team: Team;
+  /** Multiple teams — each with its own agents.
+   *  @since 0.2 — replaces the old singular `team` field. */
+  teams: Team[];
   settings: PolpoSettings;
+  providers?: Record<string, ProviderConfig>;
+}
+
+/** Shape that parseConfig() accepts from disk — supports both old `team` and new `teams`. */
+export interface PolpoFileConfigRaw {
+  project: string;
+  /** @deprecated Use `teams` instead. Kept for backward-compatible migration. */
+  team?: Team;
+  teams?: Team[];
+  settings?: Partial<PolpoSettings>;
   providers?: Record<string, ProviderConfig>;
 }
 
@@ -510,7 +567,7 @@ export interface ModelAllowlistEntry {
 export interface PolpoConfig {
   version: string;
   project: string;
-  team: Team;
+  teams: Team[];
   tasks: Omit<Task, "status" | "retries" | "result" | "createdAt" | "updatedAt">[];
   settings: PolpoSettings;
   /** Per-provider API key and base URL overrides. */
@@ -545,6 +602,10 @@ export interface PolpoSettings {
   /** Model allowlist — when set, only these models can be used.
    *  Keys are model specs (e.g. "anthropic:claude-opus-4-6"), values are aliases/params. */
   modelAllowlist?: Record<string, ModelAllowlistEntry>;
+  /** Global reasoning / deep thinking level for orchestrator LLM calls (chat, plan generation, assessment).
+   *  "off" disables thinking (default). Can be overridden per-agent via AgentConfig.reasoning.
+   *  Higher levels produce better results but are slower and more expensive. */
+  reasoning?: ReasoningLevel;
   /** Storage backend for tasks, plans, and runs. Default: "file" (filesystem JSON). */
   storage?: "file" | "sqlite";
   /** Max assessment retries when all reviewers fail before falling back to fix/retry. Default: 1 */
@@ -574,11 +635,32 @@ export interface PolpoSettings {
 
 export interface PolpoState {
   project: string;
-  team: Team;
+  teams: Team[];
   tasks: Task[];
   processes: AgentProcess[];
   startedAt?: string;
   completedAt?: string;
+}
+
+// === Multi-team helpers ===
+
+/** Get all agents across all teams (flattened). */
+export function getAllAgents(teams: Team[]): AgentConfig[] {
+  return teams.flatMap(t => t.agents);
+}
+
+/** Find a specific agent by name across all teams. */
+export function findAgent(teams: Team[], agentName: string): AgentConfig | undefined {
+  for (const t of teams) {
+    const agent = t.agents.find(a => a.name === agentName);
+    if (agent) return agent;
+  }
+  return undefined;
+}
+
+/** Find the team an agent belongs to. */
+export function findAgentTeam(teams: Team[], agentName: string): Team | undefined {
+  return teams.find(t => t.agents.some(a => a.name === agentName));
 }
 
 // === Project Config (legacy JSON format) ===

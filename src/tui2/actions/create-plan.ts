@@ -60,13 +60,15 @@ export async function createPlan(
 
     const systemPrompt = buildPlanSystemPrompt(polpo, state, polpo.getWorkDir());
     const userPrompt = `Generate a task plan for:\n"${prompt}"`;
-    const model = resolveModelSpec(polpo.getConfig()?.settings?.orchestratorModel);
+    const settings = polpo.getConfig()?.settings;
+    const model = resolveModelSpec(settings?.orchestratorModel);
 
     const result = await generatePlanInteractive(
       systemPrompt,
       userPrompt,
       model,
       (tokens) => tui.updateStreamingTokens(tokens),
+      settings?.reasoning,
     );
 
     tui.setProcessing(false);
@@ -350,7 +352,8 @@ async function refinePlan(
     })();
 
     const systemPrompt = buildPlanSystemPrompt(polpo, state, polpo.getWorkDir());
-    const model = resolveModelSpec(polpo.getConfig()?.settings?.orchestratorModel);
+    const settings2 = polpo.getConfig()?.settings;
+    const model = resolveModelSpec(settings2?.orchestratorModel);
     const currentJson = JSON.stringify(currentPlanData);
 
     const planData = await refinePlanStructured(
@@ -360,6 +363,7 @@ async function refinePlan(
       feedback,
       model,
       (tokens) => tui.updateStreamingTokens(tokens),
+      settings2?.reasoning,
     );
 
     tui.setProcessing(false);

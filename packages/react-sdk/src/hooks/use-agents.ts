@@ -1,15 +1,17 @@
 import { useSyncExternalStore, useCallback, useEffect, useState } from "react";
 import { usePolpoContext } from "../provider/polpo-context.js";
-import type { AgentConfig, Team, AddAgentRequest } from "../client/types.js";
+import type { AgentConfig, Team, AddAgentRequest, AddTeamRequest } from "../client/types.js";
 
 export interface UseAgentsReturn {
   agents: AgentConfig[];
-  team: Team | null;
+  teams: Team[];
   isLoading: boolean;
   error: Error | null;
-  addAgent: (req: AddAgentRequest) => Promise<void>;
+  addAgent: (req: AddAgentRequest, teamName?: string) => Promise<void>;
   removeAgent: (name: string) => Promise<void>;
-  renameTeam: (name: string) => Promise<Team>;
+  addTeam: (req: AddTeamRequest) => Promise<void>;
+  removeTeam: (name: string) => Promise<void>;
+  renameTeam: (oldName: string, newName: string) => Promise<Team>;
   refetch: () => Promise<void>;
 }
 
@@ -22,15 +24,15 @@ export function useAgents(): UseAgentsReturn {
     () => store.getServerSnapshot().agents,
   );
 
-  const [team, setTeam] = useState<Team | null>(null);
+  const [teams, setTeams] = useState<Team[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
 
   const fetchAll = useCallback(async () => {
     try {
-      const [a, t] = await Promise.all([client.getAgents(), client.getTeam()]);
+      const [a, t] = await Promise.all([client.getAgents(), client.getTeams()]);
       store.setAgents(a);
-      setTeam(t);
+      setTeams(t);
     } catch (err) {
       setError(err as Error);
     }
@@ -41,8 +43,8 @@ export function useAgents(): UseAgentsReturn {
     fetchAll().finally(() => setIsLoading(false));
   }, [fetchAll]);
 
-  const addAgent = useCallback(async (req: AddAgentRequest) => {
-    await client.addAgent(req);
+  const addAgent = useCallback(async (req: AddAgentRequest, teamName?: string) => {
+    await client.addAgent(req, teamName);
     await fetchAll();
   }, [client, fetchAll]);
 
@@ -51,11 +53,21 @@ export function useAgents(): UseAgentsReturn {
     await fetchAll();
   }, [client, fetchAll]);
 
-  const renameTeam = useCallback(async (name: string) => {
-    const t = await client.renameTeam(name);
-    setTeam(t);
-    return t;
-  }, [client]);
+  const addTeam = useCallback(async (req: AddTeamRequest) => {
+    await client.addTeam(req);
+    await fetchAll();
+  }, [client, fetchAll]);
 
-  return { agents, team, isLoading, error, addAgent, removeAgent, renameTeam, refetch: fetchAll };
+  const removeTeam = useCallback(async (name: string) => {
+    await client.removeTeam(name);
+    await fetchAll();
+  }, [client, fetchAll]);
+
+  const renameTeam = useCallback(async (oldName: string, newName: string) => {
+    const t = await client.renameTeam(oldName, newName);
+    await fetchAll();
+    return t;
+  }, [client, fetchAll]);
+
+  return { agents, teams, isLoading, error, addAgent, removeAgent, addTeam, removeTeam, renameTeam, refetch: fetchAll };
 }

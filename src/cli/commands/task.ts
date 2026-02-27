@@ -262,8 +262,9 @@ export function registerTaskCommands(program: Command): void {
             console.log(chalk.dim("  Preparing task with AI..."));
 
             const systemPrompt = buildTaskPrepPrompt(orchestrator, state, orchestrator.getWorkDir(), description, agentName);
-            const model = resolveModelSpec(orchestrator.getConfig()?.settings?.orchestratorModel);
-            const prepTask = await generateTaskPrep(systemPrompt, description, model);
+            const settings = orchestrator.getConfig()?.settings;
+            const model = resolveModelSpec(settings?.orchestratorModel);
+            const prepTask = await generateTaskPrep(systemPrompt, description, model, undefined, settings?.reasoning);
 
             // Build expectations from validated data
             const expectations: TaskExpectation[] = [];

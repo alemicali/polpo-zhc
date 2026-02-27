@@ -147,12 +147,14 @@ async function doCreateWithPrep(
     })();
 
     const systemPrompt = buildTaskPrepPrompt(polpo, state, polpo.getWorkDir(), userInput, agentName);
-    const model = resolveModelSpec(polpo.getConfig()?.settings?.orchestratorModel);
+    const settings = polpo.getConfig()?.settings;
+    const model = resolveModelSpec(settings?.orchestratorModel);
     const prepTask = await generateTaskPrep(
       systemPrompt,
       userInput,
       model,
       (tokens) => store.updateProcessingTokens(tokens),
+      settings?.reasoning,
     );
 
     store.setProcessing(false);

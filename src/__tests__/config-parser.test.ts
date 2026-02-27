@@ -51,9 +51,9 @@ describe("parseConfig (.polpo/polpo.json)", () => {
 
       expect(config.version).toBe("1");
       expect(config.project).toBe("test-project");
-      expect(config.team.name).toBe("test-team");
-      expect(config.team.agents).toHaveLength(1);
-      expect(config.team.agents[0].name).toBe("agent-1");
+      expect(config.teams[0].name).toBe("test-team");
+      expect(config.teams[0].agents).toHaveLength(1);
+      expect(config.teams[0].agents[0].name).toBe("agent-1");
       expect(config.tasks).toEqual([]); // tasks come from plans, not config
     });
 
@@ -95,8 +95,8 @@ describe("parseConfig (.polpo/polpo.json)", () => {
       const workDir = writeConfig(cfg);
       const config = await parseConfig(workDir);
 
-      expect(config.team.agents).toHaveLength(3);
-      expect(config.team.agents).toHaveLength(3);
+      expect(config.teams[0].agents).toHaveLength(3);
+      expect(config.teams[0].agents).toHaveLength(3);
     });
 
     it("defaults logLevel to 'normal' when settings are missing", async () => {
@@ -191,9 +191,9 @@ describe("generatePolpoConfigDefault", () => {
   it("returns a valid config with project name", () => {
     const config = generatePolpoConfigDefault("my-project");
     expect(config.project).toBe("my-project");
-    expect(config.team.name).toBe("default");
-    expect(config.team.agents).toHaveLength(1);
-    expect(config.team.agents[0].name).toBe("dev-1");
+    expect(config.teams[0].name).toBe("default");
+    expect(config.teams[0].agents).toHaveLength(1);
+    expect(config.teams[0].agents[0].name).toBe("dev-1");
     expect(config.settings.maxRetries).toBe(3);
     expect(config.settings.logLevel).toBe("normal");
   });
@@ -205,8 +205,8 @@ describe("generatePolpoConfigDefault", () => {
 
     const parsed = await parseConfig(TMP);
     expect(parsed.project).toBe("round-trip");
-    expect(parsed.team.name).toBe("default");
-    expect(parsed.team.agents).toHaveLength(1);
+    expect(parsed.teams[0].name).toBe("default");
+    expect(parsed.teams[0].agents).toHaveLength(1);
     expect(parsed.settings.maxRetries).toBe(3);
   });
 });

@@ -24,7 +24,7 @@ function profileDir(polpoDir: string, agentName: string, agent?: AgentConfig): s
 function findAgent(polpoDir: string, name: string): AgentConfig | undefined {
   try {
     const config = loadPolpoConfig(polpoDir);
-    return config?.team?.agents?.find(
+    return config?.teams?.[0]?.agents?.find(
       (a: AgentConfig) => a.name.toLowerCase() === name.toLowerCase(),
     );
   } catch {

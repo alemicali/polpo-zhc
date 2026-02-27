@@ -178,11 +178,11 @@ describe("SqliteTaskStore", () => {
     it("persists team as JSON", () => {
       const store = makeStore();
       const team = { name: "test-team", agents: [{ name: "dev", role: "dev" }] };
-      store.setState({ team });
+      store.setState({ teams: [team] });
       const state = store.getState();
-      expect(state.team.name).toBe("test-team");
-      expect(state.team.agents).toHaveLength(1);
-      expect(state.team.agents[0].name).toBe("dev");
+      expect(state.teams[0].name).toBe("test-team");
+      expect(state.teams[0].agents).toHaveLength(1);
+      expect(state.teams[0].agents[0].name).toBe("dev");
       store.close();
     });
 
@@ -255,7 +255,7 @@ describe("SqliteTaskStore", () => {
       const store = makeStore();
 
       expect(store.getState().project).toBe("migrated-project");
-      expect(store.getState().team.name).toBe("old-team");
+      expect(store.getState().teams[0].name).toBe("old-team");
       expect(store.getAllTasks()).toHaveLength(1);
       expect(store.getAllTasks()[0].title).toBe("Migrated task");
       expect(store.getAllTasks()[0].result?.exitCode).toBe(0);

@@ -14,6 +14,7 @@ import type {
   CreatePlanRequest,
   UpdatePlanRequest,
   AddAgentRequest,
+  AddTeamRequest,
   ExecutePlanResult,
   ResumePlanResult,
   ApiResult,
@@ -24,6 +25,7 @@ import type {
   ChatCompletionRequest,
   ChatCompletionResponse,
   ChatCompletionChunk,
+  AskUserPayload,
   RunActivityEntry,
   SkillInfo,
   NotificationRecord,
@@ -43,6 +45,108 @@ export interface PolpoClientConfig {
   projectId?: string;
   apiKey?: string;
   fetch?: typeof globalThis.fetch;
+}
+
+/**
+ * Async-iterable streaming response from chat completions.
+ * Exposes `sessionId` from the server's `x-session-id` response header,
+ * which lets callers learn which session was created/reused.
+ */
+export class ChatCompletionStream implements AsyncIterable<ChatCompletionChunk> {
+  /** Session ID assigned by the server. Available after the first `next()` call. */
+  sessionId: string | null = null;
+
+  /** If the stream ended with finish_reason "ask_user", this contains the questions. */
+  askUser: AskUserPayload | null = null;
+
+  private fetchFn: typeof globalThis.fetch;
+  private baseUrl: string;
+  private clientHeaders: Record<string, string>;
+  private req: ChatCompletionRequest;
+  private reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+  private decoder = new TextDecoder();
+  private buffer = "";
+  private started = false;
+
+  constructor(
+    fetchFn: typeof globalThis.fetch,
+    baseUrl: string,
+    clientHeaders: Record<string, string>,
+    req: ChatCompletionRequest,
+  ) {
+    this.fetchFn = fetchFn;
+    this.baseUrl = baseUrl;
+    this.clientHeaders = clientHeaders;
+    this.req = req;
+  }
+
+  private async ensureStarted(): Promise<void> {
+    if (this.started) return;
+    this.started = true;
+
+    const url = `${this.baseUrl}/v1/chat/completions`;
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+    if (this.clientHeaders["x-api-key"]) {
+      headers["Authorization"] = `Bearer ${this.clientHeaders["x-api-key"]}`;
+    }
+    if (this.req.sessionId) {
+      headers["x-session-id"] = this.req.sessionId;
+    }
+    const { sessionId: _, ...body } = this.req;
+    const res = await this.fetchFn(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ ...body, stream: true }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: { message: res.statusText } }));
+      throw new PolpoApiError(
+        (err as any).error?.message ?? "Chat completions failed",
+        res.status === 401 ? "AUTH_REQUIRED" : "INTERNAL_ERROR",
+        res.status,
+      );
+    }
+
+    // Capture session ID from response header
+    this.sessionId = res.headers.get("x-session-id");
+
+    this.reader = res.body?.getReader() ?? null;
+    if (!this.reader) throw new PolpoApiError("No response body", "INTERNAL_ERROR", 500);
+  }
+
+  async *[Symbol.asyncIterator](): AsyncGenerator<ChatCompletionChunk, void, unknown> {
+    await this.ensureStarted();
+    const reader = this.reader!;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      this.buffer += this.decoder.decode(value, { stream: true });
+      const lines = this.buffer.split("\n");
+      this.buffer = lines.pop() ?? "";
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed || !trimmed.startsWith("data: ")) continue;
+        const data = trimmed.slice(6);
+        if (data === "[DONE]") return;
+        try {
+          const chunk = JSON.parse(data) as ChatCompletionChunk;
+          // Capture ask_user payload from the chunk
+          const choice = chunk.choices[0];
+          if (choice?.finish_reason === "ask_user" && choice.ask_user) {
+            this.askUser = choice.ask_user;
+          }
+          yield chunk;
+        } catch {
+          // skip malformed chunks
+        }
+      }
+    }
+  }
 }
 
 export class PolpoClient {
@@ -194,20 +298,34 @@ export class PolpoClient {
     return this.get<AgentConfig>(`/agents/${encodeURIComponent(name)}`);
   }
 
-  addAgent(req: AddAgentRequest): Promise<{ added: boolean }> {
-    return this.post<{ added: boolean }>("/agents", req);
+  addAgent(req: AddAgentRequest, teamName?: string): Promise<{ added: boolean }> {
+    const qs = teamName ? `?team=${encodeURIComponent(teamName)}` : "";
+    return this.post<{ added: boolean }>(`/agents${qs}`, req);
   }
 
   removeAgent(name: string): Promise<{ removed: boolean }> {
     return this.del<{ removed: boolean }>(`/agents/${encodeURIComponent(name)}`);
   }
 
-  getTeam(): Promise<Team> {
-    return this.get<Team>("/agents/team");
+  getTeams(): Promise<Team[]> {
+    return this.get<Team[]>("/agents/teams");
   }
 
-  renameTeam(name: string): Promise<Team> {
-    return this.patch<Team>("/agents/team", { name });
+  getTeam(name?: string): Promise<Team | undefined> {
+    const qs = name ? `?name=${encodeURIComponent(name)}` : "";
+    return this.get<Team | undefined>(`/agents/team${qs}`);
+  }
+
+  addTeam(req: AddTeamRequest): Promise<{ added: boolean }> {
+    return this.post<{ added: boolean }>("/agents/teams", req);
+  }
+
+  removeTeam(name: string): Promise<{ removed: boolean }> {
+    return this.del<{ removed: boolean }>(`/agents/teams/${encodeURIComponent(name)}`);
+  }
+
+  renameTeam(oldName: string, newName: string): Promise<Team> {
+    return this.patch<Team>("/agents/team", { oldName, name: newName });
   }
 
   getProcesses(): Promise<AgentProcess[]> {
@@ -268,10 +386,14 @@ export class PolpoClient {
     if (this.headers["x-api-key"]) {
       headers["Authorization"] = `Bearer ${this.headers["x-api-key"]}`;
     }
+    if (req.sessionId) {
+      headers["x-session-id"] = req.sessionId;
+    }
+    const { sessionId: _, ...body } = req;
     const res = await this.fetchFn(url, {
       method: "POST",
       headers,
-      body: JSON.stringify({ ...req, stream: false }),
+      body: JSON.stringify({ ...body, stream: false }),
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({ error: { message: res.statusText } }));
@@ -286,55 +408,10 @@ export class PolpoClient {
 
   /**
    * Talk to Polpo via the OpenAI-compatible chat completions endpoint.
-   * Streaming mode — returns an async generator of chunks.
+   * Streaming mode — returns a ChatCompletionStream (async-iterable + metadata).
    */
-  async *chatCompletionsStream(req: ChatCompletionRequest): AsyncGenerator<ChatCompletionChunk, void, unknown> {
-    const url = `${this.baseUrl}/v1/chat/completions`;
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-    };
-    if (this.headers["x-api-key"]) {
-      headers["Authorization"] = `Bearer ${this.headers["x-api-key"]}`;
-    }
-    const res = await this.fetchFn(url, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({ ...req, stream: true }),
-    });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: { message: res.statusText } }));
-      throw new PolpoApiError(
-        (err as any).error?.message ?? "Chat completions failed",
-        res.status === 401 ? "AUTH_REQUIRED" : "INTERNAL_ERROR",
-        res.status,
-      );
-    }
-    const reader = res.body?.getReader();
-    if (!reader) throw new PolpoApiError("No response body", "INTERNAL_ERROR", 500);
-
-    const decoder = new TextDecoder();
-    let buffer = "";
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split("\n");
-      buffer = lines.pop() ?? "";
-
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed || !trimmed.startsWith("data: ")) continue;
-        const data = trimmed.slice(6);
-        if (data === "[DONE]") return;
-        try {
-          yield JSON.parse(data) as ChatCompletionChunk;
-        } catch {
-          // skip malformed chunks
-        }
-      }
-    }
+  chatCompletionsStream(req: ChatCompletionRequest): ChatCompletionStream {
+    return new ChatCompletionStream(this.fetchFn, this.baseUrl, this.headers, req);
   }
 
   // ── Sessions ────────────────────────────────────────────

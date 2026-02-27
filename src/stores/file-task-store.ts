@@ -22,7 +22,17 @@ import { assertValidTransition } from "../core/state-machine.js";
 
 interface MetaState {
   project: string;
-  team: Team;
+  teams: Team[];
+  processes: AgentProcess[];
+  startedAt?: string;
+  completedAt?: string;
+}
+
+/** Legacy meta state with singular team — auto-migrated on read. */
+interface MetaStateRaw {
+  project: string;
+  team?: Team;
+  teams?: Team[];
   processes: AgentProcess[];
   startedAt?: string;
   completedAt?: string;
@@ -88,11 +98,18 @@ export class FileTaskStore implements TaskStore {
   }
 
   private readMeta(): MetaState {
-    return readJson<MetaState>(this.metaPath, {
+    const raw = readJson<MetaStateRaw>(this.metaPath, {
       project: "",
-      team: { name: "", agents: [] },
+      teams: [{ name: "", agents: [] }],
       processes: [],
     });
+    // Migrate legacy singular team → teams array
+    const teams = raw.teams && raw.teams.length > 0
+      ? raw.teams
+      : raw.team
+        ? [raw.team]
+        : [{ name: "", agents: [] }];
+    return { project: raw.project, teams, processes: raw.processes, startedAt: raw.startedAt, completedAt: raw.completedAt };
   }
 
   private writeMeta(meta: MetaState): void {
@@ -136,7 +153,7 @@ export class FileTaskStore implements TaskStore {
     const tasks = this.getAllTasks();
     return {
       project: meta.project,
-      team: meta.team,
+      teams: meta.teams,
       tasks,
       processes: meta.processes,
       startedAt: meta.startedAt,
@@ -148,7 +165,7 @@ export class FileTaskStore implements TaskStore {
     const meta = this.readMeta();
 
     if (partial.project !== undefined) meta.project = partial.project;
-    if (partial.team !== undefined) meta.team = partial.team;
+    if (partial.teams !== undefined) meta.teams = partial.teams;
     if (partial.startedAt !== undefined) meta.startedAt = partial.startedAt;
     if (partial.completedAt !== undefined) meta.completedAt = partial.completedAt;
     if (partial.processes !== undefined) meta.processes = partial.processes;

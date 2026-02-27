@@ -1,4 +1,4 @@
-import type { AgentConfig, AgentActivity, Task, TaskResult, TaskOutcome } from "./types.js";
+import type { AgentConfig, AgentActivity, Task, TaskResult, TaskOutcome, ReasoningLevel } from "./types.js";
 
 /**
  * Handle returned by the engine after spawning an agent.
@@ -44,4 +44,6 @@ export interface SpawnContext {
   emailAllowedDomains?: string[];
   /** MCP tool allowlist — keys are server names, values are allowed tool names. */
   mcpToolAllowlist?: Record<string, string[]>;
+  /** Global reasoning level from settings — used as fallback when agent doesn't specify one. */
+  reasoning?: ReasoningLevel;
 }

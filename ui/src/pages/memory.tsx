@@ -47,7 +47,7 @@ export function MemoryPage() {
   const [content, setContent] = useState("");
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [memoryView, setMemoryView] = useState<"edit" | "preview">("edit");
+  const [memoryView, setMemoryView] = useState<"edit" | "preview">("preview");
 
   useEffect(() => {
     if (memory) {

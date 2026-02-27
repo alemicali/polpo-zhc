@@ -22,7 +22,7 @@ import {
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
-import type { ProviderConfig, ModelConfig, ModelAllowlistEntry } from "../core/types.js";
+import type { ProviderConfig, ModelConfig, ModelAllowlistEntry, ReasoningLevel } from "../core/types.js";
 
 // ─── Constants ──────────────────────────────────────
 
@@ -785,6 +785,35 @@ async function handleBillingDisable(provider: string): Promise<void> {
   }
 }
 
+// ─── Stream Options Builder ─────────────────────────
+
+/**
+ * Build stream/complete options combining API key and reasoning level.
+ * Returns the options object to pass as the 3rd argument to completeSimple/streamSimple.
+ *
+ * Maps our ReasoningLevel to pi-ai's ThinkingLevel:
+ * - "off" or undefined → no reasoning parameter (pi-ai default)
+ * - "minimal" | "low" | "medium" | "high" | "xhigh" → passed as `reasoning` to pi-ai
+ *
+ * pi-ai handles provider-specific translation automatically:
+ * - Anthropic → thinkingEnabled + thinkingBudgetTokens
+ * - OpenAI → reasoningEffort
+ * - Google → thinking.enabled + thinking.budgetTokens
+ */
+export function buildStreamOpts(
+  apiKey?: string,
+  reasoning?: ReasoningLevel,
+): Record<string, unknown> | undefined {
+  const reasoningVal = reasoning && reasoning !== "off" ? reasoning : undefined;
+
+  if (!apiKey && !reasoningVal) return undefined;
+
+  const opts: Record<string, unknown> = {};
+  if (apiKey) opts.apiKey = apiKey;
+  if (reasoningVal) opts.reasoning = reasoningVal;
+  return opts;
+}
+
 // ─── Query Functions ────────────────────────────────
 
 /**
@@ -792,14 +821,14 @@ async function handleBillingDisable(provider: string): Promise<void> {
  * Integrates with the cooldown system: marks provider cooldown on classified errors,
  * clears cooldown on success. Uses async API key resolution (includes OAuth profiles).
  */
-export async function queryText(prompt: string, model?: string): Promise<{ text: string; usage?: Usage; model: Model<Api> }> {
+export async function queryText(prompt: string, model?: string, reasoning?: ReasoningLevel): Promise<{ text: string; usage?: Usage; model: Model<Api> }> {
   const m = resolveModel(model);
   const provider = m.provider as string;
   const apiKey = await resolveApiKeyAsync(provider);
   try {
     const response = await completeSimple(m, {
       messages: [{ role: "user", content: prompt, timestamp: Date.now() }],
-    }, apiKey ? { apiKey } : undefined);
+    }, buildStreamOpts(apiKey, reasoning));
     const textBlocks = response.content.filter((c): c is { type: "text"; text: string } => c.type === "text");
     const text = textBlocks.map(b => b.text).join("\n").trim();
     // Success — clear any cooldown for this provider
@@ -831,6 +860,7 @@ export async function queryStream(
   prompt: string,
   model?: string,
   onProgress?: (text: string) => void,
+  reasoning?: ReasoningLevel,
 ): Promise<{ text: string; usage?: Usage; model: Model<Api> }> {
   const m = resolveModel(model);
   const provider = m.provider as string;
@@ -838,7 +868,7 @@ export async function queryStream(
   try {
     const s = streamSimple(m, {
       messages: [{ role: "user", content: prompt, timestamp: Date.now() }],
-    }, apiKey ? { apiKey } : undefined);
+    }, buildStreamOpts(apiKey, reasoning));
 
     for await (const event of s) {
       if (event.type === "text_delta" && onProgress) {

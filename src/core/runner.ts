@@ -115,6 +115,7 @@ async function main(): Promise<void> {
       polpoDir: config.polpoDir,
       emailAllowedDomains: config.emailAllowedDomains,
       mcpToolAllowlist: config.mcpToolAllowlist,
+      reasoning: config.reasoning,
     };
     handle = spawnEngine(config.agent, config.task, config.cwd, spawnCtx);
     // Wire transcript persistence — every agent message gets written to the run log

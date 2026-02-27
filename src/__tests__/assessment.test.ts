@@ -96,7 +96,7 @@ describe("runCheck", () => {
     const exp: TaskExpectation = { type: "llm_review", criteria: "be good" };
     const result = await runCheck(exp, "/tmp");
     expect(result.passed).toBe(true);
-    expect(mockedLLMReview).toHaveBeenCalledWith(exp, "/tmp", undefined, undefined);
+    expect(mockedLLMReview).toHaveBeenCalledWith(exp, "/tmp", undefined, undefined, undefined);
   });
 });
 

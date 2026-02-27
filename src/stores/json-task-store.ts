@@ -21,7 +21,7 @@ export class JsonTaskStore implements TaskStore {
     }
     return {
       project: "",
-      team: { name: "", agents: [] },
+      teams: [{ name: "", agents: [] }],
       tasks: [],
       processes: [],
     };

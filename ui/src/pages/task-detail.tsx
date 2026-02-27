@@ -50,6 +50,7 @@ import {
 import { MessageResponse } from "@/components/ai-elements/message";
 import { useTask, useTasks, useProcesses, useTaskActivity } from "@lumea-labs/polpo-react";
 import type { TaskStatus, DimensionScore, CheckResult, EvalDimension, AssessmentResult, AssessmentTrigger, AgentProcess, RunActivityEntry } from "@lumea-labs/polpo-react";
+import { useAsyncAction } from "@/hooks/use-polpo";
 import { toast } from "sonner";
 import { formatDistanceToNow, format } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -341,6 +342,9 @@ function ActivityPanel({ taskId, isActive }: { taskId: string; isActive?: boolea
   const { entries, isLoading, error, refetch } = useTaskActivity(taskId, {
     pollIntervalMs: isActive ? 1000 : 0,
   });
+  const [handleActivityRefresh, isActivityRefreshing] = useAsyncAction(async () => {
+    await refetch();
+  });
 
   const stats = entries.reduce((acc, e) => {
     if (e.event === "activity") acc.snapshots++;
@@ -421,8 +425,8 @@ function ActivityPanel({ taskId, isActive }: { taskId: string; isActive?: boolea
             </span>
           )}
         </div>
-        <Button variant="ghost" size="sm" onClick={refetch}>
-          <RefreshCw className="h-3.5 w-3.5" />
+        <Button variant="ghost" size="sm" onClick={handleActivityRefresh} disabled={isActivityRefreshing}>
+          <RefreshCw className={cn("h-3.5 w-3.5", isActivityRefreshing && "animate-spin")} />
         </Button>
       </div>
       <ScrollArea className="h-[calc(100vh-16rem)]">
@@ -522,12 +526,17 @@ export function TaskDetailPage() {
   }
   const process = task ? processes.find(p => p.taskId === task.id) : undefined;
 
+  const [actionPending, setActionPending] = useState<string | null>(null);
   const handleAction = async (action: () => Promise<unknown>, label: string) => {
+    if (actionPending) return;
+    setActionPending(label);
     try {
       await action();
       toast.success(label);
     } catch (e) {
       toast.error((e as Error).message);
+    } finally {
+      setActionPending(null);
     }
   };
 
@@ -601,23 +610,23 @@ export function TaskDetailPage() {
         </div>
         <div className="flex items-center gap-2 shrink-0">
           {task.status === "draft" && (
-            <Button variant="outline" size="sm" onClick={() => handleAction(queueTask, "Queued")}>
-              <Zap className="h-3.5 w-3.5 mr-1.5" /> Queue
+            <Button variant="outline" size="sm" disabled={!!actionPending} onClick={() => handleAction(queueTask, "Queued")}>
+              {actionPending === "Queued" ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Zap className="h-3.5 w-3.5 mr-1.5" />} Queue
             </Button>
           )}
           {task.status === "failed" && (
-            <Button variant="outline" size="sm" onClick={() => handleAction(retryTask, "Retried")}>
-              <RotateCcw className="h-3.5 w-3.5 mr-1.5" /> Retry
+            <Button variant="outline" size="sm" disabled={!!actionPending} onClick={() => handleAction(retryTask, "Retried")}>
+              {actionPending === "Retried" ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5 mr-1.5" />} Retry
             </Button>
           )}
           {(task.status === "in_progress" || task.status === "assigned") && (
-            <Button variant="outline" size="sm" className="text-red-400 hover:text-red-500" onClick={() => handleAction(killTask, "Killed")}>
-              <XCircle className="h-3.5 w-3.5 mr-1.5" /> Kill
+            <Button variant="outline" size="sm" className="text-red-400 hover:text-red-500" disabled={!!actionPending} onClick={() => handleAction(killTask, "Killed")}>
+              {actionPending === "Killed" ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <XCircle className="h-3.5 w-3.5 mr-1.5" />} Kill
             </Button>
           )}
           {(task.status === "failed" || (task.status === "done" && assessment?.globalScore != null && assessment.globalScore < 0.8)) && (
-            <Button variant="outline" size="sm" onClick={() => handleAction(reassessTask, "Re-assessed")}>
-              <RefreshCw className="h-3.5 w-3.5 mr-1.5" /> Re-assess
+            <Button variant="outline" size="sm" disabled={!!actionPending} onClick={() => handleAction(reassessTask, "Re-assessed")}>
+              {actionPending === "Re-assessed" ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5 mr-1.5" />} Re-assess
             </Button>
           )}
         </div>
