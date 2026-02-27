@@ -115,7 +115,7 @@
     "concurrently": "^9.2.1",
     "tsx": "^4.21.0",
     "typescript": "^5.7.3",
-    "vitest": "^3.0.4"
+    "vitest": "^4.0.18"
   },
   "pnpm": {
     "overrides": {},
