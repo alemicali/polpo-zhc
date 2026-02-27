@@ -1,4 +1,4 @@
-import type { Task, Plan, PlanReport, AgentProcess, SSEEvent, TaskStatus } from "../client/types.js";
+import type { Task, Mission, MissionReport, AgentProcess, SSEEvent, TaskStatus } from "../client/types.js";
 import type { StoreState } from "./types.js";
 
 export interface TaskFilter {
@@ -47,24 +47,24 @@ export function selectTask(state: StoreState, taskId: string): Task | undefined 
   return state.tasks.get(taskId);
 }
 
-// ── Plan selectors ──────────────────────────────────────────
+// ── Mission selectors ───────────────────────────────────────
 
-let lastPlansMap: Map<string, Plan> | null = null;
-let lastPlanResult: Plan[] = [];
+let lastMissionsMap: Map<string, Mission> | null = null;
+let lastMissionResult: Mission[] = [];
 
-export function selectPlans(state: StoreState): Plan[] {
-  if (state.plans === lastPlansMap) return lastPlanResult;
-  lastPlansMap = state.plans;
-  lastPlanResult = Array.from(state.plans.values());
-  return lastPlanResult;
+export function selectMissions(state: StoreState): Mission[] {
+  if (state.missions === lastMissionsMap) return lastMissionResult;
+  lastMissionsMap = state.missions;
+  lastMissionResult = Array.from(state.missions.values());
+  return lastMissionResult;
 }
 
-export function selectPlan(state: StoreState, planId: string): Plan | undefined {
-  return state.plans.get(planId);
+export function selectMission(state: StoreState, missionId: string): Mission | undefined {
+  return state.missions.get(missionId);
 }
 
-export function selectPlanReport(state: StoreState, planId: string): PlanReport | undefined {
-  return state.planReports.get(planId);
+export function selectMissionReport(state: StoreState, missionId: string): MissionReport | undefined {
+  return state.missionReports.get(missionId);
 }
 
 // ── Process selector ────────────────────────────────────────

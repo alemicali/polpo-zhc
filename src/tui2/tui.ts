@@ -23,7 +23,7 @@ import { dispatch, COMMANDS } from "./commands/router.js";
 import { parseMentions } from "./mentions.js";
 import { startChat } from "./actions/chat.js";
 import { createTask } from "./actions/create-task.js";
-import { createPlan } from "./actions/create-plan.js";
+import { createMission } from "./actions/create-mission.js";
 import { startRecording, stopAndTranscribe } from "./voice.js";
 import type { RecordingHandle } from "./voice.js";
 
@@ -279,12 +279,12 @@ export async function startPiTUI(workDir: string): Promise<void> {
     taskPanel.setOrchestratorStartedAt(Date.now());
   });
 
-  // === State Sync (tasks/plans -> TaskPanel) ===
+  // === State Sync (tasks/missions -> TaskPanel) ===
   function syncState(): void {
     const tasks = polpo.getStore().getAllTasks();
     const state = polpo.getStore().getState();
     const processes = state.processes ?? [];
-    const plans = polpo.getAllPlans();
+    const missions = polpo.getAllMissions();
 
     taskPanel.setTasks(tasks.map(t => ({
       id: t.id,
@@ -300,7 +300,7 @@ export async function startPiTUI(workDir: string): Promise<void> {
       description: t.description,
     })));
 
-    taskPanel.setPlans(plans.map((p) => {
+    taskPanel.setMissions(missions.map((p) => {
       let taskCount: number | undefined;
       try {
         const parsed = JSON.parse(p.data);
@@ -365,7 +365,7 @@ export async function startPiTUI(workDir: string): Promise<void> {
         void startChat(mentions.text, polpo, ctx, mentions.agent);
         break;
       case "plan":
-        void createPlan(mentions.text, polpo, ctx);
+        void createMission(mentions.text, polpo, ctx);
         break;
       case "task":
         createTask(mentions.text, polpo, ctx, mentions.agent);

@@ -2,7 +2,7 @@ import { createDatabase, type PolpoDatabase, type PolpoStatement } from "./sqlit
 import { join } from "node:path";
 import { existsSync, readFileSync, renameSync, mkdirSync } from "node:fs";
 import { nanoid } from "nanoid";
-import type { Task, TaskStatus, PolpoState, AgentProcess, Team, Plan, PlanStatus } from "../core/types.js";
+import type { Task, TaskStatus, PolpoState, AgentProcess, Team, Mission, MissionStatus } from "../core/types.js";
 import type { TaskStore } from "../core/task-store.js";
 import { assertValidTransition } from "../core/state-machine.js";
 
@@ -40,7 +40,7 @@ interface ProcessRow {
   activity: string;
 }
 
-interface PlanRow {
+interface MissionRow {
   id: string;
   name: string;
   data: string;
@@ -75,11 +75,11 @@ export class SqliteTaskStore implements TaskStore {
   private clearProcessesStmt: PolpoStatement;
   private insertProcessStmt: PolpoStatement;
   private getAllProcessesStmt: PolpoStatement;
-  private insertPlanStmt!: PolpoStatement;
-  private getPlanStmt!: PolpoStatement;
-  private getPlanByNameStmt!: PolpoStatement;
-  private getAllPlansStmt!: PolpoStatement;
-  private deletePlanStmt!: PolpoStatement;
+  private insertMissionStmt!: PolpoStatement;
+  private getMissionStmt!: PolpoStatement;
+  private getMissionByNameStmt!: PolpoStatement;
+  private getAllMissionsStmt!: PolpoStatement;
+  private deleteMissionStmt!: PolpoStatement;
 
   constructor(polpoDir: string) {
     this.polpoDir = polpoDir;
@@ -112,15 +112,15 @@ export class SqliteTaskStore implements TaskStore {
     `);
     this.getAllProcessesStmt = this.db.prepare(`SELECT * FROM processes`);
 
-    // Plan statements
-    this.insertPlanStmt = this.db.prepare(`
-      INSERT INTO plans (id, name, data, prompt, status, notifications, created_at, updated_at)
+    // Mission statements
+    this.insertMissionStmt = this.db.prepare(`
+      INSERT INTO missions (id, name, data, prompt, status, notifications, created_at, updated_at)
       VALUES (@id, @name, @data, @prompt, @status, @notifications, @created_at, @updated_at)
     `);
-    this.getPlanStmt = this.db.prepare(`SELECT * FROM plans WHERE id = ?`);
-    this.getPlanByNameStmt = this.db.prepare(`SELECT * FROM plans WHERE name = ?`);
-    this.getAllPlansStmt = this.db.prepare(`SELECT * FROM plans ORDER BY created_at DESC`);
-    this.deletePlanStmt = this.db.prepare(`DELETE FROM plans WHERE id = ?`);
+    this.getMissionStmt = this.db.prepare(`SELECT * FROM missions WHERE id = ?`);
+    this.getMissionByNameStmt = this.db.prepare(`SELECT * FROM missions WHERE name = ?`);
+    this.getAllMissionsStmt = this.db.prepare(`SELECT * FROM missions ORDER BY created_at DESC`);
+    this.deleteMissionStmt = this.db.prepare(`DELETE FROM missions WHERE id = ?`);
 
     this.migrateFromJson();
   }
@@ -165,7 +165,7 @@ export class SqliteTaskStore implements TaskStore {
         activity   TEXT NOT NULL DEFAULT '{}'
       );
 
-      CREATE TABLE IF NOT EXISTS plans (
+      CREATE TABLE IF NOT EXISTS missions (
         id          TEXT PRIMARY KEY,
         name        TEXT NOT NULL UNIQUE,
         data        TEXT NOT NULL,
@@ -174,7 +174,7 @@ export class SqliteTaskStore implements TaskStore {
         created_at  TEXT NOT NULL,
         updated_at  TEXT NOT NULL
       );
-      CREATE INDEX IF NOT EXISTS idx_plans_status ON plans(status);
+      CREATE INDEX IF NOT EXISTS idx_missions_status ON missions(status);
     `);
   }
 
@@ -189,12 +189,17 @@ export class SqliteTaskStore implements TaskStore {
       `ALTER TABLE tasks ADD COLUMN resolution_attempts INTEGER NOT NULL DEFAULT 0`,
       `ALTER TABLE tasks ADD COLUMN session_id TEXT`,
       `ALTER TABLE tasks ADD COLUMN notifications TEXT`,
-      `ALTER TABLE plans ADD COLUMN notifications TEXT`,
-      `ALTER TABLE plans RENAME COLUMN yaml TO data`,
+      `ALTER TABLE missions ADD COLUMN notifications TEXT`,
+      `ALTER TABLE missions RENAME COLUMN yaml TO data`,
     ];
     for (const sql of migrations) {
       try { this.db.exec(sql); } catch { /* column already exists or rename already applied */ }
     }
+
+    // Rename legacy "plans" table → "missions"
+    try {
+      this.db.exec(`ALTER TABLE plans RENAME TO missions`);
+    } catch { /* table already renamed or doesn't exist */ }
   }
 
   private migrateFromJson(): void {
@@ -469,63 +474,63 @@ export class SqliteTaskStore implements TaskStore {
     return this.rowToTask(this.getTaskStmt.get(taskId) as TaskRow);
   }
 
-  // === Plan persistence ===
+  // === Mission persistence ===
 
-  private rowToPlan(row: PlanRow): Plan {
+  private rowToMission(row: MissionRow): Mission {
     return {
       id: row.id,
       name: row.name,
       data: row.data,
       prompt: row.prompt ?? undefined,
-      status: row.status as PlanStatus,
+      status: row.status as MissionStatus,
       notifications: safeJsonParse(row.notifications, undefined),
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     };
   }
 
-  savePlan(plan: Omit<Plan, "id" | "createdAt" | "updatedAt">): Plan {
+  saveMission(mission: Omit<Mission, "id" | "createdAt" | "updatedAt">): Mission {
     const now = new Date().toISOString();
-    const newPlan: Plan = {
-      ...plan,
+    const newMission: Mission = {
+      ...mission,
       id: nanoid(),
       createdAt: now,
       updatedAt: now,
     };
-    this.insertPlanStmt.run({
-      id: newPlan.id,
-      name: newPlan.name,
-      data: newPlan.data,
-      prompt: newPlan.prompt ?? null,
-      status: newPlan.status,
-      notifications: newPlan.notifications ? JSON.stringify(newPlan.notifications) : null,
-      created_at: newPlan.createdAt,
-      updated_at: newPlan.updatedAt,
+    this.insertMissionStmt.run({
+      id: newMission.id,
+      name: newMission.name,
+      data: newMission.data,
+      prompt: newMission.prompt ?? null,
+      status: newMission.status,
+      notifications: newMission.notifications ? JSON.stringify(newMission.notifications) : null,
+      created_at: newMission.createdAt,
+      updated_at: newMission.updatedAt,
     });
-    return newPlan;
+    return newMission;
   }
 
-  getPlan(planId: string): Plan | undefined {
-    const row = this.getPlanStmt.get(planId) as PlanRow | undefined;
-    return row ? this.rowToPlan(row) : undefined;
+  getMission(missionId: string): Mission | undefined {
+    const row = this.getMissionStmt.get(missionId) as MissionRow | undefined;
+    return row ? this.rowToMission(row) : undefined;
   }
 
-  getPlanByName(name: string): Plan | undefined {
-    const row = this.getPlanByNameStmt.get(name) as PlanRow | undefined;
-    return row ? this.rowToPlan(row) : undefined;
+  getMissionByName(name: string): Mission | undefined {
+    const row = this.getMissionByNameStmt.get(name) as MissionRow | undefined;
+    return row ? this.rowToMission(row) : undefined;
   }
 
-  getAllPlans(): Plan[] {
-    return (this.getAllPlansStmt.all() as PlanRow[]).map(r => this.rowToPlan(r));
+  getAllMissions(): Mission[] {
+    return (this.getAllMissionsStmt.all() as MissionRow[]).map(r => this.rowToMission(r));
   }
 
-  updatePlan(planId: string, updates: Partial<Omit<Plan, "id">>): Plan {
-    const existing = this.getPlanStmt.get(planId) as PlanRow | undefined;
-    if (!existing) throw new Error(`Plan not found: ${planId}`);
+  updateMission(missionId: string, updates: Partial<Omit<Mission, "id">>): Mission {
+    const existing = this.getMissionStmt.get(missionId) as MissionRow | undefined;
+    if (!existing) throw new Error(`Mission not found: ${missionId}`);
 
     const now = new Date().toISOString();
     const setClauses: string[] = ["updated_at = @updated_at"];
-    const params: Record<string, unknown> = { id: planId, updated_at: now };
+    const params: Record<string, unknown> = { id: missionId, updated_at: now };
 
     if (updates.name !== undefined) { setClauses.push("name = @name"); params.name = updates.name; }
     if (updates.data !== undefined) { setClauses.push("data = @data"); params.data = updates.data; }
@@ -533,20 +538,20 @@ export class SqliteTaskStore implements TaskStore {
     if (updates.status !== undefined) { setClauses.push("status = @status"); params.status = updates.status; }
     if (updates.notifications !== undefined) { setClauses.push("notifications = @notifications"); params.notifications = updates.notifications ? JSON.stringify(updates.notifications) : null; }
 
-    const sql = `UPDATE plans SET ${setClauses.join(", ")} WHERE id = @id`;
+    const sql = `UPDATE missions SET ${setClauses.join(", ")} WHERE id = @id`;
     this.db.prepare(sql).run(params);
 
-    return this.rowToPlan(this.getPlanStmt.get(planId) as PlanRow);
+    return this.rowToMission(this.getMissionStmt.get(missionId) as MissionRow);
   }
 
-  deletePlan(planId: string): boolean {
-    const result = this.deletePlanStmt.run(planId);
+  deleteMission(missionId: string): boolean {
+    const result = this.deleteMissionStmt.run(missionId);
     return result.changes > 0;
   }
 
-  nextPlanName(): string {
-    const row = this.db.prepare("SELECT COUNT(*) as c FROM plans").get() as { c: number };
-    return `plan-${row.c + 1}`;
+  nextMissionName(): string {
+    const row = this.db.prepare("SELECT COUNT(*) as c FROM missions").get() as { c: number };
+    return `mission-${row.c + 1}`;
   }
 
   close(): void {

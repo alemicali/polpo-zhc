@@ -6,8 +6,8 @@ export type { PolpoProviderProps } from "./provider/polpo-provider.js";
 export { usePolpo } from "./hooks/use-polpo.js";
 export { useTasks } from "./hooks/use-tasks.js";
 export { useTask } from "./hooks/use-task.js";
-export { usePlans } from "./hooks/use-plans.js";
-export { usePlan } from "./hooks/use-plan.js";
+export { useMissions } from "./hooks/use-missions.js";
+export { useMission } from "./hooks/use-mission.js";
 export { useAgents } from "./hooks/use-agents.js";
 export { useAgent } from "./hooks/use-agent.js";
 export { useProcesses } from "./hooks/use-processes.js";
@@ -36,9 +36,9 @@ export type {
   TaskOutcome,
   ExpectedOutcome,
   OutcomeType,
-  Plan,
-  PlanStatus,
-  PlanReport,
+  Mission,
+  MissionStatus,
+  MissionReport,
   AgentConfig,
   AgentIdentity,
   AgentResponsibility,
@@ -59,8 +59,8 @@ export type {
   SSEEvent,
   CreateTaskRequest,
   UpdateTaskRequest,
-  CreatePlanRequest,
-  UpdatePlanRequest,
+  CreateMissionRequest,
+  UpdateMissionRequest,
   AddAgentRequest,
   AddTeamRequest,
   TaskFilters,

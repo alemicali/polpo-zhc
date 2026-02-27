@@ -73,7 +73,7 @@ function configEdit(
     { label: `maxRetries: ${s.maxRetries}`, value: "maxRetries", description: "Max task retries" },
     { label: `orchestratorModel: ${typeof s.orchestratorModel === "string" ? s.orchestratorModel : s.orchestratorModel?.primary ?? "(default)"}`, value: "orchestratorModel", description: "Model for LLM calls" },
     { label: `autoCorrect: ${s.autoCorrectExpectations !== false}`, value: "autoCorrectExpectations", description: "Auto-correct expectations" },
-    { label: `enableVolatileTeams: ${s.enableVolatileTeams !== false}`, value: "enableVolatileTeams", description: "Allow plan-defined agents" },
+    { label: `enableVolatileTeams: ${s.enableVolatileTeams !== false}`, value: "enableVolatileTeams", description: "Allow mission-defined agents" },
   ];
 
   store.navigate({

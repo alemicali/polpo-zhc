@@ -131,7 +131,7 @@ async function doCreateWithPrep(
   tui.requestRender();
 
   try {
-    const { generateTaskPrep } = await import("../../llm/plan-generator.js");
+    const { generateTaskPrep } = await import("../../llm/mission-generator.js");
     const { buildTaskPrepPrompt } = await import("../../llm/prompts.js");
     const { resolveModelSpec } = await import("../../llm/pi-client.js");
 

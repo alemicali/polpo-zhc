@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import type { Task, TaskStatus, DimensionScore, PlanStatus, PlanReport, ChannelType, PeerIdentity } from "./types.js";
+import type { Task, TaskStatus, DimensionScore, MissionStatus, MissionReport, ChannelType, PeerIdentity } from "./types.js";
 import type { LogStore } from "./log-store.js";
 
 export interface PolpoEventMap {
@@ -48,19 +48,19 @@ export interface PolpoEventMap {
   // Recovery
   "task:recovered": { taskId: string; title: string; previousStatus: TaskStatus };
 
-  // Plans
-  "plan:saved": { planId: string; name: string; status: PlanStatus };
-  "plan:executed": { planId: string; group: string; taskCount: number };
-  "plan:completed": { planId: string; group: string; allPassed: boolean; report: PlanReport };
-  "plan:resumed": { planId: string; name: string; retried: number; pending: number };
-  "plan:deleted": { planId: string };
+  // Missions
+  "mission:saved": { missionId: string; name: string; status: MissionStatus };
+  "mission:executed": { missionId: string; group: string; taskCount: number };
+  "mission:completed": { missionId: string; group: string; allPassed: boolean; report: MissionReport };
+  "mission:resumed": { missionId: string; name: string; retried: number; pending: number };
+  "mission:deleted": { missionId: string };
 
   // Chat sessions
   "session:created": { sessionId: string; title?: string };
   "message:added": { sessionId: string; messageId: string; role: "user" | "assistant" };
 
   // Approval gates
-  "approval:requested": { requestId: string; gateId: string; gateName: string; taskId?: string; planId?: string };
+  "approval:requested": { requestId: string; gateId: string; gateName: string; taskId?: string; missionId?: string };
   "approval:resolved": { requestId: string; status: "approved" | "rejected"; resolvedBy?: string };
   "approval:rejected": { requestId: string; taskId?: string; feedback: string; rejectionCount: number; resolvedBy?: string };
   "approval:timeout": { requestId: string; action: "approve" | "reject" };
@@ -71,19 +71,19 @@ export interface PolpoEventMap {
   "escalation:human": { taskId: string; message: string; channels?: string[] };
 
   // SLA & Deadlines
-  "sla:warning": { entityId: string; entityType: "task" | "plan"; deadline: string; elapsed: number; remaining: number; percentUsed: number };
-  "sla:violated": { entityId: string; entityType: "task" | "plan"; deadline: string; overdueMs: number };
-  "sla:met": { entityId: string; entityType: "task" | "plan"; deadline: string; marginMs: number };
+  "sla:warning": { entityId: string; entityType: "task" | "mission"; deadline: string; elapsed: number; remaining: number; percentUsed: number };
+  "sla:violated": { entityId: string; entityType: "task" | "mission"; deadline: string; overdueMs: number };
+  "sla:met": { entityId: string; entityType: "task" | "mission"; deadline: string; marginMs: number };
 
-  // Quality gates (plan-level)
-  "quality:gate:passed": { planId: string; gateName: string; avgScore?: number };
-  "quality:gate:failed": { planId: string; gateName: string; avgScore?: number; reason: string };
-  "quality:threshold:failed": { planId: string; avgScore: number; threshold: number };
+  // Quality gates (mission-level)
+  "quality:gate:passed": { missionId: string; gateName: string; avgScore?: number };
+  "quality:gate:failed": { missionId: string; gateName: string; avgScore?: number; reason: string };
+  "quality:threshold:failed": { missionId: string; avgScore: number; threshold: number };
 
   // Scheduling
-  "schedule:triggered": { scheduleId: string; planId: string; expression: string };
-  "schedule:created": { scheduleId: string; planId: string; nextRunAt?: string };
-  "schedule:completed": { scheduleId: string; planId: string };
+  "schedule:triggered": { scheduleId: string; missionId: string; expression: string };
+  "schedule:created": { scheduleId: string; missionId: string; nextRunAt?: string };
+  "schedule:completed": { scheduleId: string; missionId: string };
 
   // Notifications
   "notification:sent": { ruleId: string; channel: string; event: string };

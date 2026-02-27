@@ -23,7 +23,7 @@ import {
   ListChecks,
   Bot,
   Shield,
-  Map,
+  Target,
   AlertTriangle,
   Info,
   Zap,
@@ -57,7 +57,7 @@ type EventCategory =
   | "task"
   | "agent"
   | "assessment"
-  | "plan"
+  | "mission"
   | "deadlock"
   | "orchestrator"
   | "session"
@@ -70,7 +70,7 @@ function getCategory(event: string): EventCategory {
   if (event.startsWith("task:")) return "task";
   if (event.startsWith("agent:")) return "agent";
   if (event.startsWith("assessment:")) return "assessment";
-  if (event.startsWith("plan:")) return "plan";
+  if (event.startsWith("mission:")) return "mission";
   if (event.startsWith("deadlock:")) return "deadlock";
   if (event.startsWith("orchestrator:")) return "orchestrator";
   if (event.startsWith("session:") || event.startsWith("message:"))
@@ -103,9 +103,9 @@ const categoryConfig: Record<
     color: "text-amber-400",
     bg: "bg-amber-500/10",
   },
-  plan: {
-    icon: Map,
-    label: "Plans",
+  mission: {
+    icon: Target,
+    label: "Missions",
     color: "text-emerald-400",
     bg: "bg-emerald-500/10",
   },
@@ -318,24 +318,24 @@ function buildNarrative(
           return taskId || action;
       }
     }
-    case "plan": {
-      const planName =
+    case "mission": {
+      const missionName =
         (data?.name as string) ??
-        (data?.planId as string)?.slice(0, 8) ??
+        (data?.missionId as string)?.slice(0, 8) ??
         "";
       switch (action) {
         case "saved":
-          return `Plan "${planName}" saved`;
+          return `Mission "${missionName}" saved`;
         case "executed":
-          return `Plan "${planName}" started execution`;
+          return `Mission "${missionName}" started execution`;
         case "completed":
-          return `Plan "${planName}" completed`;
+          return `Mission "${missionName}" completed`;
         case "resumed":
-          return `Plan "${planName}" resumed`;
+          return `Mission "${missionName}" resumed`;
         case "deleted":
-          return `Plan "${planName}" deleted`;
+          return `Mission "${missionName}" deleted`;
         default:
-          return planName || action;
+          return missionName || action;
       }
     }
     case "deadlock": {
@@ -668,7 +668,7 @@ function EventStream({ events }: { events: EventRowData[] }) {
               "task",
               "agent",
               "assessment",
-              "plan",
+              "mission",
               "deadlock",
               "session",
               "notification",

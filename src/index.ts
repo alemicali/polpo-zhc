@@ -31,8 +31,8 @@ export type {
   SSEEvent,
   CreateTaskRequest,
   UpdateTaskRequest,
-  CreatePlanRequest,
-  UpdatePlanRequest,
+  CreateMissionRequest,
+  UpdateMissionRequest,
   AddAgentRequest,
 } from "./server/index.js";
 

@@ -4,8 +4,8 @@
  */
 
 import { create } from "zustand";
-import type { Task, AgentProcess, PolpoState, Plan } from "../core/types.js";
-import type { UserQuestion, UserAnswer } from "../llm/plan-generator.js";
+import type { Task, AgentProcess, PolpoState, Mission } from "../core/types.js";
+import type { UserQuestion, UserAnswer } from "../llm/mission-generator.js";
 
 // ─── Segment (styled text unit) ─────────────────────────
 
@@ -91,13 +91,13 @@ export interface TUIStore {
   updateLastLine(segs: Seg[]): void;
   clearLines(): void;
 
-  // Tasks & plans (snapshot from orchestrator)
+  // Tasks & missions (snapshot from orchestrator)
   tasks: Task[];
   processes: AgentProcess[];
-  plans: Plan[];
+  missions: Mission[];
   orchestratorStartedAt: string | null;
   tuiStartedAt: string;
-  syncState(state: PolpoState, plans?: Plan[]): void;
+  syncState(state: PolpoState, missions?: Mission[]): void;
 
   // Input
   inputBuffer: string;
@@ -205,17 +205,17 @@ export const useStore = create<TUIStore>((set) => ({
     }),
   clearLines: () => set({ lines: [] }),
 
-  // Tasks & plans
+  // Tasks & missions
   tasks: [],
   processes: [],
-  plans: [],
+  missions: [],
   orchestratorStartedAt: null,
   tuiStartedAt: new Date().toISOString(),
-  syncState: (state, plans) =>
+  syncState: (state, missions) =>
     set({
       tasks: state.tasks,
       processes: state.processes,
-      plans: plans ?? [],
+      missions: missions ?? [],
       orchestratorStartedAt: state.startedAt ?? null,
     }),
 

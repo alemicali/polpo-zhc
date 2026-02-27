@@ -3,7 +3,7 @@ import { NavLink, useLocation } from "react-router-dom";
 import {
   LayoutDashboard,
   MessageCircle,
-  Map,
+  Target,
   ListChecks,
   Bot,
   Brain,
@@ -25,7 +25,7 @@ import {
 const primaryNav = [
   { to: "/dashboard", icon: LayoutDashboard, label: "Home" },
   { to: "/chat", icon: MessageCircle, label: "Chat" },
-  { to: "/plans", icon: Map, label: "Plans" },
+  { to: "/missions", icon: Target, label: "Missions" },
   { to: "/tasks", icon: ListChecks, label: "Tasks" },
   { to: "/agents", icon: Bot, label: "Agents" },
 ];

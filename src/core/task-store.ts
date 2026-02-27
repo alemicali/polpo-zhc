@@ -1,4 +1,4 @@
-import type { Task, TaskStatus, PolpoState, Plan } from "./types.js";
+import type { Task, TaskStatus, PolpoState, Mission } from "./types.js";
 
 /**
  * Abstract interface for task persistence.
@@ -27,12 +27,12 @@ export interface TaskStore {
   // Lifecycle
   close?(): void;
 
-  // Plan persistence (optional)
-  savePlan?(plan: Omit<Plan, "id" | "createdAt" | "updatedAt">): Plan;
-  getPlan?(planId: string): Plan | undefined;
-  getPlanByName?(name: string): Plan | undefined;
-  getAllPlans?(): Plan[];
-  updatePlan?(planId: string, updates: Partial<Omit<Plan, "id">>): Plan;
-  deletePlan?(planId: string): boolean;
-  nextPlanName?(): string;
+  // Mission persistence (optional)
+  saveMission?(mission: Omit<Mission, "id" | "createdAt" | "updatedAt">): Mission;
+  getMission?(missionId: string): Mission | undefined;
+  getMissionByName?(name: string): Mission | undefined;
+  getAllMissions?(): Mission[];
+  updateMission?(missionId: string, updates: Partial<Omit<Mission, "id">>): Mission;
+  deleteMission?(missionId: string): boolean;
+  nextMissionName?(): string;
 }

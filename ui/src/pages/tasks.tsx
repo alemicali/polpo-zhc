@@ -40,11 +40,11 @@ import {
   Filter,
   LayoutList,
   Columns3,
-  Map,
+  Target,
   Users,
   Check,
 } from "lucide-react";
-import { useTasks, usePolpo, useProcesses, usePlans, useAgents } from "@lumea-labs/polpo-react";
+import { useTasks, usePolpo, useProcesses, useMissions, useAgents } from "@lumea-labs/polpo-react";
 import type { Task, TaskStatus, AgentProcess } from "@lumea-labs/polpo-react";
 import { useAsyncAction } from "@/hooks/use-polpo";
 import { toast } from "sonner";
@@ -85,14 +85,14 @@ const kanbanColumns: { status: TaskStatus | "queued"; label: string; filter: (t:
   { status: "failed", label: "Failed", filter: (t) => t.status === "failed" },
 ];
 
-// ── Plan filter popover ──
+// ── Mission filter popover ──
 
-function PlanFilter({
-  plans,
+function MissionFilter({
+  missions,
   selected,
   onToggle,
 }: {
-  plans: { id: string; name: string }[];
+  missions: { id: string; name: string }[];
   selected: Set<string>;
   onToggle: (name: string) => void;
 }) {
@@ -103,7 +103,7 @@ function PlanFilter({
       <PopoverTrigger asChild>
         <Button variant={hasFilter ? "default" : "outline"} size="sm" className="gap-1.5">
           <Filter className="h-3.5 w-3.5" />
-          Plans
+          Missions
           {hasFilter && (
             <Badge variant="secondary" className="text-[9px] ml-1">{selected.size}</Badge>
           )}
@@ -111,10 +111,10 @@ function PlanFilter({
       </PopoverTrigger>
       <PopoverContent className="w-56 p-2" align="start">
         <div className="space-y-1 max-h-64 overflow-y-auto">
-          {plans.length === 0 ? (
-            <p className="text-xs text-muted-foreground text-center py-3">No plans</p>
+          {missions.length === 0 ? (
+            <p className="text-xs text-muted-foreground text-center py-3">No missions</p>
           ) : (
-            plans.map((p) => (
+            missions.map((p) => (
               <button
                 key={p.name}
                 className={cn(
@@ -129,7 +129,7 @@ function PlanFilter({
                 )}>
                   {selected.has(p.name) && <Check className="h-3 w-3 text-primary-foreground" />}
                 </div>
-                <Map className="h-3 w-3 text-muted-foreground shrink-0" />
+                <Target className="h-3 w-3 text-muted-foreground shrink-0" />
                 <span className="truncate">{p.name}</span>
               </button>
             ))
@@ -140,7 +140,7 @@ function PlanFilter({
             variant="ghost"
             size="sm"
             className="w-full mt-1 text-xs"
-            onClick={() => plans.forEach(p => { if (selected.has(p.name)) onToggle(p.name); })}
+            onClick={() => missions.forEach(p => { if (selected.has(p.name)) onToggle(p.name); })}
           >
             Clear all
           </Button>
@@ -537,7 +537,7 @@ function ListView({
                 </p>
                 {tab === "all" && (
                   <p className="text-xs mt-1 text-center max-w-xs">
-                    Tasks are created when a plan is executed. Use the TUI or Chat to create and run a plan.
+                    Tasks are created when a mission is executed. Use the TUI or Chat to create and run a mission.
                   </p>
                 )}
               </CardContent>
@@ -571,13 +571,13 @@ export function TasksPage() {
   const { tasks, isLoading: loading, refetch, retryTask } = useTasks();
   const { processes } = useProcesses();
   const { client } = usePolpo();
-  const { plans } = usePlans();
+  const { missions } = useMissions();
   const { teams } = useAgents();
   const [search, setSearch] = useState("");
   const [viewMode, setViewMode] = useState<ViewMode>(() => {
     return (localStorage.getItem("polpo-tasks-view") as ViewMode) ?? "list";
   });
-  const [selectedPlans, setSelectedPlans] = useState<Set<string>>(new Set());
+  const [selectedMissions, setSelectedMissions] = useState<Set<string>>(new Set());
   const [selectedTeams, setSelectedTeams] = useState<Set<string>>(new Set());
 
   const setView = (mode: ViewMode) => {
@@ -585,8 +585,8 @@ export function TasksPage() {
     localStorage.setItem("polpo-tasks-view", mode);
   };
 
-  const togglePlan = (name: string) => {
-    setSelectedPlans(prev => {
+  const toggleMission = (name: string) => {
+    setSelectedMissions(prev => {
       const next = new Set(prev);
       if (next.has(name)) next.delete(name);
       else next.add(name);
@@ -631,11 +631,11 @@ export function TasksPage() {
     }
   };
 
-  // Filtered tasks by search + plan filter + team filter
+  // Filtered tasks by search + mission filter + team filter
   const filtered = useMemo(() => {
     return tasks.filter(t => {
-      // Plan filter
-      if (selectedPlans.size > 0 && !selectedPlans.has(t.group ?? "")) {
+      // Mission filter
+      if (selectedMissions.size > 0 && !selectedMissions.has(t.group ?? "")) {
         return false;
       }
       // Team filter
@@ -654,18 +654,18 @@ export function TasksPage() {
       }
       return true;
     });
-  }, [tasks, search, selectedPlans, selectedTeams, agentTeamMap]);
+  }, [tasks, search, selectedMissions, selectedTeams, agentTeamMap]);
 
-  // Unique plan names for the filter
-  const planOptions = useMemo((): { name: string; id: string }[] => {
+  // Unique mission names for the filter
+  const missionOptions = useMemo((): { name: string; id: string }[] => {
     const names: Record<string, string> = {};
-    for (const p of plans) names[p.name] = p.id;
-    // Also include groups from tasks that may not match a plan name
+    for (const p of missions) names[p.name] = p.id;
+    // Also include groups from tasks that may not match a mission name
     for (const t of tasks) {
       if (t.group && !(t.group in names)) names[t.group] = "";
     }
     return Object.entries(names).map(([name, id]) => ({ name, id }));
-  }, [plans, tasks]);
+  }, [missions, tasks]);
 
   if (loading) {
     return (
@@ -690,11 +690,11 @@ export function TasksPage() {
           />
         </div>
 
-        {/* Plan filter */}
-        <PlanFilter
-          plans={planOptions}
-          selected={selectedPlans}
-          onToggle={togglePlan}
+        {/* Mission filter */}
+        <MissionFilter
+          missions={missionOptions}
+          selected={selectedMissions}
+          onToggle={toggleMission}
         />
 
         {/* Team filter */}
@@ -736,17 +736,17 @@ export function TasksPage() {
       </div>
 
       {/* Active filter indicators */}
-      {(selectedPlans.size > 0 || selectedTeams.size > 0) && (
+      {(selectedMissions.size > 0 || selectedTeams.size > 0) && (
         <div className="flex items-center gap-2 shrink-0 flex-wrap">
           <span className="text-[10px] text-muted-foreground">Filtering by:</span>
-          {Array.from(selectedPlans).map((name) => (
+          {Array.from(selectedMissions).map((name) => (
             <Badge
-              key={`plan-${name}`}
+              key={`mission-${name}`}
               variant="secondary"
               className="text-[10px] gap-1 cursor-pointer bg-primary/10 text-primary hover:bg-destructive/20"
-              onClick={() => togglePlan(name)}
+              onClick={() => toggleMission(name)}
             >
-              <Map className="h-2.5 w-2.5" />
+              <Target className="h-2.5 w-2.5" />
               {name}
               <XCircle className="h-2.5 w-2.5" />
             </Badge>
@@ -767,7 +767,7 @@ export function TasksPage() {
             variant="ghost"
             size="sm"
             className="h-5 px-1.5 text-[10px] text-muted-foreground"
-            onClick={() => { setSelectedPlans(new Set()); setSelectedTeams(new Set()); }}
+            onClick={() => { setSelectedMissions(new Set()); setSelectedTeams(new Set()); }}
           >
             Clear all
           </Button>
@@ -778,7 +778,7 @@ export function TasksPage() {
       <div className="flex items-center gap-2 shrink-0">
         <span className="text-xs text-muted-foreground">
           {filtered.length} task{filtered.length !== 1 ? "s" : ""}
-          {(selectedPlans.size > 0 || selectedTeams.size > 0) && ` (filtered from ${tasks.length})`}
+          {(selectedMissions.size > 0 || selectedTeams.size > 0) && ` (filtered from ${tasks.length})`}
         </span>
       </div>
 
@@ -789,10 +789,10 @@ export function TasksPage() {
             <ListChecks className="h-12 w-12 mb-4 opacity-40" />
             <p className="text-sm font-medium">No tasks yet</p>
             <p className="text-xs mt-1 text-center max-w-xs">
-              Tasks are created when a plan is executed. Use the TUI or Chat to create and run a plan.
+              Tasks are created when a mission is executed. Use the TUI or Chat to create and run a mission.
             </p>
             <kbd className="mt-3 rounded border border-border bg-muted px-2 py-1 font-mono text-[10px]">
-              polpo plan &lt;prompt&gt;
+              polpo mission &lt;prompt&gt;
             </kbd>
           </CardContent>
         </Card>

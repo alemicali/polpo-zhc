@@ -159,26 +159,26 @@ export function bridgeEvents(polpo: Orchestrator, chatLog: ChatLog, requestRende
     requestRender();
   });
 
-  // Plans
-  on("plan:executed", ({ group, taskCount }: any) => {
+  // Missions
+  on("mission:executed", ({ group, taskCount }: any) => {
     const countStr = taskCount ? ` (${taskCount} tasks)` : "";
-    chatLog.addEvent(theme.info(`▸ Plan executed: ${group}${countStr}`));
+    chatLog.addEvent(theme.info(`▸ Mission executed: ${group}${countStr}`));
     requestRender();
   });
 
-  on("plan:completed", ({ group, allPassed }: any) => {
+  on("mission:completed", ({ group, allPassed }: any) => {
     const icon = allPassed ? theme.done("✓") : theme.warning("⚠");
     const label = allPassed ? "completed" : "completed with failures";
-    chatLog.addEvent(`${icon} Plan ${label}: ${group}`);
+    chatLog.addEvent(`${icon} Mission ${label}: ${group}`);
     requestRender();
   });
 
-  on("plan:resumed", ({ name, retried, pending }: any) => {
+  on("mission:resumed", ({ name, retried, pending }: any) => {
     const parts: string[] = [];
     if (retried) parts.push(`${retried} retried`);
     if (pending) parts.push(`${pending} pending`);
     const detail = parts.length > 0 ? ` (${parts.join(", ")})` : "";
-    chatLog.addEvent(theme.info(`↻ Plan resumed: ${name}${detail}`));
+    chatLog.addEvent(theme.info(`↻ Mission resumed: ${name}${detail}`));
     requestRender();
   });
 
@@ -208,20 +208,20 @@ export function bridgeEvents(polpo: Orchestrator, chatLog: ChatLog, requestRende
   });
 
   // Quality gates
-  on("quality:gate:passed", ({ planId, gateName, avgScore }: any) => {
+  on("quality:gate:passed", ({ missionId, gateName, avgScore }: any) => {
     const scoreStr = avgScore !== undefined ? ` (avg ${avgScore.toFixed(1)})` : "";
     chatLog.addEvent(theme.done(`✓ Quality gate "${gateName}" passed${scoreStr}`));
     requestRender();
   });
 
-  on("quality:gate:failed", ({ planId, gateName, reason }: any) => {
+  on("quality:gate:failed", ({ missionId, gateName, reason }: any) => {
     chatLog.addEvent(theme.error(`✗ Quality gate "${gateName}" failed: ${reason}`));
     requestRender();
   });
 
   // Scheduling
-  on("schedule:triggered", ({ planId, expression }: any) => {
-    chatLog.addEvent(theme.info(`⏲ Schedule triggered for plan ${planId} (${expression})`));
+  on("schedule:triggered", ({ missionId, expression }: any) => {
+    chatLog.addEvent(theme.info(`⏲ Schedule triggered for mission ${missionId} (${expression})`));
     requestRender();
   });
 

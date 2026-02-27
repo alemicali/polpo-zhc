@@ -21,7 +21,7 @@ import { join } from "path";
 
 const getStatusTool: Tool = {
   name: "get_status",
-  description: "Get a full overview: task counts, active processes, team info, plans, memory status, pending approvals, active checkpoints.",
+  description: "Get a full overview: task counts, active processes, team info, missions, memory status, pending approvals, active checkpoints.",
   parameters: Type.Object({}),
 };
 
@@ -30,7 +30,7 @@ const listTasksTool: Tool = {
   description: "List all tasks. Optionally filter by status, group, or assigned agent.",
   parameters: Type.Object({
     status: Type.Optional(Type.String({ description: "Filter by status: pending, assigned, in_progress, review, done, failed" })),
-    group: Type.Optional(Type.String({ description: "Filter by plan group name" })),
+    group: Type.Optional(Type.String({ description: "Filter by mission group name" })),
     assignTo: Type.Optional(Type.String({ description: "Filter by agent name" })),
   }),
 };
@@ -44,20 +44,20 @@ const getTaskTool: Tool = {
   }),
 };
 
-const listPlansTool: Tool = {
-  name: "list_plans",
-  description: "List all plans. Optionally filter by status.",
+const listMissionsTool: Tool = {
+  name: "list_missions",
+  description: "List all missions. Optionally filter by status.",
   parameters: Type.Object({
     status: Type.Optional(Type.String({ description: "Filter by status: draft, active, paused, completed, failed, cancelled" })),
   }),
 };
 
-const getPlanTool: Tool = {
-  name: "get_plan",
-  description: "Get full details of a plan by ID or name (partial match).",
+const getMissionTool: Tool = {
+  name: "get_mission",
+  description: "Get full details of a mission by ID or name (partial match).",
   parameters: Type.Object({
-    id: Type.Optional(Type.String({ description: "Plan ID" })),
-    name: Type.Optional(Type.String({ description: "Plan name (partial match)" })),
+    id: Type.Optional(Type.String({ description: "Mission ID" })),
+    name: Type.Optional(Type.String({ description: "Mission name (partial match)" })),
   }),
 };
 
@@ -97,7 +97,7 @@ const listApprovalsTool: Tool = {
 
 const listCheckpointsTool: Tool = {
   name: "list_checkpoints",
-  description: "List all active (unresumed) checkpoints across plans.",
+  description: "List all active (unresumed) checkpoints across missions.",
   parameters: Type.Object({}),
 };
 
@@ -121,7 +121,7 @@ const createTaskTool: Tool = {
     description: Type.String({ description: "Detailed task description" }),
     assignTo: Type.String({ description: "Agent name to assign the task to" }),
     dependsOn: Type.Optional(Type.Array(Type.String(), { description: "IDs of tasks this depends on" })),
-    group: Type.Optional(Type.String({ description: "Plan group name" })),
+    group: Type.Optional(Type.String({ description: "Mission group name" })),
     expectations: Type.Optional(Type.Array(Type.Object({
       type: Type.String({ description: "test, file_exists, script, or llm_review" }),
       command: Type.Optional(Type.String()),
@@ -162,7 +162,7 @@ const deleteTasksTool: Tool = {
   description: "Delete multiple tasks matching a filter.",
   parameters: Type.Object({
     status: Type.Optional(Type.String({ description: "Delete tasks with this status" })),
-    group: Type.Optional(Type.String({ description: "Delete tasks in this plan group" })),
+    group: Type.Optional(Type.String({ description: "Delete tasks in this mission group" })),
     all: Type.Optional(Type.Boolean({ description: "Delete ALL tasks (use with caution)" })),
   }),
 };
@@ -200,60 +200,60 @@ const forceFailTaskTool: Tool = {
 };
 
 // ═══════════════════════════════════════════════════════
-//  PLAN TOOLS (6)
+//  MISSION TOOLS (6)
 // ═══════════════════════════════════════════════════════
 
-const createPlanTool: Tool = {
-  name: "create_plan",
-  description: "Create a new plan. Provide the plan content as a JSON string with tasks, dependencies, expectations, and optionally quality gates.",
+const createMissionTool: Tool = {
+  name: "create_mission",
+  description: "Create a new mission. Provide the mission content as a JSON string with tasks, dependencies, expectations, and optionally quality gates.",
   parameters: Type.Object({
-    name: Type.String({ description: "Plan name" }),
-    data: Type.String({ description: "JSON plan content (tasks array, qualityGates, etc.)" }),
-    prompt: Type.Optional(Type.String({ description: "Original user request that generated this plan" })),
+    name: Type.String({ description: "Mission name" }),
+    data: Type.String({ description: "JSON mission content (tasks array, qualityGates, etc.)" }),
+    prompt: Type.Optional(Type.String({ description: "Original user request that generated this mission" })),
   }),
 };
 
-const updatePlanTool: Tool = {
-  name: "update_plan",
-  description: "Update an existing plan's name, content, or status.",
+const updateMissionTool: Tool = {
+  name: "update_mission",
+  description: "Update an existing mission's name, content, or status.",
   parameters: Type.Object({
-    planId: Type.String({ description: "Plan ID to update" }),
-    name: Type.Optional(Type.String({ description: "New plan name" })),
-    data: Type.Optional(Type.String({ description: "New JSON plan content" })),
+    missionId: Type.String({ description: "Mission ID to update" }),
+    name: Type.Optional(Type.String({ description: "New mission name" })),
+    data: Type.Optional(Type.String({ description: "New JSON mission content" })),
     status: Type.Optional(Type.String({ description: "New status: draft, active, paused, completed, failed, cancelled" })),
   }),
 };
 
-const executePlanTool: Tool = {
-  name: "execute_plan",
-  description: "Execute a draft plan — creates tasks for all plan items and starts the work.",
+const executeMissionTool: Tool = {
+  name: "execute_mission",
+  description: "Execute a draft mission — creates tasks for all mission items and starts the work.",
   parameters: Type.Object({
-    planId: Type.String({ description: "Plan ID to execute" }),
+    missionId: Type.String({ description: "Mission ID to execute" }),
   }),
 };
 
-const resumePlanTool: Tool = {
-  name: "resume_plan",
-  description: "Resume a failed or active plan. Optionally retry failed tasks.",
+const resumeMissionTool: Tool = {
+  name: "resume_mission",
+  description: "Resume a failed or active mission. Optionally retry failed tasks.",
   parameters: Type.Object({
-    planId: Type.String({ description: "Plan ID to resume" }),
+    missionId: Type.String({ description: "Mission ID to resume" }),
     retryFailed: Type.Optional(Type.Boolean({ description: "Also retry failed tasks (default: false)" })),
   }),
 };
 
-const abortPlanTool: Tool = {
-  name: "abort_plan",
-  description: "Abort all tasks in a plan — kills running processes and marks tasks as failed.",
+const abortMissionTool: Tool = {
+  name: "abort_mission",
+  description: "Abort all tasks in a mission — kills running processes and marks tasks as failed.",
   parameters: Type.Object({
-    planId: Type.String({ description: "Plan ID to abort" }),
+    missionId: Type.String({ description: "Mission ID to abort" }),
   }),
 };
 
-const deletePlanTool: Tool = {
-  name: "delete_plan",
-  description: "Delete a plan.",
+const deleteMissionTool: Tool = {
+  name: "delete_mission",
+  description: "Delete a mission.",
   parameters: Type.Object({
-    planId: Type.String({ description: "Plan ID to delete" }),
+    missionId: Type.String({ description: "Mission ID to delete" }),
   }),
 };
 
@@ -354,9 +354,9 @@ const rejectRequestTool: Tool = {
 
 const resumeCheckpointTool: Tool = {
   name: "resume_checkpoint",
-  description: "Resume a blocked checkpoint in a plan.",
+  description: "Resume a blocked checkpoint in a mission.",
   parameters: Type.Object({
-    planId: Type.String({ description: "Plan ID" }),
+    missionId: Type.String({ description: "Mission ID" }),
     checkpointName: Type.String({ description: "Checkpoint name to resume" }),
   }),
 };
@@ -367,9 +367,9 @@ const resumeCheckpointTool: Tool = {
 
 const createScheduleTool: Tool = {
   name: "create_schedule",
-  description: "Schedule a plan for future or recurring execution. Supports cron expressions (minimum 1 minute) and ISO timestamps.",
+  description: "Schedule a mission for future or recurring execution. Supports cron expressions (minimum 1 minute) and ISO timestamps.",
   parameters: Type.Object({
-    planId: Type.String({ description: "Plan ID to schedule" }),
+    missionId: Type.String({ description: "Mission ID to schedule" }),
     expression: Type.String({ description: "Cron expression (e.g. '*/5 * * * *' = every 5 min) or ISO timestamp for one-shot" }),
     recurring: Type.Optional(Type.Boolean({ description: "Repeat on every cron tick (default: false = one-shot)" })),
   }),
@@ -385,9 +385,9 @@ const listSchedulesTool: Tool = {
 
 const deleteScheduleTool: Tool = {
   name: "delete_schedule",
-  description: "Delete a schedule by plan ID.",
+  description: "Delete a schedule by mission ID.",
   parameters: Type.Object({
-    planId: Type.String({ description: "Plan ID whose schedule to delete" }),
+    missionId: Type.String({ description: "Mission ID whose schedule to delete" }),
   }),
 };
 
@@ -395,7 +395,7 @@ const updateScheduleTool: Tool = {
   name: "update_schedule",
   description: "Update a schedule's expression, recurring flag, or enabled state.",
   parameters: Type.Object({
-    planId: Type.String({ description: "Plan ID whose schedule to update" }),
+    missionId: Type.String({ description: "Mission ID whose schedule to update" }),
     expression: Type.Optional(Type.String({ description: "New cron expression or ISO timestamp" })),
     recurring: Type.Optional(Type.Boolean({ description: "New recurring flag" })),
     enabled: Type.Optional(Type.Boolean({ description: "Enable or disable the schedule" })),
@@ -408,20 +408,20 @@ const updateScheduleTool: Tool = {
 
 const addNotificationRuleTool: Tool = {
   name: "add_notification_rule",
-  description: "Add a notification rule that triggers on events. Can include action triggers (create_task, execute_plan, run_script, send_notification) in addition to channel notifications.",
+  description: "Add a notification rule that triggers on events. Can include action triggers (create_task, execute_mission, run_script, send_notification) in addition to channel notifications.",
   parameters: Type.Object({
     name: Type.String({ description: "Rule name" }),
-    events: Type.Array(Type.String(), { description: "Event patterns (glob: 'task:*', 'plan:completed', etc.)" }),
+    events: Type.Array(Type.String(), { description: "Event patterns (glob: 'task:*', 'mission:completed', etc.)" }),
     channels: Type.Optional(Type.Array(Type.String(), { description: "Channel IDs to notify. Omit if using actions only." })),
     condition: Type.Optional(Type.String({ description: "JSON condition string, e.g. '{\"field\":\"to\",\"op\":\"==\",\"value\":\"done\"}'" })),
     severity: Type.Optional(Type.String({ description: "info, warning, or critical" })),
     cooldownMs: Type.Optional(Type.Number({ description: "Minimum ms between notifications for this rule" })),
     actions: Type.Optional(Type.Array(Type.Object({
-      type: Type.String({ description: "create_task, execute_plan, run_script, or send_notification" }),
+      type: Type.String({ description: "create_task, execute_mission, run_script, or send_notification" }),
       title: Type.Optional(Type.String()),
       description: Type.Optional(Type.String()),
       assignTo: Type.Optional(Type.String()),
-      planId: Type.Optional(Type.String()),
+      missionId: Type.Optional(Type.String()),
       command: Type.Optional(Type.String()),
       timeoutMs: Type.Optional(Type.Number()),
       channel: Type.Optional(Type.String()),
@@ -467,11 +467,11 @@ const watchTaskTool: Tool = {
     taskId: Type.String({ description: "Task ID to watch" }),
     targetStatus: Type.String({ description: "Status to trigger on: done, failed, review, etc." }),
     action: Type.Object({
-      type: Type.String({ description: "create_task, execute_plan, run_script, or send_notification" }),
+      type: Type.String({ description: "create_task, execute_mission, run_script, or send_notification" }),
       title: Type.Optional(Type.String()),
       description: Type.Optional(Type.String()),
       assignTo: Type.Optional(Type.String()),
-      planId: Type.Optional(Type.String()),
+      missionId: Type.Optional(Type.String()),
       command: Type.Optional(Type.String()),
       timeoutMs: Type.Optional(Type.Number()),
       channel: Type.Optional(Type.String()),
@@ -561,7 +561,7 @@ After receiving answers, continue with the task using the clarified information.
 // ═══════════════════════════════════════════════════════
 
 export const READ_TOOLS = new Set([
-  "get_status", "list_tasks", "get_task", "list_plans", "get_plan",
+  "get_status", "list_tasks", "get_task", "list_missions", "get_mission",
   "list_agents", "get_team", "get_memory", "get_config",
   "list_approvals", "list_checkpoints", "get_logs",
   // Read-only listing tools
@@ -572,8 +572,8 @@ export const WRITE_TOOLS = new Set([
   // Task
   "create_task", "update_task", "delete_task", "delete_tasks",
   "retry_task", "kill_task", "reassess_task", "force_fail_task",
-  // Plan
-  "create_plan", "update_plan", "execute_plan", "resume_plan", "abort_plan", "delete_plan",
+  // Mission
+  "create_mission", "update_mission", "execute_mission", "resume_mission", "abort_mission", "delete_mission",
   // Team
   "add_agent", "remove_agent", "update_agent", "rename_team", "add_team", "remove_team",
   // Approvals & Checkpoints
@@ -601,15 +601,15 @@ export function isInteractive(toolName: string): boolean {
 
 export const ALL_ORCHESTRATOR_TOOLS: Tool[] = [
   // Read (15)
-  getStatusTool, listTasksTool, getTaskTool, listPlansTool, getPlanTool,
+  getStatusTool, listTasksTool, getTaskTool, listMissionsTool, getMissionTool,
   listAgentsTool, getTeamsTool, getMemoryTool, getConfigTool,
   listApprovalsTool, listCheckpointsTool, getLogsTool,
   listSchedulesTool, listNotificationRulesTool, listWatchersTool,
   // Task (8)
   createTaskTool, updateTaskTool, deleteTaskTool, deleteTasksTool,
   retryTaskTool, killTaskTool, reassessTaskTool, forceFailTaskTool,
-  // Plan (6)
-  createPlanTool, updatePlanTool, executePlanTool, resumePlanTool, abortPlanTool, deletePlanTool,
+  // Mission (6)
+  createMissionTool, updateMissionTool, executeMissionTool, resumeMissionTool, abortMissionTool, deleteMissionTool,
   // Team (7)
   listTeamsTool, addAgentTool, removeAgentTool, updateAgentTool, renameTeamTool, addTeamTool, removeTeamTool,
   // Approvals & Checkpoints (3)
@@ -636,12 +636,12 @@ const TOOL_LABELS: Record<string, string> = {
   kill_task: "Kill Task",
   reassess_task: "Reassess Task",
   force_fail_task: "Force Fail Task",
-  create_plan: "Create Plan",
-  update_plan: "Update Plan",
-  execute_plan: "Execute Plan",
-  resume_plan: "Resume Plan",
-  abort_plan: "Abort Plan",
-  delete_plan: "Delete Plan",
+  create_mission: "Create Mission",
+  update_mission: "Update Mission",
+  execute_mission: "Execute Mission",
+  resume_mission: "Resume Mission",
+  abort_mission: "Abort Mission",
+  delete_mission: "Delete Mission",
   add_agent: "Add Agent",
   remove_agent: "Remove Agent",
   update_agent: "Update Agent",
@@ -684,8 +684,8 @@ export function executeOrchestratorTool(
       case "get_status":       return execGetStatus(polpo);
       case "list_tasks":       return execListTasks(polpo, args);
       case "get_task":         return execGetTask(polpo, args);
-      case "list_plans":       return execListPlans(polpo, args);
-      case "get_plan":         return execGetPlan(polpo, args);
+      case "list_missions":    return execListMissions(polpo, args);
+      case "get_mission":      return execGetMission(polpo, args);
       case "list_agents":      return execListAgents(polpo);
       case "get_teams":        return execGetTeams(polpo, args);
       case "get_memory":       return execGetMemory(polpo);
@@ -704,13 +704,13 @@ export function executeOrchestratorTool(
       case "reassess_task":    return execReassessTask(polpo, args);
       case "force_fail_task":  return execForceFailTask(polpo, args);
 
-      // ── Plan ──
-      case "create_plan":      return execCreatePlan(polpo, args);
-      case "update_plan":      return execUpdatePlan(polpo, args);
-      case "execute_plan":     return execExecutePlan(polpo, args);
-      case "resume_plan":      return execResumePlan(polpo, args);
-      case "abort_plan":       return execAbortPlan(polpo, args);
-      case "delete_plan":      return execDeletePlan(polpo, args);
+      // ── Mission ──
+      case "create_mission":   return execCreateMission(polpo, args);
+      case "update_mission":   return execUpdateMission(polpo, args);
+      case "execute_mission":  return execExecuteMission(polpo, args);
+      case "resume_mission":   return execResumeMission(polpo, args);
+      case "abort_mission":    return execAbortMission(polpo, args);
+      case "delete_mission":   return execDeleteMission(polpo, args);
 
       // ── Team ──
       case "list_teams":       return execListTeams(polpo);
@@ -789,16 +789,16 @@ function resolveTargetName(
     } catch { /* ignore */ }
     return String(args.taskId);
   }
-  if (args.planId && polpo) {
+  if (args.missionId && polpo) {
     try {
-      const plan = polpo.getPlan(String(args.planId));
-      if (plan) return `"${plan.name}"`;
+      const mission = polpo.getMission(String(args.missionId));
+      if (mission) return `"${mission.name}"`;
     } catch { /* ignore */ }
-    return String(args.planId);
+    return String(args.missionId);
   }
   if (args.requestId) return String(args.requestId);
   if (toolName === "create_task" && args.title) return `"${String(args.title)}"`;
-  if (toolName === "create_plan" && args.name) return `"${String(args.name)}"`;
+  if (toolName === "create_mission" && args.name) return `"${String(args.name)}"`;
   if (toolName === "add_agent" && args.name) return `"${String(args.name)}"`;
   if (toolName === "remove_agent" && args.name) return `"${String(args.name)}"`;
   if (toolName === "update_agent" && args.name) return `"${String(args.name)}"`;
@@ -834,11 +834,11 @@ export function formatToolDetails(
       return task ? `${task.title} (${id})` : String(id);
     } catch { return String(id); }
   };
-  const resolvePlan = (id: unknown): string => {
+  const resolveMission = (id: unknown): string => {
     if (!polpo || !id) return String(id);
     try {
-      const plan = polpo.getPlan(String(id));
-      return plan ? `${plan.name} (${id})` : String(id);
+      const mission = polpo.getMission(String(id));
+      return mission ? `${mission.name} (${id})` : String(id);
     } catch { return String(id); }
   };
 
@@ -858,7 +858,7 @@ export function formatToolDetails(
       if (args.assignTo) main.push(["New agent", String(args.assignTo)]);
       if (args.description) extra.push(["New description", trunc(args.description, 200)]);
       break;
-    case "create_plan":
+    case "create_mission":
       main.push(["Name", trunc(args.name)]);
       if (args.data) extra.push(["Content", trunc(args.data, 300)]);
       break;
@@ -879,11 +879,11 @@ export function formatToolDetails(
     case "force_fail_task":
       main.push(["Task", resolveTask(args.taskId)]);
       break;
-    case "execute_plan":
-    case "resume_plan":
-    case "abort_plan":
-    case "delete_plan":
-      main.push(["Plan", resolvePlan(args.planId)]);
+    case "execute_mission":
+    case "resume_mission":
+    case "abort_mission":
+    case "delete_mission":
+      main.push(["Mission", resolveMission(args.missionId)]);
       if (args.retryFailed) main.push(["Retry failed", "yes"]);
       break;
     case "delete_tasks":
@@ -940,12 +940,12 @@ function execGetStatus(polpo: Orchestrator): string {
   lines.push(`Active processes: ${alive.length}`);
   for (const p of alive) lines.push(`  ${p.agentName} → task ${p.taskId}`);
 
-  const plans = polpo.getAllPlans();
-  if (plans.length > 0) {
-    lines.push(`Plans: ${plans.length} total`);
-    const planCounts: Record<string, number> = {};
-    for (const p of plans) planCounts[p.status] = (planCounts[p.status] || 0) + 1;
-    for (const [status, count] of Object.entries(planCounts)) lines.push(`  ${status}: ${count}`);
+  const missions = polpo.getAllMissions();
+  if (missions.length > 0) {
+    lines.push(`Missions: ${missions.length} total`);
+    const missionCounts: Record<string, number> = {};
+    for (const p of missions) missionCounts[p.status] = (missionCounts[p.status] || 0) + 1;
+    for (const [status, count] of Object.entries(missionCounts)) lines.push(`  ${status}: ${count}`);
   }
 
   if (polpo.hasMemory()) lines.push("Memory: available");
@@ -984,28 +984,28 @@ function execGetTask(polpo: Orchestrator, args: Record<string, unknown>): string
   return JSON.stringify(task, null, 2);
 }
 
-function execListPlans(polpo: Orchestrator, args: Record<string, unknown>): string {
-  let plans = polpo.getAllPlans();
-  if (args.status) plans = plans.filter(p => p.status === args.status);
-  if (plans.length === 0) return "No plans found.";
-  const lines = plans.map(p =>
+function execListMissions(polpo: Orchestrator, args: Record<string, unknown>): string {
+  let missions = polpo.getAllMissions();
+  if (args.status) missions = missions.filter(p => p.status === args.status);
+  if (missions.length === 0) return "No missions found.";
+  const lines = missions.map(p =>
     `[${p.id}] ${p.status.toUpperCase().padEnd(10)} ${p.name}${p.prompt ? ` — "${p.prompt.slice(0, 60)}"` : ""}`
   );
-  return `${plans.length} plan(s):\n${lines.join("\n")}`;
+  return `${missions.length} mission(s):\n${lines.join("\n")}`;
 }
 
-function execGetPlan(polpo: Orchestrator, args: Record<string, unknown>): string {
-  let plan;
-  if (args.id) plan = polpo.getPlan(args.id as string);
-  if (!plan && args.name) {
-    plan = polpo.getPlanByName(args.name as string);
-    if (!plan) {
+function execGetMission(polpo: Orchestrator, args: Record<string, unknown>): string {
+  let mission;
+  if (args.id) mission = polpo.getMission(args.id as string);
+  if (!mission && args.name) {
+    mission = polpo.getMissionByName(args.name as string);
+    if (!mission) {
       const needle = (args.name as string).toLowerCase();
-      plan = polpo.getAllPlans().find(p => p.name.toLowerCase().includes(needle));
+      mission = polpo.getAllMissions().find(p => p.name.toLowerCase().includes(needle));
     }
   }
-  if (!plan) return "Plan not found.";
-  return JSON.stringify(plan, null, 2);
+  if (!mission) return "Mission not found.";
+  return JSON.stringify(mission, null, 2);
 }
 
 function execListAgents(polpo: Orchestrator): string {
@@ -1181,66 +1181,66 @@ function execForceFailTask(polpo: Orchestrator, args: Record<string, unknown>): 
 }
 
 // ═══════════════════════════════════════════════════════
-//  PLAN IMPLEMENTATIONS
+//  MISSION IMPLEMENTATIONS
 // ═══════════════════════════════════════════════════════
 
-function execCreatePlan(polpo: Orchestrator, args: Record<string, unknown>): string {
-  const plan = polpo.savePlan({
+function execCreateMission(polpo: Orchestrator, args: Record<string, unknown>): string {
+  const mission = polpo.saveMission({
     data: args.data as string,
     name: args.name as string,
     prompt: args.prompt as string | undefined,
     status: "draft",
   });
-  return `Plan created: [${plan.id}] "${plan.name}" (draft)`;
+  return `Mission created: [${mission.id}] "${mission.name}" (draft)`;
 }
 
-function execUpdatePlan(polpo: Orchestrator, args: Record<string, unknown>): string {
-  const planId = args.planId as string;
-  const plan = polpo.getPlan(planId);
-  if (!plan) return `Error: Plan "${planId}" not found.`;
+function execUpdateMission(polpo: Orchestrator, args: Record<string, unknown>): string {
+  const missionId = args.missionId as string;
+  const mission = polpo.getMission(missionId);
+  if (!mission) return `Error: Mission "${missionId}" not found.`;
   const updates: Record<string, unknown> = {};
   if (args.name) updates.name = args.name;
   if (args.data) updates.data = args.data;
   if (args.status) updates.status = args.status;
-  const updated = polpo.updatePlan(planId, updates as any);
-  return `Plan "${updated.name}" updated.`;
+  const updated = polpo.updateMission(missionId, updates as any);
+  return `Mission "${updated.name}" updated.`;
 }
 
-function execExecutePlan(polpo: Orchestrator, args: Record<string, unknown>): string {
-  const planId = args.planId as string;
-  const plan = polpo.getPlan(planId);
-  if (!plan) return `Error: Plan "${planId}" not found.`;
-  const result = polpo.executePlan(planId);
-  return `Plan "${plan.name}" executed: ${result.tasks.length} tasks created in group "${result.group}".`;
+function execExecuteMission(polpo: Orchestrator, args: Record<string, unknown>): string {
+  const missionId = args.missionId as string;
+  const mission = polpo.getMission(missionId);
+  if (!mission) return `Error: Mission "${missionId}" not found.`;
+  const result = polpo.executeMission(missionId);
+  return `Mission "${mission.name}" executed: ${result.tasks.length} tasks created in group "${result.group}".`;
 }
 
-function execResumePlan(polpo: Orchestrator, args: Record<string, unknown>): string {
-  const planId = args.planId as string;
-  const plan = polpo.getPlan(planId);
-  if (!plan) return `Error: Plan "${planId}" not found.`;
-  const result = polpo.resumePlan(planId, { retryFailed: args.retryFailed as boolean | undefined });
-  return `Plan "${plan.name}" resumed: ${result.retried} retried, ${result.pending} pending.`;
+function execResumeMission(polpo: Orchestrator, args: Record<string, unknown>): string {
+  const missionId = args.missionId as string;
+  const mission = polpo.getMission(missionId);
+  if (!mission) return `Error: Mission "${missionId}" not found.`;
+  const result = polpo.resumeMission(missionId, { retryFailed: args.retryFailed as boolean | undefined });
+  return `Mission "${mission.name}" resumed: ${result.retried} retried, ${result.pending} pending.`;
 }
 
-function execAbortPlan(polpo: Orchestrator, args: Record<string, unknown>): string {
-  const planId = args.planId as string;
-  const plan = polpo.getPlan(planId);
-  if (!plan) return `Error: Plan "${planId}" not found.`;
-  // abortGroup uses the plan's group name, which is typically the plan ID or name
+function execAbortMission(polpo: Orchestrator, args: Record<string, unknown>): string {
+  const missionId = args.missionId as string;
+  const mission = polpo.getMission(missionId);
+  if (!mission) return `Error: Mission "${missionId}" not found.`;
+  // abortGroup uses the mission's group name, which is typically the mission ID or name
   // We need to find the group from active tasks
   const state = polpo.getStore().getState();
-  const planTasks = state.tasks.filter(t => t.group && polpo.getPlan(planId));
-  // Use the plan name as group identifier
-  const count = polpo.abortGroup(plan.name);
-  return count > 0 ? `Plan "${plan.name}" aborted: ${count} tasks killed/failed.` : `Plan "${plan.name}" — no active tasks to abort.`;
+  const missionTasks = state.tasks.filter(t => t.group && polpo.getMission(missionId));
+  // Use the mission name as group identifier
+  const count = polpo.abortGroup(mission.name);
+  return count > 0 ? `Mission "${mission.name}" aborted: ${count} tasks killed/failed.` : `Mission "${mission.name}" — no active tasks to abort.`;
 }
 
-function execDeletePlan(polpo: Orchestrator, args: Record<string, unknown>): string {
-  const planId = args.planId as string;
-  const plan = polpo.getPlan(planId);
-  if (!plan) return `Error: Plan "${planId}" not found.`;
-  polpo.deletePlan(planId);
-  return `Plan "${plan.name}" deleted.`;
+function execDeleteMission(polpo: Orchestrator, args: Record<string, unknown>): string {
+  const missionId = args.missionId as string;
+  const mission = polpo.getMission(missionId);
+  if (!mission) return `Error: Mission "${missionId}" not found.`;
+  polpo.deleteMission(missionId);
+  return `Mission "${mission.name}" deleted.`;
 }
 
 // ═══════════════════════════════════════════════════════
@@ -1357,8 +1357,8 @@ function execRejectRequest(polpo: Orchestrator, args: Record<string, unknown>): 
 }
 
 function execResumeCheckpoint(polpo: Orchestrator, args: Record<string, unknown>): string {
-  const resumed = polpo.resumeCheckpointByPlanId(
-    args.planId as string,
+  const resumed = polpo.resumeCheckpointByMissionId(
+    args.missionId as string,
     args.checkpointName as string,
   );
   return resumed ? `Checkpoint "${args.checkpointName}" resumed.` : `Error: Checkpoint not found or already resumed.`;
@@ -1371,19 +1371,19 @@ function execResumeCheckpoint(polpo: Orchestrator, args: Record<string, unknown>
 function execCreateSchedule(polpo: Orchestrator, args: Record<string, unknown>): string {
   const scheduler = polpo.getScheduler();
   if (!scheduler) return "Error: Scheduler not available (enableScheduler may be false).";
-  const planId = args.planId as string;
-  const plan = polpo.getPlan(planId);
-  if (!plan) return `Error: Plan "${planId}" not found.`;
+  const missionId = args.missionId as string;
+  const mission = polpo.getMission(missionId);
+  if (!mission) return `Error: Mission "${missionId}" not found.`;
 
-  // Temporarily set schedule on the plan so registerPlan can read it
-  const updatedPlan = polpo.updatePlan(planId, {
+  // Temporarily set schedule on the mission so registerMission can read it
+  const updatedMission = polpo.updateMission(missionId, {
     schedule: args.expression as string,
     recurring: (args.recurring as boolean) ?? false,
   });
 
-  const entry = scheduler.registerPlan(updatedPlan);
+  const entry = scheduler.registerMission(updatedMission);
   if (!entry) return `Error: Could not create schedule. Expression may be invalid or timestamp is in the past.`;
-  return `Schedule created for plan "${updatedPlan.name}": ${entry.expression}${entry.recurring ? " (recurring)" : ""}, next run: ${entry.nextRunAt ?? "N/A"}`;
+  return `Schedule created for mission "${updatedMission.name}": ${entry.expression}${entry.recurring ? " (recurring)" : ""}, next run: ${entry.nextRunAt ?? "N/A"}`;
 }
 
 function execListSchedules(polpo: Orchestrator, args: Record<string, unknown>): string {
@@ -1392,9 +1392,9 @@ function execListSchedules(polpo: Orchestrator, args: Record<string, unknown>): 
   const all = args.active ? scheduler.getActiveSchedules() : scheduler.getAllSchedules();
   if (all.length === 0) return "No schedules found.";
   const lines = all.map(s => {
-    const plan = polpo.getPlan(s.planId);
-    const planName = plan ? plan.name : s.planId;
-    return `[${s.id}] ${s.enabled ? "ACTIVE" : "DISABLED"} plan: "${planName}" expr: ${s.expression}${s.recurring ? " (recurring)" : ""} next: ${s.nextRunAt ?? "N/A"}${s.lastRunAt ? ` last: ${s.lastRunAt}` : ""}`;
+    const mission = polpo.getMission(s.missionId);
+    const missionName = mission ? mission.name : s.missionId;
+    return `[${s.id}] ${s.enabled ? "ACTIVE" : "DISABLED"} mission: "${missionName}" expr: ${s.expression}${s.recurring ? " (recurring)" : ""} next: ${s.nextRunAt ?? "N/A"}${s.lastRunAt ? ` last: ${s.lastRunAt}` : ""}`;
   });
   return `${all.length} schedule(s):\n${lines.join("\n")}`;
 }
@@ -1402,37 +1402,37 @@ function execListSchedules(polpo: Orchestrator, args: Record<string, unknown>): 
 function execDeleteSchedule(polpo: Orchestrator, args: Record<string, unknown>): string {
   const scheduler = polpo.getScheduler();
   if (!scheduler) return "Error: Scheduler not available.";
-  const planId = args.planId as string;
-  const deleted = scheduler.unregisterPlan(planId);
-  if (!deleted) return `Error: No schedule found for plan "${planId}".`;
-  // Clear schedule from the plan itself
-  polpo.updatePlan(planId, { schedule: undefined, recurring: undefined } as any);
-  return `Schedule for plan "${planId}" deleted.`;
+  const missionId = args.missionId as string;
+  const deleted = scheduler.unregisterMission(missionId);
+  if (!deleted) return `Error: No schedule found for mission "${missionId}".`;
+  // Clear schedule from the mission itself
+  polpo.updateMission(missionId, { schedule: undefined, recurring: undefined } as any);
+  return `Schedule for mission "${missionId}" deleted.`;
 }
 
 function execUpdateSchedule(polpo: Orchestrator, args: Record<string, unknown>): string {
   const scheduler = polpo.getScheduler();
   if (!scheduler) return "Error: Scheduler not available.";
-  const planId = args.planId as string;
-  const existing = scheduler.getScheduleByPlanId(planId);
-  if (!existing) return `Error: No schedule found for plan "${planId}".`;
+  const missionId = args.missionId as string;
+  const existing = scheduler.getScheduleByMissionId(missionId);
+  if (!existing) return `Error: No schedule found for mission "${missionId}".`;
 
   const changes: string[] = [];
   if (args.expression !== undefined) {
     // Re-register with new expression
-    const plan = polpo.getPlan(planId);
-    if (!plan) return `Error: Plan "${planId}" not found.`;
-    const updated = polpo.updatePlan(planId, {
+    const mission = polpo.getMission(missionId);
+    if (!mission) return `Error: Mission "${missionId}" not found.`;
+    const updated = polpo.updateMission(missionId, {
       schedule: args.expression as string,
       recurring: (args.recurring as boolean) ?? existing.recurring,
     });
-    scheduler.unregisterPlan(planId);
-    scheduler.registerPlan(updated);
+    scheduler.unregisterMission(missionId);
+    scheduler.registerMission(updated);
     changes.push(`expression: ${args.expression}`);
   }
   if (args.recurring !== undefined && args.expression === undefined) {
     existing.recurring = args.recurring as boolean;
-    polpo.updatePlan(planId, { recurring: args.recurring as boolean } as any);
+    polpo.updateMission(missionId, { recurring: args.recurring as boolean } as any);
     changes.push(`recurring: ${args.recurring}`);
   }
   if (args.enabled !== undefined) {
@@ -1440,7 +1440,7 @@ function execUpdateSchedule(polpo: Orchestrator, args: Record<string, unknown>):
     changes.push(`enabled: ${args.enabled}`);
   }
   if (changes.length === 0) return "No changes specified.";
-  return `Schedule for plan "${planId}" updated: ${changes.join(", ")}`;
+  return `Schedule for mission "${missionId}" updated: ${changes.join(", ")}`;
 }
 
 // ═══════════════════════════════════════════════════════

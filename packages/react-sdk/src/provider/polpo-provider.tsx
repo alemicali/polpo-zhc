@@ -66,7 +66,7 @@ export function PolpoProvider({
           // Re-fetch all resources to fill any SSE gaps
           Promise.all([
             client.getTasks().then((t) => store.setTasks(t)),
-            client.getPlans().then((p) => store.setPlans(p)),
+            client.getMissions().then((m) => store.setMissions(m)),
             client.getAgents().then((a) => store.setAgents(a)),
             client.getProcesses().then((p) => store.setProcesses(p)),
           ]).catch(() => {

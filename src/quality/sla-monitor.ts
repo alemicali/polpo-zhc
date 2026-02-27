@@ -1,9 +1,9 @@
 import type { OrchestratorContext } from "../core/orchestrator-context.js";
 import type { NotificationRouter } from "../notifications/index.js";
-import type { SLAConfig, Task, Plan } from "../core/types.js";
+import type { SLAConfig, Task, Mission } from "../core/types.js";
 
 /**
- * SLA Monitor — tracks deadlines on tasks and plans.
+ * SLA Monitor — tracks deadlines on tasks and missions.
  *
  * Runs periodically (driven by the orchestrator tick) and emits:
  *   - sla:warning  — when a configurable % of the deadline has elapsed
@@ -48,7 +48,7 @@ export class SLAMonitor {
   init(): void {
     // Register dynamic notification rules for SLA channels
     this.registerNotificationRules();
-    // Detect SLA met when task/plan completes
+    // Detect SLA met when task/mission completes
     this.ctx.hooks.register({
       hook: "task:complete",
       phase: "after",
@@ -75,7 +75,7 @@ export class SLAMonitor {
   }
 
   /**
-   * Check all active tasks and plans for SLA status.
+   * Check all active tasks and missions for SLA status.
    * Called from the orchestrator tick loop (or on a timer).
    */
   check(): void {
@@ -94,19 +94,19 @@ export class SLAMonitor {
       this.checkEntity(task.id, "task", task.deadline, task.createdAt, now);
     }
 
-    // Check plans
-    const plans = this.ctx.registry.getAllPlans?.() ?? [];
-    for (const plan of plans) {
-      if (!plan.deadline) continue;
-      if (plan.status === "completed" || plan.status === "failed" || plan.status === "cancelled") continue;
+    // Check missions
+    const missions = this.ctx.registry.getAllMissions?.() ?? [];
+    for (const mission of missions) {
+      if (!mission.deadline) continue;
+      if (mission.status === "completed" || mission.status === "failed" || mission.status === "cancelled") continue;
 
-      this.checkEntity(plan.id, "plan", plan.deadline, plan.createdAt, now);
+      this.checkEntity(mission.id, "mission", mission.deadline, mission.createdAt, now);
     }
   }
 
   private checkEntity(
     entityId: string,
-    entityType: "task" | "plan",
+    entityType: "task" | "mission",
     deadlineStr: string,
     createdAtStr: string,
     now: number,

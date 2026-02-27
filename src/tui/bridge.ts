@@ -191,28 +191,28 @@ export function bridgeEvents(polpo: Orchestrator, store: TUIStore): Off {
     ]);
   });
 
-  // ─── Plans ──────────────────────────────────────────
+  // ─── Missions ──────────────────────────────────────────
 
-  on("plan:executed", ({ group, taskCount }: any) => {
-    store.log(`▶ Plan "${group}" (${taskCount} tasks)`, [
+  on("mission:executed", ({ group, taskCount }: any) => {
+    store.log(`▶ Mission "${group}" (${taskCount} tasks)`, [
       seg("▶ ", "blue", true),
       seg(group, undefined, true),
       seg(` started (${taskCount} tasks)`, "gray"),
     ]);
   });
 
-  on("plan:completed", ({ group, allPassed }: any) => {
+  on("mission:completed", ({ group, allPassed }: any) => {
     const icon = allPassed ? "✓" : "✗";
     const color = allPassed ? "green" : "red";
     const label = allPassed ? "completed" : "failed";
-    store.log(`${icon} Plan "${group}" ${label}`, [
+    store.log(`${icon} Mission "${group}" ${label}`, [
       seg(`${icon} `, color, true),
       seg(group, undefined, true),
       seg(` ${label}`, color),
     ]);
   });
 
-  on("plan:resumed", ({ name, retried, pending }: any) => {
+  on("mission:resumed", ({ name, retried, pending }: any) => {
     store.log(`⟳ Resumed: ${name}`, [
       seg("⟳ ", "blue"),
       seg(name, undefined, true),

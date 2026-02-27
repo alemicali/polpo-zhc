@@ -48,15 +48,15 @@ export async function cmdTemplate(api: CommandAPI): Promise<void> {
       tui.requestRender();
       return;
     }
-    const plan = instantiateTemplate(tpl, validation.resolved);
-    const saved = polpo.savePlan({
-      data: plan.data,
-      name: plan.name,
-      prompt: plan.prompt,
+    const mission = instantiateTemplate(tpl, validation.resolved);
+    const saved = polpo.saveMission({
+      data: mission.data,
+      name: mission.name,
+      prompt: mission.prompt,
     });
-    polpo.executePlan(saved.id);
+    polpo.executeMission(saved.id);
     kickRun(polpo);
-    tui.logSystem(`Template "${name}" executed as plan "${plan.name}"`);
+    tui.logSystem(`Template "${name}" executed as mission "${mission.name}"`);
     tui.requestRender();
     return;
   }

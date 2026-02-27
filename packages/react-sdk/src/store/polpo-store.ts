@@ -1,6 +1,6 @@
 import type {
   Task,
-  Plan,
+  Mission,
   AgentConfig,
   AgentProcess,
   SSEEvent,
@@ -14,14 +14,14 @@ export type { StoreState, PolpoStats } from "./types.js";
 function createInitialState(): StoreState {
   return {
     tasks: new Map(),
-    plans: new Map(),
-    planReports: new Map(),
+    missions: new Map(),
+    missionReports: new Map(),
     agents: [],
     processes: [],
     stats: null,
     connectionStatus: "disconnected",
     recentEvents: [],
-    plansStale: false,
+    missionsStale: false,
     memory: null,
   };
 }
@@ -61,11 +61,11 @@ export class PolpoStore {
     this.notify();
   }
 
-  setPlans(plans: Plan[]): void {
+  setMissions(missions: Mission[]): void {
     this.state = {
       ...this.state,
-      plans: new Map(plans.map((p) => [p.id, p])),
-      plansStale: false,
+      missions: new Map(missions.map((m) => [m.id, m])),
+      missionsStale: false,
     };
     this.notify();
   }

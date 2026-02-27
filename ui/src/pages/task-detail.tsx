@@ -35,7 +35,7 @@ import {
   FileEdit,
   Zap,
   Hash,
-  Map,
+  Target,
   Copy,
   Check,
   FileCode,
@@ -594,8 +594,8 @@ export function TaskDetailPage() {
                 <Bot className="h-3 w-3" /> {task.assignTo}
               </span>
               {task.group && (
-                <Link to={`/plans`} className="flex items-center gap-1 hover:text-foreground transition-colors">
-                  <Map className="h-3 w-3" /> {task.group}
+                <Link to={`/missions`} className="flex items-center gap-1 hover:text-foreground transition-colors">
+                  <Target className="h-3 w-3" /> {task.group}
                 </Link>
               )}
               {task.sessionId && (

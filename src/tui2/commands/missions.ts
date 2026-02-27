@@ -7,15 +7,15 @@ import { ViewerOverlay } from "../overlays/viewer.js";
 import { EditorOverlay } from "../overlays/editor-page.js";
 import { ConfirmOverlay } from "../overlays/confirm.js";
 
-export function cmdPlans(api: CommandAPI): void {
+export function cmdMissions(api: CommandAPI): void {
   const { polpo, tui, args } = api;
-  const plans = polpo.getAllPlans();
+  const missions = polpo.getAllMissions();
 
   if (args[0] === "list") {
-    if (plans.length === 0) {
-      tui.logSystem("No plans");
+    if (missions.length === 0) {
+      tui.logSystem("No missions");
     } else {
-      const lines = plans.map((p) => {
+      const lines = missions.map((p) => {
         const status =
           p.status === "active"
             ? theme.inProgress("active")
@@ -26,7 +26,7 @@ export function cmdPlans(api: CommandAPI): void {
                 : theme.dim(p.status);
         return `  ${status} ${p.name}`;
       });
-      tui.logSystem(theme.bold("Plans:") + "\n" + lines.join("\n"));
+      tui.logSystem(theme.bold("Missions:") + "\n" + lines.join("\n"));
     }
     tui.requestRender();
     return;
@@ -35,7 +35,7 @@ export function cmdPlans(api: CommandAPI): void {
   if (args[0] === "new") {
     const template = JSON.stringify(
       {
-        group: "new-plan",
+        group: "new-mission",
         tasks: [
           { title: "Task 1", description: "Description", assignTo: "" },
         ],
@@ -44,15 +44,15 @@ export function cmdPlans(api: CommandAPI): void {
       2,
     );
     const editor = new EditorOverlay({
-      title: "New Plan (JSON)",
+      title: "New Mission (JSON)",
       initialText: template,
       tui: tui.tuiInstance,
       onSave: (text) => {
         tui.hideOverlay();
         try {
           const data = JSON.parse(text);
-          polpo.savePlan({ data: JSON.stringify(data), name: data.group });
-          tui.logSystem(`Plan saved: ${data.group ?? "unnamed"}`);
+          polpo.saveMission({ data: JSON.stringify(data), name: data.group });
+          tui.logSystem(`Mission saved: ${data.group ?? "unnamed"}`);
         } catch (e: unknown) {
           const msg = e instanceof Error ? e.message : String(e);
           tui.logSystem(`Invalid JSON: ${msg}`);
@@ -65,74 +65,74 @@ export function cmdPlans(api: CommandAPI): void {
     return;
   }
 
-  if (plans.length === 0) {
-    tui.logSystem("No plans. Use /plans new to create one.");
+  if (missions.length === 0) {
+    tui.logSystem("No missions. Use /missions new to create one.");
     tui.requestRender();
     return;
   }
 
-  const items = plans.map((p) => ({
+  const items = missions.map((p) => ({
     value: p.id,
     label: p.name,
     description: p.status,
   }));
 
   const picker = new PickerOverlay({
-    title: "Plans",
+    title: "Missions",
     items,
     hint: "Enter: view · e: edit · x: execute · d: delete",
     onSelect: (item) => {
       tui.hideOverlay();
-      showPlanDetail(api, item.value);
+      showMissionDetail(api, item.value);
     },
     onCancel: () => tui.hideOverlay(),
   });
   tui.showOverlay(picker);
 }
 
-function showPlanDetail(api: CommandAPI, planId: string): void {
+function showMissionDetail(api: CommandAPI, missionId: string): void {
   const { polpo, tui } = api;
-  const plan = polpo.getPlan(planId);
-  if (!plan) {
-    tui.logSystem(`Plan not found: ${planId}`);
+  const mission = polpo.getMission(missionId);
+  if (!mission) {
+    tui.logSystem(`Mission not found: ${missionId}`);
     tui.requestRender();
     return;
   }
 
   const lines: string[] = [];
-  lines.push(chalk.bold(plan.name));
-  lines.push(`Status: ${plan.status}`);
-  if (plan.prompt) lines.push(`Prompt: ${plan.prompt}`);
+  lines.push(chalk.bold(mission.name));
+  lines.push(`Status: ${mission.status}`);
+  if (mission.prompt) lines.push(`Prompt: ${mission.prompt}`);
   lines.push("");
-  lines.push(chalk.bold("Plan data:"));
+  lines.push(chalk.bold("Mission data:"));
   try {
-    const parsed = JSON.parse(plan.data);
+    const parsed = JSON.parse(mission.data);
     lines.push(JSON.stringify(parsed, null, 2));
   } catch {
-    lines.push(plan.data ?? "[no data]");
+    lines.push(mission.data ?? "[no data]");
   }
 
   const actions = [];
-  if (plan.status === "draft") {
+  if (mission.status === "draft") {
     actions.push({
       label: "Execute",
       handler: () => {
         tui.hideOverlay();
-        polpo.executePlan(plan.id);
+        polpo.executeMission(mission.id);
         kickRun(polpo);
-        tui.logSystem(`Executing plan: ${plan.name}`);
+        tui.logSystem(`Executing mission: ${mission.name}`);
         tui.requestRender();
       },
     });
   }
-  if (plan.status === "failed" || plan.status === "active") {
+  if (mission.status === "failed" || mission.status === "active") {
     actions.push({
       label: "Resume",
       handler: () => {
         tui.hideOverlay();
-        polpo.resumePlan(plan.id);
+        polpo.resumeMission(mission.id);
         kickRun(polpo);
-        tui.logSystem(`Resuming plan: ${plan.name}`);
+        tui.logSystem(`Resuming mission: ${mission.name}`);
         tui.requestRender();
       },
     });
@@ -142,15 +142,15 @@ function showPlanDetail(api: CommandAPI, planId: string): void {
     handler: () => {
       tui.hideOverlay();
       const editor = new EditorOverlay({
-        title: `Edit Plan: ${plan.name}`,
-        initialText: plan.data ?? "{}",
+        title: `Edit Mission: ${mission.name}`,
+        initialText: mission.data ?? "{}",
         tui: tui.tuiInstance,
         onSave: (text) => {
           tui.hideOverlay();
           try {
             JSON.parse(text); // validate
-            polpo.updatePlan(plan.id, { data: text });
-            tui.logSystem(`Plan updated: ${plan.name}`);
+            polpo.updateMission(mission.id, { data: text });
+            tui.logSystem(`Mission updated: ${mission.name}`);
           } catch (e: unknown) {
             const msg = e instanceof Error ? e.message : String(e);
             tui.logSystem(`Invalid JSON: ${msg}`);
@@ -167,11 +167,11 @@ function showPlanDetail(api: CommandAPI, planId: string): void {
     handler: () => {
       tui.hideOverlay();
       const confirm = new ConfirmOverlay({
-        message: `Delete plan "${plan.name}"?`,
+        message: `Delete mission "${mission.name}"?`,
         onConfirm: () => {
           tui.hideOverlay();
-          polpo.deletePlan(plan.id);
-          tui.logSystem(`Deleted plan: ${plan.name}`);
+          polpo.deleteMission(mission.id);
+          tui.logSystem(`Deleted mission: ${mission.name}`);
           tui.requestRender();
         },
         onCancel: () => tui.hideOverlay(),
@@ -182,7 +182,7 @@ function showPlanDetail(api: CommandAPI, planId: string): void {
   actions.push({ label: "Close", handler: () => tui.hideOverlay() });
 
   const viewer = new ViewerOverlay({
-    title: `Plan: ${plan.name}`,
+    title: `Mission: ${mission.name}`,
     content: lines.join("\n"),
     actions,
     onClose: () => tui.hideOverlay(),

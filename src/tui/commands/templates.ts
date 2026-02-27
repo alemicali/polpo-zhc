@@ -1,5 +1,5 @@
 /**
- * /template — discover, inspect, and execute reusable plan templates.
+ * /template — discover, inspect, and execute reusable mission templates.
  * /template              → picker with all available templates
  * /template list         → inline summary
  * /template <name> [k=v] → execute template with parameters
@@ -128,9 +128,9 @@ function showTemplateDetail(
     richContent.push([]);
   }
 
-  richContent.push([sg("Plan Template:", "gray", true)]);
-  const planJson = JSON.stringify(full.plan, null, 2);
-  for (const line of planJson.split("\n")) {
+  richContent.push([sg("Mission Template:", "gray", true)]);
+  const missionJson = JSON.stringify(full.mission, null, 2);
+  for (const line of missionJson.split("\n")) {
     richContent.push([sg(line, "gray")]);
   }
 
@@ -199,13 +199,13 @@ function templateRun(
   try {
     const instance = instantiateTemplate(template, validation.resolved);
 
-    const plan = polpo.savePlan({
+    const mission = polpo.saveMission({
       data: instance.data,
       prompt: instance.prompt,
       name: instance.name,
     });
 
-    const result = polpo.executePlan(plan.id);
+    const result = polpo.executeMission(mission.id);
     store.log(`Template "${template.name}" executed`, [
       seg("▶ ", "blue", true),
       seg(template.name, undefined, true),

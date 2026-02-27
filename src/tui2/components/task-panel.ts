@@ -1,7 +1,7 @@
 import chalk from "chalk";
 import type { Component } from "@mariozechner/pi-tui";
 import { truncateToWidth } from "@mariozechner/pi-tui";
-import type { TaskSnapshot, PlanSnapshot, AgentActivity } from "../types.js";
+import type { TaskSnapshot, MissionSnapshot, AgentActivity } from "../types.js";
 import { theme, statusIcon, statusColor } from "../theme.js";
 import { formatElapsed, formatDuration, progressBar, spinnerFrame } from "../format.js";
 
@@ -10,7 +10,7 @@ export const TASK_PANEL_WIDTH = 56;
 
 export class TaskPanel implements Component {
   private tasks: TaskSnapshot[] = [];
-  private plans: PlanSnapshot[] = [];
+  private missions: MissionSnapshot[] = [];
   private activities: AgentActivity[] = [];
   private startedAt: number | null = null;
   private orchestratorStartedAt: number | null = null;
@@ -31,8 +31,8 @@ export class TaskPanel implements Component {
     this.tasks = tasks;
   }
 
-  setPlans(plans: PlanSnapshot[]): void {
-    this.plans = plans;
+  setMissions(missions: MissionSnapshot[]): void {
+    this.missions = missions;
   }
 
   setActivities(activities: AgentActivity[]): void {
@@ -122,22 +122,22 @@ export class TaskPanel implements Component {
 
     lines.push(sep);
 
-    // Plans
-    if (this.plans.length > 0) {
-      lines.push(theme.bold(" PLANS"));
-      for (const plan of this.plans) {
+    // Missions
+    if (this.missions.length > 0) {
+      lines.push(theme.bold(" MISSIONS"));
+      for (const mission of this.missions) {
         const statusLabel =
-          plan.status === "active"
+          mission.status === "active"
             ? theme.inProgress("active")
-            : plan.status === "completed"
+            : mission.status === "completed"
               ? theme.done("completed")
-              : plan.status === "failed"
+              : mission.status === "failed"
                 ? theme.failed("failed")
-                : theme.dim(plan.status);
-        const progress = plan.taskCount
-          ? ` (${plan.completedCount ?? 0}/${plan.taskCount})`
+                : theme.dim(mission.status);
+        const progress = mission.taskCount
+          ? ` (${mission.completedCount ?? 0}/${mission.taskCount})`
           : "";
-        lines.push(` ${statusLabel} ${plan.name}${progress}`);
+        lines.push(` ${statusLabel} ${mission.name}${progress}`);
       }
       lines.push(sep);
     }

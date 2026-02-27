@@ -5,7 +5,7 @@ import { loadPolpoConfig, savePolpoConfig } from "./config.js";
 
 /**
  * Manages multi-team agent topology: CRUD operations on teams and agents,
- * volatile (plan-tied) agents, and config persistence.
+ * volatile (mission-tied) agents, and config persistence.
  */
 export class AgentManager {
   constructor(private ctx: OrchestratorContext) {}
@@ -154,7 +154,7 @@ export class AgentManager {
 
     // Volatile agents go to the default (first) team
     const team = this.getDefaultTeam();
-    const volatileAgent: AgentConfig = { ...agent, volatile: true, planGroup: group };
+    const volatileAgent: AgentConfig = { ...agent, volatile: true, missionGroup: group };
     team.agents.push(volatileAgent);
     this.ctx.registry.setState({ teams: this.ctx.config.teams });
     this.ctx.emitter.emit("log", { level: "info", message: `Volatile agent added: ${agent.name} for ${group}` });
@@ -165,7 +165,7 @@ export class AgentManager {
     let removed = 0;
     for (const team of this.ctx.config.teams) {
       const before = team.agents.length;
-      team.agents = team.agents.filter(a => !(a.volatile && a.planGroup === group));
+      team.agents = team.agents.filter(a => !(a.volatile && a.missionGroup === group));
       removed += before - team.agents.length;
     }
     if (removed > 0) {

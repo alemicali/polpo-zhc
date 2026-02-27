@@ -1,7 +1,7 @@
 import { PolpoApiError } from "./errors.js";
 import type {
   Task,
-  Plan,
+  Mission,
   AgentConfig,
   AgentProcess,
   Team,
@@ -11,12 +11,12 @@ import type {
   TaskFilters,
   CreateTaskRequest,
   UpdateTaskRequest,
-  CreatePlanRequest,
-  UpdatePlanRequest,
+  CreateMissionRequest,
+  UpdateMissionRequest,
   AddAgentRequest,
   AddTeamRequest,
-  ExecutePlanResult,
-  ResumePlanResult,
+  ExecuteMissionResult,
+  ResumeMissionResult,
   ApiResult,
   LogSession,
   LogEntry,
@@ -250,42 +250,42 @@ export class PolpoClient {
     return this.post<{ queued: boolean }>(`/tasks/${taskId}/queue`);
   }
 
-  // ── Plans ────────────────────────────────────────────────
+  // ── Missions ─────────────────────────────────────────────
 
-  getPlans(): Promise<Plan[]> {
-    return this.get<Plan[]>("/plans");
+  getMissions(): Promise<Mission[]> {
+    return this.get<Mission[]>("/missions");
   }
 
-  getResumablePlans(): Promise<Plan[]> {
-    return this.get<Plan[]>("/plans/resumable");
+  getResumableMissions(): Promise<Mission[]> {
+    return this.get<Mission[]>("/missions/resumable");
   }
 
-  getPlan(planId: string): Promise<Plan> {
-    return this.get<Plan>(`/plans/${planId}`);
+  getMission(missionId: string): Promise<Mission> {
+    return this.get<Mission>(`/missions/${missionId}`);
   }
 
-  createPlan(req: CreatePlanRequest): Promise<Plan> {
-    return this.post<Plan>("/plans", req);
+  createMission(req: CreateMissionRequest): Promise<Mission> {
+    return this.post<Mission>("/missions", req);
   }
 
-  updatePlan(planId: string, req: UpdatePlanRequest): Promise<Plan> {
-    return this.patch<Plan>(`/plans/${planId}`, req);
+  updateMission(missionId: string, req: UpdateMissionRequest): Promise<Mission> {
+    return this.patch<Mission>(`/missions/${missionId}`, req);
   }
 
-  deletePlan(planId: string): Promise<{ deleted: boolean }> {
-    return this.del<{ deleted: boolean }>(`/plans/${planId}`);
+  deleteMission(missionId: string): Promise<{ deleted: boolean }> {
+    return this.del<{ deleted: boolean }>(`/missions/${missionId}`);
   }
 
-  executePlan(planId: string): Promise<ExecutePlanResult> {
-    return this.post<ExecutePlanResult>(`/plans/${planId}/execute`);
+  executeMission(missionId: string): Promise<ExecuteMissionResult> {
+    return this.post<ExecuteMissionResult>(`/missions/${missionId}/execute`);
   }
 
-  resumePlan(planId: string, opts?: { retryFailed?: boolean }): Promise<ResumePlanResult> {
-    return this.post<ResumePlanResult>(`/plans/${planId}/resume`, opts);
+  resumeMission(missionId: string, opts?: { retryFailed?: boolean }): Promise<ResumeMissionResult> {
+    return this.post<ResumeMissionResult>(`/missions/${missionId}/resume`, opts);
   }
 
-  abortPlan(planId: string): Promise<{ aborted: number }> {
-    return this.post<{ aborted: number }>(`/plans/${planId}/abort`);
+  abortMission(missionId: string): Promise<{ aborted: number }> {
+    return this.post<{ aborted: number }>(`/missions/${missionId}/abort`);
   }
 
   // ── Agents ───────────────────────────────────────────────
@@ -481,12 +481,12 @@ export class PolpoClient {
     return this.get<TemplateInfo[]>("/templates");
   }
 
-  /** Get full template definition including the plan template. */
+  /** Get full template definition including the mission template. */
   getTemplate(name: string): Promise<TemplateDefinition> {
     return this.get<TemplateDefinition>(`/templates/${encodeURIComponent(name)}`);
   }
 
-  /** Run a template with parameters. Returns the created plan + task count. */
+  /** Run a template with parameters. Returns the created mission + task count. */
   runTemplate(name: string, params?: Record<string, string | number | boolean>): Promise<TemplateRunResult> {
     return this.post<TemplateRunResult>(`/templates/${encodeURIComponent(name)}/run`, { params });
   }

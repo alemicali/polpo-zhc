@@ -12,7 +12,7 @@ const ALL_EVENTS: PolpoEvent[] = [
   "deadlock:detected", "deadlock:resolving", "deadlock:resolved", "deadlock:unresolvable",
   "task:timeout", "agent:stale",
   "task:recovered",
-  "plan:saved", "plan:executed", "plan:completed", "plan:resumed", "plan:deleted",
+  "mission:saved", "mission:executed", "mission:completed", "mission:resumed", "mission:deleted",
   "session:created", "message:added",
   "approval:requested", "approval:resolved", "approval:rejected", "approval:timeout",
   "escalation:triggered", "escalation:resolved", "escalation:human",

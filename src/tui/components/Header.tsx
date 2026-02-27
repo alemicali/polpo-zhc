@@ -10,7 +10,7 @@ import { basename } from "node:path";
 export function Header() {
   const polpo = usePolpo();
   const tasks = useStore((s) => s.tasks);
-  const plans = useStore((s) => s.plans);
+  const missions = useStore((s) => s.missions);
 
   const dir = basename(polpo.getWorkDir());
   const done = tasks.filter((t) => t.status === "done").length;
@@ -18,7 +18,7 @@ export function Header() {
     (t) => t.status === "in_progress" || t.status === "review",
   ).length;
   const orchestrating = running > 0;
-  const draftPlans = plans.filter((p) => p.status === "draft").length;
+  const draftMissions = missions.filter((p) => p.status === "draft").length;
 
   return (
     <Box paddingX={1} justifyContent="space-between">
@@ -32,8 +32,8 @@ export function Header() {
         {running > 0 && <Text color="gray"> | </Text>}
         {done > 0 && <Text color="green">✓ {done} done</Text>}
         {done > 0 && <Text color="gray"> | </Text>}
-        {draftPlans > 0 && <Text color="yellow">□ {draftPlans} draft</Text>}
-        {draftPlans > 0 && <Text color="gray"> | </Text>}
+        {draftMissions > 0 && <Text color="yellow">□ {draftMissions} draft</Text>}
+        {draftMissions > 0 && <Text color="gray"> | </Text>}
         <Text color={orchestrating ? "green" : "gray"}>
           {orchestrating ? "♪ running" : "♪ idle"}
         </Text>

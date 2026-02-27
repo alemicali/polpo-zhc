@@ -7,7 +7,7 @@ import { errorMiddleware } from "./middleware/error.js";
 import { rateLimitMiddleware } from "./middleware/rate-limit.js";
 import { healthRoutes } from "./routes/health.js";
 import { taskRoutes } from "./routes/tasks.js";
-import { planRoutes } from "./routes/plans.js";
+import { missionRoutes } from "./routes/missions.js";
 import { agentRoutes } from "./routes/agents.js";
 import { eventRoutes } from "./routes/events.js";
 import { chatRoutes } from "./routes/chat.js";
@@ -78,7 +78,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
 
   // Mount all routes directly (no project prefix)
   authed.route("/tasks", taskRoutes());
-  authed.route("/plans", planRoutes());
+  authed.route("/missions", missionRoutes());
   authed.route("/agents", agentRoutes());
   authed.route("/events", eventRoutes(sseBridge));
   authed.route("/chat", chatRoutes());
@@ -98,7 +98,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     info: {
       title: "Polpo API",
       version: "1.0.0",
-      description: "REST API for Polpo — an AI agent that manages teams of AI coding agents. Manage tasks, plans, agents, templates, skills, notifications, and approvals. For conversational interaction, use the OpenAI-compatible POST /v1/chat/completions endpoint.",
+      description: "REST API for Polpo — an AI agent that manages teams of AI coding agents. Manage tasks, missions, agents, templates, skills, notifications, and approvals. For conversational interaction, use the OpenAI-compatible POST /v1/chat/completions endpoint.",
     },
     servers: [
       { url: "http://localhost:3000", description: "Local development" },

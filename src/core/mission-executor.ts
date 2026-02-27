@@ -1,12 +1,12 @@
 import type { OrchestratorContext } from "./orchestrator-context.js";
 import type { TaskManager } from "./task-manager.js";
 import type { AgentManager } from "./agent-manager.js";
-import type { Plan, PlanStatus, PlanReport, Task, TaskExpectation, ExpectedOutcome, PlanQualityGate, PlanCheckpoint, ScopedNotificationRules } from "./types.js";
+import type { Mission, MissionStatus, MissionReport, Task, TaskExpectation, ExpectedOutcome, MissionQualityGate, MissionCheckpoint, ScopedNotificationRules } from "./types.js";
 import type { QualityController } from "../quality/quality-controller.js";
 import { sanitizeExpectations } from "./schemas.js";
 import { validateProviderKeys } from "../llm/pi-client.js";
 
-interface PlanDocument {
+interface MissionDocument {
   tasks?: Array<{
     title: string;
     description: string;
@@ -39,24 +39,24 @@ interface PlanDocument {
     enableAudio?: boolean;
     enableImage?: boolean;
   }>;
-  qualityGates?: PlanQualityGate[];
+  qualityGates?: MissionQualityGate[];
   /** Checkpoints — planned stopping points for human-in-the-loop review. */
-  checkpoints?: PlanCheckpoint[];
-  /** Plan-level scoped notification rules — override or extend global rules. */
+  checkpoints?: MissionCheckpoint[];
+  /** Mission-level scoped notification rules — override or extend global rules. */
   notifications?: ScopedNotificationRules;
 }
 
 /**
- * Plan CRUD + execution + resume + group lifecycle.
+ * Mission CRUD + execution + resume + group lifecycle.
  */
-export class PlanExecutor {
+export class MissionExecutor {
   private cleanedGroups = new Set<string>();
-  /** Quality gates parsed from plan documents, keyed by plan group name */
-  private gatesByGroup = new Map<string, PlanQualityGate[]>();
-  /** Checkpoints parsed from plan documents, keyed by plan group name */
-  private checkpointsByGroup = new Map<string, PlanCheckpoint[]>();
+  /** Quality gates parsed from mission documents, keyed by mission group name */
+  private gatesByGroup = new Map<string, MissionQualityGate[]>();
+  /** Checkpoints parsed from mission documents, keyed by mission group name */
+  private checkpointsByGroup = new Map<string, MissionCheckpoint[]>();
   /** Checkpoints that have been reached and are waiting for resume, keyed by "group:name" */
-  private activeCheckpoints = new Map<string, { checkpoint: PlanCheckpoint; reachedAt: string }>();
+  private activeCheckpoints = new Map<string, { checkpoint: MissionCheckpoint; reachedAt: string }>();
   /** Checkpoints that have been resumed (so they don't re-trigger), keyed by "group:name" */
   private resumedCheckpoints = new Set<string>();
   /** Optional quality controller — set by orchestrator after init */
@@ -82,13 +82,13 @@ export class PlanExecutor {
     this.notificationRouter = router;
   }
 
-  /** Get quality gates for a plan group. Returns empty array if none defined. */
-  getQualityGates(group: string): PlanQualityGate[] {
+  /** Get quality gates for a mission group. Returns empty array if none defined. */
+  getQualityGates(group: string): MissionQualityGate[] {
     return this.gatesByGroup.get(group) ?? [];
   }
 
-  /** Get checkpoints for a plan group. Returns empty array if none defined. */
-  getCheckpoints(group: string): PlanCheckpoint[] {
+  /** Get checkpoints for a mission group. Returns empty array if none defined. */
+  getCheckpoints(group: string): MissionCheckpoint[] {
     return this.checkpointsByGroup.get(group) ?? [];
   }
 
@@ -101,7 +101,7 @@ export class PlanExecutor {
     taskTitle: string,
     taskId: string,
     tasks: Task[],
-  ): { checkpoint: PlanCheckpoint; reachedAt: string } | undefined {
+  ): { checkpoint: MissionCheckpoint; reachedAt: string } | undefined {
     const checkpoints = this.checkpointsByGroup.get(group);
     if (!checkpoints) return undefined;
 
@@ -133,10 +133,10 @@ export class PlanExecutor {
         const reachedAt = new Date().toISOString();
         this.activeCheckpoints.set(cpKey, { checkpoint: cp, reachedAt });
 
-        // Pause the plan
-        const plan = this.ctx.registry.getPlanByName?.(group);
-        if (plan && plan.status === "active") {
-          this.ctx.registry.updatePlan?.(plan.id, { status: "paused" });
+        // Pause the mission
+        const mission = this.ctx.registry.getMissionByName?.(group);
+        if (mission && mission.status === "active") {
+          this.ctx.registry.updateMission?.(mission.id, { status: "paused" });
         }
 
         // Register notification rules for this checkpoint's channels
@@ -144,7 +144,7 @@ export class PlanExecutor {
 
         // Emit event (picked up by notification router if rules are configured)
         this.ctx.emitter.emit("checkpoint:reached", {
-          planId: plan?.id,
+          missionId: mission?.id,
           group,
           checkpointName: cp.name,
           message: cp.message,
@@ -174,14 +174,14 @@ export class PlanExecutor {
     this.resumedCheckpoints.add(cpKey);
     this.activeCheckpoints.delete(cpKey);
 
-    // Un-pause the plan (back to active)
-    const plan = this.ctx.registry.getPlanByName?.(group);
-    if (plan && plan.status === "paused") {
-      this.ctx.registry.updatePlan?.(plan.id, { status: "active" });
+    // Un-pause the mission (back to active)
+    const mission = this.ctx.registry.getMissionByName?.(group);
+    if (mission && mission.status === "paused") {
+      this.ctx.registry.updateMission?.(mission.id, { status: "active" });
     }
 
     this.ctx.emitter.emit("checkpoint:resumed", {
-      planId: plan?.id,
+      missionId: mission?.id,
       group,
       checkpointName,
     });
@@ -189,9 +189,9 @@ export class PlanExecutor {
     return true;
   }
 
-  /** Get all active (unresumed) checkpoints across all plan groups. */
-  getActiveCheckpoints(): Array<{ group: string; checkpointName: string; checkpoint: PlanCheckpoint; reachedAt: string }> {
-    const result: Array<{ group: string; checkpointName: string; checkpoint: PlanCheckpoint; reachedAt: string }> = [];
+  /** Get all active (unresumed) checkpoints across all mission groups. */
+  getActiveCheckpoints(): Array<{ group: string; checkpointName: string; checkpoint: MissionCheckpoint; reachedAt: string }> {
+    const result: Array<{ group: string; checkpointName: string; checkpoint: MissionCheckpoint; reachedAt: string }> = [];
     for (const [cpKey, data] of this.activeCheckpoints) {
       const [group, ...nameParts] = cpKey.split(":");
       const checkpointName = nameParts.join(":");
@@ -201,7 +201,7 @@ export class PlanExecutor {
   }
 
   /** Register dynamic notification rules for a checkpoint's notifyChannels (once per checkpoint). */
-  private ensureCheckpointNotificationRules(cpKey: string, cp: PlanCheckpoint): void {
+  private ensureCheckpointNotificationRules(cpKey: string, cp: MissionCheckpoint): void {
     if (!this.notificationRouter) return;
     if (!cp.notifyChannels || cp.notifyChannels.length === 0) return;
     if (this.registeredCheckpointRules.has(cpKey)) return;
@@ -229,79 +229,79 @@ export class PlanExecutor {
     });
   }
 
-  savePlan(opts: { data: string; prompt?: string; name?: string; status?: PlanStatus; notifications?: ScopedNotificationRules }): Plan {
-    if (!this.ctx.registry.savePlan) throw new Error("Store does not support plans");
-    const name = opts.name ?? this.ctx.registry.nextPlanName?.() ?? `plan-${Date.now()}`;
-    const plan = this.ctx.registry.savePlan({
+  saveMission(opts: { data: string; prompt?: string; name?: string; status?: MissionStatus; notifications?: ScopedNotificationRules }): Mission {
+    if (!this.ctx.registry.saveMission) throw new Error("Store does not support missions");
+    const name = opts.name ?? this.ctx.registry.nextMissionName?.() ?? `mission-${Date.now()}`;
+    const mission = this.ctx.registry.saveMission({
       name,
       data: opts.data,
       prompt: opts.prompt,
       status: opts.status ?? "draft",
       notifications: opts.notifications,
     });
-    this.ctx.emitter.emit("plan:saved", { planId: plan.id, name: plan.name, status: plan.status });
-    return plan;
+    this.ctx.emitter.emit("mission:saved", { missionId: mission.id, name: mission.name, status: mission.status });
+    return mission;
   }
 
-  getPlan(planId: string): Plan | undefined {
-    return this.ctx.registry.getPlan?.(planId);
+  getMission(missionId: string): Mission | undefined {
+    return this.ctx.registry.getMission?.(missionId);
   }
 
-  getPlanByName(name: string): Plan | undefined {
-    return this.ctx.registry.getPlanByName?.(name);
+  getMissionByName(name: string): Mission | undefined {
+    return this.ctx.registry.getMissionByName?.(name);
   }
 
-  getAllPlans(): Plan[] {
-    return this.ctx.registry.getAllPlans?.() ?? [];
+  getAllMissions(): Mission[] {
+    return this.ctx.registry.getAllMissions?.() ?? [];
   }
 
-  updatePlan(planId: string, updates: Partial<Omit<Plan, "id">>): Plan {
-    if (!this.ctx.registry.updatePlan) throw new Error("Store does not support plans");
-    return this.ctx.registry.updatePlan(planId, updates);
+  updateMission(missionId: string, updates: Partial<Omit<Mission, "id">>): Mission {
+    if (!this.ctx.registry.updateMission) throw new Error("Store does not support missions");
+    return this.ctx.registry.updateMission(missionId, updates);
   }
 
-  deletePlan(planId: string): boolean {
-    if (!this.ctx.registry.deletePlan) throw new Error("Store does not support plans");
-    const result = this.ctx.registry.deletePlan(planId);
-    if (result) this.ctx.emitter.emit("plan:deleted", { planId });
+  deleteMission(missionId: string): boolean {
+    if (!this.ctx.registry.deleteMission) throw new Error("Store does not support missions");
+    const result = this.ctx.registry.deleteMission(missionId);
+    if (result) this.ctx.emitter.emit("mission:deleted", { missionId });
     return result;
   }
 
-  getResumablePlans(): Plan[] {
-    const plans = this.getAllPlans();
+  getResumableMissions(): Mission[] {
+    const missions = this.getAllMissions();
     const state = this.ctx.registry.getState();
-    return plans.filter(p => {
-      if (p.status === "draft" || p.status === "completed" || p.status === "cancelled") return false;
-      const tasks = state.tasks.filter(t => t.group === p.name);
+    return missions.filter(m => {
+      if (m.status === "draft" || m.status === "completed" || m.status === "cancelled") return false;
+      const tasks = state.tasks.filter(t => t.group === m.name);
       if (tasks.length === 0) return false;
       return tasks.some(t => t.status === "pending" || t.status === "failed");
     });
   }
 
-  resumePlan(planId: string, opts?: { retryFailed?: boolean }): { retried: number; pending: number } {
-    const plan = this.getPlan(planId);
-    if (!plan) throw new Error("Plan not found");
+  resumeMission(missionId: string, opts?: { retryFailed?: boolean }): { retried: number; pending: number } {
+    const mission = this.getMission(missionId);
+    if (!mission) throw new Error("Mission not found");
 
     // Re-register volatile agents if they were cleaned up
-    this.cleanedGroups.delete(plan.name);
+    this.cleanedGroups.delete(mission.name);
     const enableVolatile = this.ctx.config.settings.enableVolatileTeams !== false;
-    if (enableVolatile && plan.data) {
+    if (enableVolatile && mission.data) {
       try {
-        const doc = JSON.parse(plan.data) as PlanDocument;
+        const doc = JSON.parse(mission.data) as MissionDocument;
         if (doc?.team && Array.isArray(doc.team)) {
           for (const a of doc.team) {
             if (!a.name) continue;
             const { name, ...rest } = a;
-            this.agentMgr.addVolatileAgent({ name, ...rest }, plan.name);
+            this.agentMgr.addVolatileAgent({ name, ...rest }, mission.name);
           }
         }
       } catch (err) {
-        this.ctx.emitter.emit("log", { level: "warn", message: `Failed to re-register volatile agents for ${plan.name}: ${err instanceof Error ? err.message : String(err)}` });
+        this.ctx.emitter.emit("log", { level: "warn", message: `Failed to re-register volatile agents for ${mission.name}: ${err instanceof Error ? err.message : String(err)}` });
       }
     }
 
     const state = this.ctx.registry.getState();
-    const tasks = state.tasks.filter(t => t.group === plan.name);
+    const tasks = state.tasks.filter(t => t.group === mission.name);
     const failedTasks = tasks.filter(t => t.status === "failed");
     const pendingTasks = tasks.filter(t => t.status === "pending");
 
@@ -316,37 +316,37 @@ export class PlanExecutor {
       }
     }
 
-    if (plan.status === "failed") {
-      this.updatePlan(planId, { status: "active" });
+    if (mission.status === "failed") {
+      this.updateMission(missionId, { status: "active" });
     }
 
-    this.ctx.emitter.emit("plan:resumed", { planId, name: plan.name, retried, pending: pendingTasks.length });
+    this.ctx.emitter.emit("mission:resumed", { missionId, name: mission.name, retried, pending: pendingTasks.length });
     return { retried, pending: pendingTasks.length };
   }
 
-  executePlan(planId: string): { tasks: Task[]; group: string } {
-    const plan = this.ctx.registry.getPlan?.(planId);
-    if (!plan) throw new Error("Plan not found");
-    if (plan.status === "active") throw new Error("Plan already active");
+  executeMission(missionId: string): { tasks: Task[]; group: string } {
+    const mission = this.ctx.registry.getMission?.(missionId);
+    if (!mission) throw new Error("Mission not found");
+    if (mission.status === "active") throw new Error("Mission already active");
 
-    const doc = JSON.parse(plan.data) as PlanDocument;
+    const doc = JSON.parse(mission.data) as MissionDocument;
     if (!doc?.tasks || !Array.isArray(doc.tasks) || doc.tasks.length === 0) {
-      throw new Error("Plan has no tasks");
+      throw new Error("Mission has no tasks");
     }
 
-    const group = plan.name;
+    const group = mission.name;
 
-    // Run before:plan:execute hook
-    const hookResult = this.ctx.hooks.runBeforeSync("plan:execute", {
-      planId,
-      plan,
+    // Run before:mission:execute hook
+    const hookResult = this.ctx.hooks.runBeforeSync("mission:execute", {
+      missionId,
+      mission,
       taskCount: doc.tasks.length,
     });
     if (hookResult.cancelled) {
-      throw new Error(`Plan execution blocked by hook: ${hookResult.cancelReason ?? "no reason"}`);
+      throw new Error(`Mission execution blocked by hook: ${hookResult.cancelReason ?? "no reason"}`);
     }
 
-    // Register volatile agents from the plan's team section
+    // Register volatile agents from the mission's team section
     const enableVolatile = this.ctx.config.settings.enableVolatileTeams !== false;
     if (enableVolatile && doc.team && Array.isArray(doc.team)) {
       for (const a of doc.team) {
@@ -356,7 +356,7 @@ export class PlanExecutor {
       }
     }
 
-    // Validate API keys for all agents referenced in the plan
+    // Validate API keys for all agents referenced in the mission
     const allAgents = this.agentMgr.getAgents();
     const referencedModels: string[] = [];
     for (const t of doc.tasks) {
@@ -366,7 +366,7 @@ export class PlanExecutor {
         referencedModels.push(agent.model);
       } else if (!agent) {
         throw new Error(
-          `Plan references agent "${agentName}" (task "${t.title}") but no such agent exists. ` +
+          `Mission references agent "${agentName}" (task "${t.title}") but no such agent exists. ` +
           `Available agents: ${allAgents.map(a => a.name).join(", ")}`
         );
       }
@@ -398,7 +398,7 @@ export class PlanExecutor {
         const { valid, warnings } = sanitizeExpectations(t.expectations);
         expectations = valid;
         for (const w of warnings) {
-          this.ctx.emitter.emit("log", { level: "warn", message: `Plan task "${t.title}": ${w}` });
+          this.ctx.emitter.emit("log", { level: "warn", message: `Mission task "${t.title}": ${w}` });
         }
       }
 
@@ -418,29 +418,29 @@ export class PlanExecutor {
       tasks.push(task);
     }
 
-    // Parse and store quality gates from plan document
+    // Parse and store quality gates from mission document
     if (doc.qualityGates && Array.isArray(doc.qualityGates) && doc.qualityGates.length > 0) {
       this.gatesByGroup.set(group, doc.qualityGates);
     }
 
-    // Parse and store checkpoints from plan document
+    // Parse and store checkpoints from mission document
     if (doc.checkpoints && Array.isArray(doc.checkpoints) && doc.checkpoints.length > 0) {
       this.checkpointsByGroup.set(group, doc.checkpoints);
     }
 
-    // Persist plan-level notifications from document onto the Plan record
+    // Persist mission-level notifications from document onto the Mission record
     if (doc.notifications) {
-      this.ctx.registry.updatePlan?.(planId, { status: "active", notifications: doc.notifications });
+      this.ctx.registry.updateMission?.(missionId, { status: "active", notifications: doc.notifications });
     } else {
-      // Mark plan as active
-      this.ctx.registry.updatePlan?.(planId, { status: "active" });
+      // Mark mission as active
+      this.ctx.registry.updateMission?.(missionId, { status: "active" });
     }
-    this.ctx.emitter.emit("plan:executed", { planId, group, taskCount: tasks.length });
+    this.ctx.emitter.emit("mission:executed", { missionId, group, taskCount: tasks.length });
 
     return { tasks, group };
   }
 
-  /** Check if any plan groups have all tasks terminal, and clean up their volatile agents */
+  /** Check if any mission groups have all tasks terminal, and clean up their volatile agents */
   cleanupCompletedGroups(tasks: Task[]): void {
     const groups = new Set<string>();
     for (const t of tasks) {
@@ -466,33 +466,33 @@ export class PlanExecutor {
       }
       this.cleanedGroups.add(group);
 
-      // Auto-update plan status
-      const plan = this.ctx.registry.getPlanByName?.(group);
-      if (plan && plan.status === "active") {
+      // Auto-update mission status
+      const mission = this.ctx.registry.getMissionByName?.(group);
+      if (mission && mission.status === "active") {
         let allDone = groupTasks.every(t => t.status === "done");
 
-        // Check plan quality threshold (only if all tasks passed structurally)
+        // Check mission quality threshold (only if all tasks passed structurally)
         if (allDone && this.qualityCtrl) {
-          const thresholdResult = this.qualityCtrl.checkPlanThreshold(
-            plan,
+          const thresholdResult = this.qualityCtrl.checkMissionThreshold(
+            mission,
             groupTasks,
             this.ctx.config.settings.defaultQualityThreshold,
           );
           if (!thresholdResult.passed) {
-            allDone = false; // Quality threshold not met — mark plan as failed
+            allDone = false; // Quality threshold not met — mark mission as failed
             this.ctx.emitter.emit("log", {
               level: "warn",
-              message: `Plan "${group}" quality threshold not met: ${thresholdResult.avgScore?.toFixed(2) ?? "N/A"} < ${thresholdResult.threshold}`,
+              message: `Mission "${group}" quality threshold not met: ${thresholdResult.avgScore?.toFixed(2) ?? "N/A"} < ${thresholdResult.threshold}`,
             });
           }
         }
 
-        this.ctx.registry.updatePlan?.(plan.id, { status: allDone ? "completed" : "failed" });
-        const report = this.buildPlanReport(plan.id, group, groupTasks, allDone);
-        this.ctx.emitter.emit("plan:completed", { planId: plan.id, group, allPassed: allDone, report });
+        this.ctx.registry.updateMission?.(mission.id, { status: allDone ? "completed" : "failed" });
+        const report = this.buildMissionReport(mission.id, group, groupTasks, allDone);
+        this.ctx.emitter.emit("mission:completed", { missionId: mission.id, group, allPassed: allDone, report });
 
-        // Aggregate plan metrics
-        this.qualityCtrl?.aggregatePlanMetrics(plan.id, groupTasks);
+        // Aggregate mission metrics
+        this.qualityCtrl?.aggregateMissionMetrics(mission.id, groupTasks);
 
         // Clean up gate and checkpoint caches
         this.gatesByGroup.delete(group);
@@ -508,7 +508,7 @@ export class PlanExecutor {
     }
   }
 
-  buildPlanReport(planId: string, group: string, groupTasks: Task[], allPassed: boolean): PlanReport {
+  buildMissionReport(missionId: string, group: string, groupTasks: Task[], allPassed: boolean): MissionReport {
     const state = this.ctx.registry.getState();
     const processes = state?.processes ?? [];
 
@@ -552,7 +552,7 @@ export class PlanExecutor {
       : undefined;
 
     return {
-      planId,
+      missionId,
       group,
       allPassed,
       totalDuration,

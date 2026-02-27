@@ -262,9 +262,9 @@ function ApprovalCard({
                   <TooltipContent className="text-xs font-mono">{request.taskId}</TooltipContent>
                 </Tooltip>
               )}
-              {request.planId && (
+              {request.missionId && (
                 <Badge variant="secondary" className="text-[9px] gap-1 px-1.5 py-0">
-                  Plan {request.planId.slice(0, 8)}
+                  Mission {request.missionId.slice(0, 8)}
                 </Badge>
               )}
               <span className="text-[10px] text-muted-foreground flex items-center gap-1">
@@ -392,7 +392,7 @@ export function ApprovalsPage() {
           a.gateName.toLowerCase().includes(q) ||
           a.gateId.toLowerCase().includes(q) ||
           (a.taskId ?? "").toLowerCase().includes(q) ||
-          (a.planId ?? "").toLowerCase().includes(q) ||
+          (a.missionId ?? "").toLowerCase().includes(q) ||
           (a.note ?? "").toLowerCase().includes(q) ||
           (a.resolvedBy ?? "").toLowerCase().includes(q)
       );

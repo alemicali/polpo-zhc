@@ -1,11 +1,11 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import {
   Copy,
   Check,
   Trash2,
   Zap,
   ListChecks,
-  Map,
+  Target,
   MessageSquare,
   Plus,
   History,
@@ -15,6 +15,7 @@ import {
   PenLine,
   ChevronLeft,
   ChevronRight,
+  ArrowDown,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -25,11 +26,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import {
-  Conversation,
-  ConversationContent,
-  ConversationScrollButton,
-} from "@/components/ai-elements/conversation";
+import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 import {
   Message,
   MessageContent,
@@ -391,7 +388,7 @@ const suggestions = [
   {
     icon: Zap,
     title: "What's the current status?",
-    description: "Overview of tasks, agents, and plans",
+    description: "Overview of tasks, agents, and missions",
   },
   {
     icon: ListChecks,
@@ -399,9 +396,9 @@ const suggestions = [
     description: "Tasks that need attention",
   },
   {
-    icon: Map,
-    title: "Create a plan to refactor the auth module",
-    description: "Generate a multi-task execution plan",
+    icon: Target,
+    title: "Create a mission to refactor the auth module",
+    description: "Generate a multi-task execution mission",
   },
   {
     icon: MessageSquare,
@@ -511,6 +508,8 @@ export function ChatPage() {
   } = useChat();
 
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [atBottom, setAtBottom] = useState(true);
+  const virtuosoRef = useRef<VirtuosoHandle>(null);
 
   // Filter out empty/orphan sessions — server creates placeholder sessions
   // before streaming starts; if streaming fails these remain empty
@@ -688,145 +687,147 @@ export function ChatPage() {
         </div>
 
         {/* Messages area */}
-        <Conversation className="flex-1 min-h-0">
-          <ConversationContent className="mx-auto max-w-3xl gap-0 p-0">
-            {isEmpty ? (
-              <div className="flex flex-col items-center justify-center h-full pt-24">
-                <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10 mb-4 text-3xl">
-                  🐙
-                </div>
-                <h2 className="text-2xl font-semibold mb-2">How can I help you?</h2>
-                <p className="text-sm text-muted-foreground mb-8 max-w-md text-center">
-                  I can manage your tasks, create execution plans, monitor agents,
-                  and help you orchestrate your AI coding team.
-                </p>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-xl w-full px-4">
-                  {suggestions.map((s) => (
-                    <button
-                      key={s.title}
-                      onClick={() => send(s.title)}
-                      className="flex items-start gap-3 rounded-xl border border-border/40 p-4 text-left transition-all hover:bg-accent/30 hover:border-primary/20"
-                    >
-                      <s.icon className="h-5 w-5 text-muted-foreground shrink-0 mt-0.5" />
-                      <div>
-                        <p className="text-sm font-medium">{s.title}</p>
-                        <p className="text-xs text-muted-foreground mt-0.5">
-                          {s.description}
-                        </p>
-                      </div>
-                    </button>
-                  ))}
-                </div>
+        <div className="relative flex-1 min-h-0">
+          {isEmpty ? (
+            <div className="flex flex-col items-center justify-center h-full pt-24">
+              <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10 mb-4 text-3xl">
+                🐙
               </div>
-            ) : (
-              <>
-                {messages.map((msg, i) => {
-                  // Copy is only shown when the message is complete (not still streaming)
-                  const isStreaming = isLoading && i === messages.length - 1;
+              <h2 className="text-2xl font-semibold mb-2">How can I help you?</h2>
+              <p className="text-sm text-muted-foreground mb-8 max-w-md text-center">
+                I can manage your tasks, create execution plans, monitor agents,
+                and help you orchestrate your AI coding team.
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-xl w-full px-4">
+                {suggestions.map((s) => (
+                  <button
+                    key={s.title}
+                    onClick={() => send(s.title)}
+                    className="flex items-start gap-3 rounded-xl border border-border/40 p-4 text-left transition-all hover:bg-accent/30 hover:border-primary/20"
+                  >
+                    <s.icon className="h-5 w-5 text-muted-foreground shrink-0 mt-0.5" />
+                    <div>
+                      <p className="text-sm font-medium">{s.title}</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        {s.description}
+                      </p>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <Virtuoso
+              ref={virtuosoRef}
+              data={messages}
+              followOutput="smooth"
+              initialTopMostItemIndex={messages.length - 1}
+              atBottomStateChange={setAtBottom}
+              atBottomThreshold={80}
+              increaseViewportBy={600}
+              itemContent={(i, msg) => {
+                const isStreaming = isLoading && i === messages.length - 1;
 
-                  return msg.role === "user" ? (
-                    <div key={msg.id || i} className="group w-full py-4 px-4">
-                      <div className="mx-auto max-w-3xl">
-                        <div className="flex justify-end">
-                          <div className="max-w-[85%]">
-                            <div className="rounded-2xl rounded-br-sm bg-primary text-primary-foreground px-4 py-2.5">
-                              <p className="text-sm leading-relaxed whitespace-pre-wrap">
-                                {msg.content}
-                              </p>
-                            </div>
-                            <div className="flex items-center justify-end gap-1.5 mt-1">
+                return msg.role === "user" ? (
+                  <div className="group w-full py-4 px-4">
+                    <div className="mx-auto max-w-3xl">
+                      <div className="flex justify-end">
+                        <div className="max-w-[85%]">
+                          <div className="rounded-2xl rounded-br-sm bg-primary text-primary-foreground px-4 py-2.5">
+                            <p className="text-sm leading-relaxed whitespace-pre-wrap">
+                              {msg.content}
+                            </p>
+                          </div>
+                          <div className="flex items-center justify-end gap-1.5 mt-1">
+                            {msg.ts && (
+                              <span className="text-[10px] text-muted-foreground">
+                                {formatDistanceToNow(new Date(msg.ts), { addSuffix: true })}
+                              </span>
+                            )}
+                            <span className="opacity-0 group-hover:opacity-100 transition-opacity">
+                              <CopyAction text={msg.content} />
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="group w-full py-4 px-4">
+                    <div className="mx-auto max-w-3xl">
+                      <Message from="assistant">
+                        <div className="flex gap-3">
+                          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/10 mt-0.5 text-sm">
+                            🐙
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-1">
+                              <p className="text-xs font-semibold">Polpo</p>
                               {msg.ts && (
                                 <span className="text-[10px] text-muted-foreground">
                                   {formatDistanceToNow(new Date(msg.ts), { addSuffix: true })}
                                 </span>
                               )}
-                              <span className="opacity-0 group-hover:opacity-100 transition-opacity">
-                                <CopyAction text={msg.content} />
-                              </span>
                             </div>
+                            {/* Render segments chronologically, grouping consecutive tools */}
+                            {msg.segments && msg.segments.length > 0 ? (
+                              (() => {
+                                const groups: Array<{ type: "text"; content: string } | { type: "tools"; tools: ToolCallInfo[] }> = [];
+                                for (const seg of msg.segments as MessageSegment[]) {
+                                  if (seg.type === "text") {
+                                    groups.push({ type: "text", content: seg.content });
+                                  } else {
+                                    const last = groups[groups.length - 1];
+                                    if (last && last.type === "tools") {
+                                      last.tools.push(seg.tool);
+                                    } else {
+                                      groups.push({ type: "tools", tools: [seg.tool] });
+                                    }
+                                  }
+                                }
+                                return groups.map((g, gi) =>
+                                  g.type === "text" ? (
+                                    <MessageContent key={`g-${gi}`}>
+                                      <MessageResponse mode={isStreaming ? "streaming" : "static"}>{g.content}</MessageResponse>
+                                    </MessageContent>
+                                  ) : g.tools.length === 1 ? (
+                                    <ToolInvocation key={g.tools[0].id} tool={g.tools[0]} />
+                                  ) : (
+                                    <ToolCallGroup key={`tg-${gi}`} tools={g.tools} />
+                                  )
+                                );
+                              })()
+                            ) : (
+                              <>
+                                {msg.toolCalls && msg.toolCalls.length > 0 && (
+                                  <ToolCallList tools={msg.toolCalls} />
+                                )}
+                                <MessageContent>
+                                  <MessageResponse mode={isStreaming ? "streaming" : "static"}>{msg.content}</MessageResponse>
+                                </MessageContent>
+                              </>
+                            )}
+                            {!isStreaming && (
+                              <MessageActions className="mt-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <CopyAction text={msg.content} />
+                              </MessageActions>
+                            )}
+                            {msg.askUserQuestions && msg.askUserQuestions.length > 0 && (
+                              <AskUserCards
+                                questions={msg.askUserQuestions}
+                                onSubmit={answerQuestions}
+                                disabled={isLoading || !pendingQuestions}
+                              />
+                            )}
                           </div>
                         </div>
-                      </div>
+                      </Message>
                     </div>
-                  ) : (
-                    <div key={msg.id || i} className="group w-full py-4 px-4">
-                      <div className="mx-auto max-w-3xl">
-                        <Message from="assistant">
-                            <div className="flex gap-3">
-                              <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/10 mt-0.5 text-sm">
-                                🐙
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <div className="flex items-center gap-2 mb-1">
-                                  <p className="text-xs font-semibold">Polpo</p>
-                                  {msg.ts && (
-                                    <span className="text-[10px] text-muted-foreground">
-                                      {formatDistanceToNow(new Date(msg.ts), { addSuffix: true })}
-                                    </span>
-                                  )}
-                                </div>
-                                {/* Render segments chronologically, grouping consecutive tools */}
-                                {msg.segments && msg.segments.length > 0 ? (
-                                  (() => {
-                                    // Group consecutive tool segments into runs
-                                    const groups: Array<{ type: "text"; content: string } | { type: "tools"; tools: ToolCallInfo[] }> = [];
-                                    for (const seg of msg.segments as MessageSegment[]) {
-                                      if (seg.type === "text") {
-                                        groups.push({ type: "text", content: seg.content });
-                                      } else {
-                                        const last = groups[groups.length - 1];
-                                        if (last && last.type === "tools") {
-                                          last.tools.push(seg.tool);
-                                        } else {
-                                          groups.push({ type: "tools", tools: [seg.tool] });
-                                        }
-                                      }
-                                    }
-                                    return groups.map((g, gi) =>
-                                      g.type === "text" ? (
-                                        <MessageContent key={`g-${gi}`}>
-                                          <MessageResponse>{g.content}</MessageResponse>
-                                        </MessageContent>
-                                      ) : g.tools.length === 1 ? (
-                                        <ToolInvocation key={g.tools[0].id} tool={g.tools[0]} />
-                                      ) : (
-                                        <ToolCallGroup key={`tg-${gi}`} tools={g.tools} />
-                                      )
-                                    );
-                                  })()
-                                ) : (
-                                  <>
-                                    {/* Fallback for saved sessions without segments */}
-                                    {msg.toolCalls && msg.toolCalls.length > 0 && (
-                                      <ToolCallList tools={msg.toolCalls} />
-                                    )}
-                                    <MessageContent>
-                                      <MessageResponse>{msg.content}</MessageResponse>
-                                    </MessageContent>
-                                  </>
-                                )}
-                                {!isStreaming && (
-                                  <MessageActions className="mt-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                    <CopyAction text={msg.content} />
-                                  </MessageActions>
-                                )}
-                                {/* Ask User interactive cards — shown inline with the assistant message */}
-                                {msg.askUserQuestions && msg.askUserQuestions.length > 0 && (
-                                  <AskUserCards
-                                    questions={msg.askUserQuestions}
-                                    onSubmit={answerQuestions}
-                                    disabled={isLoading || !pendingQuestions}
-                                  />
-                                )}
-                              </div>
-                            </div>
-                        </Message>
-                      </div>
-                    </div>
-                  );
-                })}
-
-                {isLoading && (
+                  </div>
+                );
+              }}
+              components={{
+                Footer: () => isLoading ? (
                   <div className="w-full py-2 px-4">
                     <div className="mx-auto max-w-3xl">
                       <div className="flex items-center gap-2.5 pl-10 py-1.5">
@@ -841,12 +842,23 @@ export function ChatPage() {
                       </div>
                     </div>
                   </div>
-                )}
-              </>
-            )}
-          </ConversationContent>
-          <ConversationScrollButton />
-        </Conversation>
+                ) : null,
+              }}
+            />
+          )}
+
+          {/* Scroll to bottom button */}
+          {!atBottom && !isEmpty && (
+            <Button
+              className="absolute bottom-4 left-1/2 -translate-x-1/2 rounded-full shadow-md"
+              size="icon"
+              variant="outline"
+              onClick={() => virtuosoRef.current?.scrollToIndex({ index: messages.length - 1, align: "end", behavior: "smooth" })}
+            >
+              <ArrowDown className="h-4 w-4" />
+            </Button>
+          )}
+        </div>
 
         {/* Input */}
         <div className="bg-background/80 backdrop-blur-md px-4 pt-2 pb-1.5 shrink-0">

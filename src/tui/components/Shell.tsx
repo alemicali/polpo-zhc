@@ -15,7 +15,7 @@ import { ViewerPage } from "../pages/ViewerPage.js";
 import { ConfirmPage } from "../pages/ConfirmPage.js";
 import { QuestionsPage } from "../pages/QuestionsPage.js";
 import { createTask } from "../actions/create-task.js";
-import { createPlan } from "../actions/create-plan.js";
+import { createMission } from "../actions/create-mission.js";
 import { startChat } from "../actions/chat.js";
 import { parseMentions } from "../mentions.js";
 
@@ -47,7 +47,7 @@ export function Shell() {
     if (mode === "chat") {
       startChat(mentions.text || text, polpo, s);
     } else if (mode === "plan") {
-      createPlan(mentions.text || text, polpo, s);
+      createMission(mentions.text || text, polpo, s);
     } else {
       createTask(mentions.text || text, polpo, s, mentions.agent);
     }

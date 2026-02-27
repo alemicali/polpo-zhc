@@ -1,31 +1,31 @@
 /**
- * Plan creation action — generates a structured plan from user prompt via LLM.
- * Uses tool-based structured output (submit_plan tool) for reliable generation.
+ * Mission creation action — generates a structured mission from user prompt via LLM.
+ * Uses tool-based structured output (submit_mission tool) for reliable generation.
  * Shows preview in viewer with Execute/Edit/Save/Refine actions.
  */
 
 import type { Orchestrator } from "../../core/orchestrator.js";
 import type { TUIStore } from "../store.js";
 import { seg, kickRun } from "../format.js";
-import { buildPlanSystemPrompt } from "../../llm/prompts.js";
+import { buildMissionSystemPrompt } from "../../llm/prompts.js";
 import { resolveModelSpec } from "../../llm/pi-client.js";
 import {
-  generatePlanInteractive,
-  continuePlanWithAnswers,
-  refinePlanStructured,
-  planDataToJson,
-  formatPlanReadable,
-  formatPlanRich,
-  type PlanData,
-  type GeneratePlanResult,
+  generateMissionInteractive,
+  continueMissionWithAnswers,
+  refineMissionStructured,
+  missionDataToJson,
+  formatMissionReadable,
+  formatMissionRich,
+  type MissionData,
+  type GenerateMissionResult,
   type UserAnswer,
-} from "../../llm/plan-generator.js";
+} from "../../llm/mission-generator.js";
 
 function slugify(s: string): string {
-  return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 30) || "plan";
+  return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 30) || "mission";
 }
 
-export async function createPlan(
+export async function createMission(
   prompt: string,
   polpo: Orchestrator,
   store: TUIStore,
@@ -42,7 +42,7 @@ export async function createPlan(
   }
 
   store.startStreaming();
-  store.setProcessing(true, "Generating plan...");
+  store.setProcessing(true, "Generating mission...");
 
   try {
     const state = (() => {
@@ -50,12 +50,12 @@ export async function createPlan(
       catch { return null; }
     })();
 
-    const systemPrompt = buildPlanSystemPrompt(polpo, state, polpo.getWorkDir());
-    const userPrompt = `Generate a task plan for:\n"${prompt}"`;
+    const systemPrompt = buildMissionSystemPrompt(polpo, state, polpo.getWorkDir());
+    const userPrompt = `Generate a task mission for:\n"${prompt}"`;
     const settings = polpo.getConfig()?.settings;
     const model = resolveModelSpec(settings?.orchestratorModel);
 
-    const result = await generatePlanInteractive(
+    const result = await generateMissionInteractive(
       systemPrompt,
       userPrompt,
       model,
@@ -66,20 +66,20 @@ export async function createPlan(
     store.setProcessing(false);
     store.stopStreaming();
 
-    handlePlanResult(result, systemPrompt, prompt, polpo, store, model);
+    handleMissionResult(result, systemPrompt, prompt, polpo, store, model);
   } catch (err: unknown) {
     store.setProcessing(false);
     store.stopStreaming();
     const msg = err instanceof Error ? err.message : String(err);
-    store.log(`Plan generation failed: ${msg}`, [seg(`Plan error: ${msg}`, "red")]);
+    store.log(`Mission generation failed: ${msg}`, [seg(`Mission error: ${msg}`, "red")]);
   }
 }
 
 /**
- * Handle a plan generation result — either show questions or plan preview.
+ * Handle a mission generation result — either show questions or mission preview.
  */
-function handlePlanResult(
-  result: GeneratePlanResult,
+function handleMissionResult(
+  result: GenerateMissionResult,
   systemPrompt: string,
   originalPrompt: string,
   polpo: Orchestrator,
@@ -89,15 +89,15 @@ function handlePlanResult(
   if (result.type === "questions") {
     showQuestions(result, systemPrompt, originalPrompt, polpo, store, model);
   } else {
-    showPlanPreview(result.data, originalPrompt, polpo, store);
+    showMissionPreview(result.data, originalPrompt, polpo, store);
   }
 }
 
 /**
- * Show the questions page for user clarification, then continue plan generation.
+ * Show the questions page for user clarification, then continue mission generation.
  */
 function showQuestions(
-  result: Extract<GeneratePlanResult, { type: "questions" }>,
+  result: Extract<GenerateMissionResult, { type: "questions" }>,
   systemPrompt: string,
   originalPrompt: string,
   polpo: Orchestrator,
@@ -111,9 +111,9 @@ function showQuestions(
     onSubmit: async (answers: UserAnswer[]) => {
       store.goMain();
       store.startStreaming();
-      store.setProcessing(true, "Generating plan with your answers...");
+      store.setProcessing(true, "Generating mission with your answers...");
       try {
-        const nextResult = await continuePlanWithAnswers(
+        const nextResult = await continueMissionWithAnswers(
           systemPrompt,
           result.messages,
           answers,
@@ -122,34 +122,34 @@ function showQuestions(
         );
         store.setProcessing(false);
         store.stopStreaming();
-        handlePlanResult(nextResult, systemPrompt, originalPrompt, polpo, store, model);
+        handleMissionResult(nextResult, systemPrompt, originalPrompt, polpo, store, model);
       } catch (err: unknown) {
         store.setProcessing(false);
         store.stopStreaming();
         const msg = err instanceof Error ? err.message : String(err);
-        store.log(`Plan generation failed: ${msg}`, [seg(`Plan error: ${msg}`, "red")]);
+        store.log(`Mission generation failed: ${msg}`, [seg(`Mission error: ${msg}`, "red")]);
       }
     },
     onCancel: () => {
       store.goMain();
-      store.log("Plan cancelled", [seg("Plan cancelled", "yellow")]);
+      store.log("Mission cancelled", [seg("Mission cancelled", "yellow")]);
     },
   });
 }
 
-function showPlanPreview(
-  planData: PlanData,
+function showMissionPreview(
+  missionData: MissionData,
   originalPrompt: string,
   polpo: Orchestrator,
   store: TUIStore,
 ): void {
-  const richContent = formatPlanRich(planData, process.stdout.columns) as import("../store.js").Seg[][];
-  const preview = formatPlanReadable(planData);
-  const json = planDataToJson(planData);
+  const richContent = formatMissionRich(missionData, process.stdout.columns) as import("../store.js").Seg[][];
+  const preview = formatMissionReadable(missionData);
+  const json = missionDataToJson(missionData);
 
   store.navigate({
     id: "viewer",
-    title: `Plan: ${planData.name || "generated"}`,
+    title: `Mission: ${missionData.name || "generated"}`,
     content: preview,
     richContent,
     actions: ["Execute", "Save draft", "Edit JSON", "Refine", "Cancel"],
@@ -157,32 +157,32 @@ function showPlanPreview(
       switch (idx) {
         case 0: // Execute
           store.goMain();
-          executePlan(json, originalPrompt, polpo, store, planData.name);
+          executeMission(json, originalPrompt, polpo, store, missionData.name);
           break;
         case 1: // Save draft
           store.goMain();
-          saveDraft(json, originalPrompt, polpo, store, planData.name);
+          saveDraft(json, originalPrompt, polpo, store, missionData.name);
           break;
         case 2: // Edit JSON
           store.navigate({
             id: "editor",
-            title: "Edit Plan JSON",
-            initial: JSON.stringify(planData, null, 2),
+            title: "Edit Mission JSON",
+            initial: JSON.stringify(missionData, null, 2),
             onSave: (edited) => {
               try {
-                const newData = JSON.parse(edited) as PlanData;
+                const newData = JSON.parse(edited) as MissionData;
                 if (newData?.tasks?.length) {
-                  showPlanPreview(newData, originalPrompt, polpo, store);
+                  showMissionPreview(newData, originalPrompt, polpo, store);
                 } else {
                   store.goMain();
-                  store.log("Edited plan has no tasks", [seg("Edited plan has no tasks", "red")]);
+                  store.log("Edited mission has no tasks", [seg("Edited mission has no tasks", "red")]);
                 }
               } catch {
                 store.goMain();
-                store.log("Invalid JSON in edited plan", [seg("Invalid JSON in edited plan", "red")]);
+                store.log("Invalid JSON in edited mission", [seg("Invalid JSON in edited mission", "red")]);
               }
             },
-            onCancel: () => showPlanPreview(planData, originalPrompt, polpo, store),
+            onCancel: () => showMissionPreview(missionData, originalPrompt, polpo, store),
           });
           break;
         case 3: // Refine
@@ -192,29 +192,29 @@ function showPlanPreview(
             initial: "",
             onSave: (feedback) => {
               if (!feedback.trim()) {
-                showPlanPreview(planData, originalPrompt, polpo, store);
+                showMissionPreview(missionData, originalPrompt, polpo, store);
                 return;
               }
               store.goMain();
-              refinePlan(json, originalPrompt, feedback.trim(), polpo, store);
+              refineMission(json, originalPrompt, feedback.trim(), polpo, store);
             },
-            onCancel: () => showPlanPreview(planData, originalPrompt, polpo, store),
+            onCancel: () => showMissionPreview(missionData, originalPrompt, polpo, store),
           });
           break;
         case 4: // Cancel
           store.goMain();
-          store.log("Plan cancelled", [seg("Plan cancelled", "yellow")]);
+          store.log("Mission cancelled", [seg("Mission cancelled", "yellow")]);
           break;
       }
     },
     onClose: () => {
       store.goMain();
-      store.log("Plan cancelled", [seg("Plan cancelled", "yellow")]);
+      store.log("Mission cancelled", [seg("Mission cancelled", "yellow")]);
     },
   });
 }
 
-function executePlan(
+function executeMission(
   json: string,
   prompt: string,
   polpo: Orchestrator,
@@ -222,12 +222,12 @@ function executePlan(
   name?: string,
 ): void {
   try {
-    const planName = name ? slugify(name) : undefined;
-    const plan = polpo.savePlan({ data: json, prompt, name: planName });
-    const result = polpo.executePlan(plan.id);
-    store.log(`Plan executed: ${plan.name} (${result.tasks.length} tasks)`, [
+    const missionName = name ? slugify(name) : undefined;
+    const mission = polpo.saveMission({ data: json, prompt, name: missionName });
+    const result = polpo.executeMission(mission.id);
+    store.log(`Mission executed: ${mission.name} (${result.tasks.length} tasks)`, [
       seg("▶ ", "blue", true),
-      seg(plan.name, undefined, true),
+      seg(mission.name, undefined, true),
       seg(` → ${result.tasks.length} tasks`, "gray"),
     ]);
     kickRun(polpo, store);
@@ -245,11 +245,11 @@ function saveDraft(
   name?: string,
 ): void {
   try {
-    const planName = name ? slugify(name) : undefined;
-    const plan = polpo.savePlan({ data: json, prompt, status: "draft", name: planName });
-    store.log(`Draft saved: ${plan.name}`, [
+    const missionName = name ? slugify(name) : undefined;
+    const mission = polpo.saveMission({ data: json, prompt, status: "draft", name: missionName });
+    store.log(`Draft saved: ${mission.name}`, [
       seg("■ ", "blue"),
-      seg(plan.name, undefined, true),
+      seg(mission.name, undefined, true),
       seg(" (draft)", "gray"),
     ]);
   } catch (err: unknown) {
@@ -258,7 +258,7 @@ function saveDraft(
   }
 }
 
-async function refinePlan(
+async function refineMission(
   currentJson: string,
   originalPrompt: string,
   feedback: string,
@@ -266,7 +266,7 @@ async function refinePlan(
   store: TUIStore,
 ): Promise<void> {
   store.startStreaming();
-  store.setProcessing(true, "Refining plan...");
+  store.setProcessing(true, "Refining mission...");
 
   try {
     const state = (() => {
@@ -274,11 +274,11 @@ async function refinePlan(
       catch { return null; }
     })();
 
-    const systemPrompt = buildPlanSystemPrompt(polpo, state, polpo.getWorkDir());
+    const systemPrompt = buildMissionSystemPrompt(polpo, state, polpo.getWorkDir());
     const settings2 = polpo.getConfig()?.settings;
     const model = resolveModelSpec(settings2?.orchestratorModel);
 
-    const planData = await refinePlanStructured(
+    const missionData = await refineMissionStructured(
       systemPrompt,
       originalPrompt,
       currentJson,
@@ -290,7 +290,7 @@ async function refinePlan(
 
     store.setProcessing(false);
     store.stopStreaming();
-    showPlanPreview(planData, originalPrompt, polpo, store);
+    showMissionPreview(missionData, originalPrompt, polpo, store);
   } catch (err: unknown) {
     store.setProcessing(false);
     store.stopStreaming();

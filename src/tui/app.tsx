@@ -117,7 +117,7 @@ function useOrchestratorInit(workDir: string) {
     const syncInterval = setInterval(() => {
       try {
         const state = orc.getStore()?.getState();
-        if (state) store.syncState(state, orc.getAllPlans());
+        if (state) store.syncState(state, orc.getAllMissions());
       } catch { /* store not ready yet */ }
     }, 1000);
 

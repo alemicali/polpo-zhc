@@ -103,7 +103,7 @@ export type {
   SSEEvent,
   CreateTaskRequest,
   UpdateTaskRequest,
-  CreatePlanRequest,
-  UpdatePlanRequest,
+  CreateMissionRequest,
+  UpdateMissionRequest,
   AddAgentRequest,
 } from "./types.js";

@@ -1,7 +1,7 @@
 /**
  * Chat action — tool-based agentic loop for conversational interaction.
  * Streams response chunks in real-time via the pi-tui ChatLog.
- * The LLM can use orchestrator tools to manage tasks, plans, and state.
+ * The LLM can use orchestrator tools to manage tasks, missions, and state.
  * Write tools may require user approval depending on approval mode.
  *
  * Port of src/tui/actions/chat.ts for the pi-tui imperative TUI2.

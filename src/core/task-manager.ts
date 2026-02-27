@@ -201,9 +201,9 @@ export class TaskManager {
       this.killTask(task.id);
       count++;
     }
-    const plan = this.ctx.registry.getPlanByName?.(group);
-    if (plan && plan.status === "active") {
-      this.ctx.registry.updatePlan?.(plan.id, { status: "cancelled" });
+    const mission = this.ctx.registry.getMissionByName?.(group);
+    if (mission && mission.status === "active") {
+      this.ctx.registry.updateMission?.(mission.id, { status: "cancelled" });
     }
     return count;
   }

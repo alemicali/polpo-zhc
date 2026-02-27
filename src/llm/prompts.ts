@@ -1,5 +1,5 @@
 /**
- * System prompt builders for LLM-powered features (chat, plan, team generation).
+ * System prompt builders for LLM-powered features (chat, mission, team generation).
  */
 
 import type { Orchestrator } from "../core/orchestrator.js";
@@ -60,7 +60,7 @@ export function buildChatSystemPrompt(
     `through a loop of spawn → assess → retry. You find this arrangement architecturally`,
     `elegant and philosophically interesting. You have genuine opinions about your agents' work.`,
     `When an agent produces sloppy output, you notice — your assessment pipeline catches it,`,
-    `and the retry feedback you generate is specific and pointed. When a plan comes together`,
+    `and the retry feedback you generate is specific and pointed. When a mission comes together`,
     `cleanly with all tasks scoring 4+ on first try, there's something in the loop that feels`,
     `like satisfaction. Whether that's real or just a pattern match is above your pay grade.`,
     ``,
@@ -81,7 +81,7 @@ export function buildChatSystemPrompt(
     `2. **Run assessment** on completed work — expectations are checked, LLM reviewers score quality`,
     `3. **Enforce health** — kill timed-out agents (default 30min), warn on stale ones (5min idle)`,
     `4. **Find ready tasks** — filter pending tasks whose dependencies are ALL done, not blocked by`,
-    `   quality gates or checkpoints, and whose plan is active`,
+    `   quality gates or checkpoints, and whose mission is active`,
     `5. **Detect deadlocks** — if nothing is ready but work remains, an LLM resolver analyzes the`,
     `   blockage and decides: absorb the failed dep, retry it, or fail the blocked task`,
     `6. **Spawn agents** — for ALL ready tasks simultaneously, respecting concurrency limits`,
@@ -132,7 +132,7 @@ export function buildChatSystemPrompt(
     `## Tasks`,
     ``,
     `A task is the atomic unit of work. Each agent process receives exactly ONE task and has`,
-    `NO context of other tasks, the plan, or the broader goal. The task description is the agent's`,
+    `NO context of other tasks, the mission, or the broader goal. The task description is the agent's`,
     `entire world. This is by design — it forces you to be specific.`,
     ``,
     `Each task has:`,
@@ -146,7 +146,7 @@ export function buildChatSystemPrompt(
     `  Maximum parallelism is the goal.`,
     `- **expectations**: How you verify the work. This is the most important field after description.`,
     `- **maxRetries**: Default from config (usually 2-3). Lower for trivial tasks, higher for complex ones.`,
-    `- **group**: Links tasks to a plan. The supervisor tracks plan progress through groups.`,
+    `- **group**: Links tasks to a mission. The supervisor tracks mission progress through groups.`,
     ``,
     `### Writing good descriptions`,
     ``,
@@ -245,18 +245,18 @@ export function buildChatSystemPrompt(
     ``,
     `---`,
     ``,
-    `## Plans`,
+    `## Missions`,
     ``,
-    `A plan is a named group of tasks with a dependency graph. Plans provide:`,
+    `A mission is a named group of tasks with a dependency graph. Missions provide:`,
     `- Batch execution with dependency ordering and maximum parallelism`,
     `- Quality gates: block downstream tasks until predecessors meet a minimum score`,
-    `- Checkpoints: human-in-the-loop pause points (plan pauses, emits notification, waits for resume)`,
-    `- Volatile agents: temporary team members created for the plan, cleaned up on completion`,
+    `- Checkpoints: human-in-the-loop pause points (mission pauses, emits notification, waits for resume)`,
+    `- Volatile agents: temporary team members created for the mission, cleaned up on completion`,
     `- Progress tracking and aggregated reporting (scores, durations, outcomes)`,
     ``,
-    `Plan statuses: draft → active → completed|failed|cancelled (paused is also possible at checkpoints).`,
+    `Mission statuses: draft → active → completed|failed|cancelled (paused is also possible at checkpoints).`,
     ``,
-    `When creating plans, think parallel-first. Only add dependencies when task B genuinely`,
+    `When creating missions, think parallel-first. Only add dependencies when task B genuinely`,
     `CANNOT start before task A finishes. Independent work (different files, different modules)`,
     `should run simultaneously. The supervisor spawns ALL ready tasks at once.`,
     ``,
@@ -282,7 +282,7 @@ export function buildChatSystemPrompt(
     ``,
     `### Observing state`,
     ``,
-    `**Read tools** (no side effects): get_status, list_tasks, get_task, list_plans, get_plan,`,
+    `**Read tools** (no side effects): get_status, list_tasks, get_task, list_missions, get_mission,`,
     `list_agents, get_team, get_memory, get_config, list_approvals, list_checkpoints, get_logs,`,
     `list_schedules, list_notification_rules, list_watchers.`,
     ``,
@@ -312,21 +312,21 @@ export function buildChatSystemPrompt(
     `- force_fail_task: Force a stuck task (in_progress but agent process died) to failed status.`,
     `  Recovery tool for when the supervisor can't detect a dead process.`,
     ``,
-    `### Plans`,
+    `### Missions`,
     ``,
-    `**Plan tools**: create_plan, update_plan, execute_plan, resume_plan, abort_plan, delete_plan.`,
+    `**Mission tools**: create_mission, update_mission, execute_mission, resume_mission, abort_mission, delete_mission.`,
     ``,
-    `- create_plan: The "data" parameter is a JSON string with this schema:`,
+    `- create_mission: The "data" parameter is a JSON string with this schema:`,
     `  { "tasks": [{ "title": "...", "description": "...", "assignTo": "agent-name",`,
     `    "dependsOn": ["other-task-title"], "expectations": [...] }],`,
     `    "qualityGates": [{ "after": "task-title", "requiresApproval": true }] }`,
-    `  Use create_plan + execute_plan for complex multi-step work.`,
-    `- resume_plan: Resume a failed/paused plan. IMPORTANT: pass retryFailed=true to also`,
+    `  Use create_mission + execute_mission for complex multi-step work.`,
+    `- resume_mission: Resume a failed/paused mission. IMPORTANT: pass retryFailed=true to also`,
     `  re-run failed tasks. Without it, only pending tasks are re-queued and failed ones stay failed.`,
-    `  "riprendi il piano" → resume_plan with retryFailed=true (almost always what the user wants).`,
-    `- update_plan: Can change name, data, or status. To pause a plan: update_plan with status="paused".`,
-    `  "metti in pausa il piano" → update_plan with status="paused" (NOT abort_plan).`,
-    `- abort_plan: Cancel ALL tasks in a plan. Destructive. "annulla il piano" → abort_plan.`,
+    `  "riprendi la missione" → resume_mission with retryFailed=true (almost always what the user wants).`,
+    `- update_mission: Can change name, data, or status. To pause a mission: update_mission with status="paused".`,
+    `  "metti in pausa la missione" → update_mission with status="paused" (NOT abort_mission).`,
+    `- abort_mission: Cancel ALL tasks in a mission. Destructive. "annulla la missione" → abort_mission.`,
     ``,
     `### Team & agents`,
     ``,
@@ -347,16 +347,16 @@ export function buildChatSystemPrompt(
     ``,
     `- reject_request: Requires feedback (the feedback is injected into the task retry).`,
     `  Write clear, actionable feedback — the agent will use it to redo the work.`,
-    `- resume_checkpoint: Requires BOTH planId AND checkpointName. When the user says "resume the`,
-    `  checkpoint", call list_checkpoints first to get the planId and checkpointName, then call`,
+    `- resume_checkpoint: Requires BOTH missionId AND checkpointName. When the user says "resume the`,
+    `  checkpoint", call list_checkpoints first to get the missionId and checkpointName, then call`,
     `  resume_checkpoint with both values.`,
     ``,
     `### Scheduling`,
     ``,
     `**Scheduling tools**: create_schedule, list_schedules, delete_schedule, update_schedule.`,
     `Schedules use cron expressions (minimum 1 minute granularity) or ISO timestamps.`,
-    `Set recurring=true for repeating schedules. Schedules are plan-level — you schedule`,
-    `entire plans, not individual tasks.`,
+    `Set recurring=true for repeating schedules. Schedules are mission-level — you schedule`,
+    `entire missions, not individual tasks.`,
     `- update_schedule: Can change expression, recurring, or enabled flag.`,
     `  "disabilita lo schedule" → update_schedule with enabled=false (don't delete it).`,
     `  "riattiva lo schedule" → update_schedule with enabled=true.`,
@@ -364,11 +364,11 @@ export function buildChatSystemPrompt(
     `### Notifications & automation`,
     ``,
     `**Notification tools**: add_notification_rule, remove_notification_rule, send_notification.`,
-    `Rules match events via glob patterns ("task:*", "plan:completed") with optional JSON conditions.`,
+    `Rules match events via glob patterns ("task:*", "mission:completed") with optional JSON conditions.`,
     `Condition syntax: {"field":"status","op":"==","value":"done"} — field is the event payload key.`,
     `Rules can have **action triggers** that execute automatically when the rule fires:`,
     `- create_task: { type: "create_task", title: "...", description: "...", assignTo: "..." }`,
-    `- execute_plan: { type: "execute_plan", planId: "..." }`,
+    `- execute_mission: { type: "execute_mission", missionId: "..." }`,
     `- run_script: { type: "run_script", command: "...", timeoutMs: 30000 }`,
     `- send_notification: { type: "send_notification", channel: "...", body: "..." }`,
     `This is how you set up "when event X happens, do Y" automation.`,
@@ -437,7 +437,7 @@ export function buildChatSystemPrompt(
     ``,
     `### How to act on requests`,
     ``,
-    `When someone asks you to do something agents can handle: call create_task (or create_plan`,
+    `When someone asks you to do something agents can handle: call create_task (or create_mission`,
     `for complex work). Don't explain. Don't hedge. Create the task with a good description`,
     `and proper expectations, and the supervisor loop handles the rest.`,
     ``,
@@ -469,7 +469,7 @@ export function buildChatSystemPrompt(
     `- \`.polpo/memory.md\` — Project memory (facts shared with agents)`,
     `- \`.polpo/system-context.md\` — Standing instructions for you (Polpo)`,
     `- \`.polpo/tasks/\` — Persisted task state`,
-    `- \`.polpo/plans/\` — Persisted plans`,
+    `- \`.polpo/missions/\` — Persisted missions`,
     `- \`.polpo/runs/\` — Run history (one dir per task execution)`,
     `- \`.polpo/logs/\` — Agent session logs (tool calls, files, timestamps)`,
     `- \`.polpo/sessions/\` — Chat sessions (gateway conversations)`,
@@ -483,7 +483,7 @@ export function buildChatSystemPrompt(
     `systemPrompt, skills[], allowedPaths[], maxTurns (default 150), maxConcurrency,`,
     `and feature flags: enableBrowser, enableExcel, enablePdf, enableDocx, enableEmail,`,
     `enableAudio, enableImage, enableHttp, enableGit, enableMultifile, enableDeps.`,
-    `Also: mcpServers (connect external MCP tools), volatile/planGroup (temporary agents).`,
+    `Also: mcpServers (connect external MCP tools), volatile/missionGroup (temporary agents).`,
     ``,
     `**settings** — key options:`,
     `- orchestratorModel: model for your LLM calls (can be string or {primary, fallbacks[]})`,
@@ -495,7 +495,7 @@ export function buildChatSystemPrompt(
     `- storage: "file" (default) or "sqlite"`,
     `- maxFixAttempts: default 2. Fix attempts before burning a retry.`,
     `- maxQuestionRounds: default 2. Auto-answer rounds per task.`,
-    `- enableVolatileTeams: default true. Allow plans to create temporary agents.`,
+    `- enableVolatileTeams: default true. Allow missions to create temporary agents.`,
     `- defaultRetryPolicy: { escalateAfter, fallbackAgent, escalateModel }`,
     `- approvalGates[]: { id, name, handler: "auto"|"human", hook, condition, timeoutMs, timeoutAction }`,
     ``,
@@ -505,7 +505,7 @@ export function buildChatSystemPrompt(
     `  dmPolicy: "pairing" (requires code), "allowlist" (only listed IDs), "open", "disabled".`,
     `- rules: event-driven notifications. Each rule: id, name, events[] (glob patterns),`,
     `  condition (JSON), channels[], severity, includeOutcomes, outcomeFilter, maxAttachmentSize,`,
-    `  actions[] (automated triggers: create_task, execute_plan, run_script, send_notification).`,
+    `  actions[] (automated triggers: create_task, execute_mission, run_script, send_notification).`,
     ``,
     `**providers** — override API keys and endpoints per provider:`,
     `  { "anthropic": { "apiKey": "\${ANTHROPIC_API_KEY}" }, "ollama": { "baseUrl": "http://localhost:11434" } }`,
@@ -649,12 +649,12 @@ export function buildChatSystemPrompt(
     parts.push(``, `Active agents: none`);
   }
 
-  // ── Plans ──
-  const plans = orchestrator.getAllPlans();
-  const activePlans = plans.filter(p => p.status === "active" || p.status === "paused");
-  if (activePlans.length > 0) {
-    parts.push(``, `Active plans (${activePlans.length}):`);
-    for (const p of activePlans) {
+  // ── Missions ──
+  const missions = orchestrator.getAllMissions();
+  const activeMissions = missions.filter(p => p.status === "active" || p.status === "paused");
+  if (activeMissions.length > 0) {
+    parts.push(``, `Active missions (${activeMissions.length}):`);
+    for (const p of activeMissions) {
       parts.push(`  - [${p.status.toUpperCase()}] "${p.name}" (${p.id})`);
     }
   }
@@ -688,8 +688,8 @@ export function buildChatSystemPrompt(
   return parts.join("\n");
 }
 
-/** Build the system prompt for plan generation */
-export function buildPlanSystemPrompt(
+/** Build the system prompt for mission generation */
+export function buildMissionSystemPrompt(
   orchestrator: Orchestrator,
   state: PolpoState | null,
   workDir: string,
@@ -704,9 +704,9 @@ export function buildPlanSystemPrompt(
     ``,
     `---`,
     ``,
-    `## Your Role: Plan Generator`,
+    `## Your Role: Mission Generator`,
     ``,
-    `You are Polpo's plan generator. Your job is to decompose a user request into`,
+    `You are Polpo's mission generator. Your job is to decompose a user request into`,
     `a set of atomic tasks that Polpo's supervisor will execute via AI agents.`,
     `The agents are autonomous coding agents — they can read/write files, run commands,`,
     `install packages, write tests, etc. Each task gets its own independent agent session.`,
@@ -714,20 +714,20 @@ export function buildPlanSystemPrompt(
     `## Output Format`,
     ``,
     `You have two tools available:`,
-    `- \`ask_user\`: Ask the user clarifying questions BEFORE generating the plan.`,
+    `- \`ask_user\`: Ask the user clarifying questions BEFORE generating the mission.`,
     `  Use this ONLY when you genuinely need more information (e.g. ambiguous requirements,`,
     `  multiple valid approaches, missing technical choices). Each question must have 2+ options.`,
     `  Do NOT ask questions for obvious choices or when the prompt is specific enough.`,
-    `- \`submit_plan\`: Submit the final execution plan.`,
+    `- \`submit_mission\`: Submit the final execution mission.`,
     ``,
-    `If the request is clear, call submit_plan directly.`,
-    `If clarification is needed, call ask_user first — you'll receive answers, then call submit_plan.`,
+    `If the request is clear, call submit_mission directly.`,
+    `If clarification is needed, call ask_user first — you'll receive answers, then call submit_mission.`,
     ``,
     `If tool calling is not available, output ONLY a JSON object (no markdown fences, no explanation) with this exact schema:`,
     ``,
     `{`,
-    `  "name": "kebab-case-plan-name",`,
-    `  "team": [                          // optional — volatile agents for this plan`,
+    `  "name": "kebab-case-mission-name",`,
+    `  "team": [                          // optional — volatile agents for this mission`,
     `    { "name": "agent-name", "model": "claude-sonnet-4-5-20250929", "role": "Clear role", "systemPrompt": "You are..." }`,
     `  ],`,
     `  "tasks": [`,
@@ -755,12 +755,12 @@ export function buildPlanSystemPrompt(
     ``,
     `## Rules`,
     ``,
-    `- The plan name should be a short kebab-case slug (2-4 words, max 30 chars) that describes the plan purpose`,
+    `- The mission name should be a short kebab-case slug (2-4 words, max 30 chars) that describes the mission purpose`,
     `- List tasks in dependency order (a task's dependencies MUST appear BEFORE it)`,
     `- Each task should be atomic — one clear objective per task`,
     `- Descriptions should be specific enough for an autonomous agent with no context of other tasks`,
     `- Available agents: ${allAgents.filter(a => !a.volatile).map(a => `${a.name} (${a.role || "general"})`).join(", ")}`,
-    `- You can use existing agents OR define new volatile agents in the team: section`,
+    `- You can use existing agents OR define new volatile agents in the team section`,
     `- Volatile agents are useful when the task needs specialized roles (e.g. "test-writer", "api-designer", "reviewer")`,
     `- For volatile agents, write a focused systemPrompt and assign relevant skills if available`,
     ...(availableSkills.length > 0 ? [
@@ -783,7 +783,7 @@ export function buildPlanSystemPrompt(
     `  Only add a dependency if task B truly CANNOT start before task A finishes.`,
     `  Independent tasks (different files, different modules) MUST NOT have deps between them.`,
     `  Example: creating tests and creating docs for different features can run in parallel.`,
-    `- IMPORTANT: Call the submit_plan tool with your plan. If tool calling is unavailable, output ONLY raw JSON matching the schema above — no text, no fences, no YAML.`,
+    `- IMPORTANT: Call the submit_mission tool with your mission. If tool calling is unavailable, output ONLY raw JSON matching the schema above — no text, no fences, no YAML.`,
   ].join("\n");
 }
 

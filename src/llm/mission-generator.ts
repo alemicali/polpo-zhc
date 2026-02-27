@@ -1,8 +1,8 @@
 /**
- * Structured plan generation using pi-ai tool-based output.
+ * Structured mission generation using pi-ai tool-based output.
  *
  * Instead of asking the LLM for raw text (fragile: preamble, fences, malformed output),
- * we define a `submit_plan` tool with a TypeBox schema. The LLM calls the tool
+ * we define a `submit_mission` tool with a TypeBox schema. The LLM calls the tool
  * with validated JSON data, which we store directly as JSON.
  *
  * Fallback: if tool calling fails, tries to parse JSON from text output.
@@ -54,7 +54,7 @@ const ExpectedOutcomeSchema = Type.Object({
   tags: Type.Optional(Type.Array(Type.String(), { description: "Tags for categorization" })),
 });
 
-const PlanTaskSchema = Type.Object({
+const MissionTaskSchema = Type.Object({
   title: Type.String({ description: "Short descriptive title" }),
   description: Type.String({ description: "Detailed description — be specific about files, logic, etc." }),
   assignTo: Type.String({ description: "Agent name to assign the task to" }),
@@ -64,7 +64,7 @@ const PlanTaskSchema = Type.Object({
   maxRetries: Type.Optional(Type.Number({ description: "Max retry attempts (default: 2)" })),
 });
 
-const PlanTeamSchema = Type.Object({
+const MissionTeamSchema = Type.Object({
   name: Type.String({ description: "Agent name (kebab-case)" }),
   model: Type.Optional(Type.String({ description: "Model spec: 'provider:model' or just 'model'. Uses agent's configured model when omitted." })),
   role: Type.Optional(Type.String({ description: "Agent role description" })),
@@ -85,19 +85,19 @@ const PlanTeamSchema = Type.Object({
   enableImage: Type.Optional(Type.Boolean({ description: "Enable image tools (generate images, analyze/describe images with vision)" })),
 });
 
-const SubmitPlanSchema = Type.Object({
-  name: Type.String({ description: "kebab-case plan name, 2-4 words (e.g. implement-auth-system)" }),
-  team: Type.Optional(Type.Array(PlanTeamSchema, { description: "Volatile agents specific to this plan" })),
-  tasks: Type.Array(PlanTaskSchema, { minItems: 1, description: "Atomic tasks in dependency order" }),
+const SubmitMissionSchema = Type.Object({
+  name: Type.String({ description: "kebab-case mission name, 2-4 words (e.g. implement-auth-system)" }),
+  team: Type.Optional(Type.Array(MissionTeamSchema, { description: "Volatile agents specific to this mission" })),
+  tasks: Type.Array(MissionTaskSchema, { minItems: 1, description: "Atomic tasks in dependency order" }),
 });
 
-const submitPlanTool: Tool = {
-  name: "submit_plan",
-  description: `Submit your structured execution plan. You MUST call this tool exactly once
-with all the tasks for the plan. Each task should be atomic — one clear objective per task.
+const submitMissionTool: Tool = {
+  name: "submit_mission",
+  description: `Submit your structured execution mission. You MUST call this tool exactly once
+with all the tasks for the mission. Each task should be atomic — one clear objective per task.
 List tasks in dependency order (a task's dependencies MUST appear before it).
-Do NOT output the plan as plain text or YAML — use this tool.`,
-  parameters: SubmitPlanSchema,
+Do NOT output the mission as plain text or YAML — use this tool.`,
+  parameters: SubmitMissionSchema,
 };
 
 // ─── AskUser Tool (interactive clarification) ───────────────────────
@@ -120,10 +120,10 @@ const AskUserSchema = Type.Object({
 
 const askUserTool: Tool = {
   name: "ask_user",
-  description: `Ask the user clarifying questions before generating the plan. Call this ONLY when
-you genuinely need more information to produce a good plan. Each question must have 2+ pre-built
+  description: `Ask the user clarifying questions before generating the mission. Call this ONLY when
+you genuinely need more information to produce a good mission. Each question must have 2+ pre-built
 options. The user can select options or provide custom text. After receiving answers, call
-submit_plan with the final plan. Do NOT ask questions for obvious choices.`,
+submit_mission with the final mission. Do NOT ask questions for obvious choices.`,
   parameters: AskUserSchema,
 };
 
@@ -133,11 +133,11 @@ const submitTaskTool: Tool = {
 Enrich the user's input into a well-structured task with a clear title, detailed description,
 and appropriate expectations (test, file_exists, script, llm_review).
 Do NOT output the task as plain text or YAML — use this tool.`,
-  parameters: PlanTaskSchema,
+  parameters: MissionTaskSchema,
 };
 
 const SubmitTeamSchema = Type.Object({
-  team: Type.Array(PlanTeamSchema, { minItems: 1, description: "Array of specialized agents" }),
+  team: Type.Array(MissionTeamSchema, { minItems: 1, description: "Array of specialized agents" }),
 });
 
 const submitTeamTool: Tool = {
@@ -150,7 +150,7 @@ Do NOT output the team as plain text or YAML — use this tool.`,
 
 // ─── Types ───────────────────────────────────────────────────────────
 
-export interface PlanTaskData {
+export interface MissionTaskData {
   title: string;
   description: string;
   assignTo: string;
@@ -180,7 +180,7 @@ export interface PlanTaskData {
   maxRetries?: number;
 }
 
-export interface PlanTeamData {
+export interface MissionTeamData {
   name: string;
   model?: string;
   role?: string;
@@ -201,10 +201,10 @@ export interface PlanTeamData {
   enableImage?: boolean;
 }
 
-export interface PlanData {
+export interface MissionData {
   name: string;
-  team?: PlanTeamData[];
-  tasks: PlanTaskData[];
+  team?: MissionTeamData[];
+  tasks: MissionTaskData[];
 }
 
 // ─── AskUser Types ──────────────────────────────────────────────────
@@ -227,24 +227,24 @@ export interface UserAnswer {
   customText?: string;
 }
 
-export type GeneratePlanResult =
-  | { type: "plan"; data: PlanData }
+export type GenerateMissionResult =
+  | { type: "mission"; data: MissionData }
   | { type: "questions"; questions: UserQuestion[]; messages: Message[] };
 
 // ─── Core Functions ──────────────────────────────────────────────────
 
 /**
- * Generate a structured plan using tool-based output.
- * The LLM calls `submit_plan` with validated JSON → we get typed PlanData.
+ * Generate a structured mission using tool-based output.
+ * The LLM calls `submit_mission` with validated JSON → we get typed MissionData.
  * Falls back to text parsing (JSON) if the LLM doesn't use the tool.
  */
-export async function generatePlan(
+export async function generateMission(
   systemPrompt: string,
   userPrompt: string,
   model?: string,
   onTokens?: (tokens: number) => void,
   reasoning?: ReasoningLevel,
-): Promise<PlanData> {
+): Promise<MissionData> {
   return withRetry(async () => {
     const m = resolveModel(model);
     const apiKey = await resolveApiKeyAsync(m.provider);
@@ -256,7 +256,7 @@ export async function generatePlan(
     const response = await completeSimple(m, {
       systemPrompt,
       messages,
-      tools: [submitPlanTool],
+      tools: [submitMissionTool],
     }, buildStreamOpts(apiKey, reasoning));
 
     // Track tokens if callback provided
@@ -268,11 +268,11 @@ export async function generatePlan(
     // Extract from tool call (primary path)
     const toolCall = response.content.find(
       (c): c is { type: "toolCall"; id: string; name: string; arguments: Record<string, any> } =>
-        c.type === "toolCall" && c.name === "submit_plan"
+        c.type === "toolCall" && c.name === "submit_mission"
     );
 
     if (toolCall) {
-      return validatePlanData(toolCall.arguments as PlanData);
+      return validateMissionData(toolCall.arguments as MissionData);
     }
 
     // Fallback: try parsing from text response (JSON)
@@ -280,31 +280,31 @@ export async function generatePlan(
       (c): c is { type: "text"; text: string } => c.type === "text"
     );
     const fullText = textBlocks.map(b => b.text).join("\n");
-    const fallback = tryParsePlanFromText(fullText);
-    if (fallback) return validatePlanData(fallback);
+    const fallback = tryParseMissionFromText(fullText);
+    if (fallback) return validateMissionData(fallback);
 
     // Debug: show what we got
     const contentTypes = response.content.map(c => c.type).join(", ");
     const preview = fullText.slice(0, 200).replace(/\n/g, "\\n");
     throw new Error(
-      `LLM did not produce a valid plan. Response content types: [${contentTypes}]. ` +
+      `LLM did not produce a valid mission. Response content types: [${contentTypes}]. ` +
       `Text preview: "${preview}"`
     );
   }, { maxRetries: 2 });
 }
 
 /**
- * Internal: run a single plan generation step with given tools and messages.
- * Returns either a plan (if submit_plan called) or questions (if ask_user called).
+ * Internal: run a single mission generation step with given tools and messages.
+ * Returns either a mission (if submit_mission called) or questions (if ask_user called).
  */
-async function _runPlanStep(
+async function _runMissionStep(
   systemPrompt: string,
   messages: Message[],
   tools: Tool[],
   model?: string,
   onTokens?: (tokens: number) => void,
   reasoning?: ReasoningLevel,
-): Promise<GeneratePlanResult> {
+): Promise<GenerateMissionResult> {
   const m = resolveModel(model);
   const apiKey = await resolveApiKeyAsync(m.provider);
 
@@ -323,13 +323,13 @@ async function _runPlanStep(
   // Append assistant response to messages for potential multi-turn
   messages.push(response);
 
-  // Check for submit_plan tool call
-  const planCall = response.content.find(
+  // Check for submit_mission tool call
+  const missionCall = response.content.find(
     (c): c is { type: "toolCall"; id: string; name: string; arguments: Record<string, any> } =>
-      c.type === "toolCall" && c.name === "submit_plan"
+      c.type === "toolCall" && c.name === "submit_mission"
   );
-  if (planCall) {
-    return { type: "plan", data: validatePlanData(planCall.arguments as PlanData) };
+  if (missionCall) {
+    return { type: "mission", data: validateMissionData(missionCall.arguments as MissionData) };
   }
 
   // Check for ask_user tool call
@@ -347,49 +347,49 @@ async function _runPlanStep(
     (c): c is { type: "text"; text: string } => c.type === "text"
   );
   const fullText = textBlocks.map(b => b.text).join("\n");
-  const fallback = tryParsePlanFromText(fullText);
-  if (fallback) return { type: "plan", data: validatePlanData(fallback) };
+  const fallback = tryParseMissionFromText(fullText);
+  if (fallback) return { type: "mission", data: validateMissionData(fallback) };
 
   const contentTypes = response.content.map(c => c.type).join(", ");
   const preview = fullText.slice(0, 200).replace(/\n/g, "\\n");
   throw new Error(
-    `LLM did not produce a valid plan. Response content types: [${contentTypes}]. ` +
+    `LLM did not produce a valid mission. Response content types: [${contentTypes}]. ` +
     `Text preview: "${preview}"`
   );
 }
 
 /**
- * Generate a plan interactively — may return questions for user clarification.
+ * Generate a mission interactively — may return questions for user clarification.
  * Used by TUI where user can answer questions. The returned `messages` array
- * should be passed to `continuePlanWithAnswers()` after the user answers.
+ * should be passed to `continueMissionWithAnswers()` after the user answers.
  */
-export async function generatePlanInteractive(
+export async function generateMissionInteractive(
   systemPrompt: string,
   userPrompt: string,
   model?: string,
   onTokens?: (tokens: number) => void,
   reasoning?: ReasoningLevel,
-): Promise<GeneratePlanResult> {
+): Promise<GenerateMissionResult> {
   return withRetry(async () => {
     const messages: Message[] = [
       { role: "user", content: userPrompt, timestamp: Date.now() },
     ];
-    return _runPlanStep(systemPrompt, messages, [askUserTool, submitPlanTool], model, onTokens, reasoning);
+    return _runMissionStep(systemPrompt, messages, [askUserTool, submitMissionTool], model, onTokens, reasoning);
   }, { maxRetries: 2 });
 }
 
 /**
- * Continue plan generation after user answered questions.
+ * Continue mission generation after user answered questions.
  * Formats answers as toolResult, appends to conversation, and runs another step.
  */
-export async function continuePlanWithAnswers(
+export async function continueMissionWithAnswers(
   systemPrompt: string,
   previousMessages: Message[],
   answers: UserAnswer[],
   model?: string,
   onTokens?: (tokens: number) => void,
   reasoning?: ReasoningLevel,
-): Promise<GeneratePlanResult> {
+): Promise<GenerateMissionResult> {
   // Find the last ask_user tool call to get its ID
   const messages = [...previousMessages];
   const lastAssistant = [...messages].reverse().find(m => m.role === "assistant");
@@ -418,38 +418,38 @@ export async function continuePlanWithAnswers(
     timestamp: Date.now(),
   } as any);
 
-  return _runPlanStep(systemPrompt, messages, [askUserTool, submitPlanTool], model, onTokens, reasoning);
+  return _runMissionStep(systemPrompt, messages, [askUserTool, submitMissionTool], model, onTokens, reasoning);
 }
 
 /**
- * Generate a refined plan given existing plan JSON and feedback.
+ * Generate a refined mission given existing mission JSON and feedback.
  */
-export async function refinePlanStructured(
+export async function refineMissionStructured(
   systemPrompt: string,
   originalPrompt: string,
-  currentPlanJson: string,
+  currentMissionJson: string,
   feedback: string,
   model?: string,
   onTokens?: (tokens: number) => void,
   reasoning?: ReasoningLevel,
-): Promise<PlanData> {
+): Promise<MissionData> {
   const userPrompt = [
     `Original request: "${originalPrompt}"`,
     "",
-    "Current plan:",
-    currentPlanJson,
+    "Current mission:",
+    currentMissionJson,
     "",
     `User feedback: "${feedback}"`,
     "",
-    "Revise the plan based on the feedback. Call the submit_plan tool with the updated plan.",
+    "Revise the mission based on the feedback. Call the submit_mission tool with the updated mission.",
   ].join("\n");
 
-  return generatePlan(systemPrompt, userPrompt, model, onTokens, reasoning);
+  return generateMission(systemPrompt, userPrompt, model, onTokens, reasoning);
 }
 
 /**
  * Generate a single prepared task using tool-based output.
- * The LLM calls `submit_task` with validated JSON → we get typed PlanTaskData.
+ * The LLM calls `submit_task` with validated JSON → we get typed MissionTaskData.
  * Falls back to text parsing if the LLM doesn't use the tool.
  */
 export async function generateTaskPrep(
@@ -458,7 +458,7 @@ export async function generateTaskPrep(
   model?: string,
   onTokens?: (tokens: number) => void,
   reasoning?: ReasoningLevel,
-): Promise<PlanTaskData> {
+): Promise<MissionTaskData> {
   return withRetry(async () => {
     const m = resolveModel(model);
     const apiKey = await resolveApiKeyAsync(m.provider);
@@ -486,7 +486,7 @@ export async function generateTaskPrep(
     );
 
     if (toolCall) {
-      return validateTaskData(toolCall.arguments as PlanTaskData);
+      return validateTaskData(toolCall.arguments as MissionTaskData);
     }
 
     // Fallback: try parsing from text response
@@ -504,7 +504,7 @@ export async function generateTaskPrep(
 
 /**
  * Generate a team using tool-based output.
- * The LLM calls `submit_team` with validated JSON → we get PlanTeamData[].
+ * The LLM calls `submit_team` with validated JSON → we get MissionTeamData[].
  * Falls back to text parsing if the LLM doesn't use the tool.
  */
 export async function generateTeam(
@@ -512,7 +512,7 @@ export async function generateTeam(
   userPrompt: string,
   model?: string,
   reasoning?: ReasoningLevel,
-): Promise<PlanTeamData[]> {
+): Promise<MissionTeamData[]> {
   return withRetry(async () => {
     const m = resolveModel(model);
     const apiKey = await resolveApiKeyAsync(m.provider);
@@ -534,7 +534,7 @@ export async function generateTeam(
     );
 
     if (toolCall) {
-      const data = toolCall.arguments as { team: PlanTeamData[] };
+      const data = toolCall.arguments as { team: MissionTeamData[] };
       return validateTeamData(data.team);
     }
 
@@ -559,7 +559,7 @@ export async function refineTeam(
   feedback: string,
   model?: string,
   reasoning?: ReasoningLevel,
-): Promise<PlanTeamData[]> {
+): Promise<MissionTeamData[]> {
   const userPrompt = [
     "Current team:",
     currentTeamJson,
@@ -573,22 +573,22 @@ export async function refineTeam(
 }
 
 /**
- * Convert structured PlanData to JSON string (for storage).
+ * Convert structured MissionData to JSON string (for storage).
  */
-export function planDataToJson(data: PlanData): string {
+export function missionDataToJson(data: MissionData): string {
   return JSON.stringify(data);
 }
 
 // ─── Segment type (mirrored from TUI store for independence) ─────────
 
-export interface PlanSeg {
+export interface MissionSeg {
   text: string;
   color?: string;
   bold?: boolean;
   dim?: boolean;
 }
 
-const s = (text: string, color?: string, bold?: boolean, dim?: boolean): PlanSeg =>
+const s = (text: string, color?: string, bold?: boolean, dim?: boolean): MissionSeg =>
   ({ text, color, bold, dim });
 
 // ─── Expectation type badges ─────────────────────────────────────────
@@ -601,8 +601,8 @@ const EXPECT_BADGE: Record<string, { color: string; label: string }> = {
 };
 
 /**
- * Format PlanData as rich colored segments for TUI display.
- * Returns PlanSeg[][] (one Seg[] per line).
+ * Format MissionData as rich colored segments for TUI display.
+ * Returns MissionSeg[][] (one Seg[] per line).
  */
 /** Word-wrap text to maxWidth, preserving indent on continuation lines. */
 function wrapLines(text: string, indent: string, maxWidth: number): string[] {
@@ -626,13 +626,13 @@ function wrapLines(text: string, indent: string, maxWidth: number): string[] {
   return lines;
 }
 
-export function formatPlanRich(data: PlanData, termCols?: number): PlanSeg[][] {
-  const out: PlanSeg[][] = [];
+export function formatMissionRich(data: MissionData, termCols?: number): MissionSeg[][] {
+  const out: MissionSeg[][] = [];
   const maxWidth = (termCols ?? 100) - 4; // 4 for paddingX
   const SEP = "─".repeat(Math.min(50, maxWidth));
   const INDENT = "     ";
 
-  // (Plan title rendered by the viewer page title — no duplication here)
+  // (Mission title rendered by the viewer page title — no duplication here)
 
   // ── Team section ──
   if (data.team && data.team.length > 0) {
@@ -762,10 +762,10 @@ export function formatPlanRich(data: PlanData, termCols?: number): PlanSeg[][] {
 }
 
 /**
- * Format PlanData as a plain string for CLI/non-TUI display.
+ * Format MissionData as a plain string for CLI/non-TUI display.
  */
-export function formatPlanReadable(data: PlanData): string {
-  return formatPlanRich(data)
+export function formatMissionReadable(data: MissionData): string {
+  return formatMissionRich(data)
     .map((segs) => segs.map((sg) => sg.text).join(""))
     .join("\n");
 }
@@ -773,23 +773,23 @@ export function formatPlanReadable(data: PlanData): string {
 // ─── Validation ──────────────────────────────────────────────────────
 
 /**
- * Validate and sanitize plan data.
+ * Validate and sanitize mission data.
  * Runs expectations through Zod sanitization and ensures required fields.
  */
-function validatePlanData(data: PlanData): PlanData {
+function validateMissionData(data: MissionData): MissionData {
   if (!data.name || typeof data.name !== "string") {
-    data.name = "generated-plan";
+    data.name = "generated-mission";
   }
 
   if (!data.tasks || !Array.isArray(data.tasks) || data.tasks.length === 0) {
-    throw new Error("Plan has no tasks");
+    throw new Error("Mission has no tasks");
   }
 
   // Sanitize expectations on each task
   for (const task of data.tasks) {
     if (task.expectations && Array.isArray(task.expectations)) {
       const { valid } = sanitizeExpectations(task.expectations);
-      task.expectations = valid.length > 0 ? valid as PlanTaskData["expectations"] : undefined;
+      task.expectations = valid.length > 0 ? valid as MissionTaskData["expectations"] : undefined;
     }
     // Ensure required fields
     if (!task.title) task.title = "Untitled task";
@@ -803,9 +803,9 @@ function validatePlanData(data: PlanData): PlanData {
 // ─── Fallback Parsing ────────────────────────────────────────────────
 
 /**
- * Try to parse plan data from LLM text output (JSON only).
+ * Try to parse mission data from LLM text output (JSON only).
  */
-function tryParsePlanFromText(text: string): PlanData | null {
+function tryParseMissionFromText(text: string): MissionData | null {
   const trimmed = text.trim();
 
   // Strip markdown fences if present
@@ -821,10 +821,10 @@ function tryParsePlanFromText(text: string): PlanData | null {
       const parsed = JSON.parse(objMatch[0]);
       if (parsed?.tasks && Array.isArray(parsed.tasks) && parsed.tasks.length > 0) {
         return {
-          name: parsed.name || "generated-plan",
+          name: parsed.name || "generated-mission",
           team: parsed.team,
           tasks: parsed.tasks,
-        } as PlanData;
+        } as MissionData;
       }
     } catch { /* not valid JSON */ }
   }
@@ -835,14 +835,14 @@ function tryParsePlanFromText(text: string): PlanData | null {
 /**
  * Validate and sanitize a single task.
  */
-function validateTaskData(data: PlanTaskData): PlanTaskData {
+function validateTaskData(data: MissionTaskData): MissionTaskData {
   if (!data.title) data.title = "Untitled task";
   if (!data.description) data.description = data.title;
   if (!data.assignTo) data.assignTo = "default";
 
   if (data.expectations && Array.isArray(data.expectations)) {
     const { valid } = sanitizeExpectations(data.expectations);
-    data.expectations = valid.length > 0 ? valid as PlanTaskData["expectations"] : undefined;
+    data.expectations = valid.length > 0 ? valid as MissionTaskData["expectations"] : undefined;
   }
 
   return data;
@@ -851,7 +851,7 @@ function validateTaskData(data: PlanTaskData): PlanTaskData {
 /**
  * Try to parse a single task from LLM text output (JSON only).
  */
-function tryParseTaskFromText(text: string): PlanTaskData | null {
+function tryParseTaskFromText(text: string): MissionTaskData | null {
   const trimmed = text.trim();
   const fenceMatch = trimmed.match(/```(?:json)?\s*\n?([\s\S]*?)\n?\s*```/);
   const inner = fenceMatch ? fenceMatch[1].trim() : trimmed;
@@ -867,7 +867,7 @@ function tryParseTaskFromText(text: string): PlanTaskData | null {
       // Could be { tasks: [...] } wrapper or direct task object
       const task = parsed?.tasks?.[0] ?? parsed;
       if (task?.title && task?.description) {
-        return task as PlanTaskData;
+        return task as MissionTaskData;
       }
     } catch { /* not valid JSON */ }
   }
@@ -878,7 +878,7 @@ function tryParseTaskFromText(text: string): PlanTaskData | null {
 /**
  * Validate team data — ensure each agent has a name.
  */
-function validateTeamData(agents: PlanTeamData[]): PlanTeamData[] {
+function validateTeamData(agents: MissionTeamData[]): MissionTeamData[] {
   if (!Array.isArray(agents) || agents.length === 0) {
     throw new Error("Team has no agents");
   }
@@ -891,7 +891,7 @@ function validateTeamData(agents: PlanTeamData[]): PlanTeamData[] {
 /**
  * Try to parse team data from LLM text output (JSON only).
  */
-function tryParseTeamFromText(text: string): PlanTeamData[] | null {
+function tryParseTeamFromText(text: string): MissionTeamData[] | null {
   const trimmed = text.trim();
   const fenceMatch = trimmed.match(/```(?:json)?\s*\n?([\s\S]*?)\n?\s*```/);
   const inner = fenceMatch ? fenceMatch[1].trim() : trimmed;
@@ -907,7 +907,7 @@ function tryParseTeamFromText(text: string): PlanTeamData[] | null {
       // Could be { team: [...] } wrapper or direct array
       const team = parsed?.team ?? (Array.isArray(parsed) ? parsed : null);
       if (team && Array.isArray(team) && team.length > 0 && team[0]?.name) {
-        return team as PlanTeamData[];
+        return team as MissionTeamData[];
       }
     } catch { /* not valid JSON */ }
   }

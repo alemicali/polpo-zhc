@@ -224,7 +224,7 @@ export interface AgentConfig {
   /** Max concurrent tasks for this agent. Default: unlimited. */
   maxConcurrency?: number;
   volatile?: boolean;
-  planGroup?: string;
+  missionGroup?: string;
 
   // Extended tool categories (opt-in)
   /** Enable browser automation tools (browser_navigate, browser_click, etc.) */
@@ -318,32 +318,32 @@ export interface AssessmentResult {
   trigger?: AssessmentTrigger;
 }
 
-// === Plan ===
+// === Mission ===
 
-export type PlanStatus = "draft" | "active" | "paused" | "completed" | "failed" | "cancelled";
+export type MissionStatus = "draft" | "active" | "paused" | "completed" | "failed" | "cancelled";
 
-export interface Plan {
+export interface Mission {
   id: string;
   name: string;
   data: string;
   prompt?: string;
-  status: PlanStatus;
+  status: MissionStatus;
   /** Absolute deadline (ISO timestamp). */
   deadline?: string;
   /** Cron expression or ISO timestamp for scheduled execution. */
   schedule?: string;
   /** Re-execute on every schedule trigger. Default: false (one-shot). */
   recurring?: boolean;
-  /** Minimum average score for the plan to pass. */
+  /** Minimum average score for the mission to pass. */
   qualityThreshold?: number;
-  /** Plan-level scoped notification rules. */
+  /** Mission-level scoped notification rules. */
   notifications?: ScopedNotificationRules;
   createdAt: string;
   updatedAt: string;
 }
 
-export interface PlanReport {
-  planId: string;
+export interface MissionReport {
+  missionId: string;
   group: string;
   allPassed: boolean;
   totalDuration: number;
@@ -435,7 +435,7 @@ export interface ApprovalRequest {
   gateId: string;
   gateName: string;
   taskId?: string;
-  planId?: string;
+  missionId?: string;
   status: ApprovalStatus;
   payload: unknown;
   requestedAt: string;
@@ -448,7 +448,7 @@ export interface ApprovalRequest {
 
 export interface ScheduleEntry {
   id: string;
-  planId: string;
+  missionId: string;
   expression: string;
   recurring: boolean;
   enabled: boolean;
@@ -462,7 +462,7 @@ export interface ScheduleEntry {
 
 export interface QualityMetrics {
   entityId: string;
-  entityType: "task" | "agent" | "plan";
+  entityType: "task" | "agent" | "mission";
   totalAssessments: number;
   passedAssessments: number;
   avgScore?: number;
@@ -479,7 +479,7 @@ export interface QualityMetrics {
 // === Templates ===
 
 export interface TemplateParameter {
-  /** Parameter name — used as {{name}} in the plan template. */
+  /** Parameter name — used as {{name}} in the mission template. */
   name: string;
   /** Human-readable description. */
   description: string;
@@ -493,7 +493,7 @@ export interface TemplateParameter {
   enum?: (string | number)[];
 }
 
-/** Lightweight template metadata (no plan body). */
+/** Lightweight template metadata (no mission body). */
 export interface TemplateInfo {
   name: string;
   description: string;
@@ -502,17 +502,17 @@ export interface TemplateInfo {
   path: string;
 }
 
-/** Full template definition including the plan template. */
+/** Full template definition including the mission template. */
 export interface TemplateDefinition {
   name: string;
   description: string;
-  plan: Record<string, unknown>;
+  mission: Record<string, unknown>;
   parameters?: TemplateParameter[];
 }
 
 /** Result of running a template. */
 export interface TemplateRunResult {
-  plan: Plan;
+  mission: Mission;
   tasks: number;
   group: string;
 }
@@ -624,17 +624,17 @@ export interface UpdateTaskRequest {
   expectations?: TaskExpectation[];
 }
 
-export interface CreatePlanRequest {
+export interface CreateMissionRequest {
   data: string;
   prompt?: string;
   name?: string;
-  status?: PlanStatus;
+  status?: MissionStatus;
   notifications?: ScopedNotificationRules;
 }
 
-export interface UpdatePlanRequest {
+export interface UpdateMissionRequest {
   data?: string;
-  status?: PlanStatus;
+  status?: MissionStatus;
   name?: string;
 }
 
@@ -701,12 +701,12 @@ export interface TaskFilters {
 
 // === Execution results ===
 
-export interface ExecutePlanResult {
+export interface ExecuteMissionResult {
   tasks: Task[];
   group: string;
 }
 
-export interface ResumePlanResult {
+export interface ResumeMissionResult {
   retried: number;
   pending: number;
 }

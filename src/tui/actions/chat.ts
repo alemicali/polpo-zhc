@@ -1,7 +1,7 @@
 /**
  * Chat action — tool-based agentic loop for conversational interaction.
  * Streams response chunks in real-time as plain text.
- * The LLM can use orchestrator tools to manage tasks, plans, and state.
+ * The LLM can use orchestrator tools to manage tasks, missions, and state.
  * Write tools may require user approval depending on approval mode.
  */
 

@@ -1,9 +1,9 @@
 /**
- * Template system — parameterized, reusable plan templates.
+ * Template system — parameterized, reusable mission templates.
  *
- * A template is a JSON file (template.json) that defines a PlanDocument with
+ * A template is a JSON file (template.json) that defines a MissionDocument with
  * placeholder parameters ({{name}}). When executed, parameters are resolved
- * and the result is saved + executed as a standard Plan.
+ * and the result is saved + executed as a standard Mission.
  *
  * Discovery paths (in priority order, first occurrence wins):
  *   1. <polpoDir>/templates/          — project-level templates
@@ -44,8 +44,8 @@ export interface TemplateDefinition {
   name: string;
   /** Human-readable description. */
   description: string;
-  /** Parameterized plan template — same shape as PlanDocument. */
-  plan: Record<string, unknown>;
+  /** Parameterized mission template — same shape as MissionDocument. */
+  mission: Record<string, unknown>;
   /** Declared parameters. */
   parameters?: TemplateParameter[];
 }
@@ -99,7 +99,7 @@ function scanTemplateDir(dir: string): TemplateInfo[] {
       const raw = readFileSync(templateFile, "utf-8");
       const def = JSON.parse(raw) as Partial<TemplateDefinition>;
 
-      if (!def.name || !def.description || !def.plan) continue;
+      if (!def.name || !def.description || !def.mission) continue;
 
       results.push({
         name: def.name,
@@ -253,16 +253,16 @@ export function validateParams(
 /**
  * Instantiate a template with resolved parameters.
  *
- * 1. Serializes the plan to JSON string
+ * 1. Serializes the mission to JSON string
  * 2. Replaces all {{placeholder}} with parameter values
  * 3. Re-parses the JSON to validate structural integrity
- * 4. Returns the plan data string ready for planExecutor.savePlan()
+ * 4. Returns the mission data string ready for missionExecutor.saveMission()
  */
 export function instantiateTemplate(
   template: TemplateDefinition,
   resolved: Record<string, string | number | boolean>,
 ): { name: string; data: string; prompt: string } {
-  let json = JSON.stringify(template.plan);
+  let json = JSON.stringify(template.mission);
 
   // Replace all {{param}} placeholders
   for (const [key, value] of Object.entries(resolved)) {

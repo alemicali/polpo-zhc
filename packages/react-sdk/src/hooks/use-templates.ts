@@ -13,7 +13,7 @@ export interface UseTemplatesReturn {
   loading: boolean;
   /** Refresh the template list from the server. */
   refetch: () => void;
-  /** Get the full definition (including plan template) for a template. */
+  /** Get the full definition (including mission template) for a template. */
   getTemplate: (name: string) => Promise<TemplateDefinition>;
   /** Run a template with parameters. */
   runTemplate: (
@@ -25,8 +25,8 @@ export interface UseTemplatesReturn {
 /**
  * Hook for listing, inspecting, and running templates.
  *
- * Templates are parameterized plan templates discovered from disk.
- * Running a template instantiates a Plan and executes it.
+ * Templates are parameterized mission templates discovered from disk.
+ * Running a template instantiates a Mission and executes it.
  */
 export function useTemplates(): UseTemplatesReturn {
   const { client } = usePolpo();

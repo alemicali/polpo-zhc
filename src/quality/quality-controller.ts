@@ -1,15 +1,15 @@
 import type { OrchestratorContext } from "../core/orchestrator-context.js";
 import type { NotificationRouter } from "../notifications/index.js";
-import type { PlanQualityGate, QualityMetrics, Task, Plan, AssessmentResult } from "../core/types.js";
+import type { MissionQualityGate, QualityMetrics, Task, Mission, AssessmentResult } from "../core/types.js";
 
 /**
- * QualityController — manages quality gates within plans and aggregates
- * quality metrics across tasks, agents, and plans.
+ * QualityController — manages quality gates within missions and aggregates
+ * quality metrics across tasks, agents, and missions.
  *
  * Responsibilities:
- *  1. Evaluate quality gates defined in plan documents (between task phases)
- *  2. Aggregate quality metrics per entity (task, agent, plan)
- *  3. Enforce plan-level quality thresholds on completion
+ *  1. Evaluate quality gates defined in mission documents (between task phases)
+ *  2. Aggregate quality metrics per entity (task, agent, mission)
+ *  3. Enforce mission-level quality thresholds on completion
  *
  * This is a standalone architectural layer — NOT embedded in the assessment pipeline.
  * It consumes assessment results via hooks and emits quality events.
@@ -109,17 +109,17 @@ export class QualityController {
   // ─── Quality Gates ─────────────────────────────────
 
   /**
-   * Evaluate a quality gate defined in a plan.
+   * Evaluate a quality gate defined in a mission.
    * Returns true if the gate passes, false if it fails.
    *
-   * Called by PlanExecutor when checking if blocked tasks can proceed.
+   * Called by MissionExecutor when checking if blocked tasks can proceed.
    */
   evaluateGate(
-    planId: string,
-    gate: PlanQualityGate,
+    missionId: string,
+    gate: MissionQualityGate,
     tasks: Task[],
   ): { passed: boolean; reason?: string; avgScore?: number } {
-    const gateKey = `${planId}:${gate.name}`;
+    const gateKey = `${missionId}:${gate.name}`;
 
     // Register dynamic notification rules for this gate's channels (once per gate)
     this.ensureGateNotificationRules(gateKey, gate);
@@ -156,12 +156,12 @@ export class QualityController {
       if (failedTasks.length > 0) {
         const reason = `Required tasks failed: ${failedTasks.map(t => t.title).join(", ")}`;
         this.ctx.emitter.emit("quality:gate:failed", {
-          planId,
+          missionId,
           gateName: gate.name,
           reason,
         });
         this.ctx.hooks.runAfter("quality:gate", {
-          planId,
+          missionId,
           gateName: gate.name,
           allPassed: false,
           tasks: afterTasks.map(t => ({
@@ -188,13 +188,13 @@ export class QualityController {
       if (avgScore === undefined || avgScore < gate.minScore) {
         const reason = `Average score ${avgScore?.toFixed(2) ?? "N/A"} below threshold ${gate.minScore}`;
         this.ctx.emitter.emit("quality:gate:failed", {
-          planId,
+          missionId,
           gateName: gate.name,
           avgScore,
           reason,
         });
         this.ctx.hooks.runAfter("quality:gate", {
-          planId,
+          missionId,
           gateName: gate.name,
           avgScore,
           allPassed: false,
@@ -211,12 +211,12 @@ export class QualityController {
       // Gate passed
       this.evaluatedGates.add(gateKey);
       this.ctx.emitter.emit("quality:gate:passed", {
-        planId,
+        missionId,
         gateName: gate.name,
         avgScore,
       });
       this.ctx.hooks.runAfter("quality:gate", {
-        planId,
+        missionId,
         gateName: gate.name,
         avgScore,
         allPassed: true,
@@ -233,11 +233,11 @@ export class QualityController {
     // No score requirement — just completion check passed
     this.evaluatedGates.add(gateKey);
     this.ctx.emitter.emit("quality:gate:passed", {
-      planId,
+      missionId,
       gateName: gate.name,
     });
     this.ctx.hooks.runAfter("quality:gate", {
-      planId,
+      missionId,
       gateName: gate.name,
       allPassed: true,
       tasks: afterTasks.map(t => ({
@@ -251,21 +251,21 @@ export class QualityController {
   }
 
   /**
-   * Check if a task is blocked by any quality gate in its plan.
+   * Check if a task is blocked by any quality gate in its mission.
    * Returns the blocking gate if found, undefined if the task can proceed.
    */
   getBlockingGate(
-    planId: string,
+    missionId: string,
     taskTitle: string,
     taskId: string,
-    gates: PlanQualityGate[],
+    gates: MissionQualityGate[],
     tasks: Task[],
-  ): { gate: PlanQualityGate; result: { passed: boolean; reason?: string; avgScore?: number } } | undefined {
+  ): { gate: MissionQualityGate; result: { passed: boolean; reason?: string; avgScore?: number } } | undefined {
     for (const gate of gates) {
       if (!gate.blocksTasks.includes(taskTitle) && !gate.blocksTasks.includes(taskId)) {
         continue;
       }
-      const result = this.evaluateGate(planId, gate, tasks);
+      const result = this.evaluateGate(missionId, gate, tasks);
       if (!result.passed) {
         return { gate, result };
       }
@@ -273,18 +273,18 @@ export class QualityController {
     return undefined;
   }
 
-  // ─── Plan Quality Threshold ────────────────────────
+  // ─── Mission Quality Threshold ────────────────────────
 
   /**
-   * Check if a completed plan meets its quality threshold.
+   * Check if a completed mission meets its quality threshold.
    * Returns the average score and whether the threshold was met.
    */
-  checkPlanThreshold(
-    plan: Plan,
+  checkMissionThreshold(
+    mission: Mission,
     tasks: Task[],
     defaultThreshold?: number,
   ): { avgScore?: number; threshold?: number; passed: boolean } {
-    const threshold = plan.qualityThreshold ?? defaultThreshold;
+    const threshold = mission.qualityThreshold ?? defaultThreshold;
     if (threshold === undefined) return { passed: true };
 
     const scores = tasks
@@ -311,7 +311,7 @@ export class QualityController {
 
     if (!passed) {
       this.ctx.emitter.emit("quality:threshold:failed", {
-        planId: plan.id,
+        missionId: mission.id,
         avgScore,
         threshold,
       });
@@ -327,7 +327,7 @@ export class QualityController {
    */
   private recordAssessment(
     entityId: string,
-    entityType: "task" | "agent" | "plan",
+    entityType: "task" | "agent" | "mission",
     assessment: AssessmentResult,
     passed: boolean,
   ): void {
@@ -369,25 +369,25 @@ export class QualityController {
   /**
    * Get quality metrics for an entity. Returns undefined if no data collected.
    */
-  getMetrics(entityType: "task" | "agent" | "plan", entityId: string): QualityMetrics | undefined {
+  getMetrics(entityType: "task" | "agent" | "mission", entityId: string): QualityMetrics | undefined {
     return this.metrics.get(this.metricsKey(entityType, entityId));
   }
 
   /**
    * Get all metrics of a given type.
    */
-  getAllMetrics(entityType?: "task" | "agent" | "plan"): QualityMetrics[] {
+  getAllMetrics(entityType?: "task" | "agent" | "mission"): QualityMetrics[] {
     const all = [...this.metrics.values()];
     if (entityType) return all.filter(m => m.entityType === entityType);
     return all;
   }
 
   /**
-   * Aggregate metrics for a plan from its tasks.
+   * Aggregate metrics for a mission from its tasks.
    */
-  aggregatePlanMetrics(planId: string, tasks: Task[]): QualityMetrics {
-    const key = this.metricsKey("plan", planId);
-    const m = this.getOrCreate(key, planId, "plan");
+  aggregateMissionMetrics(missionId: string, tasks: Task[]): QualityMetrics {
+    const key = this.metricsKey("mission", missionId);
+    const m = this.getOrCreate(key, missionId, "mission");
 
     const scores: number[] = [];
     let totalAssessments = 0;
@@ -435,7 +435,7 @@ export class QualityController {
     return `${entityType}:${entityId}`;
   }
 
-  private getOrCreate(key: string, entityId: string, entityType: "task" | "agent" | "plan"): QualityMetrics {
+  private getOrCreate(key: string, entityId: string, entityType: "task" | "agent" | "mission"): QualityMetrics {
     let m = this.metrics.get(key);
     if (!m) {
       m = {
@@ -473,7 +473,7 @@ export class QualityController {
    * This ensures that quality:gate:passed and quality:gate:failed events for gates
    * with notifyChannels are actually routed to those channels.
    */
-  private ensureGateNotificationRules(gateKey: string, gate: PlanQualityGate): void {
+  private ensureGateNotificationRules(gateKey: string, gate: MissionQualityGate): void {
     if (!this.notificationRouter) return;
     if (!gate.notifyChannels || gate.notifyChannels.length === 0) return;
     if (this.registeredGateRules.has(gateKey)) return;
@@ -501,11 +501,11 @@ export class QualityController {
     });
   }
 
-  /** Clear gate evaluation cache (e.g. when a plan is retried) */
-  clearGateCache(planId?: string): void {
-    if (planId) {
+  /** Clear gate evaluation cache (e.g. when a mission is retried) */
+  clearGateCache(missionId?: string): void {
+    if (missionId) {
       for (const key of this.evaluatedGates) {
-        if (key.startsWith(`${planId}:`)) {
+        if (key.startsWith(`${missionId}:`)) {
           this.evaluatedGates.delete(key);
         }
       }

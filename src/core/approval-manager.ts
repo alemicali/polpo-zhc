@@ -162,8 +162,8 @@ export class ApprovalManager {
           requestId: request.id,
           gateId: gate.id,
           gateName: gate.name,
-          taskId: request.taskId,
-          planId: request.planId,
+        taskId: request.taskId,
+        missionId: request.missionId,
         });
 
         // Start timeout timer if configured
@@ -183,7 +183,7 @@ export class ApprovalManager {
       gateId: gate.id,
       gateName: gate.name,
       taskId: this.extractTaskId(payload),
-      planId: this.extractPlanId(payload),
+      missionId: this.extractMissionId(payload),
       status: "pending",
       payload,
       requestedAt: new Date().toISOString(),
@@ -421,10 +421,10 @@ export class ApprovalManager {
   private evaluateCondition(expression: string, data: unknown): boolean {
     try {
       // Safe evaluation: create a function with the data as scope
-      const fn = new Function("data", "task", "plan", `try { return !!(${expression}); } catch { return false; }`);
+      const fn = new Function("data", "task", "mission", `try { return !!(${expression}); } catch { return false; }`);
       const taskData = this.isRecord(data) ? (data as Record<string, unknown>).task : undefined;
-      const planData = this.isRecord(data) ? (data as Record<string, unknown>).plan : undefined;
-      return fn(data, taskData, planData) === true;
+      const missionData = this.isRecord(data) ? (data as Record<string, unknown>).mission : undefined;
+      return fn(data, taskData, missionData) === true;
     } catch {
       return false;
     }
@@ -444,12 +444,12 @@ export class ApprovalManager {
     return undefined;
   }
 
-  private extractPlanId(data: unknown): string | undefined {
+  private extractMissionId(data: unknown): string | undefined {
     if (!this.isRecord(data)) return undefined;
     const d = data as Record<string, unknown>;
-    if (typeof d.planId === "string") return d.planId;
-    if (this.isRecord(d.plan) && typeof (d.plan as Record<string, unknown>).id === "string") {
-      return (d.plan as Record<string, unknown>).id as string;
+    if (typeof d.missionId === "string") return d.missionId;
+    if (this.isRecord(d.mission) && typeof (d.mission as Record<string, unknown>).id === "string") {
+      return (d.mission as Record<string, unknown>).id as string;
     }
     return undefined;
   }

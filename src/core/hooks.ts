@@ -1,4 +1,4 @@
-import type { Task, AgentConfig, Plan, PlanReport, TaskResult, AssessmentResult, TaskExpectation, ExpectedOutcome, RetryPolicy, ScopedNotificationRules } from "./types.js";
+import type { Task, AgentConfig, Mission, MissionReport, TaskResult, AssessmentResult, TaskExpectation, ExpectedOutcome, RetryPolicy, ScopedNotificationRules } from "./types.js";
 
 // ─── Lifecycle Hook Points ───────────────────────────
 
@@ -10,9 +10,9 @@ export type LifecycleHook =
   | "task:complete"
   | "task:fail"
   | "task:retry"
-  // Plan lifecycle
-  | "plan:execute"
-  | "plan:complete"
+  // Mission lifecycle
+  | "mission:execute"
+  | "mission:complete"
   // Assessment
   | "assessment:run"
   | "assessment:complete"
@@ -69,16 +69,16 @@ export interface HookPayloads {
     attempt: number;
     maxRetries: number;
   };
-  "plan:execute": {
-    planId: string;
-    plan: Plan;
+  "mission:execute": {
+    missionId: string;
+    mission: Mission;
     taskCount: number;
   };
-  "plan:complete": {
-    planId: string;
-    plan: Plan;
+  "mission:complete": {
+    missionId: string;
+    mission: Mission;
     allPassed: boolean;
-    report: PlanReport;
+    report: MissionReport;
   };
   "assessment:run": {
     taskId: string;
@@ -91,7 +91,7 @@ export interface HookPayloads {
     passed: boolean;
   };
   "quality:gate": {
-    planId: string;
+    missionId: string;
     gateName: string;
     avgScore?: number;
     allPassed: boolean;
@@ -99,14 +99,14 @@ export interface HookPayloads {
   };
   "quality:sla": {
     entityId: string;
-    entityType: "task" | "plan";
+    entityType: "task" | "mission";
     deadline: string;
     status: "warning" | "violated";
     percentUsed: number;
   };
   "schedule:trigger": {
     scheduleId: string;
-    planId: string;
+    missionId: string;
     expression: string;
   };
   "orchestrator:tick": {

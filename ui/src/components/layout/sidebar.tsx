@@ -3,7 +3,7 @@ import { NavLink } from "react-router-dom";
 import {
   LayoutDashboard,
   ListChecks,
-  Map,
+  Target,
   Bot,
   MessageCircle,
   Brain,
@@ -23,9 +23,9 @@ import {
 } from "@/components/ui/tooltip";
 
 const nav = [
-  { to: "/dashboard", icon: LayoutDashboard, label: "Mission Control" },
+  { to: "/dashboard", icon: LayoutDashboard, label: "Dashboard" },
   { to: "/chat", icon: MessageCircle, label: "Chat" },
-  { to: "/plans", icon: Map, label: "Plans" },
+  { to: "/missions", icon: Target, label: "Missions" },
   { to: "/tasks", icon: ListChecks, label: "Tasks" },
   { to: "/agents", icon: Bot, label: "Agents" },
   { to: "/memory", icon: Brain, label: "Memory" },

@@ -47,7 +47,7 @@ function parseParamFlags(raw: string[]): Record<string, string> {
 export function registerTemplateCommands(program: Command): void {
   const tpl = program
     .command("template")
-    .description("Manage reusable plan templates");
+    .description("Manage reusable mission templates");
 
   // ---- template list ------------------------------------------------------
   tpl
@@ -115,9 +115,9 @@ export function registerTemplateCommands(program: Command): void {
         }
 
         console.log();
-        console.log(chalk.dim("  --- Plan Template ---"));
+        console.log(chalk.dim("  --- Mission Template ---"));
         console.log();
-        console.log(JSON.stringify(template.plan, null, 2));
+        console.log(JSON.stringify(template.mission, null, 2));
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
         console.error(chalk.red(`Error: ${msg}`));
@@ -131,7 +131,7 @@ export function registerTemplateCommands(program: Command): void {
     .description("Execute a template with parameters")
     .option("-d, --dir <path>", "Working directory", ".")
     .option("-p, --param <params...>", "Parameters as key=value pairs")
-    .option("--dry-run", "Show the instantiated plan without executing")
+    .option("--dry-run", "Show the instantiated mission without executing")
     .action(async (name: string, opts) => {
       try {
         const cwd = resolve(opts.dir);
@@ -164,7 +164,7 @@ export function registerTemplateCommands(program: Command): void {
         const instance = instantiateTemplate(template, validation.resolved);
 
         if (opts.dryRun) {
-          console.log(chalk.dim("  --- Dry Run: Instantiated Plan ---"));
+          console.log(chalk.dim("  --- Dry Run: Instantiated Mission ---"));
           console.log();
           console.log(JSON.stringify(JSON.parse(instance.data), null, 2));
           return;
@@ -173,13 +173,13 @@ export function registerTemplateCommands(program: Command): void {
         // Init orchestrator, save & execute
         const orchestrator = await initOrchestrator(opts.dir);
 
-        const plan = orchestrator.savePlan({
+        const mission = orchestrator.saveMission({
           data: instance.data,
           prompt: instance.prompt,
           name: instance.name,
         });
 
-        const result = orchestrator.executePlan(plan.id);
+        const result = orchestrator.executeMission(mission.id);
         console.log(
           chalk.green(`  Template "${template.name}" executed — ${result.tasks.length} task(s), group: ${result.group}`),
         );
@@ -210,16 +210,16 @@ export function registerTemplateCommands(program: Command): void {
         // Check required fields
         if (!template.name) errors.push("Missing field: name");
         if (!template.description) errors.push("Missing field: description");
-        if (!template.plan) errors.push("Missing field: plan");
+        if (!template.mission) errors.push("Missing field: mission");
 
-        // Check plan has tasks
-        const plan = template.plan as { tasks?: unknown[] };
-        if (!plan.tasks || !Array.isArray(plan.tasks) || plan.tasks.length === 0) {
-          errors.push("Plan must have at least one task");
+        // Check mission has tasks
+        const mission = template.mission as { tasks?: unknown[] };
+        if (!mission.tasks || !Array.isArray(mission.tasks) || mission.tasks.length === 0) {
+          errors.push("Mission must have at least one task");
         }
 
         // Check all placeholders have matching parameters
-        const json = JSON.stringify(template.plan);
+        const json = JSON.stringify(template.mission);
         const placeholders = json.match(/\{\{([^}]+)\}\}/g) ?? [];
         const paramNames = new Set((template.parameters ?? []).map(p => p.name));
         const undeclared = [...new Set(placeholders.map(m => m.slice(2, -2)))]
@@ -231,7 +231,7 @@ export function registerTemplateCommands(program: Command): void {
         // Check parameters with no matching placeholder
         for (const p of template.parameters ?? []) {
           if (!json.includes(`{{${p.name}}}`)) {
-            errors.push(`Parameter "${p.name}" is declared but never used in the plan template`);
+            errors.push(`Parameter "${p.name}" is declared but never used in the mission template`);
           }
         }
 
@@ -245,8 +245,8 @@ export function registerTemplateCommands(program: Command): void {
 
         console.log(chalk.green(`  Template "${template.name}" is valid.`));
         console.log(chalk.dim(`    ${(template.parameters ?? []).length} parameter(s)`));
-        console.log(chalk.dim(`    ${(plan.tasks as unknown[]).length} task(s)`));
-        const teamSize = (template.plan as { team?: unknown[] }).team?.length ?? 0;
+        console.log(chalk.dim(`    ${(mission.tasks as unknown[]).length} task(s)`));
+        const teamSize = (template.mission as { team?: unknown[] }).team?.length ?? 0;
         if (teamSize > 0) console.log(chalk.dim(`    ${teamSize} volatile agent(s)`));
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);

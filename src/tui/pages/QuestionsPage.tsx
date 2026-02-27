@@ -16,7 +16,7 @@
 import { Box, Text, useInput, useStdout } from "ink";
 import { useState } from "react";
 import { useStore, type Page } from "../store.js";
-import type { UserAnswer } from "../../llm/plan-generator.js";
+import type { UserAnswer } from "../../llm/mission-generator.js";
 
 interface AnswerState {
   selected: Set<number>;

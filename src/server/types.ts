@@ -2,7 +2,7 @@ import type {
   TaskExpectation,
   ExpectedOutcome,
   RetryPolicy,
-  PlanStatus,
+  MissionStatus,
 } from "../core/types.js";
 import type { PolpoEvent } from "../core/events.js";
 
@@ -53,18 +53,18 @@ export interface UpdateTaskRequest {
   expectations?: TaskExpectation[];
 }
 
-// === Plan Endpoints ===
+// === Mission Endpoints ===
 
-export interface CreatePlanRequest {
+export interface CreateMissionRequest {
   data: string;
   prompt?: string;
   name?: string;
-  status?: PlanStatus;
+  status?: MissionStatus;
 }
 
-export interface UpdatePlanRequest {
+export interface UpdateMissionRequest {
   data?: string;
-  status?: PlanStatus;
+  status?: MissionStatus;
   name?: string;
 }
 

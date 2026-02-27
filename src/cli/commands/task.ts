@@ -252,7 +252,7 @@ export function registerTaskCommands(program: Command): void {
           // LLM task-prep (default) — tool-based structured output
           try {
             const { buildTaskPrepPrompt } = await import("../../llm/prompts.js");
-            const { generateTaskPrep } = await import("../../llm/plan-generator.js");
+            const { generateTaskPrep } = await import("../../llm/mission-generator.js");
 
             const state = (() => {
               try { return orchestrator.getStore()?.getState() ?? null; }

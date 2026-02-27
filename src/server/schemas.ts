@@ -65,9 +65,9 @@ export const UpdateTaskSchema = z.object({
   maxRetries: z.number().int().min(0).optional(),
 });
 
-// ── Plan schemas ──────────────────────────────────────────────────────
+// ── Mission schemas ──────────────────────────────────────────────────
 
-export const CreatePlanSchema = z.object({
+export const CreateMissionSchema = z.object({
   data: z.string().min(1),
   prompt: z.string().optional(),
   name: z.string().optional(),
@@ -77,7 +77,7 @@ export const CreatePlanSchema = z.object({
   notifications: ScopedNotificationRulesSchema.optional(),
 });
 
-export const UpdatePlanSchema = z.object({
+export const UpdateMissionSchema = z.object({
   data: z.string().min(1).optional(),
   status: z
     .enum(["draft", "active", "completed", "failed", "cancelled"])

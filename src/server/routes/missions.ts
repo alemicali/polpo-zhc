@@ -1,131 +1,131 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import type { ServerEnv } from "../app.js";
-import { CreatePlanSchema, UpdatePlanSchema } from "../schemas.js";
+import { CreateMissionSchema, UpdateMissionSchema } from "../schemas.js";
 
 // ── Route definitions ─────────────────────────────────────────────────
 
-const listPlansRoute = createRoute({
+const listMissionsRoute = createRoute({
   method: "get",
   path: "/",
-  tags: ["Plans"],
-  summary: "List all plans",
+  tags: ["Missions"],
+  summary: "List all missions",
   responses: {
     200: {
       content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.array(z.any()) }) } },
-      description: "List of plans",
+      description: "List of missions",
     },
   },
 });
 
-const listResumablePlansRoute = createRoute({
+const listResumableMissionsRoute = createRoute({
   method: "get",
   path: "/resumable",
-  tags: ["Plans"],
-  summary: "List resumable plans",
+  tags: ["Missions"],
+  summary: "List resumable missions",
   responses: {
     200: {
       content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.array(z.any()) }) } },
-      description: "List of resumable plans",
+      description: "List of resumable missions",
     },
   },
 });
 
-const getPlanRoute = createRoute({
+const getMissionRoute = createRoute({
   method: "get",
-  path: "/{planId}",
-  tags: ["Plans"],
-  summary: "Get a plan by ID",
+  path: "/{missionId}",
+  tags: ["Missions"],
+  summary: "Get a mission by ID",
   request: {
-    params: z.object({ planId: z.string() }),
+    params: z.object({ missionId: z.string() }),
   },
   responses: {
     200: {
       content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.any() }) } },
-      description: "Plan details",
+      description: "Mission details",
     },
     404: {
       content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string(), code: z.string() }) } },
-      description: "Plan not found",
+      description: "Mission not found",
     },
   },
 });
 
-const createPlanRoute = createRoute({
+const createMissionRoute = createRoute({
   method: "post",
   path: "/",
-  tags: ["Plans"],
-  summary: "Save a new plan",
+  tags: ["Missions"],
+  summary: "Save a new mission",
   request: {
-    body: { content: { "application/json": { schema: CreatePlanSchema } } },
+    body: { content: { "application/json": { schema: CreateMissionSchema } } },
   },
   responses: {
     201: {
       content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.any() }) } },
-      description: "Plan created",
+      description: "Mission created",
     },
   },
 });
 
-const updatePlanRoute = createRoute({
+const updateMissionRoute = createRoute({
   method: "patch",
-  path: "/{planId}",
-  tags: ["Plans"],
-  summary: "Update a plan",
+  path: "/{missionId}",
+  tags: ["Missions"],
+  summary: "Update a mission",
   request: {
-    params: z.object({ planId: z.string() }),
-    body: { content: { "application/json": { schema: UpdatePlanSchema } } },
+    params: z.object({ missionId: z.string() }),
+    body: { content: { "application/json": { schema: UpdateMissionSchema } } },
   },
   responses: {
     200: {
       content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.any() }) } },
-      description: "Plan updated",
+      description: "Mission updated",
     },
   },
 });
 
-const deletePlanRoute = createRoute({
+const deleteMissionRoute = createRoute({
   method: "delete",
-  path: "/{planId}",
-  tags: ["Plans"],
-  summary: "Delete a plan",
+  path: "/{missionId}",
+  tags: ["Missions"],
+  summary: "Delete a mission",
   request: {
-    params: z.object({ planId: z.string() }),
+    params: z.object({ missionId: z.string() }),
   },
   responses: {
     200: {
       content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.object({ deleted: z.boolean() }) }) } },
-      description: "Plan deleted",
+      description: "Mission deleted",
     },
     404: {
       content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string(), code: z.string() }) } },
-      description: "Plan not found",
+      description: "Mission not found",
     },
   },
 });
 
-const executePlanRoute = createRoute({
+const executeMissionRoute = createRoute({
   method: "post",
-  path: "/{planId}/execute",
-  tags: ["Plans"],
-  summary: "Execute a plan",
+  path: "/{missionId}/execute",
+  tags: ["Missions"],
+  summary: "Execute a mission",
   request: {
-    params: z.object({ planId: z.string() }),
+    params: z.object({ missionId: z.string() }),
   },
   responses: {
     200: {
       content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.any() }) } },
-      description: "Plan execution result",
+      description: "Mission execution result",
     },
   },
 });
 
-const resumePlanRoute = createRoute({
+const resumeMissionRoute = createRoute({
   method: "post",
-  path: "/{planId}/resume",
-  tags: ["Plans"],
-  summary: "Resume a plan",
+  path: "/{missionId}/resume",
+  tags: ["Missions"],
+  summary: "Resume a mission",
   request: {
-    params: z.object({ planId: z.string() }),
+    params: z.object({ missionId: z.string() }),
     body: {
       content: {
         "application/json": {
@@ -138,7 +138,7 @@ const resumePlanRoute = createRoute({
   responses: {
     200: {
       content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.any() }) } },
-      description: "Plan resumed",
+      description: "Mission resumed",
     },
   },
 });
@@ -146,7 +146,7 @@ const resumePlanRoute = createRoute({
 const listCheckpointsRoute = createRoute({
   method: "get",
   path: "/checkpoints",
-  tags: ["Plans"],
+  tags: ["Missions"],
   summary: "List all active checkpoints",
   responses: {
     200: {
@@ -158,11 +158,11 @@ const listCheckpointsRoute = createRoute({
 
 const resumeCheckpointRoute = createRoute({
   method: "post",
-  path: "/{planId}/checkpoints/{checkpointName}/resume",
-  tags: ["Plans"],
+  path: "/{missionId}/checkpoints/{checkpointName}/resume",
+  tags: ["Missions"],
   summary: "Resume a checkpoint",
   request: {
-    params: z.object({ planId: z.string(), checkpointName: z.string() }),
+    params: z.object({ missionId: z.string(), checkpointName: z.string() }),
   },
   responses: {
     200: {
@@ -176,22 +176,22 @@ const resumeCheckpointRoute = createRoute({
   },
 });
 
-const abortPlanRoute = createRoute({
+const abortMissionRoute = createRoute({
   method: "post",
-  path: "/{planId}/abort",
-  tags: ["Plans"],
-  summary: "Abort a plan",
+  path: "/{missionId}/abort",
+  tags: ["Missions"],
+  summary: "Abort a mission",
   request: {
-    params: z.object({ planId: z.string() }),
+    params: z.object({ missionId: z.string() }),
   },
   responses: {
     200: {
       content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.object({ aborted: z.number() }) }) } },
-      description: "Plan aborted",
+      description: "Mission aborted",
     },
     404: {
       content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string(), code: z.string() }) } },
-      description: "Plan not found",
+      description: "Mission not found",
     },
   },
 });
@@ -199,40 +199,40 @@ const abortPlanRoute = createRoute({
 // ── Route handlers ────────────────────────────────────────────────────
 
 /**
- * Plan CRUD + execute/resume/abort routes.
+ * Mission CRUD + execute/resume/abort routes.
  */
-export function planRoutes(): OpenAPIHono<ServerEnv> {
+export function missionRoutes(): OpenAPIHono<ServerEnv> {
   const app = new OpenAPIHono<ServerEnv>();
 
-  // GET /plans — list all plans
-  app.openapi(listPlansRoute, (c) => {
+  // GET /missions — list all missions
+  app.openapi(listMissionsRoute, (c) => {
     const orchestrator = c.get("orchestrator");
-    return c.json({ ok: true, data: orchestrator.getAllPlans() });
+    return c.json({ ok: true, data: orchestrator.getAllMissions() });
   });
 
-  // GET /plans/resumable — list resumable plans
-  app.openapi(listResumablePlansRoute, (c) => {
+  // GET /missions/resumable — list resumable missions
+  app.openapi(listResumableMissionsRoute, (c) => {
     const orchestrator = c.get("orchestrator");
-    return c.json({ ok: true, data: orchestrator.getResumablePlans() });
+    return c.json({ ok: true, data: orchestrator.getResumableMissions() });
   });
 
-  // GET /plans/:planId — get plan by ID
-  app.openapi(getPlanRoute, (c) => {
+  // GET /missions/:missionId — get mission by ID
+  app.openapi(getMissionRoute, (c) => {
     const orchestrator = c.get("orchestrator");
-    const { planId } = c.req.valid("param");
-    const plan = orchestrator.getPlan(planId);
-    if (!plan) {
-      return c.json({ ok: false, error: "Plan not found", code: "NOT_FOUND" }, 404);
+    const { missionId } = c.req.valid("param");
+    const mission = orchestrator.getMission(missionId);
+    if (!mission) {
+      return c.json({ ok: false, error: "Mission not found", code: "NOT_FOUND" }, 404);
     }
-    return c.json({ ok: true, data: plan }, 200);
+    return c.json({ ok: true, data: mission }, 200);
   });
 
-  // POST /plans — save plan
-  app.openapi(createPlanRoute, async (c) => {
+  // POST /missions — save mission
+  app.openapi(createMissionRoute, async (c) => {
     const orchestrator = c.get("orchestrator");
     const body = c.req.valid("json");
 
-    const plan = orchestrator.savePlan({
+    const mission = orchestrator.saveMission({
       data: body.data,
       prompt: body.prompt,
       name: body.name,
@@ -240,72 +240,72 @@ export function planRoutes(): OpenAPIHono<ServerEnv> {
       notifications: body.notifications,
     });
 
-    return c.json({ ok: true, data: plan }, 201);
+    return c.json({ ok: true, data: mission }, 201);
   });
 
-  // PATCH /plans/:planId — update plan
-  app.openapi(updatePlanRoute, async (c) => {
+  // PATCH /missions/:missionId — update mission
+  app.openapi(updateMissionRoute, async (c) => {
     const orchestrator = c.get("orchestrator");
-    const { planId } = c.req.valid("param");
+    const { missionId } = c.req.valid("param");
     const body = c.req.valid("json");
-    const plan = orchestrator.updatePlan(planId, body);
-    return c.json({ ok: true, data: plan });
+    const mission = orchestrator.updateMission(missionId, body);
+    return c.json({ ok: true, data: mission });
   });
 
-  // DELETE /plans/:planId — delete plan
-  app.openapi(deletePlanRoute, (c) => {
+  // DELETE /missions/:missionId — delete mission
+  app.openapi(deleteMissionRoute, (c) => {
     const orchestrator = c.get("orchestrator");
-    const { planId } = c.req.valid("param");
-    const deleted = orchestrator.deletePlan(planId);
+    const { missionId } = c.req.valid("param");
+    const deleted = orchestrator.deleteMission(missionId);
     if (!deleted) {
-      return c.json({ ok: false, error: "Plan not found", code: "NOT_FOUND" }, 404);
+      return c.json({ ok: false, error: "Mission not found", code: "NOT_FOUND" }, 404);
     }
     return c.json({ ok: true, data: { deleted: true } }, 200);
   });
 
-  // POST /plans/:planId/execute — execute plan
-  app.openapi(executePlanRoute, (c) => {
+  // POST /missions/:missionId/execute — execute mission
+  app.openapi(executeMissionRoute, (c) => {
     const orchestrator = c.get("orchestrator");
-    const { planId } = c.req.valid("param");
-    const result = orchestrator.executePlan(planId);
+    const { missionId } = c.req.valid("param");
+    const result = orchestrator.executeMission(missionId);
     return c.json({ ok: true, data: result });
   });
 
-  // POST /plans/:planId/resume — resume plan
-  app.openapi(resumePlanRoute, async (c) => {
+  // POST /missions/:missionId/resume — resume mission
+  app.openapi(resumeMissionRoute, async (c) => {
     const orchestrator = c.get("orchestrator");
-    const { planId } = c.req.valid("param");
+    const { missionId } = c.req.valid("param");
     const body = c.req.valid("json");
-    const result = orchestrator.resumePlan(planId, body);
+    const result = orchestrator.resumeMission(missionId, body);
     return c.json({ ok: true, data: result });
   });
 
-  // GET /plans/checkpoints — list all active checkpoints
+  // GET /missions/checkpoints — list all active checkpoints
   app.openapi(listCheckpointsRoute, (c) => {
     const orchestrator = c.get("orchestrator");
     return c.json({ ok: true, data: orchestrator.getActiveCheckpoints() });
   });
 
-  // POST /plans/:planId/checkpoints/:checkpointName/resume — resume a checkpoint
+  // POST /missions/:missionId/checkpoints/:checkpointName/resume — resume a checkpoint
   app.openapi(resumeCheckpointRoute, (c) => {
     const orchestrator = c.get("orchestrator");
-    const { planId, checkpointName } = c.req.valid("param");
-    const resumed = orchestrator.resumeCheckpointByPlanId(planId, checkpointName);
+    const { missionId, checkpointName } = c.req.valid("param");
+    const resumed = orchestrator.resumeCheckpointByMissionId(missionId, checkpointName);
     if (!resumed) {
       return c.json({ ok: false, error: "Checkpoint not found or not active", code: "NOT_FOUND" }, 404);
     }
     return c.json({ ok: true, data: { resumed: true } }, 200);
   });
 
-  // POST /plans/:planId/abort — abort plan group
-  app.openapi(abortPlanRoute, (c) => {
+  // POST /missions/:missionId/abort — abort mission group
+  app.openapi(abortMissionRoute, (c) => {
     const orchestrator = c.get("orchestrator");
-    const { planId } = c.req.valid("param");
-    const plan = orchestrator.getPlan(planId);
-    if (!plan) {
-      return c.json({ ok: false, error: "Plan not found", code: "NOT_FOUND" }, 404);
+    const { missionId } = c.req.valid("param");
+    const mission = orchestrator.getMission(missionId);
+    if (!mission) {
+      return c.json({ ok: false, error: "Mission not found", code: "NOT_FOUND" }, 404);
     }
-    const count = orchestrator.abortGroup(plan.name);
+    const count = orchestrator.abortGroup(mission.name);
     return c.json({ ok: true, data: { aborted: count } }, 200);
   });
 

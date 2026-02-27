@@ -8,7 +8,7 @@ import { cmdStatus } from "./status.js";
 import { cmdHelp } from "./help.js";
 import { cmdTeam } from "./team.js";
 import { cmdTasks } from "./tasks.js";
-import { cmdPlans } from "./plans.js";
+import { cmdMissions } from "./missions.js";
 import { cmdConfig } from "./config.js";
 import { cmdChat, cmdPlanMode, cmdTaskMode } from "./chat.js";
 import { cmdSessions } from "./sessions.js";
@@ -24,7 +24,7 @@ const commands: Record<string, Handler> = {
   "/help": cmdHelp,
   "/team": cmdTeam,
   "/tasks": cmdTasks,
-  "/plans": cmdPlans,
+  "/missions": cmdMissions,
   "/plan": cmdPlanMode,
   "/config": cmdConfig,
   "/chat": cmdChat,

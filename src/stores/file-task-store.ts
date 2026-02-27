@@ -15,7 +15,7 @@ import type {
   PolpoState,
   AgentProcess,
   Team,
-  Plan,
+  Mission,
 } from "../core/types.js";
 import type { TaskStore } from "../core/task-store.js";
 import { assertValidTransition } from "../core/state-machine.js";
@@ -65,26 +65,26 @@ function readJson<T>(filePath: string, fallback: T): T {
 
 /**
  * Filesystem-based TaskStore.
- * Stores tasks, plans, and metadata as individual JSON files under .polpo/.
+ * Stores tasks, missions, and metadata as individual JSON files under .polpo/.
  *
  * Layout:
  *   .polpo/tasks/<taskId>.json
- *   .polpo/plans/<planId>.json
+ *   .polpo/missions/<missionId>.json
  *   .polpo/_meta.json
  */
 export class FileTaskStore implements TaskStore {
   private tasksDir: string;
-  private plansDir: string;
+  private missionsDir: string;
   private metaPath: string;
 
   constructor(polpoDir: string) {
     this.tasksDir = join(polpoDir, "tasks");
-    this.plansDir = join(polpoDir, "plans");
+    this.missionsDir = join(polpoDir, "missions");
     this.metaPath = join(polpoDir, "_meta.json");
 
     if (!existsSync(polpoDir)) mkdirSync(polpoDir, { recursive: true });
     if (!existsSync(this.tasksDir)) mkdirSync(this.tasksDir, { recursive: true });
-    if (!existsSync(this.plansDir)) mkdirSync(this.plansDir, { recursive: true });
+    if (!existsSync(this.missionsDir)) mkdirSync(this.missionsDir, { recursive: true });
   }
 
   // ── Helpers ──
@@ -93,8 +93,8 @@ export class FileTaskStore implements TaskStore {
     return join(this.tasksDir, `${id}.json`);
   }
 
-  private planPath(id: string): string {
-    return join(this.plansDir, `${id}.json`);
+  private missionPath(id: string): string {
+    return join(this.missionsDir, `${id}.json`);
   }
 
   private readMeta(): MetaState {
@@ -131,17 +131,17 @@ export class FileTaskStore implements TaskStore {
       .map(f => f.slice(0, -5));
   }
 
-  private readPlan(id: string): Plan | undefined {
-    return readJson<Plan | undefined>(this.planPath(id), undefined);
+  private readMission(id: string): Mission | undefined {
+    return readJson<Mission | undefined>(this.missionPath(id), undefined);
   }
 
-  private writePlan(plan: Plan): void {
-    atomicWrite(this.planPath(plan.id), plan);
+  private writeMission(mission: Mission): void {
+    atomicWrite(this.missionPath(mission.id), mission);
   }
 
-  private listPlanIds(): string[] {
-    if (!existsSync(this.plansDir)) return [];
-    return readdirSync(this.plansDir)
+  private listMissionIds(): string[] {
+    if (!existsSync(this.missionsDir)) return [];
+    return readdirSync(this.missionsDir)
       .filter(f => f.endsWith(".json") && !f.endsWith(".tmp"))
       .map(f => f.slice(0, -5));
   }
@@ -279,58 +279,58 @@ export class FileTaskStore implements TaskStore {
     return updated;
   }
 
-  // ── Plan persistence ──
+  // ── Mission persistence ──
 
-  savePlan(plan: Omit<Plan, "id" | "createdAt" | "updatedAt">): Plan {
+  saveMission(mission: Omit<Mission, "id" | "createdAt" | "updatedAt">): Mission {
     const now = new Date().toISOString();
-    const newPlan: Plan = {
-      ...plan,
+    const newMission: Mission = {
+      ...mission,
       id: nanoid(),
       createdAt: now,
       updatedAt: now,
     };
-    this.writePlan(newPlan);
-    return newPlan;
+    this.writeMission(newMission);
+    return newMission;
   }
 
-  getPlan(planId: string): Plan | undefined {
-    return this.readPlan(planId);
+  getMission(missionId: string): Mission | undefined {
+    return this.readMission(missionId);
   }
 
-  getPlanByName(name: string): Plan | undefined {
-    for (const id of this.listPlanIds()) {
-      const plan = this.readPlan(id);
-      if (plan && plan.name === name) return plan;
+  getMissionByName(name: string): Mission | undefined {
+    for (const id of this.listMissionIds()) {
+      const mission = this.readMission(id);
+      if (mission && mission.name === name) return mission;
     }
     return undefined;
   }
 
-  getAllPlans(): Plan[] {
-    const plans: Plan[] = [];
-    for (const id of this.listPlanIds()) {
-      const plan = this.readPlan(id);
-      if (plan) plans.push(plan);
+  getAllMissions(): Mission[] {
+    const missions: Mission[] = [];
+    for (const id of this.listMissionIds()) {
+      const mission = this.readMission(id);
+      if (mission) missions.push(mission);
     }
-    plans.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-    return plans;
+    missions.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    return missions;
   }
 
-  updatePlan(planId: string, updates: Partial<Omit<Plan, "id">>): Plan {
-    const existing = this.readPlan(planId);
-    if (!existing) throw new Error(`Plan not found: ${planId}`);
+  updateMission(missionId: string, updates: Partial<Omit<Mission, "id">>): Mission {
+    const existing = this.readMission(missionId);
+    if (!existing) throw new Error(`Mission not found: ${missionId}`);
 
-    const updated: Plan = {
+    const updated: Mission = {
       ...existing,
       ...updates,
-      id: planId,
+      id: missionId,
       updatedAt: new Date().toISOString(),
     };
-    this.writePlan(updated);
+    this.writeMission(updated);
     return updated;
   }
 
-  deletePlan(planId: string): boolean {
-    const path = this.planPath(planId);
+  deleteMission(missionId: string): boolean {
+    const path = this.missionPath(missionId);
     if (!existsSync(path)) return false;
     try {
       unlinkSync(path);
@@ -340,9 +340,9 @@ export class FileTaskStore implements TaskStore {
     }
   }
 
-  nextPlanName(): string {
-    const count = this.listPlanIds().length;
-    return `plan-${count + 1}`;
+  nextMissionName(): string {
+    const count = this.listMissionIds().length;
+    return `mission-${count + 1}`;
   }
 
   close(): void {

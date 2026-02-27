@@ -107,7 +107,7 @@ export interface TaskOutcome {
 }
 
 /**
- * Declared in task/plan definitions — tells the agent what it should produce.
+ * Declared in task/mission definitions — tells the agent what it should produce.
  * Used for validation: the orchestrator checks that expected outcomes are fulfilled.
  */
 export interface ExpectedOutcome {
@@ -158,7 +158,7 @@ export interface Task {
   outcomes?: TaskOutcome[];
   /** Number of approval revision rounds this task has gone through. */
   revisionCount?: number;
-  /** Scoped notification rules — override or extend global/plan rules for this task. */
+  /** Scoped notification rules — override or extend global/mission rules for this task. */
   notifications?: ScopedNotificationRules;
   createdAt: string;
   updatedAt: string;
@@ -252,10 +252,10 @@ export interface AgentConfig {
    *  "off" disables thinking (default). Higher levels = more reasoning tokens = better quality but slower + more expensive.
    *  Falls back to the global `settings.reasoning` when not set. */
   reasoning?: ReasoningLevel;
-  /** Volatile agent — created for a specific plan, auto-removed when plan completes */
+  /** Volatile agent — created for a specific mission, auto-removed when mission completes */
   volatile?: boolean;
-  /** Plan group this volatile agent belongs to */
-  planGroup?: string;
+  /** Mission group this volatile agent belongs to */
+  missionGroup?: string;
 
   // ── Extended tool categories (opt-in) ──
 
@@ -428,33 +428,33 @@ export interface AskUserRequest {
   questions: AskUserQuestion[];
 }
 
-// === Plan ===
+// === Mission ===
 
-export type PlanStatus = "draft" | "active" | "paused" | "completed" | "failed" | "cancelled";
+export type MissionStatus = "draft" | "active" | "paused" | "completed" | "failed" | "cancelled";
 
-export interface Plan {
+export interface Mission {
   id: string;
-  name: string;         // "plan-1", "plan-2", or custom name
-  data: string;         // JSON plan content (tasks, team, etc.)
-  prompt?: string;      // original user prompt that generated this plan
-  status: PlanStatus;
-  /** Absolute deadline for the entire plan (ISO timestamp). */
+  name: string;         // "mission-1", "mission-2", or custom name
+  data: string;         // JSON mission content (tasks, team, etc.)
+  prompt?: string;      // original user prompt that generated this mission
+  status: MissionStatus;
+  /** Absolute deadline for the entire mission (ISO timestamp). */
   deadline?: string;
   /** Cron expression or ISO timestamp for scheduled execution. */
   schedule?: string;
   /** If true, re-execute on every schedule trigger (recurring). Default: false (one-shot). */
   recurring?: boolean;
-  /** Minimum average score for the plan to be considered successful. */
+  /** Minimum average score for the mission to be considered successful. */
   qualityThreshold?: number;
-  /** Scoped notification rules — override or extend global rules for tasks in this plan. */
+  /** Scoped notification rules — override or extend global rules for tasks in this mission. */
   notifications?: ScopedNotificationRules;
   createdAt: string;
   updatedAt: string;
 }
 
-/** Completion report for a plan — aggregated results across all tasks. */
-export interface PlanReport {
-  planId: string;
+/** Completion report for a mission — aggregated results across all tasks. */
+export interface MissionReport {
+  missionId: string;
   group: string;
   allPassed: boolean;
   totalDuration: number;           // ms, sum of all task durations
@@ -581,10 +581,10 @@ export interface PolpoSettings {
   taskTimeout?: number;            // default timeout per task (ms). Default: 30min
   staleThreshold?: number;         // ms idle before agent considered stale. Default: 5min
   defaultRetryPolicy?: RetryPolicy;
-  /** Whether plans can define volatile agents in their team: section. Default: true */
+  /** Whether missions can define volatile agents in their team: section. Default: true */
   enableVolatileTeams?: boolean;
-  /** When to clean up volatile agents: "on_complete" (default) removes them when the plan
-   *  finishes, "manual" keeps them until the user explicitly removes them or the plan is deleted */
+  /** When to clean up volatile agents: "on_complete" (default) removes them when the mission
+   *  finishes, "manual" keeps them until the user explicitly removes them or the mission is deleted */
   volatileCleanup?: "on_complete" | "manual";
   /** Max fix attempts per review cycle before falling back to full retry. Default: 2 */
   maxFixAttempts?: number;
@@ -594,7 +594,7 @@ export interface PolpoSettings {
   maxResolutionAttempts?: number;
   /** Auto-correct correctable expectations (e.g. file_exists paths) on assessment failure. Default: true */
   autoCorrectExpectations?: boolean;
-  /** Model for orchestrator LLM calls (question detection, deadlock, plans).
+  /** Model for orchestrator LLM calls (question detection, deadlock, missions).
    *  Can be a simple string ("anthropic:claude-opus-4-6") or a ModelConfig with fallbacks. */
   orchestratorModel?: string | ModelConfig;
   /** Image-capable model for tasks that need vision (falls back to orchestratorModel). */
@@ -606,13 +606,13 @@ export interface PolpoSettings {
    *  "off" disables thinking (default). Can be overridden per-agent via AgentConfig.reasoning.
    *  Higher levels produce better results but are slower and more expensive. */
   reasoning?: ReasoningLevel;
-  /** Storage backend for tasks, plans, and runs. Default: "file" (filesystem JSON). */
+  /** Storage backend for tasks, missions, and runs. Default: "file" (filesystem JSON). */
   storage?: "file" | "sqlite";
   /** Max assessment retries when all reviewers fail before falling back to fix/retry. Default: 1 */
   maxAssessmentRetries?: number;
   /** Max concurrent agent processes. Default: unlimited (undefined). */
   maxConcurrency?: number;
-  /** Approval gates — checkpoints that block task/plan execution until approved. */
+  /** Approval gates — checkpoints that block task/mission execution until approved. */
   approvalGates?: ApprovalGate[];
   /** Notification system — routes events to external channels (Slack, email, Telegram). */
   notifications?: NotificationsConfig;
@@ -620,9 +620,9 @@ export interface PolpoSettings {
   escalationPolicy?: EscalationPolicy;
   /** SLA monitoring configuration. */
   sla?: SLAConfig;
-  /** Enable the scheduling engine. Default: true if any plan has a schedule. */
+  /** Enable the scheduling engine. Default: true if any mission has a schedule. */
   enableScheduler?: boolean;
-  /** Default quality threshold for plans (1-5). Plans below this score are marked failed. */
+  /** Default quality threshold for missions (1-5). Missions below this score are marked failed. */
   defaultQualityThreshold?: number;
   /** Allowed recipient email domains — applies to all agents (can be overridden per-agent). */
   emailAllowedDomains?: string[];
@@ -720,8 +720,8 @@ export interface ApprovalRequest {
   gateName: string;
   /** Related task ID, if applicable. */
   taskId?: string;
-  /** Related plan ID, if applicable. */
-  planId?: string;
+  /** Related mission ID, if applicable. */
+  missionId?: string;
   /** Current status. */
   status: ApprovalStatus;
   /** Hook payload snapshot at time of request. */
@@ -901,7 +901,7 @@ export interface NotificationRule {
   id: string;
   /** Human-readable name. */
   name: string;
-  /** Event patterns to match (glob-style: "task:*", "plan:completed"). */
+  /** Event patterns to match (glob-style: "task:*", "mission:completed"). */
   events: string[];
   /** Optional JSON condition on the event payload. No eval — pure data. */
   condition?: NotificationCondition;
@@ -926,7 +926,7 @@ export interface NotificationRule {
 // === Notification Action Triggers ===
 
 /** Action types that can be triggered by notification rules. */
-export type NotificationActionType = "create_task" | "execute_plan" | "run_script" | "send_notification";
+export type NotificationActionType = "create_task" | "execute_mission" | "run_script" | "send_notification";
 
 /** Base action interface. */
 interface NotificationActionBase {
@@ -942,10 +942,10 @@ export interface CreateTaskAction extends NotificationActionBase {
   expectations?: TaskExpectation[];
 }
 
-/** Execute an existing plan when the rule fires. */
-export interface ExecutePlanAction extends NotificationActionBase {
-  type: "execute_plan";
-  planId: string;
+/** Execute an existing mission when the rule fires. */
+export interface ExecuteMissionAction extends NotificationActionBase {
+  type: "execute_mission";
+  missionId: string;
 }
 
 /** Run a shell script when the rule fires. */
@@ -965,7 +965,7 @@ export interface SendNotificationAction extends NotificationActionBase {
   severity?: NotificationSeverity;
 }
 
-export type NotificationAction = CreateTaskAction | ExecutePlanAction | RunScriptAction | SendNotificationAction;
+export type NotificationAction = CreateTaskAction | ExecuteMissionAction | RunScriptAction | SendNotificationAction;
 
 export interface NotificationsConfig {
   channels: Record<string, NotificationChannelConfig>;
@@ -973,10 +973,10 @@ export interface NotificationsConfig {
 }
 
 /**
- * Scoped notification rules — can be attached to a Task or Plan to override
+ * Scoped notification rules — can be attached to a Task or Mission to override
  * or extend the global notification rules.
  *
- * Precedence: task > plan > global.
+ * Precedence: task > mission > global.
  * - Default: more-specific scope **replaces** global rules for matching events.
  * - With `inherit: true`: scoped rules are **added** on top of the parent scope.
  */
@@ -1014,8 +1014,8 @@ export interface EscalationPolicy {
 
 // === Quality Layer ===
 
-/** Quality gate defined within a plan — checkpoint between task phases. */
-export interface PlanQualityGate {
+/** Quality gate defined within a mission — checkpoint between task phases. */
+export interface MissionQualityGate {
   /** Gate name. */
   name: string;
   /** Tasks that must be completed before this gate is evaluated. */
@@ -1032,12 +1032,12 @@ export interface PlanQualityGate {
   notifyChannels?: string[];
 }
 
-/** Checkpoint defined within a plan — planned stopping point for human review.
+/** Checkpoint defined within a mission — planned stopping point for human review.
  *
  * Unlike approval gates (which ask yes/no and auto-resume on approval),
- * checkpoints unconditionally pause the plan until explicitly resumed.
+ * checkpoints unconditionally pause the mission until explicitly resumed.
  * Use checkpoints for human-in-the-loop review at defined milestones. */
-export interface PlanCheckpoint {
+export interface MissionCheckpoint {
   /** Checkpoint name (used in events and notifications). */
   name: string;
   /** Tasks that must be completed before this checkpoint triggers. */
@@ -1064,12 +1064,12 @@ export interface SLAConfig {
   violationAction?: "notify" | "fail";
 }
 
-/** Quality metrics snapshot for a single entity (task, agent, plan). */
+/** Quality metrics snapshot for a single entity (task, agent, mission). */
 export interface QualityMetrics {
   /** Entity identifier. */
   entityId: string;
   /** Entity type. */
-  entityType: "task" | "agent" | "plan";
+  entityType: "task" | "agent" | "mission";
   /** Total assessments run. */
   totalAssessments: number;
   /** Assessments that passed. */
@@ -1093,12 +1093,12 @@ export interface QualityMetrics {
   updatedAt: string;
 }
 
-/** Scheduled plan entry. */
+/** Scheduled mission entry. */
 export interface ScheduleEntry {
   /** Unique schedule ID. */
   id: string;
-  /** Plan ID to execute. */
-  planId: string;
+  /** Mission ID to execute. */
+  missionId: string;
   /** Cron expression (e.g. "0 2 * * *") or ISO timestamp for one-shot. */
   expression: string;
   /** Whether this schedule recurs. */
@@ -1109,7 +1109,7 @@ export interface ScheduleEntry {
   lastRunAt?: string;
   /** Next scheduled execution time (ISO). */
   nextRunAt?: string;
-  /** Deadline offset — auto-set task/plan deadline to N ms after execution start. */
+  /** Deadline offset — auto-set task/mission deadline to N ms after execution start. */
   deadlineOffsetMs?: number;
   /** Created at. */
   createdAt: string;

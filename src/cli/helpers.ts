@@ -1,7 +1,7 @@
 import chalk from "chalk";
 import { resolve } from "node:path";
 import { Orchestrator } from "../core/orchestrator.js";
-import type { Task, Plan, TaskStatus } from "../core/types.js";
+import type { Task, Mission, TaskStatus } from "../core/types.js";
 
 /** Create and initialize an Orchestrator for the given config path. */
 export async function createOrchestrator(configPath: string): Promise<Orchestrator> {
@@ -53,8 +53,8 @@ export function formatTaskLine(task: Task): string {
   return `  ${icon} ${task.title}${agent}${group}${retries}`;
 }
 
-/** Format a plan as a one-liner */
-export function formatPlanLine(plan: Plan): string {
+/** Format a mission as a one-liner */
+export function formatMissionLine(mission: Mission): string {
   const colors: Record<string, typeof chalk> = {
     draft: chalk.gray,
     active: chalk.cyan,
@@ -62,8 +62,8 @@ export function formatPlanLine(plan: Plan): string {
     failed: chalk.red,
     cancelled: chalk.yellow,
   };
-  const color = colors[plan.status] ?? chalk.gray;
-  return `  ${plan.name} ${color(`[${plan.status}]`)}`;
+  const color = colors[mission.status] ?? chalk.gray;
+  return `  ${mission.name} ${color(`[${mission.status}]`)}`;
 }
 
 /** Format elapsed milliseconds as human-readable string */

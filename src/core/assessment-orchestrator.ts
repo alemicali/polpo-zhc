@@ -601,11 +601,11 @@ export class AssessmentOrchestrator {
     const current = this.ctx.registry.getTask(taskId);
     if (!current) return;
 
-    // Don't retry tasks from cancelled plans
+    // Don't retry tasks from cancelled missions
     if (current.group) {
-      const plan = this.ctx.registry.getPlanByName?.(current.group);
-      if (plan && plan.status === "cancelled") {
-        this.ctx.emitter.emit("log", { level: "debug", message: `[${taskId}] Skipping retry — plan cancelled` });
+      const mission = this.ctx.registry.getMissionByName?.(current.group);
+      if (mission && mission.status === "cancelled") {
+        this.ctx.emitter.emit("log", { level: "debug", message: `[${taskId}] Skipping retry — mission cancelled` });
         this.ctx.registry.transition(taskId, "failed");
         return;
       }

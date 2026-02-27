@@ -1,5 +1,5 @@
 /**
- * TaskPanel — right sidebar: dashboard stats, plan tree, scores, agent activity.
+ * TaskPanel — right sidebar: dashboard stats, mission tree, scores, agent activity.
  */
 
 import { Box, Text } from "ink";
@@ -13,7 +13,7 @@ const SPINNER = ["\u28CB", "\u28D9", "\u28F9", "\u28F8", "\u28FC", "\u28F4", "\u
 export function TaskPanel({ width, height }: { width: number; height: number }) {
   const tasks = useStore((s) => s.tasks);
   const processes = useStore((s) => s.processes);
-  const plans = useStore((s) => s.plans);
+  const missions = useStore((s) => s.missions);
   const orchestratorStartedAt = useStore((s) => s.orchestratorStartedAt);
   const tuiStartedAt = useStore((s) => s.tuiStartedAt);
 
@@ -46,11 +46,11 @@ export function TaskPanel({ width, height }: { width: number; height: number }) 
   const filled = total > 0 ? Math.round((done / total) * barWidth) : 0;
   const bar = "\u2588".repeat(filled) + "\u2591".repeat(barWidth - filled);
 
-  // Plan counts
-  const draftPlans = plans.filter((p) => p.status === "draft").length;
-  const activePlans = plans.filter((p) => p.status === "active").length;
-  const completedPlans = plans.filter((p) => p.status === "completed").length;
-  const failedPlans = plans.filter((p) => p.status === "failed").length;
+  // Mission counts
+  const draftMissions = missions.filter((p) => p.status === "draft").length;
+  const activeMissions = missions.filter((p) => p.status === "active").length;
+  const completedMissions = missions.filter((p) => p.status === "completed").length;
+  const failedMissions = missions.filter((p) => p.status === "failed").length;
 
   // Group tasks by planGroup
   const grouped = new Map<string, Task[]>();
@@ -91,8 +91,8 @@ export function TaskPanel({ width, height }: { width: number; height: number }) 
     );
   }
 
-  // Space budget: border(2) + dashboard(~6) + plans(~4) + hint(1) = ~13
-  const dashboardLines = 6 + (plans.length > 0 ? 3 + draftPlans + activePlans : 0);
+  // Space budget: border(2) + dashboard(~6) + missions(~4) + hint(1) = ~13
+  const dashboardLines = 6 + (missions.length > 0 ? 3 + draftMissions + activeMissions : 0);
   const available = Math.max(0, height - dashboardLines - 3);
   const visible = lines.slice(0, available);
   const overflow = lines.length - available;
@@ -139,24 +139,24 @@ export function TaskPanel({ width, height }: { width: number; height: number }) 
         </Text>
       )}
 
-      {/* ── Plans ── */}
-      {plans.length > 0 && (
+      {/* ── Missions ── */}
+      {missions.length > 0 && (
         <>
           <Text> </Text>
-          <Text bold color="cyan">Plans</Text>
+          <Text bold color="cyan">Missions</Text>
           <Text>
-            {draftPlans > 0 && <><Text color="yellow">□ {draftPlans} draft</Text><Text color="gray">  </Text></>}
-            {activePlans > 0 && <><Text color="cyan">● {activePlans} active</Text><Text color="gray">  </Text></>}
-            {completedPlans > 0 && <><Text color="green">✓ {completedPlans} done</Text><Text color="gray">  </Text></>}
-            {failedPlans > 0 && <Text color="red">✗ {failedPlans} failed</Text>}
+            {draftMissions > 0 && <><Text color="yellow">□ {draftMissions} draft</Text><Text color="gray">  </Text></>}
+            {activeMissions > 0 && <><Text color="cyan">● {activeMissions} active</Text><Text color="gray">  </Text></>}
+            {completedMissions > 0 && <><Text color="green">✓ {completedMissions} done</Text><Text color="gray">  </Text></>}
+            {failedMissions > 0 && <Text color="red">✗ {failedMissions} failed</Text>}
           </Text>
-          {plans.filter(p => p.status === "draft").map(p => (
+          {missions.filter(p => p.status === "draft").map(p => (
             <Text key={p.id}>
               <Text color="yellow">  □ </Text>
               <Text>{p.name.length > maxTitle - 4 ? p.name.slice(0, maxTitle - 7) + "..." : p.name}</Text>
             </Text>
           ))}
-          {plans.filter(p => p.status === "active").map(p => (
+          {missions.filter(p => p.status === "active").map(p => (
             <Text key={p.id}>
               <Text color="cyan">  ● </Text>
               <Text bold>{p.name.length > maxTitle - 4 ? p.name.slice(0, maxTitle - 7) + "..." : p.name}</Text>

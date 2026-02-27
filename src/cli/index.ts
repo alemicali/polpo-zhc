@@ -36,7 +36,7 @@ import { Orchestrator } from "../core/orchestrator.js";
 import type { PolpoState, Task, TaskStatus } from "../core/types.js";
 
 import { registerTaskCommands } from "./commands/task.js";
-import { registerPlanCommands } from "./commands/plan.js";
+import { registerMissionCommands } from "./commands/mission.js";
 import { registerTeamCommands } from "./commands/team.js";
 import { registerMemoryCommands } from "./commands/memory.js";
 import { registerLogsCommands } from "./commands/logs.js";
@@ -514,7 +514,7 @@ program
 
 // Register subcommand groups
 registerTaskCommands(program);
-registerPlanCommands(program);
+registerMissionCommands(program);
 registerTeamCommands(program);
 registerMemoryCommands(program);
 registerLogsCommands(program);

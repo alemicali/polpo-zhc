@@ -15,12 +15,12 @@ const require = createRequire(import.meta.url);
 const { version: PKG_VERSION } = require("../../../package.json") as { version: string };
 
 const COMMANDS = [
-  "/status", "/help", "/team", "/tasks", "/plans", "/plan",
+  "/status", "/help", "/team", "/tasks", "/missions", "/plan",
   "/config", "/chat", "/task", "/sessions",
   "/abort", "/clear", "/clear-tasks", "/quit", "/memory",
   "/logs", "/logs sessions", "/inspect",
   "/team add", "/team remove", "/team edit", "/team rename",
-  "/plans new", "/plans exec", "/plans resume", "/plans list",
+  "/missions new", "/missions exec", "/missions resume", "/missions list",
   "/tasks list",
 ];
 

@@ -24,14 +24,14 @@ import type {
   TaskExpectation,
   ExpectedOutcome,
   Team,
-  Plan,
-  PlanStatus,
+  Mission,
+  MissionStatus,
   RetryPolicy,
   ScopedNotificationRules,
 } from "./types.js";
 import { AgentManager } from "./agent-manager.js";
 import { TaskManager } from "./task-manager.js";
-import { PlanExecutor } from "./plan-executor.js";
+import { MissionExecutor } from "./mission-executor.js";
 import { TaskRunner } from "./task-runner.js";
 import { AssessmentOrchestrator } from "./assessment-orchestrator.js";
 import type { OrchestratorContext } from "./orchestrator-context.js";
@@ -106,7 +106,7 @@ export class Orchestrator extends TypedEmitter {
   // Managers
   private agentMgr!: AgentManager;
   private taskMgr!: TaskManager;
-  private planExec!: PlanExecutor;
+  private missionExec!: MissionExecutor;
   private runner!: TaskRunner;
   private assessor!: AssessmentOrchestrator;
 
@@ -241,7 +241,7 @@ export class Orchestrator extends TypedEmitter {
     };
     this.agentMgr = new AgentManager(ctx);
     this.taskMgr = new TaskManager(ctx);
-    this.planExec = new PlanExecutor(ctx, this.taskMgr, this.agentMgr);
+    this.missionExec = new MissionExecutor(ctx, this.taskMgr, this.agentMgr);
     this.runner = new TaskRunner(ctx);
     this.assessor = new AssessmentOrchestrator(ctx);
 
@@ -269,7 +269,7 @@ export class Orchestrator extends TypedEmitter {
       this.notificationRouter.setStore(notifStore);
       this.notificationRouter.start();
 
-      // Set scope resolver so the router can resolve task/plan-level notification rules
+      // Set scope resolver so the router can resolve task/mission-level notification rules
       this.notificationRouter.setScopeResolver((data: unknown) => {
         if (!data || typeof data !== "object") return undefined;
         const d = data as Record<string, unknown>;
@@ -278,7 +278,7 @@ export class Orchestrator extends TypedEmitter {
         const taskId = (d.taskId as string | undefined)
           ?? ((d.task as Record<string, unknown> | undefined)?.id as string | undefined);
 
-        // Extract planId / group
+        // Extract missionId / group
         const group = (d.group as string | undefined)
           ?? (taskId ? this.registry.getTask(taskId)?.group : undefined);
 
@@ -286,16 +286,16 @@ export class Orchestrator extends TypedEmitter {
           ? this.registry.getTask(taskId)?.notifications
           : undefined;
 
-        let planNotifications: import("./types.js").ScopedNotificationRules | undefined;
+        let missionNotifications: import("./types.js").ScopedNotificationRules | undefined;
         if (group) {
-          const plan = this.registry.getPlanByName?.(group);
-          planNotifications = plan?.notifications;
-        } else if (d.planId) {
-          const plan = this.registry.getPlan?.(d.planId as string);
-          planNotifications = plan?.notifications;
+          const mission = this.registry.getMissionByName?.(group);
+          missionNotifications = mission?.notifications;
+        } else if (d.missionId) {
+          const mission = this.registry.getMission?.(d.missionId as string);
+          missionNotifications = mission?.notifications;
         }
 
-        return { taskNotifications, planNotifications };
+        return { taskNotifications, missionNotifications };
       });
     }
 
@@ -337,15 +337,15 @@ export class Orchestrator extends TypedEmitter {
     // Wire notification router so per-gate and per-checkpoint notifyChannels work
     if (this.notificationRouter) {
       this.qualityController.setNotificationRouter(this.notificationRouter);
-      this.planExec.setNotificationRouter(this.notificationRouter);
+      this.missionExec.setNotificationRouter(this.notificationRouter);
     }
     this.qualityController.init();
-    this.planExec.setQualityController(this.qualityController);
+    this.missionExec.setQualityController(this.qualityController);
 
     // Initialize scheduler (always available — zero cost when no schedules exist)
     if (this.config.settings.enableScheduler !== false) {
       this.scheduler = new Scheduler(ctx);
-      this.scheduler.setExecutor((planId) => this.planExec.executePlan(planId));
+      this.scheduler.setExecutor((missionId) => this.missionExec.executeMission(missionId));
       this.scheduler.init();
     }
 
@@ -364,7 +364,7 @@ export class Orchestrator extends TypedEmitter {
   }
 
   /**
-   * Build the action executor callback — handles create_task, execute_plan,
+   * Build the action executor callback — handles create_task, execute_mission,
    * run_script, send_notification actions triggered by notification rules
    * or task watchers.
    */
@@ -380,11 +380,11 @@ export class Orchestrator extends TypedEmitter {
           });
           return `Task created: [${task.id}] "${task.title}" → ${task.assignTo}`;
         }
-        case "execute_plan": {
-          const plan = this.registry.getPlan?.(action.planId);
-          if (!plan) throw new Error(`Plan "${action.planId}" not found`);
-          const result = this.planExec.executePlan(action.planId);
-          return `Plan "${plan.name}" executed: ${result.tasks.length} tasks created`;
+        case "execute_mission": {
+          const mission = this.registry.getMission?.(action.missionId);
+          if (!mission) throw new Error(`Mission "${action.missionId}" not found`);
+          const result = this.missionExec.executeMission(action.missionId);
+          return `Mission "${mission.name}" executed: ${result.tasks.length} tasks created`;
         }
         case "run_script": {
           const { execSync } = await import("node:child_process");
@@ -557,14 +557,14 @@ export class Orchestrator extends TypedEmitter {
   cleanupVolatileAgents(group: string): number { return this.agentMgr.cleanupVolatileAgents(group); }
 
 
-  // ─── Plan Management (delegates to PlanExecutor) ──
+  // ─── Mission Management (delegates to MissionExecutor) ──
 
-  savePlan(opts: { data: string; prompt?: string; name?: string; status?: PlanStatus; notifications?: ScopedNotificationRules }): Plan { return this.planExec.savePlan(opts); }
-  getPlan(planId: string): Plan | undefined { return this.planExec.getPlan(planId); }
-  getPlanByName(name: string): Plan | undefined { return this.planExec.getPlanByName(name); }
-  getAllPlans(): Plan[] { return this.planExec.getAllPlans(); }
-  updatePlan(planId: string, updates: Partial<Omit<Plan, "id">>): Plan { return this.planExec.updatePlan(planId, updates); }
-  deletePlan(planId: string): boolean { return this.planExec.deletePlan(planId); }
+  saveMission(opts: { data: string; prompt?: string; name?: string; status?: MissionStatus; notifications?: ScopedNotificationRules }): Mission { return this.missionExec.saveMission(opts); }
+  getMission(missionId: string): Mission | undefined { return this.missionExec.getMission(missionId); }
+  getMissionByName(name: string): Mission | undefined { return this.missionExec.getMissionByName(name); }
+  getAllMissions(): Mission[] { return this.missionExec.getAllMissions(); }
+  updateMission(missionId: string, updates: Partial<Omit<Mission, "id">>): Mission { return this.missionExec.updateMission(missionId, updates); }
+  deleteMission(missionId: string): boolean { return this.missionExec.deleteMission(missionId); }
 
   // ─── Project Memory ──────────────────────────────────
 
@@ -613,27 +613,27 @@ export class Orchestrator extends TypedEmitter {
     try { this.sessionStore.prune(20); } catch { /* best-effort: non-critical */ }
   }
 
-  // ─── Plan Resume / Execute (delegates to PlanExecutor) ──
+  // ─── Mission Resume / Execute (delegates to MissionExecutor) ──
 
-  getResumablePlans(): Plan[] { return this.planExec.getResumablePlans(); }
-  resumePlan(planId: string, opts?: { retryFailed?: boolean }): { retried: number; pending: number } { return this.planExec.resumePlan(planId, opts); }
-  executePlan(planId: string): { tasks: Task[]; group: string } { return this.planExec.executePlan(planId); }
+  getResumableMissions(): Mission[] { return this.missionExec.getResumableMissions(); }
+  resumeMission(missionId: string, opts?: { retryFailed?: boolean }): { retried: number; pending: number } { return this.missionExec.resumeMission(missionId, opts); }
+  executeMission(missionId: string): { tasks: Task[]; group: string } { return this.missionExec.executeMission(missionId); }
 
   // ─── Checkpoints ────────────────────────────────────
 
-  /** Get all active (unresumed) checkpoints across all plan groups. */
-  getActiveCheckpoints() { return this.planExec.getActiveCheckpoints(); }
+  /** Get all active (unresumed) checkpoints across all mission groups. */
+  getActiveCheckpoints() { return this.missionExec.getActiveCheckpoints(); }
 
-  /** Resume a checkpoint by plan group name and checkpoint name. Returns true if resumed. */
+  /** Resume a checkpoint by mission group name and checkpoint name. Returns true if resumed. */
   resumeCheckpoint(group: string, checkpointName: string): boolean {
-    return this.planExec.resumeCheckpoint(group, checkpointName);
+    return this.missionExec.resumeCheckpoint(group, checkpointName);
   }
 
-  /** Resume a checkpoint by plan ID and checkpoint name. Returns true if resumed. */
-  resumeCheckpointByPlanId(planId: string, checkpointName: string): boolean {
-    const plan = this.planExec.getPlan(planId);
-    if (!plan) return false;
-    return this.planExec.resumeCheckpoint(plan.name, checkpointName);
+  /** Resume a checkpoint by mission ID and checkpoint name. Returns true if resumed. */
+  resumeCheckpointByMissionId(missionId: string, checkpointName: string): boolean {
+    const mission = this.missionExec.getMission(missionId);
+    if (!mission) return false;
+    return this.missionExec.resumeCheckpoint(mission.name, checkpointName);
   }
 
   /** Stop the supervisor loop (non-graceful — use gracefulStop for clean shutdown) */
@@ -720,7 +720,7 @@ export class Orchestrator extends TypedEmitter {
    * Reload polpo.json at runtime without restarting the server.
    * Disposes optional subsystems (notifications, approvals, escalation, SLA,
    * quality, scheduler, telegram poller) and re-initializes them from the
-   * freshly-read config.  Core managers (agents, tasks, plans, runner,
+   * freshly-read config.  Core managers (agents, tasks, missions, runner,
    * assessor) and stores are left untouched — live state is preserved.
    *
    * Returns `true` if the config was successfully reloaded.
@@ -805,15 +805,15 @@ export class Orchestrator extends TypedEmitter {
         const taskNotifications = taskId
           ? this.registry.getTask(taskId)?.notifications
           : undefined;
-        let planNotifications: ScopedNotificationRules | undefined;
+        let missionNotifications: ScopedNotificationRules | undefined;
         if (group) {
-          const plan = this.registry.getPlanByName?.(group);
-          planNotifications = plan?.notifications;
-        } else if (d.planId) {
-          const plan = this.registry.getPlan?.(d.planId as string);
-          planNotifications = plan?.notifications;
+          const mission = this.registry.getMissionByName?.(group);
+          missionNotifications = mission?.notifications;
+        } else if (d.missionId) {
+          const mission = this.registry.getMission?.(d.missionId as string);
+          missionNotifications = mission?.notifications;
         }
-        return { taskNotifications, planNotifications };
+        return { taskNotifications, missionNotifications };
       });
     }
 
@@ -846,17 +846,17 @@ export class Orchestrator extends TypedEmitter {
     this.qualityController = new QualityController(ctx);
     if (this.notificationRouter) {
       this.qualityController.setNotificationRouter(this.notificationRouter);
-      this.planExec.setNotificationRouter(this.notificationRouter);
+      this.missionExec.setNotificationRouter(this.notificationRouter);
     }
     this.qualityController.init();
-    this.planExec.setQualityController(this.qualityController);
+    this.missionExec.setQualityController(this.qualityController);
 
     // Scheduler
-    const hasScheduledPlans = (this.config.settings.enableScheduler !== false) &&
-      (this.registry.getAllPlans?.() ?? []).some(p => !!p.schedule);
-    if (this.config.settings.enableScheduler || hasScheduledPlans) {
+    const hasScheduledMissions = (this.config.settings.enableScheduler !== false) &&
+      (this.registry.getAllMissions?.() ?? []).some((p: Mission) => !!p.schedule);
+    if (this.config.settings.enableScheduler || hasScheduledMissions) {
       this.scheduler = new Scheduler(ctx);
-      this.scheduler.setExecutor((planId) => this.planExec.executePlan(planId));
+      this.scheduler.setExecutor((missionId) => this.missionExec.executeMission(missionId));
       this.scheduler.init();
     }
 
@@ -1031,7 +1031,7 @@ export class Orchestrator extends TypedEmitter {
     if (activeTasks.length > 0 && terminal.length === activeTasks.length) {
       // Must run cleanup BEFORE returning — assessment transitions happen async
       // between ticks, so this may be the first tick that sees all tasks terminal.
-      this.planExec.cleanupCompletedGroups(tasks);
+      this.missionExec.cleanupCompletedGroups(tasks);
       this.runner.syncProcessesFromRunStore();
       return true;
     }
@@ -1045,21 +1045,21 @@ export class Orchestrator extends TypedEmitter {
     // 2b. SLA deadline checks
     this.slaMonitor?.check();
 
-    // 2c. Scheduler checks (trigger due plans)
+    // 2c. Scheduler checks (trigger due missions)
     this.scheduler?.check();
 
-    // 3. Spawn agents for ready tasks (skip tasks from cancelled/completed/paused plans)
+    // 3. Spawn agents for ready tasks (skip tasks from cancelled/completed/paused missions)
     const ready = pending.filter(task => {
       if (task.group) {
-        const plan = this.registry.getPlanByName?.(task.group);
-        if (plan && (plan.status === "cancelled" || plan.status === "completed" || plan.status === "paused")) return false;
+        const mission = this.registry.getMissionByName?.(task.group);
+        if (mission && (mission.status === "cancelled" || mission.status === "completed" || mission.status === "paused")) return false;
 
         // Check quality gates — task may be blocked by a gate even if deps are done
         if (this.qualityController) {
-          const gates = this.planExec.getQualityGates(task.group);
+          const gates = this.missionExec.getQualityGates(task.group);
           if (gates.length > 0) {
             const blocking = this.qualityController.getBlockingGate(
-              plan?.id ?? task.group,
+              mission?.id ?? task.group,
               task.title,
               task.id,
               gates,
@@ -1070,9 +1070,9 @@ export class Orchestrator extends TypedEmitter {
         }
 
         // Check checkpoints — task may be blocked by a checkpoint awaiting human resume
-        const checkpoints = this.planExec.getCheckpoints(task.group);
+        const checkpoints = this.missionExec.getCheckpoints(task.group);
         if (checkpoints.length > 0) {
-          const blockingCp = this.planExec.getBlockingCheckpoint(
+          const blockingCp = this.missionExec.getBlockingCheckpoint(
             task.group,
             task.title,
             task.id,
@@ -1089,7 +1089,7 @@ export class Orchestrator extends TypedEmitter {
 
     // Check for deadlock: no tasks ready, none running, but some pending
     // Don't consider it a deadlock if tasks are awaiting approval or blocked by checkpoints
-    const hasActiveCheckpoints = this.planExec.getActiveCheckpoints().length > 0;
+    const hasActiveCheckpoints = this.missionExec.getActiveCheckpoints().length > 0;
     if (ready.length === 0 && inProgress.length === 0 && pending.length > 0 && awaitingApproval.length === 0 && !hasActiveCheckpoints) {
       // Async resolution already in progress — wait for next tick
       if (isResolving()) return false;
@@ -1167,10 +1167,10 @@ export class Orchestrator extends TypedEmitter {
       queued,
     });
 
-    // Clean up volatile agents for completed plan groups.
+    // Clean up volatile agents for completed mission groups.
     // Re-read tasks fresh — assessment callbacks (async) may have transitioned
     // tasks to done/failed since the snapshot at the top of tick().
-    this.planExec.cleanupCompletedGroups(this.registry.getAllTasks());
+    this.missionExec.cleanupCompletedGroups(this.registry.getAllTasks());
 
     // Sync process list from RunStore for backward compat with TUI
     this.runner.syncProcessesFromRunStore();

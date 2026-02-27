@@ -8,7 +8,7 @@ import type { Orchestrator } from "../../core/orchestrator.js";
 import type { TUIStore } from "../store.js";
 import type { TaskExpectation } from "../../core/types.js";
 import { seg, kickRun } from "../format.js";
-import { generateTaskPrep } from "../../llm/plan-generator.js";
+import { generateTaskPrep } from "../../llm/mission-generator.js";
 import { buildTaskPrepPrompt } from "../../llm/prompts.js";
 import { resolveModelSpec } from "../../llm/pi-client.js";
 

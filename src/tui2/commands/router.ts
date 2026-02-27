@@ -3,7 +3,7 @@ import { cmdHelp, COMMANDS } from "./help.js";
 import { cmdStatus } from "./status.js";
 import { cmdTeam } from "./team.js";
 import { cmdTasks } from "./tasks.js";
-import { cmdPlans } from "./plans.js";
+import { cmdMissions } from "./missions.js";
 import { cmdConfig } from "./config.js";
 import { cmdChat, cmdPlanMode, cmdTaskMode } from "./modes.js";
 import { cmdSessions } from "./sessions.js";
@@ -22,7 +22,7 @@ const COMMAND_MAP: Record<string, (api: CommandAPI) => Promise<void> | void> = {
   status: cmdStatus,
   team: cmdTeam,
   tasks: cmdTasks,
-  plans: cmdPlans,
+  missions: cmdMissions,
   plan: cmdPlanMode,
   config: cmdConfig,
   chat: cmdChat,

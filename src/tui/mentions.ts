@@ -1,5 +1,5 @@
 /**
- * Mention parsing — extracts @agent, #task, %plan from input text.
+ * Mention parsing — extracts @agent, #task, %mission from input text.
  * Returns parsed mentions and the clean text (mentions removed).
  */
 
@@ -8,22 +8,22 @@ export interface ParsedMentions {
   agent?: string;
   /** Task title from #title mention */
   taskRef?: string;
-  /** Plan group from %group mention */
-  planRef?: string;
+  /** Mission group from %group mention */
+  missionRef?: string;
   /** Input text with mentions stripped */
   text: string;
 }
 
 /**
  * Parse mentions from raw input.
- * Supports: @agent-name, #"task title with spaces", %plan-group
- * Quoted form: @"agent name", #"task title", %"plan group"
+ * Supports: @agent-name, #"task title with spaces", %mission-group
+ * Quoted form: @"agent name", #"task title", %"mission group"
  */
 export function parseMentions(input: string): ParsedMentions {
   let text = input;
   let agent: string | undefined;
   let taskRef: string | undefined;
-  let planRef: string | undefined;
+  let missionRef: string | undefined;
 
   // @agent — quoted or unquoted
   const agentQuoted = text.match(/@"([^"]+)"/);
@@ -51,20 +51,20 @@ export function parseMentions(input: string): ParsedMentions {
     }
   }
 
-  // %plan — quoted or unquoted
-  const planQuoted = text.match(/%"([^"]+)"/);
-  if (planQuoted) {
-    planRef = planQuoted[1];
-    text = text.replace(planQuoted[0], "").trim();
+  // %mission — quoted or unquoted
+  const missionQuoted = text.match(/%"([^"]+)"/);
+  if (missionQuoted) {
+    missionRef = missionQuoted[1];
+    text = text.replace(missionQuoted[0], "").trim();
   } else {
-    const planMatch = text.match(/%([\w-]+)/);
-    if (planMatch) {
-      planRef = planMatch[1];
-      text = text.replace(planMatch[0], "").trim();
+    const missionMatch = text.match(/%([\w-]+)/);
+    if (missionMatch) {
+      missionRef = missionMatch[1];
+      text = text.replace(missionMatch[0], "").trim();
     }
   }
 
-  return { agent, taskRef, planRef, text: text.trim() };
+  return { agent, taskRef, missionRef, text: text.trim() };
 }
 
 /**
@@ -74,7 +74,7 @@ export function parseMentions(input: string): ParsedMentions {
 export interface MentionSpan {
   start: number;
   end: number;
-  type: "agent" | "task" | "plan";
+  type: "agent" | "task" | "mission";
 }
 
 export function findMentionSpans(input: string): MentionSpan[] {
@@ -90,9 +90,9 @@ export function findMentionSpans(input: string): MentionSpan[] {
     spans.push({ start: m.index!, end: m.index! + m[0].length, type: "task" });
   }
 
-  // %plan
+  // %mission
   for (const m of input.matchAll(/%"[^"]+"|%[\w-]+/g)) {
-    spans.push({ start: m.index!, end: m.index! + m[0].length, type: "plan" });
+    spans.push({ start: m.index!, end: m.index! + m[0].length, type: "mission" });
   }
 
   return spans.sort((a, b) => a.start - b.start);

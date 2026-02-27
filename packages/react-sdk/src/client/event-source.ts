@@ -86,11 +86,11 @@ export class EventSourceManager {
     es.addEventListener("deadlock:resolving", (e) => this.handleMessage(e as MessageEvent));
     es.addEventListener("deadlock:resolved", (e) => this.handleMessage(e as MessageEvent));
     es.addEventListener("deadlock:unresolvable", (e) => this.handleMessage(e as MessageEvent));
-    es.addEventListener("plan:saved", (e) => this.handleMessage(e as MessageEvent));
-    es.addEventListener("plan:executed", (e) => this.handleMessage(e as MessageEvent));
-    es.addEventListener("plan:completed", (e) => this.handleMessage(e as MessageEvent));
-    es.addEventListener("plan:resumed", (e) => this.handleMessage(e as MessageEvent));
-    es.addEventListener("plan:deleted", (e) => this.handleMessage(e as MessageEvent));
+    es.addEventListener("mission:saved", (e) => this.handleMessage(e as MessageEvent));
+    es.addEventListener("mission:executed", (e) => this.handleMessage(e as MessageEvent));
+    es.addEventListener("mission:completed", (e) => this.handleMessage(e as MessageEvent));
+    es.addEventListener("mission:resumed", (e) => this.handleMessage(e as MessageEvent));
+    es.addEventListener("mission:deleted", (e) => this.handleMessage(e as MessageEvent));
     es.addEventListener("log", (e) => this.handleMessage(e as MessageEvent));
 
     es.onerror = () => {

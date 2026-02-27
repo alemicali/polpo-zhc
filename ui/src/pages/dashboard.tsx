@@ -23,7 +23,7 @@ import { PieChart, Pie, Cell, Label } from "recharts";
 import {
   ListChecks,
   Bot,
-  Map,
+  Target,
   CheckCircle2,
   Clock,
   AlertTriangle,
@@ -36,7 +36,7 @@ import {
   HelpCircle,
   FileEdit,
 } from "lucide-react";
-import { useTasks, usePlans, useProcesses, useAgents, useStats } from "@lumea-labs/polpo-react";
+import { useTasks, useMissions, useProcesses, useAgents, useStats } from "@lumea-labs/polpo-react";
 import type { Task, AgentProcess, PolpoStats } from "@lumea-labs/polpo-react";
 import { cn } from "@/lib/utils";
 
@@ -351,7 +351,7 @@ function RecentTasks({ tasks }: { tasks: Task[] }) {
           <div className="flex flex-col items-center justify-center py-6 text-muted-foreground">
             <ListChecks className="h-8 w-8 mb-2 opacity-40" />
             <p className="text-sm">No tasks yet</p>
-            <p className="text-xs">Tasks will appear when a plan is executed</p>
+            <p className="text-xs">Tasks will appear when a mission is executed</p>
           </div>
         ) : (
           <div className="space-y-1.5">
@@ -425,12 +425,12 @@ function RecentTasks({ tasks }: { tasks: Task[] }) {
 
 export function DashboardPage() {
   const { tasks, isLoading: tasksLoading } = useTasks();
-  const { plans } = usePlans();
+  const { missions } = useMissions();
   const { processes } = useProcesses();
   const { agents } = useAgents();
   const stats = useStats();
 
-  const activePlans = plans.filter((p) => p.status === "active").length;
+  const activeMissions = missions.filter((p) => p.status === "active").length;
   const doneCount = tasks.filter((t) => t.status === "done").length;
   const failedCount = tasks.filter((t) => t.status === "failed").length;
 
@@ -456,11 +456,11 @@ export function DashboardPage() {
           description={`${doneCount} completed, ${failedCount} failed`}
         />
         <StatCard
-          title="Active Plans"
-          value={activePlans}
-          icon={Map}
-          description={`${plans.length} total`}
-          color={activePlans > 0 ? "text-blue-500" : undefined}
+          title="Active Missions"
+          value={activeMissions}
+          icon={Target}
+          description={`${missions.length} total`}
+          color={activeMissions > 0 ? "text-blue-500" : undefined}
         />
         <StatCard
           title="Agents Online"

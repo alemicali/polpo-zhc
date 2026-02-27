@@ -1,7 +1,7 @@
 // Types for the pi-tui based TUI
 
 import type { Orchestrator } from "../core/orchestrator.js";
-import type { TaskStatus, PlanStatus, AgentProcess } from "../core/types.js";
+import type { TaskStatus, MissionStatus, AgentProcess } from "../core/types.js";
 import type { Component, TUI } from "@mariozechner/pi-tui";
 
 /** Input mode - determines how Enter submits text */
@@ -34,10 +34,10 @@ export interface TaskSnapshot {
   description?: string;
 }
 
-/** Plan snapshot for display */
-export interface PlanSnapshot {
+/** Mission snapshot for display */
+export interface MissionSnapshot {
   name: string;
-  status: PlanStatus;
+  status: MissionStatus;
   prompt?: string;
   taskCount?: number;
   completedCount?: number;

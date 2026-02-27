@@ -9,7 +9,7 @@
  *   - Inbound message routing from Telegram (WhatsApp/Slack/Discord ready to extend)
  *   - Peer identity resolution and DM policy enforcement (allowlist/pairing)
  *   - Session-per-peer management (each peer gets their own conversation thread)
- *   - Slash commands (/tasks, /status, /plans, /approve, /new)
+ *   - Slash commands (/tasks, /status, /missions, /approve, /new)
  *   - Free-text chat forwarded to POST /v1/chat/completions internally
  *   - Approval inline buttons (preserves existing TelegramCallbackPoller behavior)
  *   - Presence tracking
@@ -19,7 +19,7 @@
  *     └── ChannelGateway (this file, full message routing)
  *           ├── PeerStore (identity, allowlist, pairing, session mapping)
  *           ├── SessionStore (conversation persistence)
- *           ├── Orchestrator (for commands: tasks, plans, agents, approvals)
+ *           ├── Orchestrator (for commands: tasks, missions, agents, approvals)
  *           └── Chat completions (for free-text conversation)
  */
 
@@ -73,7 +73,7 @@ const COMMANDS: Record<string, string> = {
   "/help":    "Show available commands",
   "/status":  "Show orchestrator status (running tasks, agents)",
   "/tasks":   "List all tasks with status",
-  "/plans":   "List all plans",
+  "/missions": "List all missions",
   "/agents":  "List all agents",
   "/approve": "Approve a pending approval (usage: /approve REQUEST_ID)",
   "/reject":  "Reject a pending approval (usage: /reject REQUEST_ID [reason])",
@@ -231,8 +231,8 @@ export class ChannelGateway {
         return this.cmdStatus();
       case "/tasks":
         return this.cmdTasks();
-      case "/plans":
-        return this.cmdPlans();
+      case "/missions":
+        return this.cmdMissions();
       case "/agents":
         return this.cmdAgents();
       case "/approve":
@@ -296,12 +296,12 @@ export class ChannelGateway {
     return { text: lines.join("\n") };
   }
 
-  private cmdPlans(): CommandResult {
-    const plans = this.orchestrator.getAllPlans();
-    if (plans.length === 0) return { text: "No plans." };
+  private cmdMissions(): CommandResult {
+    const missions = this.orchestrator.getAllMissions();
+    if (missions.length === 0) return { text: "No missions." };
 
-    const lines = plans.slice(0, 10).map(p =>
-      `• ${p.name} (${p.status})`,
+    const lines = missions.slice(0, 10).map(m =>
+      `• ${m.name} (${m.status})`,
     );
     return { text: lines.join("\n") };
   }

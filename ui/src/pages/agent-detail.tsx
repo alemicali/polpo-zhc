@@ -455,9 +455,9 @@ export function AgentDetailPage() {
                     <Zap className="h-2.5 w-2.5 mr-0.5" /> Volatile
                   </Badge>
                 )}
-                {agent.planGroup && (
+                {agent.missionGroup && (
                   <Badge variant="outline" className="text-[9px] text-amber-400 border-amber-500/30">
-                    plan: {agent.planGroup}
+                    mission: {agent.missionGroup}
                   </Badge>
                 )}
                 {enabledFlags.length > 0 && (
@@ -770,7 +770,7 @@ export function AgentDetailPage() {
                           </div>
                           <div className="divide-y divide-border/20">
                             {agent.reportsTo && <KV label="Reports To" mono>{agent.reportsTo}</KV>}
-                            {agent.planGroup && <KV label="Plan Group" mono>{agent.planGroup}</KV>}
+                            {agent.missionGroup && <KV label="Mission Group" mono>{agent.missionGroup}</KV>}
                             <KV label="Paths">{agent.allowedPaths?.length ?? 1}</KV>
                           </div>
                         </div>
@@ -1190,7 +1190,7 @@ export function AgentDetailPage() {
                             <KV label="Volatile">{agent.volatile ? "Yes" : "No"}</KV>
                           </div>
                           <div className="divide-y divide-border/20">
-                            {agent.planGroup && <KV label="Plan Group" mono>{agent.planGroup}</KV>}
+                            {agent.missionGroup && <KV label="Mission Group" mono>{agent.missionGroup}</KV>}
                             {agent.reportsTo && <KV label="Reports To" mono>{agent.reportsTo}</KV>}
                             <KV label="Allowed Paths">{agent.allowedPaths?.length ?? 1}</KV>
                             <KV label="Allowed Tools">{agent.allowedTools?.length ?? 0}</KV>

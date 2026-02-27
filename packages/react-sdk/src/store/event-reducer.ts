@@ -4,8 +4,8 @@ import type {
   SSEEvent,
   TaskStatus,
   DimensionScore,
-  PlanReport,
-  PlanStatus,
+  MissionReport,
+  MissionStatus,
 } from "../client/types.js";
 import type { StoreState } from "./types.js";
 
@@ -205,58 +205,58 @@ export function reduceEvent(state: StoreState, sseEvent: SSEEvent): StoreState {
     case "deadlock:unresolvable":
       return next;
 
-    // ── Plans ─────────────────────────────────────────────────
+    // ── Missions ──────────────────────────────────────────────
 
-    case "plan:saved": {
-      const { planId, name, status } = data as { planId: string; name: string; status: PlanStatus };
-      const existing = state.plans.get(planId);
+    case "mission:saved": {
+      const { missionId, name, status } = data as { missionId: string; name: string; status: MissionStatus };
+      const existing = state.missions.get(missionId);
       if (existing) {
-        const plans = new Map(state.plans);
-        plans.set(planId, { ...existing, name, status, updatedAt: new Date().toISOString() });
-        return { ...next, plans, plansStale: true };
+        const missions = new Map(state.missions);
+        missions.set(missionId, { ...existing, name, status, updatedAt: new Date().toISOString() });
+        return { ...next, missions, missionsStale: true };
       }
-      return { ...next, plansStale: true };
+      return { ...next, missionsStale: true };
     }
 
-    case "plan:executed": {
-      const { planId } = data as { planId: string; group: string; taskCount: number };
-      const existing = state.plans.get(planId);
+    case "mission:executed": {
+      const { missionId } = data as { missionId: string; group: string; taskCount: number };
+      const existing = state.missions.get(missionId);
       if (existing) {
-        const plans = new Map(state.plans);
-        plans.set(planId, { ...existing, status: "active" as PlanStatus, updatedAt: new Date().toISOString() });
-        return { ...next, plans };
+        const missions = new Map(state.missions);
+        missions.set(missionId, { ...existing, status: "active" as MissionStatus, updatedAt: new Date().toISOString() });
+        return { ...next, missions };
       }
-      return { ...next, plansStale: true };
+      return { ...next, missionsStale: true };
     }
 
-    case "plan:completed": {
-      const payload = data as { planId: string; group: string; allPassed: boolean; report: PlanReport };
-      // Store the PlanReport — this is the only source of aggregated plan results
-      const planReports = new Map(state.planReports);
+    case "mission:completed": {
+      const payload = data as { missionId: string; group: string; allPassed: boolean; report: MissionReport };
+      // Store the MissionReport — this is the only source of aggregated mission results
+      const missionReports = new Map(state.missionReports);
       if (payload.report) {
-        planReports.set(payload.planId, payload.report);
+        missionReports.set(payload.missionId, payload.report);
       }
-      const existing = state.plans.get(payload.planId);
+      const existing = state.missions.get(payload.missionId);
       if (existing) {
-        const plans = new Map(state.plans);
-        plans.set(payload.planId, {
+        const missions = new Map(state.missions);
+        missions.set(payload.missionId, {
           ...existing,
-          status: payload.allPassed ? ("completed" as PlanStatus) : ("failed" as PlanStatus),
+          status: payload.allPassed ? ("completed" as MissionStatus) : ("failed" as MissionStatus),
           updatedAt: new Date().toISOString(),
         });
-        return { ...next, plans, planReports };
+        return { ...next, missions, missionReports };
       }
-      return { ...next, plansStale: true, planReports };
+      return { ...next, missionsStale: true, missionReports };
     }
 
-    case "plan:resumed":
-      return { ...next, plansStale: true };
+    case "mission:resumed":
+      return { ...next, missionsStale: true };
 
-    case "plan:deleted": {
-      const { planId } = data as { planId: string };
-      const plans = new Map(state.plans);
-      plans.delete(planId);
-      return { ...next, plans };
+    case "mission:deleted": {
+      const { missionId } = data as { missionId: string };
+      const missions = new Map(state.missions);
+      missions.delete(missionId);
+      return { ...next, missions };
     }
 
     // ── Approval gates ──────────────────────────────────────

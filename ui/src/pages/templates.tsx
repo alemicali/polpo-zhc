@@ -280,13 +280,13 @@ function DefinitionDialog({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-sm">
             <FileJson2 className="h-4 w-4 text-muted-foreground" />
-            {definition.name} — Plan Template
+            {definition.name} — Mission Template
           </DialogTitle>
         </DialogHeader>
         <p className="text-xs text-muted-foreground">{definition.description}</p>
         <ScrollArea className="flex-1 min-h-0 mt-2">
           <JsonBlock
-            data={definition.plan}
+            data={definition.mission}
             className="text-[10px] leading-relaxed font-mono bg-muted/30 border border-border/20 rounded-lg p-4 whitespace-pre-wrap overflow-x-auto"
           />
         </ScrollArea>
@@ -462,8 +462,8 @@ export function TemplatesPage() {
       toast.success(
         `Template "${name}" started — ${result.tasks} task${result.tasks !== 1 ? "s" : ""} created`
       );
-      // Navigate to the created plan
-      navigate(`/plans/${result.plan.id}`);
+      // Navigate to the created mission
+      navigate(`/missions/${result.mission.id}`);
     } catch (e) {
       toast.error(`Run failed: ${(e as Error).message}`);
       throw e; // re-throw so dialog stays open
@@ -516,7 +516,7 @@ export function TemplatesPage() {
             <p className="text-xs mt-1 text-center max-w-sm">
               {templates.length === 0 ? (
                 <>
-                  Templates are parameterized plan definitions.
+                  Templates are parameterized mission definitions.
                   Create a <code className="text-[10px] bg-muted rounded px-1">.polpo/templates/my-template/template.json</code> file to get started.
                 </>
               ) : (

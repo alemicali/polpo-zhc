@@ -468,7 +468,7 @@ function AgentCard({
               )}
               {!!agent.volatile && (
                 <Badge variant="outline" className="text-[10px] text-amber-400 border-amber-500/30">
-                  <Zap className="h-2.5 w-2.5 mr-0.5" /> plan
+                  <Zap className="h-2.5 w-2.5 mr-0.5" /> mission
                 </Badge>
               )}
             </div>
@@ -599,7 +599,7 @@ function AgentNode({ data }: NodeProps<Node<AgentNodeData>>) {
             {agent.model && <Badge variant="secondary" className="text-[9px] px-1.5 py-0 font-mono">{agent.model}</Badge>}
             {!!agent.volatile && (
               <Badge variant="outline" className="text-[9px] px-1.5 py-0 text-amber-400 border-amber-500/30">
-                <Zap className="h-2 w-2 mr-0.5" /> plan
+                <Zap className="h-2 w-2 mr-0.5" /> mission
               </Badge>
             )}
             {subordinateCount > 0 && <Badge variant="outline" className="text-[9px] px-1.5 py-0">{subordinateCount} report{subordinateCount !== 1 ? "s" : ""}</Badge>}
@@ -1191,7 +1191,7 @@ export function AgentsPage() {
     const q = search.toLowerCase();
     return a.name.toLowerCase().includes(q) || (a.role ?? "").toLowerCase().includes(q) ||
       (a.model ?? "").toLowerCase().includes(q) || (a.identity?.displayName ?? "").toLowerCase().includes(q) ||
-      (a.planGroup ?? "").toLowerCase().includes(q);
+      (a.missionGroup ?? "").toLowerCase().includes(q);
   });
 
   return (

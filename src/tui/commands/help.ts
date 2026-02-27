@@ -9,7 +9,7 @@ export const COMMANDS: [string, string][] = [
   ["/status", "Show status"],
   ["/team [add|rm|edit]", "Manage team agents"],
   ["/tasks [list]", "Browse and manage tasks"],
-  ["/plans [new|exec|resume]", "Manage plans"],
+  ["/missions [new|exec|resume]", "Manage missions"],
   ["/config", "Configure settings"],
   ["/chat", "Toggle chat mode"],
   ["/task", "Switch to task mode"],

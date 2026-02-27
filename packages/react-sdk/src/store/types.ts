@@ -1,7 +1,7 @@
 import type {
   Task,
-  Plan,
-  PlanReport,
+  Mission,
+  MissionReport,
   AgentConfig,
   AgentProcess,
   SSEEvent,
@@ -18,14 +18,14 @@ export interface PolpoStats {
 
 export interface StoreState {
   tasks: Map<string, Task>;
-  plans: Map<string, Plan>;
-  /** Plan completion reports keyed by planId. Populated from plan:completed SSE events. */
-  planReports: Map<string, PlanReport>;
+  missions: Map<string, Mission>;
+  /** Mission completion reports keyed by missionId. Populated from mission:completed SSE events. */
+  missionReports: Map<string, MissionReport>;
   agents: AgentConfig[];
   processes: AgentProcess[];
   stats: PolpoStats | null;
   connectionStatus: ConnectionStatus;
   recentEvents: SSEEvent[];
-  plansStale: boolean;
+  missionsStale: boolean;
   memory: { exists: boolean; content: string } | null;
 }

@@ -132,19 +132,19 @@ export function templateRoutes(): OpenAPIHono<ServerEnv> {
     // Instantiate
     const instance = instantiateTemplate(template, validation.resolved);
 
-    // Save as plan and execute
-    const plan = orchestrator.savePlan({
+    // Save as mission and execute
+    const mission = orchestrator.saveMission({
       data: instance.data,
       prompt: instance.prompt,
       name: instance.name,
     });
 
-    const result = orchestrator.executePlan(plan.id);
+    const result = orchestrator.executeMission(mission.id);
 
     return c.json({
       ok: true,
       data: {
-        plan,
+        mission,
         tasks: result.tasks.length,
         group: result.group,
       },

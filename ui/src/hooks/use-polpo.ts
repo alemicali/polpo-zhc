@@ -1,7 +1,7 @@
 /**
  * Custom hooks that complement the @lumea-labs/polpo-react.
  *
- * The SDK provides: useTasks, useTask, usePlans, usePlan, useAgents,
+ * The SDK provides: useTasks, useTask, useMissions, useMission, useAgents,
  * useProcesses, useEvents, useStats, useMemory, useLogs, usePolpo,
  * useSessions.
  *

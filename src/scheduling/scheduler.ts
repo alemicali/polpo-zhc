@@ -1,30 +1,30 @@
 import type { OrchestratorContext } from "../core/orchestrator-context.js";
-import type { ScheduleEntry, Plan } from "../core/types.js";
+import type { ScheduleEntry, Mission } from "../core/types.js";
 import { isCronExpression, nextCronOccurrence } from "./cron.js";
 
 /**
- * Scheduler — tick-driven scheduling engine for plans.
+ * Scheduler — tick-driven scheduling engine for missions.
  *
- * Plans can define:
+ * Missions can define:
  *  - `schedule`: a cron expression ("0 2 * * *") or ISO timestamp for one-shot
  *  - `recurring`: if true, re-execute on every cron tick (default: false = one-shot)
  *
  * The scheduler is checked on every orchestrator tick. It:
- *  1. Loads all plans with schedule definitions
+ *  1. Loads all missions with schedule definitions
  *  2. Computes next run times from cron expressions
- *  3. Triggers plan execution when the time arrives
- *  4. For recurring plans, resets after completion
- *  5. For one-shot plans, disables after first execution
+ *  3. Triggers mission execution when the time arrives
+ *  4. For recurring missions, resets after completion
+ *  5. For one-shot missions, disables after first execution
  *
- * Schedule entries are kept in-memory — rebuilt on init from plan definitions.
+ * Schedule entries are kept in-memory — rebuilt on init from mission definitions.
  */
 export class Scheduler {
   /** In-memory schedule registry */
   private schedules = new Map<string, ScheduleEntry>();
   private lastCheckMs = 0;
   private checkIntervalMs: number;
-  /** Callback to execute a plan — injected to avoid circular dependency with PlanExecutor */
-  private executePlanFn?: (planId: string) => void;
+  /** Callback to execute a mission — injected to avoid circular dependency with MissionExecutor */
+  private executeMissionFn?: (missionId: string) => void;
 
   constructor(
     private ctx: OrchestratorContext,
@@ -34,55 +34,55 @@ export class Scheduler {
   }
 
   /**
-   * Initialize: scan all plans for schedule definitions and build the schedule registry.
+   * Initialize: scan all missions for schedule definitions and build the schedule registry.
    */
   init(): void {
-    const plans = this.ctx.registry.getAllPlans?.() ?? [];
-    for (const plan of plans) {
-      if (plan.schedule && plan.status === "draft") {
-        this.registerPlan(plan);
+    const missions = this.ctx.registry.getAllMissions?.() ?? [];
+    for (const mission of missions) {
+      if (mission.schedule && mission.status === "draft") {
+        this.registerMission(mission);
       }
     }
   }
 
   /**
-   * Set the plan execution callback.
-   * Called by the orchestrator after PlanExecutor is initialized.
+   * Set the mission execution callback.
+   * Called by the orchestrator after MissionExecutor is initialized.
    */
-  setExecutor(fn: (planId: string) => void): void {
-    this.executePlanFn = fn;
+  setExecutor(fn: (missionId: string) => void): void {
+    this.executeMissionFn = fn;
   }
 
   /**
-   * Register or update a schedule for a plan.
+   * Register or update a schedule for a mission.
    */
-  registerPlan(plan: Plan): ScheduleEntry | null {
-    if (!plan.schedule) return null;
+  registerMission(mission: Mission): ScheduleEntry | null {
+    if (!mission.schedule) return null;
 
-    const isCron = isCronExpression(plan.schedule);
+    const isCron = isCronExpression(mission.schedule);
     const now = new Date();
 
     let nextRunAt: string | undefined;
     if (isCron) {
-      const next = nextCronOccurrence(plan.schedule, now);
+      const next = nextCronOccurrence(mission.schedule, now);
       nextRunAt = next?.toISOString();
     } else {
       // ISO timestamp — one-shot
-      const scheduled = new Date(plan.schedule);
+      const scheduled = new Date(mission.schedule);
       if (scheduled.getTime() > now.getTime()) {
         nextRunAt = scheduled.toISOString();
       }
-      // If the timestamp is in the past and plan is not recurring, skip
-      else if (!plan.recurring) {
+      // If the timestamp is in the past and mission is not recurring, skip
+      else if (!mission.recurring) {
         return null;
       }
     }
 
     const entry: ScheduleEntry = {
-      id: `sched-${plan.id}`,
-      planId: plan.id,
-      expression: plan.schedule,
-      recurring: plan.recurring ?? false,
+      id: `sched-${mission.id}`,
+      missionId: mission.id,
+      expression: mission.schedule,
+      recurring: mission.recurring ?? false,
       enabled: true,
       nextRunAt,
       createdAt: new Date().toISOString(),
@@ -92,7 +92,7 @@ export class Scheduler {
 
     this.ctx.emitter.emit("schedule:created", {
       scheduleId: entry.id,
-      planId: plan.id,
+      missionId: mission.id,
       nextRunAt,
     });
 
@@ -100,16 +100,16 @@ export class Scheduler {
   }
 
   /**
-   * Remove a schedule for a plan.
+   * Remove a schedule for a mission.
    */
-  unregisterPlan(planId: string): boolean {
-    const schedId = `sched-${planId}`;
+  unregisterMission(missionId: string): boolean {
+    const schedId = `sched-${missionId}`;
     return this.schedules.delete(schedId);
   }
 
   /**
    * Main check — called from the orchestrator tick loop.
-   * Checks all active schedules and triggers plans that are due.
+   * Checks all active schedules and triggers missions that are due.
    */
   check(): void {
     const now = Date.now();
@@ -131,23 +131,23 @@ export class Scheduler {
   }
 
   private triggerSchedule(schedId: string, entry: ScheduleEntry): void {
-    // Check plan still exists and is in a triggerable state
-    const plan = this.ctx.registry.getPlan?.(entry.planId);
-    if (!plan) {
+    // Check mission still exists and is in a triggerable state
+    const mission = this.ctx.registry.getMission?.(entry.missionId);
+    if (!mission) {
       entry.enabled = false;
       return;
     }
 
-    // Only trigger draft or completed (for recurring) plans
-    if (plan.status !== "draft" && plan.status !== "completed") {
-      // Plan is active/failed/cancelled — skip this tick, will retry next
+    // Only trigger draft or completed (for recurring) missions
+    if (mission.status !== "draft" && mission.status !== "completed") {
+      // Mission is active/failed/cancelled — skip this tick, will retry next
       return;
     }
 
     // Run before hook — allows cancellation
     const hookResult = this.ctx.hooks.runBeforeSync("schedule:trigger", {
       scheduleId: schedId,
-      planId: entry.planId,
+      missionId: entry.missionId,
       expression: entry.expression,
     });
     if (hookResult.cancelled) {
@@ -157,24 +157,24 @@ export class Scheduler {
     // Emit trigger event
     this.ctx.emitter.emit("schedule:triggered", {
       scheduleId: schedId,
-      planId: entry.planId,
+      missionId: entry.missionId,
       expression: entry.expression,
     });
 
-    // Execute the plan
+    // Execute the mission
     try {
-      if (this.executePlanFn) {
-        // For recurring plans on completed state, reset to draft first
-        if (plan.status === "completed") {
-          this.ctx.registry.updatePlan?.(plan.id, { status: "draft" });
+      if (this.executeMissionFn) {
+        // For recurring missions on completed state, reset to draft first
+        if (mission.status === "completed") {
+          this.ctx.registry.updateMission?.(mission.id, { status: "draft" });
         }
-        this.executePlanFn(entry.planId);
+        this.executeMissionFn(entry.missionId);
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       this.ctx.emitter.emit("log", {
         level: "error",
-        message: `[Scheduler] Failed to execute plan ${entry.planId}: ${msg}`,
+        message: `[Scheduler] Failed to execute mission ${entry.missionId}: ${msg}`,
       });
     }
 
@@ -194,7 +194,7 @@ export class Scheduler {
     // Emit completion event
     this.ctx.emitter.emit("schedule:completed", {
       scheduleId: schedId,
-      planId: entry.planId,
+      missionId: entry.missionId,
     });
   }
 
@@ -204,8 +204,8 @@ export class Scheduler {
     return this.schedules.get(scheduleId);
   }
 
-  getScheduleByPlanId(planId: string): ScheduleEntry | undefined {
-    return this.schedules.get(`sched-${planId}`);
+  getScheduleByMissionId(missionId: string): ScheduleEntry | undefined {
+    return this.schedules.get(`sched-${missionId}`);
   }
 
   getAllSchedules(): ScheduleEntry[] {
@@ -218,6 +218,6 @@ export class Scheduler {
 
   dispose(): void {
     this.schedules.clear();
-    this.executePlanFn = undefined;
+    this.executeMissionFn = undefined;
   }
 }

@@ -6,7 +6,7 @@ import { PickerOverlay } from "../overlays/picker.js";
 import { EditorOverlay } from "../overlays/editor-page.js";
 import { ViewerOverlay } from "../overlays/viewer.js";
 import { ConfirmOverlay } from "../overlays/confirm.js";
-import type { PlanTeamData } from "../../llm/plan-generator.js";
+import type { MissionTeamData } from "../../llm/mission-generator.js";
 
 export async function cmdTeam(api: CommandAPI): Promise<void> {
   const { polpo, tui, args } = api;
@@ -226,7 +226,7 @@ export async function cmdTeam(api: CommandAPI): Promise<void> {
 
 // ── AI Team Generation ───────────────────────────────────────────────
 
-function formatTeamPreview(team: PlanTeamData[]): string {
+function formatTeamPreview(team: MissionTeamData[]): string {
   const lines: string[] = [];
   lines.push(chalk.bold(`Team (${team.length} agents)`));
   lines.push("");
@@ -264,7 +264,7 @@ async function generateTeamAction(
   tui.requestRender();
 
   try {
-    const { generateTeam } = await import("../../llm/plan-generator.js");
+    const { generateTeam } = await import("../../llm/mission-generator.js");
     const { buildTeamGenPrompt } = await import("../../llm/prompts.js");
     const { resolveModelSpec } = await import("../../llm/pi-client.js");
 
@@ -288,7 +288,7 @@ async function generateTeamAction(
 }
 
 function showTeamPreview(
-  team: PlanTeamData[],
+  team: MissionTeamData[],
   description: string,
   polpo: Orchestrator,
   tui: TUIContext,
@@ -344,7 +344,7 @@ function showTeamPreview(
   tui.showOverlay(viewer);
 }
 
-function applyTeam(team: PlanTeamData[], polpo: Orchestrator, tui: TUIContext): void {
+function applyTeam(team: MissionTeamData[], polpo: Orchestrator, tui: TUIContext): void {
   const existing = polpo.getAgents();
   const doApply = () => {
     // Remove all existing agents
@@ -383,7 +383,7 @@ function applyTeam(team: PlanTeamData[], polpo: Orchestrator, tui: TUIContext): 
 }
 
 async function refineTeamAction(
-  currentTeam: PlanTeamData[],
+  currentTeam: MissionTeamData[],
   description: string,
   feedback: string,
   polpo: Orchestrator,
@@ -394,7 +394,7 @@ async function refineTeamAction(
   tui.requestRender();
 
   try {
-    const { refineTeam } = await import("../../llm/plan-generator.js");
+    const { refineTeam } = await import("../../llm/mission-generator.js");
     const { buildTeamGenPrompt } = await import("../../llm/prompts.js");
     const { resolveModelSpec } = await import("../../llm/pi-client.js");
 

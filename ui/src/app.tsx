@@ -7,8 +7,8 @@ import { Loader2 } from "lucide-react";
 const DashboardPage = lazy(() => import("@/pages/dashboard").then(m => ({ default: m.DashboardPage })));
 const TasksPage = lazy(() => import("@/pages/tasks").then(m => ({ default: m.TasksPage })));
 const TaskDetailPage = lazy(() => import("@/pages/task-detail").then(m => ({ default: m.TaskDetailPage })));
-const PlansPage = lazy(() => import("@/pages/plans").then(m => ({ default: m.PlansPage })));
-const PlanDetailPage = lazy(() => import("@/pages/plan-detail").then(m => ({ default: m.PlanDetailPage })));
+const MissionsPage = lazy(() => import("@/pages/missions").then(m => ({ default: m.MissionsPage })));
+const MissionDetailPage = lazy(() => import("@/pages/mission-detail").then(m => ({ default: m.MissionDetailPage })));
 const AgentsPage = lazy(() => import("@/pages/agents").then(m => ({ default: m.AgentsPage })));
 const AgentDetailPage = lazy(() => import("@/pages/agent-detail").then(m => ({ default: m.AgentDetailPage })));
 const ActivityPage = lazy(() => import("@/pages/activity").then(m => ({ default: m.ActivityPage })));
@@ -36,8 +36,8 @@ export function App() {
         <Route path="dashboard" element={<Suspense fallback={<PageLoader />}><DashboardPage /></Suspense>} />
         <Route path="tasks" element={<Suspense fallback={<PageLoader />}><TasksPage /></Suspense>} />
         <Route path="tasks/:taskId" element={<Suspense fallback={<PageLoader />}><TaskDetailPage /></Suspense>} />
-        <Route path="plans" element={<Suspense fallback={<PageLoader />}><PlansPage /></Suspense>} />
-        <Route path="plans/:planId" element={<Suspense fallback={<PageLoader />}><PlanDetailPage /></Suspense>} />
+        <Route path="missions" element={<Suspense fallback={<PageLoader />}><MissionsPage /></Suspense>} />
+        <Route path="missions/:missionId" element={<Suspense fallback={<PageLoader />}><MissionDetailPage /></Suspense>} />
         <Route path="agents" element={<Suspense fallback={<PageLoader />}><AgentsPage /></Suspense>} />
         <Route path="agents/:name" element={<Suspense fallback={<PageLoader />}><AgentDetailPage /></Suspense>} />
         <Route path="activity" element={<Suspense fallback={<PageLoader />}><ActivityPage /></Suspense>} />

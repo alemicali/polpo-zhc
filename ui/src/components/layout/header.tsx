@@ -10,8 +10,8 @@ import {
 import { useTheme } from "@/hooks/use-theme";
 
 const titles: Record<string, string> = {
-  "/dashboard": "Mission Control",
-  "/plans": "Plans",
+  "/dashboard": "Dashboard",
+  "/missions": "Missions",
   "/tasks": "Tasks",
   "/agents": "Agents",
   "/activity": "Activity",
@@ -26,7 +26,7 @@ const titles: Record<string, string> = {
 
 function resolveTitle(pathname: string): string {
   if (titles[pathname]) return titles[pathname];
-  if (pathname.startsWith("/plans/")) return "Plan Detail";
+  if (pathname.startsWith("/missions/")) return "Mission Detail";
   if (pathname.startsWith("/tasks/")) return "Task Detail";
   if (pathname.startsWith("/agents/")) return "Agent Detail";
   return "Polpo";

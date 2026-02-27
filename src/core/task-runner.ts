@@ -387,35 +387,35 @@ export class TaskRunner {
       }
     } catch { /* best effort */ }
 
-    // 3. Plan context — if this task belongs to a plan, include the plan goal and sibling tasks
-    if (task.group && this.ctx.registry.getPlanByName) {
+    // 3. Mission context — if this task belongs to a mission, include the mission goal and sibling tasks
+    if (task.group && this.ctx.registry.getMissionByName) {
       try {
-        const plan = this.ctx.registry.getPlanByName(task.group);
-        const planParts: string[] = [];
+        const mission = this.ctx.registry.getMissionByName(task.group);
+        const missionParts: string[] = [];
 
-        // Original user prompt that generated this plan (the "why")
-        if (plan?.prompt) {
-          planParts.push(`Plan goal: ${plan.prompt}`);
+        // Original user prompt that generated this mission (the "why")
+        if (mission?.prompt) {
+          missionParts.push(`Mission goal: ${mission.prompt}`);
         }
 
         // Sibling tasks — just titles and statuses for awareness, not full descriptions
         const allTasks = this.ctx.registry.getAllTasks();
         const siblings = allTasks.filter(t => t.group === task.group && t.id !== task.id);
         if (siblings.length > 0) {
-          planParts.push(`Other tasks in this plan:`);
+          missionParts.push(`Other tasks in this mission:`);
           for (const s of siblings) {
             const marker = s.status === "done" ? "[done]"
               : s.status === "in_progress" ? "[in progress]"
               : s.status === "failed" ? "[failed]"
               : "[pending]";
-            planParts.push(`  ${marker} "${s.title}" → ${s.assignTo}`);
+            missionParts.push(`  ${marker} "${s.title}" → ${s.assignTo}`);
           }
         }
 
-        if (planParts.length > 0) {
-          contextParts.push(`<plan-context>\n${planParts.join("\n")}\n</plan-context>`);
+        if (missionParts.length > 0) {
+          contextParts.push(`<mission-context>\n${missionParts.join("\n")}\n</mission-context>`);
         }
-      } catch { /* best effort — plan may have been deleted */ }
+      } catch { /* best effort — mission may have been deleted */ }
     }
 
     if (contextParts.length > 0) {

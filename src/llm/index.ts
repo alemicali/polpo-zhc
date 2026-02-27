@@ -2,7 +2,7 @@ export { querySDK, querySDKText, querySDKTextDetailed, querySDKStream, querySDKS
 export type { OnProgress, QueryResult } from "./query.js";
 export { withRetry, isTransientError } from "./retry.js";
 export type { RetryOptions } from "./retry.js";
-export { buildChatSystemPrompt, buildPlanSystemPrompt, buildTaskPrepPrompt, buildTeamGenPrompt } from "./prompts.js";
+export { buildChatSystemPrompt, buildMissionSystemPrompt, buildTaskPrepPrompt, buildTeamGenPrompt } from "./prompts.js";
 export {
   discoverSkills, parseSkillFrontmatter, loadAgentSkills, assignSkillToAgent, buildSkillPrompt,
   installSkills, removeSkill, parseSkillSource, listSkillsWithAssignments,

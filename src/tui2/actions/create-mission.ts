@@ -1,18 +1,18 @@
 /**
- * Plan creation action — generates a structured plan from user prompt via LLM.
- * Uses tool-based structured output (submit_plan tool) for reliable generation.
+ * Mission creation action — generates a structured mission from user prompt via LLM.
+ * Uses tool-based structured output (submit_mission tool) for reliable generation.
  * Shows preview in viewer overlay with Execute/Edit/Save/Refine actions.
  *
- * Port of src/tui/actions/create-plan.ts for the pi-tui imperative TUI2.
+ * Port of src/tui/actions/create-mission.ts for the pi-tui imperative TUI2.
  */
 
 import type { Orchestrator } from "../../core/orchestrator.js";
 import type { TUIContext } from "../types.js";
 import type {
-  PlanData,
-  GeneratePlanResult,
+  MissionData,
+  GenerateMissionResult,
   UserAnswer,
-} from "../../llm/plan-generator.js";
+} from "../../llm/mission-generator.js";
 import chalk from "chalk";
 import { theme } from "../theme.js";
 import { kickRun } from "../format.js";
@@ -21,13 +21,13 @@ import { EditorOverlay } from "../overlays/editor-page.js";
 import { QuestionsOverlay, type Question } from "../overlays/questions.js";
 
 function slugify(s: string): string {
-  return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 30) || "plan";
+  return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 30) || "mission";
 }
 
 /**
- * Create a plan from a natural language prompt using LLM generation.
+ * Create a mission from a natural language prompt using LLM generation.
  */
-export async function createPlan(
+export async function createMission(
   prompt: string,
   polpo: Orchestrator,
   tui: TUIContext,
@@ -40,17 +40,17 @@ export async function createPlan(
   }
 
   tui.setStreaming(true);
-  tui.setProcessing(true, "Generating plan…");
+  tui.setProcessing(true, "Generating mission…");
   tui.requestRender();
 
   try {
     const {
-      generatePlanInteractive,
-      continuePlanWithAnswers,
-      planDataToJson,
-      formatPlanReadable,
-    } = await import("../../llm/plan-generator.js");
-    const { buildPlanSystemPrompt } = await import("../../llm/prompts.js");
+      generateMissionInteractive,
+      continueMissionWithAnswers,
+      missionDataToJson,
+      formatMissionReadable,
+    } = await import("../../llm/mission-generator.js");
+    const { buildMissionSystemPrompt } = await import("../../llm/prompts.js");
     const { resolveModelSpec } = await import("../../llm/pi-client.js");
 
     const state = (() => {
@@ -58,12 +58,12 @@ export async function createPlan(
       catch { return null; }
     })();
 
-    const systemPrompt = buildPlanSystemPrompt(polpo, state, polpo.getWorkDir());
-    const userPrompt = `Generate a task plan for:\n"${prompt}"`;
+    const systemPrompt = buildMissionSystemPrompt(polpo, state, polpo.getWorkDir());
+    const userPrompt = `Generate a task mission for:\n"${prompt}"`;
     const settings = polpo.getConfig()?.settings;
     const model = resolveModelSpec(settings?.orchestratorModel);
 
-    const result = await generatePlanInteractive(
+    const result = await generateMissionInteractive(
       systemPrompt,
       userPrompt,
       model,
@@ -74,21 +74,21 @@ export async function createPlan(
     tui.setProcessing(false);
     tui.setStreaming(false);
 
-    handlePlanResult(result, systemPrompt, prompt, polpo, tui, model);
+    handleMissionResult(result, systemPrompt, prompt, polpo, tui, model);
   } catch (err: unknown) {
     tui.setProcessing(false);
     tui.setStreaming(false);
     const msg = err instanceof Error ? err.message : String(err);
-    tui.logSystem(`${theme.error("✗")} Plan generation failed: ${msg}`);
+    tui.logSystem(`${theme.error("✗")} Mission generation failed: ${msg}`);
     tui.requestRender();
   }
 }
 
 /**
- * Handle a plan generation result — either show questions or plan preview.
+ * Handle a mission generation result — either show questions or mission preview.
  */
-function handlePlanResult(
-  result: GeneratePlanResult,
+function handleMissionResult(
+  result: GenerateMissionResult,
   systemPrompt: string,
   originalPrompt: string,
   polpo: Orchestrator,
@@ -98,15 +98,15 @@ function handlePlanResult(
   if (result.type === "questions") {
     showQuestions(result, systemPrompt, originalPrompt, polpo, tui, model);
   } else {
-    void showPlanPreview(result.data, originalPrompt, polpo, tui);
+    void showMissionPreview(result.data, originalPrompt, polpo, tui);
   }
 }
 
 /**
- * Show the questions overlay for user clarification, then continue plan generation.
+ * Show the questions overlay for user clarification, then continue mission generation.
  */
 function showQuestions(
-  result: Extract<GeneratePlanResult, { type: "questions" }>,
+  result: Extract<GenerateMissionResult, { type: "questions" }>,
   systemPrompt: string,
   originalPrompt: string,
   polpo: Orchestrator,
@@ -125,11 +125,11 @@ function showQuestions(
     onSubmit: async (answerMap) => {
       tui.hideOverlay();
       tui.setStreaming(true);
-      tui.setProcessing(true, "Generating plan with your answers…");
+      tui.setProcessing(true, "Generating mission with your answers…");
       tui.requestRender();
 
       try {
-        const { continuePlanWithAnswers } = await import("../../llm/plan-generator.js");
+        const { continueMissionWithAnswers } = await import("../../llm/mission-generator.js");
 
         // Convert Map<number, string[]> to UserAnswer[]
         const answers: UserAnswer[] = [];
@@ -143,7 +143,7 @@ function showQuestions(
           }
         }
 
-        const nextResult = await continuePlanWithAnswers(
+        const nextResult = await continueMissionWithAnswers(
           systemPrompt,
           result.messages,
           answers,
@@ -153,18 +153,18 @@ function showQuestions(
 
         tui.setProcessing(false);
         tui.setStreaming(false);
-        void handlePlanResult(nextResult, systemPrompt, originalPrompt, polpo, tui, model);
+        void handleMissionResult(nextResult, systemPrompt, originalPrompt, polpo, tui, model);
       } catch (err: unknown) {
         tui.setProcessing(false);
         tui.setStreaming(false);
         const msg = err instanceof Error ? err.message : String(err);
-        tui.logSystem(`${theme.error("✗")} Plan generation failed: ${msg}`);
+        tui.logSystem(`${theme.error("✗")} Mission generation failed: ${msg}`);
         tui.requestRender();
       }
     },
     onCancel: () => {
       tui.hideOverlay();
-      tui.logSystem(`${theme.warning("Plan cancelled")}`);
+      tui.logSystem(`${theme.warning("Mission cancelled")}`);
       tui.requestRender();
     },
   });
@@ -172,21 +172,21 @@ function showQuestions(
 }
 
 /**
- * Show the plan preview in a viewer overlay with Execute/Edit/Save/Refine actions.
+ * Show the mission preview in a viewer overlay with Execute/Edit/Save/Refine actions.
  */
-async function showPlanPreview(
-  planData: PlanData,
+async function showMissionPreview(
+  missionData: MissionData,
   originalPrompt: string,
   polpo: Orchestrator,
   tui: TUIContext,
 ): Promise<void> {
-  // Format plan for display using the rich formatter.
-  // formatPlanRich returns PlanSeg[][] — an array of lines, each line being an array of styled segments.
+  // Format mission for display using the rich formatter.
+  // formatMissionRich returns MissionSeg[][] — an array of lines, each line being an array of styled segments.
   // We flatten to plain text with chalk styling for the viewer.
   let content: string;
   try {
-    const { formatPlanRich } = await import("../../llm/plan-generator.js");
-    const richLines = formatPlanRich(planData, process.stdout.columns ?? 80);
+    const { formatMissionRich } = await import("../../llm/mission-generator.js");
+    const richLines = formatMissionRich(missionData, process.stdout.columns ?? 80);
     content = richLines
       .map((segs) =>
         segs.map((s) => {
@@ -200,25 +200,25 @@ async function showPlanPreview(
       .join("\n");
   } catch {
     // Fallback to JSON if formatter fails
-    content = JSON.stringify(planData, null, 2);
+    content = JSON.stringify(missionData, null, 2);
   }
 
   const viewer = new ViewerOverlay({
-    title: `Plan: ${planData.name || "generated"}`,
+    title: `Mission: ${missionData.name || "generated"}`,
     content,
     actions: [
       {
         label: "Execute",
         handler: () => {
           tui.hideOverlay();
-          executePlan(planData, originalPrompt, polpo, tui);
+          executeMission(missionData, originalPrompt, polpo, tui);
         },
       },
       {
         label: "Save draft",
         handler: () => {
           tui.hideOverlay();
-          saveDraft(planData, originalPrompt, polpo, tui);
+          saveDraft(missionData, originalPrompt, polpo, tui);
         },
       },
       {
@@ -226,25 +226,25 @@ async function showPlanPreview(
         handler: () => {
           tui.hideOverlay();
           const editor = new EditorOverlay({
-            title: "Edit Plan JSON",
-            initialText: JSON.stringify(planData, null, 2),
+            title: "Edit Mission JSON",
+            initialText: JSON.stringify(missionData, null, 2),
             tui: tui.tuiInstance,
             onSave: (text) => {
               tui.hideOverlay();
               try {
-                const edited = JSON.parse(text) as PlanData;
+                const edited = JSON.parse(text) as MissionData;
                 if (edited?.tasks?.length) {
-                  void showPlanPreview(edited, originalPrompt, polpo, tui);
+                  void showMissionPreview(edited, originalPrompt, polpo, tui);
                 } else {
-                  tui.logSystem(`${theme.error("Edited plan has no tasks")}`);
+                  tui.logSystem(`${theme.error("Edited mission has no tasks")}`);
                   tui.requestRender();
                 }
               } catch {
-                tui.logSystem(`${theme.error("Invalid JSON in edited plan")}`);
+                tui.logSystem(`${theme.error("Invalid JSON in edited mission")}`);
                 tui.requestRender();
               }
             },
-            onCancel: () => void showPlanPreview(planData, originalPrompt, polpo, tui),
+            onCancel: () => void showMissionPreview(missionData, originalPrompt, polpo, tui),
           });
           tui.showOverlay(editor);
         },
@@ -260,12 +260,12 @@ async function showPlanPreview(
             onSave: (feedback) => {
               tui.hideOverlay();
               if (!feedback.trim()) {
-                void showPlanPreview(planData, originalPrompt, polpo, tui);
+                void showMissionPreview(missionData, originalPrompt, polpo, tui);
                 return;
               }
-              refinePlan(planData, originalPrompt, feedback.trim(), polpo, tui);
+              refineMission(missionData, originalPrompt, feedback.trim(), polpo, tui);
             },
-            onCancel: () => void showPlanPreview(planData, originalPrompt, polpo, tui),
+            onCancel: () => void showMissionPreview(missionData, originalPrompt, polpo, tui),
           });
           tui.showOverlay(editor);
         },
@@ -274,33 +274,33 @@ async function showPlanPreview(
         label: "Cancel",
         handler: () => {
           tui.hideOverlay();
-          tui.logSystem(`${theme.warning("Plan cancelled")}`);
+          tui.logSystem(`${theme.warning("Mission cancelled")}`);
           tui.requestRender();
         },
       },
     ],
     onClose: () => {
       tui.hideOverlay();
-      tui.logSystem(`${theme.warning("Plan cancelled")}`);
+      tui.logSystem(`${theme.warning("Mission cancelled")}`);
       tui.requestRender();
     },
   });
   tui.showOverlay(viewer);
 }
 
-function executePlan(
-  planData: PlanData,
+function executeMission(
+  missionData: MissionData,
   prompt: string,
   polpo: Orchestrator,
   tui: TUIContext,
 ): void {
   try {
-    const json = JSON.stringify(planData);
-    const planName = planData.name ? slugify(planData.name) : undefined;
-    const plan = polpo.savePlan({ data: json, prompt, name: planName });
-    const result = polpo.executePlan(plan.id);
+    const json = JSON.stringify(missionData);
+    const missionName = missionData.name ? slugify(missionData.name) : undefined;
+    const mission = polpo.saveMission({ data: json, prompt, name: missionName });
+    const result = polpo.executeMission(mission.id);
     tui.logSystem(
-      `${theme.done("▶")} ${theme.bold(plan.name)} → ${theme.dim(`${result.tasks.length} tasks`)}`,
+      `${theme.done("▶")} ${theme.bold(mission.name)} → ${theme.dim(`${result.tasks.length} tasks`)}`,
     );
     tui.requestRender();
     kickRun(polpo);
@@ -312,16 +312,16 @@ function executePlan(
 }
 
 function saveDraft(
-  planData: PlanData,
+  missionData: MissionData,
   prompt: string,
   polpo: Orchestrator,
   tui: TUIContext,
 ): void {
   try {
-    const json = JSON.stringify(planData);
-    const planName = planData.name ? slugify(planData.name) : undefined;
-    const plan = polpo.savePlan({ data: json, prompt, status: "draft", name: planName });
-    tui.logSystem(`${theme.done("■")} ${theme.bold(plan.name)} ${theme.dim("(draft)")}`);
+    const json = JSON.stringify(missionData);
+    const missionName = missionData.name ? slugify(missionData.name) : undefined;
+    const mission = polpo.saveMission({ data: json, prompt, status: "draft", name: missionName });
+    tui.logSystem(`${theme.done("■")} ${theme.bold(mission.name)} ${theme.dim("(draft)")}`);
     tui.requestRender();
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -330,20 +330,20 @@ function saveDraft(
   }
 }
 
-async function refinePlan(
-  currentPlanData: PlanData,
+async function refineMission(
+  currentMissionData: MissionData,
   originalPrompt: string,
   feedback: string,
   polpo: Orchestrator,
   tui: TUIContext,
 ): Promise<void> {
   tui.setStreaming(true);
-  tui.setProcessing(true, "Refining plan…");
+  tui.setProcessing(true, "Refining mission…");
   tui.requestRender();
 
   try {
-    const { refinePlanStructured } = await import("../../llm/plan-generator.js");
-    const { buildPlanSystemPrompt } = await import("../../llm/prompts.js");
+    const { refineMissionStructured } = await import("../../llm/mission-generator.js");
+    const { buildMissionSystemPrompt } = await import("../../llm/prompts.js");
     const { resolveModelSpec } = await import("../../llm/pi-client.js");
 
     const state = (() => {
@@ -351,12 +351,12 @@ async function refinePlan(
       catch { return null; }
     })();
 
-    const systemPrompt = buildPlanSystemPrompt(polpo, state, polpo.getWorkDir());
+    const systemPrompt = buildMissionSystemPrompt(polpo, state, polpo.getWorkDir());
     const settings2 = polpo.getConfig()?.settings;
     const model = resolveModelSpec(settings2?.orchestratorModel);
-    const currentJson = JSON.stringify(currentPlanData);
+    const currentJson = JSON.stringify(currentMissionData);
 
-    const planData = await refinePlanStructured(
+    const missionData = await refineMissionStructured(
       systemPrompt,
       originalPrompt,
       currentJson,
@@ -368,7 +368,7 @@ async function refinePlan(
 
     tui.setProcessing(false);
     tui.setStreaming(false);
-    void showPlanPreview(planData, originalPrompt, polpo, tui);
+    void showMissionPreview(missionData, originalPrompt, polpo, tui);
   } catch (err: unknown) {
     tui.setProcessing(false);
     tui.setStreaming(false);
