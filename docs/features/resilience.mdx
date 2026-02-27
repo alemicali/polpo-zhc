@@ -128,10 +128,10 @@ Settings are configured in `.polpo/polpo.json` under the `settings` object.
 
 ## Volatile Agent Cleanup
 
-Volatile agents (scoped to a plan) are cleaned up when their plan completes. A `cleanedGroups` set prevents repeated cleanup attempts:
+Volatile agents (scoped to a mission) are cleaned up when their mission completes. A `cleanedGroups` set prevents repeated cleanup attempts:
 
-1. Plan reaches terminal state (completed/failed/cancelled)
-2. Find all volatile agents for that plan group
+1. Mission reaches terminal state (completed/failed/cancelled)
+2. Find all volatile agents for that mission group
 3. Remove them from the team
 4. Mark the group as cleaned
 

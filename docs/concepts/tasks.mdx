@@ -3,7 +3,7 @@ title: "Tasks"
 description: "The unit of work in Polpo — what they are, how they're defined, and how Polpo moves them to done."
 ---
 
-A task is a single unit of work assigned to an agent. It has a title, a description of what needs to be done, and an agent responsible for doing it. Tasks live inside plans and can depend on other tasks.
+A task is a single unit of work assigned to an agent. It has a title, a description of what needs to be done, and an agent responsible for doing it. Tasks live inside missions and can depend on other tasks.
 
 ```json
 {
@@ -68,7 +68,7 @@ When assessment fails, Polpo first tries a **fix phase** — sending the agent s
 
 ### Happy Path
 
-1. Plan is executed → tasks created as `pending`
+1. Mission is executed → tasks created as `pending`
 2. If approval gates are enabled → `awaiting_approval` → approved → `assigned`
 3. Otherwise, dependencies met → `assigned` to agent
 4. Runner spawned → `in_progress` (phase: `execution`)
@@ -109,14 +109,14 @@ When assessment fails, Polpo first tries a **fix phase** — sending the agent s
 
 ## SLA Deadline Tracking
 
-Tasks and plans can have `deadline` fields (ISO-8601 timestamps). The SLA monitor tracks these deadlines every tick cycle and emits events:
+Tasks and missions can have `deadline` fields (ISO-8601 timestamps). The SLA monitor tracks these deadlines every tick cycle and emits events:
 
 - **Warning** (`quality:sla` with `status: "warning"`) — when the configured warning threshold is reached (default: 80% of deadline elapsed)
 - **Violation** (`quality:sla` with `status: "violated"`) — when the deadline is exceeded
 
-## Quality Gates in Plans
+## Quality Gates in Missions
 
-Plans can define quality gates that block task progression. When a quality gate is configured at a specific point in a plan, subsequent tasks will not start until all preceding tasks meet the required quality threshold. See [Plans](/concepts/plans) for details.
+Missions can define quality gates that block task progression. When a quality gate is configured at a specific point in a mission, subsequent tasks will not start until all preceding tasks meet the required quality threshold. See [Missions](/concepts/missions) for details.
 
 ## Configuration
 

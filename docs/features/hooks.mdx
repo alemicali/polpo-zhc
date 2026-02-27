@@ -35,12 +35,12 @@ There is also a synchronous variant:
 | `task:fail` | `{ taskId, task, result?, reason? }` | Fired when a task reaches `failed`. |
 | `task:retry` | `{ taskId, task, attempt, maxRetries }` | Fired when a task is about to be retried. `before` can cancel the retry. |
 
-### Plan Lifecycle (2 hooks)
+### Mission Lifecycle (2 hooks)
 
 | Hook | Payload | Description |
 |------|---------|-------------|
-| `plan:execute` | `{ planId, plan, taskCount }` | Fired before a plan starts execution. `before` can cancel the plan. |
-| `plan:complete` | `{ planId, plan, allPassed, report }` | Fired when all tasks in a plan are finished. |
+| `mission:execute` | `{ missionId, mission, taskCount }` | Fired before a mission starts execution. `before` can cancel the mission. |
+| `mission:complete` | `{ missionId, mission, allPassed, report }` | Fired when all tasks in a mission are finished. |
 
 ### Assessment (2 hooks)
 
@@ -53,14 +53,14 @@ There is also a synchronous variant:
 
 | Hook | Payload | Description |
 |------|---------|-------------|
-| `quality:gate` | `{ planId, gateName, avgScore?, allPassed, tasks[] }` | Fired when a quality gate is evaluated. `tasks` includes each task's ID, title, status, and score. |
-| `quality:sla` | `{ entityId, entityType, deadline, status, percentUsed }` | Fired on SLA warning or violation. `entityType` is `"task"` or `"plan"`. `status` is `"warning"` or `"violated"`. |
+| `quality:gate` | `{ missionId, gateName, avgScore?, allPassed, tasks[] }` | Fired when a quality gate is evaluated. `tasks` includes each task's ID, title, status, and score. |
+| `quality:sla` | `{ entityId, entityType, deadline, status, percentUsed }` | Fired on SLA warning or violation. `entityType` is `"task"` or `"mission"`. `status` is `"warning"` or `"violated"`. |
 
 ### Scheduling (1 hook)
 
 | Hook | Payload | Description |
 |------|---------|-------------|
-| `schedule:trigger` | `{ scheduleId, planId, expression }` | Fired when a cron schedule triggers a plan execution. `before` can cancel the trigger. |
+| `schedule:trigger` | `{ scheduleId, missionId, expression }` | Fired when a cron schedule triggers a mission execution. `before` can cancel the trigger. |
 
 ### Orchestrator (2 hooks)
 
@@ -118,23 +118,23 @@ The orchestrator calls these methods internally:
 
 ```typescript
 // Async before — returns { cancelled, cancelReason?, data }
-const result = await hooks.runBefore("plan:execute", {
-  planId: "abc",
-  plan,
+const result = await hooks.runBefore("mission:execute", {
+  missionId: "abc",
+  mission,
   taskCount: 5,
 });
 
 if (result.cancelled) {
-  console.log(`Plan blocked: ${result.cancelReason}`);
+  console.log(`Mission blocked: ${result.cancelReason}`);
   return;
 }
 
-// ... execute the plan ...
+// ... execute the mission ...
 
 // Async after — fire-and-forget
-await hooks.runAfter("plan:complete", {
-  planId: "abc",
-  plan,
+await hooks.runAfter("mission:complete", {
+  missionId: "abc",
+  mission,
   allPassed: true,
   report,
 });
@@ -173,20 +173,20 @@ A throwing hook does **not** cancel the operation — it's treated as a hook bug
 
 ## Examples
 
-### Blocking a Plan Execution
+### Blocking a Mission Execution
 
-Prevent plans from executing during maintenance windows:
+Prevent missions from executing during maintenance windows:
 
 ```typescript
 hooks.register({
-  hook: "plan:execute",
+  hook: "mission:execute",
   phase: "before",
   priority: 10,
   name: "maintenance-window",
   handler(ctx) {
     const hour = new Date().getHours();
     if (hour >= 2 && hour < 4) {
-      ctx.cancel("Maintenance window: 2-4 AM. Plans are paused.");
+      ctx.cancel("Maintenance window: 2-4 AM. Missions are paused.");
     }
   },
 });

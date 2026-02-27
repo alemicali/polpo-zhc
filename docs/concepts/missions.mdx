@@ -1,73 +1,73 @@
 ---
-title: "Plans"
-description: "Define multi-task execution plans"
+title: "Missions"
+description: "Define multi-task execution missions"
 ---
 
-## What is a Plan?
+## What is a Mission?
 
-A **plan** is a group of related tasks that Polpo executes together. Plans are stored as JSON in `.polpo/plans/` and can include:
+A **mission** is a group of related tasks that Polpo executes together. Missions are stored as JSON in `.polpo/missions/` and can include:
 
 - Multiple tasks with dependencies
-- Volatile teams (temporary agents scoped to the plan)
+- Volatile teams (temporary agents scoped to the mission)
 - Custom assessment criteria per task
 - Quality gates that block progression until thresholds are met
 - Cron-based scheduling for recurring execution
 - Deadlines tracked by SLA monitoring
 
-## Plan Lifecycle
+## Mission Lifecycle
 
 <Frame>
-  <img src="/plan-lifecycle.svg" alt="Plan lifecycle: draft → active → completed / failed / cancelled" />
+  <img src="/mission-lifecycle.svg" alt="Mission lifecycle: draft → active → completed / failed / cancelled" />
 </Frame>
 
 | Status | Description |
 |--------|-------------|
-| `draft` | Plan created but not yet executed |
+| `draft` | Mission created but not yet executed |
 | `active` | Tasks are being processed |
 | `completed` | All tasks finished successfully |
 | `failed` | One or more tasks failed after exhausting retries |
-| `cancelled` | Plan was manually aborted |
+| `cancelled` | Mission was manually aborted |
 
-## Creating Plans
+## Creating Missions
 
-Plans are created via CLI, TUI, or API — not by editing the config file.
+Missions are created via CLI, TUI, or API — not by editing the config file.
 
 <Tabs>
   <Tab title="CLI">
     ```bash
-    # Generate a plan with AI
-    polpo plan create "Build a REST API with auth, rate limiting, and tests"
+    # Generate a mission with AI
+    polpo mission create "Build a REST API with auth, rate limiting, and tests"
 
-    # Review the plan
-    polpo plan list
-    polpo plan show <plan-id>
+    # Review the mission
+    polpo mission list
+    polpo mission show <mission-id>
 
     # Execute it
-    polpo plan execute <plan-id>
+    polpo mission execute <mission-id>
     ```
   </Tab>
 
   <Tab title="TUI">
     ```
-    /plan
+    /mission
     ```
-    The TUI plan command lets you create plans from templates or generate them with AI.
+    The TUI mission command lets you create missions from templates or generate them with AI.
   </Tab>
 
   <Tab title="HTTP API">
     ```bash
-    curl -X POST http://localhost:3000/api/v1/projects/my-project/plans \
+    curl -X POST http://localhost:3000/api/v1/projects/my-project/missions \
       -H "Content-Type: application/json" \
       -d '{"prompt": "Build a REST API with auth"}'
 
-    curl -X POST http://localhost:3000/api/v1/projects/my-project/plans/<plan-id>/execute
+    curl -X POST http://localhost:3000/api/v1/projects/my-project/missions/<mission-id>/execute
     ```
   </Tab>
 </Tabs>
 
-## Plan Task Format
+## Mission Task Format
 
-Each task inside a plan uses these fields:
+Each task inside a mission uses these fields:
 
 ```json
 {
@@ -124,12 +124,12 @@ Tasks can depend on other tasks by referencing their titles using the `dependsOn
 ```
 
 <Note>
-Dependencies are matched by **task title** within the same plan group. A task won't start until all its dependencies reach `done` status.
+Dependencies are matched by **task title** within the same mission group. A task won't start until all its dependencies reach `done` status.
 </Note>
 
 ## Volatile Teams
 
-Plans can define agents that exist only for that plan:
+Missions can define agents that exist only for that mission:
 
 ```json
 {
@@ -150,7 +150,7 @@ Plans can define agents that exist only for that plan:
 }
 ```
 
-When the plan completes (all tasks done or failed), Polpo automatically removes volatile agents. This prevents agent sprawl when running many specialized plans.
+When the mission completes (all tasks done or failed), Polpo automatically removes volatile agents. This prevents agent sprawl when running many specialized missions.
 
 ### Cleanup Modes
 
@@ -163,12 +163,12 @@ When the plan completes (all tasks done or failed), Polpo automatically removes 
 }
 ```
 
-- `on_complete`: Agents removed immediately when their plan finishes
+- `on_complete`: Agents removed immediately when their mission finishes
 - `manual`: Agents persist until explicitly removed
 
 ## Quality Gates
 
-Quality gates block plan progression until preceding tasks meet a score threshold:
+Quality gates block mission progression until preceding tasks meet a score threshold:
 
 ```json
 {
@@ -198,7 +198,7 @@ Tasks after a quality gate won't start until all gate tasks are `done` and their
 
 ## Scheduling
 
-Plans can be scheduled using cron expressions:
+Missions can be scheduled using cron expressions:
 
 ```json
 {
@@ -217,47 +217,47 @@ Plans can be scheduled using cron expressions:
 | Field | Type | Description |
 |-------|------|-------------|
 | `schedule` | string | Cron expression (e.g., `"0 2 * * *"` for daily at 2 AM) |
-| `recurring` | boolean | If `true`, the plan re-executes on each trigger. If `false` (default), it runs once at the next scheduled time. |
+| `recurring` | boolean | If `true`, the mission re-executes on each trigger. If `false` (default), it runs once at the next scheduled time. |
 
-Scheduling requires `"enableScheduler": true` in the top-level config. The `schedule:trigger` hook fires when a scheduled plan is triggered.
+Scheduling requires `"enableScheduler": true` in the top-level config. The `schedule:trigger` hook fires when a scheduled mission is triggered.
 
 ## Execution
 
-Plans can be executed via:
+Missions can be executed via:
 
 <Tabs>
   <Tab title="CLI">
     ```bash
-    polpo plan execute <plan-id>
-    polpo run    # executes all pending plans
+    polpo mission execute <mission-id>
+    polpo run    # executes all pending missions
     ```
   </Tab>
 
   <Tab title="TUI">
     ```
-    /plan
+    /mission
     ```
-    The TUI plan command lets you create plans from templates or generate them with AI.
+    The TUI mission command lets you create missions from templates or generate them with AI.
   </Tab>
 
   <Tab title="HTTP API">
     ```bash
-    curl -X POST http://localhost:3000/api/v1/projects/my-project/plans/<plan-id>/execute
+    curl -X POST http://localhost:3000/api/v1/projects/my-project/missions/<mission-id>/execute
     ```
   </Tab>
 
   <Tab title="Web UI">
-    Navigate to the Plans page and click **Execute** on a draft plan.
+    Navigate to the Missions page and click **Execute** on a draft mission.
   </Tab>
 </Tabs>
 
-## Plan Reports
+## Mission Reports
 
-When a plan completes, Polpo generates a **PlanReport** with:
+When a mission completes, Polpo generates a **MissionReport** with:
 
 ```typescript
-interface PlanReport {
-  planId: string;
+interface MissionReport {
+  missionId: string;
   group: string;
   allPassed: boolean;
   totalDuration: number;        // sum of all task durations (ms)
@@ -275,31 +275,31 @@ interface PlanReport {
 }
 ```
 
-Plan completion triggers the `plan:completed` event with the full report.
+Mission completion triggers the `mission:completed` event with the full report.
 
-## AI-Generated Plans
+## AI-Generated Missions
 
-Polpo can generate plans from natural language prompts:
+Polpo can generate missions from natural language prompts:
 
 ```bash
-polpo plan create "Build a REST API with authentication, rate limiting, and tests"
+polpo mission create "Build a REST API with authentication, rate limiting, and tests"
 ```
 
 Or interactively in the TUI:
 
 ```
-/plan
+/mission
 > Generate with AI
 > Prompt: Build a REST API with authentication, rate limiting, and tests
 ```
 
-The AI generates a plan with appropriate agents, tasks, dependencies, and expectations. You can then review, edit, and execute it.
+The AI generates a mission with appropriate agents, tasks, dependencies, and expectations. You can then review, edit, and execute it.
 
-## Editing Running Plans
+## Editing Running Missions
 
-The `/edit-plan` TUI command lets you modify active plans:
+The `/edit-mission` TUI command lets you modify active missions:
 
-- **Add tasks** to a running plan
+- **Add tasks** to a running mission
 - **Remove** pending tasks
 - **Reassign** tasks to different agents
 - **Retry** specific failed tasks

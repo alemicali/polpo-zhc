@@ -3,7 +3,7 @@
   "info": {
     "title": "Polpo API",
     "version": "1.0.0",
-    "description": "REST API for Polpo — an AI agent that manages teams of AI coding agents. Manage tasks, plans, agents, templates, skills, notifications, and approvals. For conversational interaction, use the OpenAI-compatible POST /v1/chat/completions endpoint."
+    "description": "REST API for Polpo — an AI agent that manages teams of AI coding agents. Manage tasks, missions, agents, templates, skills, notifications, and approvals. For conversational interaction, use the OpenAI-compatible POST /v1/chat/completions endpoint."
   },
   "servers": [
     {
@@ -1093,15 +1093,15 @@
         }
       }
     },
-    "/api/v1/plans": {
+    "/api/v1/missions": {
       "get": {
         "tags": [
-          "Plans"
+          "Missions"
         ],
-        "summary": "List all plans",
+        "summary": "List all missions",
         "responses": {
           "200": {
-            "description": "List of plans",
+            "description": "List of missions",
             "content": {
               "application/json": {
                 "schema": {
@@ -1129,9 +1129,9 @@
       },
       "post": {
         "tags": [
-          "Plans"
+          "Missions"
         ],
-        "summary": "Save a new plan",
+        "summary": "Save a new mission",
         "requestBody": {
           "content": {
             "application/json": {
@@ -1255,7 +1255,7 @@
         },
         "responses": {
           "201": {
-            "description": "Plan created",
+            "description": "Mission created",
             "content": {
               "application/json": {
                 "schema": {
@@ -1278,15 +1278,15 @@
         }
       }
     },
-    "/api/v1/plans/resumable": {
+    "/api/v1/missions/resumable": {
       "get": {
         "tags": [
-          "Plans"
+          "Missions"
         ],
-        "summary": "List resumable plans",
+        "summary": "List resumable missions",
         "responses": {
           "200": {
-            "description": "List of resumable plans",
+            "description": "List of resumable missions",
             "content": {
               "application/json": {
                 "schema": {
@@ -1313,25 +1313,25 @@
         }
       }
     },
-    "/api/v1/plans/{planId}": {
+    "/api/v1/missions/{missionId}": {
       "get": {
         "tags": [
-          "Plans"
+          "Missions"
         ],
-        "summary": "Get a plan by ID",
+        "summary": "Get a mission by ID",
         "parameters": [
           {
             "schema": {
               "type": "string"
             },
             "required": true,
-            "name": "planId",
+            "name": "missionId",
             "in": "path"
           }
         ],
         "responses": {
           "200": {
-            "description": "Plan details",
+            "description": "Mission details",
             "content": {
               "application/json": {
                 "schema": {
@@ -1352,7 +1352,7 @@
             }
           },
           "404": {
-            "description": "Plan not found",
+            "description": "Mission not found",
             "content": {
               "application/json": {
                 "schema": {
@@ -1381,16 +1381,16 @@
       },
       "patch": {
         "tags": [
-          "Plans"
+          "Missions"
         ],
-        "summary": "Update a plan",
+        "summary": "Update a mission",
         "parameters": [
           {
             "schema": {
               "type": "string"
             },
             "required": true,
-            "name": "planId",
+            "name": "missionId",
             "in": "path"
           }
         ],
@@ -1424,7 +1424,7 @@
         },
         "responses": {
           "200": {
-            "description": "Plan updated",
+            "description": "Mission updated",
             "content": {
               "application/json": {
                 "schema": {
@@ -1448,22 +1448,22 @@
       },
       "delete": {
         "tags": [
-          "Plans"
+          "Missions"
         ],
-        "summary": "Delete a plan",
+        "summary": "Delete a mission",
         "parameters": [
           {
             "schema": {
               "type": "string"
             },
             "required": true,
-            "name": "planId",
+            "name": "missionId",
             "in": "path"
           }
         ],
         "responses": {
           "200": {
-            "description": "Plan deleted",
+            "description": "Mission deleted",
             "content": {
               "application/json": {
                 "schema": {
@@ -1493,7 +1493,7 @@
             }
           },
           "404": {
-            "description": "Plan not found",
+            "description": "Mission not found",
             "content": {
               "application/json": {
                 "schema": {
@@ -1521,25 +1521,25 @@
         }
       }
     },
-    "/api/v1/plans/{planId}/execute": {
+    "/api/v1/missions/{missionId}/execute": {
       "post": {
         "tags": [
-          "Plans"
+          "Missions"
         ],
-        "summary": "Execute a plan",
+        "summary": "Execute a mission",
         "parameters": [
           {
             "schema": {
               "type": "string"
             },
             "required": true,
-            "name": "planId",
+            "name": "missionId",
             "in": "path"
           }
         ],
         "responses": {
           "200": {
-            "description": "Plan execution result",
+            "description": "Mission execution result",
             "content": {
               "application/json": {
                 "schema": {
@@ -1562,19 +1562,19 @@
         }
       }
     },
-    "/api/v1/plans/{planId}/resume": {
+    "/api/v1/missions/{missionId}/resume": {
       "post": {
         "tags": [
-          "Plans"
+          "Missions"
         ],
-        "summary": "Resume a plan",
+        "summary": "Resume a mission",
         "parameters": [
           {
             "schema": {
               "type": "string"
             },
             "required": true,
-            "name": "planId",
+            "name": "missionId",
             "in": "path"
           }
         ],
@@ -1595,7 +1595,7 @@
         },
         "responses": {
           "200": {
-            "description": "Plan resumed",
+            "description": "Mission resumed",
             "content": {
               "application/json": {
                 "schema": {
@@ -1618,10 +1618,10 @@
         }
       }
     },
-    "/api/v1/plans/checkpoints": {
+    "/api/v1/missions/checkpoints": {
       "get": {
         "tags": [
-          "Plans"
+          "Missions"
         ],
         "summary": "List all active checkpoints",
         "responses": {
@@ -1653,10 +1653,10 @@
         }
       }
     },
-    "/api/v1/plans/{planId}/checkpoints/{checkpointName}/resume": {
+    "/api/v1/missions/{missionId}/checkpoints/{checkpointName}/resume": {
       "post": {
         "tags": [
-          "Plans"
+          "Missions"
         ],
         "summary": "Resume a checkpoint",
         "parameters": [
@@ -1665,7 +1665,7 @@
               "type": "string"
             },
             "required": true,
-            "name": "planId",
+            "name": "missionId",
             "in": "path"
           },
           {
@@ -1737,25 +1737,25 @@
         }
       }
     },
-    "/api/v1/plans/{planId}/abort": {
+    "/api/v1/missions/{missionId}/abort": {
       "post": {
         "tags": [
-          "Plans"
+          "Missions"
         ],
-        "summary": "Abort a plan",
+        "summary": "Abort a mission",
         "parameters": [
           {
             "schema": {
               "type": "string"
             },
             "required": true,
-            "name": "planId",
+            "name": "missionId",
             "in": "path"
           }
         ],
         "responses": {
           "200": {
-            "description": "Plan aborted",
+            "description": "Mission aborted",
             "content": {
               "application/json": {
                 "schema": {
@@ -1785,7 +1785,7 @@
             }
           },
           "404": {
-            "description": "Plan not found",
+            "description": "Mission not found",
             "content": {
               "application/json": {
                 "schema": {
@@ -2212,6 +2212,100 @@
         }
       }
     },
+    "/api/v1/agents/teams": {
+      "get": {
+        "tags": [
+          "Agents"
+        ],
+        "summary": "List all teams",
+        "responses": {
+          "200": {
+            "description": "All teams",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "nullable": true
+                      }
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Agents"
+        ],
+        "summary": "Add a team",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "description": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Team added",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "added": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "added"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/agents/team": {
       "get": {
         "tags": [
@@ -2253,12 +2347,17 @@
               "schema": {
                 "type": "object",
                 "properties": {
+                  "oldName": {
+                    "type": "string",
+                    "minLength": 1
+                  },
                   "name": {
                     "type": "string",
                     "minLength": 1
                   }
                 },
                 "required": [
+                  "oldName",
                   "name"
                 ]
               }
@@ -2282,6 +2381,82 @@
                   },
                   "required": [
                     "ok"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/agents/teams/{name}": {
+      "delete": {
+        "tags": [
+          "Agents"
+        ],
+        "summary": "Remove a team",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Team removed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "removed": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "removed"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Team not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
                   ]
                 }
               }

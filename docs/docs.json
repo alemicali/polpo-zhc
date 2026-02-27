@@ -62,7 +62,7 @@
               "install/index",
               "guides/setup",
               "guides/build-your-team",
-              "guides/first-plan",
+              "guides/first-mission",
               "configuration"
             ]
           },
@@ -97,7 +97,7 @@
               "concepts/agents",
               "concepts/teams",
               "concepts/tasks",
-              "concepts/plans",
+              "concepts/missions",
               "features/memory",
               "features/sessions",
               "features/channel-gateway",
@@ -112,7 +112,7 @@
             ]
           },
           {
-            "group": "Plan Execution",
+            "group": "Mission Execution",
             "pages": [
               "features/templates",
               "features/scheduling",
@@ -269,6 +269,14 @@
     {
       "source": "/features/assessment",
       "destination": "/features/review"
+    },
+    {
+      "source": "/concepts/plans",
+      "destination": "/concepts/missions"
+    },
+    {
+      "source": "/guides/first-plan",
+      "destination": "/guides/first-mission"
     }
   ],
   "footer": {

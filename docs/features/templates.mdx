@@ -1,9 +1,9 @@
 ---
 title: "Templates"
-description: "Parameterized, reusable plan templates — define a process once, run it with different parameters."
+description: "Parameterized, reusable mission templates — define a process once, run it with different parameters."
 ---
 
-Templates are **parameterized plan templates** — JSON files that define a complete [Plan](/concepts/plans) with `{{placeholder}}` parameters. When you execute a template, Polpo substitutes your parameters, saves the result as a standard Plan, and runs it.
+Templates are **parameterized mission templates** — JSON files that define a complete [Mission](/concepts/missions) with `{{placeholder}}` parameters. When you execute a template, Polpo substitutes your parameters, saves the result as a standard Mission, and runs it.
 
 ```bash
 # Review the auth module, focusing on security
@@ -13,7 +13,7 @@ polpo template run code-review --param module=src/auth --param focus=security
 polpo template run bug-fix --param issue="Login fails when email has + character"
 ```
 
-A template is data, not code — a JSON file on disk. When executed, it becomes a regular Plan with no new runtime concepts or special execution path.
+A template is data, not code — a JSON file on disk. When executed, it becomes a regular Mission with no new runtime concepts or special execution path.
 
 ## Quick Start
 
@@ -39,17 +39,17 @@ A template is data, not code — a JSON file on disk. When executed, it becomes 
          "required": true
        }
      ],
-     "plan": {
-       "tasks": [
-         {
-           "title": "Do the thing to {{target}}",
-           "description": "Detailed instructions for the agent about what to do with {{target}}.",
-           "assignTo": "default"
-         }
-       ]
-     }
-   }
-   ```
+      "mission": {
+        "tasks": [
+          {
+            "title": "Do the thing to {{target}}",
+            "description": "Detailed instructions for the agent about what to do with {{target}}.",
+            "assignTo": "default"
+          }
+        ]
+      }
+    }
+    ```
 
 3. **Validate it**
 
@@ -84,7 +84,7 @@ The `template.json` has three required fields and one optional:
   "name": "code-review",
   "description": "Deep code review of a module: analysis, fixes, and verification",
   "parameters": [ ... ],
-  "plan": { ... }
+  "mission": { ... }
 }
 ```
 
@@ -93,7 +93,7 @@ The `template.json` has three required fields and one optional:
 | `name` | string | Yes | Template identifier (kebab-case, must match directory name) |
 | `description` | string | Yes | Human-readable summary |
 | `parameters` | array | No | Declared parameters (see below) |
-| `plan` | object | Yes | Plan body — same shape as a PlanDocument, with `{{placeholders}}` |
+| `mission` | object | Yes | Mission body — same shape as a MissionDocument, with `{{placeholders}}` |
 
 ## Parameters
 
@@ -110,7 +110,7 @@ Each parameter declares a name, type, and constraints:
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `name` | string | — | Parameter name, used as `{{name}}` in the plan |
+| `name` | string | — | Parameter name, used as `{{name}}` in the mission |
 | `description` | string | — | Human-readable explanation |
 | `type` | `"string"` \| `"number"` \| `"boolean"` | `"string"` | Value type — booleans accept `true/false/yes/no/1/0` |
 | `required` | boolean | `false` | Whether the parameter must be provided |
@@ -151,9 +151,9 @@ Constrain a parameter to specific values:
 }
 ```
 
-## Writing the Plan Template
+## Writing the Mission Template
 
-The `plan` field is a standard Plan structure — teams, tasks, dependencies, expectations, quality gates — with `{{placeholder}}` tokens wherever you want parameter substitution.
+The `mission` field is a standard Mission structure — teams, tasks, dependencies, expectations, quality gates — with `{{placeholder}}` tokens wherever you want parameter substitution.
 
 ### Teams
 
@@ -161,7 +161,7 @@ Define volatile agents specific to this template:
 
 ```json
 {
-  "plan": {
+  "mission": {
     "team": [
       {
         "name": "analyst",
@@ -185,7 +185,7 @@ You can omit the `team` field entirely if you want the template to use the proje
 
 ### Tasks with Placeholders
 
-Placeholders work in any string value within the plan:
+Placeholders work in any string value within the mission:
 
 ```json
 {
@@ -199,15 +199,15 @@ Placeholders work in any string value within the plan:
 }
 ```
 
-Placeholders work anywhere in the plan JSON — titles, descriptions, commands, file paths, even `dependsOn` references. During instantiation, Polpo serializes the plan to a string, replaces all `{{param}}` tokens, and parses it back.
+Placeholders work anywhere in the mission JSON — titles, descriptions, commands, file paths, even `dependsOn` references. During instantiation, Polpo serializes the mission to a string, replaces all `{{param}}` tokens, and parses it back.
 
 <Note>
-Every placeholder in the plan **must** correspond to a declared parameter (or have a default). Polpo will throw an error if any `{{placeholder}}` remains unreplaced after substitution.
+Every placeholder in the mission **must** correspond to a declared parameter (or have a default). Polpo will throw an error if any `{{placeholder}}` remains unreplaced after substitution.
 </Note>
 
 ### Dependencies
 
-Task dependencies work the same as in regular Plans — reference tasks by title:
+Task dependencies work the same as in regular Missions — reference tasks by title:
 
 ```json
 {
@@ -266,7 +266,7 @@ Block progression until quality thresholds are met:
 
 ```json
 {
-  "plan": {
+  "mission": {
     "qualityGates": [
       {
         "name": "analysis-quality",
@@ -301,13 +301,13 @@ When you run a template, four things happen:
 1. **Load** — the template definition is loaded from disk
 2. **Validate** — parameters are checked against declared types, enums, and required flags. Defaults are applied.
 3. **Instantiate** — all `{{placeholder}}` tokens are replaced with resolved values. The result is validated as legal JSON.
-4. **Execute** — the instantiated plan is saved via `savePlan()` and executed via `executePlan()` — from here on it's a standard Plan
+4. **Execute** — the instantiated mission is saved via `saveMission()` and executed via `executeMission()` — from here on it's a standard Mission
 
 ```
-template.json + params → validation → substitution → PlanDocument → executePlan()
+template.json + params → validation → substitution → MissionDocument → executeMission()
 ```
 
-The template system adds zero runtime overhead — once instantiated, the plan executes through the exact same path as any manually created plan. Same task lifecycle, same assessment, same quality gates, same hooks.
+The template system adds zero runtime overhead — once instantiated, the mission executes through the exact same path as any manually created mission. Same task lifecycle, same assessment, same quality gates, same hooks.
 
 ## Running Templates
 
@@ -323,7 +323,7 @@ The template system adds zero runtime overhead — once instantiated, the plan e
     # Run with parameters
     polpo template run code-review --param module=src/auth --param focus=security
 
-    # Dry run — see the instantiated plan without executing
+    # Dry run — see the instantiated mission without executing
     polpo template run code-review --param module=src/auth --dry-run
 
     # Validate a template definition
@@ -365,10 +365,10 @@ polpo template validate code-review
 
 The validator checks:
 
-- Required fields (`name`, `description`, `plan`) are present
-- The plan has at least one task
-- All `{{placeholders}}` in the plan have matching parameter declarations
-- All declared parameters are actually used somewhere in the plan
+- Required fields (`name`, `description`, `mission`) are present
+- The mission has at least one task
+- All `{{placeholders}}` in the mission have matching parameter declarations
+- All declared parameters are actually used somewhere in the mission
 
 ## Example: Full Template
 
@@ -399,7 +399,7 @@ Here's a complete template that performs a focused code review:
       "enum": ["general", "performance", "security", "readability", "types"]
     }
   ],
-  "plan": {
+  "mission": {
     "team": [
       {
         "name": "analyst",
@@ -490,22 +490,22 @@ Put templates in `~/.polpo/templates/` — they're available across all your pro
 
 If a project and user-level template share the same name, the project-level one wins. This lets teams override a personal template with a standardized version.
 
-## Templates vs Skills vs Plans
+## Templates vs Skills vs Missions
 
-| Dimension | Skills | Templates | Plans |
-|-----------|--------|-----------|-------|
+| Dimension | Skills | Templates | Missions |
+|-----------|--------|-----------|----------|
 | **Layer** | Prompt | Orchestration | Execution |
-| **Format** | Markdown (`SKILL.md`) | JSON (`template.json`) | JSON (`.polpo/plans/`) |
-| **What it does** | Injects instructions into agent's system prompt | Generates a Plan from a parameterized template | Defines tasks, agents, and dependencies to execute |
+| **Format** | Markdown (`SKILL.md`) | JSON (`template.json`) | JSON (`.polpo/missions/`) |
+| **What it does** | Injects instructions into agent's system prompt | Generates a Mission from a parameterized template | Defines tasks, agents, and dependencies to execute |
 | **Reusability** | Assigned to agents across tasks | Instantiated with different parameters | Single-use (one execution) |
-| **Runtime impact** | Affects how the agent thinks | None — becomes a standard Plan | Drives task execution |
+| **Runtime impact** | Affects how the agent thinks | None — becomes a standard Mission | Drives task execution |
 
-Skills make agents smarter. Templates make processes repeatable. Plans are the execution unit.
+Skills make agents smarter. Templates make processes repeatable. Missions are the execution unit.
 
 ## Tips
 
 - **Start simple.** A template with one task and one parameter is still useful. You can add complexity later.
 - **Use quality gates for multi-step templates.** They prevent wasted work when an early step produces poor results.
 - **Write detailed task descriptions.** The agent only sees the resolved description — make it clear what "success" looks like.
-- **Test with `--dry-run`.** The CLI's `--dry-run` flag shows the fully instantiated plan without executing, so you can verify placeholders resolve correctly.
+- **Test with `--dry-run`.** The CLI's `--dry-run` flag shows the fully instantiated mission without executing, so you can verify placeholders resolve correctly.
 - **Validate after editing.** Run `polpo template validate <name>` to catch placeholder/parameter mismatches early.

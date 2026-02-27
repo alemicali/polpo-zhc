@@ -81,7 +81,7 @@ For fine-grained control, define custom rubrics per dimension:
 
 ## Quality Gates
 
-Quality gates are checkpoints defined in plan documents that control task execution flow. A gate sits between two phases of tasks: it waits for `afterTasks` to complete, evaluates pass/fail criteria, and then either unblocks `blocksTasks` or halts the plan.
+Quality gates are checkpoints defined in mission documents that control task execution flow. A gate sits between two phases of tasks: it waits for `afterTasks` to complete, evaluates pass/fail criteria, and then either unblocks `blocksTasks` or halts the mission.
 
 <Frame>
   <img src="/quality-gate.svg" alt="Quality gate flow: Phase 1 tasks complete → quality gate (review, minScore:4) → passed → Phase 2 tasks unblocked" />
@@ -98,7 +98,7 @@ Quality gates are checkpoints defined in plan documents that control task execut
 | `requireAllPassed` | `boolean` | All `afterTasks` must have status `done` (not `failed`) |
 | `notifyChannels` | `string[]` | Notification channels to alert on pass/fail |
 
-### Gate Configuration in Plans
+### Gate Configuration in Missions
 
 ```json
 {
@@ -130,7 +130,7 @@ Quality gates are checkpoints defined in plan documents that control task execut
 
 ### Gate Evaluation
 
-Gates are evaluated by the PlanExecutor when checking if blocked tasks can proceed:
+Gates are evaluated by the MissionExecutor when checking if blocked tasks can proceed:
 
 1. Checks that all `afterTasks` are in a terminal state (done or failed)
 2. If `requireAllPassed` is set, verifies none of the `afterTasks` failed
@@ -138,9 +138,9 @@ Gates are evaluated by the PlanExecutor when checking if blocked tasks can proce
 
 Gates are evaluated at most once — after passing, they are cached and not re-evaluated.
 
-### Plan Quality Threshold
+### Mission Quality Threshold
 
-Plans can define a `qualityThreshold` — a minimum weighted average score across all completed tasks:
+Missions can define a `qualityThreshold` — a minimum weighted average score across all completed tasks:
 
 ```json
 {
@@ -157,7 +157,7 @@ If the weighted average score falls below the threshold, a `quality:threshold:fa
 
 ### Quality Metrics
 
-The QualityController aggregates metrics per entity (task, agent, or plan):
+The QualityController aggregates metrics per entity (task, agent, or mission):
 
 | Metric | Description |
 |--------|-------------|
@@ -174,9 +174,9 @@ The QualityController aggregates metrics per entity (task, agent, or plan):
 
 ## SLA Monitor
 
-The SLAMonitor tracks deadlines on tasks and plans, emitting warning and violation events as deadlines approach or pass.
+The SLAMonitor tracks deadlines on tasks and missions, emitting warning and violation events as deadlines approach or pass.
 
-The monitor runs on Polpo's tick loop, checking all active tasks and plans with deadlines at a configurable interval (default: 30 seconds).
+The monitor runs on Polpo's tick loop, checking all active tasks and missions with deadlines at a configurable interval (default: 30 seconds).
 
 <Frame>
   <img src="/sla-monitor.svg" alt="SLA monitor: task with deadline → 80% elapsed: warning → deadline passed: violated → completes in time: met" />
@@ -214,9 +214,9 @@ The `"fail"` violation action immediately transitions the task to `failed` statu
 
 | Event | Payload | Description |
 |-------|---------|-------------|
-| `quality:gate:passed` | `{ planId, gateName, avgScore? }` | A quality gate passed |
-| `quality:gate:failed` | `{ planId, gateName, reason, avgScore? }` | A quality gate failed |
-| `quality:threshold:failed` | `{ planId, avgScore, threshold }` | Plan did not meet its quality threshold |
+| `quality:gate:passed` | `{ missionId, gateName, avgScore? }` | A quality gate passed |
+| `quality:gate:failed` | `{ missionId, gateName, reason, avgScore? }` | A quality gate failed |
+| `quality:threshold:failed` | `{ missionId, avgScore, threshold }` | Mission did not meet its quality threshold |
 | `sla:warning` | `{ entityId, entityType, deadline, elapsed, remaining, percentUsed }` | Approaching deadline |
 | `sla:violated` | `{ entityId, entityType, deadline, overdueMs }` | Deadline exceeded |
 | `sla:met` | `{ entityId, entityType, deadline, marginMs }` | Completed before deadline |

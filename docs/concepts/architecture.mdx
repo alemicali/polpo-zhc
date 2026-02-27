@@ -10,7 +10,7 @@ Polpo follows a **supervisor architecture**: it manages agent lifecycles, task a
 Under the hood, Polpo is composed of four layers:
 
 1. **Interface layer** — CLI, TUI, Web UI, OpenAI-compatible chat endpoint (`/v1/chat/completions`), and REST API provide different ways to talk to Polpo
-2. **Core** — the supervisor loop, task registry, plan executor, system context (`.polpo/system-context.md`), project memory, and all the managers (assessment, approvals, escalation, scheduling, etc.)
+2. **Core** — the supervisor loop, task registry, mission executor, system context (`.polpo/system-context.md`), project memory, and all the managers (assessment, approvals, escalation, scheduling, etc.)
 3. **Runner layer** — detached subprocesses that host individual agents, communicating with Polpo via the file-based RunStore
 4. **Agent layer** — the actual AI agents (Claude, GPT, Gemini, etc.) running on the built-in engine
 
@@ -49,7 +49,7 @@ Polpo runs a **5-second tick loop** that:
 6. **Detects deadlocks** — tasks blocked on failed dependencies ([Deadlock Resolution](/features/deadlock-resolution))
 7. **Recovers orphans** — reconnects to live processes after a crash
 8. **Checks SLA deadlines** — emits warnings or violations when deadlines approach
-9. **Evaluates quality gates** — blocks plan progression until thresholds are met
+9. **Evaluates quality gates** — blocks mission progression until thresholds are met
 10. **Processes approval gates** — transitions tasks through `awaiting_approval` when required
 
 ## Detached Runners
@@ -76,12 +76,12 @@ Polpo uses a **typed event emitter** with 55+ event types organized by category:
 | `assessment:*` | started, progress, complete, corrected | Task assessment |
 | `orchestrator:*` | started, tick, deadlock, shutdown | System events |
 | `deadlock:*` | detected, resolving, resolved, unresolvable | Deadlock resolution |
-| `plan:*` | saved, executed, completed, resumed, deleted | Plan lifecycle |
+| `mission:*` | saved, executed, completed, resumed, deleted | Mission lifecycle |
 | `session:*` | created, message:added | Chat sessions |
 | `approval:*` | requested, resolved, timeout | Approval gates |
 | `sla:*` | warning, violated, met | SLA monitoring |
 | `quality:*` | gate:passed, gate:failed, threshold:failed | Quality gates |
-| `schedule:*` | triggered, created, completed | Plan scheduling |
+| `schedule:*` | triggered, created, completed | Mission scheduling |
 | `escalation:*` | triggered, resolved, human | Escalation chain |
 | `notification:*` | sent, failed | Notification delivery |
 | `log` | — | General log messages |
@@ -95,7 +95,7 @@ Events are consumed by the TUI, HTTP/SSE server, and notifications. See [Events 
 | Task Registry | File-based store (default) | Task state with atomic writes |
 | RunStore | File-based store (default) | Runner process tracking |
 | Log Store | File-based store (default) | Persistent event log |
-| Plan Store | File-based store (default) | Plan definitions and status |
+| Mission Store | File-based store (default) | Mission definitions and status |
 | Memory | File (`.polpo/memory.md`) | Project context for agents |
 | System Context | File (`.polpo/system-context.md`) | Standing instructions for Polpo (injected into every conversation) |
 | Runner configs | JSON (`.polpo/tmp/`) | Temporary config for detached runners |

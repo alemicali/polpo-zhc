@@ -95,7 +95,7 @@ When stdin is not a TTY (e.g., in CI pipelines), the wizard skips prompts and us
 # CI example
 export POLPO_MODEL=anthropic:claude-sonnet-4-6
 polpo init  # writes config non-interactively
-polpo run   # execute plans
+polpo run   # execute missions
 ```
 
 If `POLPO_MODEL` is not set, the config is written without a model and agents will fail with a clear error message asking you to configure one.

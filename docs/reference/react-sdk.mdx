@@ -114,58 +114,58 @@ const { task, isLoading, error, updateTask, deleteTask, killTask, reassessTask, 
 
 ---
 
-## usePlans
+## useMissions
 
-List plans with management actions.
+List missions with management actions.
 
 ```tsx
-const { plans, isLoading, createPlan, updatePlan, executePlan, resumePlan, abortPlan, deletePlan, refetch } = usePlans();
+const { missions, isLoading, createMission, updateMission, executeMission, resumeMission, abortMission, deleteMission, refetch } = useMissions();
 ```
 
 ### Returns
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `plans` | `Plan[]` | All plans |
+| `missions` | `Mission[]` | All missions |
 | `isLoading` | `boolean` | Initial load in progress |
 | `error` | `Error \| null` | Fetch error |
-| `createPlan` | `(opts) => Promise<Plan>` | Save new plan |
-| `updatePlan` | `(id, opts) => Promise<Plan>` | Update plan metadata |
-| `executePlan` | `(id) => Promise<{ tasks: Task[] }>` | Execute a draft plan |
-| `resumePlan` | `(id, opts?) => Promise` | Resume failed plan |
-| `abortPlan` | `(id) => Promise<{ aborted: number }>` | Abort active plan |
-| `deletePlan` | `(id) => Promise<void>` | Delete plan |
+| `createMission` | `(opts) => Promise<Mission>` | Save new mission |
+| `updateMission` | `(id, opts) => Promise<Mission>` | Update mission metadata |
+| `executeMission` | `(id) => Promise<{ tasks: Task[] }>` | Execute a draft mission |
+| `resumeMission` | `(id, opts?) => Promise` | Resume failed mission |
+| `abortMission` | `(id) => Promise<{ aborted: number }>` | Abort active mission |
+| `deleteMission` | `(id) => Promise<void>` | Delete mission |
 | `refetch` | `() => Promise<void>` | Force refetch |
 
 ---
 
-## usePlan
+## useMission
 
-Single plan with actions and completion report.
+Single mission with actions and completion report.
 
 ```tsx
-const { plan, report, isLoading, error, updatePlan, executePlan, resumePlan, abortPlan, deletePlan } = usePlan("plan-1");
+const { mission, report, isLoading, error, updateMission, executeMission, resumeMission, abortMission, deleteMission } = useMission("mission-1");
 ```
 
 ### Parameters
 
 | Param | Type | Description |
 |-------|------|-------------|
-| `planId` | string | Plan ID to subscribe to |
+| `missionId` | string | Mission ID to subscribe to |
 
 ### Returns
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `plan` | `Plan \| undefined` | Plan object |
-| `report` | `PlanReport \| undefined` | Completion report (populated from `plan:completed` SSE event) |
+| `mission` | `Mission \| undefined` | Mission object |
+| `report` | `MissionReport \| undefined` | Completion report (populated from `mission:completed` SSE event) |
 | `isLoading` | `boolean` | Initial load in progress |
 | `error` | `Error \| null` | Fetch error |
-| `updatePlan` | `(opts) => Promise<Plan>` | Update plan metadata |
-| `executePlan` | `() => Promise<{ tasks: Task[] }>` | Execute the plan |
-| `resumePlan` | `(opts?) => Promise` | Resume failed plan |
-| `abortPlan` | `() => Promise<{ aborted: number }>` | Abort active plan |
-| `deletePlan` | `() => Promise<void>` | Delete plan |
+| `updateMission` | `(opts) => Promise<Mission>` | Update mission metadata |
+| `executeMission` | `() => Promise<{ tasks: Task[] }>` | Execute the mission |
+| `resumeMission` | `(opts?) => Promise` | Resume failed mission |
+| `abortMission` | `() => Promise<{ aborted: number }>` | Abort active mission |
+| `deleteMission` | `() => Promise<void>` | Delete mission |
 
 ---
 
@@ -469,7 +469,7 @@ The SDK supports subpath exports for tree-shaking:
 
 ```tsx
 // Full import
-import { PolpoProvider, useTasks, usePlans } from "@lumea-labs/polpo-react";
+import { PolpoProvider, useTasks, useMissions } from "@lumea-labs/polpo-react";
 
 // Direct client import (no React dependency)
 import { PolpoClient } from "@lumea-labs/polpo-react/client";

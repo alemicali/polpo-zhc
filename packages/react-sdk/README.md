@@ -24,13 +24,12 @@ npm install @lumea-labs/polpo-react
 ## Quick Start
 
 ```tsx
-import { PolpoProvider, useTasks, useAgents } from '@lumea-labs/polpo-react';
+import { PolpoProvider, useTasks, useAgents, useStats } from '@lumea-labs/polpo-react';
 
 function App() {
   return (
     <PolpoProvider
-      baseURL="http://localhost:3890"
-      projectId="my-project"
+      baseUrl="http://localhost:3890"
       apiKey="optional-api-key"
     >
       <Dashboard />
@@ -39,7 +38,7 @@ function App() {
 }
 
 function Dashboard() {
-  const tasks = useTasks();
+  const { tasks } = useTasks();
   const agents = useAgents();
   const stats = useStats();
 
@@ -47,7 +46,7 @@ function Dashboard() {
     <div>
       <h1>Polpo Dashboard</h1>
       <p>Tasks: {tasks.length}</p>
-      <p>Active Agents: {stats.activeAgents}</p>
+      <p>Pending: {stats?.pending ?? 0}</p>
       <ul>
         {tasks.map(task => (
           <li key={task.id}>
@@ -68,24 +67,19 @@ Root provider component that manages connection and state.
 
 ```tsx
 <PolpoProvider
-  baseURL="http://localhost:3890"
-  projectId="my-project"
+  baseUrl="http://localhost:3890"
   apiKey="optional-key"
   autoConnect={true}
-  reconnectInterval={1000}
-  maxReconnectInterval={30000}
 >
   {children}
 </PolpoProvider>
 ```
 
 **Props**:
-- `baseURL`: OpenPolpo server URL
-- `projectId`: Project identifier
+- `baseUrl`: OpenPolpo server URL
 - `apiKey?`: Optional API key for authentication
 - `autoConnect?`: Auto-connect on mount (default: true)
-- `reconnectInterval?`: Initial reconnect delay in ms (default: 1000)
-- `maxReconnectInterval?`: Max reconnect delay in ms (default: 30000)
+- `eventFilter?`: Array of SSE event type patterns to subscribe to
 
 ### Hooks
 
@@ -94,29 +88,13 @@ Root provider component that manages connection and state.
 Access full Polpo state and methods.
 
 ```tsx
-const {
-  // State
-  tasks,
-  plans,
-  agents,
-  processes,
-  events,
-  memory,
-  logs,
+const { client, connectionStatus } = usePolpo();
 
-  // Connection
-  connected,
-  connecting,
+// connectionStatus: 'connecting' | 'connected' | 'reconnecting' | 'disconnected' | 'error'
 
-  // Methods
-  createTask,
-  updateTask,
-  retryTask,
-  createPlan,
-  sendMessage,
-  connect,
-  disconnect,
-} = usePolpo();
+// Use the client to call API methods:
+await client.createTask({ title: '...', description: '...', assignTo: 'backend-dev' });
+await client.createMission({ data: '...', name: 'my-mission' });
 ```
 
 #### useTasks(filter?)
@@ -125,31 +103,31 @@ Get all tasks with optional filtering.
 
 ```tsx
 // All tasks
-const tasks = useTasks();
+const { tasks } = useTasks();
 
 // Filtered tasks
-const pendingTasks = useTasks({ status: 'pending' });
-const agentTasks = useTasks({ agent: 'backend-dev' });
+const { tasks: pendingTasks } = useTasks({ status: 'pending' });
+const { tasks: agentTasks } = useTasks({ assignTo: 'backend-dev' });
 ```
 
-**Returns**: `Task[]`
+**Returns**: `UseTasksReturn` (includes `tasks: Task[]`, `isLoading`, `error`, `createTask`, `deleteTask`, `retryTask`, `refetch`)
 
 ```typescript
 interface Task {
   id: string;
   title: string;
   description: string;
-  status: 'pending' | 'assigned' | 'in_progress' | 'review' | 'done' | 'failed';
-  agent?: string;
-  result?: string;
-  error?: string;
+  assignTo: string;
+  status: 'draft' | 'pending' | 'awaiting_approval' | 'assigned' | 'in_progress' | 'review' | 'done' | 'failed';
+  dependsOn: string[];
+  group?: string;
+  result?: TaskResult;
   createdAt: string;
   updatedAt: string;
-  dependencies?: string[];
-  planGroup?: string;
-  retryCount?: number;
-  expectations?: Expectation[];
-  assessmentResult?: AssessmentResult;
+  expectations: TaskExpectation[];
+  retries: number;
+  maxRetries: number;
+  missionGroup?: string;
 }
 ```
 
@@ -169,36 +147,52 @@ return <div>{task.title}: {task.status}</div>;
 
 **Returns**: `Task | undefined`
 
-#### usePlans(filter?)
+#### useMissions()
 
-Get all plans with optional filtering.
+Get all missions with CRUD and execution methods.
 
 ```tsx
-const plans = usePlans();
-const activePlans = usePlans({ status: 'active' });
+const {
+  missions,
+  isLoading,
+  error,
+  createMission,
+  updateMission,
+  deleteMission,
+  executeMission,
+  resumeMission,
+  abortMission,
+  refetch,
+} = useMissions();
 ```
 
-**Returns**: `Plan[]`
+**Returns**: `UseMissionsReturn`
 
 ```typescript
-interface Plan {
-  group: string;
-  tasks: string[];
-  status: 'pending' | 'active' | 'completed' | 'failed';
+interface Mission {
+  id: string;
+  name: string;
+  data: string;
+  prompt?: string;
+  status: 'draft' | 'active' | 'paused' | 'completed' | 'failed' | 'cancelled';
+  deadline?: string;
+  schedule?: string;
+  recurring?: boolean;
+  qualityThreshold?: number;
   createdAt: string;
-  completedAt?: string;
+  updatedAt: string;
 }
 ```
 
-#### usePlan(planGroup)
+#### useMission(missionId)
 
-Get a single plan by group name.
+Get a single mission by ID.
 
 ```tsx
-const plan = usePlan('setup-project');
+const { mission, report, isLoading, executeMission, abortMission } = useMission('mission-123');
 ```
 
-**Returns**: `Plan | undefined`
+**Returns**: `UseMissionReturn` (includes `mission`, `report: MissionReport | undefined`, and action methods)
 
 #### useAgents(filter?)
 
@@ -209,15 +203,20 @@ const agents = useAgents();
 const availableAgents = useAgents({ available: true });
 ```
 
-**Returns**: `Agent[]`
+**Returns**: `AgentConfig[]`
 
 ```typescript
-interface Agent {
+interface AgentConfig {
   name: string;
-  description?: string;
-  available: boolean;
-  currentTask?: string;
+  role?: string;
+  model?: string;
+  allowedTools?: string[];
+  systemPrompt?: string;
+  skills?: string[];
+  maxTurns?: number;
+  maxConcurrency?: number;
   volatile?: boolean;
+  missionGroup?: string;
 }
 ```
 
@@ -231,8 +230,8 @@ const processes = useProcesses();
 return (
   <ul>
     {processes.map(proc => (
-      <li key={proc.agent}>
-        {proc.agent} - PID: {proc.pid} - {proc.alive ? 'Running' : 'Dead'}
+      <li key={proc.agentName}>
+        {proc.agentName} - PID: {proc.pid} - {proc.alive ? 'Running' : 'Dead'}
       </li>
     ))}
   </ul>
@@ -243,19 +242,24 @@ return (
 
 ```typescript
 interface AgentProcess {
-  agent: string;
+  agentName: string;
   pid: number;
-  sessionId?: string;
   taskId: string;
   startedAt: string;
   alive: boolean;
-  lastActivity?: AgentActivity;
+  activity: AgentActivity;
 }
 
 interface AgentActivity {
   lastTool?: string;
   lastFile?: string;
+  filesCreated: string[];
+  filesEdited: string[];
+  toolCalls: number;
+  totalTokens: number;
   lastUpdate: string;
+  summary?: string;
+  sessionId?: string;
 }
 ```
 
@@ -270,14 +274,14 @@ return (
   <ul>
     {events.map(event => (
       <li key={event.id}>
-        {event.type}: {event.timestamp}
+        {event.event}: {event.timestamp}
       </li>
     ))}
   </ul>
 );
 ```
 
-**Returns**: `PolpoEvent[]`
+**Returns**: `SSEEvent[]`
 
 #### useStats()
 
@@ -286,28 +290,28 @@ Get aggregate statistics.
 ```tsx
 const stats = useStats();
 
+if (!stats) return null;
+
 return (
   <div>
-    <p>Total Tasks: {stats.totalTasks}</p>
-    <p>Completed: {stats.completedTasks}</p>
-    <p>Failed: {stats.failedTasks}</p>
-    <p>Active Agents: {stats.activeAgents}</p>
+    <p>Pending: {stats.pending}</p>
+    <p>Running: {stats.running}</p>
+    <p>Queued: {stats.queued}</p>
+    <p>Done: {stats.done}</p>
+    <p>Failed: {stats.failed}</p>
   </div>
 );
 ```
 
-**Returns**: `Stats`
+**Returns**: `PolpoStats | null`
 
 ```typescript
-interface Stats {
-  totalTasks: number;
-  pendingTasks: number;
-  inProgressTasks: number;
-  completedTasks: number;
-  failedTasks: number;
-  activeAgents: number;
-  totalPlans: number;
-  activePlans: number;
+interface PolpoStats {
+  pending: number;
+  running: number;
+  done: number;
+  failed: number;
+  queued: number;
 }
 ```
 
@@ -335,28 +339,15 @@ const logs = useLogs(100);
 
 #### createTask(task)
 
-Create a new task.
+Create a new task via the `useTasks` hook or directly via the client.
 
 ```tsx
-const { createTask } = usePolpo();
+const { createTask } = useTasks();
 
 await createTask({
   title: 'Implement feature X',
   description: 'Add authentication to the API',
-  agent: 'backend-dev',
-});
-```
-
-#### updateTask(taskId, updates)
-
-Update an existing task.
-
-```tsx
-const { updateTask } = usePolpo();
-
-await updateTask('task-123', {
-  status: 'done',
-  result: 'Feature implemented successfully',
+  assignTo: 'backend-dev',
 });
 ```
 
@@ -365,39 +356,32 @@ await updateTask('task-123', {
 Retry a failed task.
 
 ```tsx
-const { retryTask } = usePolpo();
+const { retryTask } = useTasks();
 
 await retryTask('task-123');
 ```
 
-#### createPlan(yaml)
+#### createMission(req)
 
-Create a new plan from YAML.
+Create a new mission.
 
 ```tsx
-const { createPlan } = usePolpo();
+const { createMission } = useMissions();
 
-const yaml = `
-group: new-feature
-tasks:
-  - title: Task 1
-    agent: backend-dev
-    description: Do something
-`;
-
-await createPlan(yaml);
+await createMission({
+  data: 'tasks:\n  - title: Task 1\n    assignTo: backend-dev\n    description: Do something',
+  name: 'new-feature',
+});
 ```
 
-#### sendMessage(content, metadata?)
+#### executeMission(missionId)
 
-Send a message through the chat interface.
+Execute a mission (create tasks and start agents).
 
 ```tsx
-const { sendMessage } = usePolpo();
+const { executeMission } = useMissions();
 
-await sendMessage('Create a new task for implementing auth', {
-  targetAgent: 'backend-dev',
-});
+await executeMission('mission-123');
 ```
 
 ## Real-time Updates
@@ -405,16 +389,15 @@ await sendMessage('Create a new task for implementing auth', {
 The SDK uses Server-Sent Events (SSE) for push-based real-time updates. All hooks automatically update when the server emits events.
 
 **Event Types**:
-- `task:created`, `task:updated`, `task:assigned`, `task:completed`, `task:failed`
-- `plan:created`, `plan:started`, `plan:completed`
-- `agent:registered`, `agent:assigned`, `agent:available`
-- `process:started`, `process:stopped`, `process:activity`
-- `system:*` events
+- `task:created`, `task:transition`, `task:updated`, `task:removed`, `task:retry`, `task:fix`, `task:timeout`
+- `mission:saved`, `mission:executed`, `mission:completed`, `mission:resumed`, `mission:deleted`
+- `agent:spawned`, `agent:finished`, `agent:activity`, `agent:stale`
+- `assessment:started`, `assessment:progress`, `assessment:complete`, `assessment:corrected`
+- `orchestrator:started`, `orchestrator:tick`, `orchestrator:shutdown`
 
 **Auto-reconnect**:
-- Exponential backoff (1s → 30s)
+- Exponential backoff (`reconnectDelay` → `maxReconnectDelay`, defaults 1s → 30s)
 - Resumes from last event ID
-- Circular buffer (1000 events) for reconnection
 
 ## Authentication
 
@@ -423,8 +406,7 @@ The SDK supports two authentication methods:
 **Header-based** (preferred):
 ```tsx
 <PolpoProvider
-  baseURL="http://localhost:3890"
-  projectId="my-project"
+  baseUrl="http://localhost:3890"
   apiKey="your-api-key"
 >
 ```
@@ -439,13 +421,16 @@ Full TypeScript support with exported types:
 ```typescript
 import type {
   Task,
-  Plan,
-  Agent,
+  Mission,
+  MissionReport,
+  AgentConfig,
   AgentProcess,
-  PolpoEvent,
-  Stats,
-  CreateTaskInput,
-  UpdateTaskInput,
+  SSEEvent,
+  PolpoStats,
+  CreateTaskRequest,
+  UpdateTaskRequest,
+  CreateMissionRequest,
+  UpdateMissionRequest,
 } from '@lumea-labs/polpo-react';
 ```
 
@@ -454,11 +439,10 @@ import type {
 ### Task List with Retry
 
 ```tsx
-import { useTasks, usePolpo } from '@lumea-labs/polpo-react';
+import { useTasks } from '@lumea-labs/polpo-react';
 
 function TaskList() {
-  const tasks = useTasks();
-  const { retryTask } = usePolpo();
+  const { tasks, retryTask } = useTasks();
 
   return (
     <ul>
@@ -488,13 +472,13 @@ function AgentActivity() {
   return (
     <div>
       {processes.filter(p => p.alive).map(proc => (
-        <div key={proc.agent}>
-          <h3>{proc.agent}</h3>
+        <div key={proc.agentName}>
+          <h3>{proc.agentName}</h3>
           <p>Task: {proc.taskId}</p>
-          {proc.lastActivity && (
+          {proc.activity && (
             <>
-              <p>Tool: {proc.lastActivity.lastTool}</p>
-              <p>File: {proc.lastActivity.lastFile}</p>
+              <p>Tool: {proc.activity.lastTool}</p>
+              <p>File: {proc.activity.lastFile}</p>
             </>
           )}
         </div>
@@ -504,27 +488,27 @@ function AgentActivity() {
 }
 ```
 
-### Plan Progress
+### Mission Progress
 
 ```tsx
-import { usePlan, useTasks } from '@lumea-labs/polpo-react';
+import { useMission, useTasks } from '@lumea-labs/polpo-react';
 
-function PlanProgress({ planGroup }: { planGroup: string }) {
-  const plan = usePlan(planGroup);
-  const allTasks = useTasks();
+function MissionProgress({ missionId }: { missionId: string }) {
+  const { mission, report } = useMission(missionId);
+  const { tasks } = useTasks({ group: missionId });
 
-  if (!plan) return null;
+  if (!mission) return null;
 
-  const planTasks = allTasks.filter(t => plan.tasks.includes(t.id));
-  const completed = planTasks.filter(t => t.status === 'done').length;
-  const total = planTasks.length;
+  const completed = tasks.filter(t => t.status === 'done').length;
+  const total = tasks.length;
   const progress = total > 0 ? (completed / total) * 100 : 0;
 
   return (
     <div>
-      <h2>{planGroup}</h2>
+      <h2>{mission.name} ({mission.status})</h2>
       <progress value={completed} max={total} />
       <p>{progress.toFixed(0)}% complete ({completed}/{total})</p>
+      {report && <p>Score: {report.avgScore?.toFixed(1) ?? 'N/A'}</p>}
     </div>
   );
 }
@@ -542,7 +526,7 @@ function EventFeed() {
     <ul>
       {events.map(event => (
         <li key={event.id}>
-          <strong>{event.type}</strong>
+          <strong>{event.event}</strong>
           {' - '}
           {new Date(event.timestamp).toLocaleTimeString()}
         </li>

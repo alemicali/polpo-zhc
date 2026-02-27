@@ -18,7 +18,7 @@ description: "Complete field-by-field reference for .polpo/polpo.json"
 ```
 
 <Note>
-Plans and tasks are stored separately in `.polpo/plans/` and `.polpo/tasks/` — they are not part of the config file. Use `polpo plan create`, the TUI, or the API to manage them.
+Missions and tasks are stored separately in `.polpo/missions/` and `.polpo/tasks/` — they are not part of the config file. Use `polpo mission create`, the TUI, or the API to manage them.
 </Note>
 
 ## Agent Fields
@@ -38,8 +38,8 @@ Plans and tasks are stored separately in `.polpo/plans/` and `.polpo/tasks/` —
 | `skills` | string[] | — | Installed skill names (e.g. `"frontend-design"`) |
 | `maxTurns` | number | `150` | Max conversation turns before stopping |
 | `maxConcurrency` | number | unlimited | Max concurrent tasks for this agent |
-| `volatile` | boolean | `false` | Auto-cleanup when plan completes |
-| `planGroup` | string | — | Plan group this volatile agent belongs to |
+| `volatile` | boolean | `false` | Auto-cleanup when mission completes |
+| `missionGroup` | string | — | Mission group this volatile agent belongs to |
 | `enableBrowser` | boolean | `false` | Enable browser automation tools (18 tools, requires `agent-browser`) |
 | `browserEngine` | string | `"agent-browser"` | Browser engine: `"agent-browser"` (CLI) or `"playwright"` (persistent profiles via Playwright) |
 | `browserProfile` | string | agent name | Profile name for Playwright persistent context. Only used with `browserEngine: "playwright"` |
@@ -153,7 +153,7 @@ Vault credentials support `${ENV_VAR}` syntax — at runtime, Polpo resolves the
 
 ## Task Fields
 
-Tasks are created inside plans (via CLI, TUI, or API). Each task has these fields:
+Tasks are created inside missions (via CLI, TUI, or API). Each task has these fields:
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
@@ -161,7 +161,7 @@ Tasks are created inside plans (via CLI, TUI, or API). Each task has these field
 | `title` | string | — | **Required.** Short task title |
 | `description` | string | — | **Required.** Detailed instructions |
 | `assignTo` | string | — | **Required.** Agent name |
-| `group` | string | — | Plan group name |
+| `group` | string | — | Mission group name |
 | `dependsOn` | string[] | `[]` | Task titles this depends on |
 | `status` | TaskStatus | `"pending"` | Current status |
 | `expectations` | Expectation[] | `[]` | Assessment criteria |
@@ -212,7 +212,7 @@ Tasks are created inside plans (via CLI, TUI, or API). Each task has these field
 | `maxAssessmentRetries` | number | `1` | Max assessment retries when all reviewers fail before falling back to fix/retry |
 | `autoCorrectExpectations` | boolean | `true` | Auto-correct correctable expectations (e.g. file_exists paths) on assessment failure |
 | `defaultRetryPolicy` | RetryPolicy | — | Default retry policy for all tasks |
-| `enableVolatileTeams` | boolean | `true` | Allow volatile agents in plan `team:` sections |
+| `enableVolatileTeams` | boolean | `true` | Allow volatile agents in mission `team:` sections |
 | `volatileCleanup` | string | `"on_complete"` | `"on_complete"` or `"manual"` |
 | `maxFixAttempts` | number | `2` | Max fix attempts before full retry. During the fix phase, agents receive targeted feedback to correct specific issues instead of starting over. After `maxFixAttempts` fail, the task falls back to a full retry. See [Escalation Chain](/features/escalation). |
 | `maxQuestionRounds` | number | `2` | Max auto-answer rounds per task. When an agent asks a question, Polpo generates an answer using project context. After `maxQuestionRounds`, Q&A stops to prevent infinite loops. See [Question Detection](/features/question-detection). |
@@ -222,8 +222,8 @@ Tasks are created inside plans (via CLI, TUI, or API). Each task has these field
 | `notifications` | object | — | Notification routing configuration. See [Notifications](/features/notifications) |
 | `escalationPolicy` | object | — | Default escalation chain. See [Escalation](/features/escalation) |
 | `sla` | object | — | SLA monitoring configuration. See [Scoring](/features/scoring) |
-| `enableScheduler` | boolean | auto | Enable the scheduling engine. Default: `true` if any plan has a schedule |
-| `defaultQualityThreshold` | number | — | Default quality threshold for plans (1-5). Plans below this score are marked failed |
+| `enableScheduler` | boolean | auto | Enable the scheduling engine. Default: `true` if any mission has a schedule |
+| `defaultQualityThreshold` | number | — | Default quality threshold for missions (1-5). Missions below this score are marked failed |
 
 ## ProjectConfig Fields
 

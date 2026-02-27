@@ -3,7 +3,7 @@ title: "Notifications"
 description: "Event-driven notification routing with channels, conditions, and templates"
 ---
 
-Polpo can notify you about anything that happens — task failures, SLA warnings, plan completions. It subscribes to internal events, matches them against configurable rules, and dispatches notifications to external channels.
+Polpo can notify you about anything that happens — task failures, SLA warnings, mission completions. It subscribes to internal events, matches them against configurable rules, and dispatches notifications to external channels.
 
 ## Architecture
 
@@ -220,15 +220,15 @@ Use `testChannels()` on the NotificationRouter to verify all configured channels
 
 ## Scoped Notification Rules
 
-Global rules (configured in `settings.notifications.rules`) apply to every event by default. You can **override or extend** these rules at the **plan** and **task** level using scoped notification rules.
+Global rules (configured in `settings.notifications.rules`) apply to every event by default. You can **override or extend** these rules at the **mission** and **task** level using scoped notification rules.
 
 ### Scope hierarchy
 
 <Frame>
-  <img src="/notification-scopes.svg" alt="Notification rule scope hierarchy: global → plan-level → task-level" />
+  <img src="/notification-scopes.svg" alt="Notification rule scope hierarchy: global → mission-level → task-level" />
 </Frame>
 
-The most specific scope wins: if a task has scoped rules, those are used instead of global rules when processing events for that task. Similarly, plan-level rules override global rules for all events within that plan's execution.
+The most specific scope wins: if a task has scoped rules, those are used instead of global rules when processing events for that task. Similarly, mission-level rules override global rules for all events within that mission's execution.
 
 ### Replacement vs. inheritance
 
@@ -275,7 +275,7 @@ With `inherit: true`, the scoped rules are added on top of global rules. Both th
 
 ### Setting scoped rules via API
 
-When creating tasks or plans via the REST API, include a `notifications` field:
+When creating tasks or missions via the REST API, include a `notifications` field:
 
 ```bash
 # Task with scoped notification rules
@@ -299,8 +299,8 @@ curl -X POST http://localhost:3000/api/v1/projects/my-project/tasks \
 ```
 
 ```bash
-# Plan with scoped notification rules
-curl -X POST http://localhost:3000/api/v1/projects/my-project/plans \
+# Mission with scoped notification rules
+curl -X POST http://localhost:3000/api/v1/projects/my-project/missions \
   -H "Content-Type: application/json" \
   -d '{
     "name": "Release v2.0",
@@ -309,7 +309,7 @@ curl -X POST http://localhost:3000/api/v1/projects/my-project/plans \
       "rules": [{
         "id": "release-updates",
         "name": "Release progress",
-        "events": ["task:*", "plan:*"],
+        "events": ["task:*", "mission:*"],
         "channels": ["slack-releases"],
         "severity": "info"
       }],
@@ -323,7 +323,7 @@ curl -X POST http://localhost:3000/api/v1/projects/my-project/plans \
 When an event fires, the router resolves which rules to use:
 
 1. If the event is associated with a **task** that has `notifications`, use those rules (respecting `inherit`).
-2. Otherwise, if the event is associated with a **plan** that has `notifications`, use those rules (respecting `inherit`).
+2. Otherwise, if the event is associated with a **mission** that has `notifications`, use those rules (respecting `inherit`).
 3. Otherwise, use **global** rules from `settings.notifications.rules`.
 
 ## Send Direct API

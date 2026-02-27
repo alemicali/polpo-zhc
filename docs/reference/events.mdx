@@ -146,17 +146,17 @@ Events for task recovery after restarts.
 
 ---
 
-## Plans
+## Missions
 
-Events for plan lifecycle management.
+Events for mission lifecycle management.
 
 | Event | Description | Key Payload Fields |
 |-------|-------------|-------------------|
-| `plan:saved` | Plan created or updated | `planId`, `name`, `status: PlanStatus` |
-| `plan:executed` | Plan group started execution | `planId`, `group`, `taskCount` |
-| `plan:completed` | All tasks in a plan group finished | `planId`, `group`, `allPassed: boolean`, `report: PlanReport` |
-| `plan:resumed` | Plan resumed from a previous run | `planId`, `name`, `retried`, `pending` |
-| `plan:deleted` | Plan deleted | `planId` |
+| `mission:saved` | Mission created or updated | `missionId`, `name`, `status: MissionStatus` |
+| `mission:executed` | Mission group started execution | `missionId`, `group`, `taskCount` |
+| `mission:completed` | All tasks in a mission group finished | `missionId`, `group`, `allPassed: boolean`, `report: MissionReport` |
+| `mission:resumed` | Mission resumed from a previous run | `missionId`, `name`, `retried`, `pending` |
+| `mission:deleted` | Mission deleted | `missionId` |
 
 ---
 
@@ -177,7 +177,7 @@ Events for human-in-the-loop approval workflows.
 
 | Event | Description | Key Payload Fields |
 |-------|-------------|-------------------|
-| `approval:requested` | Approval request created | `requestId`, `gateId`, `gateName`, `taskId?`, `planId?` |
+| `approval:requested` | Approval request created | `requestId`, `gateId`, `gateName`, `taskId?`, `missionId?` |
 | `approval:resolved` | Approval resolved | `requestId`, `status: "approved" \| "rejected"`, `resolvedBy?` |
 | `approval:revised` | Task sent back for rework | `requestId`, `taskId?`, `feedback`, `revisionCount`, `resolvedBy?` |
 | `approval:timeout` | Approval timed out | `requestId`, `action: "approve" \| "reject"` |
@@ -198,37 +198,37 @@ Events for the 4-level escalation chain (agent retry, fallback agent, orchestrat
 
 ## SLA & Deadlines
 
-Events for monitoring task and plan deadlines.
+Events for monitoring task and mission deadlines.
 
 | Event | Description | Key Payload Fields |
 |-------|-------------|-------------------|
-| `sla:warning` | Approaching deadline | `entityId`, `entityType: "task" \| "plan"`, `deadline`, `elapsed`, `remaining`, `percentUsed` |
-| `sla:violated` | Deadline exceeded | `entityId`, `entityType: "task" \| "plan"`, `deadline`, `overdueMs` |
-| `sla:met` | Completed within deadline | `entityId`, `entityType: "task" \| "plan"`, `deadline`, `marginMs` |
+| `sla:warning` | Approaching deadline | `entityId`, `entityType: "task" \| "mission"`, `deadline`, `elapsed`, `remaining`, `percentUsed` |
+| `sla:violated` | Deadline exceeded | `entityId`, `entityType: "task" \| "mission"`, `deadline`, `overdueMs` |
+| `sla:met` | Completed within deadline | `entityId`, `entityType: "task" \| "mission"`, `deadline`, `marginMs` |
 
 ---
 
 ## Quality Gates
 
-Plan-level quality gate events.
+Mission-level quality gate events.
 
 | Event | Description | Key Payload Fields |
 |-------|-------------|-------------------|
-| `quality:gate:passed` | Quality gate passed | `planId`, `gateName`, `avgScore?` |
-| `quality:gate:failed` | Quality gate failed | `planId`, `gateName`, `avgScore?`, `reason` |
-| `quality:threshold:failed` | Plan average score below threshold | `planId`, `avgScore`, `threshold` |
+| `quality:gate:passed` | Quality gate passed | `missionId`, `gateName`, `avgScore?` |
+| `quality:gate:failed` | Quality gate failed | `missionId`, `gateName`, `avgScore?`, `reason` |
+| `quality:threshold:failed` | Mission average score below threshold | `missionId`, `avgScore`, `threshold` |
 
 ---
 
 ## Scheduling
 
-Events for cron-based plan scheduling.
+Events for cron-based mission scheduling.
 
 | Event | Description | Key Payload Fields |
 |-------|-------------|-------------------|
-| `schedule:triggered` | Scheduled plan triggered | `scheduleId`, `planId`, `expression` |
-| `schedule:created` | Schedule registered | `scheduleId`, `planId`, `nextRunAt?` |
-| `schedule:completed` | Scheduled run completed | `scheduleId`, `planId` |
+| `schedule:triggered` | Scheduled mission triggered | `scheduleId`, `missionId`, `expression` |
+| `schedule:created` | Schedule registered | `scheduleId`, `missionId`, `nextRunAt?` |
+| `schedule:completed` | Scheduled run completed | `scheduleId`, `missionId` |
 
 ---
 

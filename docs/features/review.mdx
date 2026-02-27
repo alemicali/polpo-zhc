@@ -145,7 +145,7 @@ When review fails, Polpo uses a multi-stage retry strategy:
 
 Sometimes the **expectations** (acceptance criteria) are wrong, not the agent's work. For example:
 
-- A test command that was incorrect in the plan
+- A test command that was incorrect in the mission
 - A file path that doesn't match the actual project structure
 - An LLM review threshold that's too strict for the task scope
 
@@ -185,7 +185,7 @@ The judge can fix test commands, file paths, and score thresholds:
 - **Original preserved** — `task.originalDescription` is never modified
 
 <Tip>
-The expectation judge is most useful when plans are AI-generated. Human-written expectations are typically more accurate, but AI-generated plans may include test commands or file paths that don't match the actual project structure.
+The expectation judge is most useful when missions are AI-generated. Human-written expectations are typically more accurate, but AI-generated missions may include test commands or file paths that don't match the actual project structure.
 </Tip>
 
 ---

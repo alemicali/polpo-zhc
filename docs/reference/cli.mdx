@@ -80,7 +80,7 @@ polpo task list [-d <path>] [--status <status>] [--group <group>]
 | Flag | Description |
 |------|-------------|
 | `--status` | Filter by task status |
-| `--group` | Filter by plan group |
+| `--group` | Filter by mission group |
 
 ### task show
 
@@ -129,30 +129,30 @@ polpo task delete <taskId> [-d <path>]
 
 ---
 
-## polpo plan
+## polpo mission
 
-Manage execution plans.
+Manage execution missions.
 
-### plan list
+### mission list
 
 ```bash
-polpo plan list [-d <path>]
+polpo mission list [-d <path>]
 ```
 
-### plan show
+### mission show
 
 ```bash
-polpo plan show <planId> [-d <path>]
+polpo mission show <missionId> [-d <path>]
 ```
 
-Shows name, status, prompt, timestamps, and raw plan data. `<planId>` accepts ID or name.
+Shows name, status, prompt, timestamps, and raw mission data. `<missionId>` accepts ID or name.
 
-### plan create
+### mission create
 
-Generate a plan from a prompt using the LLM.
+Generate a mission from a prompt using the LLM.
 
 ```bash
-polpo plan create <prompt...> [-d <path>] [--execute] [--save]
+polpo mission create <prompt...> [-d <path>] [--execute] [--save]
 ```
 
 | Flag | Description |
@@ -160,34 +160,34 @@ polpo plan create <prompt...> [-d <path>] [--execute] [--save]
 | `--execute` | Execute immediately after creation |
 | `--save` | Save as draft (default when `--execute` is not given) |
 
-### plan execute
+### mission execute
 
 ```bash
-polpo plan execute <planId> [-d <path>]
+polpo mission execute <missionId> [-d <path>]
 ```
 
-### plan resume
+### mission resume
 
 ```bash
-polpo plan resume <planId> [-d <path>] [--no-retry-failed]
+polpo mission resume <missionId> [-d <path>] [--no-retry-failed]
 ```
 
 | Flag | Description |
 |------|-------------|
 | `--no-retry-failed` | Do not retry failed tasks |
 
-### plan delete
+### mission delete
 
 ```bash
-polpo plan delete <planId> [-d <path>]
+polpo mission delete <missionId> [-d <path>]
 ```
 
-### plan abort
+### mission abort
 
-Abort all tasks in a plan group.
+Abort all tasks in a mission group.
 
 ```bash
-polpo plan abort <group> [-d <path>]
+polpo mission abort <group> [-d <path>]
 ```
 
 ---
@@ -352,7 +352,7 @@ Validates `.polpo/polpo.json`. Exits with code 0 on valid, 1 on invalid.
 
 ## polpo template
 
-Manage reusable plan templates.
+Manage reusable mission templates.
 
 ### template list
 
@@ -375,7 +375,7 @@ polpo template run <name> [-d <path>] [-p key=value...] [--dry-run]
 | Flag | Description |
 |------|-------------|
 | `-p, --param` | Parameters as `key=value` pairs (repeatable) |
-| `--dry-run` | Show the instantiated plan without executing |
+| `--dry-run` | Show the instantiated mission without executing |
 
 ### template validate
 

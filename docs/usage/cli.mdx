@@ -33,7 +33,7 @@ See [TUI Usage](/usage/tui) for details on features and commands.
 
 ## `polpo run`
 
-Execute all pending plans in headless mode.
+Execute all pending missions in headless mode.
 
 ```bash
 polpo run [options]
@@ -96,33 +96,33 @@ polpo serve [options]
 
 The server provides REST API, SSE streaming, and WebSocket support. See [Server Usage](/usage/server) for details.
 
-## `polpo plan`
+## `polpo mission`
 
-Manage execution plans.
+Manage execution missions.
 
 ```bash
-polpo plan <subcommand> [options]
+polpo mission <subcommand> [options]
 ```
 
 | Subcommand | Description |
 |------------|-------------|
-| `list` | List all plans |
-| `show <planId>` | Show plan details |
-| `create <prompt>` | Create a new plan with AI generation |
-| `execute <planId>` | Execute a plan (create and run its tasks) |
-| `resume <planId>` | Resume a paused or failed plan |
-| `delete <planId>` | Delete a plan |
-| `abort <planId>` | Abort all tasks in a plan |
+| `list` | List all missions |
+| `show <missionId>` | Show mission details |
+| `create <prompt>` | Create a new mission with AI generation |
+| `execute <missionId>` | Execute a mission (create and run its tasks) |
+| `resume <missionId>` | Resume a paused or failed mission |
+| `delete <missionId>` | Delete a mission |
+| `abort <missionId>` | Abort all tasks in a mission |
 
 ```bash
-# Generate a plan from a prompt
-polpo plan create "Build a REST API with auth and tests"
+# Generate a mission from a prompt
+polpo mission create "Build a REST API with auth and tests"
 
-# List plans
-polpo plan list
+# List missions
+polpo mission list
 
-# Execute a specific plan
-polpo plan execute <plan-id>
+# Execute a specific mission
+polpo mission execute <mission-id>
 ```
 
 ## `polpo task`
@@ -160,7 +160,7 @@ polpo team <subcommand> [options]
 
 ## `polpo template`
 
-Manage and execute reusable [plan templates](/features/templates).
+Manage and execute reusable [mission templates](/features/templates).
 
 ```bash
 polpo template <subcommand> [options]
@@ -169,7 +169,7 @@ polpo template <subcommand> [options]
 | Subcommand | Description |
 |------------|-------------|
 | `list` | List all available templates |
-| `show <name>` | Show template details, parameters, and plan body |
+| `show <name>` | Show template details, parameters, and mission body |
 | `run <name>` | Execute a template with parameters |
 | `validate <name>` | Validate a template definition |
 
@@ -183,13 +183,13 @@ polpo template run <name> [options]
 |--------|---------|-------------|
 | `-d, --dir <path>` | `.` | Working directory |
 | `-p, --param <key=value...>` | — | Parameters as `key=value` pairs (repeatable) |
-| `--dry-run` | `false` | Show the instantiated plan without executing |
+| `--dry-run` | `false` | Show the instantiated mission without executing |
 
 ```bash
 # Run a code review on the auth module
 polpo template run code-review --param module=src/auth --param focus=security
 
-# Preview what the plan would look like
+# Preview what the mission would look like
 polpo template run code-review --param module=src/auth --dry-run
 ```
 

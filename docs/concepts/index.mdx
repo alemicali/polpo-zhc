@@ -1,6 +1,6 @@
 ---
 title: "Core Concepts"
-description: "Agents, teams, tasks, plans, assessment, sessions, and memory — the building blocks of Polpo."
+description: "Agents, teams, tasks, missions, assessment, sessions, and memory — the building blocks of Polpo."
 ---
 
 Polpo is an AI agent that manages a team of other AI agents. You talk to Polpo, and it plans, delegates, reviews, and delivers. Here are the core primitives.
@@ -39,7 +39,7 @@ Every Polpo project has a **team** — the group of agents available to work on 
 }
 ```
 
-Plans can also define **volatile agents** — temporary team members that exist only for the duration of that plan and are cleaned up automatically.
+Missions can also define **volatile agents** — temporary team members that exist only for the duration of that mission and are cleaned up automatically.
 
 See [Teams](/concepts/teams) for management, volatile teams, and runtime API.
 
@@ -57,9 +57,9 @@ Tasks can also pass through `awaiting_approval` (when [approval gates](/features
 
 See [Tasks](/concepts/tasks) for states, phases, and transitions.
 
-## Plans
+## Missions
 
-A plan is a group of tasks with dependencies. You can ask Polpo to generate one from a description, or define them as JSON files in `.polpo/plans/`. Polpo resolves the dependency graph, parallelizes what it can, and sequences the rest.
+A mission is a group of tasks with dependencies. You can ask Polpo to generate one from a description, or define them as JSON files in `.polpo/missions/`. Polpo resolves the dependency graph, parallelizes what it can, and sequences the rest.
 
 ```json
 {
@@ -72,9 +72,9 @@ A plan is a group of tasks with dependencies. You can ask Polpo to generate one 
 }
 ```
 
-Plans can include [quality gates](/features/scoring), [checkpoints](/features/checkpoints), [scheduling](/features/scheduling), deadlines, and [volatile teams](/concepts/teams) scoped to the plan.
+Missions can include [quality gates](/features/scoring), [checkpoints](/features/checkpoints), [scheduling](/features/scheduling), deadlines, and [volatile teams](/concepts/teams) scoped to the mission.
 
-See [Plans](/concepts/plans) for the full format and lifecycle.
+See [Missions](/concepts/missions) for the full format and lifecycle.
 
 ## Assessment
 

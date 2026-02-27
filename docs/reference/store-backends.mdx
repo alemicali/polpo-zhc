@@ -3,7 +3,7 @@ title: "Store Backends"
 description: "File and SQLite persistence backends for Polpo"
 ---
 
-Polpo persists tasks, runs, plans, sessions, memory, logs, notifications, and approval state using a pluggable store layer. All stores implement a common interface and can be swapped via configuration.
+Polpo persists tasks, runs, missions, sessions, memory, logs, notifications, and approval state using a pluggable store layer. All stores implement a common interface and can be swapped via configuration.
 
 ## TaskStore Interface
 
@@ -32,14 +32,14 @@ interface TaskStore {
   // Lifecycle
   close?(): void;
 
-  // Plan persistence (optional)
-  savePlan?(plan: Omit<Plan, "id" | "createdAt" | "updatedAt">): Plan;
-  getPlan?(planId: string): Plan | undefined;
-  getPlanByName?(name: string): Plan | undefined;
-  getAllPlans?(): Plan[];
-  updatePlan?(planId: string, updates: Partial<Omit<Plan, "id">>): Plan;
-  deletePlan?(planId: string): boolean;
-  nextPlanName?(): string;
+  // Mission persistence (optional)
+  saveMission?(mission: Omit<Mission, "id" | "createdAt" | "updatedAt">): Mission;
+  getMission?(missionId: string): Mission | undefined;
+  getMissionByName?(name: string): Mission | undefined;
+  getAllMissions?(): Mission[];
+  updateMission?(missionId: string, updates: Partial<Omit<Mission, "id">>): Mission;
+  deleteMission?(missionId: string): boolean;
+  nextMissionName?(): string;
 }
 ```
 
@@ -55,7 +55,7 @@ File-based stores persist data as individual files in the `.polpo/` directory. T
 
 | Store | Purpose | Location |
 |-------|---------|----------|
-| `FileTaskStore` | Tasks and plans | `.polpo/tasks/<id>.json` + `.polpo/plans/<id>.json` |
+| `FileTaskStore` | Tasks and missions | `.polpo/tasks/<id>.json` + `.polpo/missions/<id>.json` |
 | `FileRunStore` | Execution run history | `.polpo/runs/` |
 | `FileMemoryStore` | Project memory | `.polpo/memory.md` |
 | `FileLogStore` | Event log persistence | `.polpo/logs/` |
@@ -63,15 +63,15 @@ File-based stores persist data as individual files in the `.polpo/` directory. T
 | `FileApprovalStore` | Approval gate state | `.polpo/approvals.json` |
 | `FileNotificationStore` | Notification records | `.polpo/notifications.json` |
 
-The `FileTaskStore` uses a multi-file layout: each task and plan is stored as a separate JSON file, plus a `_meta.json` metadata file.
+The `FileTaskStore` uses a multi-file layout: each task and mission is stored as a separate JSON file, plus a `_meta.json` metadata file.
 
 ```
 .polpo/
 ├── tasks/
 │   ├── <taskId>.json
 │   └── ...
-├── plans/
-│   ├── <planId>.json
+├── missions/
+│   ├── <missionId>.json
 │   └── ...
 └── _meta.json
 ```
@@ -85,7 +85,7 @@ SQLite stores use an embedded database for higher concurrency and better query p
 
 | Store | Purpose | Location |
 |-------|---------|----------|
-| `SqliteTaskStore` | Tasks and plans | `.polpo/state.db` |
+| `SqliteTaskStore` | Tasks and missions | `.polpo/state.db` |
 | `SqliteRunStore` | Execution run history | `.polpo/state.db` |
 | `SqliteSessionStore` | Chat sessions | `.polpo/state.db` |
 | `SqliteNotificationStore` | Notification records | `.polpo/state.db` |

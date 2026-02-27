@@ -77,12 +77,12 @@ Gates are configured under `settings.approvalGates` as an array:
 
 ## Auto Gates
 
-Auto gates evaluate a condition expression against the hook payload. The expression has access to `data`, `task`, and `plan` variables.
+Auto gates evaluate a condition expression against the hook payload. The expression has access to `data`, `task`, and `mission` variables.
 
 ```json
 {
-  "id": "block-failed-plans",
-  "name": "Block tasks in failed plans",
+  "id": "block-failed-missions",
+  "name": "Block tasks in failed missions",
   "handler": "auto",
   "hook": "task:assign",
   "condition": {
@@ -161,7 +161,7 @@ Pending approvals survive orchestrator restarts. On startup, the ApprovalManager
 Approval requests are persisted via the `ApprovalStore` interface. The default implementation (`FileApprovalStore`) writes to `.polpo/approvals.json`. Each request tracks:
 
 - Gate ID and name
-- Related task and plan IDs
+- Related task and mission IDs
 - Status (`pending`, `approved`, `rejected`, `revised`, `timeout`)
 - Timestamps for creation and resolution
 - Who resolved it and optional notes
@@ -170,7 +170,7 @@ Approval requests are persisted via the `ApprovalStore` interface. The default i
 
 | Event | Payload | Description |
 |-------|---------|-------------|
-| `approval:requested` | `{ requestId, gateId, gateName, taskId, planId }` | A new approval request was created |
+| `approval:requested` | `{ requestId, gateId, gateName, taskId, missionId }` | A new approval request was created |
 | `approval:resolved` | `{ requestId, status, resolvedBy }` | Request was approved or rejected |
 | `approval:revised` | `{ requestId, taskId, feedback, revisionCount, resolvedBy }` | Request was revised — task sent back for rework |
 | `approval:timeout` | `{ requestId, action }` | Request timed out; `action` is the applied timeout action |

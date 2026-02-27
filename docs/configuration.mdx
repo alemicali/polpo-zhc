@@ -34,7 +34,7 @@ Polpo is configured through a JSON file at `.polpo/polpo.json` in your project d
 ```
 
 <Note>
-Plans and tasks are managed dynamically via the TUI, CLI, or API. They are stored separately in `.polpo/plans/` and `.polpo/tasks/` — **not** in the config file.
+Missions and tasks are managed dynamically via the TUI, CLI, or API. They are stored separately in `.polpo/missions/` and `.polpo/tasks/` — **not** in the config file.
 </Note>
 
 ## Agents
@@ -62,44 +62,44 @@ Each agent entry defines a worker that can be assigned tasks. You specify a `nam
 
 Agents support many additional options like `allowedTools`, `allowedPaths`, `enableBrowser`, `skills`, and more. See [Configuration Reference](/reference/config) for the full field list.
 
-## Creating Plans
+## Creating Missions
 
-Plans are created via the CLI or TUI — not by editing the config file:
+Missions are created via the CLI or TUI — not by editing the config file:
 
 <Tabs>
   <Tab title="CLI">
     ```bash
-    # AI-generated plan from a prompt
-    polpo plan create "Build a REST API with auth and tests"
+    # AI-generated mission from a prompt
+    polpo mission create "Build a REST API with auth and tests"
 
-    # List and inspect plans
-    polpo plan list
-    polpo plan show <plan-id>
+    # List and inspect missions
+    polpo mission list
+    polpo mission show <mission-id>
 
-    # Execute a plan
-    polpo plan execute <plan-id>
+    # Execute a mission
+    polpo mission execute <mission-id>
     ```
   </Tab>
   <Tab title="TUI">
     ```
-    /plan
+    /mission
     ```
-    The TUI plan command lets you create plans from templates or generate them with AI.
+    The TUI mission command lets you create missions from templates or generate them with AI.
   </Tab>
   <Tab title="HTTP API">
     ```bash
-    # Create a plan
-    curl -X POST http://localhost:3000/api/v1/projects/my-project/plans \
+    # Create a mission
+    curl -X POST http://localhost:3000/api/v1/projects/my-project/missions \
       -H "Content-Type: application/json" \
       -d '{"prompt": "Build a REST API with auth"}'
 
-    # Execute a plan
-    curl -X POST http://localhost:3000/api/v1/projects/my-project/plans/<plan-id>/execute
+    # Execute a mission
+    curl -X POST http://localhost:3000/api/v1/projects/my-project/missions/<mission-id>/execute
     ```
   </Tab>
 </Tabs>
 
-Each plan contains tasks with these key fields:
+Each mission contains tasks with these key fields:
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -109,7 +109,7 @@ Each plan contains tasks with these key fields:
 | `dependsOn` | string[] | Titles of tasks that must finish first |
 | `expectations` | array | Assessment criteria |
 
-Plans can also define volatile teams (agents scoped to a single plan) and quality gates. See [Plans & Dependencies](/concepts/plans) for details on plan structure.
+Missions can also define volatile teams (agents scoped to a single mission) and quality gates. See [Missions & Dependencies](/concepts/missions) for details on mission structure.
 
 ## Settings
 

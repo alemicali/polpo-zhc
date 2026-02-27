@@ -1,9 +1,9 @@
 ---
 title: "Checkpoints"
-description: "Planned stopping points in a plan — pause execution, get notified, review the state, resume when ready."
+description: "Planned stopping points in a mission — pause execution, get notified, review the state, resume when ready."
 ---
 
-Checkpoints are **planned stopping points** inside a plan. When a checkpoint is reached, the plan pauses, sends notifications, and waits for you to explicitly resume it. Nothing happens automatically — the plan sits in `paused` status until you decide to continue.
+Checkpoints are **planned stopping points** inside a mission. When a checkpoint is reached, the mission pauses, sends notifications, and waits for you to explicitly resume it. Nothing happens automatically — the mission sits in `paused` status until you decide to continue.
 
 This is the human-in-the-loop mechanism for reviewing intermediate results before proceeding with later tasks.
 
@@ -11,16 +11,16 @@ This is the human-in-the-loop mechanism for reviewing intermediate results befor
 
 | | Checkpoints | Approval Gates | Quality Gates |
 |---|---|---|---|
-| **What it does** | Pauses the plan at a defined point | Pauses a task and asks approve/reject | Blocks tasks until a score threshold is met |
-| **Scope** | Plan-level | Task-level | Plan-level (group of tasks) |
+| **What it does** | Pauses the mission at a defined point | Pauses a task and asks approve/reject | Blocks tasks until a score threshold is met |
+| **Scope** | Mission-level | Task-level | Mission-level (group of tasks) |
 | **Trigger** | Always — when `afterTasks` complete | Conditional — when a hook fires and condition matches | Automatic — when `afterTasks` complete |
 | **Resolution** | Manual resume (no decision needed) | Approve, reject, or revise (decision required) | Automatic — passes or fails based on scores |
-| **Plan status** | `paused` | Stays `active` (task is `awaiting_approval`) | Stays `active` (tasks are blocked) |
+| **Mission status** | `paused` | Stays `active` (task is `awaiting_approval`) | Stays `active` (tasks are blocked) |
 | **Use case** | "Stop here so I can review before continuing" | "Should this task proceed?" | "Is the quality good enough to continue?" |
 
 ## Quick Start
 
-Add a `checkpoints` array to your plan:
+Add a `checkpoints` array to your mission:
 
 ```json
 {
@@ -41,13 +41,13 @@ Add a `checkpoints` array to your plan:
 }
 ```
 
-When `Analyze codebase` completes, the plan pauses. You get a Slack notification. You review the analysis output. When you're satisfied, you resume the checkpoint and `Apply refactoring` starts.
+When `Analyze codebase` completes, the mission pauses. You get a Slack notification. You review the analysis output. When you're satisfied, you resume the checkpoint and `Apply refactoring` starts.
 
 ## Checkpoint Fields
 
 | Field | Type | Required | Description |
 |-------|------|:--------:|-------------|
-| `name` | string | Yes | Unique name within the plan (used in events and API) |
+| `name` | string | Yes | Unique name within the mission (used in events and API) |
 | `afterTasks` | string[] | Yes | Tasks that must complete before the checkpoint triggers |
 | `blocksTasks` | string[] | Yes | Tasks that are blocked until the checkpoint is resumed |
 | `notifyChannels` | string[] | No | Notification channels to alert when the checkpoint is reached |
@@ -55,26 +55,26 @@ When `Analyze codebase` completes, the plan pauses. You get a Slack notification
 
 ## Resuming a Checkpoint
 
-When a checkpoint is active, the plan shows status `paused`. Resume it through any interface:
+When a checkpoint is active, the mission shows status `paused`. Resume it through any interface:
 
 <Tabs>
   <Tab title="HTTP API">
     ```bash
     # List active checkpoints
-    curl http://localhost:3000/api/v1/projects/my-project/plans/checkpoints
+    curl http://localhost:3000/api/v1/projects/my-project/missions/checkpoints
 
     # Resume a checkpoint
-    curl -X POST http://localhost:3000/api/v1/projects/my-project/plans/{planId}/checkpoints/review-analysis/resume
+    curl -X POST http://localhost:3000/api/v1/projects/my-project/missions/{missionId}/checkpoints/review-analysis/resume
     ```
   </Tab>
 
   <Tab title="CLI">
     ```bash
     # Show active checkpoints
-    polpo plan checkpoints
+    polpo mission checkpoints
 
     # Resume
-    polpo plan checkpoint resume my-plan review-analysis
+    polpo mission checkpoint resume my-mission review-analysis
     ```
   </Tab>
 
@@ -86,9 +86,9 @@ When a checkpoint is active, the plan shows status `paused`. Resume it through a
   </Tab>
 </Tabs>
 
-After resume, the plan transitions back to `active` and the blocked tasks become eligible for execution.
+After resume, the mission transitions back to `active` and the blocked tasks become eligible for execution.
 
-## Plan Status Lifecycle
+## Mission Status Lifecycle
 
 ```
 draft → active → paused → active → paused → active → completed
@@ -97,7 +97,7 @@ draft → active → paused → active → paused → active → completed
                reached              reached
 ```
 
-A plan can hit multiple checkpoints. Each one pauses the plan, and each resume returns it to `active`. The plan only reaches `completed` when all tasks are done (and all checkpoints have been passed).
+A mission can hit multiple checkpoints. Each one pauses the mission, and each resume returns it to `active`. The mission only reaches `completed` when all tasks are done (and all checkpoints have been passed).
 
 ## Examples
 
@@ -155,7 +155,7 @@ Two checkpoints: one before staging, one before production. Each requires explic
 
 ### Combining with quality gates
 
-Checkpoints and quality gates can coexist in the same plan. Quality gates are automatic (they check scores), checkpoints are manual (they always pause):
+Checkpoints and quality gates can coexist in the same mission. Quality gates are automatic (they check scores), checkpoints are manual (they always pause):
 
 ```json
 {
@@ -188,7 +188,7 @@ Here, `Write tests` is blocked by a quality gate (automatic — checks implement
 
 ## Notifications
 
-If `notifyChannels` is set on a checkpoint, Polpo automatically registers notification rules for `checkpoint:reached` and `checkpoint:resumed` events. The notification includes the checkpoint name, message, and the plan/task context.
+If `notifyChannels` is set on a checkpoint, Polpo automatically registers notification rules for `checkpoint:reached` and `checkpoint:resumed` events. The notification includes the checkpoint name, message, and the mission/task context.
 
 See [Notifications](/features/notifications) for channel configuration.
 
@@ -196,8 +196,8 @@ See [Notifications](/features/notifications) for channel configuration.
 
 | Event | When | Payload |
 |-------|------|---------|
-| `checkpoint:reached` | A checkpoint is triggered (all `afterTasks` done) | `planId`, `group`, `checkpointName`, `message`, `afterTasks`, `blocksTasks`, `reachedAt` |
-| `checkpoint:resumed` | A checkpoint is manually resumed | `planId`, `group`, `checkpointName` |
+| `checkpoint:reached` | A checkpoint is triggered (all `afterTasks` done) | `missionId`, `group`, `checkpointName`, `message`, `afterTasks`, `blocksTasks`, `reachedAt` |
+| `checkpoint:resumed` | A checkpoint is manually resumed | `missionId`, `group`, `checkpointName` |
 
 ## Checkpoints in Templates
 

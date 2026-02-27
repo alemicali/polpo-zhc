@@ -1,6 +1,6 @@
 ---
 title: "Writing Templates"
-description: "Step-by-step guide to creating custom reusable plan templates."
+description: "Step-by-step guide to creating custom reusable mission templates."
 ---
 
 This guide walks you through creating a custom template from scratch. If you haven't read the [Templates](/features/templates) page yet, start there for the big picture.
@@ -29,15 +29,15 @@ This guide walks you through creating a custom template from scratch. If you hav
          "required": true
        }
      ],
-     "plan": {
-       "tasks": [
-         {
-           "title": "Do the thing to {{target}}",
-           "description": "Detailed instructions for the agent about what to do with {{target}}.",
-           "assignTo": "default"
-         }
-       ]
-     }
+      "mission": {
+        "tasks": [
+          {
+            "title": "Do the thing to {{target}}",
+            "description": "Detailed instructions for the agent about what to do with {{target}}.",
+            "assignTo": "default"
+          }
+        ]
+      }
    }
    ```
 
@@ -66,11 +66,11 @@ Every template has three required fields and one optional:
   "name": "kebab-case-name",
   "description": "Human-readable description",
   "parameters": [],
-  "plan": {}
+  "mission": {}
 }
 ```
 
-The `name` must match the directory name. The `plan` field is a standard [PlanDocument](/concepts/plans) — teams, tasks, dependencies, expectations, quality gates — with `{{placeholder}}` tokens for parameterization.
+The `name` must match the directory name. The `mission` field is a standard [MissionDocument](/concepts/missions) — teams, tasks, dependencies, expectations, quality gates — with `{{placeholder}}` tokens for parameterization.
 
 ## Designing Parameters
 
@@ -103,9 +103,9 @@ Good parameters make templates flexible without making them complicated. Some gu
 }
 ```
 
-## Writing the Plan Template
+## Writing the Mission Template
 
-The `plan` field is where the real work happens. It uses the same structure as a regular Plan, but with `{{placeholders}}` wherever you want parameter substitution.
+The `mission` field is where the real work happens. It uses the same structure as a regular Mission, but with `{{placeholders}}` wherever you want parameter substitution.
 
 ### Teams
 
@@ -113,7 +113,7 @@ Define volatile agents specific to this template:
 
 ```json
 {
-  "plan": {
+  "mission": {
     "team": [
       {
         "name": "analyst",
@@ -137,7 +137,7 @@ You can omit the `team` field entirely if you want the template to use the proje
 
 ### Tasks with Placeholders
 
-Placeholders work in any string value within the plan:
+Placeholders work in any string value within the mission:
 
 ```json
 {
@@ -157,7 +157,7 @@ Placeholders in `dependsOn` must match the **resolved** title of the dependency.
 
 ### Dependencies
 
-Task dependencies work the same as in regular Plans — reference tasks by title:
+Task dependencies work the same as in regular Missions — reference tasks by title:
 
 ```json
 {
@@ -212,7 +212,7 @@ Block progression until quality thresholds are met:
 
 ```json
 {
-  "plan": {
+  "mission": {
     "qualityGates": [
       {
         "name": "analysis-quality",
@@ -255,7 +255,7 @@ Here's a complete template that performs a focused code review:
       "enum": ["general", "performance", "security", "readability", "types"]
     }
   ],
-  "plan": {
+  "mission": {
     "team": [
       {
         "name": "analyst",
@@ -327,10 +327,10 @@ polpo template validate code-review
 
 The validator checks:
 
-- Required fields (`name`, `description`, `plan`) are present
-- The plan has at least one task
-- All `{{placeholders}}` in the plan have matching parameter declarations
-- All declared parameters are actually used somewhere in the plan
+- Required fields (`name`, `description`, `mission`) are present
+- The mission has at least one task
+- All `{{placeholders}}` in the mission have matching parameter declarations
+- All declared parameters are actually used somewhere in the mission
 
 ## Sharing Templates
 
@@ -351,5 +351,5 @@ If a project and user-level template share the same name, the project-level one 
 - **Start simple.** A template with one task and one parameter is still useful. You can add complexity later.
 - **Use quality gates for multi-step templates.** They prevent wasted work when an early step produces poor results.
 - **Write detailed task descriptions.** The agent only sees the resolved description — make it clear what "success" looks like.
-- **Test with `--dry-run`.** The CLI's `--dry-run` flag shows the fully instantiated plan without executing, so you can verify placeholders resolve correctly.
+- **Test with `--dry-run`.** The CLI's `--dry-run` flag shows the fully instantiated mission without executing, so you can verify placeholders resolve correctly.
 - **Validate after editing.** Run `polpo template validate <name>` to catch placeholder/parameter mismatches early.

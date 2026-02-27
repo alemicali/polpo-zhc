@@ -48,7 +48,7 @@ Overview of the entire project:
 - **Stats cards**: Total tasks, running, done, failed counts
 - **Active agents**: Live agent activity with shimmer animation
 - **Event feed**: Real-time SSE event stream
-- **Plan progress**: Visual progress for active plans
+- **Mission progress**: Visual progress for active missions
 
 ### Tasks
 
@@ -57,12 +57,12 @@ Full task management:
 - **Detail sheet**: Click any task to see full details, assessment scores, and logs
 - **Actions**: Retry, kill, reassess from the UI
 
-### Plans
+### Missions
 
-Plan management:
-- **Plan list**: All plans with status badges
-- **Execute/abort**: Control plan lifecycle
-- **Progress tracking**: Per-plan task completion
+Mission management:
+- **Mission list**: All missions with status badges
+- **Execute/abort**: Control mission lifecycle
+- **Progress tracking**: Per-mission task completion
 
 ### Team
 
@@ -87,7 +87,7 @@ Event log viewer:
 ### Chat
 
 Conversational interface powered by Polpo's 37 built-in tools:
-- **Full agent capabilities**: Create tasks, generate plans, manage the team, check status — all through conversation
+- **Full agent capabilities**: Create tasks, generate missions, manage the team, check status — all through conversation
 - **Status commands**: `/status`, `/idle`, `/failed`
 - **Local processing**: Common commands handled client-side
 
@@ -106,7 +106,7 @@ import {
   PolpoProvider,
   useTasks,
   useAgents,
-  usePlans,
+  useMissions,
   useProcesses,
   useEvents,
   useStats,
@@ -134,8 +134,8 @@ Press `Ctrl+K` (or `Cmd+K`) to open the command palette with:
 
 - **Navigate**: Jump to any page
 - **Task actions**: Retry all failed, clear finished, kill all running, reassess
-- **Plan actions**: Execute draft plans, abort active plans
-- **AI generation**: Quick access to team and plan generators
+- **Mission actions**: Execute draft missions, abort active missions
+- **AI generation**: Quick access to team and mission generators
 - **Go to task**: Jump directly to any task
 
 ## Tech Stack

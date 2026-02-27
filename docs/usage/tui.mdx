@@ -19,10 +19,10 @@ The TUI has 6 tabs, navigable with keyboard:
 |-----|----------|---------|
 | Dashboard | `1` | Overview of tasks, agents, live activity |
 | Tasks | `2` | Detailed task list with status and scores |
-| Plans | `3` | Plan groups and progress |
+| Missions | `3` | Mission groups and progress |
 | Agents | `4` | Agent configuration and availability |
 | Logs | `5` | Real-time event log |
-| Chat | `6` | Message agents, create tasks, generate plans |
+| Chat | `6` | Message agents, create tasks, generate missions |
 
 ## Input Modes
 
@@ -30,9 +30,9 @@ The Chat tab supports three input modes that control how free-text input is hand
 
 | Mode | Command | Behavior |
 |------|---------|----------|
-| **Chat** | `/chat` | Free text is a conversation with Polpo — it can create tasks, generate plans, manage the team, and answer questions using its 37 built-in tools |
+| **Chat** | `/chat` | Free text is a conversation with Polpo — it can create tasks, generate missions, manage the team, and answer questions using its 37 built-in tools |
 | **Task** | `/task` | Free text creates a new task directly |
-| **Plan** | `/plan` | Free text generates a plan with AI |
+| **Plan** | `/plan` | Free text generates a mission with AI |
 
 The default mode is Chat. Polpo handles most requests conversationally — use Task and Plan modes as shortcuts when you know exactly what you want.
 
@@ -44,15 +44,15 @@ The default mode is Chat. Polpo handles most requests conversationally — use T
 |---------|-------------|
 | `/status` | Show task count summary (pending, running, done, failed) |
 | `/tasks` | Browse all tasks with an interactive picker — view details, retry, kill |
-| `/abort <group>` | Abort all tasks in a plan group |
+| `/abort <group>` | Abort all tasks in a mission group |
 | `/clear-tasks` | Clear all tasks from the registry |
 
-### Plan Management
+### Mission Management
 
 | Command | Description |
 |---------|-------------|
-| `/plans` | Browse, create, execute, and resume plans via interactive picker |
-| `/plan` | Switch to plan mode (free text generates plans with AI) |
+| `/missions` | Browse, create, execute, and resume missions via interactive picker |
+| `/plan` | Switch to plan mode (free text generates missions with AI) |
 
 ### Templates
 
@@ -96,7 +96,7 @@ See [Templates](/features/templates) for details on the template system.
 See [Skills](/features/skills) for details on the skill system.
 
 In plan mode, type a natural language description and Polpo will:
-1. Generate a plan with AI
+1. Generate a mission with AI
 2. Ask clarifying questions if needed
 3. Show a preview for review
 4. Let you execute, edit, or refine with feedback
@@ -140,7 +140,7 @@ Reference entities by typing their prefix character. Supports quoted form for na
 |--------|--------|---------|
 | `@` | Agent | `@backend-dev fix the tests` |
 | `#` | Task | `#"Create database schema" retry this` |
-| `%` | Plan | `%"feature-auth" abort` |
+| `%` | Mission | `%"feature-auth" abort` |
 
 Mentions are parsed and stripped from input text before processing. The referenced entity is passed as context to the action.
 

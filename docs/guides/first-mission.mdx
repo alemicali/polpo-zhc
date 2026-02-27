@@ -1,26 +1,26 @@
 ---
-title: "Your First Plan"
-description: "Create and run a multi-task plan with dependencies and automated assessment."
+title: "Your First Mission"
+description: "Create and run a multi-task mission with dependencies and automated assessment."
 ---
 
-This guide walks you through creating a multi-task plan, executing it, and understanding the results. It assumes you've already [set up your project](/getting-started) and [configured your team](/guides/build-your-team).
+This guide walks you through creating a multi-task mission, executing it, and understanding the results. It assumes you've already [set up your project](/getting-started) and [configured your team](/guides/build-your-team).
 
-## Create a plan
+## Create a mission
 
-Use AI to generate a plan from a prompt:
+Use AI to generate a mission from a prompt:
 
 ```bash
-polpo plan create "Build a blog API: first create a SQLite database layer with users and posts tables, then build Express REST endpoints on top of it"
+polpo mission create "Build a blog API: first create a SQLite database layer with users and posts tables, then build Express REST endpoints on top of it"
 ```
 
 Polpo generates tasks, assigns them to your agents, and sets up dependencies automatically. Review it:
 
 ```bash
-polpo plan list
-polpo plan show <plan-id>
+polpo mission list
+polpo mission show <mission-id>
 ```
 
-The plan will contain tasks like:
+The mission will contain tasks like:
 
 ```
 Task 1: Create database layer
@@ -33,10 +33,10 @@ Task 2: Build REST endpoints
 ```
 
 <Tip>
-  You can also create plans in the TUI with `/plan`, which offers AI generation and manual editing.
+  You can also create missions in the TUI with `/plan`, which offers AI generation and manual editing.
 </Tip>
 
-## Run the plan
+## Run the mission
 
 ```bash
 polpo run
@@ -98,9 +98,9 @@ Polpo handles failures automatically:
 4. Falls back to **full retry** if fixes aren't enough
 5. Gives up after `maxRetries` (default: 3) total attempts
 
-## Plan task fields
+## Mission task fields
 
-Each task in a plan uses these fields:
+Each task in a mission uses these fields:
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -113,6 +113,6 @@ Each task in a plan uses these fields:
 
 ## Next steps
 
-- **[Plans & Dependencies](/concepts/plans)** — Advanced plan features: volatile teams, quality gates, complex dependency graphs
+- **[Missions & Dependencies](/concepts/missions)** — Advanced mission features: volatile teams, quality gates, complex dependency graphs
 - **[Scoring](/features/scoring)** — Customize assessment dimensions and thresholds
 - **[Configuration](/configuration)** — Full settings reference
