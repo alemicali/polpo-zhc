@@ -43,8 +43,8 @@ import {
   Map,
   Check,
 } from "lucide-react";
-import { useTasks, usePolpo, useProcesses, usePlans } from "@openpolpo/react-sdk";
-import type { Task, TaskStatus, AgentProcess } from "@openpolpo/react-sdk";
+import { useTasks, usePolpo, useProcesses, usePlans } from "@lumea-labs/polpo-react";
+import type { Task, TaskStatus, AgentProcess } from "@lumea-labs/polpo-react";
 import { toast } from "sonner";
 import { formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -184,8 +184,8 @@ function TaskCard({
   return (
     <div
       className={cn(
-        "group rounded-lg border border-border bg-card transition-all cursor-pointer",
-        "hover:border-border/80 hover:shadow-sm",
+        "group rounded-lg border border-border/40 bg-card/80 backdrop-blur-sm transition-all cursor-pointer",
+        "hover:border-primary/20 hover:shadow-[0_0_15px_oklch(0.7_0.15_200_/_8%)]",
         compact && "p-2.5",
         !compact && "p-3",
       )}
@@ -279,10 +279,10 @@ function TaskCard({
 
       {/* Live activity strip for running tasks */}
       {process && (
-        <div className="flex items-center gap-2 mt-2 pt-2 border-t border-blue-500/10">
-          <div className="h-1.5 w-1.5 rounded-full bg-blue-400 animate-pulse shrink-0" />
+        <div className="flex items-center gap-2 mt-2 pt-2 border-t border-primary/10">
+          <div className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse shrink-0" />
           {process.activity.lastTool && (
-            <Badge variant="outline" className="text-[8px] font-mono px-1 py-0 text-blue-400 border-blue-400/30">
+            <Badge variant="outline" className="text-[8px] font-mono px-1 py-0 text-primary border-primary/30">
               <Wrench className="h-2 w-2 mr-0.5" />{process.activity.lastTool}
             </Badge>
           )}
@@ -356,7 +356,7 @@ function KanbanBoard({
         return (
           <div key={col.status} className="flex flex-col min-w-[260px] w-[260px] shrink-0">
             {/* Column header */}
-            <div className="flex items-center gap-2 px-2 pb-2 shrink-0">
+            <div className="flex items-center gap-2 px-2 pb-2 shrink-0 border-t-2 border-border/30 pt-2">
               <div className={cn("h-2 w-2 rounded-full", colCfg.bg.replace("bg-", "bg-").replace("/10", ""))} style={{
                 backgroundColor: `hsl(var(--${colCfg.color.replace("text-", "").replace("-400", "")}))`,
               }} />
@@ -368,7 +368,7 @@ function KanbanBoard({
             <ScrollArea className="flex-1 min-h-0">
               <div className="space-y-1.5 px-1 pr-3 pb-1">
                 {colTasks.length === 0 ? (
-                  <div className="flex items-center justify-center py-8 text-muted-foreground">
+                  <div className="flex items-center justify-center py-8 text-muted-foreground/60">
                     <p className="text-[10px]">No tasks</p>
                   </div>
                 ) : (
@@ -462,7 +462,7 @@ function ListView({
       <ScrollArea className="flex-1 min-h-0 -mx-1">
         <div className="space-y-1.5 px-1 pr-5 pb-1">
           {filtered.length === 0 ? (
-            <Card>
+            <Card className="bg-card/60 backdrop-blur-sm">
               <CardContent className="flex flex-col items-center justify-center py-12 text-muted-foreground">
                 <ListChecks className="h-10 w-10 mb-3 opacity-40" />
                 <p className="text-sm font-medium">
@@ -572,7 +572,7 @@ export function TasksPage() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-full">
-        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
       </div>
     );
   }
@@ -586,7 +586,7 @@ export function TasksPage() {
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
           <Input
             placeholder="Search tasks..."
-            className="pl-8 h-8 text-sm"
+            className="pl-8 h-8 text-sm bg-input/50 backdrop-blur-sm border-border/40 focus:border-primary/50"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
@@ -603,7 +603,7 @@ export function TasksPage() {
         <div className="flex-1" />
 
         {/* View toggle */}
-        <div className="flex items-center rounded-md border border-border">
+        <div className="flex items-center rounded-md border border-border/50">
           <Button
             variant={viewMode === "list" ? "default" : "ghost"}
             size="sm"
@@ -636,7 +636,7 @@ export function TasksPage() {
             <Badge
               key={name}
               variant="secondary"
-              className="text-[10px] gap-1 cursor-pointer hover:bg-destructive/20"
+              className="text-[10px] gap-1 cursor-pointer bg-primary/10 text-primary hover:bg-destructive/20"
               onClick={() => togglePlan(name)}
             >
               <Map className="h-2.5 w-2.5" />
@@ -665,7 +665,7 @@ export function TasksPage() {
 
       {/* Content */}
       {tasks.length === 0 ? (
-        <Card>
+        <Card className="bg-card/60 backdrop-blur-sm">
           <CardContent className="flex flex-col items-center justify-center py-16 text-muted-foreground">
             <ListChecks className="h-12 w-12 mb-4 opacity-40" />
             <p className="text-sm font-medium">No tasks yet</p>

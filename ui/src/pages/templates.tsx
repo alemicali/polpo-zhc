@@ -39,21 +39,22 @@ import {
   Asterisk,
   Code2,
 } from "lucide-react";
-import { useTemplates } from "@openpolpo/react-sdk";
+import { useTemplates } from "@lumea-labs/polpo-react";
 import type {
   TemplateInfo,
   TemplateDefinition,
   TemplateParameter,
-} from "@openpolpo/react-sdk";
+} from "@lumea-labs/polpo-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { JsonBlock } from "@/components/json-block";
 
 // ── Parameter type badge colors ──
 
 const paramTypeColor: Record<string, string> = {
-  string: "text-sky-400",
-  number: "text-amber-400",
-  boolean: "text-violet-400",
+  string: "text-primary",
+  number: "text-primary/80",
+  boolean: "text-primary/60",
 };
 
 // ── Parameter input field ──
@@ -76,7 +77,7 @@ function ParamField({
           {param.required && <Asterisk className="h-2 w-2 text-rose-400" />}
         </label>
         <Select value={value} onValueChange={onChange}>
-          <SelectTrigger className="h-8 text-sm">
+          <SelectTrigger className="h-8 text-sm bg-input/50">
             <SelectValue placeholder={`Select ${param.name}...`} />
           </SelectTrigger>
           <SelectContent>
@@ -103,7 +104,7 @@ function ParamField({
           {param.required && <Asterisk className="h-2 w-2 text-rose-400" />}
         </label>
         <Select value={value} onValueChange={onChange}>
-          <SelectTrigger className="h-8 text-sm">
+          <SelectTrigger className="h-8 text-sm bg-input/50">
             <SelectValue placeholder="Select..." />
           </SelectTrigger>
           <SelectContent>
@@ -126,7 +127,7 @@ function ParamField({
         {param.required && <Asterisk className="h-2 w-2 text-rose-400" />}
       </label>
       <Input
-        className="h-8 text-sm font-mono"
+        className="h-8 text-sm font-mono bg-input/50"
         type={param.type === "number" ? "number" : "text"}
         placeholder={
           param.default !== undefined
@@ -199,10 +200,10 @@ function RunTemplateDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg max-h-[80vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-lg max-h-[80vh] overflow-y-auto bg-popover/95 backdrop-blur-xl border-border/40">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-sm">
-            <Play className="h-4 w-4 text-emerald-400" />
+            <Play className="h-4 w-4 text-teal-400" />
             Run "{template.name}"
           </DialogTitle>
         </DialogHeader>
@@ -243,7 +244,7 @@ function RunTemplateDialog({
           </Button>
           <Button
             size="sm"
-            className="gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white"
+            className="gap-1.5 bg-teal-600 hover:bg-teal-700 text-white"
             onClick={handleRun}
             disabled={missingRequired.length > 0 || running}
           >
@@ -275,7 +276,7 @@ function DefinitionDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-2xl max-h-[80vh] overflow-hidden flex flex-col">
+      <DialogContent className="sm:max-w-2xl max-h-[80vh] overflow-hidden flex flex-col bg-popover/95 backdrop-blur-xl border-border/40">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-sm">
             <FileJson2 className="h-4 w-4 text-muted-foreground" />
@@ -284,9 +285,10 @@ function DefinitionDialog({
         </DialogHeader>
         <p className="text-xs text-muted-foreground">{definition.description}</p>
         <ScrollArea className="flex-1 min-h-0 mt-2">
-          <pre className="text-[10px] bg-muted/40 rounded-lg p-4 whitespace-pre-wrap font-mono overflow-x-auto text-muted-foreground">
-            {JSON.stringify(definition.plan, null, 2)}
-          </pre>
+          <JsonBlock
+            data={definition.plan}
+            className="text-[10px] leading-relaxed font-mono bg-muted/30 border border-border/20 rounded-lg p-4 whitespace-pre-wrap overflow-x-auto"
+          />
         </ScrollArea>
       </DialogContent>
     </Dialog>
@@ -308,12 +310,12 @@ function TemplateCard({
   const requiredParams = params.filter((p) => p.required);
 
   return (
-    <Card className="group transition-all hover:shadow-sm hover:border-border/80">
+    <Card className="group transition-all bg-card/80 backdrop-blur-sm border-border/40 hover:border-primary/20 hover:shadow-[0_0_15px_oklch(0.7_0.15_200_/_8%)]">
       <CardContent className="p-4">
         <div className="flex items-start gap-3">
           {/* Icon */}
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-indigo-500/10">
-            <Workflow className="h-5 w-5 text-indigo-400" />
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10">
+            <Workflow className="h-5 w-5 text-primary" />
           </div>
 
           {/* Content */}
@@ -382,7 +384,7 @@ function TemplateCard({
           <div className="flex flex-col gap-1.5 shrink-0">
             <Button
               size="sm"
-              className="h-8 gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white"
+              className="h-8 gap-1.5 bg-teal-600 hover:bg-teal-700 text-white"
               onClick={(e) => {
                 e.stopPropagation();
                 onRun();
@@ -394,7 +396,7 @@ function TemplateCard({
             <Button
               variant="outline"
               size="sm"
-              className="h-8 gap-1.5"
+              className="h-8 gap-1.5 border-border/50 hover:bg-accent/50"
               onClick={(e) => {
                 e.stopPropagation();
                 onInspect();
@@ -471,7 +473,7 @@ export function TemplatesPage() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-full">
-        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
       </div>
     );
   }
@@ -484,7 +486,7 @@ export function TemplatesPage() {
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
           <Input
             placeholder="Search templates..."
-            className="pl-9 h-8 text-sm"
+            className="pl-9 h-8 text-sm bg-input/50 border-border/40"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
@@ -503,9 +505,9 @@ export function TemplatesPage() {
 
       {/* Template list */}
       {filtered.length === 0 ? (
-        <Card className="flex-1">
+        <Card className="flex-1 bg-card/60 border-border/40">
           <CardContent className="flex flex-col items-center justify-center py-20 text-muted-foreground">
-            <Workflow className="h-12 w-12 mb-4 opacity-30" />
+            <Workflow className="h-12 w-12 mb-4 text-primary/30" />
             <p className="text-sm font-medium">
               {templates.length === 0
                 ? "No templates found"
@@ -561,7 +563,7 @@ export function TemplatesPage() {
       {/* Inspect loading overlay */}
       {inspectLoading && (
         <div className="fixed inset-0 flex items-center justify-center bg-background/50 z-50">
-          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+          <Loader2 className="h-6 w-6 animate-spin text-primary" />
         </div>
       )}
     </div>

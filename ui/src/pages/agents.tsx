@@ -24,21 +24,12 @@ import {
   ChevronDown,
   Search,
   Zap,
-  FileCode,
-  FilePlus,
-  FileEdit,
-  Activity,
   Sparkles,
-  Hash,
-  Shield,
   Users,
-  Layers,
-  Infinity as InfinityIcon,
+  ChevronRight,
 } from "lucide-react";
-import { MessageResponse } from "@/components/ai-elements/message";
-import { useAgents, useProcesses, useSkills } from "@openpolpo/react-sdk";
-import type { AgentConfig, AgentProcess, SkillInfo } from "@openpolpo/react-sdk";
-import { formatDistanceToNow } from "date-fns";
+import { useAgents, useProcesses, useSkills } from "@lumea-labs/polpo-react";
+import type { AgentConfig, AgentProcess, SkillInfo } from "@lumea-labs/polpo-react";
 import { cn } from "@/lib/utils";
 
 
@@ -75,7 +66,7 @@ function SkillsPool({
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
       <CollapsibleTrigger asChild>
-        <button className="w-full flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 hover:bg-muted/30 transition-colors cursor-pointer text-left">
+        <button className="w-full flex items-center gap-2 rounded-lg border border-border/40 bg-card/80 backdrop-blur-sm px-3 py-2 hover:bg-muted/30 transition-colors cursor-pointer text-left">
           <Sparkles className="h-3.5 w-3.5 text-violet-400 shrink-0" />
           <span className="text-xs font-medium">Skills</span>
           <Badge variant="secondary" className="text-[9px]">{skills.length}</Badge>
@@ -94,7 +85,7 @@ function SkillsPool({
             return (
               <div
                 key={skill.name}
-                className="rounded-md border border-border bg-muted/20 px-3 py-2 space-y-1"
+                className="rounded-md border border-border/30 bg-card/60 px-3 py-2 space-y-1"
               >
                 <div className="flex items-center gap-2">
                   <Sparkles className="h-3 w-3 text-violet-400 shrink-0" />
@@ -162,7 +153,7 @@ function BaseTeamHeader({
   const utilization = agents.length > 0 ? Math.round((activeCount / agents.length) * 100) : 0;
 
   return (
-    <div className="flex items-center gap-3 rounded-lg border border-border bg-card px-3 py-2">
+    <div className="flex items-center gap-3 rounded-lg border border-border/40 bg-card/80 backdrop-blur-sm px-3 py-2">
       {/* Team name */}
       <div className="flex items-center gap-2 shrink-0">
         <Users className="h-3.5 w-3.5 text-primary" />
@@ -181,7 +172,7 @@ function BaseTeamHeader({
       {/* Agent counts */}
       <div className="flex items-center gap-4">
         <div className="flex items-center gap-1.5">
-          <div className={cn("h-1.5 w-1.5 rounded-full", activeCount > 0 ? "bg-blue-500 animate-pulse" : "bg-zinc-600")} />
+          <div className={cn("h-1.5 w-1.5 rounded-full", activeCount > 0 ? "bg-primary animate-pulse" : "bg-zinc-600")} />
           <span className="text-[11px] text-muted-foreground">Active</span>
           <span className="text-[11px] font-bold">{activeCount}</span>
         </div>
@@ -234,7 +225,7 @@ function VolatileTeamHeader({
   const activeCount = processes.filter(p => agents.some(a => a.name === p.agentName)).length;
 
   return (
-    <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 px-4 py-3">
+    <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 backdrop-blur-sm px-4 py-3">
       <div className="flex items-center gap-3">
         <div className="flex h-7 w-7 items-center justify-center rounded-md bg-amber-500/10">
           <Zap className="h-3.5 w-3.5 text-amber-400" />
@@ -249,7 +240,7 @@ function VolatileTeamHeader({
               {agents.length} agent{agents.length !== 1 ? "s" : ""}
             </Badge>
             {activeCount > 0 && (
-              <Badge variant="outline" className="text-[9px] text-blue-400 border-blue-500/30">
+              <Badge variant="outline" className="text-[9px] text-primary border-primary/30">
                 {activeCount} active
               </Badge>
             )}
@@ -267,205 +258,94 @@ function VolatileTeamHeader({
 
 // ── Live activity panel (inside agent card) ──
 
-function LiveActivity({ process }: { process: AgentProcess }) {
-  const act = process.activity;
-  const totalFiles = (act.filesCreated?.length ?? 0) + (act.filesEdited?.length ?? 0);
-
-  return (
-    <div className="rounded-lg border border-blue-500/20 bg-blue-500/5 p-3 space-y-2.5">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <div className={cn("h-2 w-2 rounded-full", process.alive ? "bg-blue-500 animate-pulse" : "bg-zinc-500")} />
-          <span className="text-[10px] font-medium text-blue-400 uppercase tracking-wider">
-            {process.alive ? "Active" : "Finished"}
-          </span>
-          <Badge variant="secondary" className="text-[9px]">PID {process.pid}</Badge>
-          {act.sessionId && (
-            <span className="text-[9px] font-mono text-muted-foreground">session:{act.sessionId.slice(0, 8)}</span>
-          )}
-        </div>
-        <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
-          {act.lastUpdate && (
-            <span>updated {formatDistanceToNow(new Date(act.lastUpdate), { addSuffix: true })}</span>
-          )}
-          <span>started {formatDistanceToNow(new Date(process.startedAt), { addSuffix: true })}</span>
-        </div>
-      </div>
-
-      <p className="text-xs text-muted-foreground">
-        {act.summary
-          ? act.summary
-          : act.lastTool && act.lastFile
-          ? <>Using <span className="font-mono text-foreground">{act.lastTool}</span> on <code className="text-foreground">{act.lastFile}</code></>
-          : act.lastTool
-          ? <>Using <span className="font-mono text-foreground">{act.lastTool}</span></>
-          : "Running..."}
-      </p>
-
-      <div className="flex items-center gap-4">
-        <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
-          <Wrench className="h-3 w-3" />
-          <span className="font-mono font-bold text-foreground">{act.toolCalls}</span> calls
-        </div>
-        {totalFiles > 0 && (
-          <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
-            <FileCode className="h-3 w-3" />
-            <span className="font-mono font-bold text-foreground">{totalFiles}</span> files
-          </div>
-        )}
-        {act.totalTokens != null && act.totalTokens > 0 && (
-          <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
-            <Hash className="h-3 w-3" />
-            <span className="font-mono font-bold text-foreground">{(act.totalTokens / 1000).toFixed(1)}k</span> tokens
-          </div>
-        )}
-      </div>
-
-      {/* File lists */}
-      {act.filesCreated && act.filesCreated.length > 0 && (
-        <div>
-          <p className="text-[10px] text-muted-foreground flex items-center gap-1 mb-1">
-            <FilePlus className="h-2.5 w-2.5 text-emerald-400" /> Created
-          </p>
-          <div className="flex flex-wrap gap-1">
-            {act.filesCreated.slice(0, 8).map((f) => (
-              <Badge key={f} variant="secondary" className="text-[9px] font-mono max-w-[200px] truncate">
-                {f.split("/").pop()}
-              </Badge>
-            ))}
-            {act.filesCreated.length > 8 && (
-              <Badge variant="secondary" className="text-[9px]">+{act.filesCreated.length - 8}</Badge>
-            )}
-          </div>
-        </div>
-      )}
-      {act.filesEdited && act.filesEdited.length > 0 && (
-        <div>
-          <p className="text-[10px] text-muted-foreground flex items-center gap-1 mb-1">
-            <FileEdit className="h-2.5 w-2.5 text-amber-400" /> Edited
-          </p>
-          <div className="flex flex-wrap gap-1">
-            {act.filesEdited.slice(0, 8).map((f) => (
-              <Badge key={f} variant="outline" className="text-[9px] font-mono max-w-[200px] truncate">
-                {f.split("/").pop()}
-              </Badge>
-            ))}
-            {act.filesEdited.length > 8 && (
-              <Badge variant="outline" className="text-[9px]">+{act.filesEdited.length - 8}</Badge>
-            )}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ── Agent card (read-only, full inspection) ──
+// ── Agent card (navigates to detail page on click) ──
 
 function AgentCard({
   agent,
   process,
-  skillPool,
 }: {
   agent: AgentConfig;
   process?: AgentProcess;
-  skillPool: Map<string, SkillInfo>;
 }) {
-  const [expanded, setExpanded] = useState(false);
-
   const capabilityCount =
     (agent.allowedTools?.length ?? 0) +
     (agent.skills?.length ?? 0) +
     (agent.mcpServers ? Object.keys(agent.mcpServers).length : 0);
 
   return (
-    <Collapsible open={expanded} onOpenChange={setExpanded}>
+    <Link
+      to={`/agents/${encodeURIComponent(agent.name)}`}
+      className="block group"
+    >
       <div className={cn(
-        "rounded-lg border transition-colors bg-card",
-        process ? "border-blue-500/30" : "border-border hover:border-border/80"
+        "rounded-lg border transition-all bg-card/80 backdrop-blur-sm hover:bg-accent/5",
+        process
+          ? "border-primary/30 shadow-[0_0_20px_oklch(0.7_0.15_200_/_8%)]"
+          : "border-border/40 hover:border-primary/20"
       )}>
-        <CollapsibleTrigger asChild>
-          <div className="flex items-center gap-3 p-4 cursor-pointer">
-            {/* Agent icon */}
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-blue-500/10">
-              <Bot className="h-5 w-5 text-blue-400" />
-            </div>
+        <div className="flex items-center gap-3 p-4">
+          {/* Agent icon */}
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10">
+            <Bot className="h-5 w-5 text-primary" />
+          </div>
 
-            {/* Name + meta */}
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2">
-                <p className="text-sm font-medium truncate">{agent.name}</p>
-                {agent.volatile && (
-                  <Badge variant="outline" className="text-[10px] text-amber-400 border-amber-500/30">
-                    <Zap className="h-2.5 w-2.5 mr-0.5" /> volatile
-                  </Badge>
-                )}
-              </div>
-              <div className="flex items-center gap-2 mt-0.5">
-                {agent.model && (
-                  <span className="text-[10px] text-muted-foreground font-mono truncate max-w-[200px]">
-                    {agent.model}
-                  </span>
-                )}
-                {agent.role && (
-                  <span className="text-[10px] text-muted-foreground truncate max-w-[200px] hidden lg:inline">
-                    &middot; {agent.role}
-                  </span>
-                )}
-              </div>
+          {/* Name + meta */}
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-medium truncate group-hover:text-primary transition-colors">
+                {agent.identity?.displayName ?? agent.name}
+              </span>
+              {agent.identity?.displayName && agent.identity.displayName !== agent.name && (
+                <span className="text-[10px] font-mono text-muted-foreground">@{agent.name}</span>
+              )}
+              {agent.volatile && (
+                <Badge variant="outline" className="text-[10px] text-amber-400 border-amber-500/30">
+                  <Zap className="h-2.5 w-2.5 mr-0.5" /> volatile
+                </Badge>
+              )}
             </div>
-
-            {/* Right side: status + badges */}
-            <div className="flex items-center gap-2 shrink-0">
-              {process && (
-                <div className="flex items-center gap-1.5">
-                  <div className="h-2 w-2 rounded-full bg-blue-500 animate-pulse" />
-                  <span className="text-[10px] text-blue-400 font-medium">Working</span>
-                </div>
+            <div className="flex items-center gap-2 mt-0.5">
+              {agent.identity?.title && (
+                <span className="text-[10px] text-muted-foreground truncate max-w-[200px]">
+                  {agent.identity.title}
+                </span>
               )}
-              {agent.maxConcurrency != null && (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Badge variant="secondary" className="text-[10px] cursor-help">
-                      <Layers className="h-2.5 w-2.5 mr-0.5" />
-                      {agent.maxConcurrency}
-                    </Badge>
-                  </TooltipTrigger>
-                  <TooltipContent className="text-xs">Max {agent.maxConcurrency} concurrent tasks</TooltipContent>
-                </Tooltip>
+              {agent.model && (
+                <span className="text-[10px] text-muted-foreground font-mono truncate max-w-[200px]">
+                  {agent.identity?.title ? <>&middot; </> : ""}{agent.model}
+                </span>
               )}
-              {agent.maxTurns != null && (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Badge variant="secondary" className="text-[10px] cursor-help">
-                      <Hash className="h-2.5 w-2.5 mr-0.5" />
-                      {agent.maxTurns}
-                    </Badge>
-                  </TooltipTrigger>
-                  <TooltipContent className="text-xs">Max {agent.maxTurns} turns per task</TooltipContent>
-                </Tooltip>
+              {agent.role && !agent.identity?.title && (
+                <span className="text-[10px] text-muted-foreground truncate max-w-[200px] hidden lg:inline">
+                  &middot; {agent.role}
+                </span>
               )}
-              {capabilityCount > 0 && (
-                <span className="text-[10px] text-muted-foreground">{capabilityCount} capabilities</span>
-              )}
-              <Link
-                to={`/agents/${encodeURIComponent(agent.name)}`}
-                className="text-[10px] text-muted-foreground hover:text-foreground transition-colors"
-                onClick={(e) => e.stopPropagation()}
-              >
-                Details
-              </Link>
-              <ChevronDown className={cn("h-4 w-4 text-muted-foreground transition-transform", expanded && "rotate-180")} />
             </div>
           </div>
-        </CollapsibleTrigger>
+
+          {/* Right side: status + badges */}
+          <div className="flex items-center gap-2 shrink-0">
+            {process && (
+              <div className="flex items-center gap-1.5">
+                <div className="h-2 w-2 rounded-full bg-primary animate-pulse" />
+                <span className="text-[10px] text-primary font-medium">Working</span>
+              </div>
+            )}
+            {capabilityCount > 0 && (
+              <Badge variant="secondary" className="text-[10px] hidden sm:flex">
+                {capabilityCount} cap.
+              </Badge>
+            )}
+            <ChevronRight className="h-4 w-4 text-muted-foreground group-hover:text-primary transition-colors" />
+          </div>
+        </div>
 
         {/* Live activity strip for running agents */}
-        {process && !expanded && (
-          <div className="flex items-center gap-3 px-4 py-1.5 bg-blue-500/5 border-t border-blue-500/10">
-            <div className="h-1.5 w-1.5 rounded-full bg-blue-400 animate-pulse shrink-0" />
+        {process && (
+          <div className="flex items-center gap-3 px-4 py-1.5 bg-primary/5 border-t border-primary/10">
+            <div className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse shrink-0" />
             {process.activity.lastTool && (
-              <Badge variant="outline" className="text-[9px] font-mono px-1.5 py-0 text-blue-400 border-blue-400/30 shrink-0">
+              <Badge variant="outline" className="text-[9px] font-mono px-1.5 py-0 text-primary border-primary/30 shrink-0">
                 <Wrench className="h-2 w-2 mr-0.5" />
                 {process.activity.lastTool}
               </Badge>
@@ -483,135 +363,8 @@ function AgentCard({
             </span>
           </div>
         )}
-
-        <CollapsibleContent>
-          <div className="border-t border-border px-4 py-4 space-y-4">
-            {/* Role as markdown */}
-            {agent.role && (
-              <div>
-                <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-1.5 flex items-center gap-1">
-                  <Shield className="h-3 w-3" /> Role
-                </p>
-                <div className="rounded-md bg-muted/30 px-3 py-2 text-xs">
-                  <MessageResponse>{agent.role}</MessageResponse>
-                </div>
-              </div>
-            )}
-
-            {/* System prompt */}
-            {agent.systemPrompt && (
-              <div>
-                <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-1.5">
-                  System Prompt
-                </p>
-                <div className="rounded-md bg-muted/30 px-3 py-2">
-                  <p className="text-xs text-muted-foreground line-clamp-6 font-mono whitespace-pre-wrap">{agent.systemPrompt}</p>
-                </div>
-              </div>
-            )}
-
-            {/* Capabilities grid */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-              {/* Tools */}
-              {agent.allowedTools && agent.allowedTools.length > 0 && (
-                <div>
-                  <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-1.5 flex items-center gap-1">
-                    <Wrench className="h-3 w-3" /> Tools ({agent.allowedTools.length})
-                  </p>
-                  <div className="flex flex-wrap gap-1">
-                    {agent.allowedTools.map((t) => (
-                      <Badge key={t} variant="secondary" className="text-[9px] font-mono">{t}</Badge>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Skills — enriched with pool info */}
-              {agent.skills && agent.skills.length > 0 && (
-                <div>
-                  <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-1.5 flex items-center gap-1">
-                    <Sparkles className="h-3 w-3" /> Skills ({agent.skills.length})
-                  </p>
-                  <div className="flex flex-wrap gap-1">
-                    {agent.skills.map((s) => {
-                      const info = skillPool.get(s);
-                      return info ? (
-                        <Tooltip key={s}>
-                          <TooltipTrigger asChild>
-                            <Badge variant="outline" className="text-[9px] cursor-help">{s}</Badge>
-                          </TooltipTrigger>
-                          <TooltipContent className="text-xs max-w-60">
-                            {info.description || "No description"}
-                          </TooltipContent>
-                        </Tooltip>
-                      ) : (
-                        <Badge key={s} variant="outline" className="text-[9px] text-muted-foreground">{s}</Badge>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-
-              {/* MCP Servers */}
-              {agent.mcpServers && Object.keys(agent.mcpServers).length > 0 && (
-                <div>
-                  <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-1.5 flex items-center gap-1">
-                    <Activity className="h-3 w-3" /> MCP Servers ({Object.keys(agent.mcpServers).length})
-                  </p>
-                  <div className="flex flex-wrap gap-1">
-                    {Object.entries(agent.mcpServers).map(([name, cfg]) => {
-                      const type = "command" in cfg ? "stdio" : ("type" in cfg ? cfg.type : "http");
-                      const detail = "command" in cfg
-                        ? `${cfg.command} ${"args" in cfg && Array.isArray(cfg.args) ? cfg.args.join(" ") : ""}`.trim()
-                        : ("url" in cfg ? cfg.url : "");
-                      return (
-                        <Badge key={name} variant="secondary" className="text-[9px] font-mono" title={detail}>
-                          {name} <span className="text-muted-foreground ml-0.5">({type})</span>
-                        </Badge>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-
-              {/* Allowed Paths (sandbox) */}
-              {agent.allowedPaths && agent.allowedPaths.length > 0 && (
-                <div>
-                  <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-1.5 flex items-center gap-1">
-                    <Shield className="h-3 w-3" /> Allowed Paths ({agent.allowedPaths.length})
-                  </p>
-                  <div className="flex flex-wrap gap-1">
-                    {agent.allowedPaths.map((p) => (
-                      <Badge key={p} variant="outline" className="text-[9px] font-mono">{p}</Badge>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* Metadata row */}
-            <div className="flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
-              {agent.maxTurns != null && (
-                <span>Max turns: <span className="font-mono text-foreground">{agent.maxTurns}</span></span>
-              )}
-              {agent.maxConcurrency != null && (
-                <span>Max concurrency: <span className="font-mono text-foreground">{agent.maxConcurrency}</span></span>
-              )}
-              {agent.maxConcurrency == null && (
-                <span className="flex items-center gap-1">
-                  Concurrency: <InfinityIcon className="h-3 w-3 inline" />
-                </span>
-              )}
-              {agent.volatile && <span className="text-amber-400">Volatile (auto-cleanup on plan complete)</span>}
-              {agent.planGroup && <span>Plan group: <span className="font-mono text-foreground">{agent.planGroup}</span></span>}
-            </div>
-
-            {/* Live activity (expanded view) */}
-            {process && <LiveActivity process={process} />}
-          </div>
-        </CollapsibleContent>
       </div>
-    </Collapsible>
+    </Link>
   );
 }
 
@@ -626,17 +379,10 @@ export function AgentsPage() {
   const [search, setSearch] = useState("");
   const [tab, setTab] = useState<AgentTab>("permanent");
 
-  // Build skill pool map for enriched tooltips
-  const skillPool = useMemo(() => {
-    const map = new Map<string, SkillInfo>();
-    for (const s of skills) map.set(s.name, s);
-    return map;
-  }, [skills]);
-
   if (loading) {
     return (
       <div className="flex items-center justify-center h-full">
-        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
       </div>
     );
   }
@@ -689,12 +435,12 @@ export function AgentsPage() {
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           {/* Permanent / Volatile tabs */}
-          <div className="flex items-center rounded-lg border border-border bg-muted/30 p-0.5">
+          <div className="flex items-center rounded-lg border border-border/40 bg-muted/20 p-0.5">
             <button
               className={cn(
                 "flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
                 tab === "permanent"
-                  ? "bg-background text-foreground shadow-sm"
+                  ? "bg-card text-foreground shadow-sm"
                   : "text-muted-foreground hover:text-foreground"
               )}
               onClick={() => setTab("permanent")}
@@ -707,7 +453,7 @@ export function AgentsPage() {
               className={cn(
                 "flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
                 tab === "volatile"
-                  ? "bg-background text-foreground shadow-sm"
+                  ? "bg-card text-foreground shadow-sm"
                   : "text-muted-foreground hover:text-foreground"
               )}
               onClick={() => setTab("volatile")}
@@ -723,7 +469,7 @@ export function AgentsPage() {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
               placeholder="Search agents..."
-              className="pl-9 h-8"
+              className="pl-9 h-8 bg-input/50 border-border/40"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
@@ -738,7 +484,7 @@ export function AgentsPage() {
       <ScrollArea className="flex-1 min-h-0 -mx-1">
         <div className="space-y-5 px-1 pr-5 pb-2">
           {filtered.length === 0 ? (
-            <Card>
+            <Card className="bg-card/60 backdrop-blur-sm">
               <CardContent className="flex flex-col items-center justify-center py-16 text-muted-foreground">
                 <Bot className="h-12 w-12 mb-4 opacity-40" />
                 <p className="text-sm font-medium">
@@ -760,7 +506,7 @@ export function AgentsPage() {
                   key={agent.name}
                   agent={agent}
                   process={processes.find((p) => p.agentName === agent.name)}
-                  skillPool={skillPool}
+                  
                 />
               ))}
             </div>
@@ -779,7 +525,7 @@ export function AgentsPage() {
                         key={agent.name}
                         agent={agent}
                         process={processes.find((p) => p.agentName === agent.name)}
-                        skillPool={skillPool}
+                        
                       />
                     ))}
                   </div>
@@ -793,7 +539,7 @@ export function AgentsPage() {
                       key={agent.name}
                       agent={agent}
                       process={processes.find((p) => p.agentName === agent.name)}
-                      skillPool={skillPool}
+                      
                     />
                   ))}
                 </div>

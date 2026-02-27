@@ -34,9 +34,10 @@ import {
   Eye,
   Hammer,
   HelpCircle,
+  FileEdit,
 } from "lucide-react";
-import { useTasks, usePlans, useProcesses, useAgents, useStats } from "@openpolpo/react-sdk";
-import type { Task, AgentProcess, PolpoStats } from "@openpolpo/react-sdk";
+import { useTasks, usePlans, useProcesses, useAgents, useStats } from "@lumea-labs/polpo-react";
+import type { Task, AgentProcess, PolpoStats } from "@lumea-labs/polpo-react";
 import { cn } from "@/lib/utils";
 
 // ── Phase icon helper ──
@@ -55,11 +56,11 @@ function PhaseIcon({ phase }: { phase?: string }) {
 function LiveTicker({ stats }: { stats: PolpoStats | null }) {
   if (!stats) return null;
   const items = [
-    { label: "Pending", value: stats.pending, color: "bg-zinc-500" },
-    { label: "Queued", value: stats.queued, color: "bg-violet-500" },
-    { label: "Running", value: stats.running, color: "bg-blue-500" },
-    { label: "Done", value: stats.done, color: "bg-emerald-500" },
-    { label: "Failed", value: stats.failed, color: "bg-red-500" },
+    { label: "Pending", value: stats.pending, color: "bg-zinc-500", glow: "" },
+    { label: "Queued", value: stats.queued, color: "bg-indigo-500", glow: "shadow-[0_0_6px_rgba(99,102,241,0.5)]" },
+    { label: "Running", value: stats.running, color: "bg-cyan-400", glow: "shadow-[0_0_6px_rgba(34,211,238,0.6)]" },
+    { label: "Done", value: stats.done, color: "bg-teal-400", glow: "shadow-[0_0_6px_rgba(45,212,191,0.5)]" },
+    { label: "Failed", value: stats.failed, color: "bg-rose-500", glow: "shadow-[0_0_6px_rgba(244,63,94,0.5)]" },
   ];
   const total = stats.pending + stats.running + stats.done + stats.failed;
 
@@ -67,13 +68,18 @@ function LiveTicker({ stats }: { stats: PolpoStats | null }) {
     <div className="flex items-center gap-4">
       {items.map((item) => (
         <div key={item.label} className="flex items-center gap-1.5">
-          <div className={cn("h-2 w-2 rounded-full", item.color, item.value > 0 && item.label === "Running" && "animate-pulse")} />
+          <div className={cn(
+            "h-2 w-2 rounded-full",
+            item.color,
+            item.value > 0 && item.glow,
+            item.value > 0 && item.label === "Running" && "animate-pulse",
+          )} />
           <span className="text-xs text-muted-foreground">{item.label}</span>
-          <span className="text-xs font-bold">{item.value}</span>
+          <span className="text-xs font-bold font-mono">{item.value}</span>
         </div>
       ))}
       {total > 0 && (
-        <div className="text-[10px] text-muted-foreground ml-2">
+        <div className="text-[10px] text-muted-foreground ml-2 font-mono">
           Total: {total}
         </div>
       )}
@@ -82,6 +88,14 @@ function LiveTicker({ stats }: { stats: PolpoStats | null }) {
 }
 
 // ── Stat card ──
+
+const ACCENT_BAR_COLORS: Record<string, string> = {
+  "text-blue-500": "bg-blue-500/60",
+  "text-emerald-500": "bg-teal-400/60",
+  "text-red-500": "bg-rose-500/60",
+  "text-cyan-400": "bg-cyan-400/60",
+  "text-muted-foreground": "bg-primary/30",
+};
 
 function StatCard({
   title,
@@ -96,16 +110,20 @@ function StatCard({
   description?: string;
   color?: string;
 }) {
+  const accentBar = ACCENT_BAR_COLORS[color ?? "text-muted-foreground"] ?? "bg-primary/30";
+
   return (
-    <Card>
+    <Card className="relative overflow-hidden bg-card/80 backdrop-blur-sm border-border/50 transition-shadow hover:shadow-[0_0_20px_rgba(34,211,238,0.06)]">
       <CardHeader className="flex flex-row items-center justify-between pb-2">
         <CardTitle className="text-sm font-medium text-muted-foreground">{title}</CardTitle>
         <Icon className={cn("h-4 w-4", color ?? "text-muted-foreground")} />
       </CardHeader>
       <CardContent>
-        <div className="text-2xl font-bold">{value}</div>
+        <div className="text-3xl font-bold">{value}</div>
         {description && <p className="text-xs text-muted-foreground mt-1">{description}</p>}
       </CardContent>
+      {/* Accent bar */}
+      <div className={cn("absolute bottom-0 left-0 right-0 h-[2px]", accentBar)} />
     </Card>
   );
 }
@@ -113,17 +131,17 @@ function StatCard({
 // ── Task progress donut chart ──
 
 const progressChartConfig = {
-  done: { label: "Done", color: "hsl(var(--chart-2, 142 76% 36%))" },
-  failed: { label: "Failed", color: "hsl(var(--chart-5, 0 84% 60%))" },
-  running: { label: "Running", color: "hsl(var(--chart-1, 221 83% 53%))" },
-  queued: { label: "Queued", color: "hsl(var(--chart-4, 240 5% 64%))" },
+  done: { label: "Done", color: "#2dd4bf" },
+  failed: { label: "Failed", color: "#f43f5e" },
+  running: { label: "Running", color: "#5eead4" },
+  queued: { label: "Queued", color: "#6366f1" },
 } satisfies ChartConfig;
 
 const STATUS_COLORS = {
-  done: "#22c55e",
-  failed: "#ef4444",
-  running: "#3b82f6",
-  queued: "#71717a",
+  done: "#2dd4bf",
+  failed: "#f43f5e",
+  running: "#5eead4",
+  queued: "#6366f1",
 };
 
 function TaskProgress({ tasks }: { tasks: Task[] }) {
@@ -146,13 +164,15 @@ function TaskProgress({ tasks }: { tasks: Task[] }) {
     { status: "queued", count: counts.queued, fill: STATUS_COLORS.queued },
   ].filter(d => d.count > 0);
 
-  // If no tasks, show empty state
-  if (total === 0) {
-    chartData.push({ status: "queued", count: 1, fill: "hsl(var(--muted))" });
+  const isEmpty = chartData.length === 0;
+
+  // If no tasks, show a visible empty ring
+  if (isEmpty) {
+    chartData.push({ status: "queued", count: 1, fill: "oklch(0.45 0.03 250)" });
   }
 
   return (
-    <Card className="lg:col-span-2">
+    <Card className="lg:col-span-2 bg-card/80 backdrop-blur-sm border-border/50">
       <CardHeader className="pb-2">
         <div className="flex items-center justify-between">
           <div>
@@ -187,7 +207,16 @@ function TaskProgress({ tasks }: { tasks: Task[] }) {
                 <Label
                   content={({ viewBox }) => {
                     if (viewBox && "cx" in viewBox && "cy" in viewBox) {
-                      return (
+                      return isEmpty ? (
+                        <text x={viewBox.cx} y={viewBox.cy} textAnchor="middle" dominantBaseline="middle">
+                          <tspan x={viewBox.cx} y={(viewBox.cy ?? 0) - 4} className="fill-muted-foreground text-xs font-medium">
+                            No tasks
+                          </tspan>
+                          <tspan x={viewBox.cx} y={(viewBox.cy ?? 0) + 12} className="fill-muted-foreground/60 text-[10px]">
+                            yet
+                          </tspan>
+                        </text>
+                      ) : (
                         <text x={viewBox.cx} y={viewBox.cy} textAnchor="middle" dominantBaseline="middle">
                           <tspan x={viewBox.cx} y={(viewBox.cy ?? 0) - 6} className="fill-foreground text-2xl font-bold">
                             {completionRate}%
@@ -207,10 +236,10 @@ function TaskProgress({ tasks }: { tasks: Task[] }) {
           {/* Legend + counts */}
           <div className="flex-1 grid grid-cols-2 gap-3">
             {([
-              ["Done", counts.done, STATUS_COLORS.done, "text-emerald-500"],
-              ["Failed", counts.failed, STATUS_COLORS.failed, "text-red-500"],
-              ["Running", counts.running, STATUS_COLORS.running, "text-blue-500"],
-              ["Queued", counts.queued, STATUS_COLORS.queued, "text-zinc-400"],
+              ["Done", counts.done, STATUS_COLORS.done, "text-teal-400"],
+              ["Failed", counts.failed, STATUS_COLORS.failed, "text-rose-500"],
+              ["Running", counts.running, STATUS_COLORS.running, "text-cyan-400"],
+              ["Queued", counts.queued, STATUS_COLORS.queued, "text-indigo-400"],
             ] as const).map(([label, count, dotColor, textColor]) => (
               <div key={label} className="flex items-center gap-2.5">
                 <div className="h-3 w-3 rounded-sm shrink-0" style={{ backgroundColor: dotColor }} />
@@ -234,7 +263,7 @@ function TaskProgress({ tasks }: { tasks: Task[] }) {
 function ActiveAgents({ processes }: { processes: AgentProcess[] }) {
   if (processes.length === 0) {
     return (
-      <Card>
+      <Card className="bg-card/80 backdrop-blur-sm border-border/50">
         <CardHeader>
           <CardTitle className="text-sm font-medium">Active Agents</CardTitle>
         </CardHeader>
@@ -250,7 +279,7 @@ function ActiveAgents({ processes }: { processes: AgentProcess[] }) {
   }
 
   return (
-    <Card>
+    <Card className={cn("bg-card/80 backdrop-blur-sm border-border/50", processes.length > 0 && "glow-cyan")}>
       <CardHeader className="pb-3">
         <CardTitle className="text-sm font-medium">Active Agents</CardTitle>
         <CardDescription>{processes.length} agent{processes.length !== 1 ? "s" : ""} working</CardDescription>
@@ -267,10 +296,10 @@ function ActiveAgents({ processes }: { processes: AgentProcess[] }) {
             : "Working...";
 
           return (
-            <div key={`${p.agentName}-${p.taskId}`} className="rounded-lg border border-border p-3">
+            <div key={`${p.agentName}-${p.taskId}`} className="rounded-lg border border-border/40 bg-card/60 backdrop-blur-sm p-3">
               <div className="flex items-center gap-3 mb-2">
-                <div className="flex h-8 w-8 items-center justify-center rounded-md bg-blue-500/10">
-                  <Bot className="h-4 w-4 text-blue-500" />
+                <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary/10">
+                  <Bot className="h-4 w-4 text-primary" />
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium">{p.agentName}</p>
@@ -305,7 +334,7 @@ function RecentTasks({ tasks }: { tasks: Task[] }) {
     .slice(0, 8);
 
   return (
-    <Card className="lg:col-span-2">
+    <Card className="lg:col-span-2 bg-card/80 backdrop-blur-sm border-border/50">
       <CardHeader className="flex flex-row items-center justify-between pb-3">
         <div>
           <CardTitle className="text-sm font-medium">Recent Activity</CardTitle>
@@ -328,19 +357,20 @@ function RecentTasks({ tasks }: { tasks: Task[] }) {
           <div className="space-y-1.5">
             {recent.map((task) => {
               const cfg = {
-                done: { icon: CheckCircle2, color: "text-emerald-500" },
-                failed: { icon: AlertTriangle, color: "text-red-500" },
-                in_progress: { icon: Loader2, color: "text-blue-500" },
+                done: { icon: CheckCircle2, color: "text-teal-400" },
+                failed: { icon: AlertTriangle, color: "text-rose-500" },
+                in_progress: { icon: Loader2, color: "text-cyan-400" },
                 review: { icon: Eye, color: "text-amber-500" },
                 pending: { icon: Clock, color: "text-zinc-400" },
                 awaiting_approval: { icon: Clock, color: "text-amber-400" },
                 assigned: { icon: Clock, color: "text-violet-400" },
+                draft: { icon: FileEdit, color: "text-zinc-500" },
               }[task.status] ?? { icon: Clock, color: "text-muted-foreground" };
 
               return (
                 <div
                   key={task.id}
-                  className="flex items-center gap-3 rounded-md px-3 py-2 transition-colors hover:bg-muted/50"
+                  className="flex items-center gap-3 rounded-md px-3 py-2 transition-colors hover:bg-accent/30"
                 >
                   <cfg.icon className={cn("h-4 w-4 shrink-0", cfg.color, task.status === "in_progress" && "animate-spin")} />
                   <div className="flex-1 min-w-0">
@@ -359,7 +389,12 @@ function RecentTasks({ tasks }: { tasks: Task[] }) {
                         <TooltipTrigger asChild>
                           <Badge
                             variant={task.result.assessment.passed ? "default" : "destructive"}
-                            className="text-[10px] cursor-help"
+                            className={cn(
+                              "text-[10px] cursor-help",
+                              task.result.assessment.passed
+                                ? "bg-teal-500/20 text-teal-300 border-teal-500/30 hover:bg-teal-500/30"
+                                : "bg-rose-500/20 text-rose-300 border-rose-500/30 hover:bg-rose-500/30",
+                            )}
                           >
                             <Star className="h-2.5 w-2.5 mr-0.5" />
                             {Math.round(task.result.assessment.globalScore * 100)}
@@ -402,13 +437,13 @@ export function DashboardPage() {
   if (tasksLoading) {
     return (
       <div className="flex items-center justify-center h-full">
-        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        <Loader2 className="h-8 w-8 animate-spin text-primary drop-shadow-[0_0_8px_rgba(34,211,238,0.5)]" />
       </div>
     );
   }
 
   return (
-    <div className="space-y-6 flex-1 min-h-0 overflow-auto">
+    <div className="space-y-6 flex-1 min-h-0 overflow-auto pb-bottom-nav lg:pb-0">
       {/* Live ticker */}
       <LiveTicker stats={stats} />
 

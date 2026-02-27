@@ -9,7 +9,7 @@ OpenPolpo (`polpo` CLI) is an agent-agnostic framework for orchestrating teams o
 ## Repository Structure
 
 ```
-openpolpo/
+polpo/
 ├── src/                  # Main TypeScript source (ESM)
 │   ├── core/             # Orchestrator, config, runner, types, events, state machine
 │   ├── adapters/         # Agent adapters (native, claude-sdk, generic)
@@ -22,7 +22,7 @@ openpolpo/
 │   ├── cli/              # Commander CLI entry point
 │   └── index.ts          # Barrel export (only file in src/ root)
 ├── packages/
-│   └── react-sdk/        # @openpolpo/react-sdk — React hooks + SSE client
+│   └── react-sdk/        # @lumea-labs/polpo-react — React hooks + SSE client
 ├── ui/                   # Vite + React SPA dashboard
 ├── docs/                 # Mintlify documentation site
 └── templates/            # Built-in plan templates (JSON)
@@ -38,7 +38,7 @@ pnpm install
 ./node_modules/.bin/tsc
 
 # Build React SDK
-pnpm --filter @openpolpo/react-sdk build
+pnpm --filter @lumea-labs/polpo-react build
 
 # Build UI
 pnpm --filter ui build
@@ -52,7 +52,7 @@ pnpm test
 ## Naming Conventions
 
 - **User-facing strings**: "Polpo" or "OpenPolpo" (CLI output, docs, prompts)
-- **npm package**: `openpolpo` (root), `@openpolpo/react-sdk` (SDK)
+- **npm package**: `@lumea-labs/polpo` (root), `@lumea-labs/polpo-react` (SDK)
 - **CLI command**: `polpo`
 - **Config directory**: `.polpo/`
 - **Internal types**: `OrchestraConfig`, `OrchestraState`, `OrchestraEvent` (historical, kept as-is)

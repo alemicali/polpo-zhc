@@ -18,8 +18,8 @@ Be respectful. We're building something fun and useful together. Harassment, tro
 
 ```bash
 # Fork the repository on GitHub, then:
-git clone https://github.com/<your-username>/openpolpo.git
-cd openpolpo
+git clone https://github.com/<your-username>/polpo.git
+cd polpo
 pnpm install
 ```
 
@@ -50,7 +50,7 @@ npx mintlify dev docs   # Dev server on localhost:3333
 ## Project Structure
 
 ```
-openpolpo/
+polpo/
 ├── src/                    # Core TypeScript source
 │   ├── core/               # Orchestrator, types, events, hooks, state machine
 │   ├── adapters/           # Built-in engine
@@ -75,7 +75,7 @@ openpolpo/
 
 ### Reporting Bugs
 
-Open a [GitHub Issue](https://github.com/openpolpo/openpolpo/issues/new) with:
+Open a [GitHub Issue](https://github.com/lumea-labs/polpo/issues/new) with:
 
 1. **What happened** — describe the bug clearly
 2. **What you expected** — what should have happened instead
@@ -84,7 +84,7 @@ Open a [GitHub Issue](https://github.com/openpolpo/openpolpo/issues/new) with:
 
 ### Suggesting Features
 
-Open a [GitHub Issue](https://github.com/openpolpo/openpolpo/issues/new) with the `enhancement` label. Describe the use case, not just the solution. We're open to ideas but want to keep the core focused.
+Open a [GitHub Issue](https://github.com/lumea-labs/polpo/issues/new) with the `enhancement` label. Describe the use case, not just the solution. We're open to ideas but want to keep the core focused.
 
 ### Submitting Pull Requests
 
@@ -173,7 +173,7 @@ Releases are managed by maintainers. We follow semver:
 
 ## Questions?
 
-Open a [Discussion](https://github.com/openpolpo/openpolpo/discussions) or reach out in issues. We're friendly.
+Open a [Discussion](https://github.com/lumea-labs/polpo/discussions) or reach out in issues. We're friendly.
 
 ---
 

@@ -48,8 +48,8 @@ import {
   MailX,
   ArrowUpRight,
 } from "lucide-react";
-import { useNotifications } from "@openpolpo/react-sdk";
-import type { NotificationRecord, NotificationSeverity } from "@openpolpo/react-sdk";
+import { useNotifications } from "@lumea-labs/polpo-react";
+import type { NotificationRecord, NotificationSeverity } from "@lumea-labs/polpo-react";
 import { formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -103,6 +103,13 @@ const statusConfig: Record<
 
 // ── Stat card ──
 
+const statGradients: Record<string, string> = {
+  "text-sky-400": "from-sky-500/60 to-sky-400/20",
+  "text-emerald-400": "from-emerald-500/60 to-emerald-400/20",
+  "text-red-400": "from-red-500/60 to-red-400/20",
+  "text-rose-400": "from-rose-500/60 to-rose-400/20",
+};
+
 function StatCard({
   label,
   value,
@@ -119,14 +126,14 @@ function StatCard({
   subtitle?: string;
 }) {
   return (
-    <Card className="relative overflow-hidden">
+    <Card className="relative overflow-hidden bg-card/80 backdrop-blur-sm border-border/40">
       <CardContent className="p-4">
         <div className="flex items-start justify-between">
           <div>
             <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
               {label}
             </p>
-            <p className="text-2xl font-bold tracking-tight mt-1">{value}</p>
+            <p className="text-2xl font-bold font-mono tracking-tight mt-1">{value}</p>
             {subtitle && (
               <p className="text-[10px] text-muted-foreground mt-0.5">{subtitle}</p>
             )}
@@ -137,7 +144,7 @@ function StatCard({
         </div>
       </CardContent>
       {/* Decorative accent bar */}
-      <div className={cn("absolute bottom-0 left-0 right-0 h-0.5", bg.replace("/10", "/40"))} />
+      <div className={cn("absolute bottom-0 left-0 right-0 h-0.5 bg-gradient-to-r", statGradients[color] ?? "from-primary/40 to-primary/10")} />
     </Card>
   );
 }
@@ -151,9 +158,9 @@ function NotificationRow({ record }: { record: NotificationRecord }) {
   const StatIcon = stat.icon;
 
   return (
-    <div className="flex items-start gap-3 px-4 py-3 hover:bg-muted/20 transition-colors group">
+    <div className="flex items-start gap-3 px-4 py-3 hover:bg-accent/20 transition-colors group">
       {/* Severity indicator */}
-      <div className={cn("flex h-8 w-8 shrink-0 items-center justify-center rounded-lg mt-0.5", sev.bg)}>
+      <div className={cn("flex h-8 w-8 shrink-0 items-center justify-center rounded-lg mt-0.5 backdrop-blur-sm", sev.bg)}>
         <SevIcon className={cn("h-4 w-4", sev.color)} />
       </div>
 
@@ -266,7 +273,7 @@ function SendDirectDialog({
           Send Direct
         </Button>
       </DialogTrigger>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-md bg-popover/95 backdrop-blur-xl border-border/40">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-sm">
             <Megaphone className="h-4 w-4 text-muted-foreground" />
@@ -279,7 +286,7 @@ function SendDirectDialog({
               Channel ID
             </label>
             <Input
-              className="mt-1 h-8 text-sm font-mono"
+              className="mt-1 h-8 text-sm font-mono bg-input/50"
               placeholder="e.g. telegram, slack-general"
               value={channel}
               onChange={(e) => setChannel(e.target.value)}
@@ -290,7 +297,7 @@ function SendDirectDialog({
               Title
             </label>
             <Input
-              className="mt-1 h-8 text-sm"
+              className="mt-1 h-8 text-sm bg-input/50"
               placeholder="Notification title"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
@@ -301,7 +308,7 @@ function SendDirectDialog({
               Body
             </label>
             <Textarea
-              className="mt-1 text-sm min-h-[80px] resize-none"
+              className="mt-1 text-sm min-h-[80px] resize-none bg-input/50"
               placeholder="Notification body (HTML supported)"
               value={body}
               onChange={(e) => setBody(e.target.value)}
@@ -328,7 +335,7 @@ function SendDirectDialog({
                 Delay (seconds)
               </label>
               <Input
-                className="mt-1 h-8 text-sm"
+                className="mt-1 h-8 text-sm bg-input/50"
                 type="number"
                 min="0"
                 placeholder="0"
@@ -421,7 +428,7 @@ export function NotificationsPage() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-full">
-        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
       </div>
     );
   }
@@ -469,7 +476,7 @@ export function NotificationsPage() {
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
           <Input
             placeholder="Search notifications..."
-            className="pl-9 h-8 text-sm"
+            className="pl-9 h-8 text-sm bg-input/50 border-border/40"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
@@ -477,7 +484,7 @@ export function NotificationsPage() {
 
         {/* Status filter */}
         <Select value={statusFilter} onValueChange={setStatusFilter}>
-          <SelectTrigger className="h-8 w-28 text-xs">
+          <SelectTrigger className="h-8 w-28 text-xs bg-input/50 border-border/40">
             <Filter className="h-3 w-3 mr-1.5 text-muted-foreground" />
             <SelectValue />
           </SelectTrigger>
@@ -490,7 +497,7 @@ export function NotificationsPage() {
 
         {/* Severity filter */}
         <Select value={severityFilter} onValueChange={setSeverityFilter}>
-          <SelectTrigger className="h-8 w-28 text-xs">
+          <SelectTrigger className="h-8 w-28 text-xs bg-input/50 border-border/40">
             <AlertTriangle className="h-3 w-3 mr-1.5 text-muted-foreground" />
             <SelectValue />
           </SelectTrigger>
@@ -516,7 +523,7 @@ export function NotificationsPage() {
       </div>
 
       {/* ── Notification list ── */}
-      <Card className="flex-1 flex flex-col overflow-hidden">
+      <Card className="flex-1 flex flex-col overflow-hidden bg-card/80 backdrop-blur-sm border-border/40">
         <CardHeader className="pb-0 pt-3 px-4 shrink-0">
           <div className="flex items-center gap-2">
             <Bell className="h-4 w-4 text-muted-foreground" />
@@ -544,19 +551,21 @@ export function NotificationsPage() {
         </CardHeader>
         <CardContent className="flex-1 overflow-hidden p-0 mt-2">
           {filtered.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-20 text-muted-foreground">
-              <Bell className="h-12 w-12 mb-4 opacity-30" />
-              <p className="text-sm font-medium">
-                {notifications.length === 0
-                  ? "No notifications yet"
-                  : "No matching notifications"}
-              </p>
-              <p className="text-xs mt-1 text-center max-w-xs">
-                {notifications.length === 0
-                  ? "Notifications appear when rules fire or you send directly"
-                  : "Try adjusting your filters"}
-              </p>
-            </div>
+            <Card className="bg-card/60 border-0 shadow-none">
+              <div className="flex flex-col items-center justify-center py-20 text-muted-foreground">
+                <Bell className="h-12 w-12 mb-4 text-primary/30" />
+                <p className="text-sm font-medium">
+                  {notifications.length === 0
+                    ? "No notifications yet"
+                    : "No matching notifications"}
+                </p>
+                <p className="text-xs mt-1 text-center max-w-xs">
+                  {notifications.length === 0
+                    ? "Notifications appear when rules fire or you send directly"
+                    : "Try adjusting your filters"}
+                </p>
+              </div>
+            </Card>
           ) : (
             <ScrollArea className="h-full">
               <div className="divide-y divide-border/30">

@@ -6,7 +6,7 @@ If you discover a security vulnerability in OpenPolpo, please report it responsi
 
 ### How to Report
 
-Use the GitHub Security Advisory ["Report a Vulnerability"](https://github.com/openpolpo/openpolpo/security/advisories/new) tab to submit a private report.
+Use the GitHub Security Advisory ["Report a Vulnerability"](https://github.com/lumea-labs/polpo/security/advisories/new) tab to submit a private report.
 
 Alternatively, email **security@openpolpo.dev** with:
 

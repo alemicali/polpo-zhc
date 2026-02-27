@@ -46,7 +46,7 @@ description: "Deploy Polpo on a Hetzner Cloud server with Docker and systemd."
    ```yaml
    services:
      polpo:
-       image: ghcr.io/openpolpo/openpolpo:latest
+       image: ghcr.io/lumea-labs/polpo:latest
        ports:
          - "3000:3000"
        volumes:
@@ -89,7 +89,7 @@ If you prefer running Node.js directly:
 2. **Install Polpo**
 
    ```bash
-   npm install -g openpolpo
+   npm install -g @lumea-labs/polpo
    mkdir -p /opt/polpo/workspace
    cd /opt/polpo/workspace
    polpo init

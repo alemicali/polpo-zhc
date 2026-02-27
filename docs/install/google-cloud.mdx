@@ -32,7 +32,7 @@ description: "Deploy Polpo on Google Cloud Run or Compute Engine."
 
    ```bash
    gcloud run deploy polpo \
-     --image ghcr.io/openpolpo/openpolpo:latest \
+     --image ghcr.io/lumea-labs/polpo:latest \
      --platform managed \
      --region us-central1 \
      --port 3000 \
@@ -106,7 +106,7 @@ For always-on orchestration, a Compute Engine VM is simpler and cheaper.
    cat > docker-compose.yml << 'EOF'
    services:
      polpo:
-       image: ghcr.io/openpolpo/openpolpo:latest
+       image: ghcr.io/lumea-labs/polpo:latest
        ports:
          - "3000:3000"
        volumes:

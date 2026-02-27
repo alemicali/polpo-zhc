@@ -16,7 +16,7 @@ description: "Install Polpo via npm, Docker, or from source."
 <Tabs>
   <Tab title="npm / pnpm">
     ```bash
-    npm install -g openpolpo
+    npm install -g @lumea-labs/polpo
     ```
 
     Or with pnpm:
@@ -41,7 +41,7 @@ description: "Install Polpo via npm, Docker, or from source."
       -p 3000:3000 \
       -v $(pwd):/workspace \
       -e ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY \
-      ghcr.io/openpolpo/openpolpo:latest
+      ghcr.io/lumea-labs/polpo:latest
     ```
 
     Polpo starts in server mode on port 3000. Your current directory is mounted as the workspace.
@@ -51,7 +51,7 @@ description: "Install Polpo via npm, Docker, or from source."
     ```yaml
     services:
       polpo:
-        image: ghcr.io/openpolpo/openpolpo:latest
+        image: ghcr.io/lumea-labs/polpo:latest
         ports:
           - "3000:3000"
         volumes:
@@ -90,7 +90,7 @@ description: "Install Polpo via npm, Docker, or from source."
     Requires `pnpm 10+`.
 
     ```bash
-    git clone https://github.com/openpolpo/openpolpo.git
+    git clone https://github.com/lumea-labs/polpo.git
     cd openpolpo
     pnpm install
     pnpm run build
@@ -112,7 +112,7 @@ description: "Install Polpo via npm, Docker, or from source."
     pnpm test             # run tests
     ```
 
-    See [CONTRIBUTING.md](https://github.com/openpolpo/openpolpo/blob/main/CONTRIBUTING.md) for guidelines.
+    See [CONTRIBUTING.md](https://github.com/lumea-labs/polpo/blob/main/CONTRIBUTING.md) for guidelines.
   </Tab>
 </Tabs>
 

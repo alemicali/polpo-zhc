@@ -5,7 +5,9 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.3.0] — Quality Layer & Scheduling
+## [Unreleased]
+
+## [0.3.0] — 2026-02-20 — Quality Layer & Scheduling
 
 ### Added
 - **Quality controller** with plan-level quality gates — block plan progression until score thresholds are met
@@ -15,7 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `quality:gate` and `quality:sla` lifecycle hooks for before/after interception
 - `schedule:trigger` lifecycle hook
 
-## [0.2.0] — Lifecycle Hooks & Operations
+## [0.2.0] — 2026-02-10 — Lifecycle Hooks & Operations
 
 ### Added
 - **Lifecycle hook system** — 15 hook points across task, plan, assessment, quality, scheduling, and orchestrator events; before-hooks can cancel/modify, after-hooks are observe-only
@@ -27,7 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - File-based approval store (`FileApprovalStore`)
 - Notification template engine with per-channel formatting
 
-## [0.1.0] — Initial Release
+## [0.1.0] — 2026-01-30 — Initial Release
 
 ### Added
 - Core orchestrator with 5-second supervisor loop, graceful shutdown, and orphan recovery

@@ -253,6 +253,8 @@ export interface AgentConfig {
   enableAudio?: boolean;
   /** Enable image tools (image_generate, image_analyze) */
   enableImage?: boolean;
+  /** Allowed recipient email domains for email_send. Overrides global setting. */
+  emailAllowedDomains?: string[];
 }
 
 export interface AgentActivity {

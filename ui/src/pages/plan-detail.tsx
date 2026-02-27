@@ -37,11 +37,12 @@ import {
   FilePlus,
   Timer,
 } from "lucide-react";
-import { usePlan, useTasks } from "@openpolpo/react-sdk";
-import type { PlanStatus, PlanReport, TaskStatus } from "@openpolpo/react-sdk";
+import { usePlan, useTasks } from "@lumea-labs/polpo-react";
+import type { PlanStatus, PlanReport, TaskStatus } from "@lumea-labs/polpo-react";
 import { toast } from "sonner";
 import { formatDistanceToNow, format } from "date-fns";
 import { cn } from "@/lib/utils";
+import { JsonBlock } from "@/components/json-block";
 
 // ── Copyable ID ──
 
@@ -654,15 +655,10 @@ export function PlanDetailPage() {
                 <FileJson className="h-4 w-4 text-muted-foreground" />
                 <span className="text-xs text-muted-foreground">Raw plan data</span>
               </div>
-              <pre className="text-xs bg-muted/30 rounded-lg p-4 whitespace-pre-wrap font-mono text-muted-foreground">
-                {(() => {
-                  try {
-                    return JSON.stringify(JSON.parse(plan.data), null, 2);
-                  } catch {
-                    return plan.data;
-                  }
-                })()}
-              </pre>
+              <JsonBlock
+                data={(() => { try { return JSON.parse(plan.data); } catch { return plan.data; } })()}
+                className="text-xs leading-relaxed font-mono bg-muted/30 rounded-lg p-4 whitespace-pre-wrap max-h-[70vh] overflow-auto border border-border/20"
+              />
             </div>
           </ScrollArea>
         </TabsContent>

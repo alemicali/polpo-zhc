@@ -1,9 +1,17 @@
 #!/usr/bin/env node
 
-import { resolve } from "node:path";
+import { resolve, dirname } from "node:path";
 import { mkdir, access, readFile } from "node:fs/promises";
 import { existsSync, readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { Command } from "commander";
+
+// Read version from package.json at build time fallback
+const __dirname_cli = dirname(fileURLToPath(import.meta.url));
+const pkgPath = resolve(__dirname_cli, "..", "..", "package.json");
+const PKG_VERSION = existsSync(pkgPath)
+  ? JSON.parse(readFileSync(pkgPath, "utf-8")).version
+  : "0.0.0";
 
 // Load .env files (project-local, then .polpo/.env)
 for (const envPath of [".env", ".polpo/.env"]) {
@@ -42,7 +50,9 @@ import { registerSetupCommand } from "./commands/setup.js";
 import { registerBrowserCommands } from "./commands/browser-profile.js";
 import { registerScheduleCommands } from "./commands/schedule.js";
 import { registerAgentOnboardCommands } from "./commands/agent-onboard.js";
+import { registerUpdateCommand } from "./commands/update.js";
 import { ensureSetup } from "./ensure-setup.js";
+import { startUpdateCheck } from "./update-check.js";
 
 /** Wire orchestrator events to console output with chalk formatting. */
 function wireConsoleEvents(orchestrator: Orchestrator): void {
@@ -153,7 +163,7 @@ const program = new Command();
 program
   .name("polpo")
   .description("Agent-agnostic framework for orchestrating teams of AI coding agents")
-  .version("0.1.0");
+  .version(PKG_VERSION);
 
 // polpo init
 program
@@ -518,5 +528,10 @@ registerSetupCommand(program);
 registerBrowserCommands(program);
 registerScheduleCommands(program);
 registerAgentOnboardCommands(program);
+registerUpdateCommand(program);
+
+// Non-blocking update check — prints notice at exit if a new version exists
+const printUpdateNotice = startUpdateCheck(PKG_VERSION);
+process.on("exit", printUpdateNotice);
 
 program.parse();

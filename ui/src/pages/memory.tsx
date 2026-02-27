@@ -18,7 +18,7 @@ import {
   Pencil,
 } from "lucide-react";
 import { MessageResponse } from "@/components/ai-elements/message";
-import { useMemory } from "@openpolpo/react-sdk";
+import { useMemory } from "@lumea-labs/polpo-react";
 import { toast } from "sonner";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
@@ -30,7 +30,7 @@ function MemoryStats({ content }: { content: string }) {
   const chars = content.length;
 
   return (
-    <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
+    <div className="flex items-center gap-3 text-[10px] text-muted-foreground font-mono">
       <span>{lines} lines</span>
       <span>&middot;</span>
       <span>{words} words</span>
@@ -72,7 +72,7 @@ export function MemoryPage() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-full">
-        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
       </div>
     );
   }
@@ -80,9 +80,9 @@ export function MemoryPage() {
   if (error) {
     return (
       <div className="flex flex-col items-center justify-center h-full gap-2 text-muted-foreground">
-        <Brain className="h-10 w-10 opacity-40" />
+        <Brain className="h-10 w-10 opacity-40 text-destructive" />
         <p className="text-sm font-medium">Failed to load memory</p>
-        <p className="text-xs text-red-400">{error.message}</p>
+        <p className="text-xs text-destructive">{error.message}</p>
         <Button variant="outline" size="sm" onClick={refetch}>
           <RefreshCw className="h-3.5 w-3.5 mr-1.5" /> Retry
         </Button>
@@ -92,7 +92,7 @@ export function MemoryPage() {
 
   return (
     <div className="flex-1 min-h-0 flex flex-col">
-      <Card className="flex flex-col h-full overflow-hidden">
+      <Card className="flex flex-col h-full overflow-hidden bg-card/80 backdrop-blur-sm border-border/40">
         <CardHeader className="flex flex-row items-center justify-between pb-3 shrink-0">
           <div className="flex items-center gap-3">
             <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10">
@@ -146,7 +146,7 @@ export function MemoryPage() {
         <CardContent className="flex-1 overflow-hidden">
           {memoryView === "edit" ? (
             <Textarea
-              className="h-full min-h-0 font-mono text-sm resize-none"
+              className="h-full min-h-0 font-mono text-sm resize-none bg-input/50 border-border/40 focus:border-primary/50"
               placeholder="Project memory is shared context that all agents and the orchestrator can reference. Write markdown here — conventions, architecture notes, key decisions, etc."
               value={content}
               onChange={(e) => {
@@ -158,7 +158,7 @@ export function MemoryPage() {
             <ScrollArea className="h-full">
               <div className="pr-4">
                 {content ? (
-                  <div className="prose prose-sm dark:prose-invert max-w-none">
+                  <div className="prose prose-sm dark:prose-invert max-w-none prose-headings:text-foreground prose-a:text-primary">
                     <MessageResponse>{content}</MessageResponse>
                   </div>
                 ) : (

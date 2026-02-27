@@ -1,5 +1,5 @@
 /**
- * Custom hooks that complement the @openpolpo/react-sdk.
+ * Custom hooks that complement the @lumea-labs/polpo-react.
  *
  * The SDK provides: useTasks, useTask, usePlans, usePlan, useAgents,
  * useProcesses, useEvents, useStats, useMemory, useLogs, usePolpo,
@@ -11,8 +11,8 @@
  */
 
 import { useState, useCallback, useEffect, useRef } from "react";
-import { usePolpo, useSessions } from "@openpolpo/react-sdk";
-import type { ChatMessage, ChatCompletionMessage } from "@openpolpo/react-sdk";
+import { usePolpo, useSessions } from "@lumea-labs/polpo-react";
+import type { ChatMessage, ChatCompletionMessage, PolpoConfig } from "@lumea-labs/polpo-react";
 
 // ── useChat (session-aware + streaming) ──
 // Builds on the SDK's useSessions hook for session management,
@@ -206,4 +206,28 @@ export function useProjectInfo() {
   }, [client]);
 
   return { info, loading };
+}
+
+// ── useConfig ──
+// Fetches the full orchestrator config (read-only, redacted secrets).
+
+export function useConfig() {
+  const { client } = usePolpo();
+  const [config, setConfig] = useState<PolpoConfig | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetch = useCallback(() => {
+    setIsLoading(true);
+    setError(null);
+    client
+      .getConfig()
+      .then((cfg) => setConfig(cfg))
+      .catch((e) => setError((e as Error).message))
+      .finally(() => setIsLoading(false));
+  }, [client]);
+
+  useEffect(() => { fetch(); }, [fetch]);
+
+  return { config, isLoading, error, refetch: fetch };
 }

@@ -1,5 +1,5 @@
 {
-  "name": "@openpolpo/react-sdk",
+  "name": "@lumea-labs/polpo-react",
   "version": "0.1.0",
   "description": "React SDK for OpenPolpo — typed client + hooks with real-time SSE updates",
   "type": "module",
@@ -22,7 +22,8 @@
   "sideEffects": false,
   "scripts": {
     "build": "tsc",
-    "dev": "tsc --watch"
+    "dev": "tsc --watch",
+    "prepublishOnly": "tsc"
   },
   "peerDependencies": {
     "react": "^18.0.0 || ^19.0.0"
@@ -34,13 +35,30 @@
   },
   "files": ["dist", "README.md"],
   "license": "MIT",
+  "keywords": [
+    "polpo",
+    "polpo",
+    "ai-agents",
+    "orchestration",
+    "react",
+    "hooks",
+    "sse",
+    "real-time"
+  ],
+  "author": "OpenPolpo Contributors",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "repository": {
     "type": "git",
-    "url": "https://github.com/openpolpo/openpolpo.git",
+    "url": "https://github.com/lumea-labs/polpo.git",
     "directory": "packages/react-sdk"
   },
-  "homepage": "https://github.com/openpolpo/openpolpo/tree/main/packages/react-sdk",
+  "homepage": "https://github.com/lumea-labs/polpo/tree/main/packages/react-sdk",
   "bugs": {
-    "url": "https://github.com/openpolpo/openpolpo/issues"
+    "url": "https://github.com/lumea-labs/polpo/issues"
   }
 }

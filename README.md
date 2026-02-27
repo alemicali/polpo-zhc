@@ -15,8 +15,8 @@
 </p>
 
 <p align="center">
-  <img alt="npm" src="https://img.shields.io/npm/v/openpolpo?style=flat-square&color=blue" />
-  <img alt="license" src="https://img.shields.io/github/license/openpolpo/openpolpo?style=flat-square" />
+  <img alt="npm" src="https://img.shields.io/npm/v/@lumea-labs/polpo?style=flat-square&color=blue" />
+  <img alt="license" src="https://img.shields.io/github/license/lumea-labs/polpo?style=flat-square" />
   <img alt="node" src="https://img.shields.io/badge/node-%3E%3D18-brightgreen?style=flat-square" />
   <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-ESM-blue?style=flat-square" />
 </p>
@@ -27,12 +27,41 @@ OpenPolpo coordinates teams of AI agents working together on complex software ta
 
 Polpo includes a **built-in engine** (Pi Agent) — a full agentic loop with 7 coding tools, 18+ LLM providers, and MCP support. No API key needed — the default model is free.
 
+## Installation
+
+### One-line install (recommended)
+
+**macOS / Linux / WSL:**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/lumea-labs/polpo/main/install/install.sh | bash
+```
+
+**Windows (PowerShell):**
+
+```powershell
+irm https://raw.githubusercontent.com/lumea-labs/polpo/main/install/install.ps1 | iex
+```
+
+The installer detects your platform, ensures Node.js >= 18 is available (installing it via your system package manager if needed), and installs `@lumea-labs/polpo` globally.
+
+### Manual install
+
+```bash
+npm install -g @lumea-labs/polpo    # or: pnpm add -g @lumea-labs/polpo
+```
+
+### Docker
+
+```bash
+docker run -it -p 3000:3000 -v $(pwd):/workspace lumea-labs/polpo
+```
+
 ## Quick Start
 
 ### Path 1: Chat with an agent (30 seconds)
 
 ```bash
-npm install -g openpolpo
 mkdir my-project && cd my-project
 polpo init
 polpo
@@ -42,10 +71,9 @@ That's it. You're in the interactive TUI. Type what you need, hit Enter, and the
 
 ### Path 2: Orchestrate a team (5 minutes)
 
-**1. Install and init**
+**1. Init your project**
 
 ```bash
-npm install -g openpolpo
 mkdir my-project && cd my-project
 polpo init
 ```
@@ -179,7 +207,7 @@ Seven states with validated transitions. Tasks flow forward through assignment, 
 ## Project Structure
 
 ```
-openpolpo/
+polpo/
 ├── src/
 │   ├── core/               # Orchestrator, config, types, events, hooks, state machine
 │   │                       #   approval manager, escalation, task/plan managers
@@ -199,7 +227,7 @@ openpolpo/
 ├── ui/                     # Vite + React monitoring dashboard
 ├── docs/                   # Mintlify documentation site
 ├── packages/
-│   └── react-sdk/          # React hooks + SSE client (@openpolpo/react-sdk)
+│   └── react-sdk/          # React hooks + SSE client (@lumea-labs/polpo-react)
 └── .polpo/polpo.json       # Your project configuration
 ```
 
@@ -219,8 +247,8 @@ Full documentation is available at [openpolpo.dev](https://openpolpo.dev), inclu
 We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for setup instructions, coding standards, and PR guidelines.
 
 ```bash
-git clone https://github.com/openpolpo/openpolpo.git
-cd openpolpo
+git clone https://github.com/lumea-labs/polpo.git
+cd polpo
 pnpm install
 pnpm run build
 pnpm run test -- --run

@@ -1,5 +1,5 @@
 {
-  "name": "openpolpo",
+  "name": "@lumea-labs/polpo",
   "version": "0.1.0",
   "description": "Agent-agnostic framework for orchestrating teams of AI coding agents",
   "type": "module",
@@ -28,23 +28,30 @@
   },
   "files": [
     "dist/",
+    "!dist/__tests__/",
     "templates/",
     "README.md",
     "LICENSE"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsc",
-    "build:all": "tsc && pnpm --filter @openpolpo/react-sdk build && pnpm --filter ui build",
-    "build:sdk": "pnpm --filter @openpolpo/react-sdk build",
+    "build:all": "tsc && pnpm --filter @lumea-labs/polpo-react build && pnpm --filter ui build",
+    "build:sdk": "pnpm --filter @lumea-labs/polpo-react build",
     "build:ui": "pnpm --filter ui build",
     "dev": "tsc --watch",
-    "dev:serve": "tsx --watch src/cli/index.ts serve",
+    "dev:serve": "tsx --watch src/cli/index.ts serve -p 3890",
     "dev:ui": "pnpm --filter ui dev",
+    "dev:docs": "cd docs && npx mintlify@latest dev",
+    "dev:all": "pnpm build:sdk && concurrently -n server,ui,docs -c blue,green,magenta \"pnpm dev:serve\" \"pnpm dev:ui\" \"pnpm dev:docs\"",
     "start": "node dist/cli/index.js",
     "test": "vitest",
     "typecheck": "./node_modules/.bin/tsc --noEmit",
     "lint": "pnpm --filter ui lint",
     "clean": "rm -rf dist packages/react-sdk/dist ui/dist",
+    "prepublishOnly": "./node_modules/.bin/tsc",
     "generate:openapi": "node -e \"const{createApp}=require('./dist/server/app.js');const app=createApp(null,null);const fs=require('fs');app.fetch(new Request('http://localhost/api/v1/openapi.json')).then(r=>r.json()).then(j=>{fs.writeFileSync('docs/openapi.json',JSON.stringify(j,null,2));console.log('Generated openapi.json with',Object.keys(j.paths).length,'paths')})\""
   },
   "keywords": [
@@ -57,11 +64,11 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/openpolpo/openpolpo.git"
+    "url": "https://github.com/lumea-labs/polpo.git"
   },
-  "homepage": "https://github.com/openpolpo/openpolpo",
+  "homepage": "https://github.com/lumea-labs/polpo",
   "bugs": {
-    "url": "https://github.com/openpolpo/openpolpo/issues"
+    "url": "https://github.com/lumea-labs/polpo/issues"
   },
   "author": "OpenPolpo Contributors",
   "packageManager": "pnpm@10.29.3",
@@ -105,6 +112,7 @@
     "@types/node": "^22.12.0",
     "@types/nodemailer": "^7.0.10",
     "@types/react": "^19.2.14",
+    "concurrently": "^9.2.1",
     "tsx": "^4.21.0",
     "typescript": "^5.7.3",
     "vitest": "^3.0.4"

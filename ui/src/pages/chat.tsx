@@ -1,6 +1,5 @@
 import { useState, useCallback } from "react";
 import {
-  Bot,
   Copy,
   Check,
   Trash2,
@@ -105,8 +104,8 @@ function SessionSidebar({
   onDelete: (id: string) => void;
 }) {
   return (
-    <div className="w-56 border-r border-border flex flex-col bg-muted/20 h-full">
-      <div className="p-3 border-b border-border flex items-center justify-between shrink-0">
+    <div className="w-56 border-r border-border/30 flex flex-col bg-card/40 h-full">
+      <div className="p-3 border-b border-border/30 flex items-center justify-between shrink-0">
         <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
           Sessions
         </span>
@@ -138,8 +137,8 @@ function SessionSidebar({
                 className={cn(
                   "group flex items-start gap-2 rounded-md px-2.5 py-2 cursor-pointer transition-colors",
                   activeSessionId === s.id
-                    ? "bg-accent text-accent-foreground"
-                    : "hover:bg-muted/50 text-muted-foreground"
+                    ? "bg-accent/80 text-accent-foreground"
+                    : "hover:bg-accent/30 text-muted-foreground"
                 )}
                 onClick={() => onSelect(s.id)}
               >
@@ -228,7 +227,7 @@ export function ChatPage() {
       {/* Main chat area */}
       <div className="flex-1 flex flex-col min-w-0 h-full">
         {/* Chat toolbar */}
-        <div className="flex items-center gap-2 px-4 py-2 border-b border-border bg-background shrink-0">
+        <div className="flex items-center gap-2 px-4 py-2 border-b border-border/40 bg-background/80 backdrop-blur-md shrink-0">
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
@@ -269,9 +268,9 @@ export function ChatPage() {
         <Conversation className="flex-1 min-h-0">
           <ConversationContent className="mx-auto max-w-3xl gap-0 p-0">
             {isEmpty ? (
-              <div className="flex flex-col items-center justify-center h-full">
-                <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-emerald-600 text-white mb-4">
-                  <Bot className="h-8 w-8" />
+              <div className="flex flex-col items-center justify-center h-full pt-24">
+                <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10 mb-4 text-3xl">
+                  🐙
                 </div>
                 <h2 className="text-2xl font-semibold mb-2">How can I help you?</h2>
                 <p className="text-sm text-muted-foreground mb-8 max-w-md text-center">
@@ -283,7 +282,7 @@ export function ChatPage() {
                     <button
                       key={s.title}
                       onClick={() => send(s.title)}
-                      className="flex items-start gap-3 rounded-xl border border-border p-4 text-left transition-colors hover:bg-muted/50"
+                      className="flex items-start gap-3 rounded-xl border border-border/40 p-4 text-left transition-all hover:bg-accent/30 hover:border-primary/20"
                     >
                       <s.icon className="h-5 w-5 text-muted-foreground shrink-0 mt-0.5" />
                       <div>
@@ -319,12 +318,12 @@ export function ChatPage() {
                       </div>
                     </div>
                   ) : (
-                    <div key={msg.id || i} className="w-full py-4 px-4 bg-muted/30">
+                    <div key={msg.id || i} className="w-full py-4 px-4 bg-muted/20">
                       <div className="mx-auto max-w-3xl">
                         <Message from="assistant">
                           <div className="flex gap-3">
-                            <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-white mt-0.5">
-                              <Bot className="h-3.5 w-3.5" />
+                            <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/10 mt-0.5 text-sm">
+                              🐙
                             </div>
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-2 mb-1">
@@ -349,21 +348,13 @@ export function ChatPage() {
                   )
                 )}
 
-                {isLoading && (
-                  <div className="w-full py-4 px-4 bg-muted/30">
-                    <div className="mx-auto max-w-3xl">
-                      <div className="flex gap-3">
-                        <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-white">
-                          <Bot className="h-3.5 w-3.5" />
-                        </div>
-                        <div>
-                          <p className="text-xs font-semibold mb-1">Polpo</p>
-                          <div className="flex items-center gap-1 py-2">
-                            <span className="h-2 w-2 rounded-full bg-muted-foreground/40 animate-bounce [animation-delay:0ms]" />
-                            <span className="h-2 w-2 rounded-full bg-muted-foreground/40 animate-bounce [animation-delay:150ms]" />
-                            <span className="h-2 w-2 rounded-full bg-muted-foreground/40 animate-bounce [animation-delay:300ms]" />
-                          </div>
-                        </div>
+                {isLoading && messages.at(-1)?.role !== "assistant" && (
+                  <div className="w-full py-2 px-4">
+                    <div className="mx-auto max-w-3xl pl-10">
+                      <div className="flex items-center gap-1.5 py-1">
+                        <span className="h-1.5 w-1.5 rounded-full bg-primary/50 animate-bounce [animation-delay:0ms]" />
+                        <span className="h-1.5 w-1.5 rounded-full bg-primary/50 animate-bounce [animation-delay:150ms]" />
+                        <span className="h-1.5 w-1.5 rounded-full bg-primary/50 animate-bounce [animation-delay:300ms]" />
                       </div>
                     </div>
                   </div>
@@ -375,7 +366,7 @@ export function ChatPage() {
         </Conversation>
 
         {/* Input */}
-        <div className="bg-background px-4 py-3 shrink-0">
+        <div className="bg-background/80 backdrop-blur-md px-4 py-3 shrink-0">
           <div className="mx-auto max-w-3xl">
             <PromptInput onSubmit={handleSubmit}>
               <PromptInputTextarea placeholder="Message Polpo..." />

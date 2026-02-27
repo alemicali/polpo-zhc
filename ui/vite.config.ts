@@ -19,8 +19,8 @@ export default defineConfig({
         short_name: "Polpo",
         description:
           "Monitor and orchestrate your AI coding agent team",
-        theme_color: "#3B3E73",
-        background_color: "#1a1a1a",
+        theme_color: "#0a0e1a",
+        background_color: "#0a0e1a",
         display: "standalone",
         orientation: "portrait-primary",
         scope: "/",

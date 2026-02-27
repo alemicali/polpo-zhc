@@ -32,13 +32,13 @@
         "label": "GitHub",
         "icon": "github",
         "iconType": "brands",
-        "href": "https://github.com/openpolpo/openpolpo"
+        "href": "https://github.com/lumea-labs/polpo"
       },
       {
         "label": "Releases",
         "icon": "npm",
         "iconType": "brands",
-        "href": "https://www.npmjs.com/package/openpolpo"
+        "href": "https://www.npmjs.com/package/@lumea-labs/polpo"
       }
     ]
   },
@@ -273,7 +273,7 @@
   ],
   "footer": {
     "socials": {
-      "github": "https://github.com/openpolpo/openpolpo"
+      "github": "https://github.com/lumea-labs/polpo"
     }
   }
 }

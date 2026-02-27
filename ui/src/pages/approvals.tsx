@@ -36,11 +36,12 @@ import {
   ThumbsUp,
   ThumbsDown,
 } from "lucide-react";
-import { useApprovals } from "@openpolpo/react-sdk";
-import type { ApprovalRequest, ApprovalStatus } from "@openpolpo/react-sdk";
+import { useApprovals } from "@lumea-labs/polpo-react";
+import type { ApprovalRequest, ApprovalStatus } from "@lumea-labs/polpo-react";
 import { formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { JsonBlock } from "@/components/json-block";
 
 // ── Status styling ──
 
@@ -80,6 +81,13 @@ const approvalStatusConfig: Record<
 
 // ── Stat card ──
 
+const statGradients: Record<string, string> = {
+  "text-amber-400": "from-amber-500/60 to-amber-400/20",
+  "text-sky-400": "from-sky-500/60 to-sky-400/20",
+  "text-emerald-400": "from-emerald-500/60 to-emerald-400/20",
+  "text-red-400": "from-red-500/60 to-red-400/20",
+};
+
 function StatCard({
   label,
   value,
@@ -97,8 +105,8 @@ function StatCard({
 }) {
   return (
     <Card className={cn(
-      "relative overflow-hidden transition-all",
-      accent && value > 0 && "ring-1 ring-amber-500/30 shadow-amber-500/5 shadow-lg"
+      "relative overflow-hidden transition-all bg-card/80 backdrop-blur-sm border-border/40",
+      accent && value > 0 && "ring-1 ring-amber-500/30 shadow-[0_0_15px_oklch(0.75_0.15_85_/_10%)]"
     )}>
       <CardContent className="p-4">
         <div className="flex items-start justify-between">
@@ -106,7 +114,7 @@ function StatCard({
             <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
               {label}
             </p>
-            <p className={cn("text-2xl font-bold tracking-tight mt-1", accent && value > 0 && "text-amber-400")}>
+            <p className={cn("text-2xl font-bold font-mono tracking-tight mt-1", accent && value > 0 && "text-amber-400")}>
               {value}
             </p>
           </div>
@@ -115,7 +123,7 @@ function StatCard({
           </div>
         </div>
       </CardContent>
-      <div className={cn("absolute bottom-0 left-0 right-0 h-0.5", bg.replace("/10", "/40"))} />
+      <div className={cn("absolute bottom-0 left-0 right-0 h-0.5 bg-gradient-to-r", statGradients[color] ?? "from-primary/40 to-primary/10")} />
     </Card>
   );
 }
@@ -137,7 +145,7 @@ function RejectDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-md bg-popover/95 backdrop-blur-xl border-border/40">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-sm">
             <ShieldX className="h-4 w-4 text-red-400" />
@@ -150,7 +158,7 @@ function RejectDialog({
               Feedback (required)
             </label>
             <Textarea
-              className="mt-1 text-sm min-h-[100px] resize-none"
+              className="mt-1 text-sm min-h-[100px] resize-none bg-input/50"
               placeholder="Explain why this request is being rejected..."
               value={feedback}
               onChange={(e) => setFeedback(e.target.value)}
@@ -207,14 +215,14 @@ function ApprovalCard({
 
   return (
     <Card className={cn(
-      "transition-all",
-      isPending && "ring-1 ring-amber-500/20 shadow-sm",
+      "transition-all bg-card/80 backdrop-blur-sm border-border/40",
+      isPending && "ring-1 ring-amber-500/20 shadow-[0_0_15px_oklch(0.75_0.15_85_/_10%)]",
     )}>
       <CardContent className="p-4">
         <div className="flex items-start gap-3">
           {/* Status badge */}
           <div className={cn(
-            "flex h-10 w-10 shrink-0 items-center justify-center rounded-xl",
+            "flex h-10 w-10 shrink-0 items-center justify-center rounded-xl backdrop-blur-sm",
             cfg.bg,
             isPending && "animate-pulse"
           )}>
@@ -291,9 +299,10 @@ function ApprovalCard({
                 <summary className="text-[10px] text-muted-foreground cursor-pointer hover:text-foreground transition-colors">
                   View payload
                 </summary>
-                <pre className="text-[9px] bg-muted/40 rounded-md p-2 mt-1 whitespace-pre-wrap font-mono overflow-x-auto text-muted-foreground max-h-40 overflow-y-auto">
-                  {JSON.stringify(request.payload, null, 2) as string}
-                </pre>
+                <JsonBlock
+                  data={request.payload}
+                  className="text-[9px] leading-relaxed font-mono bg-muted/30 rounded-md p-2 mt-1 whitespace-pre-wrap overflow-x-auto max-h-40 overflow-y-auto border border-border/20"
+                />
               </details>
             )}
           </div>
@@ -303,7 +312,7 @@ function ApprovalCard({
             <div className="flex flex-col gap-1.5 shrink-0">
               <Button
                 size="sm"
-                className="h-8 gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white"
+                className="h-8 gap-1.5 bg-teal-600 hover:bg-teal-700 text-white"
                 onClick={() => onApprove(request.id)}
               >
                 <ThumbsUp className="h-3.5 w-3.5" />
@@ -312,7 +321,7 @@ function ApprovalCard({
               <Button
                 variant="outline"
                 size="sm"
-                className="h-8 gap-1.5 text-red-400 border-red-500/30 hover:bg-red-500/10 hover:text-red-300"
+                className="h-8 gap-1.5 text-rose-400 border-rose-500/30 hover:bg-rose-500/10 hover:text-rose-300"
                 onClick={() => onReject(request.id)}
               >
                 <ThumbsDown className="h-3.5 w-3.5" />
@@ -397,7 +406,7 @@ export function ApprovalsPage() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-full">
-        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
       </div>
     );
   }
@@ -479,7 +488,7 @@ export function ApprovalsPage() {
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
           <Input
             placeholder="Search approvals..."
-            className="pl-9 h-8 text-sm"
+            className="pl-9 h-8 text-sm bg-input/50 border-border/40"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
@@ -493,7 +502,7 @@ export function ApprovalsPage() {
       {/* ── Pending highlight banner ── */}
       {pending.length > 0 && tab !== "pending" && (
         <div
-          className="flex items-center gap-3 rounded-lg border border-amber-500/30 bg-amber-500/5 px-4 py-2.5 cursor-pointer hover:bg-amber-500/10 transition-colors shrink-0"
+          className="flex items-center gap-3 rounded-lg border border-amber-500/20 bg-amber-500/5 backdrop-blur-sm px-4 py-2.5 cursor-pointer hover:bg-amber-500/10 transition-colors shrink-0"
           onClick={() => setTab("pending")}
         >
           <ShieldAlert className="h-4 w-4 text-amber-400 shrink-0" />
@@ -506,9 +515,9 @@ export function ApprovalsPage() {
 
       {/* ── Approval list ── */}
       {filtered.length === 0 ? (
-        <Card className="flex-1">
+        <Card className="flex-1 bg-card/60 border-border/40">
           <CardContent className="flex flex-col items-center justify-center py-20 text-muted-foreground">
-            <ShieldCheck className="h-12 w-12 mb-4 opacity-30" />
+            <ShieldCheck className="h-12 w-12 mb-4 text-primary/30" />
             <p className="text-sm font-medium">
               {approvals.length === 0
                 ? "No approval requests yet"

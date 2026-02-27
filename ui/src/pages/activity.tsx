@@ -45,10 +45,11 @@ import {
   Archive,
   Bell,
 } from "lucide-react";
-import { useEvents, usePolpo, useLogs } from "@openpolpo/react-sdk";
-import type { LogEntry } from "@openpolpo/react-sdk";
+import { useEvents, usePolpo, useLogs } from "@lumea-labs/polpo-react";
+import type { LogEntry } from "@lumea-labs/polpo-react";
 import { formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
+import { JsonBlock } from "@/components/json-block";
 
 // ── Event categories ──
 
@@ -430,15 +431,15 @@ function EventRow({ event }: { event: EventRowData }) {
         className={cn(
           "border-l-2 transition-colors",
           sevStyle.border,
-          expanded && "bg-muted/20",
+          expanded && "bg-accent/10",
         )}
       >
         <CollapsibleTrigger asChild>
-          <div className="flex items-start gap-3 px-3 py-2.5 cursor-pointer hover:bg-muted/30 transition-colors">
+          <div className="flex items-start gap-3 px-3 py-2.5 cursor-pointer hover:bg-accent/20 transition-colors">
             {/* Category icon */}
             <div
               className={cn(
-                "flex h-7 w-7 shrink-0 items-center justify-center rounded-md mt-0.5",
+                "flex h-7 w-7 shrink-0 items-center justify-center rounded-md mt-0.5 backdrop-blur-sm",
                 catCfg.bg,
               )}
             >
@@ -483,9 +484,10 @@ function EventRow({ event }: { event: EventRowData }) {
 
         <CollapsibleContent>
           <div className="px-3 pb-3 ml-10">
-            <pre className="text-[10px] bg-muted/50 rounded-md p-3 whitespace-pre-wrap font-mono overflow-x-auto text-muted-foreground">
-              {JSON.stringify(event.data, null, 2)}
-            </pre>
+            <JsonBlock
+              data={event.data}
+              className="text-[10px] leading-relaxed font-mono bg-muted/30 border border-border/20 rounded-md p-3 whitespace-pre-wrap overflow-x-auto"
+            />
           </div>
         </CollapsibleContent>
       </div>
@@ -640,7 +642,7 @@ function EventStream({ events }: { events: EventRowData[] }) {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
             <Input
               placeholder="Filter events..."
-              className="pl-9 h-8 text-xs"
+              className="pl-9 h-8 text-xs bg-input/50 border-border/40"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
@@ -689,7 +691,7 @@ function EventStream({ events }: { events: EventRowData[] }) {
         </TabsList>
 
         <TabsContent value={tab} className="mt-3 flex-1 min-h-0">
-          <Card className="h-full flex flex-col overflow-hidden">
+          <Card className="h-full flex flex-col overflow-hidden bg-card/80 backdrop-blur-sm border-border/40">
             <ScrollArea className="h-full">
               {display.length === 0 ? (
                 <CardContent className="flex flex-col items-center justify-center py-16 text-muted-foreground">
@@ -785,15 +787,15 @@ function HistoryView() {
   if (logsLoading) {
     return (
       <div className="flex items-center justify-center flex-1">
-        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-      </div>
-    );
+      <Loader2 className="h-8 w-8 animate-spin text-primary" />
+    </div>
+  );
   }
 
   return (
     <div className="flex flex-col lg:grid lg:grid-cols-[300px_1fr] gap-4 flex-1 min-h-0">
       {/* Left: Session list */}
-      <Card className="flex flex-col overflow-hidden">
+      <Card className="flex flex-col overflow-hidden bg-card/80 backdrop-blur-sm border-border/40">
         <CardHeader className="pb-3 shrink-0">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -843,8 +845,8 @@ function HistoryView() {
                     className={cn(
                       "w-full text-left rounded-lg px-3 py-2.5 transition-colors border",
                       selectedSession === s.sessionId
-                        ? "bg-accent text-accent-foreground border-accent"
-                        : "border-transparent hover:bg-muted/50 text-muted-foreground",
+                        ? "bg-accent/80 text-accent-foreground border-accent"
+                        : "border-transparent hover:bg-accent/30 text-muted-foreground",
                     )}
                   >
                     <div className="flex items-center justify-between mb-1">
@@ -874,7 +876,7 @@ function HistoryView() {
       </Card>
 
       {/* Right: Session event viewer */}
-      <Card className="flex flex-col overflow-hidden">
+      <Card className="flex flex-col overflow-hidden bg-card/80 backdrop-blur-sm border-border/40">
         <CardHeader className="pb-3 shrink-0">
           <div className="flex items-center justify-between">
             <div>
@@ -947,7 +949,7 @@ function HistoryView() {
             </div>
           ) : entriesLoading ? (
             <div className="flex items-center justify-center py-16">
-              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+              <Loader2 className="h-6 w-6 animate-spin text-primary" />
             </div>
           ) : entriesError ? (
             <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
@@ -1010,27 +1012,27 @@ export function ActivityPage() {
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           {/* Mode toggle */}
-          <div className="flex items-center rounded-lg border border-border bg-muted/30 p-0.5">
+          <div className="flex items-center rounded-lg border border-border/40 bg-muted/20 p-0.5">
             <button
               onClick={() => setMode("live")}
               className={cn(
                 "flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-all",
                 mode === "live"
-                  ? "bg-background text-foreground shadow-sm"
+                  ? "bg-card text-foreground shadow-sm"
                   : "text-muted-foreground hover:text-foreground",
               )}
             >
               <Radio
                 className={cn(
                   "h-3 w-3",
-                  mode === "live" && connected && "text-emerald-500",
+                  mode === "live" && connected && "text-teal-500",
                 )}
               />
               Live
               {mode === "live" && connected && (
                 <span className="relative flex h-2 w-2">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-teal-400 opacity-75" />
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-teal-500" />
                 </span>
               )}
             </button>
@@ -1039,7 +1041,7 @@ export function ActivityPage() {
               className={cn(
                 "flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-all",
                 mode === "history"
-                  ? "bg-background text-foreground shadow-sm"
+                  ? "bg-card text-foreground shadow-sm"
                   : "text-muted-foreground hover:text-foreground",
               )}
             >
@@ -1054,11 +1056,11 @@ export function ActivityPage() {
               <div className="h-4 w-px bg-border" />
               <div className="flex items-center gap-2">
                 {connected ? (
-                  <Wifi className="h-3.5 w-3.5 text-emerald-500" />
+                  <Wifi className="h-3.5 w-3.5 text-teal-500" />
                 ) : (
                   <WifiOff className="h-3.5 w-3.5 text-red-500" />
                 )}
-                <span className="text-xs text-muted-foreground">
+                <span className={cn("text-xs", connected ? "text-teal-400" : "text-muted-foreground")}>
                   {connected ? "Connected" : "Disconnected"}
                 </span>
               </div>
@@ -1072,7 +1074,7 @@ export function ActivityPage() {
         connected ? (
           <EventStream events={liveEvents} />
         ) : (
-          <Card className="flex-1 flex flex-col items-center justify-center">
+          <Card className="flex-1 flex flex-col items-center justify-center bg-card/80 backdrop-blur-sm border-border/40">
             <CardContent className="flex flex-col items-center py-16 text-muted-foreground">
               <WifiOff className="h-10 w-10 mb-3 opacity-40" />
               <p className="text-sm font-medium">Not connected to server</p>

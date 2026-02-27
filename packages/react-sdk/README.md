@@ -1,4 +1,4 @@
-# @openpolpo/react-sdk
+# @lumea-labs/polpo-react
 
 Type-safe React hooks for OpenPolpo with real-time Server-Sent Events (SSE) updates.
 
@@ -15,7 +15,7 @@ Type-safe React hooks for OpenPolpo with real-time Server-Sent Events (SSE) upda
 ## Installation
 
 ```bash
-npm install @openpolpo/react-sdk
+npm install @lumea-labs/polpo-react
 ```
 
 **Peer Dependencies**:
@@ -24,7 +24,7 @@ npm install @openpolpo/react-sdk
 ## Quick Start
 
 ```tsx
-import { PolpoProvider, useTasks, useAgents } from '@openpolpo/react-sdk';
+import { PolpoProvider, useTasks, useAgents } from '@lumea-labs/polpo-react';
 
 function App() {
   return (
@@ -446,7 +446,7 @@ import type {
   Stats,
   CreateTaskInput,
   UpdateTaskInput,
-} from '@openpolpo/react-sdk';
+} from '@lumea-labs/polpo-react';
 ```
 
 ## Examples
@@ -454,7 +454,7 @@ import type {
 ### Task List with Retry
 
 ```tsx
-import { useTasks, usePolpo } from '@openpolpo/react-sdk';
+import { useTasks, usePolpo } from '@lumea-labs/polpo-react';
 
 function TaskList() {
   const tasks = useTasks();
@@ -480,7 +480,7 @@ function TaskList() {
 ### Live Agent Activity
 
 ```tsx
-import { useProcesses } from '@openpolpo/react-sdk';
+import { useProcesses } from '@lumea-labs/polpo-react';
 
 function AgentActivity() {
   const processes = useProcesses();
@@ -507,7 +507,7 @@ function AgentActivity() {
 ### Plan Progress
 
 ```tsx
-import { usePlan, useTasks } from '@openpolpo/react-sdk';
+import { usePlan, useTasks } from '@lumea-labs/polpo-react';
 
 function PlanProgress({ planGroup }: { planGroup: string }) {
   const plan = usePlan(planGroup);
@@ -533,7 +533,7 @@ function PlanProgress({ planGroup }: { planGroup: string }) {
 ### Event Stream
 
 ```tsx
-import { useEvents } from '@openpolpo/react-sdk';
+import { useEvents } from '@lumea-labs/polpo-react';
 
 function EventFeed() {
   const events = useEvents(20);

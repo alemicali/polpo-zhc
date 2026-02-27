@@ -1,0 +1,87 @@
+name: Publish install scripts
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'install/**'
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Deploy install scripts to GitHub Pages
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare pages content
+        run: |
+          mkdir -p _site
+          cp install/install.sh _site/install.sh
+          cp install/install.ps1 _site/install.ps1
+          # Create an index page
+          cat > _site/index.html << 'EOF'
+          <!DOCTYPE html>
+          <html lang="en">
+          <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Install OpenPolpo</title>
+            <style>
+              body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; max-width: 680px; margin: 4rem auto; padding: 0 1.5rem; color: #1a1a2e; background: #fafafa; }
+              h1 { font-size: 2rem; }
+              code { background: #e8e8f0; padding: 0.15em 0.4em; border-radius: 4px; font-size: 0.9em; }
+              pre { background: #1a1a2e; color: #e0e0f0; padding: 1.2rem; border-radius: 8px; overflow-x: auto; }
+              pre code { background: none; padding: 0; color: inherit; }
+              .platform { margin: 2rem 0; }
+              a { color: #5b5bd6; }
+            </style>
+          </head>
+          <body>
+            <h1>Install OpenPolpo</h1>
+            <p>Agent-agnostic framework for orchestrating teams of AI coding agents.</p>
+
+            <div class="platform">
+              <h2>macOS / Linux / WSL</h2>
+              <pre><code>curl -fsSL https://lumea-labs.github.io/polpo/install.sh | bash</code></pre>
+            </div>
+
+            <div class="platform">
+              <h2>Windows (PowerShell)</h2>
+              <pre><code>irm https://lumea-labs.github.io/polpo/install.ps1 | iex</code></pre>
+            </div>
+
+            <div class="platform">
+              <h2>npm (manual)</h2>
+              <pre><code>npm install -g @lumea-labs/polpo</code></pre>
+            </div>
+
+            <div class="platform">
+              <h2>Docker</h2>
+              <pre><code>docker run -it -p 3000:3000 -v $(pwd):/workspace lumea-labs/polpo</code></pre>
+            </div>
+
+            <p><a href="https://github.com/lumea-labs/polpo">GitHub</a> · <a href="https://openpolpo.dev">Documentation</a></p>
+          </body>
+          </html>
+          EOF
+
+      - name: Upload pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

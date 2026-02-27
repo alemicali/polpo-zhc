@@ -381,10 +381,10 @@ Delayed notifications use in-memory timers and are not persisted. They will be l
 
 ## React SDK
 
-The `@openpolpo/react-sdk` provides the `useNotifications` hook for accessing notification data in the UI:
+The `@lumea-labs/polpo-react` provides the `useNotifications` hook for accessing notification data in the UI:
 
 ```tsx
-import { useNotifications } from "@openpolpo/react-sdk";
+import { useNotifications } from "@lumea-labs/polpo-react";
 
 function NotificationsPanel() {
   const { notifications, stats, sendNotification, refetch, loading } = useNotifications({

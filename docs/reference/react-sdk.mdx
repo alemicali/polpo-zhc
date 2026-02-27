@@ -3,12 +3,12 @@ title: "React SDK"
 description: "Provider, hooks, and client API for the React SDK"
 ---
 
-The `@openpolpo/react-sdk` package provides type-safe React hooks with real-time SSE updates.
+The `@lumea-labs/polpo-react` package provides type-safe React hooks with real-time SSE updates.
 
 ## Installation
 
 ```bash
-npm install @openpolpo/react-sdk
+npm install @lumea-labs/polpo-react
 ```
 
 Peer dependencies: React 18 or 19.
@@ -18,7 +18,7 @@ Peer dependencies: React 18 or 19.
 Wrap your app to provide Polpo context:
 
 ```tsx
-import { PolpoProvider } from "@openpolpo/react-sdk";
+import { PolpoProvider } from "@lumea-labs/polpo-react";
 
 function App() {
   return (
@@ -469,13 +469,13 @@ The SDK supports subpath exports for tree-shaking:
 
 ```tsx
 // Full import
-import { PolpoProvider, useTasks, usePlans } from "@openpolpo/react-sdk";
+import { PolpoProvider, useTasks, usePlans } from "@lumea-labs/polpo-react";
 
 // Direct client import (no React dependency)
-import { PolpoClient } from "@openpolpo/react-sdk/client";
+import { PolpoClient } from "@lumea-labs/polpo-react/client";
 
 // Individual hook imports
-import { useTasks } from "@openpolpo/react-sdk/hooks/use-tasks";
+import { useTasks } from "@lumea-labs/polpo-react/hooks/use-tasks";
 ```
 
 ---

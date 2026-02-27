@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import {
   Play,
+  Pause,
   MoreVertical,
   Loader2,
   Map,
@@ -29,8 +30,8 @@ import {
   Clock,
   ArrowRight,
 } from "lucide-react";
-import { usePlans, useTasks } from "@openpolpo/react-sdk";
-import type { Plan, PlanStatus } from "@openpolpo/react-sdk";
+import { usePlans, useTasks } from "@lumea-labs/polpo-react";
+import type { Plan, PlanStatus } from "@lumea-labs/polpo-react";
 import { toast } from "sonner";
 import { formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -53,7 +54,8 @@ function parsePlanCounts(data: string): { taskCount: number; agentCount: number 
 
 const statusStyles: Record<PlanStatus, { color: string; bg: string; label: string; icon: React.ElementType }> = {
   draft: { color: "text-zinc-400", bg: "bg-zinc-500/10", label: "Draft", icon: Clock },
-  active: { color: "text-blue-400", bg: "bg-blue-500/10", label: "Running", icon: Loader2 },
+  active: { color: "text-primary", bg: "bg-primary/10", label: "Running", icon: Loader2 },
+  paused: { color: "text-amber-400", bg: "bg-amber-500/10", label: "Paused", icon: Pause },
   completed: { color: "text-emerald-400", bg: "bg-emerald-500/10", label: "Completed", icon: CheckCircle2 },
   failed: { color: "text-red-400", bg: "bg-red-500/10", label: "Failed", icon: AlertTriangle },
   cancelled: { color: "text-zinc-500", bg: "bg-zinc-500/10", label: "Cancelled", icon: XCircle },
@@ -87,15 +89,22 @@ function PlanRow({
   const progress = totalCount > 0 ? Math.round((doneCount / totalCount) * 100) : 0;
   const counts = useMemo(() => parsePlanCounts(plan.data), [plan.data]);
 
-  const hasActions = plan.status === "draft" || plan.status === "active" || plan.status === "failed";
+  const isActive = plan.status === "active";
+  const hasActions = plan.status === "draft" || plan.status === "active" || plan.status === "failed" || plan.status === "paused";
 
   return (
     <div
-      className="group flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 p-4 rounded-lg border border-border bg-card transition-colors hover:border-border/80 cursor-pointer"
+      className={cn(
+        "group relative flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 p-4 rounded-lg",
+        "bg-card/80 backdrop-blur-sm border border-border/40",
+        "transition-all duration-200 hover:border-primary/20 cursor-pointer",
+        isActive && "border-l-2 border-l-primary/60 glow-cyan",
+        plan.status === "paused" && "border-l-2 border-l-amber-400/60 glow-amber",
+      )}
       onClick={onClick}
     >
       {/* Status icon */}
-      <div className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-lg", style.bg)}>
+      <div className={cn("flex h-10 w-10 shrink-0 items-center justify-center rounded-xl", style.bg)}>
         <StatusIcon className={cn("h-4 w-4", style.color, plan.status === "active" && "animate-spin")} />
       </div>
 
@@ -124,7 +133,7 @@ function PlanRow({
       {/* Progress for active plans */}
       {plan.status === "active" && totalCount > 0 && (
         <div className="flex items-center gap-2 shrink-0">
-          <Progress value={progress} className="h-1.5 w-20" />
+          <Progress value={progress} className="h-1.5 w-20 [&>div]:bg-primary" />
           <span className="text-[10px] text-muted-foreground font-mono">{doneCount}/{totalCount}</span>
         </div>
       )}
@@ -161,7 +170,7 @@ function PlanRow({
                 <Play className="h-3.5 w-3.5 mr-2" /> Execute
               </DropdownMenuItem>
             )}
-            {(plan.status === "active" || plan.status === "failed") && (
+            {(plan.status === "active" || plan.status === "failed" || plan.status === "paused") && (
               <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onResume(); }}>
                 <RotateCcw className="h-3.5 w-3.5 mr-2" /> Resume
               </DropdownMenuItem>
@@ -225,12 +234,12 @@ export function PlansPage() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-full">
-        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        <Loader2 className="h-8 w-8 animate-spin text-primary glow-cyan" />
       </div>
     );
   }
 
-  const active = plans.filter(p => p.status === "active");
+  const active = plans.filter(p => p.status === "active" || p.status === "paused");
   const drafts = plans.filter(p => p.status === "draft");
   const completed = plans.filter(p => p.status === "completed" || p.status === "failed" || p.status === "cancelled");
 
@@ -246,23 +255,23 @@ export function PlansPage() {
       <div className="flex items-center justify-between shrink-0">
         <div className="flex items-center gap-3">
           <h3 className="text-sm font-medium text-muted-foreground">
-            {plans.length} plan{plans.length !== 1 ? "s" : ""}
+            <span className="font-mono">{plans.length}</span> plan{plans.length !== 1 ? "s" : ""}
           </h3>
           {active.length > 0 && (
-            <Badge variant="default" className="text-[10px]">
+            <Badge variant="default" className="text-[10px] font-mono">
               {active.length} running
             </Badge>
           )}
         </div>
-        <Button variant="outline" size="sm" onClick={refetch}>
+        <Button variant="outline" size="sm" onClick={refetch} className="hover:bg-accent/50">
           <RefreshCw className="h-3.5 w-3.5" />
         </Button>
       </div>
 
       {plans.length === 0 ? (
-        <Card>
+        <Card className="bg-card/60 backdrop-blur-sm border-border/40">
           <CardContent className="flex flex-col items-center justify-center py-16 text-muted-foreground">
-            <Map className="h-12 w-12 mb-4 opacity-40" />
+            <Map className="h-12 w-12 mb-4 text-primary/30" />
             <p className="text-sm font-medium">No plans yet</p>
             <p className="text-xs mt-1 text-center max-w-xs">
               Plans are created when you give the orchestrator a prompt via the TUI or Chat.
@@ -277,9 +286,12 @@ export function PlansPage() {
           <div className="space-y-6 pr-4">
             {sections.map(({ label, plans: sectionPlans }) => (
               <section key={label}>
-                <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-3">
-                  {label} ({sectionPlans.length})
-                </h3>
+                <div className="mb-3">
+                  <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-widest">
+                    {label} ({sectionPlans.length})
+                  </h3>
+                  <div className="mt-1.5 h-px bg-border/40" />
+                </div>
                 <div className="space-y-2">
                   {sectionPlans.map((plan) => {
                     const stats = planStats[plan.id] ?? { done: 0, failed: 0, running: 0, total: 0 };

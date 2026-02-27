@@ -6,12 +6,13 @@ import { BottomNav } from "./bottom-nav";
 export function AppLayout() {
   return (
     <div className="flex h-[100dvh] w-screen overflow-hidden bg-background text-foreground">
+      {/* Desktop sidebar with deep-sea gradient */}
       <div className="hidden lg:flex">
         <Sidebar />
       </div>
       <div className="flex flex-1 flex-col overflow-hidden">
         <Header />
-        <main className="flex-1 flex flex-col overflow-hidden p-4 lg:p-6 pb-bottom-nav lg:pb-6">
+        <main className="flex-1 flex flex-col overflow-hidden p-4 lg:p-8 pb-bottom-nav lg:pb-8">
           <Outlet />
         </main>
       </div>

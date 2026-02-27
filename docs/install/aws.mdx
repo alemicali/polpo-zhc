@@ -28,8 +28,8 @@ AWS offers multiple ways to run Polpo. Pick based on your needs:
    aws ecr get-login-password --region us-east-1 | \
      docker login --username AWS --password-stdin YOUR_ACCOUNT.dkr.ecr.us-east-1.amazonaws.com
 
-   docker pull ghcr.io/openpolpo/openpolpo:latest
-   docker tag ghcr.io/openpolpo/openpolpo:latest \
+   docker pull ghcr.io/lumea-labs/polpo:latest
+   docker tag ghcr.io/lumea-labs/polpo:latest \
      YOUR_ACCOUNT.dkr.ecr.us-east-1.amazonaws.com/polpo:latest
    docker push YOUR_ACCOUNT.dkr.ecr.us-east-1.amazonaws.com/polpo:latest
    ```
@@ -191,7 +191,7 @@ The simplest and cheapest option — a regular Linux server.
    cat > docker-compose.yml << 'EOF'
    services:
      polpo:
-       image: ghcr.io/openpolpo/openpolpo:latest
+       image: ghcr.io/lumea-labs/polpo:latest
        ports:
          - "3000:3000"
        volumes:

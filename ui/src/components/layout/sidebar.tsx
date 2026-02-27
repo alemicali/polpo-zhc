@@ -11,8 +11,9 @@ import {
   Bell,
   ShieldCheck,
   Workflow,
+  Settings2,
 } from "lucide-react";
-import { usePolpo } from "@openpolpo/react-sdk";
+import { usePolpo } from "@lumea-labs/polpo-react";
 import { useProjectInfo } from "@/hooks/use-polpo";
 import { cn } from "@/lib/utils";
 import {
@@ -31,31 +32,32 @@ const nav = [
   { to: "/templates", icon: Workflow, label: "Templates" },
   { to: "/notifications", icon: Bell, label: "Notifications" },
   { to: "/approvals", icon: ShieldCheck, label: "Approvals" },
+  { to: "/config", icon: Settings2, label: "Configuration" },
 ] as const;
 
 const statusConfig: Record<string, { color: string; pulse: boolean; label: string }> = {
   connected: {
-    color: "bg-emerald-500",
+    color: "bg-teal-400",
     pulse: true,
     label: "Connected",
   },
   connecting: {
-    color: "bg-amber-500",
+    color: "bg-amber-400",
     pulse: true,
     label: "Connecting...",
   },
   reconnecting: {
-    color: "bg-amber-500",
+    color: "bg-amber-400",
     pulse: true,
     label: "Reconnecting...",
   },
   disconnected: {
-    color: "bg-red-500",
+    color: "bg-rose-500",
     pulse: false,
     label: "Disconnected",
   },
   error: {
-    color: "bg-red-500",
+    color: "bg-rose-500",
     pulse: false,
     label: "Error",
   },
@@ -87,39 +89,39 @@ export function Sidebar() {
   return (
     <aside
       className={cn(
-        "flex h-full flex-col border-r border-border bg-sidebar transition-all duration-200 ease-in-out",
-        collapsed ? "w-[52px]" : "w-60"
+        "relative flex h-full flex-col border-r border-sidebar-border bg-sidebar deep-sea-bg transition-all duration-300 ease-out",
+        collapsed ? "w-[56px]" : "w-64"
       )}
     >
       {/* Logo area */}
-      <div className="relative flex h-14 items-center border-b border-border group">
+      <div className="relative flex h-16 items-center border-b border-sidebar-border group">
         {collapsed ? (
           <div className="flex w-full items-center justify-center">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg text-lg">
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary/10 text-lg">
               🐙
             </div>
             <button
               onClick={() => setCollapsed(false)}
-              className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-sidebar/90 cursor-pointer"
+              className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-sidebar/90 backdrop-blur-sm cursor-pointer"
               aria-label="Expand sidebar"
             >
               <Columns2 className="h-4 w-4 text-sidebar-foreground" />
             </button>
           </div>
         ) : (
-          <div className="flex w-full items-center justify-between px-4">
-            <div className="flex items-center gap-2">
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg text-lg shrink-0">
+          <div className="flex w-full items-center justify-between px-5">
+            <div className="flex items-center gap-3">
+              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary/10 text-lg shrink-0">
                 🐙
               </div>
               <div>
-                <h1 className="text-sm font-semibold text-sidebar-foreground">Polpo</h1>
-                <p className="text-[10px] text-muted-foreground">AI Agent Wrangler</p>
+                <h1 className="text-sm font-bold tracking-tight text-sidebar-foreground">Polpo</h1>
+                <p className="text-[10px] tracking-wide uppercase text-muted-foreground/70">Agent Wrangler</p>
               </div>
             </div>
             <button
               onClick={() => setCollapsed(true)}
-              className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:text-sidebar-foreground hover:bg-sidebar-accent/50 transition-colors cursor-pointer"
+              className="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground hover:text-sidebar-foreground hover:bg-sidebar-accent/50 transition-all cursor-pointer"
               aria-label="Collapse sidebar"
             >
               <Columns2 className="h-4 w-4" />
@@ -131,47 +133,61 @@ export function Sidebar() {
       {/* Navigation */}
       <nav
         className={cn(
-          "flex-1 flex flex-col gap-1",
-          collapsed ? "items-center py-2" : "p-2"
+          "flex-1 flex flex-col gap-0.5",
+          collapsed ? "items-center py-3" : "p-3"
         )}
       >
         {nav.map(({ to, icon: Icon, label }) => {
           const linkClasses = ({ isActive }: { isActive: boolean }) =>
             cn(
-              "flex items-center rounded-md transition-colors",
+              "flex items-center rounded-lg transition-all duration-200 group/link relative",
               collapsed
-                ? "justify-center h-9 w-9"
-                : "gap-3 px-3 py-2 text-sm font-medium",
+                ? "justify-center h-10 w-10"
+                : "gap-3 px-3 py-2.5 text-[13px] font-medium",
               isActive
-                ? "bg-sidebar-accent text-sidebar-accent-foreground"
-                : "text-muted-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
+                ? "bg-sidebar-accent text-sidebar-accent-foreground shadow-sm"
+                : "text-muted-foreground hover:bg-sidebar-accent/40 hover:text-sidebar-foreground"
             );
 
           return collapsed ? (
             <Tooltip key={to} delayDuration={0}>
               <TooltipTrigger asChild>
                 <NavLink to={to} className={linkClasses}>
-                  <Icon className="h-4 w-4" />
+                  {({ isActive }) => (
+                    <>
+                      <Icon className="h-[18px] w-[18px]" />
+                      {isActive && (
+                        <span className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-[2px] h-5 w-1 rounded-r-full bg-primary" />
+                      )}
+                    </>
+                  )}
                 </NavLink>
               </TooltipTrigger>
-              <TooltipContent side="right" className="text-xs">
+              <TooltipContent side="right" className="text-xs font-medium">
                 {label}
               </TooltipContent>
             </Tooltip>
           ) : (
             <NavLink key={to} to={to} className={linkClasses}>
-              <Icon className="h-4 w-4 shrink-0" />
-              <span className="truncate">{label}</span>
+              {({ isActive }) => (
+                <>
+                  {isActive && (
+                    <span className="absolute left-0 top-1/2 -translate-y-1/2 h-5 w-1 rounded-r-full bg-primary" />
+                  )}
+                  <Icon className="h-[18px] w-[18px] shrink-0" />
+                  <span className="truncate">{label}</span>
+                </>
+              )}
             </NavLink>
           );
         })}
       </nav>
 
-      {/* Footer */}
+      {/* Footer — connection + project */}
       <div
         className={cn(
-          "border-t border-border space-y-2",
-          collapsed ? "p-0 py-3 flex flex-col items-center" : "p-3"
+          "border-t border-sidebar-border space-y-2",
+          collapsed ? "p-0 py-3 flex flex-col items-center" : "px-4 py-3"
         )}
       >
         {collapsed ? (
@@ -182,13 +198,13 @@ export function Sidebar() {
                   className={cn(
                     "h-2.5 w-2.5 rounded-full",
                     status.color,
-                    status.pulse && "animate-pulse"
+                    status.pulse && "bio-pulse"
                   )}
                 />
               </div>
             </TooltipTrigger>
             <TooltipContent side="right" className="text-xs">
-              <p>{status.label}</p>
+              <p className="font-medium">{status.label}</p>
               {info?.project && (
                 <p className="text-muted-foreground mt-0.5">{info.project}</p>
               )}
@@ -197,19 +213,19 @@ export function Sidebar() {
         ) : (
           <>
             {info?.project && (
-              <div className="text-[10px] text-muted-foreground truncate">
+              <div className="text-[10px] text-muted-foreground/60 truncate font-mono tracking-wider uppercase">
                 {info.project}
               </div>
             )}
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <div className="flex items-center gap-2.5 text-xs text-muted-foreground">
               <div
                 className={cn(
                   "h-2 w-2 rounded-full",
                   status.color,
-                  status.pulse && "animate-pulse"
+                  status.pulse && "bio-pulse"
                 )}
               />
-              {status.label}
+              <span className="font-medium">{status.label}</span>
             </div>
           </>
         )}
