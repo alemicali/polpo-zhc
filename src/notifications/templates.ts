@@ -79,16 +79,16 @@ export function defaultTitle(ctx: TemplateContext): string {
     case "assessment:complete":
       return `${emoji} Assessment ${bool(data, "passed") ? "PASSED" : "FAILED"}`;
 
-    case "plan:saved":
-      return `${emoji} Plan Saved: ${str(data, "name")}`;
-    case "plan:executed":
-      return `${emoji} Plan Executing: ${num(data, "taskCount")} tasks`;
-    case "plan:completed":
-      return `${emoji} Plan ${bool(data, "allPassed") ? "Completed" : "Failed"}`;
-    case "plan:resumed":
-      return `${emoji} Plan Resumed`;
-    case "plan:deleted":
-      return `${emoji} Plan Deleted`;
+    case "mission:saved":
+      return `${emoji} Mission Saved: ${str(data, "name")}`;
+    case "mission:executed":
+      return `${emoji} Mission Executing: ${num(data, "taskCount")} tasks`;
+    case "mission:completed":
+      return `${emoji} Mission ${bool(data, "allPassed") ? "Completed" : "Failed"}`;
+    case "mission:resumed":
+      return `${emoji} Mission Resumed`;
+    case "mission:deleted":
+      return `${emoji} Mission Deleted`;
 
     case "approval:requested":
       return `${emoji} Approval Required: ${str(data, "gateName")}`;
@@ -123,15 +123,15 @@ export function defaultTitle(ctx: TemplateContext): string {
     case "quality:gate:failed":
       return `${emoji} Quality Gate Failed: ${str(data, "gateName")}`;
     case "quality:threshold:failed":
-      return `${emoji} Plan Quality Below Threshold: ${numFixed(data, "avgScore")}/${numFixed(data, "threshold")}`;
+      return `${emoji} Mission Quality Below Threshold: ${numFixed(data, "avgScore")}/${numFixed(data, "threshold")}`;
 
     // Scheduling
     case "schedule:triggered":
-      return `${emoji} Schedule Triggered: plan ${str(data, "planId")}`;
+      return `${emoji} Schedule Triggered: mission ${str(data, "missionId")}`;
     case "schedule:created":
-      return `${emoji} Schedule Created: plan ${str(data, "planId")}`;
+      return `${emoji} Schedule Created: mission ${str(data, "missionId")}`;
     case "schedule:completed":
-      return `${emoji} Schedule Completed: plan ${str(data, "planId")}`;
+      return `${emoji} Schedule Completed: mission ${str(data, "missionId")}`;
 
     default:
       return `${emoji} ${event}`;
@@ -156,9 +156,9 @@ export function defaultBody(ctx: TemplateContext): string {
       lines.push(`Agent **${str(data, "agentName")}** on task **${str(data, "taskId")}** has been idle for ${Math.round(num(data, "idleMs") / 1000)}s.`);
       lines.push(`Action: **${str(data, "action")}**`);
       break;
-    case "plan:completed": {
+    case "mission:completed": {
       const report = field(data, "report") as Record<string, unknown> | undefined;
-      lines.push(`Plan **${str(data, "group")}** has ${bool(data, "allPassed") ? "completed successfully" : "failed"}.`);
+      lines.push(`Mission **${str(data, "group")}** has ${bool(data, "allPassed") ? "completed successfully" : "failed"}.`);
       if (report) {
         lines.push(`Tasks: ${(report.tasks as unknown[])?.length ?? 0}`);
         if (typeof report.avgScore === "number") {
@@ -170,7 +170,7 @@ export function defaultBody(ctx: TemplateContext): string {
     case "approval:requested":
       lines.push(`Gate **${str(data, "gateName")}** requires approval.`);
       if (str(data, "taskId")) lines.push(`Task: ${str(data, "taskId")}`);
-      if (str(data, "planId")) lines.push(`Plan: ${str(data, "planId")}`);
+      if (str(data, "missionId")) lines.push(`Mission: ${str(data, "missionId")}`);
       break;
     case "approval:rejected":
       lines.push(`Task rejected (#${num(data, "rejectionCount")}) — will retry with feedback.`);
@@ -204,30 +204,30 @@ export function defaultBody(ctx: TemplateContext): string {
 
     // Quality gates
     case "quality:gate:passed":
-      lines.push(`Quality gate **${str(data, "gateName")}** passed for plan **${str(data, "planId")}**.`);
+      lines.push(`Quality gate **${str(data, "gateName")}** passed for mission **${str(data, "missionId")}**.`);
       if (num(data, "avgScore") > 0) lines.push(`Average score: ${numFixed(data, "avgScore")}/5`);
       break;
     case "quality:gate:failed":
-      lines.push(`Quality gate **${str(data, "gateName")}** failed for plan **${str(data, "planId")}**.`);
+      lines.push(`Quality gate **${str(data, "gateName")}** failed for mission **${str(data, "missionId")}**.`);
       lines.push(`Reason: ${str(data, "reason")}`);
       if (num(data, "avgScore") > 0) lines.push(`Average score: ${numFixed(data, "avgScore")}/5`);
       break;
     case "quality:threshold:failed":
-      lines.push(`Plan **${str(data, "planId")}** did not meet its quality threshold.`);
+      lines.push(`Mission **${str(data, "missionId")}** did not meet its quality threshold.`);
       lines.push(`Score: ${numFixed(data, "avgScore")}/5 (required: ${numFixed(data, "threshold")})`);
       break;
 
     // Scheduling
     case "schedule:triggered":
-      lines.push(`Scheduled execution of plan **${str(data, "planId")}** has been triggered.`);
+      lines.push(`Scheduled execution of mission **${str(data, "missionId")}** has been triggered.`);
       lines.push(`Expression: \`${str(data, "expression")}\``);
       break;
     case "schedule:created":
-      lines.push(`Schedule created for plan **${str(data, "planId")}**.`);
+      lines.push(`Schedule created for mission **${str(data, "missionId")}**.`);
       if (str(data, "nextRunAt")) lines.push(`Next run: ${str(data, "nextRunAt")}`);
       break;
     case "schedule:completed":
-      lines.push(`Scheduled execution of plan **${str(data, "planId")}** has completed.`);
+      lines.push(`Scheduled execution of mission **${str(data, "missionId")}** has completed.`);
       break;
 
     default:

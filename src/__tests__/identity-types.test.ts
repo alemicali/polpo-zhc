@@ -114,7 +114,7 @@ describe("Config parsing — identity, responsibilities, vault", () => {
     expect(id.personality).toBe("Strategic thinker");
   });
 
-  it("parses vault with smtp entry", async () => {
+  it("silently strips vault from config (vault now lives in encrypted store)", async () => {
     const workDir = writeConfig(baseConfig({
       vault: {
         email: {
@@ -124,10 +124,9 @@ describe("Config parsing — identity, responsibilities, vault", () => {
       },
     }));
     const config = await parseConfig(workDir);
-    const vault = config.teams[0].agents[0].vault!;
-    expect(vault.email).toBeDefined();
-    expect(vault.email.type).toBe("smtp");
-    expect(vault.email.credentials.host).toBe("smtp.example.com");
+    const agent = config.teams[0].agents[0];
+    // vault field is silently stripped — no longer on AgentConfig
+    expect((agent as any).vault).toBeUndefined();
   });
 
   it("parses reportsTo", async () => {

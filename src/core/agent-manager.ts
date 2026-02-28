@@ -123,6 +123,7 @@ export class AgentManager {
       : this.getDefaultTeam();
     if (!team) throw new Error(`Team "${teamName}" not found`);
 
+    if (!agent.createdAt) agent.createdAt = new Date().toISOString();
     team.agents.push(agent);
     this.ctx.registry.setState({ teams: this.ctx.config.teams });
     if (!agent.volatile) this.persistConfig();
@@ -154,7 +155,7 @@ export class AgentManager {
 
     // Volatile agents go to the default (first) team
     const team = this.getDefaultTeam();
-    const volatileAgent: AgentConfig = { ...agent, volatile: true, missionGroup: group };
+    const volatileAgent: AgentConfig = { ...agent, volatile: true, missionGroup: group, createdAt: agent.createdAt ?? new Date().toISOString() };
     team.agents.push(volatileAgent);
     this.ctx.registry.setState({ teams: this.ctx.config.teams });
     this.ctx.emitter.emit("log", { level: "info", message: `Volatile agent added: ${agent.name} for ${group}` });

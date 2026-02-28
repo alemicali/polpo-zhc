@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Card,
@@ -6,6 +6,7 @@ import {
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
@@ -28,13 +29,26 @@ import {
   AlertTriangle,
   Clock,
   ArrowRight,
+  Search,
+  Filter,
+  Check,
+  Calendar,
+  Repeat,
+  Timer,
+  Star,
 } from "lucide-react";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { useMissions, useTasks } from "@lumea-labs/polpo-react";
 import type { Mission, MissionStatus } from "@lumea-labs/polpo-react";
 import { useAsyncAction } from "@/hooks/use-polpo";
 import { toast } from "sonner";
 import { formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
+import { cronToHuman } from "@/lib/cron";
 
 // ── Parse mission data (lightweight — only extract counts) ──
 
@@ -122,6 +136,38 @@ function MissionRow({
           <span>created {formatDistanceToNow(new Date(mission.createdAt), { addSuffix: true })}</span>
           <span>updated {formatDistanceToNow(new Date(mission.updatedAt), { addSuffix: true })}</span>
         </div>
+        {/* Schedule / deadline / quality badges */}
+        {(mission.schedule || mission.deadline || mission.qualityThreshold != null) && (
+          <div className="flex items-center gap-2 mt-1 flex-wrap">
+            {mission.schedule && (
+              <Badge variant="outline" className="text-[10px] gap-1 text-blue-400">
+                <Calendar className="h-2.5 w-2.5" />
+                {cronToHuman(mission.schedule)}
+                {mission.recurring ? (
+                  <span className="flex items-center gap-0.5 ml-0.5 text-violet-400"><Repeat className="h-2 w-2" />Recurring</span>
+                ) : (
+                  <span className="ml-0.5 text-muted-foreground">One-shot</span>
+                )}
+              </Badge>
+            )}
+            {mission.deadline && (() => {
+              const deadlineDate = new Date(mission.deadline);
+              const isOverdue = deadlineDate.getTime() < Date.now();
+              return (
+                <Badge variant="outline" className={cn("text-[10px] gap-1", isOverdue ? "text-red-400 border-red-500/30" : "text-amber-400")}>
+                  <Timer className="h-2.5 w-2.5" />
+                  {isOverdue ? "Overdue" : `due ${formatDistanceToNow(deadlineDate, { addSuffix: true })}`}
+                </Badge>
+              );
+            })()}
+            {mission.qualityThreshold != null && (
+              <Badge variant="outline" className="text-[10px] gap-1 text-amber-400">
+                <Star className="h-2.5 w-2.5" />
+                {mission.qualityThreshold}
+              </Badge>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Progress for active missions */}
@@ -186,6 +232,75 @@ function MissionRow({
 
 // ── Main page ──
 
+// ── Status filter popover ──
+
+const statusFilterOptions: { value: MissionStatus; label: string; color: string }[] = [
+  { value: "active", label: "Running", color: "text-blue-400" },
+  { value: "paused", label: "Paused", color: "text-amber-400" },
+  { value: "draft", label: "Draft", color: "text-zinc-400" },
+  { value: "completed", label: "Completed", color: "text-emerald-400" },
+  { value: "failed", label: "Failed", color: "text-red-400" },
+  { value: "cancelled", label: "Cancelled", color: "text-zinc-500" },
+];
+
+function StatusFilter({
+  selected,
+  onToggle,
+}: {
+  selected: Set<MissionStatus>;
+  onToggle: (status: MissionStatus) => void;
+}) {
+  const hasFilter = selected.size > 0;
+
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button variant={hasFilter ? "default" : "outline"} size="sm" className="gap-1.5">
+          <Filter className="h-3.5 w-3.5" />
+          Status
+          {hasFilter && (
+            <Badge variant="secondary" className="text-[9px] ml-1">{selected.size}</Badge>
+          )}
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-48 p-2" align="start">
+        <div className="space-y-1">
+          {statusFilterOptions.map((opt) => (
+            <button
+              key={opt.value}
+              className={cn(
+                "flex items-center gap-2 w-full rounded-md px-2 py-1.5 text-left text-sm transition-colors",
+                selected.has(opt.value) ? "bg-accent text-accent-foreground" : "hover:bg-muted"
+              )}
+              onClick={() => onToggle(opt.value)}
+            >
+              <div className={cn(
+                "flex h-4 w-4 shrink-0 items-center justify-center rounded border",
+                selected.has(opt.value) ? "bg-primary border-primary" : "border-muted-foreground/30"
+              )}>
+                {selected.has(opt.value) && <Check className="h-3 w-3 text-primary-foreground" />}
+              </div>
+              <span className={cn("truncate", opt.color)}>{opt.label}</span>
+            </button>
+          ))}
+        </div>
+        {hasFilter && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="w-full mt-1 text-xs"
+            onClick={() => statusFilterOptions.forEach(o => { if (selected.has(o.value)) onToggle(o.value); })}
+          >
+            Clear all
+          </Button>
+        )}
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+// ── Main page ──
+
 export function MissionsPage() {
   const navigate = useNavigate();
   const {
@@ -198,6 +313,8 @@ export function MissionsPage() {
   } = useMissions();
 
   const { tasks } = useTasks();
+  const [search, setSearch] = useState("");
+  const [selectedStatuses, setSelectedStatuses] = useState<Set<MissionStatus>>(new Set());
 
   const [handleRefresh, isRefreshing] = useAsyncAction(async () => {
     await refetch();
@@ -211,6 +328,15 @@ export function MissionsPage() {
     } catch (e) {
       toast.error((e as Error).message);
     }
+  };
+
+  const toggleStatus = (status: MissionStatus) => {
+    setSelectedStatuses(prev => {
+      const next = new Set(prev);
+      if (next.has(status)) next.delete(status);
+      else next.add(status);
+      return next;
+    });
   };
 
   // Compute task stats per mission group
@@ -229,6 +355,20 @@ export function MissionsPage() {
     return map;
   }, [missions, tasks]);
 
+  // Filter missions by search + status
+  const filtered = useMemo(() => {
+    return missions.filter(m => {
+      // Status filter
+      if (selectedStatuses.size > 0 && !selectedStatuses.has(m.status)) return false;
+      // Search filter
+      if (search) {
+        const q = search.toLowerCase();
+        return m.name.toLowerCase().includes(q) || m.id.toLowerCase().includes(q) || (m.prompt ?? "").toLowerCase().includes(q);
+      }
+      return true;
+    });
+  }, [missions, search, selectedStatuses]);
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-full">
@@ -237,9 +377,11 @@ export function MissionsPage() {
     );
   }
 
-  const active = missions.filter(p => p.status === "active" || p.status === "paused");
-  const drafts = missions.filter(p => p.status === "draft");
-  const completed = missions.filter(p => p.status === "completed" || p.status === "failed" || p.status === "cancelled");
+  const hasFilters = search.length > 0 || selectedStatuses.size > 0;
+
+  const active = filtered.filter(p => p.status === "active" || p.status === "paused");
+  const drafts = filtered.filter(p => p.status === "draft");
+  const completed = filtered.filter(p => p.status === "completed" || p.status === "failed" || p.status === "cancelled");
 
   const sections = [
     { label: "Active", missions: active, defaultOpen: true },
@@ -250,21 +392,68 @@ export function MissionsPage() {
   return (
     <div className="flex flex-col flex-1 min-h-0 gap-4">
       {/* Toolbar */}
-      <div className="flex items-center justify-between shrink-0">
+      <div className="flex flex-wrap items-center gap-2 lg:gap-3 shrink-0">
+        {/* Search */}
+        <div className="relative w-full sm:w-64">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+          <Input
+            placeholder="Search missions..."
+            className="pl-8 h-8 text-sm bg-input/50 backdrop-blur-sm border-border/40 focus:border-primary/50"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </div>
+
+        {/* Status filter */}
+        <StatusFilter selected={selectedStatuses} onToggle={toggleStatus} />
+
+        {/* Spacer */}
+        <div className="flex-1" />
+
+        {/* Count + refresh */}
         <div className="flex items-center gap-3">
-          <h3 className="text-sm font-medium text-muted-foreground">
-            <span className="font-mono">{missions.length}</span> mission{missions.length !== 1 ? "s" : ""}
-          </h3>
+          <span className="text-xs text-muted-foreground">
+            <span className="font-mono">{filtered.length}</span>{hasFilters ? ` of ${missions.length}` : ""} mission{filtered.length !== 1 ? "s" : ""}
+          </span>
           {active.length > 0 && (
             <Badge variant="default" className="text-[10px] font-mono">
               {active.length} running
             </Badge>
           )}
+          <Button variant="outline" size="sm" onClick={handleRefresh} disabled={isRefreshing} className="hover:bg-accent/50">
+            <RefreshCw className={cn("h-3.5 w-3.5", isRefreshing && "animate-spin")} />
+          </Button>
         </div>
-        <Button variant="outline" size="sm" onClick={handleRefresh} disabled={isRefreshing} className="hover:bg-accent/50">
-          <RefreshCw className={cn("h-3.5 w-3.5", isRefreshing && "animate-spin")} />
-        </Button>
       </div>
+
+      {/* Active filter indicators */}
+      {(selectedStatuses.size > 0) && (
+        <div className="flex items-center gap-2 shrink-0 flex-wrap">
+          <span className="text-[10px] text-muted-foreground">Filtering by:</span>
+          {Array.from(selectedStatuses).map((status) => {
+            const opt = statusFilterOptions.find(o => o.value === status);
+            return (
+              <Badge
+                key={status}
+                variant="secondary"
+                className={cn("text-[10px] gap-1 cursor-pointer hover:bg-destructive/20", opt?.color)}
+                onClick={() => toggleStatus(status)}
+              >
+                {opt?.label ?? status}
+                <XCircle className="h-2.5 w-2.5" />
+              </Badge>
+            );
+          })}
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-5 px-1.5 text-[10px] text-muted-foreground"
+            onClick={() => setSelectedStatuses(new Set())}
+          >
+            Clear all
+          </Button>
+        </div>
+      )}
 
       {missions.length === 0 ? (
         <Card className="bg-card/60 backdrop-blur-sm border-border/40">

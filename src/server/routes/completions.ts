@@ -30,11 +30,26 @@ const MAX_TURNS = 20;
 
 // ── Zod Schemas ────────────────────────────────────────────────────────
 
+/** OpenAI-compatible content part (text or image_url). */
+const contentPartSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("text"), text: z.string() }),
+  z.object({
+    type: z.literal("image_url"),
+    image_url: z.object({
+      url: z.string().openapi({ description: "Data URL (data:image/…;base64,…) or HTTPS URL" }),
+      detail: z.enum(["auto", "low", "high"]).optional(),
+    }),
+  }),
+]);
+
 const messageSchema = z.object({
   role: z.enum(["system", "user", "assistant"]).openapi({
     description: "Message role. System messages are appended as additional context (Polpo has its own system prompt).",
   }),
-  content: z.string().openapi({ description: "Message content" }),
+  content: z.union([
+    z.string(),
+    z.array(contentPartSchema),
+  ]).openapi({ description: "Message content — plain string or array of content parts (text / image_url)" }),
 });
 
 const completionRequestSchema = z.object({
@@ -69,7 +84,7 @@ const completionResponseSchema = z.object({
       role: z.literal("assistant"),
       content: z.string(),
     }),
-    finish_reason: z.enum(["stop", "length"]),
+    finish_reason: z.enum(["stop", "length", "ask_user", "mission_preview", "vault_preview"]),
   })),
   usage: z.object({
     prompt_tokens: z.number().int(),
@@ -133,19 +148,56 @@ const chatCompletionsRoute = createRoute({
 
 // ── Helpers ────────────────────────────────────────────────────────────
 
+/** Extract plain text from a content field (string or content-part array). */
+function extractText(content: z.infer<typeof messageSchema>["content"]): string {
+  if (typeof content === "string") return content;
+  return content
+    .filter((p): p is { type: "text"; text: string } => p.type === "text")
+    .map((p) => p.text)
+    .join("\n");
+}
+
+/** Convert OpenAI-format content to pi-ai UserMessage content. */
+function toPiContent(content: z.infer<typeof messageSchema>["content"]): string | ({ type: "text"; text: string } | { type: "image"; data: string; mimeType: string })[] {
+  if (typeof content === "string") return content;
+
+  // Check if there are any image parts
+  const hasImages = content.some((p) => p.type === "image_url");
+  if (!hasImages) {
+    // Text-only array → flatten to plain string
+    return content.map((p) => (p as { type: "text"; text: string }).text).join("\n");
+  }
+
+  // Mixed content → convert to pi-ai TextContent | ImageContent array
+  return content.map((p) => {
+    if (p.type === "text") {
+      return { type: "text" as const, text: p.text };
+    }
+    // image_url → ImageContent
+    const url = p.image_url.url;
+    // data:image/png;base64,... → extract mimeType and base64 data
+    const match = url.match(/^data:([^;]+);base64,(.+)$/);
+    if (match) {
+      return { type: "image" as const, data: match[2], mimeType: match[1] };
+    }
+    // HTTPS URL — pass as-is (pi-ai may or may not support external URLs depending on provider)
+    return { type: "image" as const, data: url, mimeType: "image/png" };
+  });
+}
+
 function convertMessages(messages: z.infer<typeof messageSchema>[]): { piMessages: Message[]; extraSystemParts: string[] } {
   const piMessages: Message[] = [];
   const extraSystemParts: string[] = [];
 
   for (const msg of messages) {
     if (msg.role === "system") {
-      extraSystemParts.push(msg.content);
+      extraSystemParts.push(extractText(msg.content));
     } else if (msg.role === "user") {
-      piMessages.push({ role: "user", content: msg.content, timestamp: Date.now() });
+      piMessages.push({ role: "user", content: toPiContent(msg.content), timestamp: Date.now() });
     } else if (msg.role === "assistant") {
       piMessages.push({
         role: "user",
-        content: `[Previous assistant response]\n${msg.content}\n[End previous response]`,
+        content: `[Previous assistant response]\n${extractText(msg.content)}\n[End previous response]`,
         timestamp: Date.now(),
       });
     }
@@ -245,13 +297,13 @@ export function completionRoutes(orchestrator: Orchestrator, apiKeys?: string[])
           sessionId = latest.id;
         } else {
           const firstUserMsg = body.messages.find(m => m.role === "user");
-          sessionId = sessionStore.create(firstUserMsg?.content.slice(0, 60));
+          sessionId = sessionStore.create(firstUserMsg ? extractText(firstUserMsg.content).slice(0, 60) : undefined);
         }
       }
       // Persist user message (only the last one — earlier messages are already persisted)
       const lastUserMsg = [...body.messages].reverse().find(m => m.role === "user");
       if (lastUserMsg && sessionId) {
-        sessionStore.addMessage(sessionId, "user", lastUserMsg.content);
+        sessionStore.addMessage(sessionId, "user", extractText(lastUserMsg.content));
       }
     }
 
@@ -314,15 +366,49 @@ export function completionRoutes(orchestrator: Orchestrator, apiKeys?: string[])
 
             if (toolCalls.length === 0) break;
 
-            // Check for ask_user — intercept and pause the stream
-            const askUserCall = toolCalls.find(tc => isInteractive(tc.name));
-            if (askUserCall) {
-              const questions = (askUserCall.arguments as any)?.questions as AskUserQuestion[] ?? [];
-
-              // Emit the ask_user chunk with questions, then stop
-              await stream.writeSSE({
-                data: sseChunk(completionId, {}, "ask_user", { ask_user: { questions } }),
+            // Check for interactive tools — intercept and pause the stream
+            const interactiveCall = toolCalls.find(tc => isInteractive(tc.name));
+            if (interactiveCall) {
+              // Persist the interactive tool call so it survives session reload
+              toolCallsAccum.push({
+                id: interactiveCall.id,
+                name: interactiveCall.name,
+                arguments: interactiveCall.arguments,
+                state: "interrupted",
               });
+
+              if (interactiveCall.name === "ask_user") {
+                const questions = (interactiveCall.arguments as any)?.questions as AskUserQuestion[] ?? [];
+                await stream.writeSSE({
+                  data: sseChunk(completionId, {}, "ask_user", { ask_user: { questions } }),
+                });
+              } else if (interactiveCall.name === "create_mission") {
+                const args = interactiveCall.arguments as Record<string, unknown>;
+                let missionData: unknown;
+                try { missionData = JSON.parse(args.data as string); } catch { missionData = args.data; }
+                await stream.writeSSE({
+                  data: sseChunk(completionId, {}, "mission_preview", {
+                    mission_preview: {
+                      name: args.name as string,
+                      data: missionData,
+                      prompt: args.prompt as string | undefined,
+                    },
+                  }),
+                });
+              } else if (interactiveCall.name === "set_vault_entry") {
+                const args = interactiveCall.arguments as Record<string, unknown>;
+                await stream.writeSSE({
+                  data: sseChunk(completionId, {}, "vault_preview", {
+                    vault_preview: {
+                      agent: args.agent as string,
+                      service: args.service as string,
+                      type: args.type as string,
+                      label: args.label as string | undefined,
+                      credentials: args.credentials as Record<string, string>,
+                    },
+                  }),
+                });
+              }
               await stream.writeSSE({ data: "[DONE]" });
               return; // finally block will persist whatever finalText we have
             }
@@ -428,28 +514,80 @@ export function completionRoutes(orchestrator: Orchestrator, apiKeys?: string[])
 
           if (toolCalls.length === 0) break;
 
-          // Check for ask_user — return questions to client
-          const askUserCall = toolCalls.find(tc => isInteractive(tc.name));
-          if (askUserCall) {
-            const questions = (askUserCall.arguments as any)?.questions as AskUserQuestion[] ?? [];
-            return c.json({
+          // Check for interactive tools — return control to client
+          const interactiveCall = toolCalls.find(tc => isInteractive(tc.name));
+          if (interactiveCall) {
+            // Persist the interactive tool call so it survives session reload
+            toolCallsAccum.push({
+              id: interactiveCall.id,
+              name: interactiveCall.name,
+              arguments: interactiveCall.arguments,
+              state: "interrupted",
+            });
+
+            const baseResponse = {
               id: completionId,
               object: "chat.completion" as const,
               created: Math.floor(Date.now() / 1000),
               model: "polpo" as const,
-              choices: [{
-                index: 0,
-                message: { role: "assistant" as const, content: finalText },
-                finish_reason: "ask_user" as const,
-                ask_user: { questions },
-              }],
               usage: {
                 prompt_tokens: Math.ceil(fullSystemPrompt.length / 4),
                 completion_tokens: Math.ceil(finalText.length / 4),
                 total_tokens: Math.ceil(fullSystemPrompt.length / 4) + Math.ceil(finalText.length / 4),
               },
-            });
-            // Note: finally block persists finalText
+            };
+
+            if (interactiveCall.name === "ask_user") {
+              const questions = (interactiveCall.arguments as any)?.questions as AskUserQuestion[] ?? [];
+              return c.json({
+                ...baseResponse,
+                choices: [{
+                  index: 0,
+                  message: { role: "assistant" as const, content: finalText },
+                  finish_reason: "ask_user" as const,
+                  ask_user: { questions },
+                }],
+              });
+            }
+
+            if (interactiveCall.name === "create_mission") {
+              const args = interactiveCall.arguments as Record<string, unknown>;
+              let missionData: unknown;
+              try { missionData = JSON.parse(args.data as string); } catch { missionData = args.data; }
+              return c.json({
+                ...baseResponse,
+                choices: [{
+                  index: 0,
+                  message: { role: "assistant" as const, content: finalText },
+                  finish_reason: "mission_preview" as const,
+                  mission_preview: {
+                    name: args.name as string,
+                    data: missionData,
+                    prompt: args.prompt as string | undefined,
+                  },
+                }],
+              });
+            }
+
+            if (interactiveCall.name === "set_vault_entry") {
+              const args = interactiveCall.arguments as Record<string, unknown>;
+              return c.json({
+                ...baseResponse,
+                choices: [{
+                  index: 0,
+                  message: { role: "assistant" as const, content: finalText },
+                  finish_reason: "vault_preview" as const,
+                  vault_preview: {
+                    agent: args.agent as string,
+                    service: args.service as string,
+                    type: args.type as string,
+                    label: args.label as string | undefined,
+                    credentials: args.credentials as Record<string, string>,
+                  },
+                }],
+              });
+            }
+            // Note: finally block persists finalText + toolCallsAccum
           }
 
           for (const call of toolCalls) {

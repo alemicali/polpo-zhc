@@ -624,18 +624,18 @@ describe("AssessmentOrchestrator", () => {
       expect(h.store.getTask(task.id)!.assignTo).toBe("senior-agent");
     });
 
-    it("skips retry for tasks from cancelled plans", async () => {
+    it("skips retry for tasks from cancelled missions", async () => {
       const h = createHarness();
-      // Add getPlanByName to the store to simulate cancelled plan
-      (h.store as any).getPlanByName = (name: string) => {
-        if (name === "cancelled-plan") {
-          return { id: "p1", name: "cancelled-plan", status: "cancelled", data: "", createdAt: "", updatedAt: "" };
+      // Add getMissionByName to the store to simulate cancelled mission
+      (h.store as any).getMissionByName = (name: string) => {
+        if (name === "cancelled-mission") {
+          return { id: "p1", name: "cancelled-mission", status: "cancelled", data: "", createdAt: "", updatedAt: "" };
         }
         return undefined;
       };
 
       const task = addReviewTask(h, {
-        group: "cancelled-plan",
+        group: "cancelled-mission",
         maxRetries: 3,
       });
 

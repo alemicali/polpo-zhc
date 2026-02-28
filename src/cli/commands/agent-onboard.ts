@@ -12,6 +12,7 @@ import type { Command } from "commander";
 import chalk from "chalk";
 import { loadPolpoConfig, savePolpoConfig } from "../../core/config.js";
 import type { AgentConfig, AgentIdentity, AgentResponsibility, VaultEntry } from "../../core/types.js";
+import { EncryptedVaultStore } from "../../vault/encrypted-store.js";
 
 // ── Readline helpers ──
 
@@ -150,32 +151,36 @@ export function registerAgentOnboardCommands(program: Command): void {
       // ── 4. Email ──
       console.log(chalk.cyan("\n  Step 4: Email\n"));
       const enableEmail = await askYesNo("Enable email tools?", agentCfg.enableEmail ?? false);
-      const vault: Record<string, VaultEntry> = { ...(agentCfg.vault ?? {}) };
+      const vaultStore = new EncryptedVaultStore(polpoDir);
+      const existingVault = vaultStore.getAllForAgent(name);
+      const vaultEntries: Record<string, VaultEntry> = {};
 
       if (enableEmail) {
-        if (await askYesNo("Configure SMTP (send)?", !vault.email)) {
-          vault.email = {
+        const existingSmtp = existingVault.email;
+        if (await askYesNo("Configure SMTP (send)?", !existingSmtp)) {
+          vaultEntries.email = {
             type: "smtp",
             label: "SMTP Email",
             credentials: {
-              host: await askDefault("SMTP host", vault.email?.credentials?.host ?? "smtp.gmail.com"),
-              port: await askDefault("SMTP port", vault.email?.credentials?.port ?? "587"),
-              user: await askDefault("SMTP user (e.g. ${ALICE_SMTP_USER})", vault.email?.credentials?.user ?? ""),
-              pass: await askDefault("SMTP pass (e.g. ${ALICE_SMTP_PASS})", vault.email?.credentials?.pass ?? ""),
-              from: await askDefault("From address", vault.email?.credentials?.from ?? email ?? ""),
+              host: await askDefault("SMTP host", existingSmtp?.credentials?.host ?? "smtp.gmail.com"),
+              port: await askDefault("SMTP port", existingSmtp?.credentials?.port ?? "587"),
+              user: await askDefault("SMTP user (e.g. ${ALICE_SMTP_USER})", existingSmtp?.credentials?.user ?? ""),
+              pass: await askDefault("SMTP pass (e.g. ${ALICE_SMTP_PASS})", existingSmtp?.credentials?.pass ?? ""),
+              from: await askDefault("From address", existingSmtp?.credentials?.from ?? email ?? ""),
             },
           };
         }
 
-        if (await askYesNo("Configure IMAP (read)?", !vault["email-inbox"])) {
-          vault["email-inbox"] = {
+        const existingImap = existingVault["email-inbox"];
+        if (await askYesNo("Configure IMAP (read)?", !existingImap)) {
+          vaultEntries["email-inbox"] = {
             type: "imap",
             label: "IMAP Email",
             credentials: {
-              host: await askDefault("IMAP host", vault["email-inbox"]?.credentials?.host ?? "imap.gmail.com"),
-              port: await askDefault("IMAP port", vault["email-inbox"]?.credentials?.port ?? "993"),
-              user: await askDefault("IMAP user (env var)", vault["email-inbox"]?.credentials?.user ?? ""),
-              pass: await askDefault("IMAP pass (env var)", vault["email-inbox"]?.credentials?.pass ?? ""),
+              host: await askDefault("IMAP host", existingImap?.credentials?.host ?? "imap.gmail.com"),
+              port: await askDefault("IMAP port", existingImap?.credentials?.port ?? "993"),
+              user: await askDefault("IMAP user (env var)", existingImap?.credentials?.user ?? ""),
+              pass: await askDefault("IMAP pass (env var)", existingImap?.credentials?.pass ?? ""),
             },
           };
         }
@@ -200,7 +205,7 @@ export function registerAgentOnboardCommands(program: Command): void {
           creds[key] = val;
         }
         if (Object.keys(creds).length > 0) {
-          vault[svcName] = { type: svcType, label: svcLabel, credentials: creds };
+          vaultEntries[svcName] = { type: svcType, label: svcLabel, credentials: creds };
         }
       }
 
@@ -218,7 +223,6 @@ export function registerAgentOnboardCommands(program: Command): void {
 
       const updated: Record<string, unknown> = { ...agentCfg };
       if (Object.keys(identity).length > 0) updated.identity = identity;
-      if (Object.keys(vault).length > 0) updated.vault = vault;
       if (reportsTo) updated.reportsTo = reportsTo;
       else delete updated.reportsTo;
       if (enableEmail) updated.enableEmail = true;
@@ -226,8 +230,18 @@ export function registerAgentOnboardCommands(program: Command): void {
       defaultTeam.agents[agentIdx] = updated as any;
       savePolpoConfig(polpoDir, config);
 
+      // Save vault entries to encrypted store
+      for (const [svc, entry] of Object.entries(vaultEntries)) {
+        vaultStore.set(name, svc, entry);
+      }
+      const vaultCount = Object.keys(vaultEntries).length;
+
       console.log(chalk.green(`\n  Agent "${name}" onboarded successfully!`));
-      console.log(chalk.dim("  Saved to .polpo/polpo.json\n"));
+      console.log(chalk.dim("  Config saved to .polpo/polpo.json"));
+      if (vaultCount > 0) {
+        console.log(chalk.dim(`  ${vaultCount} credential(s) saved to .polpo/vault.enc (encrypted)`));
+      }
+      console.log();
     });
 
   // ── polpo agent list ──
@@ -256,11 +270,14 @@ export function registerAgentOnboardCommands(program: Command): void {
       const roots = agents.filter(a => !a.reportsTo);
       const childrenOf = (name: string) => agents.filter(a => a.reportsTo === name);
 
+      let listVaultStore: EncryptedVaultStore | undefined;
+      try { listVaultStore = new EncryptedVaultStore(polpoDir); } catch { /* vault unavailable */ }
+
       const printAgent = (a: AgentConfig, prefix: string, isLast: boolean) => {
         const connector = isLast ? "└── " : "├── ";
         const display = a.identity?.displayName ? `${a.name} (${a.identity.displayName})` : a.name;
         const titleStr = a.identity?.title ?? a.role ?? "";
-        const vaultCount = a.vault ? Object.keys(a.vault).length : 0;
+        const vaultCount = listVaultStore?.list(a.name).length ?? 0;
         const flags: string[] = [];
         if (a.enableEmail) flags.push("email");
         if (a.enableBrowser) flags.push("browser");
@@ -328,14 +345,16 @@ export function registerAgentOnboardCommands(program: Command): void {
         if (id.personality) console.log(`    Personality: ${id.personality}`);
       }
 
-      if (agentCfg.vault && Object.keys(agentCfg.vault).length > 0) {
-        console.log(chalk.cyan("\n  Vault:"));
-        for (const [service, entry] of Object.entries(agentCfg.vault)) {
-          const e = entry as VaultEntry;
-          console.log(`    ${chalk.bold(service)} (${e.type})${e.label ? ` — ${e.label}` : ""}`);
-          for (const [key, value] of Object.entries(e.credentials)) {
-            const masked = value.startsWith("${") ? value : maskValue(value);
-            console.log(chalk.dim(`      ${key}: ${masked}`));
+      // Show vault entries from encrypted store
+      let showVaultStore: EncryptedVaultStore | undefined;
+      try { showVaultStore = new EncryptedVaultStore(polpoDir); } catch { /* vault unavailable */ }
+      const vaultList = showVaultStore?.list(name) ?? [];
+      if (vaultList.length > 0) {
+        console.log(chalk.cyan("\n  Vault (encrypted):"));
+        for (const entry of vaultList) {
+          console.log(`    ${chalk.bold(entry.service)} (${entry.type})${entry.label ? ` — ${entry.label}` : ""}`);
+          for (const key of entry.keys) {
+            console.log(chalk.dim(`      ${key}: ***`));
           }
         }
       }

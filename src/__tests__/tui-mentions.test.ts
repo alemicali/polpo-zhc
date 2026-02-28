@@ -26,15 +26,15 @@ describe("parseMentions", () => {
     expect(r.text).toBe("see");
   });
 
-  it("extracts %plan reference", () => {
+  it("extracts %mission reference", () => {
     const r = parseMentions("run %refactor-v2");
-    expect(r.planRef).toBe("refactor-v2");
+    expect(r.missionRef).toBe("refactor-v2");
     expect(r.text).toBe("run");
   });
 
-  it("extracts quoted %plan", () => {
+  it("extracts quoted %mission", () => {
     const r = parseMentions('execute %"full migration"');
-    expect(r.planRef).toBe("full migration");
+    expect(r.missionRef).toBe("full migration");
     expect(r.text).toBe("execute");
   });
 
@@ -42,7 +42,7 @@ describe("parseMentions", () => {
     const r = parseMentions("@bob fix #auth-bug in %sprint-3");
     expect(r.agent).toBe("bob");
     expect(r.taskRef).toBe("auth-bug");
-    expect(r.planRef).toBe("sprint-3");
+    expect(r.missionRef).toBe("sprint-3");
     expect(r.text).toBe("fix  in");
   });
 
@@ -50,7 +50,7 @@ describe("parseMentions", () => {
     const r = parseMentions("just a normal message");
     expect(r.agent).toBeUndefined();
     expect(r.taskRef).toBeUndefined();
-    expect(r.planRef).toBeUndefined();
+    expect(r.missionRef).toBeUndefined();
     expect(r.text).toBe("just a normal message");
   });
 
@@ -78,10 +78,10 @@ describe("findMentionSpans", () => {
     expect(spans[0]).toEqual({ start: 4, end: 12, type: "task" });
   });
 
-  it("finds %plan span", () => {
+  it("finds %mission span", () => {
     const spans = findMentionSpans("run %deploy");
     expect(spans).toHaveLength(1);
-    expect(spans[0]).toEqual({ start: 4, end: 11, type: "plan" });
+    expect(spans[0]).toEqual({ start: 4, end: 11, type: "mission" });
   });
 
   it("finds multiple spans sorted by position", () => {
@@ -89,7 +89,7 @@ describe("findMentionSpans", () => {
     expect(spans).toHaveLength(3);
     expect(spans[0]!.type).toBe("agent");
     expect(spans[1]!.type).toBe("task");
-    expect(spans[2]!.type).toBe("plan");
+    expect(spans[2]!.type).toBe("mission");
     expect(spans[0]!.start).toBeLessThan(spans[1]!.start);
     expect(spans[1]!.start).toBeLessThan(spans[2]!.start);
   });

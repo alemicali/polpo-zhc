@@ -78,9 +78,8 @@ export interface AddAgentRequest {
   systemPrompt?: string;
   skills?: string[];
   maxTurns?: number;
-  // Identity, vault, hierarchy
+  // Identity & hierarchy (vault credentials managed via encrypted store)
   identity?: import("../core/types.js").AgentIdentity;
-  vault?: Record<string, import("../core/types.js").VaultEntry>;
   reportsTo?: string;
   // Extended tool categories
   enableBrowser?: boolean;

@@ -52,12 +52,14 @@ import {
   type NodeProps,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { useMission, useTasks } from "@lumea-labs/polpo-react";
-import type { MissionStatus, MissionReport, TaskStatus, Task } from "@lumea-labs/polpo-react";
+import { useMission, useTasks, useSchedules } from "@lumea-labs/polpo-react";
+import type { MissionStatus, MissionReport, TaskStatus, Task, ScheduleEntry } from "@lumea-labs/polpo-react";
 import { toast } from "sonner";
 import { formatDistanceToNow, format } from "date-fns";
 import { cn } from "@/lib/utils";
+import { cronToHuman } from "@/lib/cron";
 import { JsonBlock } from "@/components/json-block";
+import { Calendar, Repeat } from "lucide-react";
 
 // ── Copyable ID ──
 
@@ -861,6 +863,7 @@ export function MissionDetailPage() {
   const navigate = useNavigate();
   const { mission, report, isLoading, error, executeMission, resumeMission, abortMission } = useMission(missionId ?? "");
   const { tasks: allTasks } = useTasks();
+  const { schedules } = useSchedules();
 
   const parsed = useMemo(() => mission ? parseMissionData(mission.data) : null, [mission]);
 
@@ -881,6 +884,13 @@ export function MissionDetailPage() {
   const runningCount = groupTasks.filter(t => t.status === "in_progress" || t.status === "review").length;
   const totalCount = parsed?.tasks.length ?? 0;
   const progress = totalCount > 0 ? Math.round((doneCount / totalCount) * 100) : 0;
+
+  const scheduleEntry = useMemo(
+    () => missionId ? schedules.find(s => s.missionId === missionId) : undefined,
+    [schedules, missionId],
+  );
+
+  const hasScheduleInfo = !!(mission?.schedule || mission?.deadline || mission?.qualityThreshold != null);
 
   const [actionPending, setActionPending] = useState<string | null>(null);
   const handleAction = async (action: () => Promise<unknown>, label: string) => {
@@ -976,6 +986,66 @@ export function MissionDetailPage() {
           )}
         </div>
       </div>
+
+      {/* Scheduling info strip */}
+      {hasScheduleInfo && (
+        <div className="flex items-center gap-4 flex-wrap shrink-0 rounded-lg border border-border/40 bg-card/60 backdrop-blur-sm px-4 py-2.5">
+          {mission.schedule && (
+            <div className="flex items-center gap-1.5 text-xs">
+              <Calendar className="h-3.5 w-3.5 text-blue-400" />
+              <span className="text-muted-foreground">Schedule:</span>
+              <span className="font-medium">{cronToHuman(mission.schedule)}</span>
+              {mission.recurring ? (
+                <Badge variant="outline" className="text-[9px] gap-0.5 text-violet-400 ml-1">
+                  <Repeat className="h-2 w-2" />Recurring
+                </Badge>
+              ) : (
+                <Badge variant="outline" className="text-[9px] text-muted-foreground ml-1">One-shot</Badge>
+              )}
+            </div>
+          )}
+          {mission.deadline && (() => {
+            const dl = new Date(mission.deadline);
+            const isOverdue = dl.getTime() < Date.now();
+            return (
+              <div className="flex items-center gap-1.5 text-xs">
+                <Timer className={cn("h-3.5 w-3.5", isOverdue ? "text-red-400" : "text-amber-400")} />
+                <span className="text-muted-foreground">Deadline:</span>
+                <span className={cn("font-medium", isOverdue && "text-red-400")}>
+                  {isOverdue ? "Overdue" : `due ${formatDistanceToNow(dl, { addSuffix: true })}`}
+                </span>
+              </div>
+            );
+          })()}
+          {mission.qualityThreshold != null && (
+            <div className="flex items-center gap-1.5 text-xs">
+              <Star className="h-3.5 w-3.5 text-amber-400" />
+              <span className="text-muted-foreground">Quality:</span>
+              <span className="font-medium">{mission.qualityThreshold}</span>
+            </div>
+          )}
+          {scheduleEntry?.nextRunAt && (
+            <div className="flex items-center gap-1.5 text-xs">
+              <Clock className="h-3.5 w-3.5 text-muted-foreground" />
+              <span className="text-muted-foreground">Next run:</span>
+              <span className="font-medium">{formatDistanceToNow(new Date(scheduleEntry.nextRunAt), { addSuffix: true })}</span>
+            </div>
+          )}
+          {scheduleEntry?.lastRunAt && (
+            <div className="flex items-center gap-1.5 text-xs">
+              <Clock className="h-3.5 w-3.5 text-muted-foreground" />
+              <span className="text-muted-foreground">Last run:</span>
+              <span className="font-medium">{formatDistanceToNow(new Date(scheduleEntry.lastRunAt), { addSuffix: true })}</span>
+            </div>
+          )}
+          {scheduleEntry && (
+            <div className="flex items-center gap-1.5 text-xs">
+              <span className={cn("h-2 w-2 rounded-full", scheduleEntry.enabled ? "bg-emerald-500" : "bg-zinc-500")} />
+              <span className="text-muted-foreground">{scheduleEntry.enabled ? "Enabled" : "Disabled"}</span>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Tabs */}
       <Tabs defaultValue="graph" className="flex flex-col flex-1 min-h-0">

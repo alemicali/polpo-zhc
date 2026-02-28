@@ -2,7 +2,7 @@
  * End-to-end integration test using real Claude SDK.
  *
  * This test exercises the FULL framework pipeline:
- *   Orchestrator → Plan → Runner subprocess → Assessment → Cleanup
+ *   Orchestrator → Mission → Runner subprocess → Assessment → Cleanup
  *
  * Requires: ANTHROPIC_API_KEY in environment.
  * Run explicitly: INTEGRATION_TEST=1 npm test -- --run src/__tests__/integration/e2e-claude.test.ts
@@ -56,7 +56,7 @@ describe.runIf(RUN_E2E)("e2e: Claude SDK full pipeline", () => {
     orchestrator.on("task:answered", track("task:answered"));
     orchestrator.on("assessment:started", track("assessment:started"));
     orchestrator.on("assessment:complete", track("assessment:complete"));
-    orchestrator.on("plan:completed", track("plan:completed"));
+    orchestrator.on("mission:completed", track("mission:completed"));
     orchestrator.on("deadlock:detected", track("deadlock:detected"));
     orchestrator.on("log", track("log"));
   });
@@ -73,8 +73,8 @@ describe.runIf(RUN_E2E)("e2e: Claude SDK full pipeline", () => {
     } catch { /* best effort */ }
   });
 
-  it("executes a 3-task plan with dependencies and assessment", async () => {
-    // ── Define Plan ──────────────────────────────────────
+  it("executes a 3-task mission with dependencies and assessment", async () => {
+    // ── Define Mission ───────────────────────────────────
     //
     // Task A: Create a utility module (no deps)
     // Task B: Create a consumer module (depends on A)
@@ -97,7 +97,7 @@ describe.runIf(RUN_E2E)("e2e: Claude SDK full pipeline", () => {
         `Only create this one file. Do not create any other files.`,
       ].join("\n"),
       assignTo: "claude",
-      group: "e2e-plan",
+      group: "e2e-mission",
     });
 
     const taskB = orchestrator.addTask({
@@ -115,7 +115,7 @@ describe.runIf(RUN_E2E)("e2e: Claude SDK full pipeline", () => {
       ].join("\n"),
       assignTo: "claude",
       dependsOn: [taskA.id],
-      group: "e2e-plan",
+      group: "e2e-mission",
     });
 
     const taskC = orchestrator.addTask({
@@ -130,7 +130,7 @@ describe.runIf(RUN_E2E)("e2e: Claude SDK full pipeline", () => {
       ].join("\n"),
       assignTo: "claude",
       dependsOn: [taskA.id, taskB.id],
-      group: "e2e-plan",
+      group: "e2e-mission",
       expectations: [
         {
           type: "script",
@@ -139,9 +139,9 @@ describe.runIf(RUN_E2E)("e2e: Claude SDK full pipeline", () => {
       ],
     });
 
-    // Save as a plan for plan:completed event
-    orchestrator.savePlan({
-      name: "e2e-plan",
+    // Save as a mission for mission:completed event
+    orchestrator.saveMission({
+      name: "e2e-mission",
       data: JSON.stringify({ tasks: [{ title: "Create greet module" }, { title: "Create main module" }, { title: "Verify files exist" }] }),
       status: "active",
     });

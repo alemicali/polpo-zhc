@@ -19,7 +19,7 @@ import {
 
 // ── Types ──
 
-export type ToolState = "calling" | "completed" | "error";
+export type ToolState = "calling" | "completed" | "error" | "interrupted";
 
 export interface ToolCallInfo {
   id: string;
@@ -46,6 +46,8 @@ function getStateIcon(state: ToolState) {
       return <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />;
     case "error":
       return <AlertCircle className="h-3.5 w-3.5 text-destructive" />;
+    case "interrupted":
+      return <AlertCircle className="h-3.5 w-3.5 text-amber-500" />;
   }
 }
 
@@ -67,6 +69,12 @@ function getStateBadge(state: ToolState) {
       return (
         <Badge variant="outline" className="text-[9px] font-normal border-destructive/30 text-destructive">
           Error
+        </Badge>
+      );
+    case "interrupted":
+      return (
+        <Badge variant="outline" className="text-[9px] font-normal border-amber-500/30 text-amber-600 dark:text-amber-400">
+          Waiting
         </Badge>
       );
   }

@@ -25,7 +25,7 @@ import { homedir } from "node:os";
 // ── Types ──────────────────────────────────────────────────────────────
 
 export interface TemplateParameter {
-  /** Parameter name — used as {{name}} in the plan template. */
+  /** Parameter name — used as {{name}} in the mission template. */
   name: string;
   /** Human-readable description. */
   description: string;
@@ -50,7 +50,7 @@ export interface TemplateDefinition {
   parameters?: TemplateParameter[];
 }
 
-/** Lightweight metadata returned by discovery (no plan body). */
+/** Lightweight metadata returned by discovery (no mission body). */
 export interface TemplateInfo {
   name: string;
   description: string;

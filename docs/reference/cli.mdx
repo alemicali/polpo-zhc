@@ -245,7 +245,7 @@ Interactive wizard to set up an agent's full profile. Walks through 5 steps:
 4. **Email** — SMTP vault entry (send) and IMAP vault entry (read), sets `enableEmail: true`
 5. **Vault** — additional credentials (API keys, OAuth tokens, logins, custom)
 
-All changes are saved to `.polpo/polpo.json`. Run again to update an existing agent's profile.
+Agent config is saved to `.polpo/polpo.json`; vault entries are saved to `.polpo/vault.enc` (AES-256-GCM encrypted). Run again to update an existing agent's profile.
 
 See [Onboarding walkthrough](/guides/build-your-team#onboard-your-agents) for detailed examples of each step.
 

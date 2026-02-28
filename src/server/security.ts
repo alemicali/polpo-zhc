@@ -3,9 +3,12 @@
  * before exposing it through API responses or persisting to transcript logs.
  *
  * Handles:
- * - Vault credential masking (agent configs, team, state, config)
  * - Provider API key masking
  * - Transcript parameter sanitization (passwords, tokens, secrets)
+ *
+ * NOTE: Vault credentials are no longer stored on AgentConfig — they live in
+ * the encrypted vault store (.polpo/vault.enc). Agent/team/state redaction
+ * functions are kept as pass-throughs for API compatibility.
  */
 
 import type { AgentConfig, Team, PolpoState, PolpoConfig, PolpoFileConfig } from "../core/types.js";
@@ -20,58 +23,32 @@ const REDACTED = "***";
 // ── Agent Config Redaction ──
 
 /**
- * Deep-clone an AgentConfig and mask vault credential values.
- * Preserves vault structure (type, label, key names) but replaces values with "***".
+ * Returns the agent config as-is (vault credentials are no longer inline).
+ * Kept for backward compatibility with callers that expect redaction.
  */
 export function redactAgentConfig(agent: AgentConfig): AgentConfig {
-  if (!agent.vault) return agent;
-
-  const redactedVault: Record<string, any> = {};
-  for (const [serviceName, entry] of Object.entries(agent.vault)) {
-    const redactedCreds: Record<string, string> = {};
-    for (const key of Object.keys(entry.credentials)) {
-      redactedCreds[key] = REDACTED;
-    }
-    redactedVault[serviceName] = {
-      type: entry.type,
-      ...(entry.label ? { label: entry.label } : {}),
-      credentials: redactedCreds,
-    };
-  }
-
-  return { ...agent, vault: redactedVault };
+  return agent;
 }
 
 // ── Team Redaction ──
 
-/** Redact all agents in a team. */
+/** Returns the team as-is (no inline credentials to redact). */
 export function redactTeam(team: Team): Team {
-  return {
-    ...team,
-    agents: team.agents.map(redactAgentConfig),
-  };
+  return team;
 }
 
 // ── State Redaction ──
 
-/** Redact team inside an OrchestraState snapshot. */
+/** Returns the state as-is (no inline credentials to redact). */
 export function redactPolpoState(state: PolpoState): PolpoState {
-  return {
-    ...state,
-    teams: state.teams.map(redactTeam),
-  };
+  return state;
 }
 
 // ── Config Redaction ──
 
-/** Redact provider API keys and team vault in a PolpoConfig or PolpoFileConfig. */
+/** Redact provider API keys in a PolpoConfig or PolpoFileConfig. */
 export function redactPolpoConfig<T extends PolpoConfig | PolpoFileConfig>(config: T): T {
   const result: any = { ...config };
-
-  // Redact teams
-  if (result.teams) {
-    result.teams = result.teams.map(redactTeam);
-  }
 
   // Redact provider API keys
   if (result.providers) {

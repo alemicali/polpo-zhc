@@ -10,102 +10,67 @@ import {
 import type { AgentConfig, Team, PolpoState, PolpoConfig } from "../core/types.js";
 
 // ── redactAgentConfig ──
+// NOTE: Vault credentials are no longer stored on AgentConfig — they live
+// in the encrypted vault store. redactAgentConfig is a pass-through now.
 
 describe("redactAgentConfig", () => {
-  it("preserves name/role/identity, masks vault values", () => {
+  it("returns agent unchanged (pass-through — vault no longer inline)", () => {
     const agent: AgentConfig = {
       name: "alice",
       role: "dev",
       identity: { displayName: "Alice", title: "Engineer" },
-      vault: {
-        smtp: {
-          type: "smtp",
-          label: "Work Email",
-          credentials: { host: "mail.example.com", user: "alice", pass: "s3cret" },
-        },
-      },
     };
 
     const result = redactAgentConfig(agent);
-
+    expect(result).toBe(agent); // same reference — pass-through
     expect(result.name).toBe("alice");
     expect(result.role).toBe("dev");
     expect(result.identity?.displayName).toBe("Alice");
-    expect(result.vault!.smtp.type).toBe("smtp");
-    expect(result.vault!.smtp.label).toBe("Work Email");
-    expect(result.vault!.smtp.credentials.host).toBe("***");
-    expect(result.vault!.smtp.credentials.user).toBe("***");
-    expect(result.vault!.smtp.credentials.pass).toBe("***");
   });
 
-  it("returns agent unchanged when no vault", () => {
+  it("returns agent unchanged when no vault (still pass-through)", () => {
     const agent: AgentConfig = { name: "bob", role: "qa" };
     const result = redactAgentConfig(agent);
-    expect(result).toBe(agent); // same reference — no copy needed
-  });
-
-  it("handles multiple vault entries", () => {
-    const agent: AgentConfig = {
-      name: "carol",
-      vault: {
-        smtp: { type: "smtp", credentials: { pass: "x" } },
-        github: { type: "api_key", credentials: { token: "ghp_abc" } },
-      },
-    };
-
-    const result = redactAgentConfig(agent);
-    expect(result.vault!.smtp.credentials.pass).toBe("***");
-    expect(result.vault!.github.credentials.token).toBe("***");
-  });
-
-  it("does not mutate original agent", () => {
-    const agent: AgentConfig = {
-      name: "dave",
-      vault: { api: { type: "api_key", credentials: { key: "real-key" } } },
-    };
-
-    redactAgentConfig(agent);
-    expect(agent.vault!.api.credentials.key).toBe("real-key");
+    expect(result).toBe(agent);
   });
 });
 
 // ── redactTeam ──
 
 describe("redactTeam", () => {
-  it("applies redaction to all agents", () => {
+  it("returns team unchanged (pass-through)", () => {
     const team: Team = {
       name: "alpha",
       agents: [
-        { name: "a1", vault: { s: { type: "smtp", credentials: { pass: "p1" } } } },
-        { name: "a2", vault: { s: { type: "api_key", credentials: { key: "k2" } } } },
-        { name: "a3" }, // no vault
+        { name: "a1" },
+        { name: "a2", role: "dev" },
+        { name: "a3" },
       ],
     };
 
     const result = redactTeam(team);
+    expect(result).toBe(team); // same reference
     expect(result.name).toBe("alpha");
-    expect(result.agents[0].vault!.s.credentials.pass).toBe("***");
-    expect(result.agents[1].vault!.s.credentials.key).toBe("***");
-    expect(result.agents[2].vault).toBeUndefined();
+    expect(result.agents).toHaveLength(3);
   });
 });
 
 // ── redactPolpoState ──
 
 describe("redactPolpoState", () => {
-  it("redacts team.agents in state", () => {
+  it("returns state unchanged (pass-through)", () => {
     const state: PolpoState = {
       project: "test",
       teams: [{
         name: "t",
-        agents: [{ name: "x", vault: { db: { type: "login", credentials: { password: "abc" } } } }],
+        agents: [{ name: "x" }],
       }],
       tasks: [],
       processes: [],
     };
 
     const result = redactPolpoState(state);
-    expect(result.teams[0].agents[0].vault!.db.credentials.password).toBe("***");
+    expect(result).toBe(state); // same reference
     expect(result.project).toBe("test");
   });
 });
@@ -113,13 +78,13 @@ describe("redactPolpoState", () => {
 // ── redactPolpoConfig ──
 
 describe("redactPolpoConfig", () => {
-  it("redacts team + providers.apiKey", () => {
+  it("redacts providers.apiKey values", () => {
     const config = {
       version: "1",
       project: "test",
       teams: [{
         name: "t",
-        agents: [{ name: "a", vault: { s: { type: "smtp" as const, credentials: { pass: "x" } } } }],
+        agents: [{ name: "a" }],
       }],
       tasks: [],
       settings: { maxRetries: 3, workDir: ".", logLevel: "normal" as const },
@@ -131,9 +96,6 @@ describe("redactPolpoConfig", () => {
     } as PolpoConfig;
 
     const result = redactPolpoConfig(config);
-
-    // Team redacted
-    expect(result.teams[0].agents[0].vault!.s.credentials.pass).toBe("***");
 
     // Provider keys redacted
     expect(result.providers!.anthropic.apiKey).toBe("***");

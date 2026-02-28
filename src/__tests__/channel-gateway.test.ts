@@ -81,7 +81,7 @@ function createMockOrchestrator(): Orchestrator {
       getState: vi.fn().mockReturnValue({ processes: [] }),
     }),
     getAgents: vi.fn().mockReturnValue([]),
-    getAllPlans: vi.fn().mockReturnValue([]),
+    getAllMissions: vi.fn().mockReturnValue([]),
     getConfig: vi.fn().mockReturnValue({ project: "test-project", settings: {} }),
     getApprovalRequest: vi.fn().mockReturnValue(undefined),
   } as unknown as Orchestrator;
@@ -281,7 +281,7 @@ describe("ChannelGateway — Slash Commands", () => {
     expect(result).toContain("/help");
     expect(result).toContain("/status");
     expect(result).toContain("/tasks");
-    expect(result).toContain("/plans");
+    expect(result).toContain("/missions");
     expect(result).toContain("/agents");
     expect(result).toContain("/approve");
     expect(result).toContain("/reject");
@@ -351,9 +351,9 @@ describe("ChannelGateway — Slash Commands", () => {
     expect(result).toContain("No tasks");
   });
 
-  it("/plans returns plan list", async () => {
+  it("/missions returns mission list", async () => {
     const orchestrator = createMockOrchestrator();
-    (orchestrator.getAllPlans as any).mockReturnValue([
+    (orchestrator.getAllMissions as any).mockReturnValue([
       { name: "Deploy v2", status: "active" },
       { name: "Refactor", status: "completed" },
     ]);
@@ -363,7 +363,7 @@ describe("ChannelGateway — Slash Commands", () => {
       channel: "telegram",
       externalId: "42",
       chatId: "chat-1",
-      text: "/plans",
+      text: "/missions",
     });
 
     expect(result).toContain("Deploy v2");

@@ -1,59 +1,59 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { nanoid } from "nanoid";
 import { TaskManager } from "../core/task-manager.js";
-import { PlanExecutor } from "../core/plan-executor.js";
+import { MissionExecutor } from "../core/mission-executor.js";
 import { AgentManager } from "../core/agent-manager.js";
 import { TypedEmitter } from "../core/events.js";
 import { InMemoryTaskStore, InMemoryRunStore, createTestAgent } from "./fixtures.js";
 import type { OrchestratorContext } from "../core/orchestrator-context.js";
 import { HookRegistry } from "../core/hooks.js";
-import type { PolpoConfig, Plan } from "../core/types.js";
+import type { PolpoConfig, Mission } from "../core/types.js";
 import type { TaskStore } from "../core/task-store.js";
 
-// ── Extended InMemoryTaskStore with plan support ───────────────────────
+// ── Extended InMemoryTaskStore with mission support ────────────────────
 
-class InMemoryTaskStoreWithPlans extends InMemoryTaskStore implements TaskStore {
-  private plans = new Map<string, Plan>();
+class InMemoryTaskStoreWithMissions extends InMemoryTaskStore implements TaskStore {
+  private missions = new Map<string, Mission>();
 
-  savePlan(plan: Omit<Plan, "id" | "createdAt" | "updatedAt">): Plan {
-    const existing = [...this.plans.values()].find(p => p.name === plan.name);
-    if (existing) throw new Error(`Plan name "${plan.name}" already exists`);
+  saveMission(mission: Omit<Mission, "id" | "createdAt" | "updatedAt">): Mission {
+    const existing = [...this.missions.values()].find(p => p.name === mission.name);
+    if (existing) throw new Error(`Mission name "${mission.name}" already exists`);
     const now = new Date().toISOString();
-    const newPlan: Plan = {
-      ...plan,
+    const newMission: Mission = {
+      ...mission,
       id: nanoid(),
       createdAt: now,
       updatedAt: now,
     };
-    this.plans.set(newPlan.id, newPlan);
-    return newPlan;
+    this.missions.set(newMission.id, newMission);
+    return newMission;
   }
 
-  getPlan(planId: string): Plan | undefined {
-    return this.plans.get(planId);
+  getMission(missionId: string): Mission | undefined {
+    return this.missions.get(missionId);
   }
 
-  getPlanByName(name: string): Plan | undefined {
-    return [...this.plans.values()].find(p => p.name === name);
+  getMissionByName(name: string): Mission | undefined {
+    return [...this.missions.values()].find(p => p.name === name);
   }
 
-  getAllPlans(): Plan[] {
-    return [...this.plans.values()];
+  getAllMissions(): Mission[] {
+    return [...this.missions.values()];
   }
 
-  updatePlan(planId: string, updates: Partial<Omit<Plan, "id">>): Plan {
-    const plan = this.plans.get(planId);
-    if (!plan) throw new Error("Plan not found");
-    Object.assign(plan, updates, { updatedAt: new Date().toISOString() });
-    return plan;
+  updateMission(missionId: string, updates: Partial<Omit<Mission, "id">>): Mission {
+    const mission = this.missions.get(missionId);
+    if (!mission) throw new Error("Mission not found");
+    Object.assign(mission, updates, { updatedAt: new Date().toISOString() });
+    return mission;
   }
 
-  deletePlan(planId: string): boolean {
-    return this.plans.delete(planId);
+  deleteMission(missionId: string): boolean {
+    return this.missions.delete(missionId);
   }
 
-  nextPlanName(): string {
-    return `plan-${this.plans.size + 1}`;
+  nextMissionName(): string {
+    return `mission-${this.missions.size + 1}`;
   }
 }
 
@@ -117,7 +117,7 @@ function createContext(overrides?: {
   const config = overrides?.config ?? createDefaultConfig();
   return {
     emitter: new TypedEmitter(),
-    registry: overrides?.registry ?? new InMemoryTaskStoreWithPlans(),
+    registry: overrides?.registry ?? new InMemoryTaskStoreWithMissions(),
     runStore: new InMemoryRunStore(),
     memoryStore: createNoopMemoryStore(),
     logStore: createNoopLogStore(),
@@ -685,25 +685,25 @@ describe("TaskManager", () => {
       expect(ctx.registry.getTask(t3.id)!.status).toBe("failed");
     });
 
-    it("cancels the associated plan if active", () => {
-      const store = ctx.registry as InMemoryTaskStoreWithPlans;
-      const plan = store.savePlan({
+    it("cancels the associated mission if active", () => {
+      const store = ctx.registry as InMemoryTaskStoreWithMissions;
+      const mission = store.saveMission({
         name: "g2",
         data: JSON.stringify({ tasks: [{ title: "T1" }] }),
         status: "active",
       });
 
       mgr.addTask({
-        title: "Plan task",
-        description: "in plan",
+        title: "Mission task",
+        description: "in mission",
         assignTo: "dev",
         group: "g2",
       });
 
       mgr.abortGroup("g2");
 
-      const updatedPlan = store.getPlan(plan.id)!;
-      expect(updatedPlan.status).toBe("cancelled");
+      const updatedMission = store.getMission(mission.id)!;
+      expect(updatedMission.status).toBe("cancelled");
     });
   });
 
@@ -762,114 +762,114 @@ describe("TaskManager", () => {
 });
 
 // ════════════════════════════════════════════════════════════════════════
-// PlanExecutor Tests
+// MissionExecutor Tests
 // ════════════════════════════════════════════════════════════════════════
 
-describe("PlanExecutor", () => {
+describe("MissionExecutor", () => {
   let ctx: OrchestratorContext;
   let taskMgr: TaskManager;
   let agentMgr: AgentManager;
-  let planExec: PlanExecutor;
+  let missionExec: MissionExecutor;
 
   beforeEach(() => {
     ctx = createContext();
     taskMgr = new TaskManager(ctx);
     agentMgr = new AgentManager(ctx);
-    planExec = new PlanExecutor(ctx, taskMgr, agentMgr);
+    missionExec = new MissionExecutor(ctx, taskMgr, agentMgr);
   });
 
-  // ── savePlan ─────────────────────────────────────────────────────────
+  // ── saveMission ──────────────────────────────────────────────────────
 
-  describe("savePlan", () => {
-    it("persists a plan with draft status by default", () => {
-      const plan = planExec.savePlan({
+  describe("saveMission", () => {
+    it("persists a mission with draft status by default", () => {
+      const mission = missionExec.saveMission({
         data: JSON.stringify({ tasks: [{ title: "T1", assignTo: "dev" }] }),
       });
 
-      expect(plan).toBeDefined();
-      expect(plan.id).toBeTruthy();
-      expect(plan.status).toBe("draft");
-      expect(plan.data).toContain("tasks");
+      expect(mission).toBeDefined();
+      expect(mission.id).toBeTruthy();
+      expect(mission.status).toBe("draft");
+      expect(mission.data).toContain("tasks");
 
       // Verify it is retrievable
-      const found = planExec.getPlan(plan.id);
+      const found = missionExec.getMission(mission.id);
       expect(found).toBeDefined();
-      expect(found!.id).toBe(plan.id);
+      expect(found!.id).toBe(mission.id);
     });
 
-    it("emits plan:saved event", () => {
+    it("emits mission:saved event", () => {
       const events: any[] = [];
-      ctx.emitter.on("plan:saved", (e) => events.push(e));
+      ctx.emitter.on("mission:saved", (e) => events.push(e));
 
-      const plan = planExec.savePlan({
+      const mission = missionExec.saveMission({
         data: JSON.stringify({ tasks: [{ title: "T1" }] }),
       });
 
       expect(events).toHaveLength(1);
-      expect(events[0].planId).toBe(plan.id);
+      expect(events[0].missionId).toBe(mission.id);
       expect(events[0].status).toBe("draft");
     });
 
     it("assigns auto-generated name when none provided", () => {
-      const plan = planExec.savePlan({
+      const mission = missionExec.saveMission({
         data: JSON.stringify({ tasks: [{ title: "T1" }] }),
       });
 
-      expect(plan.name).toBeTruthy();
-      // Should get nextPlanName() output: "plan-1"
-      expect(plan.name).toBe("plan-1");
+      expect(mission.name).toBeTruthy();
+      // Should get nextMissionName() output: "mission-1"
+      expect(mission.name).toBe("mission-1");
     });
 
     it("uses provided name", () => {
-      const plan = planExec.savePlan({
+      const mission = missionExec.saveMission({
         data: JSON.stringify({ tasks: [{ title: "T1" }] }),
-        name: "my-custom-plan",
+        name: "my-custom-mission",
       });
 
-      expect(plan.name).toBe("my-custom-plan");
+      expect(mission.name).toBe("my-custom-mission");
     });
 
     it("stores optional prompt", () => {
-      const plan = planExec.savePlan({
+      const mission = missionExec.saveMission({
         data: JSON.stringify({ tasks: [{ title: "T1" }] }),
         prompt: "Build a login page",
       });
 
-      expect(plan.prompt).toBe("Build a login page");
+      expect(mission.prompt).toBe("Build a login page");
     });
   });
 
-  // ── executePlan ──────────────────────────────────────────────────────
+  // ── executeMission ───────────────────────────────────────────────────
 
-  describe("executePlan", () => {
-    it("creates tasks from JSON plan", () => {
+  describe("executeMission", () => {
+    it("creates tasks from JSON mission", () => {
       const data = JSON.stringify({ tasks: [
           { title: "Setup project", description: "Initialize the project structure", assignTo: "dev" },
           { title: "Write tests", description: "Add unit tests", assignTo: "dev" },
         ] });
 
-      const plan = planExec.savePlan({ data });
-      const result = planExec.executePlan(plan.id);
+      const mission = missionExec.saveMission({ data });
+      const result = missionExec.executeMission(mission.id);
 
       expect(result.tasks).toHaveLength(2);
-      expect(result.group).toBe(plan.name);
+      expect(result.group).toBe(mission.name);
       expect(result.tasks[0].title).toBe("Setup project");
       expect(result.tasks[1].title).toBe("Write tests");
 
       // Tasks should be in the registry
       const allTasks = ctx.registry.getAllTasks();
       expect(allTasks).toHaveLength(2);
-      expect(allTasks.every((t) => t.group === plan.name)).toBe(true);
+      expect(allTasks.every((t) => t.group === mission.name)).toBe(true);
     });
 
-    it("resolves title-based dependencies within the plan", () => {
+    it("resolves title-based dependencies within the mission", () => {
       const data = JSON.stringify({ tasks: [
           { title: "Create DB", description: "Setup database", assignTo: "dev" },
           { title: "Build API", description: "Implement REST API", assignTo: "dev", dependsOn: ["Create DB"] },
         ] });
 
-      const plan = planExec.savePlan({ data });
-      const result = planExec.executePlan(plan.id);
+      const mission = missionExec.saveMission({ data });
+      const result = missionExec.executeMission(mission.id);
 
       const dbTask = result.tasks.find((t) => t.title === "Create DB")!;
       const apiTask = result.tasks.find((t) => t.title === "Build API")!;
@@ -877,66 +877,66 @@ describe("PlanExecutor", () => {
       expect(apiTask.dependsOn).toEqual([dbTask.id]);
     });
 
-    it("throws for non-existent plan", () => {
-      expect(() => planExec.executePlan("nonexistent-id")).toThrow(
-        "Plan not found",
+    it("throws for non-existent mission", () => {
+      expect(() => missionExec.executeMission("nonexistent-id")).toThrow(
+        "Mission not found",
       );
     });
 
-    it("throws for already-active plan", () => {
+    it("throws for already-active mission", () => {
       const data = JSON.stringify({ tasks: [{ title: "T1", description: "d", assignTo: "dev" }] });
-      const plan = planExec.savePlan({ data });
-      planExec.executePlan(plan.id);
+      const mission = missionExec.saveMission({ data });
+      missionExec.executeMission(mission.id);
 
-      // Plan is now active — second execution should throw
-      expect(() => planExec.executePlan(plan.id)).toThrow(
-        "Plan already active",
+      // Mission is now active — second execution should throw
+      expect(() => missionExec.executeMission(mission.id)).toThrow(
+        "Mission already active",
       );
     });
 
-    it("throws for plan with no tasks in plan data", () => {
-      const plan = planExec.savePlan({ data: JSON.stringify({ team: [{ name: "dev" }] }) });
+    it("throws for mission with no tasks in mission data", () => {
+      const mission = missionExec.saveMission({ data: JSON.stringify({ team: [{ name: "dev" }] }) });
 
-      expect(() => planExec.executePlan(plan.id)).toThrow("Plan has no tasks");
+      expect(() => missionExec.executeMission(mission.id)).toThrow("Mission has no tasks");
     });
 
-    it("marks plan as active after execution", () => {
+    it("marks mission as active after execution", () => {
       const data = JSON.stringify({ tasks: [{ title: "T1", description: "d", assignTo: "dev" }] });
-      const plan = planExec.savePlan({ data });
-      planExec.executePlan(plan.id);
+      const mission = missionExec.saveMission({ data });
+      missionExec.executeMission(mission.id);
 
-      const updated = planExec.getPlan(plan.id)!;
+      const updated = missionExec.getMission(mission.id)!;
       expect(updated.status).toBe("active");
     });
 
-    it("emits plan:executed event", () => {
+    it("emits mission:executed event", () => {
       const events: any[] = [];
-      ctx.emitter.on("plan:executed", (e) => events.push(e));
+      ctx.emitter.on("mission:executed", (e) => events.push(e));
 
       const data = JSON.stringify({ tasks: [{ title: "T1", description: "d", assignTo: "dev" }] });
-      const plan = planExec.savePlan({ data });
-      planExec.executePlan(plan.id);
+      const mission = missionExec.saveMission({ data });
+      missionExec.executeMission(mission.id);
 
       expect(events).toHaveLength(1);
-      expect(events[0].planId).toBe(plan.id);
+      expect(events[0].missionId).toBe(mission.id);
       expect(events[0].taskCount).toBe(1);
     });
 
-    it("uses first agent from config when assignTo is missing in plan data", () => {
+    it("uses first agent from config when assignTo is missing in mission data", () => {
       const data = JSON.stringify({ tasks: [{ title: "No Agent", description: "has no assignTo" }] });
-      const plan = planExec.savePlan({ data });
-      const result = planExec.executePlan(plan.id);
+      const mission = missionExec.saveMission({ data });
+      const result = missionExec.executeMission(mission.id);
 
       expect(result.tasks[0].assignTo).toBe("dev");
     });
   });
 
-  // ── resumePlan ───────────────────────────────────────────────────────
+  // ── resumeMission ────────────────────────────────────────────────────
 
-  describe("resumePlan", () => {
-    it("throws for non-existent plan", () => {
-      expect(() => planExec.resumePlan("nonexistent")).toThrow(
-        "Plan not found",
+  describe("resumeMission", () => {
+    it("throws for non-existent mission", () => {
+      expect(() => missionExec.resumeMission("nonexistent")).toThrow(
+        "Mission not found",
       );
     });
 
@@ -945,18 +945,18 @@ describe("PlanExecutor", () => {
           { title: "Failing task", description: "This will fail", assignTo: "dev" },
         ] });
 
-      const plan = planExec.savePlan({ data });
-      planExec.executePlan(plan.id);
+      const mission = missionExec.saveMission({ data });
+      missionExec.executeMission(mission.id);
 
       // Fail the task manually through state machine
-      const task = ctx.registry.getAllTasks().find((t) => t.group === plan.name)!;
+      const task = ctx.registry.getAllTasks().find((t) => t.group === mission.name)!;
       ctx.registry.transition(task.id, "assigned");
       ctx.registry.transition(task.id, "in_progress");
       ctx.registry.transition(task.id, "review");
       ctx.registry.transition(task.id, "failed");
-      planExec.updatePlan(plan.id, { status: "failed" });
+      missionExec.updateMission(mission.id, { status: "failed" });
 
-      const result = planExec.resumePlan(plan.id, { retryFailed: true });
+      const result = missionExec.resumeMission(mission.id, { retryFailed: true });
 
       expect(result.retried).toBe(1);
 
@@ -964,43 +964,43 @@ describe("PlanExecutor", () => {
       const taskAfter = ctx.registry.getTask(task.id)!;
       expect(taskAfter.status).toBe("pending");
 
-      // Plan should be active again
-      const planAfter = planExec.getPlan(plan.id)!;
-      expect(planAfter.status).toBe("active");
+      // Mission should be active again
+      const missionAfter = missionExec.getMission(mission.id)!;
+      expect(missionAfter.status).toBe("active");
     });
 
     it("does not retry when retryFailed is false", () => {
       const data = JSON.stringify({ tasks: [{ title: "T", description: "d", assignTo: "dev" }] });
-      const plan = planExec.savePlan({ data });
-      planExec.executePlan(plan.id);
+      const mission = missionExec.saveMission({ data });
+      missionExec.executeMission(mission.id);
 
-      const task = ctx.registry.getAllTasks().find((t) => t.group === plan.name)!;
+      const task = ctx.registry.getAllTasks().find((t) => t.group === mission.name)!;
       ctx.registry.transition(task.id, "assigned");
       ctx.registry.transition(task.id, "in_progress");
       ctx.registry.transition(task.id, "review");
       ctx.registry.transition(task.id, "failed");
-      planExec.updatePlan(plan.id, { status: "failed" });
+      missionExec.updateMission(mission.id, { status: "failed" });
 
-      const result = planExec.resumePlan(plan.id, { retryFailed: false });
+      const result = missionExec.resumeMission(mission.id, { retryFailed: false });
 
       expect(result.retried).toBe(0);
       expect(ctx.registry.getTask(task.id)!.status).toBe("failed");
     });
 
-    it("emits plan:resumed event", () => {
+    it("emits mission:resumed event", () => {
       const events: any[] = [];
-      ctx.emitter.on("plan:resumed", (e) => events.push(e));
+      ctx.emitter.on("mission:resumed", (e) => events.push(e));
 
       const data = JSON.stringify({ tasks: [{ title: "T", description: "d", assignTo: "dev" }] });
-      const plan = planExec.savePlan({ data });
-      planExec.executePlan(plan.id);
-      planExec.updatePlan(plan.id, { status: "failed" });
+      const mission = missionExec.saveMission({ data });
+      missionExec.executeMission(mission.id);
+      missionExec.updateMission(mission.id, { status: "failed" });
 
-      planExec.resumePlan(plan.id);
+      missionExec.resumeMission(mission.id);
 
       expect(events).toHaveLength(1);
-      expect(events[0].planId).toBe(plan.id);
-      expect(events[0].name).toBe(plan.name);
+      expect(events[0].missionId).toBe(mission.id);
+      expect(events[0].name).toBe(mission.name);
     });
 
     it("reports pending task count", () => {
@@ -1009,11 +1009,11 @@ describe("PlanExecutor", () => {
           { title: "T2", description: "d2", assignTo: "dev" },
         ] });
 
-      const plan = planExec.savePlan({ data });
-      planExec.executePlan(plan.id);
+      const mission = missionExec.saveMission({ data });
+      missionExec.executeMission(mission.id);
 
       // Both tasks are pending
-      const result = planExec.resumePlan(plan.id);
+      const result = missionExec.resumeMission(mission.id);
 
       expect(result.pending).toBe(2);
       expect(result.retried).toBe(0);
@@ -1023,34 +1023,34 @@ describe("PlanExecutor", () => {
   // ── cleanupCompletedGroups ───────────────────────────────────────────
 
   describe("cleanupCompletedGroups", () => {
-    it("marks plan as completed when all tasks are done", () => {
+    it("marks mission as completed when all tasks are done", () => {
       const data = JSON.stringify({ tasks: [{ title: "T1", description: "d", assignTo: "dev" }] });
-      const plan = planExec.savePlan({ data });
-      planExec.executePlan(plan.id);
+      const mission = missionExec.saveMission({ data });
+      missionExec.executeMission(mission.id);
 
       // Complete the task
-      const task = ctx.registry.getAllTasks().find((t) => t.group === plan.name)!;
+      const task = ctx.registry.getAllTasks().find((t) => t.group === mission.name)!;
       ctx.registry.transition(task.id, "assigned");
       ctx.registry.transition(task.id, "in_progress");
       ctx.registry.transition(task.id, "review");
       ctx.registry.transition(task.id, "done");
 
-      planExec.cleanupCompletedGroups(ctx.registry.getAllTasks());
+      missionExec.cleanupCompletedGroups(ctx.registry.getAllTasks());
 
-      const updatedPlan = planExec.getPlan(plan.id)!;
-      expect(updatedPlan.status).toBe("completed");
+      const updatedMission = missionExec.getMission(mission.id)!;
+      expect(updatedMission.status).toBe("completed");
     });
 
-    it("marks plan as failed when some tasks failed", () => {
+    it("marks mission as failed when some tasks failed", () => {
       const data = JSON.stringify({ tasks: [
           { title: "T1", description: "d1", assignTo: "dev" },
           { title: "T2", description: "d2", assignTo: "dev" },
         ] });
 
-      const plan = planExec.savePlan({ data });
-      planExec.executePlan(plan.id);
+      const mission = missionExec.saveMission({ data });
+      missionExec.executeMission(mission.id);
 
-      const tasks = ctx.registry.getAllTasks().filter((t) => t.group === plan.name);
+      const tasks = ctx.registry.getAllTasks().filter((t) => t.group === mission.name);
 
       // One done, one failed
       ctx.registry.transition(tasks[0].id, "assigned");
@@ -1062,49 +1062,49 @@ describe("PlanExecutor", () => {
       ctx.registry.transition(tasks[1].id, "in_progress");
       ctx.registry.transition(tasks[1].id, "failed");
 
-      planExec.cleanupCompletedGroups(ctx.registry.getAllTasks());
+      missionExec.cleanupCompletedGroups(ctx.registry.getAllTasks());
 
-      const updatedPlan = planExec.getPlan(plan.id)!;
-      expect(updatedPlan.status).toBe("failed");
+      const updatedMission = missionExec.getMission(mission.id)!;
+      expect(updatedMission.status).toBe("failed");
     });
 
-    it("emits plan:completed event", () => {
+    it("emits mission:completed event", () => {
       const events: any[] = [];
-      ctx.emitter.on("plan:completed", (e) => events.push(e));
+      ctx.emitter.on("mission:completed", (e) => events.push(e));
 
       const data = JSON.stringify({ tasks: [{ title: "T1", description: "d", assignTo: "dev" }] });
-      const plan = planExec.savePlan({ data });
-      planExec.executePlan(plan.id);
+      const mission = missionExec.saveMission({ data });
+      missionExec.executeMission(mission.id);
 
-      const task = ctx.registry.getAllTasks().find((t) => t.group === plan.name)!;
+      const task = ctx.registry.getAllTasks().find((t) => t.group === mission.name)!;
       ctx.registry.transition(task.id, "assigned");
       ctx.registry.transition(task.id, "in_progress");
       ctx.registry.transition(task.id, "review");
       ctx.registry.transition(task.id, "done");
 
-      planExec.cleanupCompletedGroups(ctx.registry.getAllTasks());
+      missionExec.cleanupCompletedGroups(ctx.registry.getAllTasks());
 
       expect(events).toHaveLength(1);
-      expect(events[0].planId).toBe(plan.id);
+      expect(events[0].missionId).toBe(mission.id);
       expect(events[0].allPassed).toBe(true);
     });
 
     it("only cleans up each group once", () => {
       const data = JSON.stringify({ tasks: [{ title: "T1", description: "d", assignTo: "dev" }] });
-      const plan = planExec.savePlan({ data });
-      planExec.executePlan(plan.id);
+      const mission = missionExec.saveMission({ data });
+      missionExec.executeMission(mission.id);
 
-      const task = ctx.registry.getAllTasks().find((t) => t.group === plan.name)!;
+      const task = ctx.registry.getAllTasks().find((t) => t.group === mission.name)!;
       ctx.registry.transition(task.id, "assigned");
       ctx.registry.transition(task.id, "in_progress");
       ctx.registry.transition(task.id, "review");
       ctx.registry.transition(task.id, "done");
 
       const events: any[] = [];
-      ctx.emitter.on("plan:completed", (e) => events.push(e));
+      ctx.emitter.on("mission:completed", (e) => events.push(e));
 
-      planExec.cleanupCompletedGroups(ctx.registry.getAllTasks());
-      planExec.cleanupCompletedGroups(ctx.registry.getAllTasks());
+      missionExec.cleanupCompletedGroups(ctx.registry.getAllTasks());
+      missionExec.cleanupCompletedGroups(ctx.registry.getAllTasks());
 
       // Should only emit once
       expect(events).toHaveLength(1);

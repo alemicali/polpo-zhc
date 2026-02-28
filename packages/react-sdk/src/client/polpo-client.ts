@@ -26,6 +26,8 @@ import type {
   ChatCompletionResponse,
   ChatCompletionChunk,
   AskUserPayload,
+  MissionPreviewPayload,
+  VaultPreviewPayload,
   RunActivityEntry,
   SkillInfo,
   NotificationRecord,
@@ -34,6 +36,7 @@ import type {
   SendNotificationResult,
   ApprovalRequest,
   ApprovalStatus,
+  ScheduleEntry,
   TemplateInfo,
   TemplateDefinition,
   TemplateRunResult,
@@ -58,6 +61,12 @@ export class ChatCompletionStream implements AsyncIterable<ChatCompletionChunk> 
 
   /** If the stream ended with finish_reason "ask_user", this contains the questions. */
   askUser: AskUserPayload | null = null;
+
+  /** If the stream ended with finish_reason "mission_preview", this contains the proposed mission. */
+  missionPreview: MissionPreviewPayload | null = null;
+
+  /** If the stream ended with finish_reason "vault_preview", this contains the proposed vault entry. */
+  vaultPreview: VaultPreviewPayload | null = null;
 
   private fetchFn: typeof globalThis.fetch;
   private baseUrl: string;
@@ -139,6 +148,14 @@ export class ChatCompletionStream implements AsyncIterable<ChatCompletionChunk> 
           const choice = chunk.choices[0];
           if (choice?.finish_reason === "ask_user" && choice.ask_user) {
             this.askUser = choice.ask_user;
+          }
+          // Capture mission_preview payload from the chunk
+          if (choice?.finish_reason === "mission_preview" && choice.mission_preview) {
+            this.missionPreview = choice.mission_preview;
+          }
+          // Capture vault_preview payload from the chunk
+          if (choice?.finish_reason === "vault_preview" && choice.vault_preview) {
+            this.vaultPreview = choice.vault_preview;
           }
           yield chunk;
         } catch {
@@ -286,6 +303,12 @@ export class PolpoClient {
 
   abortMission(missionId: string): Promise<{ aborted: number }> {
     return this.post<{ aborted: number }>(`/missions/${missionId}/abort`);
+  }
+
+  // ── Schedules ─────────────────────────────────────────────
+
+  getSchedules(): Promise<ScheduleEntry[]> {
+    return this.get<ScheduleEntry[]>("/schedules");
   }
 
   // ── Agents ───────────────────────────────────────────────
@@ -489,6 +512,11 @@ export class PolpoClient {
   /** Run a template with parameters. Returns the created mission + task count. */
   runTemplate(name: string, params?: Record<string, string | number | boolean>): Promise<TemplateRunResult> {
     return this.post<TemplateRunResult>(`/templates/${encodeURIComponent(name)}/run`, { params });
+  }
+
+  /** Health check (instance method — uses configured base URL). */
+  getHealth(): Promise<HealthResponse> {
+    return this.get<HealthResponse>("/health");
   }
 
   // ── Static ───────────────────────────────────────────────

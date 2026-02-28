@@ -559,7 +559,7 @@ function TeamHeaderNode({ data }: NodeProps<Node<TeamHeaderNodeData>>) {
 function AgentNode({ data }: NodeProps<Node<AgentNodeData>>) {
   const navigate = useNavigate();
   const [popoverOpen, setPopoverOpen] = useState(false);
-  const { agent, isActive, subordinateCount, teamColorIdx, teamName } = data;
+  const { agent, isActive, subordinateCount, teamColorIdx } = data;
   const displayName = agent.identity?.displayName ?? agent.name;
   const tc = getTeamColor(teamColorIdx);
 
@@ -608,47 +608,76 @@ function AgentNode({ data }: NodeProps<Node<AgentNodeData>>) {
         <Handle type="source" position={Position.Bottom} className="!bg-primary/60 !w-2 !h-2 !border-0" />
       </div>
 
-      {/* Popover overlay */}
+      {/* Popover overlay — opens upward to avoid being covered by child nodes */}
       {popoverOpen && (
         <div
-          className="absolute left-1/2 -translate-x-1/2 top-full mt-2 z-50 w-56 rounded-xl border border-border/60 bg-popover shadow-xl p-3 space-y-2.5"
+          className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 z-50 w-64 rounded-xl border border-border/60 bg-popover shadow-xl p-3 space-y-2"
           onClick={(e) => e.stopPropagation()}
         >
-          {/* Close on click outside handled via onBlur on the card itself — or a backdrop */}
           <div className="fixed inset-0 z-[-1]" onClick={() => setPopoverOpen(false)} />
 
-          <div className="flex items-center gap-2">
-            <div className={cn("flex h-8 w-8 shrink-0 items-center justify-center rounded-lg", tc.bg)}>
-              <Bot className={cn("h-4 w-4", tc.text)} />
-            </div>
-            <div className="min-w-0">
-              <p className="text-sm font-semibold truncate">{displayName}</p>
-              <p className="text-[10px] font-mono text-muted-foreground truncate">@{agent.name}</p>
-            </div>
-          </div>
-
-          {(agent.identity?.title || agent.role) && (
-            <p className="text-[11px] text-muted-foreground line-clamp-3">{agent.identity?.title ?? agent.role}</p>
+          {/* Bio — only if present */}
+          {agent.identity?.bio && (
+            <p className="text-[11px] text-muted-foreground leading-snug line-clamp-3">
+              {agent.identity.bio}
+            </p>
           )}
 
-          <div className="flex items-center gap-1.5 flex-wrap text-[10px] text-muted-foreground">
-            <span className="flex items-center gap-1"><Users className="h-2.5 w-2.5" />{teamName}</span>
-            {agent.model && <span className="font-mono">&middot; {agent.model}</span>}
-            {capabilityCount > 0 && <span>&middot; {capabilityCount} cap.</span>}
-          </div>
+          {/* Capabilities breakdown */}
+          {capabilityCount > 0 && (
+            <div className="space-y-1">
+              <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Capabilities</p>
+              <div className="flex flex-wrap gap-1">
+                {(agent.allowedTools?.length ?? 0) > 0 && (
+                  <Badge variant="secondary" className="text-[9px] px-1.5 py-0">
+                    <Wrench className="h-2 w-2 mr-0.5" />
+                    {agent.allowedTools!.length} tool{agent.allowedTools!.length !== 1 ? "s" : ""}
+                  </Badge>
+                )}
+                {(agent.skills?.length ?? 0) > 0 && (
+                  <Badge variant="secondary" className="text-[9px] px-1.5 py-0">
+                    <Sparkles className="h-2 w-2 mr-0.5" />
+                    {agent.skills!.length} skill{agent.skills!.length !== 1 ? "s" : ""}
+                  </Badge>
+                )}
+                {agent.mcpServers && Object.keys(agent.mcpServers).length > 0 && (
+                  <Badge variant="secondary" className="text-[9px] px-1.5 py-0">
+                    {Object.keys(agent.mcpServers).length} MCP
+                  </Badge>
+                )}
+              </div>
+            </div>
+          )}
 
+          {/* Reports to */}
+          {agent.reportsTo && (
+            <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+              <GitBranchPlus className="h-2.5 w-2.5 shrink-0" />
+              <span>Reports to <span className="font-mono text-foreground/70">{agent.reportsTo}</span></span>
+            </div>
+          )}
+
+          {/* Subordinates count */}
+          {subordinateCount > 0 && (
+            <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+              <Users className="h-2.5 w-2.5 shrink-0" />
+              <span>{subordinateCount} direct report{subordinateCount !== 1 ? "s" : ""}</span>
+            </div>
+          )}
+
+          {/* Live activity */}
           {isActive && (
             <div className="flex items-center gap-1.5 text-[10px]">
-              <div className={cn("h-2 w-2 rounded-full animate-pulse", tc.dot)} />
-              <span className={tc.text}>Working</span>
+              <div className={cn("h-2 w-2 rounded-full animate-pulse shrink-0", tc.dot)} />
+              <span className={tc.text}>Currently active</span>
             </div>
           )}
 
           <div className="flex items-center gap-2 pt-1 border-t border-border/30">
             <Button
-              variant="default"
+              variant="ghost"
               size="sm"
-              className="flex-1 h-7 text-xs"
+              className={cn("flex-1 h-7 text-xs font-medium", tc.bg, tc.text)}
               onClick={() => navigate(`/agents/${encodeURIComponent(agent.name)}`)}
             >
               View details

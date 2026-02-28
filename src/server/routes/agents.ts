@@ -61,7 +61,6 @@ export function agentRoutes(): OpenAPIHono<ServerEnv> {
       skills: body.skills,
       maxTurns: body.maxTurns,
       identity: body.identity,
-      vault: body.vault as any,
       reportsTo: body.reportsTo,
       enableBrowser: body.enableBrowser,
       browserEngine: body.browserEngine,

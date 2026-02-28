@@ -192,18 +192,10 @@ export interface AgentIdentity {
   personality?: string;
 }
 
-/** Vault credential entry */
-export interface VaultEntry {
-  /** Service type for semantic meaning */
-  type: "smtp" | "imap" | "oauth" | "api_key" | "login" | "custom";
-  /** Human-readable label */
-  label?: string;
-  /** Credential fields — values can be literals or ${ENV_VAR} references */
-  credentials: Record<string, string>;
-}
-
 export interface AgentConfig {
   name: string;
+  /** ISO timestamp of when this agent was created / added to the team. */
+  createdAt?: string;
   role?: string;
   model?: string;
   allowedTools?: string[];
@@ -214,8 +206,7 @@ export interface AgentConfig {
   allowedPaths?: string[];
   /** Agent's identity — persona, responsibilities, communication style */
   identity?: AgentIdentity;
-  /** Per-agent credential vault — keyed by service name */
-  vault?: Record<string, VaultEntry>;
+  // NOTE: Vault credentials are stored in encrypted .polpo/vault.enc — not on AgentConfig.
   /** Agent this one reports to — org chart hierarchy for escalation */
   reportsTo?: string;
   systemPrompt?: string;
@@ -223,6 +214,8 @@ export interface AgentConfig {
   maxTurns?: number;
   /** Max concurrent tasks for this agent. Default: unlimited. */
   maxConcurrency?: number;
+  /** Reasoning / deep thinking level for this agent's LLM calls. */
+  reasoning?: ReasoningLevel;
   volatile?: boolean;
   missionGroup?: string;
 
@@ -519,6 +512,43 @@ export interface TemplateRunResult {
 
 // === Config ===
 
+/** Reasoning level for LLM calls. */
+export type ReasoningLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+
+/** Primary model with ordered fallbacks. */
+export interface ModelConfig {
+  /** Primary model spec (e.g. "anthropic:claude-opus-4-6"). */
+  primary?: string;
+  /** Ordered fallback models — tried when primary fails. */
+  fallbacks?: string[];
+}
+
+/** Model allowlist entry with optional alias and parameter overrides. */
+export interface ModelAllowlistEntry {
+  /** Display alias for this model (e.g. "Sonnet", "GPT"). */
+  alias?: string;
+  /** Per-model parameter overrides. */
+  params?: Record<string, unknown>;
+}
+
+/** Custom model definition for non-catalog providers (Ollama, vLLM, LM Studio, etc.) */
+export interface CustomModelDef {
+  /** Model ID used in API calls. */
+  id: string;
+  /** Human-readable name. */
+  name: string;
+  /** Whether the model supports extended thinking / reasoning. */
+  reasoning?: boolean;
+  /** Supported input types. Default: ["text"] */
+  input?: ("text" | "image")[];
+  /** Cost per million tokens. Default: all zeros (free/local). */
+  cost?: { input: number; output: number; cacheRead: number; cacheWrite: number };
+  /** Context window size in tokens. Default: 200000 */
+  contextWindow?: number;
+  /** Max output tokens. Default: 8192 */
+  maxTokens?: number;
+}
+
 export interface PolpoSettings {
   maxRetries: number;
   workDir: string;
@@ -532,9 +562,12 @@ export interface PolpoSettings {
   maxQuestionRounds?: number;
   maxResolutionAttempts?: number;
   autoCorrectExpectations?: boolean;
-  orchestratorModel?: string;
+  /** Model for orchestrator LLM calls. Can be a string or a ModelConfig with fallbacks. */
+  orchestratorModel?: string | ModelConfig;
   imageModel?: string;
-  modelAllowlist?: Record<string, { alias?: string; maxTokens?: number }>;
+  modelAllowlist?: Record<string, ModelAllowlistEntry>;
+  /** Global reasoning / deep thinking level. */
+  reasoning?: ReasoningLevel;
   storage?: "file" | "sqlite";
   maxAssessmentRetries?: number;
   maxConcurrency?: number;
@@ -551,6 +584,10 @@ export interface PolpoSettings {
 export interface ProviderConfig {
   apiKey?: string;
   baseUrl?: string;
+  /** API compatibility mode for custom endpoints. */
+  api?: "openai-completions" | "openai-responses" | "anthropic-messages";
+  /** Custom model definitions for this provider. */
+  models?: CustomModelDef[];
 }
 
 export interface PolpoConfig {
@@ -654,8 +691,7 @@ export interface AddAgentRequest {
   allowedPaths?: string[];
   /** Agent identity (display name, bio, avatar). */
   identity?: AgentIdentity;
-  /** Vault credentials. */
-  vault?: Record<string, VaultEntry>;
+  // NOTE: Vault credentials managed via encrypted store, not in API body.
   /** Org chart: who this agent reports to. */
   reportsTo?: string;
   /** Allowed email recipient domains (overrides global setting). */
@@ -797,9 +833,27 @@ export interface ChatMessage {
 
 // === Chat Completions types (OpenAI-compatible) ===
 
+/** A text content part. */
+export interface TextContentPart {
+  type: "text";
+  text: string;
+}
+
+/** An image content part (data URL or HTTPS URL). */
+export interface ImageUrlContentPart {
+  type: "image_url";
+  image_url: {
+    url: string;
+    detail?: "auto" | "low" | "high";
+  };
+}
+
+export type ContentPart = TextContentPart | ImageUrlContentPart;
+
 export interface ChatCompletionMessage {
   role: "system" | "user" | "assistant";
-  content: string;
+  /** Plain string or multimodal content parts (text + images). */
+  content: string | ContentPart[];
 }
 
 export interface ChatCompletionRequest {
@@ -816,9 +870,13 @@ export interface ChatCompletionRequest {
 export interface ChatCompletionChoice {
   index: number;
   message: { role: "assistant"; content: string };
-  finish_reason: "stop" | "length" | "ask_user";
+  finish_reason: "stop" | "length" | "ask_user" | "mission_preview" | "vault_preview";
   /** Present when finish_reason is "ask_user" — structured questions for the user. */
   ask_user?: AskUserPayload;
+  /** Present when finish_reason is "mission_preview" — proposed mission for user review. */
+  mission_preview?: MissionPreviewPayload;
+  /** Present when finish_reason is "vault_preview" — proposed vault entry for user review. */
+  vault_preview?: VaultPreviewPayload;
 }
 
 export interface ChatCompletionResponse {
@@ -841,7 +899,7 @@ export interface ChatCompletionChunkDelta {
 
 // === Tool Call streaming ===
 
-export type ToolCallState = "calling" | "completed" | "error";
+export type ToolCallState = "calling" | "completed" | "error" | "interrupted";
 
 export interface ToolCallEvent {
   /** Tool call ID from the LLM */
@@ -867,6 +925,10 @@ export interface ChatCompletionChunk {
     finish_reason: string | null;
     /** Present when finish_reason is "ask_user" — structured questions for the user. */
     ask_user?: AskUserPayload;
+    /** Present when finish_reason is "mission_preview" — proposed mission for user review. */
+    mission_preview?: MissionPreviewPayload;
+    /** Present when finish_reason is "vault_preview" — proposed vault entry for user review. */
+    vault_preview?: VaultPreviewPayload;
     /** Present when the server is executing a tool call. */
     tool_call?: ToolCallEvent;
   }>;
@@ -904,4 +966,30 @@ export interface AskUserAnswer {
   selected: string[];
   /** Custom text typed by user */
   customText?: string;
+}
+
+// === Mission Preview (interactive review before creation) ===
+
+export interface MissionPreviewPayload {
+  /** Proposed mission name */
+  name: string;
+  /** Parsed mission document (tasks, qualityGates, etc.) */
+  data: unknown;
+  /** Original user prompt that generated this mission */
+  prompt?: string;
+}
+
+// === Vault Preview (interactive credential review before saving) ===
+
+export interface VaultPreviewPayload {
+  /** Agent name */
+  agent: string;
+  /** Service name (vault key, e.g. "gmail", "stripe") */
+  service: string;
+  /** Credential type */
+  type: "smtp" | "imap" | "oauth" | "api_key" | "login" | "custom";
+  /** Human-readable label */
+  label?: string;
+  /** Credential key-value pairs — user can edit before confirming */
+  credentials: Record<string, string>;
 }

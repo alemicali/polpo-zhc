@@ -47,7 +47,6 @@ Each agent supports these fields:
 | `role` | `string` | — | What this agent does (included in its system prompt) |
 | `model` | `string` | — | `"provider:model"` format. See [Providers](/models/overview) |
 | `identity` | `AgentIdentity` | — | Persona: name, title, responsibilities, tone, personality. See [Identity](#agent-identity-and-persona) |
-| `vault` | `Record<string, VaultEntry>` | — | Per-agent credentials (SMTP, IMAP, OAuth, API keys). See [Vault](#per-agent-credentials-vault) |
 | `reportsTo` | `string` | — | Org chart parent — automatic escalation on failure. See [Org chart](#org-chart-reportsto) |
 | `allowedTools` | `string[]` | all tools | Restrict which coding tools the agent can use |
 | `allowedPaths` | `string[]` | project root | Filesystem sandbox — agent can only access these paths |
@@ -268,7 +267,7 @@ The wizard runs through 5 steps:
 
 </Steps>
 
-The wizard saves everything to `.polpo/polpo.json`. Run it again anytime to update an agent's configuration.
+The wizard saves agent config to `.polpo/polpo.json` and vault entries to `.polpo/vault.enc` (AES-256-GCM encrypted). Run it again anytime to update an agent's configuration.
 
 ### Verify the result
 
@@ -301,29 +300,16 @@ When alice's task fails and the retry policy has no explicit `fallbackAgent`, Po
 
 ## Per-agent credentials (vault)
 
-Each agent can have its own credentials for email, APIs, logins, etc. Secrets use `${ENV_VAR}` references:
+Each agent can have its own credentials for email, APIs, logins, etc. Vault entries are stored in `.polpo/vault.enc` (AES-256-GCM encrypted), **not** in `polpo.json`.
 
-```json
-{
-  "name": "alice",
-  "vault": {
-    "email": {
-      "type": "smtp",
-      "label": "Work email",
-      "credentials": {
-        "host": "smtp.gmail.com",
-        "port": "587",
-        "user": "${ALICE_SMTP_USER}",
-        "pass": "${ALICE_SMTP_PASS}",
-        "from": "alice@acme.com"
-      }
-    }
-  },
-  "enableEmail": true
-}
-```
+Manage vault entries via:
 
-See [Configuration](/reference/config#vaultentry-fields) for all vault entry types.
+- **CLI**: `polpo agent onboard <name>` — the Email and Vault steps write to the encrypted store
+- **TUI / Chat**: Use the built-in tools — `set_vault_entry`, `remove_vault_entry`, `list_vault`
+
+Credential values support `${ENV_VAR}` references — Polpo resolves them at runtime from environment variables.
+
+See [Configuration — Encrypted Vault](/reference/config#encrypted-vault) for vault entry fields, key management, and supported credential types.
 
 ## Next steps
 

@@ -222,6 +222,8 @@ export interface VaultEntry {
 
 export interface AgentConfig {
   name: string;
+  /** ISO timestamp of when this agent was created / added to the team. Auto-set by addAgent(). */
+  createdAt?: string;
   role?: string;
   /** Model to use. Format: "provider:model" (e.g. "anthropic:claude-sonnet-4-5-20250929") or bare model ID (auto-inferred). */
   model?: string;
@@ -235,8 +237,8 @@ export interface AgentConfig {
   mcpServers?: Record<string, McpServerConfig>;
   /** Agent's identity — persona, responsibilities, communication style */
   identity?: AgentIdentity;
-  /** Per-agent credential vault — keyed by service name */
-  vault?: Record<string, VaultEntry>;
+  // NOTE: Vault credentials are stored in .polpo/vault.enc (encrypted).
+  // Use EncryptedVaultStore to manage credentials — NOT inline on the agent config.
   /** Agent this one reports to — org chart hierarchy for escalation.
    *  When a task fails or needs a decision, escalates up the chain. */
   reportsTo?: string;

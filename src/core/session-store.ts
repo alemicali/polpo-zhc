@@ -5,7 +5,7 @@
 
 export type MessageRole = "user" | "assistant";
 
-export type ToolCallState = "calling" | "completed" | "error";
+export type ToolCallState = "calling" | "completed" | "error" | "interrupted";
 
 export interface ToolCallInfo {
   /** Tool call ID from the LLM */

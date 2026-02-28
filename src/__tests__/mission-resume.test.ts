@@ -5,9 +5,9 @@ import { Orchestrator } from "../core/orchestrator.js";
 import { SqliteTaskStore } from "../stores/sqlite-task-store.js";
 import { InMemoryRunStore, createTestAgent } from "./fixtures.js";
 
-const TEST_DIR = join(process.cwd(), ".test-polpo-plan-resume");
+const TEST_DIR = join(process.cwd(), ".test-polpo-mission-resume");
 
-describe("Plan resume (Orchestrator)", () => {
+describe("Mission resume (Orchestrator)", () => {
   let store: SqliteTaskStore;
   let runStore: InMemoryRunStore;
   let orchestrator: Orchestrator;
@@ -43,87 +43,87 @@ describe("Plan resume (Orchestrator)", () => {
     if (existsSync(TEST_DIR)) rmSync(TEST_DIR, { recursive: true });
   });
 
-  describe("getResumablePlans", () => {
-    it("returns empty array when no plans exist", () => {
-      expect(orchestrator.getResumablePlans()).toEqual([]);
+  describe("getResumableMissions", () => {
+    it("returns empty array when no missions exist", () => {
+      expect(orchestrator.getResumableMissions()).toEqual([]);
     });
 
-    it("returns empty array for draft plans", () => {
-      orchestrator.savePlan({ data: JSON.stringify({ tasks: [{ title: "T1", assignTo: "dev" }] }), status: "draft" });
-      expect(orchestrator.getResumablePlans()).toEqual([]);
+    it("returns empty array for draft missions", () => {
+      orchestrator.saveMission({ data: JSON.stringify({ tasks: [{ title: "T1", assignTo: "dev" }] }), status: "draft" });
+      expect(orchestrator.getResumableMissions()).toEqual([]);
     });
 
-    it("returns empty array for completed plans", () => {
-      const plan = orchestrator.savePlan({ data: JSON.stringify({ tasks: [{ title: "T1", assignTo: "dev" }] }), status: "draft" });
-      orchestrator.updatePlan(plan.id, { status: "completed" });
-      expect(orchestrator.getResumablePlans()).toEqual([]);
+    it("returns empty array for completed missions", () => {
+      const mission = orchestrator.saveMission({ data: JSON.stringify({ tasks: [{ title: "T1", assignTo: "dev" }] }), status: "draft" });
+      orchestrator.updateMission(mission.id, { status: "completed" });
+      expect(orchestrator.getResumableMissions()).toEqual([]);
     });
 
-    it("returns active plan with pending tasks", () => {
+    it("returns active mission with pending tasks", () => {
       const data = JSON.stringify({ tasks: [{ title: "Task1", description: "Do something", assignTo: "dev" }] });
-      const plan = orchestrator.savePlan({ data });
-      orchestrator.executePlan(plan.id);
+      const mission = orchestrator.saveMission({ data });
+      orchestrator.executeMission(mission.id);
 
-      const resumable = orchestrator.getResumablePlans();
-      // After execution, tasks start as pending — plan is resumable
+      const resumable = orchestrator.getResumableMissions();
+      // After execution, tasks start as pending — mission is resumable
       expect(resumable.length).toBe(1);
-      expect(resumable[0].id).toBe(plan.id);
+      expect(resumable[0].id).toBe(mission.id);
     });
 
-    it("returns failed plan with failed tasks", () => {
+    it("returns failed mission with failed tasks", () => {
       const data = JSON.stringify({ tasks: [{ title: "FailTask", description: "Will fail", assignTo: "dev" }] });
-      const plan = orchestrator.savePlan({ data });
-      orchestrator.executePlan(plan.id);
+      const mission = orchestrator.saveMission({ data });
+      orchestrator.executeMission(mission.id);
 
       // Manually fail the task
       const state = store.getState();
-      const task = state.tasks.find(t => t.group === plan.name);
+      const task = state.tasks.find(t => t.group === mission.name);
       expect(task).toBeDefined();
       store.transition(task!.id, "assigned");
       store.transition(task!.id, "in_progress");
       store.transition(task!.id, "review");
       store.transition(task!.id, "failed");
-      orchestrator.updatePlan(plan.id, { status: "failed" });
+      orchestrator.updateMission(mission.id, { status: "failed" });
 
-      const resumable = orchestrator.getResumablePlans();
+      const resumable = orchestrator.getResumableMissions();
       expect(resumable.length).toBe(1);
-      expect(resumable[0].name).toBe(plan.name);
+      expect(resumable[0].name).toBe(mission.name);
     });
 
-    it("excludes cancelled plans", () => {
+    it("excludes cancelled missions", () => {
       const data = JSON.stringify({ tasks: [{ title: "T", description: "d", assignTo: "dev" }] });
-      const plan = orchestrator.savePlan({ data });
-      orchestrator.executePlan(plan.id);
-      orchestrator.updatePlan(plan.id, { status: "cancelled" });
+      const mission = orchestrator.saveMission({ data });
+      orchestrator.executeMission(mission.id);
+      orchestrator.updateMission(mission.id, { status: "cancelled" });
 
-      expect(orchestrator.getResumablePlans()).toEqual([]);
+      expect(orchestrator.getResumableMissions()).toEqual([]);
     });
   });
 
-  describe("resumePlan", () => {
-    it("throws for non-existent plan", () => {
-      expect(() => orchestrator.resumePlan("nonexistent")).toThrow("Plan not found");
+  describe("resumeMission", () => {
+    it("throws for non-existent mission", () => {
+      expect(() => orchestrator.resumeMission("nonexistent")).toThrow("Mission not found");
     });
 
-    it("resumes a failed plan and retries failed tasks", () => {
+    it("resumes a failed mission and retries failed tasks", () => {
       const data = JSON.stringify({ tasks: [{ title: "ResumableTask", description: "Will be resumed", assignTo: "dev" }] });
-      const plan = orchestrator.savePlan({ data });
-      orchestrator.executePlan(plan.id);
+      const mission = orchestrator.saveMission({ data });
+      orchestrator.executeMission(mission.id);
 
       // Fail the task
       const state = store.getState();
-      const task = state.tasks.find(t => t.group === plan.name)!;
+      const task = state.tasks.find(t => t.group === mission.name)!;
       store.transition(task.id, "assigned");
       store.transition(task.id, "in_progress");
       store.transition(task.id, "review");
       store.transition(task.id, "failed");
-      orchestrator.updatePlan(plan.id, { status: "failed" });
+      orchestrator.updateMission(mission.id, { status: "failed" });
 
-      const result = orchestrator.resumePlan(plan.id, { retryFailed: true });
+      const result = orchestrator.resumeMission(mission.id, { retryFailed: true });
       expect(result.retried).toBe(1);
 
-      // Plan should be back to active
-      const updated = orchestrator.getPlan(plan.id);
+      // Mission should be back to active
+      const updated = orchestrator.getMission(mission.id);
       expect(updated?.status).toBe("active");
 
       // Task should be back to pending
@@ -133,18 +133,18 @@ describe("Plan resume (Orchestrator)", () => {
 
     it("resumes without retrying when retryFailed is false", () => {
       const data = JSON.stringify({ tasks: [{ title: "NoRetryTask", description: "d", assignTo: "dev" }] });
-      const plan = orchestrator.savePlan({ data });
-      orchestrator.executePlan(plan.id);
+      const mission = orchestrator.saveMission({ data });
+      orchestrator.executeMission(mission.id);
 
       const state = store.getState();
-      const task = state.tasks.find(t => t.group === plan.name)!;
+      const task = state.tasks.find(t => t.group === mission.name)!;
       store.transition(task.id, "assigned");
       store.transition(task.id, "in_progress");
       store.transition(task.id, "review");
       store.transition(task.id, "failed");
-      orchestrator.updatePlan(plan.id, { status: "failed" });
+      orchestrator.updateMission(mission.id, { status: "failed" });
 
-      const result = orchestrator.resumePlan(plan.id, { retryFailed: false });
+      const result = orchestrator.resumeMission(mission.id, { retryFailed: false });
       expect(result.retried).toBe(0);
 
       // Task stays failed
@@ -152,25 +152,25 @@ describe("Plan resume (Orchestrator)", () => {
       expect(taskAfter?.status).toBe("failed");
     });
 
-    it("emits plan:resumed event", () => {
+    it("emits mission:resumed event", () => {
       const data = JSON.stringify({ tasks: [{ title: "EventTask", description: "d", assignTo: "dev" }] });
-      const plan = orchestrator.savePlan({ data });
-      orchestrator.executePlan(plan.id);
-      orchestrator.updatePlan(plan.id, { status: "failed" });
+      const mission = orchestrator.saveMission({ data });
+      orchestrator.executeMission(mission.id);
+      orchestrator.updateMission(mission.id, { status: "failed" });
 
       // Fail the task
-      const task = store.getState().tasks.find(t => t.group === plan.name)!;
+      const task = store.getState().tasks.find(t => t.group === mission.name)!;
       store.transition(task.id, "assigned");
       store.transition(task.id, "in_progress");
       store.transition(task.id, "review");
       store.transition(task.id, "failed");
 
       let event: any;
-      orchestrator.on("plan:resumed", (e) => { event = e; });
+      orchestrator.on("mission:resumed", (e) => { event = e; });
 
-      orchestrator.resumePlan(plan.id, { retryFailed: true });
+      orchestrator.resumeMission(mission.id, { retryFailed: true });
       expect(event).toBeDefined();
-      expect(event.planId).toBe(plan.id);
+      expect(event.missionId).toBe(mission.id);
       expect(event.retried).toBe(1);
     });
   });

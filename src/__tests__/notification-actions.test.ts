@@ -96,14 +96,14 @@ describe("NotificationRouter — action triggers", () => {
     router.addRule({
       id: "multi-action",
       name: "Multi Action",
-      events: ["plan:completed"],
+      events: ["mission:completed"],
       channels: [],
       actions: [action1, action2],
     });
     router.start();
 
-    emitter.emit("plan:completed", {
-      planId: "p1",
+    emitter.emit("mission:completed", {
+      missionId: "p1",
       group: "g1",
       allPassed: true,
       report: {} as any,

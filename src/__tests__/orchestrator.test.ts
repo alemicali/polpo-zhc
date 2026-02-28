@@ -241,16 +241,16 @@ describe("Orchestrator", () => {
 
   describe("volatile agents", () => {
     it("addVolatileAgent marks agent as volatile", () => {
-      orchestrator.addVolatileAgent(createTestAgent({ name: "vol-1" }), "plan-1");
+      orchestrator.addVolatileAgent(createTestAgent({ name: "vol-1" }), "mission-1");
       const agent = orchestrator.getAgents().find(a => a.name === "vol-1");
       expect(agent?.volatile).toBe(true);
-      expect(agent?.planGroup).toBe("plan-1");
+      expect(agent?.missionGroup).toBe("mission-1");
     });
 
     it("cleanupVolatileAgents removes agents for group", () => {
-      orchestrator.addVolatileAgent(createTestAgent({ name: "vol-1" }), "plan-1");
-      orchestrator.addVolatileAgent(createTestAgent({ name: "vol-2" }), "plan-1");
-      const removed = orchestrator.cleanupVolatileAgents("plan-1");
+      orchestrator.addVolatileAgent(createTestAgent({ name: "vol-1" }), "mission-1");
+      orchestrator.addVolatileAgent(createTestAgent({ name: "vol-2" }), "mission-1");
+      const removed = orchestrator.cleanupVolatileAgents("mission-1");
       expect(removed).toBe(2);
       expect(orchestrator.getAgents().find(a => a.name === "vol-1")).toBeUndefined();
     });

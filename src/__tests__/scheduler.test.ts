@@ -5,7 +5,7 @@ import { HookRegistry } from "../core/hooks.js";
 import { TypedEmitter } from "../core/events.js";
 import { InMemoryTaskStore, InMemoryRunStore } from "./fixtures.js";
 import type { OrchestratorContext } from "../core/orchestrator-context.js";
-import type { PolpoConfig, Plan } from "../core/types.js";
+import type { PolpoConfig, Mission } from "../core/types.js";
 
 // ── Helpers ──────────────────────────────────────────
 
@@ -19,14 +19,14 @@ function createMinimalConfig(): PolpoConfig {
   };
 }
 
-/** InMemoryTaskStore with plan support */
-class PlanAwareStore extends InMemoryTaskStore {
-  private plans = new Map<string, Plan>();
-  private planCounter = 0;
+/** InMemoryTaskStore with mission support */
+class MissionAwareStore extends InMemoryTaskStore {
+  private missions = new Map<string, Mission>();
+  private missionCounter = 0;
 
-  savePlan(opts: { name: string; data: string; prompt?: string; status: string }): Plan {
-    const plan: Plan = {
-      id: `plan-${++this.planCounter}`,
+  saveMission(opts: { name: string; data: string; prompt?: string; status: string }): Mission {
+    const mission: Mission = {
+      id: `mission-${++this.missionCounter}`,
       name: opts.name,
       data: opts.data,
       prompt: opts.prompt,
@@ -34,38 +34,38 @@ class PlanAwareStore extends InMemoryTaskStore {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
-    this.plans.set(plan.id, plan);
-    return plan;
+    this.missions.set(mission.id, mission);
+    return mission;
   }
 
-  getPlan(planId: string): Plan | undefined {
-    return this.plans.get(planId);
+  getMission(missionId: string): Mission | undefined {
+    return this.missions.get(missionId);
   }
 
-  getPlanByName(name: string): Plan | undefined {
-    return [...this.plans.values()].find(p => p.name === name);
+  getMissionByName(name: string): Mission | undefined {
+    return [...this.missions.values()].find(p => p.name === name);
   }
 
-  getAllPlans(): Plan[] {
-    return [...this.plans.values()];
+  getAllMissions(): Mission[] {
+    return [...this.missions.values()];
   }
 
-  updatePlan(planId: string, updates: Partial<Plan>): Plan {
-    const plan = this.plans.get(planId);
-    if (!plan) throw new Error("Plan not found");
-    Object.assign(plan, updates, { updatedAt: new Date().toISOString() });
-    return plan;
+  updateMission(missionId: string, updates: Partial<Mission>): Mission {
+    const mission = this.missions.get(missionId);
+    if (!mission) throw new Error("Mission not found");
+    Object.assign(mission, updates, { updatedAt: new Date().toISOString() });
+    return mission;
   }
 
-  deletePlan(planId: string): boolean {
-    return this.plans.delete(planId);
+  deleteMission(missionId: string): boolean {
+    return this.missions.delete(missionId);
   }
 }
 
-function createMockCtx(store?: PlanAwareStore): OrchestratorContext {
+function createMockCtx(store?: MissionAwareStore): OrchestratorContext {
   return {
     emitter: new TypedEmitter(),
-    registry: store ?? new PlanAwareStore(),
+    registry: store ?? new MissionAwareStore(),
     runStore: new InMemoryRunStore(),
     memoryStore: { exists: () => false, get: () => "", save: () => {}, append: () => {} },
     logStore: { startSession: () => "s", getSessionId: () => "s", append: () => {}, getSessionEntries: () => [], listSessions: () => [], prune: () => 0, close: () => {} },
@@ -194,96 +194,96 @@ describe("Cron Parser", () => {
 
 describe("Scheduler", () => {
   let ctx: OrchestratorContext;
-  let store: PlanAwareStore;
+  let store: MissionAwareStore;
   let scheduler: Scheduler;
-  let executePlanFn: ReturnType<typeof vi.fn>;
+  let executeMissionFn: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
-    store = new PlanAwareStore();
+    store = new MissionAwareStore();
     ctx = createMockCtx(store);
     scheduler = new Scheduler(ctx, { checkIntervalMs: 0 }); // no throttle in tests
-    executePlanFn = vi.fn();
-    scheduler.setExecutor(executePlanFn);
+    executeMissionFn = vi.fn();
+    scheduler.setExecutor(executeMissionFn);
   });
 
   afterEach(() => {
     scheduler.dispose();
   });
 
-  it("registers a plan with a cron schedule", () => {
-    const plan = store.savePlan({
-      name: "cron-plan",
+  it("registers a mission with a cron schedule", () => {
+    const mission = store.saveMission({
+      name: "cron-mission",
       data: JSON.stringify({ tasks: [{ title: "A", description: "A" }] }),
       status: "draft",
     });
-    Object.assign(plan, { schedule: "0 2 * * *" });
+    Object.assign(mission, { schedule: "0 2 * * *" });
 
-    const entry = scheduler.registerPlan(plan);
+    const entry = scheduler.registerMission(mission);
     expect(entry).not.toBeNull();
     expect(entry!.recurring).toBe(false);
     expect(entry!.nextRunAt).toBeDefined();
   });
 
-  it("registers a plan with an ISO timestamp schedule", () => {
+  it("registers a mission with an ISO timestamp schedule", () => {
     const futureDate = new Date(Date.now() + 60_000).toISOString();
-    const plan = store.savePlan({
-      name: "oneshot-plan",
+    const mission = store.saveMission({
+      name: "oneshot-mission",
       data: JSON.stringify({ tasks: [{ title: "A", description: "A" }] }),
       status: "draft",
     });
-    Object.assign(plan, { schedule: futureDate });
+    Object.assign(mission, { schedule: futureDate });
 
-    const entry = scheduler.registerPlan(plan);
+    const entry = scheduler.registerMission(mission);
     expect(entry).not.toBeNull();
     expect(entry!.nextRunAt).toBe(futureDate);
   });
 
-  it("skips past ISO timestamps for non-recurring plans", () => {
+  it("skips past ISO timestamps for non-recurring missions", () => {
     const pastDate = new Date(Date.now() - 60_000).toISOString();
-    const plan = store.savePlan({
-      name: "past-plan",
+    const mission = store.saveMission({
+      name: "past-mission",
       data: JSON.stringify({ tasks: [{ title: "A", description: "A" }] }),
       status: "draft",
     });
-    Object.assign(plan, { schedule: pastDate });
+    Object.assign(mission, { schedule: pastDate });
 
-    const entry = scheduler.registerPlan(plan);
+    const entry = scheduler.registerMission(mission);
     expect(entry).toBeNull();
   });
 
-  it("triggers plan execution when schedule is due", () => {
-    const plan = store.savePlan({
-      name: "due-plan",
+  it("triggers mission execution when schedule is due", () => {
+    const mission = store.saveMission({
+      name: "due-mission",
       data: JSON.stringify({ tasks: [{ title: "A", description: "A" }] }),
       status: "draft",
     });
 
     // Set nextRunAt to the past
-    const entry = scheduler.registerPlan({
-      ...plan,
+    const entry = scheduler.registerMission({
+      ...mission,
       schedule: "0 0 * * *",
-    } as Plan);
+    } as Mission);
     if (entry) {
       entry.nextRunAt = new Date(Date.now() - 1000).toISOString();
     }
 
     scheduler.check();
 
-    expect(executePlanFn).toHaveBeenCalledWith(plan.id);
+    expect(executeMissionFn).toHaveBeenCalledWith(mission.id);
   });
 
   it("disables one-shot schedules after execution", () => {
-    const plan = store.savePlan({
+    const mission = store.saveMission({
       name: "oneshot",
       data: JSON.stringify({ tasks: [{ title: "A", description: "A" }] }),
       status: "draft",
     });
 
     const futureDate = new Date(Date.now() + 60_000).toISOString();
-    const entry = scheduler.registerPlan({
-      ...plan,
+    const entry = scheduler.registerMission({
+      ...mission,
       schedule: futureDate,
-    } as Plan);
+    } as Mission);
     expect(entry).not.toBeNull();
 
     // Force the schedule to be due
@@ -294,17 +294,17 @@ describe("Scheduler", () => {
   });
 
   it("keeps recurring schedules active after execution", () => {
-    const plan = store.savePlan({
+    const mission = store.saveMission({
       name: "recurring",
       data: JSON.stringify({ tasks: [{ title: "A", description: "A" }] }),
       status: "draft",
     });
 
-    const entry = scheduler.registerPlan({
-      ...plan,
+    const entry = scheduler.registerMission({
+      ...mission,
       schedule: "0 2 * * *",
       recurring: true,
-    } as Plan);
+    } as Mission);
     expect(entry).not.toBeNull();
 
     // Force due
@@ -319,44 +319,44 @@ describe("Scheduler", () => {
   it("emits schedule:triggered and schedule:completed events", () => {
     const emitSpy = vi.spyOn(ctx.emitter, "emit");
 
-    const plan = store.savePlan({
-      name: "event-plan",
+    const mission = store.saveMission({
+      name: "event-mission",
       data: JSON.stringify({ tasks: [{ title: "A", description: "A" }] }),
       status: "draft",
     });
 
-    const entry = scheduler.registerPlan({
-      ...plan,
+    const entry = scheduler.registerMission({
+      ...mission,
       schedule: "0 0 * * *",
-    } as Plan);
+    } as Mission);
     entry!.nextRunAt = new Date(Date.now() - 1000).toISOString();
 
     scheduler.check();
 
     expect(emitSpy).toHaveBeenCalledWith("schedule:triggered", expect.objectContaining({
-      planId: plan.id,
+      missionId: mission.id,
     }));
     expect(emitSpy).toHaveBeenCalledWith("schedule:completed", expect.objectContaining({
-      planId: plan.id,
+      missionId: mission.id,
     }));
   });
 
-  it("skips plans that are not in draft/completed state", () => {
-    const plan = store.savePlan({
-      name: "active-plan",
+  it("skips missions that are not in draft/completed state", () => {
+    const mission = store.saveMission({
+      name: "active-mission",
       data: JSON.stringify({ tasks: [{ title: "A", description: "A" }] }),
       status: "active",
     });
 
-    const entry = scheduler.registerPlan({
-      ...plan,
+    const entry = scheduler.registerMission({
+      ...mission,
       schedule: "0 0 * * *",
-    } as Plan);
+    } as Mission);
     entry!.nextRunAt = new Date(Date.now() - 1000).toISOString();
 
     scheduler.check();
 
-    expect(executePlanFn).not.toHaveBeenCalled();
+    expect(executeMissionFn).not.toHaveBeenCalled();
   });
 
   it("before:schedule:trigger hook can cancel execution", () => {
@@ -368,55 +368,55 @@ describe("Scheduler", () => {
       },
     });
 
-    const plan = store.savePlan({
-      name: "blocked-plan",
+    const mission = store.saveMission({
+      name: "blocked-mission",
       data: JSON.stringify({ tasks: [{ title: "A", description: "A" }] }),
       status: "draft",
     });
 
-    const entry = scheduler.registerPlan({
-      ...plan,
+    const entry = scheduler.registerMission({
+      ...mission,
       schedule: "0 0 * * *",
-    } as Plan);
+    } as Mission);
     entry!.nextRunAt = new Date(Date.now() - 1000).toISOString();
 
     scheduler.check();
 
-    expect(executePlanFn).not.toHaveBeenCalled();
+    expect(executeMissionFn).not.toHaveBeenCalled();
   });
 
-  it("unregisterPlan removes the schedule", () => {
-    const plan = store.savePlan({
-      name: "remove-plan",
+  it("unregisterMission removes the schedule", () => {
+    const mission = store.saveMission({
+      name: "remove-mission",
       data: JSON.stringify({ tasks: [{ title: "A", description: "A" }] }),
       status: "draft",
     });
 
-    scheduler.registerPlan({ ...plan, schedule: "0 0 * * *" } as Plan);
+    scheduler.registerMission({ ...mission, schedule: "0 0 * * *" } as Mission);
     expect(scheduler.getAllSchedules().length).toBe(1);
 
-    scheduler.unregisterPlan(plan.id);
+    scheduler.unregisterMission(mission.id);
     expect(scheduler.getAllSchedules().length).toBe(0);
   });
 
   it("getActiveSchedules only returns enabled schedules", () => {
-    const plan1 = store.savePlan({ name: "p1", data: "{}", status: "draft" });
-    const plan2 = store.savePlan({ name: "p2", data: "{}", status: "draft" });
+    const mission1 = store.saveMission({ name: "m1", data: "{}", status: "draft" });
+    const mission2 = store.saveMission({ name: "m2", data: "{}", status: "draft" });
 
-    scheduler.registerPlan({ ...plan1, schedule: "0 0 * * *" } as Plan);
-    const entry2 = scheduler.registerPlan({ ...plan2, schedule: "0 0 * * *" } as Plan);
+    scheduler.registerMission({ ...mission1, schedule: "0 0 * * *" } as Mission);
+    const entry2 = scheduler.registerMission({ ...mission2, schedule: "0 0 * * *" } as Mission);
     entry2!.enabled = false;
 
     expect(scheduler.getActiveSchedules().length).toBe(1);
   });
 
-  it("init scans existing plans for schedules", () => {
-    const plan = store.savePlan({
+  it("init scans existing missions for schedules", () => {
+    const mission = store.saveMission({
       name: "pre-scheduled",
       data: JSON.stringify({ tasks: [{ title: "A", description: "A" }] }),
       status: "draft",
     });
-    Object.assign(plan, { schedule: "0 3 * * *" });
+    Object.assign(mission, { schedule: "0 3 * * *" });
 
     scheduler.init();
 

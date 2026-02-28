@@ -20,7 +20,7 @@ export type { NotificationStore, NotificationRecord, NotificationStatus } from "
  * and dispatches notifications to the appropriate channels.
  *
  * Features:
- * - Glob-style event pattern matching ("task:*", "plan:completed")
+ * - Glob-style event pattern matching ("task:*", "mission:completed")
  * - Optional condition filters on event payloads
  * - Per-rule cooldown/throttling
  * - Pluggable channel adapters (Slack, Telegram, Email, Webhook)
@@ -313,7 +313,7 @@ export class NotificationRouter {
    * Load outcome attachments from the event data.
    * Looks for outcomes in common event payload shapes:
    *   - task:transition / task:created → data.task.outcomes
-   *   - plan:completed → data.report.outcomes
+   *   - mission:completed → data.report.outcomes
    *   - Direct outcomes array on data
    */
    private loadAttachments(
@@ -694,8 +694,8 @@ function getAllEventNames(): string[] {
     "task:timeout", "agent:stale",
     // Recovery
     "task:recovered",
-    // Plans
-    "plan:saved", "plan:executed", "plan:completed", "plan:resumed", "plan:deleted",
+    // Missions
+    "mission:saved", "mission:executed", "mission:completed", "mission:resumed", "mission:deleted",
     // Chat sessions
     "session:created", "message:added",
     // Approval gates
@@ -704,7 +704,7 @@ function getAllEventNames(): string[] {
     "escalation:triggered", "escalation:resolved", "escalation:human",
     // SLA & Deadlines
     "sla:warning", "sla:violated", "sla:met",
-    // Quality gates (plan-level)
+    // Quality gates (mission-level)
     "quality:gate:passed", "quality:gate:failed", "quality:threshold:failed",
     // Scheduling
     "schedule:triggered", "schedule:created", "schedule:completed",
@@ -723,8 +723,8 @@ function getAllEventNames(): string[] {
  * Extract TaskOutcome[] from an event payload.
  * Supports multiple event shapes:
  *   - { task: { outcomes: [...] } }              — task:transition, task:created
- *   - { report: { outcomes: [...] } }            — plan:completed
- *   - { report: { tasks: [{ outcomes: [...] }] } } — plan:completed (per-task)
+  *   - { report: { outcomes: [...] } }            — mission:completed
+  *   - { report: { tasks: [{ outcomes: [...] }] } } — mission:completed (per-task)
  *   - { outcomes: [...] }                        — direct
  */
 function extractOutcomes(data: unknown): TaskOutcome[] {
@@ -744,7 +744,7 @@ function extractOutcomes(data: unknown): TaskOutcome[] {
     }
   }
 
-  // report.outcomes (plan:completed aggregated outcomes)
+  // report.outcomes (mission:completed aggregated outcomes)
   if (d.report && typeof d.report === "object") {
     const report = d.report as Record<string, unknown>;
     if (Array.isArray(report.outcomes) && report.outcomes.length > 0) {

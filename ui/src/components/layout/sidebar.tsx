@@ -12,6 +12,7 @@ import {
   ShieldCheck,
   Workflow,
   Settings2,
+  CalendarClock,
 } from "lucide-react";
 import { usePolpo } from "@lumea-labs/polpo-react";
 import { useProjectInfo } from "@/hooks/use-polpo";
@@ -26,6 +27,7 @@ const nav = [
   { to: "/dashboard", icon: LayoutDashboard, label: "Dashboard" },
   { to: "/chat", icon: MessageCircle, label: "Chat" },
   { to: "/missions", icon: Target, label: "Missions" },
+  { to: "/schedules", icon: CalendarClock, label: "Schedules" },
   { to: "/tasks", icon: ListChecks, label: "Tasks" },
   { to: "/agents", icon: Bot, label: "Agents" },
   { to: "/memory", icon: Brain, label: "Memory" },
@@ -208,6 +210,9 @@ export function Sidebar() {
               {info?.project && (
                 <p className="text-muted-foreground mt-0.5">{info.project}</p>
               )}
+              {info?.version && (
+                <p className="text-muted-foreground/60 mt-0.5 font-mono">v{info.version}</p>
+              )}
             </TooltipContent>
           </Tooltip>
         ) : (
@@ -226,6 +231,11 @@ export function Sidebar() {
                 )}
               />
               <span className="font-medium">{status.label}</span>
+              {info?.version && (
+                <span className="ml-auto text-[10px] font-mono text-muted-foreground/50">
+                  v{info.version}
+                </span>
+              )}
             </div>
           </>
         )}

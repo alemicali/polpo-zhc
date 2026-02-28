@@ -11,7 +11,7 @@
 import { Type } from "@sinclair/typebox";
 import type { Tool } from "@mariozechner/pi-ai";
 import type { Orchestrator } from "../core/orchestrator.js";
-import type { ApprovalStatus } from "../core/types.js";
+import type { ApprovalStatus, VaultEntry, AgentIdentity, AgentResponsibility } from "../core/types.js";
 import { existsSync, readFileSync, appendFileSync, writeFileSync } from "fs";
 import { join } from "path";
 
@@ -331,6 +331,90 @@ const renameTeamTool: Tool = {
 };
 
 // ═══════════════════════════════════════════════════════
+//  VAULT TOOLS (3)
+// ═══════════════════════════════════════════════════════
+
+const setVaultEntryTool: Tool = {
+  name: "set_vault_entry",
+  description: "Add or update a credential in an agent's vault. Credentials can reference environment variables with ${ENV_VAR} syntax. Common types: smtp (host, port, user, pass), imap (host, port, user, pass), api_key (key), oauth (clientId, clientSecret, refreshToken), login (username, password), custom (any fields).",
+  parameters: Type.Object({
+    agent: Type.String({ description: "Agent name" }),
+    service: Type.String({ description: "Service name (vault key, e.g. 'gmail', 'sendgrid', 'stripe')" }),
+    type: Type.Union([
+      Type.Literal("smtp"),
+      Type.Literal("imap"),
+      Type.Literal("oauth"),
+      Type.Literal("api_key"),
+      Type.Literal("login"),
+      Type.Literal("custom"),
+    ], { description: "Credential type" }),
+    label: Type.Optional(Type.String({ description: "Human-readable label (e.g. 'Work Gmail SMTP')" })),
+    credentials: Type.Record(Type.String(), Type.String(), { description: "Key-value credential fields. Values can be literals or ${ENV_VAR} references." }),
+  }),
+};
+
+const removeVaultEntryTool: Tool = {
+  name: "remove_vault_entry",
+  description: "Remove a credential from an agent's vault.",
+  parameters: Type.Object({
+    agent: Type.String({ description: "Agent name" }),
+    service: Type.String({ description: "Service name (vault key) to remove" }),
+  }),
+};
+
+const listVaultTool: Tool = {
+  name: "list_vault",
+  description: "List all credentials in an agent's vault. Values are masked (***) for security.",
+  parameters: Type.Object({
+    agent: Type.String({ description: "Agent name" }),
+  }),
+};
+
+// ═══════════════════════════════════════════════════════
+//  IDENTITY TOOLS (2)
+// ═══════════════════════════════════════════════════════
+
+const setIdentityTool: Tool = {
+  name: "set_identity",
+  description: "Set or update an agent's identity — who they are, how they communicate, and what they're responsible for. All fields are optional; only provided fields are updated, existing values are preserved. Responsibilities can be simple strings or structured objects with area/description/priority.",
+  parameters: Type.Object({
+    agent: Type.String({ description: "Agent name" }),
+    displayName: Type.Optional(Type.String({ description: "Display name (e.g. 'Alice Chen')" })),
+    title: Type.Optional(Type.String({ description: "Job title (e.g. 'Social Media Manager')" })),
+    company: Type.Optional(Type.String({ description: "Company name" })),
+    email: Type.Optional(Type.String({ description: "Email address (also used as default SMTP sender)" })),
+    bio: Type.Optional(Type.String({ description: "Brief persona description" })),
+    timezone: Type.Optional(Type.String({ description: "Timezone (e.g. 'Europe/Rome')" })),
+    tone: Type.Optional(Type.String({ description: "Communication tone — HOW the agent communicates (e.g. 'Professional but warm', 'Concise and data-driven')" })),
+    personality: Type.Optional(Type.String({ description: "Personality traits — WHO the agent IS (e.g. 'Detail-oriented and empathetic')" })),
+    responsibilities: Type.Optional(Type.Array(
+      Type.Union([
+        Type.String(),
+        Type.Object({
+          area: Type.String({ description: "Responsibility area (e.g. 'Customer Relations')" }),
+          description: Type.String({ description: "What the agent does in this area" }),
+          priority: Type.Optional(Type.Union([
+            Type.Literal("critical"),
+            Type.Literal("high"),
+            Type.Literal("medium"),
+            Type.Literal("low"),
+          ], { description: "Priority level" })),
+        }),
+      ]),
+      { description: "Responsibilities — simple strings or structured { area, description, priority } objects" },
+    )),
+  }),
+};
+
+const getIdentityTool: Tool = {
+  name: "get_identity",
+  description: "Get an agent's current identity configuration.",
+  parameters: Type.Object({
+    agent: Type.String({ description: "Agent name" }),
+  }),
+};
+
+// ═══════════════════════════════════════════════════════
 //  APPROVAL & CHECKPOINT TOOLS (3)
 // ═══════════════════════════════════════════════════════
 
@@ -576,6 +660,8 @@ export const WRITE_TOOLS = new Set([
   "create_mission", "update_mission", "execute_mission", "resume_mission", "abort_mission", "delete_mission",
   // Team
   "add_agent", "remove_agent", "update_agent", "rename_team", "add_team", "remove_team",
+  // Vault & Identity
+  "set_vault_entry", "remove_vault_entry", "set_identity",
   // Approvals & Checkpoints
   "approve_request", "reject_request", "resume_checkpoint",
   // Scheduling
@@ -588,8 +674,8 @@ export const WRITE_TOOLS = new Set([
   "reload_config", "save_memory", "append_memory", "append_system_context",
 ]);
 
-/** Tools that pause the conversation to collect user input. */
-export const INTERACTIVE_TOOLS = new Set(["ask_user"]);
+/** Tools that pause the conversation to collect user input / show a preview. */
+export const INTERACTIVE_TOOLS = new Set(["ask_user", "create_mission", "set_vault_entry"]);
 
 export function needsApproval(toolName: string): boolean {
   return WRITE_TOOLS.has(toolName);
@@ -612,6 +698,10 @@ export const ALL_ORCHESTRATOR_TOOLS: Tool[] = [
   createMissionTool, updateMissionTool, executeMissionTool, resumeMissionTool, abortMissionTool, deleteMissionTool,
   // Team (7)
   listTeamsTool, addAgentTool, removeAgentTool, updateAgentTool, renameTeamTool, addTeamTool, removeTeamTool,
+  // Vault (3)
+  setVaultEntryTool, removeVaultEntryTool, listVaultTool,
+  // Identity (2)
+  setIdentityTool, getIdentityTool,
   // Approvals & Checkpoints (3)
   approveRequestTool, rejectRequestTool, resumeCheckpointTool,
   // Scheduling (3 write + 1 read above)
@@ -648,6 +738,9 @@ const TOOL_LABELS: Record<string, string> = {
   rename_team: "Rename Team",
   add_team: "Add Team",
   remove_team: "Remove Team",
+  set_vault_entry: "Set Vault Entry",
+  remove_vault_entry: "Remove Vault Entry",
+  set_identity: "Set Agent Identity",
   approve_request: "Approve Request",
   reject_request: "Reject Request",
   resume_checkpoint: "Resume Checkpoint",
@@ -720,6 +813,15 @@ export function executeOrchestratorTool(
       case "rename_team":      return execRenameTeam(polpo, args);
       case "add_team":         return execAddTeam(polpo, args);
       case "remove_team":      return execRemoveTeam(polpo, args);
+
+      // ── Vault ──
+      case "set_vault_entry":    return execSetVaultEntry(polpo, args);
+      case "remove_vault_entry": return execRemoveVaultEntry(polpo, args);
+      case "list_vault":         return execListVault(polpo, args);
+
+      // ── Identity ──
+      case "set_identity":       return execSetIdentity(polpo, args);
+      case "get_identity":       return execGetIdentity(polpo, args);
 
       // ── Approvals & Checkpoints ──
       case "approve_request":    return execApproveRequest(polpo, args);
@@ -802,6 +904,11 @@ function resolveTargetName(
   if (toolName === "add_agent" && args.name) return `"${String(args.name)}"`;
   if (toolName === "remove_agent" && args.name) return `"${String(args.name)}"`;
   if (toolName === "update_agent" && args.name) return `"${String(args.name)}"`;
+  if (toolName === "set_vault_entry" && args.agent) return `"${String(args.agent)}" → ${String(args.service)}`;
+  if (toolName === "remove_vault_entry" && args.agent) return `"${String(args.agent)}" → ${String(args.service)}`;
+  if (toolName === "list_vault" && args.agent) return `"${String(args.agent)}"`;
+  if (toolName === "set_identity" && args.agent) return `"${String(args.agent)}"`;
+  if (toolName === "get_identity" && args.agent) return `"${String(args.agent)}"`;
   if (toolName === "rename_team" && args.name) return `"${String(args.name)}"`;
   if (toolName === "delete_tasks") {
     if (args.all) return "ALL tasks";
@@ -896,6 +1003,22 @@ export function formatToolDetails(
     case "append_system_context":
       main.push(["Content length", `${String(args.content ?? "").length} chars`]);
       extra.push(["Content", trunc(args.content, 300)]);
+      break;
+    case "set_vault_entry":
+      main.push(["Agent", String(args.agent)]);
+      main.push(["Service", String(args.service)]);
+      main.push(["Type", String(args.type)]);
+      if (args.label) main.push(["Label", String(args.label)]);
+      extra.push(["Credential keys", Object.keys((args.credentials as Record<string, string>) ?? {}).join(", ")]);
+      break;
+    case "remove_vault_entry":
+      main.push(["Agent", String(args.agent)]);
+      main.push(["Service", String(args.service)]);
+      break;
+    case "set_identity":
+      main.push(["Agent", String(args.agent)]);
+      { const fields = Object.keys(args).filter(k => k !== "agent" && args[k] !== undefined);
+        if (fields.length) main.push(["Fields", fields.join(", ")]); }
       break;
     default:
       for (const [k, v] of Object.entries(args)) {
@@ -1606,6 +1729,131 @@ function execAppendSystemContext(polpo: Orchestrator, args: Record<string, unkno
     writeFileSync(contextPath, `${content}\n`, "utf-8");
   }
   return `Remembered: "${content.slice(0, 80)}${content.length > 80 ? "..." : ""}"`;
+}
+
+// ═══════════════════════════════════════════════════════
+//  VAULT IMPLEMENTATIONS
+// ═══════════════════════════════════════════════════════
+
+function execSetVaultEntry(polpo: Orchestrator, args: Record<string, unknown>): string {
+  const agentName = args.agent as string;
+  const agents = polpo.getAgents();
+  if (!agents.find(a => a.name === agentName)) return `Error: Agent "${agentName}" not found.`;
+
+  const vaultStore = polpo.getVaultStore();
+  if (!vaultStore) return `Error: Vault store not available. Check POLPO_VAULT_KEY or ~/.polpo/vault.key.`;
+
+  const service = args.service as string;
+  const entry: VaultEntry = {
+    type: args.type as VaultEntry["type"],
+    ...(args.label ? { label: args.label as string } : {}),
+    credentials: args.credentials as Record<string, string>,
+  };
+
+  vaultStore.set(agentName, service, entry);
+  const credKeys = Object.keys(entry.credentials).join(", ");
+  return `Vault entry "${service}" (${entry.type}) set for agent "${agentName}". Credential fields: ${credKeys}`;
+}
+
+function execRemoveVaultEntry(polpo: Orchestrator, args: Record<string, unknown>): string {
+  const agentName = args.agent as string;
+  const agents = polpo.getAgents();
+  if (!agents.find(a => a.name === agentName)) return `Error: Agent "${agentName}" not found.`;
+
+  const vaultStore = polpo.getVaultStore();
+  if (!vaultStore) return `Error: Vault store not available.`;
+
+  const service = args.service as string;
+  const removed = vaultStore.remove(agentName, service);
+  if (!removed) return `Error: No vault entry "${service}" found for agent "${agentName}".`;
+
+  return `Vault entry "${service}" removed from agent "${agentName}".`;
+}
+
+function execListVault(polpo: Orchestrator, args: Record<string, unknown>): string {
+  const agentName = args.agent as string;
+  const agents = polpo.getAgents();
+  if (!agents.find(a => a.name === agentName)) return `Error: Agent "${agentName}" not found.`;
+
+  const vaultStore = polpo.getVaultStore();
+  if (!vaultStore) return `Error: Vault store not available.`;
+
+  const entries = vaultStore.list(agentName);
+  if (entries.length === 0) return `Agent "${agentName}" has no vault entries.`;
+
+  const lines: string[] = [`Vault for "${agentName}" (${entries.length} entries):`];
+  for (const e of entries) {
+    const maskedCreds = e.keys.map(k => `${k}: ***`).join(", ");
+    let line = `  - ${e.service} [${e.type}]`;
+    if (e.label) line += ` — ${e.label}`;
+    line += `: { ${maskedCreds} }`;
+    lines.push(line);
+  }
+  return lines.join("\n");
+}
+
+// ═══════════════════════════════════════════════════════
+//  IDENTITY IMPLEMENTATIONS
+// ═══════════════════════════════════════════════════════
+
+function execSetIdentity(polpo: Orchestrator, args: Record<string, unknown>): string {
+  const agentName = args.agent as string;
+  const agents = polpo.getAgents();
+  const existing = agents.find(a => a.name === agentName);
+  if (!existing) return `Error: Agent "${agentName}" not found.`;
+
+  const currentIdentity = existing.identity ?? {};
+
+  // Merge only provided fields
+  const updated: AgentIdentity = { ...currentIdentity };
+  if (args.displayName !== undefined) updated.displayName = args.displayName as string;
+  if (args.title !== undefined) updated.title = args.title as string;
+  if (args.company !== undefined) updated.company = args.company as string;
+  if (args.email !== undefined) updated.email = args.email as string;
+  if (args.bio !== undefined) updated.bio = args.bio as string;
+  if (args.timezone !== undefined) updated.timezone = args.timezone as string;
+  if (args.tone !== undefined) updated.tone = args.tone as string;
+  if (args.personality !== undefined) updated.personality = args.personality as string;
+  if (args.responsibilities !== undefined) {
+    updated.responsibilities = (args.responsibilities as (string | AgentResponsibility)[]);
+  }
+
+  polpo.removeAgent(agentName);
+  polpo.addAgent({ ...existing, identity: updated });
+
+  const updatedFields = Object.keys(args).filter(k => k !== "agent");
+  return `Identity updated for agent "${agentName}": ${updatedFields.join(", ")}`;
+}
+
+function execGetIdentity(polpo: Orchestrator, args: Record<string, unknown>): string {
+  const agentName = args.agent as string;
+  const agents = polpo.getAgents();
+  const existing = agents.find(a => a.name === agentName);
+  if (!existing) return `Error: Agent "${agentName}" not found.`;
+
+  const id = existing.identity;
+  if (!id) return `Agent "${agentName}" has no identity configured.`;
+
+  const lines: string[] = [`Identity for "${agentName}":`];
+  if (id.displayName) lines.push(`  Display name: ${id.displayName}`);
+  if (id.title) lines.push(`  Title: ${id.title}`);
+  if (id.company) lines.push(`  Company: ${id.company}`);
+  if (id.email) lines.push(`  Email: ${id.email}`);
+  if (id.bio) lines.push(`  Bio: ${id.bio}`);
+  if (id.timezone) lines.push(`  Timezone: ${id.timezone}`);
+  if (id.tone) lines.push(`  Tone: ${id.tone}`);
+  if (id.personality) lines.push(`  Personality: ${id.personality}`);
+  if (id.responsibilities?.length) {
+    lines.push(`  Responsibilities (${id.responsibilities.length}):`);
+    for (const r of id.responsibilities) {
+      if (typeof r === "string") {
+        lines.push(`    - ${r}`);
+      } else {
+        lines.push(`    - [${r.priority ?? "medium"}] ${r.area}: ${r.description}`);
+      }
+    }
+  }
+  return lines.join("\n");
 }
 
 /**

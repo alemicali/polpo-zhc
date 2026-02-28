@@ -4,7 +4,7 @@ import { HookRegistry } from "../core/hooks.js";
 import { TypedEmitter } from "../core/events.js";
 import { InMemoryTaskStore, InMemoryRunStore, createTestTask } from "./fixtures.js";
 import type { OrchestratorContext } from "../core/orchestrator-context.js";
-import type { PolpoConfig, Task, PlanQualityGate, Plan, AssessmentResult } from "../core/types.js";
+import type { PolpoConfig, Task, MissionQualityGate, Mission, AssessmentResult } from "../core/types.js";
 
 // ── Helpers ──────────────────────────────────────────
 
@@ -70,10 +70,10 @@ function createFailedTask(title: string, overrides: Partial<Task> = {}): Task {
   });
 }
 
-function createPlan(overrides: Partial<Plan> = {}): Plan {
+function createMission(overrides: Partial<Mission> = {}): Mission {
   return {
-    id: "plan-1",
-    name: "test-plan",
+    id: "mission-1",
+    name: "test-mission",
     data: "{}",
     status: "active",
     createdAt: new Date().toISOString(),
@@ -96,7 +96,7 @@ describe("QualityController", () => {
 
   describe("evaluateGate", () => {
     it("passes when all afterTasks are done and no score requirement", () => {
-      const gate: PlanQualityGate = {
+      const gate: MissionQualityGate = {
         name: "gate-1",
         afterTasks: ["Task A", "Task B"],
         blocksTasks: ["Task C"],
@@ -106,12 +106,12 @@ describe("QualityController", () => {
         createDoneTask("Task B"),
       ];
 
-      const result = ctrl.evaluateGate("plan-1", gate, tasks);
+      const result = ctrl.evaluateGate("mission-1", gate, tasks);
       expect(result.passed).toBe(true);
     });
 
     it("fails when afterTasks are not yet terminal", () => {
-      const gate: PlanQualityGate = {
+      const gate: MissionQualityGate = {
         name: "gate-1",
         afterTasks: ["Task A", "Task B"],
         blocksTasks: ["Task C"],
@@ -121,13 +121,13 @@ describe("QualityController", () => {
         createTestTask({ title: "Task B", status: "in_progress" }),
       ];
 
-      const result = ctrl.evaluateGate("plan-1", gate, tasks);
+      const result = ctrl.evaluateGate("mission-1", gate, tasks);
       expect(result.passed).toBe(false);
       expect(result.reason).toContain("Waiting for tasks");
     });
 
     it("fails when requireAllPassed and some tasks failed", () => {
-      const gate: PlanQualityGate = {
+      const gate: MissionQualityGate = {
         name: "gate-1",
         afterTasks: ["Task A", "Task B"],
         blocksTasks: ["Task C"],
@@ -138,13 +138,13 @@ describe("QualityController", () => {
         createFailedTask("Task B"),
       ];
 
-      const result = ctrl.evaluateGate("plan-1", gate, tasks);
+      const result = ctrl.evaluateGate("mission-1", gate, tasks);
       expect(result.passed).toBe(false);
       expect(result.reason).toContain("Required tasks failed");
     });
 
     it("passes when requireAllPassed and all tasks done", () => {
-      const gate: PlanQualityGate = {
+      const gate: MissionQualityGate = {
         name: "gate-1",
         afterTasks: ["Task A", "Task B"],
         blocksTasks: ["Task C"],
@@ -155,12 +155,12 @@ describe("QualityController", () => {
         createDoneTask("Task B"),
       ];
 
-      const result = ctrl.evaluateGate("plan-1", gate, tasks);
+      const result = ctrl.evaluateGate("mission-1", gate, tasks);
       expect(result.passed).toBe(true);
     });
 
     it("fails when avgScore below minScore", () => {
-      const gate: PlanQualityGate = {
+      const gate: MissionQualityGate = {
         name: "gate-1",
         afterTasks: ["Task A", "Task B"],
         blocksTasks: ["Task C"],
@@ -171,14 +171,14 @@ describe("QualityController", () => {
         createDoneTask("Task B", 3.5),
       ];
 
-      const result = ctrl.evaluateGate("plan-1", gate, tasks);
+      const result = ctrl.evaluateGate("mission-1", gate, tasks);
       expect(result.passed).toBe(false);
       expect(result.avgScore).toBeCloseTo(3.25);
       expect(result.reason).toContain("below threshold");
     });
 
     it("passes when avgScore meets minScore", () => {
-      const gate: PlanQualityGate = {
+      const gate: MissionQualityGate = {
         name: "gate-1",
         afterTasks: ["Task A", "Task B"],
         blocksTasks: ["Task C"],
@@ -189,31 +189,31 @@ describe("QualityController", () => {
         createDoneTask("Task B", 4.5),
       ];
 
-      const result = ctrl.evaluateGate("plan-1", gate, tasks);
+      const result = ctrl.evaluateGate("mission-1", gate, tasks);
       expect(result.passed).toBe(true);
       expect(result.avgScore).toBeCloseTo(4.25);
     });
 
     it("emits quality:gate:passed event on success", () => {
       const emitSpy = vi.spyOn(ctx.emitter, "emit");
-      const gate: PlanQualityGate = {
+      const gate: MissionQualityGate = {
         name: "gate-1",
         afterTasks: ["Task A"],
         blocksTasks: ["Task B"],
       };
       const tasks = [createDoneTask("Task A")];
 
-      ctrl.evaluateGate("plan-1", gate, tasks);
+      ctrl.evaluateGate("mission-1", gate, tasks);
 
       expect(emitSpy).toHaveBeenCalledWith("quality:gate:passed", expect.objectContaining({
-        planId: "plan-1",
+        missionId: "mission-1",
         gateName: "gate-1",
       }));
     });
 
     it("emits quality:gate:failed event on failure", () => {
       const emitSpy = vi.spyOn(ctx.emitter, "emit");
-      const gate: PlanQualityGate = {
+      const gate: MissionQualityGate = {
         name: "gate-1",
         afterTasks: ["Task A"],
         blocksTasks: ["Task B"],
@@ -221,62 +221,62 @@ describe("QualityController", () => {
       };
       const tasks = [createFailedTask("Task A")];
 
-      ctrl.evaluateGate("plan-1", gate, tasks);
+      ctrl.evaluateGate("mission-1", gate, tasks);
 
       expect(emitSpy).toHaveBeenCalledWith("quality:gate:failed", expect.objectContaining({
-        planId: "plan-1",
+        missionId: "mission-1",
         gateName: "gate-1",
       }));
     });
 
     it("caches gate evaluation — does not re-evaluate passed gates", () => {
-      const gate: PlanQualityGate = {
+      const gate: MissionQualityGate = {
         name: "gate-1",
         afterTasks: ["Task A"],
         blocksTasks: ["Task B"],
       };
       const tasks = [createDoneTask("Task A")];
 
-      const r1 = ctrl.evaluateGate("plan-1", gate, tasks);
+      const r1 = ctrl.evaluateGate("mission-1", gate, tasks);
       expect(r1.passed).toBe(true);
 
       // Even if we change the tasks to fail, the gate is cached
-      const r2 = ctrl.evaluateGate("plan-1", gate, []);
+      const r2 = ctrl.evaluateGate("mission-1", gate, []);
       expect(r2.passed).toBe(true);
     });
 
     it("clearGateCache allows re-evaluation", () => {
-      const gate: PlanQualityGate = {
+      const gate: MissionQualityGate = {
         name: "gate-1",
         afterTasks: ["Task A"],
         blocksTasks: ["Task B"],
       };
       const tasks = [createDoneTask("Task A")];
 
-      ctrl.evaluateGate("plan-1", gate, tasks);
-      ctrl.clearGateCache("plan-1");
+      ctrl.evaluateGate("mission-1", gate, tasks);
+      ctrl.clearGateCache("mission-1");
 
       // Now with no tasks, it should fail
-      const result = ctrl.evaluateGate("plan-1", gate, []);
+      const result = ctrl.evaluateGate("mission-1", gate, []);
       expect(result.passed).toBe(false);
     });
   });
 
   describe("getBlockingGate", () => {
     it("returns undefined when no gate blocks the task", () => {
-      const gates: PlanQualityGate[] = [{
+      const gates: MissionQualityGate[] = [{
         name: "gate-1",
         afterTasks: ["Task A"],
         blocksTasks: ["Task C"],
       }];
       const tasks = [createDoneTask("Task A")];
 
-      const result = ctrl.getBlockingGate("plan-1", "Task B", "id-b", gates, tasks);
+      const result = ctrl.getBlockingGate("mission-1", "Task B", "id-b", gates, tasks);
       expect(result).toBeUndefined();
     });
 
     it("returns the blocking gate when task is blocked", () => {
-      const gates: PlanQualityGate[] = [{
+      const gates: MissionQualityGate[] = [{
         name: "gate-1",
         afterTasks: ["Task A"],
         blocksTasks: ["Task B"],
@@ -284,86 +284,86 @@ describe("QualityController", () => {
       }];
       const tasks = [createDoneTask("Task A", 2.0)];
 
-      const result = ctrl.getBlockingGate("plan-1", "Task B", "id-b", gates, tasks);
+      const result = ctrl.getBlockingGate("mission-1", "Task B", "id-b", gates, tasks);
       expect(result).toBeDefined();
       expect(result!.gate.name).toBe("gate-1");
       expect(result!.result.passed).toBe(false);
     });
   });
 
-  describe("checkPlanThreshold", () => {
+  describe("checkMissionThreshold", () => {
     it("passes when no threshold is configured", () => {
-      const plan = createPlan();
+      const mission = createMission();
       const tasks = [createDoneTask("Task A", 2.0)];
 
-      const result = ctrl.checkPlanThreshold(plan, tasks);
+      const result = ctrl.checkMissionThreshold(mission, tasks);
       expect(result.passed).toBe(true);
     });
 
     it("passes when threshold is met", () => {
-      const plan = createPlan({ qualityThreshold: 3.0 });
+      const mission = createMission({ qualityThreshold: 3.0 });
       const tasks = [
         createDoneTask("Task A", 4.0),
         createDoneTask("Task B", 3.5),
       ];
 
-      const result = ctrl.checkPlanThreshold(plan, tasks);
+      const result = ctrl.checkMissionThreshold(mission, tasks);
       expect(result.passed).toBe(true);
       expect(result.avgScore).toBeCloseTo(3.75);
     });
 
     it("fails when threshold is not met", () => {
-      const plan = createPlan({ qualityThreshold: 4.0 });
+      const mission = createMission({ qualityThreshold: 4.0 });
       const tasks = [
         createDoneTask("Task A", 3.0),
         createDoneTask("Task B", 3.5),
       ];
 
-      const result = ctrl.checkPlanThreshold(plan, tasks);
+      const result = ctrl.checkMissionThreshold(mission, tasks);
       expect(result.passed).toBe(false);
       expect(result.avgScore).toBeCloseTo(3.25);
     });
 
     it("emits quality:threshold:failed event on failure", () => {
       const emitSpy = vi.spyOn(ctx.emitter, "emit");
-      const plan = createPlan({ qualityThreshold: 4.0 });
+      const mission = createMission({ qualityThreshold: 4.0 });
       const tasks = [createDoneTask("Task A", 2.0)];
 
-      ctrl.checkPlanThreshold(plan, tasks);
+      ctrl.checkMissionThreshold(mission, tasks);
 
       expect(emitSpy).toHaveBeenCalledWith("quality:threshold:failed", expect.objectContaining({
-        planId: "plan-1",
+        missionId: "mission-1",
         threshold: 4.0,
       }));
     });
 
     it("uses default threshold from settings as fallback", () => {
-      const plan = createPlan(); // no qualityThreshold
+      const mission = createMission(); // no qualityThreshold
       const tasks = [createDoneTask("Task A", 2.0)];
 
-      const result = ctrl.checkPlanThreshold(plan, tasks, 3.0);
+      const result = ctrl.checkMissionThreshold(mission, tasks, 3.0);
       expect(result.passed).toBe(false);
       expect(result.threshold).toBe(3.0);
     });
 
     it("applies priority weighting to scores", () => {
-      const plan = createPlan({ qualityThreshold: 3.5 });
+      const mission = createMission({ qualityThreshold: 3.5 });
       const tasks = [
         createDoneTask("Task A", 4.0, { priority: 3.0 }),
         createDoneTask("Task B", 2.0, { priority: 1.0 }),
       ];
 
-      const result = ctrl.checkPlanThreshold(plan, tasks);
+      const result = ctrl.checkMissionThreshold(mission, tasks);
       // Weighted avg: (4.0*3 + 2.0*1) / (3+1) = 14/4 = 3.5
       expect(result.passed).toBe(true);
       expect(result.avgScore).toBeCloseTo(3.5);
     });
 
     it("passes when no scored tasks exist", () => {
-      const plan = createPlan({ qualityThreshold: 4.0 });
+      const mission = createMission({ qualityThreshold: 4.0 });
       const tasks = [createDoneTask("Task A")]; // no score
 
-      const result = ctrl.checkPlanThreshold(plan, tasks);
+      const result = ctrl.checkMissionThreshold(mission, tasks);
       expect(result.passed).toBe(true);
     });
   });
@@ -453,7 +453,7 @@ describe("QualityController", () => {
     });
   });
 
-  describe("aggregatePlanMetrics", () => {
+  describe("aggregateMissionMetrics", () => {
     it("aggregates metrics from task-level data", async () => {
       const assessment: AssessmentResult = {
         passed: true,
@@ -469,27 +469,27 @@ describe("QualityController", () => {
       await ctx.hooks.runAfter("assessment:complete", { taskId: "t1", task: t1, assessment, passed: true });
       await ctx.hooks.runAfter("assessment:complete", { taskId: "t2", task: t2, assessment: { ...assessment, globalScore: 3.0 }, passed: false });
 
-      const planMetrics = ctrl.aggregatePlanMetrics("plan-1", [t1, t2]);
-      expect(planMetrics.totalAssessments).toBe(2);
-      expect(planMetrics.passedAssessments).toBe(1);
-      expect(planMetrics.avgScore).toBeCloseTo(3.5);
+      const missionMetrics = ctrl.aggregateMissionMetrics("mission-1", [t1, t2]);
+      expect(missionMetrics.totalAssessments).toBe(2);
+      expect(missionMetrics.passedAssessments).toBe(1);
+      expect(missionMetrics.avgScore).toBeCloseTo(3.5);
     });
   });
 
   describe("dispose", () => {
     it("clears all internal state", () => {
-      const gate: PlanQualityGate = {
+      const gate: MissionQualityGate = {
         name: "gate-1",
         afterTasks: ["Task A"],
         blocksTasks: ["Task B"],
       };
-      ctrl.evaluateGate("plan-1", gate, [createDoneTask("Task A")]);
+      ctrl.evaluateGate("mission-1", gate, [createDoneTask("Task A")]);
 
       ctrl.dispose();
 
       expect(ctrl.getAllMetrics().length).toBe(0);
       // Gate cache should be cleared — re-evaluation should work
-      const result = ctrl.evaluateGate("plan-1", gate, []);
+      const result = ctrl.evaluateGate("mission-1", gate, []);
       expect(result.passed).toBe(false); // No tasks = can't pass
     });
   });

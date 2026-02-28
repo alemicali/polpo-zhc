@@ -131,10 +131,10 @@ describe("CLI: task operations", () => {
 });
 
 // ═════════════════════════════════════════════════════════════════
-// 2. Plan Commands
+// 2. Mission Commands
 // ═════════════════════════════════════════════════════════════════
 
-describe("CLI: plan operations", () => {
+describe("CLI: mission operations", () => {
   let tempDir: string;
   let o: Orchestrator;
 
@@ -147,64 +147,64 @@ describe("CLI: plan operations", () => {
     await rm(tempDir, { recursive: true, force: true });
   });
 
-  test("plan list — empty initially", () => {
-    const plans = o.getAllPlans();
-    expect(plans).toHaveLength(0);
+  test("mission list — empty initially", () => {
+    const missions = o.getAllMissions();
+    expect(missions).toHaveLength(0);
   });
 
-  test("plan save — creates draft plan", () => {
-    const plan = o.savePlan({
+  test("mission save — creates draft mission", () => {
+    const mission = o.saveMission({
       data: JSON.stringify({ tasks: [{ title: "Test", description: "Do something", assignTo: "agent-1" }] }),
     });
-    expect(plan.status).toBe("draft");
-    expect(plan.name).toBeDefined();
-    expect(plan.id).toBeDefined();
-    expect(plan.data).toContain("tasks");
+    expect(mission.status).toBe("draft");
+    expect(mission.name).toBeDefined();
+    expect(mission.id).toBeDefined();
+    expect(mission.data).toContain("tasks");
   });
 
-  test("plan show — finds by ID", () => {
-    const plan = o.savePlan({
+  test("mission show — finds by ID", () => {
+    const mission = o.saveMission({
       data: JSON.stringify({ tasks: [{ title: "FindById", description: "Test", assignTo: "agent-1" }] }),
       name: "find-by-id",
     });
-    const found = o.getPlan(plan.id);
+    const found = o.getMission(mission.id);
     expect(found).toBeDefined();
-    expect(found!.id).toBe(plan.id);
+    expect(found!.id).toBe(mission.id);
     expect(found!.name).toBe("find-by-id");
   });
 
-  test("plan show — finds by name", () => {
-    const plan = o.savePlan({
+  test("mission show — finds by name", () => {
+    const mission = o.saveMission({
       data: JSON.stringify({ tasks: [{ title: "FindByName", description: "Test", assignTo: "agent-1" }] }),
-      name: "named-plan",
+      name: "named-mission",
     });
-    const found = o.getPlanByName("named-plan");
+    const found = o.getMissionByName("named-mission");
     expect(found).toBeDefined();
-    expect(found!.id).toBe(plan.id);
+    expect(found!.id).toBe(mission.id);
   });
 
-  test("plan delete — removes plan", () => {
-    const plan = o.savePlan({
+  test("mission delete — removes mission", () => {
+    const mission = o.saveMission({
       data: JSON.stringify({ tasks: [{ title: "DeleteMe", description: "Test", assignTo: "agent-1" }] }),
       name: "to-delete",
     });
-    const result = o.deletePlan(plan.id);
+    const result = o.deleteMission(mission.id);
     expect(result).toBe(true);
-    expect(o.getPlan(plan.id)).toBeUndefined();
+    expect(o.getMission(mission.id)).toBeUndefined();
   });
 
-  test("plan execute — creates tasks from plan", () => {
-    const plan = o.savePlan({
-      data: JSON.stringify({ tasks: [{ title: "Plan task", description: "Do work", assignTo: "agent-1" }] }),
-      name: "exec-plan",
+  test("mission execute — creates tasks from mission", () => {
+    const mission = o.saveMission({
+      data: JSON.stringify({ tasks: [{ title: "Mission task", description: "Do work", assignTo: "agent-1" }] }),
+      name: "exec-mission",
     });
-    const result = o.executePlan(plan.id);
+    const result = o.executeMission(mission.id);
     expect(result.tasks.length).toBe(1);
-    expect(result.tasks[0].title).toBe("Plan task");
-    expect(result.group).toBe("exec-plan");
+    expect(result.tasks[0].title).toBe("Mission task");
+    expect(result.group).toBe("exec-mission");
 
-    // Plan should now be active
-    const updated = o.getPlan(plan.id);
+    // Mission should now be active
+    const updated = o.getMission(mission.id);
     expect(updated!.status).toBe("active");
   });
 });

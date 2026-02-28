@@ -1,12 +1,12 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { PlanExecutor } from "../core/plan-executor.js";
+import { MissionExecutor } from "../core/mission-executor.js";
 import { TaskManager } from "../core/task-manager.js";
 import { AgentManager } from "../core/agent-manager.js";
 import { HookRegistry } from "../core/hooks.js";
 import { TypedEmitter } from "../core/events.js";
 import { InMemoryTaskStore, InMemoryRunStore, createTestTask } from "./fixtures.js";
 import type { OrchestratorContext } from "../core/orchestrator-context.js";
-import type { PolpoConfig, Task, Plan, PlanCheckpoint } from "../core/types.js";
+import type { PolpoConfig, Task, Mission, MissionCheckpoint } from "../core/types.js";
 
 // ── Helpers ──────────────────────────────────────────
 
@@ -22,36 +22,36 @@ function createMinimalConfig(): PolpoConfig {
 
 function createMockCtx(overrides: Partial<OrchestratorContext> = {}): OrchestratorContext {
   const store = new InMemoryTaskStore();
-  const plans = new Map<string, Plan>();
-  let planCounter = 0;
+  const missions = new Map<string, Mission>();
+  let missionCounter = 0;
 
-  // Extend the InMemoryTaskStore with plan methods by assigning onto the instance
+  // Extend the InMemoryTaskStore with mission methods by assigning onto the instance
   const registry = Object.assign(store, {
-    savePlan: (opts: { name: string; data: string; prompt?: string; status?: string; notifications?: unknown }) => {
-      const id = `plan-${++planCounter}`;
-      const plan: Plan = {
+    saveMission: (opts: { name: string; data: string; prompt?: string; status?: string; notifications?: unknown }) => {
+      const id = `mission-${++missionCounter}`;
+      const mission: Mission = {
         id,
         name: opts.name,
         data: opts.data,
         prompt: opts.prompt,
-        status: (opts.status as Plan["status"]) ?? "draft",
+        status: (opts.status as Mission["status"]) ?? "draft",
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
-      plans.set(id, plan);
-      return plan;
+      missions.set(id, mission);
+      return mission;
     },
-    getPlan: (id: string) => plans.get(id),
-    getPlanByName: (name: string) => [...plans.values()].find(p => p.name === name),
-    getAllPlans: () => [...plans.values()],
-    updatePlan: (id: string, updates: Partial<Plan>) => {
-      const plan = plans.get(id);
-      if (!plan) throw new Error(`Plan not found: ${id}`);
-      Object.assign(plan, updates, { updatedAt: new Date().toISOString() });
-      return plan;
+    getMission: (id: string) => missions.get(id),
+    getMissionByName: (name: string) => [...missions.values()].find(p => p.name === name),
+    getAllMissions: () => [...missions.values()],
+    updateMission: (id: string, updates: Partial<Mission>) => {
+      const mission = missions.get(id);
+      if (!mission) throw new Error(`Mission not found: ${id}`);
+      Object.assign(mission, updates, { updatedAt: new Date().toISOString() });
+      return mission;
     },
-    deletePlan: (id: string) => plans.delete(id),
-    nextPlanName: () => `plan-${planCounter + 1}`,
+    deleteMission: (id: string) => missions.delete(id),
+    nextMissionName: () => `mission-${missionCounter + 1}`,
   });
 
   return {
@@ -87,7 +87,7 @@ function createPendingTask(title: string, overrides: Partial<Task> = {}): Task {
 
 describe("Checkpoints", () => {
   let ctx: OrchestratorContext;
-  let planExec: PlanExecutor;
+  let missionExec: MissionExecutor;
   let taskMgr: TaskManager;
   let agentMgr: AgentManager;
 
@@ -95,16 +95,16 @@ describe("Checkpoints", () => {
     ctx = createMockCtx();
     taskMgr = new TaskManager(ctx);
     agentMgr = new AgentManager(ctx);
-    planExec = new PlanExecutor(ctx, taskMgr, agentMgr);
+    missionExec = new MissionExecutor(ctx, taskMgr, agentMgr);
   });
 
   describe("getCheckpoints", () => {
     it("returns empty array when no checkpoints defined", () => {
-      expect(planExec.getCheckpoints("my-plan")).toEqual([]);
+      expect(missionExec.getCheckpoints("my-mission")).toEqual([]);
     });
 
-    it("returns checkpoints after plan execution", () => {
-      const planData = JSON.stringify({
+    it("returns checkpoints after mission execution", () => {
+      const missionData = JSON.stringify({
         tasks: [
           { title: "Task A", description: "Do A" },
           { title: "Task B", description: "Do B" },
@@ -114,10 +114,10 @@ describe("Checkpoints", () => {
         ],
       });
 
-      const plan = planExec.savePlan({ data: planData, name: "my-plan" });
-      planExec.executePlan(plan.id);
+      const mission = missionExec.saveMission({ data: missionData, name: "my-mission" });
+      missionExec.executeMission(mission.id);
 
-      const checkpoints = planExec.getCheckpoints("my-plan");
+      const checkpoints = missionExec.getCheckpoints("my-mission");
       expect(checkpoints).toHaveLength(1);
       expect(checkpoints[0].name).toBe("review-a");
     });
@@ -126,12 +126,12 @@ describe("Checkpoints", () => {
   describe("getBlockingCheckpoint", () => {
     it("returns undefined when no checkpoints defined", () => {
       const tasks = [createDoneTask("Task A"), createPendingTask("Task B")];
-      const result = planExec.getBlockingCheckpoint("my-plan", "Task B", "id-b", tasks);
+      const result = missionExec.getBlockingCheckpoint("my-mission", "Task B", "id-b", tasks);
       expect(result).toBeUndefined();
     });
 
     it("does not block when afterTasks are not yet complete", () => {
-      const planData = JSON.stringify({
+      const missionData = JSON.stringify({
         tasks: [
           { title: "Task A", description: "Do A" },
           { title: "Task B", description: "Do B" },
@@ -140,17 +140,17 @@ describe("Checkpoints", () => {
           { name: "review-a", afterTasks: ["Task A"], blocksTasks: ["Task B"] },
         ],
       });
-      const plan = planExec.savePlan({ data: planData, name: "my-plan" });
-      planExec.executePlan(plan.id);
+      const mission = missionExec.saveMission({ data: missionData, name: "my-mission" });
+      missionExec.executeMission(mission.id);
 
       // Task A is still pending — checkpoint not reached
       const tasks = [createPendingTask("Task A"), createPendingTask("Task B")];
-      const result = planExec.getBlockingCheckpoint("my-plan", "Task B", "id-b", tasks);
+      const result = missionExec.getBlockingCheckpoint("my-mission", "Task B", "id-b", tasks);
       expect(result).toBeUndefined();
     });
 
     it("blocks when afterTasks are done and checkpoint not resumed", () => {
-      const planData = JSON.stringify({
+      const missionData = JSON.stringify({
         tasks: [
           { title: "Task A", description: "Do A" },
           { title: "Task B", description: "Do B" },
@@ -159,19 +159,19 @@ describe("Checkpoints", () => {
           { name: "review-a", afterTasks: ["Task A"], blocksTasks: ["Task B"] },
         ],
       });
-      const plan = planExec.savePlan({ data: planData, name: "my-plan" });
-      planExec.executePlan(plan.id);
+      const mission = missionExec.saveMission({ data: missionData, name: "my-mission" });
+      missionExec.executeMission(mission.id);
 
       // Task A is done — checkpoint triggers
       const tasks = [createDoneTask("Task A"), createPendingTask("Task B")];
-      const result = planExec.getBlockingCheckpoint("my-plan", "Task B", "id-b", tasks);
+      const result = missionExec.getBlockingCheckpoint("my-mission", "Task B", "id-b", tasks);
       expect(result).toBeDefined();
       expect(result!.checkpoint.name).toBe("review-a");
       expect(result!.reachedAt).toBeTruthy();
     });
 
     it("does not block tasks not listed in blocksTasks", () => {
-      const planData = JSON.stringify({
+      const missionData = JSON.stringify({
         tasks: [
           { title: "Task A", description: "Do A" },
           { title: "Task B", description: "Do B" },
@@ -181,12 +181,12 @@ describe("Checkpoints", () => {
           { name: "review-a", afterTasks: ["Task A"], blocksTasks: ["Task B"] },
         ],
       });
-      const plan = planExec.savePlan({ data: planData, name: "my-plan" });
-      planExec.executePlan(plan.id);
+      const mission = missionExec.saveMission({ data: missionData, name: "my-mission" });
+      missionExec.executeMission(mission.id);
 
       const tasks = [createDoneTask("Task A"), createPendingTask("Task B"), createPendingTask("Task C")];
       // Task C is NOT in blocksTasks — should not be blocked
-      const result = planExec.getBlockingCheckpoint("my-plan", "Task C", "id-c", tasks);
+      const result = missionExec.getBlockingCheckpoint("my-mission", "Task C", "id-c", tasks);
       expect(result).toBeUndefined();
     });
 
@@ -194,7 +194,7 @@ describe("Checkpoints", () => {
       const events: unknown[] = [];
       ctx.emitter.on("checkpoint:reached", (data) => events.push(data));
 
-      const planData = JSON.stringify({
+      const missionData = JSON.stringify({
         tasks: [
           { title: "Task A", description: "Do A" },
           { title: "Task B", description: "Do B" },
@@ -203,15 +203,15 @@ describe("Checkpoints", () => {
           { name: "review-a", afterTasks: ["Task A"], blocksTasks: ["Task B"], message: "Review Task A output" },
         ],
       });
-      const plan = planExec.savePlan({ data: planData, name: "my-plan" });
-      planExec.executePlan(plan.id);
+      const mission = missionExec.saveMission({ data: missionData, name: "my-mission" });
+      missionExec.executeMission(mission.id);
 
       const tasks = [createDoneTask("Task A"), createPendingTask("Task B")];
-      planExec.getBlockingCheckpoint("my-plan", "Task B", "id-b", tasks);
+      missionExec.getBlockingCheckpoint("my-mission", "Task B", "id-b", tasks);
 
       expect(events).toHaveLength(1);
       expect(events[0]).toMatchObject({
-        group: "my-plan",
+        group: "my-mission",
         checkpointName: "review-a",
         message: "Review Task A output",
       });
@@ -221,7 +221,7 @@ describe("Checkpoints", () => {
       const events: unknown[] = [];
       ctx.emitter.on("checkpoint:reached", (data) => events.push(data));
 
-      const planData = JSON.stringify({
+      const missionData = JSON.stringify({
         tasks: [
           { title: "Task A", description: "Do A" },
           { title: "Task B", description: "Do B" },
@@ -230,22 +230,22 @@ describe("Checkpoints", () => {
           { name: "review-a", afterTasks: ["Task A"], blocksTasks: ["Task B"] },
         ],
       });
-      const plan = planExec.savePlan({ data: planData, name: "my-plan" });
-      planExec.executePlan(plan.id);
+      const mission = missionExec.saveMission({ data: missionData, name: "my-mission" });
+      missionExec.executeMission(mission.id);
 
       const tasks = [createDoneTask("Task A"), createPendingTask("Task B")];
 
       // Call multiple times
-      planExec.getBlockingCheckpoint("my-plan", "Task B", "id-b", tasks);
-      planExec.getBlockingCheckpoint("my-plan", "Task B", "id-b", tasks);
-      planExec.getBlockingCheckpoint("my-plan", "Task B", "id-b", tasks);
+      missionExec.getBlockingCheckpoint("my-mission", "Task B", "id-b", tasks);
+      missionExec.getBlockingCheckpoint("my-mission", "Task B", "id-b", tasks);
+      missionExec.getBlockingCheckpoint("my-mission", "Task B", "id-b", tasks);
 
       // Event only emitted once
       expect(events).toHaveLength(1);
     });
 
-    it("pauses the plan when checkpoint is reached", () => {
-      const planData = JSON.stringify({
+    it("pauses the mission when checkpoint is reached", () => {
+      const missionData = JSON.stringify({
         tasks: [
           { title: "Task A", description: "Do A" },
           { title: "Task B", description: "Do B" },
@@ -254,27 +254,27 @@ describe("Checkpoints", () => {
           { name: "review-a", afterTasks: ["Task A"], blocksTasks: ["Task B"] },
         ],
       });
-      const plan = planExec.savePlan({ data: planData, name: "my-plan" });
-      planExec.executePlan(plan.id);
+      const mission = missionExec.saveMission({ data: missionData, name: "my-mission" });
+      missionExec.executeMission(mission.id);
 
-      // Plan should be active
-      expect(planExec.getPlan(plan.id)!.status).toBe("active");
+      // Mission should be active
+      expect(missionExec.getMission(mission.id)!.status).toBe("active");
 
       const tasks = [createDoneTask("Task A"), createPendingTask("Task B")];
-      planExec.getBlockingCheckpoint("my-plan", "Task B", "id-b", tasks);
+      missionExec.getBlockingCheckpoint("my-mission", "Task B", "id-b", tasks);
 
-      // Plan should now be paused
-      expect(planExec.getPlan(plan.id)!.status).toBe("paused");
+      // Mission should now be paused
+      expect(missionExec.getMission(mission.id)!.status).toBe("paused");
     });
   });
 
   describe("resumeCheckpoint", () => {
     it("returns false for non-existent checkpoint", () => {
-      expect(planExec.resumeCheckpoint("my-plan", "nonexistent")).toBe(false);
+      expect(missionExec.resumeCheckpoint("my-mission", "nonexistent")).toBe(false);
     });
 
     it("resumes an active checkpoint and unblocks tasks", () => {
-      const planData = JSON.stringify({
+      const missionData = JSON.stringify({
         tasks: [
           { title: "Task A", description: "Do A" },
           { title: "Task B", description: "Do B" },
@@ -283,26 +283,26 @@ describe("Checkpoints", () => {
           { name: "review-a", afterTasks: ["Task A"], blocksTasks: ["Task B"] },
         ],
       });
-      const plan = planExec.savePlan({ data: planData, name: "my-plan" });
-      planExec.executePlan(plan.id);
+      const mission = missionExec.saveMission({ data: missionData, name: "my-mission" });
+      missionExec.executeMission(mission.id);
 
       const tasks = [createDoneTask("Task A"), createPendingTask("Task B")];
 
       // Activate checkpoint
-      const blocking = planExec.getBlockingCheckpoint("my-plan", "Task B", "id-b", tasks);
+      const blocking = missionExec.getBlockingCheckpoint("my-mission", "Task B", "id-b", tasks);
       expect(blocking).toBeDefined();
 
       // Resume
-      const resumed = planExec.resumeCheckpoint("my-plan", "review-a");
+      const resumed = missionExec.resumeCheckpoint("my-mission", "review-a");
       expect(resumed).toBe(true);
 
       // Task B should no longer be blocked
-      const blocking2 = planExec.getBlockingCheckpoint("my-plan", "Task B", "id-b", tasks);
+      const blocking2 = missionExec.getBlockingCheckpoint("my-mission", "Task B", "id-b", tasks);
       expect(blocking2).toBeUndefined();
     });
 
-    it("sets plan status back to active after resume", () => {
-      const planData = JSON.stringify({
+    it("sets mission status back to active after resume", () => {
+      const missionData = JSON.stringify({
         tasks: [
           { title: "Task A", description: "Do A" },
           { title: "Task B", description: "Do B" },
@@ -311,22 +311,22 @@ describe("Checkpoints", () => {
           { name: "review-a", afterTasks: ["Task A"], blocksTasks: ["Task B"] },
         ],
       });
-      const plan = planExec.savePlan({ data: planData, name: "my-plan" });
-      planExec.executePlan(plan.id);
+      const mission = missionExec.saveMission({ data: missionData, name: "my-mission" });
+      missionExec.executeMission(mission.id);
 
       const tasks = [createDoneTask("Task A"), createPendingTask("Task B")];
-      planExec.getBlockingCheckpoint("my-plan", "Task B", "id-b", tasks);
-      expect(planExec.getPlan(plan.id)!.status).toBe("paused");
+      missionExec.getBlockingCheckpoint("my-mission", "Task B", "id-b", tasks);
+      expect(missionExec.getMission(mission.id)!.status).toBe("paused");
 
-      planExec.resumeCheckpoint("my-plan", "review-a");
-      expect(planExec.getPlan(plan.id)!.status).toBe("active");
+      missionExec.resumeCheckpoint("my-mission", "review-a");
+      expect(missionExec.getMission(mission.id)!.status).toBe("active");
     });
 
     it("emits checkpoint:resumed event", () => {
       const events: unknown[] = [];
       ctx.emitter.on("checkpoint:resumed", (data) => events.push(data));
 
-      const planData = JSON.stringify({
+      const missionData = JSON.stringify({
         tasks: [
           { title: "Task A", description: "Do A" },
           { title: "Task B", description: "Do B" },
@@ -335,16 +335,16 @@ describe("Checkpoints", () => {
           { name: "review-a", afterTasks: ["Task A"], blocksTasks: ["Task B"] },
         ],
       });
-      const plan = planExec.savePlan({ data: planData, name: "my-plan" });
-      planExec.executePlan(plan.id);
+      const mission = missionExec.saveMission({ data: missionData, name: "my-mission" });
+      missionExec.executeMission(mission.id);
 
       const tasks = [createDoneTask("Task A"), createPendingTask("Task B")];
-      planExec.getBlockingCheckpoint("my-plan", "Task B", "id-b", tasks);
-      planExec.resumeCheckpoint("my-plan", "review-a");
+      missionExec.getBlockingCheckpoint("my-mission", "Task B", "id-b", tasks);
+      missionExec.resumeCheckpoint("my-mission", "review-a");
 
       expect(events).toHaveLength(1);
       expect(events[0]).toMatchObject({
-        group: "my-plan",
+        group: "my-mission",
         checkpointName: "review-a",
       });
     });
@@ -353,7 +353,7 @@ describe("Checkpoints", () => {
       const reachedEvents: unknown[] = [];
       ctx.emitter.on("checkpoint:reached", (data) => reachedEvents.push(data));
 
-      const planData = JSON.stringify({
+      const missionData = JSON.stringify({
         tasks: [
           { title: "Task A", description: "Do A" },
           { title: "Task B", description: "Do B" },
@@ -362,15 +362,15 @@ describe("Checkpoints", () => {
           { name: "review-a", afterTasks: ["Task A"], blocksTasks: ["Task B"] },
         ],
       });
-      const plan = planExec.savePlan({ data: planData, name: "my-plan" });
-      planExec.executePlan(plan.id);
+      const mission = missionExec.saveMission({ data: missionData, name: "my-mission" });
+      missionExec.executeMission(mission.id);
 
       const tasks = [createDoneTask("Task A"), createPendingTask("Task B")];
-      planExec.getBlockingCheckpoint("my-plan", "Task B", "id-b", tasks);
-      planExec.resumeCheckpoint("my-plan", "review-a");
+      missionExec.getBlockingCheckpoint("my-mission", "Task B", "id-b", tasks);
+      missionExec.resumeCheckpoint("my-mission", "review-a");
 
       // Check again after resume — should not re-trigger
-      const blocking = planExec.getBlockingCheckpoint("my-plan", "Task B", "id-b", tasks);
+      const blocking = missionExec.getBlockingCheckpoint("my-mission", "Task B", "id-b", tasks);
       expect(blocking).toBeUndefined();
       expect(reachedEvents).toHaveLength(1); // Only the first trigger
     });
@@ -378,11 +378,11 @@ describe("Checkpoints", () => {
 
   describe("getActiveCheckpoints", () => {
     it("returns empty array when no checkpoints active", () => {
-      expect(planExec.getActiveCheckpoints()).toEqual([]);
+      expect(missionExec.getActiveCheckpoints()).toEqual([]);
     });
 
     it("returns active checkpoints", () => {
-      const planData = JSON.stringify({
+      const missionData = JSON.stringify({
         tasks: [
           { title: "Task A", description: "Do A" },
           { title: "Task B", description: "Do B" },
@@ -391,20 +391,20 @@ describe("Checkpoints", () => {
           { name: "review-a", afterTasks: ["Task A"], blocksTasks: ["Task B"] },
         ],
       });
-      const plan = planExec.savePlan({ data: planData, name: "my-plan" });
-      planExec.executePlan(plan.id);
+      const mission = missionExec.saveMission({ data: missionData, name: "my-mission" });
+      missionExec.executeMission(mission.id);
 
       const tasks = [createDoneTask("Task A"), createPendingTask("Task B")];
-      planExec.getBlockingCheckpoint("my-plan", "Task B", "id-b", tasks);
+      missionExec.getBlockingCheckpoint("my-mission", "Task B", "id-b", tasks);
 
-      const active = planExec.getActiveCheckpoints();
+      const active = missionExec.getActiveCheckpoints();
       expect(active).toHaveLength(1);
-      expect(active[0].group).toBe("my-plan");
+      expect(active[0].group).toBe("my-mission");
       expect(active[0].checkpointName).toBe("review-a");
     });
 
     it("removes checkpoint from active list after resume", () => {
-      const planData = JSON.stringify({
+      const missionData = JSON.stringify({
         tasks: [
           { title: "Task A", description: "Do A" },
           { title: "Task B", description: "Do B" },
@@ -413,21 +413,21 @@ describe("Checkpoints", () => {
           { name: "review-a", afterTasks: ["Task A"], blocksTasks: ["Task B"] },
         ],
       });
-      const plan = planExec.savePlan({ data: planData, name: "my-plan" });
-      planExec.executePlan(plan.id);
+      const mission = missionExec.saveMission({ data: missionData, name: "my-mission" });
+      missionExec.executeMission(mission.id);
 
       const tasks = [createDoneTask("Task A"), createPendingTask("Task B")];
-      planExec.getBlockingCheckpoint("my-plan", "Task B", "id-b", tasks);
-      expect(planExec.getActiveCheckpoints()).toHaveLength(1);
+      missionExec.getBlockingCheckpoint("my-mission", "Task B", "id-b", tasks);
+      expect(missionExec.getActiveCheckpoints()).toHaveLength(1);
 
-      planExec.resumeCheckpoint("my-plan", "review-a");
-      expect(planExec.getActiveCheckpoints()).toHaveLength(0);
+      missionExec.resumeCheckpoint("my-mission", "review-a");
+      expect(missionExec.getActiveCheckpoints()).toHaveLength(0);
     });
   });
 
   describe("multiple checkpoints", () => {
-    it("handles sequential checkpoints in a plan", () => {
-      const planData = JSON.stringify({
+    it("handles sequential checkpoints in a mission", () => {
+      const missionData = JSON.stringify({
         tasks: [
           { title: "Task A", description: "Do A" },
           { title: "Task B", description: "Do B" },
@@ -438,33 +438,33 @@ describe("Checkpoints", () => {
           { name: "cp-2", afterTasks: ["Task B"], blocksTasks: ["Task C"] },
         ],
       });
-      const plan = planExec.savePlan({ data: planData, name: "my-plan" });
-      planExec.executePlan(plan.id);
+      const mission = missionExec.saveMission({ data: missionData, name: "my-mission" });
+      missionExec.executeMission(mission.id);
 
       // Checkpoint 1: Task A done, blocks Task B
       const tasks1 = [createDoneTask("Task A"), createPendingTask("Task B"), createPendingTask("Task C")];
-      const blocking1 = planExec.getBlockingCheckpoint("my-plan", "Task B", "id-b", tasks1);
+      const blocking1 = missionExec.getBlockingCheckpoint("my-mission", "Task B", "id-b", tasks1);
       expect(blocking1).toBeDefined();
       expect(blocking1!.checkpoint.name).toBe("cp-1");
 
       // Task C not blocked by cp-1
-      const blockingC1 = planExec.getBlockingCheckpoint("my-plan", "Task C", "id-c", tasks1);
+      const blockingC1 = missionExec.getBlockingCheckpoint("my-mission", "Task C", "id-c", tasks1);
       expect(blockingC1).toBeUndefined();
 
       // Resume cp-1
-      planExec.resumeCheckpoint("my-plan", "cp-1");
-      const blocking1After = planExec.getBlockingCheckpoint("my-plan", "Task B", "id-b", tasks1);
+      missionExec.resumeCheckpoint("my-mission", "cp-1");
+      const blocking1After = missionExec.getBlockingCheckpoint("my-mission", "Task B", "id-b", tasks1);
       expect(blocking1After).toBeUndefined();
 
       // Checkpoint 2: Task B done, blocks Task C
       const tasks2 = [createDoneTask("Task A"), createDoneTask("Task B"), createPendingTask("Task C")];
-      const blocking2 = planExec.getBlockingCheckpoint("my-plan", "Task C", "id-c", tasks2);
+      const blocking2 = missionExec.getBlockingCheckpoint("my-mission", "Task C", "id-c", tasks2);
       expect(blocking2).toBeDefined();
       expect(blocking2!.checkpoint.name).toBe("cp-2");
 
       // Resume cp-2
-      planExec.resumeCheckpoint("my-plan", "cp-2");
-      const blocking2After = planExec.getBlockingCheckpoint("my-plan", "Task C", "id-c", tasks2);
+      missionExec.resumeCheckpoint("my-mission", "cp-2");
+      const blocking2After = missionExec.getBlockingCheckpoint("my-mission", "Task C", "id-c", tasks2);
       expect(blocking2After).toBeUndefined();
     });
   });
@@ -475,9 +475,9 @@ describe("Checkpoints", () => {
       const mockRouter = {
         addRule: (rule: { id: string; events: string[] }) => { addedRules.push(rule); },
       };
-      planExec.setNotificationRouter(mockRouter as any);
+      missionExec.setNotificationRouter(mockRouter as any);
 
-      const planData = JSON.stringify({
+      const missionData = JSON.stringify({
         tasks: [
           { title: "Task A", description: "Do A" },
           { title: "Task B", description: "Do B" },
@@ -486,11 +486,11 @@ describe("Checkpoints", () => {
           { name: "review-a", afterTasks: ["Task A"], blocksTasks: ["Task B"], notifyChannels: ["slack-alerts"] },
         ],
       });
-      const plan = planExec.savePlan({ data: planData, name: "my-plan" });
-      planExec.executePlan(plan.id);
+      const mission = missionExec.saveMission({ data: missionData, name: "my-mission" });
+      missionExec.executeMission(mission.id);
 
       const tasks = [createDoneTask("Task A"), createPendingTask("Task B")];
-      planExec.getBlockingCheckpoint("my-plan", "Task B", "id-b", tasks);
+      missionExec.getBlockingCheckpoint("my-mission", "Task B", "id-b", tasks);
 
       // Should have registered 2 rules: reached + resumed
       expect(addedRules).toHaveLength(2);
@@ -503,9 +503,9 @@ describe("Checkpoints", () => {
       const mockRouter = {
         addRule: (rule: unknown) => { addedRules.push(rule); },
       };
-      planExec.setNotificationRouter(mockRouter as any);
+      missionExec.setNotificationRouter(mockRouter as any);
 
-      const planData = JSON.stringify({
+      const missionData = JSON.stringify({
         tasks: [
           { title: "Task A", description: "Do A" },
           { title: "Task B", description: "Do B" },
@@ -514,11 +514,11 @@ describe("Checkpoints", () => {
           { name: "review-a", afterTasks: ["Task A"], blocksTasks: ["Task B"] },
         ],
       });
-      const plan = planExec.savePlan({ data: planData, name: "my-plan" });
-      planExec.executePlan(plan.id);
+      const mission = missionExec.saveMission({ data: missionData, name: "my-mission" });
+      missionExec.executeMission(mission.id);
 
       const tasks = [createDoneTask("Task A"), createPendingTask("Task B")];
-      planExec.getBlockingCheckpoint("my-plan", "Task B", "id-b", tasks);
+      missionExec.getBlockingCheckpoint("my-mission", "Task B", "id-b", tasks);
 
       expect(addedRules).toHaveLength(0);
     });

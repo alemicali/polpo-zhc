@@ -13,7 +13,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Bot,
   Loader2,
-  Settings2,
+
   Wrench,
   ArrowLeft,
   RefreshCw,
@@ -28,7 +28,7 @@ import {
   CheckCircle2,
   XCircle,
   Layers,
-  Infinity as InfinityIcon,
+
   FolderOpen,
   Terminal,
   Globe,
@@ -39,16 +39,16 @@ import {
   Clock,
   Star,
   AlertTriangle,
-  User,
   Building2,
   Mail,
   MapPin,
   Heart,
   MessageSquare,
   ListChecks,
-  Lock,
   KeyRound,
   ArrowUpRight,
+  Brain,
+  Cake,
 } from "lucide-react";
 import { MessageResponse } from "@/components/ai-elements/message";
 import { useAgent, useAgents, useProcesses, useSkills, useTasks } from "@lumea-labs/polpo-react";
@@ -91,13 +91,35 @@ const responsibilityPriorityColors: Record<string, string> = {
   low: "text-zinc-400 border-zinc-500/30",
 };
 
-const vaultTypeIcons: Record<string, { icon: React.ElementType; color: string }> = {
-  smtp: { icon: Mail, color: "text-sky-400" },
-  imap: { icon: Mail, color: "text-indigo-400" },
-  oauth: { icon: KeyRound, color: "text-amber-400" },
-  api_key: { icon: KeyRound, color: "text-emerald-400" },
-  login: { icon: User, color: "text-violet-400" },
-  custom: { icon: Lock, color: "text-zinc-400" },
+
+/** Format agent age as a human-friendly string, e.g. "3 months" / "12 days" / "1 year, 2 months" */
+function formatAgentAge(isoDate: string): string {
+  const created = new Date(isoDate);
+  const now = new Date();
+  const diffMs = now.getTime() - created.getTime();
+  const days = Math.floor(diffMs / 86_400_000);
+  if (days < 1) return "born today";
+  if (days === 1) return "1 day old";
+  if (days < 30) return `${days} days old`;
+  const months = Math.floor(days / 30);
+  const remainDays = days % 30;
+  if (months < 12) {
+    if (remainDays === 0) return `${months} month${months > 1 ? "s" : ""} old`;
+    return `${months}m ${remainDays}d old`;
+  }
+  const years = Math.floor(months / 12);
+  const remainMonths = months % 12;
+  if (remainMonths === 0) return `${years} year${years > 1 ? "s" : ""} old`;
+  return `${years}y ${remainMonths}m old`;
+}
+
+const reasoningMeta: Record<string, { label: string; color: string }> = {
+  off: { label: "Off", color: "text-zinc-500" },
+  minimal: { label: "Minimal", color: "text-zinc-400" },
+  low: { label: "Low", color: "text-blue-400" },
+  medium: { label: "Medium", color: "text-violet-400" },
+  high: { label: "High", color: "text-amber-400" },
+  xhigh: { label: "X-High", color: "text-red-400" },
 };
 
 // ── Section header ──
@@ -119,13 +141,181 @@ function SectionHeader({ title, icon: Icon, count, className }: {
   );
 }
 
-// ── KV pair ──
+// ── Activity heatmap (GitHub-style contribution graph) ──
 
-function KV({ label, children, mono }: { label: string; children: React.ReactNode; mono?: boolean }) {
+const HEATMAP_WEEKS = 20;
+const DAY_NAMES = ["", "Mon", "", "Wed", "", "Fri", ""];
+
+function ActivityHeatmap({ tasks }: { tasks: Task[] }) {
+  const { grid, maxCount, totalActive, streakDays } = useMemo(() => {
+    // Build day → task list index covering last N weeks up to today
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    // Start from the most recent Sunday, then go back HEATMAP_WEEKS weeks
+    const dayOfWeek = today.getDay(); // 0 = Sunday
+    const endSunday = new Date(today);
+    endSunday.setDate(today.getDate() - dayOfWeek + 6); // end of this week (Saturday)
+    const startDate = new Date(endSunday);
+    startDate.setDate(endSunday.getDate() - (HEATMAP_WEEKS * 7 - 1));
+
+    const dayMap = new Map<string, { count: number; done: number; failed: number; scores: number[] }>();
+
+    for (const t of tasks) {
+      const d = new Date(t.updatedAt);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      const existing = dayMap.get(key) ?? { count: 0, done: 0, failed: 0, scores: [] };
+      existing.count++;
+      if (t.status === "done") existing.done++;
+      if (t.status === "failed") existing.failed++;
+      if (t.result?.assessment?.globalScore != null) existing.scores.push(t.result.assessment.globalScore);
+      dayMap.set(key, existing);
+    }
+
+    // Build weeks × 7 grid
+    const weeks: { date: Date; key: string; data: { count: number; done: number; failed: number; scores: number[] } | null }[][] = [];
+    let max = 0;
+    let cursor = new Date(startDate);
+    let currentWeek: typeof weeks[number] = [];
+
+    // Pad the first week if startDate isn't a Sunday
+    const startDay = cursor.getDay();
+    if (startDay !== 0) {
+      for (let i = 0; i < startDay; i++) {
+        currentWeek.push({ date: new Date(0), key: "", data: null });
+      }
+    }
+
+    const totalDays = HEATMAP_WEEKS * 7;
+    for (let i = 0; i < totalDays; i++) {
+      const d = new Date(cursor);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      const data = dayMap.get(key) ?? { count: 0, done: 0, failed: 0, scores: [] };
+      if (data.count > max) max = data.count;
+      const isFuture = d > now;
+      currentWeek.push({ date: d, key, data: isFuture ? null : data });
+      if (currentWeek.length === 7) {
+        weeks.push(currentWeek);
+        currentWeek = [];
+      }
+      cursor.setDate(cursor.getDate() + 1);
+    }
+    if (currentWeek.length > 0) weeks.push(currentWeek);
+
+    // Compute streak (consecutive days with activity, ending today or yesterday)
+    let streak = 0;
+    const checkDate = new Date(today);
+    for (let i = 0; i < 365; i++) {
+      const k = `${checkDate.getFullYear()}-${String(checkDate.getMonth() + 1).padStart(2, "0")}-${String(checkDate.getDate()).padStart(2, "0")}`;
+      const d = dayMap.get(k);
+      if (d && d.count > 0) {
+        streak++;
+        checkDate.setDate(checkDate.getDate() - 1);
+      } else if (i === 0) {
+        // Today might have no activity yet, check yesterday
+        checkDate.setDate(checkDate.getDate() - 1);
+        continue;
+      } else {
+        break;
+      }
+    }
+
+    const total = tasks.filter(t => t.status !== "draft" && t.status !== "pending").length;
+
+    return { grid: weeks, maxCount: max, totalActive: total, streakDays: streak };
+  }, [tasks]);
+
+  if (tasks.length === 0) return null;
+
+  const getCellColor = (data: { count: number; done: number; failed: number; scores: number[] } | null) => {
+    if (!data) return "bg-muted/20";
+    if (data.count === 0) return "bg-muted/30";
+    // Color by intensity: ratio of count to max
+    const ratio = maxCount > 0 ? data.count / maxCount : 0;
+    // Use emerald tones for success-heavy, red for failure-heavy
+    const failRatio = data.count > 0 ? data.failed / data.count : 0;
+    if (failRatio > 0.5) {
+      if (ratio > 0.7) return "bg-red-500";
+      if (ratio > 0.4) return "bg-red-500/70";
+      return "bg-red-500/40";
+    }
+    if (ratio > 0.75) return "bg-emerald-400";
+    if (ratio > 0.5) return "bg-emerald-400/70";
+    if (ratio > 0.25) return "bg-emerald-400/50";
+    return "bg-emerald-400/30";
+  };
+
+  const formatDate = (d: Date) =>
+    d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+
   return (
-    <div className="flex items-baseline justify-between gap-3 py-1">
-      <span className="text-[11px] text-muted-foreground shrink-0">{label}</span>
-      <span className={cn("text-[11px] text-right truncate", mono && "font-mono")}>{children}</span>
+    <div className="space-y-2">
+      {/* Stats row */}
+      <div className="flex items-center gap-4 text-[11px] text-muted-foreground">
+        <span className="font-medium text-foreground">{totalActive} tasks</span>
+        <span>in the last {HEATMAP_WEEKS} weeks</span>
+        {streakDays > 0 && (
+          <span className="ml-auto flex items-center gap-1">
+            <Zap className="h-3 w-3 text-amber-400" />
+            <span className="font-medium text-foreground">{streakDays}d</span> streak
+          </span>
+        )}
+      </div>
+
+      {/* Heatmap grid */}
+      <div className="flex gap-[3px]">
+        {/* Day labels */}
+        <div className="flex flex-col gap-[3px] pr-1.5 pt-0">
+          {DAY_NAMES.map((name, i) => (
+            <div key={i} className="h-[11px] flex items-center">
+              <span className="text-[9px] text-muted-foreground/60 leading-none w-5">{name}</span>
+            </div>
+          ))}
+        </div>
+        {/* Weeks */}
+        {grid.map((week, wi) => (
+          <div key={wi} className="flex flex-col gap-[3px]">
+            {week.map((cell, di) => (
+              <Tooltip key={cell.key || `empty-${di}`}>
+                <TooltipTrigger asChild>
+                  <div className={cn(
+                    "h-[11px] w-[11px] rounded-[2px] transition-colors",
+                    getCellColor(cell.data),
+                    cell.data && cell.data.count > 0 && "hover:ring-1 hover:ring-primary/50"
+                  )} />
+                </TooltipTrigger>
+                {cell.data && (
+                  <TooltipContent className="text-[11px] space-y-0.5">
+                    <p className="font-medium">{formatDate(cell.date)}</p>
+                    {cell.data.count > 0 ? (
+                      <>
+                        <p>{cell.data.count} task{cell.data.count !== 1 ? "s" : ""}: {cell.data.done} done, {cell.data.failed} failed</p>
+                        {cell.data.scores.length > 0 && (
+                          <p className="text-muted-foreground">
+                            avg score {Math.round((cell.data.scores.reduce((a, b) => a + b, 0) / cell.data.scores.length) * 100)}%
+                          </p>
+                        )}
+                      </>
+                    ) : (
+                      <p className="text-muted-foreground">No activity</p>
+                    )}
+                  </TooltipContent>
+                )}
+              </Tooltip>
+            ))}
+          </div>
+        ))}
+      </div>
+
+      {/* Legend */}
+      <div className="flex items-center gap-1.5 justify-end">
+        <span className="text-[9px] text-muted-foreground/60">Less</span>
+        <div className="h-[9px] w-[9px] rounded-[2px] bg-muted/30" />
+        <div className="h-[9px] w-[9px] rounded-[2px] bg-emerald-400/30" />
+        <div className="h-[9px] w-[9px] rounded-[2px] bg-emerald-400/50" />
+        <div className="h-[9px] w-[9px] rounded-[2px] bg-emerald-400/70" />
+        <div className="h-[9px] w-[9px] rounded-[2px] bg-emerald-400" />
+        <span className="text-[9px] text-muted-foreground/60">More</span>
+      </div>
     </div>
   );
 }
@@ -359,10 +549,8 @@ export function AgentDetailPage() {
   }
 
   const identity = agent.identity;
-  const hasIdentity = identity && (identity.displayName || identity.title || identity.bio || identity.company);
   const agentAny = agent as unknown as Record<string, unknown>;
   const mcpEntries = agent.mcpServers ? Object.entries(agent.mcpServers) : [];
-  const vaultEntries = agent.vault ? Object.entries(agent.vault) : [];
   const enabledFlags = enableFlags.filter(f => agentAny[f.key] === true);
 
   return (
@@ -386,91 +574,117 @@ export function AgentDetailPage() {
             <div className="h-16 bg-gradient-to-r from-primary/20 via-primary/10 to-transparent" />
             <CardContent className="pt-0 -mt-8 pb-4 space-y-3">
               {/* Avatar + name */}
-              <div className="flex items-end gap-3">
+              <div className="flex items-center gap-3">
                 <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-card border-2 border-background shadow-lg">
                   <Bot className="h-7 w-7 text-primary" />
                 </div>
-                <div className="min-w-0 pb-0.5">
+                <div className="min-w-0">
                   <div className="flex items-center gap-2">
                     <h1 className="text-lg font-bold tracking-tight leading-tight truncate">
                       {identity?.displayName ?? agent.name}
                     </h1>
                     {process && (
-                      <div className="flex items-center gap-1">
-                        <div className="h-2 w-2 rounded-full bg-primary animate-pulse" />
-                      </div>
+                      <div className="h-2 w-2 rounded-full bg-primary animate-pulse" />
                     )}
                   </div>
                   {identity?.displayName && identity.displayName !== agent.name && (
                     <p className="text-[10px] font-mono text-muted-foreground">@{agent.name}</p>
                   )}
+                  {agent.createdAt && (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <p className="text-[10px] text-muted-foreground/50 flex items-center gap-1 mt-0.5 cursor-help">
+                          <Cake className="h-2.5 w-2.5" />
+                          {formatAgentAge(agent.createdAt)}
+                        </p>
+                      </TooltipTrigger>
+                      <TooltipContent className="text-xs">
+                        Created {new Date(agent.createdAt).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })}
+                      </TooltipContent>
+                    </Tooltip>
+                  )}
                 </div>
               </div>
 
-              {/* Title + company */}
-              {(identity?.title || identity?.company) && (
-                <div className="space-y-0.5">
-                  {identity.title && (
-                    <p className="text-xs font-medium">{identity.title}</p>
+              {/* Badges row — only volatile/mission (contextual flags) */}
+              {(agent.volatile || agent.missionGroup) && (
+                <div className="flex flex-wrap gap-1.5">
+                  {agent.volatile && (
+                    <Badge variant="outline" className="text-[9px] text-amber-400 border-amber-500/30">
+                      <Zap className="h-2.5 w-2.5 mr-0.5" /> Volatile
+                    </Badge>
                   )}
-                  {identity.company && (
-                    <p className="text-[11px] text-muted-foreground flex items-center gap-1">
-                      <Building2 className="h-3 w-3" /> {identity.company}
-                    </p>
+                  {agent.missionGroup && (
+                    <Badge variant="outline" className="text-[9px] text-amber-400 border-amber-500/30">
+                      mission: {agent.missionGroup}
+                    </Badge>
                   )}
                 </div>
               )}
+
+              {/* Identity — ALL fields, always visible */}
+              <div className="divide-y divide-border/20 text-[11px]">
+                <div className="flex items-center gap-2 py-1.5">
+                  <Building2 className="h-3 w-3 text-muted-foreground shrink-0" />
+                  <span className="text-muted-foreground/60 shrink-0">Title</span>
+                  <span className={cn("ml-auto truncate", identity?.title ? "text-muted-foreground" : "text-muted-foreground/30 italic")}>{identity?.title || "not set"}</span>
+                </div>
+                <div className="flex items-center gap-2 py-1.5">
+                  <Building2 className="h-3 w-3 text-muted-foreground shrink-0" />
+                  <span className="text-muted-foreground/60 shrink-0">Company</span>
+                  <span className={cn("ml-auto truncate", identity?.company ? "text-muted-foreground" : "text-muted-foreground/30 italic")}>{identity?.company || "not set"}</span>
+                </div>
+                <div className="flex items-center gap-2 py-1.5">
+                  <Mail className="h-3 w-3 text-muted-foreground shrink-0" />
+                  <span className="text-muted-foreground/60 shrink-0">Email</span>
+                  <span className={cn("ml-auto truncate font-mono", identity?.email ? "text-muted-foreground" : "text-muted-foreground/30 italic")}>{identity?.email || "not set"}</span>
+                </div>
+                <div className="flex items-center gap-2 py-1.5">
+                  <MapPin className="h-3 w-3 text-muted-foreground shrink-0" />
+                  <span className="text-muted-foreground/60 shrink-0">Timezone</span>
+                  <span className={cn("ml-auto", identity?.timezone ? "text-muted-foreground" : "text-muted-foreground/30 italic")}>{identity?.timezone || "not set"}</span>
+                </div>
+                <div className="flex items-center gap-2 py-1.5">
+                  <Zap className="h-3 w-3 text-muted-foreground shrink-0" />
+                  <span className="text-muted-foreground/60 shrink-0">Model</span>
+                  <span className={cn("ml-auto truncate font-mono", agent.model ? "text-muted-foreground" : "text-muted-foreground/30 italic")}>{agent.model || "not set"}</span>
+                </div>
+                <div className="flex items-center gap-2 py-1.5">
+                  <Brain className="h-3 w-3 text-muted-foreground shrink-0" />
+                  <span className="text-muted-foreground/60 shrink-0">Reasoning</span>
+                  {agent.reasoning && agent.reasoning !== "off" ? (
+                    <Badge variant="outline" className={cn("text-[9px] ml-auto", reasoningMeta[agent.reasoning]?.color)}>
+                      {reasoningMeta[agent.reasoning]?.label ?? agent.reasoning}
+                    </Badge>
+                  ) : (
+                    <span className="ml-auto text-muted-foreground/30 italic">off</span>
+                  )}
+                </div>
+                {agent.createdAt && (
+                  <div className="flex items-center gap-2 py-1.5">
+                    <Cake className="h-3 w-3 text-muted-foreground shrink-0" />
+                    <span className="text-muted-foreground/60 shrink-0">Age</span>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className="ml-auto text-muted-foreground cursor-help">
+                          {formatAgentAge(agent.createdAt)}
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent className="text-xs">
+                        Created {new Date(agent.createdAt).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })}
+                      </TooltipContent>
+                    </Tooltip>
+                  </div>
+                )}
+              </div>
 
               {/* Bio */}
               {identity?.bio && (
-                <p className="text-xs text-muted-foreground leading-relaxed">{identity.bio}</p>
+                <div className="pt-1">
+                  <p className="text-[10px] text-muted-foreground/60 uppercase tracking-wider mb-1">Bio</p>
+                  <p className="text-xs text-muted-foreground leading-relaxed">{identity.bio}</p>
+                </div>
               )}
-
-              {/* Metadata: email, timezone, model */}
-              <div className="divide-y divide-border/20 text-[11px]">
-                {identity?.email && (
-                  <div className="flex items-center gap-2 py-1.5">
-                    <Mail className="h-3 w-3 text-muted-foreground shrink-0" />
-                    <span className="text-muted-foreground truncate font-mono">{identity.email}</span>
-                  </div>
-                )}
-                {identity?.timezone && (
-                  <div className="flex items-center gap-2 py-1.5">
-                    <MapPin className="h-3 w-3 text-muted-foreground shrink-0" />
-                    <span className="text-muted-foreground">{identity.timezone}</span>
-                  </div>
-                )}
-                {agent.model && (
-                  <div className="flex items-center gap-2 py-1.5">
-                    <Zap className="h-3 w-3 text-muted-foreground shrink-0" />
-                    <span className="text-muted-foreground font-mono truncate">{agent.model}</span>
-                  </div>
-                )}
-              </div>
-
-              {/* Badges row */}
-              <div className="flex flex-wrap gap-1.5">
-                {agent.volatile && (
-                  <Badge variant="outline" className="text-[9px] text-amber-400 border-amber-500/30">
-                    <Zap className="h-2.5 w-2.5 mr-0.5" /> Volatile
-                  </Badge>
-                )}
-                {agent.missionGroup && (
-                  <Badge variant="outline" className="text-[9px] text-amber-400 border-amber-500/30">
-                    mission: {agent.missionGroup}
-                  </Badge>
-                )}
-                {enabledFlags.length > 0 && (
-                  <Badge variant="secondary" className="text-[9px]">
-                    {enabledFlags.length} extension{enabledFlags.length !== 1 ? "s" : ""}
-                  </Badge>
-                )}
-                {agent.skills && agent.skills.length > 0 && (
-                  <Badge variant="secondary" className="text-[9px]">
-                    {agent.skills.length} skill{agent.skills.length !== 1 ? "s" : ""}
-                  </Badge>
-                )}
-              </div>
 
               {/* Refresh */}
               <div className="pt-1">
@@ -480,69 +694,6 @@ export function AgentDetailPage() {
               </div>
             </CardContent>
           </Card>
-
-          {/* ── Personality & Tone ── */}
-          {(identity?.personality || identity?.tone) && (
-            <Card className="bg-card/80 backdrop-blur-sm border-border/40">
-              <CardContent className="pt-4 pb-4 space-y-3">
-                {identity.personality && (
-                  <div>
-                    <div className="flex items-center gap-1.5 mb-1">
-                      <Heart className="h-3 w-3 text-pink-400" />
-                      <span className="text-[10px] text-muted-foreground uppercase tracking-wider">Personality</span>
-                    </div>
-                    <p className="text-xs text-muted-foreground leading-relaxed">{identity.personality}</p>
-                  </div>
-                )}
-                {identity.tone && (
-                  <div>
-                    <div className="flex items-center gap-1.5 mb-1">
-                      <MessageSquare className="h-3 w-3 text-sky-400" />
-                      <span className="text-[10px] text-muted-foreground uppercase tracking-wider">Communication Tone</span>
-                    </div>
-                    <p className="text-xs text-muted-foreground leading-relaxed">{identity.tone}</p>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          )}
-
-          {/* ── Responsibilities ── */}
-          {identity?.responsibilities && identity.responsibilities.length > 0 && (
-            <Card className="bg-card/80 backdrop-blur-sm border-border/40">
-              <CardContent className="pt-4 pb-4">
-                <SectionHeader title="Responsibilities" icon={ListChecks} count={identity.responsibilities.length} />
-                <div className="space-y-2">
-                  {identity.responsibilities.map((resp, i) => {
-                    if (typeof resp === "string") {
-                      return (
-                        <div key={i} className="flex items-start gap-2 text-xs">
-                          <div className="h-1.5 w-1.5 rounded-full bg-primary mt-1.5 shrink-0" />
-                          <span className="text-muted-foreground">{resp}</span>
-                        </div>
-                      );
-                    }
-                    return (
-                      <div key={i} className="rounded-md border border-border/30 bg-muted/10 px-3 py-2 space-y-1">
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs font-medium">{resp.area}</span>
-                          {resp.priority && (
-                            <Badge
-                              variant="outline"
-                              className={cn("text-[8px] capitalize", responsibilityPriorityColors[resp.priority])}
-                            >
-                              {resp.priority}
-                            </Badge>
-                          )}
-                        </div>
-                        <p className="text-[11px] text-muted-foreground leading-relaxed">{resp.description}</p>
-                      </div>
-                    );
-                  })}
-                </div>
-              </CardContent>
-            </Card>
-          )}
 
           {/* ── Reporting hierarchy ── */}
           {(agent.reportsTo || subordinates.length > 0) && (
@@ -651,6 +802,7 @@ export function AgentDetailPage() {
               </CardContent>
             </Card>
           )}
+
         </div>
 
         {/* ════════════ RIGHT COLUMN: Tabs ════════════ */}
@@ -678,15 +830,19 @@ export function AgentDetailPage() {
           {/* Live activity (shows on right column for better visibility) */}
           {process && <LiveActivity process={process} />}
 
+          {/* Activity heatmap */}
+          {agentTasks.length > 0 && (
+            <Card className="bg-card/80 backdrop-blur-sm border-border/40 mb-3">
+              <CardContent className="pt-3 pb-3 overflow-x-auto">
+                <ActivityHeatmap tasks={agentTasks} />
+              </CardContent>
+            </Card>
+          )}
+
           <Tabs defaultValue="overview" className="flex flex-col flex-1 min-h-0 mt-2">
             <TabsList className="shrink-0">
               <TabsTrigger value="overview">Overview</TabsTrigger>
-              <TabsTrigger value="tasks">
-                Tasks
-                {taskStats.total > 0 && (
-                  <Badge variant="secondary" className="ml-1.5 text-[9px]">{taskStats.total}</Badge>
-                )}
-              </TabsTrigger>
+              <TabsTrigger value="instructions">Instructions</TabsTrigger>
               <TabsTrigger value="tools">
                 Tools & Skills
                 <Badge variant="secondary" className="ml-1.5 text-[9px]">
@@ -694,24 +850,104 @@ export function AgentDetailPage() {
                 </Badge>
               </TabsTrigger>
               <TabsTrigger value="config">Config</TabsTrigger>
+              <TabsTrigger value="tasks">
+                Tasks
+                {taskStats.total > 0 && (
+                  <Badge variant="secondary" className="ml-1.5 text-[9px]">{taskStats.total}</Badge>
+                )}
+              </TabsTrigger>
             </TabsList>
 
             {/* ═══ OVERVIEW TAB ═══ */}
             <TabsContent value="overview" className="mt-4 flex-1 min-h-0">
               <ScrollArea className="h-full">
-                <div className="space-y-6 pr-4 pb-bottom-nav lg:pb-4">
+                <div className="space-y-4 pr-4 pb-bottom-nav lg:pb-4">
 
                   {/* Role */}
-                  {agent.role && (
-                    <div>
-                      <SectionHeader title="Role" icon={Shield} />
-                      <Card className="bg-card/80 backdrop-blur-sm border-border/40">
-                        <CardContent className="pt-4 pb-4">
+                  <div>
+                    <SectionHeader title="Role" icon={Shield} />
+                    <Card className="bg-card/80 backdrop-blur-sm border-border/40">
+                      <CardContent className="pt-3 pb-3">
+                        {agent.role ? (
                           <MessageResponse>{agent.role}</MessageResponse>
-                        </CardContent>
-                      </Card>
-                    </div>
-                  )}
+                        ) : (
+                          <p className="text-xs text-muted-foreground/40 italic">No role configured</p>
+                        )}
+                      </CardContent>
+                    </Card>
+                  </div>
+
+                  {/* Personality & Tone */}
+                  <div>
+                    <SectionHeader title="Personality & Tone" icon={Heart} />
+                    <Card className="bg-card/80 backdrop-blur-sm border-border/40">
+                      <CardContent className="pt-3 pb-3 divide-y divide-border/20">
+                        <div className="pb-3">
+                          <div className="flex items-center gap-1.5 mb-1">
+                            <Heart className="h-3 w-3 text-pink-400" />
+                            <span className="text-[10px] text-muted-foreground uppercase tracking-wider">Personality</span>
+                          </div>
+                          {identity?.personality ? (
+                            <p className="text-xs text-muted-foreground leading-relaxed">{identity.personality}</p>
+                          ) : (
+                            <p className="text-xs text-muted-foreground/40 italic">Not configured</p>
+                          )}
+                        </div>
+                        <div className="pt-3">
+                          <div className="flex items-center gap-1.5 mb-1">
+                            <MessageSquare className="h-3 w-3 text-sky-400" />
+                            <span className="text-[10px] text-muted-foreground uppercase tracking-wider">Communication Tone</span>
+                          </div>
+                          {identity?.tone ? (
+                            <p className="text-xs text-muted-foreground leading-relaxed">{identity.tone}</p>
+                          ) : (
+                            <p className="text-xs text-muted-foreground/40 italic">Not configured</p>
+                          )}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  </div>
+
+                  {/* Responsibilities */}
+                  <div>
+                    <SectionHeader title="Responsibilities" icon={ListChecks} count={identity?.responsibilities?.length} />
+                    <Card className="bg-card/80 backdrop-blur-sm border-border/40">
+                      <CardContent className="pt-3 pb-3">
+                        {identity?.responsibilities && identity.responsibilities.length > 0 ? (
+                          <div className="space-y-2">
+                            {identity.responsibilities.map((resp, i) => {
+                              if (typeof resp === "string") {
+                                return (
+                                  <div key={i} className="flex items-start gap-2 text-xs">
+                                    <div className="h-1.5 w-1.5 rounded-full bg-primary mt-1.5 shrink-0" />
+                                    <span className="text-muted-foreground">{resp}</span>
+                                  </div>
+                                );
+                              }
+                              return (
+                                <div key={i} className="rounded-md border border-border/30 bg-muted/10 px-3 py-2 space-y-1">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-xs font-medium">{resp.area}</span>
+                                    {resp.priority && (
+                                      <Badge
+                                        variant="outline"
+                                        className={cn("text-[8px] capitalize", responsibilityPriorityColors[resp.priority])}
+                                      >
+                                        {resp.priority}
+                                      </Badge>
+                                    )}
+                                  </div>
+                                  <p className="text-[11px] text-muted-foreground leading-relaxed">{resp.description}</p>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          <p className="text-xs text-muted-foreground/40 italic">No responsibilities configured</p>
+                        )}
+                      </CardContent>
+                    </Card>
+                  </div>
 
                   {/* Capabilities overview */}
                   <div>
@@ -743,95 +979,62 @@ export function AgentDetailPage() {
                       </Card>
                     </div>
                   </div>
+                </div>
+              </ScrollArea>
+            </TabsContent>
 
-                  {/* Configuration summary */}
-                  <div>
-                    <SectionHeader title="Configuration" icon={Settings2} />
-                    <Card className="bg-card/80 backdrop-blur-sm border-border/40">
-                      <CardContent className="pt-4 pb-4">
-                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-8 gap-y-1 divide-y sm:divide-y-0">
-                          <div className="divide-y divide-border/20">
-                            <KV label="Max Turns">{agent.maxTurns ?? 150}</KV>
-                            <KV label="Max Concurrency">
-                              {agent.maxConcurrency != null ? agent.maxConcurrency : (
-                                <span className="flex items-center gap-0.5"><InfinityIcon className="h-3 w-3" /></span>
-                              )}
-                            </KV>
-                          </div>
-                          <div className="divide-y divide-border/20">
-                            <KV label="Model" mono>{agent.model ?? "default"}</KV>
-                            <KV label="Type">
-                              {agent.volatile ? (
-                                <span className="flex items-center gap-1 text-amber-400"><Zap className="h-3 w-3" /> Volatile</span>
-                              ) : (
-                                <span className="flex items-center gap-1 text-emerald-400"><Shield className="h-3 w-3" /> Permanent</span>
-                              )}
-                            </KV>
-                          </div>
-                          <div className="divide-y divide-border/20">
-                            {agent.reportsTo && <KV label="Reports To" mono>{agent.reportsTo}</KV>}
-                            {agent.missionGroup && <KV label="Mission Group" mono>{agent.missionGroup}</KV>}
-                            <KV label="Paths">{agent.allowedPaths?.length ?? 1}</KV>
-                          </div>
+            {/* ═══ INSTRUCTIONS TAB ═══ */}
+            <TabsContent value="instructions" className="mt-4 flex-1 min-h-0">
+              <ScrollArea className="h-full">
+                <div className="space-y-4 pr-4 pb-bottom-nav lg:pb-4">
+                  {agent.systemPrompt ? (
+                    <Card className="bg-card/80 backdrop-blur-sm border-border/40 overflow-hidden">
+                      <div className="flex items-center justify-between px-4 py-2 border-b border-border bg-muted/30">
+                        <span className="text-[10px] text-muted-foreground font-mono">
+                          {agent.systemPrompt.length.toLocaleString()} chars
+                        </span>
+                        <div className="flex items-center gap-1">
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                variant="ghost" size="sm" className="h-6 w-6 p-0"
+                                onClick={() => navigator.clipboard.writeText(agent.systemPrompt!)}
+                              >
+                                <Copy className="h-3 w-3" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent className="text-xs">Copy</TooltipContent>
+                          </Tooltip>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                variant="ghost" size="sm" className="h-6 w-6 p-0"
+                                onClick={() => setShowSystemPrompt(!showSystemPrompt)}
+                              >
+                                {showSystemPrompt ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent className="text-xs">{showSystemPrompt ? "Collapse" : "Expand"}</TooltipContent>
+                          </Tooltip>
                         </div>
-                      </CardContent>
+                      </div>
+                      <div className={cn(
+                        "px-4 py-3 text-sm overflow-hidden",
+                        !showSystemPrompt && "max-h-[70vh]"
+                      )}>
+                        <MessageResponse>{agent.systemPrompt}</MessageResponse>
+                      </div>
+                      {!showSystemPrompt && (
+                        <div className="h-8 bg-gradient-to-t from-card/95 to-transparent -mt-8 relative pointer-events-none" />
+                      )}
                     </Card>
-                  </div>
-
-                  {/* Mobile-only: identity details that are in left column on desktop */}
-                  <div className="lg:hidden space-y-4">
-                    {(identity?.personality || identity?.tone) && (
-                      <div>
-                        <SectionHeader title="Personality & Tone" icon={Heart} />
-                        <Card className="bg-card/80 backdrop-blur-sm border-border/40">
-                          <CardContent className="pt-4 pb-4 space-y-3">
-                            {identity?.personality && (
-                              <div>
-                                <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1">Personality</p>
-                                <p className="text-xs text-muted-foreground">{identity.personality}</p>
-                              </div>
-                            )}
-                            {identity?.tone && (
-                              <div>
-                                <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1">Communication Tone</p>
-                                <p className="text-xs text-muted-foreground">{identity.tone}</p>
-                              </div>
-                            )}
-                          </CardContent>
-                        </Card>
-                      </div>
-                    )}
-
-                    {identity?.responsibilities && identity.responsibilities.length > 0 && (
-                      <div>
-                        <SectionHeader title="Responsibilities" icon={ListChecks} count={identity.responsibilities.length} />
-                        <Card className="bg-card/80 backdrop-blur-sm border-border/40">
-                          <CardContent className="pt-4 pb-4 space-y-2">
-                            {identity.responsibilities.map((resp, i) => (
-                              typeof resp === "string" ? (
-                                <div key={i} className="flex items-start gap-2 text-xs">
-                                  <div className="h-1.5 w-1.5 rounded-full bg-primary mt-1.5 shrink-0" />
-                                  <span className="text-muted-foreground">{resp}</span>
-                                </div>
-                              ) : (
-                                <div key={i} className="rounded-md border border-border/30 bg-muted/10 px-3 py-2">
-                                  <div className="flex items-center gap-2">
-                                    <span className="text-xs font-medium">{resp.area}</span>
-                                    {resp.priority && (
-                                      <Badge variant="outline" className={cn("text-[8px] capitalize", responsibilityPriorityColors[resp.priority])}>
-                                        {resp.priority}
-                                      </Badge>
-                                    )}
-                                  </div>
-                                  <p className="text-[11px] text-muted-foreground mt-1">{resp.description}</p>
-                                </div>
-                              )
-                            ))}
-                          </CardContent>
-                        </Card>
-                      </div>
-                    )}
-                  </div>
+                  ) : (
+                    <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
+                      <Terminal className="h-10 w-10 mb-3 opacity-40" />
+                      <p className="text-sm">No system prompt configured</p>
+                      <p className="text-xs text-muted-foreground/60 mt-1">Add a <code className="font-mono text-[10px]">systemPrompt</code> field in the agent config</p>
+                    </div>
+                  )}
                 </div>
               </ScrollArea>
             </TabsContent>
@@ -896,7 +1099,7 @@ export function AgentDetailPage() {
             {/* ═══ TOOLS & SKILLS TAB ═══ */}
             <TabsContent value="tools" className="mt-4 flex-1 min-h-0">
               <ScrollArea className="h-full">
-                <div className="space-y-6 pr-4 pb-bottom-nav lg:pb-4">
+                <div className="space-y-4 pr-4 pb-bottom-nav lg:pb-4">
 
                   {/* Allowed tools */}
                   {agent.allowedTools && agent.allowedTools.length > 0 && (
@@ -1090,144 +1293,46 @@ export function AgentDetailPage() {
                       </div>
                     </div>
                   )}
+
+                  {/* Credential Vault */}
+                  <div>
+                    <SectionHeader title="Credential Vault" icon={KeyRound} />
+                    <Card className="bg-card/80 backdrop-blur-sm border-border/40">
+                      <CardContent className="pt-4 pb-4">
+                        <p className="text-xs text-muted-foreground leading-relaxed">
+                          Credentials are stored in the encrypted vault (<code className="text-[10px] font-mono">.polpo/vault.enc</code>), secured with AES-256-GCM.
+                          Use the chat to add, update, or remove vault entries for this agent.
+                        </p>
+                      </CardContent>
+                    </Card>
+                  </div>
                 </div>
               </ScrollArea>
             </TabsContent>
 
-            {/* ═══ CONFIG TAB ═══ */}
+            {/* ═══ CONFIG TAB — Raw JSON ═══ */}
             <TabsContent value="config" className="mt-4 flex-1 min-h-0">
               <ScrollArea className="h-full">
-                <div className="space-y-6 pr-4 pb-bottom-nav lg:pb-4">
-
-                  {/* System Prompt */}
-                  {agent.systemPrompt && (
-                    <div>
-                      <SectionHeader title="System Prompt" icon={Terminal} />
-                      <Card className="bg-card/80 backdrop-blur-sm border-border/40 overflow-hidden">
-                        <div className="flex items-center justify-between px-4 py-2 border-b border-border bg-muted/30">
-                          <span className="text-[10px] text-muted-foreground font-mono">
-                            {agent.systemPrompt.length.toLocaleString()} chars
-                          </span>
-                          <div className="flex items-center gap-1">
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <Button
-                                  variant="ghost" size="sm" className="h-6 w-6 p-0"
-                                  onClick={() => navigator.clipboard.writeText(agent.systemPrompt!)}
-                                >
-                                  <Copy className="h-3 w-3" />
-                                </Button>
-                              </TooltipTrigger>
-                              <TooltipContent className="text-xs">Copy</TooltipContent>
-                            </Tooltip>
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <Button
-                                  variant="ghost" size="sm" className="h-6 w-6 p-0"
-                                  onClick={() => setShowSystemPrompt(!showSystemPrompt)}
-                                >
-                                  {showSystemPrompt ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
-                                </Button>
-                              </TooltipTrigger>
-                              <TooltipContent className="text-xs">{showSystemPrompt ? "Collapse" : "Expand"}</TooltipContent>
-                            </Tooltip>
-                          </div>
-                        </div>
-                        <div className="px-4 py-3">
-                          <pre className={cn(
-                            "text-xs text-muted-foreground font-mono whitespace-pre-wrap break-words",
-                            !showSystemPrompt && "line-clamp-6"
-                          )}>
-                            {agent.systemPrompt}
-                          </pre>
-                        </div>
-                      </Card>
+                <div className="pr-4 pb-bottom-nav lg:pb-4">
+                  <Card className="bg-card/80 backdrop-blur-sm border-border/40 overflow-hidden">
+                    <div className="flex items-center justify-between px-4 py-2 border-b border-border bg-muted/30">
+                      <span className="text-[10px] text-muted-foreground font-mono">polpo.json &mdash; agent configuration</span>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="ghost" size="sm" className="h-6 w-6 p-0"
+                            onClick={() => navigator.clipboard.writeText(JSON.stringify(agent, null, 2))}
+                          >
+                            <Copy className="h-3 w-3" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent className="text-xs">Copy JSON</TooltipContent>
+                      </Tooltip>
                     </div>
-                  )}
-
-                  {/* Vault */}
-                  {vaultEntries.length > 0 && (
-                    <div>
-                      <SectionHeader title="Credential Vault" icon={Lock} count={vaultEntries.length} />
-                      <div className="space-y-2">
-                        {vaultEntries.map(([serviceName, entry]) => {
-                          const typeInfo = vaultTypeIcons[entry.type] ?? vaultTypeIcons.custom;
-                          const TypeIcon = typeInfo.icon;
-                          return (
-                            <Card key={serviceName} className="bg-card/80 backdrop-blur-sm border-border/40">
-                              <CardContent className="pt-3 pb-3">
-                                <div className="flex items-center gap-2 mb-2">
-                                  <TypeIcon className={cn("h-4 w-4", typeInfo.color)} />
-                                  <span className="text-sm font-medium">{entry.label ?? serviceName}</span>
-                                  <Badge variant="outline" className="text-[9px] ml-auto">{entry.type}</Badge>
-                                </div>
-                                <div className="flex flex-wrap gap-1">
-                                  {Object.keys(entry.credentials).map((key) => (
-                                    <Badge key={key} variant="secondary" className="text-[9px] font-mono">{key}: ***</Badge>
-                                  ))}
-                                </div>
-                              </CardContent>
-                            </Card>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Full config grid */}
-                  <div>
-                    <SectionHeader title="Agent Configuration" icon={Settings2} />
-                    <Card className="bg-card/80 backdrop-blur-sm border-border/40">
-                      <CardContent className="pt-4 pb-4">
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8">
-                          <div className="divide-y divide-border/20">
-                            <KV label="Name" mono>{agent.name}</KV>
-                            <KV label="Model" mono>{agent.model ?? "default"}</KV>
-                            <KV label="Max Turns">{agent.maxTurns ?? 150}</KV>
-                            <KV label="Max Concurrency">
-                              {agent.maxConcurrency ?? "unlimited"}
-                            </KV>
-                            <KV label="Volatile">{agent.volatile ? "Yes" : "No"}</KV>
-                          </div>
-                          <div className="divide-y divide-border/20">
-                            {agent.missionGroup && <KV label="Mission Group" mono>{agent.missionGroup}</KV>}
-                            {agent.reportsTo && <KV label="Reports To" mono>{agent.reportsTo}</KV>}
-                            <KV label="Allowed Paths">{agent.allowedPaths?.length ?? 1}</KV>
-                            <KV label="Allowed Tools">{agent.allowedTools?.length ?? 0}</KV>
-                            <KV label="Skills">{agent.skills?.length ?? 0}</KV>
-                            <KV label="MCP Servers">{mcpEntries.length}</KV>
-                          </div>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  </div>
-
-                  {/* Identity config (raw details for completeness) */}
-                  {hasIdentity && (
-                    <div>
-                      <SectionHeader title="Identity Configuration" icon={User} />
-                      <Card className="bg-card/80 backdrop-blur-sm border-border/40">
-                        <CardContent className="pt-4 pb-4">
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8">
-                            <div className="divide-y divide-border/20">
-                              {identity!.displayName && <KV label="Display Name">{identity!.displayName}</KV>}
-                              {identity!.title && <KV label="Title">{identity!.title}</KV>}
-                              {identity!.company && <KV label="Company">{identity!.company}</KV>}
-                              {identity!.email && <KV label="Email" mono>{identity!.email}</KV>}
-                            </div>
-                            <div className="divide-y divide-border/20">
-                              {identity!.timezone && <KV label="Timezone">{identity!.timezone}</KV>}
-                              {identity!.tone && <KV label="Tone">{identity!.tone}</KV>}
-                              {identity!.personality && <KV label="Personality">{identity!.personality}</KV>}
-                              {identity!.responsibilities && (
-                                <KV label="Responsibilities">{identity!.responsibilities.length} defined</KV>
-                              )}
-                            </div>
-                          </div>
-                        </CardContent>
-                      </Card>
-                    </div>
-                  )}
+                    <pre className="px-4 py-3 text-xs font-mono text-muted-foreground leading-relaxed overflow-x-auto whitespace-pre">
+                      {JSON.stringify(agent, null, 2)}
+                    </pre>
+                  </Card>
                 </div>
               </ScrollArea>
             </TabsContent>

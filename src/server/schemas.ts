@@ -105,12 +105,6 @@ const AgentIdentitySchema = z.object({
   personality: z.string().optional(),
 });
 
-const VaultEntrySchema = z.object({
-  type: z.enum(["smtp", "imap", "oauth", "api_key", "login", "custom"]),
-  label: z.string().optional(),
-  credentials: z.record(z.string(), z.string()),
-});
-
 export const AddAgentSchema = z.object({
   name: z.string().min(1),
   role: z.string().optional(),
@@ -119,9 +113,8 @@ export const AddAgentSchema = z.object({
   systemPrompt: z.string().optional(),
   skills: z.array(z.string()).optional(),
   maxTurns: z.number().int().positive().optional(),
-  // Identity, vault, hierarchy
+  // Identity & hierarchy (vault credentials managed via encrypted store)
   identity: AgentIdentitySchema.optional(),
-  vault: z.record(z.string(), VaultEntrySchema).optional(),
   reportsTo: z.string().optional(),
   // Extended tool categories
   enableBrowser: z.boolean().optional(),

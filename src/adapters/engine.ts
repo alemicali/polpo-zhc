@@ -321,8 +321,9 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
   // Run the agent and capture result
   handle.done = (async (): Promise<TaskResult> => {
     try {
-      // Resolve agent vault credentials
-      const vault = resolveAgentVault(agentConfig.vault);
+      // Resolve agent vault credentials from encrypted store
+      const vaultEntries = ctx?.vaultStore?.getAllForAgent(agentConfig.name);
+      const vault = resolveAgentVault(vaultEntries);
 
       // Resolve extended tools (async — Playwright import) and MCP servers before prompting
       let allTools = codingTools;

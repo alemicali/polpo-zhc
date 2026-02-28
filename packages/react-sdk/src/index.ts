@@ -21,6 +21,7 @@ export { useSkills } from "./hooks/use-skills.js";
 export { useNotifications } from "./hooks/use-notifications.js";
 export { useApprovals } from "./hooks/use-approvals.js";
 export { useTemplates } from "./hooks/use-templates.js";
+export { useSchedules } from "./hooks/use-schedules.js";
 
 // Client (re-export for convenience)
 export { PolpoClient, ChatCompletionStream } from "./client/polpo-client.js";
@@ -42,7 +43,6 @@ export type {
   AgentConfig,
   AgentIdentity,
   AgentResponsibility,
-  VaultEntry,
   AgentProcess,
   AgentActivity,
   Team,
@@ -56,6 +56,11 @@ export type {
   PolpoState,
   PolpoConfig,
   PolpoSettings,
+  ReasoningLevel,
+  ModelConfig,
+  ModelAllowlistEntry,
+  CustomModelDef,
+  ProviderConfig,
   SSEEvent,
   CreateTaskRequest,
   UpdateTaskRequest,
@@ -70,6 +75,9 @@ export type {
   ChatSession,
   ChatMessage,
   ChatCompletionMessage,
+  TextContentPart,
+  ImageUrlContentPart,
+  ContentPart,
   ChatCompletionRequest,
   ChatCompletionResponse,
   ChatCompletionChoice,
@@ -81,6 +89,8 @@ export type {
   AskUserQuestion,
   AskUserPayload,
   AskUserAnswer,
+  MissionPreviewPayload,
+  VaultPreviewPayload,
   SkillInfo,
   NotificationRule,
   NotificationRecord,

@@ -294,107 +294,107 @@ describe("Tasks API", () => {
   });
 });
 
-// ── Plans API ────────────────────────────────────────────────────────
+// ── Missions API ─────────────────────────────────────────────────────
 
-describe("Plans API", () => {
-  const PLAN_DATA = JSON.stringify({
+describe("Missions API", () => {
+  const MISSION_DATA = JSON.stringify({
     tasks: [
       { title: "Build feature", description: "Implement the new feature", assignTo: "agent-1" },
       { title: "Write tests", description: "Write tests for the feature", assignTo: "agent-1", dependsOn: ["Build feature"] },
     ],
   });
 
-  test("GET /plans returns 200 with plan array", async () => {
-    const res = await app.request(api("/plans"));
+  test("GET /missions returns 200 with mission array", async () => {
+    const res = await app.request(api("/missions"));
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.ok).toBe(true);
     expect(Array.isArray(body.data)).toBe(true);
   });
 
-  test("POST /plans creates a plan (201)", async () => {
+  test("POST /missions creates a mission (201)", async () => {
     const res = await app.request(
-      api("/plans"),
+      api("/missions"),
       jsonReq("POST", {
-        data: PLAN_DATA,
-        name: "test-plan-create",
+        data: MISSION_DATA,
+        name: "test-mission-create",
       }),
     );
     expect(res.status).toBe(201);
     const body = await res.json();
     expect(body.ok).toBe(true);
     expect(body.data).toHaveProperty("id");
-    expect(body.data.data).toBe(PLAN_DATA);
-    expect(body.data.name).toBe("test-plan-create");
+    expect(body.data.data).toBe(MISSION_DATA);
+    expect(body.data.name).toBe("test-mission-create");
     expect(body.data.status).toBe("draft");
   });
 
-  test("GET /plans/:id returns 200 for existing plan", async () => {
-    // Create a plan first
+  test("GET /missions/:id returns 200 for existing mission", async () => {
+    // Create a mission first
     const createRes = await app.request(
-      api("/plans"),
+      api("/missions"),
       jsonReq("POST", {
-        data: PLAN_DATA,
-        name: "test-plan-get",
+        data: MISSION_DATA,
+        name: "test-mission-get",
       }),
     );
     const created = await createRes.json();
-    const planId = created.data.id;
+    const missionId = created.data.id;
 
-    const res = await app.request(api(`/plans/${planId}`));
+    const res = await app.request(api(`/missions/${missionId}`));
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.ok).toBe(true);
-    expect(body.data.id).toBe(planId);
-    expect(body.data.name).toBe("test-plan-get");
+    expect(body.data.id).toBe(missionId);
+    expect(body.data.name).toBe("test-mission-get");
   });
 
-  test("GET /plans/:id returns 404 for unknown ID", async () => {
-    const res = await app.request(api("/plans/nonexistent-plan-xyz"));
+  test("GET /missions/:id returns 404 for unknown ID", async () => {
+    const res = await app.request(api("/missions/nonexistent-mission-xyz"));
     expect(res.status).toBe(404);
     const body = await res.json();
     expect(body.ok).toBe(false);
     expect(body.code).toBe("NOT_FOUND");
   });
 
-  test("DELETE /plans/:id removes the plan", async () => {
-    // Create a plan
+  test("DELETE /missions/:id removes the mission", async () => {
+    // Create a mission
     const createRes = await app.request(
-      api("/plans"),
+      api("/missions"),
       jsonReq("POST", {
-        data: PLAN_DATA,
-        name: "test-plan-delete",
+        data: MISSION_DATA,
+        name: "test-mission-delete",
       }),
     );
     const created = await createRes.json();
-    const planId = created.data.id;
+    const missionId = created.data.id;
 
     // Delete it
-    const res = await app.request(api(`/plans/${planId}`), { method: "DELETE" });
+    const res = await app.request(api(`/missions/${missionId}`), { method: "DELETE" });
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.ok).toBe(true);
     expect(body.data.deleted).toBe(true);
 
     // Verify gone
-    const getRes = await app.request(api(`/plans/${planId}`));
+    const getRes = await app.request(api(`/missions/${missionId}`));
     expect(getRes.status).toBe(404);
   });
 
-  test("POST /plans/:id/execute creates tasks from plan", async () => {
-    // Create a plan
+  test("POST /missions/:id/execute creates tasks from mission", async () => {
+    // Create a mission
     const createRes = await app.request(
-      api("/plans"),
+      api("/missions"),
       jsonReq("POST", {
-        data: PLAN_DATA,
-        name: "test-plan-execute",
+        data: MISSION_DATA,
+        name: "test-mission-execute",
       }),
     );
     const created = await createRes.json();
-    const planId = created.data.id;
+    const missionId = created.data.id;
 
     // Execute it
-    const res = await app.request(api(`/plans/${planId}/execute`), { method: "POST" });
+    const res = await app.request(api(`/missions/${missionId}/execute`), { method: "POST" });
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.ok).toBe(true);
@@ -408,9 +408,9 @@ describe("Plans API", () => {
     expect(body.data.tasks[1].dependsOn).toContain(body.data.tasks[0].id);
   });
 
-  test("POST /plans with empty data is rejected", async () => {
+  test("POST /missions with empty data is rejected", async () => {
     const res = await app.request(
-      api("/plans"),
+      api("/missions"),
       jsonReq("POST", {
         data: "",
       }),
@@ -420,21 +420,21 @@ describe("Plans API", () => {
     expect(res.status).toBeGreaterThanOrEqual(400);
   });
 
-  test("PATCH /plans/:id updates plan status", async () => {
-    // Create a plan
+  test("PATCH /missions/:id updates mission status", async () => {
+    // Create a mission
     const createRes = await app.request(
-      api("/plans"),
+      api("/missions"),
       jsonReq("POST", {
-        data: PLAN_DATA,
-        name: "test-plan-patch",
+        data: MISSION_DATA,
+        name: "test-mission-patch",
       }),
     );
     const created = await createRes.json();
-    const planId = created.data.id;
+    const missionId = created.data.id;
 
     // Patch status
     const res = await app.request(
-      api(`/plans/${planId}`),
+      api(`/missions/${missionId}`),
       jsonReq("PATCH", {
         status: "cancelled",
       }),
@@ -673,45 +673,45 @@ describe("Agents Detail API", () => {
   });
 });
 
-// ── Plans Resume/Abort ───────────────────────────────────────────────
+// ── Missions Resume/Abort ────────────────────────────────────────────
 
-describe("Plans Resume/Abort API", () => {
-  test("GET /plans/resumable returns 200 with array", async () => {
-    const res = await app.request(api("/plans/resumable"));
+describe("Missions Resume/Abort API", () => {
+  test("GET /missions/resumable returns 200 with array", async () => {
+    const res = await app.request(api("/missions/resumable"));
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.ok).toBe(true);
     expect(Array.isArray(body.data)).toBe(true);
   });
 
-  test("POST /plans/:id/abort returns 404 for unknown plan", async () => {
-    const res = await app.request(api("/plans/nonexistent-plan/abort"), { method: "POST" });
+  test("POST /missions/:id/abort returns 404 for unknown mission", async () => {
+    const res = await app.request(api("/missions/nonexistent-mission/abort"), { method: "POST" });
     expect(res.status).toBe(404);
     const body = await res.json();
     expect(body.ok).toBe(false);
     expect(body.code).toBe("NOT_FOUND");
   });
 
-  test("POST /plans/:id/abort aborts an executed plan's tasks", async () => {
-    const PLAN_DATA = JSON.stringify({
+  test("POST /missions/:id/abort aborts an executed mission's tasks", async () => {
+    const MISSION_DATA = JSON.stringify({
       tasks: [
         { title: "Abort test 1", description: "Will be aborted", assignTo: "agent-1" },
         { title: "Abort test 2", description: "Will be aborted too", assignTo: "agent-1" },
       ],
     });
 
-    // Create and execute plan
+    // Create and execute mission
     const createRes = await app.request(
-      api("/plans"),
-      jsonReq("POST", { data: PLAN_DATA, name: "abort-test" }),
+      api("/missions"),
+      jsonReq("POST", { data: MISSION_DATA, name: "abort-test" }),
     );
     const created = await createRes.json();
-    const planId = created.data.id;
+    const missionId = created.data.id;
 
-    await app.request(api(`/plans/${planId}/execute`), { method: "POST" });
+    await app.request(api(`/missions/${missionId}/execute`), { method: "POST" });
 
     // Abort
-    const res = await app.request(api(`/plans/${planId}/abort`), { method: "POST" });
+    const res = await app.request(api(`/missions/${missionId}/abort`), { method: "POST" });
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.ok).toBe(true);
@@ -719,27 +719,27 @@ describe("Plans Resume/Abort API", () => {
     expect(body.data.aborted).toBeGreaterThanOrEqual(0);
   });
 
-  test("POST /plans/:id/resume resumes an executed plan", async () => {
-    const PLAN_DATA = JSON.stringify({
+  test("POST /missions/:id/resume resumes an executed mission", async () => {
+    const MISSION_DATA = JSON.stringify({
       tasks: [
         { title: "Resume test 1", description: "Task one", assignTo: "agent-1" },
         { title: "Resume test 2", description: "Task two", assignTo: "agent-1" },
       ],
     });
 
-    // Create and execute plan
+    // Create and execute mission
     const createRes = await app.request(
-      api("/plans"),
-      jsonReq("POST", { data: PLAN_DATA, name: "resume-test" }),
+      api("/missions"),
+      jsonReq("POST", { data: MISSION_DATA, name: "resume-test" }),
     );
     const created = await createRes.json();
-    const planId = created.data.id;
+    const missionId = created.data.id;
 
-    await app.request(api(`/plans/${planId}/execute`), { method: "POST" });
+    await app.request(api(`/missions/${missionId}/execute`), { method: "POST" });
 
     // Resume with empty body
     const res = await app.request(
-      api(`/plans/${planId}/resume`),
+      api(`/missions/${missionId}/resume`),
       jsonReq("POST", {}),
     );
     expect(res.status).toBe(200);
@@ -909,7 +909,7 @@ describe("Templates API", () => {
     await writeFile(join(wfDir, "template.json"), JSON.stringify({
       name: "test-wf",
       description: "A test template",
-      plan: {
+      mission: {
         tasks: [
           { title: "{{taskName}}", description: "Do the thing", assignTo: "agent-1" },
         ],
@@ -958,7 +958,7 @@ describe("Templates API", () => {
     expect(res.status).toBe(201);
     const body = await res.json();
     expect(body.ok).toBe(true);
-    expect(body.data).toHaveProperty("plan");
+    expect(body.data).toHaveProperty("mission");
     expect(body.data).toHaveProperty("tasks");
     expect(body.data).toHaveProperty("group");
     expect(body.data.tasks).toBeGreaterThanOrEqual(1);

@@ -32,7 +32,6 @@ Missions and tasks are stored separately in `.polpo/missions/` and `.polpo/tasks
 | `allowedPaths` | string[] | `[workDir]` | Filesystem sandbox — directories the agent can access. Absolute or relative to `workDir` |
 | `mcpServers` | object | — | MCP server configuration. Keys are server names, values are stdio or HTTP configs |
 | `identity` | AgentIdentity | — | Agent's identity — persona, responsibilities, communication style. See [Identity](#agentidentity-fields) |
-| `vault` | Record\<string, VaultEntry\> | — | Per-agent credential vault, keyed by service name. See [Vault](#vaultentry-fields) |
 | `reportsTo` | string | — | Agent this one reports to — org chart hierarchy for escalation. Must match another agent's `name` |
 | `systemPrompt` | string | — | Additional system prompt appended to base |
 | `skills` | string[] | — | Installed skill names (e.g. `"frontend-design"`) |
@@ -76,9 +75,11 @@ Missions and tasks are stored separately in `.polpo/missions/` and `.polpo/tasks
 | `description` | string | yes | What the agent does in this area |
 | `priority` | string | no | `"critical"`, `"high"`, `"medium"`, or `"low"` — affects how the agent prioritizes work |
 
-## VaultEntry Fields
+## Encrypted Vault
 
-Each vault entry represents a set of credentials for a service.
+Each agent can have its own set of credentials for different services (SMTP, IMAP, OAuth, API keys, logins). Vault entries are stored in `.polpo/vault.enc`, encrypted with AES-256-GCM — they are **not** part of `polpo.json`.
+
+### VaultEntry Fields
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -86,11 +87,26 @@ Each vault entry represents a set of credentials for a service.
 | `label` | string | Human-readable label (e.g. "Work email") |
 | `credentials` | Record\<string, string\> | **Required.** Key-value credential fields. Values can reference env vars: `"${ALICE_SMTP_PASS}"` |
 
+### Key Management
+
+The vault encryption key is loaded from (in order):
+
+1. `POLPO_VAULT_KEY` environment variable
+2. `~/.polpo/vault.key` — auto-generated on first use (`chmod 600`)
+
+### Managing Vault Entries
+
+- **CLI**: `polpo agent onboard <name>` — the wizard's Email and Vault steps write to `vault.enc`
+- **TUI / Chat**: Use the built-in vault tools:
+  - `set_vault_entry` — add or update a credential
+  - `remove_vault_entry` — delete a credential
+  - `list_vault` — show all entries (credentials masked)
+
 <Info>
-Vault credentials support `${ENV_VAR}` syntax — at runtime, Polpo resolves them from environment variables. This keeps secrets out of `polpo.json`.
+Vault credentials support `${ENV_VAR}` syntax — at runtime, Polpo resolves them from environment variables. This keeps plaintext secrets out of the vault file entirely.
 </Info>
 
-### Example: Agent with Identity and Vault
+### Example: Agent with Identity
 
 ```json
 {
@@ -123,33 +139,12 @@ Vault credentials support `${ENV_VAR}` syntax — at runtime, Polpo resolves the
     "tone": "Professional but approachable. Uses first names. Keeps emails under 3 paragraphs. Ends messages with a clear call-to-action. Uses bullet points for lists. Avoids jargon when writing to customers.",
     "personality": "Empathetic and detail-oriented. Anticipates customer concerns before they escalate. Prefers data-backed decisions — always cites engagement metrics. Creative with content ideas but disciplined with deadlines. Collaborative by nature, regularly checks in with teammates."
   },
-  "vault": {
-    "email": {
-      "type": "smtp",
-      "label": "Work email (SMTP)",
-      "credentials": {
-        "host": "smtp.gmail.com",
-        "port": "587",
-        "user": "${ALICE_SMTP_USER}",
-        "pass": "${ALICE_SMTP_PASS}",
-        "from": "alice@acme.com"
-      }
-    },
-    "email-inbox": {
-      "type": "imap",
-      "label": "Work email (IMAP)",
-      "credentials": {
-        "host": "imap.gmail.com",
-        "port": "993",
-        "user": "${ALICE_IMAP_USER}",
-        "pass": "${ALICE_IMAP_PASS}"
-      }
-    }
-  },
   "enableEmail": true,
   "enableBrowser": true
 }
 ```
+
+Vault entries for this agent (stored in `.polpo/vault.enc`) would include SMTP and IMAP credentials, managed via `polpo agent onboard alice` or the `set_vault_entry` tool.
 
 ## Task Fields
 
@@ -270,6 +265,7 @@ See [Providers & Models](/models/overview) for supported providers and model res
 | `POLPO_MODEL` | Global default model override (e.g. `anthropic:claude-sonnet-4-6`) |
 | `POLPO_JUDGE_MODEL` | Model for LLM-as-Judge assessment reviews |
 | `POLPO_STT_MODEL` | Speech-to-text model (default: `gpt-4o-mini-transcribe`) |
+| `POLPO_VAULT_KEY` | Vault encryption key (overrides `~/.polpo/vault.key`) |
 | `API_KEY` | Server authentication key (for HTTP API) |
 
 ### Provider API Keys

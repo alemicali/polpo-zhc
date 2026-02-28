@@ -19,6 +19,12 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
   CheckCircle2,
   Clock,
   AlertTriangle,
@@ -43,9 +49,11 @@ import {
   Target,
   Users,
   Check,
+  ArrowUpDown,
 } from "lucide-react";
 import { useTasks, usePolpo, useProcesses, useMissions, useAgents } from "@lumea-labs/polpo-react";
 import type { Task, TaskStatus, AgentProcess } from "@lumea-labs/polpo-react";
+import { Skeleton } from "@/components/ui/skeleton";
 import { useAsyncAction } from "@/hooks/use-polpo";
 import { toast } from "sonner";
 import { formatDistanceToNow } from "date-fns";
@@ -84,6 +92,55 @@ const kanbanColumns: { status: TaskStatus | "queued"; label: string; filter: (t:
   { status: "done", label: "Done", filter: (t) => t.status === "done" },
   { status: "failed", label: "Failed", filter: (t) => t.status === "failed" },
 ];
+
+// ── Sort options ──
+
+type SortKey = "updated" | "created" | "name" | "status" | "priority" | "score";
+
+const sortOptions: { value: SortKey; label: string }[] = [
+  { value: "updated", label: "Last updated" },
+  { value: "created", label: "Created" },
+  { value: "name", label: "Name" },
+  { value: "status", label: "Status" },
+  { value: "priority", label: "Priority" },
+  { value: "score", label: "Score" },
+];
+
+const statusOrder: Record<TaskStatus, number> = {
+  in_progress: 0,
+  review: 1,
+  awaiting_approval: 2,
+  assigned: 3,
+  pending: 4,
+  draft: 5,
+  failed: 6,
+  done: 7,
+};
+
+function sortTasks(tasks: Task[], key: SortKey): Task[] {
+  const sorted = [...tasks];
+  switch (key) {
+    case "updated":
+      return sorted.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+    case "created":
+      return sorted.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    case "name":
+      return sorted.sort((a, b) => a.title.localeCompare(b.title));
+    case "status":
+      return sorted.sort((a, b) => (statusOrder[a.status] ?? 99) - (statusOrder[b.status] ?? 99));
+    case "priority":
+      return sorted.sort((a, b) => (b.priority ?? 1) - (a.priority ?? 1)); // higher first
+    case "score": {
+      return sorted.sort((a, b) => {
+        const sa = a.result?.assessment?.globalScore ?? -1;
+        const sb = b.result?.assessment?.globalScore ?? -1;
+        return sb - sa; // higher first
+      });
+    }
+    default:
+      return sorted;
+  }
+}
 
 // ── Mission filter popover ──
 
@@ -156,10 +213,12 @@ function TeamFilter({
   teams,
   selected,
   onToggle,
+  isLoading,
 }: {
   teams: { name: string }[];
   selected: Set<string>;
   onToggle: (name: string) => void;
+  isLoading?: boolean;
 }) {
   const hasFilter = selected.size > 0;
 
@@ -176,7 +235,13 @@ function TeamFilter({
       </PopoverTrigger>
       <PopoverContent className="w-56 p-2" align="start">
         <div className="space-y-1 max-h-64 overflow-y-auto">
-          {teams.length === 0 ? (
+          {isLoading ? (
+            <div className="space-y-2 py-1">
+              <Skeleton className="h-7 w-full rounded-md" />
+              <Skeleton className="h-7 w-full rounded-md" />
+              <Skeleton className="h-7 w-3/4 rounded-md" />
+            </div>
+          ) : teams.length === 0 ? (
             <p className="text-xs text-muted-foreground text-center py-3">No teams</p>
           ) : (
             teams.map((t) => (
@@ -415,9 +480,7 @@ function KanbanBoard({
   return (
     <div className="flex gap-3 flex-1 min-h-0 overflow-x-auto pb-2">
       {kanbanColumns.map((col) => {
-        const colTasks = tasks.filter(col.filter).sort(
-          (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
-        );
+        const colTasks = tasks.filter(col.filter);
         const colCfg = col.status === "queued" ? statusConfig.pending : statusConfig[col.status as TaskStatus];
 
         return (
@@ -486,8 +549,7 @@ function ListView({
       if (tab === "pending") return t.status === "pending" || t.status === "assigned";
       if (tab !== "all" && t.status !== tab) return false;
       return true;
-    })
-    .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+    });
 
   const counts = {
     all: tasks.length,
@@ -572,13 +634,16 @@ export function TasksPage() {
   const { processes } = useProcesses();
   const { client } = usePolpo();
   const { missions } = useMissions();
-  const { teams } = useAgents();
+  const { teams, isLoading: teamsLoading } = useAgents();
   const [search, setSearch] = useState("");
   const [viewMode, setViewMode] = useState<ViewMode>(() => {
     return (localStorage.getItem("polpo-tasks-view") as ViewMode) ?? "list";
   });
   const [selectedMissions, setSelectedMissions] = useState<Set<string>>(new Set());
   const [selectedTeams, setSelectedTeams] = useState<Set<string>>(new Set());
+  const [sortKey, setSortKey] = useState<SortKey>(() => {
+    return (localStorage.getItem("polpo-tasks-sort") as SortKey) ?? "updated";
+  });
 
   const setView = (mode: ViewMode) => {
     setViewMode(mode);
@@ -631,9 +696,14 @@ export function TasksPage() {
     }
   };
 
-  // Filtered tasks by search + mission filter + team filter
+  const setSort = (key: SortKey) => {
+    setSortKey(key);
+    localStorage.setItem("polpo-tasks-sort", key);
+  };
+
+  // Filtered + sorted tasks by search + mission filter + team filter
   const filtered = useMemo(() => {
-    return tasks.filter(t => {
+    const result = tasks.filter(t => {
       // Mission filter
       if (selectedMissions.size > 0 && !selectedMissions.has(t.group ?? "")) {
         return false;
@@ -654,7 +724,8 @@ export function TasksPage() {
       }
       return true;
     });
-  }, [tasks, search, selectedMissions, selectedTeams, agentTeamMap]);
+    return sortTasks(result, sortKey);
+  }, [tasks, search, selectedMissions, selectedTeams, agentTeamMap, sortKey]);
 
   // Unique mission names for the filter
   const missionOptions = useMemo((): { name: string; id: string }[] => {
@@ -698,16 +769,38 @@ export function TasksPage() {
         />
 
         {/* Team filter */}
-        {teams.length > 1 && (
-          <TeamFilter
-            teams={teams}
-            selected={selectedTeams}
-            onToggle={toggleTeam}
-          />
-        )}
+        <TeamFilter
+          teams={teams}
+          selected={selectedTeams}
+          onToggle={toggleTeam}
+          isLoading={teamsLoading}
+        />
 
         {/* Spacer */}
         <div className="flex-1" />
+
+        {/* Sort */}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="outline" size="sm" className="h-7 gap-1.5 text-xs">
+              <ArrowUpDown className="h-3 w-3" />
+              {sortOptions.find(o => o.value === sortKey)?.label ?? "Sort"}
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            {sortOptions.map((opt) => (
+              <DropdownMenuItem
+                key={opt.value}
+                className={cn("text-xs gap-2", sortKey === opt.value && "font-medium")}
+                onClick={() => setSort(opt.value)}
+              >
+                {sortKey === opt.value && <Check className="h-3 w-3" />}
+                {sortKey !== opt.value && <span className="w-3" />}
+                {opt.label}
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
 
         {/* View toggle */}
         <div className="flex items-center rounded-md border border-border/50">

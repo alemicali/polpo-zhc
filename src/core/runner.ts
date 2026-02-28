@@ -20,6 +20,7 @@ import type { RunStore, RunRecord } from "./run-store.js";
 import type { RunnerConfig, TaskResult } from "./types.js";
 import { notifyRunComplete } from "./notification.js";
 import { sanitizeTranscriptEntry } from "../server/security.js";
+import { EncryptedVaultStore } from "../vault/encrypted-store.js";
 
 const ACTIVITY_POLL_MS = 1500;
 
@@ -111,11 +112,14 @@ async function main(): Promise<void> {
 
   let handle;
   try {
+    let vaultStore: EncryptedVaultStore | undefined;
+    try { vaultStore = new EncryptedVaultStore(config.polpoDir); } catch { /* vault unavailable */ }
     const spawnCtx = {
       polpoDir: config.polpoDir,
       emailAllowedDomains: config.emailAllowedDomains,
       mcpToolAllowlist: config.mcpToolAllowlist,
       reasoning: config.reasoning,
+      vaultStore,
     };
     handle = spawnEngine(config.agent, config.task, config.cwd, spawnCtx);
     // Wire transcript persistence — every agent message gets written to the run log

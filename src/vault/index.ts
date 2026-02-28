@@ -6,3 +6,5 @@ export {
   type SmtpCredentials,
   type ImapCredentials,
 } from "./resolver.js";
+
+export { EncryptedVaultStore } from "./encrypted-store.js";

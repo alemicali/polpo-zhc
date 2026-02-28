@@ -97,22 +97,10 @@ export function validateAgents(agents: any[]): void {
         throw new Error(`Agent "${agent.name}": browserProfile must contain only letters, numbers, hyphens, underscores`);
       }
     }
-    // Validate vault entries
-    if (agent.vault) {
-      if (typeof agent.vault !== "object" || Array.isArray(agent.vault)) {
-        throw new Error(`Agent "${agent.name}": vault must be an object`);
-      }
-      const validVaultTypes = ["smtp", "imap", "oauth", "api_key", "login", "custom"];
-      for (const [service, entry] of Object.entries(agent.vault)) {
-        const e = entry as Record<string, unknown>;
-        if (!e.type || !validVaultTypes.includes(e.type as string)) {
-          throw new Error(`Agent "${agent.name}": vault entry "${service}" has invalid type "${e.type}" (must be one of: ${validVaultTypes.join(", ")})`);
-        }
-        if (!e.credentials || typeof e.credentials !== "object" || Array.isArray(e.credentials)) {
-          throw new Error(`Agent "${agent.name}": vault entry "${service}" must have a credentials object`);
-        }
-      }
-    }
+    // Vault credentials are now stored in .polpo/vault.enc (encrypted) — no longer inline.
+    // Silently strip any leftover vault field from old configs.
+    if ((agent as any).vault) delete (agent as any).vault;
+
     // Validate identity
     if (agent.identity) {
       if (agent.identity.responsibilities && !Array.isArray(agent.identity.responsibilities)) {

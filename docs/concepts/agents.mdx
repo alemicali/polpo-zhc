@@ -23,12 +23,6 @@ An agent is a named AI worker on Polpo's team. Each agent gets a model, a role, 
     "tone": "Professional but warm. Uses first names. Keeps emails under 3 paragraphs.",
     "personality": "Empathetic and detail-oriented. Data-driven — always cites metrics."
   },
-  "vault": {
-    "email": {
-      "type": "smtp",
-      "credentials": { "host": "smtp.gmail.com", "user": "${ALICE_SMTP_USER}", "pass": "${ALICE_SMTP_PASS}" }
-    }
-  },
   "enableEmail": true,
   "allowedPaths": ["./content", "./reports"]
 }
@@ -44,7 +38,6 @@ See [Configuration](/reference/config#agent-fields) for the full field-by-field 
 | `role` | `string` | Role description (included in system prompt) |
 | `model` | `string` | `"provider:model"` or bare model ID |
 | `identity` | `AgentIdentity` | Persona: name, title, responsibilities, tone, personality |
-| `vault` | `Record<string, VaultEntry>` | Per-agent credentials (SMTP, IMAP, OAuth, API keys) |
 | `reportsTo` | `string` | Org chart parent — used for automatic escalation |
 | `allowedTools` | `string[]` | Which tools this agent can use |
 | `allowedPaths` | `string[]` | Filesystem sandbox |
@@ -73,7 +66,7 @@ While you can write identity JSON by hand, the recommended approach is the **onb
 polpo agent onboard alice
 ```
 
-This interactive CLI walks through 5 steps — identity, persona (responsibilities + tone + personality), hierarchy, email, and additional vault credentials — and writes everything to `.polpo/polpo.json`.
+This interactive CLI walks through 5 steps — identity, persona (responsibilities + tone + personality), hierarchy, email, and additional vault credentials. Agent config is written to `.polpo/polpo.json`; vault entries are stored in `.polpo/vault.enc` (AES-256-GCM encrypted).
 
 After onboarding, verify the result:
 
@@ -88,17 +81,16 @@ polpo agent list          # org chart tree
 
 ## Credential Vault
 
-Each agent can have its own set of credentials for different services. Vault entries use `${ENV_VAR}` references to keep secrets out of the config file:
+Each agent can have its own set of credentials for different services (SMTP, IMAP, OAuth, API keys, logins). Vault entries are stored in `.polpo/vault.enc`, encrypted with AES-256-GCM — they are **not** part of `polpo.json`.
 
-```json
-"vault": {
-  "email": { "type": "smtp", "credentials": { "user": "${ALICE_SMTP_USER}", "pass": "${ALICE_SMTP_PASS}" } },
-  "twitter": { "type": "oauth", "credentials": { "api_key": "${TWITTER_KEY}" } },
-  "crm": { "type": "login", "credentials": { "url": "https://crm.example.com", "username": "alice", "password": "${CRM_PASS}" } }
-}
-```
+Manage vault entries via:
 
-At runtime, Polpo resolves `${ENV_VAR}` from environment variables and passes the credentials to the agent's tools. Credential resolution order: tool parameters > vault > environment variables.
+- **CLI**: `polpo agent onboard <name>` — the Email and Vault steps write to the encrypted store
+- **TUI / Chat**: Use the built-in tools — `set_vault_entry`, `remove_vault_entry`, `list_vault`
+
+Credential values support `${ENV_VAR}` references — Polpo resolves them at runtime from environment variables. Credential resolution order: tool parameters > vault > environment variables.
+
+See [Configuration — Encrypted Vault](/reference/config#encrypted-vault) for vault entry fields and key management.
 
 ## Hierarchy (reportsTo)
 

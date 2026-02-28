@@ -28,7 +28,7 @@ function makeTemplate(overrides?: Partial<TemplateDefinition>): TemplateDefiniti
       { name: "depth", description: "Analysis depth", type: "string", default: "normal", enum: ["quick", "normal", "deep"] },
       { name: "retries", description: "Max retries", type: "number", default: 2 },
     ],
-    plan: {
+    mission: {
       tasks: [
         {
           title: "Analyze {{module}}",
@@ -88,7 +88,7 @@ describe("discoverTemplates", () => {
   });
 
   it("skips templates missing required fields", () => {
-    writeTemplate("no-plan", { name: "no-plan", description: "Has no plan" });
+    writeTemplate("no-mission", { name: "no-mission", description: "Has no mission" });
     writeTemplate("valid", makeTemplate({ name: "valid" }));
 
     const templates = discoverTemplates(TMP, POLPO_DIR);
@@ -125,8 +125,8 @@ describe("loadTemplate", () => {
     const wf = loadTemplate(TMP, POLPO_DIR, "my-wf");
     expect(wf).not.toBeNull();
     expect(wf!.name).toBe("my-wf");
-    expect(wf!.plan).toBeDefined();
-    expect((wf!.plan as { tasks: unknown[] }).tasks).toHaveLength(1);
+    expect(wf!.mission).toBeDefined();
+    expect((wf!.mission as { tasks: unknown[] }).tasks).toHaveLength(1);
   });
 
   it("returns null for non-existent template", () => {
@@ -208,14 +208,14 @@ describe("validateParams", () => {
 // ── instantiateTemplate ────────────────────────────────────────────────
 
 describe("instantiateTemplate", () => {
-  it("replaces placeholders in the plan", () => {
+  it("replaces placeholders in the mission", () => {
     const wf = makeTemplate();
     const result = instantiateTemplate(wf, { module: "src/core", depth: "deep", retries: 3 });
 
-    const plan = JSON.parse(result.data);
-    expect(plan.tasks[0].title).toBe("Analyze src/core");
-    expect(plan.tasks[0].description).toBe("Analyze src/core at deep depth");
-    expect(plan.tasks[0].maxRetries).toBe("3");
+    const mission = JSON.parse(result.data);
+    expect(mission.tasks[0].title).toBe("Analyze src/core");
+    expect(mission.tasks[0].description).toBe("Analyze src/core at deep depth");
+    expect(mission.tasks[0].maxRetries).toBe("3");
   });
 
   it("generates a descriptive prompt", () => {
@@ -229,7 +229,7 @@ describe("instantiateTemplate", () => {
 
   it("throws on unreplaced placeholders", () => {
     const wf = makeTemplate({
-      plan: {
+      mission: {
         tasks: [{
           title: "Process {{module}} with {{missing_param}}",
           assignTo: "agent-1",
@@ -264,7 +264,7 @@ describe("instantiateTemplate", () => {
   it("handles empty resolved params", () => {
     const wf = makeTemplate({
       parameters: [],
-      plan: {
+      mission: {
         tasks: [{
           title: "Simple task",
           description: "No params needed",
@@ -275,7 +275,7 @@ describe("instantiateTemplate", () => {
 
     const result = instantiateTemplate(wf, {});
     expect(result.prompt).toBe("template:test-template");
-    const plan = JSON.parse(result.data);
-    expect(plan.tasks[0].title).toBe("Simple task");
+    const mission = JSON.parse(result.data);
+    expect(mission.tasks[0].title).toBe("Simple task");
   });
 });

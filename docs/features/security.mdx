@@ -199,8 +199,42 @@ Each agent can be restricted to specific filesystem paths using `allowedPaths`. 
 | Network exposure | Localhost-only by default (`127.0.0.1`) |
 | Unauthorized API access | Optional API key authentication |
 | Agent filesystem access | `allowedPaths` sandbox per agent |
+| Credential storage | AES-256-GCM encrypted vault (`.polpo/vault.enc`) |
 | Cross-origin requests | CORS restricted to localhost origins |
 | Log store errors | Wrapped in try/catch — never breaks the system |
+
+## Encrypted Vault
+
+Agent credentials (SMTP, IMAP, OAuth, API keys, logins) are stored in `.polpo/vault.enc`, encrypted with AES-256-GCM. Credentials are **never** stored in `polpo.json`.
+
+### Encryption Key
+
+The vault key is loaded from (in order):
+
+1. `POLPO_VAULT_KEY` environment variable — use this in CI/CD or containerized deployments
+2. `~/.polpo/vault.key` — auto-generated on first use with `chmod 600` (user-read-only)
+
+The key file is stored in the **home directory** (`~/.polpo/`), not the project directory, so it is never committed to version control.
+
+### Vault File Structure
+
+`.polpo/vault.enc` contains a single AES-256-GCM encrypted blob. Each entry is keyed by `agentName:serviceName` and contains:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `type` | string | `"smtp"`, `"imap"`, `"oauth"`, `"api_key"`, `"login"`, or `"custom"` |
+| `label` | string | Human-readable label |
+| `credentials` | Record\<string, string\> | Key-value credential fields. Supports `${ENV_VAR}` references |
+
+### Managing Credentials
+
+| Method | Command / Tool |
+|--------|---------------|
+| CLI wizard | `polpo agent onboard <name>` (Email + Vault steps) |
+| Add/update entry | `set_vault_entry` tool (TUI / chat) |
+| Remove entry | `remove_vault_entry` tool |
+| List entries | `list_vault` tool (credentials masked) |
+| View agent vault | `polpo agent show <name>` (credentials masked) |
 
 <Note>
 Polpo follows a defense-in-depth approach. No single measure is sufficient on its own, but together they significantly limit the blast radius of a compromised agent.

@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from "react";
+import { useState } from "react";
 import { Link } from "react-router-dom";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -28,11 +28,30 @@ import {
   Monitor,
   Mail,
   ToggleRight,
+  MessageSquare,
+  Link2,
+  Timer,
+  Paperclip,
+  FolderLock,
+  Gauge,
+  Sparkles,
+  Activity,
 } from "lucide-react";
 import { useConfig } from "@/hooks/use-polpo";
 import { useAgents } from "@lumea-labs/polpo-react";
 import { cn } from "@/lib/utils";
 import { JsonBlock } from "@/components/json-block";
+
+// ── Helpers ──
+
+function formatModel(model: string | { primary?: string; fallbacks?: string[] } | undefined): string {
+  if (!model) return "not set";
+  if (typeof model === "string") return model;
+  const parts: string[] = [];
+  if (model.primary) parts.push(model.primary);
+  if (model.fallbacks?.length) parts.push(`+ ${model.fallbacks.length} fallback${model.fallbacks.length > 1 ? "s" : ""}`);
+  return parts.join(" ") || "not set";
+}
 
 // ── Section definitions ──
 
@@ -49,46 +68,56 @@ const sections = [
 
 type SectionId = (typeof sections)[number]["id"];
 
-// ── Helpers ──
+// ── Reusable display components ──
 
-function KV({ label, children, mono }: { label: string; children: React.ReactNode; mono?: boolean }) {
+/** Key-value row — label left, value right, dotted filler in between */
+function Row({ label, value, mono }: { label: string; value: React.ReactNode; mono?: boolean }) {
   return (
-    <div className="flex items-baseline justify-between gap-3 py-1">
-      <span className="text-[11px] text-muted-foreground shrink-0">{label}</span>
-      <span className={cn("text-[11px] text-right truncate", mono && "font-mono")}>{children}</span>
+    <div className="flex items-baseline gap-2 py-1.5 min-w-0">
+      <span className="text-xs text-muted-foreground shrink-0">{label}</span>
+      <span className="flex-1 border-b border-dotted border-border/30 min-w-4 self-end mb-[3px]" />
+      <span className={cn("text-xs text-foreground shrink-0 text-right max-w-[60%] truncate", mono && "font-mono text-[11px]")}>{value}</span>
     </div>
   );
 }
 
-function SectionAnchor({ id, icon: Icon, label, count, children }: {
-  id: string;
-  icon: React.ElementType;
-  label: string;
-  count?: number;
+/** A titled subsection card with optional colored accent */
+function GroupCard({ title, icon: Icon, accent, children }: {
+  title: string;
+  icon?: React.ElementType;
+  accent?: string; // tailwind border-l color e.g. "border-l-amber-500"
   children: React.ReactNode;
 }) {
   return (
-    <section id={`cfg-${id}`} className="scroll-mt-4">
-      <div className="flex items-center gap-2 mb-3 sticky top-0 bg-background/80 backdrop-blur-sm py-1.5 z-10">
-        <Icon className="h-4 w-4 text-primary" />
-        <h3 className="text-sm font-semibold tracking-tight">{label}</h3>
-        {count != null && count > 0 && (
-          <Badge variant="secondary" className="text-[9px] ml-auto">{count}</Badge>
-        )}
-      </div>
-      {children}
-    </section>
+    <Card className={cn("bg-card/80 border-border/40", accent && `border-l-2 ${accent}`)}>
+      <CardContent className="pt-3 pb-3">
+        <div className="flex items-center gap-2 mb-2.5">
+          {Icon && <Icon className="h-3.5 w-3.5 text-muted-foreground" />}
+          <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{title}</span>
+        </div>
+        {children}
+      </CardContent>
+    </Card>
   );
 }
 
-function FeatureFlag({ label, enabled }: { label: string; enabled?: boolean }) {
-  if (enabled == null) return null;
+/** Inline pill for enabled/disabled capabilities */
+function CapPill({ label, on }: { label: string; on: boolean }) {
   return (
-    <div className="flex items-center gap-2 py-0.5">
-      <div className={cn("h-1.5 w-1.5 rounded-full", enabled ? "bg-emerald-500" : "bg-zinc-500")} />
-      <span className="text-[11px] text-muted-foreground">{label}</span>
-    </div>
+    <span className={cn(
+      "inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium border",
+      on
+        ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
+        : "bg-muted/30 text-muted-foreground/60 border-border/30 line-through decoration-muted-foreground/30",
+    )}>
+      {label}
+    </span>
   );
+}
+
+/** Empty state placeholder */
+function Empty({ text }: { text: string }) {
+  return <p className="text-xs text-muted-foreground/60 italic py-4 text-center">{text}</p>;
 }
 
 // ── Main ──
@@ -97,13 +126,6 @@ export function ConfigPage() {
   const { config, isLoading, error, refetch } = useConfig();
   const { agents, teams } = useAgents();
   const [activeSection, setActiveSection] = useState<SectionId>("general");
-  const scrollRef = useRef<HTMLDivElement>(null);
-
-  const scrollTo = useCallback((id: SectionId) => {
-    setActiveSection(id);
-    const el = document.getElementById(`cfg-${id}`);
-    el?.scrollIntoView({ behavior: "smooth", block: "start" });
-  }, []);
 
   if (isLoading) {
     return (
@@ -131,9 +153,10 @@ export function ConfigPage() {
   const rules = (notifications?.rules ?? []) as Array<{
     id: string; name: string; events: string[]; channels: string[];
     severity?: string; template?: string; condition?: Record<string, unknown>;
+    cooldownMs?: number; includeOutcomes?: boolean; outcomeFilter?: string[];
+    maxAttachmentSize?: number; actions?: Array<{ type: string; [key: string]: unknown }>;
   }>;
 
-  // Collect agent feature flags
   const agentFlags = (a: (typeof agents)[number]) => {
     const flags: { label: string; enabled: boolean }[] = [];
     if (a.enableBrowser != null) flags.push({ label: `Browser (${a.browserEngine ?? "default"})`, enabled: a.enableBrowser });
@@ -146,23 +169,24 @@ export function ConfigPage() {
     if (a.enableDocx != null) flags.push({ label: "DOCX", enabled: a.enableDocx });
     if (a.enableEmail != null) flags.push({ label: "Email", enabled: a.enableEmail });
     if (a.enableAudio != null) flags.push({ label: "Audio", enabled: a.enableAudio });
+    if (a.enableImage != null) flags.push({ label: "Image", enabled: a.enableImage });
     return flags;
   };
 
   return (
     <div className="flex flex-col flex-1 min-h-0 gap-4">
-      {/* ── Horizontal tab bar ── */}
+      {/* ── Tab bar ── */}
       <div className="flex items-center gap-2 shrink-0">
         <div className="flex items-center gap-1 overflow-x-auto scrollbar-none flex-1 pb-0.5">
           {sections.map(({ id, label, icon: Icon }) => (
             <button
               key={id}
-              onClick={() => scrollTo(id)}
+              onClick={() => setActiveSection(id)}
               className={cn(
                 "flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer",
                 activeSection === id
                   ? "bg-accent text-accent-foreground shadow-sm"
-                  : "text-muted-foreground hover:bg-accent/40 hover:text-foreground"
+                  : "text-muted-foreground hover:bg-accent/40 hover:text-foreground",
               )}
             >
               <Icon className="h-3.5 w-3.5 shrink-0" />
@@ -175,85 +199,80 @@ export function ConfigPage() {
         </Button>
       </div>
 
-      {/* ── Content ── */}
-      <div ref={scrollRef} className="flex-1 overflow-auto space-y-8 pb-bottom-nav lg:pb-2">
+      {/* ── Tab content ── */}
+      <div className="flex-1 overflow-auto pb-bottom-nav lg:pb-2 space-y-3">
 
         {/* ═══ GENERAL ═══ */}
-        <SectionAnchor id="general" icon={Hash} label="General">
-          <Card className="bg-card/80 backdrop-blur-sm border-border/40">
-            <CardContent className="pt-4">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8">
-                <div className="divide-y divide-border/20">
-                  <KV label="Project" mono>{config.project}</KV>
-                  <KV label="Teams" mono>{teams.map(t => t.name).join(", ") || config.teams?.[0]?.name || "default"}</KV>
-                  {teams[0]?.description && <KV label="Description">{teams[0].description}</KV>}
-                </div>
-                <div className="divide-y divide-border/20">
-                  <KV label="Agents">{agents.length} configured</KV>
-                  <KV label="Storage">{settings.storage ?? "file"}</KV>
-                  <KV label="Log Level">{settings.logLevel}</KV>
-                </div>
+        {activeSection === "general" && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <GroupCard title="Project" icon={Hash} accent="border-l-sky-500">
+              <Row label="Name" value={config.project} mono />
+              <Row label="Teams" value={teams.map(t => t.name).join(", ") || "default"} mono />
+              {teams[0]?.description && <Row label="Description" value={teams[0].description} />}
+              <Row label="Agents" value={`${agents.length} configured`} />
+            </GroupCard>
+            <GroupCard title="Runtime" icon={Settings2} accent="border-l-violet-500">
+              <Row label="Storage" value={settings.storage ?? "file"} mono />
+              <Row label="Log Level" value={settings.logLevel} mono />
+              <Row label="Work Directory" value={settings.workDir} mono />
+              <div className="mt-2 pt-2 border-t border-border/20">
+                <p className="text-[10px] text-muted-foreground">
+                  Source: <code className="font-mono text-primary">.polpo/polpo.json</code>
+                </p>
               </div>
-              <p className="text-[10px] text-muted-foreground mt-3 border-t border-border/20 pt-2">
-                Source: <code className="font-mono text-primary">.polpo/polpo.json</code>
-              </p>
-            </CardContent>
-          </Card>
-        </SectionAnchor>
+            </GroupCard>
+          </div>
+        )}
 
         {/* ═══ MODELS ═══ */}
-        <SectionAnchor id="models" icon={Cpu} label="Models">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {/* Orchestrator model */}
-            <Card className="bg-card/80 backdrop-blur-sm border-border/40">
-              <CardContent className="pt-3 pb-3">
-                <div className="flex items-center gap-2 mb-2">
-                  <Zap className="h-3.5 w-3.5 text-amber-400" />
-                  <span className="text-[10px] text-muted-foreground uppercase tracking-wider">Orchestrator</span>
-                </div>
-                <code className="text-sm font-mono font-medium block truncate">
-                  {settings.orchestratorModel ?? "not set"}
-                </code>
-              </CardContent>
-            </Card>
-            {/* Image model */}
-            <Card className="bg-card/80 backdrop-blur-sm border-border/40">
-              <CardContent className="pt-3 pb-3">
-                <div className="flex items-center gap-2 mb-2">
-                  <Monitor className="h-3.5 w-3.5 text-violet-400" />
-                  <span className="text-[10px] text-muted-foreground uppercase tracking-wider">Image</span>
-                </div>
-                <code className="text-sm font-mono font-medium block truncate">
-                  {settings.imageModel ?? "none"}
-                </code>
-              </CardContent>
-            </Card>
-          </div>
-          {settings.modelAllowlist && Object.keys(settings.modelAllowlist).length > 0 && (
-            <Card className="bg-card/80 backdrop-blur-sm border-border/40 mt-3">
-              <CardContent className="pt-3 pb-3">
-                <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-2">Model Allowlist</p>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+        {activeSection === "models" && (
+          <>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <GroupCard title="Orchestrator Model" icon={Zap} accent="border-l-amber-500">
+                <code className="text-sm font-mono font-medium block truncate">{formatModel(settings.orchestratorModel)}</code>
+                {typeof settings.orchestratorModel === "object" && settings.orchestratorModel?.fallbacks?.length ? (
+                  <div className="flex flex-wrap gap-1 mt-2">
+                    <span className="text-[10px] text-muted-foreground mr-1">Fallbacks:</span>
+                    {settings.orchestratorModel.fallbacks.map((fb) => (
+                      <Badge key={fb} variant="outline" className="text-[10px] font-mono">{fb}</Badge>
+                    ))}
+                  </div>
+                ) : null}
+              </GroupCard>
+              <GroupCard title="Image Model" icon={Monitor} accent="border-l-violet-500">
+                <code className="text-sm font-mono font-medium block truncate">{settings.imageModel ?? "none"}</code>
+              </GroupCard>
+            </div>
+            {settings.reasoning && (
+              <GroupCard title="Global Reasoning" icon={Sparkles}>
+                <Row label="Level" value={settings.reasoning} mono />
+              </GroupCard>
+            )}
+            {settings.modelAllowlist && Object.keys(settings.modelAllowlist).length > 0 && (
+              <GroupCard title="Model Allowlist" icon={Shield}>
+                <div className="space-y-1.5">
                   {Object.entries(settings.modelAllowlist).map(([model, opts]) => (
                     <div key={model} className="flex items-center gap-2 rounded-md bg-muted/20 px-2.5 py-1.5 min-w-0">
-                      <code className="text-[10px] font-mono truncate flex-1">{model}</code>
-                      {opts.alias && <Badge variant="outline" className="text-[8px] shrink-0">→ {opts.alias}</Badge>}
-                      {opts.maxTokens && <span className="text-[9px] text-muted-foreground shrink-0">{(opts.maxTokens / 1000).toFixed(0)}k</span>}
+                      <code className="text-[11px] font-mono truncate flex-1">{model}</code>
+                      {opts.alias && <Badge variant="outline" className="text-[10px] shrink-0">→ {opts.alias}</Badge>}
+                      {opts.params && Object.entries(opts.params).map(([k, v]) => (
+                        <Badge key={k} variant="secondary" className="text-[10px] shrink-0">{k}: {String(v)}</Badge>
+                      ))}
                     </div>
                   ))}
                 </div>
-              </CardContent>
-            </Card>
-          )}
-        </SectionAnchor>
+              </GroupCard>
+            )}
+          </>
+        )}
 
         {/* ═══ AGENTS ═══ */}
-        <SectionAnchor id="agents" icon={Bot} label="Agents" count={agents.length}>
+        {activeSection === "agents" && (
           <div className="space-y-2">
             {agents.map((agent) => {
               const flags = agentFlags(agent);
               return (
-                <Card key={agent.name} className="bg-card/80 backdrop-blur-sm border-border/40 overflow-hidden">
+                <Card key={agent.name} className="bg-card/80 border-border/40 overflow-hidden">
                   <Collapsible>
                     <CollapsibleTrigger className="flex items-center gap-3 w-full px-4 py-3 text-left transition-colors hover:bg-accent/10 cursor-pointer group">
                       <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 shrink-0">
@@ -262,94 +281,138 @@ export function ConfigPage() {
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
                           <span className="text-sm font-semibold">{agent.name}</span>
-                          {agent.model && (
-                            <code className="text-[10px] font-mono text-muted-foreground">{agent.model}</code>
-                          )}
+                          {agent.model && <code className="text-[11px] font-mono text-muted-foreground">{agent.model}</code>}
                         </div>
-                        <p className="text-[11px] text-muted-foreground truncate mt-0.5">{agent.role}</p>
+                        <p className="text-xs text-muted-foreground truncate mt-0.5">{agent.role}</p>
                       </div>
                       <div className="flex items-center gap-1.5 shrink-0">
                         {flags.filter(f => f.enabled).slice(0, 3).map(f => (
-                          <Badge key={f.label} variant="secondary" className="text-[8px] hidden sm:inline-flex">{f.label}</Badge>
+                          <Badge key={f.label} variant="secondary" className="text-[10px] hidden sm:inline-flex">{f.label}</Badge>
                         ))}
                         {flags.filter(f => f.enabled).length > 3 && (
-                          <Badge variant="secondary" className="text-[8px] hidden sm:inline-flex">+{flags.filter(f => f.enabled).length - 3}</Badge>
+                          <Badge variant="secondary" className="text-[10px] hidden sm:inline-flex">+{flags.filter(f => f.enabled).length - 3}</Badge>
                         )}
                         <ChevronDown className="h-4 w-4 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
                       </div>
                     </CollapsibleTrigger>
                     <CollapsibleContent>
-                      <div className="px-4 pb-4 pt-1 border-t border-border/20">
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-0.5">
-                          {agent.identity?.displayName && <KV label="Display Name">{agent.identity.displayName}</KV>}
-                          {agent.identity?.title && <KV label="Title">{agent.identity.title}</KV>}
-                          {agent.maxTurns && <KV label="Max Turns">{agent.maxTurns}</KV>}
-                          {agent.maxConcurrency && <KV label="Max Concurrency">{agent.maxConcurrency}</KV>}
-                          {agent.reportsTo && <KV label="Reports To" mono>{agent.reportsTo}</KV>}
-                          {agent.systemPrompt && <KV label="System Prompt">{agent.systemPrompt.slice(0, 60)}...</KV>}
+                      <div className="px-4 pb-4 pt-2 border-t border-border/20 space-y-3">
+                        {/* Identity & Config */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          {(agent.identity?.displayName || agent.identity?.title || agent.reportsTo || agent.reasoning) && (
+                            <div className="space-y-0">
+                              {agent.identity?.displayName && <Row label="Display Name" value={agent.identity.displayName} />}
+                              {agent.identity?.title && <Row label="Title" value={agent.identity.title} />}
+                              {agent.reportsTo && <Row label="Reports To" value={agent.reportsTo} mono />}
+                              {agent.reasoning && <Row label="Reasoning" value={agent.reasoning} mono />}
+                              {agent.volatile && <Row label="Volatile" value={agent.missionGroup ? `Yes (${agent.missionGroup})` : "Yes"} />}
+                            </div>
+                          )}
+                          {(agent.maxTurns || agent.maxConcurrency || agent.browserProfile) && (
+                            <div className="space-y-0">
+                              {agent.maxTurns && <Row label="Max Turns" value={agent.maxTurns} />}
+                              {agent.maxConcurrency && <Row label="Max Concurrency" value={agent.maxConcurrency} />}
+                              {agent.browserProfile && <Row label="Browser Profile" value={agent.browserProfile} mono />}
+                            </div>
+                          )}
                         </div>
 
-                        {/* Feature flags */}
+                        {/* System Prompt */}
+                        {agent.systemPrompt && (
+                          <div className="rounded-md bg-muted/20 border border-border/20 px-3 py-2">
+                            <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">System Prompt</span>
+                            <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{agent.systemPrompt}</p>
+                          </div>
+                        )}
+
+                        {/* Capabilities */}
                         {flags.length > 0 && (
-                          <div className="mt-3 pt-2 border-t border-border/20">
+                          <div>
                             <div className="flex items-center gap-1.5 mb-2">
-                              <ToggleRight className="h-3 w-3 text-muted-foreground" />
-                              <span className="text-[10px] text-muted-foreground uppercase tracking-wider">Capabilities</span>
+                              <ToggleRight className="h-3.5 w-3.5 text-muted-foreground" />
+                              <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Capabilities</span>
                             </div>
-                            <div className="grid grid-cols-2 sm:grid-cols-3 gap-0.5">
-                              {flags.map(f => <FeatureFlag key={f.label} label={f.label} enabled={f.enabled} />)}
+                            <div className="flex flex-wrap gap-1.5">
+                              {flags.map(f => <CapPill key={f.label} label={f.label} on={f.enabled} />)}
                             </div>
                           </div>
                         )}
 
-                        {/* Tools */}
-                        {agent.allowedTools && agent.allowedTools.length > 0 && (
-                          <div className="mt-3 pt-2 border-t border-border/20">
+                        {/* Allowed Paths */}
+                        {agent.allowedPaths && agent.allowedPaths.length > 0 && (
+                          <div>
                             <div className="flex items-center gap-1.5 mb-2">
-                              <Wrench className="h-3 w-3 text-muted-foreground" />
-                              <span className="text-[10px] text-muted-foreground uppercase tracking-wider">Allowed Tools</span>
+                              <FolderLock className="h-3.5 w-3.5 text-muted-foreground" />
+                              <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Allowed Paths</span>
                             </div>
-                            <div className="flex flex-wrap gap-1">
-                              {agent.allowedTools.map((t) => (
-                                <Badge key={t} variant="outline" className="text-[9px] font-mono">{t}</Badge>
+                            <div className="flex flex-wrap gap-1.5">
+                              {agent.allowedPaths.map((p) => (
+                                <Badge key={p} variant="outline" className="text-[11px] font-mono">{p}</Badge>
                               ))}
                             </div>
                           </div>
                         )}
 
-                        {/* Skills */}
-                        {agent.skills && agent.skills.length > 0 && (
-                          <div className="mt-3 pt-2 border-t border-border/20">
-                            <span className="text-[10px] text-muted-foreground uppercase tracking-wider">Skills</span>
-                            <div className="flex flex-wrap gap-1 mt-1.5">
-                              {agent.skills.map((s: string) => (
-                                <Badge key={s} variant="secondary" className="text-[9px]">{s}</Badge>
-                              ))}
+                        {/* Tools & Skills side by side */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          {agent.allowedTools && agent.allowedTools.length > 0 && (
+                            <div>
+                              <div className="flex items-center gap-1.5 mb-2">
+                                <Wrench className="h-3.5 w-3.5 text-muted-foreground" />
+                                <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Tools</span>
+                              </div>
+                              <div className="flex flex-wrap gap-1">
+                                {agent.allowedTools.map((t) => (
+                                  <Badge key={t} variant="outline" className="text-[10px] font-mono">{t}</Badge>
+                                ))}
+                              </div>
                             </div>
-                          </div>
-                        )}
+                          )}
+                          {agent.skills && agent.skills.length > 0 && (
+                            <div>
+                              <div className="flex items-center gap-1.5 mb-2">
+                                <Sparkles className="h-3.5 w-3.5 text-muted-foreground" />
+                                <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Skills</span>
+                              </div>
+                              <div className="flex flex-wrap gap-1">
+                                {agent.skills.map((s: string) => (
+                                  <Badge key={s} variant="secondary" className="text-[10px]">{s}</Badge>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
 
-                        {/* MCP Servers */}
+                        {/* MCP Servers & Email Domains */}
                         {agent.mcpServers && Object.keys(agent.mcpServers as object).length > 0 && (
-                          <div className="mt-3 pt-2 border-t border-border/20">
-                            <span className="text-[10px] text-muted-foreground uppercase tracking-wider">MCP Servers</span>
+                          <div>
+                            <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">MCP Servers</span>
                             <div className="flex flex-wrap gap-1 mt-1.5">
                               {Object.keys(agent.mcpServers as object).map((s) => (
-                                <Badge key={s} variant="outline" className="text-[9px] font-mono">{s}</Badge>
+                                <Badge key={s} variant="outline" className="text-[10px] font-mono">{s}</Badge>
                               ))}
                             </div>
                           </div>
                         )}
 
-                        {/* Link to agent detail */}
-                        <div className="mt-3 pt-2 border-t border-border/20">
-                          <Link
-                            to={`/agents/${agent.name}`}
-                            className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
-                          >
-                            View agent detail <ChevronRight className="h-3 w-3" />
-                          </Link>
-                        </div>
+                        {agent.emailAllowedDomains && agent.emailAllowedDomains.length > 0 && (
+                          <div>
+                            <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Email Domains</span>
+                            <div className="flex flex-wrap gap-1 mt-1.5">
+                              {agent.emailAllowedDomains.map((d) => (
+                                <Badge key={d} variant="secondary" className="text-[10px] font-mono">{d}</Badge>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Link */}
+                        <Link
+                          to={`/agents/${agent.name}`}
+                          className="inline-flex items-center gap-1 text-xs text-primary hover:underline pt-1"
+                        >
+                          View full detail <ChevronRight className="h-3 w-3" />
+                        </Link>
                       </div>
                     </CollapsibleContent>
                   </Collapsible>
@@ -357,225 +420,292 @@ export function ConfigPage() {
               );
             })}
           </div>
-        </SectionAnchor>
+        )}
 
         {/* ═══ PROVIDERS ═══ */}
-        <SectionAnchor id="providers" icon={Key} label="Providers" count={providers ? Object.keys(providers).length : 0}>
-          {providers && Object.keys(providers).length > 0 ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {Object.entries(providers).map(([name, prov]) => (
-                <Card key={name} className="bg-card/80 backdrop-blur-sm border-border/40">
-                  <CardContent className="pt-3 pb-3">
+        {activeSection === "providers" && (
+          <>
+            {providers && Object.keys(providers).length > 0 ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {Object.entries(providers).map(([name, prov]) => (
+                  <GroupCard key={name} title={name} icon={Globe} accent={prov.apiKey ? "border-l-emerald-500" : "border-l-zinc-500"}>
                     <div className="flex items-center gap-2 mb-2">
-                      <Globe className="h-4 w-4 text-muted-foreground" />
-                      <span className="text-sm font-semibold">{name}</span>
                       <Badge
                         variant="outline"
                         className={cn(
-                          "text-[9px] ml-auto",
-                          prov.apiKey ? "text-emerald-500 border-emerald-500/30" : "text-zinc-500"
+                          "text-[10px]",
+                          prov.apiKey ? "text-emerald-500 border-emerald-500/30" : "text-zinc-500",
                         )}
                       >
-                        {prov.apiKey ? "● key set" : "○ no key"}
+                        {prov.apiKey ? "● Key configured" : "○ No key"}
                       </Badge>
+                      {prov.api && <Badge variant="secondary" className="text-[10px] font-mono">{prov.api}</Badge>}
                     </div>
                     {prov.baseUrl && (
-                      <code className="text-[10px] font-mono text-muted-foreground block truncate bg-muted/20 rounded px-2 py-1">
+                      <code className="text-[11px] font-mono text-muted-foreground block truncate bg-muted/20 rounded px-2 py-1">
                         {prov.baseUrl}
                       </code>
                     )}
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          ) : (
-            <p className="text-xs text-muted-foreground">No providers configured.</p>
-          )}
-        </SectionAnchor>
-
-        {/* ═══ NOTIFICATION CHANNELS ═══ */}
-        <SectionAnchor id="channels" icon={Send} label="Notification Channels" count={Object.keys(channels).length}>
-          {Object.keys(channels).length > 0 ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {Object.entries(channels).map(([name, ch]) => (
-                <Card key={name} className="bg-card/80 backdrop-blur-sm border-border/40">
-                  <CardContent className="pt-3 pb-3">
-                    <div className="flex items-center gap-2 mb-1">
-                      {ch.type === "telegram" && <Send className="h-4 w-4 text-sky-400" />}
-                      {ch.type === "email" && <Mail className="h-4 w-4 text-amber-400" />}
-                      {ch.type !== "telegram" && ch.type !== "email" && <Bell className="h-4 w-4 text-muted-foreground" />}
-                      <span className="text-sm font-semibold">{name}</span>
-                      <Badge variant="outline" className="text-[9px]">{ch.type ?? "unknown"}</Badge>
-                    </div>
-                    <div className="flex items-center gap-2 mt-1.5">
-                      {Boolean(ch.gateway?.enableInbound) && (
-                        <Badge variant="secondary" className="text-[8px]">
-                          <Zap className="h-2.5 w-2.5 mr-0.5" /> Inbound enabled
-                        </Badge>
-                      )}
-                      {ch.gateway && (
-                        <span className="text-[10px] text-muted-foreground">
-                          DM: {String((ch.gateway as Record<string, unknown>).dmPolicy ?? "default")}
+                    {prov.models && prov.models.length > 0 && (
+                      <div className="mt-2 pt-2 border-t border-border/20">
+                        <span className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold">
+                          {prov.models.length} Custom Model{prov.models.length > 1 ? "s" : ""}
                         </span>
-                      )}
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          ) : (
-            <p className="text-xs text-muted-foreground">No notification channels configured.</p>
-          )}
-        </SectionAnchor>
-
-        {/* ═══ NOTIFICATION RULES ═══ */}
-        <SectionAnchor id="rules" icon={Bell} label="Notification Rules" count={rules.length}>
-          {rules.length > 0 ? (
-            <Card className="bg-card/80 backdrop-blur-sm border-border/40">
-              <CardContent className="pt-3 pb-3 space-y-0">
-                {rules.map((rule, i) => (
-                  <div key={rule.id} className={cn("py-2.5", i > 0 && "border-t border-border/20")}>
-                    <div className="flex items-center gap-2 mb-1.5">
-                      <Eye className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                      <span className="text-xs font-semibold">{rule.name}</span>
-                      {rule.severity && (
-                        <Badge variant={rule.severity === "critical" ? "destructive" : "outline"} className="text-[8px]">
-                          {rule.severity}
-                        </Badge>
-                      )}
-                    </div>
-                    <div className="flex flex-wrap items-center gap-1.5 ml-5">
-                      {rule.events.map((e) => (
-                        <Badge key={e} variant="secondary" className="text-[8px] font-mono">{e}</Badge>
-                      ))}
-                      <ChevronRight className="h-3 w-3 text-muted-foreground" />
-                      {rule.channels.map((c) => (
-                        <Badge key={c} variant="outline" className="text-[8px]">{c}</Badge>
-                      ))}
-                    </div>
-                    {rule.template && (
-                      <p className="text-[10px] text-muted-foreground ml-5 mt-1 font-mono truncate">{rule.template}</p>
-                    )}
-                  </div>
-                ))}
-              </CardContent>
-            </Card>
-          ) : (
-            <p className="text-xs text-muted-foreground">No notification rules configured.</p>
-          )}
-        </SectionAnchor>
-
-        {/* ═══ SETTINGS ═══ */}
-        <SectionAnchor id="settings" icon={Settings2} label="Settings">
-          <Card className="bg-card/80 backdrop-blur-sm border-border/40">
-            <CardContent className="pt-4">
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-8 gap-y-0 divide-y sm:divide-y-0">
-                <div className="space-y-0">
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1.5">Execution</p>
-                  <KV label="Max Retries">{settings.maxRetries}</KV>
-                  <KV label="Max Concurrency">{settings.maxConcurrency ?? "unlimited"}</KV>
-                  <KV label="Task Timeout">{settings.taskTimeout ? `${Math.round(settings.taskTimeout / 1000)}s` : "none"}</KV>
-                  <KV label="Max Fix Attempts">{settings.maxFixAttempts ?? "default"}</KV>
-                  <KV label="Max Question Rounds">{settings.maxQuestionRounds ?? "default"}</KV>
-                  <KV label="Max Resolution Attempts">{settings.maxResolutionAttempts ?? "default"}</KV>
-                </div>
-                <div className="space-y-0 pt-2 sm:pt-0">
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1.5">Quality</p>
-                  <KV label="Quality Threshold">{settings.defaultQualityThreshold != null ? `${(settings.defaultQualityThreshold * 100).toFixed(0)}%` : "none"}</KV>
-                  <KV label="Auto-correct">{settings.autoCorrectExpectations ? "Yes" : "No"}</KV>
-                  <KV label="Max Assessment Retries">{settings.maxAssessmentRetries ?? "default"}</KV>
-                </div>
-                <div className="space-y-0 pt-2 lg:pt-0">
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1.5">Features</p>
-                  <FeatureFlag label="Scheduler" enabled={settings.enableScheduler ?? false} />
-                  <FeatureFlag label="Volatile Teams" enabled={settings.enableVolatileTeams ?? false} />
-                  {settings.volatileCleanup && <KV label="Volatile Cleanup">{settings.volatileCleanup}</KV>}
-                  <KV label="Work Directory" mono>{settings.workDir}</KV>
-                </div>
-              </div>
-              {/* MCP Tool Allowlist */}
-              {settings.mcpToolAllowlist && Object.keys(settings.mcpToolAllowlist).length > 0 && (
-                <div className="mt-4 pt-3 border-t border-border/20">
-                  <div className="flex items-center gap-1.5 mb-2">
-                    <Wrench className="h-3 w-3 text-muted-foreground" />
-                    <span className="text-[10px] text-muted-foreground uppercase tracking-wider">MCP Tool Allowlist</span>
-                  </div>
-                  <div className="space-y-2">
-                    {Object.entries(settings.mcpToolAllowlist).map(([server, tools]) => (
-                      <div key={server} className="flex items-start gap-2">
-                        <code className="text-[10px] font-mono text-muted-foreground shrink-0 mt-0.5">{server}:</code>
-                        <div className="flex flex-wrap gap-1">
-                          {tools.map((t) => (
-                            <Badge key={t} variant="outline" className="text-[8px] font-mono">{t}</Badge>
+                        <div className="flex flex-wrap gap-1 mt-1.5">
+                          {prov.models.map((m) => (
+                            <Badge key={m.id} variant="outline" className="text-[10px] font-mono">
+                              {m.name}{m.reasoning ? " ⟡" : ""}{m.contextWindow ? ` ${(m.contextWindow / 1000).toFixed(0)}k` : ""}
+                            </Badge>
                           ))}
                         </div>
                       </div>
-                    ))}
+                    )}
+                  </GroupCard>
+                ))}
+              </div>
+            ) : (
+              <Empty text="No providers configured" />
+            )}
+          </>
+        )}
+
+        {/* ═══ CHANNELS ═══ */}
+        {activeSection === "channels" && (
+          <>
+            {Object.keys(channels).length > 0 ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {Object.entries(channels).map(([name, ch]) => {
+                  const typeColor: Record<string, string> = {
+                    telegram: "border-l-sky-500",
+                    email: "border-l-amber-500",
+                    slack: "border-l-green-500",
+                    webhook: "border-l-violet-500",
+                  };
+                  const TypeIcon: Record<string, React.ElementType> = {
+                    telegram: Send,
+                    email: Mail,
+                    slack: MessageSquare,
+                    webhook: Link2,
+                  };
+                  const Ic = TypeIcon[ch.type ?? ""] ?? Bell;
+                  return (
+                    <GroupCard key={name} title={name} icon={Ic} accent={typeColor[ch.type ?? ""]}>
+                      <div className="flex items-center gap-2">
+                        <Badge variant="outline" className="text-[10px]">{ch.type ?? "unknown"}</Badge>
+                        {Boolean(ch.gateway?.enableInbound) && (
+                          <Badge variant="secondary" className="text-[10px]">
+                            <Zap className="h-2.5 w-2.5 mr-0.5" /> Inbound
+                          </Badge>
+                        )}
+                      </div>
+                      {ch.gateway && (
+                        <Row label="DM Policy" value={String((ch.gateway as Record<string, unknown>).dmPolicy ?? "default")} />
+                      )}
+                    </GroupCard>
+                  );
+                })}
+              </div>
+            ) : (
+              <Empty text="No notification channels configured" />
+            )}
+          </>
+        )}
+
+        {/* ═══ RULES ═══ */}
+        {activeSection === "rules" && (
+          <>
+            {rules.length > 0 ? (
+              <div className="space-y-2">
+                {rules.map((rule) => (
+                  <Card key={rule.id} className="bg-card/80 border-border/40">
+                    <CardContent className="pt-3 pb-3">
+                      <div className="flex items-center gap-2 mb-2">
+                        <Eye className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                        <span className="text-sm font-semibold">{rule.name}</span>
+                        {rule.severity && (
+                          <Badge variant={rule.severity === "critical" ? "destructive" : rule.severity === "warning" ? "secondary" : "outline"} className="text-[10px]">
+                            {rule.severity}
+                          </Badge>
+                        )}
+                      </div>
+                      {/* Events → Channels flow */}
+                      <div className="flex flex-wrap items-center gap-1.5 mb-2">
+                        {rule.events.map((e) => (
+                          <Badge key={e} variant="secondary" className="text-[10px] font-mono">{e}</Badge>
+                        ))}
+                        <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+                        {rule.channels.map((c) => (
+                          <Badge key={c} variant="outline" className="text-[10px]">{c}</Badge>
+                        ))}
+                      </div>
+                      {rule.template && (
+                        <code className="text-[11px] text-muted-foreground block truncate bg-muted/20 rounded px-2 py-1 mb-2">{rule.template}</code>
+                      )}
+                      {/* Meta row */}
+                      {(rule.cooldownMs || rule.includeOutcomes || rule.actions?.length) && (
+                        <div className="flex flex-wrap items-center gap-3 pt-2 border-t border-border/20">
+                          {rule.cooldownMs != null && rule.cooldownMs > 0 && (
+                            <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                              <Timer className="h-3 w-3" />
+                              {rule.cooldownMs >= 60000 ? `${(rule.cooldownMs / 60000).toFixed(0)}min` : `${(rule.cooldownMs / 1000).toFixed(0)}s`} cooldown
+                            </span>
+                          )}
+                          {rule.includeOutcomes && (
+                            <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                              <Paperclip className="h-3 w-3" />
+                              Outcomes{rule.outcomeFilter?.length ? ` (${rule.outcomeFilter.join(", ")})` : ""}
+                              {rule.maxAttachmentSize ? ` max ${(rule.maxAttachmentSize / 1048576).toFixed(0)}MB` : ""}
+                            </span>
+                          )}
+                          {rule.actions && rule.actions.length > 0 && (
+                            <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                              <Zap className="h-3 w-3" />
+                              {rule.actions.length} action{rule.actions.length > 1 ? "s" : ""} ({rule.actions.map(a => a.type).join(", ")})
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            ) : (
+              <Empty text="No notification rules configured" />
+            )}
+          </>
+        )}
+
+        {/* ═══ SETTINGS ═══ */}
+        {activeSection === "settings" && (
+          <div className="space-y-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {/* Execution */}
+              <GroupCard title="Execution" icon={Activity} accent="border-l-sky-500">
+                <Row label="Max Retries" value={settings.maxRetries} />
+                <Row label="Max Concurrency" value={settings.maxConcurrency ?? "unlimited"} />
+                <Row label="Task Timeout" value={settings.taskTimeout ? `${Math.round(settings.taskTimeout / 1000)}s` : "none"} />
+                <Row label="Stale Threshold" value={settings.staleThreshold ? `${Math.round(settings.staleThreshold / 1000)}s` : "5min (default)"} />
+                <Row label="Max Fix Attempts" value={settings.maxFixAttempts ?? "2 (default)"} />
+                <Row label="Max Question Rounds" value={settings.maxQuestionRounds ?? "2 (default)"} />
+                <Row label="Max Resolution Attempts" value={settings.maxResolutionAttempts ?? "2 (default)"} />
+              </GroupCard>
+
+              {/* Quality */}
+              <GroupCard title="Quality" icon={Gauge} accent="border-l-amber-500">
+                <Row label="Quality Threshold" value={settings.defaultQualityThreshold != null ? `${settings.defaultQualityThreshold}/5` : "none"} />
+                <Row label="Auto-correct" value={settings.autoCorrectExpectations !== false ? "Yes" : "No"} />
+                <Row label="Max Assessment Retries" value={settings.maxAssessmentRetries ?? "1 (default)"} />
+                <Row label="Reasoning Level" value={settings.reasoning ?? "off"} mono />
+              </GroupCard>
+
+              {/* Features */}
+              <GroupCard title="Features" icon={ToggleRight} accent="border-l-emerald-500">
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between py-1">
+                    <span className="text-xs text-muted-foreground">Scheduler</span>
+                    <CapPill label={settings.enableScheduler ? "Enabled" : "Disabled"} on={settings.enableScheduler ?? false} />
                   </div>
+                  <div className="flex items-center justify-between py-1">
+                    <span className="text-xs text-muted-foreground">Volatile Teams</span>
+                    <CapPill label={settings.enableVolatileTeams !== false ? "Enabled" : "Disabled"} on={settings.enableVolatileTeams !== false} />
+                  </div>
+                  {settings.volatileCleanup && <Row label="Volatile Cleanup" value={settings.volatileCleanup} mono />}
+                  <Row label="Work Directory" value={settings.workDir} mono />
                 </div>
-              )}
-              {/* Email domains */}
-              {settings.emailAllowedDomains && settings.emailAllowedDomains.length > 0 && (
-                <div className="mt-4 pt-3 border-t border-border/20">
-                  <div className="flex items-center gap-1.5 mb-2">
-                    <Mail className="h-3 w-3 text-muted-foreground" />
-                    <span className="text-[10px] text-muted-foreground uppercase tracking-wider">Email Allowed Domains</span>
-                  </div>
-                  <div className="flex flex-wrap gap-1">
-                    {settings.emailAllowedDomains.map((d) => (
-                      <Badge key={d} variant="secondary" className="text-[9px] font-mono">{d}</Badge>
-                    ))}
-                  </div>
+              </GroupCard>
+            </div>
+
+            {/* Retry Policy */}
+            {settings.defaultRetryPolicy && (
+              <GroupCard title="Default Retry Policy" icon={RefreshCw}>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-x-6">
+                  {settings.defaultRetryPolicy.escalateAfter != null && <Row label="Escalate After" value={`${settings.defaultRetryPolicy.escalateAfter} failures`} />}
+                  {settings.defaultRetryPolicy.fallbackAgent && <Row label="Fallback Agent" value={settings.defaultRetryPolicy.fallbackAgent} mono />}
+                  {settings.defaultRetryPolicy.escalateModel && <Row label="Escalate Model" value={settings.defaultRetryPolicy.escalateModel} mono />}
                 </div>
-              )}
-            </CardContent>
-          </Card>
-        </SectionAnchor>
+              </GroupCard>
+            )}
+
+            {/* MCP Tool Allowlist */}
+            {settings.mcpToolAllowlist && Object.keys(settings.mcpToolAllowlist).length > 0 && (
+              <GroupCard title="MCP Tool Allowlist" icon={Wrench}>
+                <div className="space-y-2">
+                  {Object.entries(settings.mcpToolAllowlist).map(([server, tools]) => (
+                    <div key={server}>
+                      <code className="text-[11px] font-mono text-muted-foreground font-semibold">{server}</code>
+                      <div className="flex flex-wrap gap-1 mt-1">
+                        {tools.map((t) => (
+                          <Badge key={t} variant="outline" className="text-[10px] font-mono">{t}</Badge>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </GroupCard>
+            )}
+
+            {/* Email Domains */}
+            {settings.emailAllowedDomains && settings.emailAllowedDomains.length > 0 && (
+              <GroupCard title="Email Allowed Domains" icon={Mail}>
+                <div className="flex flex-wrap gap-1.5">
+                  {settings.emailAllowedDomains.map((d) => (
+                    <Badge key={d} variant="secondary" className="text-[10px] font-mono">{d}</Badge>
+                  ))}
+                </div>
+              </GroupCard>
+            )}
+          </div>
+        )}
 
         {/* ═══ POLICIES ═══ */}
-        {(settings.escalationPolicy || settings.sla || settings.approvalGates) && (
-          <SectionAnchor id="policies" icon={Shield} label="Policies">
-            <Card className="bg-card/80 backdrop-blur-sm border-border/40">
-              <CardContent className="pt-4 space-y-3">
+        {activeSection === "policies" && (
+          <>
+            {(settings.escalationPolicy || settings.sla || settings.approvalGates) ? (
+              <div className="space-y-3">
                 {settings.escalationPolicy && (
-                  <Collapsible>
-                    <CollapsibleTrigger className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer group w-full">
-                      <ChevronDown className="h-3.5 w-3.5 transition-transform group-data-[state=open]:rotate-180" />
-                      <Shield className="h-3.5 w-3.5" />
-                      <span className="font-medium">Escalation Policy</span>
-                    </CollapsibleTrigger>
-                    <CollapsibleContent>
-                      <JsonBlock data={settings.escalationPolicy} className="text-[10px] leading-relaxed font-mono bg-muted/20 rounded-lg px-4 py-3 mt-2 whitespace-pre-wrap max-h-56 overflow-auto border border-border/20" />
-                    </CollapsibleContent>
-                  </Collapsible>
+                  <GroupCard title="Escalation Policy" icon={Shield} accent="border-l-red-500">
+                    <Collapsible>
+                      <CollapsibleTrigger className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer group w-full">
+                        <ChevronDown className="h-3.5 w-3.5 transition-transform group-data-[state=open]:rotate-180" />
+                        <span className="font-medium">View JSON</span>
+                      </CollapsibleTrigger>
+                      <CollapsibleContent>
+                        <JsonBlock data={settings.escalationPolicy} className="text-[11px] leading-relaxed font-mono bg-muted/20 rounded-lg px-4 py-3 mt-2 whitespace-pre-wrap max-h-64 overflow-auto border border-border/20" />
+                      </CollapsibleContent>
+                    </Collapsible>
+                  </GroupCard>
                 )}
                 {settings.sla && (
-                  <Collapsible>
-                    <CollapsibleTrigger className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer group w-full">
-                      <ChevronDown className="h-3.5 w-3.5 transition-transform group-data-[state=open]:rotate-180" />
-                      <Zap className="h-3.5 w-3.5" />
-                      <span className="font-medium">SLA</span>
-                    </CollapsibleTrigger>
-                    <CollapsibleContent>
-                      <JsonBlock data={settings.sla} className="text-[10px] leading-relaxed font-mono bg-muted/20 rounded-lg px-4 py-3 mt-2 whitespace-pre-wrap max-h-56 overflow-auto border border-border/20" />
-                    </CollapsibleContent>
-                  </Collapsible>
+                  <GroupCard title="SLA Configuration" icon={Zap} accent="border-l-amber-500">
+                    <Collapsible>
+                      <CollapsibleTrigger className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer group w-full">
+                        <ChevronDown className="h-3.5 w-3.5 transition-transform group-data-[state=open]:rotate-180" />
+                        <span className="font-medium">View JSON</span>
+                      </CollapsibleTrigger>
+                      <CollapsibleContent>
+                        <JsonBlock data={settings.sla} className="text-[11px] leading-relaxed font-mono bg-muted/20 rounded-lg px-4 py-3 mt-2 whitespace-pre-wrap max-h-64 overflow-auto border border-border/20" />
+                      </CollapsibleContent>
+                    </Collapsible>
+                  </GroupCard>
                 )}
                 {settings.approvalGates && settings.approvalGates.length > 0 && (
-                  <Collapsible>
-                    <CollapsibleTrigger className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer group w-full">
-                      <ChevronDown className="h-3.5 w-3.5 transition-transform group-data-[state=open]:rotate-180" />
-                      <Eye className="h-3.5 w-3.5" />
-                      <span className="font-medium">Approval Gates ({settings.approvalGates.length})</span>
-                    </CollapsibleTrigger>
-                    <CollapsibleContent>
-                      <JsonBlock data={settings.approvalGates} className="text-[10px] leading-relaxed font-mono bg-muted/20 rounded-lg px-4 py-3 mt-2 whitespace-pre-wrap max-h-56 overflow-auto border border-border/20" />
-                    </CollapsibleContent>
-                  </Collapsible>
+                  <GroupCard title={`Approval Gates (${settings.approvalGates.length})`} icon={Eye} accent="border-l-violet-500">
+                    <Collapsible>
+                      <CollapsibleTrigger className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer group w-full">
+                        <ChevronDown className="h-3.5 w-3.5 transition-transform group-data-[state=open]:rotate-180" />
+                        <span className="font-medium">View JSON</span>
+                      </CollapsibleTrigger>
+                      <CollapsibleContent>
+                        <JsonBlock data={settings.approvalGates} className="text-[11px] leading-relaxed font-mono bg-muted/20 rounded-lg px-4 py-3 mt-2 whitespace-pre-wrap max-h-64 overflow-auto border border-border/20" />
+                      </CollapsibleContent>
+                    </Collapsible>
+                  </GroupCard>
                 )}
-              </CardContent>
-            </Card>
-          </SectionAnchor>
+              </div>
+            ) : (
+              <Empty text="No policies configured" />
+            )}
+          </>
         )}
       </div>
     </div>

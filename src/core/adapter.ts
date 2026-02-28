@@ -1,4 +1,5 @@
 import type { AgentConfig, AgentActivity, Task, TaskResult, TaskOutcome, ReasoningLevel } from "./types.js";
+import type { EncryptedVaultStore } from "../vault/encrypted-store.js";
 
 /**
  * Handle returned by the engine after spawning an agent.
@@ -46,4 +47,6 @@ export interface SpawnContext {
   mcpToolAllowlist?: Record<string, string[]>;
   /** Global reasoning level from settings — used as fallback when agent doesn't specify one. */
   reasoning?: ReasoningLevel;
+  /** Encrypted vault store — for resolving agent credentials at runtime. */
+  vaultStore?: EncryptedVaultStore;
 }

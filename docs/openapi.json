@@ -104,8 +104,72 @@
                           "description": "Message role. System messages are appended as additional context (Polpo has its own system prompt)."
                         },
                         "content": {
-                          "type": "string",
-                          "description": "Message content"
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "array",
+                              "items": {
+                                "oneOf": [
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "type": {
+                                        "type": "string",
+                                        "enum": [
+                                          "text"
+                                        ]
+                                      },
+                                      "text": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "type",
+                                      "text"
+                                    ]
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "type": {
+                                        "type": "string",
+                                        "enum": [
+                                          "image_url"
+                                        ]
+                                      },
+                                      "image_url": {
+                                        "type": "object",
+                                        "properties": {
+                                          "url": {
+                                            "type": "string",
+                                            "description": "Data URL (data:image/…;base64,…) or HTTPS URL"
+                                          },
+                                          "detail": {
+                                            "type": "string",
+                                            "enum": [
+                                              "auto",
+                                              "low",
+                                              "high"
+                                            ]
+                                          }
+                                        },
+                                        "required": [
+                                          "url"
+                                        ]
+                                      }
+                                    },
+                                    "required": [
+                                      "type",
+                                      "image_url"
+                                    ]
+                                  }
+                                ]
+                              }
+                            }
+                          ],
+                          "description": "Message content — plain string or array of content parts (text / image_url)"
                         }
                       },
                       "required": [

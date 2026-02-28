@@ -35,8 +35,28 @@ export interface AskUserAnswer {
   customText?: string;
 }
 
+// Local mirror of SDK mission preview types
+export interface MissionPreviewData {
+  name: string;
+  data: unknown;
+  prompt?: string;
+}
+
+export type MissionPreviewAction = "execute" | "draft" | "refine" | "cancel";
+
+// Local mirror of SDK vault preview types
+export interface VaultPreviewData {
+  agent: string;
+  service: string;
+  type: "smtp" | "imap" | "oauth" | "api_key" | "login" | "custom";
+  label?: string;
+  credentials: Record<string, string>;
+}
+
+export type VaultPreviewAction = "confirm" | "cancel";
+
 // Local mirror of SDK tool call types
-export type ToolCallState = "calling" | "completed" | "error";
+export type ToolCallState = "calling" | "completed" | "error" | "interrupted";
 
 export interface ToolCallInfo {
   id: string;
@@ -51,9 +71,11 @@ export type MessageSegment =
   | { type: "text"; content: string }
   | { type: "tool"; tool: ToolCallInfo };
 
-/** A chat message enriched with optional ask_user questions and tool calls */
+/** A chat message enriched with optional ask_user questions, tool calls, mission preview, and vault preview */
 export interface ChatMessageWithQuestions extends ChatMessage {
   askUserQuestions?: AskUserQuestion[];
+  missionPreview?: MissionPreviewData;
+  vaultPreview?: VaultPreviewData;
   toolCalls?: ToolCallInfo[];
   /** Chronologically ordered segments (text interleaved with tool calls) */
   segments?: MessageSegment[];
@@ -79,9 +101,56 @@ export function useChat() {
   const [isLoading, setIsLoading] = useState(false);
   /** Questions waiting for user response (null = no pending questions) */
   const [pendingQuestions, setPendingQuestions] = useState<AskUserQuestion[] | null>(null);
+  /** Mission preview waiting for user action (null = no pending preview) */
+  const [pendingMission, setPendingMission] = useState<MissionPreviewData | null>(null);
+  /** Vault entry preview waiting for user confirmation (null = no pending vault) */
+  const [pendingVault, setPendingVault] = useState<VaultPreviewData | null>(null);
   const initialLoadDone = useRef(false);
   /** Conversation history sent to the completions endpoint */
   const conversationRef = useRef<ChatCompletionMessage[]>([]);
+
+  // Reconstruct interactive state from persisted "interrupted" tool calls on the last assistant message.
+  // If the last message is an assistant with an interrupted ask_user/create_mission, restore the pending state.
+  const restoreInteractiveState = (msgs: ChatMessageWithQuestions[]) => {
+    if (msgs.length === 0) return;
+    const lastMsg = msgs[msgs.length - 1];
+    // Only restore if the last message is from the assistant (no user reply yet)
+    if (lastMsg.role !== "assistant" || !lastMsg.toolCalls) return;
+
+    for (const tc of lastMsg.toolCalls) {
+      if (tc.state !== "interrupted") continue;
+
+      if (tc.name === "ask_user" && tc.arguments) {
+        const questions = (tc.arguments as any)?.questions as AskUserQuestion[] ?? [];
+        if (questions.length > 0) {
+          lastMsg.askUserQuestions = questions;
+          setPendingQuestions(questions);
+        }
+      } else if (tc.name === "create_mission" && tc.arguments) {
+        const args = tc.arguments as Record<string, unknown>;
+        let missionData: unknown;
+        try { missionData = typeof args.data === "string" ? JSON.parse(args.data) : args.data; } catch { missionData = args.data; }
+        const preview: MissionPreviewData = {
+          name: (args.name as string) ?? "Mission",
+          data: missionData,
+          prompt: args.prompt as string | undefined,
+        };
+        lastMsg.missionPreview = preview;
+        setPendingMission(preview);
+      } else if (tc.name === "set_vault_entry" && tc.arguments) {
+        const args = tc.arguments as Record<string, unknown>;
+        const vaultPreview: VaultPreviewData = {
+          agent: (args.agent as string) ?? "",
+          service: (args.service as string) ?? "",
+          type: (args.type as VaultPreviewData["type"]) ?? "custom",
+          label: args.label as string | undefined,
+          credentials: (args.credentials as Record<string, string>) ?? {},
+        };
+        lastMsg.vaultPreview = vaultPreview;
+        setPendingVault(vaultPreview);
+      }
+    }
+  };
 
   // Reconstruct segments from persisted toolCalls + text content.
   // Since we can't know exact interleaving, show tool calls before text.
@@ -102,6 +171,8 @@ export function useChat() {
     async (id: string) => {
       setSessionId(id);
       setPendingQuestions(null);
+      setPendingMission(null);
+      setPendingVault(null);
       try {
         const raw = await getMessages(id);
         // Filter out empty placeholder messages (server saves them before streaming starts)
@@ -117,6 +188,8 @@ export function useChat() {
             }
             return enriched;
           });
+        // Restore any pending interactive state (ask_user / mission preview) from the last message
+        restoreInteractiveState(msgs);
         setMessages(msgs);
         conversationRef.current = msgs.map((m) => ({
           role: m.role as "user" | "assistant",
@@ -162,6 +235,8 @@ export function useChat() {
                 }
                 return enriched;
               });
+            // Restore any pending interactive state on visibility change
+            restoreInteractiveState(msgs);
             setMessages(msgs);
             conversationRef.current = msgs.map((m) => ({
               role: m.role as "user" | "assistant",
@@ -180,6 +255,8 @@ export function useChat() {
     setSessionId(null);
     setMessages([]);
     setPendingQuestions(null);
+    setPendingMission(null);
+    setPendingVault(null);
     conversationRef.current = [];
   }, [setSessionId]);
 
@@ -264,9 +341,50 @@ export function useChat() {
           )
         );
         setPendingQuestions(stream.askUser.questions);
+        setPendingMission(null);
+        conversationRef.current.push({ role: "assistant", content: fullContent });
+      } else if (stream.missionPreview) {
+        // Mission preview — show interactive card for user to Execute/Draft/Refine/Cancel
+        const preview: MissionPreviewData = {
+          name: stream.missionPreview.name,
+          data: stream.missionPreview.data,
+          prompt: stream.missionPreview.prompt ?? undefined,
+        };
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantId
+              ? { ...m, content: fullContent, missionPreview: preview, toolCalls: toolCalls.length > 0 ? toolCalls : undefined, segments: [...segments] }
+              : m
+          )
+        );
+        setPendingMission(preview);
+        setPendingQuestions(null);
+        setPendingVault(null);
+        conversationRef.current.push({ role: "assistant", content: fullContent });
+      } else if (stream.vaultPreview) {
+        // Vault preview — show interactive card for user to Confirm/Cancel
+        const vaultData: VaultPreviewData = {
+          agent: stream.vaultPreview.agent,
+          service: stream.vaultPreview.service,
+          type: stream.vaultPreview.type,
+          label: stream.vaultPreview.label ?? undefined,
+          credentials: stream.vaultPreview.credentials,
+        };
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantId
+              ? { ...m, content: fullContent, vaultPreview: vaultData, toolCalls: toolCalls.length > 0 ? toolCalls : undefined, segments: [...segments] }
+              : m
+          )
+        );
+        setPendingVault(vaultData);
+        setPendingQuestions(null);
+        setPendingMission(null);
         conversationRef.current.push({ role: "assistant", content: fullContent });
       } else {
         setPendingQuestions(null);
+        setPendingMission(null);
+        setPendingVault(null);
         conversationRef.current.push({ role: "assistant", content: fullContent });
       }
 
@@ -276,12 +394,26 @@ export function useChat() {
     [client, sessionId, setSessionId, refetchSessions]
   );
 
-  // Send a message (streaming)
+  // Send a message (streaming). Optionally attach images (data URLs).
   const send = useCallback(
-    async (message: string) => {
+    async (message: string, images?: { url: string; mimeType: string }[]) => {
       setPendingQuestions(null);
+      setPendingMission(null);
+      setPendingVault(null);
 
-      // Optimistic user message
+      // Build content: plain string or multimodal content parts
+      const content: ChatCompletionMessage["content"] =
+        images && images.length > 0
+          ? [
+              { type: "text" as const, text: message },
+              ...images.map((img) => ({
+                type: "image_url" as const,
+                image_url: { url: img.url },
+              })),
+            ]
+          : message;
+
+      // Optimistic user message (display always shows text only)
       const userMsg: ChatMessageWithQuestions = {
         id: `temp-${Date.now()}`,
         role: "user",
@@ -289,7 +421,7 @@ export function useChat() {
         ts: new Date().toISOString(),
       };
       setMessages((prev) => [...prev, userMsg]);
-      conversationRef.current.push({ role: "user", content: message });
+      conversationRef.current.push({ role: "user", content });
 
       // Placeholder for streaming assistant response
       const assistantId = `temp-${Date.now()}-a`;
@@ -369,6 +501,232 @@ export function useChat() {
     [pendingQuestions, streamCompletion]
   );
 
+  // Respond to a mission preview.
+  // Execute/Draft call the REST API directly (same pattern as TUI).
+  // Refine sends feedback back to the LLM for re-planning.
+  // Cancel just clears the state.
+  const respondToMission = useCallback(
+    async (action: MissionPreviewAction, feedback?: string): Promise<{ missionId?: string; error?: string }> => {
+      if (!pendingMission) return {};
+
+      const missionData = pendingMission.data as Record<string, unknown>;
+      const dataStr = typeof missionData === "string" ? missionData : JSON.stringify(missionData);
+
+      // ── Execute: save as draft then execute via REST API ──
+      if (action === "execute") {
+        setPendingMission(null);
+        try {
+          const mission = await client.createMission({
+            data: dataStr,
+            name: pendingMission.name,
+            prompt: pendingMission.prompt,
+            status: "draft",
+          });
+          await client.executeMission(mission.id);
+          // Add confirmation as a synthetic assistant message
+          const confirmMsg: ChatMessageWithQuestions = {
+            id: `temp-${Date.now()}-confirm`,
+            role: "assistant",
+            content: `Mission **"${mission.name}"** created and execution started. You can track progress on the [missions page](/missions).`,
+            ts: new Date().toISOString(),
+          };
+          setMessages((prev) => [...prev, confirmMsg]);
+          conversationRef.current.push({ role: "assistant", content: confirmMsg.content });
+          return { missionId: mission.id };
+        } catch (e) {
+          const errMsg = (e as Error).message;
+          const errorConfirm: ChatMessageWithQuestions = {
+            id: `temp-${Date.now()}-err`,
+            role: "assistant",
+            content: `Failed to execute mission: ${errMsg}`,
+            ts: new Date().toISOString(),
+          };
+          setMessages((prev) => [...prev, errorConfirm]);
+          return { error: errMsg };
+        }
+      }
+
+      // ── Draft: save via REST API without executing ──
+      if (action === "draft") {
+        setPendingMission(null);
+        try {
+          const mission = await client.createMission({
+            data: dataStr,
+            name: pendingMission.name,
+            prompt: pendingMission.prompt,
+            status: "draft",
+          });
+          const confirmMsg: ChatMessageWithQuestions = {
+            id: `temp-${Date.now()}-confirm`,
+            role: "assistant",
+            content: `Mission **"${mission.name}"** saved as draft. You can review and execute it from the [missions page](/missions).`,
+            ts: new Date().toISOString(),
+          };
+          setMessages((prev) => [...prev, confirmMsg]);
+          conversationRef.current.push({ role: "assistant", content: confirmMsg.content });
+          return { missionId: mission.id };
+        } catch (e) {
+          const errMsg = (e as Error).message;
+          const errorConfirm: ChatMessageWithQuestions = {
+            id: `temp-${Date.now()}-err`,
+            role: "assistant",
+            content: `Failed to save mission: ${errMsg}`,
+            ts: new Date().toISOString(),
+          };
+          setMessages((prev) => [...prev, errorConfirm]);
+          return { error: errMsg };
+        }
+      }
+
+      // ── Cancel: just clear the state ──
+      if (action === "cancel") {
+        setPendingMission(null);
+        const cancelMsg: ChatMessageWithQuestions = {
+          id: `temp-${Date.now()}-cancel`,
+          role: "assistant",
+          content: "Mission cancelled.",
+          ts: new Date().toISOString(),
+        };
+        setMessages((prev) => [...prev, cancelMsg]);
+        conversationRef.current.push({ role: "assistant", content: cancelMsg.content });
+        return {};
+      }
+
+      // ── Refine: send feedback back to the LLM for re-planning ──
+      if (action === "refine" && feedback?.trim()) {
+        setPendingMission(null);
+
+        const responseText = `Please refine the mission plan with these changes:\n${feedback.trim()}`;
+
+        const userMsg: ChatMessageWithQuestions = {
+          id: `temp-${Date.now()}`,
+          role: "user",
+          content: responseText,
+          ts: new Date().toISOString(),
+        };
+        setMessages((prev) => [...prev, userMsg]);
+        conversationRef.current.push({ role: "user", content: responseText });
+
+        const assistantId = `temp-${Date.now()}-a`;
+        setMessages((prev) => [
+          ...prev,
+          { id: assistantId, role: "assistant", content: "", ts: new Date().toISOString() },
+        ]);
+        setIsLoading(true);
+
+        try {
+          await streamCompletion(assistantId);
+        } catch (e) {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantId
+                ? { ...m, content: `Error: ${(e as Error).message}` }
+                : m
+            )
+          );
+        } finally {
+          setIsLoading(false);
+        }
+      }
+
+      return {};
+    },
+    [pendingMission, client, streamCompletion]
+  );
+
+  // Respond to a vault preview.
+  // Confirm sends the (potentially edited) credentials back to the LLM to proceed.
+  // Cancel tells the LLM the user declined to save.
+  const respondToVault = useCallback(
+    async (action: VaultPreviewAction, editedCredentials?: Record<string, string>) => {
+      if (!pendingVault) return;
+
+      setPendingVault(null);
+
+      if (action === "confirm") {
+        // Build a user message that tells the LLM to proceed with the (possibly edited) credentials
+        const creds = editedCredentials ?? pendingVault.credentials;
+        const credSummary = Object.entries(creds)
+          .map(([k, v]) => `  ${k}: ${v ? "••••" : "(empty)"}`)
+          .join("\n");
+        const responseText = `Confirmed. Save the vault entry for "${pendingVault.service}" (${pendingVault.type}) on agent "${pendingVault.agent}":\n${credSummary}`;
+
+        const userMsg: ChatMessageWithQuestions = {
+          id: `temp-${Date.now()}`,
+          role: "user",
+          content: responseText,
+          ts: new Date().toISOString(),
+        };
+        setMessages((prev) => [...prev, userMsg]);
+
+        // Send the actual credentials as structured JSON so the LLM can pass them through
+        const structuredResponse = JSON.stringify({
+          action: "confirm",
+          agent: pendingVault.agent,
+          service: pendingVault.service,
+          type: pendingVault.type,
+          label: pendingVault.label,
+          credentials: creds,
+        });
+        conversationRef.current.push({ role: "user", content: structuredResponse });
+
+        const assistantId = `temp-${Date.now()}-a`;
+        setMessages((prev) => [
+          ...prev,
+          { id: assistantId, role: "assistant", content: "", ts: new Date().toISOString() },
+        ]);
+        setIsLoading(true);
+
+        try {
+          await streamCompletion(assistantId);
+        } catch (e) {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantId
+                ? { ...m, content: `Error: ${(e as Error).message}` }
+                : m
+            )
+          );
+        } finally {
+          setIsLoading(false);
+        }
+      } else {
+        // Cancel — tell the LLM the user declined
+        const cancelText = `Declined saving vault entry for "${pendingVault.service}" on agent "${pendingVault.agent}".`;
+        const userMsg: ChatMessageWithQuestions = {
+          id: `temp-${Date.now()}`,
+          role: "user",
+          content: cancelText,
+          ts: new Date().toISOString(),
+        };
+        setMessages((prev) => [...prev, userMsg]);
+        conversationRef.current.push({ role: "user", content: cancelText });
+
+        const assistantId = `temp-${Date.now()}-a`;
+        setMessages((prev) => [
+          ...prev,
+          { id: assistantId, role: "assistant", content: "", ts: new Date().toISOString() },
+        ]);
+        setIsLoading(true);
+
+        try {
+          await streamCompletion(assistantId);
+        } catch (e) {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantId
+                ? { ...m, content: `Error: ${(e as Error).message}` }
+                : m
+            )
+          );
+        } finally {
+          setIsLoading(false);
+        }
+      }
+    },
+    [pendingVault, streamCompletion]
+  );
+
   // Delete a session — clear messages if active
   const deleteSession = useCallback(
     async (id: string) => {
@@ -378,6 +736,8 @@ export function useChat() {
           setMessages([]);
           conversationRef.current = [];
           setPendingQuestions(null);
+          setPendingMission(null);
+          setPendingVault(null);
         }
       } catch {
         // silent
@@ -390,6 +750,8 @@ export function useChat() {
     setMessages([]);
     setSessionId(null);
     setPendingQuestions(null);
+    setPendingMission(null);
+    setPendingVault(null);
     conversationRef.current = [];
   }, [setSessionId]);
 
@@ -400,8 +762,12 @@ export function useChat() {
     sessions,
     sessionsLoading,
     pendingQuestions,
+    pendingMission,
+    pendingVault,
     send,
     answerQuestions,
+    respondToMission,
+    respondToVault,
     clear,
     loadSession,
     newSession,
@@ -437,25 +803,24 @@ export function useAsyncAction<T extends unknown[]>(
 
 export function useProjectInfo() {
   const { client } = usePolpo();
-  const [info, setInfo] = useState<{ project: string } | null>(null);
+  const [info, setInfo] = useState<{ project: string; version?: string } | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
 
-    client
-      .getState()
-      .then((state) => {
-        if (!cancelled && state.project) {
-          setInfo({ project: state.project });
-        }
-      })
-      .catch(() => {
-        // silent
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
+    Promise.all([
+      client.getState().catch(() => null),
+      client.getHealth().catch(() => null),
+    ]).then(([state, health]) => {
+      if (cancelled) return;
+      const project = state?.project;
+      if (project) {
+        setInfo({ project, version: health?.version });
+      }
+    }).finally(() => {
+      if (!cancelled) setLoading(false);
+    });
 
     return () => {
       cancelled = true;

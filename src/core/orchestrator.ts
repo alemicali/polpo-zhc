@@ -60,6 +60,7 @@ import { QualityController } from "../quality/quality-controller.js";
 import { Scheduler } from "../scheduling/scheduler.js";
 import { TaskWatcherManager } from "./task-watcher.js";
 import type { ApprovalRequest, ApprovalStatus, NotificationAction } from "./types.js";
+import { EncryptedVaultStore } from "../vault/encrypted-store.js";
 
 // Re-export for backward compatibility (consumed by core/index.ts and external modules)
 export { buildFixPrompt, buildRetryPrompt };
@@ -102,6 +103,7 @@ export class Orchestrator extends TypedEmitter {
   private channelGateway?: ChannelGateway;
   private configWatcher?: FSWatcher;
   private configReloadTimer?: ReturnType<typeof setTimeout>;
+  private vaultStore?: EncryptedVaultStore;
 
   // Managers
   private agentMgr!: AgentManager;
@@ -179,6 +181,7 @@ export class Orchestrator extends TypedEmitter {
     this.initLogStore();
     this.initSessionStore();
     this.initManagers();
+    this.initVaultStore();
   }
 
   private validateProviders(): void {
@@ -454,6 +457,7 @@ export class Orchestrator extends TypedEmitter {
     }
 
     this.initManagers();
+    this.initVaultStore();
     this.interactive = true;
     this.registry.setState({
       project,
@@ -541,6 +545,21 @@ export class Orchestrator extends TypedEmitter {
   getStore(): TaskStore { return this.registry; }
   getRunStore(): RunStore { return this.runStore; }
   getPolpoDir(): string { return this.polpoDir; }
+  getVaultStore(): EncryptedVaultStore | undefined { return this.vaultStore; }
+
+  /**
+   * Initialize the encrypted vault store.
+   * Credentials are stored in .polpo/vault.enc (AES-256-GCM encrypted).
+   * Key: POLPO_VAULT_KEY env var or auto-generated ~/.polpo/vault.key.
+   */
+  private initVaultStore(): void {
+    try {
+      this.vaultStore = new EncryptedVaultStore(this.polpoDir);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.emit("log", { level: "warn", message: `Vault store init failed: ${msg}. Vault features disabled.` });
+    }
+  }
 
   // ── Agent Management (delegates to AgentManager) ──
 

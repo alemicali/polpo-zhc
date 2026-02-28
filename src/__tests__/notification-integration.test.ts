@@ -7,7 +7,7 @@ import { QualityController } from "../quality/quality-controller.js";
 import { HookRegistry } from "../core/hooks.js";
 import { InMemoryTaskStore, InMemoryRunStore, createTestTask } from "./fixtures.js";
 import type { OrchestratorContext } from "../core/orchestrator-context.js";
-import type { PolpoConfig, NotificationsConfig, PlanQualityGate } from "../core/types.js";
+import type { PolpoConfig, NotificationsConfig, MissionQualityGate } from "../core/types.js";
 import type { NotificationChannel, Notification } from "../notifications/types.js";
 
 // ── Helpers ──────────────────────────────────────────
@@ -85,7 +85,7 @@ describe("Notification Templates — Phase B events", () => {
     it("formats quality:gate:passed", () => {
       const title = defaultTitle({
         event: "quality:gate:passed",
-        data: { planId: "p1", gateName: "integration-gate" },
+        data: { missionId: "p1", gateName: "integration-gate" },
         severity: "info",
       });
       expect(title).toContain("Quality Gate Passed");
@@ -95,7 +95,7 @@ describe("Notification Templates — Phase B events", () => {
     it("formats quality:gate:failed", () => {
       const title = defaultTitle({
         event: "quality:gate:failed",
-        data: { planId: "p1", gateName: "integration-gate", reason: "score too low" },
+        data: { missionId: "p1", gateName: "integration-gate", reason: "score too low" },
         severity: "critical",
       });
       expect(title).toContain("Quality Gate Failed");
@@ -105,7 +105,7 @@ describe("Notification Templates — Phase B events", () => {
     it("formats quality:threshold:failed", () => {
       const title = defaultTitle({
         event: "quality:threshold:failed",
-        data: { planId: "p1", avgScore: 2.5, threshold: 3.5 },
+        data: { missionId: "p1", avgScore: 2.5, threshold: 3.5 },
         severity: "critical",
       });
       expect(title).toContain("Quality Below Threshold");
@@ -116,7 +116,7 @@ describe("Notification Templates — Phase B events", () => {
     it("formats schedule:triggered", () => {
       const title = defaultTitle({
         event: "schedule:triggered",
-        data: { scheduleId: "s1", planId: "p1", expression: "0 2 * * *" },
+        data: { scheduleId: "s1", missionId: "p1", expression: "0 2 * * *" },
         severity: "info",
       });
       expect(title).toContain("Schedule Triggered");
@@ -125,7 +125,7 @@ describe("Notification Templates — Phase B events", () => {
     it("formats schedule:created", () => {
       const title = defaultTitle({
         event: "schedule:created",
-        data: { scheduleId: "s1", planId: "p1" },
+        data: { scheduleId: "s1", missionId: "p1" },
         severity: "info",
       });
       expect(title).toContain("Schedule Created");
@@ -134,7 +134,7 @@ describe("Notification Templates — Phase B events", () => {
     it("formats schedule:completed", () => {
       const title = defaultTitle({
         event: "schedule:completed",
-        data: { scheduleId: "s1", planId: "p1" },
+        data: { scheduleId: "s1", missionId: "p1" },
         severity: "info",
       });
       expect(title).toContain("Schedule Completed");
@@ -166,7 +166,7 @@ describe("Notification Templates — Phase B events", () => {
     it("formats quality:gate:failed with reason", () => {
       const body = defaultBody({
         event: "quality:gate:failed",
-        data: { planId: "p1", gateName: "tests-gate", reason: "avg score 2.0 below threshold 3.5", avgScore: 2.0 },
+        data: { missionId: "p1", gateName: "tests-gate", reason: "avg score 2.0 below threshold 3.5", avgScore: 2.0 },
         severity: "critical",
       });
       expect(body).toContain("tests-gate");
@@ -176,7 +176,7 @@ describe("Notification Templates — Phase B events", () => {
     it("formats schedule:triggered with expression", () => {
       const body = defaultBody({
         event: "schedule:triggered",
-        data: { scheduleId: "s1", planId: "p1", expression: "0 2 * * *" },
+        data: { scheduleId: "s1", missionId: "p1", expression: "0 2 * * *" },
         severity: "info",
       });
       expect(body).toContain("0 2 * * *");
@@ -245,7 +245,7 @@ describe("NotificationRouter — Phase B event subscriptions", () => {
     router.start();
 
     emitter.emit("quality:gate:failed", {
-      planId: "p1",
+      missionId: "p1",
       gateName: "my-gate",
       reason: "score too low",
     });
@@ -279,7 +279,7 @@ describe("NotificationRouter — Phase B event subscriptions", () => {
 
     emitter.emit("schedule:triggered", {
       scheduleId: "s1",
-      planId: "p1",
+      missionId: "p1",
       expression: "0 2 * * *",
     });
 
@@ -423,7 +423,7 @@ describe("QualityController — gate notification channel routing", () => {
     ctrl.setNotificationRouter(router);
     ctrl.init();
 
-    const gate: PlanQualityGate = {
+    const gate: MissionQualityGate = {
       name: "test-gate",
       afterTasks: ["Task A"],
       blocksTasks: ["Task B"],
@@ -462,7 +462,7 @@ describe("QualityController — gate notification channel routing", () => {
     ctrl.setNotificationRouter(router);
     ctrl.init();
 
-    const gate: PlanQualityGate = {
+    const gate: MissionQualityGate = {
       name: "no-notify-gate",
       afterTasks: ["Task A"],
       blocksTasks: ["Task B"],
