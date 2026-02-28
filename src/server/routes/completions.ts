@@ -28,6 +28,26 @@ import type { ToolCallInfo } from "../../core/session-store.js";
 
 const MAX_TURNS = 20;
 
+/**
+ * Redact sensitive credential values from vault tool call arguments before persistence.
+ * Returns a sanitized copy — original is NOT mutated.
+ */
+function redactVaultToolCalls(toolCalls: ToolCallInfo[]): ToolCallInfo[] {
+  return toolCalls.map(tc => {
+    if (tc.name !== "set_vault_entry" || !tc.arguments) return tc;
+    const args = { ...tc.arguments };
+    if (args.credentials && typeof args.credentials === "object") {
+      // Replace each credential value with a redacted marker, preserve keys for display
+      const redacted: Record<string, string> = {};
+      for (const key of Object.keys(args.credentials as Record<string, string>)) {
+        redacted[key] = "[REDACTED]";
+      }
+      args.credentials = redacted;
+    }
+    return { ...tc, arguments: args };
+  });
+}
+
 // ── Zod Schemas ────────────────────────────────────────────────────────
 
 /** OpenAI-compatible content part (text or image_url). */
@@ -455,15 +475,16 @@ export function completionRoutes(orchestrator: Orchestrator, apiKeys?: string[])
           await stream.writeSSE({ data: "[DONE]" });
         } finally {
           // Always persist the assistant response — even on disconnect.
-          // Update the placeholder message with whatever text was accumulated, plus tool calls.
+          // SECURITY: Redact vault credentials before persisting to SQLite
+          const safeToolCalls = redactVaultToolCalls(toolCallsAccum);
           if (sessionStore && sessionId && assistantMsgId) {
             if (finalText.trim()) {
-              sessionStore.updateMessage(sessionId, assistantMsgId, finalText.trim(), toolCallsAccum);
+              sessionStore.updateMessage(sessionId, assistantMsgId, finalText.trim(), safeToolCalls);
             }
             // If finalText is empty (LLM never responded), remove the empty placeholder
             // by setting content to a marker that indicates an interrupted response
             else {
-              sessionStore.updateMessage(sessionId, assistantMsgId, "[Response interrupted]", toolCallsAccum);
+              sessionStore.updateMessage(sessionId, assistantMsgId, "[Response interrupted]", safeToolCalls);
             }
           }
         }
@@ -619,11 +640,13 @@ export function completionRoutes(orchestrator: Orchestrator, apiKeys?: string[])
         return c.json(completionResponse(completionId, finalText, promptTokens, completionTokens));
       } finally {
         // Always persist the final text + tool calls — even on early return (ask_user) or error
+        // SECURITY: Redact vault credentials before persisting to SQLite
+        const safeToolCalls = redactVaultToolCalls(toolCallsAccum);
         if (sessionStore && sessionId && assistantMsgId) {
           if (finalText.trim()) {
-            sessionStore.updateMessage(sessionId, assistantMsgId, finalText.trim(), toolCallsAccum);
+            sessionStore.updateMessage(sessionId, assistantMsgId, finalText.trim(), safeToolCalls);
           } else {
-            sessionStore.updateMessage(sessionId, assistantMsgId, "[Response interrupted]", toolCallsAccum);
+            sessionStore.updateMessage(sessionId, assistantMsgId, "[Response interrupted]", safeToolCalls);
           }
         }
       }

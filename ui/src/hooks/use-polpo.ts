@@ -635,8 +635,11 @@ export function useChat() {
   );
 
   // Respond to a vault preview.
-  // Confirm sends the (potentially edited) credentials back to the LLM to proceed.
+  // Confirm saves credentials directly via REST API (bypasses LLM entirely).
   // Cancel tells the LLM the user declined to save.
+  //
+  // SECURITY: Credentials NEVER flow back through the LLM or chat persistence.
+  // The REST endpoint encrypts them at rest (AES-256-GCM) and returns only metadata.
   const respondToVault = useCallback(
     async (action: VaultPreviewAction, editedCredentials?: Record<string, string>) => {
       if (!pendingVault) return;
@@ -644,12 +647,27 @@ export function useChat() {
       setPendingVault(null);
 
       if (action === "confirm") {
-        // Build a user message that tells the LLM to proceed with the (possibly edited) credentials
         const creds = editedCredentials ?? pendingVault.credentials;
-        const credSummary = Object.entries(creds)
-          .map(([k, v]) => `  ${k}: ${v ? "••••" : "(empty)"}`)
-          .join("\n");
-        const responseText = `Confirmed. Save the vault entry for "${pendingVault.service}" (${pendingVault.type}) on agent "${pendingVault.agent}":\n${credSummary}`;
+        const credKeys = Object.keys(creds).join(", ");
+
+        // Save directly via REST — credentials go to encrypted store, NOT to the LLM
+        let saveError: string | undefined;
+        try {
+          await client.saveVaultEntry({
+            agent: pendingVault.agent,
+            service: pendingVault.service,
+            type: pendingVault.type,
+            label: pendingVault.label,
+            credentials: creds,
+          });
+        } catch (e) {
+          saveError = (e as Error).message;
+        }
+
+        // Tell the LLM the result — NO credentials in the message, only metadata
+        const responseText = saveError
+          ? `Failed to save vault entry "${pendingVault.service}" for agent "${pendingVault.agent}": ${saveError}`
+          : `Vault entry "${pendingVault.service}" (${pendingVault.type}) saved for agent "${pendingVault.agent}". Credential fields: ${credKeys}`;
 
         const userMsg: ChatMessageWithQuestions = {
           id: `temp-${Date.now()}`,
@@ -658,17 +676,7 @@ export function useChat() {
           ts: new Date().toISOString(),
         };
         setMessages((prev) => [...prev, userMsg]);
-
-        // Send the actual credentials as structured JSON so the LLM can pass them through
-        const structuredResponse = JSON.stringify({
-          action: "confirm",
-          agent: pendingVault.agent,
-          service: pendingVault.service,
-          type: pendingVault.type,
-          label: pendingVault.label,
-          credentials: creds,
-        });
-        conversationRef.current.push({ role: "user", content: structuredResponse });
+        conversationRef.current.push({ role: "user", content: responseText });
 
         const assistantId = `temp-${Date.now()}-a`;
         setMessages((prev) => [
@@ -724,7 +732,7 @@ export function useChat() {
         }
       }
     },
-    [pendingVault, streamCompletion]
+    [pendingVault, client, streamCompletion]
   );
 
   // Delete a session — clear messages if active

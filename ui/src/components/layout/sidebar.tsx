@@ -1,4 +1,4 @@
-import { useState, useEffect, memo } from "react";
+import { useState, useEffect, useCallback, memo } from "react";
 import { NavLink } from "react-router-dom";
 import {
   LayoutDashboard,
@@ -14,7 +14,7 @@ import {
   Settings2,
   CalendarClock,
 } from "lucide-react";
-import { usePolpo, useApprovals } from "@lumea-labs/polpo-react";
+import { usePolpo } from "@lumea-labs/polpo-react";
 import { useProjectInfo } from "@/hooks/use-polpo";
 import { cn } from "@/lib/utils";
 import {
@@ -90,10 +90,28 @@ const statusConfig: Record<string, { color: string; pulse: boolean; label: strin
 
 const STORAGE_KEY = "polpo-sidebar-collapsed";
 
-/** Isolated component so useApprovals re-renders don't cascade to the whole Sidebar */
+/** Lightweight pending-approval counter — fetches directly from client to avoid
+ *  the useApprovals → useEvents → useSyncExternalStore re-render loop. */
+const POLL_INTERVAL = 15_000;
+
 const PendingBadge = memo(function PendingBadge({ collapsed }: { collapsed: boolean }) {
-  const { pending } = useApprovals();
-  const count = pending.length;
+  const { client, connectionStatus } = usePolpo();
+  const [count, setCount] = useState(0);
+
+  const fetchCount = useCallback(() => {
+    if (!client) return;
+    client.getApprovals("pending")
+      .then((list: unknown[]) => setCount(list.length))
+      .catch(() => {});
+  }, [client]);
+
+  useEffect(() => {
+    if (connectionStatus !== "connected") return;
+    fetchCount();
+    const id = setInterval(fetchCount, POLL_INTERVAL);
+    return () => clearInterval(id);
+  }, [connectionStatus, fetchCount]);
+
   if (count === 0) return null;
 
   return collapsed ? (

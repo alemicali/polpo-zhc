@@ -305,6 +305,30 @@ export class PolpoClient {
     return this.post<{ aborted: number }>(`/missions/${missionId}/abort`);
   }
 
+  // ── Vault ─────────────────────────────────────────────────
+
+  /**
+   * Save a vault entry directly to the encrypted store.
+   * Bypasses the LLM entirely — credentials go straight to AES-256-GCM encrypted storage.
+   * Returns metadata only (never credential values).
+   */
+  saveVaultEntry(req: {
+    agent: string;
+    service: string;
+    type: "smtp" | "imap" | "oauth" | "api_key" | "login" | "custom";
+    label?: string;
+    credentials: Record<string, string>;
+  }): Promise<{ agent: string; service: string; type: string; keys: string[] }> {
+    return this.post<{ agent: string; service: string; type: string; keys: string[] }>("/vault/entries", req);
+  }
+
+  /**
+   * Remove a vault entry from the encrypted store.
+   */
+  removeVaultEntry(agent: string, service: string): Promise<{ removed: boolean }> {
+    return this.del<{ removed: boolean }>(`/vault/entries/${encodeURIComponent(agent)}/${encodeURIComponent(service)}`);
+  }
+
   // ── Schedules ─────────────────────────────────────────────
 
   getSchedules(): Promise<ScheduleEntry[]> {

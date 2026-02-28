@@ -50,6 +50,19 @@ import {
   Brain,
   Cake,
   Users,
+  Search,
+  GitBranch,
+  Package,
+  Table2,
+  FileText,
+  Mic,
+  Image,
+  Palette,
+  Plug,
+  Wand2,
+  Upload,
+  Target,
+  type LucideIcon,
 } from "lucide-react";
 import { MessageResponse } from "@/components/ai-elements/message";
 import { useAgent, useAgents, useProcesses, useSkills, useTasks } from "@lumea-labs/polpo-react";
@@ -57,6 +70,67 @@ import type { AgentProcess, AgentConfig, SkillInfo, Task, TaskStatus } from "@lu
 import { formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
 import { useState, useMemo } from "react";
+
+// ── Tool & skill icon mapping ──
+
+type ToolMeta = { icon: LucideIcon; color: string; bg: string };
+
+function getToolMeta(name: string): ToolMeta {
+  const n = name.toLowerCase();
+  // Core file ops
+  if (n === "read") return { icon: FileCode, color: "text-teal-400", bg: "bg-teal-500/10" };
+  if (n === "write") return { icon: FilePlus, color: "text-emerald-400", bg: "bg-emerald-500/10" };
+  if (n === "edit" || n === "multi_edit") return { icon: FileEdit, color: "text-sky-400", bg: "bg-sky-500/10" };
+  // Terminal
+  if (n === "bash" || n === "ls") return { icon: Terminal, color: "text-amber-400", bg: "bg-amber-500/10" };
+  // Search
+  if (n === "glob" || n === "grep" || n === "regex_replace") return { icon: Search, color: "text-blue-400", bg: "bg-blue-500/10" };
+  // Browser
+  if (n.startsWith("browser_")) return { icon: Globe, color: "text-indigo-400", bg: "bg-indigo-500/10" };
+  // HTTP
+  if (n.startsWith("http_")) return { icon: ArrowUpRight, color: "text-cyan-400", bg: "bg-cyan-500/10" };
+  // Git
+  if (n.startsWith("git_")) return { icon: GitBranch, color: "text-green-400", bg: "bg-green-500/10" };
+  // Excel
+  if (n.startsWith("excel_")) return { icon: Table2, color: "text-green-400", bg: "bg-green-500/10" };
+  // PDF
+  if (n.startsWith("pdf_")) return { icon: FileText, color: "text-red-400", bg: "bg-red-500/10" };
+  // Docx
+  if (n.startsWith("docx_")) return { icon: FileText, color: "text-blue-400", bg: "bg-blue-500/10" };
+  // Email
+  if (n.startsWith("email_")) return { icon: Mail, color: "text-rose-400", bg: "bg-rose-500/10" };
+  // Audio
+  if (n.startsWith("audio_")) return { icon: Mic, color: "text-pink-400", bg: "bg-pink-500/10" };
+  // Image
+  if (n.startsWith("image_")) return { icon: Image, color: "text-emerald-400", bg: "bg-emerald-500/10" };
+  // Dependencies
+  if (n.startsWith("dep_") || n === "bulk_rename") return { icon: Package, color: "text-amber-400", bg: "bg-amber-500/10" };
+  // Outcome
+  if (n === "register_outcome") return { icon: Target, color: "text-teal-400", bg: "bg-teal-500/10" };
+  // Fallback
+  return { icon: Wrench, color: "text-muted-foreground", bg: "bg-muted/30" };
+}
+
+function getSkillMeta(name: string): { icon: LucideIcon; color: string } {
+  const n = name.toLowerCase();
+  if (n.includes("git") || n.includes("commit") || n.includes("feature-dev")) return { icon: GitBranch, color: "text-green-400" };
+  if (n.includes("browser")) return { icon: Globe, color: "text-indigo-400" };
+  if (n.includes("test")) return { icon: CheckCircle2, color: "text-teal-400" };
+  if (n.includes("deploy") || n.includes("vercel") || n.includes("ship")) return { icon: Upload, color: "text-blue-400" };
+  if (n.includes("design") || n.includes("frontend") || n.includes("ui") || n.includes("web-design")) return { icon: Palette, color: "text-pink-400" };
+  if (n.includes("email")) return { icon: Mail, color: "text-rose-400" };
+  if (n.includes("mcp")) return { icon: Plug, color: "text-cyan-400" };
+  if (n.includes("linear")) return { icon: ListChecks, color: "text-purple-400" };
+  if (n.includes("docker") || n.includes("runner")) return { icon: Package, color: "text-orange-400" };
+  if (n.includes("skill") || n.includes("find")) return { icon: Wand2, color: "text-amber-400" };
+  if (n.includes("llm") || n.includes("model") || n.includes("litellm")) return { icon: Brain, color: "text-violet-400" };
+  if (n.includes("key") || n.includes("binding")) return { icon: KeyRound, color: "text-zinc-400" };
+  if (n.includes("review") || n.includes("audit") || n.includes("best-practice")) return { icon: Eye, color: "text-sky-400" };
+  if (n.includes("propagat") || n.includes("sync") || n.includes("change")) return { icon: RefreshCw, color: "text-yellow-400" };
+  if (n.includes("remotion") || n.includes("video")) return { icon: Image, color: "text-red-400" };
+  if (n.includes("composition") || n.includes("pattern")) return { icon: Layers, color: "text-orange-400" };
+  return { icon: Sparkles, color: "text-violet-400" };
+}
 
 // ── Enable flag meta ──
 
@@ -1118,10 +1192,23 @@ export function AgentDetailPage() {
                   {agent.allowedTools && agent.allowedTools.length > 0 && (
                     <div>
                       <SectionHeader title={`Allowed Tools`} icon={Wrench} count={agent.allowedTools.length} />
-                      <div className="flex flex-wrap gap-1.5">
-                        {agent.allowedTools.map((t) => (
-                          <Badge key={t} variant="secondary" className="text-xs font-mono">{t}</Badge>
-                        ))}
+                      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-1.5">
+                        {agent.allowedTools.map((t) => {
+                          const meta = getToolMeta(t);
+                          const ToolIcon = meta.icon;
+                          return (
+                            <div
+                              key={t}
+                              className={cn(
+                                "flex items-center gap-2 rounded-lg border border-border/30 px-3 py-2 transition-colors",
+                                meta.bg,
+                              )}
+                            >
+                              <ToolIcon className={cn("h-3.5 w-3.5 shrink-0", meta.color)} />
+                              <span className="text-xs font-mono truncate">{t}</span>
+                            </div>
+                          );
+                        })}
                       </div>
                     </div>
                   )}
@@ -1192,13 +1279,15 @@ export function AgentDetailPage() {
                       <div className="space-y-2">
                         {agent.skills.map((skillName) => {
                           const info = skillPool.get(skillName);
+                          const skillMeta = getSkillMeta(skillName);
+                          const SkillIcon = skillMeta.icon;
                           return (
                             <div
                               key={skillName}
                               className="rounded-md border border-border/30 bg-card/60 px-4 py-3 space-y-1.5"
                             >
                               <div className="flex items-center gap-2">
-                                <Sparkles className="h-3.5 w-3.5 text-violet-400 shrink-0" />
+                                <SkillIcon className={cn("h-3.5 w-3.5 shrink-0", skillMeta.color)} />
                                 <span className="text-sm font-medium">{skillName}</span>
                                 {info && (
                                   <Badge variant="outline" className="text-[9px] px-1.5 py-0 ml-auto">{info.source}</Badge>

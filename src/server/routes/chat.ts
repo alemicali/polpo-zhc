@@ -97,7 +97,28 @@ export function chatRoutes(): OpenAPIHono<ServerEnv> {
       return c.json({ ok: false, error: "Session not found", code: "NOT_FOUND" }, 404);
     }
     const messages = sessionStore.getMessages(id);
-    return c.json({ ok: true, data: { session, messages } }, 200);
+    // SECURITY: Redact vault credentials from persisted tool calls before serving to client
+    const safeMessages = messages.map(m => {
+      if (!m.toolCalls) return m;
+      const hasVault = m.toolCalls.some(tc => tc.name === "set_vault_entry");
+      if (!hasVault) return m;
+      return {
+        ...m,
+        toolCalls: m.toolCalls.map(tc => {
+          if (tc.name !== "set_vault_entry" || !tc.arguments) return tc;
+          const args = { ...tc.arguments };
+          if (args.credentials && typeof args.credentials === "object") {
+            const redacted: Record<string, string> = {};
+            for (const key of Object.keys(args.credentials as Record<string, string>)) {
+              redacted[key] = "[REDACTED]";
+            }
+            args.credentials = redacted;
+          }
+          return { ...tc, arguments: args };
+        }),
+      };
+    });
+    return c.json({ ok: true, data: { session, messages: safeMessages } }, 200);
   });
 
   // DELETE /chat/sessions/:id — delete a session

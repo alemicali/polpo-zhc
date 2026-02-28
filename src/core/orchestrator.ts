@@ -582,6 +582,7 @@ export class Orchestrator extends TypedEmitter {
   renameTeam(oldName: string, newName: string): void { this.agentMgr.renameTeam(oldName, newName); }
   addAgent(agent: AgentConfig, teamName?: string): void { this.agentMgr.addAgent(agent, teamName); }
   removeAgent(name: string): boolean { return this.agentMgr.removeAgent(name); }
+  findAgentTeam(name: string): Team | undefined { return this.agentMgr.findAgentTeam(name); }
   addVolatileAgent(agent: AgentConfig, group: string): void { this.agentMgr.addVolatileAgent(agent, group); }
   cleanupVolatileAgents(group: string): number { return this.agentMgr.cleanupVolatileAgents(group); }
 

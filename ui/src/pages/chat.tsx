@@ -626,63 +626,65 @@ function VaultPreviewCard({
     /password|secret|token|key|credential/i.test(key);
 
   return (
-    <div className="mt-3 rounded-xl border border-amber-500/20 bg-amber-500/[0.03] overflow-hidden">
-      {/* Header */}
-      <div className="flex items-center gap-2 px-4 py-3 border-b border-amber-500/10 bg-amber-500/[0.02]">
-        <KeyRound className="h-4 w-4 text-amber-500 shrink-0" />
-        <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold truncate">
-            {preview.label ?? preview.service}
-          </p>
-          <p className="text-[11px] text-muted-foreground">
-            {vaultTypeLabel[preview.type] ?? preview.type} credential for <span className="font-medium">{preview.agent}</span>
-          </p>
+    <div className="mt-3 space-y-3">
+      <div className="rounded-xl border border-amber-500/20 bg-amber-500/[0.03] overflow-hidden">
+        {/* Header */}
+        <div className="flex items-center gap-2 px-4 py-3 border-b border-amber-500/10 bg-amber-500/[0.02]">
+          <KeyRound className="h-4 w-4 text-amber-500 shrink-0" />
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold truncate">
+              {preview.label ?? preview.service}
+            </p>
+            <p className="text-[11px] text-muted-foreground">
+              {vaultTypeLabel[preview.type] ?? preview.type} credential for <span className="font-medium">{preview.agent}</span>
+            </p>
+          </div>
+          <Badge variant="outline" className="text-[10px] shrink-0 border-amber-500/30 text-amber-600">
+            <ShieldCheck className="h-3 w-3 mr-1" />
+            Vault
+          </Badge>
         </div>
-        <Badge variant="outline" className="text-[10px] shrink-0 border-amber-500/30 text-amber-600">
-          <ShieldCheck className="h-3 w-3 mr-1" />
-          Vault
-        </Badge>
-      </div>
 
-      {/* Credential fields — editable */}
-      <div className="px-4 py-3 space-y-2">
-        {Object.entries(credentials).map(([key, value]) => {
-          const sensitive = isSensitive(key);
-          const isVisible = showValues.has(key);
+        {/* Credential fields — editable */}
+        <div className="px-4 py-3 space-y-2">
+          {Object.entries(credentials).map(([key, value]) => {
+            const sensitive = isSensitive(key);
+            const isVisible = showValues.has(key);
 
-          return (
-            <div key={key} className="flex items-center gap-2">
-              <label className="text-xs font-medium text-muted-foreground w-28 shrink-0 text-right">
-                {key}
-              </label>
-              <div className="relative flex-1">
-                <Input
-                  type={sensitive && !isVisible ? "password" : "text"}
-                  value={value}
-                  onChange={(e) =>
-                    setCredentials((prev) => ({ ...prev, [key]: e.target.value }))
-                  }
-                  disabled={disabled || submitting}
-                  className="h-8 text-sm bg-background/60 pr-8 font-mono"
-                />
-                {sensitive && (
-                  <button
-                    type="button"
-                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
-                    onClick={() => toggleShow(key)}
-                    tabIndex={-1}
-                  >
-                    <Eye className="h-3.5 w-3.5" />
-                  </button>
-                )}
+            return (
+              <div key={key} className="flex items-center gap-2">
+                <label className="text-xs font-medium text-muted-foreground w-28 shrink-0 text-right">
+                  {key}
+                </label>
+                <div className="relative flex-1">
+                  <Input
+                    type={sensitive && !isVisible ? "password" : "text"}
+                    value={value}
+                    onChange={(e) =>
+                      setCredentials((prev) => ({ ...prev, [key]: e.target.value }))
+                    }
+                    disabled={disabled || submitting}
+                    className="h-8 text-sm bg-background/60 pr-8 font-mono"
+                  />
+                  {sensitive && (
+                    <button
+                      type="button"
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                      onClick={() => toggleShow(key)}
+                      tabIndex={-1}
+                    >
+                      <Eye className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
               </div>
-            </div>
-          );
-        })}
+            );
+          })}
+        </div>
       </div>
 
-      {/* Action buttons */}
-      <div className="flex items-center gap-2 px-4 py-3 border-t border-amber-500/10 bg-amber-500/[0.02]">
+      {/* Action buttons — outside the box, consistent with AskUser pattern */}
+      <div className="flex items-center justify-between">
         <Button
           variant="ghost"
           size="sm"
@@ -693,7 +695,6 @@ function VaultPreviewCard({
           <Ban className="h-3.5 w-3.5" />
           Cancel
         </Button>
-        <div className="flex-1" />
         <Button
           size="sm"
           disabled={disabled || submitting}

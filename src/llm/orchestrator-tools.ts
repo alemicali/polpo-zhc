@@ -1514,6 +1514,10 @@ function execUpdateAgent(polpo: Orchestrator, args: Record<string, unknown>): st
   }
   const name = existing.name; // canonical name
 
+  // Remember which team the agent is currently in BEFORE removing
+  const currentTeam = polpo.findAgentTeam(name);
+  const originalTeamName = currentTeam?.name;
+
   // Remove and re-add with updated fields
   polpo.removeAgent(name);
 
@@ -1552,7 +1556,8 @@ function execUpdateAgent(polpo: Orchestrator, args: Record<string, unknown>): st
     emailAllowedDomains: (args.emailAllowedDomains as string[] | undefined) ?? existing.emailAllowedDomains,
   };
 
-  const targetTeam = args.team as string | undefined;
+  // Use explicit team from args, otherwise preserve the original team
+  const targetTeam = (args.team as string | undefined) ?? originalTeamName;
   polpo.addAgent(merged as any, targetTeam);
   const changes = Object.keys(args).filter(k => k !== "name").join(", ");
   return `Agent "${name}" updated: ${changes}`;
