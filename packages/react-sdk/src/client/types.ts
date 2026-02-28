@@ -190,6 +190,8 @@ export interface AgentIdentity {
   tone?: string;
   /** Personality traits — WHO the agent IS as a persona */
   personality?: string;
+  /** Social & web accounts — keys are platform names, values are handles/URLs */
+  socials?: Record<string, string>;
 }
 
 export interface AgentConfig {

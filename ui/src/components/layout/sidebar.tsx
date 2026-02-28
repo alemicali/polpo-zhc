@@ -23,19 +23,42 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 
-const nav = [
-  { to: "/dashboard", icon: LayoutDashboard, label: "Dashboard" },
-  { to: "/chat", icon: MessageCircle, label: "Chat" },
-  { to: "/missions", icon: Target, label: "Missions" },
-  { to: "/schedules", icon: CalendarClock, label: "Schedules" },
-  { to: "/tasks", icon: ListChecks, label: "Tasks" },
-  { to: "/agents", icon: Bot, label: "Agents" },
-  { to: "/memory", icon: Brain, label: "Memory" },
-  { to: "/templates", icon: Workflow, label: "Templates" },
-  { to: "/notifications", icon: Bell, label: "Notifications" },
-  { to: "/approvals", icon: ShieldCheck, label: "Approvals" },
-  { to: "/config", icon: Settings2, label: "Configuration" },
-] as const;
+type NavItem = { to: string; icon: typeof LayoutDashboard; label: string };
+type NavSection = { section: string; items: NavItem[] };
+
+const nav: NavSection[] = [
+  {
+    section: "Overview",
+    items: [
+      { to: "/dashboard", icon: LayoutDashboard, label: "Dashboard" },
+      { to: "/chat", icon: MessageCircle, label: "Chat" },
+    ],
+  },
+  {
+    section: "Work",
+    items: [
+      { to: "/missions", icon: Target, label: "Missions" },
+      { to: "/schedules", icon: CalendarClock, label: "Schedules" },
+      { to: "/tasks", icon: ListChecks, label: "Tasks" },
+    ],
+  },
+  {
+    section: "Knowledge",
+    items: [
+      { to: "/agents", icon: Bot, label: "Agents" },
+      { to: "/memory", icon: Brain, label: "Memory" },
+      { to: "/templates", icon: Workflow, label: "Templates" },
+    ],
+  },
+  {
+    section: "System",
+    items: [
+      { to: "/notifications", icon: Bell, label: "Notifications" },
+      { to: "/approvals", icon: ShieldCheck, label: "Approvals" },
+      { to: "/config", icon: Settings2, label: "Configuration" },
+    ],
+  },
+];
 
 const statusConfig: Record<string, { color: string; pulse: boolean; label: string }> = {
   connected: {
@@ -135,54 +158,67 @@ export function Sidebar() {
       {/* Navigation */}
       <nav
         className={cn(
-          "flex-1 flex flex-col gap-0.5",
-          collapsed ? "items-center py-3" : "p-3"
+          "flex-1 flex flex-col",
+          collapsed ? "items-center py-3 gap-1" : "p-3 gap-1"
         )}
       >
-        {nav.map(({ to, icon: Icon, label }) => {
-          const linkClasses = ({ isActive }: { isActive: boolean }) =>
-            cn(
-              "flex items-center rounded-lg transition-all duration-200 group/link relative",
-              collapsed
-                ? "justify-center h-10 w-10"
-                : "gap-3 px-3 py-2.5 text-[13px] font-medium",
-              isActive
-                ? "bg-accent text-accent-foreground shadow-sm"
-                : "text-muted-foreground hover:bg-accent/40 hover:text-foreground"
-            );
+        {nav.map(({ section, items }, sectionIdx) => (
+          <div key={section} className={cn(sectionIdx > 0 && (collapsed ? "mt-2" : "mt-3"))}>
+            {collapsed ? (
+              <div className="mx-auto mb-1 h-px w-5 bg-border/60" />
+            ) : (
+              <div className="px-3 mb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50">
+                {section}
+              </div>
+            )}
+            <div className={cn("flex flex-col gap-0.5", collapsed && "items-center")}>
+              {items.map(({ to, icon: Icon, label }) => {
+                const linkClasses = ({ isActive }: { isActive: boolean }) =>
+                  cn(
+                    "flex items-center rounded-lg transition-all duration-200 group/link relative",
+                    collapsed
+                      ? "justify-center h-10 w-10"
+                      : "gap-3 px-3 py-2.5 text-[13px] font-medium",
+                    isActive
+                      ? "bg-accent text-accent-foreground shadow-sm"
+                      : "text-muted-foreground hover:bg-accent/40 hover:text-foreground"
+                  );
 
-          return collapsed ? (
-            <Tooltip key={to} delayDuration={0}>
-              <TooltipTrigger asChild>
-                <NavLink to={to} className={linkClasses}>
-                  {({ isActive }) => (
-                    <>
-                      <Icon className="h-[18px] w-[18px]" />
-                      {isActive && (
-                        <span className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-[2px] h-5 w-1 rounded-r-full bg-primary" />
-                      )}
-                    </>
-                  )}
-                </NavLink>
-              </TooltipTrigger>
-              <TooltipContent side="right" className="text-xs font-medium">
-                {label}
-              </TooltipContent>
-            </Tooltip>
-          ) : (
-            <NavLink key={to} to={to} className={linkClasses}>
-              {({ isActive }) => (
-                <>
-                  {isActive && (
-                    <span className="absolute left-0 top-1/2 -translate-y-1/2 h-5 w-1 rounded-r-full bg-primary" />
-                  )}
-                  <Icon className="h-[18px] w-[18px] shrink-0" />
-                  <span className="truncate">{label}</span>
-                </>
-              )}
-            </NavLink>
-          );
-        })}
+                return collapsed ? (
+                  <Tooltip key={to} delayDuration={0}>
+                    <TooltipTrigger asChild>
+                      <NavLink to={to} className={linkClasses}>
+                        {({ isActive }) => (
+                          <>
+                            <Icon className="h-[18px] w-[18px]" />
+                            {isActive && (
+                              <span className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-[2px] h-5 w-1 rounded-r-full bg-primary" />
+                            )}
+                          </>
+                        )}
+                      </NavLink>
+                    </TooltipTrigger>
+                    <TooltipContent side="right" className="text-xs font-medium">
+                      {label}
+                    </TooltipContent>
+                  </Tooltip>
+                ) : (
+                  <NavLink key={to} to={to} className={linkClasses}>
+                    {({ isActive }) => (
+                      <>
+                        {isActive && (
+                          <span className="absolute left-0 top-1/2 -translate-y-1/2 h-5 w-1 rounded-r-full bg-primary" />
+                        )}
+                        <Icon className="h-[18px] w-[18px] shrink-0" />
+                        <span className="truncate">{label}</span>
+                      </>
+                    )}
+                  </NavLink>
+                );
+              })}
+            </div>
+          </div>
+        ))}
       </nav>
 
       {/* Footer — connection + project */}

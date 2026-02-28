@@ -206,6 +206,11 @@ export interface AgentIdentity {
   /** Personality traits — WHO the agent IS as a persona.
    *  Examples: "Detail-oriented and empathetic", "Creative problem-solver" */
   personality?: string;
+
+  /** Social & web accounts — free-form key-value.
+   *  Keys are platform names, values are handles/URLs.
+   *  Examples: { x: "@alice", linkedin: "linkedin.com/in/alice", github: "alice", website: "https://alice.dev" } */
+  socials?: Record<string, string>;
 }
 
 /** Vault credential entry */

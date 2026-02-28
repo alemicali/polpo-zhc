@@ -11,7 +11,7 @@
 import { Type } from "@sinclair/typebox";
 import type { Tool } from "@mariozechner/pi-ai";
 import type { Orchestrator } from "../core/orchestrator.js";
-import type { ApprovalStatus, VaultEntry, AgentIdentity, AgentResponsibility } from "../core/types.js";
+import type { ApprovalStatus, VaultEntry, AgentIdentity, AgentResponsibility, AgentConfig } from "../core/types.js";
 import { existsSync, readFileSync, appendFileSync, writeFileSync } from "fs";
 import { join } from "path";
 
@@ -263,16 +263,34 @@ const deleteMissionTool: Tool = {
 
 const addAgentTool: Tool = {
   name: "add_agent",
-  description: "Add a new agent to a team. If no team is specified, adds to the default (first) team.",
+  description: "Add a new agent to a team. If no team is specified, adds to the default (first) team. Use enable* flags to grant tool capabilities (e.g. enableBrowser, enableEmail). Use allowedTools to restrict to specific tool names.",
   parameters: Type.Object({
     name: Type.String({ description: "Agent name (unique identifier, must be globally unique across all teams)" }),
     role: Type.Optional(Type.String({ description: "Agent role description (e.g. 'Frontend developer')" })),
     model: Type.Optional(Type.String({ description: "LLM model (e.g. 'claude-sonnet-4-5-20250929', 'gpt-4o')" })),
     systemPrompt: Type.Optional(Type.String({ description: "Custom system prompt for this agent" })),
     skills: Type.Optional(Type.Array(Type.String(), { description: "Skill names to assign" })),
-    allowedPaths: Type.Optional(Type.Array(Type.String(), { description: "Filesystem paths this agent can access" })),
+    allowedPaths: Type.Optional(Type.Array(Type.String(), { description: "Filesystem paths this agent can access (relative to workDir)" })),
+    allowedTools: Type.Optional(Type.Array(Type.String(), { description: "Restrict to specific tool names (e.g. ['read','write','bash']). Omit for all tools." })),
     reportsTo: Type.Optional(Type.String({ description: "Name of the agent this one reports to (org chart hierarchy, e.g. 'lead-dev')" })),
     team: Type.Optional(Type.String({ description: "Team name to add the agent to (default: first team)" })),
+    reasoning: Type.Optional(Type.Union([Type.Literal("off"), Type.Literal("low"), Type.Literal("medium"), Type.Literal("high")], { description: "Agent thinking/reasoning level. Overrides global settings.reasoning." })),
+    maxTurns: Type.Optional(Type.Number({ description: "Max conversation turns before agent stops. Default: 200" })),
+    maxConcurrency: Type.Optional(Type.Number({ description: "Max concurrent tasks this agent can run. Default: 1" })),
+    enableBrowser: Type.Optional(Type.Boolean({ description: "Enable browser tools (navigate, click, fill, screenshot)" })),
+    browserEngine: Type.Optional(Type.Union([Type.Literal("agent-browser"), Type.Literal("playwright")], { description: "Browser backend. Default: agent-browser" })),
+    browserProfile: Type.Optional(Type.String({ description: "Persistent browser profile name (shares state across tasks)" })),
+    enableHttp: Type.Optional(Type.Boolean({ description: "Enable HTTP fetch/download tools" })),
+    enableGit: Type.Optional(Type.Boolean({ description: "Enable Git tools (status, diff, log, commit, branch)" })),
+    enableMultifile: Type.Optional(Type.Boolean({ description: "Enable multi-file tools (multi_edit, regex_replace, bulk_rename)" })),
+    enableDeps: Type.Optional(Type.Boolean({ description: "Enable dependency management tools (install, add, remove, audit)" })),
+    enableExcel: Type.Optional(Type.Boolean({ description: "Enable Excel/CSV tools (read, write, query)" })),
+    enablePdf: Type.Optional(Type.Boolean({ description: "Enable PDF tools (read, create, merge)" })),
+    enableDocx: Type.Optional(Type.Boolean({ description: "Enable DOCX tools (read, create)" })),
+    enableEmail: Type.Optional(Type.Boolean({ description: "Enable email tools (send, list, read, search). Requires vault SMTP/IMAP credentials." })),
+    enableAudio: Type.Optional(Type.Boolean({ description: "Enable audio tools (transcribe, speak)" })),
+    enableImage: Type.Optional(Type.Boolean({ description: "Enable image tools (generate, analyze)" })),
+    emailAllowedDomains: Type.Optional(Type.Array(Type.String(), { description: "Restrict email sending to these domains only (e.g. ['company.com'])" })),
   }),
 };
 
@@ -286,7 +304,7 @@ const removeAgentTool: Tool = {
 
 const updateAgentTool: Tool = {
   name: "update_agent",
-  description: "Update an existing agent's configuration (model, role, system prompt, skills, paths, hierarchy).",
+  description: "Update an existing agent's configuration. Only provided fields are changed; omitted fields keep their current value. Use empty string for reportsTo to remove hierarchy.",
   parameters: Type.Object({
     name: Type.String({ description: "Agent name to update" }),
     role: Type.Optional(Type.String({ description: "New role description" })),
@@ -294,7 +312,26 @@ const updateAgentTool: Tool = {
     systemPrompt: Type.Optional(Type.String({ description: "New system prompt" })),
     skills: Type.Optional(Type.Array(Type.String(), { description: "New skill list (replaces existing)" })),
     allowedPaths: Type.Optional(Type.Array(Type.String(), { description: "New allowed paths (replaces existing)" })),
-    reportsTo: Type.Optional(Type.String({ description: "Name of the agent this one reports to (org chart hierarchy). Use empty string to remove." })),
+    allowedTools: Type.Optional(Type.Array(Type.String(), { description: "Restrict to specific tool names (replaces existing). Omit to keep current." })),
+    reportsTo: Type.Optional(Type.String({ description: "Name of the agent this one reports to. Use empty string to remove." })),
+    team: Type.Optional(Type.String({ description: "Move agent to a different team" })),
+    reasoning: Type.Optional(Type.Union([Type.Literal("off"), Type.Literal("low"), Type.Literal("medium"), Type.Literal("high")], { description: "Agent thinking/reasoning level" })),
+    maxTurns: Type.Optional(Type.Number({ description: "Max conversation turns" })),
+    maxConcurrency: Type.Optional(Type.Number({ description: "Max concurrent tasks" })),
+    enableBrowser: Type.Optional(Type.Boolean({ description: "Enable/disable browser tools" })),
+    browserEngine: Type.Optional(Type.Union([Type.Literal("agent-browser"), Type.Literal("playwright")], { description: "Browser backend" })),
+    browserProfile: Type.Optional(Type.String({ description: "Persistent browser profile name" })),
+    enableHttp: Type.Optional(Type.Boolean({ description: "Enable/disable HTTP tools" })),
+    enableGit: Type.Optional(Type.Boolean({ description: "Enable/disable Git tools" })),
+    enableMultifile: Type.Optional(Type.Boolean({ description: "Enable/disable multi-file tools" })),
+    enableDeps: Type.Optional(Type.Boolean({ description: "Enable/disable dependency tools" })),
+    enableExcel: Type.Optional(Type.Boolean({ description: "Enable/disable Excel/CSV tools" })),
+    enablePdf: Type.Optional(Type.Boolean({ description: "Enable/disable PDF tools" })),
+    enableDocx: Type.Optional(Type.Boolean({ description: "Enable/disable DOCX tools" })),
+    enableEmail: Type.Optional(Type.Boolean({ description: "Enable/disable email tools" })),
+    enableAudio: Type.Optional(Type.Boolean({ description: "Enable/disable audio tools" })),
+    enableImage: Type.Optional(Type.Boolean({ description: "Enable/disable image tools" })),
+    emailAllowedDomains: Type.Optional(Type.Array(Type.String(), { description: "Restrict email to these domains" })),
   }),
 };
 
@@ -336,7 +373,7 @@ const renameTeamTool: Tool = {
 
 const setVaultEntryTool: Tool = {
   name: "set_vault_entry",
-  description: "Add or update a credential in an agent's vault. Credentials can reference environment variables with ${ENV_VAR} syntax. Common types: smtp (host, port, user, pass), imap (host, port, user, pass), api_key (key), oauth (clientId, clientSecret, refreshToken), login (username, password), custom (any fields).",
+  description: "Add or update a credential in an agent's vault. Credentials are encrypted at rest (AES-256-GCM). Ask the user for actual values — do NOT use placeholder or template syntax. Common types: smtp (host, port, user, pass), imap (host, port, user, pass), api_key (key), oauth (clientId, clientSecret, refreshToken), login (username, password), custom (any fields).",
   parameters: Type.Object({
     agent: Type.String({ description: "Agent name" }),
     service: Type.String({ description: "Service name (vault key, e.g. 'gmail', 'sendgrid', 'stripe')" }),
@@ -349,7 +386,7 @@ const setVaultEntryTool: Tool = {
       Type.Literal("custom"),
     ], { description: "Credential type" }),
     label: Type.Optional(Type.String({ description: "Human-readable label (e.g. 'Work Gmail SMTP')" })),
-    credentials: Type.Record(Type.String(), Type.String(), { description: "Key-value credential fields. Values can be literals or ${ENV_VAR} references." }),
+    credentials: Type.Record(Type.String(), Type.String(), { description: "Key-value credential fields. Use actual values — they will be encrypted at rest." }),
   }),
 };
 
@@ -387,6 +424,7 @@ const setIdentityTool: Tool = {
     timezone: Type.Optional(Type.String({ description: "Timezone (e.g. 'Europe/Rome')" })),
     tone: Type.Optional(Type.String({ description: "Communication tone — HOW the agent communicates (e.g. 'Professional but warm', 'Concise and data-driven')" })),
     personality: Type.Optional(Type.String({ description: "Personality traits — WHO the agent IS (e.g. 'Detail-oriented and empathetic')" })),
+    socials: Type.Optional(Type.Record(Type.String(), Type.String(), { description: "Social & web accounts — keys are platform names, values are handles/URLs (e.g. { x: '@alice', github: 'alice', linkedin: '...', website: 'https://...' })" })),
     responsibilities: Type.Optional(Type.Array(
       Type.Union([
         Type.String(),
@@ -763,6 +801,53 @@ const TOOL_LABELS: Record<string, string> = {
 };
 
 // ═══════════════════════════════════════════════════════
+//  AGENT RESOLUTION HELPER
+// ═══════════════════════════════════════════════════════
+
+/**
+ * Resolve an agent by name or displayName.
+ *
+ * Resolution order:
+ * 1. Exact match on `agent.name`
+ * 2. Case-insensitive match on `agent.name`
+ * 3. Case-insensitive match on `agent.identity.displayName`
+ *
+ * Returns the AgentConfig if found, or undefined.
+ */
+function resolveAgent(agents: AgentConfig[], query: string): AgentConfig | undefined {
+  // 1. Exact match on name
+  const exact = agents.find(a => a.name === query);
+  if (exact) return exact;
+
+  // 2. Case-insensitive match on name
+  const lower = query.toLowerCase();
+  const ciName = agents.find(a => a.name.toLowerCase() === lower);
+  if (ciName) return ciName;
+
+  // 3. Case-insensitive match on displayName
+  const ciDisplay = agents.find(a =>
+    a.identity?.displayName?.toLowerCase() === lower,
+  );
+  if (ciDisplay) return ciDisplay;
+
+  return undefined;
+}
+
+/**
+ * Resolve an agent and return its canonical name, or an error string.
+ * Convenience wrapper used by tool executors.
+ */
+function resolveAgentName(agents: AgentConfig[], query: string): { name: string } | { error: string } {
+  const agent = resolveAgent(agents, query);
+  if (agent) return { name: agent.name };
+  const available = agents.map(a => {
+    const dn = a.identity?.displayName;
+    return dn ? `${a.name} (${dn})` : a.name;
+  }).join(", ");
+  return { error: `Error: Agent "${query}" not found. Available agents: ${available}` };
+}
+
+// ═══════════════════════════════════════════════════════
 //  EXECUTOR
 // ═══════════════════════════════════════════════════════
 
@@ -1135,7 +1220,8 @@ function execListAgents(polpo: Orchestrator): string {
   const agents = polpo.getAgents();
   if (agents.length === 0) return "No agents configured.";
   const lines = agents.map(a => {
-    const parts = [`• ${a.name}`];
+    const dn = a.identity?.displayName;
+    const parts = [`• ${a.name}${dn ? ` (${dn})` : ""}`];
     if (a.role) parts.push(`— ${a.role}`);
     if (a.model) parts.push(`[${a.model}]`);
     if (a.reportsTo) parts.push(`→ reports to: ${a.reportsTo}`);
@@ -1221,10 +1307,9 @@ function execGetLogs(polpo: Orchestrator, args: Record<string, unknown>): string
 
 function execCreateTask(polpo: Orchestrator, args: Record<string, unknown>): string {
   const agents = polpo.getAgents();
-  const agentName = args.assignTo as string;
-  if (!agents.find(a => a.name === agentName)) {
-    return `Error: Agent "${agentName}" not found. Available agents: ${agents.map(a => a.name).join(", ")}`;
-  }
+  const resolved = resolveAgentName(agents, args.assignTo as string);
+  if ("error" in resolved) return resolved.error;
+  const agentName = resolved.name;
   const task = polpo.addTask({
     title: args.title as string,
     description: args.description as string,
@@ -1248,9 +1333,10 @@ function execUpdateTask(polpo: Orchestrator, args: Record<string, unknown>): str
   }
   if (args.assignTo) {
     const agents = polpo.getAgents();
-    if (!agents.find(a => a.name === args.assignTo)) return `Error: Agent "${args.assignTo}" not found.`;
-    polpo.updateTaskAssignment(taskId, args.assignTo as string);
-    changes.push(`assignment → ${args.assignTo}`);
+    const resolved = resolveAgentName(agents, args.assignTo as string);
+    if ("error" in resolved) return resolved.error;
+    polpo.updateTaskAssignment(taskId, resolved.name);
+    changes.push(`assignment → ${resolved.name}`);
   }
   if (args.expectations) {
     polpo.updateTaskExpectations(taskId, args.expectations as any[]);
@@ -1372,32 +1458,61 @@ function execDeleteMission(polpo: Orchestrator, args: Record<string, unknown>): 
 
 function execAddAgent(polpo: Orchestrator, args: Record<string, unknown>): string {
   const existing = polpo.getAgents();
-  if (existing.find(a => a.name === args.name)) {
-    return `Error: Agent "${args.name}" already exists. Use update_agent to modify.`;
+  // For add_agent, check if agent already exists (by name or displayName)
+  const dup = resolveAgent(existing, args.name as string);
+  if (dup) {
+    return `Error: Agent "${args.name}" already exists (matched "${dup.name}"). Use update_agent to modify.`;
   }
   const teamName = args.team as string | undefined;
-  polpo.addAgent({
+  const config: Record<string, unknown> = {
     name: args.name as string,
     role: args.role as string | undefined,
     model: args.model as string | undefined,
     systemPrompt: args.systemPrompt as string | undefined,
     skills: args.skills as string[] | undefined,
     allowedPaths: args.allowedPaths as string[] | undefined,
+    allowedTools: args.allowedTools as string[] | undefined,
     reportsTo: args.reportsTo as string | undefined,
-  }, teamName);
+    reasoning: args.reasoning as string | undefined,
+    maxTurns: args.maxTurns as number | undefined,
+    maxConcurrency: args.maxConcurrency as number | undefined,
+    enableBrowser: args.enableBrowser as boolean | undefined,
+    browserEngine: args.browserEngine as string | undefined,
+    browserProfile: args.browserProfile as string | undefined,
+    enableHttp: args.enableHttp as boolean | undefined,
+    enableGit: args.enableGit as boolean | undefined,
+    enableMultifile: args.enableMultifile as boolean | undefined,
+    enableDeps: args.enableDeps as boolean | undefined,
+    enableExcel: args.enableExcel as boolean | undefined,
+    enablePdf: args.enablePdf as boolean | undefined,
+    enableDocx: args.enableDocx as boolean | undefined,
+    enableEmail: args.enableEmail as boolean | undefined,
+    enableAudio: args.enableAudio as boolean | undefined,
+    enableImage: args.enableImage as boolean | undefined,
+    emailAllowedDomains: args.emailAllowedDomains as string[] | undefined,
+  };
+  // Strip undefined values so addAgent only receives explicitly set fields
+  const cleaned = Object.fromEntries(Object.entries(config).filter(([, v]) => v !== undefined));
+  polpo.addAgent(cleaned as any, teamName);
   return `Agent "${args.name}" added to ${teamName ? `team "${teamName}"` : "the first team"}.`;
 }
 
 function execRemoveAgent(polpo: Orchestrator, args: Record<string, unknown>): string {
-  const removed = polpo.removeAgent(args.name as string);
-  return removed ? `Agent "${args.name}" removed.` : `Error: Agent "${args.name}" not found.`;
+  const agents = polpo.getAgents();
+  const resolved = resolveAgentName(agents, args.name as string);
+  if ("error" in resolved) return resolved.error;
+  const removed = polpo.removeAgent(resolved.name);
+  return removed ? `Agent "${resolved.name}" removed.` : `Error: Agent "${resolved.name}" not found.`;
 }
 
 function execUpdateAgent(polpo: Orchestrator, args: Record<string, unknown>): string {
-  const name = args.name as string;
   const agents = polpo.getAgents();
-  const existing = agents.find(a => a.name === name);
-  if (!existing) return `Error: Agent "${name}" not found.`;
+  const existing = resolveAgent(agents, args.name as string);
+  if (!existing) {
+    const resolved = resolveAgentName(agents, args.name as string);
+    return "error" in resolved ? resolved.error : `Error: Agent "${args.name}" not found.`;
+  }
+  const name = existing.name; // canonical name
 
   // Remove and re-add with updated fields
   polpo.removeAgent(name);
@@ -1408,15 +1523,37 @@ function execUpdateAgent(polpo: Orchestrator, args: Record<string, unknown>): st
     reportsTo = args.reportsTo.trim() || undefined;
   }
 
-  polpo.addAgent({
+  // Merge: explicit args override existing, undefined keeps current
+  const merged: Record<string, unknown> = {
     ...existing,
     role: (args.role as string | undefined) ?? existing.role,
     model: (args.model as string | undefined) ?? existing.model,
     systemPrompt: (args.systemPrompt as string | undefined) ?? existing.systemPrompt,
     skills: (args.skills as string[] | undefined) ?? existing.skills,
     allowedPaths: (args.allowedPaths as string[] | undefined) ?? existing.allowedPaths,
+    allowedTools: (args.allowedTools as string[] | undefined) ?? existing.allowedTools,
     reportsTo,
-  });
+    reasoning: (args.reasoning as string | undefined) ?? existing.reasoning,
+    maxTurns: (args.maxTurns as number | undefined) ?? existing.maxTurns,
+    maxConcurrency: (args.maxConcurrency as number | undefined) ?? existing.maxConcurrency,
+    enableBrowser: (args.enableBrowser as boolean | undefined) ?? existing.enableBrowser,
+    browserEngine: (args.browserEngine as string | undefined) ?? existing.browserEngine,
+    browserProfile: (args.browserProfile as string | undefined) ?? existing.browserProfile,
+    enableHttp: (args.enableHttp as boolean | undefined) ?? existing.enableHttp,
+    enableGit: (args.enableGit as boolean | undefined) ?? existing.enableGit,
+    enableMultifile: (args.enableMultifile as boolean | undefined) ?? existing.enableMultifile,
+    enableDeps: (args.enableDeps as boolean | undefined) ?? existing.enableDeps,
+    enableExcel: (args.enableExcel as boolean | undefined) ?? existing.enableExcel,
+    enablePdf: (args.enablePdf as boolean | undefined) ?? existing.enablePdf,
+    enableDocx: (args.enableDocx as boolean | undefined) ?? existing.enableDocx,
+    enableEmail: (args.enableEmail as boolean | undefined) ?? existing.enableEmail,
+    enableAudio: (args.enableAudio as boolean | undefined) ?? existing.enableAudio,
+    enableImage: (args.enableImage as boolean | undefined) ?? existing.enableImage,
+    emailAllowedDomains: (args.emailAllowedDomains as string[] | undefined) ?? existing.emailAllowedDomains,
+  };
+
+  const targetTeam = args.team as string | undefined;
+  polpo.addAgent(merged as any, targetTeam);
   const changes = Object.keys(args).filter(k => k !== "name").join(", ");
   return `Agent "${name}" updated: ${changes}`;
 }
@@ -1736,9 +1873,10 @@ function execAppendSystemContext(polpo: Orchestrator, args: Record<string, unkno
 // ═══════════════════════════════════════════════════════
 
 function execSetVaultEntry(polpo: Orchestrator, args: Record<string, unknown>): string {
-  const agentName = args.agent as string;
   const agents = polpo.getAgents();
-  if (!agents.find(a => a.name === agentName)) return `Error: Agent "${agentName}" not found.`;
+  const resolved = resolveAgentName(agents, args.agent as string);
+  if ("error" in resolved) return resolved.error;
+  const agentName = resolved.name;
 
   const vaultStore = polpo.getVaultStore();
   if (!vaultStore) return `Error: Vault store not available. Check POLPO_VAULT_KEY or ~/.polpo/vault.key.`;
@@ -1756,9 +1894,10 @@ function execSetVaultEntry(polpo: Orchestrator, args: Record<string, unknown>): 
 }
 
 function execRemoveVaultEntry(polpo: Orchestrator, args: Record<string, unknown>): string {
-  const agentName = args.agent as string;
   const agents = polpo.getAgents();
-  if (!agents.find(a => a.name === agentName)) return `Error: Agent "${agentName}" not found.`;
+  const resolved = resolveAgentName(agents, args.agent as string);
+  if ("error" in resolved) return resolved.error;
+  const agentName = resolved.name;
 
   const vaultStore = polpo.getVaultStore();
   if (!vaultStore) return `Error: Vault store not available.`;
@@ -1771,9 +1910,10 @@ function execRemoveVaultEntry(polpo: Orchestrator, args: Record<string, unknown>
 }
 
 function execListVault(polpo: Orchestrator, args: Record<string, unknown>): string {
-  const agentName = args.agent as string;
   const agents = polpo.getAgents();
-  if (!agents.find(a => a.name === agentName)) return `Error: Agent "${agentName}" not found.`;
+  const resolved = resolveAgentName(agents, args.agent as string);
+  if ("error" in resolved) return resolved.error;
+  const agentName = resolved.name;
 
   const vaultStore = polpo.getVaultStore();
   if (!vaultStore) return `Error: Vault store not available.`;
@@ -1797,10 +1937,13 @@ function execListVault(polpo: Orchestrator, args: Record<string, unknown>): stri
 // ═══════════════════════════════════════════════════════
 
 function execSetIdentity(polpo: Orchestrator, args: Record<string, unknown>): string {
-  const agentName = args.agent as string;
   const agents = polpo.getAgents();
-  const existing = agents.find(a => a.name === agentName);
-  if (!existing) return `Error: Agent "${agentName}" not found.`;
+  const existing = resolveAgent(agents, args.agent as string);
+  if (!existing) {
+    const resolved = resolveAgentName(agents, args.agent as string);
+    return "error" in resolved ? resolved.error : `Error: Agent "${args.agent}" not found.`;
+  }
+  const agentName = existing.name;
 
   const currentIdentity = existing.identity ?? {};
 
@@ -1814,6 +1957,7 @@ function execSetIdentity(polpo: Orchestrator, args: Record<string, unknown>): st
   if (args.timezone !== undefined) updated.timezone = args.timezone as string;
   if (args.tone !== undefined) updated.tone = args.tone as string;
   if (args.personality !== undefined) updated.personality = args.personality as string;
+  if (args.socials !== undefined) updated.socials = args.socials as Record<string, string>;
   if (args.responsibilities !== undefined) {
     updated.responsibilities = (args.responsibilities as (string | AgentResponsibility)[]);
   }
@@ -1826,15 +1970,17 @@ function execSetIdentity(polpo: Orchestrator, args: Record<string, unknown>): st
 }
 
 function execGetIdentity(polpo: Orchestrator, args: Record<string, unknown>): string {
-  const agentName = args.agent as string;
   const agents = polpo.getAgents();
-  const existing = agents.find(a => a.name === agentName);
-  if (!existing) return `Error: Agent "${agentName}" not found.`;
+  const existing = resolveAgent(agents, args.agent as string);
+  if (!existing) {
+    const resolved = resolveAgentName(agents, args.agent as string);
+    return "error" in resolved ? resolved.error : `Error: Agent "${args.agent}" not found.`;
+  }
 
   const id = existing.identity;
-  if (!id) return `Agent "${agentName}" has no identity configured.`;
+  if (!id) return `Agent "${existing.name}" has no identity configured.`;
 
-  const lines: string[] = [`Identity for "${agentName}":`];
+  const lines: string[] = [`Identity for "${existing.name}":`];
   if (id.displayName) lines.push(`  Display name: ${id.displayName}`);
   if (id.title) lines.push(`  Title: ${id.title}`);
   if (id.company) lines.push(`  Company: ${id.company}`);
@@ -1843,6 +1989,9 @@ function execGetIdentity(polpo: Orchestrator, args: Record<string, unknown>): st
   if (id.timezone) lines.push(`  Timezone: ${id.timezone}`);
   if (id.tone) lines.push(`  Tone: ${id.tone}`);
   if (id.personality) lines.push(`  Personality: ${id.personality}`);
+  if (id.socials && Object.keys(id.socials).length > 0) {
+    lines.push(`  Socials: ${Object.entries(id.socials).map(([k, v]) => `${k}: ${v}`).join(", ")}`);
+  }
   if (id.responsibilities?.length) {
     lines.push(`  Responsibilities (${id.responsibilities.length}):`);
     for (const r of id.responsibilities) {

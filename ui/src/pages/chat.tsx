@@ -34,6 +34,8 @@ import {
   Eye,
   KeyRound,
   ShieldCheck,
+  AlertTriangle,
+  SkipForward,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -327,13 +329,17 @@ function MissionPreviewCard({
 
   const handleAction = async (action: MissionPreviewAction, fb?: string) => {
     setSubmitting(true);
-    const result = await onRespond(action, fb);
-    if (result.error) {
-      toast.error(`Mission ${action} failed`, { description: result.error });
-    } else if (action === "execute") {
-      toast.success("Mission execution started", { description: "Track progress on the missions page." });
-    } else if (action === "draft") {
-      toast.success("Mission saved as draft", { description: "Review it on the missions page." });
+    try {
+      const result = await onRespond(action, fb);
+      if (result.error) {
+        toast.error(`Mission ${action} failed`, { description: result.error });
+      } else if (action === "execute") {
+        toast.success("Mission execution started", { description: "Track progress on the missions page." });
+      } else if (action === "draft") {
+        toast.success("Mission saved as draft", { description: "Review it on the missions page." });
+      }
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -851,6 +857,8 @@ function QuestionCard({
 
 // ── AskUser cards: wizard for multi-question, flat for single ──
 
+type StepStatus = "answered" | "empty";
+
 function AskUserCards({
   questions,
   onSubmit,
@@ -872,6 +880,12 @@ function AskUserCards({
   });
   const [submitting, setSubmitting] = useState(false);
   const [step, setStep] = useState(0);
+  const [partialWarning, setPartialWarning] = useState(false);
+  const [skipWarning, setSkipWarning] = useState(false);
+
+  const isWizard = questions.length > 1;
+  const isSummaryStep = isWizard && step === questions.length;
+  const current = !isSummaryStep ? questions[step] : undefined;
 
   const toggleOption = (questionId: string, label: string, multiple: boolean) => {
     setSelections((prev) => {
@@ -886,15 +900,37 @@ function AskUserCards({
     });
   };
 
-  const hasAnyAnswer = questions.some((q) => {
+  const getStatus = (q: AskUserQuestion): StepStatus => {
     const sel = selections[q.id];
     const txt = customTexts[q.id]?.trim();
-    return (sel && sel.size > 0) || (txt && txt.length > 0);
-  });
+    return (sel && sel.size > 0) || (txt && txt.length > 0) ? "answered" : "empty";
+  };
+
+  const statuses = questions.map(getStatus);
+  const answeredCount = statuses.filter(s => s === "answered").length;
+  const emptyCount = statuses.filter(s => s === "empty").length;
+  const allAnswered = emptyCount === 0;
+  const hasAnyAnswer = answeredCount > 0;
+
+  // Auto-navigate to summary when all questions are answered
+  const prevAllAnswered = useRef(false);
+  useEffect(() => {
+    if (isWizard && allAnswered && !prevAllAnswered.current && !isSummaryStep) {
+      setStep(questions.length);
+    }
+    prevAllAnswered.current = allAnswered;
+  }, [allAnswered, isWizard, isSummaryStep, questions.length]);
 
   const handleSubmit = () => {
-    if (!hasAnyAnswer || submitting) return;
+    if (submitting) return;
+    // Warn if there are unanswered questions — double confirm to proceed
+    if (emptyCount > 0 && !partialWarning) {
+      setPartialWarning(true);
+      return;
+    }
+    if (!hasAnyAnswer) return;
     setSubmitting(true);
+    setPartialWarning(false);
     const answers: AskUserAnswer[] = questions.map((q) => ({
       questionId: q.id,
       selected: Array.from(selections[q.id] ?? []),
@@ -903,72 +939,198 @@ function AskUserCards({
     onSubmit(answers);
   };
 
-  const isWizard = questions.length > 1;
-  const current = questions[step];
-  const isLastStep = step === questions.length - 1;
+  const handleSkip = () => {
+    if (submitting) return;
+    if (!skipWarning) {
+      setSkipWarning(true);
+      return;
+    }
+    // Confirmed — submit empty answers
+    setSubmitting(true);
+    setSkipWarning(false);
+    const answers: AskUserAnswer[] = questions.map((q) => ({
+      questionId: q.id,
+      selected: [],
+      customText: undefined,
+    }));
+    onSubmit(answers);
+  };
 
-  // Check if current step has an answer
-  const currentHasAnswer = current
-    ? ((selections[current.id]?.size ?? 0) > 0) || (customTexts[current.id]?.trim().length > 0)
-    : false;
+  // Reset warnings when navigating
+  useEffect(() => { if (!isSummaryStep) setPartialWarning(false); }, [isSummaryStep]);
+  useEffect(() => { setSkipWarning(false); }, [step]);
 
+  // ── Single question — flat layout ──
+  if (!isWizard) {
+    return (
+      <div className="mt-3 space-y-3">
+        <QuestionCard
+          q={questions[0]}
+          sel={selections[questions[0].id] ?? new Set()}
+          customText={customTexts[questions[0].id] ?? ""}
+          disabled={disabled}
+          submitting={submitting}
+          onToggle={(label, multiple) => toggleOption(questions[0].id, label, multiple)}
+          onCustomChange={(text) =>
+            setCustomTexts((prev) => ({ ...prev, [questions[0].id]: text }))
+          }
+          onEnterSubmit={() => { if (hasAnyAnswer) handleSubmit(); }}
+        />
+        <div className="flex justify-end">
+          <Button
+            size="sm"
+            disabled={!hasAnyAnswer || disabled || submitting}
+            onClick={handleSubmit}
+            className="gap-1.5"
+          >
+            {submitting ? (
+              <>
+                <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                Sending...
+              </>
+            ) : (
+              <>
+                <Send className="h-3.5 w-3.5" />
+                Send answer
+              </>
+            )}
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Wizard layout ──
   return (
     <div className="mt-3">
-      {isWizard ? (
-        <>
-          {/* Step indicator */}
-          <div className="flex items-center gap-1.5 mb-3">
-            {questions.map((_, idx) => (
-              <button
-                key={idx}
-                type="button"
-                onClick={() => setStep(idx)}
-                className={cn(
-                  "h-1.5 rounded-full transition-all",
-                  idx === step
-                    ? "w-6 bg-primary"
-                    : idx < step
-                      ? "w-3 bg-primary/40"
-                      : "w-3 bg-border/60",
-                )}
-              />
-            ))}
-            <span className="text-[10px] text-muted-foreground ml-1.5">
-              {step + 1} / {questions.length}
-            </span>
+      {/* Step tabs with names and status indicators */}
+      <div className="flex items-center gap-1 mb-3 overflow-x-auto pb-1">
+        {questions.map((q, idx) => {
+          const status = statuses[idx];
+          const isActive = idx === step;
+          return (
+            <button
+              key={q.id}
+              type="button"
+              onClick={() => setStep(idx)}
+              className={cn(
+                "flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[11px] font-medium transition-all whitespace-nowrap shrink-0",
+                isActive
+                  ? "bg-primary/10 text-primary border border-primary/30"
+                  : "text-muted-foreground hover:bg-muted/50 border border-transparent",
+              )}
+            >
+              <span className={cn(
+                "h-2 w-2 rounded-full shrink-0",
+                status === "answered" ? "bg-emerald-500"
+                  : isActive ? "bg-primary" : "bg-border",
+              )} />
+              {q.header || `Q${idx + 1}`}
+            </button>
+          );
+        })}
+        {/* Summary tab */}
+        <button
+          type="button"
+          onClick={() => setStep(questions.length)}
+          className={cn(
+            "flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[11px] font-medium transition-all whitespace-nowrap shrink-0",
+            isSummaryStep
+              ? "bg-primary/10 text-primary border border-primary/30"
+              : "text-muted-foreground hover:bg-muted/50 border border-transparent",
+          )}
+        >
+          <ListChecks className="h-3 w-3" />
+          Summary
+        </button>
+      </div>
+
+      {/* ── Summary step ── */}
+      {isSummaryStep ? (
+        <div className="space-y-3">
+          <div className="rounded-xl border border-primary/20 bg-primary/[0.03] p-4 space-y-3">
+            <div className="flex items-center gap-2 mb-1">
+              <ListChecks className="h-4 w-4 text-primary" />
+              <p className="text-sm font-semibold">Summary</p>
+              <Badge variant="secondary" className="text-[9px] ml-auto">
+                {answeredCount}/{questions.length} answered
+              </Badge>
+            </div>
+
+            <div className="space-y-2">
+              {questions.map((q, idx) => {
+                const status = statuses[idx];
+                const sel = selections[q.id];
+                const txt = customTexts[q.id]?.trim();
+                const answer = status === "answered"
+                  ? [...(sel?.size ? Array.from(sel) : []), ...(txt ? [txt] : [])].join(", ")
+                  : undefined;
+
+                return (
+                  <button
+                    key={q.id}
+                    type="button"
+                    onClick={() => setStep(idx)}
+                    className="flex items-start gap-2 w-full text-left rounded-lg px-3 py-2 hover:bg-muted/50 transition-colors"
+                  >
+                    <span className={cn(
+                      "h-2 w-2 rounded-full shrink-0 mt-1.5",
+                      status === "answered" ? "bg-emerald-500" : "bg-border",
+                    )} />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-medium">{q.question}</p>
+                      {status === "answered" && answer && (
+                        <p className="text-[11px] text-muted-foreground truncate">{answer}</p>
+                      )}
+                      {status === "empty" && (
+                        <p className="text-[11px] text-muted-foreground/50 italic">Not answered yet</p>
+                      )}
+                    </div>
+                    <ChevronRight className="h-3 w-3 text-muted-foreground mt-1 shrink-0" />
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
-          {/* Current question */}
-          <QuestionCard
-            q={current}
-            sel={selections[current.id] ?? new Set()}
-            customText={customTexts[current.id] ?? ""}
-            disabled={disabled}
-            submitting={submitting}
-            onToggle={(label, multiple) => toggleOption(current.id, label, multiple)}
-            onCustomChange={(text) =>
-              setCustomTexts((prev) => ({ ...prev, [current.id]: text }))
-            }
-            onEnterSubmit={() => {
-              if (isLastStep && hasAnyAnswer) handleSubmit();
-              else if (!isLastStep) setStep(step + 1);
-            }}
-          />
+          {/* Partial warning */}
+          {partialWarning && (
+            <div className="flex items-center gap-2 px-3 py-2 rounded-md bg-amber-500/10 border border-amber-500/20 text-[11px] text-amber-600 dark:text-amber-400">
+              <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+              <span>{emptyCount} question{emptyCount > 1 ? "s" : ""} not answered. Press send again to confirm.</span>
+            </div>
+          )}
+          {skipWarning && (
+            <div className="flex items-center gap-2 px-3 py-2 rounded-md bg-amber-500/10 border border-amber-500/20 text-[11px] text-amber-600 dark:text-amber-400">
+              <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+              <span>Skip all questions without answering? Press skip again to confirm.</span>
+            </div>
+          )}
 
-          {/* Wizard navigation */}
-          <div className="flex items-center justify-between mt-3">
+          {/* Submit */}
+          <div className="flex items-center justify-between pt-1">
             <Button
               variant="ghost"
               size="sm"
-              disabled={step === 0}
-              onClick={() => setStep(step - 1)}
+              onClick={() => setStep(questions.length - 1)}
               className="gap-1 text-muted-foreground"
             >
               <ChevronLeft className="h-3.5 w-3.5" />
               Back
             </Button>
-
-            {isLastStep ? (
+            <div className="flex items-center gap-2">
+              {!allAnswered && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={disabled || submitting}
+                  onClick={handleSkip}
+                  className="gap-1 text-muted-foreground"
+                >
+                  <SkipForward className="h-3.5 w-3.5" />
+                  {skipWarning ? "Confirm skip" : "Skip all"}
+                </Button>
+              )}
               <Button
                 size="sm"
                 disabled={!hasAnyAnswer || disabled || submitting}
@@ -987,56 +1149,79 @@ function AskUserCards({
                   </>
                 )}
               </Button>
-            ) : (
+            </div>
+          </div>
+        </div>
+      ) : current ? (
+        <>
+          {/* Current question */}
+          <QuestionCard
+            q={current}
+            sel={selections[current.id] ?? new Set()}
+            customText={customTexts[current.id] ?? ""}
+            disabled={disabled}
+            submitting={submitting}
+            onToggle={(label, multiple) => toggleOption(current.id, label, multiple)}
+            onCustomChange={(text) =>
+              setCustomTexts((prev) => ({ ...prev, [current.id]: text }))
+            }
+            onEnterSubmit={() => {
+              const nextEmpty = questions.findIndex((q, i) => i > step && getStatus(q) === "empty");
+              if (nextEmpty >= 0) setStep(nextEmpty);
+              else setStep(questions.length);
+            }}
+          />
+
+          {/* Skip warning */}
+          {skipWarning && (
+            <div className="flex items-center gap-2 mt-3 px-3 py-2 rounded-md bg-amber-500/10 border border-amber-500/20 text-[11px] text-amber-600 dark:text-amber-400">
+              <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+              <span>Skip all questions without answering? Press skip again to confirm.</span>
+            </div>
+          )}
+
+          {/* Wizard navigation */}
+          <div className="flex items-center justify-between mt-3">
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={step === 0}
+              onClick={() => setStep(step - 1)}
+              className="gap-1 text-muted-foreground"
+            >
+              <ChevronLeft className="h-3.5 w-3.5" />
+              Back
+            </Button>
+
+            <div className="flex items-center gap-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={disabled || submitting}
+                onClick={handleSkip}
+                className="gap-1 text-muted-foreground"
+              >
+                <SkipForward className="h-3.5 w-3.5" />
+                {skipWarning ? "Confirm skip" : "Skip all"}
+              </Button>
               <Button
                 size="sm"
-                variant={currentHasAnswer ? "default" : "outline"}
-                onClick={() => setStep(step + 1)}
+                variant={getStatus(current) === "answered" ? "default" : "outline"}
+                onClick={() => {
+                  setSkipWarning(false);
+                  const nextEmpty = questions.findIndex((q, i) => i > step && getStatus(q) === "empty");
+                  if (nextEmpty >= 0) setStep(nextEmpty);
+                  else setStep(questions.length);
+                }}
                 className="gap-1"
               >
                 Next
                 <ChevronRight className="h-3.5 w-3.5" />
               </Button>
-            )}
+            </div>
           </div>
         </>
-      ) : (
-        /* Single question — flat layout (no wizard) */
-        <div className="space-y-3">
-          <QuestionCard
-            q={questions[0]}
-            sel={selections[questions[0].id] ?? new Set()}
-            customText={customTexts[questions[0].id] ?? ""}
-            disabled={disabled}
-            submitting={submitting}
-            onToggle={(label, multiple) => toggleOption(questions[0].id, label, multiple)}
-            onCustomChange={(text) =>
-              setCustomTexts((prev) => ({ ...prev, [questions[0].id]: text }))
-            }
-            onEnterSubmit={() => { if (hasAnyAnswer) handleSubmit(); }}
-          />
-          <div className="flex justify-end">
-            <Button
-              size="sm"
-              disabled={!hasAnyAnswer || disabled || submitting}
-              onClick={handleSubmit}
-              className="gap-1.5"
-            >
-              {submitting ? (
-                <>
-                  <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />
-                  Sending...
-                </>
-              ) : (
-                <>
-                  <Send className="h-3.5 w-3.5" />
-                  Send answer
-                </>
-              )}
-            </Button>
-          </div>
-        </div>
-      )}
+      ) : null}
     </div>
   );
 }
@@ -1485,7 +1670,7 @@ export function ChatPage() {
                                 </MessageContent>
                               </>
                             )}
-                            {!isStreaming && (
+                            {!isStreaming && !msg.askUserQuestions?.length && !msg.missionPreview && !msg.vaultPreview && (
                               <MessageActions className="mt-2 opacity-0 group-hover:opacity-100 transition-opacity">
                                 <CopyAction text={msg.content} />
                               </MessageActions>

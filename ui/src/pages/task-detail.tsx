@@ -841,7 +841,7 @@ export function TaskDetailPage() {
               )}
 
               {/* ── Description ── */}
-              <Card className="bg-card/80 backdrop-blur-sm border-border/40">
+              <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0">
                 <CardContent className="pt-4 space-y-4">
                   <div>
                     <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-widest mb-2 flex items-center gap-1">
@@ -869,7 +869,7 @@ export function TaskDetailPage() {
 
               {/* ── Output (stdout/stderr — always visible, scrollable) ── */}
               {task.result && (task.result.stdout || task.result.stderr) && (
-                <Card className="bg-card/80 backdrop-blur-sm border-border/40">
+                <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0">
                   <CardContent className="pt-4 space-y-3">
                     <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-widest flex items-center gap-1">
                       <Terminal className="h-3 w-3" /> Output
@@ -927,7 +927,7 @@ export function TaskDetailPage() {
 
               {/* ── Expectations ── */}
               {task.expectations.length > 0 && (
-                <Card className="bg-card/80 backdrop-blur-sm border-border/40">
+                <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0">
                   <CardContent className="pt-4">
                     <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-widest mb-3 flex items-center gap-1">
                       <Wrench className="h-3 w-3" /> Expectations ({task.expectations.length})
@@ -1003,7 +1003,7 @@ export function TaskDetailPage() {
 
               {/* ── Outcomes (produced artifacts — actionable) ── */}
               {(task.outcomes?.length ?? 0) > 0 && (
-                <Card className="bg-card/80 backdrop-blur-sm border-border/40">
+                <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0">
                   <CardContent className="pt-4">
                     <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-widest mb-3 flex items-center gap-1">
                       <Package className="h-3 w-3" /> Outcomes ({task.outcomes!.length})
@@ -1123,7 +1123,7 @@ export function TaskDetailPage() {
 
               {/* ── Expected Outcomes (declared, not yet produced) ── */}
               {(task.expectedOutcomes?.length ?? 0) > 0 && !(task.outcomes?.length) && (
-                <Card className="bg-card/80 backdrop-blur-sm border-border/40">
+                <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0">
                   <CardContent className="pt-4">
                     <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-widest mb-3 flex items-center gap-1">
                       <Package className="h-3 w-3" /> Expected Outcomes ({task.expectedOutcomes!.length})
@@ -1145,7 +1145,7 @@ export function TaskDetailPage() {
 
               {/* ── Metrics ── */}
               {task.metrics.length > 0 && (
-                <Card className="bg-card/80 backdrop-blur-sm border-border/40">
+                <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0">
                   <CardContent className="pt-4">
                     <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-widest mb-3">
                       Metrics ({task.metrics.length})
@@ -1164,7 +1164,7 @@ export function TaskDetailPage() {
               )}
 
               {/* ── Details / metadata ── */}
-              <Card className="bg-card/80 backdrop-blur-sm border-border/40">
+              <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0">
                 <CardContent className="pt-4">
                   <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-widest mb-3">
                     Details

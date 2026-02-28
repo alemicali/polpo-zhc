@@ -103,6 +103,7 @@ const AgentIdentitySchema = z.object({
   responsibilities: z.array(z.union([z.string(), AgentResponsibilitySchema])).optional(),
   tone: z.string().optional(),
   personality: z.string().optional(),
+  socials: z.record(z.string(), z.string()).optional(),
 });
 
 export const AddAgentSchema = z.object({

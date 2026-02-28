@@ -134,6 +134,12 @@ export function registerAgentOnboardCommands(program: Command): void {
         "Personality traits (e.g. Detail-oriented and empathetic. Anticipates concerns. Data-driven.)",
         agentCfg.identity?.personality ?? "",
       );
+      const socialsRaw = await askDefault(
+        "Social accounts (comma-separated, e.g. x:@alice, github:alice, linkedin:linkedin.com/in/alice)",
+        agentCfg.identity?.socials
+          ? Object.entries(agentCfg.identity.socials).map(([k, v]) => `${k}:${v}`).join(", ")
+          : "",
+      );
 
       // ── 3. Hierarchy ──
       console.log(chalk.cyan("\n  Step 3: Hierarchy\n"));
@@ -220,6 +226,16 @@ export function registerAgentOnboardCommands(program: Command): void {
       if (responsibilities.length > 0) identity.responsibilities = responsibilities;
       if (tone) identity.tone = tone;
       if (personality) identity.personality = personality;
+      if (socialsRaw) {
+        const socials: Record<string, string> = {};
+        for (const pair of socialsRaw.split(",").map(s => s.trim()).filter(Boolean)) {
+          const colonIdx = pair.indexOf(":");
+          if (colonIdx > 0) {
+            socials[pair.slice(0, colonIdx).trim()] = pair.slice(colonIdx + 1).trim();
+          }
+        }
+        if (Object.keys(socials).length > 0) identity.socials = socials;
+      }
 
       const updated: Record<string, unknown> = { ...agentCfg };
       if (Object.keys(identity).length > 0) updated.identity = identity;
@@ -344,6 +360,9 @@ export function registerAgentOnboardCommands(program: Command): void {
         }
         if (id.tone) console.log(`    Tone: ${id.tone}`);
         if (id.personality) console.log(`    Personality: ${id.personality}`);
+        if (id.socials && Object.keys(id.socials).length > 0) {
+          console.log(`    Socials: ${Object.entries(id.socials).map(([k, v]) => `${k}: ${v}`).join(", ")}`);
+        }
       }
 
       // Show vault entries from encrypted store

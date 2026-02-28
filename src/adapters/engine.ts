@@ -53,6 +53,10 @@ export function buildSystemPrompt(agent: AgentConfig, cwd: string, polpoDir?: st
     if (agent.identity.email) parts.push(`- Email: ${agent.identity.email}`);
     if (agent.identity.bio) parts.push(`- Bio: ${agent.identity.bio}`);
     if (agent.identity.timezone) parts.push(`- Timezone: ${agent.identity.timezone}`);
+    if (agent.identity.socials && Object.keys(agent.identity.socials).length > 0) {
+      const entries = Object.entries(agent.identity.socials).map(([k, v]) => `${k}: ${v}`).join(", ");
+      parts.push(`- Socials: ${entries}`);
+    }
     parts.push("Use this identity when communicating externally (emails, messages, etc.).");
   }
 

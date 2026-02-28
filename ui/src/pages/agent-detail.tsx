@@ -49,6 +49,7 @@ import {
   ArrowUpRight,
   Brain,
   Cake,
+  Users,
 } from "lucide-react";
 import { MessageResponse } from "@/components/ai-elements/message";
 import { useAgent, useAgents, useProcesses, useSkills, useTasks } from "@lumea-labs/polpo-react";
@@ -569,7 +570,7 @@ export function AgentDetailPage() {
         <div className="w-80 shrink-0 hidden lg:flex flex-col gap-4 overflow-auto pb-bottom-nav lg:pb-0 pr-1">
 
           {/* ── Hero card ── */}
-          <Card className="bg-card/80 backdrop-blur-sm border-border/40 overflow-hidden">
+          <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0 overflow-hidden">
             {/* Gradient header bar */}
             <div className="h-16 bg-gradient-to-r from-primary/20 via-primary/10 to-transparent" />
             <CardContent className="pt-0 -mt-8 pb-4 space-y-3">
@@ -589,19 +590,6 @@ export function AgentDetailPage() {
                   </div>
                   {identity?.displayName && identity.displayName !== agent.name && (
                     <p className="text-[10px] font-mono text-muted-foreground">@{agent.name}</p>
-                  )}
-                  {agent.createdAt && (
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <p className="text-[10px] text-muted-foreground/50 flex items-center gap-1 mt-0.5 cursor-help">
-                          <Cake className="h-2.5 w-2.5" />
-                          {formatAgentAge(agent.createdAt)}
-                        </p>
-                      </TooltipTrigger>
-                      <TooltipContent className="text-xs">
-                        Created {new Date(agent.createdAt).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })}
-                      </TooltipContent>
-                    </Tooltip>
                   )}
                 </div>
               </div>
@@ -644,6 +632,20 @@ export function AgentDetailPage() {
                   <span className="text-muted-foreground/60 shrink-0">Timezone</span>
                   <span className={cn("ml-auto", identity?.timezone ? "text-muted-foreground" : "text-muted-foreground/30 italic")}>{identity?.timezone || "not set"}</span>
                 </div>
+                {identity?.socials && Object.keys(identity.socials).length > 0 && (
+                  <div className="flex items-center gap-2 py-1.5">
+                    <Globe className="h-3 w-3 text-muted-foreground shrink-0" />
+                    <span className="text-muted-foreground/60 shrink-0">Socials</span>
+                    <div className="ml-auto flex flex-wrap gap-1.5 justify-end">
+                      {Object.entries(identity.socials).map(([platform, handle]) => (
+                        <Badge key={platform} variant="secondary" className="text-[9px] font-mono gap-1">
+                          {platform}
+                          <span className="text-muted-foreground">{handle}</span>
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 <div className="flex items-center gap-2 py-1.5">
                   <Zap className="h-3 w-3 text-muted-foreground shrink-0" />
                   <span className="text-muted-foreground/60 shrink-0">Model</span>
@@ -678,14 +680,6 @@ export function AgentDetailPage() {
                 )}
               </div>
 
-              {/* Bio */}
-              {identity?.bio && (
-                <div className="pt-1">
-                  <p className="text-[10px] text-muted-foreground/60 uppercase tracking-wider mb-1">Bio</p>
-                  <p className="text-xs text-muted-foreground leading-relaxed">{identity.bio}</p>
-                </div>
-              )}
-
               {/* Refresh */}
               <div className="pt-1">
                 <Button variant="outline" size="sm" className="w-full text-xs" onClick={refetch}>
@@ -697,14 +691,17 @@ export function AgentDetailPage() {
 
           {/* ── Reporting hierarchy ── */}
           {(agent.reportsTo || subordinates.length > 0) && (
-            <Card className="bg-card/80 backdrop-blur-sm border-border/40">
+            <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0">
               <CardContent className="pt-4 pb-4 space-y-3">
-                <SectionHeader title="Org Chart" icon={Shield} />
+                <SectionHeader title="Hierarchy" icon={Users} />
 
-                {/* Reports to */}
+                {/* Manager */}
                 {manager && (
                   <div>
-                    <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1.5">Reports to</p>
+                    <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1.5">
+                      <ArrowUpRight className="h-2.5 w-2.5 inline mr-1" />
+                      Manager
+                    </p>
                     <Link
                       to={`/agents/${manager.name}`}
                       className="flex items-center gap-2 rounded-md border border-border/30 bg-muted/10 px-3 py-2 hover:bg-accent/10 transition-colors"
@@ -722,7 +719,10 @@ export function AgentDetailPage() {
                 )}
                 {agent.reportsTo && !manager && (
                   <div>
-                    <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1.5">Reports to</p>
+                    <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1.5">
+                      <ArrowUpRight className="h-2.5 w-2.5 inline mr-1" />
+                      Manager
+                    </p>
                     <div className="flex items-center gap-2 rounded-md border border-border/30 bg-muted/10 px-3 py-2 text-xs text-muted-foreground">
                       <Bot className="h-4 w-4 shrink-0" />
                       <span className="font-mono">{agent.reportsTo}</span>
@@ -730,10 +730,11 @@ export function AgentDetailPage() {
                   </div>
                 )}
 
-                {/* Subordinates */}
+                {/* Direct reports */}
                 {subordinates.length > 0 && (
                   <div>
                     <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1.5">
+                      <Users className="h-2.5 w-2.5 inline mr-1" />
                       Direct reports ({subordinates.length})
                     </p>
                     <div className="space-y-1">
@@ -762,7 +763,7 @@ export function AgentDetailPage() {
 
           {/* ── Task stats summary ── */}
           {taskStats.total > 0 && (
-            <Card className="bg-card/80 backdrop-blur-sm border-border/40">
+            <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0">
               <CardContent className="pt-4 pb-4 space-y-3">
                 <SectionHeader title="Performance" icon={Star} />
                 <div className="grid grid-cols-2 gap-3">
@@ -832,7 +833,7 @@ export function AgentDetailPage() {
 
           {/* Activity heatmap */}
           {agentTasks.length > 0 && (
-            <Card className="bg-card/80 backdrop-blur-sm border-border/40 mb-3">
+            <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0 mb-3">
               <CardContent className="pt-3 pb-3 overflow-x-auto">
                 <ActivityHeatmap tasks={agentTasks} />
               </CardContent>
@@ -861,12 +862,24 @@ export function AgentDetailPage() {
             {/* ═══ OVERVIEW TAB ═══ */}
             <TabsContent value="overview" className="mt-4 flex-1 min-h-0">
               <ScrollArea className="h-full">
-                <div className="space-y-4 pr-4 pb-bottom-nav lg:pb-4">
+                <div className="space-y-6 pr-4 pb-bottom-nav lg:pb-4">
+
+                  {/* Bio */}
+                  {identity?.bio && (
+                    <div>
+                      <SectionHeader title="Bio" icon={MessageSquare} />
+                      <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0">
+                        <CardContent className="pt-3 pb-3">
+                          <p className="text-sm text-muted-foreground leading-relaxed">{identity.bio}</p>
+                        </CardContent>
+                      </Card>
+                    </div>
+                  )}
 
                   {/* Role */}
                   <div>
                     <SectionHeader title="Role" icon={Shield} />
-                    <Card className="bg-card/80 backdrop-blur-sm border-border/40">
+                    <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0">
                       <CardContent className="pt-3 pb-3">
                         {agent.role ? (
                           <MessageResponse>{agent.role}</MessageResponse>
@@ -880,7 +893,7 @@ export function AgentDetailPage() {
                   {/* Personality & Tone */}
                   <div>
                     <SectionHeader title="Personality & Tone" icon={Heart} />
-                    <Card className="bg-card/80 backdrop-blur-sm border-border/40">
+                    <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0">
                       <CardContent className="pt-3 pb-3 divide-y divide-border/20">
                         <div className="pb-3">
                           <div className="flex items-center gap-1.5 mb-1">
@@ -911,7 +924,7 @@ export function AgentDetailPage() {
                   {/* Responsibilities */}
                   <div>
                     <SectionHeader title="Responsibilities" icon={ListChecks} count={identity?.responsibilities?.length} />
-                    <Card className="bg-card/80 backdrop-blur-sm border-border/40">
+                    <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0">
                       <CardContent className="pt-3 pb-3">
                         {identity?.responsibilities && identity.responsibilities.length > 0 ? (
                           <div className="space-y-2">
@@ -953,25 +966,25 @@ export function AgentDetailPage() {
                   <div>
                     <SectionHeader title="Capabilities" icon={Zap} />
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                      <Card className="bg-card/80 backdrop-blur-sm border-border/40">
+                      <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0">
                         <CardContent className="pt-3 pb-3 text-center">
                           <p className="text-2xl font-bold font-mono">{agent.allowedTools?.length ?? 0}</p>
                           <p className="text-[10px] text-muted-foreground">Tools</p>
                         </CardContent>
                       </Card>
-                      <Card className="bg-card/80 backdrop-blur-sm border-border/40">
+                      <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0">
                         <CardContent className="pt-3 pb-3 text-center">
                           <p className="text-2xl font-bold font-mono">{enabledFlags.length}</p>
                           <p className="text-[10px] text-muted-foreground">Extensions</p>
                         </CardContent>
                       </Card>
-                      <Card className="bg-card/80 backdrop-blur-sm border-border/40">
+                      <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0">
                         <CardContent className="pt-3 pb-3 text-center">
                           <p className="text-2xl font-bold font-mono">{agent.skills?.length ?? 0}</p>
                           <p className="text-[10px] text-muted-foreground">Skills</p>
                         </CardContent>
                       </Card>
-                      <Card className="bg-card/80 backdrop-blur-sm border-border/40">
+                      <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0">
                         <CardContent className="pt-3 pb-3 text-center">
                           <p className="text-2xl font-bold font-mono">{mcpEntries.length}</p>
                           <p className="text-[10px] text-muted-foreground">MCP Servers</p>
@@ -988,7 +1001,7 @@ export function AgentDetailPage() {
               <ScrollArea className="h-full">
                 <div className="space-y-4 pr-4 pb-bottom-nav lg:pb-4">
                   {agent.systemPrompt ? (
-                    <Card className="bg-card/80 backdrop-blur-sm border-border/40 overflow-hidden">
+                    <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0 overflow-hidden">
                       <div className="flex items-center justify-between px-4 py-2 border-b border-border bg-muted/30">
                         <span className="text-[10px] text-muted-foreground font-mono">
                           {agent.systemPrompt.length.toLocaleString()} chars
@@ -1079,7 +1092,7 @@ export function AgentDetailPage() {
 
                   {/* Task list */}
                   {sortedTasks.length > 0 ? (
-                    <Card className="bg-card/80 backdrop-blur-sm border-border/40">
+                    <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0">
                       <CardContent className="pt-2 pb-2 divide-y divide-border/20">
                         {sortedTasks.map((task) => (
                           <TaskRow key={task.id} task={task} />
@@ -1099,7 +1112,7 @@ export function AgentDetailPage() {
             {/* ═══ TOOLS & SKILLS TAB ═══ */}
             <TabsContent value="tools" className="mt-4 flex-1 min-h-0">
               <ScrollArea className="h-full">
-                <div className="space-y-4 pr-4 pb-bottom-nav lg:pb-4">
+                <div className="space-y-6 pr-4 pb-bottom-nav lg:pb-4">
 
                   {/* Allowed tools */}
                   {agent.allowedTools && agent.allowedTools.length > 0 && (
@@ -1297,7 +1310,7 @@ export function AgentDetailPage() {
                   {/* Credential Vault */}
                   <div>
                     <SectionHeader title="Credential Vault" icon={KeyRound} />
-                    <Card className="bg-card/80 backdrop-blur-sm border-border/40">
+                    <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0">
                       <CardContent className="pt-4 pb-4">
                         <p className="text-xs text-muted-foreground leading-relaxed">
                           Credentials are stored in the encrypted vault (<code className="text-[10px] font-mono">.polpo/vault.enc</code>), secured with AES-256-GCM.
@@ -1314,7 +1327,7 @@ export function AgentDetailPage() {
             <TabsContent value="config" className="mt-4 flex-1 min-h-0">
               <ScrollArea className="h-full">
                 <div className="pr-4 pb-bottom-nav lg:pb-4">
-                  <Card className="bg-card/80 backdrop-blur-sm border-border/40 overflow-hidden">
+                  <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0 overflow-hidden">
                     <div className="flex items-center justify-between px-4 py-2 border-b border-border bg-muted/30">
                       <span className="text-[10px] text-muted-foreground font-mono">polpo.json &mdash; agent configuration</span>
                       <Tooltip>
