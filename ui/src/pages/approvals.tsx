@@ -431,19 +431,19 @@ export function ApprovalsPage() {
       {/* ── Stats row ── */}
       <div className="grid grid-cols-4 gap-3 shrink-0">
         <StatCard
+          label="Total Requests"
+          value={counts.all}
+          icon={ShieldCheck}
+          color="text-sky-400"
+          bg="bg-sky-500/10"
+        />
+        <StatCard
           label="Awaiting Review"
           value={counts.pending}
           icon={ShieldAlert}
           color="text-amber-400"
           bg="bg-amber-500/10"
           accent
-        />
-        <StatCard
-          label="Total Requests"
-          value={counts.all}
-          icon={ShieldCheck}
-          color="text-sky-400"
-          bg="bg-sky-500/10"
         />
         <StatCard
           label="Approved"

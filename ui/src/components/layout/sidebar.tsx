@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, memo } from "react";
 import { NavLink } from "react-router-dom";
 import {
   LayoutDashboard,
@@ -14,7 +14,7 @@ import {
   Settings2,
   CalendarClock,
 } from "lucide-react";
-import { usePolpo } from "@lumea-labs/polpo-react";
+import { usePolpo, useApprovals } from "@lumea-labs/polpo-react";
 import { useProjectInfo } from "@/hooks/use-polpo";
 import { cn } from "@/lib/utils";
 import {
@@ -38,8 +38,9 @@ const nav: NavSection[] = [
     section: "Work",
     items: [
       { to: "/missions", icon: Target, label: "Missions" },
-      { to: "/schedules", icon: CalendarClock, label: "Schedules" },
       { to: "/tasks", icon: ListChecks, label: "Tasks" },
+      { to: "/approvals", icon: ShieldCheck, label: "Approvals" },
+      { to: "/schedules", icon: CalendarClock, label: "Schedules" },
     ],
   },
   {
@@ -54,7 +55,6 @@ const nav: NavSection[] = [
     section: "System",
     items: [
       { to: "/notifications", icon: Bell, label: "Notifications" },
-      { to: "/approvals", icon: ShieldCheck, label: "Approvals" },
       { to: "/config", icon: Settings2, label: "Configuration" },
     ],
   },
@@ -89,6 +89,23 @@ const statusConfig: Record<string, { color: string; pulse: boolean; label: strin
 };
 
 const STORAGE_KEY = "polpo-sidebar-collapsed";
+
+/** Isolated component so useApprovals re-renders don't cascade to the whole Sidebar */
+const PendingBadge = memo(function PendingBadge({ collapsed }: { collapsed: boolean }) {
+  const { pending } = useApprovals();
+  const count = pending.length;
+  if (count === 0) return null;
+
+  return collapsed ? (
+    <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-amber-500 text-[9px] font-bold text-white px-1">
+      {count}
+    </span>
+  ) : (
+    <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-amber-500 text-[10px] font-bold text-white px-1.5">
+      {count}
+    </span>
+  );
+});
 
 export function Sidebar() {
   const { connectionStatus } = usePolpo();
@@ -194,6 +211,7 @@ export function Sidebar() {
                             {isActive && (
                               <span className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-[2px] h-5 w-1 rounded-r-full bg-primary" />
                             )}
+                            {to === "/approvals" && <PendingBadge collapsed />}
                           </>
                         )}
                       </NavLink>
@@ -211,6 +229,7 @@ export function Sidebar() {
                         )}
                         <Icon className="h-[18px] w-[18px] shrink-0" />
                         <span className="truncate">{label}</span>
+                        {to === "/approvals" && <PendingBadge collapsed={false} />}
                       </>
                     )}
                   </NavLink>

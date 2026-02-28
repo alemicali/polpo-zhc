@@ -556,144 +556,68 @@ function TeamHeaderNode({ data }: NodeProps<Node<TeamHeaderNodeData>>) {
   );
 }
 
-function AgentNode({ data }: NodeProps<Node<AgentNodeData>>) {
+function AgentNode({ data, selected }: NodeProps<Node<AgentNodeData>>) {
   const navigate = useNavigate();
-  const [popoverOpen, setPopoverOpen] = useState(false);
   const { agent, isActive, subordinateCount, teamColorIdx } = data;
   const displayName = agent.identity?.displayName ?? agent.name;
   const tc = getTeamColor(teamColorIdx);
 
-  const capabilityCount =
-    (agent.allowedTools?.length ?? 0) + (agent.skills?.length ?? 0) + (agent.mcpServers ? Object.keys(agent.mcpServers).length : 0);
-
   return (
-    <div className="relative">
-      <div
-        className={cn(
-          "rounded-xl border bg-card shadow-md cursor-pointer transition-all hover:shadow-lg hover:border-primary/40 select-none",
-          isActive ? `${tc.border} shadow-[0_0_24px_oklch(0.7_0.15_200_/_12%)]` : "border-border/50",
-        )}
-        style={{ minWidth: 180, maxWidth: 240 }}
-        onClick={(e) => { e.stopPropagation(); setPopoverOpen((v) => !v); }}
-      >
-        <Handle type="target" position={Position.Top} className="!bg-primary/60 !w-2 !h-2 !border-0" />
-        <div className="px-4 py-3 space-y-1.5">
-          <div className="flex items-center gap-2.5">
-            <div className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-lg", tc.bg)}>
-              <Bot className={cn("h-4.5 w-4.5", tc.text)} />
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-1.5">
-                <span className="text-sm font-semibold truncate">{displayName}</span>
-                {isActive && <div className={cn("h-2 w-2 rounded-full animate-pulse shrink-0", tc.dot)} />}
-              </div>
-              {agent.identity?.displayName && agent.identity.displayName !== agent.name && (
-                <span className="text-[10px] font-mono text-muted-foreground block truncate">@{agent.name}</span>
-              )}
-            </div>
+    <div
+      className={cn(
+        "rounded-xl border bg-card shadow-md cursor-pointer transition-all hover:shadow-lg select-none",
+        selected
+          ? `border-primary shadow-[0_0_24px_oklch(0.7_0.15_200_/_18%)] ring-2 ring-primary/30`
+          : isActive
+            ? `${tc.border} shadow-[0_0_24px_oklch(0.7_0.15_200_/_12%)]`
+            : "border-border/50 hover:border-primary/40",
+      )}
+      style={{ minWidth: 180, maxWidth: 240 }}
+    >
+      <Handle type="target" position={Position.Top} className="!bg-primary/60 !w-2 !h-2 !border-0" />
+      <div className="px-4 py-3 space-y-1.5">
+        <div className="flex items-center gap-2.5">
+          <div className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-lg", tc.bg)}>
+            <Bot className={cn("h-4.5 w-4.5", tc.text)} />
           </div>
-          {(agent.identity?.title || agent.role) && (
-            <p className="text-[11px] text-muted-foreground line-clamp-2 leading-snug">{agent.identity?.title ?? agent.role}</p>
-          )}
-          <div className="flex items-center gap-1.5 flex-wrap">
-            {agent.model && <Badge variant="secondary" className="text-[9px] px-1.5 py-0 font-mono">{agent.model}</Badge>}
-            {!!agent.volatile && (
-              <Badge variant="outline" className="text-[9px] px-1.5 py-0 text-amber-400 border-amber-500/30">
-                <Zap className="h-2 w-2 mr-0.5" /> mission
-              </Badge>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-1.5">
+              <span className="text-sm font-semibold truncate">{displayName}</span>
+              {isActive && <div className={cn("h-2 w-2 rounded-full animate-pulse shrink-0", tc.dot)} />}
+            </div>
+            {agent.identity?.displayName && agent.identity.displayName !== agent.name && (
+              <span className="text-[10px] font-mono text-muted-foreground block truncate">@{agent.name}</span>
             )}
-            {subordinateCount > 0 && <Badge variant="outline" className="text-[9px] px-1.5 py-0">{subordinateCount} report{subordinateCount !== 1 ? "s" : ""}</Badge>}
           </div>
         </div>
-        <Handle type="source" position={Position.Bottom} className="!bg-primary/60 !w-2 !h-2 !border-0" />
+        {(agent.identity?.title || agent.role) && (
+          <p className="text-[11px] text-muted-foreground line-clamp-2 leading-snug">{agent.identity?.title ?? agent.role}</p>
+        )}
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {agent.model && <Badge variant="secondary" className="text-[9px] px-1.5 py-0 font-mono">{agent.model}</Badge>}
+          {!!agent.volatile && (
+            <Badge variant="outline" className="text-[9px] px-1.5 py-0 text-amber-400 border-amber-500/30">
+              <Zap className="h-2 w-2 mr-0.5" /> mission
+            </Badge>
+          )}
+          {subordinateCount > 0 && <Badge variant="outline" className="text-[9px] px-1.5 py-0">{subordinateCount} report{subordinateCount !== 1 ? "s" : ""}</Badge>}
+        </div>
       </div>
-
-      {/* Popover overlay — opens upward to avoid being covered by child nodes */}
-      {popoverOpen && (
-        <div
-          className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 z-50 w-64 rounded-xl border border-border/60 bg-popover shadow-xl p-3 space-y-2"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <div className="fixed inset-0 z-[-1]" onClick={() => setPopoverOpen(false)} />
-
-          {/* Bio — only if present */}
-          {agent.identity?.bio && (
-            <p className="text-[11px] text-muted-foreground leading-snug line-clamp-3">
-              {agent.identity.bio}
-            </p>
-          )}
-
-          {/* Capabilities breakdown */}
-          {capabilityCount > 0 && (
-            <div className="space-y-1">
-              <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Capabilities</p>
-              <div className="flex flex-wrap gap-1">
-                {(agent.allowedTools?.length ?? 0) > 0 && (
-                  <Badge variant="secondary" className="text-[9px] px-1.5 py-0">
-                    <Wrench className="h-2 w-2 mr-0.5" />
-                    {agent.allowedTools!.length} tool{agent.allowedTools!.length !== 1 ? "s" : ""}
-                  </Badge>
-                )}
-                {(agent.skills?.length ?? 0) > 0 && (
-                  <Badge variant="secondary" className="text-[9px] px-1.5 py-0">
-                    <Sparkles className="h-2 w-2 mr-0.5" />
-                    {agent.skills!.length} skill{agent.skills!.length !== 1 ? "s" : ""}
-                  </Badge>
-                )}
-                {agent.mcpServers && Object.keys(agent.mcpServers).length > 0 && (
-                  <Badge variant="secondary" className="text-[9px] px-1.5 py-0">
-                    {Object.keys(agent.mcpServers).length} MCP
-                  </Badge>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* Reports to */}
-          {agent.reportsTo && (
-            <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
-              <GitBranchPlus className="h-2.5 w-2.5 shrink-0" />
-              <span>Reports to <span className="font-mono text-foreground/70">{agent.reportsTo}</span></span>
-            </div>
-          )}
-
-          {/* Subordinates count */}
-          {subordinateCount > 0 && (
-            <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
-              <Users className="h-2.5 w-2.5 shrink-0" />
-              <span>{subordinateCount} direct report{subordinateCount !== 1 ? "s" : ""}</span>
-            </div>
-          )}
-
-          {/* Live activity */}
-          {isActive && (
-            <div className="flex items-center gap-1.5 text-[10px]">
-              <div className={cn("h-2 w-2 rounded-full animate-pulse shrink-0", tc.dot)} />
-              <span className={tc.text}>Currently active</span>
-            </div>
-          )}
-
-          <div className="flex items-center gap-2 pt-1 border-t border-border/30">
-            <Button
-              variant="ghost"
-              size="sm"
-              className={cn("flex-1 h-7 text-xs font-medium", tc.bg, tc.text)}
-              onClick={() => navigate(`/agents/${encodeURIComponent(agent.name)}`)}
-            >
-              View details
-              <ChevronRight className="h-3 w-3 ml-1" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-7 text-xs text-muted-foreground"
-              onClick={() => setPopoverOpen(false)}
-            >
-              Close
-            </Button>
-          </div>
+      {/* Navigate button — only visible when selected */}
+      {selected && (
+        <div className="flex items-center border-t border-border/30 px-3 py-1.5">
+          <Button
+            variant="ghost"
+            size="sm"
+            className={cn("h-6 w-full text-[11px] font-medium gap-1", tc.text)}
+            onClick={(e) => { e.stopPropagation(); navigate(`/agents/${encodeURIComponent(agent.name)}`); }}
+          >
+            View details
+            <ChevronRight className="h-3 w-3" />
+          </Button>
         </div>
       )}
+      <Handle type="source" position={Position.Bottom} className="!bg-primary/60 !w-2 !h-2 !border-0" />
     </div>
   );
 }
@@ -703,10 +627,62 @@ const nodeTypes = { agent: AgentNode, teamHeader: TeamHeaderNode };
 // ─── Org Chart: layout helpers ───────────────────────────
 
 const NODE_W = 210;
-const NODE_H = 120;
+const NODE_H = 140;
 const H_GAP = 40;
 const V_GAP = 60;
 const TEAM_HEADER_H = 56;
+const LEVEL_GAP = 200;
+
+/** Derive team hierarchy levels from cross-team reportsTo relationships.
+ *  If an agent in Team B reports to an agent in Team A, Team B is one level below A. */
+function deriveTeamLevels(teams: Team[]): Map<string, number> {
+  const teamOf = new Map<string, string>();
+  for (const team of teams) for (const a of team.agents) teamOf.set(a.name, team.name);
+
+  // parentTeams: teamName → set of teams whose agents are managers of agents in this team
+  const parentTeams = new Map<string, Set<string>>();
+  for (const team of teams) {
+    for (const agent of team.agents) {
+      if (!agent.reportsTo) continue;
+      const managerTeam = teamOf.get(agent.reportsTo);
+      if (managerTeam && managerTeam !== team.name) {
+        if (!parentTeams.has(team.name)) parentTeams.set(team.name, new Set());
+        parentTeams.get(team.name)!.add(managerTeam);
+      }
+    }
+  }
+
+  const levels = new Map<string, number>();
+  for (const t of teams) levels.set(t.name, 0);
+
+  // Iteratively propagate: level = max(parentLevel) + 1
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const [team, parents] of parentTeams) {
+      const maxParent = Math.max(...[...parents].map(p => levels.get(p) ?? 0));
+      if (maxParent + 1 > (levels.get(team) ?? 0)) {
+        levels.set(team, maxParent + 1);
+        changed = true;
+      }
+    }
+  }
+  return levels;
+}
+
+/** Max depth of an agent tree inside a team (for vertical sizing) */
+function teamTreeDepth(team: Team): number {
+  const { childrenOf, names } = buildChildrenMap(team.agents);
+  const roots = team.agents.filter(a => !a.reportsTo || !names.has(a.reportsTo));
+  if (roots.length === 0) return 1;
+
+  function depth(name: string): number {
+    const children = childrenOf.get(name) ?? [];
+    if (children.length === 0) return 1;
+    return 1 + Math.max(...children.map(c => depth(c.name)));
+  }
+  return Math.max(...roots.map(r => depth(r.name)));
+}
 
 const EDGE_MARKER = {
   type: MarkerType.ArrowClosed,
@@ -867,7 +843,8 @@ function buildTeamDetailLayout(
   return { nodes, edges };
 }
 
-/** Show all — every team expanded side by side with team header box at top */
+/** Show all — every team expanded, stacked by derived hierarchy level.
+ *  Cross-team reportsTo relationships determine which teams sit above others. */
 function buildShowAllLayout(
   teams: Team[],
   processes: AgentProcess[],
@@ -878,56 +855,111 @@ function buildShowAllLayout(
   const edges: Edge[] = [];
   const TEAM_GAP = 100;
 
-  // Calculate each team's width
-  const teamWidths = teams.map((team) => {
+  // ── Derive team levels from cross-team reportsTo ──
+  const teamLevels = deriveTeamLevels(teams);
+  const maxLevel = Math.max(...[...teamLevels.values()], 0);
+
+  // Group teams by level
+  const levelGroups: Team[][] = [];
+  for (let l = 0; l <= maxLevel; l++) {
+    levelGroups.push(teams.filter(t => teamLevels.get(t.name) === l));
+  }
+
+  // Pre-compute each team's width
+  const teamWidthMap = new Map<string, number>();
+  for (const team of teams) {
     const { childrenOf, names } = buildChildrenMap(team.agents);
     const roots = team.agents.filter(a => !a.reportsTo || !names.has(a.reportsTo));
-    if (roots.length === 0) return NODE_W;
-    const rootW = roots.map(r => subtreeWidth(r.name, childrenOf));
-    return Math.max(NODE_W, rootW.reduce((s, w) => s + w, 0) + H_GAP * (roots.length - 1));
+    if (roots.length === 0) {
+      teamWidthMap.set(team.name, NODE_W);
+    } else {
+      const rootW = roots.map(r => subtreeWidth(r.name, childrenOf));
+      teamWidthMap.set(team.name, Math.max(NODE_W, rootW.reduce((s, w) => s + w, 0) + H_GAP * (roots.length - 1)));
+    }
+  }
+
+  // Height of each level row = tallest team in that row
+  const levelHeights = levelGroups.map(group => {
+    if (group.length === 0) return 0;
+    const maxDepth = Math.max(...group.map(t => teamTreeDepth(t)));
+    return TEAM_HEADER_H + V_GAP + maxDepth * NODE_H + Math.max(0, maxDepth - 1) * V_GAP;
   });
 
-  const totalWidth = teamWidths.reduce((s, w) => s + w, 0) + TEAM_GAP * Math.max(0, teams.length - 1);
-  let groupX = -totalWidth / 2;
+  // ── Place teams level by level ──
+  let levelY = 0;
+  for (let level = 0; level <= maxLevel; level++) {
+    const group = levelGroups[level];
+    if (group.length === 0) { levelY += levelHeights[level] + LEVEL_GAP; continue; }
 
-  teams.forEach((team, teamIdx) => {
-    const groupWidth = teamWidths[teamIdx];
-    const centerX = groupX + groupWidth / 2;
+    const groupWidths = group.map(t => teamWidthMap.get(t.name) ?? NODE_W);
+    const totalWidth = groupWidths.reduce((s, w) => s + w, 0) + TEAM_GAP * Math.max(0, group.length - 1);
+    let groupX = -totalWidth / 2;
 
-    // Team header box at top (centered over agents)
-    const headerId = `team-header-${team.name}`;
-    const headerW = estimateTeamHeaderWidth(team.name);
-    nodes.push({
-      id: headerId,
-      type: "teamHeader",
-      position: { x: centerX - headerW / 2, y: 0 },
-      data: {
-        label: team.name,
-        teamColorIdx: teamIdx,
-        agentCount: team.agents.length,
-        onClick: () => onClickTeam(team.name),
-      } satisfies TeamHeaderNodeData,
-    });
+    for (let ti = 0; ti < group.length; ti++) {
+      const team = group[ti];
+      const teamIdx = teams.indexOf(team);
+      const groupWidth = groupWidths[ti];
+      const centerX = groupX + groupWidth / 2;
 
-    // Agents below in pyramid hierarchy
-    const { childrenOf, names } = buildChildrenMap(team.agents);
-    const roots = team.agents.filter(a => !a.reportsTo || !names.has(a.reportsTo));
-    roots.sort((a, b) => a.name.localeCompare(b.name));
+      // Team header box
+      const headerId = `team-header-${team.name}`;
+      const headerW = estimateTeamHeaderWidth(team.name);
+      nodes.push({
+        id: headerId,
+        type: "teamHeader",
+        position: { x: centerX - headerW / 2, y: levelY },
+        data: {
+          label: team.name,
+          teamColorIdx: teamIdx,
+          agentCount: team.agents.length,
+          onClick: () => onClickTeam(team.name),
+        } satisfies TeamHeaderNodeData,
+      });
 
-    const rootWidths = roots.map(r => subtreeWidth(r.name, childrenOf));
-    const agentsWidth = rootWidths.reduce((s, w) => s + w, 0) + H_GAP * Math.max(0, roots.length - 1);
-    let rx = centerX - agentsWidth / 2;
-    const agentY = TEAM_HEADER_H + V_GAP;
+      // Agents below in pyramid hierarchy
+      const { childrenOf, names } = buildChildrenMap(team.agents);
+      const roots = team.agents.filter(a => !a.reportsTo || !names.has(a.reportsTo));
+      roots.sort((a, b) => a.name.localeCompare(b.name));
 
-    for (let i = 0; i < roots.length; i++) {
-      const sw = rootWidths[i];
-      edges.push(makeEdge(`${headerId}->${roots[i].name}`, headerId, roots[i].name, activeSet.has(roots[i].name)));
-      placeAgentTree(roots[i], rx + sw / 2 - NODE_W / 2, agentY, teamIdx, team.name, childrenOf, activeSet, nodes, edges);
-      rx += sw + H_GAP;
+      const rootWidths = roots.map(r => subtreeWidth(r.name, childrenOf));
+      const agentsWidth = rootWidths.reduce((s, w) => s + w, 0) + H_GAP * Math.max(0, roots.length - 1);
+      let rx = centerX - agentsWidth / 2;
+      const agentY = levelY + TEAM_HEADER_H + V_GAP;
+
+      for (let i = 0; i < roots.length; i++) {
+        const sw = rootWidths[i];
+        edges.push(makeEdge(`${headerId}->${roots[i].name}`, headerId, roots[i].name, activeSet.has(roots[i].name)));
+        placeAgentTree(roots[i], rx + sw / 2 - NODE_W / 2, agentY, teamIdx, team.name, childrenOf, activeSet, nodes, edges);
+        rx += sw + H_GAP;
+      }
+
+      groupX += groupWidth + TEAM_GAP;
     }
 
-    groupX += groupWidth + TEAM_GAP;
-  });
+    levelY += levelHeights[level] + LEVEL_GAP;
+  }
+
+  // ── Cross-team reportsTo edges (dashed) ──
+  const teamOf = new Map<string, string>();
+  for (const team of teams) for (const a of team.agents) teamOf.set(a.name, team.name);
+
+  for (const team of teams) {
+    for (const agent of team.agents) {
+      if (!agent.reportsTo) continue;
+      const managerTeam = teamOf.get(agent.reportsTo);
+      if (managerTeam && managerTeam !== team.name) {
+        edges.push({
+          id: `cross-${agent.name}->${agent.reportsTo}`,
+          source: agent.reportsTo,
+          target: agent.name,
+          type: "smoothstep",
+          style: { stroke: "oklch(0.7 0.15 300 / 50%)", strokeWidth: 2, strokeDasharray: "6 4" },
+          markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14, color: "oklch(0.7 0.15 300 / 60%)" },
+          animated: true,
+        });
+      }
+    }
+  }
 
   return { nodes, edges };
 }

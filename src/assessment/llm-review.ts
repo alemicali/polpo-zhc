@@ -283,6 +283,50 @@ RULES:
   // Build reasoning option for scoring (reasoning helps produce better structured evaluations)
   const reasoningVal = reasoning && reasoning !== "off" ? reasoning : undefined;
 
+  // Track failures for debugging
+  const attemptErrors: string[] = [];
+
+  // Helper: extract text from response for fallback parsing
+  const extractText = (response: AssistantMessage): string =>
+    response.content
+      .filter((c): c is { type: "text"; text: string } => c.type === "text")
+      .map(b => b.text).join("\n");
+
+  // Detect provider API type for strategy selection
+  const isOpenAI = m.api === "openai-completions" || m.api === "openai-responses";
+
+  // ── JSON Schema for structured output (OpenAI response_format) ──
+  // pi-ai doesn't natively support response_format, but the onPayload callback
+  // lets us mutate the request params before they're sent to the API.
+  const reviewJsonSchema = {
+    type: "json_schema" as const,
+    json_schema: {
+      name: "review_scores",
+      strict: true,
+      schema: {
+        type: "object",
+        properties: {
+          scores: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                dimension: { type: "string", description: "Dimension name" },
+                score: { type: "number", description: "Score 1-5" },
+                reasoning: { type: "string", description: "Brief reasoning with file:line evidence" },
+              },
+              required: ["dimension", "score", "reasoning"],
+              additionalProperties: false,
+            },
+          },
+          summary: { type: "string", description: "Overall review summary" },
+        },
+        required: ["scores", "summary"],
+        additionalProperties: false,
+      },
+    },
+  };
+
   // Attempt 1: Force toolChoice (works on Anthropic, OpenAI completions, Bedrock)
   onProgress?.("Scoring with forced tool choice...");
   try {
@@ -294,11 +338,58 @@ RULES:
 
     const payload = extractSubmitReview(response);
     if (payload) return payload;
-  } catch {
-    // toolChoice not supported by this provider, or call failed — fall through
+    attemptErrors.push(`Attempt 1 (toolChoice): tool call received but extraction failed. Response types: ${response.content.map(c => c.type).join(", ")}`);
+  } catch (err) {
+    attemptErrors.push(`Attempt 1 (toolChoice): ${err instanceof Error ? err.message : String(err)}`);
   }
 
-  // Attempt 2: Try again without toolChoice, rely on strong prompting
+  // Attempt 2: Structured JSON output via response_format (OpenAI only)
+  // For OpenAI providers, use the onPayload hack to inject response_format.
+  // For others, fall through to prompt-based attempt.
+  if (isOpenAI) {
+    onProgress?.("Scoring with OpenAI structured output (json_schema)...");
+    try {
+      const jsonMessages: Message[] = [
+        {
+          role: "user",
+          content: `Score these dimensions based on the code analysis below.
+
+ANALYSIS:
+${analysis.slice(0, 12000)}
+
+DIMENSIONS AND RUBRICS:
+${rubricSection}
+
+DIMENSIONS TO SCORE: ${dimNames}
+
+Score each dimension 1-5. Reference specific file:line evidence in your reasoning.
+Return a JSON object with "scores" array and "summary" string.`,
+          timestamp: Date.now(),
+        },
+      ];
+      const response = await complete(m, {
+        systemPrompt: "You are a code review scorer. Return structured JSON scores.",
+        messages: jsonMessages,
+        tools: [],
+      }, {
+        apiKey,
+        ...(reasoningVal ? { reasoning: reasoningVal } : {}),
+        // Inject response_format into the API request via onPayload mutation
+        onPayload: (payload: any) => {
+          payload.response_format = reviewJsonSchema;
+        },
+      } as any);
+
+      const fullText = extractText(response);
+      const parsed = tryParseReviewJSON(fullText);
+      if (parsed) return parsed;
+      attemptErrors.push(`Attempt 2 (json_schema): structured output parse failed. Text preview: ${fullText.slice(0, 200)}`);
+    } catch (err) {
+      attemptErrors.push(`Attempt 2 (json_schema): ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  // Attempt 3: Strong prompting without toolChoice (cross-provider)
   onProgress?.("Scoring with prompt-based enforcement...");
   try {
     const response = await completeSimple(m, context, buildStreamOpts(apiKey, reasoning));
@@ -308,17 +399,16 @@ RULES:
     if (payload) return payload;
 
     // Check for text-based JSON fallback
-    const textBlocks = response.content
-      .filter((c): c is { type: "text"; text: string } => c.type === "text");
-    const fullText = textBlocks.map(b => b.text).join("\n");
+    const fullText = extractText(response);
     const parsed = tryParseReviewJSON(fullText);
     if (parsed) return parsed;
-  } catch {
-    // scoring call failed entirely
+    attemptErrors.push(`Attempt 3 (prompt): no tool call, text fallback failed. Response types: ${response.content.map(c => c.type).join(", ")}. Text length: ${fullText.length}`);
+  } catch (err) {
+    attemptErrors.push(`Attempt 3 (prompt): ${err instanceof Error ? err.message : String(err)}`);
   }
 
-  // Attempt 3: Minimal retry with even more explicit prompt
-  onProgress?.("Final scoring attempt...");
+  // Attempt 4: Minimal forceful prompt — fresh context, tools available
+  onProgress?.("Final scoring attempt (forceful)...");
   try {
     const forcefulMessages: Message[] = [
       {
@@ -339,15 +429,48 @@ Call submit_review immediately. No text output.`,
     const payload = extractSubmitReview(response);
     if (payload) return payload;
 
-    // Last resort: parse text
-    const textBlocks = response.content
-      .filter((c): c is { type: "text"; text: string } => c.type === "text");
-    const parsed = tryParseReviewJSON(textBlocks.map(b => b.text).join("\n"));
+    const fullText = extractText(response);
+    const parsed = tryParseReviewJSON(fullText);
     if (parsed) return parsed;
-  } catch {
-    // all attempts exhausted
+    attemptErrors.push(`Attempt 4 (forceful): no tool call, text fallback failed. Response types: ${response.content.map(c => c.type).join(", ")}. Text length: ${fullText.length}`);
+  } catch (err) {
+    attemptErrors.push(`Attempt 4 (forceful): ${err instanceof Error ? err.message : String(err)}`);
   }
 
+  // Attempt 5: Pure JSON output — no tools, no schema, just raw JSON request
+  onProgress?.("Fallback: requesting raw JSON scores...");
+  try {
+    const jsonMessages: Message[] = [
+      {
+        role: "user",
+        content: `Score these dimensions based on the analysis below. Return ONLY a JSON object, no other text.
+
+DIMENSIONS: ${dimNames}
+
+ANALYSIS:
+${analysis.slice(0, 8000)}
+
+Return this exact JSON structure (nothing else):
+{"scores":[{"dimension":"<name>","score":<1-5>,"reasoning":"<brief>"}],"summary":"<overall summary>"}`,
+        timestamp: Date.now(),
+      },
+    ];
+    const response = await completeSimple(m, {
+      systemPrompt: "You are a JSON-only scorer. Output ONLY valid JSON matching the requested schema. No markdown fences, no explanations, no commentary — just the raw JSON object.",
+      messages: jsonMessages,
+      tools: [],
+    }, buildStreamOpts(apiKey, reasoning));
+
+    const fullText = extractText(response);
+    const parsed = tryParseReviewJSON(fullText);
+    if (parsed) return parsed;
+    attemptErrors.push(`Attempt 5 (raw JSON): parse failed. Text preview: ${fullText.slice(0, 200)}`);
+  } catch (err) {
+    attemptErrors.push(`Attempt 5 (raw JSON): ${err instanceof Error ? err.message : String(err)}`);
+  }
+
+  // All attempts failed — report details
+  onProgress?.(`All scoring attempts failed (provider: ${m.provider}, api: ${m.api}):\n${attemptErrors.join("\n")}`);
   return null;
 }
 
@@ -366,17 +489,57 @@ function extractSubmitReview(response: AssistantMessage): ReviewPayload | null {
 
 /** Try to extract a ReviewPayload from free-text JSON output. */
 function tryParseReviewJSON(output: string): ReviewPayload | null {
+  if (!output || !output.trim()) return null;
   let text = output.trim();
+
+  // Strip markdown code fences (```json ... ``` or ``` ... ```)
   const fenceMatch = text.match(/```(?:json)?\s*\n?([\s\S]*?)\n?\s*```/);
   if (fenceMatch) text = fenceMatch[1].trim();
+
+  // Find the outermost JSON object
   const jsonMatch = text.match(/\{[\s\S]*\}/);
   if (!jsonMatch) return null;
   let jsonStr = jsonMatch[0];
-  jsonStr = jsonStr.replace(/,\s*([}\]])/g, "$1");
-  try {
-    const parsed = JSON.parse(jsonStr);
-    if (parsed.scores && Array.isArray(parsed.scores)) return parsed;
-  } catch { /* fall through */ }
+
+  // Common LLM JSON quirks: trailing commas, single quotes, comments
+  jsonStr = jsonStr.replace(/,\s*([}\]])/g, "$1");                      // trailing commas
+  jsonStr = jsonStr.replace(/\/\/[^\n]*/g, "");                          // single-line comments
+  jsonStr = jsonStr.replace(/\/\*[\s\S]*?\*\//g, "");                   // block comments
+
+  // Try parsing as-is first
+  const tryParse = (s: string): ReviewPayload | null => {
+    try {
+      const parsed = JSON.parse(s);
+      if (parsed.scores && Array.isArray(parsed.scores) && parsed.scores.length > 0) {
+        // Ensure each score has required fields, fill defaults
+        const validScores = parsed.scores.filter(
+          (s: any) => s && typeof s.dimension === "string" && typeof s.score === "number",
+        ).map((s: any) => ({
+          dimension: s.dimension,
+          score: Math.max(1, Math.min(5, Math.round(s.score))),  // clamp 1-5
+          reasoning: s.reasoning || s.reason || s.explanation || "(no reasoning provided)",
+          ...(s.evidence ? { evidence: s.evidence } : {}),
+        }));
+        if (validScores.length > 0) {
+          return { scores: validScores, summary: parsed.summary || "(no summary)" };
+        }
+      }
+    } catch { /* fall through */ }
+    return null;
+  };
+
+  // Attempt 1: direct parse
+  const direct = tryParse(jsonStr);
+  if (direct) return direct;
+
+  // Attempt 2: replace single quotes with double quotes (common LLM mistake)
+  // Only do this if there are no double quotes in the string (to avoid breaking valid JSON)
+  if (!jsonStr.includes('"') && jsonStr.includes("'")) {
+    const doubleQuoted = jsonStr.replace(/'/g, '"');
+    const sq = tryParse(doubleQuoted);
+    if (sq) return sq;
+  }
+
   return null;
 }
 
@@ -546,22 +709,26 @@ export async function runLLMReview(
 
   onProgress?.("Starting 3 independent review agents (2-phase: explore → score)...");
 
+  // Stagger reviewers by 1s to reduce rate-limit collisions on same provider
+  const delay = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
   const settled = await Promise.allSettled([
     runSingleReviewWithRetry(explorationPrompt, rubricSection, dimNames, cwd, reviewModel, onProgress, judgeReasoning),
-    runSingleReviewWithRetry(explorationPrompt, rubricSection, dimNames, cwd, reviewModel, onProgress, judgeReasoning),
-    runSingleReviewWithRetry(explorationPrompt, rubricSection, dimNames, cwd, reviewModel, onProgress, judgeReasoning),
+    delay(1000).then(() => runSingleReviewWithRetry(explorationPrompt, rubricSection, dimNames, cwd, reviewModel, onProgress, judgeReasoning)),
+    delay(2000).then(() => runSingleReviewWithRetry(explorationPrompt, rubricSection, dimNames, cwd, reviewModel, onProgress, judgeReasoning)),
   ]);
 
   const successfulReviews: ReviewPayload[] = [];
   const failures: string[] = [];
-  for (const result of settled) {
+  for (let i = 0; i < settled.length; i++) {
+    const result = settled[i];
     if (result.status === "fulfilled" && result.value) {
       successfulReviews.push(result.value);
     } else {
       const reason = result.status === "rejected"
         ? (result.reason instanceof Error ? result.reason.message : String(result.reason))
-        : "Reviewer returned null";
+        : "Reviewer returned null — all scoring strategies failed (toolChoice, json_schema, prompt, forceful, raw JSON)";
       failures.push(reason);
+      onProgress?.(`Reviewer ${i + 1}/3 failed: ${reason}`);
     }
   }
 
@@ -579,11 +746,12 @@ export async function runLLMReview(
   const failureDetail = failures.length > 0
     ? `\n\nFailure reasons:\n${failures.map((f, i) => `  Reviewer ${i + 1}: ${f}`).join("\n")}`
     : "";
+  const modelInfo = reviewModel ? ` (judge model: ${reviewModel})` : " (no explicit judge model — using default)";
 
   return {
     type: "llm_review",
     passed: false,
-    message: "Review failed — all evaluators failed to produce results",
-    details: `All 3 reviewers failed to produce structured output after 2-phase review with retries. Task marked as failed for safety.${failureDetail}`,
+    message: `Review failed — all evaluators failed to produce structured scores${modelInfo}`,
+    details: `All 3 reviewers failed after 5 scoring strategies (toolChoice → json_schema → prompt → forceful → raw JSON) × 2 retries each.${modelInfo}\n\nThis usually means: (1) the judge model doesn't support tool calling well, (2) API auth/rate-limit errors, or (3) the model can't produce valid JSON.\n\nTry: set POLPO_JUDGE_MODEL to a capable model (e.g. claude-sonnet-4-20250514, gpt-4o), check API keys, or reduce concurrent tasks.${failureDetail}`,
   };
 }

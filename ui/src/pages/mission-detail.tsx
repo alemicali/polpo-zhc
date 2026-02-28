@@ -35,6 +35,7 @@ import {
   Timer,
   Workflow,
   ChevronDown,
+  ChevronRight,
 } from "lucide-react";
 import {
   ReactFlow,
@@ -182,7 +183,8 @@ interface TaskNodeData {
 
 // ── Task node component for ReactFlow ──
 
-function TaskNodeComponent({ data }: NodeProps<Node<TaskNodeData>>) {
+function TaskNodeComponent({ data, selected }: NodeProps<Node<TaskNodeData>>) {
+  const navigate = useNavigate();
   const { taskDef, liveTask, index, expanded } = data;
   const statusCfg = liveTask ? taskStatusConfig[liveTask.status] : null;
   const StatusIcon = statusCfg?.icon ?? Clock;
@@ -212,7 +214,9 @@ function TaskNodeComponent({ data }: NodeProps<Node<TaskNodeData>>) {
         className={cn(
           "rounded-xl border-2 px-4 py-3 shadow-sm backdrop-blur-sm transition-all cursor-pointer overflow-hidden",
           expanded ? "min-w-[320px] max-w-[420px]" : "min-w-[200px] max-w-[280px]",
-          borderColor,
+          selected
+            ? "border-primary ring-2 ring-primary/30 shadow-[0_0_24px_oklch(0.7_0.15_200_/_18%)]"
+            : borderColor,
           bgColor,
         )}
       >
@@ -379,6 +383,21 @@ function TaskNodeComponent({ data }: NodeProps<Node<TaskNodeData>>) {
               <div className="flex items-center gap-3 text-[9px] text-muted-foreground">
                 {taskDef.maxRetries != null && <span>Max retries: {taskDef.maxRetries}</span>}
                 {taskDef.maxDuration != null && <span>Timeout: {Math.round(taskDef.maxDuration / 1000)}s</span>}
+              </div>
+            )}
+
+            {/* View task detail — only when selected and a live task exists */}
+            {selected && liveTask && (
+              <div className="pt-2 border-t border-border/30">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 w-full text-[11px] font-medium gap-1 text-primary"
+                  onClick={(e) => { e.stopPropagation(); navigate(`/tasks/${liveTask.id}`); }}
+                >
+                  View task detail
+                  <ChevronRight className="h-3 w-3" />
+                </Button>
               </div>
             )}
           </div>
