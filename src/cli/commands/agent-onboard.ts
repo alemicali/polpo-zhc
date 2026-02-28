@@ -320,6 +320,7 @@ export function registerAgentOnboardCommands(program: Command): void {
       if (agentCfg.role) console.log(chalk.dim(`  Role: ${agentCfg.role}`));
       if (agentCfg.model) console.log(chalk.dim(`  Model: ${agentCfg.model}`));
       if (agentCfg.reportsTo) console.log(chalk.dim(`  Reports to: ${agentCfg.reportsTo}`));
+      if (agentCfg.createdAt) console.log(chalk.dim(`  Created: ${agentCfg.createdAt}`));
 
       if (agentCfg.identity) {
         console.log(chalk.cyan("\n  Identity:"));

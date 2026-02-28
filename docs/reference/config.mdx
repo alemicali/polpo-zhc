@@ -26,6 +26,7 @@ Missions and tasks are stored separately in `.polpo/missions/` and `.polpo/tasks
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `name` | string | — | **Required.** Unique agent identifier |
+| `createdAt` | string | auto | ISO timestamp of when this agent was created. Auto-set by `addAgent()` |
 | `role` | string | — | Agent's role description |
 | `model` | string | — | LLM model. Format: `provider:model` (e.g. `"anthropic:claude-sonnet-4-6"`) or bare model ID |
 | `allowedTools` | string[] | — | Allowed tool names |

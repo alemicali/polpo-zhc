@@ -43,6 +43,7 @@
     "build:ui": "pnpm --filter ui build",
     "dev": "tsc --watch",
     "dev:serve": "tsx --watch src/cli/index.ts serve -p 3890",
+    "start:serve": "node dist/cli/index.js serve -p 3890",
     "dev:ui": "pnpm --filter ui dev",
     "dev:docs": "cd docs && npx mintlify@latest dev",
     "dev:all": "pnpm build:sdk && concurrently -n server,ui,docs -c blue,green,magenta \"pnpm dev:serve\" \"pnpm dev:ui\" \"pnpm dev:docs\"",

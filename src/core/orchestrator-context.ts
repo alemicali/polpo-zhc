@@ -30,6 +30,8 @@ export interface OrchestratorContext {
   readonly hooks: HookRegistry;
   config: PolpoConfig;
   readonly workDir: string;
+  /** Resolved working directory for agent processes (settings.workDir resolved against workDir). */
+  readonly agentWorkDir: string;
   readonly polpoDir: string;
   readonly assessFn: AssessFn;
 }

@@ -55,6 +55,7 @@ export function registerTeamCommands(program: Command): void {
           if (agent.model) console.log(chalk.dim(`    model:      ${agent.model}`));
           if (agent.role) console.log(chalk.dim(`    role:       ${agent.role}`));
           if (agent.reportsTo) console.log(chalk.dim(`    reportsTo:  ${agent.reportsTo}`));
+          if (agent.createdAt) console.log(chalk.dim(`    createdAt:  ${agent.createdAt}`));
         }
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
@@ -79,6 +80,7 @@ export function registerTeamCommands(program: Command): void {
         if (opts.model) agent.model = opts.model;
         if (opts.role) agent.role = opts.role;
         if (opts.reportsTo) agent.reportsTo = opts.reportsTo;
+        agent.createdAt = new Date().toISOString();
 
         const config = readPolpoConfig(opts.dir);
         if (!config.teams || config.teams.length === 0) {

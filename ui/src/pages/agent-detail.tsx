@@ -1329,9 +1329,9 @@ export function AgentDetailPage() {
                         <TooltipContent className="text-xs">Copy JSON</TooltipContent>
                       </Tooltip>
                     </div>
-                    <pre className="px-4 py-3 text-xs font-mono text-muted-foreground leading-relaxed overflow-x-auto whitespace-pre">
-                      {JSON.stringify(agent, null, 2)}
-                    </pre>
+                    <div className="px-4 py-3 text-xs leading-relaxed overflow-x-auto">
+                      <MessageResponse>{"```json\n" + JSON.stringify(agent, null, 2) + "\n```"}</MessageResponse>
+                    </div>
                   </Card>
                 </div>
               </ScrollArea>

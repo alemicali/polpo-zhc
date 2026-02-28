@@ -227,6 +227,15 @@ export class Orchestrator extends TypedEmitter {
     }
   }
 
+  /** Resolve the directory where agent processes will run (settings.workDir relative to project root). */
+  private resolveAgentWorkDir(): string {
+    const settingsWorkDir = this.config.settings.workDir;
+    if (!settingsWorkDir || settingsWorkDir === ".") return this.workDir;
+    const resolved = resolve(this.workDir, settingsWorkDir);
+    if (!existsSync(resolved)) mkdirSync(resolved, { recursive: true });
+    return resolved;
+  }
+
   /** Create manager instances with shared context. */
   private initManagers(): void {
     const ctx: OrchestratorContext = {
@@ -239,6 +248,7 @@ export class Orchestrator extends TypedEmitter {
       hooks: this.hookRegistry,
       config: this.config,
       workDir: this.workDir,
+      agentWorkDir: this.resolveAgentWorkDir(),
       polpoDir: this.polpoDir,
       assessFn: this.assessFn,
     };
@@ -393,7 +403,7 @@ export class Orchestrator extends TypedEmitter {
           const { execSync } = await import("node:child_process");
           const timeout = action.timeoutMs ?? 30_000;
           const result = execSync(action.command, {
-            cwd: ctx.workDir,
+            cwd: ctx.agentWorkDir,
             timeout,
             stdio: ["ignore", "pipe", "pipe"],
             maxBuffer: 5 * 1024 * 1024,
@@ -792,6 +802,7 @@ export class Orchestrator extends TypedEmitter {
       hooks: this.hookRegistry,
       config: this.config,
       workDir: this.workDir,
+      agentWorkDir: this.resolveAgentWorkDir(),
       polpoDir: this.polpoDir,
       assessFn: this.assessFn,
     };

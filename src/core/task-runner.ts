@@ -428,7 +428,7 @@ export class TaskRunner {
       agent,
       task: taskWithContext,
       polpoDir: this.ctx.polpoDir,
-      cwd: this.ctx.workDir,
+      cwd: this.ctx.agentWorkDir,
       storage: this.ctx.config.settings.storage,
       notifySocket: getSocketPath(this.ctx.polpoDir),
       emailAllowedDomains: agent.emailAllowedDomains ?? this.ctx.config.settings.emailAllowedDomains,
@@ -460,7 +460,7 @@ export class TaskRunner {
       const child = cpSpawn(spawnArgs[0], spawnArgs.slice(1), {
         detached: true,
         stdio: "ignore",
-        cwd: this.ctx.workDir,
+        cwd: this.ctx.agentWorkDir,
       });
       child.unref();
 

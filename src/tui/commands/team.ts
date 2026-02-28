@@ -42,6 +42,7 @@ function teamList(polpo: import("../../core/orchestrator.js").Orchestrator, stor
     if (agent.model) parts.push(seg(` ${agent.model}`, "gray", false, true));
     if (agent.role) parts.push(seg(` — ${agent.role}`, "gray", false, true));
     if (agent.reportsTo) parts.push(seg(` → ${agent.reportsTo}`, "gray"));
+    if (agent.createdAt) parts.push(seg(` (${agent.createdAt.slice(0, 10)})`, "gray"));
     store.log(`  ${agent.name}`, parts);
   }
 
