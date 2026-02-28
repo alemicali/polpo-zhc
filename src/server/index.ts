@@ -13,7 +13,7 @@ import type { ServerConfig } from "./types.js";
  *
  * Usage:
  *   const server = new PolpoServer({
- *     port: 3000,
+ *     port: 3890,
  *     host: "0.0.0.0",
  *     workDir: "./my-project",
  *     autoStart: true,

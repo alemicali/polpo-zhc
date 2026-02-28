@@ -1,7 +1,6 @@
 /**
  * Shell — page router. Renders the current page based on store state.
- * Main page shows Stream + TaskPanel + Input.
- * Other pages replace the entire screen (no overlay glitches).
+ * Chat-only: all input goes through the server completions endpoint.
  */
 
 import { useStore } from "../store.js";
@@ -13,11 +12,7 @@ import { PickerPage } from "../pages/PickerPage.js";
 import { EditorPage } from "../pages/EditorPage.js";
 import { ViewerPage } from "../pages/ViewerPage.js";
 import { ConfirmPage } from "../pages/ConfirmPage.js";
-import { QuestionsPage } from "../pages/QuestionsPage.js";
-import { createTask } from "../actions/create-task.js";
-import { createMission } from "../actions/create-mission.js";
 import { startChat } from "../actions/chat.js";
-import { parseMentions } from "../mentions.js";
 
 export function Shell() {
   const pageId = useStore((s) => s.page.id);
@@ -29,6 +24,7 @@ export function Shell() {
 
     // Echo user input
     s.pushLine({ type: "user", text, ts: new Date().toISOString() });
+    s.scrollToBottom();
 
     // Slash command?
     if (text.startsWith("/")) {
@@ -39,18 +35,8 @@ export function Shell() {
       return;
     }
 
-    // Parse @ mentions
-    const mentions = parseMentions(text);
-
-    // Mode-specific handling
-    const mode = s.inputMode;
-    if (mode === "chat") {
-      startChat(mentions.text || text, polpo, s);
-    } else if (mode === "plan") {
-      createMission(mentions.text || text, polpo, s);
-    } else {
-      createTask(mentions.text || text, polpo, s, mentions.agent);
-    }
+    // All input goes to chat via server completions
+    startChat(text, polpo, s);
   };
 
   switch (pageId) {
@@ -64,8 +50,6 @@ export function Shell() {
       return <ViewerPage />;
     case "confirm":
       return <ConfirmPage />;
-    case "questions":
-      return <QuestionsPage />;
     default:
       return <MainView onSubmit={handleSubmit} />;
   }

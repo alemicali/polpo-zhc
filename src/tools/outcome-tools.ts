@@ -1,12 +1,12 @@
 /**
  * Outcome registration tool.
  *
- * Allows agents to explicitly declare files, text, URLs, or JSON data
- * as task outcomes. This is critical when agents use bash scripts or
- * other indirect methods to produce artifacts — without this tool,
- * the orchestrator cannot track those artifacts and they won't appear
- * in notifications.
+ * The ONLY mechanism for agents to declare task outcomes. Producing a file
+ * (via write, pdf_create, bash, etc.) does NOT auto-register it as an
+ * outcome — the agent must explicitly call register_outcome for every
+ * deliverable artifact.
  *
+ * Supports files, media, text, URLs, and structured JSON data.
  * The tool validates that file outcomes actually exist on disk before
  * registering them.
  */
@@ -66,15 +66,15 @@ function createRegisterOutcomeTool(cwd: string, sandbox: string[]): AgentTool<ty
     name: "register_outcome",
     label: "Register Outcome",
     description:
-      "Explicitly register a file, text, URL, or data as a task outcome. " +
-      "Use this when you produce artifacts via bash scripts, external tools, or any method " +
-      "that the orchestrator can't auto-track. Registered outcomes are attached to task-done " +
-      "notifications (Telegram, Slack, etc.) and stored in the task record.\n\n" +
+      "Register a file, text, URL, or data as a task outcome. This is the ONLY way to declare " +
+      "deliverables — producing files does NOT auto-register them. You MUST call this tool for " +
+      "every artifact that should appear in notifications and the task record.\n\n" +
       "Examples:\n" +
-      "- After generating a PDF via a Python script: register_outcome({type: 'file', label: 'Sales Report', path: 'output/report.pdf'})\n" +
-      "- After building a chart image: register_outcome({type: 'media', label: 'Revenue Chart', path: 'charts/revenue.png'})\n" +
+      "- After creating a PDF: register_outcome({type: 'file', label: 'Sales Report', path: 'output/report.pdf'})\n" +
+      "- After generating an image: register_outcome({type: 'media', label: 'Revenue Chart', path: 'charts/revenue.png'})\n" +
       "- To share a deploy URL: register_outcome({type: 'url', label: 'Staging Deploy', url: 'https://staging.example.com'})\n" +
-      "- To include analysis results: register_outcome({type: 'text', label: 'Summary', text: 'Revenue increased 23% QoQ...'})",
+      "- To include analysis results: register_outcome({type: 'text', label: 'Summary', text: 'Revenue increased 23% QoQ...'})\n" +
+      "- To return structured data: register_outcome({type: 'json', label: 'Metrics', data: {revenue: 1234}})",
     parameters: RegisterOutcomeSchema,
     async execute(_id, params) {
       const { type, label } = params;

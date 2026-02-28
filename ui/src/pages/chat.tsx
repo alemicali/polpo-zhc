@@ -66,6 +66,8 @@ import type { PromptInputMessage } from "@/components/ai-elements/prompt-input";
 import { useChat } from "@/hooks/use-polpo";
 import type { AskUserQuestion, AskUserAnswer, MessageSegment, ToolCallInfo, MissionPreviewData, MissionPreviewAction, VaultPreviewData, VaultPreviewAction } from "@/hooks/use-polpo";
 import { ToolCallList, ToolInvocation, ToolCallGroup } from "@/components/ai-elements/tool";
+import { MentionPopover, type MentionPopoverHandle } from "@/components/ai-elements/mention-popover";
+import { useAgents, useTasks, useMissions } from "@lumea-labs/polpo-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { formatDistanceToNow } from "date-fns";
@@ -1347,6 +1349,7 @@ export function ChatPage() {
     pendingMission,
     pendingVault,
     send,
+    stop,
     answerQuestions,
     respondToMission,
     respondToVault,
@@ -1360,6 +1363,13 @@ export function ChatPage() {
   const [atBottom, setAtBottom] = useState(true);
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const inputWrapperRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const mentionRef = useRef<MentionPopoverHandle>(null);
+
+  // Mention autocomplete data
+  const { agents } = useAgents();
+  const { tasks } = useTasks();
+  const { missions } = useMissions();
 
   // Filter out empty/orphan sessions — server creates placeholder sessions
   // before streaming starts; if streaming fails these remain empty
@@ -1449,7 +1459,7 @@ export function ChatPage() {
                 </PromptInputFooter>
               </PromptInput>
               <p className="text-[10px] text-muted-foreground text-center mt-0.5">
-                Enter to send, Shift+Enter for new line.
+                @ to mention · Enter to send · Shift+Enter for new line.
               </p>
             </div>
           </div>
@@ -1741,36 +1751,44 @@ export function ChatPage() {
         {/* Input */}
         <div className="bg-background/80 backdrop-blur-md px-4 pt-2 pb-1.5 shrink-0" ref={inputWrapperRef}>
           <div className="mx-auto max-w-3xl">
-            <PromptInput
-              onSubmit={handleSubmit}
-              accept="image/*"
-              multiple
-              globalDrop
-              maxFiles={5}
-              maxFileSize={10 * 1024 * 1024}
-              onError={(err) => toast.error(err.message)}
-              className="[&_[data-slot=input-group]]:rounded-2xl"
-            >
-              <AttachmentPreview />
-              <PromptInputTextarea
-                placeholder={isLoading ? "Polpo is working..." : pendingQuestions ? "Answer the questions above first..." : pendingMission ? "Review the mission preview above..." : pendingVault ? "Review the vault entry above..." : "Message Polpo..."}
-                disabled={isLoading || !!pendingQuestions || !!pendingMission || !!pendingVault}
-              />
-              <PromptInputFooter>
-                <div className="flex items-center gap-1">
-                  <AttachButton disabled={isLoading || !!pendingQuestions || !!pendingMission || !!pendingVault} />
-                </div>
-                <div className="flex items-center gap-1">
-                  <MicButton onTranscript={setTextareaValue} disabled={isLoading || !!pendingQuestions || !!pendingMission || !!pendingVault} />
-                  <PromptInputSubmit
-                    status={isLoading ? "streaming" : undefined}
-                    disabled={!!pendingQuestions || !!pendingMission || !!pendingVault}
-                  />
-                </div>
-              </PromptInputFooter>
-            </PromptInput>
+            <MentionPopover ref={mentionRef} textareaRef={textareaRef} agents={agents} tasks={tasks} missions={missions}>
+              <PromptInput
+                onSubmit={handleSubmit}
+                accept="image/*"
+                multiple
+                globalDrop
+                maxFiles={5}
+                maxFileSize={10 * 1024 * 1024}
+                onError={(err) => toast.error(err.message)}
+                className="[&_[data-slot=input-group]]:rounded-2xl"
+              >
+                <AttachmentPreview />
+                <PromptInputTextarea
+                  placeholder={isLoading ? "Polpo is working..." : pendingQuestions ? "Answer the questions above first..." : pendingMission ? "Review the mission preview above..." : pendingVault ? "Review the vault entry above..." : "Message Polpo..."}
+                  disabled={isLoading || !!pendingQuestions || !!pendingMission || !!pendingVault}
+                  onKeyDown={(e) => mentionRef.current?.handleTextareaKeyDown(e)}
+                  onInput={(e) => {
+                    if (!textareaRef.current) textareaRef.current = e.currentTarget;
+                    mentionRef.current?.handleInput();
+                  }}
+                />
+                <PromptInputFooter>
+                  <div className="flex items-center gap-1">
+                    <AttachButton disabled={isLoading || !!pendingQuestions || !!pendingMission || !!pendingVault} />
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <MicButton onTranscript={setTextareaValue} disabled={isLoading || !!pendingQuestions || !!pendingMission || !!pendingVault} />
+                    <PromptInputSubmit
+                      status={isLoading ? "streaming" : undefined}
+                      disabled={!!pendingQuestions || !!pendingMission || !!pendingVault}
+                      onStop={stop}
+                    />
+                  </div>
+                </PromptInputFooter>
+              </PromptInput>
+            </MentionPopover>
             <p className="text-[10px] text-muted-foreground text-center mt-0.5">
-              Enter to send, Shift+Enter for new line.
+              @ to mention · Enter to send · Shift+Enter for new line.
               {sessionId && (
                 <> Session <code className="font-mono">{sessionId.slice(0, 8)}</code> — shared with TUI.</>
               )}

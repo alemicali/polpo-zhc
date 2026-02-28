@@ -703,7 +703,7 @@ export async function runLLMReview(
   const rubricSection = buildRubricSection(dimensions);
   const explorationPrompt = buildExplorationPrompt(criteria, rubricSection, dimNames, context);
 
-  const reviewModel = process.env.POLPO_JUDGE_MODEL || process.env.POLPO_MODEL || undefined;
+  const reviewModel = process.env.POLPO_JUDGE_MODEL || process.env.POLPO_MODEL || "anthropic:claude-sonnet-4.6";
   // Judge reasoning: explicit param > POLPO_JUDGE_REASONING env var > undefined
   const judgeReasoning = reasoning ?? (process.env.POLPO_JUDGE_REASONING as ReasoningLevel | undefined);
 

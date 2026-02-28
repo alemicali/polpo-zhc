@@ -1,27 +1,27 @@
 import { useCallback, useEffect, useState } from "react";
 import { usePolpoContext } from "../provider/polpo-context.js";
-import type { SkillWithAssignment } from "../client/types.js";
+import type { SkillInfo } from "../client/types.js";
 
-export interface UseSkillsReturn {
-  skills: SkillWithAssignment[];
+export interface UseOrchestratorSkillsReturn {
+  skills: SkillInfo[];
   isLoading: boolean;
   error: Error | null;
   refetch: () => Promise<void>;
 }
 
 /**
- * Fetch available project-level skills with agent assignment info.
- * Skills are not reactive (no SSE updates) — they're discovered on demand.
+ * Fetch orchestrator skills from .polpo/.agent/skills/.
+ * Not reactive — discovered on demand.
  */
-export function useSkills(): UseSkillsReturn {
+export function useOrchestratorSkills(): UseOrchestratorSkillsReturn {
   const { client } = usePolpoContext();
-  const [skills, setSkills] = useState<SkillWithAssignment[]>([]);
+  const [skills, setSkills] = useState<SkillInfo[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
 
   const fetch_ = useCallback(async () => {
     try {
-      const data = await client.getSkills();
+      const data = await client.getOrchestratorSkills();
       setSkills(data);
       setError(null);
     } catch (err) {

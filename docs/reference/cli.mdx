@@ -431,6 +431,35 @@ Assign a skill to an agent (creates symlink).
 polpo skills assign <skill> <agent> [-d <path>]
 ```
 
+### skills orchestrator list
+
+List orchestrator skills (from `.polpo/.agent/skills/`).
+
+```bash
+polpo skills orchestrator list [-d <path>]
+```
+
+### skills orchestrator add
+
+Install skills into the orchestrator's pool.
+
+```bash
+polpo skills orchestrator add <source> [-s <names...>] [-f] [-d <path>]
+```
+
+| Flag | Description |
+|------|-------------|
+| `-s, --skill <names...>` | Install only specific skills |
+| `-f, --force` | Overwrite existing skills |
+
+### skills orchestrator remove
+
+Remove a skill from the orchestrator's pool.
+
+```bash
+polpo skills orchestrator remove <name> [-d <path>]
+```
+
 ---
 
 ## polpo auth

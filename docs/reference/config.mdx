@@ -213,6 +213,7 @@ Tasks are created inside missions (via CLI, TUI, or API). Each task has these fi
 | `maxFixAttempts` | number | `2` | Max fix attempts before full retry. During the fix phase, agents receive targeted feedback to correct specific issues instead of starting over. After `maxFixAttempts` fail, the task falls back to a full retry. See [Escalation Chain](/features/escalation). |
 | `maxQuestionRounds` | number | `2` | Max auto-answer rounds per task. When an agent asks a question, Polpo generates an answer using project context. After `maxQuestionRounds`, Q&A stops to prevent infinite loops. See [Question Detection](/features/question-detection). |
 | `maxResolutionAttempts` | number | `2` | Max deadlock resolution attempts per blocked task. When a task depends on a failed dependency, Polpo evaluates whether to absorb the failure, retry the dependency, or fail the task. Each blocked task gets at most `maxResolutionAttempts` before being permanently failed. See [Deadlock Resolution](/features/deadlock-resolution). |
+| `orchestratorSkills` | string[] | — | Skills to load into the orchestrator's system prompt. Resolved against the orchestrator skill pool (`.polpo/.agent/skills/`). See [Skills — Orchestrator Skills](/features/skills#orchestrator-skills) |
 | `orchestratorModel` | string | — | Model for orchestrator LLM calls |
 | `approvalGates` | ApprovalGate[] | — | Approval gate checkpoints. See [Approval Gates](/features/approval-gates) |
 | `notifications` | object | — | Notification routing configuration. See [Notifications](/features/notifications) |

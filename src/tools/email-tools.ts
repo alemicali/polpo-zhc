@@ -84,99 +84,75 @@ function createEmailSendTool(cwd: string, sandbox: string[], vault?: ResolvedVau
       const pass = params.smtp_pass ?? vaultSmtp?.pass ?? process.env.SMTP_PASS;
       const from = params.from ?? vaultSmtp?.from ?? process.env.SMTP_FROM;
 
-      if (!host) {
-        return {
-          content: [{ type: "text", text: "Error: SMTP host not configured. Set SMTP_HOST env var, configure vault, or pass smtp_host parameter." }],
-          details: { error: "no_smtp_host" },
-        };
-      }
-      if (!from) {
-        return {
-          content: [{ type: "text", text: "Error: Sender address not configured. Set SMTP_FROM env var, configure vault, or pass 'from' parameter." }],
-          details: { error: "no_from" },
-        };
-      }
+      if (!host) throw new Error("SMTP host not configured. Set SMTP_HOST env var, configure vault, or pass smtp_host parameter.");
+      if (!from) throw new Error("Sender address not configured. Set SMTP_FROM env var, configure vault, or pass 'from' parameter.");
 
       // Validate recipient domains against allowlist
       if (emailAllowedDomains && emailAllowedDomains.length > 0) {
-        try {
-          validateRecipientDomains(params.to, emailAllowedDomains);
-          if (params.cc) validateRecipientDomains(params.cc, emailAllowedDomains);
-          if (params.bcc) validateRecipientDomains(params.bcc, emailAllowedDomains);
-        } catch (err: any) {
-          return {
-            content: [{ type: "text", text: `Error: ${err.message}` }],
-            details: { error: "recipient_domain_blocked" },
-          };
+        validateRecipientDomains(params.to, emailAllowedDomains);
+        if (params.cc) validateRecipientDomains(params.cc, emailAllowedDomains);
+        if (params.bcc) validateRecipientDomains(params.bcc, emailAllowedDomains);
+      }
+
+      const nodemailer = await import("nodemailer");
+
+      const secure = params.smtp_secure ?? vaultSmtp?.secure ?? (port === 465);
+      const transporter = nodemailer.default.createTransport({
+        host,
+        port,
+        secure,
+        auth: user ? { user, pass } : undefined,
+      });
+
+      // Process attachments
+      const attachments: Array<{ filename: string; content: Buffer }> = [];
+      if (params.attachments) {
+        for (const att of params.attachments) {
+          const attPath = resolve(cwd, att.path);
+          assertPathAllowed(attPath, sandbox, "email_send");
+          if (!existsSync(attPath)) throw new Error(`Attachment not found: ${att.path}`);
+          attachments.push({
+            filename: att.filename ?? basename(attPath),
+            content: readFileSync(attPath),
+          });
         }
       }
 
-      try {
-        const nodemailer = await import("nodemailer");
+      // Detect HTML
+      const isHtml = params.html ?? (params.body.includes("<") && params.body.includes(">"));
 
-        const secure = params.smtp_secure ?? vaultSmtp?.secure ?? (port === 465);
-        const transporter = nodemailer.default.createTransport({
-          host,
-          port,
-          secure,
-          auth: user ? { user, pass } : undefined,
-        });
+      const mailOptions: Record<string, any> = {
+        from,
+        to: Array.isArray(params.to) ? params.to.join(", ") : params.to,
+        subject: params.subject,
+        ...(isHtml ? { html: params.body } : { text: params.body }),
+        ...(params.cc && { cc: Array.isArray(params.cc) ? params.cc.join(", ") : params.cc }),
+        ...(params.bcc && { bcc: Array.isArray(params.bcc) ? params.bcc.join(", ") : params.bcc }),
+        ...(params.reply_to && { replyTo: params.reply_to }),
+        ...(attachments.length > 0 && { attachments }),
+      };
 
-        // Process attachments
-        const attachments: Array<{ filename: string; content: Buffer }> = [];
-        if (params.attachments) {
-          for (const att of params.attachments) {
-            const attPath = resolve(cwd, att.path);
-            assertPathAllowed(attPath, sandbox, "email_send");
-            if (!existsSync(attPath)) {
-              return {
-                content: [{ type: "text", text: `Error: attachment not found: ${att.path}` }],
-                details: { error: "attachment_not_found", path: att.path },
-              };
-            }
-            attachments.push({
-              filename: att.filename ?? basename(attPath),
-              content: readFileSync(attPath),
-            });
-          }
-        }
+      const info = await transporter.sendMail(mailOptions);
 
-        // Detect HTML
-        const isHtml = params.html ?? (params.body.includes("<") && params.body.includes(">"));
-
-        const mailOptions: Record<string, any> = {
-          from,
-          to: Array.isArray(params.to) ? params.to.join(", ") : params.to,
-          subject: params.subject,
-          ...(isHtml ? { html: params.body } : { text: params.body }),
-          ...(params.cc && { cc: Array.isArray(params.cc) ? params.cc.join(", ") : params.cc }),
-          ...(params.bcc && { bcc: Array.isArray(params.bcc) ? params.bcc.join(", ") : params.bcc }),
-          ...(params.reply_to && { replyTo: params.reply_to }),
-          ...(attachments.length > 0 && { attachments }),
-        };
-
-        const info = await transporter.sendMail(mailOptions);
-
-        const recipientCount = (Array.isArray(params.to) ? params.to.length : 1) +
-          (params.cc ? (Array.isArray(params.cc) ? params.cc.length : 1) : 0) +
-          (params.bcc ? (Array.isArray(params.bcc) ? params.bcc.length : 1) : 0);
-
-        return {
-          content: [{ type: "text", text: `Email sent successfully!\nTo: ${params.to}\nSubject: ${params.subject}\nMessage ID: ${info.messageId}\nRecipients: ${recipientCount}${attachments.length ? `\nAttachments: ${attachments.length}` : ""}` }],
-          details: {
-            messageId: info.messageId,
-            accepted: info.accepted,
-            rejected: info.rejected,
-            recipients: recipientCount,
-            attachments: attachments.length,
-          },
-        };
-      } catch (err: any) {
-        return {
-          content: [{ type: "text", text: `Email send error: ${err.message}` }],
-          details: { error: err.message },
-        };
+      // Check for rejected recipients
+      if (info.rejected?.length) {
+        throw new Error(`Email rejected by server for: ${info.rejected.join(", ")}`);
       }
+
+      const recipientCount = (Array.isArray(params.to) ? params.to.length : 1) +
+        (params.cc ? (Array.isArray(params.cc) ? params.cc.length : 1) : 0) +
+        (params.bcc ? (Array.isArray(params.bcc) ? params.bcc.length : 1) : 0);
+
+      return {
+        content: [{ type: "text", text: `Email sent successfully!\nTo: ${params.to}\nSubject: ${params.subject}\nMessage ID: ${info.messageId}\nRecipients: ${recipientCount}${attachments.length ? `\nAttachments: ${attachments.length}` : ""}` }],
+        details: {
+          messageId: info.messageId,
+          accepted: info.accepted,
+          rejected: info.rejected,
+          recipients: recipientCount,
+          attachments: attachments.length,
+        },
+      };
     },
   };
 }
@@ -203,35 +179,23 @@ function createEmailVerifyTool(vault?: ResolvedVault): AgentTool<typeof EmailVer
       const user = params.smtp_user ?? vaultSmtp?.user ?? process.env.SMTP_USER;
       const pass = params.smtp_pass ?? vaultSmtp?.pass ?? process.env.SMTP_PASS;
 
-      if (!host) {
-        return {
-          content: [{ type: "text", text: "Error: SMTP host not configured. Set SMTP_HOST env var, configure vault, or pass smtp_host parameter." }],
-          details: { error: "no_smtp_host", verified: false },
-        };
-      }
+      if (!host) throw new Error("SMTP host not configured. Set SMTP_HOST env var, configure vault, or pass smtp_host parameter.");
 
-      try {
-        const nodemailer = await import("nodemailer");
-        const secure = vaultSmtp?.secure ?? (port === 465);
-        const transporter = nodemailer.default.createTransport({
-          host,
-          port,
-          secure,
-          auth: user ? { user, pass } : undefined,
-        });
+      const nodemailer = await import("nodemailer");
+      const secure = vaultSmtp?.secure ?? (port === 465);
+      const transporter = nodemailer.default.createTransport({
+        host,
+        port,
+        secure,
+        auth: user ? { user, pass } : undefined,
+      });
 
-        await transporter.verify();
+      await transporter.verify();
 
-        return {
-          content: [{ type: "text", text: `SMTP connection verified: ${host}:${port} (user: ${user ?? "none"})` }],
-          details: { verified: true, host, port },
-        };
-      } catch (err: any) {
-        return {
-          content: [{ type: "text", text: `SMTP verification failed: ${err.message}` }],
-          details: { verified: false, error: err.message },
-        };
-      }
+      return {
+        content: [{ type: "text", text: `SMTP connection verified: ${host}:${port} (user: ${user ?? "none"})` }],
+        details: { verified: true, host, port },
+      };
     },
   };
 }
@@ -277,50 +241,43 @@ function createEmailListTool(vault?: ResolvedVault): AgentTool<typeof EmailListS
     description: "List recent emails from the inbox (or specified folder). Returns subject, from, date, and UID for each message. Use email_read to get full content.",
     parameters: EmailListSchema,
     async execute(_id, params) {
+      const client = await connectImap(vault);
+      const folder = params.folder ?? "INBOX";
+      const limit = params.limit ?? 20;
+
+      const lock = await client.getMailboxLock(folder);
       try {
-        const client = await connectImap(vault);
-        const folder = params.folder ?? "INBOX";
-        const limit = params.limit ?? 20;
+        const messages: string[] = [];
+        let count = 0;
 
-        const lock = await client.getMailboxLock(folder);
-        try {
-          const messages: string[] = [];
-          let count = 0;
+        // Fetch recent messages (newest first)
+        const searchCriteria = params.unseen_only ? { seen: false } : { all: true };
+        const searchResult = await client.search(searchCriteria, { uid: true });
+        const uids = Array.isArray(searchResult) ? searchResult : [];
 
-          // Fetch recent messages (newest first)
-          const searchCriteria = params.unseen_only ? { seen: false } : { all: true };
-          const searchResult = await client.search(searchCriteria, { uid: true });
-          const uids = Array.isArray(searchResult) ? searchResult : [];
+        // Get the last N UIDs
+        const targetUids = uids.slice(-limit).reverse();
 
-          // Get the last N UIDs
-          const targetUids = uids.slice(-limit).reverse();
+        for (const uid of targetUids) {
+          const msg = await client.fetchOne(String(uid), { envelope: true, uid: true, flags: true }, { uid: true }) as any;
+          if (!msg?.envelope) continue;
 
-          for (const uid of targetUids) {
-            const msg = await client.fetchOne(String(uid), { envelope: true, uid: true, flags: true }, { uid: true }) as any;
-            if (!msg?.envelope) continue;
+          const env = msg.envelope;
+          const fromAddr = env.from?.[0] ? `${env.from[0].name ?? ""} <${env.from[0].address ?? ""}>`.trim() : "unknown";
+          const date = env.date ? new Date(env.date).toISOString() : "unknown";
+          const unread = !msg.flags?.has("\\Seen") ? " [UNREAD]" : "";
 
-            const env = msg.envelope;
-            const fromAddr = env.from?.[0] ? `${env.from[0].name ?? ""} <${env.from[0].address ?? ""}>`.trim() : "unknown";
-            const date = env.date ? new Date(env.date).toISOString() : "unknown";
-            const unread = !msg.flags?.has("\\Seen") ? " [UNREAD]" : "";
-
-            messages.push(`UID: ${msg.uid} | ${date} | From: ${fromAddr} | Subject: ${env.subject ?? "(no subject)"}${unread}`);
-            count++;
-          }
-
-          return {
-            content: [{ type: "text", text: messages.length > 0 ? `${folder} — ${count} message(s):\n\n${messages.join("\n")}` : `${folder} — no messages found` }],
-            details: { folder, count },
-          };
-        } finally {
-          lock.release();
-          await client.logout();
+          messages.push(`UID: ${msg.uid} | ${date} | From: ${fromAddr} | Subject: ${env.subject ?? "(no subject)"}${unread}`);
+          count++;
         }
-      } catch (err: any) {
+
         return {
-          content: [{ type: "text", text: `IMAP error: ${err.message}` }],
-          details: { error: err.message },
+          content: [{ type: "text", text: messages.length > 0 ? `${folder} — ${count} message(s):\n\n${messages.join("\n")}` : `${folder} — no messages found` }],
+          details: { folder, count },
         };
+      } finally {
+        lock.release();
+        await client.logout();
       }
     },
   };
@@ -341,77 +298,65 @@ function createEmailReadTool(vault?: ResolvedVault): AgentTool<typeof EmailReadS
     description: "Read the full content of an email by UID. Returns headers and body text.",
     parameters: EmailReadSchema,
     async execute(_id, params) {
+      const client = await connectImap(vault);
+      const folder = params.folder ?? "INBOX";
+      const markRead = params.mark_read ?? true;
+
+      const lock = await client.getMailboxLock(folder);
       try {
-        const client = await connectImap(vault);
-        const folder = params.folder ?? "INBOX";
-        const markRead = params.mark_read ?? true;
+        const msg = await client.fetchOne(String(params.uid), {
+          envelope: true,
+          source: true,
+          uid: true,
+          flags: true,
+        }, { uid: true }) as any;
 
-        const lock = await client.getMailboxLock(folder);
-        try {
-          const msg = await client.fetchOne(String(params.uid), {
-            envelope: true,
-            source: true,
-            uid: true,
-            flags: true,
-          }, { uid: true }) as any;
+        if (!msg) throw new Error(`Email UID ${params.uid} not found in ${folder}`);
 
-          if (!msg) {
-            return {
-              content: [{ type: "text", text: `Email UID ${params.uid} not found in ${folder}` }],
-              details: { error: "not_found", uid: params.uid },
-            };
-          }
+        const env = msg.envelope;
+        const fromAddr = env?.from?.[0] ? `${env.from[0].name ?? ""} <${env.from[0].address ?? ""}>`.trim() : "unknown";
+        const toAddr = env?.to?.map((a: any) => `${a.name ?? ""} <${a.address ?? ""}>`.trim()).join(", ") ?? "unknown";
+        const date = env?.date ? new Date(env.date).toISOString() : "unknown";
 
-          const env = msg.envelope;
-          const fromAddr = env?.from?.[0] ? `${env.from[0].name ?? ""} <${env.from[0].address ?? ""}>`.trim() : "unknown";
-          const toAddr = env?.to?.map((a: any) => `${a.name ?? ""} <${a.address ?? ""}>`.trim()).join(", ") ?? "unknown";
-          const date = env?.date ? new Date(env.date).toISOString() : "unknown";
-
-          // Extract text body from source
-          let bodyText = "";
-          if (msg.source) {
-            const source = msg.source.toString("utf-8");
-            // Simple extraction: look for text after headers
-            const headerEnd = source.indexOf("\r\n\r\n");
-            if (headerEnd >= 0) {
-              bodyText = source.slice(headerEnd + 4);
-              // If it's too long, truncate
-              if (bodyText.length > 10000) {
-                bodyText = bodyText.slice(0, 10000) + "\n... (truncated)";
-              }
+        // Extract text body from source
+        let bodyText = "";
+        if (msg.source) {
+          const source = msg.source.toString("utf-8");
+          // Simple extraction: look for text after headers
+          const headerEnd = source.indexOf("\r\n\r\n");
+          if (headerEnd >= 0) {
+            bodyText = source.slice(headerEnd + 4);
+            // If it's too long, truncate
+            if (bodyText.length > 10000) {
+              bodyText = bodyText.slice(0, 10000) + "\n... (truncated)";
             }
           }
-
-          // Mark as read if requested
-          if (markRead) {
-            try {
-              await client.messageFlagsAdd(String(params.uid), ["\\Seen"], { uid: true });
-            } catch { /* best-effort */ }
-          }
-
-          const parts = [
-            `From: ${fromAddr}`,
-            `To: ${toAddr}`,
-            `Date: ${date}`,
-            `Subject: ${env?.subject ?? "(no subject)"}`,
-            `UID: ${msg.uid}`,
-            ``,
-            bodyText || "(empty body)",
-          ];
-
-          return {
-            content: [{ type: "text", text: parts.join("\n") }],
-            details: { uid: params.uid, subject: env?.subject },
-          };
-        } finally {
-          lock.release();
-          await client.logout();
         }
-      } catch (err: any) {
+
+        // Mark as read if requested
+        if (markRead) {
+          try {
+            await client.messageFlagsAdd(String(params.uid), ["\\Seen"], { uid: true });
+          } catch { /* best-effort */ }
+        }
+
+        const parts = [
+          `From: ${fromAddr}`,
+          `To: ${toAddr}`,
+          `Date: ${date}`,
+          `Subject: ${env?.subject ?? "(no subject)"}`,
+          `UID: ${msg.uid}`,
+          ``,
+          bodyText || "(empty body)",
+        ];
+
         return {
-          content: [{ type: "text", text: `IMAP error: ${err.message}` }],
-          details: { error: err.message },
+          content: [{ type: "text", text: parts.join("\n") }],
+          details: { uid: params.uid, subject: env?.subject },
         };
+      } finally {
+        lock.release();
+        await client.logout();
       }
     },
   };
@@ -436,56 +381,46 @@ function createEmailSearchTool(vault?: ResolvedVault): AgentTool<typeof EmailSea
     parameters: EmailSearchSchema,
     async execute(_id, params) {
       if (!params.from && !params.subject && !params.since && !params.body) {
-        return {
-          content: [{ type: "text", text: "Error: provide at least one search criterion (from, subject, since, or body)" }],
-          details: { error: "no_criteria" },
-        };
+        throw new Error("Provide at least one search criterion (from, subject, since, or body)");
       }
 
+      const client = await connectImap(vault);
+      const folder = params.folder ?? "INBOX";
+      const limit = params.limit ?? 20;
+
+      const lock = await client.getMailboxLock(folder);
       try {
-        const client = await connectImap(vault);
-        const folder = params.folder ?? "INBOX";
-        const limit = params.limit ?? 20;
+        // Build search query
+        const query: Record<string, any> = {};
+        if (params.from) query.from = params.from;
+        if (params.subject) query.subject = params.subject;
+        if (params.since) query.since = params.since;
+        if (params.body) query.body = params.body;
 
-        const lock = await client.getMailboxLock(folder);
-        try {
-          // Build search query
-          const query: Record<string, any> = {};
-          if (params.from) query.from = params.from;
-          if (params.subject) query.subject = params.subject;
-          if (params.since) query.since = params.since;
-          if (params.body) query.body = params.body;
+        const searchResult = await client.search(query, { uid: true });
+        const uids = Array.isArray(searchResult) ? searchResult : [];
+        const targetUids = uids.slice(-limit).reverse();
 
-          const searchResult = await client.search(query, { uid: true });
-          const uids = Array.isArray(searchResult) ? searchResult : [];
-          const targetUids = uids.slice(-limit).reverse();
+        const messages: string[] = [];
+        for (const uid of targetUids) {
+          const msg = await client.fetchOne(String(uid), { envelope: true, uid: true, flags: true }, { uid: true }) as any;
+          if (!msg?.envelope) continue;
 
-          const messages: string[] = [];
-          for (const uid of targetUids) {
-            const msg = await client.fetchOne(String(uid), { envelope: true, uid: true, flags: true }, { uid: true }) as any;
-            if (!msg?.envelope) continue;
+          const env = msg.envelope;
+          const fromAddr = env.from?.[0] ? `${env.from[0].name ?? ""} <${env.from[0].address ?? ""}>`.trim() : "unknown";
+          const date = env.date ? new Date(env.date).toISOString() : "unknown";
+          const unread = !msg.flags?.has("\\Seen") ? " [UNREAD]" : "";
 
-            const env = msg.envelope;
-            const fromAddr = env.from?.[0] ? `${env.from[0].name ?? ""} <${env.from[0].address ?? ""}>`.trim() : "unknown";
-            const date = env.date ? new Date(env.date).toISOString() : "unknown";
-            const unread = !msg.flags?.has("\\Seen") ? " [UNREAD]" : "";
-
-            messages.push(`UID: ${msg.uid} | ${date} | From: ${fromAddr} | Subject: ${env.subject ?? "(no subject)"}${unread}`);
-          }
-
-          return {
-            content: [{ type: "text", text: messages.length > 0 ? `Search results (${messages.length}):\n\n${messages.join("\n")}` : "No emails found matching your criteria" }],
-            details: { folder, count: messages.length, query: params },
-          };
-        } finally {
-          lock.release();
-          await client.logout();
+          messages.push(`UID: ${msg.uid} | ${date} | From: ${fromAddr} | Subject: ${env.subject ?? "(no subject)"}${unread}`);
         }
-      } catch (err: any) {
+
         return {
-          content: [{ type: "text", text: `IMAP error: ${err.message}` }],
-          details: { error: err.message },
+          content: [{ type: "text", text: messages.length > 0 ? `Search results (${messages.length}):\n\n${messages.join("\n")}` : "No emails found matching your criteria" }],
+          details: { folder, count: messages.length, query: params },
         };
+      } finally {
+        lock.release();
+        await client.logout();
       }
     },
   };

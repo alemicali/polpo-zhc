@@ -14,6 +14,13 @@ import type { Orchestrator } from "../core/orchestrator.js";
 import type { ApprovalStatus, VaultEntry, AgentIdentity, AgentResponsibility, AgentConfig } from "../core/types.js";
 import { existsSync, readFileSync, appendFileSync, writeFileSync } from "fs";
 import { join } from "path";
+import { execSync } from "child_process";
+import {
+  discoverOrchestratorSkills, createOrchestratorSkill, updateOrchestratorSkill,
+  removeOrchestratorSkill, installOrchestratorSkills,
+  discoverSkills, installSkills, removeSkill, createAgentSkill,
+  getSkillByName,
+} from "./skills.js";
 
 // ═══════════════════════════════════════════════════════
 //  READ TOOLS (12)
@@ -653,6 +660,108 @@ const appendSystemContextTool: Tool = {
 };
 
 // ═══════════════════════════════════════════════════════
+//  SKILL TOOLS (7) — manage orchestrator + agent skills
+// ═══════════════════════════════════════════════════════
+
+const listOrchestratorSkillsTool: Tool = {
+  name: "list_orchestrator_skills",
+  description: "List all skills installed in the orchestrator's skill pool (.polpo/.agent/skills/).",
+  parameters: Type.Object({}),
+};
+
+const createOrchestratorSkillTool: Tool = {
+  name: "create_orchestrator_skill",
+  description: "Create a new skill in the orchestrator's pool. Writes a SKILL.md with YAML frontmatter and markdown body.",
+  parameters: Type.Object({
+    name: Type.String({ description: "Skill name (directory name, e.g. 'project-planner')" }),
+    description: Type.String({ description: "Short description for the skill frontmatter" }),
+    content: Type.String({ description: "Markdown body content (the skill instructions, without frontmatter)" }),
+    allowedTools: Type.Optional(Type.Array(Type.String(), { description: "Tool names this skill requires (informational)" })),
+  }),
+};
+
+const updateOrchestratorSkillTool: Tool = {
+  name: "update_orchestrator_skill",
+  description: "Update an existing skill in the orchestrator's pool. Only provided fields are changed.",
+  parameters: Type.Object({
+    name: Type.String({ description: "Skill name to update" }),
+    description: Type.Optional(Type.String({ description: "New description" })),
+    content: Type.Optional(Type.String({ description: "New markdown body content" })),
+    allowedTools: Type.Optional(Type.Array(Type.String(), { description: "New allowed tools list" })),
+  }),
+};
+
+const removeOrchestratorSkillTool: Tool = {
+  name: "remove_orchestrator_skill",
+  description: "Remove a skill from the orchestrator's pool.",
+  parameters: Type.Object({
+    name: Type.String({ description: "Skill name to remove" }),
+  }),
+};
+
+const installOrchestratorSkillTool: Tool = {
+  name: "install_orchestrator_skill",
+  description: "Install skills from a GitHub repo or local path into the orchestrator's pool. Supports owner/repo shorthand, full GitHub URLs, and local paths.",
+  parameters: Type.Object({
+    source: Type.String({ description: "GitHub owner/repo (e.g. 'anthropics/skills'), full URL, or local path" }),
+    skillNames: Type.Optional(Type.Array(Type.String(), { description: "Only install specific skill names (default: all found)" })),
+    force: Type.Optional(Type.Boolean({ description: "Overwrite existing skills (default: false)" })),
+  }),
+};
+
+const listAgentSkillsTool: Tool = {
+  name: "list_agent_skills",
+  description: "List all skills installed in the agent skill pool (.polpo/skills/).",
+  parameters: Type.Object({}),
+};
+
+const installAgentSkillTool: Tool = {
+  name: "install_agent_skill",
+  description: "Install skills from a GitHub repo or local path into the agent skill pool. Supports owner/repo shorthand, full GitHub URLs, and local paths.",
+  parameters: Type.Object({
+    source: Type.String({ description: "GitHub owner/repo, full URL, or local path" }),
+    skillNames: Type.Optional(Type.Array(Type.String(), { description: "Only install specific skill names (default: all found)" })),
+    force: Type.Optional(Type.Boolean({ description: "Overwrite existing skills (default: false)" })),
+  }),
+};
+
+const removeAgentSkillTool: Tool = {
+  name: "remove_agent_skill",
+  description: "Remove a skill from the agent skill pool.",
+  parameters: Type.Object({
+    name: Type.String({ description: "Skill name to remove" }),
+  }),
+};
+
+const createAgentSkillTool: Tool = {
+  name: "create_agent_skill",
+  description: "Create a new skill in the agent skill pool (.polpo/skills/). Writes a SKILL.md with YAML frontmatter and markdown body. After creation, assign it to agents with update_agent.",
+  parameters: Type.Object({
+    name: Type.String({ description: "Skill name (directory name, e.g. 'api-testing')" }),
+    description: Type.String({ description: "Short description for the skill frontmatter" }),
+    content: Type.String({ description: "Markdown body content (the skill instructions, without frontmatter)" }),
+    allowedTools: Type.Optional(Type.Array(Type.String(), { description: "Tool names this skill requires (informational)" })),
+  }),
+};
+
+const searchSkillsTool: Tool = {
+  name: "search_skills",
+  description: "Search the skills.sh registry for installable skills. Returns matching skills with install counts. Use install_orchestrator_skill or install_agent_skill to install results.",
+  parameters: Type.Object({
+    query: Type.String({ description: "Search query (e.g. 'react', 'testing', 'frontend design')" }),
+  }),
+};
+
+const getSkillTool: Tool = {
+  name: "get_skill",
+  description: "Get the full content of a skill by name. Returns the SKILL.md body (markdown instructions). Use this to read a skill before creating similar ones or to understand what a skill does.",
+  parameters: Type.Object({
+    name: Type.String({ description: "Skill name to read" }),
+    pool: Type.Optional(Type.Union([Type.Literal("agent"), Type.Literal("orchestrator")], { description: "Which pool to search: 'agent' (default) or 'orchestrator'" })),
+  }),
+};
+
+// ═══════════════════════════════════════════════════════
 //  INTERACTIVE TOOLS
 // ═══════════════════════════════════════════════════════
 
@@ -688,6 +797,8 @@ export const READ_TOOLS = new Set([
   "list_approvals", "list_checkpoints", "get_logs",
   // Read-only listing tools
   "list_schedules", "list_notification_rules", "list_watchers",
+  // Skills (read-only)
+  "list_orchestrator_skills", "list_agent_skills", "search_skills", "get_skill",
 ]);
 
 export const WRITE_TOOLS = new Set([
@@ -710,6 +821,9 @@ export const WRITE_TOOLS = new Set([
   "watch_task", "remove_watcher",
   // Config & Self
   "reload_config", "save_memory", "append_memory", "append_system_context",
+  // Skills (write)
+  "create_orchestrator_skill", "update_orchestrator_skill", "remove_orchestrator_skill",
+  "install_orchestrator_skill", "create_agent_skill", "install_agent_skill", "remove_agent_skill",
 ]);
 
 /** Tools that pause the conversation to collect user input / show a preview. */
@@ -750,6 +864,11 @@ export const ALL_ORCHESTRATOR_TOOLS: Tool[] = [
   watchTaskTool, removeWatcherTool,
   // Config & Self (4)
   reloadConfigTool, saveMemoryTool, appendMemoryTool, appendSystemContextTool,
+  // Skills (9)
+  listOrchestratorSkillsTool, createOrchestratorSkillTool, updateOrchestratorSkillTool,
+  removeOrchestratorSkillTool, installOrchestratorSkillTool,
+  listAgentSkillsTool, createAgentSkillTool, installAgentSkillTool, removeAgentSkillTool,
+  searchSkillsTool, getSkillTool,
   // Interactive (1)
   askUserTool,
 ];
@@ -798,6 +917,14 @@ const TOOL_LABELS: Record<string, string> = {
   save_memory: "Save Memory",
   append_memory: "Append Memory",
   append_system_context: "Remember",
+  // Skills
+  create_orchestrator_skill: "Create Orchestrator Skill",
+  update_orchestrator_skill: "Update Orchestrator Skill",
+  remove_orchestrator_skill: "Remove Orchestrator Skill",
+  install_orchestrator_skill: "Install Orchestrator Skill",
+  create_agent_skill: "Create Agent Skill",
+  install_agent_skill: "Install Agent Skill",
+  remove_agent_skill: "Remove Agent Skill",
 };
 
 // ═══════════════════════════════════════════════════════
@@ -936,6 +1063,19 @@ export function executeOrchestratorTool(
       case "append_memory":        return execAppendMemory(polpo, args);
       case "append_system_context": return execAppendSystemContext(polpo, args);
 
+      // ── Skills ──
+      case "list_orchestrator_skills":    return execListOrchestratorSkills(polpo);
+      case "create_orchestrator_skill":   return execCreateOrchestratorSkill(polpo, args);
+      case "update_orchestrator_skill":   return execUpdateOrchestratorSkill(polpo, args);
+      case "remove_orchestrator_skill":   return execRemoveOrchestratorSkill(polpo, args);
+      case "install_orchestrator_skill":  return execInstallOrchestratorSkill(polpo, args);
+      case "list_agent_skills":           return execListAgentSkills(polpo);
+      case "create_agent_skill":          return execCreateAgentSkill(polpo, args);
+      case "install_agent_skill":         return execInstallAgentSkill(polpo, args);
+      case "remove_agent_skill":          return execRemoveAgentSkill(polpo, args);
+      case "search_skills":              return execSearchSkills(args);
+      case "get_skill":                  return execGetSkill(polpo, args);
+
       // ── Interactive (handled by the calling loop, not here) ──
       case "ask_user":
         return "Questions sent to user. Waiting for answers.";
@@ -1000,6 +1140,9 @@ function resolveTargetName(
     if (args.group) return `group "${args.group}"`;
     if (args.status) return `status: ${args.status}`;
   }
+  // Skill tools
+  if (args.name && toolName.includes("skill")) return `"${String(args.name)}"`;
+  if (args.source && toolName.includes("install")) return String(args.source);
   return null;
 }
 
@@ -2007,6 +2150,202 @@ function execGetIdentity(polpo: Orchestrator, args: Record<string, unknown>): st
       }
     }
   }
+  return lines.join("\n");
+}
+
+// ═══════════════════════════════════════════════════════
+//  SKILLS.SH SEARCH
+// ═══════════════════════════════════════════════════════
+
+function execSearchSkills(args: Record<string, unknown>): string {
+  const query = args.query as string;
+  try {
+    const encoded = encodeURIComponent(query);
+    const raw = execSync(
+      `curl -sf "https://skills.sh/api/search?q=${encoded}"`,
+      { timeout: 10_000, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] },
+    );
+    const data = JSON.parse(raw) as {
+      skills: Array<{ name: string; source: string; installs: number }>;
+      count: number;
+    };
+
+    if (!data.skills || data.skills.length === 0) {
+      return `No skills found for "${query}". Try different keywords.`;
+    }
+
+    const lines = [`Found ${data.count} skill(s) for "${query}":\n`];
+    for (const s of data.skills) {
+      const installs = s.installs >= 1000
+        ? `${(s.installs / 1000).toFixed(1)}K`
+        : String(s.installs);
+      lines.push(`  ${s.source}@${s.name}  (${installs} installs)`);
+      lines.push(`    install: install_orchestrator_skill or install_agent_skill with source "${s.source}" and skillNames ["${s.name}"]`);
+    }
+    return lines.join("\n");
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return `Error searching skills.sh: ${msg}`;
+  }
+}
+
+// ═══════════════════════════════════════════════════════
+//  SKILL IMPLEMENTATIONS
+// ═══════════════════════════════════════════════════════
+
+function execListOrchestratorSkills(polpo: Orchestrator): string {
+  const skills = discoverOrchestratorSkills(polpo.getPolpoDir());
+  if (skills.length === 0) return "No orchestrator skills installed. Use install_orchestrator_skill or create_orchestrator_skill to add some.";
+  const lines = [`Orchestrator skills (${skills.length}):`];
+  for (const s of skills) {
+    lines.push(`  - ${s.name} (${s.source}): ${s.description || "(no description)"}`);
+    if (s.allowedTools?.length) lines.push(`    tools: ${s.allowedTools.join(", ")}`);
+  }
+  return lines.join("\n");
+}
+
+function execCreateOrchestratorSkill(polpo: Orchestrator, args: Record<string, unknown>): string {
+  const name = args.name as string;
+  const description = args.description as string;
+  const content = args.content as string;
+  const allowedTools = args.allowedTools as string[] | undefined;
+
+  const existing = discoverOrchestratorSkills(polpo.getPolpoDir());
+  if (existing.some(s => s.name === name)) {
+    return `Error: Orchestrator skill "${name}" already exists. Use update_orchestrator_skill to modify it.`;
+  }
+
+  const path = createOrchestratorSkill(polpo.getPolpoDir(), name, description, content, { allowedTools });
+  return `Created orchestrator skill "${name}" at ${path}`;
+}
+
+function execUpdateOrchestratorSkill(polpo: Orchestrator, args: Record<string, unknown>): string {
+  const name = args.name as string;
+  const updates: { description?: string; content?: string; allowedTools?: string[] } = {};
+  if (args.description !== undefined) updates.description = args.description as string;
+  if (args.content !== undefined) updates.content = args.content as string;
+  if (args.allowedTools !== undefined) updates.allowedTools = args.allowedTools as string[];
+
+  const ok = updateOrchestratorSkill(polpo.getPolpoDir(), name, updates);
+  if (!ok) return `Error: Orchestrator skill "${name}" not found.`;
+
+  const fields = Object.keys(updates);
+  return `Updated orchestrator skill "${name}": ${fields.join(", ")}`;
+}
+
+function execRemoveOrchestratorSkill(polpo: Orchestrator, args: Record<string, unknown>): string {
+  const name = args.name as string;
+  const ok = removeOrchestratorSkill(polpo.getPolpoDir(), name);
+  if (!ok) return `Error: Orchestrator skill "${name}" not found.`;
+  return `Removed orchestrator skill "${name}"`;
+}
+
+function execInstallOrchestratorSkill(polpo: Orchestrator, args: Record<string, unknown>): string {
+  const source = args.source as string;
+  const skillNames = args.skillNames as string[] | undefined;
+  const force = args.force as boolean | undefined;
+
+  const result = installOrchestratorSkills(source, polpo.getPolpoDir(), { skillNames, force });
+
+  const lines: string[] = [];
+  if (result.installed.length > 0) {
+    lines.push(`Installed ${result.installed.length} orchestrator skill(s):`);
+    for (const s of result.installed) lines.push(`  + ${s.name}: ${s.description}`);
+  }
+  if (result.skipped.length > 0) {
+    lines.push(`Skipped ${result.skipped.length} (already exist):`);
+    for (const s of result.skipped) lines.push(`  ~ ${s.name}`);
+  }
+  if (result.errors.length > 0) {
+    lines.push(`Errors:`);
+    for (const e of result.errors) lines.push(`  ! ${e}`);
+  }
+  return lines.length > 0 ? lines.join("\n") : "No skills found to install.";
+}
+
+function execListAgentSkills(polpo: Orchestrator): string {
+  const cwd = polpo.getWorkDir();
+  const polpoDir = polpo.getPolpoDir();
+  const skills = discoverSkills(cwd, polpoDir);
+  if (skills.length === 0) return "No agent skills installed. Use install_agent_skill to add some.";
+  const lines = [`Agent skills (${skills.length}):`];
+  for (const s of skills) {
+    lines.push(`  - ${s.name} (${s.source}): ${s.description || "(no description)"}`);
+    if (s.allowedTools?.length) lines.push(`    tools: ${s.allowedTools.join(", ")}`);
+  }
+  return lines.join("\n");
+}
+
+function execInstallAgentSkill(polpo: Orchestrator, args: Record<string, unknown>): string {
+  const source = args.source as string;
+  const skillNames = args.skillNames as string[] | undefined;
+  const force = args.force as boolean | undefined;
+
+  const result = installSkills(source, polpo.getPolpoDir(), { skillNames, force });
+
+  const lines: string[] = [];
+  if (result.installed.length > 0) {
+    lines.push(`Installed ${result.installed.length} agent skill(s):`);
+    for (const s of result.installed) lines.push(`  + ${s.name}: ${s.description}`);
+  }
+  if (result.skipped.length > 0) {
+    lines.push(`Skipped ${result.skipped.length} (already exist):`);
+    for (const s of result.skipped) lines.push(`  ~ ${s.name}`);
+  }
+  if (result.errors.length > 0) {
+    lines.push(`Errors:`);
+    for (const e of result.errors) lines.push(`  ! ${e}`);
+  }
+  return lines.length > 0 ? lines.join("\n") : "No skills found to install.";
+}
+
+function execCreateAgentSkill(polpo: Orchestrator, args: Record<string, unknown>): string {
+  const name = args.name as string;
+  const description = args.description as string;
+  const content = args.content as string;
+  const allowedTools = args.allowedTools as string[] | undefined;
+
+  const polpoDir = polpo.getPolpoDir();
+  const cwd = polpo.getWorkDir();
+
+  // Check if already exists
+  const existing = discoverSkills(cwd, polpoDir);
+  if (existing.some(s => s.name === name)) {
+    return `Error: Agent skill "${name}" already exists. Use install_agent_skill with force, or remove it first.`;
+  }
+
+  const skillPath = createAgentSkill(polpoDir, name, description, content, { allowedTools });
+  return `Created agent skill "${name}" at ${skillPath}. Assign it to agents with update_agent (add to their skills array).`;
+}
+
+function execRemoveAgentSkill(polpo: Orchestrator, args: Record<string, unknown>): string {
+  const name = args.name as string;
+  const ok = removeSkill(polpo.getPolpoDir(), name);
+  if (!ok) return `Error: Agent skill "${name}" not found.`;
+  return `Removed agent skill "${name}"`;
+}
+
+function execGetSkill(polpo: Orchestrator, args: Record<string, unknown>): string {
+  const name = args.name as string;
+  const pool = (args.pool as "agent" | "orchestrator" | undefined) ?? "agent";
+  const cwd = polpo.getWorkDir();
+  const polpoDir = polpo.getPolpoDir();
+
+  const skill = getSkillByName(cwd, polpoDir, name, pool);
+  if (!skill) {
+    return `Error: Skill "${name}" not found in the ${pool} pool.`;
+  }
+
+  const lines = [
+    `Skill: ${skill.name}`,
+    `Description: ${skill.description || "(none)"}`,
+    `Source: ${skill.source}`,
+    `Path: ${skill.path}`,
+  ];
+  if (skill.allowedTools?.length) {
+    lines.push(`Allowed tools: ${skill.allowedTools.join(", ")}`);
+  }
+  lines.push("", "--- Content ---", "", skill.content);
   return lines.join("\n");
 }
 

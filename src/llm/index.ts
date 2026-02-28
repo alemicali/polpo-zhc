@@ -4,8 +4,9 @@ export { withRetry, isTransientError } from "./retry.js";
 export type { RetryOptions } from "./retry.js";
 export { buildChatSystemPrompt, buildMissionSystemPrompt, buildTaskPrepPrompt, buildTeamGenPrompt } from "./prompts.js";
 export {
-  discoverSkills, parseSkillFrontmatter, loadAgentSkills, assignSkillToAgent, buildSkillPrompt,
-  installSkills, removeSkill, parseSkillSource, listSkillsWithAssignments,
+  discoverSkills, parseSkillFrontmatter, loadAgentSkills, assignSkillToAgent, unassignSkillFromAgent, buildSkillPrompt,
+  installSkills, removeSkill, createAgentSkill, parseSkillSource, listSkillsWithAssignments,
+  loadSkillContent, getSkillByName,
 } from "./skills.js";
 export type { SkillInfo, LoadedSkill, ParsedSource, FoundSkill, InstallResult, SkillWithAssignment } from "./skills.js";
 export {

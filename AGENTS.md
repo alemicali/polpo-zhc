@@ -69,7 +69,6 @@ pnpm test
 - **State machine**: `pending → assigned → in_progress → review → done/failed`
 - **Default port**: 3000 for the HTTP server
 - **Adapters self-register** via side-effect imports
-- **tui-opentui/**: Excluded from tsc (Bun-only, compiled at runtime)
 
 ## Testing
 

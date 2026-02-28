@@ -17,6 +17,9 @@ import {
   removeSkill,
   assignSkillToAgent,
   listSkillsWithAssignments,
+  discoverOrchestratorSkills,
+  installOrchestratorSkills,
+  removeOrchestratorSkill,
 } from "../../llm/skills.js";
 
 // ---------------------------------------------------------------------------
@@ -191,6 +194,116 @@ export function registerSkillsCommands(program: Command): void {
 
         assignSkillToAgent(polpoDir, agentName, skillName, skill.path);
         console.log(chalk.green(`  Assigned "${skillName}" to agent "${agentName}"`));
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error(chalk.red(`Error: ${msg}`));
+        process.exit(1);
+      }
+    });
+
+  // ═══════════════════════════════════════════════════════
+  //  polpo skills orchestrator — manage orchestrator skills
+  // ═══════════════════════════════════════════════════════
+
+  const orch = sk
+    .command("orchestrator")
+    .alias("orch")
+    .description("Manage orchestrator skills (.polpo/.agent/skills/)");
+
+  // ---- skills orchestrator list -------------------------------------------
+  orch
+    .command("list")
+    .alias("ls")
+    .description("List orchestrator skills")
+    .option("-d, --dir <path>", "Working directory", ".")
+    .action((opts) => {
+      try {
+        const polpoDir = getPolpoDir(opts.dir);
+        const skills = discoverOrchestratorSkills(polpoDir);
+
+        if (skills.length === 0) {
+          console.log(chalk.dim("  No orchestrator skills installed."));
+          console.log(chalk.dim("  Install with: polpo skills orchestrator add <owner/repo>"));
+          return;
+        }
+
+        for (const skill of skills) {
+          const sourceTag = skill.source === "global" ? chalk.dim(" [global]") : "";
+          console.log(`  ${chalk.bold(skill.name)}${sourceTag}`);
+          if (skill.description) {
+            console.log(chalk.dim(`    ${skill.description}`));
+          }
+        }
+
+        console.log();
+        console.log(chalk.dim(`  ${skills.length} orchestrator skill(s).`));
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error(chalk.red(`Error: ${msg}`));
+        process.exit(1);
+      }
+    });
+
+  // ---- skills orchestrator add <source> -----------------------------------
+  orch
+    .command("add <source>")
+    .description("Install orchestrator skills from a GitHub repo or local path")
+    .option("-d, --dir <path>", "Working directory", ".")
+    .option("-s, --skill <names...>", "Install only specific skill names")
+    .option("-f, --force", "Overwrite existing skills", false)
+    .action((source: string, opts) => {
+      try {
+        const polpoDir = getPolpoDir(opts.dir);
+
+        console.log(chalk.dim(`  Installing orchestrator skills from ${source}...`));
+        console.log();
+
+        const result = installOrchestratorSkills(source, polpoDir, {
+          skillNames: opts.skill,
+          force: opts.force,
+        });
+
+        for (const skill of result.installed) {
+          console.log(chalk.green(`  ✓ ${skill.name}`) + chalk.dim(` — ${skill.description || "no description"}`));
+        }
+        for (const skill of result.skipped) {
+          console.log(chalk.yellow(`  ⊘ ${skill.name}`) + chalk.dim(" (already installed, use --force to overwrite)"));
+        }
+        for (const err of result.errors) {
+          console.error(chalk.red(`  ✗ ${err}`));
+        }
+
+        console.log();
+        if (result.installed.length > 0) {
+          console.log(chalk.green(`  ${result.installed.length} orchestrator skill(s) installed.`));
+        }
+        if (result.errors.length > 0 && result.installed.length === 0) {
+          process.exit(1);
+        }
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error(chalk.red(`Error: ${msg}`));
+        process.exit(1);
+      }
+    });
+
+  // ---- skills orchestrator remove <name> ----------------------------------
+  orch
+    .command("remove <name>")
+    .alias("rm")
+    .description("Remove an orchestrator skill")
+    .option("-d, --dir <path>", "Working directory", ".")
+    .action((name: string, opts) => {
+      try {
+        const polpoDir = getPolpoDir(opts.dir);
+        const removed = removeOrchestratorSkill(polpoDir, name);
+
+        if (removed) {
+          console.log(chalk.green(`  Removed orchestrator skill: ${name}`));
+        } else {
+          console.error(chalk.red(`  Orchestrator skill not found: ${name}`));
+          process.exit(1);
+        }
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
         console.error(chalk.red(`Error: ${msg}`));

@@ -4,7 +4,6 @@
  */
 
 import type { Seg } from "./store.js";
-import type { TaskStatus } from "../core/types.js";
 
 // ─── Segment factory ────────────────────────────────────
 
@@ -14,89 +13,6 @@ export const seg = (
   bold?: boolean,
   dim?: boolean,
 ): Seg => ({ text, color, bold, dim });
-
-// ─── Status display ─────────────────────────────────────
-
-const STATUS_ICONS: Record<TaskStatus, string> = {
-  draft: "✎",
-  pending: "○",
-  awaiting_approval: "⏳",
-  assigned: "◎",
-  in_progress: "●",
-  review: "◉",
-  done: "✓",
-  failed: "✗",
-};
-
-const STATUS_COLORS: Record<TaskStatus, string> = {
-  draft: "gray",
-  pending: "gray",
-  awaiting_approval: "yellow",
-  assigned: "yellow",
-  in_progress: "cyan",
-  review: "magenta",
-  done: "green",
-  failed: "red",
-};
-
-export function statusIcon(status: TaskStatus): string {
-  return STATUS_ICONS[status] ?? "?";
-}
-
-export function statusColor(status: TaskStatus): string {
-  return STATUS_COLORS[status] ?? "white";
-}
-
-// ─── Time formatting ────────────────────────────────────
-
-export function formatElapsed(ms: number): string {
-  if (ms < 1000) return `${ms}ms`;
-  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
-  return `${(ms / 60_000).toFixed(1)}m`;
-}
-
-/** Format duration as compact "1d 2h 3m 4s" or "3m 12s" etc. */
-export function formatDuration(ms: number): string {
-  if (ms < 1000) return "0s";
-  const totalSec = Math.floor(ms / 1000);
-  const d = Math.floor(totalSec / 86400);
-  const h = Math.floor((totalSec % 86400) / 3600);
-  const m = Math.floor((totalSec % 3600) / 60);
-  const s = totalSec % 60;
-  const parts: string[] = [];
-  if (d > 0) parts.push(`${d}d`);
-  if (h > 0) parts.push(`${h}h`);
-  if (m > 0) parts.push(`${m}m`);
-  if (s > 0 && d === 0) parts.push(`${s}s`); // skip seconds for day-scale
-  return parts.join(" ") || "0s";
-}
-
-// ─── Run helper ─────────────────────────────────────
-
-/** Kick the orchestrator run loop, logging errors to the TUI store. */
-export function kickRun(
-  polpo: { run(): Promise<void> },
-  store: { log(text: string, segs: Seg[]): void },
-): void {
-  polpo.run().catch((err: unknown) => {
-    const msg = err instanceof Error ? err.message : String(err);
-    store.log(`Run error: ${msg}`, [seg("Run error: ", "red"), seg(msg, "gray")]);
-  });
-}
-
-// ─── Provider labels ────────────────────────────────────
-
-const PROVIDER_LABELS: Record<string, string> = {
-  anthropic: "Anthropic",
-  openai: "OpenAI",
-  google: "Google",
-  openrouter: "OpenRouter",
-  opencode: "OpenCode",
-};
-
-export function providerLabel(id: string): string {
-  return PROVIDER_LABELS[id] ?? id;
-}
 
 // ─── Markdown → Seg[] parser ───────────────────────────
 
@@ -215,4 +131,3 @@ function parseInlineTo(text: string, segs: Seg[], baseStyle?: Partial<Seg>): voi
     segs.push({ text: text.slice(lastIdx), ...baseStyle });
   }
 }
-

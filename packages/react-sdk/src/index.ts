@@ -18,10 +18,13 @@ export { useLogs } from "./hooks/use-logs.js";
 export { useSessions } from "./hooks/use-sessions.js";
 export { useTaskActivity } from "./hooks/use-task-activity.js";
 export { useSkills } from "./hooks/use-skills.js";
+export { useOrchestratorSkills } from "./hooks/use-orchestrator-skills.js";
 export { useNotifications } from "./hooks/use-notifications.js";
 export { useApprovals } from "./hooks/use-approvals.js";
 export { useTemplates } from "./hooks/use-templates.js";
 export { useSchedules } from "./hooks/use-schedules.js";
+export { useVaultEntries } from "./hooks/use-vault-entries.js";
+export { useAuthStatus } from "./hooks/use-auth-status.js";
 
 // Client (re-export for convenience)
 export { PolpoClient, ChatCompletionStream } from "./client/polpo-client.js";
@@ -90,8 +93,16 @@ export type {
   AskUserPayload,
   AskUserAnswer,
   MissionPreviewPayload,
+  VaultEntryMeta,
   VaultPreviewPayload,
+  AuthProfileStatus,
+  AuthProfileType,
+  AuthProfileMeta,
+  ProviderAuthInfo,
+  AuthStatusResponse,
   SkillInfo,
+  LoadedSkill,
+  SkillWithAssignment,
   NotificationRule,
   NotificationRecord,
   NotificationStats,

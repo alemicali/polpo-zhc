@@ -4,7 +4,7 @@
 
 import type { Orchestrator } from "../core/orchestrator.js";
 import type { AgentConfig, PolpoState } from "../core/types.js";
-import { discoverSkills } from "./skills.js";
+import { discoverSkills, loadOrchestratorSkills, buildSkillPrompt } from "./skills.js";
 import { buildModelListingForPrompt } from "./pi-client.js";
 import { readSystemContext } from "./orchestrator-tools.js";
 
@@ -819,6 +819,25 @@ export function buildChatSystemPrompt(
     ``,
     buildModelListingForPrompt(),
   );
+
+  // ── Skill creation guidance ──
+  parts.push(
+    ``,
+    `## Skill Creation`,
+    ``,
+    `When the user asks you to create a custom skill (for yourself or for agents), you MUST:`,
+    `1. Create it directly using your \`create_orchestrator_skill\` or \`create_agent_skill\` tools — do NOT delegate skill creation to an agent task.`,
+    `2. Follow the skill-creator format: SKILL.md with YAML frontmatter (name, description, allowed-tools) and a well-structured markdown body with clear sections, examples, and actionable instructions.`,
+    `3. If you have a "skill-creator" skill loaded, follow its guidelines for quality and structure.`,
+    `4. For agent skills: after creation, assign them to agents using \`update_agent\` (add the skill name to the agent's skills array).`,
+  );
+
+  // ── Orchestrator skills ──
+  const orchSkills = loadOrchestratorSkills(polpoDir, config?.settings.orchestratorSkills);
+  const skillBlock = buildSkillPrompt(orchSkills);
+  if (skillBlock) {
+    parts.push(``, skillBlock);
+  }
 
   return parts.join("\n");
 }

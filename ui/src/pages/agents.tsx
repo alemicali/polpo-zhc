@@ -16,11 +16,6 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible";
-import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
@@ -47,10 +42,8 @@ import {
   Loader2,
   Wrench,
   RefreshCw,
-  ChevronDown,
   Search,
   Zap,
-  Sparkles,
   Users,
   ChevronRight,
   Plus,
@@ -59,11 +52,11 @@ import {
   Check,
   X,
   LayoutList,
-  GitBranchPlus,
+  Network,
   FolderPlus,
 } from "lucide-react";
-import { useAgents, useProcesses, useSkills } from "@lumea-labs/polpo-react";
-import type { AgentConfig, AgentProcess, SkillInfo, Team } from "@lumea-labs/polpo-react";
+import { useAgents, useProcesses } from "@lumea-labs/polpo-react";
+import type { AgentConfig, AgentProcess, Team } from "@lumea-labs/polpo-react";
 import { cn } from "@/lib/utils";
 
 // Team colors for visual distinction in org chart
@@ -318,80 +311,6 @@ function TeamNameEditor({
       </TooltipTrigger>
       <TooltipContent className="text-xs max-w-60">{teamDescription ?? "Click to rename team"}</TooltipContent>
     </Tooltip>
-  );
-}
-
-// ─── Skills Pool (collapsible) ───────────────────────────
-
-function SkillsPool({ skills, agents }: { skills: SkillInfo[]; agents: AgentConfig[] }) {
-  const [open, setOpen] = useState(false);
-  const usageMap = useMemo(() => {
-    const map = new Map<string, string[]>();
-    for (const skill of skills) map.set(skill.name, []);
-    for (const agent of agents) {
-      for (const s of agent.skills ?? []) {
-        const list = map.get(s);
-        if (list) list.push(agent.name);
-        else map.set(s, [agent.name]);
-      }
-    }
-    return map;
-  }, [skills, agents]);
-
-  if (skills.length === 0) return null;
-  const assignedCount = [...usageMap.values()].filter(v => v.length > 0).length;
-
-  return (
-    <Collapsible open={open} onOpenChange={setOpen}>
-      <CollapsibleTrigger asChild>
-        <button className="w-full flex items-center gap-2 rounded-lg border border-border/40 bg-card/80 backdrop-blur-sm px-3 py-2 hover:bg-muted/30 transition-colors cursor-pointer text-left">
-          <Sparkles className="h-3.5 w-3.5 text-violet-400 shrink-0" />
-          <span className="text-xs font-medium">Skills</span>
-          <Badge variant="secondary" className="text-[9px]">{skills.length}</Badge>
-          {assignedCount > 0 && <span className="text-[10px] text-muted-foreground">{assignedCount} assigned</span>}
-          <ChevronDown className={cn("h-3.5 w-3.5 text-muted-foreground ml-auto transition-transform", open && "rotate-180")} />
-        </button>
-      </CollapsibleTrigger>
-      <CollapsibleContent>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 pt-2">
-          {skills.map((skill) => {
-            const users = usageMap.get(skill.name) ?? [];
-            return (
-              <div key={skill.name} className="rounded-md border border-border/30 bg-card/60 px-3 py-2 space-y-1">
-                <div className="flex items-center gap-2">
-                  <Sparkles className="h-3 w-3 text-violet-400 shrink-0" />
-                  <span className="text-xs font-medium truncate">{skill.name}</span>
-                  {users.length > 0 ? (
-                    <Badge variant="secondary" className="text-[9px] ml-auto shrink-0">{users.length} agent{users.length !== 1 ? "s" : ""}</Badge>
-                  ) : (
-                    <Badge variant="outline" className="text-[9px] ml-auto shrink-0 text-muted-foreground">unused</Badge>
-                  )}
-                </div>
-                {skill.description && <p className="text-[10px] text-muted-foreground line-clamp-2">{skill.description}</p>}
-                <div className="flex items-center gap-2 text-[9px] text-muted-foreground">
-                  <Badge variant="outline" className="text-[8px] px-1 py-0">{skill.source}</Badge>
-                  <span className="font-mono truncate" title={skill.path}>{skill.path}</span>
-                </div>
-                {users.length > 0 && (
-                  <div className="flex flex-wrap gap-1">
-                    {users.map(u => <span key={u} className="text-[9px] font-mono text-muted-foreground">{u}</span>)}
-                  </div>
-                )}
-                {Array.isArray(skill.allowedTools) && skill.allowedTools.length > 0 && (
-                  <div className="flex items-center gap-1 pt-0.5">
-                    <Wrench className="h-2.5 w-2.5 text-muted-foreground" />
-                    {skill.allowedTools.slice(0, 4).map(t => (
-                      <Badge key={t} variant="outline" className="text-[8px] py-0 px-1 font-mono">{String(t)}</Badge>
-                    ))}
-                    {skill.allowedTools.length > 4 && <span className="text-[8px] text-muted-foreground">+{skill.allowedTools.length - 4}</span>}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      </CollapsibleContent>
-    </Collapsible>
   );
 }
 
@@ -1214,13 +1133,12 @@ type ViewMode = "list" | "chart";
 export function AgentsPage() {
   const { agents, teams, isLoading: loading, refetch, addAgent, removeAgent, addTeam, removeTeam, renameTeam } = useAgents();
   const { processes } = useProcesses();
-  const { skills, refetch: refetchSkills } = useSkills();
   const [search, setSearch] = useState("");
-  const [view, setView] = useState<ViewMode>("chart");
+  const [view, setView] = useState<ViewMode>("list");
 
   // All hooks before any early return
   const [handleRefresh, isRefreshing] = useAsyncAction(async () => {
-    await Promise.all([refetch(), refetchSkills()]);
+    await refetch();
   });
 
   const handleAddAgent = useCallback(
@@ -1260,9 +1178,6 @@ export function AgentsPage() {
       {/* Summary header */}
       <SummaryHeader teams={teams} agents={agents} processes={processes} />
 
-      {/* Skills pool */}
-      <SkillsPool skills={skills} agents={agents} />
-
       {/* Toolbar */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
@@ -1277,7 +1192,7 @@ export function AgentsPage() {
                   )}
                   onClick={() => setView("chart")}
                 >
-                  <GitBranchPlus className="h-3.5 w-3.5" />
+                  <Network className="h-3.5 w-3.5" />
                   <span className="hidden sm:inline">Org Chart</span>
                 </button>
               </TooltipTrigger>

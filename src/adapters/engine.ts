@@ -141,25 +141,22 @@ function buildPrompt(task: Task): string {
     ``,
     `CRITICAL — Outcome tracking:`,
     `When you produce artifacts (files, reports, data), the orchestrator attaches them to`,
-    `task-done notifications (Telegram, Slack, etc.). Some tools auto-track outcomes, but`,
-    `if you generate files via bash scripts or external tools, you MUST register them explicitly.`,
+    `task-done notifications (Telegram, Slack, etc.) and approval reviews.`,
+    `Outcomes are NEVER auto-collected — you MUST explicitly register every deliverable.`,
     ``,
-    `The register_outcome tool lets you declare any artifact as a task outcome:`,
+    `Use the register_outcome tool to declare artifacts as task outcomes:`,
     `  register_outcome({type: 'file', label: 'Sales Report', path: 'output/report.pdf'})`,
     `  register_outcome({type: 'media', label: 'Chart', path: 'charts/revenue.png'})`,
     `  register_outcome({type: 'url', label: 'Staging Deploy', url: 'https://staging.example.com'})`,
     `  register_outcome({type: 'text', label: 'Summary', text: 'Revenue increased 23%...'})`,
-    ``,
-    `Auto-tracked tools (no need to register_outcome for these):`,
-    `  pdf_create, excel_write, docx_create, audio_speak, image_generate,`,
-    `  browser_screenshot, http_download, audio_transcribe, image_analyze`,
+    `  register_outcome({type: 'json', label: 'Metrics', data: {revenue: 1234, growth: 0.23}})`,
     ``,
     `RULES:`,
-    `  - Prefer dedicated tools (pdf_create, excel_write, docx_create) when they fit your needs`,
-    `  - If you MUST use bash to generate files (e.g. complex PDF via Python), ALWAYS call`,
-    `    register_outcome afterward so the orchestrator can track and notify the result`,
-    `  - For browser screenshots: navigate to the page first, then use browser_screenshot`,
-    `  - The "write" tool auto-tracks outcomes for known binary extensions (pdf, xlsx, images, etc.)`,
+    `  - ALWAYS call register_outcome for every artifact you produce — files, reports, screenshots,`,
+    `    downloads, generated media, transcriptions, analysis results, URLs, data summaries`,
+    `  - Producing a file (via write, pdf_create, bash, etc.) does NOT auto-register it as an outcome`,
+    `  - Only register final deliverables — not intermediate/temporary files`,
+    `  - If the task has expectedOutcomes defined, ensure you register matching outcomes`,
   );
   return parts.join("\n");
 }
@@ -291,10 +288,9 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
           }
         }
 
-        // Auto-collect outcomes from tools that produce artifacts
+        // Collect outcomes from explicit register_outcome calls
         if (!event.isError && details) {
-          const contentText = event.result?.content?.map((c: any) => c.text ?? "").join("") ?? "";
-          const outcome = collectOutcome(event.toolName, details, contentText);
+          const outcome = collectOutcome(event.toolName, details);
           if (outcome) {
             if (!handle.outcomes) handle.outcomes = [];
             handle.outcomes.push(outcome);
@@ -430,24 +426,12 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
   return handle;
 }
 
-// ─── Outcome Auto-Collection ────────────────────────
+// ─── Outcome Collection ─────────────────────────────
 //
-// Maps tool names to outcome types. When a tool returns `details.path` or
-// `details.bytes`, an outcome is automatically created.
-
-/** Tools that produce file/media outcomes. Keyed by tool name. */
-const OUTCOME_TOOLS: Record<string, { type: OutcomeType; labelPrefix: string }> = {
-  audio_speak:      { type: "media",  labelPrefix: "Generated Audio" },
-  image_generate:   { type: "media",  labelPrefix: "Generated Image" },
-  excel_write:      { type: "file",   labelPrefix: "Excel File" },
-  pdf_create:       { type: "file",   labelPrefix: "PDF Document" },
-  pdf_merge:        { type: "file",   labelPrefix: "Merged PDF" },
-  docx_create:      { type: "file",   labelPrefix: "Word Document" },
-  http_download:    { type: "file",   labelPrefix: "Downloaded File" },
-  audio_transcribe:    { type: "text",   labelPrefix: "Transcription" },
-  image_analyze:       { type: "text",   labelPrefix: "Image Analysis" },
-  browser_screenshot:  { type: "media",  labelPrefix: "Screenshot" },
-};
+// Outcomes are ONLY created via the `register_outcome` tool.
+// The agent explicitly decides what artifacts are deliverables.
+// No auto-collection from other tools — producing files and
+// declaring outcomes are two separate responsibilities.
 
 /** MIME type inference from file extension. */
 const EXT_MIME: Record<string, string> = {
@@ -470,90 +454,29 @@ function guessMime(filePath: string): string | undefined {
 }
 
 /**
- * Try to create a TaskOutcome from a tool execution result.
- * Returns undefined if the tool is not an outcome-producing tool.
- *
- * @param contentText - the concatenated text from the tool result's content blocks,
- *   used for text-type outcomes where the text is in content rather than details.
+ * Create a TaskOutcome from a `register_outcome` tool call.
+ * Returns undefined for any other tool — outcome registration is explicit only.
  */
-function collectOutcome(toolName: string, details: Record<string, unknown>, contentText?: string): TaskOutcome | undefined {
-  // register_outcome tool — agent explicitly declares an outcome with full control
-  if (toolName === "register_outcome" && details.outcomeType && details.outcomeLabel) {
-    const outcome: TaskOutcome = {
-      id: nanoid(),
-      type: details.outcomeType as OutcomeType,
-      label: details.outcomeLabel as string,
-      producedBy: "register_outcome",
-      producedAt: new Date().toISOString(),
-    };
-    if (details.path) {
-      outcome.path = details.path as string;
-      outcome.mimeType = (details.outcomeMimeType as string) ?? guessMime(details.path as string);
-      if (details.outcomeSize !== undefined) outcome.size = details.outcomeSize as number;
-    }
-    if (details.outcomeText) outcome.text = details.outcomeText as string;
-    if (details.outcomeUrl) outcome.url = details.outcomeUrl as string;
-    if (details.outcomeData !== undefined) outcome.data = details.outcomeData;
-    if (details.outcomeTags) outcome.tags = details.outcomeTags as string[];
-    return outcome;
+function collectOutcome(toolName: string, details: Record<string, unknown>): TaskOutcome | undefined {
+  if (toolName !== "register_outcome" || !details.outcomeType || !details.outcomeLabel) {
+    return undefined;
   }
-
-  let spec = OUTCOME_TOOLS[toolName];
-
-  // For generic file-writing tools (write, bash), infer outcome from file extension
-  if (!spec && (toolName === "write" || toolName === "bash")) {
-    const path = details.path as string | undefined;
-    if (path) {
-      const ext = path.slice(path.lastIndexOf(".")).toLowerCase();
-      if ([".pdf"].includes(ext)) {
-        spec = { type: "file", labelPrefix: "PDF Document" };
-      } else if ([".xlsx", ".xls", ".csv"].includes(ext)) {
-        spec = { type: "file", labelPrefix: "Spreadsheet" };
-      } else if ([".docx"].includes(ext)) {
-        spec = { type: "file", labelPrefix: "Word Document" };
-      } else if ([".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg"].includes(ext)) {
-        spec = { type: "media", labelPrefix: "Image" };
-      } else if ([".mp3", ".wav", ".ogg", ".flac", ".m4a"].includes(ext)) {
-        spec = { type: "media", labelPrefix: "Audio" };
-      } else if ([".mp4", ".webm", ".mov"].includes(ext)) {
-        spec = { type: "media", labelPrefix: "Video" };
-      } else if ([".html", ".htm"].includes(ext)) {
-        spec = { type: "file", labelPrefix: "HTML Page" };
-      } else if ([".zip", ".tar", ".gz"].includes(ext)) {
-        spec = { type: "file", labelPrefix: "Archive" };
-      }
-    }
-  }
-
-  if (!spec) return undefined;
-
-  const path = details.path as string | undefined;
-  const bytes = details.bytes as number | undefined;
-  // For text outcomes, prefer details.text, fall back to contentText
-  const text = (details.text as string | undefined) ?? contentText;
-
-  // For file/media outcomes, we need at least a path
-  if ((spec.type === "file" || spec.type === "media") && !path) return undefined;
-  // For text outcomes, we need text
-  if (spec.type === "text" && !text) return undefined;
 
   const outcome: TaskOutcome = {
     id: nanoid(),
-    type: spec.type,
-    label: path ? `${spec.labelPrefix}: ${path.split("/").pop()}` : spec.labelPrefix,
-    producedBy: toolName,
+    type: details.outcomeType as OutcomeType,
+    label: details.outcomeLabel as string,
+    producedBy: "register_outcome",
     producedAt: new Date().toISOString(),
   };
-
-  if (path) {
-    outcome.path = path;
-    outcome.mimeType = guessMime(path);
-    if (bytes) outcome.size = bytes;
+  if (details.path) {
+    outcome.path = details.path as string;
+    outcome.mimeType = (details.outcomeMimeType as string) ?? guessMime(details.path as string);
+    if (details.outcomeSize !== undefined) outcome.size = details.outcomeSize as number;
   }
-
-  if (text) {
-    outcome.text = text;
-  }
-
+  if (details.outcomeText) outcome.text = details.outcomeText as string;
+  if (details.outcomeUrl) outcome.url = details.outcomeUrl as string;
+  if (details.outcomeData !== undefined) outcome.data = details.outcomeData;
+  if (details.outcomeTags) outcome.tags = details.outcomeTags as string[];
   return outcome;
 }

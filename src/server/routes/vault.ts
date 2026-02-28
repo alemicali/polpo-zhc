@@ -89,6 +89,54 @@ export function vaultRoutes(): OpenAPIHono<ServerEnv> {
     }, 200);
   });
 
+  // GET /vault/entries/:agent — list vault entries (metadata only, no credential values)
+  const listEntriesRoute = createRoute({
+    method: "get",
+    path: "/entries/{agent}",
+    tags: ["Vault"],
+    summary: "List vault entries for an agent",
+    description: "Returns metadata (service name, type, label, credential key names) without any secret values.",
+    request: {
+      params: z.object({
+        agent: z.string(),
+      }),
+    },
+    responses: {
+      200: {
+        content: {
+          "application/json": {
+            schema: z.object({
+              ok: z.boolean(),
+              data: z.array(z.object({
+                service: z.string(),
+                type: z.enum(["smtp", "imap", "oauth", "api_key", "login", "custom"]),
+                label: z.string().optional(),
+                keys: z.array(z.string()),
+              })),
+            }),
+          },
+        },
+        description: "Vault entries metadata for the agent",
+      },
+      503: {
+        content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string() }) } },
+        description: "Vault store not available",
+      },
+    },
+  });
+
+  app.openapi(listEntriesRoute, (c) => {
+    const orchestrator = c.get("orchestrator");
+    const vaultStore = orchestrator.getVaultStore();
+    if (!vaultStore) {
+      return c.json({ ok: false, error: "Vault store not available. Check POLPO_VAULT_KEY or ~/.polpo/vault.key." }, 503);
+    }
+
+    const { agent } = c.req.valid("param");
+    const entries = vaultStore.list(agent);
+    return c.json({ ok: true, data: entries }, 200);
+  });
+
   // DELETE /vault/entries/:agent/:service — remove a vault entry
   const deleteEntryRoute = createRoute({
     method: "delete",

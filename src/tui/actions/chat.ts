@@ -1,256 +1,260 @@
 /**
- * Chat action — tool-based agentic loop for conversational interaction.
- * Streams response chunks in real-time as plain text.
- * The LLM can use orchestrator tools to manage tasks, missions, and state.
- * Write tools may require user approval depending on approval mode.
+ * Chat action — streams responses from the Polpo server's completions endpoint.
+ *
+ * Instead of calling the LLM directly via pi-ai, this routes through
+ * POST /v1/chat/completions (OpenAI-compatible SSE) so that all agentic
+ * tool logic stays server-side.
  */
 
 import type { Orchestrator } from "../../core/orchestrator.js";
 import type { TUIStore } from "../store.js";
-import type { SessionStore } from "../../core/session-store.js";
 import { seg, parseMarkdown } from "../format.js";
-import { resolveModel, resolveApiKeyAsync, resolveModelSpec } from "../../llm/pi-client.js";
-import { buildChatSystemPrompt } from "../../llm/prompts.js";
-import { streamSimple, type Message } from "@mariozechner/pi-ai";
-import {
-  ALL_ORCHESTRATOR_TOOLS,
-  needsApproval,
-  executeOrchestratorTool,
-  formatToolDescription,
-} from "../../llm/orchestrator-tools.js";
+import { DEFAULT_SERVER_PORT, DEFAULT_SERVER_HOST } from "../../core/constants.js";
 
 const SESSION_TIMEOUT_MS = 30 * 60 * 1000; // 30 min
-const MAX_HISTORY = 20;
-const MAX_TURNS = 20;
+
+/**
+ * Build a short info string from tool name + arguments for display in parentheses.
+ * e.g. "read_file" + {path: "/foo/bar.ts"} → "/foo/bar.ts"
+ */
+function formatToolInfo(name: string, args?: Record<string, unknown>): string {
+  if (!args || typeof args !== "object") return "";
+  // Pick the most useful argument based on tool name
+  const path = args.path ?? args.filePath ?? args.file ?? args.filename;
+  if (typeof path === "string") {
+    // Shorten to last 2 path segments
+    const parts = path.split("/");
+    return parts.length > 2 ? `.../${parts.slice(-2).join("/")}` : path;
+  }
+  const cmd = args.command ?? args.cmd;
+  if (typeof cmd === "string") {
+    return cmd.length > 60 ? cmd.slice(0, 57) + "..." : cmd;
+  }
+  const query = args.query ?? args.pattern ?? args.search ?? args.url;
+  if (typeof query === "string") {
+    return query.length > 60 ? query.slice(0, 57) + "..." : query;
+  }
+  // Fallback: first string arg value
+  for (const val of Object.values(args)) {
+    if (typeof val === "string" && val.length > 0) {
+      return val.length > 60 ? val.slice(0, 57) + "..." : val;
+    }
+  }
+  return "";
+}
+
+/**
+ * Get the server port from the orchestrator config or use the global default.
+ */
+function getServerPort(polpo: Orchestrator): number {
+  const config = polpo.getConfig();
+  return (config?.settings as any)?.serverPort ?? DEFAULT_SERVER_PORT;
+}
 
 export async function startChat(
   message: string,
   polpo: Orchestrator,
   store: TUIStore,
 ): Promise<void> {
+  // Resolve or create session
   const sessionStore = polpo.getSessionStore();
   const sessionId = resolveSession(sessionStore, store.activeSessionId);
   if (sessionId && store.activeSessionId !== sessionId) {
     store.setActiveSessionId(sessionId);
   }
 
-  // Persist user message
-  if (sessionStore && sessionId) {
-    sessionStore.addMessage(sessionId, "user", message);
-  }
-
   store.startStreaming();
   store.setProcessing(true, "Thinking...");
 
+  // Prepare response entry
+  const ts = new Date().toISOString();
+  store.pushLine({ type: "response", segs: [seg("...", "gray")], ts });
+  let accumulated = "";
+
   try {
-    // Build system prompt with current state
-    const state = (() => {
-      try { return polpo.getStore()?.getState() ?? null; }
-      catch { return null; }
-    })();
-    const systemPrompt = buildChatSystemPrompt(polpo, state);
+    const port = getServerPort(polpo);
+    const url = `http://${DEFAULT_SERVER_HOST}:${port}/v1/chat/completions`;
 
-    // Build pi-ai messages from session history
-    const history = sessionStore && sessionId
-      ? sessionStore.getRecentMessages(sessionId, MAX_HISTORY)
-      : [];
+    // Build messages array from session history
+    const messages: { role: string; content: string }[] = [];
 
-    const messages: Message[] = [];
-
-    // Add past messages as a single user turn (pi-ai AssistantMessage needs extra fields)
-    const past = history.filter((m) => !(m.role === "user" && m.content === message));
-    if (past.length > 0) {
-      const historyText = past
-        .map(h => `${h.role === "user" ? "User" : "Assistant"}: ${h.content}`)
-        .join("\n\n");
-      messages.push({
-        role: "user" as const,
-        content: `[Conversation history]\n${historyText}\n[End of history]`,
-        timestamp: Date.now() - 1,
-      });
+    if (sessionStore && sessionId) {
+      const history = sessionStore.getRecentMessages(sessionId, 20);
+      // Exclude the current message from history (we'll add it separately)
+      const past = history.filter(
+        (m) => !(m.role === "user" && m.content === message),
+      );
+      for (const m of past) {
+        messages.push({ role: m.role, content: m.content });
+      }
     }
 
-    // Add current user message
-    messages.push({ role: "user", content: message, timestamp: Date.now() });
+    messages.push({ role: "user", content: message });
 
-    const settings = polpo.getConfig()?.settings;
-    const model = resolveModelSpec(settings?.orchestratorModel);
-    const m = resolveModel(model);
-    const apiKey = await resolveApiKeyAsync(m.provider as string);
-    const { buildStreamOpts } = await import("../../llm/pi-client.js");
-    const streamOpts = buildStreamOpts(apiKey, settings?.reasoning);
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+    if (sessionId) {
+      headers["x-session-id"] = sessionId;
+    }
 
-    // Prepare output line — plain text, updated chunk by chunk
-    const ts = new Date().toISOString();
-    store.pushLine({ type: "response", segs: [seg("...", "gray")], ts });
-    let accumulated = "";
-
-    // ── Agentic tool loop with streaming ──
-    let sessionTokens = 0; // cumulative tokens across all turns
-    for (let turn = 0; turn < MAX_TURNS; turn++) {
-      store.setProcessing(true, "Thinking...");
-      let turnTokensReported = 0; // tokens already reported for this turn
-
-      const stream = streamSimple(m, {
-        systemPrompt,
+    const response = await fetch(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
         messages,
-        tools: ALL_ORCHESTRATOR_TOOLS,
-      }, streamOpts);
+        stream: true,
+      }),
+    });
 
-      // Stream text deltas chunk by chunk as plain text.
-      // Track output tokens in real-time by counting characters (~4 chars ≈ 1 token).
-      // We'll reconcile with the exact count from the provider at the end.
-      let estimatedOutputTokens = 0;
-      let providerReportedTotal = 0;
-      let lastReportedToStore = 0;
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Server returned ${response.status}: ${errorText}`);
+    }
 
-      for await (const event of stream) {
-        if (event.type === "text_delta") {
-          store.setProcessing(false);
-          accumulated += event.delta;
-          store.updateLastLine(parseMarkdown(accumulated));
+    // Track session ID from response
+    const returnedSessionId = response.headers.get("x-session-id");
+    if (returnedSessionId && returnedSessionId !== store.activeSessionId) {
+      store.setActiveSessionId(returnedSessionId);
+    }
 
-          // Estimate output tokens from streamed characters (~4 chars per token)
-          estimatedOutputTokens += Math.ceil(event.delta.length / 4);
+    // Parse SSE stream
+    const reader = response.body?.getReader();
+    if (!reader) throw new Error("No response body");
+
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+
+      // Process complete SSE lines
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? ""; // Keep incomplete line in buffer
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith(":")) continue;
+
+        if (trimmed === "data: [DONE]") {
+          // Stream complete
+          continue;
         }
 
-        // Read provider-reported usage when available (on partial or done/error)
-        let reportedTotal = 0;
-        if ("partial" in event && event.partial?.usage) {
-          reportedTotal = (event.partial.usage as { totalTokens?: number }).totalTokens ?? 0;
-        } else if (event.type === "done" && "message" in event) {
-          const msg = event.message as { usage?: { totalTokens?: number } };
-          reportedTotal = msg.usage?.totalTokens ?? 0;
-        }
+        if (trimmed.startsWith("data: ")) {
+          const jsonStr = trimmed.slice(6);
+          try {
+            const chunk = JSON.parse(jsonStr);
+            const choice = chunk.choices?.[0];
+            if (!choice) continue;
 
-        if (reportedTotal > providerReportedTotal) {
-          providerReportedTotal = reportedTotal;
-        }
+            // Text content
+            const delta = choice.delta?.content;
+            if (delta) {
+              store.setProcessing(false);
+              accumulated += delta;
+              store.updateLastLine(parseMarkdown(accumulated));
+            }
 
-        // Push the best available count to the store:
-        // use provider data if available, otherwise use our estimate
-        const bestTotal = Math.max(providerReportedTotal, estimatedOutputTokens);
-        if (bestTotal > lastReportedToStore) {
-          store.updateStreamingTokens(bestTotal - lastReportedToStore);
-          lastReportedToStore = bestTotal;
-        }
-      }
+            // Tool call notification
+            const toolCall = choice.tool_call;
+            if (toolCall) {
+              if (toolCall.state === "calling") {
+                // Build info string from tool arguments
+                const info = formatToolInfo(toolCall.name, toolCall.arguments);
+                store.pushLine({
+                  type: "tool",
+                  name: toolCall.name,
+                  info,
+                  state: "running",
+                  ts: new Date().toISOString(),
+                });
+                store.setProcessing(true, `${toolCall.name}...`);
+              } else if (
+                toolCall.state === "completed" ||
+                toolCall.state === "error"
+              ) {
+                const toolState = toolCall.state === "error" ? "error" as const : "done" as const;
+                const info = formatToolInfo(toolCall.name, toolCall.arguments);
+                store.updateLastTool(toolState, info);
+                store.setProcessing(false);
+              }
+            }
 
-      // Get the final complete message
-      const response = await stream.result();
-      messages.push(response);
+            // Finish reason — handle special cases
+            const finishReason = choice.finish_reason;
+            if (finishReason === "ask_user" && choice.ask_user) {
+              // Server is asking the user a question — show it inline
+              const questions = choice.ask_user.questions ?? [];
+              for (const q of questions) {
+                store.pushLine({
+                  type: "event",
+                  segs: [
+                    { text: "? ", color: "yellow", bold: true },
+                    { text: q.question ?? q.text ?? String(q), color: "white" },
+                  ],
+                  ts: new Date().toISOString(),
+                });
+              }
+            }
 
-      // Reconcile with exact final count from provider
-      if ("usage" in response && response.usage && typeof response.usage === "object") {
-        const u = response.usage as { totalTokens?: number };
-        const finalTotal = u.totalTokens ?? 0;
-        if (finalTotal > lastReportedToStore) {
-          store.updateStreamingTokens(finalTotal - lastReportedToStore);
-          lastReportedToStore = finalTotal;
-        }
-        sessionTokens += finalTotal;
-      }
+            if (finishReason === "mission_preview" && choice.mission_preview) {
+              const mp = choice.mission_preview;
+              store.pushLine({
+                type: "event",
+                segs: [
+                  { text: "▶ ", color: "blue", bold: true },
+                  { text: `Mission: ${mp.name}`, color: "white", bold: true },
+                ],
+                ts: new Date().toISOString(),
+              });
+            }
 
-      // Extract tool calls
-      const toolCalls = response.content.filter(
-        (c): c is { type: "toolCall"; id: string; name: string; arguments: Record<string, any> } =>
-          c.type === "toolCall"
-      );
-
-      if (toolCalls.length === 0) break; // Done — no more tools
-
-      // Execute each tool call
-      for (const call of toolCalls) {
-        // Check if write tool needs approval
-        if (needsApproval(call.name) && store.approvalMode === "approval") {
-          const description = formatToolDescription(call.name, call.arguments, polpo);
-          store.setProcessing(false);
-
-          const approved = await new Promise<boolean>((resolve) => {
-            store.setPendingApproval({
-              toolName: call.name,
-              args: call.arguments,
-              description,
-              onApprove: () => resolve(true),
-              onReject: () => resolve(false),
-            });
-          });
-          store.clearPendingApproval();
-
-          if (!approved) {
-            messages.push({
-              role: "toolResult",
-              toolCallId: call.id,
-              toolName: call.name,
-              content: [{ type: "text", text: "User denied this action." }],
-              isError: true,
-              timestamp: Date.now(),
-            });
-            continue;
+            // After finish_reason="stop", next text deltas (if any) are part of a new turn
+            if (finishReason === "stop" || finishReason === "ask_user" || finishReason === "mission_preview" || finishReason === "vault_preview") {
+              // Stream will end with [DONE]
+            }
+          } catch {
+            // Ignore malformed JSON chunks
           }
         }
-
-        // Show tool indicator (● gray = in progress)
-        const toolDesc = formatToolDescription(call.name, call.arguments, polpo);
-        store.pushLine({
-          type: "event",
-          segs: [
-            { text: "● ", color: "gray", dim: true },
-            { text: toolDesc, color: "gray", dim: true },
-          ],
-          ts: new Date().toISOString(),
-        });
-        store.setProcessing(true, `Executing ${toolDesc}...`);
-
-        // Execute the tool
-        const result = executeOrchestratorTool(call.name, call.arguments, polpo);
-        const isError = result.startsWith("Error:");
-
-        // Update indicator to success/failure (● green/red)
-        store.updateLastLine([
-          { text: isError ? "✗ " : "✓ ", color: isError ? "red" : "green" },
-          { text: toolDesc, color: isError ? "red" : "green", dim: isError },
-        ]);
-
-        messages.push({
-          role: "toolResult",
-          toolCallId: call.id,
-          toolName: call.name,
-          content: [{ type: "text", text: result }],
-          isError,
-          timestamp: Date.now(),
-        });
       }
-
-      // Start a fresh response entry for the next streaming turn
-      store.pushLine({ type: "response", segs: [seg("", "gray")], ts: new Date().toISOString() });
-      accumulated = "";
     }
 
     store.setProcessing(false);
     store.stopStreaming();
 
-    // Persist final text
+    // Update final text and mark response as done (● turns white)
     const finalText = accumulated.trim();
     if (finalText) {
-      if (sessionStore && sessionId) {
-        sessionStore.addMessage(sessionId, "assistant", finalText);
-      }
       store.updateLastLine(parseMarkdown(finalText));
     } else {
       store.updateLastLine([seg("No response", "gray")]);
     }
+    store.markLastResponseDone();
   } catch (err: unknown) {
     store.setProcessing(false);
     store.stopStreaming();
-    store.clearPendingApproval();
     const msg = err instanceof Error ? err.message : String(err);
-    store.log(`Chat error: ${msg}`, [seg(`Chat error: ${msg}`, "red")]);
+
+    // Friendly error if server is not running
+    if (msg.includes("ECONNREFUSED") || msg.includes("fetch failed")) {
+      store.updateLastLine([
+        seg("Server not running. ", "red"),
+        seg("Start it with: ", "gray"),
+        seg("polpo serve", "cyan", true),
+      ]);
+    } else {
+      store.log(`Chat error: ${msg}`, [seg(`Chat error: ${msg}`, "red")]);
+    }
   }
 }
 
 function resolveSession(
-  sessionStore: SessionStore | undefined,
+  sessionStore: import("../../core/session-store.js").SessionStore | undefined,
   activeId: string | null,
 ): string | null {
   if (!sessionStore) return null;

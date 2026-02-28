@@ -393,7 +393,7 @@ import { createEmailTools, ALL_EMAIL_TOOL_NAMES } from "./email-tools.js";
 import type { ResolvedVault } from "../vault/index.js";
 import { createAudioTools, ALL_AUDIO_TOOL_NAMES } from "./audio-tools.js";
 import { createImageTools, ALL_IMAGE_TOOL_NAMES } from "./image-tools.js";
-import { createOutcomeTools, ALL_OUTCOME_TOOL_NAMES } from "./outcome-tools.js";
+import { ALL_OUTCOME_TOOL_NAMES } from "./outcome-tools.js";
 
 export type { BrowserToolName } from "./browser-tools.js";
 export type { HttpToolName } from "./http-tools.js";
@@ -571,9 +571,7 @@ export async function createAllTools(options: CreateAllToolsOptions): Promise<Ag
     tools.push(...createImageTools(cwd, allowedPaths, allowedTools));
   }
 
-  // Outcome registration tool — always included with extended tools so agents
-  // can explicitly declare artifacts regardless of how they were produced
-  tools.push(...createOutcomeTools(cwd, allowedPaths, allowedTools));
+  // register_outcome is already included via createCodingTools() above — no need to add again
 
   return tools;
 }

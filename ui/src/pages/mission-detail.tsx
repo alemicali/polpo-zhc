@@ -54,7 +54,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { useMission, useTasks, useSchedules } from "@lumea-labs/polpo-react";
-import type { MissionStatus, MissionReport, TaskStatus, Task, ScheduleEntry } from "@lumea-labs/polpo-react";
+import type { MissionStatus, MissionReport, TaskStatus, Task } from "@lumea-labs/polpo-react";
 import { toast } from "sonner";
 import { formatDistanceToNow, format } from "date-fns";
 import { cn } from "@/lib/utils";

@@ -1,6 +1,6 @@
 /**
- * TUI entry point — Ink 5 + React + Zustand.
- * Orchestrator in React Context, NOT in Zustand store.
+ * TUI entry point — Ink 5 + React 18 + Zustand.
+ * Chat-only interface that communicates through the server completions endpoint.
  */
 
 import { createContext, useContext, useState, useEffect } from "react";
@@ -10,7 +10,6 @@ import { resolve, basename } from "node:path";
 import { existsSync } from "node:fs";
 import { Orchestrator } from "../core/orchestrator.js";
 import { useStore } from "./store.js";
-import { bridgeEvents } from "./bridge.js";
 import { seg, parseMarkdown } from "./format.js";
 import { Shell } from "./components/Shell.js";
 
@@ -76,9 +75,6 @@ function useOrchestratorInit(workDir: string) {
     // Create orchestrator — it loads config from .polpo/polpo.json in init()
     const orc = new Orchestrator(absDir);
 
-    // Bridge events → store
-    const unbridge = bridgeEvents(orc, store);
-
     const configPath = resolve(absDir, ".polpo", "polpo.json");
     const hasConfig = existsSync(configPath);
 
@@ -94,14 +90,8 @@ function useOrchestratorInit(workDir: string) {
       : orc.initInteractive(basename(absDir), defaultTeam);
 
     boot.then(() => {
-      const config = orc.getConfig();
-      if (config?.teams[0]?.agents[0]) {
-        store.setDefaultAgent(config.teams[0].agents[0].name);
-      }
-
       // Restore previous session messages into the stream
       restoreSession(orc, store);
-
       setPolpo(orc);
     }).catch((err: unknown) => {
       const msg = err instanceof Error ? err.message : String(err);
@@ -113,17 +103,7 @@ function useOrchestratorInit(workDir: string) {
       });
     });
 
-    // State sync interval
-    const syncInterval = setInterval(() => {
-      try {
-        const state = orc.getStore()?.getState();
-        if (state) store.syncState(state, orc.getAllMissions());
-      } catch { /* store not ready yet */ }
-    }, 1000);
-
     return () => {
-      unbridge();
-      clearInterval(syncInterval);
       orc.stop();
     };
   }, [workDir]);

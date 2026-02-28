@@ -19,6 +19,8 @@ const NotificationsPage = lazy(() => import("@/pages/notifications").then(m => (
 const ApprovalsPage = lazy(() => import("@/pages/approvals").then(m => ({ default: m.ApprovalsPage })));
 const TemplatesPage = lazy(() => import("@/pages/templates").then(m => ({ default: m.TemplatesPage })));
 const ConfigPage = lazy(() => import("@/pages/config").then(m => ({ default: m.ConfigPage })));
+const SkillsPage = lazy(() => import("@/pages/skills").then(m => ({ default: m.SkillsPage })));
+const SkillDetailPage = lazy(() => import("@/pages/skill-detail").then(m => ({ default: m.SkillDetailPage })));
 const SchedulesPage = lazy(() => import("@/pages/schedules").then(m => ({ default: m.SchedulesPage })));
 
 function PageLoader() {
@@ -41,6 +43,8 @@ export function App() {
         <Route path="missions/:missionId" element={<Suspense fallback={<PageLoader />}><MissionDetailPage /></Suspense>} />
         <Route path="agents" element={<Suspense fallback={<PageLoader />}><AgentsPage /></Suspense>} />
         <Route path="agents/:name" element={<Suspense fallback={<PageLoader />}><AgentDetailPage /></Suspense>} />
+        <Route path="skills" element={<Suspense fallback={<PageLoader />}><SkillsPage /></Suspense>} />
+        <Route path="skills/:skillName" element={<Suspense fallback={<PageLoader />}><SkillDetailPage /></Suspense>} />
         <Route path="activity" element={<Suspense fallback={<PageLoader />}><ActivityPage /></Suspense>} />
         <Route path="chat" element={<Suspense fallback={<PageLoader />}><ChatPage /></Suspense>} />
         <Route path="memory" element={<Suspense fallback={<PageLoader />}><MemoryPage /></Suspense>} />

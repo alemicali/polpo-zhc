@@ -13,6 +13,7 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { usePolpo, useSessions } from "@lumea-labs/polpo-react";
 import type { ChatMessage, ChatCompletionMessage, PolpoConfig } from "@lumea-labs/polpo-react";
+import type { ChatCompletionStream } from "@lumea-labs/polpo-react";
 
 // Local mirror of SDK ask_user types (avoids build-order issues)
 export interface AskUserOption {
@@ -108,6 +109,8 @@ export function useChat() {
   const initialLoadDone = useRef(false);
   /** Conversation history sent to the completions endpoint */
   const conversationRef = useRef<ChatCompletionMessage[]>([]);
+  /** Currently active stream (for abort support) */
+  const streamRef = useRef<ChatCompletionStream | null>(null);
 
   // Reconstruct interactive state from persisted "interrupted" tool calls on the last assistant message.
   // If the last message is an assistant with an interrupted ask_user/create_mission, restore the pending state.
@@ -267,6 +270,7 @@ export function useChat() {
         messages: conversationRef.current,
         sessionId: sessionId ?? undefined,
       });
+      streamRef.current = stream;
 
       let fullContent = "";
       const toolCalls: ToolCallInfo[] = [];
@@ -388,6 +392,7 @@ export function useChat() {
         conversationRef.current.push({ role: "assistant", content: fullContent });
       }
 
+      streamRef.current = null;
       refetchSessions();
       return fullContent;
     },
@@ -434,19 +439,34 @@ export function useChat() {
       try {
         await streamCompletion(assistantId);
       } catch (e) {
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === assistantId
-              ? { ...m, content: `Error: ${(e as Error).message}` }
-              : m
-          )
-        );
+        // Don't show error for user-initiated abort
+        if (streamRef.current?.aborted) {
+          streamRef.current = null;
+        } else {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantId
+                ? { ...m, content: `Error: ${(e as Error).message}` }
+                : m
+            )
+          );
+        }
       } finally {
         setIsLoading(false);
       }
     },
     [streamCompletion]
   );
+
+  // Stop the current streaming response
+  const stop = useCallback(() => {
+    const stream = streamRef.current;
+    if (stream) {
+      stream.abort();
+      streamRef.current = null;
+    }
+    setIsLoading(false);
+  }, []);
 
   // Answer pending questions — formats answers as a user message and continues the conversation
   const answerQuestions = useCallback(
@@ -487,13 +507,17 @@ export function useChat() {
       try {
         await streamCompletion(assistantId);
       } catch (e) {
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === assistantId
-              ? { ...m, content: `Error: ${(e as Error).message}` }
-              : m
-          )
-        );
+        if (streamRef.current?.aborted) {
+          streamRef.current = null;
+        } else {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantId
+                ? { ...m, content: `Error: ${(e as Error).message}` }
+                : m
+            )
+          );
+        }
       } finally {
         setIsLoading(false);
       }
@@ -773,6 +797,7 @@ export function useChat() {
     pendingMission,
     pendingVault,
     send,
+    stop,
     answerQuestions,
     respondToMission,
     respondToVault,

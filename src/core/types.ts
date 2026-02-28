@@ -601,6 +601,9 @@ export interface PolpoSettings {
   maxResolutionAttempts?: number;
   /** Auto-correct correctable expectations (e.g. file_exists paths) on assessment failure. Default: true */
   autoCorrectExpectations?: boolean;
+  /** Skills to load into the orchestrator's system prompt.
+   *  Skill names are resolved against the pool (project + global). */
+  orchestratorSkills?: string[];
   /** Model for orchestrator LLM calls (question detection, deadlock, missions).
    *  Can be a simple string ("anthropic:claude-opus-4-6") or a ModelConfig with fallbacks. */
   orchestratorModel?: string | ModelConfig;

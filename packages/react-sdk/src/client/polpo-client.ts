@@ -1,5 +1,7 @@
 import { PolpoApiError } from "./errors.js";
 import type {
+  AuthStatusResponse,
+  VaultEntryMeta,
   Task,
   Mission,
   AgentConfig,
@@ -30,6 +32,8 @@ import type {
   VaultPreviewPayload,
   RunActivityEntry,
   SkillInfo,
+  LoadedSkill,
+  SkillWithAssignment,
   NotificationRecord,
   NotificationStats,
   SendNotificationRequest,
@@ -68,6 +72,9 @@ export class ChatCompletionStream implements AsyncIterable<ChatCompletionChunk> 
   /** If the stream ended with finish_reason "vault_preview", this contains the proposed vault entry. */
   vaultPreview: VaultPreviewPayload | null = null;
 
+  /** Whether abort() has been called. */
+  aborted = false;
+
   private fetchFn: typeof globalThis.fetch;
   private baseUrl: string;
   private clientHeaders: Record<string, string>;
@@ -76,6 +83,7 @@ export class ChatCompletionStream implements AsyncIterable<ChatCompletionChunk> 
   private decoder = new TextDecoder();
   private buffer = "";
   private started = false;
+  private abortController = new AbortController();
 
   constructor(
     fetchFn: typeof globalThis.fetch,
@@ -87,6 +95,16 @@ export class ChatCompletionStream implements AsyncIterable<ChatCompletionChunk> 
     this.baseUrl = baseUrl;
     this.clientHeaders = clientHeaders;
     this.req = req;
+  }
+
+  /**
+   * Abort the in-flight stream. Cancels the fetch request and closes the reader.
+   * The server will detect the disconnect and stop generating.
+   */
+  abort(): void {
+    this.aborted = true;
+    this.abortController.abort();
+    this.reader?.cancel().catch(() => { /* best effort */ });
   }
 
   private async ensureStarted(): Promise<void> {
@@ -108,6 +126,7 @@ export class ChatCompletionStream implements AsyncIterable<ChatCompletionChunk> 
       method: "POST",
       headers,
       body: JSON.stringify({ ...body, stream: true }),
+      signal: this.abortController.signal,
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({ error: { message: res.statusText } }));
@@ -129,39 +148,46 @@ export class ChatCompletionStream implements AsyncIterable<ChatCompletionChunk> 
     await this.ensureStarted();
     const reader = this.reader!;
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
 
-      this.buffer += this.decoder.decode(value, { stream: true });
-      const lines = this.buffer.split("\n");
-      this.buffer = lines.pop() ?? "";
+        this.buffer += this.decoder.decode(value, { stream: true });
+        const lines = this.buffer.split("\n");
+        this.buffer = lines.pop() ?? "";
 
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed || !trimmed.startsWith("data: ")) continue;
-        const data = trimmed.slice(6);
-        if (data === "[DONE]") return;
-        try {
-          const chunk = JSON.parse(data) as ChatCompletionChunk;
-          // Capture ask_user payload from the chunk
-          const choice = chunk.choices[0];
-          if (choice?.finish_reason === "ask_user" && choice.ask_user) {
-            this.askUser = choice.ask_user;
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed || !trimmed.startsWith("data: ")) continue;
+          const data = trimmed.slice(6);
+          if (data === "[DONE]") return;
+          try {
+            const chunk = JSON.parse(data) as ChatCompletionChunk;
+            // Capture ask_user payload from the chunk
+            const choice = chunk.choices[0];
+            if (choice?.finish_reason === "ask_user" && choice.ask_user) {
+              this.askUser = choice.ask_user;
+            }
+            // Capture mission_preview payload from the chunk
+            if (choice?.finish_reason === "mission_preview" && choice.mission_preview) {
+              this.missionPreview = choice.mission_preview;
+            }
+            // Capture vault_preview payload from the chunk
+            if (choice?.finish_reason === "vault_preview" && choice.vault_preview) {
+              this.vaultPreview = choice.vault_preview;
+            }
+            yield chunk;
+          } catch {
+            // skip malformed chunks
           }
-          // Capture mission_preview payload from the chunk
-          if (choice?.finish_reason === "mission_preview" && choice.mission_preview) {
-            this.missionPreview = choice.mission_preview;
-          }
-          // Capture vault_preview payload from the chunk
-          if (choice?.finish_reason === "vault_preview" && choice.vault_preview) {
-            this.vaultPreview = choice.vault_preview;
-          }
-          yield chunk;
-        } catch {
-          // skip malformed chunks
         }
       }
+    } catch (err) {
+      // Suppress AbortError — this is expected when the user stops the stream
+      if (err instanceof DOMException && err.name === "AbortError") return;
+      if (this.aborted) return;
+      throw err;
     }
   }
 }
@@ -329,6 +355,24 @@ export class PolpoClient {
     return this.del<{ removed: boolean }>(`/vault/entries/${encodeURIComponent(agent)}/${encodeURIComponent(service)}`);
   }
 
+  /**
+   * List vault entries for an agent (metadata only — no secret values).
+   * Returns service names, types, labels, and credential field names.
+   */
+  listVaultEntries(agent: string): Promise<VaultEntryMeta[]> {
+    return this.get<VaultEntryMeta[]>(`/vault/entries/${encodeURIComponent(agent)}`);
+  }
+
+  // ── Auth ───────────────────────────────────────────────────
+
+  /**
+   * Get per-provider auth status: config keys, env vars, OAuth profiles (metadata only).
+   * Tokens are NEVER exposed.
+   */
+  getAuthStatus(): Promise<AuthStatusResponse> {
+    return this.get<AuthStatusResponse>("/auth/status");
+  }
+
   // ── Schedules ─────────────────────────────────────────────
 
   getSchedules(): Promise<ScheduleEntry[]> {
@@ -407,9 +451,34 @@ export class PolpoClient {
 
   // ── Skills ───────────────────────────────────────────────
 
-  /** Discover available skills in the project (.claude/skills/). */
-  getSkills(): Promise<SkillInfo[]> {
-    return this.get<SkillInfo[]>("/skills");
+  /** Discover available skills in the agent skill pool with assignment info. */
+  getSkills(): Promise<SkillWithAssignment[]> {
+    return this.get<SkillWithAssignment[]>("/skills");
+  }
+
+  /** Assign a skill to an agent. */
+  assignSkill(skillName: string, agent: string): Promise<{ skill: string; agent: string }> {
+    return this.post<{ skill: string; agent: string }>(`/skills/${encodeURIComponent(skillName)}/assign`, { agent });
+  }
+
+  /** Unassign a skill from an agent. */
+  unassignSkill(skillName: string, agent: string): Promise<{ skill: string; agent: string }> {
+    return this.post<{ skill: string; agent: string }>(`/skills/${encodeURIComponent(skillName)}/unassign`, { agent });
+  }
+
+  /** Discover orchestrator skills (.polpo/.agent/skills/). */
+  getOrchestratorSkills(): Promise<SkillInfo[]> {
+    return this.get<SkillInfo[]>("/skills/orchestrator");
+  }
+
+  /** Get the full content of an agent skill by name. */
+  getSkillContent(name: string): Promise<LoadedSkill> {
+    return this.get<LoadedSkill>(`/skills/${encodeURIComponent(name)}/content`);
+  }
+
+  /** Get the full content of an orchestrator skill by name. */
+  getOrchestratorSkillContent(name: string): Promise<LoadedSkill> {
+    return this.get<LoadedSkill>(`/skills/orchestrator/${encodeURIComponent(name)}/content`);
   }
 
   // ── Run Activity ────────────────────────────────────────────

@@ -564,6 +564,8 @@ export interface PolpoSettings {
   maxQuestionRounds?: number;
   maxResolutionAttempts?: number;
   autoCorrectExpectations?: boolean;
+  /** Skills to load into the orchestrator's system prompt. Resolved against the orchestrator skill pool. */
+  orchestratorSkills?: string[];
   /** Model for orchestrator LLM calls. Can be a string or a ModelConfig with fallbacks. */
   orchestratorModel?: string | ModelConfig;
   imageModel?: string;
@@ -814,6 +816,18 @@ export interface SkillInfo {
   path: string;
 }
 
+/** Skill with full content loaded (returned by GET /skills/:name/content). */
+export interface LoadedSkill extends SkillInfo {
+  /** Full SKILL.md content (markdown body without frontmatter). */
+  content: string;
+}
+
+/** Skill with agent assignment info (returned by GET /skills). */
+export interface SkillWithAssignment extends SkillInfo {
+  /** Agent names that have this skill assigned. */
+  assignedTo: string[];
+}
+
 // === Chat Session types ===
 
 export interface ChatSession {
@@ -979,6 +993,58 @@ export interface MissionPreviewPayload {
   data: unknown;
   /** Original user prompt that generated this mission */
   prompt?: string;
+}
+
+// === Vault Entry Metadata (safe listing — no secret values) ===
+
+export interface VaultEntryMeta {
+  /** Service name (vault key, e.g. "gmail", "stripe") */
+  service: string;
+  /** Credential type */
+  type: "smtp" | "imap" | "oauth" | "api_key" | "login" | "custom";
+  /** Human-readable label */
+  label?: string;
+  /** Credential field names (e.g. ["host", "port", "user", "pass"]) — values are NOT exposed */
+  keys: string[];
+}
+
+// === Auth Profile Metadata (safe — no tokens exposed) ===
+
+export type AuthProfileStatus = "active" | "cooldown" | "billing_disabled" | "expired";
+export type AuthProfileType = "oauth" | "api_key";
+
+/** Metadata for a single auth profile — tokens are NEVER exposed. */
+export interface AuthProfileMeta {
+  id: string;
+  type: AuthProfileType;
+  email?: string;
+  expires?: number;
+  expired: boolean;
+  hasRefresh: boolean;
+  lastUsed?: string;
+  createdAt: string;
+  status: AuthProfileStatus;
+  cooldownUntil?: number;
+  disabledUntil?: number;
+  lastErrorReason?: string;
+  disabledReason?: string;
+  errorCount?: number;
+}
+
+/** Per-provider auth health info. */
+export interface ProviderAuthInfo {
+  hasConfigKey: boolean;
+  hasEnvKey: boolean;
+  envVar?: string;
+  profiles: AuthProfileMeta[];
+  oauthAvailable: boolean;
+  oauthProviderName?: string;
+  oauthFlow?: string;
+}
+
+/** Full auth status response — all providers. */
+export interface AuthStatusResponse {
+  providers: Record<string, ProviderAuthInfo>;
 }
 
 // === Vault Preview (interactive credential review before saving) ===

@@ -7,6 +7,7 @@ import {
   Bot,
   MessageCircle,
   Brain,
+  Sparkles,
   Columns2,
   Bell,
   ShieldCheck,
@@ -47,6 +48,7 @@ const nav: NavSection[] = [
     section: "Knowledge",
     items: [
       { to: "/agents", icon: Bot, label: "Agents" },
+      { to: "/skills", icon: Sparkles, label: "Skills" },
       { to: "/memory", icon: Brain, label: "Memory" },
       { to: "/templates", icon: Workflow, label: "Templates" },
     ],

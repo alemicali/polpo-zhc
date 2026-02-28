@@ -226,7 +226,11 @@ export function reduceEvent(state: StoreState, sseEvent: SSEEvent): StoreState {
         missions.set(missionId, { ...existing, status: "active" as MissionStatus, updatedAt: new Date().toISOString() });
         return { ...next, missions };
       }
-      return { ...next, missionsStale: true };
+      // Don't set missionsStale here — the preceding mission:saved event already
+      // triggered a refetch. Setting stale again causes a race where overlapping
+      // fetches loop (mission:saved stale → fetch starts → mission:executed arrives
+      // before fetch completes → mission not in store yet → stale again → loop).
+      return next;
     }
 
     case "mission:completed": {

@@ -73,27 +73,25 @@ describe("createEmailTools — factory", () => {
 describe("email_send — credential resolution", () => {
   afterEach(clearEnv);
 
-  it("returns error when no SMTP host configured", async () => {
+  it("throws when no SMTP host configured", async () => {
     const tools = createEmailTools(CWD);
     const sendTool = tools.find(t => t.name === "email_send")!;
-    const result = await sendTool.execute("test-id", {
+    await expect(sendTool.execute("test-id", {
       to: "bob@test.com",
       subject: "Hi",
       body: "Hello",
-    } as any);
-    expect(result.details?.error).toBe("no_smtp_host");
+    } as any)).rejects.toThrow("SMTP host not configured");
   });
 
-  it("returns error when no from address configured", async () => {
+  it("throws when no from address configured", async () => {
     setEnv("SMTP_HOST", "smtp.test.com");
     const tools = createEmailTools(CWD);
     const sendTool = tools.find(t => t.name === "email_send")!;
-    const result = await sendTool.execute("test-id", {
+    await expect(sendTool.execute("test-id", {
       to: "bob@test.com",
       subject: "Hi",
       body: "Hello",
-    } as any);
-    expect(result.details?.error).toBe("no_from");
+    } as any)).rejects.toThrow("Sender address not configured");
   });
 
   it("sends email when env vars are configured", async () => {
@@ -120,14 +118,13 @@ describe("email_send — sandbox enforcement", () => {
     setEnv("SMTP_FROM", "alice@test.com");
     const tools = createEmailTools(CWD);
     const sendTool = tools.find(t => t.name === "email_send")!;
-    const result = await sendTool.execute("test-id", {
+    // Should throw because /etc/passwd is outside CWD sandbox
+    await expect(sendTool.execute("test-id", {
       to: "bob@test.com",
       subject: "Hi",
       body: "Hello",
       attachments: [{ path: "/etc/passwd" }],
-    } as any);
-    // Should error because /etc/passwd is outside CWD sandbox
-    expect((result.content[0] as any).text).toContain("sandbox");
+    } as any)).rejects.toThrow("sandbox");
   });
 
   it("rejects nonexistent attachment", async () => {
@@ -136,24 +133,22 @@ describe("email_send — sandbox enforcement", () => {
     // Use a path inside CWD to pass sandbox check but that doesn't exist
     const tools = createEmailTools(CWD, ["/tmp/email-test"]);
     const sendTool = tools.find(t => t.name === "email_send")!;
-    const result = await sendTool.execute("test-id", {
+    await expect(sendTool.execute("test-id", {
       to: "bob@test.com",
       subject: "Hi",
       body: "Hello",
       attachments: [{ path: "nonexistent-file.txt" }],
-    } as any);
-    expect(result.details?.error).toBe("attachment_not_found");
+    } as any)).rejects.toThrow("Attachment not found");
   });
 });
 
 // ─── email_search — validation ───────────────────────
 
 describe("email_search — validation", () => {
-  it("returns error when no search criteria provided", async () => {
+  it("throws when no search criteria provided", async () => {
     const tools = createEmailTools(CWD);
     const searchTool = tools.find(t => t.name === "email_search")!;
-    const result = await searchTool.execute("test-id", {} as any);
-    expect(result.details?.error).toBe("no_criteria");
+    await expect(searchTool.execute("test-id", {} as any)).rejects.toThrow("at least one search criterion");
   });
 });
 
@@ -162,11 +157,10 @@ describe("email_search — validation", () => {
 describe("email_verify — credential resolution", () => {
   afterEach(clearEnv);
 
-  it("returns error when no SMTP host configured", async () => {
+  it("throws when no SMTP host configured", async () => {
     const tools = createEmailTools(CWD);
     const verifyTool = tools.find(t => t.name === "email_verify")!;
-    const result = await verifyTool.execute("test-id", {} as any);
-    expect(result.details?.error).toBe("no_smtp_host");
+    await expect(verifyTool.execute("test-id", {} as any)).rejects.toThrow("SMTP host not configured");
   });
 
   it("verifies when env vars are set", async () => {

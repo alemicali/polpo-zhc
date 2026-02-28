@@ -16,14 +16,13 @@ describe("email allowlist", () => {
     expect(sendTool).toBeDefined();
 
     // Provide SMTP config so we get past that check, but should fail on domain
-    const result = await sendTool.execute("tc1", {
+    await expect(sendTool.execute("tc1", {
       to: "user@evil.com",
       subject: "Test",
       body: "Hello",
       smtp_host: "localhost",
       from: "sender@acme.com",
-    });
-    expect(result.details?.error).toBe("recipient_domain_blocked");
+    })).rejects.toThrow("not in the allowed domains");
   });
 
   it("allows email to domain in allowlist (via smtp_host so we hit the domain check)", async () => {
@@ -31,60 +30,55 @@ describe("email allowlist", () => {
     const sendTool = tools.find(t => t.name === "email_send")!;
 
     // This will pass domain validation but fail on actual SMTP connection — that's expected
-    const result = await sendTool.execute("tc2", {
+    await expect(sendTool.execute("tc2", {
       to: "user@acme.com",
       subject: "Test",
       body: "Hello",
       smtp_host: "nonexistent.invalid",
       smtp_port: 587,
       from: "sender@acme.com",
-    });
-    // Should NOT be domain blocked — will fail with SMTP connection error instead
-    expect(result.details?.error).not.toBe("recipient_domain_blocked");
+    })).rejects.not.toThrow("not in the allowed domains");
   });
 
   it("blocks when any one recipient is outside allowlist", async () => {
     const tools = createEmailTools(cwd, undefined, undefined, undefined, ["acme.com"]);
     const sendTool = tools.find(t => t.name === "email_send")!;
 
-    const result = await sendTool.execute("tc3", {
+    await expect(sendTool.execute("tc3", {
       to: ["user@acme.com", "outsider@evil.com"],
       subject: "Test",
       body: "Hello",
       smtp_host: "localhost",
       from: "sender@acme.com",
-    });
-    expect(result.details?.error).toBe("recipient_domain_blocked");
+    })).rejects.toThrow("not in the allowed domains");
   });
 
   it("blocks CC recipients outside allowlist", async () => {
     const tools = createEmailTools(cwd, undefined, undefined, undefined, ["acme.com"]);
     const sendTool = tools.find(t => t.name === "email_send")!;
 
-    const result = await sendTool.execute("tc4", {
+    await expect(sendTool.execute("tc4", {
       to: "user@acme.com",
       cc: "hacker@evil.com",
       subject: "Test",
       body: "Hello",
       smtp_host: "localhost",
       from: "sender@acme.com",
-    });
-    expect(result.details?.error).toBe("recipient_domain_blocked");
+    })).rejects.toThrow("not in the allowed domains");
   });
 
   it("blocks BCC recipients outside allowlist", async () => {
     const tools = createEmailTools(cwd, undefined, undefined, undefined, ["acme.com"]);
     const sendTool = tools.find(t => t.name === "email_send")!;
 
-    const result = await sendTool.execute("tc5", {
+    await expect(sendTool.execute("tc5", {
       to: "user@acme.com",
       bcc: "spy@evil.com",
       subject: "Test",
       body: "Hello",
       smtp_host: "localhost",
       from: "sender@acme.com",
-    });
-    expect(result.details?.error).toBe("recipient_domain_blocked");
+    })).rejects.toThrow("not in the allowed domains");
   });
 
   it("allows all domains when no allowlist provided", async () => {
@@ -92,43 +86,41 @@ describe("email allowlist", () => {
     const tools = createEmailTools(cwd);
     const sendTool = tools.find(t => t.name === "email_send")!;
 
-    const result = await sendTool.execute("tc6", {
+    // Should fail with SMTP error, NOT domain block
+    await expect(sendTool.execute("tc6", {
       to: "anyone@anywhere.com",
       subject: "Test",
       body: "Hello",
       smtp_host: "nonexistent.invalid",
       from: "sender@example.com",
-    });
-    // Should fail with SMTP error, NOT domain block
-    expect(result.details?.error).not.toBe("recipient_domain_blocked");
+    })).rejects.not.toThrow("not in the allowed domains");
   });
 
   it("allows multiple allowlisted domains", async () => {
     const tools = createEmailTools(cwd, undefined, undefined, undefined, ["acme.com", "partner.io"]);
     const sendTool = tools.find(t => t.name === "email_send")!;
 
-    const result = await sendTool.execute("tc7", {
+    // Should pass domain validation but fail on SMTP
+    await expect(sendTool.execute("tc7", {
       to: ["user@acme.com", "user@partner.io"],
       subject: "Test",
       body: "Hello",
       smtp_host: "nonexistent.invalid",
       from: "sender@acme.com",
-    });
-    expect(result.details?.error).not.toBe("recipient_domain_blocked");
+    })).rejects.not.toThrow("not in the allowed domains");
   });
 
   it("is case-insensitive for domain matching", async () => {
     const tools = createEmailTools(cwd, undefined, undefined, undefined, ["Acme.COM"]);
     const sendTool = tools.find(t => t.name === "email_send")!;
 
-    // Should pass domain check (case-insensitive)
-    const result = await sendTool.execute("tc8", {
+    // Should pass domain check (case-insensitive), fail on SMTP
+    await expect(sendTool.execute("tc8", {
       to: "user@acme.com",
       subject: "Test",
       body: "Hello",
       smtp_host: "nonexistent.invalid",
       from: "sender@acme.com",
-    });
-    expect(result.details?.error).not.toBe("recipient_domain_blocked");
+    })).rejects.not.toThrow("not in the allowed domains");
   });
 });

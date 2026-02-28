@@ -335,6 +335,10 @@ export function completionRoutes(orchestrator: Orchestrator, apiKeys?: string[])
     if (body.stream) {
       // ── Streaming mode ──
       return streamSSE(c, async (stream) => {
+        // Abort controller: cancelled when the client disconnects (closes SSE)
+        const abortController = new AbortController();
+        stream.onAbort(() => { abortController.abort(); });
+
         await stream.writeSSE({ data: sseChunk(completionId, { role: "assistant" }) });
 
         // Reserve a placeholder message in the store BEFORE streaming.
@@ -351,22 +355,32 @@ export function completionRoutes(orchestrator: Orchestrator, apiKeys?: string[])
 
         try {
           for (let turn = 0; turn < MAX_TURNS; turn++) {
+            // Bail out early if the client already disconnected
+            if (abortController.signal.aborted) break;
+
             const piStream = streamSimple(m, {
               systemPrompt: fullSystemPrompt,
               messages,
               tools: ALL_ORCHESTRATOR_TOOLS,
-            }, streamOpts);
+            }, { ...streamOpts, signal: abortController.signal });
 
             let turnText = "";
             let streamError: string | undefined;
 
             for await (const event of piStream) {
+              if (abortController.signal.aborted) break;
               if (event.type === "text_delta") {
                 turnText += event.delta;
                 await stream.writeSSE({ data: sseChunk(completionId, { content: event.delta }) });
               } else if (event.type === "error") {
                 streamError = (event as any).error?.errorMessage ?? "Model returned an error";
               }
+            }
+
+            // If aborted, stop the loop — skip error/tool processing
+            if (abortController.signal.aborted) {
+              finalText += turnText;
+              break;
             }
 
             if (streamError) {
@@ -434,6 +448,9 @@ export function completionRoutes(orchestrator: Orchestrator, apiKeys?: string[])
             }
 
             for (const call of toolCalls) {
+              // Stop executing tools if client disconnected
+              if (abortController.signal.aborted) break;
+
               // Notify client that a tool is being called
               await stream.writeSSE({
                 data: sseChunk(completionId, {}, null, {
@@ -453,12 +470,14 @@ export function completionRoutes(orchestrator: Orchestrator, apiKeys?: string[])
                 state: isError ? "error" : "completed",
               });
 
-              // Notify client with tool result
-              await stream.writeSSE({
-                data: sseChunk(completionId, {}, null, {
-                  tool_call: { id: call.id, name: call.name, result, state: isError ? "error" : "completed" },
-                }),
-              });
+              // Notify client with tool result (skip if aborted mid-tool)
+              if (!abortController.signal.aborted) {
+                await stream.writeSSE({
+                  data: sseChunk(completionId, {}, null, {
+                    tool_call: { id: call.id, name: call.name, result, state: isError ? "error" : "completed" },
+                  }),
+                });
+              }
 
               messages.push({
                 role: "toolResult",
@@ -471,8 +490,15 @@ export function completionRoutes(orchestrator: Orchestrator, apiKeys?: string[])
             }
           }
 
-          await stream.writeSSE({ data: sseChunk(completionId, {}, "stop") });
-          await stream.writeSSE({ data: "[DONE]" });
+          if (!abortController.signal.aborted) {
+            await stream.writeSSE({ data: sseChunk(completionId, {}, "stop") });
+            await stream.writeSSE({ data: "[DONE]" });
+          }
+        } catch (err) {
+          // Suppress AbortError — expected when client disconnects
+          if (!(err instanceof DOMException && err.name === "AbortError") && !abortController.signal.aborted) {
+            throw err;
+          }
         } finally {
           // Always persist the assistant response — even on disconnect.
           // SECURITY: Redact vault credentials before persisting to SQLite

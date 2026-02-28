@@ -1,4 +1,4 @@
-import { useSyncExternalStore, useCallback, useEffect, useState } from "react";
+import { useSyncExternalStore, useCallback, useEffect, useRef, useState } from "react";
 import { usePolpoContext } from "../provider/polpo-context.js";
 import { selectMissions } from "../store/selectors.js";
 import type { Mission, CreateMissionRequest, UpdateMissionRequest, ExecuteMissionResult, ResumeMissionResult } from "../client/types.js";
@@ -48,9 +48,15 @@ export function useMissions(): UseMissionsReturn {
     fetchMissions().finally(() => setIsLoading(false));
   }, [fetchMissions]);
 
-  // Auto-refetch when missions are marked stale by SSE events
+  // Auto-refetch when missions are marked stale by SSE events.
+  // Guard against concurrent fetches to prevent cascading loops when
+  // rapid SSE events (mission:saved + mission:executed) toggle stale repeatedly.
+  const fetchingRef = useRef(false);
   useEffect(() => {
-    if (missionsStale) fetchMissions();
+    if (missionsStale && !fetchingRef.current) {
+      fetchingRef.current = true;
+      fetchMissions().finally(() => { fetchingRef.current = false; });
+    }
   }, [missionsStale, fetchMissions]);
 
   const createMission = useCallback(

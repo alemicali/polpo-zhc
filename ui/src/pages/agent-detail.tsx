@@ -65,8 +65,8 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { MessageResponse } from "@/components/ai-elements/message";
-import { useAgent, useAgents, useProcesses, useSkills, useTasks } from "@lumea-labs/polpo-react";
-import type { AgentProcess, AgentConfig, SkillInfo, Task, TaskStatus } from "@lumea-labs/polpo-react";
+import { useAgent, useAgents, useProcesses, useSkills, useTasks, useVaultEntries } from "@lumea-labs/polpo-react";
+import type { AgentProcess, AgentConfig, SkillInfo, Task, TaskStatus, VaultEntryMeta } from "@lumea-labs/polpo-react";
 import { formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
 import { useState, useMemo } from "react";
@@ -542,6 +542,7 @@ export function AgentDetailPage() {
   const { agents } = useAgents();
   const { processes } = useProcesses();
   const { skills: allSkills } = useSkills();
+  const { entries: vaultEntries } = useVaultEntries(name ?? "");
   const { tasks: agentTasks } = useTasks({ assignTo: name });
   const [showSystemPrompt, setShowSystemPrompt] = useState(false);
 
@@ -1398,15 +1399,47 @@ export function AgentDetailPage() {
 
                   {/* Credential Vault */}
                   <div>
-                    <SectionHeader title="Credential Vault" icon={KeyRound} />
-                    <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0">
-                      <CardContent className="pt-4 pb-4">
-                        <p className="text-xs text-muted-foreground leading-relaxed">
-                          Credentials are stored in the encrypted vault (<code className="text-[10px] font-mono">.polpo/vault.enc</code>), secured with AES-256-GCM.
-                          Use the chat to add, update, or remove vault entries for this agent.
+                    <SectionHeader title="Credential Vault" icon={KeyRound} count={vaultEntries.length || undefined} />
+                    {vaultEntries.length > 0 ? (
+                      <div className="space-y-2">
+                        {vaultEntries.map((entry: VaultEntryMeta) => (
+                          <div
+                            key={entry.service}
+                            className="rounded-md border border-border/30 bg-card/60 px-4 py-3 space-y-2"
+                          >
+                            <div className="flex items-center gap-2">
+                              <KeyRound className="h-3.5 w-3.5 text-primary shrink-0" />
+                              <span className="text-sm font-medium">{entry.service}</span>
+                              <Badge variant="outline" className="text-[10px] ml-auto">{entry.type}</Badge>
+                            </div>
+                            {entry.label && (
+                              <p className="text-xs text-muted-foreground ml-5.5">{entry.label}</p>
+                            )}
+                            <div className="flex flex-wrap gap-1.5 ml-5.5">
+                              {entry.keys.map((k: string) => (
+                                <span
+                                  key={k}
+                                  className="inline-flex items-center gap-1 rounded bg-muted/50 border border-border/30 px-2 py-0.5 text-[11px] font-mono text-muted-foreground"
+                                >
+                                  {k}: <span className="text-[10px] opacity-60">***</span>
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                        <p className="text-[10px] text-muted-foreground/60 mt-1">
+                          Encrypted with AES-256-GCM in <code className="font-mono">.polpo/vault.enc</code>. Use the chat to manage entries.
                         </p>
-                      </CardContent>
-                    </Card>
+                      </div>
+                    ) : (
+                      <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0">
+                        <CardContent className="pt-4 pb-4">
+                          <p className="text-xs text-muted-foreground leading-relaxed">
+                            No credentials configured for this agent. Use the chat to add vault entries — they are encrypted with AES-256-GCM in <code className="text-[10px] font-mono">.polpo/vault.enc</code>.
+                          </p>
+                        </CardContent>
+                      </Card>
+                    )}
                   </div>
                 </div>
               </ScrollArea>

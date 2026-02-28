@@ -5,6 +5,7 @@ import { mkdir, access, readFile } from "node:fs/promises";
 import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { Command } from "commander";
+import { DEFAULT_SERVER_PORT, DEFAULT_SERVER_HOST } from "../core/constants.js";
 
 // Read version from package.json at build time fallback
 const __dirname_cli = dirname(fileURLToPath(import.meta.url));
@@ -452,8 +453,8 @@ program
 program
   .command("serve")
   .description("Start the Polpo HTTP API server")
-  .option("-p, --port <port>", "Port to listen on", "3000")
-  .option("-H, --host <host>", "Host to bind to", "127.0.0.1")
+  .option("-p, --port <port>", "Port to listen on", String(DEFAULT_SERVER_PORT))
+  .option("-H, --host <host>", "Host to bind to", DEFAULT_SERVER_HOST)
   .option("-d, --dir <path>", "Working directory", ".")
   .option("--api-key <key>", "API key for authentication (optional)")
   .action(async (opts) => {
@@ -498,18 +499,6 @@ program
     await ensureSetup(dir);
     const { startInkTUI } = await import("../tui/app.js");
     await startInkTUI(dir);
-  });
-
-// polpo tui2 (pi-tui based interactive mode)
-program
-  .command("tui2")
-  .description("Launch the pi-tui based interactive TUI")
-  .option("-d, --dir <path>", "Working directory", ".")
-  .action(async (opts) => {
-    const dir = resolve(opts.dir);
-    await ensureSetup(dir);
-    const { startPiTUI } = await import("../tui2/tui.js");
-    await startPiTUI(dir);
   });
 
 // Register subcommand groups

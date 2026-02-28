@@ -201,6 +201,88 @@ That's it — Polpo discovers it automatically.
 Skills are a great way to keep agent instructions DRY. Instead of copy-pasting the same coding standards into every agent's `systemPrompt`, create a skill once and assign it to the agents that need it.
 </Tip>
 
+## Orchestrator Skills
+
+Everything above describes **agent skills** — skills loaded into worker agents when they run tasks. But the orchestrator itself is also an LLM, and it can have its own skills too.
+
+Orchestrator skills live in a **separate pool** from agent skills:
+
+| Priority | Location | Scope | Description |
+|----------|----------|-------|-------------|
+| 1 | `.polpo/.agent/skills/` | Project | Orchestrator skills for this project |
+| 2 | `~/.polpo/.agent/skills/` | Global | Orchestrator skills shared across all projects |
+
+<Note>
+The `.agent` directory (singular, dot-prefixed) is the orchestrator's own config directory — separate from `agents/` (plural) which contains worker agent configs.
+</Note>
+
+### Why Separate Pools?
+
+Agent skills teach agents **how to write code** — coding patterns, framework conventions, review criteria. Orchestrator skills teach the orchestrator **how to manage work** — how to create skills, how to structure teams, how to plan missions. Mixing them would pollute each other's context.
+
+### Installing Orchestrator Skills
+
+<Tabs>
+  <Tab title="CLI">
+    ```bash
+    # Install from a GitHub repo
+    polpo skills orchestrator add anthropics/skills --skill skill-creator
+
+    # Install all skills from a repo
+    polpo skills orchestrator add vercel-labs/skills
+
+    # List orchestrator skills
+    polpo skills orchestrator list
+
+    # Remove an orchestrator skill
+    polpo skills orchestrator remove skill-creator
+    ```
+  </Tab>
+
+  <Tab title="HTTP API">
+    ```bash
+    # List orchestrator skills
+    curl http://localhost:3000/api/v1/projects/my-project/skills/orchestrator
+
+    # Install from source
+    curl -X POST http://localhost:3000/api/v1/projects/my-project/skills/orchestrator/add \
+      -H "Content-Type: application/json" \
+      -d '{ "source": "anthropics/skills", "skillNames": ["skill-creator"] }'
+
+    # Create a custom orchestrator skill
+    curl -X POST http://localhost:3000/api/v1/projects/my-project/skills/orchestrator \
+      -H "Content-Type: application/json" \
+      -d '{ "name": "my-workflow", "description": "Custom workflow", "content": "..." }'
+
+    # Remove
+    curl -X DELETE http://localhost:3000/api/v1/projects/my-project/skills/orchestrator/skill-creator
+    ```
+  </Tab>
+
+  <Tab title="Chat">
+    The orchestrator has built-in tools for managing its own skills:
+    - `list_orchestrator_skills` — see what's installed
+    - `create_orchestrator_skill` — write a new skill from scratch
+    - `update_orchestrator_skill` — modify an existing skill
+    - `remove_orchestrator_skill` — delete a skill
+    - `install_orchestrator_skill` — install from a GitHub repo
+  </Tab>
+</Tabs>
+
+### Loading Behavior
+
+By default, **all orchestrator skills** in the pool are loaded into the orchestrator's system prompt. If you want to restrict which skills are active, use the `orchestratorSkills` setting:
+
+```json
+{
+  "settings": {
+    "orchestratorSkills": ["skill-creator", "find-skills"]
+  }
+}
+```
+
+When `orchestratorSkills` is omitted (the default), every skill discovered in `.polpo/.agent/skills/` and `~/.polpo/.agent/skills/` is loaded.
+
 ## skills.sh Compatibility
 
 Polpo is compatible with the [skills.sh](https://skills.sh) ecosystem. `polpo skills add` clones a GitHub repository, discovers all `SKILL.md` files in standard locations (`skills/`, `.agents/skills/`, `.claude/skills/`, and any subdirectory), and copies them into Polpo's `.polpo/skills/` pool.
