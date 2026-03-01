@@ -458,7 +458,7 @@ export function completionRoutes(orchestrator: Orchestrator, apiKeys?: string[])
                 }),
               });
 
-              const result = executeOrchestratorTool(call.name, call.arguments, orchestrator);
+              const result = await executeOrchestratorTool(call.name, call.arguments, orchestrator);
               const isError = result.startsWith("Error:");
 
               // Accumulate for persistence
@@ -638,7 +638,7 @@ export function completionRoutes(orchestrator: Orchestrator, apiKeys?: string[])
           }
 
           for (const call of toolCalls) {
-            const result = executeOrchestratorTool(call.name, call.arguments, orchestrator);
+            const result = await executeOrchestratorTool(call.name, call.arguments, orchestrator);
             const isError = result.startsWith("Error:");
 
             // Accumulate for persistence

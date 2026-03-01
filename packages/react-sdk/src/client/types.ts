@@ -260,6 +260,14 @@ export interface Team {
 
 // === Assessment ===
 
+/** Individual reviewer result from llm_review multi-evaluator consensus */
+export interface ReviewerResult {
+  index: number;
+  scores: { dimension: string; score: number; reasoning: string; evidence?: { file: string; line: number; note: string }[] }[];
+  summary: string;
+  globalScore: number;
+}
+
 export interface CheckResult {
   type: TaskExpectation["type"];
   passed: boolean;
@@ -267,6 +275,8 @@ export interface CheckResult {
   details?: string;
   scores?: DimensionScore[];
   globalScore?: number;
+  /** Individual reviewer results (llm_review only) — shows how each reviewer voted */
+  reviewers?: ReviewerResult[];
 }
 
 export interface MetricResult {

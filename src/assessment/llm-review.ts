@@ -23,7 +23,7 @@ import { readFileSync } from "node:fs";
 import { execSync } from "node:child_process";
 import { resolve, relative } from "node:path";
 import { Type } from "@sinclair/typebox";
-import type { TaskExpectation, DimensionScore, CheckResult, ReviewContext } from "../core/types.js";
+import type { TaskExpectation, EvalDimension, DimensionScore, CheckResult, ReviewContext } from "../core/types.js";
 import { DEFAULT_DIMENSIONS, buildRubricSection, computeWeightedScore, computeMedianScores } from "./scoring.js";
 import { withRetry } from "../llm/retry.js";
 import { resolveModel, resolveApiKeyAsync, buildStreamOpts } from "../llm/pi-client.js";
@@ -643,6 +643,7 @@ function buildCheckResult(
   parsed: ReviewPayload,
   dimensions: import("../core/types.js").EvalDimension[],
   threshold: number,
+  individualReviews?: ReviewPayload[],
 ): CheckResult {
   const dimScores: DimensionScore[] = parsed.scores.map(s => {
     const dim = dimensions.find(d => d.name === s.dimension);
@@ -667,6 +668,26 @@ function buildCheckResult(
     ? `Score ${globalScore.toFixed(1)}/5 — ${parsed.summary.slice(0, 100)}`
     : `Score ${globalScore.toFixed(1)}/5 (below ${threshold}) — ${parsed.summary.slice(0, 100)}`;
 
+  // Build individual reviewer results for transparency
+  const reviewers: import("../core/types.js").ReviewerResult[] | undefined = individualReviews?.map((review, i) => {
+    const reviewDimScores: DimensionScore[] = review.scores.map(s => {
+      const dim = dimensions.find(d => d.name === s.dimension);
+      return {
+        dimension: s.dimension,
+        score: Math.max(1, Math.min(5, Math.round(s.score))),
+        reasoning: s.reasoning,
+        weight: dim?.weight ?? (1 / dimensions.length),
+        evidence: s.evidence,
+      };
+    });
+    return {
+      index: i + 1,
+      scores: review.scores,
+      summary: review.summary,
+      globalScore: Math.round(computeWeightedScore(reviewDimScores) * 100) / 100,
+    };
+  });
+
   return {
     type: "llm_review",
     passed,
@@ -674,7 +695,110 @@ function buildCheckResult(
     details,
     scores: dimScores,
     globalScore: Math.round(globalScore * 100) / 100,
+    reviewers,
   };
+}
+
+// ── Dynamic Dimension Generation ───────────────────────────────────────
+
+/**
+ * Ask the LLM to generate 3-4 evaluation dimensions tailored to the specific task.
+ * Falls back to DEFAULT_DIMENSIONS if the LLM call fails or returns invalid data.
+ */
+async function generateDimensions(
+  context: ReviewContext | undefined,
+  model: string | undefined,
+  onProgress?: (msg: string) => void,
+): Promise<EvalDimension[]> {
+  if (!context?.taskTitle) return DEFAULT_DIMENSIONS;
+
+  onProgress?.("Generating task-specific evaluation dimensions...");
+
+  try {
+    const m = resolveModel(model);
+    const apiKey = await resolveApiKeyAsync(m.provider as string);
+
+    const messages: Message[] = [
+      {
+        role: "user",
+        content: `Generate 3-4 evaluation dimensions for assessing the following task. Each dimension must be specific and relevant to THIS task — do NOT use generic coding metrics unless the task is about writing code.
+
+TASK TITLE: ${context.taskTitle}
+TASK DESCRIPTION: ${context.taskDescription}
+${context.filesCreated?.length ? `FILES CREATED: ${context.filesCreated.join(", ")}` : ""}
+
+Return ONLY a JSON array (no markdown fences, no explanation). Each element must have:
+- "name": snake_case identifier (e.g. "visual_quality", "data_accuracy")  
+- "description": one sentence explaining what this dimension measures
+- "weight": number 0.15-0.40 (all weights must sum to 1.0)
+- "rubric": object with keys 1-5, each a one-sentence description for that score level
+
+Example for an image generation task:
+[{"name":"visual_quality","description":"Is the generated image sharp, well-composed, and visually appealing?","weight":0.30,"rubric":{"1":"Unusable — heavily distorted or corrupted","2":"Poor quality — major visual artifacts","3":"Acceptable — meets basic standards","4":"Good — clean and well-composed","5":"Excellent — professional-grade visual quality"}},{"name":"prompt_adherence","description":"Does the image match the requested subject, style, and details?","weight":0.35,"rubric":{"1":"Completely ignores the prompt","2":"Loosely related but misses key elements","3":"Partially matches — some elements present","4":"Good match — most details captured","5":"Perfect match — every detail faithfully rendered"}},{"name":"completeness","description":"Are all requested deliverables produced in the correct formats?","weight":0.35,"rubric":{"1":"No deliverables produced","2":"Partial output — missing files or formats","3":"Core deliverables present but extras missing","4":"Nearly complete — minor omissions","5":"All deliverables produced correctly"}}]`,
+        timestamp: Date.now(),
+      },
+    ];
+
+    const response = await completeSimple(m, {
+      systemPrompt: "You are an evaluation expert. Output ONLY a valid JSON array. No markdown fences, no explanations.",
+      messages,
+      tools: [],
+    }, buildStreamOpts(apiKey));
+
+    // Extract text from response
+    let text = "";
+    for (const block of response.content) {
+      if (block.type === "text") text += block.text;
+    }
+    text = text.trim();
+
+    // Strip markdown fences if present
+    const fenceMatch = text.match(/```(?:json)?\s*\n?([\s\S]*?)\n?\s*```/);
+    if (fenceMatch) text = fenceMatch[1].trim();
+
+    const parsed = JSON.parse(text);
+    if (!Array.isArray(parsed) || parsed.length < 2 || parsed.length > 6) {
+      throw new Error(`Expected 2-6 dimensions, got ${Array.isArray(parsed) ? parsed.length : typeof parsed}`);
+    }
+
+    // Validate and normalize
+    const dimensions: EvalDimension[] = [];
+    let totalWeight = 0;
+    for (const d of parsed) {
+      if (!d.name || !d.description || typeof d.weight !== "number") continue;
+      const rubric: Record<number, string> = {};
+      if (d.rubric && typeof d.rubric === "object") {
+        for (const [k, v] of Object.entries(d.rubric)) {
+          const num = Number(k);
+          if (num >= 1 && num <= 5 && typeof v === "string") rubric[num] = v;
+        }
+      }
+      dimensions.push({
+        name: String(d.name),
+        description: String(d.description),
+        weight: d.weight,
+        ...(Object.keys(rubric).length > 0 ? { rubric } : {}),
+      });
+      totalWeight += d.weight;
+    }
+
+    if (dimensions.length < 2) {
+      throw new Error(`Only ${dimensions.length} valid dimensions parsed`);
+    }
+
+    // Normalize weights to sum to 1.0
+    if (Math.abs(totalWeight - 1.0) > 0.01) {
+      for (const dim of dimensions) {
+        dim.weight = dim.weight / totalWeight;
+      }
+    }
+
+    onProgress?.(`Generated ${dimensions.length} task-specific dimensions: ${dimensions.map(d => d.name).join(", ")}`);
+    return dimensions;
+  } catch (err) {
+    onProgress?.(`Dimension generation failed (${err instanceof Error ? err.message : String(err)}), using defaults.`);
+    return DEFAULT_DIMENSIONS;
+  }
 }
 
 // ── Main Entry Point ───────────────────────────────────────────────────
@@ -695,15 +819,17 @@ export async function runLLMReview(
   context?: ReviewContext,
   reasoning?: ReasoningLevel,
 ): Promise<CheckResult> {
-  const criteria = expectation.criteria || "Code should be correct, well-structured, and meet the task requirements.";
-  const dimensions = expectation.dimensions ?? DEFAULT_DIMENSIONS;
+  const criteria = expectation.criteria || "The work should be correct, well-structured, and meet the task requirements.";
   const threshold = expectation.threshold ?? 3.0;
 
-  const dimNames = dimensions.map(d => d.name).join(", ");
+  const reviewModel = process.env.POLPO_JUDGE_MODEL || process.env.POLPO_MODEL || "anthropic:claude-sonnet-4-5";
+
+  // Generate task-specific dimensions via LLM when not explicitly provided
+  const dimensions = expectation.dimensions ?? await generateDimensions(context, reviewModel, onProgress);
+
+  const dimNames = dimensions.map((d: EvalDimension) => d.name).join(", ");
   const rubricSection = buildRubricSection(dimensions);
   const explorationPrompt = buildExplorationPrompt(criteria, rubricSection, dimNames, context);
-
-  const reviewModel = process.env.POLPO_JUDGE_MODEL || process.env.POLPO_MODEL || "anthropic:claude-sonnet-4.6";
   // Judge reasoning: explicit param > POLPO_JUDGE_REASONING env var > undefined
   const judgeReasoning = reasoning ?? (process.env.POLPO_JUDGE_REASONING as ReasoningLevel | undefined);
 
@@ -735,12 +861,12 @@ export async function runLLMReview(
   if (successfulReviews.length >= 2) {
     onProgress?.(`Computing consensus from ${successfulReviews.length} reviewers...`);
     const consensus = computeMedianScores(successfulReviews, dimensions);
-    return buildCheckResult(consensus, dimensions, threshold);
+    return buildCheckResult(consensus, dimensions, threshold, successfulReviews);
   }
 
   if (successfulReviews.length === 1) {
     onProgress?.("Only 1 reviewer succeeded, using single review...");
-    return buildCheckResult(successfulReviews[0], dimensions, threshold);
+    return buildCheckResult(successfulReviews[0], dimensions, threshold, successfulReviews);
   }
 
   const failureDetail = failures.length > 0

@@ -316,7 +316,7 @@ function TaskCard({
   return (
     <div
       className={cn(
-        "group rounded-lg border border-border/40 bg-card/80 backdrop-blur-sm transition-all cursor-pointer",
+        "group rounded-lg border border-border/40 bg-card/80 backdrop-blur-sm transition-all cursor-pointer overflow-hidden",
         "hover:border-primary/20 hover:shadow-[0_0_15px_oklch(0.7_0.15_200_/_8%)]",
         compact && "p-2.5",
         !compact && "p-3",
@@ -329,7 +329,7 @@ function TaskCard({
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5 min-w-0">
-            <span className={cn("font-medium", compact ? "text-xs line-clamp-2" : "text-sm line-clamp-2")}>{task.title}</span>
+            <span className={cn("font-medium min-w-0", compact ? "text-xs truncate" : "text-sm line-clamp-2")}>{task.title}</span>
             {phase && (
               <Badge variant="outline" className={cn("text-[8px] gap-0.5 px-1 py-0 shrink-0", phase.color)}>
                 <phase.icon className="h-2 w-2" />
@@ -362,7 +362,7 @@ function TaskCard({
                 )}>
                   <Star className={cn("h-2.5 w-2.5", assessment.passed ? "text-emerald-500" : "text-red-500")} />
                   <span className={cn("text-[10px] font-bold", assessment.passed ? "text-emerald-500" : "text-red-500")}>
-                    {Math.round(assessment.globalScore * 100)}
+                    {assessment.globalScore.toFixed(1)}
                   </span>
                 </div>
               </TooltipTrigger>
@@ -411,30 +411,32 @@ function TaskCard({
 
       {/* Live activity strip for running tasks */}
       {process && (
-        <div className="flex items-center gap-2 mt-2 pt-2 border-t border-primary/10">
-          <div className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse shrink-0" />
-          {process.activity.lastTool && (
-            <Badge variant="outline" className="text-[8px] font-mono px-1 py-0 text-primary border-primary/30">
-              <Wrench className="h-2 w-2 mr-0.5" />{process.activity.lastTool}
-            </Badge>
-          )}
-          {process.activity.lastFile && (
-            <span className="text-[10px] font-mono text-muted-foreground truncate">
-              {process.activity.lastFile.split("/").pop()}
-            </span>
-          )}
-          <div className="flex items-center gap-2 ml-auto shrink-0">
-            {process.activity.toolCalls > 0 && (
-              <span className="text-[10px] text-muted-foreground flex items-center gap-0.5">
-                <Zap className="h-2.5 w-2.5" />{process.activity.toolCalls}
-              </span>
+        <div className="mt-2 pt-2 border-t border-primary/10 space-y-1 overflow-hidden">
+          <div className="flex items-center gap-2">
+            <div className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse shrink-0" />
+            {process.activity.lastTool && (
+              <Badge variant="outline" className="text-[8px] font-mono px-1 py-0 text-primary border-primary/30">
+                <Wrench className="h-2 w-2 mr-0.5" />{process.activity.lastTool}
+              </Badge>
             )}
-            {(process.activity.filesCreated.length + process.activity.filesEdited.length) > 0 && (
-              <span className="text-[10px] text-muted-foreground flex items-center gap-0.5">
-                <FileEdit className="h-2.5 w-2.5" />{process.activity.filesCreated.length + process.activity.filesEdited.length}
-              </span>
-            )}
+            <div className="flex items-center gap-2 ml-auto shrink-0">
+              {process.activity.toolCalls > 0 && (
+                <span className="text-[10px] text-muted-foreground flex items-center gap-0.5">
+                  <Zap className="h-2.5 w-2.5" />{process.activity.toolCalls}
+                </span>
+              )}
+              {(process.activity.filesCreated.length + process.activity.filesEdited.length) > 0 && (
+                <span className="text-[10px] text-muted-foreground flex items-center gap-0.5">
+                  <FileEdit className="h-2.5 w-2.5" />{process.activity.filesCreated.length + process.activity.filesEdited.length}
+                </span>
+              )}
+            </div>
           </div>
+          {process.activity.lastFile && (
+            <p className="text-[10px] font-mono text-muted-foreground truncate pl-3.5 w-full">
+              {process.activity.lastFile}
+            </p>
+          )}
         </div>
       )}
 
@@ -484,7 +486,7 @@ function KanbanBoard({
         const colCfg = col.status === "queued" ? statusConfig.pending : statusConfig[col.status as TaskStatus];
 
         return (
-          <div key={col.status} className="flex flex-col min-w-[260px] w-[260px] shrink-0">
+          <div key={col.status} className="flex flex-col min-w-[260px] w-[260px] max-w-[260px] shrink-0">
             {/* Column header */}
             <div className="flex items-center gap-2 px-2 pb-2 shrink-0 border-t-2 border-border/30 pt-2">
               <div className={cn("h-2 w-2 rounded-full", colCfg.bg.replace("bg-", "bg-").replace("/10", ""))} style={{
@@ -496,7 +498,7 @@ function KanbanBoard({
 
             {/* Column body */}
             <ScrollArea className="flex-1 min-h-0">
-              <div className="space-y-1.5 px-1 pr-3 pb-1">
+              <div className="space-y-1.5 px-1 pr-3 pb-1 overflow-hidden">
                 {colTasks.length === 0 ? (
                   <div className="flex items-center justify-center py-8 text-muted-foreground/60">
                     <p className="text-[10px]">No tasks</p>

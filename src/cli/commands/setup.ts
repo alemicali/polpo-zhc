@@ -9,7 +9,7 @@ import { PROVIDER_ENV_MAP } from "../../llm/pi-client.js";
 
 const RECOMMENDED_MODELS: Record<string, { spec: string; label: string }[]> = {
   anthropic: [
-    { spec: "anthropic:claude-sonnet-4-6", label: "Claude Sonnet 4.6 (latest, balanced)" },
+    { spec: "anthropic:claude-sonnet-4-5", label: "Claude Sonnet 4.5 (latest, balanced)" },
     { spec: "anthropic:claude-sonnet-4-5-20250929", label: "Claude Sonnet 4.5 (balanced)" },
     { spec: "anthropic:claude-haiku-4-5-20251001", label: "Claude Haiku 4.5 (fast)" },
   ],

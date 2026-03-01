@@ -13,8 +13,9 @@ import type { Tool } from "@mariozechner/pi-ai";
 import type { Orchestrator } from "../core/orchestrator.js";
 import type { ApprovalStatus, VaultEntry, AgentIdentity, AgentResponsibility, AgentConfig } from "../core/types.js";
 import { existsSync, readFileSync, appendFileSync, writeFileSync, readdirSync, statSync, mkdirSync } from "fs";
-import { join, resolve, relative, isAbsolute } from "path";
+import { join, resolve, relative, isAbsolute, dirname } from "path";
 import { execSync } from "child_process";
+import { assertUrlAllowed } from "../tools/ssrf-guard.js";
 import {
   discoverOrchestratorSkills, createOrchestratorSkill, updateOrchestratorSkill,
   removeOrchestratorSkill, installOrchestratorSkills,
@@ -799,6 +800,40 @@ const runCommandTool: Tool = {
 };
 
 // ═══════════════════════════════════════════════════════
+//  HTTP TOOLS (2) — network access for the orchestrator
+// ═══════════════════════════════════════════════════════
+
+const httpFetchTool: Tool = {
+  name: "http_fetch",
+  description: "Make an HTTP request to a URL. Supports all HTTP methods, custom headers, and request bodies. Returns status code, response headers, and body. Use for API calls, fetching web pages, or checking endpoints. SSRF-protected: internal/private network addresses are blocked.",
+  parameters: Type.Object({
+    url: Type.String({ description: "URL to fetch (must be http:// or https://)" }),
+    method: Type.Optional(Type.Union([
+      Type.Literal("GET"),
+      Type.Literal("POST"),
+      Type.Literal("PUT"),
+      Type.Literal("DELETE"),
+      Type.Literal("PATCH"),
+      Type.Literal("HEAD"),
+      Type.Literal("OPTIONS"),
+    ], { description: "HTTP method (default: GET)" })),
+    headers: Type.Optional(Type.Record(Type.String(), Type.String(), { description: "Request headers as key-value pairs" })),
+    body: Type.Optional(Type.String({ description: "Request body (for POST/PUT/PATCH). Use JSON string for JSON APIs." })),
+    timeout: Type.Optional(Type.Number({ description: "Timeout in milliseconds (default: 30000)" })),
+  }),
+};
+
+const httpDownloadTool: Tool = {
+  name: "http_download",
+  description: "Download a file from a URL and save it locally. Use for downloading assets, binaries, or data files. SSRF-protected: internal/private network addresses are blocked.",
+  parameters: Type.Object({
+    url: Type.String({ description: "URL to download from" }),
+    path: Type.String({ description: "Local file path to save the downloaded content (relative to project root or absolute)" }),
+    headers: Type.Optional(Type.Record(Type.String(), Type.String(), { description: "Optional request headers" })),
+  }),
+};
+
+// ═══════════════════════════════════════════════════════
 //  INTERACTIVE TOOLS
 // ═══════════════════════════════════════════════════════
 
@@ -838,6 +873,8 @@ export const READ_TOOLS = new Set([
   "list_orchestrator_skills", "list_agent_skills", "search_skills", "get_skill",
   // File System (read-only)
   "read_file", "list_directory", "grep_files",
+  // HTTP (read-only)
+  "http_fetch",
 ]);
 
 export const WRITE_TOOLS = new Set([
@@ -865,6 +902,8 @@ export const WRITE_TOOLS = new Set([
   "install_orchestrator_skill", "create_agent_skill", "install_agent_skill", "remove_agent_skill",
   // File System (write)
   "write_file", "edit_file", "run_command",
+  // HTTP (write — downloads files to disk)
+  "http_download",
 ]);
 
 /** Tools that pause the conversation to collect user input / show a preview. */
@@ -912,6 +951,8 @@ export const ALL_ORCHESTRATOR_TOOLS: Tool[] = [
   searchSkillsTool, getSkillTool,
   // File System (6)
   readFileTool, writeFileTool, editFileTool, listDirectoryTool, grepFilesTool, runCommandTool,
+  // HTTP (2)
+  httpFetchTool, httpDownloadTool,
   // Interactive (1)
   askUserTool,
 ];
@@ -972,6 +1013,9 @@ const TOOL_LABELS: Record<string, string> = {
   write_file: "Write File",
   edit_file: "Edit File",
   run_command: "Run Command",
+  // HTTP
+  http_fetch: "HTTP Fetch",
+  http_download: "HTTP Download",
 };
 
 // ═══════════════════════════════════════════════════════
@@ -1025,11 +1069,11 @@ function resolveAgentName(agents: AgentConfig[], query: string): { name: string 
 //  EXECUTOR
 // ═══════════════════════════════════════════════════════
 
-export function executeOrchestratorTool(
+export async function executeOrchestratorTool(
   toolName: string,
   args: Record<string, unknown>,
   polpo: Orchestrator,
-): string {
+): Promise<string> {
   try {
     switch (toolName) {
       // ── Read ──
@@ -1130,6 +1174,10 @@ export function executeOrchestratorTool(
       case "list_directory":   return execListDirectory(polpo, args);
       case "grep_files":       return execGrepFiles(polpo, args);
       case "run_command":      return execRunCommand(polpo, args);
+
+      // ── HTTP ──
+      case "http_fetch":       return await execHttpFetch(polpo, args);
+      case "http_download":    return await execHttpDownload(polpo, args);
 
       // ── Interactive (handled by the calling loop, not here) ──
       case "ask_user":
@@ -2741,6 +2789,122 @@ function execRunCommand(polpo: Orchestrator, args: Record<string, unknown>): str
     if (e.stderr) parts.push(e.stderr.trim());
     if (parts.length === 0) parts.push(e.message ?? "Command failed");
     return `Exit code ${e.status ?? 1}:\n${parts.join("\n")}`;
+  }
+}
+
+// ═══════════════════════════════════════════════════════
+//  HTTP EXECUTORS
+// ═══════════════════════════════════════════════════════
+
+const HTTP_MAX_RESPONSE_BYTES = 100_000;
+const HTTP_DEFAULT_TIMEOUT = 30_000;
+
+async function execHttpFetch(_polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
+  const url = args.url as string;
+  if (!url.startsWith("http://") && !url.startsWith("https://")) {
+    return "Error: URL must start with http:// or https://";
+  }
+
+  try {
+    assertUrlAllowed(url);
+  } catch (err: any) {
+    return `Error: ${err.message}`;
+  }
+
+  const method = (args.method as string | undefined) ?? "GET";
+  const timeout = (args.timeout as number | undefined) ?? HTTP_DEFAULT_TIMEOUT;
+
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeout);
+
+    const response = await fetch(url, {
+      method,
+      headers: args.headers as Record<string, string> | undefined,
+      body: args.body as string | undefined,
+      signal: controller.signal,
+      redirect: "follow",
+    });
+
+    clearTimeout(timer);
+
+    const contentType = response.headers.get("content-type") ?? "";
+    const isText = contentType.includes("text") || contentType.includes("json") ||
+      contentType.includes("xml") || contentType.includes("javascript") ||
+      contentType.includes("html") || contentType.includes("css") ||
+      contentType.includes("svg");
+
+    let body: string;
+    if (isText) {
+      const text = await response.text();
+      body = text.length > HTTP_MAX_RESPONSE_BYTES
+        ? text.slice(0, HTTP_MAX_RESPONSE_BYTES) + `\n[truncated — ${text.length} total bytes]`
+        : text;
+    } else {
+      const buffer = await response.arrayBuffer();
+      body = `[Binary response: ${buffer.byteLength} bytes, content-type: ${contentType}]`;
+    }
+
+    // Extract relevant response headers
+    const responseHeaders: Record<string, string> = {};
+    for (const [key, value] of response.headers.entries()) {
+      if (["content-type", "content-length", "location", "set-cookie",
+           "cache-control", "x-ratelimit-remaining", "retry-after"].includes(key.toLowerCase())) {
+        responseHeaders[key] = value;
+      }
+    }
+
+    return [
+      `Status: ${response.status} ${response.statusText}`,
+      `Headers: ${JSON.stringify(responseHeaders)}`,
+      ``,
+      body,
+    ].join("\n");
+  } catch (err: any) {
+    const message = err.name === "AbortError" ? "Request timed out" : err.message;
+    return `Error: HTTP ${method} ${url} — ${message}`;
+  }
+}
+
+async function execHttpDownload(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
+  const url = args.url as string;
+  if (!url.startsWith("http://") && !url.startsWith("https://")) {
+    return "Error: URL must start with http:// or https://";
+  }
+
+  try {
+    assertUrlAllowed(url);
+  } catch (err: any) {
+    return `Error: ${err.message}`;
+  }
+
+  const filePath = resolveFilePath(polpo, args.path as string);
+
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 120_000); // 2 min for downloads
+
+    const response = await fetch(url, {
+      headers: args.headers as Record<string, string> | undefined,
+      signal: controller.signal,
+      redirect: "follow",
+    });
+
+    clearTimeout(timer);
+
+    if (!response.ok) {
+      return `Error: Download failed — ${response.status} ${response.statusText}`;
+    }
+
+    const buffer = Buffer.from(await response.arrayBuffer());
+    mkdirSync(dirname(filePath), { recursive: true });
+    writeFileSync(filePath, buffer);
+
+    const relPath = relative(polpo.getWorkDir(), filePath);
+    return `Downloaded ${buffer.byteLength} bytes to ${relPath}`;
+  } catch (err: any) {
+    const message = err.name === "AbortError" ? "Download timed out" : err.message;
+    return `Error: Download ${url} — ${message}`;
   }
 }
 

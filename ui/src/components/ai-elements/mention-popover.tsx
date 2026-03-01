@@ -10,7 +10,7 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
-import { User, ListChecks, Target } from "lucide-react";
+import { User, ListChecks, Target, FileText } from "lucide-react";
 import {
   Popover,
   PopoverAnchor,
@@ -25,7 +25,13 @@ import type { AgentConfig, Task, Mission } from "@lumea-labs/polpo-react";
 // ────────────────────────────────────────────────────────────────────────────
 
 /** All mentions use @ as trigger — categories are visual only in the menu */
-type MentionCategory = "agent" | "task" | "mission";
+type MentionCategory = "agent" | "task" | "mission" | "file";
+
+/** A mentionable file entry (path relative to project root) */
+export interface MentionFile {
+  name: string;
+  path: string;
+}
 
 interface TriggerState {
   isOpen: boolean;
@@ -71,6 +77,7 @@ export interface MentionPopoverProps {
   agents: AgentConfig[];
   tasks: Task[];
   missions: Mission[];
+  files?: MentionFile[];
   children: ReactNode;
 }
 
@@ -214,7 +221,7 @@ export const MentionPopover = forwardRef<
   MentionPopoverHandle,
   MentionPopoverProps
 >(function MentionPopover(
-  { textareaRef, agents, tasks, missions, children },
+  { textareaRef, agents, tasks, missions, files = [], children },
   ref,
 ) {
   const { isOpen, query, triggerIndex, close, handleInput } =
@@ -273,8 +280,21 @@ export const MentionPopover = forwardRef<
       });
     }
 
+    for (const f of files) {
+      const matchText = `${f.name} ${f.path}`.toLowerCase();
+      if (lowerQ && !matchText.includes(lowerQ)) continue;
+      result.push({
+        id: `file:${f.path}`,
+        label: f.name,     // display: filename
+        value: f.path,     // wire: relative path
+        secondary: f.path !== f.name ? f.path : undefined,
+        icon: <FileText className="size-4 shrink-0 text-purple-500" />,
+        category: "file",
+      });
+    }
+
     return result;
-  }, [query, agents, tasks, missions]);
+  }, [query, agents, tasks, missions, files]);
 
   useEffect(() => {
     setSelectedIndex(0);
@@ -384,6 +404,7 @@ export const MentionPopover = forwardRef<
               agent: "Agents",
               task: "Tasks",
               mission: "Missions",
+              file: "Files",
             };
             return items.map((item, i) => {
               const showHeader = item.category !== lastCategory;

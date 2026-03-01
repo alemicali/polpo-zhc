@@ -55,6 +55,7 @@ export type {
   DimensionScoreEvidence,
   EvalDimension,
   CheckResult,
+  ReviewerResult,
   MetricResult,
   PolpoState,
   PolpoConfig,

@@ -6,12 +6,6 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
@@ -55,161 +49,19 @@ import {
   Download,
 } from "lucide-react";
 import { MessageResponse } from "@/components/ai-elements/message";
+import {
+  FilePreviewDialog,
+  fileReadUrl,
+  filePreviewUrl,
+  previewCategory,
+  type FilePreviewState,
+} from "@/components/shared/file-preview";
 import { useTask, useTasks, useProcesses, useTaskActivity } from "@lumea-labs/polpo-react";
-import type { TaskStatus, TaskOutcome, DimensionScore, CheckResult, EvalDimension, AssessmentResult, AssessmentTrigger, AgentProcess, RunActivityEntry } from "@lumea-labs/polpo-react";
+import type { TaskStatus, TaskOutcome, DimensionScore, CheckResult, ReviewerResult, EvalDimension, AssessmentResult, AssessmentTrigger, AgentProcess, RunActivityEntry } from "@lumea-labs/polpo-react";
 import { useAsyncAction } from "@/hooks/use-polpo";
 import { toast } from "sonner";
 import { formatDistanceToNow, format } from "date-fns";
 import { cn } from "@/lib/utils";
-import { config } from "@/lib/config";
-
-// ── File URL helper ──
-
-/** Build a URL to the files API endpoint for reading a file */
-function fileReadUrl(path: string, download?: boolean): string {
-  const base = config.baseUrl || "";
-  const params = new URLSearchParams({ path });
-  if (download) params.set("download", "1");
-  return `${base}/api/v1/files/read?${params.toString()}`;
-}
-
-/** Build a URL to the files API preview endpoint */
-function filePreviewUrl(path: string): string {
-  const base = config.baseUrl || "";
-  return `${base}/api/v1/files/preview?path=${encodeURIComponent(path)}`;
-}
-
-/** Determine the preview category from a MIME type */
-function previewCategory(mime?: string): "image" | "audio" | "video" | "pdf" | "code" | "text" | "binary" {
-  if (!mime) return "binary";
-  if (mime.startsWith("image/")) return "image";
-  if (mime.startsWith("audio/")) return "audio";
-  if (mime.startsWith("video/")) return "video";
-  if (mime === "application/pdf") return "pdf";
-  if (
-    mime.startsWith("text/x-") ||
-    mime === "text/typescript" ||
-    mime === "text/javascript" ||
-    mime === "text/css" ||
-    mime === "text/html" ||
-    mime === "application/json" ||
-    mime === "application/xml"
-  ) return "code";
-  if (mime.startsWith("text/")) return "text";
-  return "binary";
-}
-
-/** Extract a language hint from MIME type for code blocks */
-function langFromMime(mime?: string): string {
-  if (!mime) return "";
-  const map: Record<string, string> = {
-    "text/typescript": "typescript", "text/javascript": "javascript",
-    "text/css": "css", "text/html": "html", "text/x-python": "python",
-    "text/x-ruby": "ruby", "text/x-go": "go", "text/x-rust": "rust",
-    "text/x-java": "java", "text/x-c": "c", "text/x-c++": "cpp",
-    "text/x-sql": "sql", "text/x-shellscript": "bash",
-    "text/yaml": "yaml", "text/markdown": "markdown",
-    "application/json": "json", "application/xml": "xml",
-  };
-  return map[mime] ?? "";
-}
-
-// ── File preview dialog ──
-
-interface FilePreviewState {
-  outcome: TaskOutcome;
-  content?: string;
-  loading: boolean;
-  error?: string;
-}
-
-function FilePreviewDialog({
-  preview,
-  onClose,
-}: {
-  preview: FilePreviewState | null;
-  onClose: () => void;
-}) {
-  if (!preview) return null;
-  const { outcome: o, content, loading, error } = preview;
-  const category = previewCategory(o.mimeType);
-  const readUrl = o.path ? fileReadUrl(o.path) : o.url;
-  const downloadUrl = o.path ? fileReadUrl(o.path, true) : o.url;
-
-  return (
-    <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-4xl max-h-[85vh] flex flex-col p-0 gap-0">
-        <DialogHeader className="flex flex-row items-center gap-2 px-4 py-3 border-b border-border/40 shrink-0">
-          <DialogTitle className="text-sm font-medium truncate flex-1">{o.label}</DialogTitle>
-          <div className="flex items-center gap-1 shrink-0">
-            {o.mimeType && (
-              <Badge variant="outline" className="text-[9px]">{o.mimeType}</Badge>
-            )}
-            {downloadUrl && (
-              <Button variant="ghost" size="icon" className="h-7 w-7" asChild>
-                <a href={downloadUrl} download title="Download">
-                  <Download className="h-3.5 w-3.5" />
-                </a>
-              </Button>
-            )}
-          </div>
-        </DialogHeader>
-
-        <div className="flex-1 min-h-0 overflow-auto">
-          {loading ? (
-            <div className="flex items-center justify-center h-64">
-              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-            </div>
-          ) : error ? (
-            <div className="flex items-center justify-center h-64 text-sm text-destructive">{error}</div>
-          ) : category === "image" && readUrl ? (
-            <div className="flex items-center justify-center p-4 bg-muted/20">
-              <img src={readUrl} alt={o.label} className="max-w-full max-h-[70vh] object-contain rounded" />
-            </div>
-          ) : category === "audio" && readUrl ? (
-            <div className="flex items-center justify-center p-8">
-              <audio controls src={readUrl} className="w-full max-w-lg" />
-            </div>
-          ) : category === "video" && readUrl ? (
-            <div className="flex items-center justify-center p-4 bg-black">
-              <video controls src={readUrl} className="max-w-full max-h-[70vh]" />
-            </div>
-          ) : category === "pdf" && readUrl ? (
-            <iframe src={readUrl} className="w-full h-[70vh]" title={o.label} />
-          ) : (category === "code" || category === "text") && content ? (
-            <ScrollArea className="max-h-[70vh]">
-              <div className="p-4">
-                <MessageResponse mode="static" className="text-sm">
-                  {category === "code"
-                    ? `\`\`\`${langFromMime(o.mimeType)}\n${content}\n\`\`\``
-                    : o.mimeType === "text/markdown" ? content : `\`\`\`\n${content}\n\`\`\``}
-                </MessageResponse>
-              </div>
-            </ScrollArea>
-          ) : o.text ? (
-            <ScrollArea className="max-h-[70vh]">
-              <div className="p-4">
-                <MessageResponse mode="static" className="text-sm">{o.text}</MessageResponse>
-              </div>
-            </ScrollArea>
-          ) : (
-            <div className="flex flex-col items-center justify-center h-64 gap-3 text-muted-foreground">
-              <File className="h-10 w-10" />
-              <p className="text-sm">Preview not available for this file type</p>
-              {downloadUrl && (
-                <Button variant="outline" size="sm" asChild>
-                  <a href={downloadUrl} download>
-                    <Download className="h-3.5 w-3.5 mr-1.5" /> Download
-                  </a>
-                </Button>
-              )}
-            </div>
-          )}
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-}
 
 // ── Status config ──
 
@@ -615,7 +467,7 @@ function AssessmentHistoryRow({ assessment, index }: { assessment: AssessmentRes
           )}
           <TriggerBadge trigger={assessment.trigger} />
           {assessment.globalScore != null && (
-            <span className="text-xs font-mono">{Math.round(assessment.globalScore * 100)}%</span>
+            <span className="text-xs font-mono">{assessment.globalScore.toFixed(1)}/5</span>
           )}
           <span className="text-[11px] text-muted-foreground ml-auto shrink-0">
             {assessment.timestamp ? formatDistanceToNow(new Date(assessment.timestamp), { addSuffix: true }) : ""}
@@ -700,31 +552,51 @@ export function TaskDetailPage() {
   const [previewState, setPreviewState] = useState<FilePreviewState | null>(null);
 
   const openPreview = useCallback(async (o: TaskOutcome) => {
+    const item = { label: o.label, path: o.path, url: o.url, mimeType: o.mimeType, size: o.size, text: o.text, data: o.data, type: o.type };
     const category = previewCategory(o.mimeType);
     // For binary-served types (image, audio, video, pdf) no content fetch needed
     if (["image", "audio", "video", "pdf"].includes(category)) {
-      setPreviewState({ outcome: o, loading: false });
+      setPreviewState({ item, loading: false });
       return;
     }
-    // For text/code: if we already have inline text, use it
+    // Inline text content
     if (o.text) {
-      setPreviewState({ outcome: o, content: o.text, loading: false });
+      setPreviewState({ item, content: o.text, loading: false });
+      return;
+    }
+    // Inline JSON data
+    if (o.type === "json" && o.data !== undefined) {
+      setPreviewState({ item, content: JSON.stringify(o.data, null, 2), loading: false });
+      return;
+    }
+    // External URL — open in dialog (iframe or link)
+    if (!o.path && o.url) {
+      setPreviewState({ item, loading: false });
       return;
     }
     // Fetch content from the preview API
     if (!o.path) {
-      setPreviewState({ outcome: o, loading: false, error: "No file path available" });
+      setPreviewState({ item, loading: false, error: "No file path available" });
       return;
     }
-    setPreviewState({ outcome: o, loading: true });
+    setPreviewState({ item, loading: true });
     try {
-      const res = await fetch(filePreviewUrl(o.path));
-      if (!res.ok) throw new Error(`Failed to load preview (${res.status})`);
-      const json = await res.json();
-      if (!json.ok) throw new Error(json.error ?? "Preview failed");
-      setPreviewState({ outcome: o, content: json.data.content ?? "", loading: false });
+      // For HTML files, fetch full content from /read (not /preview which truncates at 500 lines)
+      const isHtml = o.mimeType === "text/html" || /\.html?$/i.test(o.path);
+      if (isHtml) {
+        const res = await fetch(fileReadUrl(o.path));
+        if (!res.ok) throw new Error(`Failed to load file (${res.status})`);
+        const text = await res.text();
+        setPreviewState({ item, content: text, loading: false });
+      } else {
+        const res = await fetch(filePreviewUrl(o.path));
+        if (!res.ok) throw new Error(`Failed to load preview (${res.status})`);
+        const json = await res.json();
+        if (!json.ok) throw new Error(json.error ?? "Preview failed");
+        setPreviewState({ item, content: json.data.content ?? "", loading: false });
+      }
     } catch (e) {
-      setPreviewState({ outcome: o, loading: false, error: (e as Error).message });
+      setPreviewState({ item, loading: false, error: (e as Error).message });
     }
   }, []);
 
@@ -834,68 +706,8 @@ export function TaskDetailPage() {
           <ScrollArea className="h-full">
             <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 pr-4">
 
-              {/* ── Left column (3/5): output, assessment, description ── */}
+              {/* ── Left column (3/5): assessment, output, description ── */}
               <div className="lg:col-span-3 space-y-4">
-
-              {/* ── Output (stdout/stderr — collapsible, open by default) ── */}
-              {task.result && (task.result.stdout || task.result.stderr) && (
-                <Collapsible defaultOpen>
-                  <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0">
-                    <CardContent className="pt-4 space-y-3">
-                      <CollapsibleTrigger className="flex items-center gap-1.5 text-[10px] font-medium text-muted-foreground uppercase tracking-widest hover:text-foreground transition-colors cursor-pointer group w-full">
-                        <Terminal className="h-3 w-3" /> Output
-                        <ChevronDown className="h-3 w-3 ml-auto transition-transform group-data-[state=open]:rotate-180" />
-                      </CollapsibleTrigger>
-                      <CollapsibleContent>
-                        <div className="space-y-3 pt-1">
-                          {task.result.stdout && (
-                            <div>
-                              <div className="flex items-center justify-between mb-1.5">
-                                <span className="text-[10px] text-muted-foreground font-medium">stdout</span>
-                                <div className="flex items-center gap-2">
-                                  <span className="text-[10px] font-mono text-muted-foreground/50">{task.result.stdout.split("\n").length} lines</span>
-                                  <Button
-                                    variant="ghost" size="icon" className="h-5 w-5"
-                                    onClick={() => { navigator.clipboard.writeText(task.result!.stdout!); toast.success("stdout copied"); }}
-                                  >
-                                    <Copy className="h-3 w-3" />
-                                  </Button>
-                                </div>
-                              </div>
-                              <ScrollArea className="max-h-[600px] rounded-md border border-border/30">
-                                <div className="px-4 py-3 bg-muted/20">
-                                  <MessageResponse mode="static" className="text-sm">{task.result.stdout}</MessageResponse>
-                                </div>
-                              </ScrollArea>
-                            </div>
-                          )}
-                          {task.result.stderr && (
-                            <div>
-                              <div className="flex items-center justify-between mb-1.5">
-                                <span className="text-[10px] text-red-400 font-medium">stderr</span>
-                                <div className="flex items-center gap-2">
-                                  <span className="text-[10px] font-mono text-muted-foreground/50">{task.result.stderr.split("\n").length} lines</span>
-                                  <Button
-                                    variant="ghost" size="icon" className="h-5 w-5"
-                                    onClick={() => { navigator.clipboard.writeText(task.result!.stderr!); toast.success("stderr copied"); }}
-                                  >
-                                    <Copy className="h-3 w-3" />
-                                  </Button>
-                                </div>
-                              </div>
-                              <ScrollArea className="h-48 rounded-md border border-red-500/20">
-                                <pre className="text-xs bg-red-500/5 px-4 py-3 whitespace-pre-wrap font-mono text-red-400/80 leading-relaxed">
-                                  {task.result.stderr}
-                                </pre>
-                              </ScrollArea>
-                            </div>
-                          )}
-                        </div>
-                      </CollapsibleContent>
-                    </CardContent>
-                  </Card>
-                </Collapsible>
-              )}
 
               {/* ── Assessment summary (collapsible, open by default) ── */}
               {assessment && (
@@ -904,15 +716,15 @@ export function TaskDetailPage() {
                   "bg-card/80 backdrop-blur-sm border-border/40 overflow-hidden",
                   assessment.passed ? "border-l-2 border-l-emerald-500" : "border-l-2 border-l-red-500"
                 )}>
-                  <CardContent className="pt-4 space-y-4">
+                  <CardContent className="pt-3 space-y-3">
                     <CollapsibleTrigger className="flex items-center gap-1.5 text-[10px] font-medium text-muted-foreground uppercase tracking-widest hover:text-foreground transition-colors cursor-pointer group w-full">
                       {assessment.passed ? <CheckCircle2 className="h-3 w-3 text-emerald-500" /> : <XCircle className="h-3 w-3 text-red-500" />}
                       Assessment {assessment.passed ? "Passed" : "Failed"}
-                      {assessment.globalScore != null && <span className="font-mono ml-1">({Math.round(assessment.globalScore * 100)})</span>}
+                      {assessment.globalScore != null && <span className="font-mono ml-1">({assessment.globalScore.toFixed(1)}/5)</span>}
                       <ChevronDown className="h-3 w-3 ml-auto transition-transform group-data-[state=open]:rotate-180" />
                     </CollapsibleTrigger>
                     <CollapsibleContent>
-                    <div className="space-y-4 pt-1">
+                    <div className="space-y-3 pt-0.5">
                     {/* Score hero row */}
                     <div className="flex items-center gap-4">
                       {assessment.globalScore != null ? (
@@ -922,7 +734,7 @@ export function TaskDetailPage() {
                             ? "bg-emerald-500/10 text-emerald-500"
                             : "bg-red-500/10 text-red-500"
                         )}>
-                          {Math.round(assessment.globalScore * 100)}
+                          {assessment.globalScore.toFixed(1)}
                         </div>
                       ) : (
                         <div className={cn(
@@ -996,85 +808,168 @@ export function TaskDetailPage() {
                       </div>
                     )}
 
-                    {/* LLM review — collapsible */}
-                    {assessment.llmReview && (
-                      <Collapsible>
-                        <CollapsibleTrigger className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer group">
-                          <ChevronDown className="h-3 w-3 transition-transform group-data-[state=open]:rotate-180" />
-                          <Star className="h-3 w-3" />
-                          LLM Review
-                        </CollapsibleTrigger>
-                        <CollapsibleContent>
-                          <div className="rounded-md bg-muted/30 px-4 py-3 text-sm mt-2">
-                            <MessageResponse>{assessment.llmReview}</MessageResponse>
-                          </div>
-                        </CollapsibleContent>
-                      </Collapsible>
-                    )}
-
-                    {/* Dimension detail — collapsible for scores with reasoning/evidence */}
+                    {/* ── Dimension breakdown — visual score tiles ── */}
                     {assessment.scores && assessment.scores.some(s => s.reasoning || (s.evidence && s.evidence.length > 0)) && (
-                      <Collapsible>
+                      <Collapsible defaultOpen>
                         <CollapsibleTrigger className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer group">
                           <ChevronDown className="h-3 w-3 transition-transform group-data-[state=open]:rotate-180" />
                           <Scale className="h-3 w-3" />
-                          Score Details
+                          Score Breakdown
                         </CollapsibleTrigger>
                         <CollapsibleContent>
-                          <div className="mt-2 space-y-3">
-                            {assessment.scores.filter(s => s.reasoning || (s.evidence && s.evidence.length > 0)).map((s) => (
-                              <div key={s.dimension} className="space-y-1">
-                                <p className="text-xs font-medium capitalize">{s.dimension} <span className="text-muted-foreground font-mono">({(s.score / 5 * 100).toFixed(0)}%)</span></p>
-                                {s.reasoning && <p className="text-[11px] text-muted-foreground">{s.reasoning}</p>}
-                                {s.evidence && s.evidence.length > 0 && (
-                                  <div className="space-y-0.5">
-                                    {s.evidence.map((e, i) => (
-                                      <div key={i} className="flex items-center gap-2 text-[10px]">
-                                        <FileCode className="h-3 w-3 text-muted-foreground shrink-0" />
-                                        <code className="font-mono text-muted-foreground">{e.file}:{e.line}</code>
-                                        <span className="text-muted-foreground truncate">{e.note}</span>
+                          <div className="mt-2.5 grid grid-cols-1 gap-2">
+                            {assessment.scores.filter(s => s.reasoning || (s.evidence && s.evidence.length > 0)).map((s) => {
+                              const pct = Math.round((s.score / 5) * 100);
+                              const scoreColor = pct >= 80 ? "text-emerald-400" : pct >= 60 ? "text-amber-400" : "text-red-400";
+                              const barColor = pct >= 80 ? "bg-emerald-500" : pct >= 60 ? "bg-amber-500" : "bg-red-500";
+                              const bgGlow = pct >= 80 ? "from-emerald-500/[0.03]" : pct >= 60 ? "from-amber-500/[0.03]" : "from-red-500/[0.03]";
+                              return (
+                                <div key={s.dimension} className={cn(
+                                  "relative rounded-lg border border-border/30 overflow-hidden",
+                                  "bg-gradient-to-r to-transparent",
+                                  bgGlow
+                                )}>
+                                  {/* Score fill bar — background visual */}
+                                  <div
+                                    className={cn("absolute inset-y-0 left-0 opacity-[0.04]", barColor)}
+                                    style={{ width: `${pct}%` }}
+                                  />
+                                  <div className="relative flex items-start gap-3 p-3">
+                                    {/* Score ring */}
+                                    <div className="shrink-0 flex flex-col items-center gap-0.5">
+                                      <div
+                                        className="relative h-10 w-10 rounded-full flex items-center justify-center"
+                                        style={{
+                                          background: `conic-gradient(${pct >= 80 ? 'rgb(52 211 153)' : pct >= 60 ? 'rgb(251 191 36)' : 'rgb(248 113 113)'} ${pct * 3.6}deg, rgba(128,128,128,0.1) 0deg)`
+                                        }}
+                                      >
+                                        <div className="h-7 w-7 rounded-full bg-card flex items-center justify-center">
+                                          <span className={cn("text-[11px] font-bold font-mono tabular-nums", scoreColor)}>
+                                            {s.score.toFixed(1)}
+                                          </span>
+                                        </div>
                                       </div>
-                                    ))}
+                                      <span className="text-[8px] text-muted-foreground/50 font-mono">w:{s.weight}</span>
+                                    </div>
+                                    {/* Content */}
+                                    <div className="flex-1 min-w-0 space-y-1.5">
+                                      <div className="flex items-center gap-2">
+                                        <span className="text-xs font-semibold capitalize tracking-tight">{s.dimension}</span>
+                                        <span className={cn("text-[10px] font-mono font-bold", scoreColor)}>{pct}%</span>
+                                      </div>
+                                      {s.reasoning && (
+                                        <p className="text-[11px] text-muted-foreground/80 leading-relaxed">{s.reasoning}</p>
+                                      )}
+                                      {s.evidence && s.evidence.length > 0 && (
+                                        <div className="flex flex-wrap gap-1 pt-0.5">
+                                          {s.evidence.map((e, i) => (
+                                            <span
+                                              key={i}
+                                              className="inline-flex items-center gap-1 rounded-md bg-muted/40 px-1.5 py-0.5 text-[9px] font-mono text-muted-foreground hover:bg-muted/60 transition-colors"
+                                              title={e.note}
+                                            >
+                                              <FileCode className="h-2.5 w-2.5 shrink-0 opacity-60" />
+                                              {e.file.split('/').pop()}:{e.line}
+                                            </span>
+                                          ))}
+                                        </div>
+                                      )}
+                                    </div>
                                   </div>
-                                )}
-                              </div>
-                            ))}
+                                </div>
+                              );
+                            })}
                           </div>
                         </CollapsibleContent>
                       </Collapsible>
                     )}
 
-                    {/* Check detail — collapsible for checks with details/scores */}
-                    {assessment.checks.some(c => c.details || (c.scores && c.scores.length > 0)) && (
-                      <Collapsible>
-                        <CollapsibleTrigger className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer group">
-                          <ChevronDown className="h-3 w-3 transition-transform group-data-[state=open]:rotate-180" />
-                          <Eye className="h-3 w-3" />
-                          Check Details
-                        </CollapsibleTrigger>
-                        <CollapsibleContent>
-                          <div className="mt-2 space-y-3">
-                            {assessment.checks.filter((c: CheckResult) => c.details || (c.scores && c.scores.length > 0)).map((c: CheckResult, i: number) => (
-                              <div key={i} className="rounded-md border border-border/30 p-3 space-y-2">
-                                <div className="flex items-center gap-2 text-xs">
-                                  {c.passed
-                                    ? <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
-                                    : <XCircle className="h-3.5 w-3.5 text-red-500 shrink-0" />}
-                                  <Badge variant="outline" className="text-[8px] font-mono">{c.type}</Badge>
-                                  <span className="font-medium">{c.message}</span>
-                                </div>
-                                {c.details && <p className="text-[11px] text-muted-foreground ml-5">{c.details}</p>}
-                                {c.scores && c.scores.length > 0 && (
-                                  <div className="ml-5">
-                                    <DimensionScores scores={c.scores} />
-                                  </div>
-                                )}
-                              </div>
-                            ))}
-                          </div>
-                        </CollapsibleContent>
-                      </Collapsible>
-                    )}
+                    {/* ── Reviewer votes — horizontal judge cards ── */}
+                    {(() => {
+                      const llmCheck = assessment.checks.find(c => c.type === "llm_review");
+                      const reviewers = llmCheck?.reviewers as ReviewerResult[] | undefined;
+                      if (!reviewers || reviewers.length === 0) return null;
+                      const medianScore = llmCheck?.globalScore ?? 3;
+                      return (
+                        <Collapsible>
+                          <CollapsibleTrigger className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer group">
+                            <ChevronDown className="h-3 w-3 transition-transform group-data-[state=open]:rotate-180" />
+                            <Star className="h-3 w-3" />
+                             Judge Votes ({reviewers.length})
+                          </CollapsibleTrigger>
+                          <CollapsibleContent>
+                            <div className="mt-2.5 space-y-2">
+                              {reviewers.map((r) => {
+                                const isAboveMedian = r.globalScore >= medianScore;
+                                const rPct = Math.round((r.globalScore / 5) * 100);
+                                const rColor = rPct >= 80 ? "text-emerald-400" : rPct >= 60 ? "text-amber-400" : "text-red-400";
+                                return (
+                                  <Collapsible key={r.index}>
+                                    <div className="rounded-lg border border-border/30 overflow-hidden">
+                                      <CollapsibleTrigger className="flex items-center gap-2.5 w-full px-3 py-2 hover:bg-muted/20 transition-colors cursor-pointer group/rv">
+                                        {/* Reviewer avatar */}
+                                        <div className={cn(
+                                          "flex h-7 items-center justify-center rounded-md text-[10px] font-bold font-mono shrink-0 px-2",
+                                          isAboveMedian
+                                            ? "bg-emerald-500/10 text-emerald-400 ring-1 ring-emerald-500/20"
+                                            : "bg-amber-500/10 text-amber-400 ring-1 ring-amber-500/20"
+                                        )}>
+                                          Judge {r.index}
+                                        </div>
+                                        {/* Score */}
+                                        <span className={cn("text-sm font-bold font-mono tabular-nums", rColor)}>
+                                          {r.globalScore.toFixed(1)}
+                                        </span>
+                                        {/* Mini dimension bar — segmented horizontal visualization */}
+                                        <div className="flex-1 flex items-center gap-px h-2 rounded-sm overflow-hidden bg-muted/30">
+                                          {r.scores.map((s, si) => {
+                                            const sPct = (s.score / 5) * 100;
+                                            const sColor = sPct >= 80 ? "bg-emerald-500" : sPct >= 60 ? "bg-amber-500" : "bg-red-500";
+                                            return (
+                                              <div
+                                                key={si}
+                                                className="flex-1 h-full relative"
+                                                title={`${s.dimension}: ${s.score.toFixed(1)}/5`}
+                                              >
+                                                <div className={cn("absolute inset-y-0 left-0 rounded-[1px]", sColor)} style={{ width: `${sPct}%` }} />
+                                              </div>
+                                            );
+                                          })}
+                                        </div>
+                                        <ChevronDown className="h-3 w-3 text-muted-foreground/50 transition-transform group-data-[state=open]/rv:rotate-180 shrink-0" />
+                                      </CollapsibleTrigger>
+                                      <CollapsibleContent>
+                                        <div className="px-3 pb-3 pt-1 space-y-2 border-t border-border/20">
+                                          {/* Summary */}
+                                          <p className="text-[11px] text-muted-foreground/80 leading-relaxed">{r.summary}</p>
+                                          {/* Scores grid */}
+                                          <div className="grid grid-cols-2 gap-x-3 gap-y-1">
+                                            {r.scores.map((s) => {
+                                              const dimPct = Math.round((s.score / 5) * 100);
+                                              const dimColor = dimPct >= 80 ? "text-emerald-400" : dimPct >= 60 ? "text-amber-400" : "text-red-400";
+                                              return (
+                                                <div key={s.dimension} className="flex items-center gap-1.5 text-[10px]">
+                                                  <span className="text-muted-foreground/60 capitalize truncate flex-1">{s.dimension}</span>
+                                                  <span className={cn("font-mono font-bold tabular-nums shrink-0", dimColor)}>
+                                                    {s.score.toFixed(1)}
+                                                  </span>
+                                                </div>
+                                              );
+                                            })}
+                                          </div>
+                                        </div>
+                                      </CollapsibleContent>
+                                    </div>
+                                  </Collapsible>
+                                );
+                              })}
+                            </div>
+                          </CollapsibleContent>
+                        </Collapsible>
+                      );
+                    })()}
+
+
                     </div>
                     </CollapsibleContent>
                   </CardContent>
@@ -1097,6 +992,64 @@ export function TaskDetailPage() {
                       ))}
                     </div>
                   </CollapsibleContent>
+                </Collapsible>
+              )}
+
+              {/* ── Output (stdout/stderr — collapsible, open by default) ── */}
+              {task.result && (task.result.stdout || task.result.stderr) && (
+                <Collapsible defaultOpen>
+                  <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0">
+                    <CardContent className="pt-4 space-y-3">
+                      <CollapsibleTrigger className="flex items-center gap-1.5 text-[10px] font-medium text-muted-foreground uppercase tracking-widest hover:text-foreground transition-colors cursor-pointer group w-full">
+                        <Terminal className="h-3 w-3" /> Output
+                        <ChevronDown className="h-3 w-3 ml-auto transition-transform group-data-[state=open]:rotate-180" />
+                      </CollapsibleTrigger>
+                      <CollapsibleContent>
+                        <div className="space-y-3 pt-1">
+                          {task.result.stdout && (
+                            <div>
+                              <div className="flex items-center justify-between mb-1.5">
+                                <span className="text-[10px] text-muted-foreground font-medium">stdout</span>
+                                <div className="flex items-center gap-2">
+                                  <span className="text-[10px] font-mono text-muted-foreground/50">{task.result.stdout.split("\n").length} lines</span>
+                                  <Button
+                                    variant="ghost" size="icon" className="h-5 w-5"
+                                    onClick={() => { navigator.clipboard.writeText(task.result!.stdout!); toast.success("stdout copied"); }}
+                                  >
+                                    <Copy className="h-3 w-3" />
+                                  </Button>
+                                </div>
+                              </div>
+                              <div className="rounded-md border border-border/30 px-4 py-3 bg-muted/20">
+                                <MessageResponse mode="static" className="text-sm">{task.result.stdout}</MessageResponse>
+                              </div>
+                            </div>
+                          )}
+                          {task.result.stderr && (
+                            <div>
+                              <div className="flex items-center justify-between mb-1.5">
+                                <span className="text-[10px] text-red-400 font-medium">stderr</span>
+                                <div className="flex items-center gap-2">
+                                  <span className="text-[10px] font-mono text-muted-foreground/50">{task.result.stderr.split("\n").length} lines</span>
+                                  <Button
+                                    variant="ghost" size="icon" className="h-5 w-5"
+                                    onClick={() => { navigator.clipboard.writeText(task.result!.stderr!); toast.success("stderr copied"); }}
+                                  >
+                                    <Copy className="h-3 w-3" />
+                                  </Button>
+                                </div>
+                              </div>
+                              <div className="rounded-md border border-red-500/20">
+                                <pre className="text-xs bg-red-500/5 px-4 py-3 whitespace-pre-wrap font-mono text-red-400/80 leading-relaxed">
+                                  {task.result.stderr}
+                                </pre>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </CollapsibleContent>
+                    </CardContent>
+                  </Card>
                 </Collapsible>
               )}
 
@@ -1236,7 +1189,11 @@ export function TaskDetailPage() {
                         const isAudio = o.mimeType?.startsWith("audio/");
                         const isVideo = o.mimeType?.startsWith("video/");
                         const category = previewCategory(o.mimeType);
-                        const canPreview = o.path && category !== "binary";
+                        const canPreview =
+                          (o.path && category !== "binary") || // file on disk (non-binary)
+                          !!o.text ||                          // inline text content
+                          (o.type === "json" && o.data !== undefined) || // inline JSON
+                          !!o.url;                             // external URL
                         const apiUrl = o.path ? fileReadUrl(o.path) : undefined;
                         const downloadHref = o.path ? fileReadUrl(o.path, true) : undefined;
 
@@ -1356,20 +1313,16 @@ export function TaskDetailPage() {
                             {/* Inline text content — rendered as markdown */}
                             {o.text && (
                               <div className="border-t border-border/30 px-3 py-2">
-                                <ScrollArea className="max-h-64">
-                                  <MessageResponse mode="static" className="text-sm">{o.text}</MessageResponse>
-                                </ScrollArea>
+                                <MessageResponse mode="static" className="text-sm">{o.text}</MessageResponse>
                               </div>
                             )}
 
                             {/* JSON data — formatted code block */}
                             {o.type === "json" && o.data !== undefined && (
                               <div className="border-t border-border/30 px-3 py-2">
-                                <ScrollArea className="max-h-48">
-                                  <MessageResponse mode="static" className="text-sm">
-                                    {"```json\n" + JSON.stringify(o.data, null, 2) + "\n```"}
-                                  </MessageResponse>
-                                </ScrollArea>
+                                <MessageResponse mode="static" className="text-sm">
+                                  {"```json\n" + JSON.stringify(o.data, null, 2) + "\n```"}
+                                </MessageResponse>
                               </div>
                             )}
 

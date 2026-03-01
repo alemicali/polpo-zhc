@@ -76,7 +76,7 @@ export function Header() {
             className="min-w-[140px] bg-popover/95 backdrop-blur-lg border-border/50"
           >
             <DropdownMenuItem
-              onClick={() => setTheme("light")}
+              onSelect={() => setTheme("light")}
               className="gap-2.5 text-xs"
             >
               <Sun className="h-3.5 w-3.5" />
@@ -86,7 +86,7 @@ export function Header() {
               )}
             </DropdownMenuItem>
             <DropdownMenuItem
-              onClick={() => setTheme("dark")}
+              onSelect={() => setTheme("dark")}
               className="gap-2.5 text-xs"
             >
               <Moon className="h-3.5 w-3.5" />
@@ -96,7 +96,7 @@ export function Header() {
               )}
             </DropdownMenuItem>
             <DropdownMenuItem
-              onClick={() => setTheme("system")}
+              onSelect={() => setTheme("system")}
               className="gap-2.5 text-xs"
             >
               <Monitor className="h-3.5 w-3.5" />

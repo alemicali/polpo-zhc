@@ -312,15 +312,29 @@ export interface Team {
 
 // === Assessment ===
 
+/** Individual reviewer result from llm_review multi-evaluator consensus */
+export interface ReviewerResult {
+  /** Reviewer index (1-based) */
+  index: number;
+  /** Per-dimension scores from this reviewer */
+  scores: { dimension: string; score: number; reasoning: string; evidence?: { file: string; line: number; note: string }[] }[];
+  /** Reviewer's summary */
+  summary: string;
+  /** Weighted average score for this reviewer */
+  globalScore: number;
+}
+
 export interface CheckResult {
   type: TaskExpectation["type"];
   passed: boolean;
   message: string;
   details?: string;
-  /** Per-dimension scores from llm_review */
+  /** Per-dimension scores from llm_review (consensus/median) */
   scores?: DimensionScore[];
   /** Weighted average score (1-5) from llm_review */
   globalScore?: number;
+  /** Individual reviewer results (llm_review only) — shows how each reviewer voted */
+  reviewers?: ReviewerResult[];
 }
 
 export interface MetricResult {

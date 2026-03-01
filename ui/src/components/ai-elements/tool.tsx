@@ -8,6 +8,12 @@ import {
 } from "@/components/ui/collapsible";
 import { Badge } from "@/components/ui/badge";
 import { MessageResponse } from "@/components/ai-elements/message";
+import {
+  FilePreviewDialog,
+  useFilePreview,
+  mimeFromPath,
+  previewCategory,
+} from "@/components/shared/file-preview";
 import { cn } from "@/lib/utils";
 import {
   Loader2,
@@ -15,6 +21,7 @@ import {
   AlertCircle,
   ChevronRight,
   Wrench,
+  FileText,
 } from "lucide-react";
 
 // ── Types ──
@@ -30,6 +37,25 @@ export interface ToolCallInfo {
 }
 
 // ── Helpers ──
+
+/** Tools whose first argument is a file path that can be previewed */
+const FILE_TOOLS = new Set(["write", "edit", "read"]);
+
+/** Extract file path from tool arguments, only if the file type is previewable */
+function extractFilePath(tool: ToolCallInfo): string | undefined {
+  if (!FILE_TOOLS.has(tool.name)) return undefined;
+  const args = tool.arguments;
+  if (!args) return undefined;
+  // write/read/edit all use "path" as the key
+  const p = args.path ?? args.filePath ?? args.file;
+  if (typeof p !== "string") return undefined;
+  // Only return path if the file has a known previewable MIME type
+  const mime = mimeFromPath(p);
+  if (!mime) return undefined;
+  const category = previewCategory(mime);
+  if (category === "binary") return undefined;
+  return p;
+}
 
 /** Convert tool_name to "Tool Name" */
 function formatToolName(name: string): string {
@@ -94,64 +120,94 @@ export function ToolInvocation({
   ...props
 }: ToolInvocationProps) {
   const isOpen = defaultOpen ?? tool.state === "error";
+  const filePath = extractFilePath(tool);
+  const { previewState, openPreview, closePreview } = useFilePreview();
+
+  const handleFileClick = (e: React.MouseEvent) => {
+    e.stopPropagation(); // Don't toggle the collapsible
+    if (!filePath) return;
+    const basename = filePath.split("/").pop() ?? filePath;
+    openPreview({
+      label: basename,
+      path: filePath,
+      mimeType: mimeFromPath(filePath),
+    });
+  };
 
   return (
-    <Collapsible defaultOpen={isOpen} {...props}>
-      <div
-        className={cn(
-          "rounded-lg border bg-card/50 text-card-foreground overflow-hidden my-4",
-          tool.state === "error" && "border-destructive/30",
-          tool.state === "calling" && "border-primary/20",
-          tool.state === "completed" && "border-border/50",
-          className,
-        )}
-      >
-        <CollapsibleTrigger className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-accent/30 transition-colors group">
-          <Wrench className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-          <span className="text-xs font-medium flex-1 truncate">
-            {formatToolName(tool.name)}
-          </span>
-          {getStateIcon(tool.state)}
-          {getStateBadge(tool.state)}
-          <ChevronRight className="h-3 w-3 text-muted-foreground transition-transform group-data-[state=open]:rotate-90 shrink-0" />
-        </CollapsibleTrigger>
-
-        <CollapsibleContent>
-          <div className="border-t border-border/40 px-3 py-2 space-y-2">
-            {/* Input arguments */}
-            {tool.arguments && Object.keys(tool.arguments).length > 0 && (
-              <div>
-                <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-1">
-                  Input
-                </p>
-                <div className="text-xs bg-muted/50 rounded-md px-2.5 py-1.5 max-h-32 overflow-y-auto">
-                  <MessageResponse>{`\`\`\`json\n${JSON.stringify(tool.arguments, null, 2)}\n\`\`\``}</MessageResponse>
-                </div>
-              </div>
+    <>
+      <Collapsible defaultOpen={isOpen} {...props}>
+        <div
+          className={cn(
+            "rounded-lg border bg-card/50 text-card-foreground overflow-hidden my-4",
+            tool.state === "error" && "border-destructive/30",
+            tool.state === "calling" && "border-primary/20",
+            tool.state === "completed" && "border-border/50",
+            className,
+          )}
+        >
+          <CollapsibleTrigger className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-accent/30 transition-colors group">
+            <Wrench className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+            <span className="text-xs font-medium truncate">
+              {formatToolName(tool.name)}
+            </span>
+            {/* Clickable file path for write/edit/read tools */}
+            {filePath && tool.state === "completed" && (
+              <button
+                onClick={handleFileClick}
+                className="flex items-center gap-1 text-[11px] text-primary hover:text-primary/80 hover:underline truncate max-w-[50%] cursor-pointer"
+                title={`Preview ${filePath}`}
+              >
+                <FileText className="h-3 w-3 shrink-0" />
+                <span className="truncate">{filePath}</span>
+              </button>
             )}
+            <span className="flex-1" />
+            {getStateIcon(tool.state)}
+            {getStateBadge(tool.state)}
+            <ChevronRight className="h-3 w-3 text-muted-foreground transition-transform group-data-[state=open]:rotate-90 shrink-0" />
+          </CollapsibleTrigger>
 
-            {/* Result */}
-            {tool.result && (
-              <div>
-                <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-1">
-                  {tool.state === "error" ? "Error" : "Result"}
-                </p>
-                <div
-                  className={cn(
-                    "text-xs rounded-md px-2.5 py-1.5 max-h-48 overflow-y-auto",
-                    tool.state === "error"
-                      ? "bg-destructive/10 text-destructive"
-                      : "bg-muted/50",
-                  )}
-                >
-                  <MessageResponse>{tool.result}</MessageResponse>
+          <CollapsibleContent>
+            <div className="border-t border-border/40 px-3 py-2 space-y-2">
+              {/* Input arguments */}
+              {tool.arguments && Object.keys(tool.arguments).length > 0 && (
+                <div>
+                  <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-1">
+                    Input
+                  </p>
+                  <div className="text-xs bg-muted/50 rounded-md px-2.5 py-1.5 max-h-32 overflow-y-auto">
+                    <MessageResponse>{`\`\`\`json\n${JSON.stringify(tool.arguments, null, 2)}\n\`\`\``}</MessageResponse>
+                  </div>
                 </div>
-              </div>
-            )}
-          </div>
-        </CollapsibleContent>
-      </div>
-    </Collapsible>
+              )}
+
+              {/* Result */}
+              {tool.result && (
+                <div>
+                  <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-1">
+                    {tool.state === "error" ? "Error" : "Result"}
+                  </p>
+                  <div
+                    className={cn(
+                      "text-xs rounded-md px-2.5 py-1.5 max-h-48 overflow-y-auto",
+                      tool.state === "error"
+                        ? "bg-destructive/10 text-destructive"
+                        : "bg-muted/50",
+                    )}
+                  >
+                    <MessageResponse>{tool.result}</MessageResponse>
+                  </div>
+                </div>
+              )}
+            </div>
+          </CollapsibleContent>
+        </div>
+      </Collapsible>
+
+      {/* File preview dialog (rendered per tool invocation, only mounts when active) */}
+      <FilePreviewDialog preview={previewState} onClose={closePreview} />
+    </>
   );
 }
 

@@ -497,7 +497,7 @@ export class ChannelGateway {
 
         for (const call of toolCalls) {
 
-          const result = executeOrchestratorTool(call.name, call.arguments, this.orchestrator);
+          const result = await executeOrchestratorTool(call.name, call.arguments, this.orchestrator);
           messages.push({
             role: "toolResult",
             toolCallId: call.id,

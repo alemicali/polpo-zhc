@@ -22,7 +22,7 @@ export function createActivity(): AgentActivity {
 }
 import { Agent } from "@mariozechner/pi-agent-core";
 import type { AgentEvent } from "@mariozechner/pi-agent-core";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import { resolveModel, resolveApiKeyAsync, enforceModelAllowlist } from "../llm/pi-client.js";
 import { createCodingTools, createAllTools } from "../tools/coding-tools.js";
 import { loadAgentSkills, buildSkillPrompt } from "../llm/skills.js";
@@ -207,10 +207,30 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
   // Derive output directory from context (per-task output dir for deliverables)
   const outputDir = ctx?.outputDir;
 
-  // If outputDir is set, add it to the agent's allowed paths so it can write there
-  const effectiveAllowedPaths = outputDir
-    ? [...(agentConfig.allowedPaths ?? []), outputDir]
-    : agentConfig.allowedPaths;
+  // Build effective allowed paths, preserving the resolveAllowedPaths default behavior.
+  //
+  // When allowedPaths is NOT configured (the common case), we leave it undefined so
+  // resolveAllowedPaths defaults to [cwd]. But outputDir (.polpo/output/<taskId>)
+  // may live outside cwd when settings.workDir points to a subdirectory, so we
+  // must add it explicitly in that case.
+  //
+  // When allowedPaths IS configured, we append outputDir so the agent can write
+  // deliverables regardless of its sandbox.
+  //
+  // BUG FIX: Previously, `agentConfig.allowedPaths ?? []` turned undefined into [],
+  // producing [outputDir] as the ONLY allowed path — locking the agent out of its
+  // own working directory.
+  let effectiveAllowedPaths: string[] | undefined;
+  if (agentConfig.allowedPaths) {
+    // Explicit sandbox — append outputDir so deliverables are always writable
+    effectiveAllowedPaths = [...agentConfig.allowedPaths, ...(outputDir ? [outputDir] : [])];
+  } else if (outputDir && !outputDir.startsWith(cwd + sep) && outputDir !== cwd) {
+    // No explicit sandbox, but outputDir is outside cwd — add both
+    effectiveAllowedPaths = [cwd, outputDir];
+  } else {
+    // No explicit sandbox, outputDir under cwd (or absent) — let resolveAllowedPaths default to [cwd]
+    effectiveAllowedPaths = undefined;
+  }
 
   // Start with core coding tools (sync); extended tools loaded async in the run phase
   const codingTools = createCodingTools(cwd, agentConfig.allowedTools, effectiveAllowedPaths, outputDir);

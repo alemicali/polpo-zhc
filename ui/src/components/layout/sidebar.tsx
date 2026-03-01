@@ -14,6 +14,7 @@ import {
   Workflow,
   Settings2,
   CalendarClock,
+  FolderOpen,
 } from "lucide-react";
 import { usePolpo } from "@lumea-labs/polpo-react";
 import { useProjectInfo } from "@/hooks/use-polpo";
@@ -56,6 +57,7 @@ const nav: NavSection[] = [
   {
     section: "System",
     items: [
+      { to: "/files", icon: FolderOpen, label: "Files" },
       { to: "/notifications", icon: Bell, label: "Notifications" },
       { to: "/config", icon: Settings2, label: "Configuration" },
     ],
@@ -217,24 +219,26 @@ export function Sidebar() {
                       ? "justify-center h-10 w-10"
                       : "gap-3 px-3 py-2.5 text-[13px] font-medium",
                     isActive
-                      ? "bg-accent text-accent-foreground shadow-sm"
+                      ? "bg-primary/10 text-primary shadow-sm ring-1 ring-primary/20"
                       : "text-muted-foreground hover:bg-accent/40 hover:text-foreground"
                   );
 
                 return collapsed ? (
                   <Tooltip key={to} delayDuration={0}>
                     <TooltipTrigger asChild>
-                      <NavLink to={to} className={linkClasses}>
-                        {({ isActive }) => (
-                          <>
-                            <Icon className="h-[18px] w-[18px]" />
-                            {isActive && (
-                              <span className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-[2px] h-5 w-1 rounded-r-full bg-primary" />
-                            )}
-                            {to === "/approvals" && <PendingBadge collapsed />}
-                          </>
-                        )}
-                      </NavLink>
+                      <div>
+                        <NavLink to={to} className={linkClasses}>
+                          {({ isActive }) => (
+                            <>
+                              {isActive && (
+                                <span className="absolute left-0 top-1/2 -translate-y-1/2 h-5 w-1 rounded-r-full bg-primary" />
+                              )}
+                              <Icon className="h-[18px] w-[18px]" />
+                              {to === "/approvals" && <PendingBadge collapsed />}
+                            </>
+                          )}
+                        </NavLink>
+                      </div>
                     </TooltipTrigger>
                     <TooltipContent side="right" className="text-xs font-medium">
                       {label}

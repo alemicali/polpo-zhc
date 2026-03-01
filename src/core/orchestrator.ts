@@ -113,6 +113,7 @@ export class Orchestrator extends TypedEmitter {
   private assessor!: AssessmentOrchestrator;
 
   getWorkDir(): string { return this.workDir; }
+  getAgentWorkDir(): string { return this.resolveAgentWorkDir(); }
   getHooks(): HookRegistry { return this.hookRegistry; }
   getNotificationRouter(): NotificationRouter | undefined { return this.notificationRouter; }
   getPeerStore(): PeerStore | undefined { return this.peerStore; }

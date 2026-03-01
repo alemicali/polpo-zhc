@@ -397,11 +397,11 @@ function RecentTasks({ tasks }: { tasks: Task[] }) {
                             )}
                           >
                             <Star className="h-2.5 w-2.5 mr-0.5" />
-                            {Math.round(task.result.assessment.globalScore * 100)}
+                            {task.result.assessment.globalScore.toFixed(1)}
                           </Badge>
                         </TooltipTrigger>
                         <TooltipContent className="text-xs">
-                          Assessment score: {Math.round(task.result.assessment.globalScore * 100)}%
+                          Assessment score: {task.result.assessment.globalScore.toFixed(1)}/5
                         </TooltipContent>
                       </Tooltip>
                     )}

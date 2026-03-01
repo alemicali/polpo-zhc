@@ -1,8 +1,8 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import type { ServerEnv } from "../app.js";
-import { resolve, relative, extname, basename } from "node:path";
-import { existsSync, statSync, readdirSync, createReadStream } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { resolve, relative, extname, basename, dirname } from "node:path";
+import { existsSync, statSync, readdirSync, createReadStream, mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { readFile, writeFile } from "node:fs/promises";
 import { Readable } from "node:stream";
 
 // ── MIME type map ────────────────────────────────────────────────────────────
@@ -82,6 +82,20 @@ function resolveSandboxed(requestPath: string, allowedRoots: string[]): string |
 
 const errorSchema = z.object({ ok: z.literal(false), error: z.string() });
 
+const listRootsRoute = createRoute({
+  method: "get",
+  path: "/roots",
+  tags: ["Files"],
+  summary: "List browsable root directories",
+  description: "Returns the filesystem roots that the file browser can navigate: the project working directory and the .polpo configuration directory.",
+  responses: {
+    200: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.any() }) } },
+      description: "Array of root directories with name, path, and description",
+    },
+  },
+});
+
 const listFilesRoute = createRoute({
   method: "get",
   path: "/list",
@@ -142,10 +156,94 @@ const previewFileRoute = createRoute({
 export function fileRoutes(): OpenAPIHono<ServerEnv> {
   const app = new OpenAPIHono<ServerEnv>();
 
-  function getAllowedRoots(c: { get: (key: "orchestrator") => { getPolpoDir(): string; getWorkDir(): string } }): string[] {
+  function getAllowedRoots(c: { get: (key: "orchestrator") => { getPolpoDir(): string; getWorkDir(): string; getAgentWorkDir(): string } }): string[] {
     const orchestrator = c.get("orchestrator");
-    return [orchestrator.getPolpoDir(), orchestrator.getWorkDir()];
+    const roots = [orchestrator.getPolpoDir(), orchestrator.getWorkDir()];
+    const agentDir = orchestrator.getAgentWorkDir();
+    if (!roots.includes(agentDir)) roots.push(agentDir);
+    return roots;
   }
+
+  // ── GET /roots — available root directories ──
+  app.openapi(listRootsRoute, ((c: any) => {
+    const orchestrator = c.get("orchestrator");
+    const workDir = orchestrator.getWorkDir();
+    const polpoDir = orchestrator.getPolpoDir();
+    const agentWorkDir = orchestrator.getAgentWorkDir();
+
+    // Recursively compute total files and total size for a directory.
+    // Skips node_modules, .git, and similar heavy dirs to stay fast.
+    const SKIP = new Set(["node_modules", ".git", ".next", "dist", "__pycache__", ".cache"]);
+    function dirStats(dir: string, depth = 0): { files: number; bytes: number } {
+      if (depth > 8) return { files: 0, bytes: 0 }; // cap recursion
+      let files = 0, bytes = 0;
+      try {
+        const entries = readdirSync(dir, { withFileTypes: true });
+        for (const e of entries) {
+          if (SKIP.has(e.name)) continue;
+          const full = resolve(dir, e.name);
+          if (e.isDirectory()) {
+            const sub = dirStats(full, depth + 1);
+            files += sub.files;
+            bytes += sub.bytes;
+          } else if (e.isFile()) {
+            files++;
+            try { bytes += statSync(full).size; } catch { /* skip */ }
+          }
+        }
+      } catch { /* unreadable dir */ }
+      return { files, bytes };
+    }
+
+    // Agent workspace relative path from project root
+    const agentWorkRel = relative(workDir, agentWorkDir);
+    const hasCustomWorkspace = agentWorkDir !== workDir;
+
+    const roots: any[] = [];
+
+    // If agents have a custom workspace, show it first (most relevant)
+    if (hasCustomWorkspace) {
+      const wsStats = dirStats(agentWorkDir);
+      roots.push({
+        id: "workspace",
+        name: basename(agentWorkDir),
+        path: agentWorkRel,
+        absolutePath: agentWorkDir,
+        description: "Agent workspace",
+        icon: "folder-open",
+        totalFiles: wsStats.files,
+        totalSize: wsStats.bytes,
+      });
+    }
+
+    // Project root
+    const workDirStats = dirStats(workDir);
+    roots.push({
+      id: "workdir",
+      name: basename(workDir),
+      path: ".",
+      absolutePath: workDir,
+      description: "Project root",
+      icon: "folder-root",
+      totalFiles: workDirStats.files,
+      totalSize: workDirStats.bytes,
+    });
+
+    // .polpo config dir
+    const polpoStats = dirStats(polpoDir);
+    roots.push({
+      id: "polpo",
+      name: ".polpo",
+      path: ".polpo",
+      absolutePath: polpoDir,
+      description: "Polpo configuration & data",
+      icon: "folder-cog",
+      totalFiles: polpoStats.files,
+      totalSize: polpoStats.bytes,
+    });
+
+    return c.json({ ok: true, data: { roots } }, 200);
+  }) as any);
 
   // ── GET /list — directory listing (OpenAPI) ──
   app.openapi(listFilesRoute, ((c: any) => {
@@ -168,11 +266,14 @@ export function fileRoutes(): OpenAPIHono<ServerEnv> {
       .map((d: any) => {
         const fullPath = resolve(resolved, d.name);
         const isDir = d.isDirectory();
-        const s = isDir ? undefined : (() => { try { return statSync(fullPath); } catch { return undefined; } })();
+        const s = (() => { try { return statSync(fullPath); } catch { return undefined; } })();
         return {
           name: d.name,
           type: isDir ? "directory" : "file",
-          ...(s ? { size: s.size, mimeType: guessMime(d.name), modifiedAt: s.mtime.toISOString() } : {}),
+          ...(s ? {
+            ...(isDir ? {} : { size: s.size, mimeType: guessMime(d.name) }),
+            modifiedAt: s.mtime.toISOString(),
+          } : {}),
         };
       })
       .sort((a: any, b: any) => {
@@ -296,6 +397,140 @@ export function fileRoutes(): OpenAPIHono<ServerEnv> {
 
     return c.json({ ok: true, data: result }, 200);
   }) as any);
+
+  // ── POST /upload — upload file(s) to a directory (plain handler — multipart body) ──
+  app.post("/upload", async (c) => {
+    const body = await c.req.parseBody({ all: true });
+    const destPath = (body.path as string | undefined) ?? ".";
+    const roots = getAllowedRoots(c);
+    const resolvedDir = resolveSandboxed(destPath, roots);
+    if (!resolvedDir) return c.json({ ok: false, error: "Invalid or disallowed path" }, 400);
+    if (!existsSync(resolvedDir) || !statSync(resolvedDir).isDirectory()) {
+      return c.json({ ok: false, error: "Destination is not a directory" }, 400);
+    }
+
+    // body.file can be a single File or an array of Files
+    const rawFiles = body.file;
+    const files: globalThis.File[] = Array.isArray(rawFiles)
+      ? rawFiles.filter((f): f is globalThis.File => f instanceof globalThis.File)
+      : rawFiles instanceof globalThis.File ? [rawFiles] : [];
+
+    if (files.length === 0) {
+      return c.json({ ok: false, error: "No files provided" }, 400);
+    }
+
+    const uploaded: { name: string; size: number }[] = [];
+    for (const file of files) {
+      const filePath = resolve(resolvedDir, file.name);
+      // Safety: ensure the resolved path is still within sandbox
+      const rel = relative(resolvedDir, filePath);
+      if (rel.startsWith("..") || rel.includes("/")) continue; // skip traversal attempts
+      const buffer = Buffer.from(await file.arrayBuffer());
+      writeFileSync(filePath, buffer);
+      uploaded.push({ name: file.name, size: buffer.byteLength });
+    }
+
+    return c.json({ ok: true, data: { uploaded, count: uploaded.length } }, 200);
+  });
+
+  // ── POST /mkdir — create a directory ──
+  app.post("/mkdir", async (c) => {
+    const body = await c.req.json<{ path: string }>().catch(() => null);
+    if (!body?.path) return c.json({ ok: false, error: "Missing path" }, 400);
+
+    const roots = getAllowedRoots(c);
+    const parent = dirname(body.path);
+    const resolvedParent = resolveSandboxed(parent === "." ? "." : parent, roots);
+    if (!resolvedParent) return c.json({ ok: false, error: "Invalid or disallowed path" }, 400);
+
+    const newDir = resolve(resolvedParent, basename(body.path));
+    if (existsSync(newDir)) return c.json({ ok: false, error: "Directory already exists" }, 400);
+
+    mkdirSync(newDir, { recursive: true });
+    return c.json({ ok: true, data: { path: body.path } }, 200);
+  });
+
+  // ── POST /rename — rename a file or directory ──
+  app.post("/rename", async (c) => {
+    const body = await c.req.json<{ path: string; newName: string }>().catch(() => null);
+    if (!body?.path || !body?.newName) return c.json({ ok: false, error: "Missing path or newName" }, 400);
+    if (body.newName.includes("/") || body.newName.includes("..")) {
+      return c.json({ ok: false, error: "Invalid new name" }, 400);
+    }
+
+    const roots = getAllowedRoots(c);
+    const resolved = resolveSandboxed(body.path, roots);
+    if (!resolved) return c.json({ ok: false, error: "Invalid or disallowed path" }, 400);
+    if (!existsSync(resolved)) return c.json({ ok: false, error: "Path not found" }, 404);
+
+    const newPath = resolve(dirname(resolved), body.newName);
+    if (existsSync(newPath)) return c.json({ ok: false, error: "A file with that name already exists" }, 400);
+
+    renameSync(resolved, newPath);
+    return c.json({ ok: true, data: { oldPath: body.path, newName: body.newName } }, 200);
+  });
+
+  // ── DELETE /delete — delete a file or empty directory ──
+  app.post("/delete", async (c) => {
+    const body = await c.req.json<{ path: string }>().catch(() => null);
+    if (!body?.path) return c.json({ ok: false, error: "Missing path" }, 400);
+
+    const roots = getAllowedRoots(c);
+    const resolved = resolveSandboxed(body.path, roots);
+    if (!resolved) return c.json({ ok: false, error: "Invalid or disallowed path" }, 400);
+    if (!existsSync(resolved)) return c.json({ ok: false, error: "Path not found" }, 404);
+
+    // Don't allow deleting root directories themselves
+    for (const root of roots) {
+      if (resolved === root) return c.json({ ok: false, error: "Cannot delete a root directory" }, 400);
+    }
+
+    const stat = statSync(resolved);
+    if (stat.isDirectory()) {
+      const entries = readdirSync(resolved);
+      if (entries.length > 0) return c.json({ ok: false, error: "Directory is not empty" }, 400);
+    }
+
+    rmSync(resolved, { force: true });
+    return c.json({ ok: true, data: { path: body.path } }, 200);
+  });
+
+  // ── GET /search — recursive flat file listing for mention autocomplete ──
+  app.get("/search", (c) => {
+    const query = (c.req.query("q") ?? "").toLowerCase();
+    const root = c.req.query("root") ?? ".";           // root dir to search within
+    const limitParam = c.req.query("limit");
+    const limit = limitParam ? Math.min(Number(limitParam), 500) : 200;
+
+    const roots = getAllowedRoots(c);
+    const resolved = resolveSandboxed(root, roots);
+    if (!resolved) return c.json({ ok: false, error: "Invalid or disallowed path" }, 400);
+
+    const SKIP = new Set(["node_modules", ".git", ".next", "dist", "__pycache__", ".cache", ".polpo"]);
+    const results: { name: string; path: string }[] = [];
+
+    function walk(dir: string, depth: number) {
+      if (depth > 10 || results.length >= limit) return;
+      try {
+        const entries = readdirSync(dir, { withFileTypes: true });
+        for (const e of entries) {
+          if (results.length >= limit) return;
+          if (SKIP.has(e.name)) continue;
+          const relPath = relative(resolved!, resolve(dir, e.name));
+          if (e.isFile()) {
+            if (!query || e.name.toLowerCase().includes(query) || relPath.toLowerCase().includes(query)) {
+              results.push({ name: e.name, path: relPath });
+            }
+          } else if (e.isDirectory()) {
+            walk(resolve(dir, e.name), depth + 1);
+          }
+        }
+      } catch { /* unreadable dir */ }
+    }
+
+    walk(resolved, 0);
+    return c.json({ ok: true, data: { files: results, total: results.length } }, 200);
+  });
 
   return app;
 }
