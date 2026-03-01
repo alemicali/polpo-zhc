@@ -134,15 +134,15 @@ In plan mode, type a natural language description and Polpo will:
 
 ## @ Mentions
 
-Reference entities by typing their prefix character. Supports quoted form for names with spaces:
+Reference agents, tasks, and missions by typing `@` followed by the name. Use quotes for names with spaces:
 
-| Prefix | Entity | Example |
-|--------|--------|---------|
-| `@` | Agent | `@backend-dev fix the tests` |
-| `#` | Task | `#"Create database schema" retry this` |
-| `%` | Mission | `%"feature-auth" abort` |
+| Entity | Example |
+|--------|---------|
+| Agent | `@backend-dev fix the tests` |
+| Task | `@"Create database schema" retry this` |
+| Mission | `@"feature-auth" abort` |
 
-Mentions are parsed and stripped from input text before processing. The referenced entity is passed as context to the action.
+All mentions use the `@` prefix — the category is resolved automatically based on the name. Mentions are parsed and passed as context to the action.
 
 ## Voice Input
 

@@ -1,4 +1,4 @@
-import { Hono } from "hono";
+import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import type { ServerEnv } from "../app.js";
 import { resolve, relative, extname, basename } from "node:path";
 import { existsSync, statSync, readdirSync, createReadStream } from "node:fs";
@@ -78,19 +78,78 @@ function resolveSandboxed(requestPath: string, allowedRoots: string[]): string |
   return null;
 }
 
+// ── Route definitions ────────────────────────────────────────────────────────
+
+const errorSchema = z.object({ ok: z.literal(false), error: z.string() });
+
+const listFilesRoute = createRoute({
+  method: "get",
+  path: "/list",
+  tags: ["Files"],
+  summary: "List directory contents",
+  description: "List files and subdirectories at the given path. Path is sandboxed to the .polpo/ directory and the project working directory. Returns entries with name, type (file/directory), size, mimeType, and modifiedAt.",
+  request: {
+    query: z.object({
+      path: z.string().optional().openapi({ description: "Directory path to list. Defaults to the project root.", example: ".polpo/output" }),
+    }),
+  },
+  responses: {
+    200: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.any() }) } },
+      description: "Directory listing with path and entries array",
+    },
+    400: {
+      content: { "application/json": { schema: errorSchema } },
+      description: "Invalid or disallowed path",
+    },
+    404: {
+      content: { "application/json": { schema: errorSchema } },
+      description: "Path not found",
+    },
+  },
+});
+
+const previewFileRoute = createRoute({
+  method: "get",
+  path: "/preview",
+  tags: ["Files"],
+  summary: "Get file preview data",
+  description: "Returns structured preview metadata for a file. For text files, includes the file content (optionally truncated). For binary files (images, audio, video, PDF), returns a URL to stream the content via the /files/read endpoint. Response includes: path, name, mimeType, size, previewable (boolean), type (text|image|pdf|audio|video|binary), url, and optionally content and truncated for text files.",
+  request: {
+    query: z.object({
+      path: z.string().openapi({ description: "Absolute or relative file path", example: ".polpo/output/task-123/report.md" }),
+      maxLines: z.string().optional().openapi({ description: "Maximum lines to return for text files (default: 500)" }),
+    }),
+  },
+  responses: {
+    200: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.any() }) } },
+      description: "File preview data",
+    },
+    400: {
+      content: { "application/json": { schema: errorSchema } },
+      description: "Invalid or disallowed path",
+    },
+    404: {
+      content: { "application/json": { schema: errorSchema } },
+      description: "File not found",
+    },
+  },
+});
+
 // ── Route factory ────────────────────────────────────────────────────────────
 
-export function fileRoutes(): Hono<ServerEnv> {
-  const app = new Hono<ServerEnv>();
+export function fileRoutes(): OpenAPIHono<ServerEnv> {
+  const app = new OpenAPIHono<ServerEnv>();
 
   function getAllowedRoots(c: { get: (key: "orchestrator") => { getPolpoDir(): string; getWorkDir(): string } }): string[] {
     const orchestrator = c.get("orchestrator");
     return [orchestrator.getPolpoDir(), orchestrator.getWorkDir()];
   }
 
-  // ── GET /list — directory listing ──
-  app.get("/list", (c) => {
-    const reqPath = c.req.query("path") ?? ".";
+  // ── GET /list — directory listing (OpenAPI) ──
+  app.openapi(listFilesRoute, ((c: any) => {
+    const { path: reqPath = "." } = c.req.valid("query");
     const roots = getAllowedRoots(c);
 
     const resolved = resolveSandboxed(reqPath, roots);
@@ -105,32 +164,33 @@ export function fileRoutes(): Hono<ServerEnv> {
     }
 
     const entries = readdirSync(resolved, { withFileTypes: true })
-      .filter((d) => !d.name.startsWith(".") || d.name === ".agent")
-      .map((d) => {
+      .filter((d: any) => !d.name.startsWith(".") || d.name === ".agent")
+      .map((d: any) => {
         const fullPath = resolve(resolved, d.name);
         const isDir = d.isDirectory();
         const s = isDir ? undefined : (() => { try { return statSync(fullPath); } catch { return undefined; } })();
         return {
           name: d.name,
-          type: isDir ? "directory" as const : "file" as const,
+          type: isDir ? "directory" : "file",
           ...(s ? { size: s.size, mimeType: guessMime(d.name), modifiedAt: s.mtime.toISOString() } : {}),
         };
       })
-      .sort((a, b) => {
+      .sort((a: any, b: any) => {
         if (a.type !== b.type) return a.type === "directory" ? -1 : 1;
         return a.name.localeCompare(b.name);
       });
 
     // Display path relative to the first matching root
-    const displayPath = roots.reduce((p, root) => {
+    const displayPath = roots.reduce((p: string, root: string) => {
       const rel = relative(root, resolved);
       return !rel.startsWith("..") ? rel || "." : p;
     }, reqPath);
 
-    return c.json({ ok: true, data: { path: displayPath, entries } });
-  });
+    return c.json({ ok: true, data: { path: displayPath, entries } }, 200);
+  }) as any);
 
-  // ── GET /read — stream file content ──
+  // ── GET /read — stream file content (plain handler — binary response) ──
+  // NOTE: Binary streaming cannot use app.openapi() because it returns raw bytes, not JSON.
   app.get("/read", (c) => {
     const reqPath = c.req.query("path");
     const download = c.req.query("download");
@@ -166,10 +226,9 @@ export function fileRoutes(): Hono<ServerEnv> {
     return new Response(webStream, { status: 200, headers });
   });
 
-  // ── GET /preview — structured preview data for the UI ──
-  app.get("/preview", async (c) => {
-    const reqPath = c.req.query("path");
-    const maxLinesStr = c.req.query("maxLines");
+  // ── GET /preview — structured preview data for the UI (OpenAPI) ──
+  app.openapi(previewFileRoute, (async (c: any) => {
+    const { path: reqPath, maxLines: maxLinesStr } = c.req.valid("query");
     if (!reqPath) return c.json({ ok: false, error: "Missing path parameter" }, 400);
 
     const roots = getAllowedRoots(c);
@@ -235,8 +294,8 @@ export function fileRoutes(): Hono<ServerEnv> {
       }
     }
 
-    return c.json({ ok: true, data: result });
-  });
+    return c.json({ ok: true, data: result }, 200);
+  }) as any);
 
   return app;
 }

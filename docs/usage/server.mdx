@@ -99,6 +99,27 @@ When `--api-key` is set, all requests must include the key:
 | `GET` | `/memory` | Get project memory |
 | `PUT` | `/memory` | Update project memory |
 
+### Files
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/files/list` | List directory contents (sandboxed to `.polpo/` and project root) |
+| `GET` | `/files/read` | Stream file content with correct `Content-Type` |
+| `GET` | `/files/preview` | Get structured preview data (type, content for text, URL for binary) |
+
+**Query params** on `GET /files/list`:
+- `?path=.polpo/output` — directory to list (defaults to project root)
+
+**Query params** on `GET /files/read`:
+- `?path=/abs/path/to/file` — file path (required)
+- `?download=1` — force download (`Content-Disposition: attachment`)
+
+**Query params** on `GET /files/preview`:
+- `?path=/abs/path/to/file` — file path (required)
+- `?maxLines=500` — max lines for text content (default: 500)
+
+All paths are sandboxed — `..` traversal is rejected, and only files under `.polpo/` or the project working directory are accessible.
+
 ### Chat (OpenAI-compatible)
 
 The primary way to talk to Polpo programmatically:

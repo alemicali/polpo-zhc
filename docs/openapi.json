@@ -5679,6 +5679,206 @@
         }
       }
     },
+    "/api/v1/files/list": {
+      "get": {
+        "tags": [
+          "Files"
+        ],
+        "summary": "List directory contents",
+        "description": "List files and subdirectories at the given path. Path is sandboxed to the .polpo/ directory and the project working directory. Returns entries with name, type (file/directory), size, mimeType, and modifiedAt.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Directory path to list. Defaults to the project root.",
+              "example": ".polpo/output"
+            },
+            "required": false,
+            "description": "Directory path to list. Defaults to the project root.",
+            "name": "path",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Directory listing with path and entries array",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid or disallowed path",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Path not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/files/preview": {
+      "get": {
+        "tags": [
+          "Files"
+        ],
+        "summary": "Get file preview data",
+        "description": "Returns structured preview metadata for a file. For text files, includes the file content (optionally truncated). For binary files (images, audio, video, PDF), returns a URL to stream the content via the /files/read endpoint. Response includes: path, name, mimeType, size, previewable (boolean), type (text|image|pdf|audio|video|binary), url, and optionally content and truncated for text files.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Absolute or relative file path",
+              "example": ".polpo/output/task-123/report.md"
+            },
+            "required": true,
+            "description": "Absolute or relative file path",
+            "name": "path",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Maximum lines to return for text files (default: 500)"
+            },
+            "required": false,
+            "description": "Maximum lines to return for text files (default: 500)",
+            "name": "maxLines",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "File preview data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid or disallowed path",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "File not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/state": {
       "get": {
         "tags": [
