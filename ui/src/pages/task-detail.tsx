@@ -1,10 +1,16 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   Collapsible,
   CollapsibleContent,
@@ -46,14 +52,164 @@ import {
   Link2,
   FileJson,
   File,
+  Download,
 } from "lucide-react";
 import { MessageResponse } from "@/components/ai-elements/message";
 import { useTask, useTasks, useProcesses, useTaskActivity } from "@lumea-labs/polpo-react";
-import type { TaskStatus, DimensionScore, CheckResult, EvalDimension, AssessmentResult, AssessmentTrigger, AgentProcess, RunActivityEntry } from "@lumea-labs/polpo-react";
+import type { TaskStatus, TaskOutcome, DimensionScore, CheckResult, EvalDimension, AssessmentResult, AssessmentTrigger, AgentProcess, RunActivityEntry } from "@lumea-labs/polpo-react";
 import { useAsyncAction } from "@/hooks/use-polpo";
 import { toast } from "sonner";
 import { formatDistanceToNow, format } from "date-fns";
 import { cn } from "@/lib/utils";
+import { config } from "@/lib/config";
+
+// ── File URL helper ──
+
+/** Build a URL to the files API endpoint for reading a file */
+function fileReadUrl(path: string, download?: boolean): string {
+  const base = config.baseUrl || "";
+  const params = new URLSearchParams({ path });
+  if (download) params.set("download", "1");
+  return `${base}/api/v1/files/read?${params.toString()}`;
+}
+
+/** Build a URL to the files API preview endpoint */
+function filePreviewUrl(path: string): string {
+  const base = config.baseUrl || "";
+  return `${base}/api/v1/files/preview?path=${encodeURIComponent(path)}`;
+}
+
+/** Determine the preview category from a MIME type */
+function previewCategory(mime?: string): "image" | "audio" | "video" | "pdf" | "code" | "text" | "binary" {
+  if (!mime) return "binary";
+  if (mime.startsWith("image/")) return "image";
+  if (mime.startsWith("audio/")) return "audio";
+  if (mime.startsWith("video/")) return "video";
+  if (mime === "application/pdf") return "pdf";
+  if (
+    mime.startsWith("text/x-") ||
+    mime === "text/typescript" ||
+    mime === "text/javascript" ||
+    mime === "text/css" ||
+    mime === "text/html" ||
+    mime === "application/json" ||
+    mime === "application/xml"
+  ) return "code";
+  if (mime.startsWith("text/")) return "text";
+  return "binary";
+}
+
+/** Extract a language hint from MIME type for code blocks */
+function langFromMime(mime?: string): string {
+  if (!mime) return "";
+  const map: Record<string, string> = {
+    "text/typescript": "typescript", "text/javascript": "javascript",
+    "text/css": "css", "text/html": "html", "text/x-python": "python",
+    "text/x-ruby": "ruby", "text/x-go": "go", "text/x-rust": "rust",
+    "text/x-java": "java", "text/x-c": "c", "text/x-c++": "cpp",
+    "text/x-sql": "sql", "text/x-shellscript": "bash",
+    "text/yaml": "yaml", "text/markdown": "markdown",
+    "application/json": "json", "application/xml": "xml",
+  };
+  return map[mime] ?? "";
+}
+
+// ── File preview dialog ──
+
+interface FilePreviewState {
+  outcome: TaskOutcome;
+  content?: string;
+  loading: boolean;
+  error?: string;
+}
+
+function FilePreviewDialog({
+  preview,
+  onClose,
+}: {
+  preview: FilePreviewState | null;
+  onClose: () => void;
+}) {
+  if (!preview) return null;
+  const { outcome: o, content, loading, error } = preview;
+  const category = previewCategory(o.mimeType);
+  const readUrl = o.path ? fileReadUrl(o.path) : o.url;
+  const downloadUrl = o.path ? fileReadUrl(o.path, true) : o.url;
+
+  return (
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-w-4xl max-h-[85vh] flex flex-col p-0 gap-0">
+        <DialogHeader className="flex flex-row items-center gap-2 px-4 py-3 border-b border-border/40 shrink-0">
+          <DialogTitle className="text-sm font-medium truncate flex-1">{o.label}</DialogTitle>
+          <div className="flex items-center gap-1 shrink-0">
+            {o.mimeType && (
+              <Badge variant="outline" className="text-[9px]">{o.mimeType}</Badge>
+            )}
+            {downloadUrl && (
+              <Button variant="ghost" size="icon" className="h-7 w-7" asChild>
+                <a href={downloadUrl} download title="Download">
+                  <Download className="h-3.5 w-3.5" />
+                </a>
+              </Button>
+            )}
+          </div>
+        </DialogHeader>
+
+        <div className="flex-1 min-h-0 overflow-auto">
+          {loading ? (
+            <div className="flex items-center justify-center h-64">
+              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+            </div>
+          ) : error ? (
+            <div className="flex items-center justify-center h-64 text-sm text-destructive">{error}</div>
+          ) : category === "image" && readUrl ? (
+            <div className="flex items-center justify-center p-4 bg-muted/20">
+              <img src={readUrl} alt={o.label} className="max-w-full max-h-[70vh] object-contain rounded" />
+            </div>
+          ) : category === "audio" && readUrl ? (
+            <div className="flex items-center justify-center p-8">
+              <audio controls src={readUrl} className="w-full max-w-lg" />
+            </div>
+          ) : category === "video" && readUrl ? (
+            <div className="flex items-center justify-center p-4 bg-black">
+              <video controls src={readUrl} className="max-w-full max-h-[70vh]" />
+            </div>
+          ) : category === "pdf" && readUrl ? (
+            <iframe src={readUrl} className="w-full h-[70vh]" title={o.label} />
+          ) : (category === "code" || category === "text") && content ? (
+            <ScrollArea className="max-h-[70vh]">
+              <div className="p-4">
+                <MessageResponse mode="static" className="text-sm">
+                  {category === "code"
+                    ? `\`\`\`${langFromMime(o.mimeType)}\n${content}\n\`\`\``
+                    : o.mimeType === "text/markdown" ? content : `\`\`\`\n${content}\n\`\`\``}
+                </MessageResponse>
+              </div>
+            </ScrollArea>
+          ) : o.text ? (
+            <ScrollArea className="max-h-[70vh]">
+              <div className="p-4">
+                <MessageResponse mode="static" className="text-sm">{o.text}</MessageResponse>
+              </div>
+            </ScrollArea>
+          ) : (
+            <div className="flex flex-col items-center justify-center h-64 gap-3 text-muted-foreground">
+              <File className="h-10 w-10" />
+              <p className="text-sm">Preview not available for this file type</p>
+              {downloadUrl && (
+                <Button variant="outline" size="sm" asChild>
+                  <a href={downloadUrl} download>
+                    <Download className="h-3.5 w-3.5 mr-1.5" /> Download
+                  </a>
+                </Button>
+              )}
+            </div>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
 
 // ── Status config ──
 
@@ -539,6 +695,38 @@ export function TaskDetailPage() {
       setActionPending(null);
     }
   };
+
+  // ── File preview state ──
+  const [previewState, setPreviewState] = useState<FilePreviewState | null>(null);
+
+  const openPreview = useCallback(async (o: TaskOutcome) => {
+    const category = previewCategory(o.mimeType);
+    // For binary-served types (image, audio, video, pdf) no content fetch needed
+    if (["image", "audio", "video", "pdf"].includes(category)) {
+      setPreviewState({ outcome: o, loading: false });
+      return;
+    }
+    // For text/code: if we already have inline text, use it
+    if (o.text) {
+      setPreviewState({ outcome: o, content: o.text, loading: false });
+      return;
+    }
+    // Fetch content from the preview API
+    if (!o.path) {
+      setPreviewState({ outcome: o, loading: false, error: "No file path available" });
+      return;
+    }
+    setPreviewState({ outcome: o, loading: true });
+    try {
+      const res = await fetch(filePreviewUrl(o.path));
+      if (!res.ok) throw new Error(`Failed to load preview (${res.status})`);
+      const json = await res.json();
+      if (!json.ok) throw new Error(json.error ?? "Preview failed");
+      setPreviewState({ outcome: o, content: json.data.content ?? "", loading: false });
+    } catch (e) {
+      setPreviewState({ outcome: o, loading: false, error: (e as Error).message });
+    }
+  }, []);
 
   if (isLoading) {
     return (
@@ -1045,17 +1233,26 @@ export function TaskDetailPage() {
                           : File;
 
                         const isImage = o.mimeType?.startsWith("image/");
-                        const fileHref = o.path ? `file://${o.path}` : undefined;
+                        const isAudio = o.mimeType?.startsWith("audio/");
+                        const isVideo = o.mimeType?.startsWith("video/");
+                        const category = previewCategory(o.mimeType);
+                        const canPreview = o.path && category !== "binary";
+                        const apiUrl = o.path ? fileReadUrl(o.path) : undefined;
+                        const downloadHref = o.path ? fileReadUrl(o.path, true) : undefined;
 
                         return (
                           <div key={o.id} className="rounded-md border border-border/50 overflow-hidden">
-                            {/* Header — clickable for file/media outcomes */}
-                            <div className={`flex items-center gap-2 px-3 py-2.5 bg-muted/20 ${fileHref ? "cursor-pointer hover:bg-muted/40 transition-colors" : ""}`}>
+                            {/* Header */}
+                            <div className="flex items-center gap-2 px-3 py-2.5 bg-muted/20">
                               <OutcomeIcon className="h-4 w-4 text-muted-foreground shrink-0" />
-                              {fileHref ? (
-                                <a href={fileHref} target="_blank" rel="noopener noreferrer" className="text-sm font-medium truncate text-primary hover:underline" title={`Open ${o.path}`}>
+                              {canPreview ? (
+                                <button
+                                  className="text-sm font-medium truncate text-primary hover:underline text-left"
+                                  title={`Preview ${o.label}`}
+                                  onClick={() => openPreview(o)}
+                                >
                                   {o.label}
-                                </a>
+                                </button>
                               ) : o.url ? (
                                 <a href={o.url} target="_blank" rel="noopener noreferrer" className="text-sm font-medium truncate text-primary hover:underline" title={`Open ${o.url}`}>
                                   {o.label}
@@ -1074,6 +1271,22 @@ export function TaskDetailPage() {
                                       ? `${(o.size / 1024 / 1024).toFixed(1)} MB`
                                       : `${(o.size / 1024).toFixed(1)} KB`}
                                   </span>
+                                )}
+                                {canPreview && (
+                                  <Button
+                                    variant="ghost" size="icon" className="h-6 w-6"
+                                    onClick={() => openPreview(o)}
+                                    title="Preview"
+                                  >
+                                    <Eye className="h-3 w-3" />
+                                  </Button>
+                                )}
+                                {downloadHref && (
+                                  <Button variant="ghost" size="icon" className="h-6 w-6" asChild>
+                                    <a href={downloadHref} download title="Download">
+                                      <Download className="h-3 w-3" />
+                                    </a>
+                                  </Button>
                                 )}
                                 {o.path && (
                                   <Button
@@ -1094,12 +1307,12 @@ export function TaskDetailPage() {
                               </div>
                             </div>
 
-                            {/* Path — clickable */}
+                            {/* Path display */}
                             {o.path && (
                               <div className="px-3 py-1.5 border-t border-border/30 bg-muted/10">
-                                <a href={`file://${o.path}`} target="_blank" rel="noopener noreferrer" className="text-[11px] font-mono text-muted-foreground hover:text-primary hover:underline break-all transition-colors">
+                                <span className="text-[11px] font-mono text-muted-foreground break-all">
                                   {o.path}
-                                </a>
+                                </span>
                               </div>
                             )}
 
@@ -1113,14 +1326,30 @@ export function TaskDetailPage() {
                             )}
 
                             {/* Inline preview for images */}
-                            {isImage && (o.url || o.path) && (
+                            {isImage && (o.url || apiUrl) && (
                               <div className="px-3 py-2 border-t border-border/30">
-                                <img
-                                  src={o.url ?? `file://${o.path}`}
-                                  alt={o.label}
-                                  className="max-h-40 rounded-md object-contain"
-                                  onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
-                                />
+                                <button className="block cursor-pointer" onClick={() => openPreview(o)} title="Click to expand">
+                                  <img
+                                    src={o.url ?? apiUrl}
+                                    alt={o.label}
+                                    className="max-h-40 rounded-md object-contain hover:opacity-80 transition-opacity"
+                                    onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                                  />
+                                </button>
+                              </div>
+                            )}
+
+                            {/* Inline preview for audio */}
+                            {isAudio && (o.url || apiUrl) && (
+                              <div className="px-3 py-2 border-t border-border/30">
+                                <audio controls src={o.url ?? apiUrl} className="w-full h-8" />
+                              </div>
+                            )}
+
+                            {/* Inline preview for video */}
+                            {isVideo && (o.url || apiUrl) && (
+                              <div className="px-3 py-2 border-t border-border/30">
+                                <video controls src={o.url ?? apiUrl} className="max-h-48 rounded-md" />
                               </div>
                             )}
 
@@ -1325,6 +1554,9 @@ export function TaskDetailPage() {
           <ActivityPanel taskId={task.id} isActive={task.status === "in_progress" || task.status === "assigned"} />
         </TabsContent>
       </Tabs>
+
+      {/* File preview dialog */}
+      <FilePreviewDialog preview={previewState} onClose={() => setPreviewState(null)} />
     </div>
   );
 }

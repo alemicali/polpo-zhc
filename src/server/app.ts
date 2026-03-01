@@ -22,6 +22,7 @@ import { peerRoutes } from "./routes/peers.js";
 import { scheduleRoutes } from "./routes/schedules.js";
 import { vaultRoutes } from "./routes/vault.js";
 import { authRoutes } from "./routes/auth.js";
+import { fileRoutes } from "./routes/files.js";
 
 export type ServerEnv = {
   Variables: {
@@ -94,6 +95,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
   authed.route("/schedules", scheduleRoutes());
   authed.route("/vault", vaultRoutes());
   authed.route("/auth", authRoutes());
+  authed.route("/files", fileRoutes());
   authed.route("/", stateRoutes());
 
   app.route("/api/v1", authed);

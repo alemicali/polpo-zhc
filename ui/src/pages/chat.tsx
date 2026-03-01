@@ -66,7 +66,7 @@ import type { PromptInputMessage } from "@/components/ai-elements/prompt-input";
 import { useChat } from "@/hooks/use-polpo";
 import type { AskUserQuestion, AskUserAnswer, MessageSegment, ToolCallInfo, MissionPreviewData, MissionPreviewAction, VaultPreviewData, VaultPreviewAction } from "@/hooks/use-polpo";
 import { ToolCallList, ToolInvocation, ToolCallGroup } from "@/components/ai-elements/tool";
-import { MentionPopover, type MentionPopoverHandle } from "@/components/ai-elements/mention-popover";
+import { MentionPopover, MentionText, type MentionPopoverHandle } from "@/components/ai-elements/mention-popover";
 import { useAgents, useTasks, useMissions } from "@lumea-labs/polpo-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -1380,11 +1380,13 @@ export function ChatPage() {
   const handleSubmit = useCallback(
     async (message: PromptInputMessage) => {
       if (!message.text.trim() || isLoading) return;
+      // Resolve display mentions (@"Fix auth flow") → wire mentions (@task_abc123)
+      const resolvedText = mentionRef.current?.resolveMessage(message.text.trim()) ?? message.text.trim();
       // Convert attached files to image data URLs for the API
       const images = message.files
         .filter((f) => f.url && f.mediaType?.startsWith("image/"))
         .map((f) => ({ url: f.url!, mimeType: f.mediaType ?? "image/png" }));
-      await send(message.text.trim(), images.length > 0 ? images : undefined);
+      await send(resolvedText, images.length > 0 ? images : undefined);
     },
     [isLoading, send]
   );
@@ -1609,7 +1611,7 @@ export function ChatPage() {
                         <div className="max-w-[85%]">
                           <div className="rounded-2xl rounded-br-sm bg-primary text-primary-foreground px-4 py-2.5">
                             <p className="text-sm leading-relaxed whitespace-pre-wrap">
-                              {msg.content}
+                              <MentionText text={msg.content} variant="inverted" />
                             </p>
                           </div>
                           <div className="flex items-center justify-end gap-1.5 mt-1">
