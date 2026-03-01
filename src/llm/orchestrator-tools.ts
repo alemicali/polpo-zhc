@@ -2173,6 +2173,10 @@ function execSetIdentity(polpo: Orchestrator, args: Record<string, unknown>): st
   }
   const agentName = existing.name;
 
+  // Remember which team the agent is currently in BEFORE removing
+  const currentTeam = polpo.findAgentTeam(agentName);
+  const originalTeamName = currentTeam?.name;
+
   const currentIdentity = existing.identity ?? {};
 
   // Merge only provided fields
@@ -2192,7 +2196,7 @@ function execSetIdentity(polpo: Orchestrator, args: Record<string, unknown>): st
   }
 
   polpo.removeAgent(agentName);
-  polpo.addAgent({ ...existing, identity: updated });
+  polpo.addAgent({ ...existing, identity: updated }, originalTeamName);
 
   const updatedFields = Object.keys(args).filter(k => k !== "agent");
   return `Identity updated for agent "${agentName}": ${updatedFields.join(", ")}`;

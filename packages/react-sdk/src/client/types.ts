@@ -651,6 +651,7 @@ export interface CreateTaskRequest {
 export interface UpdateTaskRequest {
   description?: string;
   assignTo?: string;
+  status?: TaskStatus;
   expectations?: TaskExpectation[];
 }
 

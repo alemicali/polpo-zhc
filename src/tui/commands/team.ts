@@ -170,10 +170,11 @@ function teamEdit(
           initial: current != null ? String(current) : "",
           onSave: (value) => {
             const trimmed = value.trim();
-            // Update agent in-place via remove+add
+            // Update agent in-place via remove+add — preserve original team
+            const originalTeam = polpo.findAgentTeam(agent.name)?.name;
             polpo.removeAgent(agent.name);
             const updated = { ...agent, [field]: trimmed || undefined };
-            polpo.addAgent(updated);
+            polpo.addAgent(updated, originalTeam);
             store.goMain();
             store.log(`Updated ${agent.name}.${field}`, [
               seg(`${agent.name}`, "cyan", true),

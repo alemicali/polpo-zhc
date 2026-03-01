@@ -47,6 +47,7 @@ import {
   FileJson,
   File,
   Download,
+  ArrowRightLeft,
 } from "lucide-react";
 import { MessageResponse } from "@/components/ai-elements/message";
 import {
@@ -56,6 +57,12 @@ import {
   previewCategory,
   type FilePreviewState,
 } from "@/components/shared/file-preview";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { useTask, useTasks, useProcesses, useTaskActivity } from "@lumea-labs/polpo-react";
 import type { TaskStatus, TaskOutcome, DimensionScore, CheckResult, ReviewerResult, EvalDimension, AssessmentResult, AssessmentTrigger, AgentProcess, RunActivityEntry } from "@lumea-labs/polpo-react";
 import { useAsyncAction } from "@/hooks/use-polpo";
@@ -520,7 +527,7 @@ function AssessmentHistoryRow({ assessment, index }: { assessment: AssessmentRes
 export function TaskDetailPage() {
   const { taskId } = useParams<{ taskId: string }>();
   const navigate = useNavigate();
-  const { task, isLoading, error, retryTask, killTask, reassessTask, queueTask } = useTask(taskId ?? "");
+  const { task, isLoading, error, updateTask, retryTask, killTask, reassessTask, queueTask } = useTask(taskId ?? "");
   const { tasks: allTasks } = useTasks();
   const { processes } = useProcesses();
 
@@ -679,6 +686,27 @@ export function TaskDetailPage() {
               {actionPending === "Retried" ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5 mr-1.5" />} Retry
             </Button>
           )}
+          {/* Status change dropdown */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" disabled={!!actionPending}>
+                <ArrowRightLeft className="h-3.5 w-3.5 mr-1.5" /> Status
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              {(["pending", "assigned", "in_progress", "review", "done", "failed"] as TaskStatus[])
+                .filter(s => s !== task.status)
+                .map(s => (
+                  <DropdownMenuItem
+                    key={s}
+                    onSelect={() => handleAction(() => updateTask({ status: s }), `Status → ${s}`)}
+                    className="text-xs capitalize"
+                  >
+                    {s.replace(/_/g, " ")}
+                  </DropdownMenuItem>
+                ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
           {(task.status === "in_progress" || task.status === "assigned") && (
             <Button variant="outline" size="sm" className="text-red-400 hover:text-red-500" disabled={!!actionPending} onClick={() => handleAction(killTask, "Killed")}>
               {actionPending === "Killed" ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <XCircle className="h-3.5 w-3.5 mr-1.5" />} Kill

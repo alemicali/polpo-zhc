@@ -370,10 +370,11 @@ export function agentRoutes(): OpenAPIHono<ServerEnv> {
     const buffer = Buffer.from(await file.arrayBuffer());
     writeFileSync(avatarPath, buffer);
 
-    // Update agent identity with avatar path
+    // Update agent identity with avatar path — preserve original team
     const identity = { ...(agent.identity ?? {}), avatar: relativePath };
+    const originalTeam = orchestrator.findAgentTeam(name)?.name;
     orchestrator.removeAgent(name);
-    orchestrator.addAgent({ ...agent, identity });
+    orchestrator.addAgent({ ...agent, identity }, originalTeam);
 
     return c.json({ ok: true, data: { avatar: relativePath } }, 200);
   });
@@ -387,8 +388,9 @@ export function agentRoutes(): OpenAPIHono<ServerEnv> {
 
     if (agent.identity?.avatar) {
       const identity = { ...agent.identity, avatar: undefined };
+      const originalTeam = orchestrator.findAgentTeam(name)?.name;
       orchestrator.removeAgent(name);
-      orchestrator.addAgent({ ...agent, identity });
+      orchestrator.addAgent({ ...agent, identity }, originalTeam);
     }
 
     return c.json({ ok: true }, 200);

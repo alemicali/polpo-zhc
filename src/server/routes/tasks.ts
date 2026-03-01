@@ -240,6 +240,9 @@ export function taskRoutes(): OpenAPIHono<ServerEnv> {
       return c.json({ ok: false, error: "Task not found", code: "NOT_FOUND" }, 404);
     }
 
+    if (body.status !== undefined) {
+      orchestrator.getStore().unsafeSetStatus(taskId, body.status as any, "manual status update via API");
+    }
     if (body.description !== undefined) {
       orchestrator.updateTaskDescription(taskId, body.description);
     }

@@ -60,6 +60,7 @@ export const CreateTaskSchema = z.object({
 export const UpdateTaskSchema = z.object({
   description: z.string().min(1).optional(),
   assignTo: z.string().min(1).optional(),
+  status: z.enum(["draft", "pending", "awaiting_approval", "assigned", "in_progress", "review", "done", "failed"]).optional(),
   expectations: z.array(z.any()).optional(),
   retries: z.number().int().min(0).optional(),
   maxRetries: z.number().int().min(0).optional(),
