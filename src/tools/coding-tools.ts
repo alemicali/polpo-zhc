@@ -14,6 +14,7 @@ import type { AgentTool, AgentToolResult } from "@mariozechner/pi-agent-core";
 import { resolveAllowedPaths, assertPathAllowed } from "./path-sandbox.js";
 import { bashSafeEnv } from "./safe-env.js";
 import { createOutcomeTools as createOutcomeToolsCore } from "./outcome-tools.js";
+import { createHttpTools as createHttpToolsCore, ALL_HTTP_TOOL_NAMES as CORE_HTTP_TOOL_NAMES } from "./http-tools.js";
 
 const MAX_READ_LINES = 500;
 const MAX_OUTPUT_BYTES = 30_000;
@@ -354,7 +355,7 @@ const ALL_TOOL_NAMES: CodingToolName[] = ["read", "write", "edit", "bash", "glob
  * If allowedTools is provided, only those tools are included.
  * If allowedPaths is provided, file-based tools enforce path sandboxing.
  */
-export function createCodingTools(cwd: string, allowedTools?: string[], allowedPaths?: string[]): AgentTool<any>[] {
+export function createCodingTools(cwd: string, allowedTools?: string[], allowedPaths?: string[], outputDir?: string): AgentTool<any>[] {
   const sandbox = resolveAllowedPaths(cwd, allowedPaths);
 
   const factories: Record<CodingToolName, () => AgentTool<any>> = {
@@ -374,7 +375,10 @@ export function createCodingTools(cwd: string, allowedTools?: string[], allowedP
   const tools = names.map(n => factories[n]());
 
   // register_outcome is always included — agents must always be able to declare artifacts
-  tools.push(...createOutcomeToolsCore(cwd, allowedPaths, allowedTools));
+  tools.push(...createOutcomeToolsCore(cwd, allowedPaths, allowedTools, outputDir));
+
+  // http_fetch + http_download are always included — core tools with SSRF protection
+  tools.push(...createHttpToolsCore(cwd, allowedPaths, allowedTools));
 
   return tools;
 }
@@ -382,45 +386,21 @@ export function createCodingTools(cwd: string, allowedTools?: string[], allowedP
 // === Extended Tools Factory ===
 
 import { createBrowserTools, ALL_BROWSER_TOOL_NAMES } from "./browser-tools.js";
-import { createHttpTools, ALL_HTTP_TOOL_NAMES } from "./http-tools.js";
-import { createGitTools, ALL_GIT_TOOL_NAMES } from "./git-tools.js";
-import { createMultifileTools, ALL_MULTIFILE_TOOL_NAMES } from "./multifile-tools.js";
-import { createDepTools, ALL_DEP_TOOL_NAMES } from "./dep-tools.js";
-import { createExcelTools, ALL_EXCEL_TOOL_NAMES } from "./excel-tools.js";
-import { createPdfTools, ALL_PDF_TOOL_NAMES } from "./pdf-tools.js";
-import { createDocxTools, ALL_DOCX_TOOL_NAMES } from "./docx-tools.js";
+import { ALL_HTTP_TOOL_NAMES } from "./http-tools.js";
 import { createEmailTools, ALL_EMAIL_TOOL_NAMES } from "./email-tools.js";
 import type { ResolvedVault } from "../vault/index.js";
-import { createAudioTools, ALL_AUDIO_TOOL_NAMES } from "./audio-tools.js";
-import { createImageTools, ALL_IMAGE_TOOL_NAMES } from "./image-tools.js";
 import { ALL_OUTCOME_TOOL_NAMES } from "./outcome-tools.js";
 
 export type { BrowserToolName } from "./browser-tools.js";
 export type { HttpToolName } from "./http-tools.js";
-export type { GitToolName } from "./git-tools.js";
-export type { MultifileToolName } from "./multifile-tools.js";
-export type { DepToolName } from "./dep-tools.js";
-export type { ExcelToolName } from "./excel-tools.js";
-export type { PdfToolName } from "./pdf-tools.js";
-export type { DocxToolName } from "./docx-tools.js";
 export type { EmailToolName } from "./email-tools.js";
-export type { AudioToolName } from "./audio-tools.js";
-export type { ImageToolName } from "./image-tools.js";
 export type { OutcomeToolName } from "./outcome-tools.js";
 
 /** All known tool names across all categories */
 export type ExtendedToolName = CodingToolName
   | import("./browser-tools.js").BrowserToolName
   | import("./http-tools.js").HttpToolName
-  | import("./git-tools.js").GitToolName
-  | import("./multifile-tools.js").MultifileToolName
-  | import("./dep-tools.js").DepToolName
-  | import("./excel-tools.js").ExcelToolName
-  | import("./pdf-tools.js").PdfToolName
-  | import("./docx-tools.js").DocxToolName
   | import("./email-tools.js").EmailToolName
-  | import("./audio-tools.js").AudioToolName
-  | import("./image-tools.js").ImageToolName
   | import("./outcome-tools.js").OutcomeToolName;
 
 /** All available tool names for documentation/config validation */
@@ -428,59 +408,30 @@ export const ALL_EXTENDED_TOOL_NAMES: string[] = [
   ...ALL_TOOL_NAMES,
   ...ALL_BROWSER_TOOL_NAMES,
   ...ALL_HTTP_TOOL_NAMES,
-  ...ALL_GIT_TOOL_NAMES,
-  ...ALL_MULTIFILE_TOOL_NAMES,
-  ...ALL_DEP_TOOL_NAMES,
-  ...ALL_EXCEL_TOOL_NAMES,
-  ...ALL_PDF_TOOL_NAMES,
-  ...ALL_DOCX_TOOL_NAMES,
   ...ALL_EMAIL_TOOL_NAMES,
-  ...ALL_AUDIO_TOOL_NAMES,
-  ...ALL_IMAGE_TOOL_NAMES,
   ...ALL_OUTCOME_TOOL_NAMES,
 ];
 
 export interface CreateAllToolsOptions {
   /** Working directory for the agent */
   cwd: string;
-  /** Tool name filter — only include tools with these names. If omitted, includes core coding tools + explicitly enabled categories. */
+  /** Tool name filter — only include tools with these names.
+   *  Browser/email tools are auto-loaded when their names appear here (e.g. "browser_*", "email_*").
+   *  If omitted, only core coding tools are included. */
   allowedTools?: string[];
   /** Filesystem sandbox paths */
   allowedPaths?: string[];
-  /** Browser session name for isolation (default: "default"). Used with agent-browser engine. */
+  /** Browser session name for isolation (default: "default"). */
   browserSession?: string;
-  /** Browser engine: "agent-browser" (default) or "playwright" (persistent profiles). */
-  browserEngine?: "agent-browser" | "playwright";
-  /** Profile directory for Playwright persistent context. Required when browserEngine is "playwright". */
+  /** Browser profile directory for agent-browser persistent state (cookies, localStorage).
+   *  Typically `.polpo/browser-profiles/<agent>/`. Passed as --profile to agent-browser. */
   browserProfileDir?: string;
-  /** State directory for agent-browser persistent state (cookies, localStorage). Typically `.polpo/browser-profiles/<agent>/`. */
-  browserStateDir?: string;
-  /** Enable browser tools. Default: false — must be explicitly enabled. */
-  enableBrowser?: boolean;
-  /** Enable HTTP/fetch tools. Default: false — must be explicitly enabled. */
-  enableHttp?: boolean;
-  /** Enable git tools. Default: false — must be explicitly enabled. */
-  enableGit?: boolean;
-  /** Enable multi-file editing tools. Default: false — must be explicitly enabled. */
-  enableMultifile?: boolean;
-  /** Enable dependency management tools. Default: false — must be explicitly enabled. */
-  enableDeps?: boolean;
-  /** Enable Excel/CSV tools (requires exceljs). Default: false. */
-  enableExcel?: boolean;
-  /** Enable PDF tools (requires pdf-lib). Default: false. */
-  enablePdf?: boolean;
-  /** Enable Word/DOCX tools (requires docx, mammoth). Default: false. */
-  enableDocx?: boolean;
-  /** Enable email tools (requires nodemailer + SMTP config). Default: false. */
-  enableEmail?: boolean;
-  /** Enable audio tools for STT/TTS (requires OPENAI_API_KEY / DEEPGRAM_API_KEY / ELEVENLABS_API_KEY). Default: false. */
-  enableAudio?: boolean;
-  /** Enable image tools for generation/vision (requires OPENAI_API_KEY / REPLICATE_API_TOKEN / ANTHROPIC_API_KEY). Default: false. */
-  enableImage?: boolean;
   /** Resolved vault credentials for the agent */
   vault?: ResolvedVault;
   /** Allowed recipient email domains for email_send. */
   emailAllowedDomains?: string[];
+  /** Per-task output directory for deliverables. Passed to outcome tools. */
+  outputDir?: string;
 }
 
 /**
@@ -508,70 +459,19 @@ export async function createAllTools(options: CreateAllToolsOptions): Promise<Ag
     allowedTools?.some(a => names.some(n => n === a.toLowerCase()));
 
   // Core coding tools (always included unless filtered out)
-  tools.push(...createCodingTools(cwd, allowedTools, allowedPaths));
+  tools.push(...createCodingTools(cwd, allowedTools, allowedPaths, options.outputDir));
 
-  // Browser tools — Playwright (persistent profiles) or agent-browser (CLI)
-  if (options.enableBrowser || categoryRequested(ALL_BROWSER_TOOL_NAMES)) {
-    if (options.browserEngine === "playwright" && options.browserProfileDir) {
-      // Lazy import — playwright-core is optional
-      const { createPlaywrightBrowserTools } = await import("./playwright-browser-tools.js");
-      tools.push(...createPlaywrightBrowserTools(cwd, options.browserProfileDir, allowedTools));
-    } else {
-      tools.push(...createBrowserTools(cwd, browserSession, allowedTools, options.browserStateDir));
-    }
+  // Browser tools — activated when any browser_* tool is in allowedTools
+  if (categoryRequested(ALL_BROWSER_TOOL_NAMES)) {
+    tools.push(...createBrowserTools(cwd, browserSession, allowedTools, options.browserProfileDir));
   }
 
-  // HTTP tools
-  if (options.enableHttp || categoryRequested(ALL_HTTP_TOOL_NAMES)) {
-    tools.push(...createHttpTools(cwd, allowedPaths, allowedTools));
-  }
-
-  // Git tools
-  if (options.enableGit || categoryRequested(ALL_GIT_TOOL_NAMES)) {
-    tools.push(...createGitTools(cwd, allowedTools));
-  }
-
-  // Multi-file tools
-  if (options.enableMultifile || categoryRequested(ALL_MULTIFILE_TOOL_NAMES)) {
-    tools.push(...createMultifileTools(cwd, allowedPaths, allowedTools));
-  }
-
-  // Dependency tools
-  if (options.enableDeps || categoryRequested(ALL_DEP_TOOL_NAMES)) {
-    tools.push(...createDepTools(cwd, allowedTools));
-  }
-
-  // Excel/CSV tools
-  if (options.enableExcel || categoryRequested(ALL_EXCEL_TOOL_NAMES)) {
-    tools.push(...createExcelTools(cwd, allowedPaths, allowedTools));
-  }
-
-  // PDF tools
-  if (options.enablePdf || categoryRequested(ALL_PDF_TOOL_NAMES)) {
-    tools.push(...createPdfTools(cwd, allowedPaths, allowedTools));
-  }
-
-  // Word/DOCX tools
-  if (options.enableDocx || categoryRequested(ALL_DOCX_TOOL_NAMES)) {
-    tools.push(...createDocxTools(cwd, allowedPaths, allowedTools));
-  }
-
-  // Email tools
-  if (options.enableEmail || categoryRequested(ALL_EMAIL_TOOL_NAMES)) {
+  // Email tools — activated when any email_* tool is in allowedTools
+  if (categoryRequested(ALL_EMAIL_TOOL_NAMES)) {
     tools.push(...createEmailTools(cwd, allowedPaths, allowedTools, options.vault, options.emailAllowedDomains));
   }
 
-  // Audio tools (STT/TTS)
-  if (options.enableAudio || categoryRequested(ALL_AUDIO_TOOL_NAMES)) {
-    tools.push(...createAudioTools(cwd, allowedPaths, allowedTools));
-  }
-
-  // Image tools (generation/vision)
-  if (options.enableImage || categoryRequested(ALL_IMAGE_TOOL_NAMES)) {
-    tools.push(...createImageTools(cwd, allowedPaths, allowedTools));
-  }
-
-  // register_outcome is already included via createCodingTools() above — no need to add again
+  // HTTP and register_outcome are already included via createCodingTools() above — no need to add again
 
   return tools;
 }

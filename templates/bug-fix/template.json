@@ -25,13 +25,11 @@
     "team": [
       {
         "name": "debugger",
-        "role": "Senior debugger — reproduces issues, traces root causes, and applies minimal targeted fixes",
-        "enableGit": true
+        "role": "Senior debugger — reproduces issues, traces root causes, and applies minimal targeted fixes"
       },
       {
         "name": "verifier",
-        "role": "QA verifier — confirms the fix works and no regressions are introduced",
-        "enableGit": true
+        "role": "QA verifier — confirms the fix works and no regressions are introduced"
       }
     ],
     "tasks": [

@@ -359,6 +359,13 @@ export class TaskRunner {
     }
 
     const runId = nanoid();
+
+    // Create per-task output directory for deliverables
+    const outputDir = join(this.ctx.polpoDir, "output", task.id);
+    if (!existsSync(outputDir)) {
+      mkdirSync(outputDir, { recursive: true });
+    }
+
     const tmpDir = join(this.ctx.polpoDir, "tmp");
     if (!existsSync(tmpDir)) {
       mkdirSync(tmpDir, { recursive: true });
@@ -429,6 +436,7 @@ export class TaskRunner {
       task: taskWithContext,
       polpoDir: this.ctx.polpoDir,
       cwd: this.ctx.agentWorkDir,
+      outputDir,
       storage: this.ctx.config.settings.storage,
       notifySocket: getSocketPath(this.ctx.polpoDir),
       emailAllowedDomains: agent.emailAllowedDomains ?? this.ctx.config.settings.emailAllowedDomains,

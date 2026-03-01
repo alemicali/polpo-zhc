@@ -4,18 +4,13 @@ sidebarTitle: "Git"
 description: "7 structured git tools with safe environment"
 ---
 
+<Warning>
+**Deprecated**: These tools have been removed as built-in tools. Use `bash` commands for git operations instead (e.g. `git status`, `git commit`, `git push`). The tools are documented here for reference only.
+</Warning>
+
 7 structured git tools that provide safe, structured access to git operations. All commands run through `bashSafeEnv()` to strip API keys and secrets from the shell environment, preventing accidental leakage in git commits or logs.
 
 **Global limits:** `MAX_OUTPUT` = 30,000 characters, `GIT_TIMEOUT` = 30,000ms.
-
-Enable with `enableGit: true` in agent config:
-
-```json
-{
-  "name": "dev-agent",
-  "enableGit": true
-}
-```
 
 ---
 

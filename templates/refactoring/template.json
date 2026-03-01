@@ -25,13 +25,11 @@
     "team": [
       {
         "name": "architect",
-        "role": "Software architect — plans refactoring strategy with minimal risk and maximum clarity",
-        "enableGit": true
+        "role": "Software architect — plans refactoring strategy with minimal risk and maximum clarity"
       },
       {
         "name": "implementer",
-        "role": "Implementation specialist — executes refactoring changes while preserving behavior",
-        "enableGit": true
+        "role": "Implementation specialist — executes refactoring changes while preserving behavior"
       }
     ],
     "tasks": [

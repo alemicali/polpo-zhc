@@ -105,101 +105,157 @@ function createPdfReadTool(cwd: string, sandbox: string[]): AgentTool<typeof Pdf
   };
 }
 
-// ─── Tool: pdf_create ───
+// ─── Tool: pdf_create (HTML → PDF via Playwright/Chromium) ───
 
 const PdfCreateSchema = Type.Object({
   path: Type.String({ description: "Output PDF file path" }),
-  pages: Type.Array(
-    Type.Object({
-      text: Type.String({ description: "Text content for this page" }),
-      font_size: Type.Optional(Type.Number({ description: "Font size in points (default: 12)" })),
-    }),
-    { description: "Pages with text content", minItems: 1 },
-  ),
-  title: Type.Optional(Type.String({ description: "PDF document title" })),
-  author: Type.Optional(Type.String({ description: "PDF document author" })),
+  html: Type.Optional(Type.String({ description: "Complete HTML string to render. Must be a full document (<!DOCTYPE html>...). Mutually exclusive with html_path." })),
+  html_path: Type.Optional(Type.String({ description: "Path to an HTML file to render. Use this for large documents instead of passing html inline. Mutually exclusive with html." })),
+  format: Type.Optional(Type.Union([
+    Type.Literal("A4"),
+    Type.Literal("A3"),
+    Type.Literal("Letter"),
+    Type.Literal("Legal"),
+    Type.Literal("Tabloid"),
+  ], { description: "Paper format (default: A4)" })),
+  landscape: Type.Optional(Type.Boolean({ description: "Landscape orientation (default: false)" })),
+  margin: Type.Optional(Type.Object({
+    top: Type.Optional(Type.String({ description: "Top margin (e.g. '20mm', '1in')" })),
+    right: Type.Optional(Type.String({ description: "Right margin (e.g. '15mm')" })),
+    bottom: Type.Optional(Type.String({ description: "Bottom margin (e.g. '25mm')" })),
+    left: Type.Optional(Type.String({ description: "Left margin (e.g. '15mm')" })),
+  }, { description: "Page margins. Default: 20mm top, 15mm right/left, 25mm bottom." })),
+  header_template: Type.Optional(Type.String({ description: "HTML template for page header. Supports Chromium classes: pageNumber, totalPages, date, title, url. Pass empty <div></div> for no header." })),
+  footer_template: Type.Optional(Type.String({ description: "HTML template for page footer. Example: '<div style=\"font-size:9px;width:100%;text-align:center;color:#888;\">Page <span class=\"pageNumber\"></span> of <span class=\"totalPages\"></span></div>'" })),
+  print_background: Type.Optional(Type.Boolean({ description: "Print background colors/images (default: true)" })),
+  scale: Type.Optional(Type.Number({ description: "Scale of the webpage rendering (default: 1, range 0.1-2)" })),
+  wait_for_network: Type.Optional(Type.Boolean({ description: "Wait for network idle before rendering (default: true). Disable for offline HTML with no external resources." })),
 });
 
 function createPdfCreateTool(cwd: string, sandbox: string[]): AgentTool<typeof PdfCreateSchema> {
   return {
     name: "pdf_create",
     label: "Create PDF",
-    description: "Create a new PDF document with text content. Each page can have its own text and font size.",
+    description:
+      "Convert HTML to a professional PDF document using Chromium (Playwright). " +
+      "Provide a complete HTML document (with CSS, tables, images as base64) either " +
+      "inline via 'html' or from a file via 'html_path'. The tool handles rendering " +
+      "and PDF generation — you focus on writing the HTML.\n\n" +
+      "Supports full CSS: @page rules, page-break-*, flexbox, grid, custom fonts, " +
+      "background colors, borders, images (use base64 data URIs for images).\n\n" +
+      "Examples:\n" +
+      "- Simple report: pdf_create({html: '<!DOCTYPE html><html>...', path: 'report.pdf'})\n" +
+      "- From file: pdf_create({html_path: 'report.html', path: 'report.pdf', format: 'A4'})\n" +
+      "- With footer: pdf_create({html: '...', path: 'report.pdf', footer_template: '<div style=\"font-size:9px;text-align:center;width:100%\">Page <span class=\"pageNumber\"></span>/<span class=\"totalPages\"></span></div>'})",
     parameters: PdfCreateSchema,
     async execute(_id, params) {
+      // Validate: must have exactly one of html or html_path
+      if (!params.html && !params.html_path) {
+        return {
+          content: [{ type: "text", text: "Error: provide either 'html' (inline HTML string) or 'html_path' (path to HTML file)" }],
+          details: { error: "missing_html" },
+        };
+      }
+      if (params.html && params.html_path) {
+        return {
+          content: [{ type: "text", text: "Error: provide 'html' or 'html_path', not both" }],
+          details: { error: "both_html_sources" },
+        };
+      }
+
       const filePath = resolve(cwd, params.path);
       assertPathAllowed(filePath, sandbox, "pdf_create");
       mkdirSync(dirname(filePath), { recursive: true });
 
+      // Resolve HTML content
+      let htmlContent: string;
+      if (params.html_path) {
+        const htmlFilePath = resolve(cwd, params.html_path);
+        assertPathAllowed(htmlFilePath, sandbox, "pdf_create");
+        try {
+          htmlContent = readFileSync(htmlFilePath, "utf-8");
+        } catch (err: any) {
+          return {
+            content: [{ type: "text", text: `Error reading HTML file: ${err.message}` }],
+            details: { error: "html_read_failed", path: htmlFilePath },
+          };
+        }
+      } else {
+        htmlContent = params.html!;
+      }
+
+      let browser: any;
       try {
-        const { PDFDocument, StandardFonts, rgb } = await import("pdf-lib");
-        const pdfDoc = await PDFDocument.create();
+        const { chromium } = await import("playwright-core");
 
-        if (params.title) pdfDoc.setTitle(params.title);
-        if (params.author) pdfDoc.setAuthor(params.author);
+        browser = await chromium.launch({
+          headless: true,
+          args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
+        });
+        const page = await browser.newPage();
 
-        const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+        // Load HTML content
+        const waitUntil = (params.wait_for_network ?? true) ? "networkidle" : "domcontentloaded";
+        await page.setContent(htmlContent, { waitUntil, timeout: 30_000 });
 
-        for (const pageData of params.pages) {
-          const page = pdfDoc.addPage();
-          const { width, height } = page.getSize();
-          const fontSize = pageData.font_size ?? 12;
-          const margin = 50;
-          const lineHeight = fontSize * 1.4;
-          const maxWidth = width - 2 * margin;
+        // Default margins
+        const defaultMargin = { top: "20mm", right: "15mm", bottom: "25mm", left: "15mm" };
+        const margin = params.margin
+          ? { ...defaultMargin, ...params.margin }
+          : defaultMargin;
 
-          // Simple text wrapping
-          const words = pageData.text.split(/\s+/);
-          const lines: string[] = [];
-          let currentLine = "";
+        // Determine if custom header/footer templates are provided
+        const hasHeaderFooter = !!(params.header_template || params.footer_template);
 
-          for (const word of words) {
-            const testLine = currentLine ? `${currentLine} ${word}` : word;
-            const testWidth = font.widthOfTextAtSize(testLine, fontSize);
-            if (testWidth > maxWidth && currentLine) {
-              lines.push(currentLine);
-              currentLine = word;
-            } else {
-              currentLine = testLine;
-            }
-          }
-          if (currentLine) lines.push(currentLine);
+        // Generate PDF
+        const pdfBuffer = await page.pdf({
+          path: filePath,
+          format: params.format ?? "A4",
+          landscape: params.landscape ?? false,
+          printBackground: params.print_background ?? true,
+          scale: Math.max(0.1, Math.min(2, params.scale ?? 1)),
+          margin,
+          displayHeaderFooter: hasHeaderFooter,
+          ...(hasHeaderFooter ? {
+            headerTemplate: params.header_template ?? "<div></div>",
+            footerTemplate: params.footer_template ?? "<div></div>",
+          } : {}),
+        });
 
-          // Handle explicit newlines
-          const finalLines: string[] = [];
-          for (const line of lines) {
-            finalLines.push(...line.split("\n"));
-          }
+        const bytes = pdfBuffer.byteLength;
 
-          let y = height - margin;
-          for (const line of finalLines) {
-            if (y < margin) {
-              // Would need a new page, but keep it simple
-              break;
-            }
-            page.drawText(line, {
-              x: margin,
-              y,
-              size: fontSize,
-              font,
-              color: rgb(0, 0, 0),
-            });
-            y -= lineHeight;
-          }
+        // Count pages in the generated PDF for reporting
+        let pageCount = 0;
+        try {
+          const { PDFDocument } = await import("pdf-lib");
+          const doc = await PDFDocument.load(readFileSync(filePath));
+          pageCount = doc.getPageCount();
+        } catch {
+          // Best effort — pdf-lib may fail on some PDFs
         }
 
-        const pdfBytes = await pdfDoc.save();
-        writeFileSync(filePath, pdfBytes);
-
+        const pageInfo = pageCount > 0 ? `${pageCount} pages, ` : "";
         return {
-          content: [{ type: "text", text: `PDF created: ${filePath} (${params.pages.length} pages, ${pdfBytes.byteLength} bytes)` }],
-          details: { path: filePath, pages: params.pages.length, bytes: pdfBytes.byteLength },
+          content: [{ type: "text", text: `PDF created: ${filePath} (${pageInfo}${bytes} bytes)` }],
+          details: { path: filePath, pages: pageCount, bytes },
         };
       } catch (err: any) {
+        const msg = err.message ?? String(err);
+        // Provide actionable hints for common errors
+        if (msg.includes("Executable doesn't exist") || msg.includes("browserType.launch")) {
+          return {
+            content: [{ type: "text", text: `PDF create error: Chromium not found. Install it with: npx playwright install chromium\n\nOriginal error: ${msg}` }],
+            details: { error: "chromium_not_installed" },
+          };
+        }
         return {
-          content: [{ type: "text", text: `PDF create error: ${err.message}` }],
-          details: { error: err.message },
+          content: [{ type: "text", text: `PDF create error: ${msg}` }],
+          details: { error: msg },
         };
+      } finally {
+        if (browser) {
+          await browser.close().catch(() => {});
+        }
       }
     },
   };

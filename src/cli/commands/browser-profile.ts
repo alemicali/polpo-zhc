@@ -65,91 +65,51 @@ export function registerBrowserCommands(parent: Command): void {
       console.log(chalk.cyan("  Close the browser window when done — your session will be saved."));
       console.log();
 
-      const useAgentBrowser = agent?.browserEngine === "agent-browser" || (!agent?.browserEngine && agent?.browserEngine !== "playwright");
-
       try {
-        if (useAgentBrowser) {
-          // Use agent-browser with visible mode for login
-          const { execSync } = await import("node:child_process");
-          const session = agentName;
+        // Use agent-browser with visible mode + persistent profile for login
+        const { execSync } = await import("node:child_process");
+        const session = agentName;
 
-          // Open the URL in a visible agent-browser session
-          console.log(chalk.dim("  Using agent-browser for login session..."));
-          execSync(`agent-browser --session ${session} --headed open ${startUrl}`, {
+        console.log(chalk.dim("  Using agent-browser for login session..."));
+        mkdirSync(profDir, { recursive: true });
+        execSync(`agent-browser --session ${session} --profile ${profDir} --headed open ${startUrl}`, {
+          encoding: "utf-8",
+          timeout: 60_000,
+          stdio: "inherit",
+        });
+
+        // Wait for user to confirm they're done
+        const readline = await import("node:readline");
+        const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+        await new Promise<void>((res) => {
+          rl.question(
+            chalk.cyan("\n  Press Enter when you're done logging in... "),
+            () => { rl.close(); res(); },
+          );
+        });
+
+        // Close the session (profile data auto-saved by --profile)
+        try {
+          execSync(`agent-browser --session ${session} close`, {
             encoding: "utf-8",
-            timeout: 60_000,
-            stdio: "inherit",
-          });
-
-          // Wait for user to confirm they're done
-          const readline = await import("node:readline");
-          const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-          await new Promise<void>((res) => {
-            rl.question(
-              chalk.cyan("\n  Press Enter when you're done logging in... "),
-              () => { rl.close(); res(); },
-            );
-          });
-
-          // Save state to profile directory
-          mkdirSync(profDir, { recursive: true });
-          const stateFile = join(profDir, "state.json");
-          execSync(`agent-browser --session ${session} state save ${stateFile}`, {
-            encoding: "utf-8",
-            timeout: 15_000,
+            timeout: 10_000,
             stdio: ["ignore", "pipe", "pipe"],
           });
+        } catch { /* already closed */ }
 
-          // Close the session
-          try {
-            execSync(`agent-browser --session ${session} close`, {
-              encoding: "utf-8",
-              timeout: 10_000,
-              stdio: ["ignore", "pipe", "pipe"],
-            });
-          } catch { /* already closed */ }
-
-          console.log();
-          console.log(chalk.green("  Session saved."));
-          console.log(chalk.dim(`  State: ${stateFile}`));
-        } else {
-          // Use Playwright persistent context
-          const { chromium } = await import("playwright-core");
-
-          const context = await chromium.launchPersistentContext(profDir, {
-            headless: opts.headless,
-            viewport: { width: 1280, height: 900 },
-            userAgent: "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-            locale: "en-US",
-            timezoneId: Intl.DateTimeFormat().resolvedOptions().timeZone,
-            args: [
-              "--disable-blink-features=AutomationControlled",
-              "--no-sandbox",
-            ],
-          });
-
-          const page = context.pages()[0] ?? await context.newPage();
-          await page.goto(startUrl, { waitUntil: "domcontentloaded" }).catch(() => {});
-
-          // Wait for the user to close the browser
-          await new Promise<void>((res) => {
-            context.on("close", () => res());
-          });
-
-          console.log();
-          console.log(chalk.green("  Browser closed. Session saved to profile."));
-          console.log(chalk.dim(`  Profile: ${profDir}`));
-        }
+        console.log();
+        console.log(chalk.green("  Session saved to profile."));
+        console.log(chalk.dim(`  Profile: ${profDir}`));
 
         // Show helpful next step
         if (!agent) {
           console.log();
           console.log(chalk.yellow("  Note: no agent named \"" + agentName + "\" found in polpo.json."));
-          console.log(chalk.yellow("  Add it with enableBrowser: true to use this profile:"));
+          console.log(chalk.yellow("  Add it with browser_* in allowedTools to use this profile:"));
           console.log();
           console.log(chalk.dim("    agents:"));
           console.log(chalk.dim(`      - name: ${agentName}`));
-          console.log(chalk.dim("        enableBrowser: true"));
+          console.log(chalk.dim("        allowedTools: [\"browser_*\"]"));
         }
 
         console.log();

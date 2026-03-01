@@ -27,17 +27,7 @@ interface MissionDocument {
     model?: string;
     systemPrompt?: string;
     skills?: string[];
-    enableGit?: boolean;
-    enableBrowser?: boolean;
-    enableHttp?: boolean;
-    enableMultifile?: boolean;
-    enableDeps?: boolean;
-    enableExcel?: boolean;
-    enablePdf?: boolean;
-    enableDocx?: boolean;
-    enableEmail?: boolean;
-    enableAudio?: boolean;
-    enableImage?: boolean;
+    // Browser/email activated via allowedTools (e.g. ["browser_*", "email_*"])
   }>;
   qualityGates?: MissionQualityGate[];
   /** Checkpoints — planned stopping points for human-in-the-loop review. */

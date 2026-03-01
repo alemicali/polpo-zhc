@@ -27,13 +27,11 @@
     "team": [
       {
         "name": "writer",
-        "role": "Technical writer — produces clear, accurate documentation with practical examples",
-        "enableGit": true
+        "role": "Technical writer — produces clear, accurate documentation with practical examples"
       },
       {
         "name": "reviewer",
-        "role": "Documentation reviewer — verifies accuracy, completeness, and clarity",
-        "enableGit": true
+        "role": "Documentation reviewer — verifies accuracy, completeness, and clarity"
       }
     ],
     "tasks": [

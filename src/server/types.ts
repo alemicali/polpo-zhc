@@ -81,20 +81,8 @@ export interface AddAgentRequest {
   // Identity & hierarchy (vault credentials managed via encrypted store)
   identity?: import("../core/types.js").AgentIdentity;
   reportsTo?: string;
-  // Extended tool categories
-  enableBrowser?: boolean;
-  browserEngine?: "agent-browser" | "playwright";
+  // Extended tool categories (browser + email only — HTTP is always-on core)
   browserProfile?: string;
-  enableHttp?: boolean;
-  enableGit?: boolean;
-  enableMultifile?: boolean;
-  enableDeps?: boolean;
-  enableExcel?: boolean;
-  enablePdf?: boolean;
-  enableDocx?: boolean;
-  enableEmail?: boolean;
-  enableAudio?: boolean;
-  enableImage?: boolean;
 }
 
 // === SSE Event ===

@@ -480,7 +480,10 @@ export function useChat() {
         const parts: string[] = [];
         if (a.selected.length > 0) parts.push(a.selected.join(", "));
         if (a.customText) parts.push(a.customText);
-        return `${label}: ${parts.join(" — ")}`;
+        const value = parts.length > 0
+          ? parts.join(" — ")
+          : "Skipped — decide on your own based on best practices";
+        return `${label}: ${value}`;
       });
       const answerText = answerLines.join("\n");
 

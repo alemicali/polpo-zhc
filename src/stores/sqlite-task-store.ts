@@ -27,6 +27,8 @@ interface TaskRow {
   original_description: string | null;
   session_id: string | null;
   notifications: string | null;
+  outcomes: string | null;
+  expected_outcomes: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -96,8 +98,8 @@ export class SqliteTaskStore implements TaskStore {
 
     // Prepare statements
     this.insertTaskStmt = this.db.prepare(`
-      INSERT INTO tasks (id, title, description, assign_to, "group", depends_on, status, retries, max_retries, max_duration, retry_policy, expectations, metrics, result, phase, fix_attempts, original_description, session_id, notifications, created_at, updated_at)
-      VALUES (@id, @title, @description, @assign_to, @group, @depends_on, @status, @retries, @max_retries, @max_duration, @retry_policy, @expectations, @metrics, @result, @phase, @fix_attempts, @original_description, @session_id, @notifications, @created_at, @updated_at)
+      INSERT INTO tasks (id, title, description, assign_to, "group", depends_on, status, retries, max_retries, max_duration, retry_policy, expectations, metrics, result, phase, fix_attempts, original_description, session_id, notifications, outcomes, expected_outcomes, created_at, updated_at)
+      VALUES (@id, @title, @description, @assign_to, @group, @depends_on, @status, @retries, @max_retries, @max_duration, @retry_policy, @expectations, @metrics, @result, @phase, @fix_attempts, @original_description, @session_id, @notifications, @outcomes, @expected_outcomes, @created_at, @updated_at)
     `);
     this.getTaskStmt = this.db.prepare(`SELECT * FROM tasks WHERE id = ?`);
     this.getAllTasksStmt = this.db.prepare(`SELECT * FROM tasks ORDER BY created_at ASC`);
@@ -189,6 +191,8 @@ export class SqliteTaskStore implements TaskStore {
       `ALTER TABLE tasks ADD COLUMN resolution_attempts INTEGER NOT NULL DEFAULT 0`,
       `ALTER TABLE tasks ADD COLUMN session_id TEXT`,
       `ALTER TABLE tasks ADD COLUMN notifications TEXT`,
+      `ALTER TABLE tasks ADD COLUMN outcomes TEXT`,
+      `ALTER TABLE tasks ADD COLUMN expected_outcomes TEXT`,
       `ALTER TABLE missions ADD COLUMN notifications TEXT`,
       `ALTER TABLE missions RENAME COLUMN yaml TO data`,
     ];
@@ -256,6 +260,8 @@ export class SqliteTaskStore implements TaskStore {
       originalDescription: row.original_description ?? undefined,
       sessionId: row.session_id ?? undefined,
       notifications: safeJsonParse(row.notifications, undefined),
+      outcomes: safeJsonParse(row.outcomes, undefined),
+      expectedOutcomes: safeJsonParse(row.expected_outcomes, undefined),
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     };
@@ -283,6 +289,8 @@ export class SqliteTaskStore implements TaskStore {
       original_description: task.originalDescription ?? null,
       session_id: task.sessionId ?? null,
       notifications: task.notifications ? JSON.stringify(task.notifications) : null,
+      outcomes: task.outcomes ? JSON.stringify(task.outcomes) : null,
+      expected_outcomes: task.expectedOutcomes ? JSON.stringify(task.expectedOutcomes) : null,
       created_at: task.createdAt,
       updated_at: task.updatedAt,
     };
@@ -431,6 +439,8 @@ export class SqliteTaskStore implements TaskStore {
     if (updates.originalDescription !== undefined) { setClauses.push("original_description = @original_description"); params.original_description = updates.originalDescription ?? null; }
     if (updates.sessionId !== undefined) { setClauses.push("session_id = @session_id"); params.session_id = updates.sessionId ?? null; }
     if (updates.notifications !== undefined) { setClauses.push("notifications = @notifications"); params.notifications = updates.notifications ? JSON.stringify(updates.notifications) : null; }
+    if (updates.outcomes !== undefined) { setClauses.push("outcomes = @outcomes"); params.outcomes = updates.outcomes ? JSON.stringify(updates.outcomes) : null; }
+    if (updates.expectedOutcomes !== undefined) { setClauses.push("expected_outcomes = @expected_outcomes"); params.expected_outcomes = updates.expectedOutcomes ? JSON.stringify(updates.expectedOutcomes) : null; }
     if (updates.createdAt !== undefined) { setClauses.push("created_at = @created_at"); params.created_at = updates.createdAt; }
 
     const sql = `UPDATE tasks SET ${setClauses.join(", ")} WHERE id = @id`;

@@ -25,13 +25,11 @@
     "team": [
       {
         "name": "planner",
-        "role": "Migration architect — plans safe, incremental migration strategies with rollback steps",
-        "enableGit": true
+        "role": "Migration architect — plans safe, incremental migration strategies with rollback steps"
       },
       {
         "name": "migrator",
-        "role": "Migration engineer — executes migration steps while maintaining backward compatibility",
-        "enableGit": true
+        "role": "Migration engineer — executes migration steps while maintaining backward compatibility"
       }
     ],
     "tasks": [

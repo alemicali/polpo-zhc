@@ -117,20 +117,8 @@ export const AddAgentSchema = z.object({
   // Identity & hierarchy (vault credentials managed via encrypted store)
   identity: AgentIdentitySchema.optional(),
   reportsTo: z.string().optional(),
-  // Extended tool categories
-  enableBrowser: z.boolean().optional(),
-  browserEngine: z.enum(["agent-browser", "playwright"]).optional(),
+  // Extended tool categories (browser + email only — HTTP is always-on core)
   browserProfile: z.string().optional(),
-  enableHttp: z.boolean().optional(),
-  enableGit: z.boolean().optional(),
-  enableMultifile: z.boolean().optional(),
-  enableDeps: z.boolean().optional(),
-  enableExcel: z.boolean().optional(),
-  enablePdf: z.boolean().optional(),
-  enableDocx: z.boolean().optional(),
-  enableEmail: z.boolean().optional(),
-  enableAudio: z.boolean().optional(),
-  enableImage: z.boolean().optional(),
 });
 
 export const RenameTeamSchema = z.object({

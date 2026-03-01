@@ -25,8 +25,7 @@
     "team": [
       {
         "name": "test-engineer",
-        "role": "Test engineer — writes meaningful, behavior-driven tests that catch real bugs",
-        "enableGit": true
+        "role": "Test engineer — writes meaningful, behavior-driven tests that catch real bugs"
       }
     ],
     "tasks": [

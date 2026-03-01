@@ -1,13 +1,13 @@
 ---
 title: "Tools & MCP"
-description: "7 core coding tools, 11 extended tool categories (55 tools total), filesystem sandboxing, and MCP server connections."
+description: "9 core tools (including HTTP), 2 extended tool categories, filesystem sandboxing, and MCP server connections."
 ---
 
-Agents need tools to do their job. Polpo gives every agent a set of **coding tools** for reading, writing, and searching code — **11 extended tool categories** for browser automation, git, HTTP, documents, and more — plus the ability to connect to external **MCP servers** for additional capabilities.
+Agents need tools to do their job. Polpo gives every agent a set of **core tools** for reading, writing, searching files, and making HTTP requests — **2 extended tool categories** (browser and email) — plus the ability to connect to external **MCP servers** for additional capabilities.
 
-## Coding Tools (Core)
+## Core Tools
 
-Polpo ships 7 built-in coding tools. They're the same primitives you'd expect from any code editor, designed for agents:
+Polpo ships 9 built-in core tools. They're the same primitives you'd expect from any code editor, designed for agents — plus HTTP tools for making requests and downloading files:
 
 | Tool | What it does | Output limit |
 |------|-------------|--------------|
@@ -18,16 +18,18 @@ Polpo ships 7 built-in coding tools. They're the same primitives you'd expect fr
 | **`glob`** | Find files matching a glob pattern (e.g. `**/*.ts`). | 200 results |
 | **`grep`** | Regex search across files. Returns matching lines with file paths and line numbers. | 100 matches |
 | **`ls`** | List a directory. Directories are suffixed with `/`. | — |
+| **`http_fetch`** | Send an HTTP request and return the response. | 100 KB |
+| **`http_download`** | Download a file from a URL and save it to disk. | — |
 
 All tools except `bash` enforce the **filesystem sandbox** (see below). The `bash` tool runs commands from the project working directory.
 
 <Info>
-For full parameter schemas, return types, error codes, and usage examples for each core tool, see the [File System & Coding reference](/reference/coding-tools).
+For full parameter schemas, return types, error codes, and usage examples for each core tool, see the [Core Tools reference](/reference/coding-tools). For HTTP tool details, see the [HTTP tools reference](/reference/tools/http).
 </Info>
 
 ### Restricting Tools
 
-By default, agents get all 7 core tools. You can restrict this per agent:
+By default, agents get all 9 core tools. You can restrict this per agent:
 
 ```json
 {
@@ -41,118 +43,26 @@ This agent can browse code but can't write, edit, or run commands — useful for
 
 ## Extended Tools
 
-Beyond the 7 core tools, Polpo offers **11 optional tool categories** with **55 extended tools** total. Each category is enabled per-agent with a config flag.
+Beyond the 9 core tools, Polpo offers **2 optional tool categories** that can be enabled per-agent via the `allowedTools` array.
+
+<Note>
+**Simplified toolset**: Git, multi-file operations, dependency management, Excel/CSV, PDF, Word/DOCX, audio, and image tools have been removed as built-in tool categories. Agents should use the `bash` tool with appropriate CLI commands or install [skills](/features/skills) for these operations instead. HTTP tools (`http_fetch`, `http_download`) are now always-on core tools — no flag needed.
+</Note>
 
 ### Browser (18 tools)
 
 Automate browser interactions — navigate, click, fill forms, take screenshots, extract data. Powered by the `agent-browser` CLI.
 
 ```json
-{ "name": "qa-agent", "enableBrowser": true }
+{ "name": "qa-agent", "allowedTools": ["read", "write", "edit", "bash", "glob", "grep", "ls", "browser_*"] }
 ```
 
 Key tools: `browser_navigate`, `browser_click`, `browser_type`, `browser_screenshot`, `browser_evaluate`, `browser_wait`, `browser_select`, `browser_scroll`, `browser_drag_drop`, and more.
 
+For authenticated browsing, set up a persistent profile with `polpo browser login <agent> <url>` — the agent reuses the login session across tasks. See [Browser tools reference](/reference/tools/browser#persistent-browser-profiles) for details.
+
 <Card title="Browser tools reference" icon="arrow-right" href="/reference/tools/browser">
   Full parameter schemas and usage for all 18 browser tools.
-</Card>
-
-### Git (7 tools)
-
-Structured git operations with safe environment (API keys stripped from subprocess env).
-
-```json
-{ "name": "dev-agent", "enableGit": true }
-```
-
-Key tools: `git_status`, `git_diff`, `git_log`, `git_commit`, `git_branch`, `git_checkout`, `git_push`.
-
-<Card title="Git tools reference" icon="arrow-right" href="/reference/tools/git">
-  Full parameter schemas and usage for all 7 git tools.
-</Card>
-
-### HTTP (2 tools)
-
-Make HTTP requests and download files — useful for API testing, fetching data, or downloading assets.
-
-```json
-{ "name": "api-agent", "enableHttp": true }
-```
-
-Tools: `http_request`, `http_download`.
-
-<Card title="HTTP tools reference" icon="arrow-right" href="/reference/tools/http">
-  Full parameter schemas and usage for HTTP tools.
-</Card>
-
-### Multi-file (3 tools)
-
-Batch operations across multiple files — regex replace, bulk rename, batch edits.
-
-```json
-{ "name": "refactor-agent", "enableMultifile": true }
-```
-
-Tools: `multifile_replace`, `multifile_rename`, `multifile_edit`.
-
-<Card title="Multi-file tools reference" icon="arrow-right" href="/reference/tools/multifile">
-  Full parameter schemas and usage for multi-file tools.
-</Card>
-
-### Dependencies (6 tools)
-
-Package management across npm, pnpm, yarn, and bun.
-
-```json
-{ "name": "setup-agent", "enableDeps": true }
-```
-
-Key tools: `deps_install`, `deps_add`, `deps_remove`, `deps_update`, `deps_list`, `deps_audit`.
-
-<Card title="Dependencies tools reference" icon="arrow-right" href="/reference/tools/deps">
-  Full parameter schemas and usage for all 6 dependency tools.
-</Card>
-
-### Excel/CSV (4 tools)
-
-Read, write, and query spreadsheets and CSV files.
-
-```json
-{ "name": "data-agent", "enableExcel": true }
-```
-
-Tools: `excel_read`, `excel_write`, `excel_query`, `excel_info`.
-
-<Card title="Excel/CSV tools reference" icon="arrow-right" href="/reference/tools/excel">
-  Full parameter schemas and usage for spreadsheet tools.
-</Card>
-
-### PDF (4 tools)
-
-Read, create, merge, and inspect PDF documents.
-
-```json
-{ "name": "doc-agent", "enablePdf": true }
-```
-
-Tools: `pdf_read`, `pdf_create`, `pdf_merge`, `pdf_info`.
-
-<Card title="PDF tools reference" icon="arrow-right" href="/reference/tools/pdf">
-  Full parameter schemas and usage for PDF tools.
-</Card>
-
-### Word/DOCX (2 tools)
-
-Read and create Microsoft Word documents.
-
-```json
-{ "name": "doc-agent", "enableDocx": true }
-```
-
-Tools: `docx_read`, `docx_create`.
-
-<Card title="Word/DOCX tools reference" icon="arrow-right" href="/reference/tools/docx">
-  Full parameter schemas and usage for Word document tools.
 </Card>
 
 ### Email (5 tools)
@@ -160,7 +70,7 @@ Tools: `docx_read`, `docx_create`.
 Send, read, and search emails via SMTP and IMAP — useful for communication agents, notification bots, or inbox monitoring.
 
 ```json
-{ "name": "alice", "enableEmail": true }
+{ "name": "alice", "allowedTools": ["read", "write", "edit", "bash", "glob", "grep", "ls", "email_*"] }
 ```
 
 Tools: `email_send`, `email_verify`, `email_list`, `email_read`, `email_search`.
@@ -171,62 +81,21 @@ Email tools require SMTP/IMAP credentials. The easiest way to set them up is thr
   Full parameter schemas, credential resolution, and usage for all 5 email tools.
 </Card>
 
-### Audio (2 tools)
-
-Speech-to-text transcription and text-to-speech synthesis.
-
-```json
-{ "name": "voice-agent", "enableAudio": true }
-```
-
-Tools: `audio_transcribe`, `audio_synthesize`.
-
-<Card title="Audio tools reference" icon="arrow-right" href="/reference/tools/audio">
-  Full parameter schemas and usage for audio tools.
-</Card>
-
-### Image (2 tools)
-
-AI image generation and image analysis/description.
-
-```json
-{ "name": "creative-agent", "enableImage": true }
-```
-
-Tools: `image_generate`, `image_analyze`.
-
-<Card title="Image tools reference" icon="arrow-right" href="/reference/tools/image">
-  Full parameter schemas and usage for image tools.
-</Card>
-
 ### Summary
 
-| Category | Tools | Config Flag | Description |
-|----------|:-----:|-------------|-------------|
-| [Browser](/reference/tools/browser) | 18 | `enableBrowser` | Browser automation via `agent-browser` CLI |
-| [Git](/reference/tools/git) | 7 | `enableGit` | Structured git operations with safe environment |
-| [HTTP](/reference/tools/http) | 2 | `enableHttp` | HTTP requests and file downloads |
-| [Multi-file](/reference/tools/multifile) | 3 | `enableMultifile` | Batch edits, regex replace, bulk rename |
-| [Dependencies](/reference/tools/deps) | 6 | `enableDeps` | Package management (npm/pnpm/yarn/bun) |
-| [Excel/CSV](/reference/tools/excel) | 4 | `enableExcel` | Read, write, and query spreadsheets |
-| [PDF](/reference/tools/pdf) | 4 | `enablePdf` | Read, create, merge, inspect PDFs |
-| [Word/DOCX](/reference/tools/docx) | 2 | `enableDocx` | Read and create Word documents |
-| [Email](/reference/tools/email) | 5 | `enableEmail` | Send, read, and search emails via SMTP + IMAP |
-| [Audio](/reference/tools/audio) | 2 | `enableAudio` | Speech-to-text and text-to-speech |
-| [Image](/reference/tools/image) | 2 | `enableImage` | AI image generation and analysis |
+| Category | Tools | Enable via `allowedTools` | Description |
+|----------|:-----:|---------------------------|-------------|
+| [Browser](/reference/tools/browser) | 18 | `"browser_*"` | Browser automation via `agent-browser` CLI |
+| [Email](/reference/tools/email) | 5 | `"email_*"` | Send, read, and search emails via SMTP + IMAP |
 
 ### Enabling Multiple Categories
 
-You can enable multiple categories on a single agent:
+You can enable both extended categories on a single agent:
 
 ```json
 {
-  "name": "full-stack-dev",
-  "enableBrowser": true,
-  "enableGit": true,
-  "enableHttp": true,
-  "enableMultifile": true,
-  "enableDeps": true
+  "name": "outreach-agent",
+  "allowedTools": ["read", "write", "edit", "bash", "glob", "grep", "ls", "browser_*", "email_*"]
 }
 ```
 
@@ -272,7 +141,7 @@ See [Security](/features/security) for more details on environment filtering.
 Agents can connect to external [MCP](https://modelcontextprotocol.io/) servers for additional capabilities — databases, APIs, custom tools, anything with an MCP interface.
 
 <Note>
-Polpo is an MCP **client**, not a server. When you configure `mcpServers` on an agent, you're telling Polpo which external MCP servers to connect to. The agent discovers tools from those servers and can call them alongside the built-in coding tools.
+Polpo is an MCP **client**, not a server. When you configure `mcpServers` on an agent, you're telling Polpo which external MCP servers to connect to. The agent discovers tools from those servers and can call them alongside the built-in core tools.
 </Note>
 
 Polpo supports all three MCP transport types:
@@ -325,4 +194,4 @@ Polpo supports all three MCP transport types:
   </Tab>
 </Tabs>
 
-Tools discovered from connected MCP servers are added to the agent's tool set alongside the built-in coding tools. The agent doesn't know (or care) whether a tool is built-in or comes from an MCP server — it just uses what's available.
+Tools discovered from connected MCP servers are added to the agent's tool set alongside the built-in core tools. The agent doesn't know (or care) whether a tool is built-in or comes from an MCP server — it just uses what's available.

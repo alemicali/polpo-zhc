@@ -26,13 +26,11 @@
     "team": [
       {
         "name": "analyst",
-        "role": "Senior code analyst — identifies issues, patterns, and improvement opportunities",
-        "enableGit": true
+        "role": "Senior code analyst — identifies issues, patterns, and improvement opportunities"
       },
       {
         "name": "reviewer",
-        "role": "QA reviewer — verifies changes don't introduce regressions",
-        "enableGit": true
+        "role": "QA reviewer — verifies changes don't introduce regressions"
       }
     ],
     "tasks": [

@@ -156,7 +156,8 @@ export function registerAgentOnboardCommands(program: Command): void {
 
       // ── 4. Email ──
       console.log(chalk.cyan("\n  Step 4: Email\n"));
-      const enableEmail = await askYesNo("Enable email tools?", agentCfg.enableEmail ?? false);
+      const hasEmailTools = agentCfg.allowedTools?.some(t => t.toLowerCase().startsWith("email_")) ?? false;
+      const enableEmail = await askYesNo("Configure email tools?", hasEmailTools);
       const vaultStore = new EncryptedVaultStore(polpoDir);
       const existingVault = vaultStore.getAllForAgent(name);
       const vaultEntries: Record<string, VaultEntry> = {};
@@ -241,7 +242,12 @@ export function registerAgentOnboardCommands(program: Command): void {
       if (Object.keys(identity).length > 0) updated.identity = identity;
       if (reportsTo) updated.reportsTo = reportsTo;
       else delete updated.reportsTo;
-      if (enableEmail) updated.enableEmail = true;
+      // If email was enabled, ensure email_* is in allowedTools
+      if (enableEmail && !hasEmailTools) {
+        const tools = (updated.allowedTools as string[] | undefined) ?? [];
+        tools.push("email_*");
+        updated.allowedTools = tools;
+      }
 
       defaultTeam.agents[agentIdx] = updated as any;
       savePolpoConfig(polpoDir, config);
@@ -295,9 +301,9 @@ export function registerAgentOnboardCommands(program: Command): void {
         const titleStr = a.identity?.title ?? a.role ?? "";
         const vaultCount = listVaultStore?.list(a.name).length ?? 0;
         const flags: string[] = [];
-        if (a.enableEmail) flags.push("email");
-        if (a.enableBrowser) flags.push("browser");
-        if (a.enableGit) flags.push("git");
+        const aTools = a.allowedTools ?? [];
+        if (aTools.some(t => t.toLowerCase().startsWith("email_"))) flags.push("email");
+        if (aTools.some(t => t.toLowerCase().startsWith("browser_"))) flags.push("browser");
         if (vaultCount > 0) flags.push(`vault:${vaultCount}`);
 
         console.log(`${prefix}${connector}${chalk.bold(display)}${titleStr ? chalk.dim(` — ${titleStr}`) : ""}${flags.length ? chalk.cyan(` [${flags.join(", ")}]`) : ""}`);
@@ -379,18 +385,12 @@ export function registerAgentOnboardCommands(program: Command): void {
         }
       }
 
-      const flags: string[] = [];
-      if (agentCfg.enableEmail) flags.push("email");
-      if (agentCfg.enableBrowser) flags.push("browser");
-      if (agentCfg.enableGit) flags.push("git");
-      if (agentCfg.enableHttp) flags.push("http");
-      if (agentCfg.enableExcel) flags.push("excel");
-      if (agentCfg.enablePdf) flags.push("pdf");
-      if (agentCfg.enableDocx) flags.push("docx");
-      if (agentCfg.enableAudio) flags.push("audio");
-      if (agentCfg.enableImage) flags.push("image");
-      if (flags.length > 0) {
-        console.log(chalk.cyan(`\n  Enabled: `) + flags.join(", "));
+      const showTools = agentCfg.allowedTools ?? [];
+      const showFlags: string[] = [];
+      if (showTools.some(t => t.toLowerCase().startsWith("browser_"))) showFlags.push("browser");
+      if (showTools.some(t => t.toLowerCase().startsWith("email_"))) showFlags.push("email");
+      if (showFlags.length > 0) {
+        console.log(chalk.cyan(`\n  Tool categories: `) + showFlags.join(", "));
       }
       console.log();
     });

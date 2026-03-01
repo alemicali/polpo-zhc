@@ -4,7 +4,7 @@ sidebarTitle: "Email"
 description: "5 tools to send, read, and search email via SMTP and IMAP"
 ---
 
-Send, read, and search emails. Enable with `enableEmail: true` in agent config.
+Send, read, and search emails. Enable by including `"email_*"` in the agent's `allowedTools` array.
 
 <Note>
 **SMTP** (send): Uses **nodemailer**. Credentials from agent vault (`"email"` entry with type `"smtp"`), env vars (`SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`), or per-call parameter overrides.
@@ -13,7 +13,7 @@ Send, read, and search emails. Enable with `enableEmail: true` in agent config.
 </Note>
 
 <Tip>
-The easiest way to configure email credentials is through the **onboarding wizard**: `polpo agent onboard <name>`. Step 4 walks you through SMTP and IMAP setup, creates vault entries with `${ENV_VAR}` references, and sets `enableEmail: true` automatically. See [Onboarding walkthrough](/guides/build-your-team#onboard-your-agents).
+The easiest way to configure email credentials is through the **onboarding wizard**: `polpo agent onboard <name>`. Step 4 walks you through SMTP and IMAP setup, creates vault entries with `${ENV_VAR}` references, and adds `email_*` to `allowedTools` automatically. See [Onboarding walkthrough](/guides/build-your-team#onboard-your-agents).
 </Tip>
 
 ---

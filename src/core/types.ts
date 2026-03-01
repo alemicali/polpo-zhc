@@ -264,51 +264,17 @@ export interface AgentConfig {
   /** Mission group this volatile agent belongs to */
   missionGroup?: string;
 
-  // ── Extended tool categories (opt-in) ──
+  // ── Tool activation ──
+  // All tool categories are activated via allowedTools (e.g. ["browser_*", "email_*"]).
+  // No enable flags needed — if a tool name appears in allowedTools, it's loaded.
+  // HTTP tools (http_fetch, http_download) are always available as core tools.
+  // Git, multifile, deps, excel, pdf, docx, audio, and image operations should be
+  // done via bash + skills instead of dedicated tools.
 
-  /** Enable browser automation tools.
-   *  Tools: browser_navigate, browser_snapshot, browser_click, browser_fill, browser_type,
-   *  browser_press, browser_screenshot, browser_get, browser_select, browser_hover,
-   *  browser_scroll, browser_wait, browser_eval, browser_close, browser_back, browser_forward,
-   *  browser_reload, browser_tabs */
-  enableBrowser?: boolean;
-  /** Browser engine: "agent-browser" (default, uses agent-browser CLI) or "playwright" (persistent profiles via Playwright).
-   *  Requires playwright-core when set to "playwright". */
-  browserEngine?: "agent-browser" | "playwright";
   /** Browser profile name for persistent context (cookies, auth, localStorage).
-   *  Defaults to agent name. Only used with browserEngine: "playwright".
+   *  Defaults to agent name. Used with agent-browser's --profile flag.
    *  Profiles stored in .polpo/browser-profiles/<name>/. */
   browserProfile?: string;
-  /** Enable HTTP/fetch tools for API calls and web requests.
-   *  Tools: http_fetch, http_download */
-  enableHttp?: boolean;
-  /** Enable structured git tools.
-   *  Tools: git_status, git_diff, git_log, git_commit, git_branch, git_stash, git_show */
-  enableGit?: boolean;
-  /** Enable multi-file editing tools for batch operations.
-   *  Tools: multi_edit, regex_replace, bulk_rename */
-  enableMultifile?: boolean;
-  /** Enable dependency management tools (npm/pnpm/yarn/bun).
-   *  Tools: dep_install, dep_add, dep_remove, dep_outdated, dep_audit, dep_info */
-  enableDeps?: boolean;
-  /** Enable Excel/CSV tools for spreadsheet operations.
-   *  Tools: excel_read, excel_write, excel_query, excel_info */
-  enableExcel?: boolean;
-  /** Enable PDF tools for document operations.
-   *  Tools: pdf_read, pdf_create, pdf_merge, pdf_info */
-  enablePdf?: boolean;
-  /** Enable Word/DOCX tools for document operations.
-   *  Tools: docx_read, docx_create */
-  enableDocx?: boolean;
-  /** Enable email tools for sending messages via SMTP.
-   *  Tools: email_send, email_verify. Requires SMTP_HOST/SMTP_USER/SMTP_PASS env vars. */
-  enableEmail?: boolean;
-  /** Enable audio tools for speech-to-text and text-to-speech.
-   *  Tools: audio_transcribe, audio_speak. Requires OPENAI_API_KEY/DEEPGRAM_API_KEY/ELEVENLABS_API_KEY env vars. */
-  enableAudio?: boolean;
-  /** Enable image tools for generation and vision analysis.
-   *  Tools: image_generate, image_analyze. Requires OPENAI_API_KEY/REPLICATE_API_TOKEN/ANTHROPIC_API_KEY env vars. */
-  enableImage?: boolean;
   /** Allowed recipient email domains for email_send (e.g. ["acme.com", "partner.io"]).
    *  When set, emails can only be sent to addresses in these domains.
    *  When omitted, all domains are allowed (backwards compatible). */
@@ -489,6 +455,8 @@ export interface RunnerConfig {
   task: Task;
   polpoDir: string;
   cwd: string;
+  /** Per-task output directory (.polpo/output/<taskId>/). Agents should write deliverables here. */
+  outputDir: string;
   storage?: "file" | "sqlite";
   /** UDS path for push-notifying the orchestrator on completion. */
   notifySocket?: string;

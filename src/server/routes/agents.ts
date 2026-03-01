@@ -62,19 +62,7 @@ export function agentRoutes(): OpenAPIHono<ServerEnv> {
       maxTurns: body.maxTurns,
       identity: body.identity,
       reportsTo: body.reportsTo,
-      enableBrowser: body.enableBrowser,
-      browserEngine: body.browserEngine,
       browserProfile: body.browserProfile,
-      enableHttp: body.enableHttp,
-      enableGit: body.enableGit,
-      enableMultifile: body.enableMultifile,
-      enableDeps: body.enableDeps,
-      enableExcel: body.enableExcel,
-      enablePdf: body.enablePdf,
-      enableDocx: body.enableDocx,
-      enableEmail: body.enableEmail,
-      enableAudio: body.enableAudio,
-      enableImage: body.enableImage,
     }, teamName);
 
     return c.json({ ok: true, data: { added: true } }, 201);

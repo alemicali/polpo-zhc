@@ -132,20 +132,11 @@ function getSkillMeta(name: string): { icon: LucideIcon; color: string } {
   return { icon: Sparkles, color: "text-violet-400" };
 }
 
-// ── Enable flag meta ──
+// ── Tool category detection from allowedTools ──
 
-const enableFlags: { key: string; label: string; tools: string }[] = [
-  { key: "enableBrowser", label: "Browser", tools: "browser_navigate, browser_click, browser_fill, browser_type, browser_screenshot, ..." },
-  { key: "enableHttp", label: "HTTP", tools: "http_fetch, http_download" },
-  { key: "enableGit", label: "Git", tools: "git_status, git_diff, git_log, git_commit, git_branch, ..." },
-  { key: "enableMultifile", label: "Multi-file", tools: "multi_edit, regex_replace, bulk_rename" },
-  { key: "enableDeps", label: "Dependencies", tools: "dep_install, dep_add, dep_remove, dep_outdated, dep_audit, dep_info" },
-  { key: "enableExcel", label: "Excel/CSV", tools: "excel_read, excel_write, excel_query, excel_info" },
-  { key: "enablePdf", label: "PDF", tools: "pdf_read, pdf_create, pdf_merge, pdf_info" },
-  { key: "enableDocx", label: "DOCX", tools: "docx_read, docx_create" },
-  { key: "enableEmail", label: "Email", tools: "email_send, email_verify, email_list, email_read, email_search" },
-  { key: "enableAudio", label: "Audio", tools: "audio_transcribe, audio_speak" },
-  { key: "enableImage", label: "Image", tools: "image_generate, image_analyze" },
+const toolCategories: { prefix: string; label: string; tools: string }[] = [
+  { prefix: "browser_", label: "Browser", tools: "browser_navigate, browser_click, browser_fill, browser_snapshot, browser_screenshot, ..." },
+  { prefix: "email_", label: "Email", tools: "email_send, email_verify, email_list, email_read, email_search" },
 ];
 
 const taskStatusConfig: Record<TaskStatus, { color: string; icon: React.ElementType; label: string }> = {
@@ -627,7 +618,8 @@ export function AgentDetailPage() {
   const identity = agent.identity;
   const agentAny = agent as unknown as Record<string, unknown>;
   const mcpEntries = agent.mcpServers ? Object.entries(agent.mcpServers) : [];
-  const enabledFlags = enableFlags.filter(f => agentAny[f.key] === true);
+  const agentAllowedTools: string[] = (agentAny.allowedTools as string[] | undefined) ?? [];
+  const enabledCategories = toolCategories.filter(c => agentAllowedTools.some(t => (t as string).toLowerCase().startsWith(c.prefix)));
 
   return (
     <div className="flex flex-col flex-1 min-h-0 gap-4">
@@ -922,7 +914,7 @@ export function AgentDetailPage() {
               <TabsTrigger value="tools">
                 Tools & Skills
                 <Badge variant="secondary" className="ml-1.5 text-[9px]">
-                  {(agent.allowedTools?.length ?? 0) + enabledFlags.length + (agent.skills?.length ?? 0) + mcpEntries.length}
+                  {(agent.allowedTools?.length ?? 0) + enabledCategories.length + (agent.skills?.length ?? 0) + mcpEntries.length}
                 </Badge>
               </TabsTrigger>
               <TabsTrigger value="config">Config</TabsTrigger>
@@ -1049,7 +1041,7 @@ export function AgentDetailPage() {
                       </Card>
                       <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0">
                         <CardContent className="pt-3 pb-3 text-center">
-                          <p className="text-2xl font-bold font-mono">{enabledFlags.length}</p>
+                          <p className="text-2xl font-bold font-mono">{enabledCategories.length}</p>
                           <p className="text-[10px] text-muted-foreground">Extensions</p>
                         </CardContent>
                       </Card>
@@ -1214,14 +1206,14 @@ export function AgentDetailPage() {
                     </div>
                   )}
 
-                  {/* All enable flags */}
+                  {/* Tool categories from allowedTools */}
                   <div>
-                    <SectionHeader title="Tool Extensions" icon={Layers} count={enabledFlags.length} />
+                    <SectionHeader title="Tool Extensions" icon={Layers} count={enabledCategories.length} />
                     <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
-                      {enableFlags.map(({ key, label, tools }) => {
-                        const enabled = agentAny[key] === true;
+                      {toolCategories.map(({ prefix, label, tools }) => {
+                        const enabled = agentAllowedTools.some(t => (t as string).toLowerCase().startsWith(prefix));
                         return (
-                          <Tooltip key={key}>
+                          <Tooltip key={prefix}>
                             <TooltipTrigger asChild>
                               <div className={cn(
                                 "flex items-center gap-2 rounded-md border px-3 py-2 cursor-help transition-colors",
@@ -1248,20 +1240,15 @@ export function AgentDetailPage() {
                       })}
                     </div>
 
-                    {/* Browser config details */}
-                    {!!agentAny.enableBrowser && !!(agent.browserEngine || agent.browserProfile) && (
+                    {/* Browser profile details */}
+                    {agentAllowedTools.some(t => (t as string).toLowerCase().startsWith("browser_")) && agent.browserProfile && (
                       <div className="mt-3 flex items-center gap-3 text-[11px] text-muted-foreground px-1">
-                        {agent.browserEngine && (
-                          <span>Engine: <code className="font-mono text-foreground">{agent.browserEngine}</code></span>
-                        )}
-                        {agent.browserProfile && (
-                          <span>Profile: <code className="font-mono text-foreground">{agent.browserProfile}</code></span>
-                        )}
+                        <span>Profile: <code className="font-mono text-foreground">{agent.browserProfile}</code></span>
                       </div>
                     )}
 
                     {/* Email domain restrictions */}
-                    {!!agentAny.enableEmail && agent.emailAllowedDomains && agent.emailAllowedDomains.length > 0 && (
+                    {agentAllowedTools.some(t => (t as string).toLowerCase().startsWith("email_")) && agent.emailAllowedDomains && agent.emailAllowedDomains.length > 0 && (
                       <div className="mt-3 px-1">
                         <p className="text-[10px] text-muted-foreground mb-1">Allowed email domains:</p>
                         <div className="flex flex-wrap gap-1">

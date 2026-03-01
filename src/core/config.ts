@@ -83,14 +83,6 @@ export function validateAgents(agents: any[]): void {
         }
       }
     }
-    // Validate browser engine
-    if (agent.browserEngine !== undefined) {
-      if (agent.browserEngine !== "agent-browser" && agent.browserEngine !== "playwright") {
-        throw new Error(`Agent "${agent.name}": browserEngine must be "agent-browser" or "playwright"`);
-      }
-      // Auto-enable browser tools when engine is set
-      if (!agent.enableBrowser) agent.enableBrowser = true;
-    }
     // Validate browser profile name
     if (agent.browserProfile !== undefined) {
       if (typeof agent.browserProfile !== "string" || !/^[a-zA-Z0-9_-]+$/.test(agent.browserProfile)) {

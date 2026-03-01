@@ -48,13 +48,11 @@ Each agent supports these fields:
 | `model` | `string` | — | `"provider:model"` format. See [Providers](/models/overview) |
 | `identity` | `AgentIdentity` | — | Persona: name, title, responsibilities, tone, personality. See [Identity](#agent-identity-and-persona) |
 | `reportsTo` | `string` | — | Org chart parent — automatic escalation on failure. See [Org chart](#org-chart-reportsto) |
-| `allowedTools` | `string[]` | all tools | Restrict which coding tools the agent can use |
+| `allowedTools` | `string[]` | all core tools | Restrict which tools the agent can use. Include `"browser_*"` for browser access, `"email_*"` for email tools |
 | `allowedPaths` | `string[]` | project root | Filesystem sandbox — agent can only access these paths |
 | `systemPrompt` | `string` | — | Custom instructions prepended to the default prompt |
 | `skills` | `string[]` | — | Named skill files to load |
 | `maxTurns` | `number` | `150` | Maximum tool-use turns before the agent is stopped |
-| `enableBrowser` | `boolean` | `false` | Give the agent browser access |
-| `enableEmail` | `boolean` | `false` | Give the agent email tools (5 tools, requires vault credentials) |
 | `mcpServers` | `object` | — | MCP server connections |
 
 <Tip>
@@ -243,7 +241,7 @@ The wizard runs through 5 steps:
      ...
    ```
 
-   This creates vault entries (type `"smtp"` and `"imap"`) and sets `enableEmail: true`. Use `${ENV_VAR}` syntax for secrets — Polpo resolves them at runtime from environment variables.
+   This creates vault entries (type `"smtp"` and `"imap"`) and adds `email_*` to `allowedTools`. Use `${ENV_VAR}` syntax for secrets — Polpo resolves them at runtime from environment variables.
 
    Enabling email gives the agent 5 tools: `email_send`, `email_verify`, `email_list`, `email_read`, `email_search`. See [Email Tools](/reference/tools/email).
 

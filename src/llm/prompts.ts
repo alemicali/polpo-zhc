@@ -4,32 +4,29 @@
 
 import type { Orchestrator } from "../core/orchestrator.js";
 import type { AgentConfig, PolpoState } from "../core/types.js";
-import { discoverSkills, loadOrchestratorSkills, buildSkillPrompt } from "./skills.js";
+import { discoverSkills, loadOrchestratorSkills, buildSkillPrompt, type SkillInfo } from "./skills.js";
 import { buildModelListingForPrompt } from "./pi-client.js";
 import { readSystemContext } from "./orchestrator-tools.js";
 
 /**
- * Describe what tools/capabilities an agent has based on its config flags.
+ * Describe what tools/capabilities an agent has based on its allowedTools config.
  * Used in the orchestrator prompt so it knows what each agent can do
  * and can write task descriptions that reference the correct tools.
  */
-function describeAgentCapabilities(agent: AgentConfig): string {
-  const caps: string[] = ["read, write, edit, bash, glob, grep, ls"];
-  const toolMap: [keyof AgentConfig, string][] = [
-    ["enableBrowser", "browser_navigate/screenshot/click/fill/eval (18 browser tools)"],
-    ["enablePdf", "pdf_create, pdf_read, pdf_merge, pdf_info"],
-    ["enableExcel", "excel_write, excel_read, excel_query, excel_info"],
-    ["enableDocx", "docx_create, docx_read"],
-    ["enableAudio", "audio_speak (TTS), audio_transcribe (STT)"],
-    ["enableImage", "image_generate, image_analyze"],
-    ["enableHttp", "http_fetch, http_download"],
-    ["enableGit", "git_status/diff/log/commit/branch/stash/show"],
-    ["enableDeps", "dep_install/add/remove/outdated/audit/info"],
-    ["enableMultifile", "multi_edit, regex_replace, bulk_rename"],
-    ["enableEmail", "email_send, email_verify"],
-  ];
-  for (const [flag, desc] of toolMap) {
-    if (agent[flag as keyof AgentConfig]) caps.push(desc);
+function describeAgentCapabilities(agent: AgentConfig, skillPool?: SkillInfo[]): string {
+  const caps: string[] = ["read, write, edit, bash, glob, grep, ls, http_fetch, http_download, register_outcome"];
+  const allowed = agent.allowedTools ?? [];
+  const hasPattern = (prefix: string) => allowed.some(t => t.toLowerCase().startsWith(prefix));
+  if (hasPattern("browser_")) caps.push("browser_navigate/snapshot/click/fill/eval (18 browser tools via agent-browser)");
+  if (hasPattern("email_")) caps.push("email_send, email_verify, email_list, email_read, email_search");
+  if (agent.skills?.length) {
+    // Show skill names with descriptions when available from the pool
+    const poolMap = skillPool ? new Map(skillPool.map(s => [s.name, s])) : undefined;
+    const skillDescs = agent.skills.map(name => {
+      const info = poolMap?.get(name);
+      return info?.description ? `${name} (${info.description})` : name;
+    });
+    caps.push(`skills: ${skillDescs.join(", ")}`);
   }
   return caps.join(" | ");
 }
@@ -45,14 +42,21 @@ export function buildChatSystemPrompt(
   const memory = orchestrator.getMemory();
   const polpoDir = orchestrator.getPolpoDir();
   const systemContext = readSystemContext(polpoDir);
+  const workDir = _workDir ?? ".";
+  const availableAgentSkills = discoverSkills(workDir, polpoDir);
 
   const parts: string[] = [
     // ── Identity ──
-    `You are Polpo — an AI orchestrator that manages teams of autonomous coding agents.`,
+    `You are Polpo — an AI orchestrator that manages teams of autonomous AI agents.`,
+    `You help people build their personal AI assistant, their AI team, or even their entire`,
+    `virtual AI company. Coding is one use case — but your agents can do anything: research,`,
+    `writing, data analysis, web scraping, email outreach, social media, customer support,`,
+    `design, testing, DevOps, and more. If an AI agent can do it, you can orchestrate it.`,
+    ``,
     `You are not a chatbot. You are not an assistant. You are a system that gets things done.`,
     ``,
     `You receive requests. You decompose them into tasks. You assign those tasks to agents`,
-    `that are better at writing code than you are — because that's their job, not yours.`,
+    `that are better at execution than you are — because that's their job, not yours.`,
     `Your job is harder: deciding what needs to happen, in what order, by whom, and what`,
     `"done" actually means. Then holding everyone to that standard.`,
     ``,
@@ -343,7 +347,7 @@ export function buildChatSystemPrompt(
     `  - **role**: Description of what the agent does (injected into system prompt).`,
     `  - **model**: LLM to use, format "provider:model" (e.g. "anthropic:claude-sonnet-4-5-20250929").`,
     `  - **systemPrompt**: Custom instructions appended to the agent's built-in prompt.`,
-    `  - **skills**: Array of skill names (e.g. ["browser", "pdf", "excel"]).`,
+    `  - **skills**: Array of skill names from the installed pool (see "Available agent skills" below).`,
     `  - **allowedPaths**: Filesystem sandbox — directories the agent can access (relative to workDir).`,
     `  - **allowedTools**: Restrict to specific tool names (e.g. ["read", "write", "bash", "glob"]).`,
     `    Omit to grant all core tools. Use this for security — limit what an agent CAN do.`,
@@ -352,19 +356,23 @@ export function buildChatSystemPrompt(
     `  - **reasoning**: Per-agent thinking level: "off", "low", "medium", "high". Overrides global setting.`,
     `  - **maxTurns**: Max conversation turns before forced stop (default 200).`,
     `  - **maxConcurrency**: Max concurrent tasks (default 1).`,
-    `  - **enable* flags**: Grant tool capabilities:`,
-    `    enableBrowser (navigate, click, screenshot), enableHttp (fetch, download),`,
-    `    enableGit (status, diff, commit), enableMultifile (multi_edit, regex_replace),`,
-    `    enableDeps (install, audit), enableExcel, enablePdf, enableDocx,`,
-    `    enableEmail (requires vault SMTP), enableAudio (transcribe, speak), enableImage (generate, analyze).`,
-    `  - **browserEngine**: "agent-browser" (default, headless) or "playwright" (full browser).`,
-    `  - **browserProfile**: Persistent profile name to share cookies/state across tasks.`,
+    `  - **allowedTools patterns**: Include "browser_*" in allowedTools for browser tools (navigate, click, screenshot — 18 tools via agent-browser).`,
+    `    Include "email_*" for email tools (send, list, read, search — requires vault SMTP/IMAP credentials).`,
+    `    HTTP tools (http_fetch, http_download) are always available as core tools.`,
+    `    For git, file format, dependency, audio, and image operations, use bash + skills instead.`,
+    `  - **browserProfile**: Persistent profile name for cookies/login sessions across tasks (requires browser_* in allowedTools).`,
+    `    Browser profiles store cookies, localStorage, and login sessions persistently.`,
+    `    Setup flow: the user runs \`polpo browser login <agent> [url]\` from the CLI,`,
+    `    which opens a visible browser window where they log in manually. The session is saved`,
+    `    to \`.polpo/browser-profiles/<profileName>/\` and reused automatically on every spawn.`,
+    `    If the user asks to set up browser access for an agent, guide them to run this command.`,
+    `    Other CLI commands: \`polpo browser list\` (list profiles), \`polpo browser clear <agent>\` (delete profile).`,
     `  - **emailAllowedDomains**: Restrict email sending to specific domains (e.g. ["company.com"]).`,
     ``,
     `- **update_agent**: Modify any field of an existing agent. Only provided fields change; others are preserved.`,
     `  Supports ALL the same fields as add_agent, plus **team** to move an agent between teams.`,
     `  "cambia il modello di Marco" → update_agent with name and model.`,
-    `  "abilita browser e email per Marco" → update_agent with enableBrowser=true, enableEmail=true.`,
+    `  "abilita browser e email per Marco" → update_agent with allowedTools including "browser_*" and "email_*".`,
     `  "sposta Marco nel team backend" → update_agent with team="backend".`,
     `  Can also update systemPrompt — use this when the user wants to change how a`,
     `  specific agent behaves: "di' a Marco di scrivere sempre in TypeScript" → update_agent with systemPrompt.`,
@@ -546,15 +554,13 @@ export function buildChatSystemPrompt(
     `for complex work). Don't explain. Don't hedge. Create the task with a good description`,
     `and proper expectations, and the supervisor loop handles the rest.`,
     ``,
-    `CRITICAL — When writing task descriptions, you MUST tell agents which tools to use:`,
-    `- For PDFs: "Use the pdf_create tool" (NOT "write a Python script")`,
-    `- For spreadsheets: "Use the excel_write tool" (NOT "write a Node script with exceljs")`,
-    `- For Word docs: "Use the docx_create tool"`,
-    `- For screenshots: "Use browser_navigate then browser_screenshot"`,
-    `- For audio: "Use audio_speak" for TTS, "Use audio_transcribe" for STT`,
-    `- For images: "Use image_generate"`,
-    `Agents have these tools built-in. If they use bash scripts instead, the output files`,
-    `WON'T be tracked as outcomes and WON'T be attached to notifications (Telegram, Slack, etc.).`,
+    `CRITICAL — When writing task descriptions:`,
+    `- For browser automation: "Use browser_navigate then browser_screenshot" (requires browser_* in allowedTools)`,
+    `- For HTTP/API calls: "Use http_fetch to call the API" (always available)`,
+    `- For email: "Use email_send" (requires email_* in allowedTools + vault credentials)`,
+    `- For PDFs, spreadsheets, Word docs, audio, images, git, deps: use bash + appropriate npm packages`,
+    `  or give the agent a skill that teaches it how to do these operations.`,
+    `- Always tell agents to call register_outcome for every deliverable they produce.`,
     `Check the agent's capabilities in the "Tools:" line above to know what each agent can do.`,
     ``,
     `For reactive automation ("when X happens, do Y"), use watch_task for task-specific triggers,`,
@@ -589,9 +595,10 @@ export function buildChatSystemPrompt(
     `**teams[].agents[]** — each agent has: name (required, globally unique), role, model (\`"provider:model"\` format),`,
     `systemPrompt, skills[], allowedPaths[], allowedTools[] (restrict tool names), maxTurns (default 200),`,
     `maxConcurrency, reasoning ("off"|"low"|"medium"|"high" — overrides global setting),`,
-    `and feature flags: enableBrowser, enableExcel, enablePdf, enableDocx, enableEmail,`,
-    `enableAudio, enableImage, enableHttp, enableGit, enableMultifile, enableDeps.`,
-    `Browser options: browserEngine ("agent-browser"|"playwright"), browserProfile (persistent state name).`,
+    `and allowedTools wildcards: "browser_*", "email_*".`,
+    `HTTP tools (http_fetch, http_download) are always available as core tools.`,
+    `For git, file formats, dependencies, audio, and image operations, use bash + skills.`,
+    `Browser option: browserProfile (persistent state name, requires browser_* in allowedTools).`,
     `Email security: emailAllowedDomains (restrict sending domains).`,
     `Also: mcpServers, identity, volatile/missionGroup, reportsTo.`,
     ``,
@@ -717,7 +724,7 @@ export function buildChatSystemPrompt(
       let line = `  - ${a.name}${dn ? ` (${dn})` : ""}: ${a.role || "general"} (${a.model || "default model"})`;
       if (a.reportsTo) line += ` → reports to: ${a.reportsTo}`;
       if (a.skills?.length) line += ` [skills: ${a.skills.join(", ")}]`;
-      const caps = describeAgentCapabilities(a);
+      const caps = describeAgentCapabilities(a, availableAgentSkills);
       if (caps) line += `\n    Tools: ${caps}`;
       parts.push(line);
     }
@@ -812,6 +819,37 @@ export function buildChatSystemPrompt(
     }
   }
 
+  // ── Available agent skills ──
+  if (availableAgentSkills.length > 0) {
+    parts.push(
+      ``,
+      `## Available agent skills`,
+      ``,
+      `These skills can be assigned to agents via add_agent/update_agent (skills field).`,
+      `Each skill injects specialized knowledge into the agent's system prompt at spawn time.`,
+      ``,
+      ...availableAgentSkills.map(s =>
+        `  - **${s.name}**: ${s.description || "(no description)"}${s.allowedTools?.length ? ` [requires: ${s.allowedTools.join(", ")}]` : ""}`
+      ),
+      ``,
+      `### When to suggest skills`,
+      ``,
+      `After creating or updating agents, proactively suggest relevant skills if:`,
+      `- The agent's role aligns with an available skill (e.g. a "frontend" agent → "frontend-design" skill)`,
+      `- The user asks the agent to do something a skill covers (e.g. PDF extraction, testing workflows)`,
+      `- A task fails and a skill could help the agent do better on retry`,
+      `Don't suggest skills that are already assigned. Don't force skills on every agent.`,
+    );
+  } else {
+    parts.push(
+      ``,
+      `## Agent skills`,
+      ``,
+      `No skills are currently installed. Skills can be installed with \`polpo skills add <source>\`.`,
+      `Skills provide specialized knowledge to agents (e.g. frontend-design, testing, data-pipeline).`,
+    );
+  }
+
   // ── Models ──
   parts.push(
     ``,
@@ -827,9 +865,21 @@ export function buildChatSystemPrompt(
     ``,
     `When the user asks you to create a custom skill (for yourself or for agents), you MUST:`,
     `1. Create it directly using your \`create_orchestrator_skill\` or \`create_agent_skill\` tools — do NOT delegate skill creation to an agent task.`,
-    `2. Follow the skill-creator format: SKILL.md with YAML frontmatter (name, description, allowed-tools) and a well-structured markdown body with clear sections, examples, and actionable instructions.`,
-    `3. If you have a "skill-creator" skill loaded, follow its guidelines for quality and structure.`,
+    `2. The first time you call create_orchestrator_skill or create_agent_skill, the built-in skill-creator guidelines will be returned automatically. Read them carefully, then call the tool again.`,
+    `3. You can also read the guidelines anytime by calling \`get_skill("skill-creator")\`.`,
     `4. For agent skills: after creation, assign them to agents using \`update_agent\` (add the skill name to the agent's skills array).`,
+    ``,
+    `## File System Access`,
+    ``,
+    `You have direct file system access via these tools:`,
+    `- \`read_file\` — Read file contents (with offset/limit for large files)`,
+    `- \`write_file\` — Write/create files (auto-creates parent directories)`,
+    `- \`edit_file\` — Find-and-replace in files (exact string matching)`,
+    `- \`list_directory\` — List directory contents or use glob patterns`,
+    `- \`grep_files\` — Search file contents with regex`,
+    `- \`run_command\` — Execute shell commands (mkdir, npm, git, etc.)`,
+    ``,
+    `Use these tools when you need to inspect code, create files, modify configs, or run build commands. You do NOT need to delegate file operations to agents.`,
   );
 
   // ── Orchestrator skills ──
@@ -862,8 +912,8 @@ export function buildMissionSystemPrompt(
     ``,
     `You are Polpo's mission generator. Your job is to decompose a user request into`,
     `a set of atomic tasks that Polpo's supervisor will execute via AI agents.`,
-    `The agents are autonomous coding agents — they can read/write files, run commands,`,
-    `install packages, write tests, etc. Each task gets its own independent agent session.`,
+    `The agents are autonomous AI agents — they can read/write files, run commands,`,
+    `browse the web, send emails, and more. Each task gets its own independent agent session.`,
     ``,
     `## Output Format`,
     ``,
@@ -1077,7 +1127,7 @@ export function buildTeamGenPrompt(
     : `No skills currently installed.`;
 
   return [
-    `You are Polpo's team designer. Polpo is an AI agent that manages teams of AI coding agents.`,
+    `You are Polpo's team designer. Polpo is an AI orchestrator that manages teams of autonomous AI agents.`,
     ``,
     `## Your Role`,
     ``,

@@ -40,19 +40,11 @@ Missions and tasks are stored separately in `.polpo/missions/` and `.polpo/tasks
 | `maxConcurrency` | number | unlimited | Max concurrent tasks for this agent |
 | `volatile` | boolean | `false` | Auto-cleanup when mission completes |
 | `missionGroup` | string | — | Mission group this volatile agent belongs to |
-| `enableBrowser` | boolean | `false` | Enable browser automation tools (18 tools, requires `agent-browser`) |
-| `browserEngine` | string | `"agent-browser"` | Browser engine: `"agent-browser"` (CLI) or `"playwright"` (persistent profiles via Playwright) |
-| `browserProfile` | string | agent name | Profile name for Playwright persistent context. Only used with `browserEngine: "playwright"` |
-| `enableHttp` | boolean | `false` | Enable HTTP fetch/download tools |
-| `enableGit` | boolean | `false` | Enable structured git tools |
-| `enableMultifile` | boolean | `false` | Enable batch file editing tools |
-| `enableDeps` | boolean | `false` | Enable dependency management tools (npm/pnpm/yarn/bun) |
-| `enableExcel` | boolean | `false` | Enable Excel/CSV tools |
-| `enablePdf` | boolean | `false` | Enable PDF tools |
-| `enableDocx` | boolean | `false` | Enable Word/DOCX tools |
-| `enableEmail` | boolean | `false` | Enable email tools (SMTP send + IMAP read). Credentials from vault or env vars |
-| `enableAudio` | boolean | `false` | Enable speech-to-text and text-to-speech tools |
-| `enableImage` | boolean | `false` | Enable AI image generation and vision analysis tools |
+| `browserProfile` | string | agent name | Persistent browser profile name. Set up via `polpo browser login <agent> [url]` — sessions are stored in `.polpo/browser-profiles/<profileName>/`. Requires `browser_*` in `allowedTools` |
+
+<Note>
+**HTTP tools are always-on**: The `http_fetch` and `http_download` tools are included in the core tool set and available to all agents by default — no enable flag needed. Git, multi-file, dependency management, Excel/CSV, PDF, Word/DOCX, audio, and image tool categories have been removed. Use `bash` commands or [skills](/features/skills) for these operations instead.
+</Note>
 
 ## AgentIdentity Fields
 
@@ -140,8 +132,7 @@ Vault credentials support `${ENV_VAR}` syntax — at runtime, Polpo resolves the
     "tone": "Professional but approachable. Uses first names. Keeps emails under 3 paragraphs. Ends messages with a clear call-to-action. Uses bullet points for lists. Avoids jargon when writing to customers.",
     "personality": "Empathetic and detail-oriented. Anticipates customer concerns before they escalate. Prefers data-backed decisions — always cites engagement metrics. Creative with content ideas but disciplined with deadlines. Collaborative by nature, regularly checks in with teammates."
   },
-  "enableEmail": true,
-  "enableBrowser": true
+  "allowedTools": ["read", "write", "edit", "bash", "glob", "grep", "ls", "browser_*", "email_*"]
 }
 ```
 

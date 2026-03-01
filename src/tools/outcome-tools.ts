@@ -61,7 +61,9 @@ function guessMime(filePath: string): string | undefined {
   return EXT_MIME[filePath.slice(dot).toLowerCase()];
 }
 
-function createRegisterOutcomeTool(cwd: string, sandbox: string[]): AgentTool<typeof RegisterOutcomeSchema> {
+function createRegisterOutcomeTool(cwd: string, sandbox: string[], outputDir?: string): AgentTool<typeof RegisterOutcomeSchema> {
+  // Use outputDir in examples when available so the agent naturally writes there
+  const exampleDir = outputDir ? outputDir.replace(/\/$/, "") : "output";
   return {
     name: "register_outcome",
     label: "Register Outcome",
@@ -69,11 +71,12 @@ function createRegisterOutcomeTool(cwd: string, sandbox: string[]): AgentTool<ty
       "Register a file, text, URL, or data as a task outcome. This is the ONLY way to declare " +
       "deliverables — producing files does NOT auto-register them. You MUST call this tool for " +
       "every artifact that should appear in notifications and the task record.\n\n" +
+      (outputDir ? `Your task output directory is: ${outputDir}\nWrite deliverable files there before registering them.\n\n` : "") +
       "Examples:\n" +
-      "- After creating a PDF: register_outcome({type: 'file', label: 'Sales Report', path: 'output/report.pdf'})\n" +
-      "- After generating an image: register_outcome({type: 'media', label: 'Revenue Chart', path: 'charts/revenue.png'})\n" +
+      `- After creating a PDF: register_outcome({type: 'file', label: 'Sales Report', path: '${exampleDir}/report.pdf'})\n` +
+      `- After generating an image: register_outcome({type: 'media', label: 'Revenue Chart', path: '${exampleDir}/revenue.png'})\n` +
       "- To share a deploy URL: register_outcome({type: 'url', label: 'Staging Deploy', url: 'https://staging.example.com'})\n" +
-      "- To include analysis results: register_outcome({type: 'text', label: 'Summary', text: 'Revenue increased 23% QoQ...'})\n" +
+      "- To include analysis results: register_outcome({type: 'text', label: 'Summary', text: 'Revenue increased 23%...'})\n" +
       "- To return structured data: register_outcome({type: 'json', label: 'Metrics', data: {revenue: 1234}})",
     parameters: RegisterOutcomeSchema,
     async execute(_id, params) {
@@ -182,12 +185,13 @@ export const ALL_OUTCOME_TOOL_NAMES: OutcomeToolName[] = ["register_outcome"];
  * @param cwd - Working directory
  * @param allowedPaths - Sandbox paths
  * @param allowedTools - Optional filter
+ * @param outputDir - Per-task output directory for deliverables
  */
-export function createOutcomeTools(cwd: string, allowedPaths?: string[], allowedTools?: string[]): AgentTool<any>[] {
+export function createOutcomeTools(cwd: string, allowedPaths?: string[], allowedTools?: string[], outputDir?: string): AgentTool<any>[] {
   const sandbox = resolveAllowedPaths(cwd, allowedPaths);
 
   const factories: Record<OutcomeToolName, () => AgentTool<any>> = {
-    register_outcome: () => createRegisterOutcomeTool(cwd, sandbox),
+    register_outcome: () => createRegisterOutcomeTool(cwd, sandbox, outputDir),
   };
 
   const names = allowedTools

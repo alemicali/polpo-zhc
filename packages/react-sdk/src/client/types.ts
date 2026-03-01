@@ -221,33 +221,10 @@ export interface AgentConfig {
   volatile?: boolean;
   missionGroup?: string;
 
-  // Extended tool categories (opt-in)
-  /** Enable browser automation tools (browser_navigate, browser_click, etc.) */
-  enableBrowser?: boolean;
-  /** Browser engine: "agent-browser" (default) or "playwright" (persistent profiles) */
-  browserEngine?: "agent-browser" | "playwright";
-  /** Browser profile name for persistent context (cookies, auth). Only with browserEngine: "playwright". */
+  // Tool categories are activated via allowedTools (e.g. ["browser_*", "email_*"])
+  // Note: HTTP tools (http_fetch, http_download) are always available as core tools.
+  /** Browser profile name for persistent context (cookies, auth). Used with agent-browser --profile. */
   browserProfile?: string;
-  /** Enable HTTP/fetch tools (http_fetch, http_download) */
-  enableHttp?: boolean;
-  /** Enable structured git tools (git_status, git_diff, git_log, etc.) */
-  enableGit?: boolean;
-  /** Enable multi-file editing tools (multi_edit, regex_replace, bulk_rename) */
-  enableMultifile?: boolean;
-  /** Enable dependency management tools (dep_install, dep_add, etc.) */
-  enableDeps?: boolean;
-  /** Enable Excel/CSV tools (excel_read, excel_write, etc.) */
-  enableExcel?: boolean;
-  /** Enable PDF tools (pdf_read, pdf_create, pdf_merge, pdf_info) */
-  enablePdf?: boolean;
-  /** Enable Word/DOCX tools (docx_read, docx_create) */
-  enableDocx?: boolean;
-  /** Enable email tools (email_send, email_verify, email_list, email_read, email_search) */
-  enableEmail?: boolean;
-  /** Enable audio tools (audio_transcribe, audio_speak) */
-  enableAudio?: boolean;
-  /** Enable image tools (image_generate, image_analyze) */
-  enableImage?: boolean;
   /** Allowed recipient email domains for email_send. Overrides global setting. */
   emailAllowedDomains?: string[];
 }
@@ -700,18 +677,7 @@ export interface AddAgentRequest {
   reportsTo?: string;
   /** Allowed email recipient domains (overrides global setting). */
   emailAllowedDomains?: string[];
-  // Extended tool categories (opt-in)
-  enableBrowser?: boolean;
-  enableHttp?: boolean;
-  enableGit?: boolean;
-  enableMultifile?: boolean;
-  enableDeps?: boolean;
-  enableExcel?: boolean;
-  enablePdf?: boolean;
-  enableDocx?: boolean;
-  enableEmail?: boolean;
-  enableAudio?: boolean;
-  enableImage?: boolean;
+  // Tool categories activated via allowedTools (e.g. ["browser_*", "email_*"])
 }
 
 // === SSE ===

@@ -4,7 +4,11 @@ sidebarTitle: "HTTP"
 description: "2 tools for HTTP requests and file downloads"
 ---
 
-Make HTTP requests and download files. Enable with `enableHttp: true` in agent config.
+<Info>
+**Always-on core tools**: HTTP tools (`http_fetch`, `http_download`) are now included in the core tool set and are always available to all agents. No `enableHttp` flag is needed.
+</Info>
+
+Make HTTP requests and download files.
 
 <Note>
 Response bodies are truncated at **100,000 bytes** (`MAX_RESPONSE_BYTES`). Default request timeout is **30,000 ms**.

@@ -26,13 +26,11 @@
     "team": [
       {
         "name": "auditor",
-        "role": "Security auditor — identifies vulnerabilities, injection vectors, and insecure patterns",
-        "enableGit": true
+        "role": "Security auditor — identifies vulnerabilities, injection vectors, and insecure patterns"
       },
       {
         "name": "remediator",
-        "role": "Security engineer — applies fixes for identified vulnerabilities without breaking functionality",
-        "enableGit": true
+        "role": "Security engineer — applies fixes for identified vulnerabilities without breaking functionality"
       }
     ],
     "tasks": [

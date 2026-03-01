@@ -116,6 +116,7 @@ async function main(): Promise<void> {
     try { vaultStore = new EncryptedVaultStore(config.polpoDir); } catch { /* vault unavailable */ }
     const spawnCtx = {
       polpoDir: config.polpoDir,
+      outputDir: config.outputDir,
       emailAllowedDomains: config.emailAllowedDomains,
       mcpToolAllowlist: config.mcpToolAllowlist,
       reasoning: config.reasoning,

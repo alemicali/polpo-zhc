@@ -4,11 +4,50 @@ sidebarTitle: "Browser"
 description: "18 browser automation tools powered by agent-browser"
 ---
 
-Browser automation powered by the `agent-browser` CLI. Each agent gets its own isolated browser session. Enable with `enableBrowser: true` in agent config.
+Browser automation powered by the `agent-browser` CLI. Each agent gets its own isolated browser session. Enable by including `"browser_*"` in the agent's `allowedTools` array.
 
 <Note>
 Requires `agent-browser` CLI installed (`npm install -g agent-browser && agent-browser install`).
 </Note>
+
+## Persistent Browser Profiles
+
+Browser profiles let agents reuse login sessions, cookies, and localStorage across tasks. This is essential for agents that need to interact with authenticated websites.
+
+### Setup Flow
+
+```bash
+# 1. Open a visible browser and log in manually
+polpo browser login marco https://twitter.com/login
+
+# 2. A browser window opens — log in to any services you need
+# 3. Close the browser when done — your session is saved
+
+# The profile is stored in .polpo/browser-profiles/marco/
+```
+
+### Configuration
+
+Set `browserProfile` on the agent to use a persistent profile:
+
+```json
+{
+  "name": "marco",
+  "allowedTools": ["read", "write", "edit", "bash", "glob", "grep", "ls", "browser_*"],
+  "browserProfile": "marco"
+}
+```
+
+### Managing Profiles
+
+```bash
+polpo browser list              # List all profiles with last-used timestamps
+polpo browser clear marco       # Delete a profile (removes all saved sessions)
+```
+
+<Tip>
+If a login session expires, re-run `polpo browser login <agent> <url>` to log in again. The profile is overwritten with the fresh session.
+</Tip>
 
 ---
 

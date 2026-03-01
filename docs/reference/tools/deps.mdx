@@ -4,7 +4,11 @@ sidebarTitle: "Dependencies"
 description: "6 package management tools for npm, pnpm, yarn, and bun"
 ---
 
-Package management tools that auto-detect your package manager from lockfiles. Enable with `enableDeps: true` in agent config.
+<Warning>
+**Deprecated**: These tools have been removed as built-in tools. Use `bash` commands with your package manager directly (e.g. `npm install`, `pnpm add`, `yarn audit`) or install a skill that provides this functionality. The tools are documented here for reference only.
+</Warning>
+
+Package management tools that auto-detect your package manager from lockfiles.
 
 <Note>
 Supports **npm**, **pnpm**, **yarn**, and **bun**. Auto-detects the package manager by inspecting lockfiles in the project root. Default command timeout is **120 seconds**. All commands run with `bashSafeEnv()`.

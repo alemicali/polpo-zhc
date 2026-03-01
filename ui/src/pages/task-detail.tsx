@@ -646,16 +646,85 @@ export function TaskDetailPage() {
           <ScrollArea className="h-full">
             <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 pr-4">
 
-              {/* ── Left column (3/5): description, assessment, output ── */}
+              {/* ── Left column (3/5): output, assessment, description ── */}
               <div className="lg:col-span-3 space-y-4">
 
-              {/* ── Assessment summary (inline, prominent when present) ── */}
+              {/* ── Output (stdout/stderr — collapsible, open by default) ── */}
+              {task.result && (task.result.stdout || task.result.stderr) && (
+                <Collapsible defaultOpen>
+                  <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0">
+                    <CardContent className="pt-4 space-y-3">
+                      <CollapsibleTrigger className="flex items-center gap-1.5 text-[10px] font-medium text-muted-foreground uppercase tracking-widest hover:text-foreground transition-colors cursor-pointer group w-full">
+                        <Terminal className="h-3 w-3" /> Output
+                        <ChevronDown className="h-3 w-3 ml-auto transition-transform group-data-[state=open]:rotate-180" />
+                      </CollapsibleTrigger>
+                      <CollapsibleContent>
+                        <div className="space-y-3 pt-1">
+                          {task.result.stdout && (
+                            <div>
+                              <div className="flex items-center justify-between mb-1.5">
+                                <span className="text-[10px] text-muted-foreground font-medium">stdout</span>
+                                <div className="flex items-center gap-2">
+                                  <span className="text-[10px] font-mono text-muted-foreground/50">{task.result.stdout.split("\n").length} lines</span>
+                                  <Button
+                                    variant="ghost" size="icon" className="h-5 w-5"
+                                    onClick={() => { navigator.clipboard.writeText(task.result!.stdout!); toast.success("stdout copied"); }}
+                                  >
+                                    <Copy className="h-3 w-3" />
+                                  </Button>
+                                </div>
+                              </div>
+                              <ScrollArea className="max-h-[600px] rounded-md border border-border/30">
+                                <div className="px-4 py-3 bg-muted/20">
+                                  <MessageResponse mode="static" className="text-sm">{task.result.stdout}</MessageResponse>
+                                </div>
+                              </ScrollArea>
+                            </div>
+                          )}
+                          {task.result.stderr && (
+                            <div>
+                              <div className="flex items-center justify-between mb-1.5">
+                                <span className="text-[10px] text-red-400 font-medium">stderr</span>
+                                <div className="flex items-center gap-2">
+                                  <span className="text-[10px] font-mono text-muted-foreground/50">{task.result.stderr.split("\n").length} lines</span>
+                                  <Button
+                                    variant="ghost" size="icon" className="h-5 w-5"
+                                    onClick={() => { navigator.clipboard.writeText(task.result!.stderr!); toast.success("stderr copied"); }}
+                                  >
+                                    <Copy className="h-3 w-3" />
+                                  </Button>
+                                </div>
+                              </div>
+                              <ScrollArea className="h-48 rounded-md border border-red-500/20">
+                                <pre className="text-xs bg-red-500/5 px-4 py-3 whitespace-pre-wrap font-mono text-red-400/80 leading-relaxed">
+                                  {task.result.stderr}
+                                </pre>
+                              </ScrollArea>
+                            </div>
+                          )}
+                        </div>
+                      </CollapsibleContent>
+                    </CardContent>
+                  </Card>
+                </Collapsible>
+              )}
+
+              {/* ── Assessment summary (collapsible, open by default) ── */}
               {assessment && (
+                <Collapsible defaultOpen>
                 <Card className={cn(
                   "bg-card/80 backdrop-blur-sm border-border/40 overflow-hidden",
                   assessment.passed ? "border-l-2 border-l-emerald-500" : "border-l-2 border-l-red-500"
                 )}>
                   <CardContent className="pt-4 space-y-4">
+                    <CollapsibleTrigger className="flex items-center gap-1.5 text-[10px] font-medium text-muted-foreground uppercase tracking-widest hover:text-foreground transition-colors cursor-pointer group w-full">
+                      {assessment.passed ? <CheckCircle2 className="h-3 w-3 text-emerald-500" /> : <XCircle className="h-3 w-3 text-red-500" />}
+                      Assessment {assessment.passed ? "Passed" : "Failed"}
+                      {assessment.globalScore != null && <span className="font-mono ml-1">({Math.round(assessment.globalScore * 100)})</span>}
+                      <ChevronDown className="h-3 w-3 ml-auto transition-transform group-data-[state=open]:rotate-180" />
+                    </CollapsibleTrigger>
+                    <CollapsibleContent>
+                    <div className="space-y-4 pt-1">
                     {/* Score hero row */}
                     <div className="flex items-center gap-4">
                       {assessment.globalScore != null ? (
@@ -818,8 +887,11 @@ export function TaskDetailPage() {
                         </CollapsibleContent>
                       </Collapsible>
                     )}
+                    </div>
+                    </CollapsibleContent>
                   </CardContent>
                 </Card>
+                </Collapsible>
               )}
 
               {/* Assessment history — compact collapsible */}
@@ -840,85 +912,37 @@ export function TaskDetailPage() {
                 </Collapsible>
               )}
 
-              {/* ── Description ── */}
+              {/* ── Description (collapsible, open by default) ── */}
+              <Collapsible defaultOpen>
               <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0">
                 <CardContent className="pt-4 space-y-4">
-                  <div>
-                    <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-widest mb-2 flex items-center gap-1">
-                      <FileText className="h-3 w-3" /> Description
-                    </p>
-                    <div className="rounded-md bg-muted/30 px-4 py-3 text-sm">
-                      <MessageResponse>{task.description}</MessageResponse>
+                  <CollapsibleTrigger className="flex items-center gap-1.5 text-[10px] font-medium text-muted-foreground uppercase tracking-widest hover:text-foreground transition-colors cursor-pointer group w-full">
+                    <FileText className="h-3 w-3" /> Description
+                    <ChevronDown className="h-3 w-3 ml-auto transition-transform group-data-[state=open]:rotate-180" />
+                  </CollapsibleTrigger>
+                  <CollapsibleContent>
+                    <div className="space-y-4 pt-1">
+                      <div className="rounded-md bg-muted/30 px-4 py-3 text-sm">
+                        <MessageResponse>{task.description}</MessageResponse>
+                      </div>
+                      {task.originalDescription && task.originalDescription !== task.description && (
+                        <Collapsible>
+                          <CollapsibleTrigger className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer group">
+                            <ChevronDown className="h-3 w-3 transition-transform group-data-[state=open]:rotate-180" />
+                            Original Description
+                          </CollapsibleTrigger>
+                          <CollapsibleContent>
+                            <div className="rounded-md bg-muted/20 px-4 py-3 text-sm opacity-70 mt-2">
+                              <MessageResponse>{task.originalDescription}</MessageResponse>
+                            </div>
+                          </CollapsibleContent>
+                        </Collapsible>
+                      )}
                     </div>
-                  </div>
-                  {task.originalDescription && task.originalDescription !== task.description && (
-                    <Collapsible>
-                      <CollapsibleTrigger className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer group">
-                        <ChevronDown className="h-3 w-3 transition-transform group-data-[state=open]:rotate-180" />
-                        Original Description
-                      </CollapsibleTrigger>
-                      <CollapsibleContent>
-                        <div className="rounded-md bg-muted/20 px-4 py-3 text-sm opacity-70 mt-2">
-                          <MessageResponse>{task.originalDescription}</MessageResponse>
-                        </div>
-                      </CollapsibleContent>
-                    </Collapsible>
-                  )}
+                  </CollapsibleContent>
                 </CardContent>
               </Card>
-
-              {/* ── Output (stdout/stderr — always visible, scrollable) ── */}
-              {task.result && (task.result.stdout || task.result.stderr) && (
-                <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0">
-                  <CardContent className="pt-4 space-y-3">
-                    <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-widest flex items-center gap-1">
-                      <Terminal className="h-3 w-3" /> Output
-                    </p>
-                    {task.result.stdout && (
-                      <div>
-                        <div className="flex items-center justify-between mb-1.5">
-                          <span className="text-[10px] text-muted-foreground font-medium">stdout</span>
-                          <div className="flex items-center gap-2">
-                            <span className="text-[10px] font-mono text-muted-foreground/50">{task.result.stdout.split("\n").length} lines</span>
-                            <Button
-                              variant="ghost" size="icon" className="h-5 w-5"
-                              onClick={() => { navigator.clipboard.writeText(task.result!.stdout!); toast.success("stdout copied"); }}
-                            >
-                              <Copy className="h-3 w-3" />
-                            </Button>
-                          </div>
-                        </div>
-                        <ScrollArea className="h-48 rounded-md border border-border/30">
-                          <pre className="text-xs bg-muted/20 px-4 py-3 whitespace-pre-wrap font-mono text-muted-foreground leading-relaxed">
-                            {task.result.stdout}
-                          </pre>
-                        </ScrollArea>
-                      </div>
-                    )}
-                    {task.result.stderr && (
-                      <div>
-                        <div className="flex items-center justify-between mb-1.5">
-                          <span className="text-[10px] text-red-400 font-medium">stderr</span>
-                          <div className="flex items-center gap-2">
-                            <span className="text-[10px] font-mono text-muted-foreground/50">{task.result.stderr.split("\n").length} lines</span>
-                            <Button
-                              variant="ghost" size="icon" className="h-5 w-5"
-                              onClick={() => { navigator.clipboard.writeText(task.result!.stderr!); toast.success("stderr copied"); }}
-                            >
-                              <Copy className="h-3 w-3" />
-                            </Button>
-                          </div>
-                        </div>
-                        <ScrollArea className="h-48 rounded-md border border-red-500/20">
-                          <pre className="text-xs bg-red-500/5 px-4 py-3 whitespace-pre-wrap font-mono text-red-400/80 leading-relaxed">
-                            {task.result.stderr}
-                          </pre>
-                        </ScrollArea>
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-              )}
+              </Collapsible>
 
               </div>{/* end left column */}
 
@@ -1001,13 +1025,16 @@ export function TaskDetailPage() {
                 </Card>
               )}
 
-              {/* ── Outcomes (produced artifacts — actionable) ── */}
+              {/* ── Outcomes (produced artifacts — collapsible, open by default) ── */}
               {(task.outcomes?.length ?? 0) > 0 && (
+                <Collapsible defaultOpen>
                 <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0">
                   <CardContent className="pt-4">
-                    <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-widest mb-3 flex items-center gap-1">
+                    <CollapsibleTrigger className="flex items-center gap-1.5 text-[10px] font-medium text-muted-foreground uppercase tracking-widest hover:text-foreground transition-colors cursor-pointer group w-full mb-3">
                       <Package className="h-3 w-3" /> Outcomes ({task.outcomes!.length})
-                    </p>
+                      <ChevronDown className="h-3 w-3 ml-auto transition-transform group-data-[state=open]:rotate-180" />
+                    </CollapsibleTrigger>
+                    <CollapsibleContent>
                     <div className="space-y-2">
                       {task.outcomes!.map((o) => {
                         const OutcomeIcon = o.type === "media"
@@ -1018,13 +1045,24 @@ export function TaskDetailPage() {
                           : File;
 
                         const isImage = o.mimeType?.startsWith("image/");
+                        const fileHref = o.path ? `file://${o.path}` : undefined;
 
                         return (
                           <div key={o.id} className="rounded-md border border-border/50 overflow-hidden">
-                            {/* Header */}
-                            <div className="flex items-center gap-2 px-3 py-2.5 bg-muted/20">
+                            {/* Header — clickable for file/media outcomes */}
+                            <div className={`flex items-center gap-2 px-3 py-2.5 bg-muted/20 ${fileHref ? "cursor-pointer hover:bg-muted/40 transition-colors" : ""}`}>
                               <OutcomeIcon className="h-4 w-4 text-muted-foreground shrink-0" />
-                              <span className="text-sm font-medium truncate">{o.label}</span>
+                              {fileHref ? (
+                                <a href={fileHref} target="_blank" rel="noopener noreferrer" className="text-sm font-medium truncate text-primary hover:underline" title={`Open ${o.path}`}>
+                                  {o.label}
+                                </a>
+                              ) : o.url ? (
+                                <a href={o.url} target="_blank" rel="noopener noreferrer" className="text-sm font-medium truncate text-primary hover:underline" title={`Open ${o.url}`}>
+                                  {o.label}
+                                </a>
+                              ) : (
+                                <span className="text-sm font-medium truncate">{o.label}</span>
+                              )}
                               <Badge variant="outline" className="text-[9px] shrink-0">{o.type}</Badge>
                               {o.mimeType && (
                                 <span className="text-[10px] text-muted-foreground font-mono shrink-0">{o.mimeType}</span>
@@ -1056,10 +1094,12 @@ export function TaskDetailPage() {
                               </div>
                             </div>
 
-                            {/* Path */}
+                            {/* Path — clickable */}
                             {o.path && (
                               <div className="px-3 py-1.5 border-t border-border/30 bg-muted/10">
-                                <code className="text-[11px] font-mono text-muted-foreground break-all">{o.path}</code>
+                                <a href={`file://${o.path}`} target="_blank" rel="noopener noreferrer" className="text-[11px] font-mono text-muted-foreground hover:text-primary hover:underline break-all transition-colors">
+                                  {o.path}
+                                </a>
                               </div>
                             )}
 
@@ -1084,13 +1124,22 @@ export function TaskDetailPage() {
                               </div>
                             )}
 
-                            {/* Inline text content — scrollable */}
+                            {/* Inline text content — rendered as markdown */}
                             {o.text && (
-                              <div className="border-t border-border/30">
-                                <ScrollArea className="max-h-32">
-                                  <pre className="text-xs font-mono text-muted-foreground px-3 py-2 whitespace-pre-wrap leading-relaxed">
-                                    {o.text}
-                                  </pre>
+                              <div className="border-t border-border/30 px-3 py-2">
+                                <ScrollArea className="max-h-64">
+                                  <MessageResponse mode="static" className="text-sm">{o.text}</MessageResponse>
+                                </ScrollArea>
+                              </div>
+                            )}
+
+                            {/* JSON data — formatted code block */}
+                            {o.type === "json" && o.data !== undefined && (
+                              <div className="border-t border-border/30 px-3 py-2">
+                                <ScrollArea className="max-h-48">
+                                  <MessageResponse mode="static" className="text-sm">
+                                    {"```json\n" + JSON.stringify(o.data, null, 2) + "\n```"}
+                                  </MessageResponse>
                                 </ScrollArea>
                               </div>
                             )}
@@ -1117,8 +1166,10 @@ export function TaskDetailPage() {
                         );
                       })}
                     </div>
+                    </CollapsibleContent>
                   </CardContent>
                 </Card>
+                </Collapsible>
               )}
 
               {/* ── Expected Outcomes (declared, not yet produced) ── */}
@@ -1244,7 +1295,16 @@ export function TaskDetailPage() {
                       <>
                         <div>
                           <span className="text-xs text-muted-foreground block">Duration</span>
-                          <span>{Math.round(task.result.duration / 1000)}s</span>
+                          <span>{(() => {
+                            const totalSec = Math.round(task.result!.duration / 1000);
+                            if (totalSec < 60) return `${totalSec}s`;
+                            const m = Math.floor(totalSec / 60);
+                            const s = totalSec % 60;
+                            if (m < 60) return s > 0 ? `${m}m ${s}s` : `${m}m`;
+                            const h = Math.floor(m / 60);
+                            const rm = m % 60;
+                            return rm > 0 ? `${h}h ${rm}m` : `${h}h`;
+                          })()}</span>
                         </div>
                         <div>
                           <span className="text-xs text-muted-foreground block">Exit Code</span>

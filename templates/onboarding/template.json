@@ -20,13 +20,11 @@
     "team": [
       {
         "name": "explorer",
-        "role": "Codebase explorer — reads code thoroughly and builds mental models of architecture and data flows",
-        "enableGit": true
+        "role": "Codebase explorer — reads code thoroughly and builds mental models of architecture and data flows"
       },
       {
         "name": "writer",
-        "role": "Technical writer — creates clear, approachable onboarding materials for the target audience",
-        "enableGit": true
+        "role": "Technical writer — creates clear, approachable onboarding materials for the target audience"
       }
     ],
     "tasks": [

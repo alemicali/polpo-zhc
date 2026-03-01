@@ -33,7 +33,7 @@ import { nanoid } from "nanoid";
 /**
  * Build the system prompt for the agent, including loaded skills.
  */
-export function buildSystemPrompt(agent: AgentConfig, cwd: string, polpoDir?: string): string {
+export function buildSystemPrompt(agent: AgentConfig, cwd: string, polpoDir?: string, outputDir?: string): string {
   const parts = [
     "You are a coding agent managed by Polpo, an AI agent orchestrator.",
     "Complete your assigned task autonomously. Make reasonable decisions and proceed without asking questions.",
@@ -100,6 +100,18 @@ export function buildSystemPrompt(agent: AgentConfig, cwd: string, polpoDir?: st
     const skills = loadAgentSkills(cwd, polpoDir, agent.name, agent.skills);
     const skillBlock = buildSkillPrompt(skills);
     if (skillBlock) parts.push("", skillBlock);
+  }
+
+  // Output directory for task deliverables
+  if (outputDir) {
+    parts.push(
+      "",
+      "## Output Directory",
+      `Your task output directory is: ${outputDir}`,
+      "Write all deliverable files (reports, images, data exports, etc.) to this directory.",
+      "When you register an outcome with register_outcome, use paths inside this directory.",
+      "This directory is pre-created and writable. Other tasks have separate output directories.",
+    );
   }
 
   return parts.join("\n");
@@ -181,24 +193,27 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
   const model = resolveModel(agentConfig.model);
 
   // Create all tools scoped to working directory with path sandboxing
-  // Extended tool categories are enabled via agent config flags or by naming them in allowedTools
-  const hasExtended = agentConfig.enableBrowser || agentConfig.enableHttp || agentConfig.enableGit ||
-    agentConfig.enableMultifile || agentConfig.enableDeps || agentConfig.enableExcel ||
-    agentConfig.enablePdf || agentConfig.enableDocx || agentConfig.enableEmail ||
-    agentConfig.enableAudio || agentConfig.enableImage;
-
-  // Derive browser profile / state directory
+  // Browser/email tools are auto-loaded when their names appear in allowedTools (e.g. "browser_*", "email_*")
   const polpoDir = ctx?.polpoDir ?? join(cwd, ".polpo");
-  const browserProfileDir = agentConfig.browserEngine === "playwright"
-    ? join(polpoDir, "browser-profiles", agentConfig.browserProfile || agentConfig.name)
-    : undefined;
-  // For agent-browser: persistent state directory (same path convention as Playwright profiles)
-  const browserStateDir = agentConfig.browserEngine !== "playwright" && agentConfig.enableBrowser
-    ? join(polpoDir, "browser-profiles", agentConfig.browserProfile || agentConfig.name)
-    : undefined;
+
+  // Browser profile directory for agent-browser persistent state (cookies, auth, localStorage)
+  const browserProfileDir = join(polpoDir, "browser-profiles", agentConfig.browserProfile || agentConfig.name);
+
+  // Check if browser or email tools are requested via allowedTools
+  const hasBrowserOrEmail = agentConfig.allowedTools?.some(t =>
+    t.toLowerCase().startsWith("browser_") || t.toLowerCase().startsWith("email_")
+  ) ?? false;
+
+  // Derive output directory from context (per-task output dir for deliverables)
+  const outputDir = ctx?.outputDir;
+
+  // If outputDir is set, add it to the agent's allowed paths so it can write there
+  const effectiveAllowedPaths = outputDir
+    ? [...(agentConfig.allowedPaths ?? []), outputDir]
+    : agentConfig.allowedPaths;
 
   // Start with core coding tools (sync); extended tools loaded async in the run phase
-  const codingTools = createCodingTools(cwd, agentConfig.allowedTools, agentConfig.allowedPaths);
+  const codingTools = createCodingTools(cwd, agentConfig.allowedTools, effectiveAllowedPaths, outputDir);
 
   // MCP client manager — initialized later (async) if mcpServers are configured
   let mcpManager: McpClientManager | null = null;
@@ -211,7 +226,7 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
   const agent = new Agent({
     getApiKey: (provider: string) => resolveApiKeyAsync(provider),
     initialState: {
-      systemPrompt: buildSystemPrompt(agentConfig, cwd, ctx?.polpoDir),
+      systemPrompt: buildSystemPrompt(agentConfig, cwd, ctx?.polpoDir, outputDir),
       model,
       thinkingLevel,
       tools: codingTools,
@@ -325,30 +340,18 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
       const vaultEntries = ctx?.vaultStore?.getAllForAgent(agentConfig.name);
       const vault = resolveAgentVault(vaultEntries);
 
-      // Resolve extended tools (async — Playwright import) and MCP servers before prompting
+      // Resolve all tools (browser/email auto-detected from allowedTools) and MCP servers before prompting
       let allTools = codingTools;
-      if (hasExtended) {
+      if (hasBrowserOrEmail) {
         allTools = await createAllTools({
           cwd,
           allowedTools: agentConfig.allowedTools,
-          allowedPaths: agentConfig.allowedPaths,
+          allowedPaths: effectiveAllowedPaths,
           browserSession: agentConfig.name,
-          browserEngine: agentConfig.browserEngine,
           browserProfileDir,
-          browserStateDir,
-          enableBrowser: agentConfig.enableBrowser,
-          enableHttp: agentConfig.enableHttp,
-          enableGit: agentConfig.enableGit,
-          enableMultifile: agentConfig.enableMultifile,
-          enableDeps: agentConfig.enableDeps,
-          enableExcel: agentConfig.enableExcel,
-          enablePdf: agentConfig.enablePdf,
-          enableDocx: agentConfig.enableDocx,
-          enableEmail: agentConfig.enableEmail,
-          enableAudio: agentConfig.enableAudio,
-          enableImage: agentConfig.enableImage,
           vault,
           emailAllowedDomains: agentConfig.emailAllowedDomains ?? ctx?.emailAllowedDomains,
+          outputDir,
         });
         agent.setTools(allTools);
       }
@@ -410,15 +413,10 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
       if (mcpManager) {
         await mcpManager.close().catch(() => {});
       }
-      // Close Playwright browser context (preserves profile data on disk)
-      if (browserProfileDir) {
-        const { cleanupPlaywrightContext } = await import("../tools/playwright-browser-tools.js");
-        await cleanupPlaywrightContext(browserProfileDir).catch(() => {});
-      }
-      // Save agent-browser state and close session
-      if (browserStateDir) {
+      // Close agent-browser session (profile data auto-persisted by --profile)
+      if (hasBrowserOrEmail) {
         const { cleanupAgentBrowserSession } = await import("../tools/browser-tools.js");
-        await cleanupAgentBrowserSession(agentConfig.name, browserStateDir).catch(() => {});
+        await cleanupAgentBrowserSession(agentConfig.name).catch(() => {});
       }
     }
   })();

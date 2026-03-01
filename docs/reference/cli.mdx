@@ -242,7 +242,7 @@ Interactive wizard to set up an agent's full profile. Walks through 5 steps:
 1. **Identity** — display name, title, company, email, timezone, bio
 2. **Persona** — structured responsibilities (area + description + priority), communication tone, personality traits
 3. **Hierarchy** — `reportsTo` assignment (org chart parent for escalation)
-4. **Email** — SMTP vault entry (send) and IMAP vault entry (read), sets `enableEmail: true`
+4. **Email** — SMTP vault entry (send) and IMAP vault entry (read), adds `email_*` to `allowedTools`
 5. **Vault** — additional credentials (API keys, OAuth tokens, logins, custom)
 
 Agent config is saved to `.polpo/polpo.json`; vault entries are saved to `.polpo/vault.enc` (AES-256-GCM encrypted). Run again to update an existing agent's profile.
@@ -264,6 +264,44 @@ polpo agent show <name> [-d <path>]
 ```
 
 Detailed view of an agent: identity, vault (credentials masked), and enabled features.
+
+---
+
+## polpo browser
+
+Manage persistent browser profiles for agents with browser tools.
+
+### browser login
+
+Open a visible browser with the agent's profile for manual login. The session (cookies, localStorage) is saved to `.polpo/browser-profiles/<profileName>/` and reused automatically when the agent runs tasks.
+
+```bash
+polpo browser login <agent> [url] [-d <path>]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `url` | `https://x.com/login` | URL to open for login |
+
+### browser list
+
+List all browser profiles with last-used timestamps and session status.
+
+```bash
+polpo browser list [-d <path>]
+```
+
+### browser clear
+
+Delete an agent's browser profile (removes all saved cookies and sessions).
+
+```bash
+polpo browser clear <agent> [-d <path>] [-f]
+```
+
+| Flag | Description |
+|------|-------------|
+| `-f, --force` | Skip confirmation |
 
 ---
 

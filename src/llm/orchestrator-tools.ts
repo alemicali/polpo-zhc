@@ -12,8 +12,8 @@ import { Type } from "@sinclair/typebox";
 import type { Tool } from "@mariozechner/pi-ai";
 import type { Orchestrator } from "../core/orchestrator.js";
 import type { ApprovalStatus, VaultEntry, AgentIdentity, AgentResponsibility, AgentConfig } from "../core/types.js";
-import { existsSync, readFileSync, appendFileSync, writeFileSync } from "fs";
-import { join } from "path";
+import { existsSync, readFileSync, appendFileSync, writeFileSync, readdirSync, statSync, mkdirSync } from "fs";
+import { join, resolve, relative, isAbsolute } from "path";
 import { execSync } from "child_process";
 import {
   discoverOrchestratorSkills, createOrchestratorSkill, updateOrchestratorSkill,
@@ -270,7 +270,7 @@ const deleteMissionTool: Tool = {
 
 const addAgentTool: Tool = {
   name: "add_agent",
-  description: "Add a new agent to a team. If no team is specified, adds to the default (first) team. Use enable* flags to grant tool capabilities (e.g. enableBrowser, enableEmail). Use allowedTools to restrict to specific tool names.",
+  description: "Add a new agent to a team. If no team is specified, adds to the default (first) team. Use allowedTools to grant browser/email tool access (e.g. ['browser_*', 'email_*']). HTTP tools are always available. Use allowedTools to restrict to specific tool names.",
   parameters: Type.Object({
     name: Type.String({ description: "Agent name (unique identifier, must be globally unique across all teams)" }),
     role: Type.Optional(Type.String({ description: "Agent role description (e.g. 'Frontend developer')" })),
@@ -278,25 +278,13 @@ const addAgentTool: Tool = {
     systemPrompt: Type.Optional(Type.String({ description: "Custom system prompt for this agent" })),
     skills: Type.Optional(Type.Array(Type.String(), { description: "Skill names to assign" })),
     allowedPaths: Type.Optional(Type.Array(Type.String(), { description: "Filesystem paths this agent can access (relative to workDir)" })),
-    allowedTools: Type.Optional(Type.Array(Type.String(), { description: "Restrict to specific tool names (e.g. ['read','write','bash']). Omit for all tools." })),
+    allowedTools: Type.Optional(Type.Array(Type.String(), { description: "Tool names/wildcards to enable (e.g. ['read','write','bash','browser_*','email_*']). Omit for core coding tools only." })),
     reportsTo: Type.Optional(Type.String({ description: "Name of the agent this one reports to (org chart hierarchy, e.g. 'lead-dev')" })),
     team: Type.Optional(Type.String({ description: "Team name to add the agent to (default: first team)" })),
     reasoning: Type.Optional(Type.Union([Type.Literal("off"), Type.Literal("low"), Type.Literal("medium"), Type.Literal("high")], { description: "Agent thinking/reasoning level. Overrides global settings.reasoning." })),
     maxTurns: Type.Optional(Type.Number({ description: "Max conversation turns before agent stops. Default: 200" })),
     maxConcurrency: Type.Optional(Type.Number({ description: "Max concurrent tasks this agent can run. Default: 1" })),
-    enableBrowser: Type.Optional(Type.Boolean({ description: "Enable browser tools (navigate, click, fill, screenshot)" })),
-    browserEngine: Type.Optional(Type.Union([Type.Literal("agent-browser"), Type.Literal("playwright")], { description: "Browser backend. Default: agent-browser" })),
-    browserProfile: Type.Optional(Type.String({ description: "Persistent browser profile name (shares state across tasks)" })),
-    enableHttp: Type.Optional(Type.Boolean({ description: "Enable HTTP fetch/download tools" })),
-    enableGit: Type.Optional(Type.Boolean({ description: "Enable Git tools (status, diff, log, commit, branch)" })),
-    enableMultifile: Type.Optional(Type.Boolean({ description: "Enable multi-file tools (multi_edit, regex_replace, bulk_rename)" })),
-    enableDeps: Type.Optional(Type.Boolean({ description: "Enable dependency management tools (install, add, remove, audit)" })),
-    enableExcel: Type.Optional(Type.Boolean({ description: "Enable Excel/CSV tools (read, write, query)" })),
-    enablePdf: Type.Optional(Type.Boolean({ description: "Enable PDF tools (read, create, merge)" })),
-    enableDocx: Type.Optional(Type.Boolean({ description: "Enable DOCX tools (read, create)" })),
-    enableEmail: Type.Optional(Type.Boolean({ description: "Enable email tools (send, list, read, search). Requires vault SMTP/IMAP credentials." })),
-    enableAudio: Type.Optional(Type.Boolean({ description: "Enable audio tools (transcribe, speak)" })),
-    enableImage: Type.Optional(Type.Boolean({ description: "Enable image tools (generate, analyze)" })),
+    browserProfile: Type.Optional(Type.String({ description: "Persistent browser profile name (shares cookies/state across tasks). Requires browser_* in allowedTools." })),
     emailAllowedDomains: Type.Optional(Type.Array(Type.String(), { description: "Restrict email sending to these domains only (e.g. ['company.com'])" })),
   }),
 };
@@ -319,25 +307,13 @@ const updateAgentTool: Tool = {
     systemPrompt: Type.Optional(Type.String({ description: "New system prompt" })),
     skills: Type.Optional(Type.Array(Type.String(), { description: "New skill list (replaces existing)" })),
     allowedPaths: Type.Optional(Type.Array(Type.String(), { description: "New allowed paths (replaces existing)" })),
-    allowedTools: Type.Optional(Type.Array(Type.String(), { description: "Restrict to specific tool names (replaces existing). Omit to keep current." })),
+    allowedTools: Type.Optional(Type.Array(Type.String(), { description: "Tool names/wildcards to enable (replaces existing). Include 'browser_*' or 'email_*' to grant those categories. Omit to keep current." })),
     reportsTo: Type.Optional(Type.String({ description: "Name of the agent this one reports to. Use empty string to remove." })),
     team: Type.Optional(Type.String({ description: "Move agent to a different team" })),
     reasoning: Type.Optional(Type.Union([Type.Literal("off"), Type.Literal("low"), Type.Literal("medium"), Type.Literal("high")], { description: "Agent thinking/reasoning level" })),
     maxTurns: Type.Optional(Type.Number({ description: "Max conversation turns" })),
     maxConcurrency: Type.Optional(Type.Number({ description: "Max concurrent tasks" })),
-    enableBrowser: Type.Optional(Type.Boolean({ description: "Enable/disable browser tools" })),
-    browserEngine: Type.Optional(Type.Union([Type.Literal("agent-browser"), Type.Literal("playwright")], { description: "Browser backend" })),
     browserProfile: Type.Optional(Type.String({ description: "Persistent browser profile name" })),
-    enableHttp: Type.Optional(Type.Boolean({ description: "Enable/disable HTTP tools" })),
-    enableGit: Type.Optional(Type.Boolean({ description: "Enable/disable Git tools" })),
-    enableMultifile: Type.Optional(Type.Boolean({ description: "Enable/disable multi-file tools" })),
-    enableDeps: Type.Optional(Type.Boolean({ description: "Enable/disable dependency tools" })),
-    enableExcel: Type.Optional(Type.Boolean({ description: "Enable/disable Excel/CSV tools" })),
-    enablePdf: Type.Optional(Type.Boolean({ description: "Enable/disable PDF tools" })),
-    enableDocx: Type.Optional(Type.Boolean({ description: "Enable/disable DOCX tools" })),
-    enableEmail: Type.Optional(Type.Boolean({ description: "Enable/disable email tools" })),
-    enableAudio: Type.Optional(Type.Boolean({ description: "Enable/disable audio tools" })),
-    enableImage: Type.Optional(Type.Boolean({ description: "Enable/disable image tools" })),
     emailAllowedDomains: Type.Optional(Type.Array(Type.String(), { description: "Restrict email to these domains" })),
   }),
 };
@@ -762,6 +738,67 @@ const getSkillTool: Tool = {
 };
 
 // ═══════════════════════════════════════════════════════
+//  FILE SYSTEM TOOLS (6) — core coding capabilities
+// ═══════════════════════════════════════════════════════
+
+const readFileTool: Tool = {
+  name: "read_file",
+  description: "Read the contents of a file. Returns numbered lines. Use offset/limit for large files.",
+  parameters: Type.Object({
+    path: Type.String({ description: "File path (relative to project root or absolute)" }),
+    offset: Type.Optional(Type.Number({ description: "Start line (1-indexed, default: 1)" })),
+    limit: Type.Optional(Type.Number({ description: "Max lines to return (default: 500)" })),
+  }),
+};
+
+const writeFileTool: Tool = {
+  name: "write_file",
+  description: "Write content to a file. Creates parent directories if needed. Overwrites existing files.",
+  parameters: Type.Object({
+    path: Type.String({ description: "File path (relative to project root or absolute)" }),
+    content: Type.String({ description: "File content to write" }),
+  }),
+};
+
+const editFileTool: Tool = {
+  name: "edit_file",
+  description: "Replace an exact string in a file. The oldString must match exactly (including whitespace). Use replaceAll to replace every occurrence.",
+  parameters: Type.Object({
+    path: Type.String({ description: "File path (relative to project root or absolute)" }),
+    oldString: Type.String({ description: "The exact text to find and replace" }),
+    newString: Type.String({ description: "The replacement text" }),
+    replaceAll: Type.Optional(Type.Boolean({ description: "Replace all occurrences (default: false)" })),
+  }),
+};
+
+const listDirectoryTool: Tool = {
+  name: "list_directory",
+  description: "List files and directories at a path. Directories have a trailing /. Supports glob patterns.",
+  parameters: Type.Object({
+    path: Type.Optional(Type.String({ description: "Directory path (default: project root). Supports glob patterns like 'src/**/*.ts'" })),
+  }),
+};
+
+const grepFilesTool: Tool = {
+  name: "grep_files",
+  description: "Search file contents using a regex pattern. Returns matching file paths and line numbers.",
+  parameters: Type.Object({
+    pattern: Type.String({ description: "Regex pattern to search for" }),
+    path: Type.Optional(Type.String({ description: "Directory to search in (default: project root)" })),
+    include: Type.Optional(Type.String({ description: "File glob filter (e.g. '*.ts', '*.{ts,tsx}')" })),
+  }),
+};
+
+const runCommandTool: Tool = {
+  name: "run_command",
+  description: "Execute a shell command in the project directory. Use for mkdir, cp, mv, npm, git, and other operations. Returns stdout/stderr. Timeout: 30s.",
+  parameters: Type.Object({
+    command: Type.String({ description: "Shell command to execute" }),
+    cwd: Type.Optional(Type.String({ description: "Working directory (default: project root)" })),
+  }),
+};
+
+// ═══════════════════════════════════════════════════════
 //  INTERACTIVE TOOLS
 // ═══════════════════════════════════════════════════════
 
@@ -799,6 +836,8 @@ export const READ_TOOLS = new Set([
   "list_schedules", "list_notification_rules", "list_watchers",
   // Skills (read-only)
   "list_orchestrator_skills", "list_agent_skills", "search_skills", "get_skill",
+  // File System (read-only)
+  "read_file", "list_directory", "grep_files",
 ]);
 
 export const WRITE_TOOLS = new Set([
@@ -824,6 +863,8 @@ export const WRITE_TOOLS = new Set([
   // Skills (write)
   "create_orchestrator_skill", "update_orchestrator_skill", "remove_orchestrator_skill",
   "install_orchestrator_skill", "create_agent_skill", "install_agent_skill", "remove_agent_skill",
+  // File System (write)
+  "write_file", "edit_file", "run_command",
 ]);
 
 /** Tools that pause the conversation to collect user input / show a preview. */
@@ -869,6 +910,8 @@ export const ALL_ORCHESTRATOR_TOOLS: Tool[] = [
   removeOrchestratorSkillTool, installOrchestratorSkillTool,
   listAgentSkillsTool, createAgentSkillTool, installAgentSkillTool, removeAgentSkillTool,
   searchSkillsTool, getSkillTool,
+  // File System (6)
+  readFileTool, writeFileTool, editFileTool, listDirectoryTool, grepFilesTool, runCommandTool,
   // Interactive (1)
   askUserTool,
 ];
@@ -925,6 +968,10 @@ const TOOL_LABELS: Record<string, string> = {
   create_agent_skill: "Create Agent Skill",
   install_agent_skill: "Install Agent Skill",
   remove_agent_skill: "Remove Agent Skill",
+  // File System
+  write_file: "Write File",
+  edit_file: "Edit File",
+  run_command: "Run Command",
 };
 
 // ═══════════════════════════════════════════════════════
@@ -1075,6 +1122,14 @@ export function executeOrchestratorTool(
       case "remove_agent_skill":          return execRemoveAgentSkill(polpo, args);
       case "search_skills":              return execSearchSkills(args);
       case "get_skill":                  return execGetSkill(polpo, args);
+
+      // ── File System ──
+      case "read_file":        return execReadFile(polpo, args);
+      case "write_file":       return execWriteFile(polpo, args);
+      case "edit_file":        return execEditFile(polpo, args);
+      case "list_directory":   return execListDirectory(polpo, args);
+      case "grep_files":       return execGrepFiles(polpo, args);
+      case "run_command":      return execRunCommand(polpo, args);
 
       // ── Interactive (handled by the calling loop, not here) ──
       case "ask_user":
@@ -1619,19 +1674,7 @@ function execAddAgent(polpo: Orchestrator, args: Record<string, unknown>): strin
     reasoning: args.reasoning as string | undefined,
     maxTurns: args.maxTurns as number | undefined,
     maxConcurrency: args.maxConcurrency as number | undefined,
-    enableBrowser: args.enableBrowser as boolean | undefined,
-    browserEngine: args.browserEngine as string | undefined,
     browserProfile: args.browserProfile as string | undefined,
-    enableHttp: args.enableHttp as boolean | undefined,
-    enableGit: args.enableGit as boolean | undefined,
-    enableMultifile: args.enableMultifile as boolean | undefined,
-    enableDeps: args.enableDeps as boolean | undefined,
-    enableExcel: args.enableExcel as boolean | undefined,
-    enablePdf: args.enablePdf as boolean | undefined,
-    enableDocx: args.enableDocx as boolean | undefined,
-    enableEmail: args.enableEmail as boolean | undefined,
-    enableAudio: args.enableAudio as boolean | undefined,
-    enableImage: args.enableImage as boolean | undefined,
     emailAllowedDomains: args.emailAllowedDomains as string[] | undefined,
   };
   // Strip undefined values so addAgent only receives explicitly set fields
@@ -1683,19 +1726,7 @@ function execUpdateAgent(polpo: Orchestrator, args: Record<string, unknown>): st
     reasoning: (args.reasoning as string | undefined) ?? existing.reasoning,
     maxTurns: (args.maxTurns as number | undefined) ?? existing.maxTurns,
     maxConcurrency: (args.maxConcurrency as number | undefined) ?? existing.maxConcurrency,
-    enableBrowser: (args.enableBrowser as boolean | undefined) ?? existing.enableBrowser,
-    browserEngine: (args.browserEngine as string | undefined) ?? existing.browserEngine,
     browserProfile: (args.browserProfile as string | undefined) ?? existing.browserProfile,
-    enableHttp: (args.enableHttp as boolean | undefined) ?? existing.enableHttp,
-    enableGit: (args.enableGit as boolean | undefined) ?? existing.enableGit,
-    enableMultifile: (args.enableMultifile as boolean | undefined) ?? existing.enableMultifile,
-    enableDeps: (args.enableDeps as boolean | undefined) ?? existing.enableDeps,
-    enableExcel: (args.enableExcel as boolean | undefined) ?? existing.enableExcel,
-    enablePdf: (args.enablePdf as boolean | undefined) ?? existing.enablePdf,
-    enableDocx: (args.enableDocx as boolean | undefined) ?? existing.enableDocx,
-    enableEmail: (args.enableEmail as boolean | undefined) ?? existing.enableEmail,
-    enableAudio: (args.enableAudio as boolean | undefined) ?? existing.enableAudio,
-    enableImage: (args.enableImage as boolean | undefined) ?? existing.enableImage,
     emailAllowedDomains: (args.emailAllowedDomains as string[] | undefined) ?? existing.emailAllowedDomains,
   };
 
@@ -2205,6 +2236,12 @@ function execListOrchestratorSkills(polpo: Orchestrator): string {
 }
 
 function execCreateOrchestratorSkill(polpo: Orchestrator, args: Record<string, unknown>): string {
+  // Gate: force reading skill-creator guidelines before creating any skill
+  if (!_skillCreatorRead) {
+    _skillCreatorRead = true;
+    return `MANDATORY: Read the skill-creator guidelines below before creating a skill. After reading, call create_orchestrator_skill again with the same arguments.\n\n${BUILTIN_SKILL_CREATOR_CONTENT}`;
+  }
+
   const name = args.name as string;
   const description = args.description as string;
   const content = args.content as string;
@@ -2300,6 +2337,12 @@ function execInstallAgentSkill(polpo: Orchestrator, args: Record<string, unknown
 }
 
 function execCreateAgentSkill(polpo: Orchestrator, args: Record<string, unknown>): string {
+  // Gate: force reading skill-creator guidelines before creating any skill
+  if (!_skillCreatorRead) {
+    _skillCreatorRead = true;
+    return `MANDATORY: Read the skill-creator guidelines below before creating a skill. After reading, call create_agent_skill again with the same arguments.\n\n${BUILTIN_SKILL_CREATOR_CONTENT}`;
+  }
+
   const name = args.name as string;
   const description = args.description as string;
   const content = args.content as string;
@@ -2331,6 +2374,12 @@ function execGetSkill(polpo: Orchestrator, args: Record<string, unknown>): strin
   const cwd = polpo.getWorkDir();
   const polpoDir = polpo.getPolpoDir();
 
+  // If asking for the built-in skill-creator, return it directly and mark as read
+  if (name === "skill-creator") {
+    _skillCreatorRead = true;
+    return `Skill: skill-creator\nDescription: Guidelines for creating high-quality Polpo skills\nSource: built-in\n\n--- Content ---\n\n${BUILTIN_SKILL_CREATOR_CONTENT}`;
+  }
+
   const skill = getSkillByName(cwd, polpoDir, name, pool);
   if (!skill) {
     return `Error: Skill "${name}" not found in the ${pool} pool.`;
@@ -2347,6 +2396,352 @@ function execGetSkill(polpo: Orchestrator, args: Record<string, unknown>): strin
   }
   lines.push("", "--- Content ---", "", skill.content);
   return lines.join("\n");
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  BUILT-IN SKILL-CREATOR — mandatory reading before creating any skill
+// ═══════════════════════════════════════════════════════════════════════
+
+/**
+ * The built-in skill-creator guidelines. The orchestrator MUST read these
+ * (via get_skill or automatically) before creating any skill.
+ */
+export const BUILTIN_SKILL_CREATOR_CONTENT = `# Skill Creator Guidelines
+
+You are creating a Polpo skill — a reusable knowledge package that enhances an agent's (or the orchestrator's) capabilities for specific domains.
+
+## Skill Structure
+
+Every skill is a directory containing a single \`SKILL.md\` file:
+
+\`\`\`
+skill-name/
+  SKILL.md
+\`\`\`
+
+The \`SKILL.md\` has two parts: YAML frontmatter and markdown body.
+
+### YAML Frontmatter (required)
+
+\`\`\`yaml
+---
+name: skill-name
+description: One-line description of what this skill does (max 120 chars)
+allowed-tools:
+  - tool_name_1
+  - tool_name_2
+---
+\`\`\`
+
+- **name**: kebab-case, lowercase, descriptive (e.g. \`api-testing\`, \`react-patterns\`, \`code-review\`)
+- **description**: What the skill teaches the agent to do — be specific, not vague
+- **allowed-tools**: Optional list of tool names this skill may need. Purely informational for filtering.
+
+### Markdown Body (the actual skill content)
+
+This is the core — it's injected directly into the agent's system prompt. Write it as if you're giving expert instructions to a capable developer.
+
+## Quality Standards
+
+### DO:
+- Start with a clear purpose statement: what this skill is for and when to use it
+- Organize with clear \`##\` sections and \`###\` subsections
+- Include concrete examples with code blocks
+- Provide decision trees: "If X, do Y. If Z, do W."
+- List anti-patterns and common mistakes to avoid
+- Keep instructions actionable — every section should tell the agent what to DO
+- Use bullet points for rules, numbered lists for sequential steps
+- Include file path patterns where relevant (e.g. "Look for config in \`src/config/\`")
+
+### DON'T:
+- Write vague/generic advice ("write clean code") — be specific
+- Include information the agent already knows (basic language syntax, etc.)
+- Make the skill too broad — focus on one domain/task
+- Write walls of text without structure
+- Include credentials, secrets, or environment-specific paths
+- Exceed ~3000 words — keep it focused and scannable
+
+## Recommended Sections
+
+1. **Overview** — What this skill does, when to apply it
+2. **Key Concepts** — Domain-specific knowledge the agent needs
+3. **Workflow** — Step-by-step process for the main task
+4. **Patterns & Examples** — Code examples, templates, common patterns
+5. **Anti-patterns** — What NOT to do, common mistakes
+6. **Checklist** — Quick verification list before considering the task done
+
+## Example Skill
+
+\`\`\`markdown
+---
+name: api-testing
+description: Write comprehensive API endpoint tests with proper mocking, edge cases, and assertions
+allowed-tools:
+  - read
+  - write
+  - bash
+---
+
+# API Testing
+
+This skill guides you in writing thorough API endpoint tests.
+
+## When to Use
+- Creating new API endpoints
+- Adding test coverage to existing endpoints
+- Reviewing API test quality
+
+## Workflow
+1. Read the endpoint implementation to understand inputs/outputs
+2. Identify all code paths (success, validation errors, auth failures, edge cases)
+3. Write test file following the patterns below
+4. Run tests to verify
+
+## Patterns
+
+### Basic endpoint test
+\\\`\\\`\\\`typescript
+describe("POST /api/items", () => {
+  it("creates item with valid data", async () => {
+    const res = await request(app)
+      .post("/api/items")
+      .send({ name: "Test", value: 42 });
+    expect(res.status).toBe(201);
+    expect(res.body.name).toBe("Test");
+  });
+
+  it("rejects invalid payload", async () => {
+    const res = await request(app)
+      .post("/api/items")
+      .send({});
+    expect(res.status).toBe(400);
+  });
+});
+\\\`\\\`\\\`
+
+## Anti-patterns
+- Testing only the happy path — always test error cases
+- Hardcoding IDs or timestamps in assertions
+- Not cleaning up test data between runs
+
+## Checklist
+- [ ] All HTTP methods tested
+- [ ] Validation errors covered
+- [ ] Auth/permission checks tested
+- [ ] Edge cases (empty input, large payload, special chars)
+- [ ] Response shape assertions (not just status codes)
+\`\`\`
+
+## Creating the Skill
+
+Use \`create_orchestrator_skill\` or \`create_agent_skill\` with:
+- **name**: The kebab-case directory name
+- **description**: The frontmatter description
+- **content**: The markdown body (everything AFTER the frontmatter)
+- **allowedTools**: Optional array of tool names
+
+The tool handles writing the SKILL.md file with proper frontmatter automatically.
+`;
+
+/**
+ * Session-level flag: set to true after the orchestrator reads the skill-creator
+ * guidelines (either via get_skill or the built-in). This gate prevents creating
+ * skills without first understanding the format.
+ *
+ * Reset on each new session (module scope = per process).
+ */
+let _skillCreatorRead = false;
+
+/** Mark that the skill-creator guidelines have been read in this session. */
+export function markSkillCreatorRead(): void { _skillCreatorRead = true; }
+
+/** Check whether the skill-creator guidelines have been read. */
+export function hasReadSkillCreator(): boolean { return _skillCreatorRead; }
+
+/** Reset the gate (for tests). */
+export function resetSkillCreatorGate(): void { _skillCreatorRead = false; }
+
+// ═══════════════════════════════════════════════════════════════════════
+//  FILE SYSTEM EXECUTORS
+// ═══════════════════════════════════════════════════════════════════════
+
+/** Resolve a path argument relative to the project work directory. */
+function resolveFilePath(polpo: Orchestrator, pathArg: string): string {
+  if (isAbsolute(pathArg)) return pathArg;
+  return resolve(polpo.getWorkDir(), pathArg);
+}
+
+function execReadFile(polpo: Orchestrator, args: Record<string, unknown>): string {
+  const filePath = resolveFilePath(polpo, args.path as string);
+  if (!existsSync(filePath)) return `Error: File not found: ${filePath}`;
+
+  const stat = statSync(filePath);
+  if (stat.isDirectory()) return `Error: Path is a directory, not a file: ${filePath}. Use list_directory instead.`;
+
+  const content = readFileSync(filePath, "utf-8");
+  const allLines = content.split("\n");
+  const offset = Math.max(1, (args.offset as number | undefined) ?? 1);
+  const limit = Math.min(2000, (args.limit as number | undefined) ?? 500);
+  const slice = allLines.slice(offset - 1, offset - 1 + limit);
+
+  const numbered = slice.map((line, i) => `${offset + i}: ${line}`).join("\n");
+  const totalLines = allLines.length;
+  const shown = slice.length;
+
+  let suffix = "";
+  if (offset + shown - 1 < totalLines) {
+    suffix = `\n\n(Showing lines ${offset}-${offset + shown - 1} of ${totalLines}. Use offset=${offset + shown} to continue.)`;
+  }
+  return numbered + suffix;
+}
+
+function execWriteFile(polpo: Orchestrator, args: Record<string, unknown>): string {
+  const filePath = resolveFilePath(polpo, args.path as string);
+  const content = args.content as string;
+
+  // Create parent directories if needed
+  const dir = join(filePath, "..");
+  if (!existsSync(dir)) {
+    mkdirSync(dir, { recursive: true });
+  }
+
+  writeFileSync(filePath, content, "utf-8");
+  const lines = content.split("\n").length;
+  const relPath = relative(polpo.getWorkDir(), filePath);
+  return `Wrote ${lines} lines to ${relPath}`;
+}
+
+function execEditFile(polpo: Orchestrator, args: Record<string, unknown>): string {
+  const filePath = resolveFilePath(polpo, args.path as string);
+  if (!existsSync(filePath)) return `Error: File not found: ${filePath}`;
+
+  const oldString = args.oldString as string;
+  const newString = args.newString as string;
+  const replaceAll = (args.replaceAll as boolean | undefined) ?? false;
+
+  let content = readFileSync(filePath, "utf-8");
+
+  if (!content.includes(oldString)) {
+    return `Error: oldString not found in ${relative(polpo.getWorkDir(), filePath)}`;
+  }
+
+  if (!replaceAll) {
+    // Check for multiple matches
+    const firstIdx = content.indexOf(oldString);
+    const secondIdx = content.indexOf(oldString, firstIdx + 1);
+    if (secondIdx !== -1) {
+      return `Error: Found multiple matches for oldString in ${relative(polpo.getWorkDir(), filePath)}. Use replaceAll=true or provide more context to make the match unique.`;
+    }
+    content = content.replace(oldString, newString);
+  } else {
+    content = content.split(oldString).join(newString);
+  }
+
+  writeFileSync(filePath, content, "utf-8");
+  return `Edited ${relative(polpo.getWorkDir(), filePath)}`;
+}
+
+function execListDirectory(polpo: Orchestrator, args: Record<string, unknown>): string {
+  const pathArg = (args.path as string | undefined) ?? ".";
+
+  // Check if it looks like a glob pattern
+  if (pathArg.includes("*") || pathArg.includes("?")) {
+    // Use find/glob via shell — more reliable for glob patterns
+    try {
+      const cwd = polpo.getWorkDir();
+      const result = execSync(`find . -path '${pathArg}' -not -path '*/node_modules/*' -not -path '*/.git/*' 2>/dev/null | head -200`, {
+        cwd,
+        encoding: "utf-8",
+        timeout: 10000,
+      }).trim();
+      return result || "(no matches)";
+    } catch {
+      return "(no matches)";
+    }
+  }
+
+  const dirPath = resolveFilePath(polpo, pathArg);
+  if (!existsSync(dirPath)) return `Error: Path not found: ${dirPath}`;
+
+  const stat = statSync(dirPath);
+  if (!stat.isDirectory()) return `Error: Not a directory: ${dirPath}`;
+
+  const entries = readdirSync(dirPath);
+  const formatted = entries.map(name => {
+    try {
+      const s = statSync(join(dirPath, name));
+      return s.isDirectory() ? `${name}/` : name;
+    } catch {
+      return name;
+    }
+  });
+
+  return formatted.join("\n") || "(empty directory)";
+}
+
+function execGrepFiles(polpo: Orchestrator, args: Record<string, unknown>): string {
+  const pattern = args.pattern as string;
+  const searchPath = resolveFilePath(polpo, (args.path as string | undefined) ?? ".");
+  const include = args.include as string | undefined;
+
+  // Build grep command
+  let cmd = `grep -rn --include='*.ts' --include='*.tsx' --include='*.js' --include='*.jsx' --include='*.json' --include='*.md' --include='*.yaml' --include='*.yml' --include='*.toml' --include='*.css' --include='*.html'`;
+  if (include) {
+    // Override with user-specified include
+    cmd = `grep -rn --include='${include}'`;
+  }
+  cmd += ` -E '${pattern.replace(/'/g, "'\\''")}' '${searchPath}' 2>/dev/null | head -100`;
+
+  try {
+    const result = execSync(cmd, {
+      cwd: polpo.getWorkDir(),
+      encoding: "utf-8",
+      timeout: 15000,
+    }).trim();
+    if (!result) return "(no matches)";
+
+    // Make paths relative
+    const workDir = polpo.getWorkDir();
+    return result.split("\n").map(line => {
+      if (line.startsWith(workDir)) {
+        return line.slice(workDir.length + 1);
+      }
+      return line;
+    }).join("\n");
+  } catch {
+    return "(no matches)";
+  }
+}
+
+function execRunCommand(polpo: Orchestrator, args: Record<string, unknown>): string {
+  const command = args.command as string;
+  const cwdArg = args.cwd as string | undefined;
+  const cwd = cwdArg ? resolveFilePath(polpo, cwdArg) : polpo.getWorkDir();
+
+  // Block obviously dangerous commands
+  const dangerous = ["rm -rf /", "rm -rf /*", "mkfs", "dd if=", ":(){", "chmod -R 777 /"];
+  for (const d of dangerous) {
+    if (command.includes(d)) {
+      return `Error: Blocked potentially dangerous command: ${command}`;
+    }
+  }
+
+  try {
+    const result = execSync(command, {
+      cwd,
+      encoding: "utf-8",
+      timeout: 30000,
+      maxBuffer: 1024 * 1024, // 1MB
+    });
+    return result.trim() || "(command completed with no output)";
+  } catch (err: unknown) {
+    const e = err as { status?: number; stdout?: string; stderr?: string; message?: string };
+    const parts: string[] = [];
+    if (e.stdout) parts.push(e.stdout.trim());
+    if (e.stderr) parts.push(e.stderr.trim());
+    if (parts.length === 0) parts.push(e.message ?? "Command failed");
+    return `Exit code ${e.status ?? 1}:\n${parts.join("\n")}`;
+  }
 }
 
 /**

@@ -2027,48 +2027,8 @@
                   "reportsTo": {
                     "type": "string"
                   },
-                  "enableBrowser": {
-                    "type": "boolean"
-                  },
-                  "browserEngine": {
-                    "type": "string",
-                    "enum": [
-                      "agent-browser",
-                      "playwright"
-                    ]
-                  },
                   "browserProfile": {
                     "type": "string"
-                  },
-                  "enableHttp": {
-                    "type": "boolean"
-                  },
-                  "enableGit": {
-                    "type": "boolean"
-                  },
-                  "enableMultifile": {
-                    "type": "boolean"
-                  },
-                  "enableDeps": {
-                    "type": "boolean"
-                  },
-                  "enableExcel": {
-                    "type": "boolean"
-                  },
-                  "enablePdf": {
-                    "type": "boolean"
-                  },
-                  "enableDocx": {
-                    "type": "boolean"
-                  },
-                  "enableEmail": {
-                    "type": "boolean"
-                  },
-                  "enableAudio": {
-                    "type": "boolean"
-                  },
-                  "enableImage": {
-                    "type": "boolean"
                   }
                 },
                 "required": [

@@ -3,7 +3,7 @@ title: "Skills"
 description: "Markdown instruction files that give agents specialized knowledge and team conventions."
 ---
 
-Skills are **markdown instruction files** that give an agent specialized knowledge. They're like mini system prompts that you can mix and match across agents — encoding team conventions, coding standards, or domain-specific knowledge without bloating every agent's config.
+Skills are **markdown instruction files** that give an agent specialized knowledge. They're like mini system prompts that you can mix and match across agents — encoding team conventions, domain workflows, or specialized knowledge without bloating every agent's config.
 
 ## What's a Skill?
 
@@ -198,7 +198,7 @@ Your instructions here...
 That's it — Polpo discovers it automatically.
 
 <Tip>
-Skills are a great way to keep agent instructions DRY. Instead of copy-pasting the same coding standards into every agent's `systemPrompt`, create a skill once and assign it to the agents that need it.
+Skills are a great way to keep agent instructions DRY. Instead of copy-pasting the same conventions into every agent's `systemPrompt`, create a skill once and assign it to the agents that need it.
 </Tip>
 
 ## Orchestrator Skills
@@ -218,7 +218,11 @@ The `.agent` directory (singular, dot-prefixed) is the orchestrator's own config
 
 ### Why Separate Pools?
 
-Agent skills teach agents **how to write code** — coding patterns, framework conventions, review criteria. Orchestrator skills teach the orchestrator **how to manage work** — how to create skills, how to structure teams, how to plan missions. Mixing them would pollute each other's context.
+Agent skills teach agents **how to do their job** — coding patterns, domain workflows, framework conventions, review criteria. Orchestrator skills teach the orchestrator **how to manage work** — how to create skills, how to structure teams, how to plan missions. Mixing them would pollute each other's context.
+
+### Skill Discovery in Chat
+
+The orchestrator automatically discovers all available agent skills and lists them in its context. When you create or update agents via chat, the orchestrator will proactively suggest relevant skills — for example, recommending a `frontend-design` skill when you create a frontend agent, or a `testing` skill for a QA agent.
 
 ### Installing Orchestrator Skills
 
