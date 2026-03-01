@@ -1,9 +1,9 @@
 ---
 title: "Tools & MCP"
-description: "9 core tools (including HTTP), 2 extended tool categories, filesystem sandboxing, and MCP server connections."
+description: "9 core tools (including HTTP), 5 extended tool categories, filesystem sandboxing, and MCP server connections."
 ---
 
-Agents need tools to do their job. Polpo gives every agent a set of **core tools** for reading, writing, searching files, and making HTTP requests — **2 extended tool categories** (browser and email) — plus the ability to connect to external **MCP servers** for additional capabilities.
+Agents need tools to do their job. Polpo gives every agent a set of **core tools** for reading, writing, searching files, and making HTTP requests — **5 extended tool categories** (browser, email, vault, image, and video) — plus the ability to connect to external **MCP servers** for additional capabilities.
 
 ## Core Tools
 
@@ -43,10 +43,10 @@ This agent can browse code but can't write, edit, or run commands — useful for
 
 ## Extended Tools
 
-Beyond the 9 core tools, Polpo offers **3 optional tool categories** that can be enabled per-agent via the `allowedTools` array.
+Beyond the 9 core tools, Polpo offers **5 optional tool categories** that can be enabled per-agent via the `allowedTools` array.
 
 <Note>
-**Simplified toolset**: Git, multi-file operations, dependency management, Excel/CSV, PDF, Word/DOCX, audio, and image tools have been removed as built-in tool categories. Agents should use the `bash` tool with appropriate CLI commands or install [skills](/features/skills) for these operations instead. HTTP tools (`http_fetch`, `http_download`) are now always-on core tools — no flag needed.
+**Simplified toolset**: Git, multi-file operations, dependency management, Excel/CSV, PDF, Word/DOCX, and audio tools have been removed as built-in tool categories. Agents should use the `bash` tool with appropriate CLI commands or install [skills](/features/skills) for these operations instead. HTTP tools (`http_fetch`, `http_download`) are now always-on core tools — no flag needed.
 </Note>
 
 ### Browser (18 tools)
@@ -97,6 +97,30 @@ Credentials are stored in the encrypted vault (`.polpo/vault.enc`) and resolved 
   Full parameter schemas and usage for vault access tools.
 </Card>
 
+### Image (3 tools)
+
+Generate images from text prompts and analyze existing images with vision models. Image generation is powered by **fal.ai** (FLUX models), while vision/analysis uses OpenAI or Anthropic.
+
+```json
+{ "name": "designer", "allowedTools": ["read", "write", "edit", "bash", "glob", "grep", "ls", "image_*"] }
+```
+
+Tools: `image_generate` (text-to-image via fal.ai FLUX), `image_analyze` (vision/OCR via OpenAI GPT-4.1-mini or Anthropic Claude).
+
+Image generation requires the `FAL_KEY` environment variable. Image analysis requires `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`.
+
+### Video (1 tool)
+
+Generate videos from text prompts using **fal.ai** (Wan 2.2 models).
+
+```json
+{ "name": "video-creator", "allowedTools": ["read", "write", "edit", "bash", "glob", "grep", "ls", "video_*"] }
+```
+
+Tools: `video_generate` (text-to-video via fal.ai Wan 2.2).
+
+Video generation requires the `FAL_KEY` environment variable. Generation takes 1-5 minutes depending on model and resolution.
+
 ### Summary
 
 | Category | Tools | Enable via `allowedTools` | Description |
@@ -104,6 +128,8 @@ Credentials are stored in the encrypted vault (`.polpo/vault.enc`) and resolved 
 | [Browser](/reference/tools/browser) | 18 | `"browser_*"` | Browser automation via `agent-browser` CLI |
 | [Email](/reference/tools/email) | 5 | `"email_*"` | Send, read, and search emails via SMTP + IMAP |
 | [Vault](/reference/tools/vault) | 2 | `"vault_*"` | Read-only access to agent's own vault credentials |
+| Image | 3 | `"image_*"` | Image generation (fal.ai FLUX) and vision analysis (OpenAI/Anthropic) |
+| Video | 1 | `"video_*"` | Text-to-video generation via fal.ai Wan 2.2 |
 
 ### Enabling Multiple Categories
 
@@ -112,7 +138,7 @@ You can enable multiple extended categories on a single agent:
 ```json
 {
   "name": "outreach-agent",
-  "allowedTools": ["read", "write", "edit", "bash", "glob", "grep", "ls", "browser_*", "email_*", "vault_*"]
+  "allowedTools": ["read", "write", "edit", "bash", "glob", "grep", "ls", "browser_*", "email_*", "vault_*", "image_*", "video_*"]
 }
 ```
 

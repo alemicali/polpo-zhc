@@ -20,6 +20,8 @@ function describeAgentCapabilities(agent: AgentConfig, skillPool?: SkillInfo[]):
   if (hasPattern("browser_")) caps.push("browser_navigate/snapshot/click/fill/eval (18 browser tools via agent-browser)");
   if (hasPattern("email_")) caps.push("email_send, email_verify, email_list, email_read, email_search");
   if (hasPattern("vault_")) caps.push("vault_get, vault_list (runtime credential access)");
+  if (hasPattern("image_")) caps.push("image_generate (fal.ai FLUX), image_analyze (OpenAI/Anthropic vision)");
+  if (hasPattern("video_")) caps.push("video_generate (fal.ai Wan 2.2 text-to-video)");
   if (agent.skills?.length) {
     // Show skill names with descriptions when available from the pool
     const poolMap = skillPool ? new Map(skillPool.map(s => [s.name, s])) : undefined;
@@ -371,8 +373,10 @@ export function buildChatSystemPrompt(
     `  - **allowedTools patterns**: Include "browser_*" in allowedTools for browser tools (navigate, click, screenshot — 18 tools via agent-browser).`,
     `    Include "email_*" for email tools (send, list, read, search — requires vault SMTP/IMAP credentials).`,
     `    Include "vault_*" for vault tools (vault_get, vault_list — lets the agent read its own credentials at runtime).`,
+    `    Include "image_*" for image tools (image_generate via fal.ai FLUX, image_analyze via OpenAI/Anthropic vision — requires FAL_KEY for generation).`,
+    `    Include "video_*" for video generation (video_generate via fal.ai Wan 2.2 — requires FAL_KEY).`,
     `    HTTP tools (http_fetch, http_download) are always available as core tools.`,
-    `    For git, file format, dependency, audio, and image operations, use bash + skills instead.`,
+    `    For git, file format, dependency, and audio operations, use bash + skills instead.`,
     `  - **browserProfile**: Persistent profile name for cookies/login sessions across tasks (requires browser_* in allowedTools).`,
     `    Browser profiles store cookies, localStorage, and login sessions persistently.`,
     `    Setup flow: the user runs \`polpo browser login <agent> [url]\` from the CLI,`,
@@ -600,7 +604,10 @@ export function buildChatSystemPrompt(
     `- For HTTP/API calls: "Use http_fetch to call the API" (always available). For simple lookups,`,
     `  you can also call http_fetch directly yourself instead of creating a task.`,
     `- For email: "Use email_send" (requires email_* in allowedTools + vault credentials)`,
-    `- For PDFs, spreadsheets, Word docs, audio, images, git, deps: use bash + appropriate npm packages`,
+    `- For image generation: "Use image_generate" (requires image_* in allowedTools + FAL_KEY env var)`,
+    `- For video generation: "Use video_generate" (requires video_* in allowedTools + FAL_KEY env var)`,
+    `- For image analysis/vision: "Use image_analyze" (requires image_* in allowedTools + OPENAI_API_KEY or ANTHROPIC_API_KEY)`,
+    `- For PDFs, spreadsheets, Word docs, audio, git, deps: use bash + appropriate npm packages`,
     `  or give the agent a skill that teaches it how to do these operations.`,
     `- Always tell agents to call register_outcome for every deliverable they produce.`,
     `Check the agent's capabilities in the "Tools:" line above to know what each agent can do.`,
@@ -637,9 +644,9 @@ export function buildChatSystemPrompt(
     `**teams[].agents[]** — each agent has: name (required, globally unique), role, model (\`"provider:model"\` format),`,
     `systemPrompt, skills[], allowedPaths[], allowedTools[] (restrict tool names), maxTurns (default 200),`,
     `maxConcurrency, reasoning ("off"|"low"|"medium"|"high" — overrides global setting),`,
-    `and allowedTools wildcards: "browser_*", "email_*", "vault_*".`,
+    `and allowedTools wildcards: "browser_*", "email_*", "vault_*", "image_*", "video_*".`,
     `HTTP tools (http_fetch, http_download) are always available as core tools.`,
-    `For git, file formats, dependencies, audio, and image operations, use bash + skills.`,
+    `For git, file formats, dependencies, and audio operations, use bash + skills.`,
     `Browser option: browserProfile (persistent state name, requires browser_* in allowedTools).`,
     `Email security: emailAllowedDomains (restrict sending domains).`,
     `Also: mcpServers, identity, volatile/missionGroup, reportsTo.`,

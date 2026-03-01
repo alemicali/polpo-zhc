@@ -57,6 +57,7 @@ import {
   FileText,
   Mic,
   Image,
+  Video,
   Palette,
   Plug,
   Wand2,
@@ -106,6 +107,8 @@ function getToolMeta(name: string): ToolMeta {
   if (n.startsWith("audio_")) return { icon: Mic, color: "text-pink-400", bg: "bg-pink-500/10" };
   // Image
   if (n.startsWith("image_")) return { icon: Image, color: "text-emerald-400", bg: "bg-emerald-500/10" };
+  // Video
+  if (n.startsWith("video_")) return { icon: Video, color: "text-red-400", bg: "bg-red-500/10" };
   // Dependencies
   if (n.startsWith("dep_") || n === "bulk_rename") return { icon: Package, color: "text-amber-400", bg: "bg-amber-500/10" };
   // Outcome
@@ -141,6 +144,8 @@ const toolCategories: { prefix: string; label: string; tools: string }[] = [
   { prefix: "browser_", label: "Browser", tools: "browser_navigate, browser_click, browser_fill, browser_snapshot, browser_screenshot, ..." },
   { prefix: "email_", label: "Email", tools: "email_send, email_verify, email_list, email_read, email_search" },
   { prefix: "vault_", label: "Vault", tools: "vault_get, vault_list" },
+  { prefix: "image_", label: "Image", tools: "image_generate (fal.ai FLUX), image_analyze (OpenAI/Anthropic vision)" },
+  { prefix: "video_", label: "Video", tools: "video_generate (fal.ai Wan 2.2 text-to-video)" },
 ];
 
 const taskStatusConfig: Record<TaskStatus, { color: string; icon: React.ElementType; label: string }> = {

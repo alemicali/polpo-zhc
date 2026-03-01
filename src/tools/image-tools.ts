@@ -1,19 +1,21 @@
 /**
- * Image tools for generation and vision/analysis.
+ * Image & video tools for generation and vision/analysis.
  *
  * Provides agent capabilities to:
- * - Generate images from text prompts (image_generate)
- * - Analyze/describe images using vision models (image_analyze)
+ * - Generate images from text prompts (image_generate) — via fal.ai
+ * - Generate videos from text prompts (video_generate) — via fal.ai
+ * - Analyze/describe images using vision models (image_analyze) — via OpenAI/Anthropic
  *
  * Architecture: direct fetch() to provider REST APIs — zero vendor SDK dependencies.
  *
- * Supported providers:
- *   Generation: openai (gpt-image-1 / dall-e-3 / dall-e-2), replicate (Flux)
- *   Vision:     openai (gpt-4.1-mini / gpt-4.1), anthropic (Claude)
+ * Providers:
+ *   Image generation: fal.ai (FLUX models — fal-ai/flux/dev default)
+ *   Video generation: fal.ai (Wan 2.2 — fal-ai/wan/v2.2-1.3b/text-to-video default)
+ *   Vision/analysis:  openai (gpt-4.1-mini), anthropic (Claude)
  *
  * Environment variables:
- *   OPENAI_API_KEY      — required for openai provider
- *   REPLICATE_API_TOKEN — required for replicate provider
+ *   FAL_KEY             — required for fal.ai image/video generation
+ *   OPENAI_API_KEY      — required for openai vision provider
  *   ANTHROPIC_API_KEY   — required for anthropic vision provider
  */
 
@@ -29,7 +31,8 @@ type ToolResult = AgentToolResult<any>;
 
 const MAX_IMAGE_SIZE = 20 * 1024 * 1024; // 20 MB
 const DEFAULT_TIMEOUT = 120_000; // 2 min for image generation
-const REPLICATE_POLL_INTERVAL = 2_000; // 2 sec polling for async predictions
+const VIDEO_TIMEOUT = 300_000; // 5 min for video generation
+const FAL_QUEUE_POLL_INTERVAL = 3_000; // 3 sec polling for async queue
 
 // ─── Helpers ───
 
@@ -53,160 +56,155 @@ function imageMime(ext: string): string {
   return map[ext.toLowerCase()] ?? "image/png";
 }
 
+/**
+ * Submit a request to fal.ai queue and poll until completion.
+ * Uses the queue endpoint (POST https://queue.fal.run/<model>) for reliability,
+ * then polls the status endpoint until the result is ready.
+ */
+async function falQueueRequest(
+  modelId: string,
+  input: Record<string, unknown>,
+  apiKey: string,
+  timeout: number,
+  signal?: AbortSignal,
+): Promise<Record<string, unknown>> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeout);
+  if (signal) signal.addEventListener("abort", () => controller.abort(), { once: true });
+
+  try {
+    // Submit to queue
+    const submitResp = await fetch(`https://queue.fal.run/${modelId}`, {
+      method: "POST",
+      headers: {
+        Authorization: `Key ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(input),
+      signal: controller.signal,
+    });
+
+    if (!submitResp.ok) {
+      const errText = await submitResp.text();
+      throw new Error(`fal.ai queue submit ${submitResp.status}: ${errText}`);
+    }
+
+    const queueData = await submitResp.json() as {
+      request_id: string;
+      status_url?: string;
+      response_url?: string;
+    };
+
+    const requestId = queueData.request_id;
+    const statusUrl = queueData.status_url ?? `https://queue.fal.run/${modelId}/requests/${requestId}/status`;
+    const responseUrl = queueData.response_url ?? `https://queue.fal.run/${modelId}/requests/${requestId}`;
+
+    // Poll for completion
+    while (true) {
+      await new Promise(r => setTimeout(r, FAL_QUEUE_POLL_INTERVAL));
+
+      const statusResp = await fetch(statusUrl, {
+        headers: { Authorization: `Key ${apiKey}` },
+        signal: controller.signal,
+      });
+
+      if (!statusResp.ok) {
+        throw new Error(`fal.ai status poll ${statusResp.status}`);
+      }
+
+      const status = await statusResp.json() as {
+        status: string;
+        error?: string;
+      };
+
+      if (status.status === "COMPLETED") {
+        break;
+      }
+      if (status.status === "FAILED") {
+        throw new Error(`fal.ai request failed: ${status.error ?? "unknown error"}`);
+      }
+      // IN_QUEUE or IN_PROGRESS — keep polling
+    }
+
+    // Fetch result
+    const resultResp = await fetch(responseUrl, {
+      headers: { Authorization: `Key ${apiKey}` },
+      signal: controller.signal,
+    });
+
+    if (!resultResp.ok) {
+      const errText = await resultResp.text();
+      throw new Error(`fal.ai result fetch ${resultResp.status}: ${errText}`);
+    }
+
+    return await resultResp.json() as Record<string, unknown>;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // ─── Tool: image_generate ───
 
 const ImageGenerateSchema = Type.Object({
   prompt: Type.String({ description: "Text prompt describing the image to generate" }),
   path: Type.String({ description: "Output file path (e.g. 'output.png'). Format inferred from extension." }),
-  provider: Type.Optional(Type.Union([
-    Type.Literal("openai"),
-    Type.Literal("replicate"),
-  ], { description: "Image generation provider (default: openai)" })),
-  model: Type.Optional(Type.String({ description: "Model name. OpenAI: 'gpt-image-1' (default), 'dall-e-3', 'dall-e-2'. Replicate: 'black-forest-labs/flux-1.1-pro' (default)." })),
-  size: Type.Optional(Type.String({ description: "Image size. OpenAI: '1024x1024' (default), '1536x1024', '1024x1536', '256x256', '512x512'. Replicate: 'width x height'." })),
-  quality: Type.Optional(Type.Union([
-    Type.Literal("auto"),
-    Type.Literal("high"),
-    Type.Literal("medium"),
-    Type.Literal("low"),
-  ], { description: "Image quality (OpenAI only, default: auto)" })),
-  style: Type.Optional(Type.Union([
-    Type.Literal("vivid"),
-    Type.Literal("natural"),
-  ], { description: "Image style (OpenAI dall-e-3 only, default: vivid)" })),
-  n: Type.Optional(Type.Number({ description: "Number of images to generate (default: 1, max varies by model)" })),
+  model: Type.Optional(Type.String({
+    description: "fal.ai model ID. Default: 'fal-ai/flux/dev'. " +
+      "Other options: 'fal-ai/flux-pro/v1.1' (higher quality), 'fal-ai/flux/schnell' (faster).",
+  })),
+  size: Type.Optional(Type.String({
+    description: "Image size as 'WIDTHxHEIGHT' (e.g. '1024x1024', '1024x768', '768x1024'). Default: '1024x1024'.",
+  })),
+  num_inference_steps: Type.Optional(Type.Number({
+    description: "Number of inference steps (higher = better quality, slower). Default varies by model (typically 28).",
+  })),
+  guidance_scale: Type.Optional(Type.Number({
+    description: "Guidance scale / CFG — how closely to follow the prompt. Default: 3.5.",
+  })),
+  seed: Type.Optional(Type.Number({
+    description: "Random seed for reproducible results. Omit for random.",
+  })),
 });
 
 function createGenerateTool(cwd: string, sandbox: string[]): AgentTool<typeof ImageGenerateSchema> {
   return {
     name: "image_generate",
     label: "Generate Image",
-    description: "Generate an image from a text prompt using AI. " +
-      "Providers: openai (gpt-image-1/DALL-E 3, default), replicate (Flux). " +
+    description: "Generate an image from a text prompt using fal.ai (FLUX models). " +
       "Output format inferred from file extension (png, jpg, webp). " +
-      "Requires OPENAI_API_KEY or REPLICATE_API_TOKEN env var.",
+      "Models: fal-ai/flux/dev (default, balanced), fal-ai/flux-pro/v1.1 (best quality), " +
+      "fal-ai/flux/schnell (fastest). Requires FAL_KEY env var.",
     parameters: ImageGenerateSchema,
     async execute(_id, params, signal) {
       const filePath = resolve(cwd, params.path);
       assertPathAllowed(filePath, sandbox, "image_generate");
 
-      const provider = params.provider ?? "openai";
-
       try {
-        if (provider === "openai") {
-          return await generateOpenAI(filePath, params, signal);
-        } else {
-          return await generateReplicate(filePath, params, signal);
-        }
+        return await generateFal(filePath, params, signal);
       } catch (err: any) {
         return {
-          content: [{ type: "text", text: `Image generation error (${provider}): ${err.message}` }],
-          details: { provider, error: err.message },
+          content: [{ type: "text", text: `Image generation error: ${err.message}` }],
+          details: { error: err.message },
         };
       }
     },
   };
 }
 
-async function generateOpenAI(
+async function generateFal(
   filePath: string,
-  params: { prompt: string; model?: string; size?: string; quality?: string; style?: string; n?: number },
+  params: {
+    prompt: string;
+    model?: string;
+    size?: string;
+    num_inference_steps?: number;
+    guidance_scale?: number;
+    seed?: number;
+  },
   signal?: AbortSignal,
 ): Promise<ToolResult> {
-  const apiKey = requireEnv("OPENAI_API_KEY");
-  const model = params.model ?? "gpt-image-1";
-  const size = params.size ?? "1024x1024";
-  const n = params.n ?? 1;
-
-  const body: Record<string, unknown> = {
-    model,
-    prompt: params.prompt,
-    size,
-    n,
-  };
-
-  // gpt-image-1 uses output_format; dall-e-3/2 use response_format
-  const ext = extname(filePath).toLowerCase().replace(".", "");
-  if (model === "gpt-image-1") {
-    body.output_format = ext === "jpg" || ext === "jpeg" ? "jpeg" : ext === "webp" ? "webp" : "png";
-    if (params.quality) body.quality = params.quality;
-  } else {
-    body.response_format = "b64_json";
-    if (params.quality) body.quality = params.quality === "high" ? "hd" : "standard";
-    if (params.style) body.style = params.style;
-  }
-
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT);
-  if (signal) signal.addEventListener("abort", () => controller.abort(), { once: true });
-
-  const response = await fetch("https://api.openai.com/v1/images/generations", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(body),
-    signal: controller.signal,
-  });
-
-  clearTimeout(timer);
-
-  if (!response.ok) {
-    const errText = await response.text();
-    throw new Error(`OpenAI Images API ${response.status}: ${errText}`);
-  }
-
-  const data = await response.json() as {
-    data: { b64_json?: string; url?: string; revised_prompt?: string }[];
-  };
-
-  const imageData = data.data[0];
-  let buffer: Buffer;
-
-  if (imageData.b64_json) {
-    buffer = Buffer.from(imageData.b64_json, "base64");
-  } else if (imageData.url) {
-    // For gpt-image-1, the response contains b64_json by default when output_format is set
-    // But just in case there's a URL, download it
-    const imgResp = await fetch(imageData.url);
-    buffer = Buffer.from(await imgResp.arrayBuffer());
-  } else {
-    throw new Error("No image data in OpenAI response");
-  }
-
-  mkdirSync(dirname(filePath), { recursive: true });
-  writeFileSync(filePath, buffer);
-
-  const revisedPrompt = imageData.revised_prompt;
-  const info = [
-    `Image saved: ${filePath}`,
-    `Size: ${(buffer.byteLength / 1024).toFixed(1)} KB`,
-    `Model: ${model}`,
-    `Dimensions: ${size}`,
-  ];
-  if (revisedPrompt) info.push(`Revised prompt: ${revisedPrompt}`);
-
-  return {
-    content: [{ type: "text", text: info.join("\n") }],
-    details: {
-      provider: "openai",
-      model,
-      size,
-      path: filePath,
-      bytes: buffer.byteLength,
-      revisedPrompt,
-    },
-  };
-}
-
-async function generateReplicate(
-  filePath: string,
-  params: { prompt: string; model?: string; size?: string },
-  signal?: AbortSignal,
-): Promise<ToolResult> {
-  const apiToken = requireEnv("REPLICATE_API_TOKEN");
-  const model = params.model ?? "black-forest-labs/flux-1.1-pro";
+  const apiKey = requireEnv("FAL_KEY");
+  const model = params.model ?? "fal-ai/flux/dev";
 
   // Parse size into width/height
   let width = 1024, height = 1024;
@@ -218,86 +216,164 @@ async function generateReplicate(
     }
   }
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT * 2); // Replicate can be slower
-  if (signal) signal.addEventListener("abort", () => controller.abort(), { once: true });
-
-  // Create prediction
-  const createResp = await fetch("https://api.replicate.com/v1/models/" + model + "/predictions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiToken}`,
-      "Content-Type": "application/json",
-      Prefer: "wait",
-    },
-    body: JSON.stringify({
-      input: {
-        prompt: params.prompt,
-        width,
-        height,
-      },
-    }),
-    signal: controller.signal,
-  });
-
-  if (!createResp.ok) {
-    clearTimeout(timer);
-    const errText = await createResp.text();
-    throw new Error(`Replicate API ${createResp.status}: ${errText}`);
-  }
-
-  let prediction = await createResp.json() as {
-    id: string;
-    status: string;
-    output?: string | string[];
-    error?: string;
-    urls?: { get?: string };
+  const input: Record<string, unknown> = {
+    prompt: params.prompt,
+    image_size: { width, height },
+    num_images: 1,
   };
+  if (params.num_inference_steps != null) input.num_inference_steps = params.num_inference_steps;
+  if (params.guidance_scale != null) input.guidance_scale = params.guidance_scale;
+  if (params.seed != null) input.seed = params.seed;
 
-  // Poll if not yet completed (the Prefer: wait header should handle most cases)
-  while (prediction.status === "starting" || prediction.status === "processing") {
-    await new Promise(r => setTimeout(r, REPLICATE_POLL_INTERVAL));
-    const pollUrl = prediction.urls?.get ?? `https://api.replicate.com/v1/predictions/${prediction.id}`;
-    const pollResp = await fetch(pollUrl, {
-      headers: { Authorization: `Bearer ${apiToken}` },
-      signal: controller.signal,
-    });
-    if (!pollResp.ok) {
-      clearTimeout(timer);
-      throw new Error(`Replicate poll ${pollResp.status}`);
-    }
-    prediction = await pollResp.json() as typeof prediction;
+  const result = await falQueueRequest(model, input, apiKey, DEFAULT_TIMEOUT, signal);
+
+  // fal.ai FLUX response: { images: [{ url, width, height, content_type }], ... }
+  const images = result.images as { url: string; width: number; height: number; content_type?: string }[] | undefined;
+  if (!images || images.length === 0) {
+    throw new Error("No images in fal.ai response");
   }
 
-  clearTimeout(timer);
-
-  if (prediction.status === "failed") {
-    throw new Error(`Replicate prediction failed: ${prediction.error ?? "unknown error"}`);
-  }
-
-  // Output is typically a URL or array of URLs
-  const outputUrl = Array.isArray(prediction.output) ? prediction.output[0] : prediction.output;
-  if (!outputUrl || typeof outputUrl !== "string") {
-    throw new Error("No output URL in Replicate response");
-  }
-
-  // Download the generated image
-  const imgResp = await fetch(outputUrl);
+  const imageUrl = images[0].url;
+  const imgResp = await fetch(imageUrl);
   if (!imgResp.ok) throw new Error(`Failed to download generated image: ${imgResp.status}`);
   const buffer = Buffer.from(await imgResp.arrayBuffer());
 
   mkdirSync(dirname(filePath), { recursive: true });
   writeFileSync(filePath, buffer);
 
+  const info = [
+    `Image saved: ${filePath}`,
+    `Size: ${(buffer.byteLength / 1024).toFixed(1)} KB`,
+    `Model: ${model}`,
+    `Dimensions: ${images[0].width}x${images[0].height}`,
+  ];
+
   return {
-    content: [{ type: "text", text: `Image saved: ${filePath} (${(buffer.byteLength / 1024).toFixed(1)} KB, model: ${model}, ${width}x${height})` }],
+    content: [{ type: "text", text: info.join("\n") }],
     details: {
-      provider: "replicate",
+      provider: "fal",
       model,
-      size: `${width}x${height}`,
+      size: `${images[0].width}x${images[0].height}`,
       path: filePath,
       bytes: buffer.byteLength,
-      predictionId: prediction.id,
+    },
+  };
+}
+
+// ─── Tool: video_generate ───
+
+const VideoGenerateSchema = Type.Object({
+  prompt: Type.String({ description: "Text prompt describing the video to generate" }),
+  path: Type.String({ description: "Output file path (e.g. 'output.mp4')." }),
+  model: Type.Optional(Type.String({
+    description: "fal.ai video model ID. Default: 'fal-ai/wan/v2.2-1.3b/text-to-video'. " +
+      "Other options: 'fal-ai/wan/v2.2-a14b/text-to-video' (higher quality, slower).",
+  })),
+  num_frames: Type.Optional(Type.Number({
+    description: "Number of frames to generate. Default: 81 (~5 seconds at 16fps).",
+  })),
+  resolution: Type.Optional(Type.String({
+    description: "Video resolution as 'WIDTHxHEIGHT' (e.g. '854x480', '1280x720'). Default: '854x480' (480p).",
+  })),
+  num_inference_steps: Type.Optional(Type.Number({
+    description: "Number of inference steps (higher = better quality, slower). Default: 30.",
+  })),
+  guidance_scale: Type.Optional(Type.Number({
+    description: "Guidance scale — how closely to follow the prompt. Default: 5.0.",
+  })),
+  seed: Type.Optional(Type.Number({
+    description: "Random seed for reproducible results. Omit for random.",
+  })),
+});
+
+function createVideoGenerateTool(cwd: string, sandbox: string[]): AgentTool<typeof VideoGenerateSchema> {
+  return {
+    name: "video_generate",
+    label: "Generate Video",
+    description: "Generate a video from a text prompt using fal.ai (Wan 2.2 models). " +
+      "Output saved as MP4. Models: fal-ai/wan/v2.2-1.3b/text-to-video (default, faster), " +
+      "fal-ai/wan/v2.2-a14b/text-to-video (best quality). " +
+      "Video generation takes 1-5 minutes depending on model and resolution. " +
+      "Requires FAL_KEY env var.",
+    parameters: VideoGenerateSchema,
+    async execute(_id, params, signal) {
+      const filePath = resolve(cwd, params.path);
+      assertPathAllowed(filePath, sandbox, "video_generate");
+
+      try {
+        return await generateVideo(filePath, params, signal);
+      } catch (err: any) {
+        return {
+          content: [{ type: "text", text: `Video generation error: ${err.message}` }],
+          details: { error: err.message },
+        };
+      }
+    },
+  };
+}
+
+async function generateVideo(
+  filePath: string,
+  params: {
+    prompt: string;
+    model?: string;
+    num_frames?: number;
+    resolution?: string;
+    num_inference_steps?: number;
+    guidance_scale?: number;
+    seed?: number;
+  },
+  signal?: AbortSignal,
+): Promise<ToolResult> {
+  const apiKey = requireEnv("FAL_KEY");
+  const model = params.model ?? "fal-ai/wan/v2.2-1.3b/text-to-video";
+
+  const input: Record<string, unknown> = {
+    prompt: params.prompt,
+  };
+
+  if (params.num_frames != null) input.num_frames = params.num_frames;
+  if (params.num_inference_steps != null) input.num_inference_steps = params.num_inference_steps;
+  if (params.guidance_scale != null) input.guidance_scale = params.guidance_scale;
+  if (params.seed != null) input.seed = params.seed;
+
+  // Parse resolution
+  if (params.resolution) {
+    const parts = params.resolution.split("x").map(Number);
+    if (parts.length === 2 && parts[0] > 0 && parts[1] > 0) {
+      input.resolution = { width: parts[0], height: parts[1] };
+    }
+  }
+
+  const result = await falQueueRequest(model, input, apiKey, VIDEO_TIMEOUT, signal);
+
+  // fal.ai video response: { video: { url, content_type, file_name, file_size } }
+  const video = result.video as { url: string; content_type?: string; file_name?: string; file_size?: number } | undefined;
+  if (!video?.url) {
+    throw new Error("No video in fal.ai response");
+  }
+
+  const videoResp = await fetch(video.url);
+  if (!videoResp.ok) throw new Error(`Failed to download generated video: ${videoResp.status}`);
+  const buffer = Buffer.from(await videoResp.arrayBuffer());
+
+  mkdirSync(dirname(filePath), { recursive: true });
+  writeFileSync(filePath, buffer);
+
+  const sizeMB = (buffer.byteLength / 1024 / 1024).toFixed(2);
+  const info = [
+    `Video saved: ${filePath}`,
+    `Size: ${sizeMB} MB`,
+    `Model: ${model}`,
+  ];
+
+  return {
+    content: [{ type: "text", text: info.join("\n") }],
+    details: {
+      provider: "fal",
+      model,
+      path: filePath,
+      bytes: buffer.byteLength,
     },
   };
 }
@@ -521,16 +597,17 @@ async function analyzeAnthropic(
 
 // ─── Factory ───
 
-export type ImageToolName = "image_generate" | "image_analyze";
+export type ImageToolName = "image_generate" | "image_analyze" | "video_generate";
 
-export const ALL_IMAGE_TOOL_NAMES: ImageToolName[] = ["image_generate", "image_analyze"];
+export const ALL_IMAGE_TOOL_NAMES: ImageToolName[] = ["image_generate", "image_analyze", "video_generate"];
 
 /**
- * Create image tools for generation and vision analysis.
+ * Create image & video tools for generation, vision analysis, and video creation.
  *
  * @param cwd - Working directory for resolving file paths
  * @param allowedPaths - Sandbox paths for file validation
- * @param allowedTools - Optional filter
+ * @param allowedTools - Optional filter — only include tools whose names appear here.
+ *   Supports wildcards expanded upstream (e.g. "image_*", "video_*").
  */
 export function createImageTools(
   cwd: string,
@@ -542,6 +619,7 @@ export function createImageTools(
   const factories: Record<ImageToolName, () => AgentTool<any>> = {
     image_generate: () => createGenerateTool(cwd, sandbox),
     image_analyze: () => createAnalyzeTool(cwd, sandbox),
+    video_generate: () => createVideoGenerateTool(cwd, sandbox),
   };
 
   const names = allowedTools
