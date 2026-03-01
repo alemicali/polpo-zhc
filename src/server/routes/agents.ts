@@ -1,6 +1,6 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
-import { join } from "node:path";
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { join, extname } from "node:path";
+import { existsSync, readFileSync, readdirSync, mkdirSync, writeFileSync } from "node:fs";
 import type { ServerEnv } from "../app.js";
 import { AddAgentSchema, RenameTeamSchema, AddTeamSchema } from "../schemas.js";
 import { redactAgentConfig, redactTeam, sanitizeTranscriptEntry } from "../security.js";
@@ -336,6 +336,62 @@ export function agentRoutes(): OpenAPIHono<ServerEnv> {
       return c.json({ ok: false, error: "Agent not found", code: "NOT_FOUND" }, 404);
     }
     return c.json({ ok: true, data: redactAgentConfig(agent) }, 200);
+  });
+
+  // ── POST /agents/:name/avatar — upload agent avatar ──
+  app.post("/:name/avatar", async (c) => {
+    const orchestrator = c.get("orchestrator");
+    const name = c.req.param("name");
+    const agent = orchestrator.getAgents().find(a => a.name === name);
+    if (!agent) return c.json({ ok: false, error: "Agent not found" }, 404);
+
+    const body = await c.req.parseBody();
+    const file = body["file"];
+    if (!file || !(file instanceof File)) {
+      return c.json({ ok: false, error: "Missing file upload (field: file)" }, 400);
+    }
+
+    // Validate image type
+    const allowed = new Set(["image/png", "image/jpeg", "image/webp", "image/gif", "image/svg+xml"]);
+    if (!allowed.has(file.type)) {
+      return c.json({ ok: false, error: `Unsupported image type: ${file.type}. Allowed: png, jpg, webp, gif, svg` }, 400);
+    }
+
+    // Save to .polpo/avatars/<name>.<ext>
+    const polpoDir = orchestrator.getPolpoDir();
+    const avatarsDir = join(polpoDir, "avatars");
+    if (!existsSync(avatarsDir)) mkdirSync(avatarsDir, { recursive: true });
+
+    const ext = extname(file.name || "avatar.png") || ".png";
+    const filename = `${name}${ext}`;
+    const avatarPath = join(avatarsDir, filename);
+    const relativePath = `.polpo/avatars/${filename}`;
+
+    const buffer = Buffer.from(await file.arrayBuffer());
+    writeFileSync(avatarPath, buffer);
+
+    // Update agent identity with avatar path
+    const identity = { ...(agent.identity ?? {}), avatar: relativePath };
+    orchestrator.removeAgent(name);
+    orchestrator.addAgent({ ...agent, identity });
+
+    return c.json({ ok: true, data: { avatar: relativePath } }, 200);
+  });
+
+  // ── DELETE /agents/:name/avatar — remove agent avatar ──
+  app.delete("/:name/avatar", (c) => {
+    const orchestrator = c.get("orchestrator");
+    const name = c.req.param("name");
+    const agent = orchestrator.getAgents().find(a => a.name === name);
+    if (!agent) return c.json({ ok: false, error: "Agent not found" }, 404);
+
+    if (agent.identity?.avatar) {
+      const identity = { ...agent.identity, avatar: undefined };
+      orchestrator.removeAgent(name);
+      orchestrator.addAgent({ ...agent, identity });
+    }
+
+    return c.json({ ok: true }, 200);
   });
 
   return app;

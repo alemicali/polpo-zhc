@@ -57,6 +57,7 @@ import {
 } from "lucide-react";
 import { useAgents, useProcesses } from "@lumea-labs/polpo-react";
 import type { AgentConfig, AgentProcess, Team } from "@lumea-labs/polpo-react";
+import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { cn } from "@/lib/utils";
 
 // Team colors for visual distinction in org chart
@@ -375,7 +376,7 @@ function AgentCard({
       )}>
         <div className="flex items-center gap-3 p-4">
           <div className={cn("flex h-10 w-10 shrink-0 items-center justify-center rounded-lg", teamColor?.bg ?? "bg-primary/10")}>
-            <Bot className={cn("h-5 w-5", teamColor?.text ?? "text-primary")} />
+            <AgentAvatar avatar={agent.identity?.avatar} name={agent.name} size="lg" iconClassName={teamColor?.text ?? "text-primary"} />
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2">
@@ -497,7 +498,7 @@ function AgentNode({ data, selected }: NodeProps<Node<AgentNodeData>>) {
       <div className="px-4 py-3 space-y-1.5">
         <div className="flex items-center gap-2.5">
           <div className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-lg", tc.bg)}>
-            <Bot className={cn("h-4.5 w-4.5", tc.text)} />
+            <AgentAvatar avatar={agent.identity?.avatar} name={agent.name} size="md" iconClassName={tc.text} />
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-1.5">

@@ -408,6 +408,7 @@ const setIdentityTool: Tool = {
     timezone: Type.Optional(Type.String({ description: "Timezone (e.g. 'Europe/Rome')" })),
     tone: Type.Optional(Type.String({ description: "Communication tone — HOW the agent communicates (e.g. 'Professional but warm', 'Concise and data-driven')" })),
     personality: Type.Optional(Type.String({ description: "Personality traits — WHO the agent IS (e.g. 'Detail-oriented and empathetic')" })),
+    avatar: Type.Optional(Type.String({ description: "Avatar image path relative to project root (e.g. '.polpo/avatars/alice.png'). Upload via POST /agents/:name/avatar endpoint." })),
     socials: Type.Optional(Type.Record(Type.String(), Type.String(), { description: "Social & web accounts — keys are platform names, values are handles/URLs (e.g. { x: '@alice', github: 'alice', linkedin: '...', website: 'https://...' })" })),
     responsibilities: Type.Optional(Type.Array(
       Type.Union([
@@ -2184,6 +2185,7 @@ function execSetIdentity(polpo: Orchestrator, args: Record<string, unknown>): st
   if (args.timezone !== undefined) updated.timezone = args.timezone as string;
   if (args.tone !== undefined) updated.tone = args.tone as string;
   if (args.personality !== undefined) updated.personality = args.personality as string;
+  if (args.avatar !== undefined) updated.avatar = args.avatar as string;
   if (args.socials !== undefined) updated.socials = args.socials as Record<string, string>;
   if (args.responsibilities !== undefined) {
     updated.responsibilities = (args.responsibilities as (string | AgentResponsibility)[]);
@@ -2214,6 +2216,7 @@ function execGetIdentity(polpo: Orchestrator, args: Record<string, unknown>): st
   if (id.email) lines.push(`  Email: ${id.email}`);
   if (id.bio) lines.push(`  Bio: ${id.bio}`);
   if (id.timezone) lines.push(`  Timezone: ${id.timezone}`);
+  if (id.avatar) lines.push(`  Avatar: ${id.avatar}`);
   if (id.tone) lines.push(`  Tone: ${id.tone}`);
   if (id.personality) lines.push(`  Personality: ${id.personality}`);
   if (id.socials && Object.keys(id.socials).length > 0) {

@@ -68,6 +68,7 @@ import { MessageResponse } from "@/components/ai-elements/message";
 import { useAgent, useAgents, useProcesses, useSkills, useTasks, useVaultEntries } from "@lumea-labs/polpo-react";
 import type { AgentProcess, AgentConfig, SkillInfo, Task, TaskStatus, VaultEntryMeta } from "@lumea-labs/polpo-react";
 import { formatDistanceToNow } from "date-fns";
+import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { cn } from "@/lib/utils";
 import { useState, useMemo } from "react";
 
@@ -644,7 +645,7 @@ export function AgentDetailPage() {
               {/* Avatar + name */}
               <div className="flex items-center gap-3">
                 <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-card border-2 border-background shadow-lg">
-                  <Bot className="h-7 w-7 text-primary" />
+                  <AgentAvatar avatar={identity?.avatar} name={agent.name} size="xl" iconClassName="text-primary" />
                 </div>
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
@@ -773,7 +774,7 @@ export function AgentDetailPage() {
                       to={`/agents/${manager.name}`}
                       className="flex items-center gap-2 rounded-md border border-border/30 bg-muted/10 px-3 py-2 hover:bg-accent/10 transition-colors"
                     >
-                      <Bot className="h-4 w-4 text-primary shrink-0" />
+                      <AgentAvatar avatar={manager.identity?.avatar} name={manager.name} size="sm" iconClassName="text-primary" />
                       <div className="min-w-0">
                         <p className="text-xs font-medium">{manager.identity?.displayName ?? manager.name}</p>
                         {manager.identity?.title && (
@@ -811,7 +812,7 @@ export function AgentDetailPage() {
                           to={`/agents/${sub.name}`}
                           className="flex items-center gap-2 rounded-md border border-border/30 bg-muted/10 px-3 py-2 hover:bg-accent/10 transition-colors"
                         >
-                          <Bot className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                          <AgentAvatar avatar={sub.identity?.avatar} name={sub.name} size="sm" iconClassName="text-muted-foreground" />
                           <div className="min-w-0">
                             <p className="text-xs font-medium">{sub.identity?.displayName ?? sub.name}</p>
                             {sub.identity?.title && (
@@ -879,7 +880,7 @@ export function AgentDetailPage() {
           <div className="lg:hidden mb-4 space-y-3">
             <div className="flex items-start gap-3">
               <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-primary/10">
-                <Bot className="h-6 w-6 text-primary" />
+                <AgentAvatar avatar={identity?.avatar} name={agent.name} size="lg" iconClassName="text-primary" />
               </div>
               <div className="min-w-0">
                 <div className="flex items-center gap-2">

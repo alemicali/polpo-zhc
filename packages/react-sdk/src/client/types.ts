@@ -184,6 +184,8 @@ export interface AgentIdentity {
   email?: string;
   bio?: string;
   timezone?: string;
+  /** Avatar image path relative to project root, served via /api/v1/files/read?path=<avatar> */
+  avatar?: string;
   /** Responsibilities — simple strings or structured objects with area/description/priority */
   responsibilities?: (string | AgentResponsibility)[];
   /** Communication tone — HOW the agent communicates */

@@ -100,6 +100,7 @@ const AgentIdentitySchema = z.object({
   email: z.string().optional(),
   bio: z.string().optional(),
   timezone: z.string().optional(),
+  avatar: z.string().optional(),
   responsibilities: z.array(z.union([z.string(), AgentResponsibilitySchema])).optional(),
   tone: z.string().optional(),
   personality: z.string().optional(),

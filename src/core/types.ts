@@ -195,6 +195,10 @@ export interface AgentIdentity {
   bio?: string;              // Brief persona description
   timezone?: string;         // "Europe/Rome"
 
+  /** Avatar image path relative to project root (e.g. ".polpo/avatars/alice.png").
+   *  Served via GET /api/v1/files/read?path=<avatar> */
+  avatar?: string;
+
   /** Responsibilities — simple strings or structured objects with area/description/priority.
    *  Structured format is preferred for clarity. */
   responsibilities?: (string | AgentResponsibility)[];
