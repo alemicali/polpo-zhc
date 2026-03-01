@@ -66,9 +66,10 @@ import type { PromptInputMessage } from "@/components/ai-elements/prompt-input";
 import { useChat } from "@/hooks/use-polpo";
 import type { AskUserQuestion, AskUserAnswer, MessageSegment, ToolCallInfo, MissionPreviewData, MissionPreviewAction, VaultPreviewData, VaultPreviewAction } from "@/hooks/use-polpo";
 import { ToolCallList, ToolInvocation, ToolCallGroup } from "@/components/ai-elements/tool";
-import { MentionPopover, MentionText, type MentionPopoverHandle } from "@/components/ai-elements/mention-popover";
+import { MentionPopover, MentionText, type MentionPopoverHandle, type MentionFile } from "@/components/ai-elements/mention-popover";
 import { useAgents, useTasks, useMissions } from "@lumea-labs/polpo-react";
 import { cn } from "@/lib/utils";
+import { config } from "@/lib/config";
 import { toast } from "sonner";
 import { formatDistanceToNow } from "date-fns";
 
@@ -1371,6 +1372,16 @@ export function ChatPage() {
   const { tasks } = useTasks();
   const { missions } = useMissions();
 
+  // Files for @mention autocomplete — fetch once on mount
+  const [mentionFiles, setMentionFiles] = useState<MentionFile[]>([]);
+  useEffect(() => {
+    const base = config.baseUrl || "";
+    fetch(`${base}/api/v1/files/search?limit=200`)
+      .then(r => r.json())
+      .then(json => { if (json.ok) setMentionFiles(json.data.files); })
+      .catch(() => {});
+  }, []);
+
   // Filter out empty/orphan sessions — server creates placeholder sessions
   // before streaming starts; if streaming fails these remain empty
   const visibleSessions = sessions.filter(
@@ -1753,7 +1764,7 @@ export function ChatPage() {
         {/* Input */}
         <div className="bg-background/80 backdrop-blur-md px-4 pt-2 pb-1.5 shrink-0" ref={inputWrapperRef}>
           <div className="mx-auto max-w-3xl">
-            <MentionPopover ref={mentionRef} textareaRef={textareaRef} agents={agents} tasks={tasks} missions={missions}>
+            <MentionPopover ref={mentionRef} textareaRef={textareaRef} agents={agents} tasks={tasks} missions={missions} files={mentionFiles}>
               <PromptInput
                 onSubmit={handleSubmit}
                 accept="image/*"

@@ -296,9 +296,12 @@ export const MentionPopover = forwardRef<
     return result;
   }, [query, agents, tasks, missions, files]);
 
+  // Reset selection when the query or item count changes — NOT on every items
+  // reference change (parent arrays may be new refs each render).
+  const itemCount = items.length;
   useEffect(() => {
     setSelectedIndex(0);
-  }, [items]);
+  }, [query, itemCount]);
 
   useEffect(() => {
     if (!listRef.current) return;

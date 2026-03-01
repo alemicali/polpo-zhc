@@ -498,7 +498,12 @@ export function fileRoutes(): OpenAPIHono<ServerEnv> {
   // ── GET /search — recursive flat file listing for mention autocomplete ──
   app.get("/search", (c) => {
     const query = (c.req.query("q") ?? "").toLowerCase();
-    const root = c.req.query("root") ?? ".";           // root dir to search within
+    const orchestrator = c.get("orchestrator");
+    // Default to agent workspace (workDir setting), not project root
+    const agentDir = orchestrator.getAgentWorkDir();
+    const workDir = orchestrator.getWorkDir();
+    const defaultRoot = agentDir !== workDir ? relative(workDir, agentDir) : ".";
+    const root = c.req.query("root") ?? defaultRoot;
     const limitParam = c.req.query("limit");
     const limit = limitParam ? Math.min(Number(limitParam), 500) : 200;
 
