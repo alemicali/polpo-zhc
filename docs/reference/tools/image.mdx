@@ -1,55 +1,86 @@
 ---
-title: "Image Tools"
-sidebarTitle: "Image"
-description: "2 tools for AI image generation and vision analysis"
+title: "Image & Video Tools"
+sidebarTitle: "Image & Video"
+description: "4 tools for AI image generation, video generation, and vision analysis"
 ---
 
-<Warning>
-**Deprecated**: These tools have been removed as built-in tools. Use `bash` commands with appropriate packages or install a skill that provides this functionality. The tools are documented here for reference only.
-</Warning>
-
-Generate images with AI and analyze images using vision models.
+Generate images and videos from text prompts, and analyze images using vision models.
 
 <Note>
-Maximum image file size for analysis: **20 MB** (`MAX_IMAGE_SIZE`). Default timeout: **120 seconds**. Zero vendor SDK dependencies — all provider APIs are called via direct `fetch`.
+Maximum image file size for analysis: **20 MB** (`MAX_IMAGE_SIZE`). Default timeout: **120 seconds** (image), **300 seconds** (video). Zero vendor SDK dependencies — all provider APIs are called via direct `fetch`.
 </Note>
 
 **Providers:**
-- **Generation** — OpenAI gpt-image-1 / DALL-E (default), Replicate Flux
+- **Image generation** — fal.ai (FLUX models — `fal-ai/flux/dev` default)
+- **Video generation** — fal.ai (Wan 2.2 models — `fal-ai/wan/v2.2-1.3b/text-to-video` default)
 - **Vision analysis** — OpenAI GPT-4.1-mini (default), Anthropic Claude
 
-**Required environment variables** (depending on provider): `OPENAI_API_KEY`, `REPLICATE_API_TOKEN`, or `ANTHROPIC_API_KEY`.
+**Credential resolution** (same order as email tools):
+1. Agent vault (e.g. service `"fal-ai"` with key `"key"` for fal.ai, service `"openai"` with key `"key"` for vision)
+2. Environment variables: `FAL_KEY` (generation), `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` (vision)
+
+**Enable via allowedTools:**
+```json
+{ "allowedTools": ["image_*", "video_*"] }
+```
 
 ---
 
 ## `image_generate` — Generate Image
 
-Generate an image from a text prompt using an AI model.
+Generate an image from a text prompt using fal.ai FLUX models.
 
 ### Parameters
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `prompt` | string | yes | Text description of the image to generate |
-| `path` | string | yes | Destination file path for the generated image |
-| `provider` | enum: `openai` \| `replicate` | no | Generation provider (default `openai`) |
-| `model` | string | no | Model name (default `gpt-image-1`) |
-| `size` | string | no | Image dimensions (default `1024x1024`) |
-| `quality` | enum: `auto` \| `high` \| `medium` \| `low` | no | Image quality (OpenAI only) |
-| `style` | enum: `vivid` \| `natural` | no | Image style (`dall-e-3` only) |
-| `n` | number | no | Number of images to generate (default `1`) |
+| `path` | string | yes | Destination file path (format inferred from extension: png, jpg, webp) |
+| `model` | string | no | fal.ai model ID. Default: `fal-ai/flux/dev`. Options: `fal-ai/flux-pro/v1.1` (best quality), `fal-ai/flux/schnell` (fastest) |
+| `size` | string | no | Image dimensions as `WIDTHxHEIGHT` (default `1024x1024`) |
+| `num_inference_steps` | number | no | Inference steps — higher = better quality, slower (default varies by model) |
+| `guidance_scale` | number | no | CFG scale — how closely to follow the prompt (default `3.5`) |
+| `seed` | number | no | Random seed for reproducible results |
 
 ### Returns
 
-Confirmation with the output file path(s) and image dimensions.
+Confirmation with the output file path, file size, model, and dimensions.
 
 ### Notes
 
-- **OpenAI** uses synchronous generation and returns images inline
-- **Replicate** uses asynchronous polling with a **2-second interval** and a **4-minute timeout**
-- `quality` is only available for OpenAI models
-- `style` is only available for the `dall-e-3` model
-- When `n > 1`, files are saved with numeric suffixes (e.g. `image_1.png`, `image_2.png`)
+- Uses fal.ai **async queue API** (submit + poll) for reliable generation
+- Output format is inferred from the file extension (`.png`, `.jpg`, `.webp`)
+- Requires `FAL_KEY` env var or vault service `"fal-ai"` with credential key `"key"`
+
+---
+
+## `video_generate` — Generate Video
+
+Generate a video from a text prompt using fal.ai Wan 2.2 models.
+
+### Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `prompt` | string | yes | Text description of the video to generate |
+| `path` | string | yes | Destination file path (typically `.mp4`) |
+| `model` | string | no | fal.ai model ID. Default: `fal-ai/wan/v2.2-1.3b/text-to-video`. Option: `fal-ai/wan/v2.2-a14b/text-to-video` (best quality) |
+| `num_frames` | number | no | Number of frames (default `81` — ~5 seconds at 16fps) |
+| `resolution` | string | no | Video resolution as `WIDTHxHEIGHT` (default `854x480` — 480p) |
+| `num_inference_steps` | number | no | Inference steps — higher = better quality, slower (default `30`) |
+| `guidance_scale` | number | no | CFG scale (default `5.0`) |
+| `seed` | number | no | Random seed for reproducible results |
+
+### Returns
+
+Confirmation with the output file path, file size, and model.
+
+### Notes
+
+- Video generation takes **1-5 minutes** depending on model and resolution
+- Uses the same fal.ai async queue API as image generation
+- Timeout is **5 minutes** (`VIDEO_TIMEOUT`)
+- Requires `FAL_KEY` env var or vault service `"fal-ai"` with credential key `"key"`
 
 ---
 
@@ -77,3 +108,4 @@ Text description or analysis of the image based on the prompt.
 - **Anthropic** supports only: jpeg, png, gif, webp
 - **OpenAI** supports a broader range of image formats
 - Use a specific `prompt` to guide the analysis (e.g. `"Extract all text from this image"`, `"Describe the UI layout"`)
+- Credentials resolved from: vault (service `"openai"` or `"anthropic"`) > `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` env var

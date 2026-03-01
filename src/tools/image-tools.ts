@@ -13,10 +13,14 @@
  *   Video generation: fal.ai (Wan 2.2 — fal-ai/wan/v2.2-1.3b/text-to-video default)
  *   Vision/analysis:  openai (gpt-4.1-mini), anthropic (Claude)
  *
- * Environment variables:
- *   FAL_KEY             — required for fal.ai image/video generation
- *   OPENAI_API_KEY      — required for openai vision provider
- *   ANTHROPIC_API_KEY   — required for anthropic vision provider
+ * Credential resolution order (same as email tools):
+ *   1. Agent vault (per-agent credentials — e.g. service "fal" with key "key")
+ *   2. Environment variables (global fallback)
+ *
+ * Environment variables (fallback):
+ *   FAL_KEY             — fal.ai image/video generation
+ *   OPENAI_API_KEY      — openai vision provider
+ *   ANTHROPIC_API_KEY   — anthropic vision provider
  */
 
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
@@ -24,6 +28,7 @@ import { resolve, dirname, extname } from "node:path";
 import { Type } from "@sinclair/typebox";
 import type { AgentTool, AgentToolResult } from "@mariozechner/pi-agent-core";
 import { resolveAllowedPaths, assertPathAllowed } from "./path-sandbox.js";
+import type { ResolvedVault } from "../vault/index.js";
 
 type ToolResult = AgentToolResult<any>;
 
@@ -40,6 +45,13 @@ function requireEnv(key: string): string {
   const val = process.env[key];
   if (!val) throw new Error(`Missing environment variable: ${key}. Set it before using this tool.`);
   return val;
+}
+
+/** Resolve fal.ai API key: vault (service "fal-ai", key "key") > FAL_KEY env var. */
+function resolveFalKey(vault?: ResolvedVault): string {
+  const fromVault = vault?.getKey("fal-ai", "key");
+  if (fromVault) return fromVault;
+  return requireEnv("FAL_KEY");
 }
 
 function imageMime(ext: string): string {
@@ -166,21 +178,21 @@ const ImageGenerateSchema = Type.Object({
   })),
 });
 
-function createGenerateTool(cwd: string, sandbox: string[]): AgentTool<typeof ImageGenerateSchema> {
+function createGenerateTool(cwd: string, sandbox: string[], vault?: ResolvedVault): AgentTool<typeof ImageGenerateSchema> {
   return {
     name: "image_generate",
     label: "Generate Image",
     description: "Generate an image from a text prompt using fal.ai (FLUX models). " +
       "Output format inferred from file extension (png, jpg, webp). " +
       "Models: fal-ai/flux/dev (default, balanced), fal-ai/flux-pro/v1.1 (best quality), " +
-      "fal-ai/flux/schnell (fastest). Requires FAL_KEY env var.",
+      "fal-ai/flux/schnell (fastest). Credentials resolved from: agent vault > FAL_KEY env var.",
     parameters: ImageGenerateSchema,
     async execute(_id, params, signal) {
       const filePath = resolve(cwd, params.path);
       assertPathAllowed(filePath, sandbox, "image_generate");
 
       try {
-        return await generateFal(filePath, params, signal);
+        return await generateFal(filePath, params, vault, signal);
       } catch (err: any) {
         return {
           content: [{ type: "text", text: `Image generation error: ${err.message}` }],
@@ -201,9 +213,10 @@ async function generateFal(
     guidance_scale?: number;
     seed?: number;
   },
+  vault?: ResolvedVault,
   signal?: AbortSignal,
 ): Promise<ToolResult> {
-  const apiKey = requireEnv("FAL_KEY");
+  const apiKey = resolveFalKey(vault);
   const model = params.model ?? "fal-ai/flux/dev";
 
   // Parse size into width/height
@@ -286,7 +299,7 @@ const VideoGenerateSchema = Type.Object({
   })),
 });
 
-function createVideoGenerateTool(cwd: string, sandbox: string[]): AgentTool<typeof VideoGenerateSchema> {
+function createVideoGenerateTool(cwd: string, sandbox: string[], vault?: ResolvedVault): AgentTool<typeof VideoGenerateSchema> {
   return {
     name: "video_generate",
     label: "Generate Video",
@@ -294,14 +307,14 @@ function createVideoGenerateTool(cwd: string, sandbox: string[]): AgentTool<type
       "Output saved as MP4. Models: fal-ai/wan/v2.2-1.3b/text-to-video (default, faster), " +
       "fal-ai/wan/v2.2-a14b/text-to-video (best quality). " +
       "Video generation takes 1-5 minutes depending on model and resolution. " +
-      "Requires FAL_KEY env var.",
+      "Credentials resolved from: agent vault > FAL_KEY env var.",
     parameters: VideoGenerateSchema,
     async execute(_id, params, signal) {
       const filePath = resolve(cwd, params.path);
       assertPathAllowed(filePath, sandbox, "video_generate");
 
       try {
-        return await generateVideo(filePath, params, signal);
+        return await generateVideo(filePath, params, vault, signal);
       } catch (err: any) {
         return {
           content: [{ type: "text", text: `Video generation error: ${err.message}` }],
@@ -323,9 +336,10 @@ async function generateVideo(
     guidance_scale?: number;
     seed?: number;
   },
+  vault?: ResolvedVault,
   signal?: AbortSignal,
 ): Promise<ToolResult> {
-  const apiKey = requireEnv("FAL_KEY");
+  const apiKey = resolveFalKey(vault);
   const model = params.model ?? "fal-ai/wan/v2.2-1.3b/text-to-video";
 
   const input: Record<string, unknown> = {
@@ -391,14 +405,14 @@ const ImageAnalyzeSchema = Type.Object({
   max_tokens: Type.Optional(Type.Number({ description: "Max tokens in response (default: 1024)" })),
 });
 
-function createAnalyzeTool(cwd: string, sandbox: string[]): AgentTool<typeof ImageAnalyzeSchema> {
+function createAnalyzeTool(cwd: string, sandbox: string[], vault?: ResolvedVault): AgentTool<typeof ImageAnalyzeSchema> {
   return {
     name: "image_analyze",
     label: "Analyze Image",
     description: "Analyze an image using AI vision models. Can describe contents, extract text (OCR), " +
       "answer questions about the image, identify objects, read charts, etc. " +
       "Providers: openai (GPT-4.1-mini, default), anthropic (Claude). " +
-      "Requires OPENAI_API_KEY or ANTHROPIC_API_KEY env var.",
+      "Credentials resolved from: agent vault > OPENAI_API_KEY or ANTHROPIC_API_KEY env var.",
     parameters: ImageAnalyzeSchema,
     async execute(_id, params, signal) {
       const filePath = resolve(cwd, params.path);
@@ -425,9 +439,9 @@ function createAnalyzeTool(cwd: string, sandbox: string[]): AgentTool<typeof Ima
 
       try {
         if (provider === "openai") {
-          return await analyzeOpenAI(filePath, fileBuffer, params, signal);
+          return await analyzeOpenAI(filePath, fileBuffer, params, vault, signal);
         } else {
-          return await analyzeAnthropic(filePath, fileBuffer, params, signal);
+          return await analyzeAnthropic(filePath, fileBuffer, params, vault, signal);
         }
       } catch (err: any) {
         return {
@@ -443,9 +457,10 @@ async function analyzeOpenAI(
   filePath: string,
   fileBuffer: Buffer,
   params: { prompt?: string; model?: string; max_tokens?: number },
+  vault?: ResolvedVault,
   signal?: AbortSignal,
 ): Promise<ToolResult> {
-  const apiKey = requireEnv("OPENAI_API_KEY");
+  const apiKey = vault?.getKey("openai", "key") ?? requireEnv("OPENAI_API_KEY");
   const model = params.model ?? "gpt-4.1-mini";
   const prompt = params.prompt ?? "Describe this image in detail.";
   const maxTokens = params.max_tokens ?? 1024;
@@ -514,9 +529,10 @@ async function analyzeAnthropic(
   filePath: string,
   fileBuffer: Buffer,
   params: { prompt?: string; model?: string; max_tokens?: number },
+  vault?: ResolvedVault,
   signal?: AbortSignal,
 ): Promise<ToolResult> {
-  const apiKey = requireEnv("ANTHROPIC_API_KEY");
+  const apiKey = vault?.getKey("anthropic", "key") ?? requireEnv("ANTHROPIC_API_KEY");
   const model = params.model ?? "claude-sonnet-4-20250514";
   const prompt = params.prompt ?? "Describe this image in detail.";
   const maxTokens = params.max_tokens ?? 1024;
@@ -608,18 +624,21 @@ export const ALL_IMAGE_TOOL_NAMES: ImageToolName[] = ["image_generate", "image_a
  * @param allowedPaths - Sandbox paths for file validation
  * @param allowedTools - Optional filter — only include tools whose names appear here.
  *   Supports wildcards expanded upstream (e.g. "image_*", "video_*").
+ * @param vault - Resolved vault for credential resolution (fal-ai, openai, anthropic).
+ *   Credentials are resolved as: vault > environment variable.
  */
 export function createImageTools(
   cwd: string,
   allowedPaths?: string[],
   allowedTools?: string[],
+  vault?: ResolvedVault,
 ): AgentTool<any>[] {
   const sandbox = resolveAllowedPaths(cwd, allowedPaths);
 
   const factories: Record<ImageToolName, () => AgentTool<any>> = {
-    image_generate: () => createGenerateTool(cwd, sandbox),
-    image_analyze: () => createAnalyzeTool(cwd, sandbox),
-    video_generate: () => createVideoGenerateTool(cwd, sandbox),
+    image_generate: () => createGenerateTool(cwd, sandbox, vault),
+    image_analyze: () => createAnalyzeTool(cwd, sandbox, vault),
+    video_generate: () => createVideoGenerateTool(cwd, sandbox, vault),
   };
 
   const names = allowedTools

@@ -486,7 +486,7 @@ export async function createAllTools(options: CreateAllToolsOptions): Promise<Ag
 
   // Image & video tools — activated when any image_* or video_* tool is in allowedTools
   if (categoryRequested(ALL_IMAGE_TOOL_NAMES)) {
-    tools.push(...createImageTools(cwd, allowedPaths, allowedTools));
+    tools.push(...createImageTools(cwd, allowedPaths, allowedTools, options.vault));
   }
 
   // HTTP and register_outcome are already included via createCodingTools() above — no need to add again

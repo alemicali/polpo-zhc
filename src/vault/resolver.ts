@@ -65,6 +65,9 @@ export interface ResolvedVault {
   getSmtp(): SmtpCredentials | undefined;
   /** Get IMAP credentials (looks for service type "imap") */
   getImap(): ImapCredentials | undefined;
+  /** Get a credential value by service name and key.
+   *  Convenience shortcut for `get(service)?.[key]`. */
+  getKey(service: string, key: string): string | undefined;
   /** Check if a service exists in the vault */
   has(service: string): boolean;
   /** List all available services with their types and credential keys (values masked) */
@@ -126,6 +129,10 @@ export function resolveAgentVault(vault?: Record<string, VaultEntry>): ResolvedV
         }
       }
       return undefined;
+    },
+
+    getKey(service: string, key: string) {
+      return resolved.get(service)?.creds[key];
     },
 
     has(service: string) {
