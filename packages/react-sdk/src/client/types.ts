@@ -223,7 +223,7 @@ export interface AgentConfig {
   volatile?: boolean;
   missionGroup?: string;
 
-  // Tool categories are activated via allowedTools (e.g. ["browser_*", "email_*", "vault_*", "image_*", "video_*"])
+  // Tool categories are activated via allowedTools (e.g. ["browser_*", "email_*", "vault_*", "image_*", "video_*", "audio_*"])
   // Note: HTTP tools (http_fetch, http_download) are always available as core tools.
   /** Browser profile name for persistent context (cookies, auth). Used with agent-browser --profile. */
   browserProfile?: string;
@@ -690,7 +690,7 @@ export interface AddAgentRequest {
   reportsTo?: string;
   /** Allowed email recipient domains (overrides global setting). */
   emailAllowedDomains?: string[];
-  // Tool categories activated via allowedTools (e.g. ["browser_*", "email_*", "vault_*", "image_*", "video_*"])
+  // Tool categories activated via allowedTools (e.g. ["browser_*", "email_*", "vault_*", "image_*", "video_*", "audio_*"])
 }
 
 // === SSE ===

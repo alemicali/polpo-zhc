@@ -193,17 +193,17 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
   const model = resolveModel(agentConfig.model);
 
   // Create all tools scoped to working directory with path sandboxing
-  // Extended tools are auto-loaded when their names appear in allowedTools (e.g. "browser_*", "email_*", "vault_*", "image_*", "video_*")
+  // Extended tools are auto-loaded when their names appear in allowedTools (e.g. "browser_*", "email_*", "vault_*", "image_*", "video_*", "audio_*")
   const polpoDir = ctx?.polpoDir ?? join(cwd, ".polpo");
 
   // Browser profile directory for agent-browser persistent state (cookies, auth, localStorage)
   const browserProfileDir = join(polpoDir, "browser-profiles", agentConfig.browserProfile || agentConfig.name);
 
-  // Check if extended tools (browser, email, vault, image, video) are requested via allowedTools
+  // Check if extended tools (browser, email, vault, image, video, audio) are requested via allowedTools
   const hasExtendedTools = agentConfig.allowedTools?.some(t => {
     const lc = t.toLowerCase();
     return lc.startsWith("browser_") || lc.startsWith("email_") || lc.startsWith("vault_")
-      || lc.startsWith("image_") || lc.startsWith("video_");
+      || lc.startsWith("image_") || lc.startsWith("video_") || lc.startsWith("audio_");
   }) ?? false;
 
   // Derive output directory from context (per-task output dir for deliverables)

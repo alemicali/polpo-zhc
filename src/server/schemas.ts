@@ -119,7 +119,7 @@ export const AddAgentSchema = z.object({
   // Identity & hierarchy (vault credentials managed via encrypted store)
   identity: AgentIdentitySchema.optional(),
   reportsTo: z.string().optional(),
-  // Extended tool categories (browser, email, vault, image, video — HTTP is always-on core)
+  // Extended tool categories (browser, email, vault, image, video, audio — HTTP is always-on core)
   browserProfile: z.string().optional(),
 });
 

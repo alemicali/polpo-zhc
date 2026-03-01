@@ -4,7 +4,7 @@ sidebarTitle: "Core Tools"
 description: "Read, write, edit, glob, grep, bash, ls, http_fetch, http_download — the 9 core agent tools"
 ---
 
-Polpo gives agents 9 built-in core tools to interact with the workspace (including HTTP), plus 5 extended tool categories (browser, email, vault, image, and video).
+Polpo gives agents 9 built-in core tools to interact with the workspace (including HTTP), plus 6 extended tool categories (browser, email, vault, image, video, and audio).
 
 <Info>
 For a higher-level overview of all tools, filesystem sandboxing, and MCP server connections, see [Tools & MCP](/features/tools-and-mcp).
@@ -326,12 +326,12 @@ If `allowedTools` is not specified, all 9 core tools are available.
 
 ## Extended Tool Categories
 
-Beyond the 9 core tools, Polpo offers **5 optional tool categories** that can be enabled per-agent via the `allowedTools` array.
+Beyond the 9 core tools, Polpo offers **6 optional tool categories** that can be enabled per-agent via the `allowedTools` array.
 
 ```json
 {
   "name": "outreach-agent",
-  "allowedTools": ["read", "write", "edit", "bash", "glob", "grep", "ls", "browser_*", "email_*", "vault_*", "image_*", "video_*"]
+  "allowedTools": ["read", "write", "edit", "bash", "glob", "grep", "ls", "browser_*", "email_*", "vault_*", "image_*", "video_*", "audio_*"]
 }
 ```
 
@@ -342,9 +342,10 @@ Beyond the 9 core tools, Polpo offers **5 optional tool categories** that can be
 | [Vault](/reference/tools/vault) | 2 | `"vault_*"` | Read-only access to agent's own vault credentials |
 | Image | 3 | `"image_*"` | Image generation (fal.ai FLUX) and vision analysis (OpenAI/Anthropic) |
 | Video | 1 | `"video_*"` | Text-to-video generation via fal.ai Wan 2.2 |
+| [Audio](/reference/tools/audio) | 2 | `"audio_*"` | Speech-to-text (STT) and text-to-speech (TTS) |
 
 <Note>
-Git, multi-file, dependency management, Excel/CSV, PDF, Word/DOCX, and audio tools have been removed as built-in tool categories. Use the `bash` tool with appropriate CLI commands or install [skills](/features/skills) for these operations instead. HTTP tools (`http_fetch`, `http_download`) are now always-on core tools — no flag needed.
+Git, multi-file, dependency management, Excel/CSV, PDF, and Word/DOCX tools have been removed as built-in tool categories. Use the `bash` tool with appropriate CLI commands or install [skills](/features/skills) for these operations instead. HTTP tools (`http_fetch`, `http_download`) are now always-on core tools — no flag needed.
 </Note>
 
 Click any category above for full parameter documentation, return types, and usage notes.

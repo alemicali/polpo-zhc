@@ -146,6 +146,7 @@ const toolCategories: { prefix: string; label: string; tools: string }[] = [
   { prefix: "vault_", label: "Vault", tools: "vault_get, vault_list" },
   { prefix: "image_", label: "Image", tools: "image_generate (fal.ai FLUX), image_analyze (OpenAI/Anthropic vision)" },
   { prefix: "video_", label: "Video", tools: "video_generate (fal.ai Wan 2.2 text-to-video)" },
+  { prefix: "audio_", label: "Audio", tools: "audio_transcribe (STT), audio_speak (TTS)" },
 ];
 
 const taskStatusConfig: Record<TaskStatus, { color: string; icon: React.ElementType; label: string }> = {

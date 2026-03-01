@@ -390,6 +390,7 @@ import { ALL_HTTP_TOOL_NAMES } from "./http-tools.js";
 import { createEmailTools, ALL_EMAIL_TOOL_NAMES } from "./email-tools.js";
 import { createVaultTools, ALL_VAULT_TOOL_NAMES } from "./vault-tools.js";
 import { createImageTools, ALL_IMAGE_TOOL_NAMES } from "./image-tools.js";
+import { createAudioTools, ALL_AUDIO_TOOL_NAMES } from "./audio-tools.js";
 import type { ResolvedVault } from "../vault/index.js";
 import { ALL_OUTCOME_TOOL_NAMES } from "./outcome-tools.js";
 
@@ -399,6 +400,7 @@ export type { EmailToolName } from "./email-tools.js";
 export type { OutcomeToolName } from "./outcome-tools.js";
 export type { VaultToolName } from "./vault-tools.js";
 export type { ImageToolName } from "./image-tools.js";
+export type { AudioToolName } from "./audio-tools.js";
 
 /** All known tool names across all categories */
 export type ExtendedToolName = CodingToolName
@@ -407,7 +409,8 @@ export type ExtendedToolName = CodingToolName
   | import("./email-tools.js").EmailToolName
   | import("./outcome-tools.js").OutcomeToolName
   | import("./vault-tools.js").VaultToolName
-  | import("./image-tools.js").ImageToolName;
+  | import("./image-tools.js").ImageToolName
+  | import("./audio-tools.js").AudioToolName;
 
 /** All available tool names for documentation/config validation */
 export const ALL_EXTENDED_TOOL_NAMES: string[] = [
@@ -418,13 +421,14 @@ export const ALL_EXTENDED_TOOL_NAMES: string[] = [
   ...ALL_OUTCOME_TOOL_NAMES,
   ...ALL_VAULT_TOOL_NAMES,
   ...ALL_IMAGE_TOOL_NAMES,
+  ...ALL_AUDIO_TOOL_NAMES,
 ];
 
 export interface CreateAllToolsOptions {
   /** Working directory for the agent */
   cwd: string;
   /** Tool name filter — only include tools with these names.
-   *  Extended tools are auto-loaded when their names appear here (e.g. "browser_*", "email_*", "vault_*", "image_*", "video_*").
+   *  Extended tools are auto-loaded when their names appear here (e.g. "browser_*", "email_*", "vault_*", "image_*", "video_*", "audio_*").
    *  If omitted, only core coding tools are included. */
   allowedTools?: string[];
   /** Filesystem sandbox paths */
@@ -487,6 +491,11 @@ export async function createAllTools(options: CreateAllToolsOptions): Promise<Ag
   // Image & video tools — activated when any image_* or video_* tool is in allowedTools
   if (categoryRequested(ALL_IMAGE_TOOL_NAMES)) {
     tools.push(...createImageTools(cwd, allowedPaths, allowedTools, options.vault));
+  }
+
+  // Audio tools — activated when any audio_* tool is in allowedTools
+  if (categoryRequested(ALL_AUDIO_TOOL_NAMES)) {
+    tools.push(...createAudioTools(cwd, allowedPaths, allowedTools, options.vault));
   }
 
   // HTTP and register_outcome are already included via createCodingTools() above — no need to add again

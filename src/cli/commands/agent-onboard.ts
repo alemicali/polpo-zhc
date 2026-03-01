@@ -315,6 +315,7 @@ export function registerAgentOnboardCommands(program: Command): void {
         if (aTools.some(t => t.toLowerCase().startsWith("vault_"))) flags.push("vault");
         if (aTools.some(t => t.toLowerCase().startsWith("image_"))) flags.push("image");
         if (aTools.some(t => t.toLowerCase().startsWith("video_"))) flags.push("video");
+        if (aTools.some(t => t.toLowerCase().startsWith("audio_"))) flags.push("audio");
         if (vaultCount > 0) flags.push(`vault:${vaultCount}`);
 
         console.log(`${prefix}${connector}${chalk.bold(display)}${titleStr ? chalk.dim(` — ${titleStr}`) : ""}${flags.length ? chalk.cyan(` [${flags.join(", ")}]`) : ""}`);
@@ -403,6 +404,7 @@ export function registerAgentOnboardCommands(program: Command): void {
       if (showTools.some(t => t.toLowerCase().startsWith("vault_"))) showFlags.push("vault");
       if (showTools.some(t => t.toLowerCase().startsWith("image_"))) showFlags.push("image");
       if (showTools.some(t => t.toLowerCase().startsWith("video_"))) showFlags.push("video");
+      if (showTools.some(t => t.toLowerCase().startsWith("audio_"))) showFlags.push("audio");
       if (showFlags.length > 0) {
         console.log(chalk.cyan(`\n  Tool categories: `) + showFlags.join(", "));
       }

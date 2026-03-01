@@ -43,7 +43,7 @@ Missions and tasks are stored separately in `.polpo/missions/` and `.polpo/tasks
 | `browserProfile` | string | agent name | Persistent browser profile name. Set up via `polpo browser login <agent> [url]` — sessions are stored in `.polpo/browser-profiles/<profileName>/`. Requires `browser_*` in `allowedTools` |
 
 <Note>
-**HTTP tools are always-on**: The `http_fetch` and `http_download` tools are included in the core tool set and available to all agents by default — no enable flag needed. Include `"vault_*"` in `allowedTools` to let agents read their own vault credentials at runtime (essential for skills that need API keys). Include `"image_*"` for image generation/analysis and `"video_*"` for video generation. Git, multi-file, dependency management, Excel/CSV, PDF, Word/DOCX, and audio tool categories have been removed. Use `bash` commands or [skills](/features/skills) for these operations instead.
+**HTTP tools are always-on**: The `http_fetch` and `http_download` tools are included in the core tool set and available to all agents by default — no enable flag needed. Include `"vault_*"` in `allowedTools` to let agents read their own vault credentials at runtime (essential for skills that need API keys). Include `"image_*"` for image generation/analysis, `"video_*"` for video generation, and `"audio_*"` for speech-to-text and text-to-speech. Git, multi-file, dependency management, Excel/CSV, PDF, and Word/DOCX tool categories have been removed. Use `bash` commands or [skills](/features/skills) for these operations instead.
 </Note>
 
 ## AgentIdentity Fields
@@ -132,7 +132,7 @@ Vault credentials support `${ENV_VAR}` syntax — at runtime, Polpo resolves the
     "tone": "Professional but approachable. Uses first names. Keeps emails under 3 paragraphs. Ends messages with a clear call-to-action. Uses bullet points for lists. Avoids jargon when writing to customers.",
     "personality": "Empathetic and detail-oriented. Anticipates customer concerns before they escalate. Prefers data-backed decisions — always cites engagement metrics. Creative with content ideas but disciplined with deadlines. Collaborative by nature, regularly checks in with teammates."
   },
-  "allowedTools": ["read", "write", "edit", "bash", "glob", "grep", "ls", "browser_*", "email_*", "vault_*", "image_*", "video_*"]
+  "allowedTools": ["read", "write", "edit", "bash", "glob", "grep", "ls", "browser_*", "email_*", "vault_*", "image_*", "video_*", "audio_*"]
 }
 ```
 

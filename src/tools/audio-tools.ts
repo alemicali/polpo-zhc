@@ -11,10 +11,14 @@
  *   STT: openai (Whisper), deepgram (Nova)
  *   TTS: openai (gpt-4o-mini-tts / tts-1), deepgram (Aura), elevenlabs
  *
- * Environment variables:
- *   OPENAI_API_KEY    — required for openai provider
- *   DEEPGRAM_API_KEY  — required for deepgram provider
- *   ELEVENLABS_API_KEY — required for elevenlabs provider
+ * Credential resolution order (same as email/image tools):
+ *   1. Agent vault (per-agent credentials — e.g. service "openai" key "key")
+ *   2. Environment variables (global fallback)
+ *
+ * Environment variables (fallback):
+ *   OPENAI_API_KEY    — openai provider (STT + TTS)
+ *   DEEPGRAM_API_KEY  — deepgram provider (STT + TTS)
+ *   ELEVENLABS_API_KEY — elevenlabs provider (TTS)
  */
 
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
@@ -25,6 +29,7 @@ import type { AgentTool, AgentToolResult } from "@mariozechner/pi-agent-core";
 // Re-export with concrete generic to avoid "requires 1 type argument" errors
 type ToolResult = AgentToolResult<any>;
 import { resolveAllowedPaths, assertPathAllowed } from "./path-sandbox.js";
+import type { ResolvedVault } from "../vault/index.js";
 
 // ─── Constants ───
 
@@ -82,14 +87,14 @@ const AudioTranscribeSchema = Type.Object({
   prompt: Type.Optional(Type.String({ description: "Optional context/prompt to guide transcription (OpenAI only)" })),
 });
 
-function createTranscribeTool(cwd: string, sandbox: string[]): AgentTool<typeof AudioTranscribeSchema> {
+function createTranscribeTool(cwd: string, sandbox: string[], vault?: ResolvedVault): AgentTool<typeof AudioTranscribeSchema> {
   return {
     name: "audio_transcribe",
     label: "Transcribe Audio",
     description: "Transcribe an audio file to text using speech-to-text AI. " +
       "Supports mp3, wav, flac, ogg, m4a, webm formats. Max file size: 25 MB. " +
       "Providers: openai (Whisper, default), deepgram (Nova). " +
-      "Requires OPENAI_API_KEY or DEEPGRAM_API_KEY env var.",
+      "Credentials resolved from: agent vault > OPENAI_API_KEY or DEEPGRAM_API_KEY env var.",
     parameters: AudioTranscribeSchema,
     async execute(_id, params, signal) {
       const filePath = resolve(cwd, params.path);
@@ -115,9 +120,9 @@ function createTranscribeTool(cwd: string, sandbox: string[]): AgentTool<typeof 
 
       try {
         if (provider === "openai") {
-          return await transcribeOpenAI(filePath, fileBuffer, params, signal);
+          return await transcribeOpenAI(filePath, fileBuffer, params, vault, signal);
         } else {
-          return await transcribeDeepgram(filePath, fileBuffer, params, signal);
+          return await transcribeDeepgram(filePath, fileBuffer, params, vault, signal);
         }
       } catch (err: any) {
         return {
@@ -133,9 +138,10 @@ async function transcribeOpenAI(
   filePath: string,
   fileBuffer: Buffer,
   params: { model?: string; language?: string; prompt?: string },
+  vault?: ResolvedVault,
   signal?: AbortSignal,
 ): Promise<ToolResult> {
-  const apiKey = requireEnv("OPENAI_API_KEY");
+  const apiKey = vault?.getKey("openai", "key") ?? requireEnv("OPENAI_API_KEY");
   const model = params.model ?? "whisper-1";
 
   const fields: Record<string, string> = { model };
@@ -192,9 +198,10 @@ async function transcribeDeepgram(
   filePath: string,
   fileBuffer: Buffer,
   params: { model?: string; language?: string },
+  vault?: ResolvedVault,
   signal?: AbortSignal,
 ): Promise<ToolResult> {
-  const apiKey = requireEnv("DEEPGRAM_API_KEY");
+  const apiKey = vault?.getKey("deepgram", "key") ?? requireEnv("DEEPGRAM_API_KEY");
   const model = params.model ?? "nova-3";
 
   const queryParams = new URLSearchParams({
@@ -275,14 +282,14 @@ const AudioSpeakSchema = Type.Object({
   instructions: Type.Optional(Type.String({ description: "Voice style instructions (OpenAI gpt-4o-mini-tts only, e.g. 'Speak in a cheerful tone')" })),
 });
 
-function createSpeakTool(cwd: string, sandbox: string[]): AgentTool<typeof AudioSpeakSchema> {
+function createSpeakTool(cwd: string, sandbox: string[], vault?: ResolvedVault): AgentTool<typeof AudioSpeakSchema> {
   return {
     name: "audio_speak",
     label: "Text to Speech",
     description: "Generate speech audio from text using text-to-speech AI. " +
       "Output format is inferred from file extension (mp3, wav, flac, opus, aac, pcm). " +
       "Providers: openai (default), deepgram (Aura), elevenlabs. " +
-      "Requires OPENAI_API_KEY, DEEPGRAM_API_KEY, or ELEVENLABS_API_KEY env var.",
+      "Credentials resolved from: agent vault > OPENAI_API_KEY, DEEPGRAM_API_KEY, or ELEVENLABS_API_KEY env var.",
     parameters: AudioSpeakSchema,
     async execute(_id, params, signal) {
       const filePath = resolve(cwd, params.path);
@@ -292,11 +299,11 @@ function createSpeakTool(cwd: string, sandbox: string[]): AgentTool<typeof Audio
 
       try {
         if (provider === "openai") {
-          return await speakOpenAI(filePath, params, signal);
+          return await speakOpenAI(filePath, params, vault, signal);
         } else if (provider === "deepgram") {
-          return await speakDeepgram(filePath, params, signal);
+          return await speakDeepgram(filePath, params, vault, signal);
         } else {
-          return await speakElevenLabs(filePath, params, signal);
+          return await speakElevenLabs(filePath, params, vault, signal);
         }
       } catch (err: any) {
         return {
@@ -311,9 +318,10 @@ function createSpeakTool(cwd: string, sandbox: string[]): AgentTool<typeof Audio
 async function speakOpenAI(
   filePath: string,
   params: { text: string; model?: string; voice?: string; speed?: number; instructions?: string },
+  vault?: ResolvedVault,
   signal?: AbortSignal,
 ): Promise<ToolResult> {
-  const apiKey = requireEnv("OPENAI_API_KEY");
+  const apiKey = vault?.getKey("openai", "key") ?? requireEnv("OPENAI_API_KEY");
   const model = params.model ?? "tts-1";
   const voice = params.voice ?? "alloy";
 
@@ -374,9 +382,10 @@ async function speakOpenAI(
 async function speakDeepgram(
   filePath: string,
   params: { text: string; model?: string },
+  vault?: ResolvedVault,
   signal?: AbortSignal,
 ): Promise<ToolResult> {
-  const apiKey = requireEnv("DEEPGRAM_API_KEY");
+  const apiKey = vault?.getKey("deepgram", "key") ?? requireEnv("DEEPGRAM_API_KEY");
   const model = params.model ?? "aura-2-en";
 
   const controller = new AbortController();
@@ -423,9 +432,10 @@ async function speakDeepgram(
 async function speakElevenLabs(
   filePath: string,
   params: { text: string; model?: string; voice?: string },
+  vault?: ResolvedVault,
   signal?: AbortSignal,
 ): Promise<ToolResult> {
-  const apiKey = requireEnv("ELEVENLABS_API_KEY");
+  const apiKey = vault?.getKey("elevenlabs", "key") ?? requireEnv("ELEVENLABS_API_KEY");
   const model = params.model ?? "eleven_multilingual_v2";
   // ElevenLabs default voice: "Rachel" (21m00Tcm4TlvDq8ikWAM)
   const voiceId = params.voice ?? "21m00Tcm4TlvDq8ikWAM";
@@ -493,17 +503,19 @@ export const ALL_AUDIO_TOOL_NAMES: AudioToolName[] = ["audio_transcribe", "audio
  * @param cwd - Working directory for resolving file paths
  * @param allowedPaths - Sandbox paths for file validation
  * @param allowedTools - Optional filter
+ * @param vault - Resolved vault credentials for credential resolution
  */
 export function createAudioTools(
   cwd: string,
   allowedPaths?: string[],
   allowedTools?: string[],
+  vault?: ResolvedVault,
 ): AgentTool<any>[] {
   const sandbox = resolveAllowedPaths(cwd, allowedPaths);
 
   const factories: Record<AudioToolName, () => AgentTool<any>> = {
-    audio_transcribe: () => createTranscribeTool(cwd, sandbox),
-    audio_speak: () => createSpeakTool(cwd, sandbox),
+    audio_transcribe: () => createTranscribeTool(cwd, sandbox, vault),
+    audio_speak: () => createSpeakTool(cwd, sandbox, vault),
   };
 
   const names = allowedTools

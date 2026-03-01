@@ -4,11 +4,7 @@ sidebarTitle: "Audio"
 description: "2 tools for speech-to-text and text-to-speech"
 ---
 
-<Warning>
-**Deprecated**: These tools have been removed as built-in tools. Use `bash` commands with appropriate packages or install a skill that provides this functionality. The tools are documented here for reference only.
-</Warning>
-
-Transcribe audio to text (STT) and generate speech from text (TTS).
+Transcribe audio to text (STT) and generate speech from text (TTS). Enable with `"audio_*"` in `allowedTools`.
 
 <Note>
 Maximum audio file size: **25 MB** (`MAX_AUDIO_SIZE`). Default timeout: **120 seconds**. Zero vendor SDK dependencies — all provider APIs are called via direct `fetch`.
@@ -16,9 +12,11 @@ Maximum audio file size: **25 MB** (`MAX_AUDIO_SIZE`). Default timeout: **120 se
 
 **Providers:**
 - **Speech-to-text** — OpenAI Whisper (default), Deepgram Nova
-- **Text-to-speech** — OpenAI (default), ElevenLabs
+- **Text-to-speech** — OpenAI (default), Deepgram Aura, ElevenLabs
 
-**Required environment variables** (depending on provider): `OPENAI_API_KEY`, `DEEPGRAM_API_KEY`, or `ELEVENLABS_API_KEY`.
+**Credential resolution** (per provider, checked in order):
+1. Agent vault — e.g. service `"openai"` key `"key"`, service `"deepgram"` key `"key"`, service `"elevenlabs"` key `"key"`
+2. Environment variables — `OPENAI_API_KEY`, `DEEPGRAM_API_KEY`, or `ELEVENLABS_API_KEY`
 
 ---
 
@@ -58,7 +56,7 @@ Generate an audio file from text using a text-to-speech provider.
 |-----------|------|----------|-------------|
 | `text` | string | yes | Text to convert to speech |
 | `path` | string | yes | Destination file path for the audio output |
-| `provider` | enum: `openai` \| `elevenlabs` | no | TTS provider (default `openai`) |
+| `provider` | enum: `openai` \| `deepgram` \| `elevenlabs` | no | TTS provider (default `openai`) |
 | `model` | string | no | Model name (provider-specific defaults apply) |
 | `voice` | string | no | Voice selection (see below for options) |
 | `speed` | number | no | Playback speed, `0.25`–`4.0` (OpenAI only) |
@@ -71,9 +69,11 @@ Confirmation with the output file path, duration, and file size.
 ### Notes
 
 - **OpenAI voices**: `alloy`, `echo`, `fable`, `onyx`, `nova`, `shimmer` (default `alloy`)
+- **Deepgram**: model-based voice selection (default `aura-2-en`)
 - **ElevenLabs voices**: voice ID string (default `Rachel`)
 - **OpenAI output formats**: mp3, wav, flac, opus, aac, pcm
+- **Deepgram output format**: mp3
 - **ElevenLabs output formats**: mp3, wav, flac
 - Output format is determined by the file extension of `path`
-- `speed` is only supported by OpenAI — it is ignored for ElevenLabs
+- `speed` is only supported by OpenAI — it is ignored for other providers
 - `instructions` is only supported with the `gpt-4o-mini-tts` model
