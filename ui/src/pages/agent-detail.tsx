@@ -366,7 +366,7 @@ function ActivityHeatmap({ tasks }: { tasks: Task[] }) {
                         <p>{cell.data.count} task{cell.data.count !== 1 ? "s" : ""}: {cell.data.done} done, {cell.data.failed} failed</p>
                         {cell.data.scores.length > 0 && (
                           <p className="text-muted-foreground">
-                            avg score {Math.round((cell.data.scores.reduce((a, b) => a + b, 0) / cell.data.scores.length) * 100)}%
+                            avg score {(cell.data.scores.reduce((a, b) => a + b, 0) / cell.data.scores.length).toFixed(1)}/5
                           </p>
                         )}
                       </>
@@ -857,7 +857,7 @@ export function AgentDetailPage() {
                   )}
                   {taskStats.avgScore != null && (
                     <div className="text-center">
-                      <p className="text-lg font-bold font-mono">{Math.round(taskStats.avgScore * 100)}%</p>
+                      <p className="text-lg font-bold font-mono">{taskStats.avgScore.toFixed(1)}<span className="text-xs text-muted-foreground font-normal">/5</span></p>
                       <p className="text-[10px] text-muted-foreground">Avg score</p>
                     </div>
                   )}

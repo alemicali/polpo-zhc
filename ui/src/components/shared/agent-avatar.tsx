@@ -1,5 +1,6 @@
 import { Bot } from "lucide-react";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
+import { HoverCard, HoverCardTrigger, HoverCardContent } from "@/components/ui/hover-card";
 import { cn } from "@/lib/utils";
 import { config } from "@/lib/config";
 
@@ -43,12 +44,36 @@ export function AgentAvatar({
     return <Bot className={cn(s.icon, iconClassName)} />;
   }
 
-  return (
+  const url = avatarUrl(avatar);
+
+  const avatarEl = (
     <Avatar className={cn(s.avatar, "rounded-lg", className)}>
-      <AvatarImage src={avatarUrl(avatar)} alt={name ?? "Agent"} className="object-cover" />
+      <AvatarImage src={url} alt={name ?? "Agent"} className="object-cover" />
       <AvatarFallback className="rounded-lg">
         <Bot className={cn(s.icon, iconClassName)} />
       </AvatarFallback>
     </Avatar>
+  );
+
+  return (
+    <HoverCard openDelay={300} closeDelay={100}>
+      <HoverCardTrigger asChild>
+        {avatarEl}
+      </HoverCardTrigger>
+      <HoverCardContent
+        side="right"
+        align="start"
+        className="w-auto p-1.5 rounded-xl"
+      >
+        <img
+          src={url}
+          alt={name ?? "Agent"}
+          className="rounded-lg w-48 h-48 object-cover"
+        />
+        {name && (
+          <p className="text-xs text-center text-muted-foreground mt-1.5 font-medium">{name}</p>
+        )}
+      </HoverCardContent>
+    </HoverCard>
   );
 }
