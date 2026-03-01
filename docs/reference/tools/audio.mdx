@@ -12,11 +12,12 @@ Maximum audio file size: **25 MB** (`MAX_AUDIO_SIZE`). Default timeout: **120 se
 
 **Providers:**
 - **Speech-to-text** — OpenAI Whisper (default), Deepgram Nova
-- **Text-to-speech** — OpenAI (default), Deepgram Aura, ElevenLabs
+- **Text-to-speech** — OpenAI (default), Deepgram Aura, ElevenLabs, **Edge** (free, no API key)
 
 **Credential resolution** (per provider, checked in order):
 1. Agent vault — e.g. service `"openai"` key `"key"`, service `"deepgram"` key `"key"`, service `"elevenlabs"` key `"key"`
 2. Environment variables — `OPENAI_API_KEY`, `DEEPGRAM_API_KEY`, or `ELEVENLABS_API_KEY`
+3. **Automatic fallback** — if the cloud provider fails (quota, auth, billing), `edge-tts` is tried automatically. Edge TTS uses Microsoft Edge's neural voices locally — free, no API key, ~400 voices in 60+ languages. Install: `pip install edge-tts`
 
 ---
 
@@ -56,7 +57,9 @@ Generate an audio file from text using a text-to-speech provider.
 |-----------|------|----------|-------------|
 | `text` | string | yes | Text to convert to speech |
 | `path` | string | yes | Destination file path for the audio output |
-| `provider` | enum: `openai` \| `deepgram` \| `elevenlabs` | no | TTS provider (default `openai`) |
+| `provider` | enum: `openai` \| `deepgram` \| `elevenlabs` \| `edge` | no | TTS provider (default `openai`). `edge` is free (no API key). Cloud providers auto-fallback to edge on failure |
+| `language` | string | no | ISO 639-1 language code (e.g. `it`, `en`, `es`). Used by edge to select the right voice |
+| `gender` | enum: `male` \| `female` | no | Voice gender preference. Used by edge to pick the right voice |
 | `model` | string | no | Model name (provider-specific defaults apply) |
 | `voice` | string | no | Voice selection (see below for options) |
 | `speed` | number | no | Playback speed, `0.25`–`4.0` (OpenAI only) |
@@ -71,9 +74,12 @@ Confirmation with the output file path, duration, and file size.
 - **OpenAI voices**: `alloy`, `echo`, `fable`, `onyx`, `nova`, `shimmer` (default `alloy`)
 - **Deepgram**: model-based voice selection (default `aura-2-en`)
 - **ElevenLabs voices**: voice ID string (default `Rachel`)
+- **Edge voices**: auto-selected from `language` + `gender` (e.g. `it` + `male` → `it-IT-DiegoNeural`). Or pass an explicit voice like `it-IT-ElsaNeural`
 - **OpenAI output formats**: mp3, wav, flac, opus, aac, pcm
 - **Deepgram output format**: mp3
 - **ElevenLabs output formats**: mp3, wav, flac
+- **Edge output format**: mp3
 - Output format is determined by the file extension of `path`
 - `speed` is only supported by OpenAI — it is ignored for other providers
 - `instructions` is only supported with the `gpt-4o-mini-tts` model
+- If the chosen cloud provider fails (quota exceeded, auth error, billing issue), **edge-tts is tried automatically** as fallback

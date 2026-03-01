@@ -129,9 +129,9 @@ Speech-to-text (STT) and text-to-speech (TTS) using multiple providers. Zero ven
 { "name": "podcast-agent", "allowedTools": ["read", "write", "edit", "bash", "glob", "grep", "ls", "audio_*"] }
 ```
 
-Tools: `audio_transcribe` (STT via OpenAI Whisper or Deepgram Nova), `audio_speak` (TTS via OpenAI, Deepgram Aura, or ElevenLabs).
+Tools: `audio_transcribe` (STT via OpenAI Whisper or Deepgram Nova), `audio_speak` (TTS via OpenAI, Deepgram Aura, ElevenLabs, or **Edge** — free, no API key).
 
-Credentials are resolved from vault first, then environment variables (`OPENAI_API_KEY`, `DEEPGRAM_API_KEY`, `ELEVENLABS_API_KEY`).
+Credentials are resolved from vault first, then environment variables (`OPENAI_API_KEY`, `DEEPGRAM_API_KEY`, `ELEVENLABS_API_KEY`). If a cloud provider fails (quota, auth, billing), **edge-tts is used automatically as fallback** — no configuration needed, just `pip install edge-tts`.
 
 <Card title="Audio tools reference" icon="arrow-right" href="/reference/tools/audio">
   Full parameter schemas and usage for speech-to-text and text-to-speech tools.

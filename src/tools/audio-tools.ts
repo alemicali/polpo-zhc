@@ -9,11 +9,17 @@
  *
  * Supported providers:
  *   STT: openai (Whisper), deepgram (Nova)
- *   TTS: openai (gpt-4o-mini-tts / tts-1), deepgram (Aura), elevenlabs
+ *   TTS: openai (gpt-4o-mini-tts / tts-1), deepgram (Aura), elevenlabs, edge (free, local)
+ *
+ * Edge TTS: Uses Microsoft Edge's neural TTS engine via the `edge-tts` CLI.
+ * Free, no API key, ~400 voices in 60+ languages. Auto-selects voice from
+ * language + gender params. Also used as automatic fallback when cloud providers fail.
+ * Install: `pip install edge-tts`
  *
  * Credential resolution order (same as email/image tools):
  *   1. Agent vault (per-agent credentials — e.g. service "openai" key "key")
  *   2. Environment variables (global fallback)
+ *   3. Edge TTS (automatic fallback — no credentials needed)
  *
  * Environment variables (fallback):
  *   OPENAI_API_KEY    — openai provider (STT + TTS)
@@ -21,8 +27,9 @@
  *   ELEVENLABS_API_KEY — elevenlabs provider (TTS)
  */
 
-import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, statSync } from "node:fs";
 import { resolve, dirname, extname } from "node:path";
+import { execFile } from "node:child_process";
 import { Type } from "@sinclair/typebox";
 import type { AgentTool, AgentToolResult } from "@mariozechner/pi-agent-core";
 
@@ -275,9 +282,15 @@ const AudioSpeakSchema = Type.Object({
     Type.Literal("openai"),
     Type.Literal("deepgram"),
     Type.Literal("elevenlabs"),
-  ], { description: "TTS provider (default: openai)" })),
+    Type.Literal("edge"),
+  ], { description: "TTS provider. 'openai' (default), 'deepgram', 'elevenlabs', or 'edge' (free, local Microsoft Edge TTS — no API key needed). If the chosen provider fails, edge-tts is tried as automatic fallback." })),
   model: Type.Optional(Type.String({ description: "Model name. OpenAI: 'tts-1' (default), 'tts-1-hd', 'gpt-4o-mini-tts'. Deepgram: 'aura-2-en' (default). ElevenLabs: 'eleven_multilingual_v2' (default)." })),
-  voice: Type.Optional(Type.String({ description: "Voice name/ID. OpenAI: alloy, echo, fable, onyx, nova, shimmer (default: alloy). ElevenLabs: voice ID." })),
+  voice: Type.Optional(Type.String({ description: "Voice name/ID. OpenAI: alloy, echo, fable, onyx, nova, shimmer (default: alloy). ElevenLabs: voice ID. Edge: full voice name like 'it-IT-DiegoNeural' (auto-selected from language+gender if omitted)." })),
+  language: Type.Optional(Type.String({ description: "ISO 639-1 language code (e.g. 'it', 'en', 'es'). Used by edge provider to select the right voice. Also useful for other providers with multilingual models." })),
+  gender: Type.Optional(Type.Union([
+    Type.Literal("male"),
+    Type.Literal("female"),
+  ], { description: "Voice gender preference. Used by edge provider to pick the right voice when no explicit voice is given. For other providers, choose the voice directly." })),
   speed: Type.Optional(Type.Number({ description: "Playback speed 0.25-4.0 (OpenAI only, default: 1.0)" })),
   instructions: Type.Optional(Type.String({ description: "Voice style instructions (OpenAI gpt-4o-mini-tts only, e.g. 'Speak in a cheerful tone')" })),
 });
@@ -288,7 +301,9 @@ function createSpeakTool(cwd: string, sandbox: string[], vault?: ResolvedVault):
     label: "Text to Speech",
     description: "Generate speech audio from text using text-to-speech AI. " +
       "Output format is inferred from file extension (mp3, wav, flac, opus, aac, pcm). " +
-      "Providers: openai (default), deepgram (Aura), elevenlabs. " +
+      "Providers: openai (default), deepgram (Aura), elevenlabs, edge (free, no API key — Microsoft Edge neural voices). " +
+      "If the chosen provider fails (quota, auth, billing), edge-tts is tried automatically as fallback. " +
+      "Use 'language' (ISO 639-1) and 'gender' params to help select the right voice, especially for edge provider. " +
       "Credentials resolved from: agent vault > OPENAI_API_KEY, DEEPGRAM_API_KEY, or ELEVENLABS_API_KEY env var.",
     parameters: AudioSpeakSchema,
     async execute(_id, params, signal) {
@@ -297,6 +312,19 @@ function createSpeakTool(cwd: string, sandbox: string[], vault?: ResolvedVault):
 
       const provider = params.provider ?? "openai";
 
+      // Direct edge-tts request — no fallback needed
+      if (provider === "edge") {
+        try {
+          return await speakEdgeTts(filePath, params, signal);
+        } catch (err: any) {
+          return {
+            content: [{ type: "text", text: `TTS error (edge): ${err.message}` }],
+            details: { provider: "edge", error: err.message },
+          };
+        }
+      }
+
+      // Cloud provider with edge-tts fallback
       try {
         if (provider === "openai") {
           return await speakOpenAI(filePath, params, vault, signal);
@@ -306,6 +334,24 @@ function createSpeakTool(cwd: string, sandbox: string[], vault?: ResolvedVault):
           return await speakElevenLabs(filePath, params, vault, signal);
         }
       } catch (err: any) {
+        // Automatic fallback to edge-tts if available
+        if (edgeTtsAvailable()) {
+          try {
+            const result = await speakEdgeTts(filePath, params, signal);
+            // Prepend fallback notice
+            const notice = `[Fallback] ${provider} failed (${err.message}), used edge-tts instead.\n`;
+            return {
+              content: [{ type: "text", text: notice + (result.content[0] as any).text }],
+              details: { ...result.details as Record<string, unknown>, fallbackFrom: provider, fallbackReason: err.message },
+            };
+          } catch (edgeErr: any) {
+            return {
+              content: [{ type: "text", text: `TTS error (${provider}): ${err.message}\nEdge-tts fallback also failed: ${edgeErr.message}` }],
+              details: { provider, error: err.message, edgeError: edgeErr.message },
+            };
+          }
+        }
+
         return {
           content: [{ type: "text", text: `TTS error (${provider}): ${err.message}` }],
           details: { provider, error: err.message },
@@ -489,6 +535,112 @@ async function speakElevenLabs(
       textLength: params.text.length,
     },
   };
+}
+
+// ─── Edge TTS (free, local CLI, automatic fallback) ───
+
+/**
+ * Default Edge TTS voices per language+gender.
+ * Format: `${lang}-${region}-${name}Neural`
+ * Each entry: [female, male]. First match wins.
+ */
+const EDGE_VOICES: Record<string, [female: string, male: string]> = {
+  "it": ["it-IT-ElsaNeural", "it-IT-DiegoNeural"],
+  "en": ["en-US-EmmaMultilingualNeural", "en-US-AndrewMultilingualNeural"],
+  "es": ["es-ES-ElviraNeural", "es-ES-AlvaroNeural"],
+  "fr": ["fr-FR-DeniseNeural", "fr-FR-HenriNeural"],
+  "de": ["de-DE-KatjaNeural", "de-DE-ConradNeural"],
+  "pt": ["pt-BR-FranciscaNeural", "pt-BR-AntonioNeural"],
+  "ja": ["ja-JP-NanamiNeural", "ja-JP-KeitaNeural"],
+  "zh": ["zh-CN-XiaoxiaoNeural", "zh-CN-YunxiNeural"],
+  "ko": ["ko-KR-SunHiNeural", "ko-KR-InJoonNeural"],
+  "ar": ["ar-SA-ZariyahNeural", "ar-SA-HamedNeural"],
+  "hi": ["hi-IN-SwaraNeural", "hi-IN-MadhurNeural"],
+  "ru": ["ru-RU-SvetlanaNeural", "ru-RU-DmitryNeural"],
+  "nl": ["nl-NL-ColetteNeural", "nl-NL-MaartenNeural"],
+  "pl": ["pl-PL-AgnieszkaNeural", "pl-PL-MarekNeural"],
+  "tr": ["tr-TR-EmelNeural", "tr-TR-AhmetNeural"],
+  "sv": ["sv-SE-SofieNeural", "sv-SE-MattiasNeural"],
+};
+
+/**
+ * Resolve the best Edge TTS voice for a given language and gender hint.
+ * Falls back to en-US if the language is unknown.
+ */
+function resolveEdgeVoice(voice?: string, language?: string, gender?: "male" | "female"): string {
+  // If the agent passed an explicit voice name like "it-IT-DiegoNeural", use it directly
+  if (voice && voice.includes("-") && voice.endsWith("Neural")) return voice;
+
+  const lang = (language ?? "en").toLowerCase().split("-")[0]; // "it-IT" → "it"
+  const pair = EDGE_VOICES[lang] ?? EDGE_VOICES["en"]!;
+  return gender === "male" ? pair[1] : pair[0]; // default female if no gender hint
+}
+
+/** Check if edge-tts CLI is available on the system. */
+function isEdgeTtsAvailable(): boolean {
+  try {
+    const { execFileSync } = require("node:child_process") as typeof import("node:child_process");
+    execFileSync("edge-tts", ["--version"], { stdio: "pipe", timeout: 5000 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Cache the availability check
+let _edgeTtsAvailable: boolean | undefined;
+function edgeTtsAvailable(): boolean {
+  if (_edgeTtsAvailable === undefined) _edgeTtsAvailable = isEdgeTtsAvailable();
+  return _edgeTtsAvailable;
+}
+
+async function speakEdgeTts(
+  filePath: string,
+  params: { text: string; voice?: string; language?: string; gender?: "male" | "female" },
+  signal?: AbortSignal,
+): Promise<ToolResult> {
+  if (!edgeTtsAvailable()) {
+    throw new Error("edge-tts CLI is not installed. Install it with: pip install edge-tts");
+  }
+
+  const voice = resolveEdgeVoice(params.voice, params.language, params.gender);
+  mkdirSync(dirname(filePath), { recursive: true });
+
+  // Determine rate from speed if present
+  const args = [
+    "--text", params.text,
+    "--voice", voice,
+    "--write-media", filePath,
+  ];
+
+  return new Promise<ToolResult>((resolvePromise, reject) => {
+    const child = execFile("edge-tts", args, { timeout: DEFAULT_TIMEOUT }, (err, _stdout, stderr) => {
+      if (err) {
+        reject(new Error(`edge-tts failed: ${err.message}${stderr ? ` — ${stderr}` : ""}`));
+        return;
+      }
+
+      let bytes = 0;
+      try {
+        bytes = statSync(filePath).size;
+      } catch { /* ignore */ }
+
+      resolvePromise({
+        content: [{ type: "text", text: `Speech audio saved: ${filePath} (${(bytes / 1024).toFixed(1)} KB, voice: ${voice}, provider: edge-tts)` }],
+        details: {
+          provider: "edge",
+          voice,
+          path: filePath,
+          bytes,
+          textLength: params.text.length,
+        },
+      });
+    });
+
+    if (signal) {
+      signal.addEventListener("abort", () => child.kill(), { once: true });
+    }
+  });
 }
 
 // ─── Factory ───

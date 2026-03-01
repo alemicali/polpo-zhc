@@ -22,7 +22,7 @@ function describeAgentCapabilities(agent: AgentConfig, skillPool?: SkillInfo[]):
   if (hasPattern("vault_")) caps.push("vault_get, vault_list (runtime credential access)");
   if (hasPattern("image_")) caps.push("image_generate (fal.ai FLUX), image_analyze (OpenAI/Anthropic vision)");
   if (hasPattern("video_")) caps.push("video_generate (fal.ai Wan 2.2 text-to-video)");
-  if (hasPattern("audio_")) caps.push("audio_transcribe (STT: OpenAI Whisper / Deepgram Nova), audio_speak (TTS: OpenAI / Deepgram / ElevenLabs)");
+  if (hasPattern("audio_")) caps.push("audio_transcribe (STT: OpenAI Whisper / Deepgram Nova), audio_speak (TTS: OpenAI / Deepgram / ElevenLabs / Edge — free fallback)");
   if (agent.skills?.length) {
     // Show skill names with descriptions when available from the pool
     const poolMap = skillPool ? new Map(skillPool.map(s => [s.name, s])) : undefined;
@@ -376,9 +376,10 @@ export function buildChatSystemPrompt(
     `    Include "vault_*" for vault tools (vault_get, vault_list — lets the agent read its own credentials at runtime).`,
     `    Include "image_*" for image tools (image_generate via fal.ai FLUX, image_analyze via OpenAI/Anthropic vision — requires FAL_KEY for generation).`,
     `    Include "video_*" for video generation (video_generate via fal.ai Wan 2.2 — requires FAL_KEY).`,
-    `    Include "audio_*" for audio tools (audio_transcribe for STT via OpenAI Whisper / Deepgram Nova, audio_speak for TTS via OpenAI / Deepgram / ElevenLabs).`,
-    `    When using audio_speak, pick a voice matching the agent's gender: OpenAI nova/shimmer (female), echo/fable/onyx (male), alloy (neutral); Deepgram via model name (aura-asteria-en female, aura-orion-en male); ElevenLabs via voice ID.`,
-    `    When using audio_transcribe, always pass the \`language\` param (ISO 639-1) — infer it from context (user locale, task description, agent timezone, or content language).`,
+    `    Include "audio_*" for audio tools (audio_transcribe for STT via OpenAI Whisper / Deepgram Nova, audio_speak for TTS via OpenAI / Deepgram / ElevenLabs / Edge).`,
+    `    audio_speak: always pass \`language\` and \`gender\` params. Edge provider is free (no API key) and auto-selected as fallback when cloud providers fail.`,
+    `    Voice selection: OpenAI nova/shimmer (female), echo/fable/onyx (male), alloy (neutral); Deepgram via model name; ElevenLabs via voice ID; Edge auto from language+gender.`,
+    `    audio_transcribe: always pass the \`language\` param (ISO 639-1) — infer from context (user locale, task description, agent timezone, or content language).`,
     `    HTTP tools (http_fetch, http_download) are always available as core tools.`,
     `    For git, file format, and dependency operations, use bash + skills instead.`,
     `  - **browserProfile**: Persistent profile name for cookies/login sessions across tasks (requires browser_* in allowedTools).`,
@@ -613,9 +614,11 @@ export function buildChatSystemPrompt(
     `- For image analysis/vision: "Use image_analyze" (requires image_* in allowedTools + vault or OPENAI_API_KEY/ANTHROPIC_API_KEY)`,
     `- For audio transcription: "Use audio_transcribe" (requires audio_* in allowedTools + vault or OPENAI_API_KEY/DEEPGRAM_API_KEY).`,
     `  Always pass the \`language\` parameter (ISO 639-1, e.g. "it", "en", "es") — infer it from context (user locale, task description, agent identity timezone, or the content being discussed).`,
-    `- For text-to-speech: "Use audio_speak" (requires audio_* in allowedTools + vault or OPENAI_API_KEY/DEEPGRAM_API_KEY/ELEVENLABS_API_KEY).`,
+    `- For text-to-speech: "Use audio_speak" (requires audio_* in allowedTools). Providers: openai, deepgram, elevenlabs (need credentials), edge (free, no API key — auto-fallback if cloud provider fails).`,
+    `  Always pass \`language\` (ISO 639-1) and \`gender\` ("male"/"female") params — infer from context (agent identity, task, user locale). These are used to auto-select the right voice, especially for edge provider.`,
     `  Choose a voice that matches the agent's gender/persona. OpenAI voices: nova, shimmer (female), echo, fable, onyx (male), alloy (neutral).`,
     `  Deepgram: voice is set via model name (e.g. aura-asteria-en = female, aura-orion-en = male). ElevenLabs: use the appropriate voice ID.`,
+    `  Edge: voice auto-selected from language+gender (e.g. it+male → it-IT-DiegoNeural). Can also pass explicit voice like "it-IT-ElsaNeural".`,
     `- For PDFs, spreadsheets, Word docs, git, deps: use bash + appropriate npm packages`,
     `  or give the agent a skill that teaches it how to do these operations.`,
     `- Always tell agents to call register_outcome for every deliverable they produce.`,
