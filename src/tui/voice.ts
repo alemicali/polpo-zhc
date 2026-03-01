@@ -20,7 +20,7 @@ import { spawn, execSync, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { join } from "node:path";
 import { mkdirSync, unlinkSync, readFileSync, statSync } from "node:fs";
-import { resolveApiKey } from "../llm/pi-client.js";
+import { resolveApiKey, resolveApiKeyAsync } from "../llm/pi-client.js";
 import { safeEnv } from "../tools/safe-env.js";
 
 // ─── Provider types ────────────────────────
@@ -134,20 +134,21 @@ export async function stopAndTranscribe(handle: RecordingHandle): Promise<string
 /**
  * Resolve which STT provider to use.
  * Priority: POLPO_STT_PROVIDER env → first available key (deepgram > groq > openai).
+ * Checks env vars, polpo.json overrides, AND OAuth profiles.
  */
-function resolveProvider(): SttProviderConfig {
+async function resolveProvider(): Promise<SttProviderConfig> {
   const explicit = process.env.POLPO_STT_PROVIDER as SttProvider | undefined;
   const modelOverride = process.env.POLPO_STT_MODEL;
 
   // Helper: build config for a provider if its API key is available
-  const tryProvider = (p: SttProvider): SttProviderConfig | undefined => {
+  const tryProvider = async (p: SttProvider): Promise<SttProviderConfig | undefined> => {
     let apiKey: string | undefined;
     if (p === "deepgram") {
-      apiKey = process.env.DEEPGRAM_API_KEY || resolveApiKey("deepgram");
+      apiKey = process.env.DEEPGRAM_API_KEY || await resolveApiKeyAsync("deepgram");
     } else if (p === "groq") {
-      apiKey = process.env.GROQ_API_KEY || resolveApiKey("groq");
+      apiKey = process.env.GROQ_API_KEY || await resolveApiKeyAsync("groq");
     } else {
-      apiKey = resolveApiKey("openai");
+      apiKey = await resolveApiKeyAsync("openai");
     }
     if (!apiKey) return undefined;
     const defaults = PROVIDER_DEFAULTS[p];
@@ -161,7 +162,7 @@ function resolveProvider(): SttProviderConfig {
 
   // If explicit provider requested, use it or fail
   if (explicit) {
-    const config = tryProvider(explicit);
+    const config = await tryProvider(explicit);
     if (!config) {
       const keyName = explicit === "deepgram" ? "DEEPGRAM_API_KEY"
         : explicit === "groq" ? "GROQ_API_KEY" : "OPENAI_API_KEY";
@@ -173,7 +174,7 @@ function resolveProvider(): SttProviderConfig {
   // Auto-detect: try providers in preference order
   const order: SttProvider[] = ["deepgram", "groq", "openai"];
   for (const p of order) {
-    const config = tryProvider(p);
+    const config = await tryProvider(p);
     if (config) return config;
   }
 
@@ -188,7 +189,7 @@ function resolveProvider(): SttProviderConfig {
  * Transcribe an audio file. Auto-selects the best available STT provider.
  */
 export async function transcribe(filePath: string): Promise<string> {
-  const config = resolveProvider();
+  const config = await resolveProvider();
   const language = process.env.POLPO_STT_LANG ?? "auto";
 
   // Check file exists and has content
