@@ -199,10 +199,11 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
   // Browser profile directory for agent-browser persistent state (cookies, auth, localStorage)
   const browserProfileDir = join(polpoDir, "browser-profiles", agentConfig.browserProfile || agentConfig.name);
 
-  // Check if browser or email tools are requested via allowedTools
-  const hasBrowserOrEmail = agentConfig.allowedTools?.some(t =>
-    t.toLowerCase().startsWith("browser_") || t.toLowerCase().startsWith("email_")
-  ) ?? false;
+  // Check if extended tools (browser, email, vault) are requested via allowedTools
+  const hasExtendedTools = agentConfig.allowedTools?.some(t => {
+    const lc = t.toLowerCase();
+    return lc.startsWith("browser_") || lc.startsWith("email_") || lc.startsWith("vault_");
+  }) ?? false;
 
   // Derive output directory from context (per-task output dir for deliverables)
   const outputDir = ctx?.outputDir;
@@ -362,7 +363,7 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
 
       // Resolve all tools (browser/email auto-detected from allowedTools) and MCP servers before prompting
       let allTools = codingTools;
-      if (hasBrowserOrEmail) {
+      if (hasExtendedTools) {
         allTools = await createAllTools({
           cwd,
           allowedTools: agentConfig.allowedTools,
@@ -434,7 +435,7 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
         await mcpManager.close().catch(() => {});
       }
       // Close agent-browser session (profile data auto-persisted by --profile)
-      if (hasBrowserOrEmail) {
+      if (hasExtendedTools) {
         const { cleanupAgentBrowserSession } = await import("../tools/browser-tools.js");
         await cleanupAgentBrowserSession(agentConfig.name).catch(() => {});
       }

@@ -38,6 +38,7 @@ function createMockVault(smtp?: SmtpCredentials): ResolvedVault {
     getSmtp: () => smtp,
     getImap: () => undefined,
     has: () => false,
+    list: () => [],
   };
 }
 

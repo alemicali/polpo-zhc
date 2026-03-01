@@ -67,6 +67,8 @@ export interface ResolvedVault {
   getImap(): ImapCredentials | undefined;
   /** Check if a service exists in the vault */
   has(service: string): boolean;
+  /** List all available services with their types and credential keys (values masked) */
+  list(): Array<{ service: string; type: string; keys: string[] }>;
 }
 
 /**
@@ -128,6 +130,14 @@ export function resolveAgentVault(vault?: Record<string, VaultEntry>): ResolvedV
 
     has(service: string) {
       return resolved.has(service);
+    },
+
+    list() {
+      return Array.from(resolved.entries()).map(([service, entry]) => ({
+        service,
+        type: entry.type,
+        keys: Object.keys(entry.creds),
+      }));
     },
   };
 }

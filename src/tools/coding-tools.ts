@@ -388,6 +388,7 @@ export function createCodingTools(cwd: string, allowedTools?: string[], allowedP
 import { createBrowserTools, ALL_BROWSER_TOOL_NAMES } from "./browser-tools.js";
 import { ALL_HTTP_TOOL_NAMES } from "./http-tools.js";
 import { createEmailTools, ALL_EMAIL_TOOL_NAMES } from "./email-tools.js";
+import { createVaultTools, ALL_VAULT_TOOL_NAMES } from "./vault-tools.js";
 import type { ResolvedVault } from "../vault/index.js";
 import { ALL_OUTCOME_TOOL_NAMES } from "./outcome-tools.js";
 
@@ -395,13 +396,15 @@ export type { BrowserToolName } from "./browser-tools.js";
 export type { HttpToolName } from "./http-tools.js";
 export type { EmailToolName } from "./email-tools.js";
 export type { OutcomeToolName } from "./outcome-tools.js";
+export type { VaultToolName } from "./vault-tools.js";
 
 /** All known tool names across all categories */
 export type ExtendedToolName = CodingToolName
   | import("./browser-tools.js").BrowserToolName
   | import("./http-tools.js").HttpToolName
   | import("./email-tools.js").EmailToolName
-  | import("./outcome-tools.js").OutcomeToolName;
+  | import("./outcome-tools.js").OutcomeToolName
+  | import("./vault-tools.js").VaultToolName;
 
 /** All available tool names for documentation/config validation */
 export const ALL_EXTENDED_TOOL_NAMES: string[] = [
@@ -410,6 +413,7 @@ export const ALL_EXTENDED_TOOL_NAMES: string[] = [
   ...ALL_HTTP_TOOL_NAMES,
   ...ALL_EMAIL_TOOL_NAMES,
   ...ALL_OUTCOME_TOOL_NAMES,
+  ...ALL_VAULT_TOOL_NAMES,
 ];
 
 export interface CreateAllToolsOptions {
@@ -469,6 +473,11 @@ export async function createAllTools(options: CreateAllToolsOptions): Promise<Ag
   // Email tools — activated when any email_* tool is in allowedTools
   if (categoryRequested(ALL_EMAIL_TOOL_NAMES)) {
     tools.push(...createEmailTools(cwd, allowedPaths, allowedTools, options.vault, options.emailAllowedDomains));
+  }
+
+  // Vault tools — activated when any vault_* tool is in allowedTools
+  if (categoryRequested(ALL_VAULT_TOOL_NAMES) && options.vault) {
+    tools.push(...createVaultTools(options.vault, allowedTools));
   }
 
   // HTTP and register_outcome are already included via createCodingTools() above — no need to add again
