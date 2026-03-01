@@ -226,6 +226,7 @@
               "reference/tools/pdf",
               "reference/tools/docx",
               "reference/tools/email",
+              "reference/tools/vault",
               "reference/tools/audio",
               "reference/tools/image"
             ]

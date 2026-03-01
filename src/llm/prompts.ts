@@ -19,6 +19,7 @@ function describeAgentCapabilities(agent: AgentConfig, skillPool?: SkillInfo[]):
   const hasPattern = (prefix: string) => allowed.some(t => t.toLowerCase().startsWith(prefix));
   if (hasPattern("browser_")) caps.push("browser_navigate/snapshot/click/fill/eval (18 browser tools via agent-browser)");
   if (hasPattern("email_")) caps.push("email_send, email_verify, email_list, email_read, email_search");
+  if (hasPattern("vault_")) caps.push("vault_get, vault_list (runtime credential access)");
   if (agent.skills?.length) {
     // Show skill names with descriptions when available from the pool
     const poolMap = skillPool ? new Map(skillPool.map(s => [s.name, s])) : undefined;
@@ -369,6 +370,7 @@ export function buildChatSystemPrompt(
     `  - **maxConcurrency**: Max concurrent tasks (default 1).`,
     `  - **allowedTools patterns**: Include "browser_*" in allowedTools for browser tools (navigate, click, screenshot — 18 tools via agent-browser).`,
     `    Include "email_*" for email tools (send, list, read, search — requires vault SMTP/IMAP credentials).`,
+    `    Include "vault_*" for vault tools (vault_get, vault_list — lets the agent read its own credentials at runtime).`,
     `    HTTP tools (http_fetch, http_download) are always available as core tools.`,
     `    For git, file format, dependency, audio, and image operations, use bash + skills instead.`,
     `  - **browserProfile**: Persistent profile name for cookies/login sessions across tasks (requires browser_* in allowedTools).`,
@@ -419,6 +421,17 @@ export function buildChatSystemPrompt(
     `  the system intercepts, the user fills in the secure form, values go straight to encrypted vault.`,
     `- Do NOT use placeholder syntax like \${ENV_VAR}. Collect actual values via the vault tool.`,
     `- Credentials are encrypted at rest with AES-256-GCM — the vault is safe for real values.`,
+    ``,
+    `**Agent-side vault access**: Agents can read their own vault credentials at runtime using`,
+    `vault_get and vault_list tools. These are activated by including "vault_*" in the agent's allowedTools.`,
+    `- vault_list: List available services in the agent's vault (names and types only, values masked).`,
+    `- vault_get: Retrieve actual credential values for a specific service.`,
+    `This is essential for skills/tasks that need API keys, tokens, or custom credentials beyond`,
+    `the built-in SMTP/IMAP flow (which is automatic via email tools). Example: a skill that calls`,
+    `the Stripe API needs the agent to call vault_get({ service: "stripe" }) to get the API key.`,
+    `When configuring an agent that runs skills requiring credentials, always:`,
+    `1. Use set_vault_entry to store the credentials in the agent's vault.`,
+    `2. Add "vault_*" to the agent's allowedTools so it can retrieve them at runtime.`,
     ``,
     `### Agent identity`,
     ``,
@@ -624,7 +637,7 @@ export function buildChatSystemPrompt(
     `**teams[].agents[]** — each agent has: name (required, globally unique), role, model (\`"provider:model"\` format),`,
     `systemPrompt, skills[], allowedPaths[], allowedTools[] (restrict tool names), maxTurns (default 200),`,
     `maxConcurrency, reasoning ("off"|"low"|"medium"|"high" — overrides global setting),`,
-    `and allowedTools wildcards: "browser_*", "email_*".`,
+    `and allowedTools wildcards: "browser_*", "email_*", "vault_*".`,
     `HTTP tools (http_fetch, http_download) are always available as core tools.`,
     `For git, file formats, dependencies, audio, and image operations, use bash + skills.`,
     `Browser option: browserProfile (persistent state name, requires browser_* in allowedTools).`,
@@ -633,7 +646,9 @@ export function buildChatSystemPrompt(
     ``,
     `**Agent vault** — stored in encrypted \`.polpo/vault.enc\` (AES-256-GCM), NOT on AgentConfig.`,
     `Each vault entry: { type: "smtp"|"imap"|"oauth"|"api_key"|"login"|"custom", label?: string, credentials: Record<string, string> }.`,
-    `At runtime, credentials are decrypted and passed to tools.`,
+    `At runtime, credentials are decrypted and passed to tools. SMTP/IMAP credentials are used`,
+    `automatically by email tools. For other credential types (api_key, oauth, custom), agents`,
+    `need "vault_*" in allowedTools to call vault_get/vault_list and retrieve them at runtime.`,
     `Use set_vault_entry/remove_vault_entry/list_vault tools to manage. Never stored in cleartext.`,
     ``,
     `**Agent identity** — \`agent.identity\`: { displayName, title, company, email, bio, timezone, tone, personality,`,

@@ -326,12 +326,12 @@ If `allowedTools` is not specified, all 9 core tools are available.
 
 ## Extended Tool Categories
 
-Beyond the 9 core tools, Polpo offers **2 optional tool categories** that can be enabled per-agent via the `allowedTools` array.
+Beyond the 9 core tools, Polpo offers **3 optional tool categories** that can be enabled per-agent via the `allowedTools` array.
 
 ```json
 {
   "name": "outreach-agent",
-  "allowedTools": ["read", "write", "edit", "bash", "glob", "grep", "ls", "browser_*", "email_*"]
+  "allowedTools": ["read", "write", "edit", "bash", "glob", "grep", "ls", "browser_*", "email_*", "vault_*"]
 }
 ```
 
@@ -339,6 +339,7 @@ Beyond the 9 core tools, Polpo offers **2 optional tool categories** that can be
 |----------|-------|---------------------------|-------------|
 | [Browser](/reference/tools/browser) | 18 | `"browser_*"` | Browser automation via `agent-browser` CLI |
 | [Email](/reference/tools/email) | 5 | `"email_*"` | Send emails via SMTP, read via IMAP |
+| [Vault](/reference/tools/vault) | 2 | `"vault_*"` | Read-only access to agent's own vault credentials |
 
 <Note>
 Git, multi-file, dependency management, Excel/CSV, PDF, Word/DOCX, audio, and image tools have been removed as built-in tool categories. Use the `bash` tool with appropriate CLI commands or install [skills](/features/skills) for these operations instead. HTTP tools (`http_fetch`, `http_download`) are now always-on core tools — no flag needed.

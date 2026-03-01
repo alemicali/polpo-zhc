@@ -100,6 +100,8 @@ function getToolMeta(name: string): ToolMeta {
   if (n.startsWith("docx_")) return { icon: FileText, color: "text-blue-400", bg: "bg-blue-500/10" };
   // Email
   if (n.startsWith("email_")) return { icon: Mail, color: "text-rose-400", bg: "bg-rose-500/10" };
+  // Vault
+  if (n.startsWith("vault_")) return { icon: KeyRound, color: "text-amber-400", bg: "bg-amber-500/10" };
   // Audio
   if (n.startsWith("audio_")) return { icon: Mic, color: "text-pink-400", bg: "bg-pink-500/10" };
   // Image
@@ -138,6 +140,7 @@ function getSkillMeta(name: string): { icon: LucideIcon; color: string } {
 const toolCategories: { prefix: string; label: string; tools: string }[] = [
   { prefix: "browser_", label: "Browser", tools: "browser_navigate, browser_click, browser_fill, browser_snapshot, browser_screenshot, ..." },
   { prefix: "email_", label: "Email", tools: "email_send, email_verify, email_list, email_read, email_search" },
+  { prefix: "vault_", label: "Vault", tools: "vault_get, vault_list" },
 ];
 
 const taskStatusConfig: Record<TaskStatus, { color: string; icon: React.ElementType; label: string }> = {

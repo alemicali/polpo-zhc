@@ -48,7 +48,7 @@ Each agent supports these fields:
 | `model` | `string` | — | `"provider:model"` format. See [Providers](/models/overview) |
 | `identity` | `AgentIdentity` | — | Persona: name, title, responsibilities, tone, personality. See [Identity](#agent-identity-and-persona) |
 | `reportsTo` | `string` | — | Org chart parent — automatic escalation on failure. See [Org chart](#org-chart-reportsto) |
-| `allowedTools` | `string[]` | all core tools | Restrict which tools the agent can use. Include `"browser_*"` for browser access, `"email_*"` for email tools |
+| `allowedTools` | `string[]` | all core tools | Restrict which tools the agent can use. Include `"browser_*"` for browser access, `"email_*"` for email tools, `"vault_*"` for vault credential access |
 | `allowedPaths` | `string[]` | project root | Filesystem sandbox — agent can only access these paths |
 | `systemPrompt` | `string` | — | Custom instructions prepended to the default prompt |
 | `skills` | `string[]` | — | Named skill files to load |

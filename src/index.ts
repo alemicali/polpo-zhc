@@ -62,6 +62,7 @@ export { createExcelTools, ALL_EXCEL_TOOL_NAMES } from "./tools/excel-tools.js";
 export { createPdfTools, ALL_PDF_TOOL_NAMES } from "./tools/pdf-tools.js";
 export { createDocxTools, ALL_DOCX_TOOL_NAMES } from "./tools/docx-tools.js";
 export { createEmailTools, ALL_EMAIL_TOOL_NAMES } from "./tools/email-tools.js";
+export { createVaultTools, ALL_VAULT_TOOL_NAMES } from "./tools/vault-tools.js";
 export { createAudioTools, ALL_AUDIO_TOOL_NAMES } from "./tools/audio-tools.js";
 export { createImageTools, ALL_IMAGE_TOOL_NAMES } from "./tools/image-tools.js";
 

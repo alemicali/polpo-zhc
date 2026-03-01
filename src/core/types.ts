@@ -236,7 +236,7 @@ export interface AgentConfig {
   role?: string;
   /** Model to use. Format: "provider:model" (e.g. "anthropic:claude-sonnet-4-5-20250929") or bare model ID (auto-inferred). */
   model?: string;
-  /** Allowed tools for the agent (e.g. ["read", "write", "edit", "bash", "glob", "grep", "browser_navigate", "git_status"]) */
+  /** Allowed tools for the agent (e.g. ["read", "write", "edit", "bash", "glob", "grep", "browser_*", "email_*", "vault_*"]) */
   allowedTools?: string[];
   /** Filesystem sandbox — directories the agent is allowed to access.
    *  Paths can be absolute or relative to workDir. When set, all file tool operations

@@ -193,7 +193,7 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
   const model = resolveModel(agentConfig.model);
 
   // Create all tools scoped to working directory with path sandboxing
-  // Browser/email tools are auto-loaded when their names appear in allowedTools (e.g. "browser_*", "email_*")
+  // Extended tools are auto-loaded when their names appear in allowedTools (e.g. "browser_*", "email_*", "vault_*")
   const polpoDir = ctx?.polpoDir ?? join(cwd, ".polpo");
 
   // Browser profile directory for agent-browser persistent state (cookies, auth, localStorage)

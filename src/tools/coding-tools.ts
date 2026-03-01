@@ -420,7 +420,7 @@ export interface CreateAllToolsOptions {
   /** Working directory for the agent */
   cwd: string;
   /** Tool name filter — only include tools with these names.
-   *  Browser/email tools are auto-loaded when their names appear here (e.g. "browser_*", "email_*").
+   *  Extended tools are auto-loaded when their names appear here (e.g. "browser_*", "email_*", "vault_*").
    *  If omitted, only core coding tools are included. */
   allowedTools?: string[];
   /** Filesystem sandbox paths */

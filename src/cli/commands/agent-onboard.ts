@@ -248,6 +248,14 @@ export function registerAgentOnboardCommands(program: Command): void {
         tools.push("email_*");
         updated.allowedTools = tools;
       }
+      // If vault entries were added, ensure vault_* is in allowedTools
+      if (Object.keys(vaultEntries).length > 0) {
+        const tools = (updated.allowedTools as string[] | undefined) ?? [];
+        if (!tools.some(t => t.toLowerCase().startsWith("vault_"))) {
+          tools.push("vault_*");
+          updated.allowedTools = tools;
+        }
+      }
 
       defaultTeam.agents[agentIdx] = updated as any;
       savePolpoConfig(polpoDir, config);
@@ -304,6 +312,7 @@ export function registerAgentOnboardCommands(program: Command): void {
         const aTools = a.allowedTools ?? [];
         if (aTools.some(t => t.toLowerCase().startsWith("email_"))) flags.push("email");
         if (aTools.some(t => t.toLowerCase().startsWith("browser_"))) flags.push("browser");
+        if (aTools.some(t => t.toLowerCase().startsWith("vault_"))) flags.push("vault");
         if (vaultCount > 0) flags.push(`vault:${vaultCount}`);
 
         console.log(`${prefix}${connector}${chalk.bold(display)}${titleStr ? chalk.dim(` — ${titleStr}`) : ""}${flags.length ? chalk.cyan(` [${flags.join(", ")}]`) : ""}`);
@@ -389,6 +398,7 @@ export function registerAgentOnboardCommands(program: Command): void {
       const showFlags: string[] = [];
       if (showTools.some(t => t.toLowerCase().startsWith("browser_"))) showFlags.push("browser");
       if (showTools.some(t => t.toLowerCase().startsWith("email_"))) showFlags.push("email");
+      if (showTools.some(t => t.toLowerCase().startsWith("vault_"))) showFlags.push("vault");
       if (showFlags.length > 0) {
         console.log(chalk.cyan(`\n  Tool categories: `) + showFlags.join(", "));
       }
