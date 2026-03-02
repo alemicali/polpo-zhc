@@ -526,7 +526,13 @@ export class Orchestrator extends TypedEmitter {
   reassessTask(taskId: string): Promise<void> { return this.taskMgr.reassessTask(taskId); }
   killTask(taskId: string): boolean { return this.taskMgr.killTask(taskId); }
   deleteTask(taskId: string): boolean { return this.registry.removeTask(taskId); }
-  abortGroup(group: string): number { return this.taskMgr.abortGroup(group); }
+  abortGroup(group: string): number {
+    const count = this.taskMgr.abortGroup(group);
+    // Clean up any schedule tied to this mission group
+    const mission = this.registry.getMissionByName?.(group);
+    if (mission) this.scheduler?.unregisterMission(mission.id);
+    return count;
+  }
   clearTasks(filter: (task: Task) => boolean): number { return this.taskMgr.clearTasks(filter); }
   forceFailTask(taskId: string): void { this.taskMgr.forceFailTask(taskId); }
 
@@ -595,7 +601,11 @@ export class Orchestrator extends TypedEmitter {
   getMissionByName(name: string): Mission | undefined { return this.missionExec.getMissionByName(name); }
   getAllMissions(): Mission[] { return this.missionExec.getAllMissions(); }
   updateMission(missionId: string, updates: Partial<Omit<Mission, "id">>): Mission { return this.missionExec.updateMission(missionId, updates); }
-  deleteMission(missionId: string): boolean { return this.missionExec.deleteMission(missionId); }
+  deleteMission(missionId: string): boolean {
+    const result = this.missionExec.deleteMission(missionId);
+    if (result) this.scheduler?.unregisterMission(missionId);
+    return result;
+  }
 
   // ─── Project Memory ──────────────────────────────────
 
@@ -765,11 +775,9 @@ export class Orchestrator extends TypedEmitter {
 
     this.emit("log", { level: "info", message: "[reload] Reloading configuration..." });
 
-    // 1. Dispose optional subsystems
+    // 1. Dispose optional subsystems (scheduler is handled separately to preserve state)
     this.telegramPoller?.stop();
     this.telegramPoller = undefined;
-    this.scheduler?.dispose();
-    this.scheduler = undefined;
     this.qualityController?.dispose();
     this.qualityController = undefined;
     this.slaMonitor?.dispose();
@@ -883,13 +891,18 @@ export class Orchestrator extends TypedEmitter {
     this.qualityController.init();
     this.missionExec.setQualityController(this.qualityController);
 
-    // Scheduler
-    const hasScheduledMissions = (this.config.settings.enableScheduler !== false) &&
-      (this.registry.getAllMissions?.() ?? []).some((p: Mission) => !!p.schedule);
-    if (this.config.settings.enableScheduler || hasScheduledMissions) {
-      this.scheduler = new Scheduler(ctx);
-      this.scheduler.setExecutor((missionId) => this.missionExec.executeMission(missionId));
+    // Scheduler — re-init without losing existing schedule state.
+    // If scheduler was already running, just refresh its mission registrations.
+    // If not, create a new one.
+    if (this.config.settings.enableScheduler !== false) {
+      if (!this.scheduler) {
+        this.scheduler = new Scheduler(ctx);
+        this.scheduler.setExecutor((missionId) => this.missionExec.executeMission(missionId));
+      }
       this.scheduler.init();
+    } else {
+      this.scheduler?.dispose();
+      this.scheduler = undefined;
     }
 
     this.emit("log", { level: "info", message: "[reload] Configuration reloaded successfully" });
@@ -1048,6 +1061,11 @@ export class Orchestrator extends TypedEmitter {
    * Single tick of the supervisor loop. Returns true when all work is done.
    */
   tick(): boolean {
+    // Scheduler checks FIRST — must run before early-return guards because
+    // scheduled/recurring missions have zero tasks until triggered, and the
+    // scheduler is what creates them via executeMission.
+    this.scheduler?.check();
+
     const tasks = this.registry.getAllTasks();
     if (tasks.length === 0) return !this.interactive;
 
@@ -1076,9 +1094,6 @@ export class Orchestrator extends TypedEmitter {
 
     // 2b. SLA deadline checks
     this.slaMonitor?.check();
-
-    // 2c. Scheduler checks (trigger due missions)
-    this.scheduler?.check();
 
     // 3. Spawn agents for ready tasks (skip tasks from cancelled/completed/paused missions)
     const ready = pending.filter(task => {

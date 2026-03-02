@@ -12,7 +12,7 @@ import {
   Workflow,
   Settings2,
   MoreHorizontal,
-  CalendarClock,
+
 } from "lucide-react";
 import { usePolpo } from "@lumea-labs/polpo-react";
 import { cn } from "@/lib/utils";
@@ -32,7 +32,6 @@ const primaryNav = [
 ];
 
 const secondaryNav = [
-  { to: "/schedules", icon: CalendarClock, label: "Schedules" },
   { to: "/memory", icon: Brain, label: "Memory" },
   { to: "/notifications", icon: Bell, label: "Notifications" },
   { to: "/approvals", icon: ShieldCheck, label: "Approvals" },

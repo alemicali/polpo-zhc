@@ -73,17 +73,21 @@ export const CreateMissionSchema = z.object({
   prompt: z.string().optional(),
   name: z.string().optional(),
   status: z
-    .enum(["draft", "active", "completed", "failed", "cancelled"])
+    .enum(["draft", "scheduled", "recurring", "active", "paused", "completed", "failed", "cancelled"])
     .optional(),
+  /** End date for recurring schedules (ISO timestamp). */
+  endDate: z.string().datetime().optional(),
   notifications: ScopedNotificationRulesSchema.optional(),
 });
 
 export const UpdateMissionSchema = z.object({
   data: z.string().min(1).optional(),
   status: z
-    .enum(["draft", "active", "completed", "failed", "cancelled"])
+    .enum(["draft", "scheduled", "recurring", "active", "paused", "completed", "failed", "cancelled"])
     .optional(),
   name: z.string().optional(),
+  /** End date for recurring schedules (ISO timestamp). */
+  endDate: z.string().datetime().nullable().optional(),
 });
 
 // ── Agent schemas ─────────────────────────────────────────────────────

@@ -236,7 +236,8 @@ export interface AgentConfig {
   role?: string;
   /** Model to use. Format: "provider:model" (e.g. "anthropic:claude-sonnet-4-5-20250929") or bare model ID (auto-inferred). */
   model?: string;
-  /** Allowed tools for the agent (e.g. ["read", "write", "edit", "bash", "glob", "grep", "browser_*", "email_*", "vault_*", "image_*", "video_*", "audio_*"]) */
+  /** Allowed tools for the agent (e.g. ["read", "write", "edit", "bash", "glob", "grep", "browser_*", "email_*", "image_*", "video_*", "audio_*", "excel_*", "pdf_*", "docx_*"]).
+   *  Core tools (always available): read, write, edit, bash, glob, grep, ls, http_fetch, http_download, register_outcome, vault_get, vault_list. */
   allowedTools?: string[];
   /** Filesystem sandbox — directories the agent is allowed to access.
    *  Paths can be absolute or relative to workDir. When set, all file tool operations
@@ -269,11 +270,11 @@ export interface AgentConfig {
   missionGroup?: string;
 
   // ── Tool activation ──
-  // All tool categories are activated via allowedTools (e.g. ["browser_*", "email_*"]).
+  // Core tools (always available): read, write, edit, bash, glob, grep, ls, http_fetch, http_download, register_outcome, vault_get, vault_list.
+  // Extended tool categories are activated via allowedTools (e.g. ["browser_*", "email_*"]).
   // No enable flags needed — if a tool name appears in allowedTools, it's loaded.
-  // HTTP tools (http_fetch, http_download) are always available as core tools.
-  // Git, multifile, deps, excel, pdf, docx, audio, and image operations should be
-  // done via bash + skills instead of dedicated tools.
+  // Available extension categories: browser_*, email_*, image_*, video_*, audio_*, excel_*, pdf_*, docx_*.
+  // Git, multifile, and dependency operations should be done via bash + skills instead of dedicated tools.
 
   /** Browser profile name for persistent context (cookies, auth, localStorage).
    *  Defaults to agent name. Used with agent-browser's --profile flag.
@@ -421,7 +422,7 @@ export interface AskUserRequest {
 
 // === Mission ===
 
-export type MissionStatus = "draft" | "active" | "paused" | "completed" | "failed" | "cancelled";
+export type MissionStatus = "draft" | "scheduled" | "recurring" | "active" | "paused" | "completed" | "failed" | "cancelled";
 
 export interface Mission {
   id: string;
@@ -433,8 +434,8 @@ export interface Mission {
   deadline?: string;
   /** Cron expression or ISO timestamp for scheduled execution. */
   schedule?: string;
-  /** If true, re-execute on every schedule trigger (recurring). Default: false (one-shot). */
-  recurring?: boolean;
+  /** End date for recurring schedules (ISO timestamp). After this date the schedule stops firing and the mission transitions to completed. */
+  endDate?: string;
   /** Minimum average score for the mission to be considered successful. */
   qualityThreshold?: number;
   /** Scoped notification rules — override or extend global rules for tasks in this mission. */
@@ -1089,7 +1090,7 @@ export interface QualityMetrics {
   updatedAt: string;
 }
 
-/** Scheduled mission entry. */
+/** Scheduled mission entry — runtime artifact derived from Mission fields. */
 export interface ScheduleEntry {
   /** Unique schedule ID. */
   id: string;
@@ -1097,7 +1098,7 @@ export interface ScheduleEntry {
   missionId: string;
   /** Cron expression (e.g. "0 2 * * *") or ISO timestamp for one-shot. */
   expression: string;
-  /** Whether this schedule recurs. */
+  /** Whether this schedule recurs (derived from mission status === "recurring"). */
   recurring: boolean;
   /** Whether this schedule is active. */
   enabled: boolean;

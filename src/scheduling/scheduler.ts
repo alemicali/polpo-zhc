@@ -5,16 +5,15 @@ import { isCronExpression, nextCronOccurrence } from "./cron.js";
 /**
  * Scheduler — tick-driven scheduling engine for missions.
  *
- * Missions can define:
- *  - `schedule`: a cron expression ("0 2 * * *") or ISO timestamp for one-shot
- *  - `recurring`: if true, re-execute on every cron tick (default: false = one-shot)
+ * Missions use dedicated statuses for scheduling:
+ *  - `scheduled`: one-shot — waiting for the trigger time, then transitions to
+ *     active. After completion the mission stays completed (schedule disabled).
+ *     On failure it returns to `scheduled` for automatic retry.
+ *  - `recurring`: recurring — fires on every cron tick, transitions to active,
+ *     then returns to `recurring` after completion or failure.
  *
- * The scheduler is checked on every orchestrator tick. It:
- *  1. Loads all missions with schedule definitions
- *  2. Computes next run times from cron expressions
- *  3. Triggers mission execution when the time arrives
- *  4. For recurring missions, resets after completion
- *  5. For one-shot missions, disables after first execution
+ * The `mission.schedule` field holds the cron expression or ISO timestamp.
+ * The mission status itself encodes whether it's one-shot or recurring.
  *
  * Schedule entries are kept in-memory — rebuilt on init from mission definitions.
  */
@@ -35,11 +34,15 @@ export class Scheduler {
 
   /**
    * Initialize: scan all missions for schedule definitions and build the schedule registry.
+   * Registers missions that are schedulable:
+   *  - scheduled: one-shot waiting for trigger
+   *  - recurring: waiting for next scheduled run (any non-active state)
    */
   init(): void {
     const missions = this.ctx.registry.getAllMissions?.() ?? [];
     for (const mission of missions) {
-      if (mission.schedule && mission.status === "draft") {
+      if (!mission.schedule) continue;
+      if (mission.status === "scheduled" || mission.status === "recurring") {
         this.registerMission(mission);
       }
     }
@@ -59,6 +62,7 @@ export class Scheduler {
   registerMission(mission: Mission): ScheduleEntry | null {
     if (!mission.schedule) return null;
 
+    const isRecurring = mission.status === "recurring";
     const isCron = isCronExpression(mission.schedule);
     const now = new Date();
 
@@ -73,7 +77,7 @@ export class Scheduler {
         nextRunAt = scheduled.toISOString();
       }
       // If the timestamp is in the past and mission is not recurring, skip
-      else if (!mission.recurring) {
+      else if (!isRecurring) {
         return null;
       }
     }
@@ -82,7 +86,7 @@ export class Scheduler {
       id: `sched-${mission.id}`,
       missionId: mission.id,
       expression: mission.schedule,
-      recurring: mission.recurring ?? false,
+      recurring: isRecurring,
       enabled: true,
       nextRunAt,
       createdAt: new Date().toISOString(),
@@ -138,10 +142,30 @@ export class Scheduler {
       return;
     }
 
-    // Only trigger draft or completed (for recurring) missions
-    if (mission.status !== "draft" && mission.status !== "completed") {
-      // Mission is active/failed/cancelled — skip this tick, will retry next
+    // Triggerable states: only `scheduled` and `recurring`
+    // Everything else (active, paused, draft, completed, failed, cancelled) — skip
+    if (mission.status !== "scheduled" && mission.status !== "recurring") {
       return;
+    }
+
+    // Check endDate — if past, disable schedule and complete the mission
+    if (mission.endDate) {
+      const endTime = new Date(mission.endDate).getTime();
+      if (Date.now() >= endTime) {
+        entry.enabled = false;
+        entry.nextRunAt = undefined;
+        this.ctx.registry.updateMission?.(entry.missionId, { status: "completed" });
+        this.ctx.emitter.emit("schedule:expired", {
+          scheduleId: schedId,
+          missionId: entry.missionId,
+          endDate: mission.endDate,
+        });
+        this.ctx.emitter.emit("log", {
+          level: "info",
+          message: `[Scheduler] Mission ${entry.missionId} schedule expired (endDate: ${mission.endDate}). Transitioned to completed.`,
+        });
+        return;
+      }
     }
 
     // Run before hook — allows cancellation
@@ -162,20 +186,25 @@ export class Scheduler {
     });
 
     // Execute the mission
+    // executeMission now accepts scheduled/recurring status directly
+    let executionFailed = false;
     try {
       if (this.executeMissionFn) {
-        // For recurring missions on completed state, reset to draft first
-        if (mission.status === "completed") {
-          this.ctx.registry.updateMission?.(mission.id, { status: "draft" });
-        }
         this.executeMissionFn(entry.missionId);
       }
     } catch (err) {
+      executionFailed = true;
       const msg = err instanceof Error ? err.message : String(err);
       this.ctx.emitter.emit("log", {
         level: "error",
         message: `[Scheduler] Failed to execute mission ${entry.missionId}: ${msg}`,
       });
+    }
+
+    // If execution failed, don't update schedule timing for one-shot —
+    // it should be retried on the next check, not permanently disabled
+    if (executionFailed && !entry.recurring) {
+      return;
     }
 
     // Update schedule entry

@@ -69,10 +69,11 @@ function createMockCtx(store?: MissionAwareStore): OrchestratorContext {
     runStore: new InMemoryRunStore(),
     memoryStore: { exists: () => false, get: () => "", save: () => {}, append: () => {} },
     logStore: { startSession: () => "s", getSessionId: () => "s", append: () => {}, getSessionEntries: () => [], listSessions: () => [], prune: () => 0, close: () => {} },
-    sessionStore: { create: () => "s1", addMessage: () => ({ id: "m1", role: "user" as const, content: "", ts: "" }), getMessages: () => [], getRecentMessages: () => [], listSessions: () => [], getSession: () => undefined, getLatestSession: () => undefined, deleteSession: () => false, prune: () => 0, close: () => {} },
+    sessionStore: { create: () => "s1", addMessage: () => ({ id: "m1", role: "user" as const, content: "", ts: "" }), updateMessage: () => false, getMessages: () => [], getRecentMessages: () => [], listSessions: () => [], getSession: () => undefined, getLatestSession: () => undefined, deleteSession: () => false, prune: () => 0, close: () => {} },
     hooks: new HookRegistry(),
     config: createMinimalConfig(),
     workDir: "/tmp/test",
+    agentWorkDir: "/tmp/test",
     polpoDir: "/tmp/test/.polpo",
     assessFn: vi.fn(),
   };
@@ -210,11 +211,11 @@ describe("Scheduler", () => {
     scheduler.dispose();
   });
 
-  it("registers a mission with a cron schedule", () => {
+  it("registers a scheduled mission with a cron schedule", () => {
     const mission = store.saveMission({
       name: "cron-mission",
       data: JSON.stringify({ tasks: [{ title: "A", description: "A" }] }),
-      status: "draft",
+      status: "scheduled",
     });
     Object.assign(mission, { schedule: "0 2 * * *" });
 
@@ -224,12 +225,26 @@ describe("Scheduler", () => {
     expect(entry!.nextRunAt).toBeDefined();
   });
 
+  it("registers a recurring mission with a cron schedule", () => {
+    const mission = store.saveMission({
+      name: "recurring-mission",
+      data: JSON.stringify({ tasks: [{ title: "A", description: "A" }] }),
+      status: "recurring",
+    });
+    Object.assign(mission, { schedule: "0 2 * * *" });
+
+    const entry = scheduler.registerMission(mission);
+    expect(entry).not.toBeNull();
+    expect(entry!.recurring).toBe(true);
+    expect(entry!.nextRunAt).toBeDefined();
+  });
+
   it("registers a mission with an ISO timestamp schedule", () => {
     const futureDate = new Date(Date.now() + 60_000).toISOString();
     const mission = store.saveMission({
       name: "oneshot-mission",
       data: JSON.stringify({ tasks: [{ title: "A", description: "A" }] }),
-      status: "draft",
+      status: "scheduled",
     });
     Object.assign(mission, { schedule: futureDate });
 
@@ -243,7 +258,7 @@ describe("Scheduler", () => {
     const mission = store.saveMission({
       name: "past-mission",
       data: JSON.stringify({ tasks: [{ title: "A", description: "A" }] }),
-      status: "draft",
+      status: "scheduled",
     });
     Object.assign(mission, { schedule: pastDate });
 
@@ -255,7 +270,7 @@ describe("Scheduler", () => {
     const mission = store.saveMission({
       name: "due-mission",
       data: JSON.stringify({ tasks: [{ title: "A", description: "A" }] }),
-      status: "draft",
+      status: "scheduled",
     });
 
     // Set nextRunAt to the past
@@ -276,7 +291,7 @@ describe("Scheduler", () => {
     const mission = store.saveMission({
       name: "oneshot",
       data: JSON.stringify({ tasks: [{ title: "A", description: "A" }] }),
-      status: "draft",
+      status: "scheduled",
     });
 
     const futureDate = new Date(Date.now() + 60_000).toISOString();
@@ -297,13 +312,12 @@ describe("Scheduler", () => {
     const mission = store.saveMission({
       name: "recurring",
       data: JSON.stringify({ tasks: [{ title: "A", description: "A" }] }),
-      status: "draft",
+      status: "recurring",
     });
 
     const entry = scheduler.registerMission({
       ...mission,
       schedule: "0 2 * * *",
-      recurring: true,
     } as Mission);
     expect(entry).not.toBeNull();
 
@@ -322,7 +336,7 @@ describe("Scheduler", () => {
     const mission = store.saveMission({
       name: "event-mission",
       data: JSON.stringify({ tasks: [{ title: "A", description: "A" }] }),
-      status: "draft",
+      status: "scheduled",
     });
 
     const entry = scheduler.registerMission({
@@ -341,7 +355,7 @@ describe("Scheduler", () => {
     }));
   });
 
-  it("skips missions that are not in draft/completed state", () => {
+  it("skips missions that are not in scheduled/recurring state", () => {
     const mission = store.saveMission({
       name: "active-mission",
       data: JSON.stringify({ tasks: [{ title: "A", description: "A" }] }),
@@ -371,7 +385,7 @@ describe("Scheduler", () => {
     const mission = store.saveMission({
       name: "blocked-mission",
       data: JSON.stringify({ tasks: [{ title: "A", description: "A" }] }),
-      status: "draft",
+      status: "scheduled",
     });
 
     const entry = scheduler.registerMission({
@@ -389,7 +403,7 @@ describe("Scheduler", () => {
     const mission = store.saveMission({
       name: "remove-mission",
       data: JSON.stringify({ tasks: [{ title: "A", description: "A" }] }),
-      status: "draft",
+      status: "scheduled",
     });
 
     scheduler.registerMission({ ...mission, schedule: "0 0 * * *" } as Mission);
@@ -400,8 +414,8 @@ describe("Scheduler", () => {
   });
 
   it("getActiveSchedules only returns enabled schedules", () => {
-    const mission1 = store.saveMission({ name: "m1", data: "{}", status: "draft" });
-    const mission2 = store.saveMission({ name: "m2", data: "{}", status: "draft" });
+    const mission1 = store.saveMission({ name: "m1", data: "{}", status: "scheduled" });
+    const mission2 = store.saveMission({ name: "m2", data: "{}", status: "scheduled" });
 
     scheduler.registerMission({ ...mission1, schedule: "0 0 * * *" } as Mission);
     const entry2 = scheduler.registerMission({ ...mission2, schedule: "0 0 * * *" } as Mission);
@@ -410,9 +424,22 @@ describe("Scheduler", () => {
     expect(scheduler.getActiveSchedules().length).toBe(1);
   });
 
-  it("init scans existing missions for schedules", () => {
+  it("init scans existing missions with scheduled/recurring status", () => {
     const mission = store.saveMission({
       name: "pre-scheduled",
+      data: JSON.stringify({ tasks: [{ title: "A", description: "A" }] }),
+      status: "scheduled",
+    });
+    Object.assign(mission, { schedule: "0 3 * * *" });
+
+    scheduler.init();
+
+    expect(scheduler.getAllSchedules().length).toBe(1);
+  });
+
+  it("init skips draft missions even with schedule field", () => {
+    const mission = store.saveMission({
+      name: "draft-with-schedule",
       data: JSON.stringify({ tasks: [{ title: "A", description: "A" }] }),
       status: "draft",
     });
@@ -420,6 +447,58 @@ describe("Scheduler", () => {
 
     scheduler.init();
 
+    expect(scheduler.getAllSchedules().length).toBe(0);
+  });
+
+  it("init registers recurring missions", () => {
+    const mission = store.saveMission({
+      name: "recurring-init",
+      data: JSON.stringify({ tasks: [{ title: "A", description: "A" }] }),
+      status: "recurring",
+    });
+    Object.assign(mission, { schedule: "0 2 * * *" });
+
+    scheduler.init();
+
     expect(scheduler.getAllSchedules().length).toBe(1);
+    const entry = scheduler.getAllSchedules()[0];
+    expect(entry.recurring).toBe(true);
+  });
+
+  it("respects endDate — expires schedule when endDate is in the past", () => {
+    const mission = store.saveMission({
+      name: "expiring-mission",
+      data: JSON.stringify({ tasks: [{ title: "A", description: "A" }] }),
+      status: "recurring",
+    });
+    // endDate is already past
+    Object.assign(mission, {
+      schedule: "0 2 * * *",
+      endDate: new Date(Date.now() - 60_000).toISOString(),
+    });
+
+    const entry = scheduler.registerMission(mission);
+    expect(entry).not.toBeNull();
+
+    // Force due
+    entry!.nextRunAt = new Date(Date.now() - 1000).toISOString();
+
+    const emitSpy = vi.spyOn(ctx.emitter, "emit");
+    scheduler.check();
+
+    // Should NOT have executed the mission
+    expect(executeMissionFn).not.toHaveBeenCalled();
+
+    // Should have disabled the schedule
+    expect(entry!.enabled).toBe(false);
+
+    // Should have emitted schedule:expired
+    expect(emitSpy).toHaveBeenCalledWith("schedule:expired", expect.objectContaining({
+      missionId: mission.id,
+    }));
+
+    // Should have transitioned mission to completed
+    const updated = store.getMission(mission.id);
+    expect(updated!.status).toBe("completed");
   });
 });

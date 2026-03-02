@@ -23,7 +23,10 @@ A **mission** is a group of related tasks that Polpo executes together. Missions
 | Status | Description |
 |--------|-------------|
 | `draft` | Mission created but not yet executed |
+| `scheduled` | One-shot scheduled mission waiting for trigger time |
+| `recurring` | Recurring scheduled mission waiting for next cron tick |
 | `active` | Tasks are being processed |
+| `paused` | Mission paused at a checkpoint, waiting for human review |
 | `completed` | All tasks finished successfully |
 | `failed` | One or more tasks failed after exhausting retries |
 | `cancelled` | Mission was manually aborted |
@@ -198,28 +201,35 @@ Tasks after a quality gate won't start until all gate tasks are `done` and their
 
 ## Scheduling
 
-Missions can be scheduled using cron expressions:
+Missions can be scheduled using cron expressions. Scheduled missions use dedicated statuses
+(`scheduled` for one-shot, `recurring` for repeating) instead of remaining in `draft`:
 
-```json
-{
-  "schedule": "0 2 * * *",
-  "recurring": true,
-  "tasks": [
-    {
-      "title": "Run security audit",
-      "assignTo": "security-dev",
-      "description": "Scan codebase for vulnerabilities and generate report"
-    }
-  ]
-}
+```
+One-shot:   draft → scheduled → active → completed (success) / scheduled (failure, auto-retry)
+Recurring:  draft → recurring  → active → recurring (always returns for next tick)
+```
+
+Use the `create_schedule` orchestrator tool to schedule a mission:
+
+```bash
+# One-shot: runs once at 2 AM
+create_schedule(missionId, "0 2 * * *")
+
+# Recurring: runs every day at 2 AM
+create_schedule(missionId, "0 2 * * *", recurring=true)
 ```
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `schedule` | string | Cron expression (e.g., `"0 2 * * *"` for daily at 2 AM) |
-| `recurring` | boolean | If `true`, the mission re-executes on each trigger. If `false` (default), it runs once at the next scheduled time. |
+| `schedule` | string | Cron expression (e.g., `"0 2 * * *"` for daily at 2 AM) or ISO timestamp for one-shot |
+| `status` | `"scheduled"` or `"recurring"` | Set automatically by `create_schedule` — determines one-shot vs recurring behavior |
 
-Scheduling requires `"enableScheduler": true` in the top-level config. The `schedule:trigger` hook fires when a scheduled mission is triggered.
+<Note>
+The mission status itself encodes whether it's one-shot or recurring. There is no separate `recurring` boolean field.
+A recurring mission never reaches `completed` or `failed` — it always returns to `recurring` after each execution cycle.
+</Note>
+
+Scheduling requires `"enableScheduler": true` in the top-level config (enabled by default when any mission has a schedule). The `schedule:trigger` hook fires when a scheduled mission is triggered.
 
 ## Execution
 

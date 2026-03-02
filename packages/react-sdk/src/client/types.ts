@@ -304,7 +304,7 @@ export interface AssessmentResult {
 
 // === Mission ===
 
-export type MissionStatus = "draft" | "active" | "paused" | "completed" | "failed" | "cancelled";
+export type MissionStatus = "draft" | "scheduled" | "recurring" | "active" | "paused" | "completed" | "failed" | "cancelled";
 
 export interface Mission {
   id: string;
@@ -316,14 +316,49 @@ export interface Mission {
   deadline?: string;
   /** Cron expression or ISO timestamp for scheduled execution. */
   schedule?: string;
-  /** Re-execute on every schedule trigger. Default: false (one-shot). */
-  recurring?: boolean;
+  /** End date for recurring schedules (ISO timestamp). After this date the schedule stops. */
+  endDate?: string;
   /** Minimum average score for the mission to pass. */
   qualityThreshold?: number;
   /** Mission-level scoped notification rules. */
   notifications?: ScopedNotificationRules;
   createdAt: string;
   updatedAt: string;
+}
+
+// === Mission Document Types (parsed from Mission.data JSON) ===
+
+/** Checkpoint defined within a mission — planned stopping point for human review.
+ *  Pauses the mission when afterTasks complete; blocked tasks wait until resumed. */
+export interface MissionCheckpoint {
+  /** Checkpoint name (unique within the mission, used in events and resume calls). */
+  name: string;
+  /** Task titles that must all complete before this checkpoint triggers. */
+  afterTasks: string[];
+  /** Task titles that are blocked until the checkpoint is resumed. */
+  blocksTasks: string[];
+  /** Optional message shown when the checkpoint activates. */
+  message?: string;
+  /** Notification channels to alert when the checkpoint is reached. */
+  notifyChannels?: string[];
+}
+
+/** Quality gate defined within a mission — automatic score-based blocking between task phases. */
+export interface MissionQualityGate {
+  /** Gate name (unique within the mission). */
+  name: string;
+  /** Task titles whose assessment scores are evaluated. */
+  afterTasks: string[];
+  /** Task titles blocked until the gate passes. */
+  blocksTasks: string[];
+  /** Minimum average score (1-5) of afterTasks required to pass. */
+  minScore?: number;
+  /** If true, all afterTasks must be "done" (not "failed") to pass. */
+  requireAllPassed?: boolean;
+  /** Custom condition expression. */
+  condition?: string;
+  /** Notification channels for pass/fail events. */
+  notifyChannels?: string[];
 }
 
 export interface MissionReport {
@@ -793,6 +828,10 @@ export interface SkillInfo {
   source: "project" | "global" | "polpo" | "claude" | "home";
   /** Absolute path to the skill directory. */
   path: string;
+  /** Freeform tags for search and filtering (from skills-index.json). */
+  tags?: string[];
+  /** Macro-category for grouping (from skills-index.json). */
+  category?: string;
 }
 
 /** Skill with full content loaded (returned by GET /skills/:name/content). */
@@ -806,6 +845,17 @@ export interface SkillWithAssignment extends SkillInfo {
   /** Agent names that have this skill assigned. */
   assignedTo: string[];
 }
+
+/** A single entry in the skills index file (.polpo/skills-index.json). */
+export interface SkillIndexEntry {
+  /** Freeform tags for search and filtering. */
+  tags?: string[];
+  /** Macro-category for grouping. */
+  category?: string;
+}
+
+/** The full skills index: maps skill names to their index metadata. */
+export type SkillIndex = Record<string, SkillIndexEntry>;
 
 // === Chat Session types ===
 

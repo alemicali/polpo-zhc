@@ -1,4 +1,7 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { MissionExecutor } from "../core/mission-executor.js";
 import { TaskManager } from "../core/task-manager.js";
 import { AgentManager } from "../core/agent-manager.js";
@@ -90,12 +93,18 @@ describe("Checkpoints", () => {
   let missionExec: MissionExecutor;
   let taskMgr: TaskManager;
   let agentMgr: AgentManager;
+  let tmpDir: string;
 
   beforeEach(() => {
-    ctx = createMockCtx();
+    tmpDir = mkdtempSync(join(tmpdir(), "polpo-test-cp-"));
+    ctx = createMockCtx({ polpoDir: tmpDir });
     taskMgr = new TaskManager(ctx);
     agentMgr = new AgentManager(ctx);
     missionExec = new MissionExecutor(ctx, taskMgr, agentMgr);
+  });
+
+  afterEach(() => {
+    try { rmSync(tmpDir, { recursive: true, force: true }); } catch { /* ignore */ }
   });
 
   describe("getCheckpoints", () => {
@@ -466,6 +475,111 @@ describe("Checkpoints", () => {
       missionExec.resumeCheckpoint("my-mission", "cp-2");
       const blocking2After = missionExec.getBlockingCheckpoint("my-mission", "Task C", "id-c", tasks2);
       expect(blocking2After).toBeUndefined();
+    });
+  });
+
+  describe("persistence", () => {
+    it("checkpoint definitions survive across MissionExecutor instances", () => {
+      const missionData = JSON.stringify({
+        tasks: [
+          { title: "Task A", description: "Do A" },
+          { title: "Task B", description: "Do B" },
+        ],
+        checkpoints: [
+          { name: "review-a", afterTasks: ["Task A"], blocksTasks: ["Task B"] },
+        ],
+      });
+      const mission = missionExec.saveMission({ data: missionData, name: "my-mission" });
+      missionExec.executeMission(mission.id);
+
+      // Verify checkpoint was registered
+      expect(missionExec.getCheckpoints("my-mission")).toHaveLength(1);
+
+      // Create a new executor (simulates server restart) — reuse same ctx (same polpoDir)
+      const missionExec2 = new MissionExecutor(ctx, taskMgr, agentMgr);
+      const checkpoints = missionExec2.getCheckpoints("my-mission");
+      expect(checkpoints).toHaveLength(1);
+      expect(checkpoints[0].name).toBe("review-a");
+    });
+
+    it("active checkpoints survive across MissionExecutor instances", () => {
+      const missionData = JSON.stringify({
+        tasks: [
+          { title: "Task A", description: "Do A" },
+          { title: "Task B", description: "Do B" },
+        ],
+        checkpoints: [
+          { name: "review-a", afterTasks: ["Task A"], blocksTasks: ["Task B"] },
+        ],
+      });
+      const mission = missionExec.saveMission({ data: missionData, name: "my-mission" });
+      missionExec.executeMission(mission.id);
+
+      // Activate checkpoint
+      const tasks = [createDoneTask("Task A"), createPendingTask("Task B")];
+      missionExec.getBlockingCheckpoint("my-mission", "Task B", "id-b", tasks);
+      expect(missionExec.getActiveCheckpoints()).toHaveLength(1);
+
+      // New executor — active checkpoint should still be there
+      const missionExec2 = new MissionExecutor(ctx, taskMgr, agentMgr);
+      expect(missionExec2.getActiveCheckpoints()).toHaveLength(1);
+      expect(missionExec2.getActiveCheckpoints()[0].checkpointName).toBe("review-a");
+
+      // And it should still block
+      const blocking = missionExec2.getBlockingCheckpoint("my-mission", "Task B", "id-b", tasks);
+      expect(blocking).toBeDefined();
+    });
+
+    it("resumed checkpoints survive across MissionExecutor instances", () => {
+      const missionData = JSON.stringify({
+        tasks: [
+          { title: "Task A", description: "Do A" },
+          { title: "Task B", description: "Do B" },
+        ],
+        checkpoints: [
+          { name: "review-a", afterTasks: ["Task A"], blocksTasks: ["Task B"] },
+        ],
+      });
+      const mission = missionExec.saveMission({ data: missionData, name: "my-mission" });
+      missionExec.executeMission(mission.id);
+
+      const tasks = [createDoneTask("Task A"), createPendingTask("Task B")];
+      missionExec.getBlockingCheckpoint("my-mission", "Task B", "id-b", tasks);
+      missionExec.resumeCheckpoint("my-mission", "review-a");
+
+      // New executor — should know checkpoint was resumed (not re-trigger)
+      const missionExec2 = new MissionExecutor(ctx, taskMgr, agentMgr);
+      const blocking = missionExec2.getBlockingCheckpoint("my-mission", "Task B", "id-b", tasks);
+      expect(blocking).toBeUndefined();
+      expect(missionExec2.getActiveCheckpoints()).toHaveLength(0);
+    });
+
+    it("cleanup removes persisted checkpoint state for completed groups", () => {
+      const missionData = JSON.stringify({
+        tasks: [
+          { title: "Task A", description: "Do A" },
+          { title: "Task B", description: "Do B" },
+        ],
+        checkpoints: [
+          { name: "review-a", afterTasks: ["Task A"], blocksTasks: ["Task B"] },
+        ],
+      });
+      const mission = missionExec.saveMission({ data: missionData, name: "my-mission" });
+      missionExec.executeMission(mission.id);
+
+      // Activate and resume checkpoint
+      const tasks = [createDoneTask("Task A", { group: "my-mission" }), createPendingTask("Task B", { group: "my-mission" })];
+      missionExec.getBlockingCheckpoint("my-mission", "Task B", "id-b", tasks);
+      missionExec.resumeCheckpoint("my-mission", "review-a");
+
+      // Mark all tasks as done and cleanup
+      const doneTasks = [createDoneTask("Task A", { group: "my-mission" }), createDoneTask("Task B", { group: "my-mission" })];
+      missionExec.cleanupCompletedGroups(doneTasks);
+
+      // New executor — should have no checkpoint state for this group
+      const missionExec2 = new MissionExecutor(ctx, taskMgr, agentMgr);
+      expect(missionExec2.getCheckpoints("my-mission")).toHaveLength(0);
+      expect(missionExec2.getActiveCheckpoints()).toHaveLength(0);
     });
   });
 

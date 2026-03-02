@@ -706,8 +706,10 @@ function getAllEventNames(): string[] {
     "sla:warning", "sla:violated", "sla:met",
     // Quality gates (mission-level)
     "quality:gate:passed", "quality:gate:failed", "quality:threshold:failed",
+    // Checkpoints
+    "checkpoint:reached", "checkpoint:resumed",
     // Scheduling
-    "schedule:triggered", "schedule:created", "schedule:completed",
+    "schedule:triggered", "schedule:created", "schedule:completed", "schedule:expired",
     // Notifications
     "notification:sent", "notification:failed",
     // Task watchers

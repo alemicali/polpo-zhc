@@ -539,100 +539,16 @@ export function useChat() {
       const missionData = pendingMission.data as Record<string, unknown>;
       const dataStr = typeof missionData === "string" ? missionData : JSON.stringify(missionData);
 
-      // ── Execute: save as draft then execute via REST API ──
-      if (action === "execute") {
-        setPendingMission(null);
-        try {
-          const mission = await client.createMission({
-            data: dataStr,
-            name: pendingMission.name,
-            prompt: pendingMission.prompt,
-            status: "draft",
-          });
-          await client.executeMission(mission.id);
-          // Add confirmation as a synthetic assistant message
-          const confirmMsg: ChatMessageWithQuestions = {
-            id: `temp-${Date.now()}-confirm`,
-            role: "assistant",
-            content: `Mission **"${mission.name}"** created and execution started. You can track progress on the [missions page](/missions).`,
-            ts: new Date().toISOString(),
-          };
-          setMessages((prev) => [...prev, confirmMsg]);
-          conversationRef.current.push({ role: "assistant", content: confirmMsg.content });
-          return { missionId: mission.id };
-        } catch (e) {
-          const errMsg = (e as Error).message;
-          const errorConfirm: ChatMessageWithQuestions = {
-            id: `temp-${Date.now()}-err`,
-            role: "assistant",
-            content: `Failed to execute mission: ${errMsg}`,
-            ts: new Date().toISOString(),
-          };
-          setMessages((prev) => [...prev, errorConfirm]);
-          return { error: errMsg };
-        }
-      }
-
-      // ── Draft: save via REST API without executing ──
-      if (action === "draft") {
-        setPendingMission(null);
-        try {
-          const mission = await client.createMission({
-            data: dataStr,
-            name: pendingMission.name,
-            prompt: pendingMission.prompt,
-            status: "draft",
-          });
-          const confirmMsg: ChatMessageWithQuestions = {
-            id: `temp-${Date.now()}-confirm`,
-            role: "assistant",
-            content: `Mission **"${mission.name}"** saved as draft. You can review and execute it from the [missions page](/missions).`,
-            ts: new Date().toISOString(),
-          };
-          setMessages((prev) => [...prev, confirmMsg]);
-          conversationRef.current.push({ role: "assistant", content: confirmMsg.content });
-          return { missionId: mission.id };
-        } catch (e) {
-          const errMsg = (e as Error).message;
-          const errorConfirm: ChatMessageWithQuestions = {
-            id: `temp-${Date.now()}-err`,
-            role: "assistant",
-            content: `Failed to save mission: ${errMsg}`,
-            ts: new Date().toISOString(),
-          };
-          setMessages((prev) => [...prev, errorConfirm]);
-          return { error: errMsg };
-        }
-      }
-
-      // ── Cancel: just clear the state ──
-      if (action === "cancel") {
-        setPendingMission(null);
-        const cancelMsg: ChatMessageWithQuestions = {
-          id: `temp-${Date.now()}-cancel`,
-          role: "assistant",
-          content: "Mission cancelled.",
-          ts: new Date().toISOString(),
-        };
-        setMessages((prev) => [...prev, cancelMsg]);
-        conversationRef.current.push({ role: "assistant", content: cancelMsg.content });
-        return {};
-      }
-
-      // ── Refine: send feedback back to the LLM for re-planning ──
-      if (action === "refine" && feedback?.trim()) {
-        setPendingMission(null);
-
-        const responseText = `Please refine the mission plan with these changes:\n${feedback.trim()}`;
-
+      // Helper: send a user message to the orchestrator and stream the LLM response
+      const sendAndStream = async (userContent: string): Promise<void> => {
         const userMsg: ChatMessageWithQuestions = {
           id: `temp-${Date.now()}`,
           role: "user",
-          content: responseText,
+          content: userContent,
           ts: new Date().toISOString(),
         };
         setMessages((prev) => [...prev, userMsg]);
-        conversationRef.current.push({ role: "user", content: responseText });
+        conversationRef.current.push({ role: "user", content: userContent });
 
         const assistantId = `temp-${Date.now()}-a`;
         setMessages((prev) => [
@@ -654,6 +570,80 @@ export function useChat() {
         } finally {
           setIsLoading(false);
         }
+      };
+
+      // ── Execute: save as draft, execute, then inform orchestrator ──
+      if (action === "execute") {
+        setPendingMission(null);
+        try {
+          const mission = await client.createMission({
+            data: dataStr,
+            name: pendingMission.name,
+            prompt: pendingMission.prompt,
+            status: "draft",
+          });
+          await client.executeMission(mission.id);
+          // Continue conversational flow: tell the orchestrator what happened
+          await sendAndStream(
+            `I approved and executed the mission "${mission.name}" (ID: ${mission.id}). ` +
+            `It's now running. Please acknowledge and let me know if there's anything else to do.`
+          );
+          return { missionId: mission.id };
+        } catch (e) {
+          const errMsg = (e as Error).message;
+          const errorConfirm: ChatMessageWithQuestions = {
+            id: `temp-${Date.now()}-err`,
+            role: "assistant",
+            content: `Failed to execute mission: ${errMsg}`,
+            ts: new Date().toISOString(),
+          };
+          setMessages((prev) => [...prev, errorConfirm]);
+          return { error: errMsg };
+        }
+      }
+
+      // ── Draft: save, then inform orchestrator ──
+      if (action === "draft") {
+        setPendingMission(null);
+        try {
+          const mission = await client.createMission({
+            data: dataStr,
+            name: pendingMission.name,
+            prompt: pendingMission.prompt,
+            status: "draft",
+          });
+          // Continue conversational flow: tell the orchestrator what happened
+          await sendAndStream(
+            `I saved the mission "${mission.name}" (ID: ${mission.id}) as draft. ` +
+            `Don't execute it yet — I might want to review or schedule it first.`
+          );
+          return { missionId: mission.id };
+        } catch (e) {
+          const errMsg = (e as Error).message;
+          const errorConfirm: ChatMessageWithQuestions = {
+            id: `temp-${Date.now()}-err`,
+            role: "assistant",
+            content: `Failed to save mission: ${errMsg}`,
+            ts: new Date().toISOString(),
+          };
+          setMessages((prev) => [...prev, errorConfirm]);
+          return { error: errMsg };
+        }
+      }
+
+      // ── Cancel: inform orchestrator ──
+      if (action === "cancel") {
+        setPendingMission(null);
+        await sendAndStream(
+          `I decided not to proceed with the proposed mission "${pendingMission.name}". Let's move on.`
+        );
+        return {};
+      }
+
+      // ── Refine: send feedback back to the LLM for re-planning ──
+      if (action === "refine" && feedback?.trim()) {
+        setPendingMission(null);
+        await sendAndStream(`Please refine the mission plan with these changes:\n${feedback.trim()}`);
       }
 
       return {};

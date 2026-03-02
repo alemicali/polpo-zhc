@@ -20,7 +20,7 @@ import {
   discoverOrchestratorSkills, createOrchestratorSkill, updateOrchestratorSkill,
   removeOrchestratorSkill, installOrchestratorSkills,
   discoverSkills, installSkills, removeSkill, createAgentSkill,
-  getSkillByName,
+  getSkillByName, updateSkillIndex,
 } from "./skills.js";
 
 // ═══════════════════════════════════════════════════════
@@ -56,7 +56,7 @@ const listMissionsTool: Tool = {
   name: "list_missions",
   description: "List all missions. Optionally filter by status.",
   parameters: Type.Object({
-    status: Type.Optional(Type.String({ description: "Filter by status: draft, active, paused, completed, failed, cancelled" })),
+    status: Type.Optional(Type.String({ description: "Filter by status: draft, scheduled, recurring, active, paused, completed, failed, cancelled" })),
   }),
 };
 
@@ -228,13 +228,13 @@ const updateMissionTool: Tool = {
     missionId: Type.String({ description: "Mission ID to update" }),
     name: Type.Optional(Type.String({ description: "New mission name" })),
     data: Type.Optional(Type.String({ description: "New JSON mission content" })),
-    status: Type.Optional(Type.String({ description: "New status: draft, active, paused, completed, failed, cancelled" })),
+    status: Type.Optional(Type.String({ description: "New status: draft, scheduled, recurring, active, paused, completed, failed, cancelled" })),
   }),
 };
 
 const executeMissionTool: Tool = {
   name: "execute_mission",
-  description: "Execute a draft mission — creates tasks for all mission items and starts the work.",
+  description: "Execute a draft, scheduled, or recurring mission — creates tasks for all mission items and starts the work.",
   parameters: Type.Object({
     missionId: Type.String({ description: "Mission ID to execute" }),
   }),
@@ -271,7 +271,7 @@ const deleteMissionTool: Tool = {
 
 const addAgentTool: Tool = {
   name: "add_agent",
-  description: "Add a new agent to a team. If no team is specified, adds to the default (first) team. Use allowedTools to grant browser/email/vault/image/video/audio tool access (e.g. ['browser_*', 'email_*', 'vault_*', 'image_*', 'video_*', 'audio_*']). HTTP tools are always available. Use allowedTools to restrict to specific tool names.",
+  description: "Add a new agent to a team. If no team is specified, adds to the default (first) team. Use allowedTools to grant extended tool access (e.g. ['browser_*', 'email_*', 'image_*', 'video_*', 'audio_*', 'excel_*', 'pdf_*', 'docx_*']). Core tools (including vault_get/vault_list) are always available. Use allowedTools to restrict to specific tool names.",
   parameters: Type.Object({
     name: Type.String({ description: "Agent name (unique identifier, must be globally unique across all teams)" }),
     role: Type.Optional(Type.String({ description: "Agent role description (e.g. 'Frontend developer')" })),
@@ -279,7 +279,7 @@ const addAgentTool: Tool = {
     systemPrompt: Type.Optional(Type.String({ description: "Custom system prompt for this agent" })),
     skills: Type.Optional(Type.Array(Type.String(), { description: "Skill names to assign" })),
     allowedPaths: Type.Optional(Type.Array(Type.String(), { description: "Filesystem paths this agent can access (relative to workDir)" })),
-    allowedTools: Type.Optional(Type.Array(Type.String(), { description: "Tool names/wildcards to enable (e.g. ['read','write','bash','browser_*','email_*','vault_*','image_*','video_*','audio_*']). Omit for core coding tools only." })),
+    allowedTools: Type.Optional(Type.Array(Type.String(), { description: "Tool names/wildcards to enable (e.g. ['read','write','bash','browser_*','email_*','image_*','video_*','audio_*','excel_*','pdf_*','docx_*']). Vault tools are always available. Omit for core coding tools only." })),
     reportsTo: Type.Optional(Type.String({ description: "Name of the agent this one reports to (org chart hierarchy, e.g. 'lead-dev')" })),
     team: Type.Optional(Type.String({ description: "Team name to add the agent to (default: first team)" })),
     reasoning: Type.Optional(Type.Union([Type.Literal("off"), Type.Literal("low"), Type.Literal("medium"), Type.Literal("high")], { description: "Agent thinking/reasoning level. Overrides global settings.reasoning." })),
@@ -308,7 +308,7 @@ const updateAgentTool: Tool = {
     systemPrompt: Type.Optional(Type.String({ description: "New system prompt" })),
     skills: Type.Optional(Type.Array(Type.String(), { description: "New skill list (replaces existing)" })),
     allowedPaths: Type.Optional(Type.Array(Type.String(), { description: "New allowed paths (replaces existing)" })),
-    allowedTools: Type.Optional(Type.Array(Type.String(), { description: "Tool names/wildcards to enable (replaces existing). Include 'browser_*', 'email_*', 'vault_*', 'image_*', 'video_*', or 'audio_*' to grant those categories. Omit to keep current." })),
+    allowedTools: Type.Optional(Type.Array(Type.String(), { description: "Tool names/wildcards to enable (replaces existing). Include 'browser_*', 'email_*', 'image_*', 'video_*', 'audio_*', 'excel_*', 'pdf_*', or 'docx_*' to grant those categories. Vault tools are always available. Omit to keep current." })),
     reportsTo: Type.Optional(Type.String({ description: "Name of the agent this one reports to. Use empty string to remove." })),
     team: Type.Optional(Type.String({ description: "Move agent to a different team" })),
     reasoning: Type.Optional(Type.Union([Type.Literal("off"), Type.Literal("low"), Type.Literal("medium"), Type.Literal("high")], { description: "Agent thinking/reasoning level" })),
@@ -474,11 +474,12 @@ const resumeCheckpointTool: Tool = {
 
 const createScheduleTool: Tool = {
   name: "create_schedule",
-  description: "Schedule a mission for future or recurring execution. Supports cron expressions (minimum 1 minute) and ISO timestamps.",
+  description: "Schedule a mission for future or recurring execution. Sets the mission status to 'scheduled' (one-shot) or 'recurring'. Supports cron expressions (minimum 1 minute) and ISO timestamps.",
   parameters: Type.Object({
     missionId: Type.String({ description: "Mission ID to schedule" }),
     expression: Type.String({ description: "Cron expression (e.g. '*/5 * * * *' = every 5 min) or ISO timestamp for one-shot" }),
-    recurring: Type.Optional(Type.Boolean({ description: "Repeat on every cron tick (default: false = one-shot)" })),
+    recurring: Type.Optional(Type.Boolean({ description: "If true, status becomes 'recurring' (repeats on every cron tick). Default: false (one-shot, status becomes 'scheduled')" })),
+    endDate: Type.Optional(Type.String({ description: "End date (ISO timestamp) — schedule stops firing after this date. Useful for recurring missions (e.g. 'every Friday until June 30')" })),
   }),
 };
 
@@ -500,12 +501,13 @@ const deleteScheduleTool: Tool = {
 
 const updateScheduleTool: Tool = {
   name: "update_schedule",
-  description: "Update a schedule's expression, recurring flag, or enabled state.",
+  description: "Update a schedule's expression, recurring/one-shot mode, enabled state, or end date. Changing recurring mode updates the mission status.",
   parameters: Type.Object({
     missionId: Type.String({ description: "Mission ID whose schedule to update" }),
     expression: Type.Optional(Type.String({ description: "New cron expression or ISO timestamp" })),
-    recurring: Type.Optional(Type.Boolean({ description: "New recurring flag" })),
+    recurring: Type.Optional(Type.Boolean({ description: "Switch between recurring (true) and one-shot (false) mode" })),
     enabled: Type.Optional(Type.Boolean({ description: "Enable or disable the schedule" })),
+    endDate: Type.Optional(Type.String({ description: "End date (ISO timestamp). Schedule stops after this date. Use empty string to remove." })),
   }),
 };
 
@@ -739,6 +741,16 @@ const getSkillTool: Tool = {
   }),
 };
 
+const tagSkillTool: Tool = {
+  name: "tag_skill",
+  description: "Update the tags and/or category of a skill in the skills index. Tags are freeform strings for search/filtering. Category is a single string for macro-grouping. This does NOT modify the SKILL.md file — metadata is stored in .polpo/skills-index.json.",
+  parameters: Type.Object({
+    name: Type.String({ description: "Skill name to tag" }),
+    tags: Type.Optional(Type.Array(Type.String(), { description: "Freeform tags for search and filtering (e.g. ['frontend', 'react', 'ui'])" })),
+    category: Type.Optional(Type.String({ description: "Macro-category for grouping (e.g. 'development', 'design', 'operations')" })),
+  }),
+};
+
 // ═══════════════════════════════════════════════════════
 //  FILE SYSTEM TOOLS (6) — core coding capabilities
 // ═══════════════════════════════════════════════════════
@@ -901,6 +913,7 @@ export const WRITE_TOOLS = new Set([
   // Skills (write)
   "create_orchestrator_skill", "update_orchestrator_skill", "remove_orchestrator_skill",
   "install_orchestrator_skill", "create_agent_skill", "install_agent_skill", "remove_agent_skill",
+  "tag_skill",
   // File System (write)
   "write_file", "edit_file", "run_command",
   // HTTP (write — downloads files to disk)
@@ -945,11 +958,11 @@ export const ALL_ORCHESTRATOR_TOOLS: Tool[] = [
   watchTaskTool, removeWatcherTool,
   // Config & Self (4)
   reloadConfigTool, saveMemoryTool, appendMemoryTool, appendSystemContextTool,
-  // Skills (9)
+  // Skills (10)
   listOrchestratorSkillsTool, createOrchestratorSkillTool, updateOrchestratorSkillTool,
   removeOrchestratorSkillTool, installOrchestratorSkillTool,
   listAgentSkillsTool, createAgentSkillTool, installAgentSkillTool, removeAgentSkillTool,
-  searchSkillsTool, getSkillTool,
+  searchSkillsTool, getSkillTool, tagSkillTool,
   // File System (6)
   readFileTool, writeFileTool, editFileTool, listDirectoryTool, grepFilesTool, runCommandTool,
   // HTTP (2)
@@ -1167,6 +1180,7 @@ export async function executeOrchestratorTool(
       case "remove_agent_skill":          return execRemoveAgentSkill(polpo, args);
       case "search_skills":              return execSearchSkills(args);
       case "get_skill":                  return execGetSkill(polpo, args);
+      case "tag_skill":                  return execTagSkill(polpo, args);
 
       // ── File System ──
       case "read_file":        return execReadFile(polpo, args);
@@ -1863,15 +1877,23 @@ function execCreateSchedule(polpo: Orchestrator, args: Record<string, unknown>):
   const mission = polpo.getMission(missionId);
   if (!mission) return `Error: Mission "${missionId}" not found.`;
 
-  // Temporarily set schedule on the mission so registerMission can read it
-  const updatedMission = polpo.updateMission(missionId, {
+  const isRecurring = (args.recurring as boolean) ?? false;
+  // Set schedule expression and transition status to scheduled/recurring
+  const newStatus = isRecurring ? "recurring" : "scheduled";
+  const missionUpdate: Record<string, unknown> = {
     schedule: args.expression as string,
-    recurring: (args.recurring as boolean) ?? false,
-  });
+    status: newStatus,
+  };
+  if (args.endDate !== undefined) {
+    missionUpdate.endDate = args.endDate as string;
+  }
+  const updatedMission = polpo.updateMission(missionId, missionUpdate as any);
 
   const entry = scheduler.registerMission(updatedMission);
   if (!entry) return `Error: Could not create schedule. Expression may be invalid or timestamp is in the past.`;
-  return `Schedule created for mission "${updatedMission.name}": ${entry.expression}${entry.recurring ? " (recurring)" : ""}, next run: ${entry.nextRunAt ?? "N/A"}`;
+  let result = `Schedule created for mission "${updatedMission.name}" (status: ${updatedMission.status}): ${entry.expression}${entry.recurring ? " (recurring)" : " (one-shot)"}, next run: ${entry.nextRunAt ?? "N/A"}`;
+  if (updatedMission.endDate) result += `, ends: ${updatedMission.endDate}`;
+  return result;
 }
 
 function execListSchedules(polpo: Orchestrator, args: Record<string, unknown>): string {
@@ -1893,9 +1915,9 @@ function execDeleteSchedule(polpo: Orchestrator, args: Record<string, unknown>):
   const missionId = args.missionId as string;
   const deleted = scheduler.unregisterMission(missionId);
   if (!deleted) return `Error: No schedule found for mission "${missionId}".`;
-  // Clear schedule from the mission itself
-  polpo.updateMission(missionId, { schedule: undefined, recurring: undefined } as any);
-  return `Schedule for mission "${missionId}" deleted.`;
+  // Clear schedule from the mission and reset status to draft
+  polpo.updateMission(missionId, { schedule: undefined, status: "draft" });
+  return `Schedule for mission "${missionId}" deleted. Mission status reset to draft.`;
 }
 
 function execUpdateSchedule(polpo: Orchestrator, args: Record<string, unknown>): string {
@@ -1910,22 +1932,39 @@ function execUpdateSchedule(polpo: Orchestrator, args: Record<string, unknown>):
     // Re-register with new expression
     const mission = polpo.getMission(missionId);
     if (!mission) return `Error: Mission "${missionId}" not found.`;
+    // Determine new status based on recurring flag
+    const isRecurring = (args.recurring as boolean) ?? existing.recurring;
+    const newStatus = isRecurring ? "recurring" : "scheduled";
     const updated = polpo.updateMission(missionId, {
       schedule: args.expression as string,
-      recurring: (args.recurring as boolean) ?? existing.recurring,
+      status: newStatus,
     });
     scheduler.unregisterMission(missionId);
     scheduler.registerMission(updated);
     changes.push(`expression: ${args.expression}`);
+    if (args.recurring !== undefined) changes.push(`mode: ${isRecurring ? "recurring" : "one-shot"}`);
   }
   if (args.recurring !== undefined && args.expression === undefined) {
-    existing.recurring = args.recurring as boolean;
-    polpo.updateMission(missionId, { recurring: args.recurring as boolean } as any);
-    changes.push(`recurring: ${args.recurring}`);
+    const isRecurring = args.recurring as boolean;
+    existing.recurring = isRecurring;
+    const newStatus = isRecurring ? "recurring" : "scheduled";
+    polpo.updateMission(missionId, { status: newStatus });
+    // Re-register to pick up the new recurring flag
+    const mission = polpo.getMission(missionId);
+    if (mission) {
+      scheduler.unregisterMission(missionId);
+      scheduler.registerMission(mission);
+    }
+    changes.push(`mode: ${isRecurring ? "recurring" : "one-shot"}`);
   }
   if (args.enabled !== undefined) {
     existing.enabled = args.enabled as boolean;
     changes.push(`enabled: ${args.enabled}`);
+  }
+  if (args.endDate !== undefined) {
+    const endDate = (args.endDate as string).trim() || undefined;
+    polpo.updateMission(missionId, { endDate } as any);
+    changes.push(endDate ? `endDate: ${endDate}` : "endDate: removed");
   }
   if (changes.length === 0) return "No changes specified.";
   return `Schedule for mission "${missionId}" updated: ${changes.join(", ")}`;
@@ -2449,8 +2488,45 @@ function execGetSkill(polpo: Orchestrator, args: Record<string, unknown>): strin
   if (skill.allowedTools?.length) {
     lines.push(`Allowed tools: ${skill.allowedTools.join(", ")}`);
   }
+  if (skill.tags?.length) {
+    lines.push(`Tags: ${skill.tags.join(", ")}`);
+  }
+  if (skill.category) {
+    lines.push(`Category: ${skill.category}`);
+  }
   lines.push("", "--- Content ---", "", skill.content);
   return lines.join("\n");
+}
+
+function execTagSkill(polpo: Orchestrator, args: Record<string, unknown>): string {
+  const name = args.name as string;
+  const tags = args.tags as string[] | undefined;
+  const category = args.category as string | undefined;
+
+  if (!tags && !category) {
+    return "Error: At least one of 'tags' or 'category' must be provided.";
+  }
+
+  const polpoDir = polpo.getPolpoDir();
+  const cwd = polpo.getWorkDir();
+
+  // Verify the skill exists
+  const skills = discoverSkills(cwd, polpoDir);
+  const skill = skills.find(s => s.name === name);
+  if (!skill) {
+    return `Error: Skill "${name}" not found in the skill pool.`;
+  }
+
+  const entry: Record<string, unknown> = {};
+  if (tags) entry.tags = tags;
+  if (category) entry.category = category;
+
+  updateSkillIndex(polpoDir, name, entry as { tags?: string[]; category?: string });
+
+  const parts = [`Skill "${name}" index updated.`];
+  if (tags) parts.push(`Tags: ${tags.join(", ")}`);
+  if (category) parts.push(`Category: ${category}`);
+  return parts.join("\n");
 }
 
 // ═══════════════════════════════════════════════════════════════════════

@@ -57,7 +57,10 @@ export function formatTaskLine(task: Task): string {
 export function formatMissionLine(mission: Mission): string {
   const colors: Record<string, typeof chalk> = {
     draft: chalk.gray,
+    scheduled: chalk.blue,
+    recurring: chalk.magenta,
     active: chalk.cyan,
+    paused: chalk.yellow,
     completed: chalk.green,
     failed: chalk.red,
     cancelled: chalk.yellow,

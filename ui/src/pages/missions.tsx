@@ -67,7 +67,9 @@ function parseMissionCounts(data: string): { taskCount: number } {
 
 const statusStyles: Record<MissionStatus, { color: string; bg: string; label: string; icon: React.ElementType }> = {
   draft: { color: "text-zinc-400", bg: "bg-zinc-500/10", label: "Draft", icon: Clock },
-  active: { color: "text-primary", bg: "bg-primary/10", label: "Running", icon: Loader2 },
+  scheduled: { color: "text-blue-400", bg: "bg-blue-500/10", label: "Scheduled", icon: Calendar },
+  recurring: { color: "text-violet-400", bg: "bg-violet-500/10", label: "Recurring", icon: Repeat },
+  active: { color: "text-blue-400", bg: "bg-blue-500/10", label: "Running", icon: Loader2 },
   paused: { color: "text-amber-400", bg: "bg-amber-500/10", label: "Paused", icon: Pause },
   completed: { color: "text-emerald-400", bg: "bg-emerald-500/10", label: "Completed", icon: CheckCircle2 },
   failed: { color: "text-red-400", bg: "bg-red-500/10", label: "Failed", icon: AlertTriangle },
@@ -103,7 +105,8 @@ function MissionRow({
   const counts = useMemo(() => parseMissionCounts(mission.data), [mission.data]);
 
   const isActive = mission.status === "active";
-  const hasActions = mission.status === "draft" || mission.status === "active" || mission.status === "failed" || mission.status === "paused";
+  const hasActions = mission.status === "draft" || mission.status === "scheduled" || mission.status === "recurring" ||
+    mission.status === "active" || mission.status === "failed" || mission.status === "paused";
 
   return (
     <div
@@ -143,11 +146,17 @@ function MissionRow({
               <Badge variant="outline" className="text-[10px] gap-1 text-blue-400">
                 <Calendar className="h-2.5 w-2.5" />
                 {cronToHuman(mission.schedule)}
-                {mission.recurring ? (
+                {mission.status === "recurring" ? (
                   <span className="flex items-center gap-0.5 ml-0.5 text-violet-400"><Repeat className="h-2 w-2" />Recurring</span>
                 ) : (
                   <span className="ml-0.5 text-muted-foreground">One-shot</span>
                 )}
+              </Badge>
+            )}
+            {mission.endDate && (
+              <Badge variant="outline" className="text-[10px] gap-1 text-muted-foreground">
+                <Calendar className="h-2.5 w-2.5" />
+                until {new Date(mission.endDate).toLocaleDateString()}
               </Badge>
             )}
             {mission.deadline && (() => {
@@ -236,6 +245,8 @@ function MissionRow({
 
 const statusFilterOptions: { value: MissionStatus; label: string; color: string }[] = [
   { value: "active", label: "Running", color: "text-blue-400" },
+  { value: "scheduled", label: "Scheduled", color: "text-blue-400" },
+  { value: "recurring", label: "Recurring", color: "text-violet-400" },
   { value: "paused", label: "Paused", color: "text-amber-400" },
   { value: "draft", label: "Draft", color: "text-zinc-400" },
   { value: "completed", label: "Completed", color: "text-emerald-400" },
@@ -380,11 +391,15 @@ export function MissionsPage() {
   const hasFilters = search.length > 0 || selectedStatuses.size > 0;
 
   const active = filtered.filter(p => p.status === "active" || p.status === "paused");
+  const scheduledOnce = filtered.filter(p => p.status === "scheduled");
+  const recurring = filtered.filter(p => p.status === "recurring");
   const drafts = filtered.filter(p => p.status === "draft");
   const completed = filtered.filter(p => p.status === "completed" || p.status === "failed" || p.status === "cancelled");
 
   const sections = [
     { label: "Active", missions: active, defaultOpen: true },
+    { label: "Scheduled", missions: scheduledOnce, defaultOpen: true },
+    { label: "Recurring", missions: recurring, defaultOpen: true },
     { label: "Drafts", missions: drafts, defaultOpen: true },
     { label: "Completed", missions: completed, defaultOpen: false },
   ].filter(s => s.missions.length > 0);

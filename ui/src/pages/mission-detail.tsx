@@ -36,6 +36,9 @@ import {
   Workflow,
   ChevronDown,
   ChevronRight,
+  PauseCircle,
+  PlayCircle,
+  ShieldCheck,
 } from "lucide-react";
 import {
   ReactFlow,
@@ -126,17 +129,39 @@ interface MissionTaskDef {
   retryPolicy?: { escalateAfter?: number; fallbackAgent?: string; escalateModel?: string };
 }
 
+interface MissionCheckpointDef {
+  name: string;
+  afterTasks: string[];
+  blocksTasks: string[];
+  message?: string;
+  notifyChannels?: string[];
+}
+
 interface ParsedMission {
   name?: string;
   tasks: MissionTaskDef[];
+  checkpoints?: MissionCheckpointDef[];
 }
 
 function parseMissionData(data: string): ParsedMission | null {
   try {
     const parsed = JSON.parse(data);
+    // Filter valid checkpoints (strict: requires name, afterTasks[], blocksTasks[])
+    let checkpoints: MissionCheckpointDef[] | undefined;
+    if (Array.isArray(parsed.checkpoints)) {
+      const valid = parsed.checkpoints.filter(
+        (cp: unknown): cp is MissionCheckpointDef =>
+          typeof cp === "object" && cp !== null &&
+          typeof (cp as Record<string, unknown>).name === "string" &&
+          Array.isArray((cp as Record<string, unknown>).afterTasks) &&
+          Array.isArray((cp as Record<string, unknown>).blocksTasks),
+      );
+      if (valid.length > 0) checkpoints = valid;
+    }
     return {
       name: parsed.name,
       tasks: Array.isArray(parsed.tasks) ? parsed.tasks : [],
+      checkpoints,
     };
   } catch {
     return null;
@@ -147,6 +172,8 @@ function parseMissionData(data: string): ParsedMission | null {
 
 const statusStyles: Record<MissionStatus, { color: string; bg: string; label: string; icon: React.ElementType }> = {
   draft: { color: "text-zinc-400", bg: "bg-zinc-500/10", label: "Draft", icon: Clock },
+  scheduled: { color: "text-blue-400", bg: "bg-blue-500/10", label: "Scheduled", icon: Calendar },
+  recurring: { color: "text-violet-400", bg: "bg-violet-500/10", label: "Recurring", icon: Repeat },
   active: { color: "text-blue-400", bg: "bg-blue-500/10", label: "Running", icon: Loader2 },
   paused: { color: "text-amber-400", bg: "bg-amber-500/10", label: "Paused", icon: Clock },
   completed: { color: "text-emerald-400", bg: "bg-emerald-500/10", label: "Completed", icon: CheckCircle2 },
@@ -178,6 +205,15 @@ interface TaskNodeData {
   liveTask?: Task;
   index: number;
   expanded?: boolean;
+  [key: string]: unknown;
+}
+
+interface CheckpointNodeData {
+  checkpoint: MissionCheckpointDef;
+  /** Whether this checkpoint is currently active (blocking) — from live API data */
+  isActive?: boolean;
+  /** Whether this checkpoint has been resumed */
+  isResumed?: boolean;
   [key: string]: unknown;
 }
 
@@ -408,7 +444,74 @@ function TaskNodeComponent({ data, selected }: NodeProps<Node<TaskNodeData>>) {
   );
 }
 
-const nodeTypes = { taskNode: TaskNodeComponent };
+// ── Checkpoint node component for ReactFlow ──
+
+const CHECKPOINT_WIDTH = 200;
+const CHECKPOINT_HEIGHT = 72;
+
+function CheckpointNodeComponent({ data, selected }: NodeProps<Node<CheckpointNodeData>>) {
+  const { checkpoint, isActive, isResumed } = data;
+
+  const borderColor = isResumed
+    ? "border-emerald-400/60"
+    : isActive
+      ? "border-amber-400/80"
+      : "border-amber-500/40";
+
+  const bgColor = isResumed
+    ? "bg-emerald-500/5"
+    : isActive
+      ? "bg-amber-500/8"
+      : "bg-card/60";
+
+  const StatusIcon = isResumed ? PlayCircle : PauseCircle;
+  const statusLabel = isResumed ? "Resumed" : isActive ? "Waiting" : "Checkpoint";
+  const statusColor = isResumed ? "text-emerald-400" : isActive ? "text-amber-400" : "text-amber-500/70";
+
+  return (
+    <>
+      <Handle type="target" position={Position.Top} className="!bg-amber-500/50 !border-none !w-2 !h-2" />
+      <div
+        className={cn(
+          "rounded-lg border-2 border-dashed backdrop-blur-sm transition-all duration-200",
+          borderColor,
+          bgColor,
+          selected && "ring-2 ring-amber-400/30 shadow-[0_0_16px_oklch(0.75_0.15_85/0.15)]",
+        )}
+        style={{ minWidth: CHECKPOINT_WIDTH, maxWidth: CHECKPOINT_WIDTH }}
+      >
+        <div className="px-3 py-2.5 flex flex-col gap-1">
+          {/* Header */}
+          <div className="flex items-center gap-2">
+            <ShieldCheck className="h-3.5 w-3.5 text-amber-500/70 shrink-0" />
+            <span className="text-[11px] font-semibold text-foreground/90 truncate">{checkpoint.name}</span>
+            <span className={cn("ml-auto text-[9px] font-medium uppercase tracking-wider", statusColor)}>
+              {statusLabel}
+            </span>
+          </div>
+          {/* Message */}
+          {checkpoint.message && (
+            <p className="text-[10px] text-muted-foreground leading-tight line-clamp-2 mt-0.5">
+              {checkpoint.message}
+            </p>
+          )}
+          {/* Flow info */}
+          <div className="flex items-center gap-1.5 mt-0.5">
+            <StatusIcon className={cn("h-3 w-3", statusColor)} />
+            <span className="text-[9px] text-muted-foreground">
+              {checkpoint.afterTasks.length} trigger{checkpoint.afterTasks.length !== 1 ? "s" : ""}
+              {" → "}
+              {checkpoint.blocksTasks.length} blocked
+            </span>
+          </div>
+        </div>
+      </div>
+      <Handle type="source" position={Position.Bottom} className="!bg-amber-500/50 !border-none !w-2 !h-2" />
+    </>
+  );
+}
+
+const nodeTypes = { taskNode: TaskNodeComponent, checkpointNode: CheckpointNodeComponent };
 
 // ── Graph layout computation ──
 
@@ -420,7 +523,10 @@ const V_GAP = 80;
 function buildGraphLayout(
   taskDefs: MissionTaskDef[],
   findLive: (title: string) => Task | undefined,
-): { nodes: Node<TaskNodeData>[]; edges: Edge[] } {
+  checkpoints?: MissionCheckpointDef[],
+  activeCheckpoints?: Set<string>,
+  resumedCheckpoints?: Set<string>,
+): { nodes: Node[]; edges: Edge[] } {
   // Build dependency graph for layering (topological sort into levels)
   const titleIndex = new Map<string, number>();
   taskDefs.forEach((t, i) => titleIndex.set(t.title, i));
@@ -446,15 +552,65 @@ function buildGraphLayout(
 
   for (let i = 0; i < taskDefs.length; i++) computeLayer(i);
 
-  // Group by layer
-  const maxLayer = Math.max(...layers, 0);
+  // ── Checkpoint layer computation ──
+  // Each checkpoint sits between its afterTasks and blocksTasks.
+  // Its "visual layer" = max(layer of afterTasks) + 1, and blocksTasks are pushed down if needed.
+  const cpDefs = checkpoints ?? [];
+  // Map: checkpoint index → visual layer
+  const cpLayers: number[] = [];
+  // Build a set of edges that checkpoints intercept (afterTask → blocksTask)
+  // so we can reroute them through the checkpoint node
+  const interceptedEdges = new Set<string>(); // "sourceTaskIdx-targetTaskIdx"
+
+  for (let ci = 0; ci < cpDefs.length; ci++) {
+    const cp = cpDefs[ci];
+    // Find the max layer among afterTasks
+    let maxAfterLayer = 0;
+    for (const title of cp.afterTasks) {
+      const idx = titleIndex.get(title);
+      if (idx != null) maxAfterLayer = Math.max(maxAfterLayer, layers[idx]);
+    }
+    const cpLayer = maxAfterLayer + 1;
+    cpLayers.push(cpLayer);
+
+    // Push blocksTasks down so they sit below the checkpoint
+    for (const title of cp.blocksTasks) {
+      const idx = titleIndex.get(title);
+      if (idx != null && layers[idx] <= cpLayer) {
+        const shift = cpLayer + 1 - layers[idx];
+        // Shift this task and all its transitive dependents
+        shiftTaskAndDependents(idx, shift, taskDefs, titleIndex, layers);
+      }
+    }
+
+    // Mark intercepted edges: any edge from afterTask → blocksTask
+    for (const after of cp.afterTasks) {
+      const ai = titleIndex.get(after);
+      if (ai == null) continue;
+      for (const blocked of cp.blocksTasks) {
+        const bi = titleIndex.get(blocked);
+        if (bi == null) continue;
+        // Check if blocksTask actually depends on afterTask
+        const deps = taskDefs[bi].dependsOn ?? [];
+        if (deps.includes(after)) {
+          interceptedEdges.add(`${ai}-${bi}`);
+        }
+      }
+    }
+  }
+
+  // Recompute max layer after checkpoint pushes
+  const maxLayer = Math.max(...layers, ...cpLayers, 0);
+
+  // Group task nodes by layer
   const layerGroups: number[][] = Array.from({ length: maxLayer + 1 }, () => []);
   layers.forEach((l, i) => layerGroups[l].push(i));
 
-  // Position nodes: center each layer horizontally
-  const nodes: Node<TaskNodeData>[] = [];
+  // ── Position task nodes ──
+  const nodes: Node[] = [];
   for (let layer = 0; layer <= maxLayer; layer++) {
     const group = layerGroups[layer];
+    if (group.length === 0) continue;
     const totalWidth = group.length * NODE_WIDTH + (group.length - 1) * H_GAP;
     const startX = -totalWidth / 2;
 
@@ -470,17 +626,47 @@ function buildGraphLayout(
           taskDef: taskDefs[idx],
           liveTask: findLive(taskDefs[idx].title),
           index: idx,
-        },
+        } as TaskNodeData,
       });
     });
   }
 
-  // Build edges from dependencies
+  // ── Position checkpoint nodes ──
+  for (let ci = 0; ci < cpDefs.length; ci++) {
+    const cp = cpDefs[ci];
+    const cpLayer = cpLayers[ci];
+    // Center the checkpoint horizontally — if multiple checkpoints share a layer, offset them
+    const cpsInSameLayer = cpLayers.filter(l => l === cpLayer).length;
+    const cpPosInLayer = cpLayers.slice(0, ci).filter(l => l === cpLayer).length;
+    const totalCpWidth = cpsInSameLayer * CHECKPOINT_WIDTH + (cpsInSameLayer - 1) * H_GAP;
+    const cpStartX = -totalCpWidth / 2;
+
+    nodes.push({
+      id: `checkpoint-${ci}`,
+      type: "checkpointNode",
+      position: {
+        x: cpStartX + cpPosInLayer * (CHECKPOINT_WIDTH + H_GAP),
+        y: cpLayer * (NODE_HEIGHT + V_GAP) + (NODE_HEIGHT - CHECKPOINT_HEIGHT) / 2,
+      },
+      data: {
+        checkpoint: cp,
+        isActive: activeCheckpoints?.has(cp.name) ?? false,
+        isResumed: resumedCheckpoints?.has(cp.name) ?? false,
+      } as CheckpointNodeData,
+    });
+  }
+
+  // ── Build edges ──
   const edges: Edge[] = [];
+
+  // Task → Task edges (skipping intercepted ones)
   taskDefs.forEach((t, idx) => {
     for (const dep of t.dependsOn ?? []) {
       const di = titleIndex.get(dep);
       if (di != null) {
+        // Skip if this edge is intercepted by a checkpoint
+        if (interceptedEdges.has(`${di}-${idx}`)) continue;
+
         const sourceLive = findLive(taskDefs[di].title);
         const isDone = sourceLive?.status === "done";
         const isFailed = sourceLive?.status === "failed";
@@ -503,7 +689,78 @@ function buildGraphLayout(
     }
   });
 
+  // Checkpoint edges: afterTasks → checkpoint → blocksTasks
+  for (let ci = 0; ci < cpDefs.length; ci++) {
+    const cp = cpDefs[ci];
+    const cpId = `checkpoint-${ci}`;
+    const isActive = activeCheckpoints?.has(cp.name) ?? false;
+    const isResumedCp = resumedCheckpoints?.has(cp.name) ?? false;
+
+    // afterTasks → checkpoint
+    for (const title of cp.afterTasks) {
+      const ai = titleIndex.get(title);
+      if (ai == null) continue;
+      const sourceLive = findLive(title);
+      const isDone = sourceLive?.status === "done";
+      edges.push({
+        id: `e-task${ai}-cp${ci}`,
+        source: `task-${ai}`,
+        target: cpId,
+        markerEnd: { type: MarkerType.ArrowClosed, width: 12, height: 12 },
+        style: {
+          stroke: isDone
+            ? "oklch(0.72 0.15 85)"     // warm amber-green
+            : "oklch(0.55 0 0 / 0.3)",
+          strokeWidth: isDone ? 2 : 1.5,
+          strokeDasharray: "6 3",
+        },
+      });
+    }
+
+    // checkpoint → blocksTasks
+    for (const title of cp.blocksTasks) {
+      const bi = titleIndex.get(title);
+      if (bi == null) continue;
+      edges.push({
+        id: `e-cp${ci}-task${bi}`,
+        source: cpId,
+        target: `task-${bi}`,
+        markerEnd: { type: MarkerType.ArrowClosed, width: 12, height: 12 },
+        style: {
+          stroke: isResumedCp
+            ? "oklch(0.72 0.17 155)"      // green — resumed
+            : isActive
+              ? "oklch(0.75 0.15 85)"     // amber — waiting
+              : "oklch(0.55 0 0 / 0.3)",  // muted
+          strokeWidth: isActive || isResumedCp ? 2 : 1.5,
+          strokeDasharray: "6 3",
+        },
+        animated: isActive,
+      });
+    }
+  }
+
   return { nodes, edges };
+}
+
+/** Recursively shift a task and all tasks that depend on it to lower layers. */
+function shiftTaskAndDependents(
+  idx: number,
+  shift: number,
+  taskDefs: MissionTaskDef[],
+  titleIndex: Map<string, number>,
+  layers: number[],
+): void {
+  layers[idx] += shift;
+  const taskTitle = taskDefs[idx].title;
+  // Find all tasks that depend on this one and push them down too
+  for (let i = 0; i < taskDefs.length; i++) {
+    if (i === idx) continue;
+    const deps = taskDefs[i].dependsOn ?? [];
+    if (deps.includes(taskTitle) && layers[i] <= layers[idx]) {
+      shiftTaskAndDependents(i, layers[idx] + 1 - layers[i], taskDefs, titleIndex, layers);
+    }
+  }
 }
 
 // ── Graph inner (needs ReactFlow context) ──
@@ -511,14 +768,20 @@ function buildGraphLayout(
 function MissionGraphInner({
   taskDefs,
   findLiveTask,
+  checkpoints,
+  activeCheckpoints,
+  resumedCheckpoints,
 }: {
   taskDefs: MissionTaskDef[];
   findLiveTask: (title: string) => Task | undefined;
+  checkpoints?: MissionCheckpointDef[];
+  activeCheckpoints?: Set<string>;
+  resumedCheckpoints?: Set<string>;
 }) {
   const { fitView } = useReactFlow();
   const { nodes: initial, edges: initialEdges } = useMemo(
-    () => buildGraphLayout(taskDefs, findLiveTask),
-    [taskDefs, findLiveTask],
+    () => buildGraphLayout(taskDefs, findLiveTask, checkpoints, activeCheckpoints, resumedCheckpoints),
+    [taskDefs, findLiveTask, checkpoints, activeCheckpoints, resumedCheckpoints],
   );
 
   const [nodes, setNodes, onNodesChange] = useNodesState(initial);
@@ -526,11 +789,11 @@ function MissionGraphInner({
 
   // Sync when live task status changes
   useEffect(() => {
-    const { nodes: n, edges: e } = buildGraphLayout(taskDefs, findLiveTask);
+    const { nodes: n, edges: e } = buildGraphLayout(taskDefs, findLiveTask, checkpoints, activeCheckpoints, resumedCheckpoints);
     // Preserve expanded state across syncs
-    setNodes((prev) =>
-      n.map((node) => {
-        const existing = prev.find((p) => p.id === node.id);
+    setNodes((prev: Node[]) =>
+      n.map((node: Node) => {
+        const existing = prev.find((p: Node) => p.id === node.id);
         if (existing?.data.expanded) {
           return { ...node, data: { ...node.data, expanded: true } };
         }
@@ -538,18 +801,19 @@ function MissionGraphInner({
       }),
     );
     setEdges(e);
-  }, [taskDefs, findLiveTask, setNodes, setEdges]);
+  }, [taskDefs, findLiveTask, checkpoints, activeCheckpoints, resumedCheckpoints, setNodes, setEdges]);
 
   useEffect(() => {
     const t = setTimeout(() => fitView({ padding: 0.2 }), 50);
     return () => clearTimeout(t);
   }, [fitView, nodes.length]);
 
-  // Toggle expanded on node click
+  // Toggle expanded on node click (only for task nodes)
   const handleNodeClick = useCallback(
-    (_: React.MouseEvent, node: Node<TaskNodeData>) => {
-      setNodes((prev) =>
-        prev.map((n) =>
+    (_: React.MouseEvent, node: Node) => {
+      if (node.type !== "taskNode") return;
+      setNodes((prev: Node[]) =>
+        prev.map((n: Node) =>
           n.id === node.id
             ? { ...n, data: { ...n.data, expanded: !n.data.expanded } }
             : n.data.expanded
@@ -875,6 +1139,148 @@ function TaskStepCard({
   );
 }
 
+// ── Runs timeline (recurring missions) ──
+
+interface RunBatch {
+  runIndex: number;
+  startedAt: string;
+  tasks: Task[];
+  allDone: boolean;
+  allFailed: boolean;
+  doneCount: number;
+  failedCount: number;
+}
+
+function groupTasksIntoRuns(tasks: Task[], templateTaskCount: number): RunBatch[] {
+  if (tasks.length === 0 || templateTaskCount === 0) return [];
+  // Sort by creation time ascending
+  const sorted = [...tasks].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+  // Group into batches of templateTaskCount (each execution creates exactly N tasks)
+  const runs: RunBatch[] = [];
+  for (let i = 0; i < sorted.length; i += templateTaskCount) {
+    const batch = sorted.slice(i, i + templateTaskCount);
+    const doneCount = batch.filter(t => t.status === "done").length;
+    const failedCount = batch.filter(t => t.status === "failed").length;
+    const allTerminal = batch.every(t => t.status === "done" || t.status === "failed");
+    runs.push({
+      runIndex: runs.length + 1,
+      startedAt: batch[0].createdAt,
+      tasks: batch,
+      allDone: allTerminal && failedCount === 0,
+      allFailed: allTerminal && doneCount === 0,
+      doneCount,
+      failedCount,
+    });
+  }
+  // Most recent first
+  return runs.reverse();
+}
+
+function RunsTimeline({
+  tasks,
+  parsed,
+  navigate,
+}: {
+  tasks: Task[];
+  parsed: ReturnType<typeof parseMissionData> | null;
+  navigate: (path: string) => void;
+}) {
+  const templateTaskCount = parsed?.tasks.length ?? 0;
+  const runs = useMemo(() => groupTasksIntoRuns(tasks, templateTaskCount), [tasks, templateTaskCount]);
+  const [expandedRun, setExpandedRun] = useState<number | null>(runs.length > 0 ? runs[0].runIndex : null);
+
+  if (runs.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
+        <Repeat className="h-10 w-10 mb-3 opacity-40" />
+        <p className="text-sm">No execution runs yet</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="text-xs text-muted-foreground mb-2">
+        <span className="font-mono">{runs.length}</span> execution{runs.length !== 1 ? "s" : ""} recorded
+      </div>
+      {runs.map((run) => {
+        const isExpanded = expandedRun === run.runIndex;
+        const isActive = run.tasks.some(t => t.status === "in_progress" || t.status === "review" || t.status === "assigned");
+        const allTerminal = run.tasks.every(t => t.status === "done" || t.status === "failed");
+        return (
+          <div
+            key={run.runIndex}
+            className={cn(
+              "rounded-lg border border-border/40 bg-card/80 backdrop-blur-sm overflow-hidden",
+              isActive && "border-l-2 border-l-primary/60",
+            )}
+          >
+            {/* Run header */}
+            <button
+              className="flex items-center gap-3 w-full p-3 text-left hover:bg-muted/30 transition-colors"
+              onClick={() => setExpandedRun(isExpanded ? null : run.runIndex)}
+            >
+              {isExpanded ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" /> : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />}
+              <span className="text-sm font-medium">Run #{run.runIndex}</span>
+              <span className="text-xs text-muted-foreground">
+                {format(new Date(run.startedAt), "MMM d, HH:mm")}
+              </span>
+              <div className="flex-1" />
+              <div className="flex items-center gap-1.5">
+                {isActive && (
+                  <Badge variant="default" className="text-[9px]">
+                    <Loader2 className="h-2.5 w-2.5 animate-spin mr-0.5" />Running
+                  </Badge>
+                )}
+                {allTerminal && run.allDone && (
+                  <Badge variant="secondary" className="text-[9px] text-emerald-400">
+                    <CheckCircle2 className="h-2.5 w-2.5 mr-0.5" />Passed
+                  </Badge>
+                )}
+                {allTerminal && !run.allDone && (
+                  <Badge variant="secondary" className="text-[9px] text-red-400">
+                    <AlertTriangle className="h-2.5 w-2.5 mr-0.5" />
+                    {run.failedCount} failed
+                  </Badge>
+                )}
+                {!allTerminal && !isActive && (
+                  <Badge variant="secondary" className="text-[9px]">
+                    {run.doneCount}/{run.tasks.length}
+                  </Badge>
+                )}
+              </div>
+            </button>
+
+            {/* Expanded task list */}
+            {isExpanded && (
+              <div className="border-t border-border/40 px-3 py-2 space-y-1.5">
+                {run.tasks.map((task) => {
+                  const cfg = taskStatusConfig[task.status as TaskStatus];
+                  const TaskIcon = cfg?.icon ?? Clock;
+                  return (
+                    <div
+                      key={task.id}
+                      className="flex items-center gap-2 py-1.5 px-2 rounded hover:bg-muted/30 cursor-pointer transition-colors"
+                      onClick={() => navigate(`/tasks/${task.id}`)}
+                    >
+                      <TaskIcon className={cn("h-3.5 w-3.5 shrink-0", cfg?.color ?? "text-muted-foreground", task.status === "in_progress" && "animate-spin")} />
+                      <span className="text-sm truncate flex-1">{task.title}</span>
+                      <span className="text-[10px] text-muted-foreground">{task.assignTo}</span>
+                      <Badge variant="outline" className={cn("text-[9px]", cfg?.color ?? "")}>
+                        {cfg?.label ?? task.status}
+                      </Badge>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // ── Main page ──
 
 export function MissionDetailPage() {
@@ -904,12 +1310,18 @@ export function MissionDetailPage() {
   const totalCount = parsed?.tasks.length ?? 0;
   const progress = totalCount > 0 ? Math.round((doneCount / totalCount) * 100) : 0;
 
+  const isRecurring = mission?.status === "recurring";
+  const isScheduled = mission?.status === "scheduled";
+  /** Blueprint mode: scheduled/recurring missions show task definitions as templates, not live instances */
+  const isBlueprint = isRecurring || isScheduled;
+
+  const findBlueprintTask = useCallback(() => undefined, []);
+
   const scheduleEntry = useMemo(
-    () => missionId ? schedules.find(s => s.missionId === missionId) : undefined,
+    () => missionId ? schedules.find((s: { missionId: string }) => s.missionId === missionId) : undefined,
     [schedules, missionId],
   );
-
-  const hasScheduleInfo = !!(mission?.schedule || mission?.deadline || mission?.qualityThreshold != null);
+  const hasScheduleInfo = !!(mission?.schedule || mission?.deadline || mission?.endDate || mission?.qualityThreshold != null || scheduleEntry);
 
   const [actionPending, setActionPending] = useState<string | null>(null);
   const handleAction = async (action: () => Promise<unknown>, label: string) => {
@@ -1014,7 +1426,7 @@ export function MissionDetailPage() {
               <Calendar className="h-3.5 w-3.5 text-blue-400" />
               <span className="text-muted-foreground">Schedule:</span>
               <span className="font-medium">{cronToHuman(mission.schedule)}</span>
-              {mission.recurring ? (
+              {isRecurring ? (
                 <Badge variant="outline" className="text-[9px] gap-0.5 text-violet-400 ml-1">
                   <Repeat className="h-2 w-2" />Recurring
                 </Badge>
@@ -1023,6 +1435,44 @@ export function MissionDetailPage() {
               )}
             </div>
           )}
+          {scheduleEntry?.nextRunAt && (
+            <div className="flex items-center gap-1.5 text-xs">
+              <Clock className="h-3.5 w-3.5 text-muted-foreground" />
+              <span className="text-muted-foreground">Next:</span>
+              <span className={cn("font-medium", new Date(scheduleEntry.nextRunAt).getTime() < Date.now() && "text-red-400")}>
+                {new Date(scheduleEntry.nextRunAt).getTime() < Date.now()
+                  ? "overdue"
+                  : formatDistanceToNow(new Date(scheduleEntry.nextRunAt), { addSuffix: true })}
+              </span>
+            </div>
+          )}
+          {scheduleEntry?.lastRunAt && (
+            <div className="flex items-center gap-1.5 text-xs">
+              <Clock className="h-3.5 w-3.5 text-muted-foreground" />
+              <span className="text-muted-foreground">Last run:</span>
+              <span className="font-medium">{formatDistanceToNow(new Date(scheduleEntry.lastRunAt), { addSuffix: true })}</span>
+            </div>
+          )}
+          {scheduleEntry && (
+            <div className="flex items-center gap-1.5 text-xs">
+              <span className={cn("h-2 w-2 rounded-full", scheduleEntry.enabled ? "bg-emerald-500" : "bg-zinc-500")} />
+              <span className="text-muted-foreground">{scheduleEntry.enabled ? "Enabled" : "Paused"}</span>
+            </div>
+          )}
+          {mission.endDate && (() => {
+            const ed = new Date(mission.endDate);
+            const isExpired = ed.getTime() < Date.now();
+            return (
+              <div className="flex items-center gap-1.5 text-xs">
+                <Calendar className={cn("h-3.5 w-3.5", isExpired ? "text-zinc-500" : "text-muted-foreground")} />
+                <span className="text-muted-foreground">Ends:</span>
+                <span className={cn("font-medium", isExpired && "text-zinc-500 line-through")}>
+                  {format(ed, "MMM d, yyyy")}
+                </span>
+                {isExpired && <span className="text-[10px] text-zinc-500">(expired)</span>}
+              </div>
+            );
+          })()}
           {mission.deadline && (() => {
             const dl = new Date(mission.deadline);
             const isOverdue = dl.getTime() < Date.now();
@@ -1043,26 +1493,6 @@ export function MissionDetailPage() {
               <span className="font-medium">{mission.qualityThreshold}</span>
             </div>
           )}
-          {scheduleEntry?.nextRunAt && (
-            <div className="flex items-center gap-1.5 text-xs">
-              <Clock className="h-3.5 w-3.5 text-muted-foreground" />
-              <span className="text-muted-foreground">Next run:</span>
-              <span className="font-medium">{formatDistanceToNow(new Date(scheduleEntry.nextRunAt), { addSuffix: true })}</span>
-            </div>
-          )}
-          {scheduleEntry?.lastRunAt && (
-            <div className="flex items-center gap-1.5 text-xs">
-              <Clock className="h-3.5 w-3.5 text-muted-foreground" />
-              <span className="text-muted-foreground">Last run:</span>
-              <span className="font-medium">{formatDistanceToNow(new Date(scheduleEntry.lastRunAt), { addSuffix: true })}</span>
-            </div>
-          )}
-          {scheduleEntry && (
-            <div className="flex items-center gap-1.5 text-xs">
-              <span className={cn("h-2 w-2 rounded-full", scheduleEntry.enabled ? "bg-emerald-500" : "bg-zinc-500")} />
-              <span className="text-muted-foreground">{scheduleEntry.enabled ? "Enabled" : "Disabled"}</span>
-            </div>
-          )}
         </div>
       )}
 
@@ -1079,6 +1509,12 @@ export function MissionDetailPage() {
               <Badge variant="secondary" className="ml-1.5 text-[9px]">{groupTasks.length}</Badge>
             )}
           </TabsTrigger>
+          {isBlueprint && groupTasks.length > 0 && (
+            <TabsTrigger value="runs">
+              <Repeat className="h-3.5 w-3.5 mr-1.5" />
+              Runs
+            </TabsTrigger>
+          )}
           <TabsTrigger value="raw">Raw JSON</TabsTrigger>
           {report && (
             <TabsTrigger value="report">
@@ -1094,8 +1530,19 @@ export function MissionDetailPage() {
         <TabsContent value="graph" className="mt-4 flex-1 min-h-0">
           {parsed && parsed.tasks.length > 0 ? (
             <div className="h-full w-full rounded-lg border border-border/40">
+              {isBlueprint && (
+                <div className="px-4 py-2 border-b border-border/40 bg-muted/30">
+                  <span className="text-[11px] text-muted-foreground">
+                    Blueprint view — task definitions are templates. See the <span className="font-medium">Runs</span> tab for execution history.
+                  </span>
+                </div>
+              )}
               <ReactFlowProvider>
-                <MissionGraphInner taskDefs={parsed.tasks} findLiveTask={findLiveTask} />
+                <MissionGraphInner
+                  taskDefs={parsed.tasks}
+                  findLiveTask={isBlueprint ? findBlueprintTask : findLiveTask}
+                  checkpoints={parsed.checkpoints}
+                />
               </ReactFlowProvider>
             </div>
           ) : (
@@ -1110,6 +1557,15 @@ export function MissionDetailPage() {
         <TabsContent value="tasks" className="mt-4 flex-1 min-h-0">
           <ScrollArea className="h-full">
             <div className="pr-4">
+              {/* Blueprint banner */}
+              {isBlueprint && (
+                <div className="rounded-lg bg-muted/30 border border-border/40 px-4 py-2.5 mb-4">
+                  <span className="text-[11px] text-muted-foreground">
+                    Blueprint view — these are task templates, not live instances. See the <span className="font-medium">Runs</span> tab for execution history.
+                  </span>
+                </div>
+              )}
+
               {/* Prompt */}
               {mission.prompt && (
                 <div className="flex items-start gap-3 rounded-lg bg-muted/40 p-3.5 mb-6">
@@ -1132,7 +1588,7 @@ export function MissionDetailPage() {
                       taskDef={taskDef}
                       index={idx}
                       isLast={idx === parsed.tasks.length - 1}
-                      liveTask={findLiveTask(taskDef.title)}
+                      liveTask={isBlueprint ? undefined : findLiveTask(taskDef.title)}
                       navigate={navigate}
                     />
                   ))}
@@ -1146,6 +1602,17 @@ export function MissionDetailPage() {
             </div>
           </ScrollArea>
         </TabsContent>
+
+        {/* Runs tab — execution history for recurring missions */}
+        {isRecurring && groupTasks.length > 0 && (
+          <TabsContent value="runs" className="mt-4 flex-1 min-h-0">
+            <ScrollArea className="h-full">
+              <div className="space-y-4 pr-4">
+                <RunsTimeline tasks={groupTasks} parsed={parsed} navigate={navigate} />
+              </div>
+            </ScrollArea>
+          </TabsContent>
+        )}
 
         {/* Raw JSON tab — full width code block with copy */}
         <TabsContent value="raw" className="mt-4 flex-1 min-h-0">

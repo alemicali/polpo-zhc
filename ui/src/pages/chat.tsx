@@ -36,6 +36,8 @@ import {
   ShieldCheck,
   AlertTriangle,
   SkipForward,
+  PauseCircle,
+  BarChart3,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -305,10 +307,30 @@ interface MissionTaskShape {
   maxRetries?: number;
 }
 
+interface MissionCheckpointShape {
+  name: string;
+  afterTasks: string[];
+  blocksTasks: string[];
+  message?: string;
+  notifyChannels?: string[];
+}
+
+interface MissionQualityGateShape {
+  name: string;
+  afterTasks: string[];
+  blocksTasks: string[];
+  minScore?: number;
+  requireAllPassed?: boolean;
+  condition?: string;
+  notifyChannels?: string[];
+}
+
 interface MissionDataShape {
   name?: string;
   tasks: MissionTaskShape[];
   team?: Array<{ name: string; role?: string }>;
+  checkpoints?: MissionCheckpointShape[];
+  qualityGates?: MissionQualityGateShape[];
 }
 
 // ── Mission Preview Card ──
@@ -483,6 +505,98 @@ function MissionPreviewCard({
         })}
         {tasks.length === 0 && (
           <p className="text-xs text-muted-foreground italic">No tasks in this mission.</p>
+        )}
+
+        {/* Checkpoints */}
+        {mission?.checkpoints && mission.checkpoints.length > 0 && (
+          <div className="mt-3 pt-3 border-t border-primary/10 space-y-1.5">
+            <div className="flex items-center gap-1.5 px-1.5 mb-1">
+              <PauseCircle className="h-3.5 w-3.5 text-amber-500" />
+              <span className="text-[11px] font-semibold text-amber-600 dark:text-amber-400 uppercase tracking-wider">
+                Checkpoints
+              </span>
+            </div>
+            {mission.checkpoints.map((cp, ci) => (
+              <div
+                key={ci}
+                className="flex items-start gap-2 rounded-lg border border-amber-500/15 bg-amber-500/[0.03] px-3 py-2"
+              >
+                <PauseCircle className="h-3.5 w-3.5 text-amber-500 mt-0.5 shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium">{cp.name}</p>
+                  {cp.message && (
+                    <p className="text-[11px] text-muted-foreground mt-0.5">{cp.message}</p>
+                  )}
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-1">
+                    <span className="text-[10px] text-muted-foreground">
+                      After: <span className="font-medium text-foreground/70">{cp.afterTasks.join(", ")}</span>
+                    </span>
+                    <span className="text-[10px] text-muted-foreground">
+                      Blocks: <span className="font-medium text-foreground/70">{cp.blocksTasks.join(", ")}</span>
+                    </span>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Quality Gates */}
+        {mission?.qualityGates && mission.qualityGates.length > 0 && (
+          <div className="mt-3 pt-3 border-t border-primary/10 space-y-1.5">
+            <div className="flex items-center gap-1.5 px-1.5 mb-1">
+              <BarChart3 className="h-3.5 w-3.5 text-violet-500" />
+              <span className="text-[11px] font-semibold text-violet-600 dark:text-violet-400 uppercase tracking-wider">
+                Quality Gates
+              </span>
+            </div>
+            {mission.qualityGates.map((qg, qi) => (
+              <div
+                key={qi}
+                className="flex items-start gap-2 rounded-lg border border-violet-500/15 bg-violet-500/[0.03] px-3 py-2"
+              >
+                <BarChart3 className="h-3.5 w-3.5 text-violet-500 mt-0.5 shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium">{qg.name}</p>
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-1">
+                    <span className="text-[10px] text-muted-foreground">
+                      After: <span className="font-medium text-foreground/70">{qg.afterTasks.join(", ")}</span>
+                    </span>
+                    <span className="text-[10px] text-muted-foreground">
+                      Blocks: <span className="font-medium text-foreground/70">{qg.blocksTasks.join(", ")}</span>
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5 mt-1.5">
+                    {qg.minScore != null && (
+                      <Badge variant="secondary" className="text-[10px] gap-1">
+                        <BarChart3 className="h-2.5 w-2.5" />
+                        Min score: {qg.minScore}/5
+                      </Badge>
+                    )}
+                    {qg.requireAllPassed && (
+                      <Badge variant="secondary" className="text-[10px] gap-1">
+                        <ShieldCheck className="h-2.5 w-2.5" />
+                        All must pass
+                      </Badge>
+                    )}
+                    {qg.condition && (
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Badge variant="secondary" className="text-[10px] gap-1 cursor-default">
+                            <FileCode className="h-2.5 w-2.5" />
+                            Custom condition
+                          </Badge>
+                        </TooltipTrigger>
+                        <TooltipContent side="top" className="text-xs max-w-xs font-mono">
+                          {qg.condition}
+                        </TooltipContent>
+                      </Tooltip>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
         )}
       </div>
 

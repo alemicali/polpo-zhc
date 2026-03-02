@@ -79,6 +79,7 @@ function createNoopSessionStore() {
   return {
     create: () => "s1",
     addMessage: () => ({ id: "m1", role: "user" as const, content: "", ts: new Date().toISOString() }),
+    updateMessage: () => false,
     getMessages: () => [],
     getRecentMessages: () => [],
     listSessions: () => [],
@@ -125,6 +126,7 @@ function createContext(overrides?: {
     hooks: new HookRegistry(),
     config,
     workDir: "/tmp/test",
+    agentWorkDir: "/tmp/test",
     polpoDir: "/tmp/test/.polpo",
     assessFn: async () => ({
       passed: true,
@@ -890,14 +892,14 @@ describe("MissionExecutor", () => {
 
       // Mission is now active — second execution should throw
       expect(() => missionExec.executeMission(mission.id)).toThrow(
-        "Mission already active",
+        'Cannot execute mission in "active" state (must be "draft", "scheduled", or "recurring")',
       );
     });
 
     it("throws for mission with no tasks in mission data", () => {
       const mission = missionExec.saveMission({ data: JSON.stringify({ team: [{ name: "dev" }] }) });
 
-      expect(() => missionExec.executeMission(mission.id)).toThrow("Mission has no tasks");
+      expect(() => missionExec.executeMission(mission.id)).toThrow("Invalid mission document");
     });
 
     it("marks mission as active after execution", () => {

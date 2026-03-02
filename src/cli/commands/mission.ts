@@ -52,13 +52,17 @@ export function registerMissionCommands(program: Command): void {
               ? m.prompt.slice(0, 57) + "..."
               : m.prompt
             : "";
-          const status = m.status === "active"
-            ? chalk.yellow(m.status)
-            : m.status === "completed"
-              ? chalk.green(m.status)
-              : m.status === "failed"
-                ? chalk.red(m.status)
-                : chalk.dim(m.status);
+          const statusColors: Record<string, (s: string) => string> = {
+            draft: chalk.dim,
+            scheduled: chalk.blue,
+            recurring: chalk.magenta,
+            active: chalk.cyan,
+            paused: chalk.yellow,
+            completed: chalk.green,
+            failed: chalk.red,
+            cancelled: chalk.yellow,
+          };
+          const status = (statusColors[m.status] ?? chalk.dim)(m.status);
           console.log(
             `  ${chalk.bold(m.name)} [${status}]` +
             (prompt ? chalk.dim(` — ${prompt}`) : ""),

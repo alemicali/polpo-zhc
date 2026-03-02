@@ -4,7 +4,7 @@
  */
 
 import { z } from "zod";
-import type { TaskExpectation } from "./types.js";
+import type { TaskExpectation, MissionCheckpoint, MissionQualityGate } from "./types.js";
 
 // ── Expectation Schemas (discriminated union on `type`) ──────────────
 
@@ -82,4 +82,72 @@ export function sanitizeExpectations(raw: unknown[]): { valid: TaskExpectation[]
   }
 
   return { valid, warnings };
+}
+
+// ── Mission Checkpoint Schema ───────────────────────────────────────
+
+export const missionCheckpointSchema = z.object({
+  name: z.string().min(1, "checkpoint requires a name"),
+  afterTasks: z.array(z.string().min(1)).min(1, "checkpoint requires at least one task in afterTasks"),
+  blocksTasks: z.array(z.string().min(1)).min(1, "checkpoint requires at least one task in blocksTasks"),
+  message: z.string().optional(),
+  notifyChannels: z.array(z.string().min(1)).optional(),
+});
+
+// ── Mission Quality Gate Schema ─────────────────────────────────────
+
+export const missionQualityGateSchema = z.object({
+  name: z.string().min(1, "quality gate requires a name"),
+  afterTasks: z.array(z.string().min(1)).min(1, "quality gate requires at least one task in afterTasks"),
+  blocksTasks: z.array(z.string().min(1)).min(1, "quality gate requires at least one task in blocksTasks"),
+  minScore: z.number().min(1).max(5).optional(),
+  requireAllPassed: z.boolean().optional(),
+  condition: z.string().optional(),
+  notifyChannels: z.array(z.string().min(1)).optional(),
+});
+
+// ── Mission Task Schema ─────────────────────────────────────────────
+
+const missionTaskSchema = z.object({
+  title: z.string().min(1, "task requires a title"),
+  description: z.string().min(1, "task requires a description"),
+  assignTo: z.string().min(1).optional(),
+  dependsOn: z.array(z.string().min(1)).optional(),
+  expectations: z.array(z.any()).optional(),
+  expectedOutcomes: z.array(z.any()).optional(),
+  metrics: z.array(z.any()).optional(),
+  maxRetries: z.number().int().min(0).optional(),
+  maxDuration: z.number().positive().optional(),
+  retryPolicy: z.object({
+    escalateAfter: z.number().int().min(0).optional(),
+    fallbackAgent: z.string().optional(),
+  }).optional(),
+  notifications: z.any().optional(),
+});
+
+// ── Mission Document Schema ─────────────────────────────────────────
+
+export const missionDocumentSchema = z.object({
+  tasks: z.array(missionTaskSchema).min(1, "mission requires at least one task"),
+  team: z.array(z.any()).optional(),
+  qualityGates: z.array(missionQualityGateSchema).optional(),
+  checkpoints: z.array(missionCheckpointSchema).optional(),
+  notifications: z.any().optional(),
+});
+
+export type MissionDocumentParsed = z.infer<typeof missionDocumentSchema>;
+
+/**
+ * Parse and validate a mission JSON document strictly.
+ * Returns the validated document or throws with a clear error message.
+ */
+export function parseMissionDocument(raw: unknown): MissionDocumentParsed {
+  const result = missionDocumentSchema.safeParse(raw);
+  if (!result.success) {
+    const issues = result.error.issues
+      .map((i) => `${i.path.join(".")}: ${i.message}`)
+      .join("; ");
+    throw new Error(`Invalid mission document: ${issues}`);
+  }
+  return result.data;
 }

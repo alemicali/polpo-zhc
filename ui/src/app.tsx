@@ -21,7 +21,8 @@ const TemplatesPage = lazy(() => import("@/pages/templates").then(m => ({ defaul
 const ConfigPage = lazy(() => import("@/pages/config").then(m => ({ default: m.ConfigPage })));
 const SkillsPage = lazy(() => import("@/pages/skills").then(m => ({ default: m.SkillsPage })));
 const SkillDetailPage = lazy(() => import("@/pages/skill-detail").then(m => ({ default: m.SkillDetailPage })));
-const SchedulesPage = lazy(() => import("@/pages/schedules").then(m => ({ default: m.SchedulesPage })));
+// Schedules are now integrated into the Missions page — redirect old URL for bookmarks
+
 const FilesPage = lazy(() => import("@/pages/files").then(m => ({ default: m.FilesPage })));
 
 function PageLoader() {
@@ -53,7 +54,7 @@ export function App() {
         <Route path="notifications" element={<Suspense fallback={<PageLoader />}><NotificationsPage /></Suspense>} />
         <Route path="approvals" element={<Suspense fallback={<PageLoader />}><ApprovalsPage /></Suspense>} />
         <Route path="templates" element={<Suspense fallback={<PageLoader />}><TemplatesPage /></Suspense>} />
-        <Route path="schedules" element={<Suspense fallback={<PageLoader />}><SchedulesPage /></Suspense>} />
+        <Route path="schedules" element={<Navigate to="/missions" replace />} />
         <Route path="config" element={<Suspense fallback={<PageLoader />}><ConfigPage /></Suspense>} />
         <Route path="files" element={<Suspense fallback={<PageLoader />}><FilesPage /></Suspense>} />
       </Route>

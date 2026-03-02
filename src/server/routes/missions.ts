@@ -247,8 +247,13 @@ export function missionRoutes(): OpenAPIHono<ServerEnv> {
   app.openapi(updateMissionRoute, async (c) => {
     const orchestrator = c.get("orchestrator");
     const { missionId } = c.req.valid("param");
-    const body = c.req.valid("json");
-    const mission = orchestrator.updateMission(missionId, body);
+    const { endDate, ...rest } = c.req.valid("json");
+    // Convert null endDate (clear) to undefined for the Mission interface
+    const updates: Partial<Omit<import("../../core/types.js").Mission, "id">> = {
+      ...rest,
+      ...(endDate !== undefined ? { endDate: endDate ?? undefined } : {}),
+    };
+    const mission = orchestrator.updateMission(missionId, updates);
     return c.json({ ok: true, data: mission });
   });
 

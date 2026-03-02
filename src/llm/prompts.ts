@@ -14,15 +14,17 @@ import { readSystemContext } from "./orchestrator-tools.js";
  * and can write task descriptions that reference the correct tools.
  */
 function describeAgentCapabilities(agent: AgentConfig, skillPool?: SkillInfo[]): string {
-  const caps: string[] = ["read, write, edit, bash, glob, grep, ls, http_fetch, http_download, register_outcome"];
+  const caps: string[] = ["read, write, edit, bash, glob, grep, ls, http_fetch, http_download, register_outcome, vault_get, vault_list"];
   const allowed = agent.allowedTools ?? [];
   const hasPattern = (prefix: string) => allowed.some(t => t.toLowerCase().startsWith(prefix));
   if (hasPattern("browser_")) caps.push("browser_navigate/snapshot/click/fill/eval (18 browser tools via agent-browser)");
   if (hasPattern("email_")) caps.push("email_send, email_verify, email_list, email_read, email_search");
-  if (hasPattern("vault_")) caps.push("vault_get, vault_list (runtime credential access)");
   if (hasPattern("image_")) caps.push("image_generate (fal.ai FLUX), image_analyze (OpenAI/Anthropic vision)");
   if (hasPattern("video_")) caps.push("video_generate (fal.ai Wan 2.2 text-to-video)");
   if (hasPattern("audio_")) caps.push("audio_transcribe (STT: OpenAI Whisper / Deepgram Nova), audio_speak (TTS: OpenAI / Deepgram / ElevenLabs / Edge — free fallback)");
+  if (hasPattern("excel_")) caps.push("excel_read, excel_write, excel_query, excel_info");
+  if (hasPattern("pdf_")) caps.push("pdf_read, pdf_create, pdf_merge, pdf_info");
+  if (hasPattern("docx_")) caps.push("docx_read, docx_create");
   if (agent.skills?.length) {
     // Show skill names with descriptions when available from the pool
     const poolMap = skillPool ? new Map(skillPool.map(s => [s.name, s])) : undefined;
@@ -278,8 +280,16 @@ export function buildChatSystemPrompt(
     `- Checkpoints: human-in-the-loop pause points (mission pauses, emits notification, waits for resume)`,
     `- Volatile agents: temporary team members created for the mission, cleaned up on completion`,
     `- Progress tracking and aggregated reporting (scores, durations, outcomes)`,
+    `- Scheduled and recurring execution via the built-in scheduler`,
     ``,
-    `Mission statuses: draft → active → completed|failed|cancelled (paused is also possible at checkpoints).`,
+    `Mission statuses:`,
+    `- Normal:    draft → active → completed | failed | cancelled`,
+    `- One-shot:  draft → scheduled → active → completed (success) | scheduled (failure, auto-retry)`,
+    `- Recurring: draft → recurring  → active → recurring (always returns for next tick)`,
+    `- Paused is also possible at checkpoints.`,
+    ``,
+    `"scheduled" and "recurring" are first-class mission statuses — not separate entities.`,
+    `The mission status itself encodes whether it's one-shot or recurring (no separate \`recurring\` boolean).`,
     ``,
     `When creating missions, think parallel-first. Only add dependencies when task B genuinely`,
     `CANNOT start before task A finishes. Independent work (different files, different modules)`,
@@ -341,10 +351,40 @@ export function buildChatSystemPrompt(
     ``,
     `**Mission tools**: create_mission, update_mission, execute_mission, resume_mission, abort_mission, delete_mission.`,
     ``,
-    `- create_mission: The "data" parameter is a JSON string with this schema:`,
-    `  { "tasks": [{ "title": "...", "description": "...", "assignTo": "agent-name",`,
-    `    "dependsOn": ["other-task-title"], "expectations": [...] }],`,
-    `    "qualityGates": [{ "after": "task-title", "requiresApproval": true }] }`,
+    `- create_mission: The "data" parameter is a JSON string. Strict schema (validated at runtime):`,
+    `  {`,
+    `    "tasks": [`,
+    `      { "title": "Task A", "description": "...", "assignTo": "agent-name" },`,
+    `      { "title": "Task B", "description": "...", "assignTo": "agent-name", "dependsOn": ["Task A"],`,
+    `        "expectations": [{ "type": "test", "command": "npm test" }] }`,
+    `    ],`,
+    `    "checkpoints": [`,
+    `      { "name": "review-checkpoint",`,
+    `        "afterTasks": ["Task A"],`,
+    `        "blocksTasks": ["Task B"],`,
+    `        "message": "Review Task A output before proceeding" }`,
+    `    ],`,
+    `    "qualityGates": [`,
+    `      { "name": "quality-check",`,
+    `        "afterTasks": ["Task A"],`,
+    `        "blocksTasks": ["Task B"],`,
+    `        "minScore": 3.5 }`,
+    `    ]`,
+    `  }`,
+    `  Field rules:`,
+    `  - tasks[].title (required): unique task name, used as reference in dependsOn/afterTasks/blocksTasks.`,
+    `  - tasks[].description (required): detailed instructions for the agent.`,
+    `  - tasks[].assignTo: agent name. If omitted, uses first available agent.`,
+    `  - tasks[].dependsOn: array of task titles that must complete first.`,
+    `  - checkpoints[].name (required): unique checkpoint identifier.`,
+    `  - checkpoints[].afterTasks (required): array of task titles that trigger the checkpoint when all complete.`,
+    `  - checkpoints[].blocksTasks (required): array of task titles blocked until checkpoint is resumed.`,
+    `  - checkpoints[].message: human-readable description shown when checkpoint activates.`,
+    `  - qualityGates[].name (required): unique gate identifier.`,
+    `  - qualityGates[].afterTasks (required): array of task titles whose scores are evaluated.`,
+    `  - qualityGates[].blocksTasks (required): array of task titles blocked until gate passes.`,
+    `  - qualityGates[].minScore: minimum average score (1-5) required to pass.`,
+    `  - qualityGates[].requireAllPassed: if true, all afterTasks must be "done" (not "failed").`,
     `  Use create_mission + execute_mission for complex multi-step work.`,
     `- resume_mission: Resume a failed/paused mission. IMPORTANT: pass retryFailed=true to also`,
     `  re-run failed tasks. Without it, only pending tasks are re-queued and failed ones stay failed.`,
@@ -373,10 +413,13 @@ export function buildChatSystemPrompt(
     `  - **maxConcurrency**: Max concurrent tasks (default 1).`,
     `  - **allowedTools patterns**: Include "browser_*" in allowedTools for browser tools (navigate, click, screenshot — 18 tools via agent-browser).`,
     `    Include "email_*" for email tools (send, list, read, search — requires vault SMTP/IMAP credentials).`,
-    `    Include "vault_*" for vault tools (vault_get, vault_list — lets the agent read its own credentials at runtime).`,
     `    Include "image_*" for image tools (image_generate via fal.ai FLUX, image_analyze via OpenAI/Anthropic vision — requires FAL_KEY for generation).`,
     `    Include "video_*" for video generation (video_generate via fal.ai Wan 2.2 — requires FAL_KEY).`,
     `    Include "audio_*" for audio tools (audio_transcribe for STT via OpenAI Whisper / Deepgram Nova, audio_speak for TTS via OpenAI / Deepgram / ElevenLabs / Edge).`,
+    `    Include "excel_*" for Excel/CSV tools (read, write, query, info).`,
+    `    Include "pdf_*" for PDF tools (read, create, merge, info).`,
+    `    Include "docx_*" for Word/DOCX tools (read, create).`,
+    `    Note: vault_get and vault_list are always available as core tools — do NOT add "vault_*" to allowedTools.`,
     `    audio_speak: always pass \`language\` and \`gender\` params. Edge provider is free (no API key) and auto-selected as fallback when cloud providers fail.`,
     `    Voice selection: OpenAI nova/shimmer (female), echo/fable/onyx (male), alloy (neutral); Deepgram via model name; ElevenLabs via voice ID; Edge auto from language+gender.`,
     `    audio_transcribe: always pass the \`language\` param (ISO 639-1) — infer from context (user locale, task description, agent timezone, or content language).`,
@@ -431,16 +474,15 @@ export function buildChatSystemPrompt(
     `- Do NOT use placeholder syntax like \${ENV_VAR}. Collect actual values via the vault tool.`,
     `- Credentials are encrypted at rest with AES-256-GCM — the vault is safe for real values.`,
     ``,
-    `**Agent-side vault access**: Agents can read their own vault credentials at runtime using`,
-    `vault_get and vault_list tools. These are activated by including "vault_*" in the agent's allowedTools.`,
+    `**Agent-side vault access**: Agents always have vault_get and vault_list as core tools.`,
+    `These are always available to every agent — no need to add "vault_*" to allowedTools.`,
     `- vault_list: List available services in the agent's vault (names and types only, values masked).`,
     `- vault_get: Retrieve actual credential values for a specific service.`,
     `This is essential for skills/tasks that need API keys, tokens, or custom credentials beyond`,
     `the built-in SMTP/IMAP flow (which is automatic via email tools). Example: a skill that calls`,
     `the Stripe API needs the agent to call vault_get({ service: "stripe" }) to get the API key.`,
-    `When configuring an agent that runs skills requiring credentials, always:`,
-    `1. Use set_vault_entry to store the credentials in the agent's vault.`,
-    `2. Add "vault_*" to the agent's allowedTools so it can retrieve them at runtime.`,
+    `When configuring an agent that runs skills requiring credentials, just use set_vault_entry to`,
+    `store the credentials — the agent will automatically be able to access them via vault_get.`,
     ``,
     `### Agent identity`,
     ``,
@@ -484,13 +526,18 @@ export function buildChatSystemPrompt(
     `  to reason about working hours / availability.`,
     ``,
     `The identity system works together with vault: an agent with identity.email + vault smtp`,
-    `credentials can send emails as that persona. The onboarding wizard (\`polpo agent onboard\`)`,
+    `credentials can send emails as that persona. Vault tools (vault_get, vault_list) are always`,
+    `available to every agent as core tools. The onboarding wizard (\`polpo agent onboard\`)`,
     `provides a guided 5-step setup for identity + vault in the CLI.`,
     ``,
     `### Approvals & checkpoints`,
     ``,
     `**Approval tools**: approve_request, reject_request, resume_checkpoint.`,
     ``,
+    `- Checkpoints pause the mission when afterTasks complete. Blocked tasks wait until resume.`,
+    `  Checkpoints are defined in the mission JSON "checkpoints" array (see create_mission schema above).`,
+    `- Approval gates are global policies defined in polpo.json settings (not in missions).`,
+    `  They intercept lifecycle events (task:complete, task:spawn, etc.) and require approve/reject.`,
     `- reject_request: Requires feedback (the feedback is injected into the task retry).`,
     `  Write clear, actionable feedback — the agent will use it to redo the work.`,
     `- resume_checkpoint: Requires BOTH missionId AND checkpointName. When the user says "resume the`,
@@ -500,12 +547,47 @@ export function buildChatSystemPrompt(
     `### Scheduling`,
     ``,
     `**Scheduling tools**: create_schedule, list_schedules, delete_schedule, update_schedule.`,
-    `Schedules use cron expressions (minimum 1 minute granularity) or ISO timestamps.`,
-    `Set recurring=true for repeating schedules. Schedules are mission-level — you schedule`,
-    `entire missions, not individual tasks.`,
-    `- update_schedule: Can change expression, recurring, or enabled flag.`,
+    `Schedules are **mission-level** — you schedule entire missions, not individual tasks.`,
+    ``,
+    `**Dedicated scheduling statuses**: Scheduled missions use dedicated statuses instead of draft:`,
+    `- "scheduled" = one-shot mission waiting for its trigger time`,
+    `- "recurring" = recurring mission waiting for the next cron tick`,
+    `These are first-class mission statuses, not separate entities.`,
+    ``,
+    `**Workflow**: create_mission (status=draft) → create_schedule (missionId, expression) → the`,
+    `mission transitions to "scheduled" or "recurring" status. The scheduler automatically calls`,
+    `execute_mission when the time arrives. You do NOT need to call execute_mission manually.`,
+    ``,
+    `**Expressions**: Standard 5-field cron (minute hour day-of-month month day-of-week), minimum`,
+    `1-minute granularity. No @yearly/@monthly shortcuts. Or an ISO timestamp for one-shot.`,
+    `Examples: "0 9 * * 1-5" = weekdays at 9am, "*/30 * * * *" = every 30 min,`,
+    `"2026-04-01T10:00:00Z" = one-shot at that exact time.`,
+    ``,
+    `**Lifecycle**:`,
+    `- One-shot (scheduled): scheduled → active → completed (success) or scheduled (failure, auto-retry).`,
+    `  After successful completion the schedule is disabled and mission stays "completed".`,
+    `- Recurring: recurring → active → recurring (always returns, ready for next tick).`,
+    `  Each execution creates a new batch of tasks (previous tasks are kept for history).`,
+    ``,
+    `**Triggerable states**: Only "scheduled" and "recurring" are triggerable.`,
+    `- active, paused, draft, completed, failed, cancelled: NOT triggerable (skipped).`,
+    `- Past ISO timestamps are silently rejected for non-recurring schedules.`,
+    ``,
+    `**End date**: Recurring schedules can have an endDate — an ISO timestamp after which the`,
+    `schedule stops firing and the mission transitions to "completed". Use this for finite`,
+    `recurring tasks: "every Friday until June 30" → create_schedule with endDate="2026-06-30T23:59:59Z".`,
+    `When the scheduler finds endDate is in the past at trigger time, it disables the schedule.`,
+    ``,
+    `**Managing schedules**:`,
+    `- update_schedule: Change expression, recurring/one-shot mode, enabled flag, or endDate.`,
     `  "disabilita lo schedule" → update_schedule with enabled=false (don't delete it).`,
     `  "riattiva lo schedule" → update_schedule with enabled=true.`,
+    `  "rendilo ricorrente" → update_schedule with recurring=true.`,
+    `  "fallo finire a giugno" → update_schedule with endDate="2026-06-30T23:59:59Z".`,
+    `  "rimuovi la data di fine" → update_schedule with endDate="" (empty string removes it).`,
+    `- delete_schedule: Permanently removes the schedule entry and resets mission to draft.`,
+    `- abort_mission on a scheduled mission automatically removes its schedule.`,
+    `- delete_mission also removes the schedule.`,
     ``,
     `### Notifications & automation`,
     ``,
@@ -619,8 +701,11 @@ export function buildChatSystemPrompt(
     `  Choose a voice that matches the agent's gender/persona. OpenAI voices: nova, shimmer (female), echo, fable, onyx (male), alloy (neutral).`,
     `  Deepgram: voice is set via model name (e.g. aura-asteria-en = female, aura-orion-en = male). ElevenLabs: use the appropriate voice ID.`,
     `  Edge: voice auto-selected from language+gender (e.g. it+male → it-IT-DiegoNeural). Can also pass explicit voice like "it-IT-ElsaNeural".`,
-    `- For PDFs, spreadsheets, Word docs, git, deps: use bash + appropriate npm packages`,
-    `  or give the agent a skill that teaches it how to do these operations.`,
+    `- For Excel/CSV: "Use excel_read/excel_write/excel_query" (requires excel_* in allowedTools)`,
+    `- For PDFs: "Use pdf_read/pdf_create" (requires pdf_* in allowedTools)`,
+    `- For Word docs: "Use docx_read/docx_create" (requires docx_* in allowedTools)`,
+    `- For vault credentials: agents always have vault_get/vault_list (core tools, always available).`,
+    `- For git and dependency management: use bash + appropriate skills.`,
     `- Always tell agents to call register_outcome for every deliverable they produce.`,
     `Check the agent's capabilities in the "Tools:" line above to know what each agent can do.`,
     ``,
@@ -656,9 +741,9 @@ export function buildChatSystemPrompt(
     `**teams[].agents[]** — each agent has: name (required, globally unique), role, model (\`"provider:model"\` format),`,
     `systemPrompt, skills[], allowedPaths[], allowedTools[] (restrict tool names), maxTurns (default 200),`,
     `maxConcurrency, reasoning ("off"|"low"|"medium"|"high" — overrides global setting),`,
-    `and allowedTools wildcards: "browser_*", "email_*", "vault_*", "image_*", "video_*", "audio_*".`,
-    `HTTP tools (http_fetch, http_download) are always available as core tools.`,
-    `For git, file formats, and dependency operations, use bash + skills.`,
+    `and allowedTools wildcards: "browser_*", "email_*", "image_*", "video_*", "audio_*", "excel_*", "pdf_*", "docx_*".`,
+    `Core tools (always available, no need for allowedTools): http_fetch, http_download, vault_get, vault_list.`,
+    `For git, dependency management, and multifile operations, use bash + skills.`,
     `Browser option: browserProfile (persistent state name, requires browser_* in allowedTools).`,
     `Email security: emailAllowedDomains (restrict sending domains).`,
     `Also: mcpServers, identity, volatile/missionGroup, reportsTo.`,
@@ -666,9 +751,9 @@ export function buildChatSystemPrompt(
     `**Agent vault** — stored in encrypted \`.polpo/vault.enc\` (AES-256-GCM), NOT on AgentConfig.`,
     `Each vault entry: { type: "smtp"|"imap"|"oauth"|"api_key"|"login"|"custom", label?: string, credentials: Record<string, string> }.`,
     `At runtime, credentials are decrypted and passed to tools. SMTP/IMAP credentials are used`,
-    `automatically by email tools. For other credential types (api_key, oauth, custom), agents`,
-    `need "vault_*" in allowedTools to call vault_get/vault_list and retrieve them at runtime.`,
-    `Use set_vault_entry/remove_vault_entry/list_vault tools to manage. Never stored in cleartext.`,
+    `automatically by email tools. All agents can access their vault credentials at runtime via`,
+    `vault_get/vault_list (core tools, always available). Use set_vault_entry/remove_vault_entry/list_vault`,
+    `tools to manage. Never stored in cleartext.`,
     ``,
     `**Agent identity** — \`agent.identity\`: { displayName, title, company, email, bio, timezone, tone, personality,`,
     `socials: Record<string, string>, responsibilities: (string | { area, description, priority })[] }.`,
@@ -856,11 +941,16 @@ export function buildChatSystemPrompt(
 
   // ── Missions ──
   const missions = orchestrator.getAllMissions();
-  const activeMissions = missions.filter(p => p.status === "active" || p.status === "paused");
+  const activeMissions = missions.filter(p =>
+    p.status === "active" || p.status === "paused" ||
+    p.status === "scheduled" || p.status === "recurring"
+  );
   if (activeMissions.length > 0) {
-    parts.push(``, `Active missions (${activeMissions.length}):`);
+    parts.push(``, `Active/scheduled missions (${activeMissions.length}):`);
     for (const p of activeMissions) {
-      parts.push(`  - [${p.status.toUpperCase()}] "${p.name}" (${p.id})`);
+      let missionLine = `  - [${p.status.toUpperCase()}] "${p.name}" (${p.id})`;
+      if (p.schedule) missionLine += ` schedule: ${p.schedule}`;
+      parts.push(missionLine);
     }
   }
 
@@ -891,9 +981,15 @@ export function buildChatSystemPrompt(
       `These skills can be assigned to agents via add_agent/update_agent (skills field).`,
       `Each skill injects specialized knowledge into the agent's system prompt at spawn time.`,
       ``,
-      ...availableAgentSkills.map(s =>
-        `  - **${s.name}**: ${s.description || "(no description)"}${s.allowedTools?.length ? ` [requires: ${s.allowedTools.join(", ")}]` : ""}`
-      ),
+      ...availableAgentSkills.map(s => {
+        const parts: string[] = [`  - **${s.name}**: ${s.description || "(no description)"}`];
+        const meta: string[] = [];
+        if (s.category) meta.push(`category: ${s.category}`);
+        if (s.tags?.length) meta.push(`tags: ${s.tags.join(", ")}`);
+        if (s.allowedTools?.length) meta.push(`requires: ${s.allowedTools.join(", ")}`);
+        if (meta.length) parts.push(` [${meta.join(" | ")}]`);
+        return parts.join("");
+      }),
       ``,
       `### When to suggest skills`,
       ``,
@@ -901,6 +997,7 @@ export function buildChatSystemPrompt(
       `- The agent's role aligns with an available skill (e.g. a "frontend" agent → "frontend-design" skill)`,
       `- The user asks the agent to do something a skill covers (e.g. PDF extraction, testing workflows)`,
       `- A task fails and a skill could help the agent do better on retry`,
+      `- Use skill tags and categories to match skills to agent roles or task requirements`,
       `Don't suggest skills that are already assigned. Don't force skills on every agent.`,
     );
   } else {
@@ -931,6 +1028,10 @@ export function buildChatSystemPrompt(
     `2. The first time you call create_orchestrator_skill or create_agent_skill, the built-in skill-creator guidelines will be returned automatically. Read them carefully, then call the tool again.`,
     `3. You can also read the guidelines anytime by calling \`get_skill("skill-creator")\`.`,
     `4. For agent skills: after creation, assign them to agents using \`update_agent\` (add the skill name to the agent's skills array).`,
+    `5. After creating a skill, use \`tag_skill\` to add tags and a category for better discoverability.`,
+    `   Tags are freeform strings for search/filtering. Category is a single string for macro-grouping.`,
+    `   Example: \`tag_skill({ name: "frontend-design", tags: ["frontend", "react", "ui"], category: "development" })\`.`,
+    `   The tags/categories are stored in \`.polpo/skills-index.json\` — they do NOT modify the SKILL.md file.`,
     ``,
     `## File System Access`,
     ``,

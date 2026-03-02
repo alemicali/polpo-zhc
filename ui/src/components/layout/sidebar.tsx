@@ -13,7 +13,6 @@ import {
   ShieldCheck,
   Workflow,
   Settings2,
-  CalendarClock,
   FolderOpen,
 } from "lucide-react";
 import { usePolpo } from "@lumea-labs/polpo-react";
@@ -42,7 +41,6 @@ const nav: NavSection[] = [
       { to: "/missions", icon: Target, label: "Missions" },
       { to: "/tasks", icon: ListChecks, label: "Tasks" },
       { to: "/approvals", icon: ShieldCheck, label: "Approvals" },
-      { to: "/schedules", icon: CalendarClock, label: "Schedules" },
     ],
   },
   {

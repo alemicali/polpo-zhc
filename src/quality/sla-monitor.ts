@@ -98,7 +98,9 @@ export class SLAMonitor {
     const missions = this.ctx.registry.getAllMissions?.() ?? [];
     for (const mission of missions) {
       if (!mission.deadline) continue;
-      if (mission.status === "completed" || mission.status === "failed" || mission.status === "cancelled") continue;
+      // Skip terminal states and scheduling states (not actively running)
+      if (mission.status === "completed" || mission.status === "failed" || mission.status === "cancelled" ||
+          mission.status === "scheduled" || mission.status === "recurring") continue;
 
       this.checkEntity(mission.id, "mission", mission.deadline, mission.createdAt, now);
     }

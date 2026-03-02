@@ -3,38 +3,9 @@ import type { TaskManager } from "./task-manager.js";
 import type { AgentManager } from "./agent-manager.js";
 import type { Mission, MissionStatus, MissionReport, Task, TaskExpectation, ExpectedOutcome, MissionQualityGate, MissionCheckpoint, ScopedNotificationRules } from "./types.js";
 import type { QualityController } from "../quality/quality-controller.js";
-import { sanitizeExpectations } from "./schemas.js";
+import { sanitizeExpectations, parseMissionDocument, type MissionDocumentParsed } from "./schemas.js";
 import { validateProviderKeys } from "../llm/pi-client.js";
-
-interface MissionDocument {
-  tasks?: Array<{
-    title: string;
-    description: string;
-    assignTo?: string;
-    dependsOn?: string[];
-    expectations?: TaskExpectation[];
-    expectedOutcomes?: ExpectedOutcome[];
-    metrics?: unknown[];
-    maxRetries?: number;
-    maxDuration?: number;
-    retryPolicy?: { escalateAfter?: number; fallbackAgent?: string };
-    /** Per-task scoped notification rules. */
-    notifications?: ScopedNotificationRules;
-  }>;
-  team?: Array<{
-    name: string;
-    role?: string;
-    model?: string;
-    systemPrompt?: string;
-    skills?: string[];
-    // Browser/email activated via allowedTools (e.g. ["browser_*", "email_*"])
-  }>;
-  qualityGates?: MissionQualityGate[];
-  /** Checkpoints — planned stopping points for human-in-the-loop review. */
-  checkpoints?: MissionCheckpoint[];
-  /** Mission-level scoped notification rules — override or extend global rules. */
-  notifications?: ScopedNotificationRules;
-}
+import { FileCheckpointStore, type CheckpointState } from "../stores/file-checkpoint-store.js";
 
 /**
  * Mission CRUD + execution + resume + group lifecycle.
@@ -43,24 +14,28 @@ export class MissionExecutor {
   private cleanedGroups = new Set<string>();
   /** Quality gates parsed from mission documents, keyed by mission group name */
   private gatesByGroup = new Map<string, MissionQualityGate[]>();
-  /** Checkpoints parsed from mission documents, keyed by mission group name */
-  private checkpointsByGroup = new Map<string, MissionCheckpoint[]>();
-  /** Checkpoints that have been reached and are waiting for resume, keyed by "group:name" */
-  private activeCheckpoints = new Map<string, { checkpoint: MissionCheckpoint; reachedAt: string }>();
-  /** Checkpoints that have been resumed (so they don't re-trigger), keyed by "group:name" */
-  private resumedCheckpoints = new Set<string>();
+  /** Persistent checkpoint store — survives server restarts */
+  private cpStore: FileCheckpointStore;
+  /** In-memory mirror of persisted checkpoint state (synced on every mutation) */
+  private cpState: CheckpointState;
   /** Optional quality controller — set by orchestrator after init */
   private qualityCtrl?: QualityController;
   /** Optional notification router — for checkpoint notification rules */
   private notificationRouter?: import("../notifications/index.js").NotificationRouter;
   /** Track which checkpoint notification rules have been registered (by cpKey) */
   private registeredCheckpointRules = new Set<string>();
+  /** Track the pre-execution status for scheduled/recurring missions (by group name).
+   *  When a mission completes/fails, this determines whether to return to scheduled/recurring. */
+  private scheduledOrigin = new Map<string, "scheduled" | "recurring">();
 
   constructor(
     private ctx: OrchestratorContext,
     private taskMgr: TaskManager,
     private agentMgr: AgentManager,
-  ) {}
+  ) {
+    this.cpStore = new FileCheckpointStore(ctx.polpoDir);
+    this.cpState = this.cpStore.load();
+  }
 
   /** Set the quality controller instance (called by Orchestrator after init). */
   setQualityController(ctrl: QualityController): void {
@@ -79,7 +54,7 @@ export class MissionExecutor {
 
   /** Get checkpoints for a mission group. Returns empty array if none defined. */
   getCheckpoints(group: string): MissionCheckpoint[] {
-    return this.checkpointsByGroup.get(group) ?? [];
+    return this.cpState.definitions[group] ?? [];
   }
 
   /**
@@ -92,7 +67,7 @@ export class MissionExecutor {
     taskId: string,
     tasks: Task[],
   ): { checkpoint: MissionCheckpoint; reachedAt: string } | undefined {
-    const checkpoints = this.checkpointsByGroup.get(group);
+    const checkpoints = this.cpState.definitions[group];
     if (!checkpoints) return undefined;
 
     for (const cp of checkpoints) {
@@ -104,7 +79,7 @@ export class MissionExecutor {
       const cpKey = `${group}:${cp.name}`;
 
       // Already resumed — don't block
-      if (this.resumedCheckpoints.has(cpKey)) continue;
+      if (this.cpState.resumed.includes(cpKey)) continue;
 
       // Check if all afterTasks are done
       const afterTasks = tasks.filter(
@@ -119,9 +94,10 @@ export class MissionExecutor {
       }
 
       // Checkpoint reached — activate it if not already active
-      if (!this.activeCheckpoints.has(cpKey)) {
+      if (!this.cpState.active[cpKey]) {
         const reachedAt = new Date().toISOString();
-        this.activeCheckpoints.set(cpKey, { checkpoint: cp, reachedAt });
+        this.cpState.active[cpKey] = { checkpoint: cp, reachedAt };
+        this.cpStore.save(this.cpState);
 
         // Pause the mission
         const mission = this.ctx.registry.getMissionByName?.(group);
@@ -145,8 +121,7 @@ export class MissionExecutor {
       }
 
       // Return the blocking checkpoint
-      const active = this.activeCheckpoints.get(cpKey)!;
-      return active;
+      return this.cpState.active[cpKey];
     }
 
     return undefined;
@@ -158,11 +133,12 @@ export class MissionExecutor {
    */
   resumeCheckpoint(group: string, checkpointName: string): boolean {
     const cpKey = `${group}:${checkpointName}`;
-    const active = this.activeCheckpoints.get(cpKey);
+    const active = this.cpState.active[cpKey];
     if (!active) return false;
 
-    this.resumedCheckpoints.add(cpKey);
-    this.activeCheckpoints.delete(cpKey);
+    this.cpState.resumed.push(cpKey);
+    delete this.cpState.active[cpKey];
+    this.cpStore.save(this.cpState);
 
     // Un-pause the mission (back to active)
     const mission = this.ctx.registry.getMissionByName?.(group);
@@ -182,7 +158,7 @@ export class MissionExecutor {
   /** Get all active (unresumed) checkpoints across all mission groups. */
   getActiveCheckpoints(): Array<{ group: string; checkpointName: string; checkpoint: MissionCheckpoint; reachedAt: string }> {
     const result: Array<{ group: string; checkpointName: string; checkpoint: MissionCheckpoint; reachedAt: string }> = [];
-    for (const [cpKey, data] of this.activeCheckpoints) {
+    for (const [cpKey, data] of Object.entries(this.cpState.active)) {
       const [group, ...nameParts] = cpKey.split(":");
       const checkpointName = nameParts.join(":");
       result.push({ group, checkpointName, checkpoint: data.checkpoint, reachedAt: data.reachedAt });
@@ -261,7 +237,10 @@ export class MissionExecutor {
     const missions = this.getAllMissions();
     const state = this.ctx.registry.getState();
     return missions.filter(m => {
-      if (m.status === "draft" || m.status === "completed" || m.status === "cancelled") return false;
+      // Non-resumable statuses: draft (never executed), scheduled/recurring (scheduler handles),
+      // completed (done), cancelled (aborted)
+      if (m.status === "draft" || m.status === "scheduled" || m.status === "recurring" ||
+          m.status === "completed" || m.status === "cancelled") return false;
       const tasks = state.tasks.filter(t => t.group === m.name);
       if (tasks.length === 0) return false;
       return tasks.some(t => t.status === "pending" || t.status === "failed");
@@ -277,7 +256,7 @@ export class MissionExecutor {
     const enableVolatile = this.ctx.config.settings.enableVolatileTeams !== false;
     if (enableVolatile && mission.data) {
       try {
-        const doc = JSON.parse(mission.data) as MissionDocument;
+        const doc = JSON.parse(mission.data) as MissionDocumentParsed;
         if (doc?.team && Array.isArray(doc.team)) {
           for (const a of doc.team) {
             if (!a.name) continue;
@@ -317,12 +296,16 @@ export class MissionExecutor {
   executeMission(missionId: string): { tasks: Task[]; group: string } {
     const mission = this.ctx.registry.getMission?.(missionId);
     if (!mission) throw new Error("Mission not found");
-    if (mission.status === "active") throw new Error("Mission already active");
-
-    const doc = JSON.parse(mission.data) as MissionDocument;
-    if (!doc?.tasks || !Array.isArray(doc.tasks) || doc.tasks.length === 0) {
-      throw new Error("Mission has no tasks");
+    const executableStates = ["draft", "scheduled", "recurring"];
+    if (!executableStates.includes(mission.status)) {
+      throw new Error(`Cannot execute mission in "${mission.status}" state (must be "draft", "scheduled", or "recurring")`);
     }
+    // Remember whether this is a scheduled/recurring mission so we can restore status after completion
+    const scheduledStatus = mission.status === "scheduled" || mission.status === "recurring" ? mission.status : undefined;
+
+    // Validate mission document through Zod schema — throws with clear error on invalid shape
+    const raw = JSON.parse(mission.data);
+    const doc = parseMissionDocument(raw);
 
     const group = mission.name;
 
@@ -408,14 +391,18 @@ export class MissionExecutor {
       tasks.push(task);
     }
 
-    // Parse and store quality gates from mission document
-    if (doc.qualityGates && Array.isArray(doc.qualityGates) && doc.qualityGates.length > 0) {
-      this.gatesByGroup.set(group, doc.qualityGates);
+    // Store quality gates (in-memory) and checkpoints (persisted to disk)
+    if (doc.qualityGates && doc.qualityGates.length > 0) {
+      this.gatesByGroup.set(group, doc.qualityGates as MissionQualityGate[]);
+    }
+    if (doc.checkpoints && doc.checkpoints.length > 0) {
+      this.cpState.definitions[group] = doc.checkpoints as MissionCheckpoint[];
+      this.cpStore.save(this.cpState);
     }
 
-    // Parse and store checkpoints from mission document
-    if (doc.checkpoints && Array.isArray(doc.checkpoints) && doc.checkpoints.length > 0) {
-      this.checkpointsByGroup.set(group, doc.checkpoints);
+    // Track scheduled origin so we know where to return after completion
+    if (scheduledStatus) {
+      this.scheduledOrigin.set(group, scheduledStatus);
     }
 
     // Persist mission-level notifications from document onto the Mission record
@@ -477,23 +464,31 @@ export class MissionExecutor {
           }
         }
 
-        this.ctx.registry.updateMission?.(mission.id, { status: allDone ? "completed" : "failed" });
+        // Determine final status based on scheduled origin
+        const origin = this.scheduledOrigin.get(group);
+        let finalStatus: MissionStatus;
+        if (origin === "recurring") {
+          // Recurring missions always return to "recurring" — ready for next cron tick
+          finalStatus = "recurring";
+        } else if (origin === "scheduled" && !allDone) {
+          // One-shot scheduled missions return to "scheduled" on failure for retry
+          finalStatus = "scheduled";
+        } else {
+          // Normal missions or successful one-shot scheduled missions
+          finalStatus = allDone ? "completed" : "failed";
+        }
+        this.ctx.registry.updateMission?.(mission.id, { status: finalStatus });
         const report = this.buildMissionReport(mission.id, group, groupTasks, allDone);
         this.ctx.emitter.emit("mission:completed", { missionId: mission.id, group, allPassed: allDone, report });
 
         // Aggregate mission metrics
         this.qualityCtrl?.aggregateMissionMetrics(mission.id, groupTasks);
 
-        // Clean up gate and checkpoint caches
+        // Clean up gate, checkpoint, and scheduled-origin caches
         this.gatesByGroup.delete(group);
-        this.checkpointsByGroup.delete(group);
-        // Clean up active/resumed checkpoint entries for this group
-        for (const key of [...this.activeCheckpoints.keys()]) {
-          if (key.startsWith(`${group}:`)) this.activeCheckpoints.delete(key);
-        }
-        for (const key of [...this.resumedCheckpoints]) {
-          if (key.startsWith(`${group}:`)) this.resumedCheckpoints.delete(key);
-        }
+        this.scheduledOrigin.delete(group);
+        // Clean up persisted checkpoint entries for this group
+        this.cpState = this.cpStore.removeGroup(this.cpState, group);
       }
     }
   }
