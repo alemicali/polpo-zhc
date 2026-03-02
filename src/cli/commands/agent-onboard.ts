@@ -248,14 +248,7 @@ export function registerAgentOnboardCommands(program: Command): void {
         tools.push("email_*");
         updated.allowedTools = tools;
       }
-      // If vault entries were added, ensure vault_* is in allowedTools
-      if (Object.keys(vaultEntries).length > 0) {
-        const tools = (updated.allowedTools as string[] | undefined) ?? [];
-        if (!tools.some(t => t.toLowerCase().startsWith("vault_"))) {
-          tools.push("vault_*");
-          updated.allowedTools = tools;
-        }
-      }
+      // Vault tools are core — always available, no need to add to allowedTools
 
       defaultTeam.agents[agentIdx] = updated as any;
       savePolpoConfig(polpoDir, config);
@@ -312,10 +305,12 @@ export function registerAgentOnboardCommands(program: Command): void {
         const aTools = a.allowedTools ?? [];
         if (aTools.some(t => t.toLowerCase().startsWith("email_"))) flags.push("email");
         if (aTools.some(t => t.toLowerCase().startsWith("browser_"))) flags.push("browser");
-        if (aTools.some(t => t.toLowerCase().startsWith("vault_"))) flags.push("vault");
         if (aTools.some(t => t.toLowerCase().startsWith("image_"))) flags.push("image");
         if (aTools.some(t => t.toLowerCase().startsWith("video_"))) flags.push("video");
         if (aTools.some(t => t.toLowerCase().startsWith("audio_"))) flags.push("audio");
+        if (aTools.some(t => t.toLowerCase().startsWith("excel_"))) flags.push("excel");
+        if (aTools.some(t => t.toLowerCase().startsWith("pdf_"))) flags.push("pdf");
+        if (aTools.some(t => t.toLowerCase().startsWith("docx_"))) flags.push("docx");
         if (vaultCount > 0) flags.push(`vault:${vaultCount}`);
 
         console.log(`${prefix}${connector}${chalk.bold(display)}${titleStr ? chalk.dim(` — ${titleStr}`) : ""}${flags.length ? chalk.cyan(` [${flags.join(", ")}]`) : ""}`);
@@ -401,10 +396,12 @@ export function registerAgentOnboardCommands(program: Command): void {
       const showFlags: string[] = [];
       if (showTools.some(t => t.toLowerCase().startsWith("browser_"))) showFlags.push("browser");
       if (showTools.some(t => t.toLowerCase().startsWith("email_"))) showFlags.push("email");
-      if (showTools.some(t => t.toLowerCase().startsWith("vault_"))) showFlags.push("vault");
       if (showTools.some(t => t.toLowerCase().startsWith("image_"))) showFlags.push("image");
       if (showTools.some(t => t.toLowerCase().startsWith("video_"))) showFlags.push("video");
       if (showTools.some(t => t.toLowerCase().startsWith("audio_"))) showFlags.push("audio");
+      if (showTools.some(t => t.toLowerCase().startsWith("excel_"))) showFlags.push("excel");
+      if (showTools.some(t => t.toLowerCase().startsWith("pdf_"))) showFlags.push("pdf");
+      if (showTools.some(t => t.toLowerCase().startsWith("docx_"))) showFlags.push("docx");
       if (showFlags.length > 0) {
         console.log(chalk.cyan(`\n  Tool categories: `) + showFlags.join(", "));
       }

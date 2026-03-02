@@ -5,6 +5,10 @@ description: "The unit of work in Polpo — what they are, how they're defined, 
 
 A task is a single unit of work assigned to an agent. It has a title, a description of what needs to be done, and an agent responsible for doing it. Tasks live inside missions and can depend on other tasks.
 
+<Note>
+Task titles must be **unique among active tasks**. If a task with the same title already exists and is not in a terminal state (`done` or `failed`), creation will be rejected. Within a mission, all task titles must be unique.
+</Note>
+
 ```json
 {
   "title": "Implement auth API",

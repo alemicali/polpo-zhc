@@ -36,6 +36,7 @@ export interface HookPayloads {
     expectedOutcomes?: ExpectedOutcome[];
     dependsOn?: string[];
     group?: string;
+    missionId?: string;
     maxDuration?: number;
     retryPolicy?: RetryPolicy;
     notifications?: ScopedNotificationRules;

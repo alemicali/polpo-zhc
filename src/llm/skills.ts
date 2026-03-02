@@ -53,12 +53,29 @@ export interface SkillInfo {
   source: "project" | "global";
   /** Absolute path to the skill directory. */
   path: string;
+  /** Freeform tags for search and filtering (from skills-index.json). */
+  tags?: string[];
+  /** Macro-category for grouping (from skills-index.json). */
+  category?: string;
 }
 
 export interface LoadedSkill extends SkillInfo {
   /** Full SKILL.md content (markdown body without frontmatter). */
   content: string;
 }
+
+// ── Skills Index ──
+
+/** A single entry in the skills index file (.polpo/skills-index.json). */
+export interface SkillIndexEntry {
+  /** Freeform tags for search and filtering. */
+  tags?: string[];
+  /** Macro-category for grouping. */
+  category?: string;
+}
+
+/** The full skills index: maps skill names to their index metadata. */
+export type SkillIndex = Record<string, SkillIndexEntry>;
 
 // ── Parsing ──
 
@@ -143,11 +160,12 @@ function scanSkillsDir(dir: string, source: SkillInfo["source"]): SkillInfo[] {
  *   2. ~/.polpo/skills/     — user-level global pool (shared across projects)
  */
 export function discoverSkills(cwd: string, polpoDir?: string): SkillInfo[] {
+  const effectivePolpoDir = polpoDir ?? resolve(cwd, ".polpo");
   const seen = new Set<string>();
   const all: SkillInfo[] = [];
 
   const dirs: Array<{ dir: string; source: SkillInfo["source"] }> = [
-    { dir: resolve(polpoDir ?? resolve(cwd, ".polpo"), "skills"), source: "project" },
+    { dir: resolve(effectivePolpoDir, "skills"), source: "project" },
     { dir: resolve(homedir(), ".polpo", "skills"), source: "global" },
   ];
 
@@ -160,7 +178,73 @@ export function discoverSkills(cwd: string, polpoDir?: string): SkillInfo[] {
     }
   }
 
+  // Enrich with index metadata (tags, category) from skills-index.json
+  const index = loadSkillIndex(effectivePolpoDir);
+  if (index) {
+    for (const skill of all) {
+      const entry = index[skill.name];
+      if (entry) {
+        if (entry.tags) skill.tags = entry.tags;
+        if (entry.category) skill.category = entry.category;
+      }
+    }
+  }
+
   return all;
+}
+
+// ── Skills Index (tags & categories) ──
+
+const SKILLS_INDEX_FILE = "skills-index.json";
+
+/**
+ * Load the skills index from `.polpo/skills-index.json`.
+ * Returns null if the file doesn't exist or is invalid.
+ */
+export function loadSkillIndex(polpoDir: string): SkillIndex | null {
+  const indexPath = join(polpoDir, SKILLS_INDEX_FILE);
+  if (!existsSync(indexPath)) return null;
+  try {
+    const raw = readFileSync(indexPath, "utf-8");
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    return parsed as SkillIndex;
+  } catch { return null; }
+}
+
+/**
+ * Save the full skills index to `.polpo/skills-index.json`.
+ */
+export function saveSkillIndex(polpoDir: string, index: SkillIndex): void {
+  const indexPath = join(polpoDir, SKILLS_INDEX_FILE);
+  mkdirSync(polpoDir, { recursive: true });
+  writeFileSync(indexPath, JSON.stringify(index, null, 2) + "\n", "utf-8");
+}
+
+/**
+ * Update a single skill's entry in the skills index.
+ * Creates the index file if it doesn't exist.
+ * Merges with existing entry (tags/category are replaced individually).
+ */
+export function updateSkillIndex(polpoDir: string, skillName: string, entry: SkillIndexEntry): void {
+  const index = loadSkillIndex(polpoDir) ?? {};
+  index[skillName] = { ...index[skillName], ...entry };
+  // Remove empty fields
+  if (index[skillName].tags?.length === 0) delete index[skillName].tags;
+  if (!index[skillName].category) delete index[skillName].category;
+  // Remove empty entries
+  if (Object.keys(index[skillName]).length === 0) delete index[skillName];
+  saveSkillIndex(polpoDir, index);
+}
+
+/**
+ * Remove a skill's entry from the skills index.
+ */
+export function removeSkillFromIndex(polpoDir: string, skillName: string): void {
+  const index = loadSkillIndex(polpoDir);
+  if (!index || !index[skillName]) return;
+  delete index[skillName];
+  saveSkillIndex(polpoDir, index);
 }
 
 // ── Per-agent loading ──
@@ -607,25 +691,48 @@ export interface SkillWithAssignment extends SkillInfo {
   assignedTo: string[];
 }
 
-export function listSkillsWithAssignments(cwd: string, polpoDir: string, agentNames: string[]): SkillWithAssignment[] {
+/**
+ * List skills with their per-agent assignments.
+ *
+ * Checks both assignment methods:
+ *   1. Symlinks in .polpo/agents/<name>/skills/ (hard enforcement)
+ *   2. AgentConfig.skills[] names (soft/config-based)
+ *
+ * @param agentNames - All known agent names (from config + filesystem)
+ * @param agentConfigSkills - Optional map of agentName → configured skill names
+ *   (from AgentConfig.skills[]). When provided, config-based assignments are included.
+ */
+export function listSkillsWithAssignments(
+  cwd: string,
+  polpoDir: string,
+  agentNames: string[],
+  agentConfigSkills?: Map<string, string[]>,
+): SkillWithAssignment[] {
   const pool = discoverSkills(cwd, polpoDir);
   const result: SkillWithAssignment[] = [];
 
   for (const skill of pool) {
-    const assignedTo: string[] = [];
+    const assignedTo = new Set<string>();
 
     for (const agentName of agentNames) {
+      // Strategy 1: check symlink in .polpo/agents/<name>/skills/<skillName>
       const agentSkillsDir = resolve(polpoDir, "agents", agentName, "skills");
-      if (!existsSync(agentSkillsDir)) continue;
+      if (existsSync(agentSkillsDir)) {
+        const linkPath = resolve(agentSkillsDir, skill.name);
+        if (existsSync(linkPath)) {
+          assignedTo.add(agentName);
+          continue; // already assigned, skip config check
+        }
+      }
 
-      // Check if this agent has this skill via symlink
-      const linkPath = resolve(agentSkillsDir, skill.name);
-      if (existsSync(linkPath)) {
-        assignedTo.push(agentName);
+      // Strategy 2: check AgentConfig.skills[] from config
+      const configSkills = agentConfigSkills?.get(agentName);
+      if (configSkills?.includes(skill.name)) {
+        assignedTo.add(agentName);
       }
     }
 
-    result.push({ ...skill, assignedTo });
+    result.push({ ...skill, assignedTo: [...assignedTo] });
   }
 
   return result;

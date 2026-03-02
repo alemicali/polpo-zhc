@@ -120,7 +120,6 @@
   },
   "pnpm": {
     "overrides": {
-      "react": "^18.3.1",
       "react-reconciler": "0.29.2"
     },
     "onlyBuiltDependencies": [

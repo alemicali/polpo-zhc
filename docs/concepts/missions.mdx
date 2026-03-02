@@ -95,7 +95,7 @@ Each task inside a mission uses these fields:
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `title` | string | Short task title (used as dependency reference) |
+| `title` | string | Short task title (must be unique within the mission; used as dependency reference) |
 | `description` | string | Detailed instructions for the agent |
 | `assignTo` | string | Agent name from your team. Defaults to first agent if omitted |
 | `dependsOn` | string[] | Titles of tasks that must finish first |
@@ -127,7 +127,7 @@ Tasks can depend on other tasks by referencing their titles using the `dependsOn
 ```
 
 <Note>
-Dependencies are matched by **task title** within the same mission group. A task won't start until all its dependencies reach `done` status.
+Dependencies are matched by **task title** within the same mission group. A task won't start until all its dependencies reach `done` status. All task titles must be unique within a mission — duplicate titles are rejected at creation time.
 </Note>
 
 ## Volatile Teams

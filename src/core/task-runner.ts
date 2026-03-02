@@ -32,12 +32,12 @@ export class TaskRunner {
       if (sid) {
         try { this.ctx.registry.updateTask(run.taskId, { sessionId: sid }); } catch { /* task may already be gone */ }
       }
-      // Persist auto-collected outcomes on the task
+      // Persist auto-collected outcomes on the task.
+      // REPLACE (not append) — each execution produces its own definitive outcomes.
+      // Appending caused "exponential outcome" accumulation across retries/fix cycles.
       if (run.outcomes && run.outcomes.length > 0) {
         try {
-          const task = this.ctx.registry.getTask(run.taskId);
-          const existing = task?.outcomes ?? [];
-          this.ctx.registry.updateTask(run.taskId, { outcomes: [...existing, ...run.outcomes] });
+          this.ctx.registry.updateTask(run.taskId, { outcomes: run.outcomes });
         } catch { /* task may already be gone */ }
       }
       if (run.result) {
@@ -395,9 +395,12 @@ export class TaskRunner {
     } catch { /* best effort */ }
 
     // 3. Mission context — if this task belongs to a mission, include the mission goal and sibling tasks
-    if (task.group && this.ctx.registry.getMissionByName) {
+    if (task.group) {
       try {
-        const mission = this.ctx.registry.getMissionByName(task.group);
+        // Resolve mission via direct ID (preferred) or group name (legacy fallback)
+        const mission = task.missionId
+          ? this.ctx.registry.getMission?.(task.missionId)
+          : this.ctx.registry.getMissionByName?.(task.group);
         const missionParts: string[] = [];
 
         // Original user prompt that generated this mission (the "why")

@@ -133,6 +133,20 @@ export const missionDocumentSchema = z.object({
   qualityGates: z.array(missionQualityGateSchema).optional(),
   checkpoints: z.array(missionCheckpointSchema).optional(),
   notifications: z.any().optional(),
+}).superRefine((doc, ctx) => {
+  // Enforce unique task titles within a mission document
+  const seen = new Set<string>();
+  for (let i = 0; i < doc.tasks.length; i++) {
+    const title = doc.tasks[i].title;
+    if (seen.has(title)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `Duplicate task title "${title}" — each task must have a unique title`,
+        path: ["tasks", i, "title"],
+      });
+    }
+    seen.add(title);
+  }
 });
 
 export type MissionDocumentParsed = z.infer<typeof missionDocumentSchema>;

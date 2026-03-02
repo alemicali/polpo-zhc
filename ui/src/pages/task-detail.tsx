@@ -444,13 +444,13 @@ function ActivityPanel({ taskId, isActive }: { taskId: string; isActive?: boolea
           <RefreshCw className={cn("h-3.5 w-3.5", isActivityRefreshing && "animate-spin")} />
         </Button>
       </div>
-      <ScrollArea className="h-[calc(100vh-16rem)]">
-        <div className="space-y-0.5 pr-2">
+      <div className="flex-1 min-h-0 overflow-y-auto pr-1">
+        <div className="space-y-0.5">
           {[...filteredEntries].reverse().map((entry, i) => (
             <ActivityEntry key={`${entry.ts}-${entry.type ?? entry.event}-${i}`} entry={entry} />
           ))}
         </div>
-      </ScrollArea>
+      </div>
     </div>
   );
 }
@@ -732,7 +732,7 @@ export function TaskDetailPage() {
 
         <TabsContent value="detail" className="mt-4 flex-1 min-h-0">
           <ScrollArea className="h-full">
-            <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 pr-4">
+            <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 pr-4 pb-6">
 
               {/* ── Left column (3/5): assessment, output, description ── */}
               <div className="lg:col-span-3 space-y-4">
@@ -741,10 +741,10 @@ export function TaskDetailPage() {
               {assessment && (
                 <Collapsible defaultOpen>
                 <Card className={cn(
-                  "bg-card/80 backdrop-blur-sm border-border/40 overflow-hidden",
+                  "bg-card/80 backdrop-blur-sm border-border/40 overflow-hidden py-0 gap-0",
                   assessment.passed ? "border-l-2 border-l-emerald-500" : "border-l-2 border-l-red-500"
                 )}>
-                  <CardContent className="pt-3 space-y-3">
+                  <CardContent className="pt-3 pb-3 space-y-3">
                     <CollapsibleTrigger className="flex items-center gap-1.5 text-[10px] font-medium text-muted-foreground uppercase tracking-widest hover:text-foreground transition-colors cursor-pointer group w-full">
                       {assessment.passed ? <CheckCircle2 className="h-3 w-3 text-emerald-500" /> : <XCircle className="h-3 w-3 text-red-500" />}
                       Assessment {assessment.passed ? "Passed" : "Failed"}
@@ -809,7 +809,7 @@ export function TaskDetailPage() {
                               ? <CheckCircle2 className="h-3 w-3 shrink-0" />
                               : <XCircle className="h-3 w-3 shrink-0" />}
                             <Badge variant="outline" className="text-[8px] font-mono px-1 py-0 border-current/20">{c.type}</Badge>
-                            <span className="truncate max-w-48">{c.message}</span>
+                            <span className="break-words">{c.message}</span>
                             {c.globalScore != null && (
                               <span className="text-[10px] font-mono opacity-60 shrink-0">{c.globalScore.toFixed(1)}/5</span>
                             )}
@@ -1120,39 +1120,39 @@ export function TaskDetailPage() {
 
               {/* ── Expectations ── */}
               {task.expectations.length > 0 && (
-                <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0">
-                  <CardContent className="pt-4">
+                <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0 ">
+                  <CardContent className="pt-4 pb-4">
                     <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-widest mb-3 flex items-center gap-1">
                       <Wrench className="h-3 w-3" /> Expectations ({task.expectations.length})
                     </p>
                     <div className="space-y-2">
                       {task.expectations.map((exp, i) => (
                         <div key={i} className="rounded-md border border-border p-3 space-y-2">
-                          <div className="flex items-center gap-2">
-                            <Badge variant="outline" className="text-[10px]">{exp.type}</Badge>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <Badge variant="outline" className="text-[10px] shrink-0">{exp.type}</Badge>
                             {exp.confidence && (
-                              <Badge variant="secondary" className="text-[9px]">{exp.confidence}</Badge>
+                              <Badge variant="secondary" className="text-[9px] shrink-0">{exp.confidence}</Badge>
                             )}
                             {exp.threshold != null && (
-                              <span className="text-[11px] text-muted-foreground ml-auto">
+                              <span className="text-[11px] text-muted-foreground ml-auto shrink-0">
                                 Threshold: {exp.threshold}
                               </span>
                             )}
                           </div>
                           {exp.command && (
-                            <code className="block text-[11px] bg-muted/40 rounded px-2 py-1 font-mono text-muted-foreground">
+                            <code className="block text-[11px] bg-muted/40 rounded px-2 py-1.5 font-mono text-muted-foreground whitespace-pre-wrap break-all">
                               {exp.command}
                             </code>
                           )}
                           {exp.paths && exp.paths.length > 0 && (
                             <div className="flex flex-wrap gap-1">
                               {exp.paths.map((p, j) => (
-                                <code key={j} className="text-[11px] bg-muted/40 rounded px-2 py-0.5 font-mono text-muted-foreground">{p}</code>
+                                <code key={j} className="text-[11px] bg-muted/40 rounded px-2 py-0.5 font-mono text-muted-foreground break-all">{p}</code>
                               ))}
                             </div>
                           )}
                           {exp.criteria && (
-                            <p className="text-xs text-muted-foreground">{exp.criteria}</p>
+                            <p className="text-xs text-muted-foreground leading-relaxed">{exp.criteria}</p>
                           )}
                           {exp.dimensions && exp.dimensions.length > 0 && (
                             <Collapsible>
@@ -1161,22 +1161,22 @@ export function TaskDetailPage() {
                                 {exp.dimensions.length} dimensions
                               </CollapsibleTrigger>
                               <CollapsibleContent>
-                                <div className="space-y-2 mt-1">
+                                <div className="space-y-2.5 mt-2">
                                   {exp.dimensions.map((d: EvalDimension, k: number) => (
                                     <div key={k} className="pl-2 space-y-1">
-                                      <div className="flex items-center gap-2 text-xs">
-                                        <span className="font-medium capitalize">{d.name}</span>
-                                        <span className="text-muted-foreground">(w: {d.weight})</span>
-                                        <span className="text-muted-foreground truncate">{d.description}</span>
+                                      <div className="flex items-start gap-2 text-xs">
+                                        <span className="font-medium capitalize shrink-0">{d.name}</span>
+                                        <span className="text-muted-foreground shrink-0">(w: {d.weight})</span>
                                       </div>
+                                      <p className="text-[11px] text-muted-foreground/80 leading-relaxed pl-0.5">{d.description}</p>
                                       {d.rubric && Object.keys(d.rubric).length > 0 && (
-                                        <div className="ml-4 space-y-0.5">
+                                        <div className="ml-2 mt-1 space-y-1">
                                           {Object.entries(d.rubric)
                                             .sort(([a], [b]) => Number(a) - Number(b))
                                             .map(([level, desc]) => (
                                               <div key={level} className="flex items-start gap-2 text-[10px]">
-                                                <Badge variant="outline" className="text-[8px] px-1 py-0 shrink-0">{level}</Badge>
-                                                <span className="text-muted-foreground">{String(desc)}</span>
+                                                <Badge variant="outline" className="text-[8px] px-1 py-0 shrink-0 mt-0.5">{level}</Badge>
+                                                <span className="text-muted-foreground leading-relaxed">{String(desc)}</span>
                                               </div>
                                             ))}
                                         </div>
@@ -1198,7 +1198,7 @@ export function TaskDetailPage() {
               {(task.outcomes?.length ?? 0) > 0 && (
                 <Collapsible defaultOpen>
                 <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0">
-                  <CardContent className="pt-4">
+                  <CardContent className="pt-4 pb-4">
                     <CollapsibleTrigger className="flex items-center gap-1.5 text-[10px] font-medium text-muted-foreground uppercase tracking-widest hover:text-foreground transition-colors cursor-pointer group w-full mb-3">
                       <Package className="h-3 w-3" /> Outcomes ({task.outcomes!.length})
                       <ChevronDown className="h-3 w-3 ml-auto transition-transform group-data-[state=open]:rotate-180" />
@@ -1228,26 +1228,26 @@ export function TaskDetailPage() {
                         return (
                           <div key={o.id} className="rounded-md border border-border/50 overflow-hidden">
                             {/* Header */}
-                            <div className="flex items-center gap-2 px-3 py-2.5 bg-muted/20">
+                            <div className="flex items-center gap-2 px-3 py-2.5 bg-muted/20 flex-wrap">
                               <OutcomeIcon className="h-4 w-4 text-muted-foreground shrink-0" />
                               {canPreview ? (
                                 <button
-                                  className="text-sm font-medium truncate text-primary hover:underline text-left"
+                                  className="text-sm font-medium text-primary hover:underline text-left min-w-0 break-words"
                                   title={`Preview ${o.label}`}
                                   onClick={() => openPreview(o)}
                                 >
                                   {o.label}
                                 </button>
                               ) : o.url ? (
-                                <a href={o.url} target="_blank" rel="noopener noreferrer" className="text-sm font-medium truncate text-primary hover:underline" title={`Open ${o.url}`}>
+                                <a href={o.url} target="_blank" rel="noopener noreferrer" className="text-sm font-medium text-primary hover:underline min-w-0 break-words" title={`Open ${o.url}`}>
                                   {o.label}
                                 </a>
                               ) : (
-                                <span className="text-sm font-medium truncate">{o.label}</span>
+                                <span className="text-sm font-medium min-w-0 break-words">{o.label}</span>
                               )}
                               <Badge variant="outline" className="text-[9px] shrink-0">{o.type}</Badge>
                               {o.mimeType && (
-                                <span className="text-[10px] text-muted-foreground font-mono shrink-0">{o.mimeType}</span>
+                                <span className="text-[10px] text-muted-foreground font-mono">{o.mimeType}</span>
                               )}
                               <div className="flex items-center gap-1 ml-auto shrink-0">
                                 {o.size != null && (
@@ -1385,18 +1385,20 @@ export function TaskDetailPage() {
               {/* ── Expected Outcomes (declared, not yet produced) ── */}
               {(task.expectedOutcomes?.length ?? 0) > 0 && !(task.outcomes?.length) && (
                 <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0">
-                  <CardContent className="pt-4">
+                  <CardContent className="pt-4 pb-4">
                     <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-widest mb-3 flex items-center gap-1">
                       <Package className="h-3 w-3" /> Expected Outcomes ({task.expectedOutcomes!.length})
                     </p>
                     <div className="space-y-2">
                       {task.expectedOutcomes!.map((o, i) => (
-                        <div key={i} className="flex items-center gap-2 rounded-md border border-dashed border-border/50 p-2.5">
-                          <Badge variant="outline" className="text-[9px]">{o.type}</Badge>
-                          <span className="text-xs font-medium">{o.label}</span>
-                          {o.required && <Badge variant="secondary" className="text-[8px]">required</Badge>}
-                          {o.description && <span className="text-[10px] text-muted-foreground truncate">{o.description}</span>}
-                          {o.path && <code className="text-[10px] font-mono text-muted-foreground ml-auto">{o.path}</code>}
+                        <div key={i} className="rounded-md border border-dashed border-border/50 p-2.5 space-y-1.5">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <Badge variant="outline" className="text-[9px] shrink-0">{o.type}</Badge>
+                            <span className="text-xs font-medium">{o.label}</span>
+                            {o.required && <Badge variant="secondary" className="text-[8px] shrink-0">required</Badge>}
+                          </div>
+                          {o.description && <p className="text-[10px] text-muted-foreground leading-relaxed">{o.description}</p>}
+                          {o.path && <code className="block text-[10px] font-mono text-muted-foreground break-all">{o.path}</code>}
                         </div>
                       ))}
                     </div>
@@ -1407,7 +1409,7 @@ export function TaskDetailPage() {
               {/* ── Metrics ── */}
               {task.metrics.length > 0 && (
                 <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0">
-                  <CardContent className="pt-4">
+                  <CardContent className="pt-4 pb-4">
                     <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-widest mb-3">
                       Metrics ({task.metrics.length})
                     </p>
@@ -1426,18 +1428,18 @@ export function TaskDetailPage() {
 
               {/* ── Details / metadata ── */}
               <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0">
-                <CardContent className="pt-4">
+                <CardContent className="pt-4 pb-4">
                   <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-widest mb-3">
                     Details
                   </p>
-                  <div className="grid grid-cols-2 gap-3 text-sm">
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
                     <div>
-                      <span className="text-xs text-muted-foreground block">Retries</span>
+                      <span className="text-xs text-muted-foreground block mb-0.5">Retries</span>
                       <span>{task.retries} / {task.maxRetries}</span>
                     </div>
                     {task.maxDuration != null && task.maxDuration > 0 && (
                       <div>
-                        <span className="text-xs text-muted-foreground block">Timeout</span>
+                        <span className="text-xs text-muted-foreground block mb-0.5">Timeout</span>
                         <span className="flex items-center gap-1">
                           <Timer className="h-3 w-3" /> {Math.round(task.maxDuration / 1000)}s
                         </span>
@@ -1445,66 +1447,26 @@ export function TaskDetailPage() {
                     )}
                     {task.fixAttempts != null && task.fixAttempts > 0 && (
                       <div>
-                        <span className="text-xs text-muted-foreground block">Fix Attempts</span>
+                        <span className="text-xs text-muted-foreground block mb-0.5">Fix Attempts</span>
                         <span>{task.fixAttempts}</span>
                       </div>
                     )}
                     {task.questionRounds != null && task.questionRounds > 0 && (
                       <div>
-                        <span className="text-xs text-muted-foreground block">Question Rounds</span>
+                        <span className="text-xs text-muted-foreground block mb-0.5">Question Rounds</span>
                         <span>{task.questionRounds}</span>
                       </div>
                     )}
                     {task.resolutionAttempts != null && task.resolutionAttempts > 0 && (
                       <div>
-                        <span className="text-xs text-muted-foreground block">Deadlock Resolutions</span>
+                        <span className="text-xs text-muted-foreground block mb-0.5">Deadlock Resolutions</span>
                         <span>{task.resolutionAttempts}</span>
-                      </div>
-                    )}
-                    {task.dependsOn.length > 0 && (
-                      <div className="col-span-2">
-                        <span className="text-xs text-muted-foreground flex items-center gap-1 mb-1">
-                          <GitBranch className="h-3 w-3" /> Dependencies ({task.dependsOn.length})
-                        </span>
-                        <div className="flex flex-col gap-1">
-                          {task.dependsOn.map((dep) => {
-                            const depTitle = depTitleMap[dep];
-                            const depTask = allTasks.find(t => t.id === dep);
-                            return (
-                              <button
-                                key={dep}
-                                onClick={() => navigate(`/tasks/${dep}`)}
-                                className="flex items-center gap-2 text-left text-xs hover:bg-muted/50 rounded px-2 py-1 transition-colors"
-                              >
-                                <GitBranch className="h-3 w-3 text-muted-foreground shrink-0" />
-                                <span className="truncate">{depTitle || dep}</span>
-                                {depTask && (
-                                  <Badge variant="outline" className="text-[9px] px-1 py-0 shrink-0">
-                                    {depTask.status}
-                                  </Badge>
-                                )}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    )}
-                    {task.retryPolicy && (
-                      <div className="col-span-2">
-                        <span className="text-xs text-muted-foreground flex items-center gap-1 mb-1">
-                          <ArrowUpCircle className="h-3 w-3" /> Retry Policy
-                        </span>
-                        <div className="flex items-center gap-3 text-xs">
-                          {task.retryPolicy.escalateAfter != null && <span>Escalate after {task.retryPolicy.escalateAfter} failures</span>}
-                          {task.retryPolicy.fallbackAgent && <span>Fallback: <code className="font-mono">{task.retryPolicy.fallbackAgent}</code></span>}
-                          {task.retryPolicy.escalateModel && <span>Model: <code className="font-mono">{task.retryPolicy.escalateModel}</code></span>}
-                        </div>
                       </div>
                     )}
                     {task.result && (
                       <>
                         <div>
-                          <span className="text-xs text-muted-foreground block">Duration</span>
+                          <span className="text-xs text-muted-foreground block mb-0.5">Duration</span>
                           <span>{(() => {
                             const totalSec = Math.round(task.result!.duration / 1000);
                             if (totalSec < 60) return `${totalSec}s`;
@@ -1517,10 +1479,54 @@ export function TaskDetailPage() {
                           })()}</span>
                         </div>
                         <div>
-                          <span className="text-xs text-muted-foreground block">Exit Code</span>
+                          <span className="text-xs text-muted-foreground block mb-0.5">Exit Code</span>
                           <span className={task.result.exitCode !== 0 ? "text-red-400" : ""}>{task.result.exitCode}</span>
                         </div>
                       </>
+                    )}
+                  </div>
+
+                  {/* Full-width sections below the grid */}
+                  <div className="space-y-3 mt-3">
+                    {task.dependsOn.length > 0 && (
+                      <div>
+                        <span className="text-xs text-muted-foreground flex items-center gap-1 mb-1.5">
+                          <GitBranch className="h-3 w-3" /> Dependencies ({task.dependsOn.length})
+                        </span>
+                        <div className="flex flex-col gap-1">
+                          {task.dependsOn.map((dep) => {
+                            const depTitle = depTitleMap[dep];
+                            const depTask = allTasks.find(t => t.id === dep);
+                            return (
+                              <button
+                                key={dep}
+                                onClick={() => navigate(`/tasks/${dep}`)}
+                                className="flex items-center gap-2 text-left text-xs hover:bg-muted/50 rounded px-2 py-1.5 transition-colors"
+                              >
+                                <GitBranch className="h-3 w-3 text-muted-foreground shrink-0" />
+                                <span className="min-w-0 break-words">{depTitle || dep}</span>
+                                {depTask && (
+                                  <Badge variant="outline" className="text-[9px] px-1 py-0 shrink-0">
+                                    {depTask.status}
+                                  </Badge>
+                                )}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                    {task.retryPolicy && (
+                      <div>
+                        <span className="text-xs text-muted-foreground flex items-center gap-1 mb-1.5">
+                          <ArrowUpCircle className="h-3 w-3" /> Retry Policy
+                        </span>
+                        <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs">
+                          {task.retryPolicy.escalateAfter != null && <span>Escalate after {task.retryPolicy.escalateAfter} failures</span>}
+                          {task.retryPolicy.fallbackAgent && <span>Fallback: <code className="font-mono">{task.retryPolicy.fallbackAgent}</code></span>}
+                          {task.retryPolicy.escalateModel && <span>Model: <code className="font-mono break-all">{task.retryPolicy.escalateModel}</code></span>}
+                        </div>
+                      </div>
                     )}
                   </div>
                 </CardContent>
@@ -1530,8 +1536,8 @@ export function TaskDetailPage() {
           </ScrollArea>
         </TabsContent>
 
-        {/* Activity tab */}
-        <TabsContent value="activity" className="mt-4 flex-1 min-h-0">
+        {/* Activity tab — needs explicit height so ScrollArea inside can scroll */}
+        <TabsContent value="activity" className="mt-4 flex-1 min-h-0 overflow-hidden flex flex-col">
           <ActivityPanel taskId={task.id} isActive={task.status === "in_progress" || task.status === "assigned"} />
         </TabsContent>
       </Tabs>

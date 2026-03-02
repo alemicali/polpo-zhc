@@ -471,6 +471,7 @@ function TeamHeaderNode({ data }: NodeProps<Node<TeamHeaderNodeData>>) {
       <Badge variant="secondary" className={cn("text-[10px] shrink-0 font-bold", tc.text)}>
         {data.agentCount}
       </Badge>
+      <Handle type="target" position={Position.Top} className="!bg-primary/60 !w-2 !h-2 !border-0" />
       <Handle type="source" position={Position.Bottom} className="!bg-primary/60 !w-2 !h-2 !border-0" />
     </div>
   );
@@ -688,33 +689,83 @@ function estimateTeamHeaderWidth(name: string): number {
   return Math.max(140, name.length * 8 + 100);
 }
 
-/** Cluster view — team header boxes only (no agents expanded) */
+/** Cluster view — team header boxes arranged by hierarchy level with cross-team edges */
 function buildClusterLayout(
   teams: Team[],
   onClickTeam: (name: string) => void,
 ): { nodes: Node[]; edges: Edge[] } {
   const nodes: Node[] = [];
+  const edges: Edge[] = [];
   const BOX_GAP = 80;
-  const widths = teams.map(t => estimateTeamHeaderWidth(t.name));
-  const totalW = widths.reduce((s, w) => s + w, 0) + BOX_GAP * Math.max(0, teams.length - 1);
-  let x = -totalW / 2;
+  const LEVEL_V_GAP = 120;
 
-  teams.forEach((team, i) => {
-    nodes.push({
-      id: `team-header-${team.name}`,
-      type: "teamHeader",
-      position: { x, y: 0 },
-      data: {
-        label: team.name,
-        teamColorIdx: i,
-        agentCount: team.agents.length,
-        onClick: () => onClickTeam(team.name),
-      } satisfies TeamHeaderNodeData,
-    });
-    x += widths[i] + BOX_GAP;
-  });
+  // Derive hierarchy levels from cross-team reportsTo
+  const levels = deriveTeamLevels(teams);
 
-  return { nodes, edges: [] };
+  // Group teams by level
+  const byLevel = new Map<number, typeof teams>();
+  for (const team of teams) {
+    const lvl = levels.get(team.name) ?? 0;
+    if (!byLevel.has(lvl)) byLevel.set(lvl, []);
+    byLevel.get(lvl)!.push(team);
+  }
+
+  // Place team headers level by level, centered horizontally
+  const teamIdx = new Map<string, number>();
+  teams.forEach((t, i) => teamIdx.set(t.name, i));
+
+  const sortedLevels = [...byLevel.keys()].sort((a, b) => a - b);
+  for (const lvl of sortedLevels) {
+    const row = byLevel.get(lvl)!;
+    const widths = row.map(t => estimateTeamHeaderWidth(t.name));
+    const totalW = widths.reduce((s, w) => s + w, 0) + BOX_GAP * Math.max(0, row.length - 1);
+    let x = -totalW / 2;
+    const y = lvl * (TEAM_HEADER_H + LEVEL_V_GAP);
+
+    for (let i = 0; i < row.length; i++) {
+      const team = row[i];
+      nodes.push({
+        id: `team-header-${team.name}`,
+        type: "teamHeader",
+        position: { x, y },
+        data: {
+          label: team.name,
+          teamColorIdx: teamIdx.get(team.name) ?? 0,
+          agentCount: team.agents.length,
+          onClick: () => onClickTeam(team.name),
+        } satisfies TeamHeaderNodeData,
+      });
+      x += widths[i] + BOX_GAP;
+    }
+  }
+
+  // Build cross-team edges: for each cross-team reportsTo, draw edge from manager's team header to subordinate's team header
+  const teamOf = new Map<string, string>();
+  for (const team of teams) for (const a of team.agents) teamOf.set(a.name, team.name);
+
+  const drawnEdges = new Set<string>();
+  for (const team of teams) {
+    for (const agent of team.agents) {
+      if (!agent.reportsTo) continue;
+      const managerTeam = teamOf.get(agent.reportsTo);
+      if (managerTeam && managerTeam !== team.name) {
+        const edgeKey = `${managerTeam}->${team.name}`;
+        if (drawnEdges.has(edgeKey)) continue;
+        drawnEdges.add(edgeKey);
+        edges.push({
+          id: `cluster-${edgeKey}`,
+          source: `team-header-${managerTeam}`,
+          target: `team-header-${team.name}`,
+          type: "smoothstep",
+          style: { stroke: "oklch(0.7 0.15 300 / 50%)", strokeWidth: 2, strokeDasharray: "6 4" },
+          markerEnd: EDGE_MARKER,
+          animated: true,
+        });
+      }
+    }
+  }
+
+  return { nodes, edges };
 }
 
 /** Expanded view for a single team — team header at top, agents in pyramid below */

@@ -649,8 +649,8 @@ export function AgentDetailPage() {
           {/* ── Hero card ── */}
           <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0 overflow-hidden">
             {/* Gradient header bar */}
-            <div className="h-16 bg-gradient-to-r from-primary/20 via-primary/10 to-transparent" />
-            <CardContent className="pt-0 -mt-8 pb-4 space-y-3">
+            <div className="h-10 bg-gradient-to-r from-primary/20 via-primary/10 to-transparent" />
+            <CardContent className="pt-0 -mt-5 pb-4 space-y-3">
               {/* Avatar + name */}
               <div className="flex items-center gap-3">
                 <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-card border-2 border-background shadow-lg">
@@ -838,44 +838,43 @@ export function AgentDetailPage() {
             </Card>
           )}
 
-          {/* ── Task stats summary ── */}
+          {/* ── Performance stats (inline) ── */}
           {taskStats.total > 0 && (
             <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0">
               <CardContent className="pt-4 pb-4 space-y-3">
                 <SectionHeader title="Performance" icon={Star} />
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="text-center">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="text-center flex-1">
                     <p className="text-lg font-bold font-mono">{taskStats.total}</p>
-                    <p className="text-[10px] text-muted-foreground">Total tasks</p>
+                    <p className="text-[10px] text-muted-foreground">Total</p>
                   </div>
                   {taskStats.successRate != null && (
-                    <div className="text-center">
+                    <div className="text-center flex-1">
                       <p className={cn("text-lg font-bold font-mono", taskStats.successRate >= 70 ? "text-emerald-400" : "text-amber-400")}>
                         {taskStats.successRate}%
                       </p>
-                      <p className="text-[10px] text-muted-foreground">Success rate</p>
+                      <p className="text-[10px] text-muted-foreground">Success</p>
                     </div>
                   )}
                   {taskStats.avgScore != null && (
-                    <div className="text-center">
+                    <div className="text-center flex-1">
                       <p className="text-lg font-bold font-mono">{taskStats.avgScore.toFixed(1)}<span className="text-xs text-muted-foreground font-normal">/5</span></p>
-                      <p className="text-[10px] text-muted-foreground">Avg score</p>
+                      <p className="text-[10px] text-muted-foreground">Avg</p>
                     </div>
                   )}
-                  <div className="text-center">
+                  <div className="text-center flex-1">
                     <p className="text-lg font-bold font-mono text-emerald-400">{taskStats.done}</p>
                     <p className="text-[10px] text-muted-foreground">Done</p>
                   </div>
-                </div>
-                {/* Mini bar */}
-                {taskStats.done + taskStats.failed > 0 && (
-                  <div className="space-y-1">
-                    <Progress value={taskStats.successRate ?? 0} className="h-1.5" />
-                    <div className="flex justify-between text-[10px] text-muted-foreground">
-                      <span>{taskStats.done} done</span>
-                      <span>{taskStats.failed} failed</span>
+                  {taskStats.failed > 0 && (
+                    <div className="text-center flex-1">
+                      <p className="text-lg font-bold font-mono text-red-400">{taskStats.failed}</p>
+                      <p className="text-[10px] text-muted-foreground">Failed</p>
                     </div>
-                  </div>
+                  )}
+                </div>
+                {taskStats.done + taskStats.failed > 0 && (
+                  <Progress value={taskStats.successRate ?? 0} className="h-1.5" />
                 )}
               </CardContent>
             </Card>
@@ -1039,36 +1038,7 @@ export function AgentDetailPage() {
                     </Card>
                   </div>
 
-                  {/* Capabilities overview */}
-                  <div>
-                    <SectionHeader title="Capabilities" icon={Zap} />
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                      <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0">
-                        <CardContent className="pt-3 pb-3 text-center">
-                          <p className="text-2xl font-bold font-mono">{agent.allowedTools?.length ?? 0}</p>
-                          <p className="text-[10px] text-muted-foreground">Tools</p>
-                        </CardContent>
-                      </Card>
-                      <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0">
-                        <CardContent className="pt-3 pb-3 text-center">
-                          <p className="text-2xl font-bold font-mono">{enabledCategories.length}</p>
-                          <p className="text-[10px] text-muted-foreground">Extensions</p>
-                        </CardContent>
-                      </Card>
-                      <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0">
-                        <CardContent className="pt-3 pb-3 text-center">
-                          <p className="text-2xl font-bold font-mono">{agent.skills?.length ?? 0}</p>
-                          <p className="text-[10px] text-muted-foreground">Skills</p>
-                        </CardContent>
-                      </Card>
-                      <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0">
-                        <CardContent className="pt-3 pb-3 text-center">
-                          <p className="text-2xl font-bold font-mono">{mcpEntries.length}</p>
-                          <p className="text-[10px] text-muted-foreground">MCP Servers</p>
-                        </CardContent>
-                      </Card>
-                    </div>
-                  </div>
+
                 </div>
               </ScrollArea>
             </TabsContent>

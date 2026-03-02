@@ -22,6 +22,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
@@ -50,7 +51,16 @@ import {
   Users,
   Check,
   ArrowUpDown,
+  Layers,
+  ChevronRight,
+  ChevronDown,
+  Calendar,
 } from "lucide-react";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import { useTasks, usePolpo, useProcesses, useMissions, useAgents } from "@lumea-labs/polpo-react";
 import type { Task, TaskStatus, AgentProcess } from "@lumea-labs/polpo-react";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -84,14 +94,83 @@ const phaseConfig: Record<string, { icon: React.ElementType; label: string; colo
 
 // ── Kanban columns (ordering) ──
 
-const kanbanColumns: { status: TaskStatus | "queued"; label: string; filter: (t: Task) => boolean }[] = [
-  { status: "draft", label: "Draft", filter: (t) => t.status === "draft" },
-  { status: "queued", label: "Queued", filter: (t) => t.status === "pending" || t.status === "assigned" },
-  { status: "in_progress", label: "Running", filter: (t) => t.status === "in_progress" },
-  { status: "review", label: "Review", filter: (t) => t.status === "review" },
-  { status: "done", label: "Done", filter: (t) => t.status === "done" },
-  { status: "failed", label: "Failed", filter: (t) => t.status === "failed" },
+const statusKanbanColumns: { key: string; label: string; filter: (t: Task) => boolean }[] = [
+  { key: "draft", label: "Draft", filter: (t) => t.status === "draft" },
+  { key: "queued", label: "Queued", filter: (t) => t.status === "pending" || t.status === "assigned" },
+  { key: "in_progress", label: "Running", filter: (t) => t.status === "in_progress" },
+  { key: "review", label: "Review", filter: (t) => t.status === "review" },
+  { key: "done", label: "Done", filter: (t) => t.status === "done" },
+  { key: "failed", label: "Failed", filter: (t) => t.status === "failed" },
 ];
+
+// ── Column-by modes for Kanban ──
+
+type ColumnByKey = "status" | "mission" | "team" | "agent";
+
+const columnByOptions: { value: ColumnByKey; label: string; icon: React.ElementType }[] = [
+  { value: "status", label: "Status", icon: Columns3 },
+  { value: "mission", label: "Mission", icon: Target },
+  { value: "team", label: "Team", icon: Users },
+  { value: "agent", label: "Agent", icon: Bot },
+];
+
+interface DynamicColumn {
+  key: string;
+  label: string;
+  filter: (t: Task) => boolean;
+}
+
+function buildDynamicColumns(
+  mode: ColumnByKey,
+  tasks: Task[],
+  agentTeamMap: Record<string, string>,
+): DynamicColumn[] {
+  switch (mode) {
+    case "status":
+      return statusKanbanColumns;
+    case "mission": {
+      const groups = new Set<string>();
+      let hasUngrouped = false;
+      for (const t of tasks) {
+        if (t.group) groups.add(t.group);
+        else hasUngrouped = true;
+      }
+      const cols: DynamicColumn[] = Array.from(groups)
+        .sort((a, b) => a.localeCompare(b))
+        .map((g) => ({ key: `mission:${g}`, label: g, filter: (t: Task) => t.group === g }));
+      if (hasUngrouped) {
+        cols.push({ key: "mission:__none__", label: "No mission", filter: (t: Task) => !t.group });
+      }
+      return cols.length > 0 ? cols : [{ key: "mission:__all__", label: "All tasks", filter: () => true }];
+    }
+    case "team": {
+      const teamNames = new Set<string>();
+      let hasUnmapped = false;
+      for (const t of tasks) {
+        const team = agentTeamMap[t.assignTo];
+        if (team) teamNames.add(team);
+        else hasUnmapped = true;
+      }
+      const cols: DynamicColumn[] = Array.from(teamNames)
+        .sort((a, b) => a.localeCompare(b))
+        .map((name) => ({ key: `team:${name}`, label: name, filter: (t: Task) => agentTeamMap[t.assignTo] === name }));
+      if (hasUnmapped) {
+        cols.push({ key: "team:__none__", label: "No team", filter: (t: Task) => !agentTeamMap[t.assignTo] });
+      }
+      return cols.length > 0 ? cols : [{ key: "team:__all__", label: "All tasks", filter: () => true }];
+    }
+    case "agent": {
+      const agents = new Set<string>();
+      for (const t of tasks) agents.add(t.assignTo);
+      const cols: DynamicColumn[] = Array.from(agents)
+        .sort((a, b) => a.localeCompare(b))
+        .map((name) => ({ key: `agent:${name}`, label: name, filter: (t: Task) => t.assignTo === name }));
+      return cols.length > 0 ? cols : [{ key: "agent:__all__", label: "All tasks", filter: () => true }];
+    }
+    default:
+      return statusKanbanColumns;
+  }
+}
 
 // ── Sort options ──
 
@@ -280,6 +359,117 @@ function TeamFilter({
   );
 }
 
+// ── Time filter ──
+
+type TimeField = "createdAt" | "updatedAt";
+
+const timeFieldOptions: { value: TimeField; label: string }[] = [
+  { value: "createdAt", label: "Created" },
+  { value: "updatedAt", label: "Updated" },
+];
+
+type TimeRange = "1h" | "6h" | "24h" | "7d" | "30d" | "custom";
+
+const timeRangePresets: { value: TimeRange; label: string; ms: number }[] = [
+  { value: "1h", label: "Last hour", ms: 60 * 60 * 1000 },
+  { value: "6h", label: "Last 6 hours", ms: 6 * 60 * 60 * 1000 },
+  { value: "24h", label: "Last 24 hours", ms: 24 * 60 * 60 * 1000 },
+  { value: "7d", label: "Last 7 days", ms: 7 * 24 * 60 * 60 * 1000 },
+  { value: "30d", label: "Last 30 days", ms: 30 * 24 * 60 * 60 * 1000 },
+];
+
+interface TimeFilterState {
+  field: TimeField;
+  range: TimeRange;
+  /** Epoch ms — resolved from preset or custom input */
+  after: number;
+}
+
+function TimeFilter({
+  value,
+  onChange,
+  onClear,
+}: {
+  value: TimeFilterState | null;
+  onChange: (v: TimeFilterState) => void;
+  onClear: () => void;
+}) {
+  const hasFilter = value !== null;
+  const [field, setField] = useState<TimeField>(value?.field ?? "updatedAt");
+
+  const applyPreset = (preset: (typeof timeRangePresets)[number]) => {
+    onChange({ field, range: preset.value, after: Date.now() - preset.ms });
+  };
+
+  const activePresetLabel = value
+    ? timeRangePresets.find(p => p.value === value.range)?.label ?? value.range
+    : null;
+  const activeFieldLabel = value
+    ? timeFieldOptions.find(f => f.value === value.field)?.label ?? value.field
+    : null;
+
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button variant={hasFilter ? "default" : "outline"} size="sm" className="gap-1.5">
+          <Calendar className="h-3.5 w-3.5" />
+          {hasFilter ? `${activeFieldLabel}: ${activePresetLabel}` : "Time"}
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-56 p-2" align="start">
+        {/* Field selector */}
+        <div className="flex items-center gap-1 mb-2">
+          {timeFieldOptions.map((opt) => (
+            <Button
+              key={opt.value}
+              variant={field === opt.value ? "default" : "ghost"}
+              size="sm"
+              className="h-6 text-[10px] flex-1"
+              onClick={() => setField(opt.value)}
+            >
+              {opt.label}
+            </Button>
+          ))}
+        </div>
+
+        {/* Range presets */}
+        <div className="space-y-0.5">
+          {timeRangePresets.map((preset) => (
+            <button
+              key={preset.value}
+              className={cn(
+                "flex items-center gap-2 w-full rounded-md px-2 py-1.5 text-left text-sm transition-colors",
+                value?.range === preset.value && value?.field === field
+                  ? "bg-accent text-accent-foreground"
+                  : "hover:bg-muted",
+              )}
+              onClick={() => applyPreset(preset)}
+            >
+              <div className={cn(
+                "flex h-4 w-4 shrink-0 items-center justify-center rounded-full border",
+                value?.range === preset.value && value?.field === field
+                  ? "bg-primary border-primary"
+                  : "border-muted-foreground/30",
+              )}>
+                {value?.range === preset.value && value?.field === field && (
+                  <Check className="h-2.5 w-2.5 text-primary-foreground" />
+                )}
+              </div>
+              <span>{preset.label}</span>
+            </button>
+          ))}
+        </div>
+
+        {hasFilter && (
+          <Button variant="ghost" size="sm" className="w-full mt-1 text-xs" onClick={onClear}>
+            Clear
+          </Button>
+        )}
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 // ── Compact task card (used in both list and kanban) ──
 
 function TaskCard({
@@ -313,110 +503,108 @@ function TaskCard({
   });
   const isBlocked = unresolvedDeps.length > 0 && (task.status === "pending" || task.status === "assigned");
 
-  return (
+   return (
     <div
       className={cn(
-        "group rounded-lg border border-border/40 bg-card/80 backdrop-blur-sm transition-all cursor-pointer overflow-hidden",
+        "group rounded-lg border border-border/40 bg-card/80 backdrop-blur-sm transition-all cursor-pointer",
         "hover:border-primary/20 hover:shadow-[0_0_15px_oklch(0.7_0.15_200_/_8%)]",
+        "w-full max-w-full overflow-hidden box-border",
         compact && "p-2.5",
         !compact && "p-3",
       )}
       onClick={onClick}
     >
-      <div className="flex items-start gap-2.5">
+      <div className="flex items-start gap-2 w-full min-w-0">
         <div className={cn("flex shrink-0 items-center justify-center rounded-md mt-0.5", compact ? "h-6 w-6" : "h-7 w-7", cfg.bg)}>
           <Icon className={cn(compact ? "h-3 w-3" : "h-3.5 w-3.5", cfg.color, task.status === "in_progress" && "animate-spin")} />
         </div>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-1.5 min-w-0">
-            <span className={cn("font-medium min-w-0", compact ? "text-xs truncate" : "text-sm line-clamp-2")}>{task.title}</span>
-            {phase && (
-              <Badge variant="outline" className={cn("text-[8px] gap-0.5 px-1 py-0 shrink-0", phase.color)}>
-                <phase.icon className="h-2 w-2" />
-                {phase.label}
-              </Badge>
-            )}
-          </div>
-          <div className="flex items-center gap-1.5 mt-1 flex-wrap">
-            <span className="text-[10px] text-muted-foreground flex items-center gap-0.5">
-              <Bot className="h-2.5 w-2.5" />
-              {task.assignTo}
+        <div className="min-w-0 flex-1">
+          <p className={cn("font-medium leading-snug", compact ? "text-xs" : "text-sm")} style={{ overflowWrap: "anywhere", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{task.title}</p>
+          {phase && (
+            <Badge variant="outline" className={cn("text-[8px] gap-0.5 px-1 py-0 mt-0.5 inline-flex", phase.color)}>
+              <phase.icon className="h-2 w-2" />
+              {phase.label}
+            </Badge>
+          )}
+          <div className="flex items-center gap-1.5 mt-1 flex-wrap min-w-0">
+            <span className="text-[10px] text-muted-foreground inline-flex items-center gap-0.5 max-w-full min-w-0">
+              <Bot className="h-2.5 w-2.5 shrink-0" />
+              <span className="truncate">{task.assignTo}</span>
             </span>
             {task.group && (
-              <Badge variant="secondary" className="text-[8px] px-1 py-0">{task.group}</Badge>
+              <Badge variant="secondary" className="text-[8px] px-1 py-0 max-w-full truncate">{task.group}</Badge>
             )}
-            <span className="text-[10px] text-muted-foreground">
+            <span className="text-[10px] text-muted-foreground whitespace-nowrap">
               {formatDistanceToNow(new Date(task.updatedAt), { addSuffix: true })}
             </span>
           </div>
-        </div>
-
-        {/* Right side indicators */}
-        <div className="flex items-center gap-1 shrink-0">
-          {assessment?.globalScore != null && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <div className={cn(
-                  "flex items-center gap-0.5 rounded px-1.5 py-0.5",
-                  assessment.passed ? "bg-emerald-500/10" : "bg-red-500/10"
-                )}>
-                  <Star className={cn("h-2.5 w-2.5", assessment.passed ? "text-emerald-500" : "text-red-500")} />
-                  <span className={cn("text-[10px] font-bold", assessment.passed ? "text-emerald-500" : "text-red-500")}>
-                    {assessment.globalScore.toFixed(1)}
-                  </span>
-                </div>
-              </TooltipTrigger>
-              <TooltipContent className="text-xs">
-                {assessment.passed ? "Passed" : "Failed"} — {assessment.checks.length} check{assessment.checks.length !== 1 ? "s" : ""}
-              </TooltipContent>
-            </Tooltip>
-          )}
-          {task.retries > 0 && (
-            <Badge variant="secondary" className="text-[9px] px-1 py-0">
-              <RotateCcw className="h-2 w-2 mr-0.5" />{task.retries}
-            </Badge>
-          )}
-          {task.dependsOn.length > 0 && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Badge
-                  variant={isBlocked ? "destructive" : "outline"}
-                  className={cn("text-[9px] px-1 py-0 cursor-help", isBlocked && "bg-amber-500/15 text-amber-500 border-amber-500/30 hover:bg-amber-500/20")}
-                >
-                  <GitBranch className="h-2 w-2 mr-0.5" />
-                  {isBlocked ? `Blocked (${unresolvedDeps.length})` : task.dependsOn.length}
-                </Badge>
-              </TooltipTrigger>
-              <TooltipContent className="text-xs max-w-xs">
-                <p className="font-medium mb-1">{isBlocked ? "Waiting for:" : "Depends on:"}</p>
-                {task.dependsOn.map((depId) => {
-                  const dep = allTasks?.find(t => t.id === depId);
-                  const done = dep?.status === "done";
-                  return (
-                    <p key={depId} className={done ? "text-muted-foreground line-through" : ""}>
-                      {done ? "✓" : "○"} {dep ? dep.title : depId}
-                    </p>
-                  );
-                })}
-              </TooltipContent>
-            </Tooltip>
-          )}
-          {task.expectations.length > 0 && !assessment && (
-            <Badge variant="outline" className="text-[9px] px-1 py-0">
-              <Wrench className="h-2 w-2 mr-0.5" />{task.expectations.length}
-            </Badge>
-          )}
+          {/* Indicators row */}
+          <div className="flex items-center gap-1 mt-1 flex-wrap">
+            {assessment?.globalScore != null && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div className={cn(
+                    "flex items-center gap-0.5 rounded px-1.5 py-0.5",
+                    assessment.passed ? "bg-emerald-500/10" : "bg-red-500/10"
+                  )}>
+                    <Star className={cn("h-2.5 w-2.5", assessment.passed ? "text-emerald-500" : "text-red-500")} />
+                    <span className={cn("text-[10px] font-bold", assessment.passed ? "text-emerald-500" : "text-red-500")}>
+                      {assessment.globalScore.toFixed(1)}
+                    </span>
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent className="text-xs">
+                  {assessment.passed ? "Passed" : "Failed"} — {assessment.checks.length} check{assessment.checks.length !== 1 ? "s" : ""}
+                </TooltipContent>
+              </Tooltip>
+            )}
+            {task.retries > 0 && (
+              <Badge variant="secondary" className="text-[9px] px-1 py-0">
+                <RotateCcw className="h-2 w-2 mr-0.5" />{task.retries}
+              </Badge>
+            )}
+            {task.dependsOn.length > 0 && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Badge
+                    variant={isBlocked ? "destructive" : "outline"}
+                    className={cn("text-[9px] px-1 py-0 cursor-help", isBlocked && "bg-amber-500/15 text-amber-500 border-amber-500/30 hover:bg-amber-500/20")}
+                  >
+                    <GitBranch className="h-2 w-2 mr-0.5" />
+                    {isBlocked ? `Blocked (${unresolvedDeps.length})` : task.dependsOn.length}
+                  </Badge>
+                </TooltipTrigger>
+                <TooltipContent className="text-xs max-w-xs">
+                  <p className="font-medium mb-1">{isBlocked ? "Waiting for:" : "Depends on:"}</p>
+                  {task.dependsOn.map((depId) => {
+                    const dep = allTasks?.find(t => t.id === depId);
+                    const done = dep?.status === "done";
+                    return (
+                      <p key={depId} className={done ? "text-muted-foreground line-through" : ""}>
+                        {done ? "✓" : "○"} {dep ? dep.title : depId}
+                      </p>
+                    );
+                  })}
+                </TooltipContent>
+              </Tooltip>
+            )}
+            {task.expectations.length > 0 && !assessment && (
+              <Badge variant="outline" className="text-[9px] px-1 py-0">
+                <Wrench className="h-2 w-2 mr-0.5" />{task.expectations.length}
+              </Badge>
+            )}
+          </div>
         </div>
       </div>
 
       {/* Live activity strip for running tasks */}
       {process && (
-        <div className="mt-2 pt-2 border-t border-primary/10 space-y-1 overflow-hidden">
-          <div className="flex items-center gap-2">
+        <div className="mt-2 pt-2 border-t border-primary/10 space-y-1 min-w-0 overflow-hidden">
+          <div className="flex items-center gap-2 min-w-0">
             <div className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse shrink-0" />
             {process.activity.lastTool && (
-              <Badge variant="outline" className="text-[8px] font-mono px-1 py-0 text-primary border-primary/30">
-                <Wrench className="h-2 w-2 mr-0.5" />{process.activity.lastTool}
+              <Badge variant="outline" className="text-[8px] font-mono px-1 py-0 text-primary border-primary/30 min-w-0 truncate">
+                <Wrench className="h-2 w-2 mr-0.5 shrink-0" /><span className="truncate">{process.activity.lastTool}</span>
               </Badge>
             )}
             <div className="flex items-center gap-2 ml-auto shrink-0">
@@ -433,7 +621,7 @@ function TaskCard({
             </div>
           </div>
           {process.activity.lastFile && (
-            <p className="text-[10px] font-mono text-muted-foreground truncate pl-3.5 w-full">
+            <p className="text-[10px] font-mono text-muted-foreground truncate pl-3.5">
               {process.activity.lastFile}
             </p>
           )}
@@ -462,11 +650,269 @@ function TaskCard({
   );
 }
 
+// ── Group-by logic ──
+
+type GroupByKey = "none" | "status" | "mission" | "team" | "agent";
+
+const groupByOptions: { value: GroupByKey; label: string; icon: React.ElementType }[] = [
+  { value: "none", label: "None", icon: Layers },
+  { value: "status", label: "Status", icon: Columns3 },
+  { value: "mission", label: "Mission", icon: Target },
+  { value: "team", label: "Team", icon: Users },
+  { value: "agent", label: "Agent", icon: Bot },
+];
+
+const groupByIcons: Record<string, React.ElementType> = {
+  status: Columns3,
+  mission: Target,
+  team: Users,
+  agent: Bot,
+};
+
+function groupTasksBy(
+  tasks: Task[],
+  mode: GroupByKey,
+  agentTeamMap: Record<string, string>,
+): Record<string, Task[]> | null {
+  if (mode === "none") return null;
+  const groups: Record<string, Task[]> = {};
+  for (const task of tasks) {
+    let key: string;
+    switch (mode) {
+      case "status":
+        key = task.status;
+        break;
+      case "mission":
+        key = task.group || "__ungrouped__";
+        break;
+      case "team":
+        key = agentTeamMap[task.assignTo] || "__ungrouped__";
+        break;
+      case "agent":
+        key = task.assignTo;
+        break;
+      default:
+        key = "__ungrouped__";
+    }
+    if (!groups[key]) groups[key] = [];
+    groups[key].push(task);
+  }
+  return groups;
+}
+
+function getGroupLabel(mode: GroupByKey, key: string): string {
+  if (key === "__ungrouped__") {
+    switch (mode) {
+      case "mission": return "No mission";
+      case "team": return "No team";
+      default: return "Ungrouped";
+    }
+  }
+  if (mode === "status") {
+    return statusConfig[key as TaskStatus]?.label ?? key;
+  }
+  return key;
+}
+
+// ── Collapsible group block (generic) ──
+
+function GroupBlock({
+  label,
+  icon: GroupIcon,
+  tasks,
+  processes,
+  allTasks,
+  onRetry,
+  onKill,
+  onQueue,
+  onClick,
+}: {
+  label: string;
+  icon: React.ElementType;
+  tasks: Task[];
+  processes: AgentProcess[];
+  allTasks: Task[];
+  onRetry: (id: string) => void;
+  onKill: (id: string) => void;
+  onQueue: (id: string) => void;
+  onClick: (id: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+
+  const running = tasks.filter(t => t.status === "in_progress").length;
+  const done = tasks.filter(t => t.status === "done").length;
+  const failed = tasks.filter(t => t.status === "failed").length;
+
+  return (
+    <Collapsible open={open} onOpenChange={setOpen} className="w-full max-w-full overflow-hidden">
+      <CollapsibleTrigger asChild>
+        <button
+          className={cn(
+            "w-full max-w-full rounded-lg border border-border/40 bg-card/80 backdrop-blur-sm transition-all cursor-pointer overflow-hidden box-border",
+            "hover:border-primary/20 hover:shadow-[0_0_15px_oklch(0.7_0.15_200_/_8%)]",
+            "p-2.5 text-left",
+          )}
+        >
+          <div className="flex items-center gap-2 min-w-0">
+            {open ? (
+              <ChevronDown className="h-3 w-3 text-muted-foreground shrink-0" />
+            ) : (
+              <ChevronRight className="h-3 w-3 text-muted-foreground shrink-0" />
+            )}
+            <GroupIcon className="h-3 w-3 text-primary/70 shrink-0" />
+            <span className="text-xs font-medium truncate min-w-0 flex-1">{label}</span>
+            <Badge variant="secondary" className="text-[9px] shrink-0">{tasks.length}</Badge>
+          </div>
+          {/* Mini status summary */}
+          <div className="flex items-center gap-2 mt-1 pl-5">
+            {running > 0 && (
+              <span className="text-[9px] text-blue-400 flex items-center gap-0.5">
+                <Loader2 className="h-2 w-2 animate-spin" />{running}
+              </span>
+            )}
+            {done > 0 && (
+              <span className="text-[9px] text-emerald-400 flex items-center gap-0.5">
+                <CheckCircle2 className="h-2 w-2" />{done}
+              </span>
+            )}
+            {failed > 0 && (
+              <span className="text-[9px] text-red-400 flex items-center gap-0.5">
+                <AlertTriangle className="h-2 w-2" />{failed}
+              </span>
+            )}
+          </div>
+        </button>
+      </CollapsibleTrigger>
+      <CollapsibleContent className="overflow-hidden">
+        <div className="space-y-1.5 pt-1.5 pl-2 overflow-hidden">
+          {tasks.map((task) => (
+            <TaskCard
+              key={task.id}
+              task={task}
+              process={processes.find(p => p.taskId === task.id)}
+              compact
+              allTasks={allTasks}
+              onRetry={() => onRetry(task.id)}
+              onKill={() => onKill(task.id)}
+              onQueue={() => onQueue(task.id)}
+              onClick={() => onClick(task.id)}
+            />
+          ))}
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
 // ── Kanban board ──
+
+function KanbanColumn({
+  col,
+  tasks,
+  allTasks,
+  processes,
+  groupBy,
+  columnBy,
+  agentTeamMap,
+  onRetry,
+  onKill,
+  onQueue,
+  onClick,
+}: {
+  col: DynamicColumn;
+  tasks: Task[];
+  allTasks: Task[];
+  processes: AgentProcess[];
+  groupBy: GroupByKey;
+  columnBy: ColumnByKey;
+  agentTeamMap: Record<string, string>;
+  onRetry: (id: string) => void;
+  onKill: (id: string) => void;
+  onQueue: (id: string) => void;
+  onClick: (id: string) => void;
+}) {
+  const colTasks = useMemo(() => tasks.filter(col.filter), [tasks, col]);
+
+  // Status dot color — resolve from statusConfig when column-by is status
+  const statusKey = col.key === "queued" ? "pending" : col.key;
+  const colCfg = columnBy === "status" && statusKey in statusConfig
+    ? statusConfig[statusKey as TaskStatus]
+    : null;
+
+  // Effective groupBy: skip if same dimension as columns (redundant)
+  const effectiveGroupBy = groupBy === columnBy ? "none" : groupBy;
+
+  const groups = useMemo(
+    () => groupTasksBy(colTasks, effectiveGroupBy, agentTeamMap),
+    [colTasks, effectiveGroupBy, agentTeamMap],
+  );
+
+  const GroupIcon = effectiveGroupBy !== "none" ? (groupByIcons[effectiveGroupBy] ?? Layers) : Layers;
+
+  return (
+    <div className="flex flex-col w-[260px] min-w-[260px] max-w-[260px] shrink-0 overflow-hidden">
+      {/* Column header */}
+      <div className="flex items-center gap-2 px-2 pb-2 shrink-0 border-t-2 border-border/30 pt-2 min-w-0">
+        {colCfg ? (
+          <div className={cn("h-2 w-2 rounded-full shrink-0", colCfg.bg.replace("bg-", "bg-").replace("/10", ""))} style={{
+            backgroundColor: `hsl(var(--${colCfg.color.replace("text-", "").replace("-400", "")}))`,
+          }} />
+        ) : (
+          <div className="h-2 w-2 rounded-full bg-muted-foreground/40 shrink-0" />
+        )}
+        <span className="text-xs font-medium truncate">{col.label}</span>
+        <Badge variant="secondary" className="text-[9px] ml-auto shrink-0">{colTasks.length}</Badge>
+      </div>
+
+      {/* Column body — [&>div>div]:!block overrides Radix ScrollArea viewport's display:table that causes width overflow */}
+      <ScrollArea className="flex-1 min-h-0 [&>div>div]:!block">
+        <div className="space-y-1.5 px-1 pb-1">
+          {colTasks.length === 0 ? (
+            <div className="flex items-center justify-center py-8 text-muted-foreground/60">
+              <p className="text-[10px]">No tasks</p>
+            </div>
+          ) : groups ? (
+            Object.entries(groups).map(([groupName, groupTasks]) => (
+              <GroupBlock
+                key={groupName}
+                label={getGroupLabel(effectiveGroupBy, groupName)}
+                icon={GroupIcon}
+                tasks={groupTasks}
+                processes={processes}
+                allTasks={allTasks}
+                onRetry={onRetry}
+                onKill={onKill}
+                onQueue={onQueue}
+                onClick={onClick}
+              />
+            ))
+          ) : (
+            colTasks.map((task) => (
+              <TaskCard
+                key={task.id}
+                task={task}
+                process={processes.find(p => p.taskId === task.id)}
+                compact
+                allTasks={allTasks}
+                onRetry={() => onRetry(task.id)}
+                onKill={() => onKill(task.id)}
+                onQueue={() => onQueue(task.id)}
+                onClick={() => onClick(task.id)}
+              />
+            ))
+          )}
+        </div>
+      </ScrollArea>
+    </div>
+  );
+}
 
 function KanbanBoard({
   tasks,
   processes,
+  groupBy,
+  columnBy,
+  agentTeamMap,
   onRetry,
   onKill,
   onQueue,
@@ -474,55 +920,37 @@ function KanbanBoard({
 }: {
   tasks: Task[];
   processes: AgentProcess[];
+  groupBy: GroupByKey;
+  columnBy: ColumnByKey;
+  agentTeamMap: Record<string, string>;
   onRetry: (id: string) => void;
   onKill: (id: string) => void;
   onQueue: (id: string) => void;
   onClick: (id: string) => void;
 }) {
+  const columns = useMemo(
+    () => buildDynamicColumns(columnBy, tasks, agentTeamMap),
+    [columnBy, tasks, agentTeamMap],
+  );
+
   return (
     <div className="flex gap-3 flex-1 min-h-0 overflow-x-auto pb-2">
-      {kanbanColumns.map((col) => {
-        const colTasks = tasks.filter(col.filter);
-        const colCfg = col.status === "queued" ? statusConfig.pending : statusConfig[col.status as TaskStatus];
-
-        return (
-          <div key={col.status} className="flex flex-col min-w-[260px] w-[260px] max-w-[260px] shrink-0">
-            {/* Column header */}
-            <div className="flex items-center gap-2 px-2 pb-2 shrink-0 border-t-2 border-border/30 pt-2">
-              <div className={cn("h-2 w-2 rounded-full", colCfg.bg.replace("bg-", "bg-").replace("/10", ""))} style={{
-                backgroundColor: `hsl(var(--${colCfg.color.replace("text-", "").replace("-400", "")}))`,
-              }} />
-              <span className="text-xs font-medium">{col.label}</span>
-              <Badge variant="secondary" className="text-[9px] ml-auto">{colTasks.length}</Badge>
-            </div>
-
-            {/* Column body */}
-            <ScrollArea className="flex-1 min-h-0">
-              <div className="space-y-1.5 px-1 pr-3 pb-1 overflow-hidden">
-                {colTasks.length === 0 ? (
-                  <div className="flex items-center justify-center py-8 text-muted-foreground/60">
-                    <p className="text-[10px]">No tasks</p>
-                  </div>
-                ) : (
-                  colTasks.map((task) => (
-                    <TaskCard
-                      key={task.id}
-                      task={task}
-                      process={processes.find(p => p.taskId === task.id)}
-                      compact
-                      allTasks={tasks}
-                      onRetry={() => onRetry(task.id)}
-                      onKill={() => onKill(task.id)}
-                      onQueue={() => onQueue(task.id)}
-                      onClick={() => onClick(task.id)}
-                    />
-                  ))
-                )}
-              </div>
-            </ScrollArea>
-          </div>
-        );
-      })}
+      {columns.map((col) => (
+        <KanbanColumn
+          key={col.key}
+          col={col}
+          tasks={tasks}
+          allTasks={tasks}
+          processes={processes}
+          groupBy={groupBy}
+          columnBy={columnBy}
+          agentTeamMap={agentTeamMap}
+          onRetry={onRetry}
+          onKill={onKill}
+          onQueue={onQueue}
+          onClick={onClick}
+        />
+      ))}
     </div>
   );
 }
@@ -646,6 +1074,21 @@ export function TasksPage() {
   const [sortKey, setSortKey] = useState<SortKey>(() => {
     return (localStorage.getItem("polpo-tasks-sort") as SortKey) ?? "updated";
   });
+  const [groupBy, setGroupBy] = useState<GroupByKey>(() => {
+    // Migrate old boolean setting
+    const legacy = localStorage.getItem("polpo-tasks-group-mission");
+    if (legacy !== null) {
+      localStorage.removeItem("polpo-tasks-group-mission");
+      const val = legacy === "true" ? "mission" : "none";
+      localStorage.setItem("polpo-tasks-group-by", val);
+      return val as GroupByKey;
+    }
+    return (localStorage.getItem("polpo-tasks-group-by") as GroupByKey) ?? "mission";
+  });
+  const [columnBy, setColumnBy] = useState<ColumnByKey>(() => {
+    return (localStorage.getItem("polpo-tasks-column-by") as ColumnByKey) ?? "status";
+  });
+  const [timeFilter, setTimeFilter] = useState<TimeFilterState | null>(null);
 
   const setView = (mode: ViewMode) => {
     setViewMode(mode);
@@ -703,7 +1146,17 @@ export function TasksPage() {
     localStorage.setItem("polpo-tasks-sort", key);
   };
 
-  // Filtered + sorted tasks by search + mission filter + team filter
+  const changeGroupBy = (key: GroupByKey) => {
+    setGroupBy(key);
+    localStorage.setItem("polpo-tasks-group-by", key);
+  };
+
+  const changeColumnBy = (key: ColumnByKey) => {
+    setColumnBy(key);
+    localStorage.setItem("polpo-tasks-column-by", key);
+  };
+
+  // Filtered + sorted tasks by search + mission filter + team filter + time filter
   const filtered = useMemo(() => {
     const result = tasks.filter(t => {
       // Mission filter
@@ -714,6 +1167,11 @@ export function TasksPage() {
       if (selectedTeams.size > 0) {
         const agentTeam = agentTeamMap[t.assignTo];
         if (!agentTeam || !selectedTeams.has(agentTeam)) return false;
+      }
+      // Time filter
+      if (timeFilter) {
+        const ts = new Date(t[timeFilter.field]).getTime();
+        if (ts < timeFilter.after) return false;
       }
       // Search filter
       if (search) {
@@ -727,7 +1185,7 @@ export function TasksPage() {
       return true;
     });
     return sortTasks(result, sortKey);
-  }, [tasks, search, selectedMissions, selectedTeams, agentTeamMap, sortKey]);
+  }, [tasks, search, selectedMissions, selectedTeams, agentTeamMap, sortKey, timeFilter]);
 
   // Unique mission names for the filter
   const missionOptions = useMemo((): { name: string; id: string }[] => {
@@ -778,6 +1236,13 @@ export function TasksPage() {
           isLoading={teamsLoading}
         />
 
+        {/* Time filter */}
+        <TimeFilter
+          value={timeFilter}
+          onChange={setTimeFilter}
+          onClear={() => setTimeFilter(null)}
+        />
+
         {/* Spacer */}
         <div className="flex-1" />
 
@@ -803,6 +1268,66 @@ export function TasksPage() {
             ))}
           </DropdownMenuContent>
         </DropdownMenu>
+
+        {/* Kanban-only controls: Columns by + Group by Mission */}
+        {viewMode === "kanban" && (
+          <>
+            {/* Columns by dropdown */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm" className="h-7 gap-1.5 text-xs">
+                  <Columns3 className="h-3 w-3" />
+                  Columns: {columnByOptions.find(o => o.value === columnBy)?.label ?? "Status"}
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                {columnByOptions.map((opt) => {
+                  const OptIcon = opt.icon;
+                  return (
+                    <DropdownMenuItem
+                      key={opt.value}
+                      className={cn("text-xs gap-2", columnBy === opt.value && "font-medium")}
+                      onClick={() => changeColumnBy(opt.value)}
+                    >
+                      {columnBy === opt.value ? <Check className="h-3 w-3" /> : <span className="w-3" />}
+                      <OptIcon className="h-3 w-3" />
+                      {opt.label}
+                    </DropdownMenuItem>
+                  );
+                })}
+              </DropdownMenuContent>
+            </DropdownMenu>
+
+            {/* Group by dropdown */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant={groupBy !== "none" ? "default" : "outline"} size="sm" className="h-7 gap-1.5 text-xs">
+                  <Layers className="h-3 w-3" />
+                  {groupBy === "none" ? "Group" : `Group: ${groupByOptions.find(o => o.value === groupBy)?.label}`}
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                {groupByOptions.map((opt) => {
+                  const OptIcon = opt.icon;
+                  // Skip the option that matches current columnBy (redundant grouping)
+                  const isRedundant = opt.value === columnBy;
+                  if (isRedundant) return null;
+                  return (
+                    <DropdownMenuItem
+                      key={opt.value}
+                      className={cn("text-xs gap-2", groupBy === opt.value && "font-medium")}
+                      onClick={() => changeGroupBy(opt.value)}
+                    >
+                      {groupBy === opt.value ? <Check className="h-3 w-3" /> : <span className="w-3" />}
+                      <OptIcon className="h-3 w-3" />
+                      {opt.label}
+                    </DropdownMenuItem>
+                  );
+                })}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </>
+        )}
 
         {/* View toggle */}
         <div className="flex items-center rounded-md border border-border/50">
@@ -831,7 +1356,7 @@ export function TasksPage() {
       </div>
 
       {/* Active filter indicators */}
-      {(selectedMissions.size > 0 || selectedTeams.size > 0) && (
+      {(selectedMissions.size > 0 || selectedTeams.size > 0 || timeFilter) && (
         <div className="flex items-center gap-2 shrink-0 flex-wrap">
           <span className="text-[10px] text-muted-foreground">Filtering by:</span>
           {Array.from(selectedMissions).map((name) => (
@@ -858,11 +1383,23 @@ export function TasksPage() {
               <XCircle className="h-2.5 w-2.5" />
             </Badge>
           ))}
+          {timeFilter && (
+            <Badge
+              variant="secondary"
+              className="text-[10px] gap-1 cursor-pointer bg-blue-500/10 text-blue-400 hover:bg-destructive/20"
+              onClick={() => setTimeFilter(null)}
+            >
+              <Calendar className="h-2.5 w-2.5" />
+              {timeFieldOptions.find(f => f.value === timeFilter.field)?.label}:{" "}
+              {timeRangePresets.find(p => p.value === timeFilter.range)?.label ?? timeFilter.range}
+              <XCircle className="h-2.5 w-2.5" />
+            </Badge>
+          )}
           <Button
             variant="ghost"
             size="sm"
             className="h-5 px-1.5 text-[10px] text-muted-foreground"
-            onClick={() => { setSelectedMissions(new Set()); setSelectedTeams(new Set()); }}
+            onClick={() => { setSelectedMissions(new Set()); setSelectedTeams(new Set()); setTimeFilter(null); }}
           >
             Clear all
           </Button>
@@ -873,7 +1410,7 @@ export function TasksPage() {
       <div className="flex items-center gap-2 shrink-0">
         <span className="text-xs text-muted-foreground">
           {filtered.length} task{filtered.length !== 1 ? "s" : ""}
-          {(selectedMissions.size > 0 || selectedTeams.size > 0) && ` (filtered from ${tasks.length})`}
+          {(selectedMissions.size > 0 || selectedTeams.size > 0 || timeFilter) && ` (filtered from ${tasks.length})`}
         </span>
       </div>
 
@@ -895,6 +1432,9 @@ export function TasksPage() {
         <KanbanBoard
           tasks={filtered}
           processes={processes}
+          groupBy={groupBy}
+          columnBy={columnBy}
+          agentTeamMap={agentTeamMap}
           onRetry={(id) => handleAction(retryTask, id, "retried")}
           onKill={(id) => handleAction(killTask, id, "killed")}
           onQueue={(id) => handleAction(queueTask, id, "queued")}

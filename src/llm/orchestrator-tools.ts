@@ -123,9 +123,9 @@ const getLogsTool: Tool = {
 
 const createTaskTool: Tool = {
   name: "create_task",
-  description: "Create a new task and assign it to an agent.",
+  description: "Create a new task and assign it to an agent. Task titles MUST be unique among active tasks.",
   parameters: Type.Object({
-    title: Type.String({ description: "Task title" }),
+    title: Type.String({ description: "Unique task title (must not match any active task)" }),
     description: Type.String({ description: "Detailed task description" }),
     assignTo: Type.String({ description: "Agent name to assign the task to" }),
     dependsOn: Type.Optional(Type.Array(Type.String(), { description: "IDs of tasks this depends on" })),

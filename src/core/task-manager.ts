@@ -19,6 +19,7 @@ export class TaskManager {
     expectedOutcomes?: ExpectedOutcome[];
     dependsOn?: string[];
     group?: string;
+    missionId?: string;
     maxDuration?: number;
     retryPolicy?: RetryPolicy;
     notifications?: ScopedNotificationRules;
@@ -35,6 +36,7 @@ export class TaskManager {
       expectedOutcomes: opts.expectedOutcomes,
       dependsOn: opts.dependsOn,
       group: opts.group,
+      missionId: opts.missionId,
       maxDuration: opts.maxDuration,
       retryPolicy: opts.retryPolicy,
       notifications: opts.notifications,
@@ -46,6 +48,18 @@ export class TaskManager {
     // Apply any modifications from hooks
     const hookData = hookResult.data;
 
+    // Enforce unique title among active (non-terminal) tasks
+    const existingTasks = this.ctx.registry.getAllTasks();
+    const duplicate = existingTasks.find(
+      t => t.title === hookData.title && t.status !== "done" && t.status !== "failed",
+    );
+    if (duplicate) {
+      throw new Error(
+        `A task with title "${hookData.title}" already exists (id: ${duplicate.id}, status: ${duplicate.status}). ` +
+        `Task titles must be unique among active tasks.`,
+      );
+    }
+
     const rawExps = hookData.expectations ?? [];
     const { valid: expectations, warnings } = sanitizeExpectations(rawExps);
     for (const w of warnings) this.ctx.emitter.emit("log", { level: "warn", message: `[addTask "${hookData.title}"] ${w}` });
@@ -54,6 +68,7 @@ export class TaskManager {
       description: hookData.description,
       assignTo: hookData.assignTo,
       group: hookData.group,
+      missionId: hookData.missionId ?? opts.missionId,
       dependsOn: hookData.dependsOn ?? [],
       expectations,
       expectedOutcomes: hookData.expectedOutcomes,
@@ -201,7 +216,11 @@ export class TaskManager {
       this.killTask(task.id);
       count++;
     }
-    const mission = this.ctx.registry.getMissionByName?.(group);
+    // Resolve mission via task.missionId (direct FK) first, fallback to group name
+    const mid = tasks.find(t => t.missionId)?.missionId;
+    const mission = mid
+      ? this.ctx.registry.getMission?.(mid)
+      : this.ctx.registry.getMissionByName?.(group);
     if (mission && mission.status === "active") {
       this.ctx.registry.updateMission?.(mission.id, { status: "cancelled" });
     }

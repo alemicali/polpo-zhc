@@ -104,7 +104,7 @@ Each task in a mission uses these fields:
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `title` | string | Short task title (used for dependency references) |
+| `title` | string | Short task title (must be unique within the mission; used for dependency references) |
 | `description` | string | Detailed instructions for the agent |
 | `assignTo` | string | Agent name from your team |
 | `dependsOn` | string[] | Titles of tasks that must finish first |

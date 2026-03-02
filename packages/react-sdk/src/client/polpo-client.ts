@@ -34,6 +34,8 @@ import type {
   SkillInfo,
   LoadedSkill,
   SkillWithAssignment,
+  SkillIndexEntry,
+  SkillIndex,
   NotificationRecord,
   NotificationStats,
   SendNotificationRequest,
@@ -240,6 +242,10 @@ export class PolpoClient {
 
   private post<T>(path: string, body?: unknown): Promise<T> {
     return this.request<T>("POST", this.apiUrl(path), body);
+  }
+
+  private put<T>(path: string, body: unknown): Promise<T> {
+    return this.request<T>("PUT", this.apiUrl(path), body);
   }
 
   private patch<T>(path: string, body: unknown): Promise<T> {
@@ -479,6 +485,16 @@ export class PolpoClient {
   /** Get the full content of an orchestrator skill by name. */
   getOrchestratorSkillContent(name: string): Promise<LoadedSkill> {
     return this.get<LoadedSkill>(`/skills/orchestrator/${encodeURIComponent(name)}/content`);
+  }
+
+  /** Get the full skills index (tags and categories for all skills). */
+  getSkillsIndex(): Promise<SkillIndex> {
+    return this.get<SkillIndex>("/skills/index");
+  }
+
+  /** Update a skill's tags and/or category in the skills index. */
+  updateSkillIndex(name: string, entry: SkillIndexEntry): Promise<{ skill: string; tags?: string[]; category?: string }> {
+    return this.put<{ skill: string; tags?: string[]; category?: string }>(`/skills/${encodeURIComponent(name)}/index`, entry);
   }
 
   // ── Run Activity ────────────────────────────────────────────

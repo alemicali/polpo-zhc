@@ -7,8 +7,10 @@ export {
   discoverSkills, parseSkillFrontmatter, loadAgentSkills, assignSkillToAgent, unassignSkillFromAgent, buildSkillPrompt,
   installSkills, removeSkill, createAgentSkill, parseSkillSource, listSkillsWithAssignments,
   loadSkillContent, getSkillByName,
+  // Skills index (tags & categories)
+  loadSkillIndex, saveSkillIndex, updateSkillIndex, removeSkillFromIndex,
 } from "./skills.js";
-export type { SkillInfo, LoadedSkill, ParsedSource, FoundSkill, InstallResult, SkillWithAssignment } from "./skills.js";
+export type { SkillInfo, LoadedSkill, ParsedSource, FoundSkill, InstallResult, SkillWithAssignment, SkillIndexEntry, SkillIndex } from "./skills.js";
 export {
   // Model resolution
   parseModelSpec, resolveModel, resolveModelSpec, resolveModelWithFallback, resolveModelWithFallbackAsync, resolveApiKey, resolveApiKeyAsync,

@@ -301,11 +301,14 @@ export class Orchestrator extends TypedEmitter {
           : undefined;
 
         let missionNotifications: import("./types.js").ScopedNotificationRules | undefined;
-        if (group) {
-          const mission = this.registry.getMissionByName?.(group);
+        // Resolve mission via task.missionId (direct FK) or event.missionId, fallback to group name
+        const taskObj = taskId ? this.registry.getTask(taskId) : undefined;
+        const resolvedMissionId = taskObj?.missionId ?? (d.missionId as string | undefined);
+        if (resolvedMissionId) {
+          const mission = this.registry.getMission?.(resolvedMissionId);
           missionNotifications = mission?.notifications;
-        } else if (d.missionId) {
-          const mission = this.registry.getMission?.(d.missionId as string);
+        } else if (group) {
+          const mission = this.registry.getMissionByName?.(group);
           missionNotifications = mission?.notifications;
         }
 
@@ -528,8 +531,10 @@ export class Orchestrator extends TypedEmitter {
   deleteTask(taskId: string): boolean { return this.registry.removeTask(taskId); }
   abortGroup(group: string): number {
     const count = this.taskMgr.abortGroup(group);
-    // Clean up any schedule tied to this mission group
-    const mission = this.registry.getMissionByName?.(group);
+    // Clean up any schedule tied to this mission group — resolve via task.missionId first
+    const groupTasks = this.registry.getAllTasks().filter(t => t.group === group);
+    const mid = groupTasks.find(t => t.missionId)?.missionId;
+    const mission = mid ? this.registry.getMission?.(mid) : this.registry.getMissionByName?.(group);
     if (mission) this.scheduler?.unregisterMission(mission.id);
     return count;
   }
@@ -846,11 +851,14 @@ export class Orchestrator extends TypedEmitter {
           ? this.registry.getTask(taskId)?.notifications
           : undefined;
         let missionNotifications: ScopedNotificationRules | undefined;
-        if (group) {
-          const mission = this.registry.getMissionByName?.(group);
+        // Resolve mission via task.missionId (direct FK) or event.missionId, fallback to group name
+        const taskObj = taskId ? this.registry.getTask(taskId) : undefined;
+        const resolvedMissionId = taskObj?.missionId ?? (d.missionId as string | undefined);
+        if (resolvedMissionId) {
+          const mission = this.registry.getMission?.(resolvedMissionId);
           missionNotifications = mission?.notifications;
-        } else if (d.missionId) {
-          const mission = this.registry.getMission?.(d.missionId as string);
+        } else if (group) {
+          const mission = this.registry.getMissionByName?.(group);
           missionNotifications = mission?.notifications;
         }
         return { taskNotifications, missionNotifications };
@@ -1098,7 +1106,10 @@ export class Orchestrator extends TypedEmitter {
     // 3. Spawn agents for ready tasks (skip tasks from cancelled/completed/paused missions)
     const ready = pending.filter(task => {
       if (task.group) {
-        const mission = this.registry.getMissionByName?.(task.group);
+        // Resolve mission via direct ID (preferred) or group name (legacy fallback)
+        const mission = task.missionId
+          ? this.registry.getMission?.(task.missionId)
+          : this.registry.getMissionByName?.(task.group);
         if (mission && (mission.status === "cancelled" || mission.status === "completed" || mission.status === "paused")) return false;
 
         // Check quality gates — task may be blocked by a gate even if deps are done

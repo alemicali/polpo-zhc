@@ -131,6 +131,8 @@ export class AssessmentOrchestrator {
         this.ctx.registry.updateTask(taskId, { originalDescription: current.description });
       }
 
+      // Clear old outcomes before re-run — the agent will produce fresh ones.
+      this.ctx.registry.updateTask(taskId, { outcomes: [] });
       // Append Q&A to description and re-run (no retry burn)
       const qaBlock = `\n\n[Polpo Clarification]\nQ: ${question}\nA: ${answer}`;
       this.ctx.registry.unsafeSetStatus(taskId, "pending", "Q&A re-run — no retry burn");
@@ -578,6 +580,8 @@ export class AssessmentOrchestrator {
 
       this.ctx.emitter.emit("task:fix", { taskId, attempt: fixAttempts, maxFix });
 
+      // Clear old outcomes — the agent will produce fresh ones on re-execution.
+      this.ctx.registry.updateTask(taskId, { outcomes: [] });
       // unsafeSetStatus bypasses retry increment (fix attempts are NOT real failures)
       this.ctx.registry.unsafeSetStatus(taskId, "pending", "fix phase — no retry burn");
       this.ctx.registry.updateTask(taskId, {
@@ -601,9 +605,11 @@ export class AssessmentOrchestrator {
     const current = this.ctx.registry.getTask(taskId);
     if (!current) return;
 
-    // Don't retry tasks from cancelled missions
+    // Don't retry tasks from cancelled missions — resolve via missionId (direct FK) first
     if (current.group) {
-      const mission = this.ctx.registry.getMissionByName?.(current.group);
+      const mission = current.missionId
+        ? this.ctx.registry.getMission?.(current.missionId)
+        : this.ctx.registry.getMissionByName?.(current.group);
       if (mission && mission.status === "cancelled") {
         this.ctx.emitter.emit("log", { level: "debug", message: `[${taskId}] Skipping retry — mission cancelled` });
         this.ctx.registry.transition(taskId, "failed");
@@ -636,6 +642,9 @@ export class AssessmentOrchestrator {
       }
 
       this.ctx.emitter.emit("task:retry", { taskId, attempt: nextAttempt, maxRetries: current.maxRetries });
+      // Clear old outcomes — the agent will produce fresh ones on re-execution.
+      // Without this, outcomes accumulate across retries and all get re-sent via notifications.
+      this.ctx.registry.updateTask(taskId, { outcomes: [] });
       this.ctx.registry.transition(taskId, "failed");
       this.ctx.registry.transition(taskId, "pending");
       this.ctx.registry.updateTask(taskId, {

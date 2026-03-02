@@ -133,6 +133,8 @@ export interface Task {
   description: string;
   assignTo: string;
   group?: string;
+  /** ID of the mission this task belongs to (set when created via executeMission). */
+  missionId?: string;
   dependsOn: string[];
   status: TaskStatus;
   expectations: TaskExpectation[];
@@ -440,6 +442,8 @@ export interface Mission {
   qualityThreshold?: number;
   /** Scoped notification rules — override or extend global rules for tasks in this mission. */
   notifications?: ScopedNotificationRules;
+  /** How many times this mission has been executed. Incremented on each run (useful for recurring missions). */
+  executionCount?: number;
   createdAt: string;
   updatedAt: string;
 }

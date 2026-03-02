@@ -55,7 +55,7 @@ const ExpectedOutcomeSchema = Type.Object({
 });
 
 const MissionTaskSchema = Type.Object({
-  title: Type.String({ description: "Short descriptive title" }),
+  title: Type.String({ description: "Short descriptive title — MUST be unique within the mission (no duplicate titles)" }),
   description: Type.String({ description: "Detailed description — be specific about files, logic, etc." }),
   assignTo: Type.String({ description: "Agent name to assign the task to" }),
   dependsOn: Type.Optional(Type.Array(Type.String(), { description: "Task titles this depends on" })),
@@ -85,6 +85,7 @@ const submitMissionTool: Tool = {
   name: "submit_mission",
   description: `Submit your structured execution mission. You MUST call this tool exactly once
 with all the tasks for the mission. Each task should be atomic — one clear objective per task.
+Every task title MUST be unique within the mission — duplicate titles are rejected.
 List tasks in dependency order (a task's dependencies MUST appear before it).
 Do NOT output the mission as plain text or YAML — use this tool.`,
   parameters: SubmitMissionSchema,
@@ -778,6 +779,17 @@ function validateMissionData(data: MissionData): MissionData {
     if (!task.title) task.title = "Untitled task";
     if (!task.description) task.description = task.title;
     if (!task.assignTo) task.assignTo = "default";
+  }
+
+  // Enforce unique task titles — deduplicate by appending a numeric suffix
+  const seen = new Map<string, number>();
+  for (const task of data.tasks) {
+    const base = task.title;
+    const count = seen.get(base) ?? 0;
+    seen.set(base, count + 1);
+    if (count > 0) {
+      task.title = `${base} #${count + 1}`;
+    }
   }
 
   return data;

@@ -104,6 +104,8 @@ export type {
   SkillInfo,
   LoadedSkill,
   SkillWithAssignment,
+  SkillIndexEntry,
+  SkillIndex,
   NotificationRule,
   NotificationRecord,
   NotificationStats,

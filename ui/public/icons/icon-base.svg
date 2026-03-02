@@ -1,15 +1,36 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
   <defs>
-    <radialGradient id="bg" cx="50%" cy="60%" r="70%">
-      <stop offset="0%" stop-color="#142338"/>
+    <radialGradient id="bg" cx="50%" cy="55%" r="65%">
+      <stop offset="0%" stop-color="#1a2d45"/>
       <stop offset="100%" stop-color="#0a0e1a"/>
     </radialGradient>
-    <radialGradient id="glow" cx="50%" cy="50%" r="40%">
-      <stop offset="0%" stop-color="#2dd4bf" stop-opacity="0.25"/>
+    <radialGradient id="glow" cx="50%" cy="45%" r="50%">
+      <stop offset="0%" stop-color="#2dd4bf" stop-opacity=".18"/>
       <stop offset="100%" stop-color="#2dd4bf" stop-opacity="0"/>
     </radialGradient>
+    <linearGradient id="body" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" stop-color="#5eead4"/>
+      <stop offset="100%" stop-color="#14b8a6"/>
+    </linearGradient>
   </defs>
-  <rect width="512" height="512" rx="80" fill="url(#bg)"/>
-  <circle cx="256" cy="270" r="140" fill="url(#glow)"/>
-  <text x="256" y="370" font-size="300" text-anchor="middle" font-family="Apple Color Emoji, Segoe UI Emoji, Noto Color Emoji, sans-serif">🐙</text>
+  <rect width="512" height="512" rx="108" fill="url(#bg)"/>
+  <circle cx="256" cy="232" r="176" fill="url(#glow)"/>
+  <!-- Head -->
+  <ellipse cx="256" cy="208" rx="104" ry="96" fill="url(#body)"/>
+  <!-- Eyes -->
+  <ellipse cx="216" cy="192" rx="22" ry="24" fill="#0a0e1a"/>
+  <ellipse cx="296" cy="192" rx="22" ry="24" fill="#0a0e1a"/>
+  <ellipse cx="222" cy="186" rx="8" ry="9" fill="#fff"/>
+  <ellipse cx="302" cy="186" rx="8" ry="9" fill="#fff"/>
+  <!-- Tentacles -->
+  <path d="M152 272 C128 312, 112 368, 96 400" stroke="url(#body)" stroke-width="22" stroke-linecap="round" fill="none"/>
+  <path d="M184 288 C168 336, 144 384, 136 416" stroke="url(#body)" stroke-width="22" stroke-linecap="round" fill="none"/>
+  <path d="M224 296 C216 344, 200 384, 192 424" stroke="url(#body)" stroke-width="20" stroke-linecap="round" fill="none"/>
+  <path d="M256 300 C256 352, 256 392, 256 432" stroke="url(#body)" stroke-width="20" stroke-linecap="round" fill="none"/>
+  <path d="M288 296 C296 344, 312 384, 320 424" stroke="url(#body)" stroke-width="20" stroke-linecap="round" fill="none"/>
+  <path d="M328 288 C344 336, 368 384, 376 416" stroke="url(#body)" stroke-width="22" stroke-linecap="round" fill="none"/>
+  <path d="M360 272 C384 312, 400 368, 416 400" stroke="url(#body)" stroke-width="22" stroke-linecap="round" fill="none"/>
+  <!-- Cheek spots -->
+  <circle cx="176" cy="224" r="12" fill="#14b8a6" opacity=".4"/>
+  <circle cx="336" cy="224" r="12" fill="#14b8a6" opacity=".4"/>
 </svg>

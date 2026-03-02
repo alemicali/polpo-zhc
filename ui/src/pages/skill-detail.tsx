@@ -93,14 +93,14 @@ function MetadataCard({
       <CardContent className="p-4 space-y-4">
         {/* Identity */}
         <div className="space-y-2">
-          <div className="flex items-center gap-2">
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-violet-500/10 shrink-0">
-              <Sparkles className="h-4.5 w-4.5 text-violet-400" />
-            </div>
-            <div className="min-w-0">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
               <h3 className="text-sm font-semibold truncate">{skill.name}</h3>
-              <SourceBadge source={skill.source} />
+              {skill.category && (
+                <span className="text-[10px] text-amber-300/80 shrink-0">{skill.category}</span>
+              )}
             </div>
+            <SourceBadge source={skill.source} />
           </div>
           {skill.description && (
             <p className="text-xs text-muted-foreground leading-relaxed">{skill.description}</p>
@@ -156,6 +156,25 @@ function MetadataCard({
                   <Badge key={team} variant="outline" className="text-[10px] gap-1">
                     <Users className="h-2.5 w-2.5" />
                     {team}
+                  </Badge>
+                ))}
+              </div>
+            </div>
+          </>
+        )}
+
+        {/* Tags */}
+        {skill.tags && skill.tags.length > 0 && (
+          <>
+            <Separator />
+            <div className="space-y-2">
+              <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">
+                Tags
+              </span>
+              <div className="flex flex-wrap gap-1">
+                {skill.tags.map((tag) => (
+                  <Badge key={tag} variant="outline" className="text-[9px] py-0 px-1.5 bg-blue-500/10 text-blue-300 border-blue-500/20">
+                    {tag}
                   </Badge>
                 ))}
               </div>
@@ -280,12 +299,13 @@ export function SkillDetailPage() {
           <ArrowLeft className="h-4 w-4" />
         </Button>
 
-        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-violet-500/10 shrink-0">
-          <Sparkles className="h-4.5 w-4.5 text-violet-400" />
-        </div>
-
         <div className="min-w-0 flex-1">
-          <h1 className="text-base font-semibold truncate">{skill.name}</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-base font-semibold truncate">{skill.name}</h1>
+            {skill.category && (
+              <span className="text-[11px] text-amber-300/80 shrink-0">{skill.category}</span>
+            )}
+          </div>
           <div className="flex items-center gap-2 mt-0.5">
             <SourceBadge source={skill.source} />
             {skill.assignedTo.length > 0 && (

@@ -100,6 +100,8 @@ export function useChat() {
 
   const [messages, setMessages] = useState<ChatMessageWithQuestions[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  /** True while loading messages for an existing session (distinguishes from empty "new chat" state) */
+  const [messagesLoading, setMessagesLoading] = useState(false);
   /** Questions waiting for user response (null = no pending questions) */
   const [pendingQuestions, setPendingQuestions] = useState<AskUserQuestion[] | null>(null);
   /** Mission preview waiting for user action (null = no pending preview) */
@@ -173,6 +175,7 @@ export function useChat() {
   const loadSession = useCallback(
     async (id: string) => {
       setSessionId(id);
+      setMessagesLoading(true);
       setPendingQuestions(null);
       setPendingMission(null);
       setPendingVault(null);
@@ -201,6 +204,8 @@ export function useChat() {
       } catch {
         setMessages([]);
         conversationRef.current = [];
+      } finally {
+        setMessagesLoading(false);
       }
     },
     [setSessionId, getMessages]
@@ -783,6 +788,7 @@ export function useChat() {
   return {
     messages,
     isLoading,
+    messagesLoading,
     sessionId,
     sessions,
     sessionsLoading,

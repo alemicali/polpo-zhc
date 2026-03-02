@@ -145,7 +145,7 @@ Tasks are created inside missions (via CLI, TUI, or API). Each task has these fi
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `id` | string | auto | Auto-generated unique ID |
-| `title` | string | — | **Required.** Short task title |
+| `title` | string | — | **Required.** Short task title. Must be unique among active (non-terminal) tasks |
 | `description` | string | — | **Required.** Detailed instructions |
 | `assignTo` | string | — | **Required.** Agent name |
 | `group` | string | — | Mission group name |

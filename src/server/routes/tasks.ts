@@ -57,6 +57,10 @@ const createTaskRoute = createRoute({
       content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.any() }) } },
       description: "Task created",
     },
+    409: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string(), code: z.string() }) } },
+      description: "A task with this title already exists among active tasks",
+    },
   },
 });
 

@@ -322,6 +322,8 @@ export interface Mission {
   qualityThreshold?: number;
   /** Mission-level scoped notification rules. */
   notifications?: ScopedNotificationRules;
+  /** How many times this mission has been executed. */
+  executionCount?: number;
   createdAt: string;
   updatedAt: string;
 }

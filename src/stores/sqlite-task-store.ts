@@ -12,6 +12,7 @@ interface TaskRow {
   description: string;
   assign_to: string;
   group: string | null;
+  mission_id: string | null;
   depends_on: string;
   status: string;
   retries: number;
@@ -49,6 +50,7 @@ interface MissionRow {
   prompt: string | null;
   status: string;
   notifications: string | null;
+  execution_count: number;
   created_at: string;
   updated_at: string;
 }
@@ -98,8 +100,8 @@ export class SqliteTaskStore implements TaskStore {
 
     // Prepare statements
     this.insertTaskStmt = this.db.prepare(`
-      INSERT INTO tasks (id, title, description, assign_to, "group", depends_on, status, retries, max_retries, max_duration, retry_policy, expectations, metrics, result, phase, fix_attempts, original_description, session_id, notifications, outcomes, expected_outcomes, created_at, updated_at)
-      VALUES (@id, @title, @description, @assign_to, @group, @depends_on, @status, @retries, @max_retries, @max_duration, @retry_policy, @expectations, @metrics, @result, @phase, @fix_attempts, @original_description, @session_id, @notifications, @outcomes, @expected_outcomes, @created_at, @updated_at)
+      INSERT INTO tasks (id, title, description, assign_to, "group", mission_id, depends_on, status, retries, max_retries, max_duration, retry_policy, expectations, metrics, result, phase, fix_attempts, original_description, session_id, notifications, outcomes, expected_outcomes, created_at, updated_at)
+      VALUES (@id, @title, @description, @assign_to, @group, @mission_id, @depends_on, @status, @retries, @max_retries, @max_duration, @retry_policy, @expectations, @metrics, @result, @phase, @fix_attempts, @original_description, @session_id, @notifications, @outcomes, @expected_outcomes, @created_at, @updated_at)
     `);
     this.getTaskStmt = this.db.prepare(`SELECT * FROM tasks WHERE id = ?`);
     this.getAllTasksStmt = this.db.prepare(`SELECT * FROM tasks ORDER BY created_at ASC`);
@@ -193,8 +195,10 @@ export class SqliteTaskStore implements TaskStore {
       `ALTER TABLE tasks ADD COLUMN notifications TEXT`,
       `ALTER TABLE tasks ADD COLUMN outcomes TEXT`,
       `ALTER TABLE tasks ADD COLUMN expected_outcomes TEXT`,
+      `ALTER TABLE tasks ADD COLUMN mission_id TEXT`,
       `ALTER TABLE missions ADD COLUMN notifications TEXT`,
       `ALTER TABLE missions RENAME COLUMN yaml TO data`,
+      `ALTER TABLE missions ADD COLUMN execution_count INTEGER NOT NULL DEFAULT 0`,
     ];
     for (const sql of migrations) {
       try { this.db.exec(sql); } catch { /* column already exists or rename already applied */ }
@@ -245,6 +249,7 @@ export class SqliteTaskStore implements TaskStore {
       description: row.description,
       assignTo: row.assign_to,
       group: row.group ?? undefined,
+      missionId: row.mission_id ?? undefined,
       dependsOn: safeJsonParse<string[]>(row.depends_on, []),
       status: row.status as TaskStatus,
       retries: row.retries,
@@ -274,6 +279,7 @@ export class SqliteTaskStore implements TaskStore {
       description: task.description,
       assign_to: task.assignTo,
       group: task.group ?? null,
+      mission_id: task.missionId ?? null,
       depends_on: JSON.stringify(task.dependsOn ?? []),
       status: task.status,
       retries: task.retries,
@@ -425,6 +431,7 @@ export class SqliteTaskStore implements TaskStore {
     if (updates.description !== undefined) { setClauses.push("description = @description"); params.description = updates.description; }
     if (updates.assignTo !== undefined) { setClauses.push("assign_to = @assign_to"); params.assign_to = updates.assignTo; }
     if (updates.group !== undefined) { setClauses.push('"group" = @group'); params.group = updates.group ?? null; }
+    if (updates.missionId !== undefined) { setClauses.push("mission_id = @mission_id"); params.mission_id = updates.missionId ?? null; }
     if (updates.dependsOn !== undefined) { setClauses.push("depends_on = @depends_on"); params.depends_on = JSON.stringify(updates.dependsOn); }
     if (updates.retries !== undefined) { setClauses.push("retries = @retries"); params.retries = updates.retries; }
     if (updates.maxRetries !== undefined) { setClauses.push("max_retries = @max_retries"); params.max_retries = updates.maxRetries; }
@@ -494,6 +501,7 @@ export class SqliteTaskStore implements TaskStore {
       prompt: row.prompt ?? undefined,
       status: row.status as MissionStatus,
       notifications: safeJsonParse(row.notifications, undefined),
+      executionCount: row.execution_count || 0,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     };
@@ -547,6 +555,7 @@ export class SqliteTaskStore implements TaskStore {
     if (updates.prompt !== undefined) { setClauses.push("prompt = @prompt"); params.prompt = updates.prompt ?? null; }
     if (updates.status !== undefined) { setClauses.push("status = @status"); params.status = updates.status; }
     if (updates.notifications !== undefined) { setClauses.push("notifications = @notifications"); params.notifications = updates.notifications ? JSON.stringify(updates.notifications) : null; }
+    if (updates.executionCount !== undefined) { setClauses.push("execution_count = @execution_count"); params.execution_count = updates.executionCount; }
 
     const sql = `UPDATE missions SET ${setClauses.join(", ")} WHERE id = @id`;
     this.db.prepare(sql).run(params);

@@ -1,10 +1,11 @@
 /**
- * CLI skill subcommands — add, list, remove, assign.
+ * CLI skill subcommands — add, list, remove, assign, tag.
  *
  * `polpo skills add <source>`    — Install skills from GitHub repo or local path
  * `polpo skills list`            — List skills in the pool with agent assignments
  * `polpo skills remove <name>`   — Remove a skill from the pool
  * `polpo skills assign <skill> <agent>` — Assign a skill to an agent
+ * `polpo skills tag <skill>`     — Set tags and/or category for a skill
  */
 
 import { Command } from "commander";
@@ -20,7 +21,11 @@ import {
   discoverOrchestratorSkills,
   installOrchestratorSkills,
   removeOrchestratorSkill,
+  updateSkillIndex,
+  loadSkillIndex,
 } from "../../llm/skills.js";
+import { loadPolpoConfig } from "../../core/config.js";
+import type { AgentConfig } from "../../core/types.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -112,8 +117,25 @@ export function registerSkillsCommands(program: Command): void {
       try {
         const cwd = resolve(opts.dir);
         const polpoDir = getPolpoDir(opts.dir);
-        const agentNames = getAgentNames(polpoDir);
-        const skills = listSkillsWithAssignments(cwd, polpoDir, agentNames);
+
+        // Merge agent names from filesystem AND config
+        const fsAgentNames = getAgentNames(polpoDir);
+        const config = loadPolpoConfig(polpoDir);
+        const configAgents = (config?.teams?.[0]?.agents ?? []) as AgentConfig[];
+        const configAgentNames = configAgents.map(a => a.name);
+
+        // Deduplicated agent names
+        const agentNames = [...new Set([...fsAgentNames, ...configAgentNames])];
+
+        // Build agentConfigSkills map from config
+        const agentConfigSkills = new Map<string, string[]>();
+        for (const agent of configAgents) {
+          if (agent.skills?.length) {
+            agentConfigSkills.set(agent.name, agent.skills);
+          }
+        }
+
+        const skills = listSkillsWithAssignments(cwd, polpoDir, agentNames, agentConfigSkills);
 
         if (skills.length === 0) {
           console.log(chalk.dim("  No skills installed."));
@@ -132,6 +154,12 @@ export function registerSkillsCommands(program: Command): void {
           );
           if (skill.description) {
             console.log(chalk.dim(`    ${skill.description}`));
+          }
+          if (skill.category) {
+            console.log(chalk.yellow(`    category: ${skill.category}`));
+          }
+          if (skill.tags?.length) {
+            console.log(chalk.blue(`    tags: ${skill.tags.join(", ")}`));
           }
         }
 
@@ -194,6 +222,70 @@ export function registerSkillsCommands(program: Command): void {
 
         assignSkillToAgent(polpoDir, agentName, skillName, skill.path);
         console.log(chalk.green(`  Assigned "${skillName}" to agent "${agentName}"`));
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error(chalk.red(`Error: ${msg}`));
+        process.exit(1);
+      }
+    });
+
+  // ---- skills tag <skill> -------------------------------------------------
+  sk
+    .command("tag <skill>")
+    .description("Set tags and/or category for a skill in the skills index")
+    .option("-d, --dir <path>", "Working directory", ".")
+    .option("-t, --tags <tags...>", "Freeform tags (space-separated)")
+    .option("-c, --category <category>", "Macro-category for grouping")
+    .option("--clear-tags", "Remove all tags from this skill", false)
+    .option("--clear-category", "Remove the category from this skill", false)
+    .action((skillName: string, opts) => {
+      try {
+        const cwd = resolve(opts.dir);
+        const polpoDir = getPolpoDir(opts.dir);
+
+        // Verify skill exists
+        const pool = discoverSkills(cwd, polpoDir);
+        const skill = pool.find(s => s.name === skillName);
+        if (!skill) {
+          console.error(chalk.red(`  Skill not found: ${skillName}`));
+          if (pool.length > 0) {
+            console.log(chalk.dim(`  Available: ${pool.map(s => s.name).join(", ")}`));
+          }
+          process.exit(1);
+        }
+
+        const hasTags = opts.tags && opts.tags.length > 0;
+        const hasCategory = !!opts.category;
+        const hasClearTags = opts.clearTags;
+        const hasClearCategory = opts.clearCategory;
+
+        if (!hasTags && !hasCategory && !hasClearTags && !hasClearCategory) {
+          // Show current index entry
+          const index = loadSkillIndex(polpoDir);
+          const entry = index?.[skillName];
+          if (!entry) {
+            console.log(chalk.dim(`  No index entry for "${skillName}".`));
+          } else {
+            console.log(`  ${chalk.bold(skillName)}:`);
+            if (entry.tags?.length) console.log(chalk.blue(`    tags: ${entry.tags.join(", ")}`));
+            if (entry.category) console.log(chalk.yellow(`    category: ${entry.category}`));
+          }
+          return;
+        }
+
+        const update: { tags?: string[]; category?: string } = {};
+        if (hasTags) update.tags = opts.tags;
+        if (hasClearTags) update.tags = [];
+        if (hasCategory) update.category = opts.category;
+        if (hasClearCategory) update.category = "";
+
+        updateSkillIndex(polpoDir, skillName, update);
+
+        console.log(chalk.green(`  Updated index for "${skillName}"`));
+        if (update.tags && update.tags.length > 0) console.log(chalk.blue(`    tags: ${update.tags.join(", ")}`));
+        if (hasClearTags) console.log(chalk.dim(`    tags: (cleared)`));
+        if (update.category) console.log(chalk.yellow(`    category: ${update.category}`));
+        if (hasClearCategory) console.log(chalk.dim(`    category: (cleared)`));
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
         console.error(chalk.red(`Error: ${msg}`));

@@ -77,8 +77,17 @@ function createVaultListTool(vault: ResolvedVault): AgentTool<typeof VaultListSc
 // ─── Factory ───
 
 /**
- * Create vault tools for an agent.
- * Only includes tools that appear in allowedTools (if provided).
+ * Create vault tools (core — always included when vault is available).
+ * Vault tools are core tools: they are always available to every agent
+ * that has a resolved vault, regardless of allowedTools configuration.
+ */
+export function createVaultToolsCore(vault: ResolvedVault): AgentTool<any>[] {
+  return [createVaultGetTool(vault), createVaultListTool(vault)];
+}
+
+/**
+ * Create vault tools for an agent, filtered by allowedTools.
+ * @deprecated Use createVaultToolsCore() — vault tools are now core tools (always available).
  */
 export function createVaultTools(vault: ResolvedVault, allowedTools?: string[]): AgentTool<any>[] {
   const tools: AgentTool<any>[] = [];

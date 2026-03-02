@@ -14,6 +14,8 @@ import {
   createOrchestratorSkill,
   updateOrchestratorSkill,
   getSkillByName,
+  updateSkillIndex,
+  loadSkillIndex,
 } from "../../llm/skills.js";
 import { resolve } from "node:path";
 import { existsSync, readdirSync } from "node:fs";
@@ -43,8 +45,23 @@ export function skillRoutes(): OpenAPIHono<ServerEnv> {
     const orchestrator = c.get("orchestrator");
     const workDir = orchestrator.getWorkDir();
     const polpoDir = orchestrator.getPolpoDir();
-    const agentNames = getAgentNames(polpoDir);
-    const skills = listSkillsWithAssignments(workDir, polpoDir, agentNames);
+
+    // Get agent names from config (authoritative source) + filesystem fallback
+    const configAgents = orchestrator.getAgents();
+    const configAgentNames = configAgents.map(a => a.name);
+    const fsAgentNames = getAgentNames(polpoDir);
+    // Merge: config agents are authoritative, fs agents catch orphaned symlink dirs
+    const allAgentNames = [...new Set([...configAgentNames, ...fsAgentNames])];
+
+    // Build map of agentName → configured skill names for config-based assignment detection
+    const agentConfigSkills = new Map<string, string[]>();
+    for (const agent of configAgents) {
+      if (agent.skills?.length) {
+        agentConfigSkills.set(agent.name, agent.skills);
+      }
+    }
+
+    const skills = listSkillsWithAssignments(workDir, polpoDir, allAgentNames, agentConfigSkills);
     return c.json({ ok: true, data: skills });
   });
 
@@ -535,6 +552,68 @@ export function skillRoutes(): OpenAPIHono<ServerEnv> {
 
     const hasErrors = result.errors.length > 0 && result.installed.length === 0;
     return c.json({ ok: !hasErrors, data: result }, hasErrors ? 400 : 201);
+  });
+
+  // ═══════════════════════════════════════════════════════
+  //  SKILLS INDEX ROUTES (tags & categories)
+  // ═══════════════════════════════════════════════════════
+
+  // GET /skills/index — get the full skills index
+  const getSkillIndexRoute = createRoute({
+    method: "get",
+    path: "/index",
+    tags: ["Skills"],
+    summary: "Get the skills index (tags and categories)",
+    responses: {
+      200: {
+        content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.any() }) } },
+        description: "Skills index",
+      },
+    },
+  });
+
+  app.openapi(getSkillIndexRoute, (c) => {
+    const orchestrator = c.get("orchestrator");
+    const polpoDir = orchestrator.getPolpoDir();
+    const index = loadSkillIndex(polpoDir) ?? {};
+    return c.json({ ok: true, data: index });
+  });
+
+  // PUT /skills/:name/index — update a skill's index entry (tags, category)
+  const updateSkillIndexRoute = createRoute({
+    method: "put",
+    path: "/{name}/index",
+    tags: ["Skills"],
+    summary: "Update a skill's tags and category",
+    request: {
+      params: z.object({ name: z.string() }),
+      body: {
+        content: {
+          "application/json": {
+            schema: z.object({
+              tags: z.array(z.string()).optional(),
+              category: z.string().optional(),
+            }),
+          },
+        },
+      },
+    },
+    responses: {
+      200: {
+        content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.object({ skill: z.string(), tags: z.array(z.string()).optional(), category: z.string().optional() }) }) } },
+        description: "Index entry updated",
+      },
+    },
+  });
+
+  app.openapi(updateSkillIndexRoute, (c) => {
+    const orchestrator = c.get("orchestrator");
+    const polpoDir = orchestrator.getPolpoDir();
+    const { name } = c.req.valid("param");
+    const body = c.req.valid("json");
+
+    updateSkillIndex(polpoDir, name, body);
+    return c.json({ ok: true, data: { skill: name, ...body } });
   });
 
   return app;

@@ -35,6 +35,20 @@ export class MissionExecutor {
   ) {
     this.cpStore = new FileCheckpointStore(ctx.polpoDir);
     this.cpState = this.cpStore.load();
+
+    // Rebuild cleanedGroups from persisted task state — groups where ALL tasks
+    // are already terminal don't need to be re-processed after a server restart.
+    const allTasks = ctx.registry.getAllTasks();
+    const groups = new Set<string>();
+    for (const t of allTasks) {
+      if (t.group) groups.add(t.group);
+    }
+    for (const group of groups) {
+      const groupTasks = allTasks.filter(t => t.group === group);
+      if (groupTasks.every(t => t.status === "done" || t.status === "failed")) {
+        this.cleanedGroups.add(group);
+      }
+    }
   }
 
   /** Set the quality controller instance (called by Orchestrator after init). */
@@ -99,8 +113,11 @@ export class MissionExecutor {
         this.cpState.active[cpKey] = { checkpoint: cp, reachedAt };
         this.cpStore.save(this.cpState);
 
-        // Pause the mission
-        const mission = this.ctx.registry.getMissionByName?.(group);
+        // Pause the mission — use task.missionId when available
+        const taskMissionId = tasks.find(t => t.group === group && t.missionId)?.missionId;
+        const mission = taskMissionId
+          ? this.ctx.registry.getMission?.(taskMissionId)
+          : this.ctx.registry.getMissionByName?.(group);
         if (mission && mission.status === "active") {
           this.ctx.registry.updateMission?.(mission.id, { status: "paused" });
         }
@@ -140,8 +157,9 @@ export class MissionExecutor {
     delete this.cpState.active[cpKey];
     this.cpStore.save(this.cpState);
 
-    // Un-pause the mission (back to active)
-    const mission = this.ctx.registry.getMissionByName?.(group);
+    // Un-pause the mission (back to active) — resolve via missionId from tasks
+    const groupTasks = this.ctx.registry.getAllTasks().filter(t => t.group === group);
+    const mission = this.resolveMissionForGroup(groupTasks, group);
     if (mission && mission.status === "paused") {
       this.ctx.registry.updateMission?.(mission.id, { status: "active" });
     }
@@ -303,11 +321,16 @@ export class MissionExecutor {
     // Remember whether this is a scheduled/recurring mission so we can restore status after completion
     const scheduledStatus = mission.status === "scheduled" || mission.status === "recurring" ? mission.status : undefined;
 
+    // Increment execution count (tracks how many times this mission has run — useful for recurring)
+    const runNumber = (mission.executionCount ?? 0) + 1;
+    this.ctx.registry.updateMission?.(missionId, { executionCount: runNumber });
+
     // Validate mission document through Zod schema — throws with clear error on invalid shape
     const raw = JSON.parse(mission.data);
     const doc = parseMissionDocument(raw);
 
-    const group = mission.name;
+    // For recurring/scheduled missions with multiple runs, disambiguate the group with a run number
+    const group = runNumber > 1 ? `${mission.name} #${runNumber}` : mission.name;
 
     // Run before:mission:execute hook
     const hookResult = this.ctx.hooks.runBeforeSync("mission:execute", {
@@ -383,6 +406,7 @@ export class MissionExecutor {
         expectations,
         expectedOutcomes: t.expectedOutcomes,
         group,
+        missionId,
         maxDuration: t.maxDuration,
         retryPolicy: t.retryPolicy,
         notifications: t.notifications,
@@ -417,6 +441,19 @@ export class MissionExecutor {
     return { tasks, group };
   }
 
+  /**
+   * Resolve the Mission for a group of tasks.
+   * Uses task.missionId (direct FK) when available, falls back to getMissionByName
+   * for legacy tasks that pre-date the missionId field.
+   */
+  private resolveMissionForGroup(groupTasks: Task[], group: string): Mission | undefined {
+    // Prefer the direct ID reference from any task in the group
+    const mid = groupTasks.find(t => t.missionId)?.missionId;
+    if (mid) return this.ctx.registry.getMission?.(mid);
+    // Fallback: strip run-number suffix (e.g. "Mission #3" → "Mission") for legacy compat
+    return this.ctx.registry.getMissionByName?.(group.replace(/ #\d+$/, ""));
+  }
+
   /** Check if any mission groups have all tasks terminal, and clean up their volatile agents */
   cleanupCompletedGroups(tasks: Task[]): void {
     const groups = new Set<string>();
@@ -444,7 +481,7 @@ export class MissionExecutor {
       this.cleanedGroups.add(group);
 
       // Auto-update mission status
-      const mission = this.ctx.registry.getMissionByName?.(group);
+      const mission = this.resolveMissionForGroup(groupTasks, group);
       if (mission && mission.status === "active") {
         let allDone = groupTasks.every(t => t.status === "done");
 

@@ -15,6 +15,8 @@ import { resolveAllowedPaths, assertPathAllowed } from "./path-sandbox.js";
 import { bashSafeEnv } from "./safe-env.js";
 import { createOutcomeTools as createOutcomeToolsCore } from "./outcome-tools.js";
 import { createHttpTools as createHttpToolsCore, ALL_HTTP_TOOL_NAMES as CORE_HTTP_TOOL_NAMES } from "./http-tools.js";
+import { createVaultToolsCore } from "./vault-tools.js";
+import type { ResolvedVault } from "../vault/index.js";
 
 const MAX_READ_LINES = 500;
 const MAX_OUTPUT_BYTES = 30_000;
@@ -354,8 +356,14 @@ const ALL_TOOL_NAMES: CodingToolName[] = ["read", "write", "edit", "bash", "glob
  * Create the standard set of coding tools scoped to a working directory.
  * If allowedTools is provided, only those tools are included.
  * If allowedPaths is provided, file-based tools enforce path sandboxing.
+ *
+ * Core tools (always included regardless of allowedTools):
+ * - read, write, edit, bash, glob, grep, ls
+ * - register_outcome
+ * - http_fetch, http_download
+ * - vault_get, vault_list (when vault is provided)
  */
-export function createCodingTools(cwd: string, allowedTools?: string[], allowedPaths?: string[], outputDir?: string): AgentTool<any>[] {
+export function createCodingTools(cwd: string, allowedTools?: string[], allowedPaths?: string[], outputDir?: string, vault?: ResolvedVault): AgentTool<any>[] {
   const sandbox = resolveAllowedPaths(cwd, allowedPaths);
 
   const factories: Record<CodingToolName, () => AgentTool<any>> = {
@@ -380,6 +388,11 @@ export function createCodingTools(cwd: string, allowedTools?: string[], allowedP
   // http_fetch + http_download are always included — core tools with SSRF protection
   tools.push(...createHttpToolsCore(cwd, allowedPaths, allowedTools));
 
+  // vault_get + vault_list are always included — core tools for credential access
+  if (vault) {
+    tools.push(...createVaultToolsCore(vault));
+  }
+
   return tools;
 }
 
@@ -391,7 +404,9 @@ import { createEmailTools, ALL_EMAIL_TOOL_NAMES } from "./email-tools.js";
 import { createVaultTools, ALL_VAULT_TOOL_NAMES } from "./vault-tools.js";
 import { createImageTools, ALL_IMAGE_TOOL_NAMES } from "./image-tools.js";
 import { createAudioTools, ALL_AUDIO_TOOL_NAMES } from "./audio-tools.js";
-import type { ResolvedVault } from "../vault/index.js";
+import { createExcelTools, ALL_EXCEL_TOOL_NAMES } from "./excel-tools.js";
+import { createPdfTools, ALL_PDF_TOOL_NAMES } from "./pdf-tools.js";
+import { createDocxTools, ALL_DOCX_TOOL_NAMES } from "./docx-tools.js";
 import { ALL_OUTCOME_TOOL_NAMES } from "./outcome-tools.js";
 
 export type { BrowserToolName } from "./browser-tools.js";
@@ -401,6 +416,9 @@ export type { OutcomeToolName } from "./outcome-tools.js";
 export type { VaultToolName } from "./vault-tools.js";
 export type { ImageToolName } from "./image-tools.js";
 export type { AudioToolName } from "./audio-tools.js";
+export type { ExcelToolName } from "./excel-tools.js";
+export type { PdfToolName } from "./pdf-tools.js";
+export type { DocxToolName } from "./docx-tools.js";
 
 /** All known tool names across all categories */
 export type ExtendedToolName = CodingToolName
@@ -410,7 +428,10 @@ export type ExtendedToolName = CodingToolName
   | import("./outcome-tools.js").OutcomeToolName
   | import("./vault-tools.js").VaultToolName
   | import("./image-tools.js").ImageToolName
-  | import("./audio-tools.js").AudioToolName;
+  | import("./audio-tools.js").AudioToolName
+  | import("./excel-tools.js").ExcelToolName
+  | import("./pdf-tools.js").PdfToolName
+  | import("./docx-tools.js").DocxToolName;
 
 /** All available tool names for documentation/config validation */
 export const ALL_EXTENDED_TOOL_NAMES: string[] = [
@@ -422,13 +443,16 @@ export const ALL_EXTENDED_TOOL_NAMES: string[] = [
   ...ALL_VAULT_TOOL_NAMES,
   ...ALL_IMAGE_TOOL_NAMES,
   ...ALL_AUDIO_TOOL_NAMES,
+  ...ALL_EXCEL_TOOL_NAMES,
+  ...ALL_PDF_TOOL_NAMES,
+  ...ALL_DOCX_TOOL_NAMES,
 ];
 
 export interface CreateAllToolsOptions {
   /** Working directory for the agent */
   cwd: string;
   /** Tool name filter — only include tools with these names.
-   *  Extended tools are auto-loaded when their names appear here (e.g. "browser_*", "email_*", "vault_*", "image_*", "video_*", "audio_*").
+   *  Extended tools are auto-loaded when their names appear here (e.g. "browser_*", "email_*", "image_*", "video_*", "audio_*", "excel_*", "pdf_*", "docx_*").
    *  If omitted, only core coding tools are included. */
   allowedTools?: string[];
   /** Filesystem sandbox paths */
@@ -449,8 +473,10 @@ export interface CreateAllToolsOptions {
 /**
  * Create all available tools for an agent, including extended tool categories.
  *
- * By default, only core coding tools (read, write, edit, bash, glob, grep, ls) are included.
- * Extended categories must be explicitly enabled via options or by including their names in allowedTools.
+ * Core tools (always included): read, write, edit, bash, glob, grep, ls,
+ * register_outcome, http_fetch, http_download, vault_get, vault_list.
+ *
+ * Extended categories must be explicitly enabled via allowedTools patterns.
  *
  * When allowedTools is provided, it acts as a filter across ALL categories — any tool whose name
  * appears in allowedTools will be included (and its category auto-enabled).
@@ -470,8 +496,8 @@ export async function createAllTools(options: CreateAllToolsOptions): Promise<Ag
   const categoryRequested = (names: readonly string[]) =>
     allowedTools?.some(a => names.some(n => n === a.toLowerCase()));
 
-  // Core coding tools (always included unless filtered out)
-  tools.push(...createCodingTools(cwd, allowedTools, allowedPaths, options.outputDir));
+  // Core coding tools (always included unless filtered out) — includes vault_get/vault_list
+  tools.push(...createCodingTools(cwd, allowedTools, allowedPaths, options.outputDir, options.vault));
 
   // Browser tools — activated when any browser_* tool is in allowedTools
   if (categoryRequested(ALL_BROWSER_TOOL_NAMES)) {
@@ -481,11 +507,6 @@ export async function createAllTools(options: CreateAllToolsOptions): Promise<Ag
   // Email tools — activated when any email_* tool is in allowedTools
   if (categoryRequested(ALL_EMAIL_TOOL_NAMES)) {
     tools.push(...createEmailTools(cwd, allowedPaths, allowedTools, options.vault, options.emailAllowedDomains));
-  }
-
-  // Vault tools — activated when any vault_* tool is in allowedTools
-  if (categoryRequested(ALL_VAULT_TOOL_NAMES) && options.vault) {
-    tools.push(...createVaultTools(options.vault, allowedTools));
   }
 
   // Image & video tools — activated when any image_* or video_* tool is in allowedTools
@@ -498,7 +519,22 @@ export async function createAllTools(options: CreateAllToolsOptions): Promise<Ag
     tools.push(...createAudioTools(cwd, allowedPaths, allowedTools, options.vault));
   }
 
-  // HTTP and register_outcome are already included via createCodingTools() above — no need to add again
+  // Excel tools — activated when any excel_* tool is in allowedTools
+  if (categoryRequested(ALL_EXCEL_TOOL_NAMES)) {
+    tools.push(...createExcelTools(cwd, allowedPaths, allowedTools));
+  }
+
+  // PDF tools — activated when any pdf_* tool is in allowedTools
+  if (categoryRequested(ALL_PDF_TOOL_NAMES)) {
+    tools.push(...createPdfTools(cwd, allowedPaths, allowedTools));
+  }
+
+  // Docx tools — activated when any docx_* tool is in allowedTools
+  if (categoryRequested(ALL_DOCX_TOOL_NAMES)) {
+    tools.push(...createDocxTools(cwd, allowedPaths, allowedTools));
+  }
+
+  // HTTP, register_outcome, and vault are already included via createCodingTools() above — no need to add again
 
   return tools;
 }

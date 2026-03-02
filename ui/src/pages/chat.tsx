@@ -1457,6 +1457,7 @@ export function ChatPage() {
   const {
     messages,
     isLoading,
+    messagesLoading,
     sessionId,
     sessions,
     sessionsLoading,
@@ -1526,7 +1527,7 @@ export function ChatPage() {
     textarea.dispatchEvent(new Event("input", { bubbles: true }));
   }, []);
 
-  const isEmpty = messages.length === 0;
+  const isEmpty = messages.length === 0 && !messagesLoading;
 
   // ── Loading skeleton ──
   if (sessionsLoading) {
@@ -1689,7 +1690,39 @@ export function ChatPage() {
 
         {/* Messages area */}
         <div className="relative flex-1 min-h-0">
-          {isEmpty ? (
+          {messagesLoading ? (
+            <div className="flex-1 overflow-hidden">
+              <div className="mx-auto max-w-3xl p-4 space-y-6">
+                {/* User message skeleton */}
+                <div className="flex justify-end">
+                  <Skeleton className="h-10 w-48 rounded-2xl rounded-br-sm" />
+                </div>
+                {/* Assistant message skeleton */}
+                <div className="flex gap-3">
+                  <Skeleton className="h-7 w-7 rounded-full shrink-0" />
+                  <div className="flex-1 space-y-2">
+                    <Skeleton className="h-3 w-16 rounded" />
+                    <Skeleton className="h-4 w-full rounded" />
+                    <Skeleton className="h-4 w-3/4 rounded" />
+                    <Skeleton className="h-4 w-5/6 rounded" />
+                  </div>
+                </div>
+                {/* User message skeleton */}
+                <div className="flex justify-end">
+                  <Skeleton className="h-10 w-36 rounded-2xl rounded-br-sm" />
+                </div>
+                {/* Assistant message skeleton */}
+                <div className="flex gap-3">
+                  <Skeleton className="h-7 w-7 rounded-full shrink-0" />
+                  <div className="flex-1 space-y-2">
+                    <Skeleton className="h-3 w-16 rounded" />
+                    <Skeleton className="h-4 w-full rounded" />
+                    <Skeleton className="h-4 w-2/3 rounded" />
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : isEmpty ? (
             <div className="flex flex-col items-center justify-center h-full pt-24">
               <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10 mb-4 text-3xl">
                 🐙

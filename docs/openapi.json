@@ -665,6 +665,32 @@
                 }
               }
             }
+          },
+          "409": {
+            "description": "A task with this title already exists among active tasks",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
           }
         }
       }
@@ -763,6 +789,19 @@
                   "assignTo": {
                     "type": "string",
                     "minLength": 1
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "draft",
+                      "pending",
+                      "awaiting_approval",
+                      "assigned",
+                      "in_progress",
+                      "review",
+                      "done",
+                      "failed"
+                    ]
                   },
                   "expectations": {
                     "type": "array",
@@ -1219,11 +1258,18 @@
                     "type": "string",
                     "enum": [
                       "draft",
+                      "scheduled",
+                      "recurring",
                       "active",
+                      "paused",
                       "completed",
                       "failed",
                       "cancelled"
                     ]
+                  },
+                  "endDate": {
+                    "type": "string",
+                    "format": "date-time"
                   },
                   "notifications": {
                     "type": "object",
@@ -1475,7 +1521,10 @@
                     "type": "string",
                     "enum": [
                       "draft",
+                      "scheduled",
+                      "recurring",
                       "active",
+                      "paused",
                       "completed",
                       "failed",
                       "cancelled"
@@ -1483,6 +1532,11 @@
                   },
                   "name": {
                     "type": "string"
+                  },
+                  "endDate": {
+                    "type": "string",
+                    "nullable": true,
+                    "format": "date-time"
                   }
                 }
               }
@@ -1974,6 +2028,9 @@
                         "type": "string"
                       },
                       "timezone": {
+                        "type": "string"
+                      },
+                      "avatar": {
                         "type": "string"
                       },
                       "responsibilities": {
@@ -3782,6 +3839,116 @@
                   },
                   "required": [
                     "ok"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/skills/index": {
+      "get": {
+        "tags": [
+          "Skills"
+        ],
+        "summary": "Get the skills index (tags and categories)",
+        "responses": {
+          "200": {
+            "description": "Skills index",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/skills/{name}/index": {
+      "put": {
+        "tags": [
+          "Skills"
+        ],
+        "summary": "Update a skill's tags and category",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "tags": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "category": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Index entry updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "skill": {
+                          "type": "string"
+                        },
+                        "tags": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "category": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "skill"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
                   ]
                 }
               }
@@ -5671,6 +5838,38 @@
                   "required": [
                     "ok",
                     "data"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/files/roots": {
+      "get": {
+        "tags": [
+          "Files"
+        ],
+        "summary": "List browsable root directories",
+        "description": "Returns the filesystem roots that the file browser can navigate: the project working directory and the .polpo configuration directory.",
+        "responses": {
+          "200": {
+            "description": "Array of root directories with name, path, and description",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
                   ]
                 }
               }

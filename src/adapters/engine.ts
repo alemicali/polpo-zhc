@@ -193,17 +193,20 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
   const model = resolveModel(agentConfig.model);
 
   // Create all tools scoped to working directory with path sandboxing
-  // Extended tools are auto-loaded when their names appear in allowedTools (e.g. "browser_*", "email_*", "vault_*", "image_*", "video_*", "audio_*")
+  // Core tools (always available): read, write, edit, bash, glob, grep, ls, http_fetch, http_download, register_outcome, vault_get, vault_list
+  // Extended tools are auto-loaded when their names appear in allowedTools (e.g. "browser_*", "email_*", "image_*", "video_*", "audio_*", "excel_*", "pdf_*", "docx_*")
   const polpoDir = ctx?.polpoDir ?? join(cwd, ".polpo");
 
   // Browser profile directory for agent-browser persistent state (cookies, auth, localStorage)
   const browserProfileDir = join(polpoDir, "browser-profiles", agentConfig.browserProfile || agentConfig.name);
 
-  // Check if extended tools (browser, email, vault, image, video, audio) are requested via allowedTools
+  // Check if extended tools (browser, email, image, video, audio, excel, pdf, docx) are requested via allowedTools
+  // Note: vault tools are now core — always available, no need to check here.
   const hasExtendedTools = agentConfig.allowedTools?.some(t => {
     const lc = t.toLowerCase();
-    return lc.startsWith("browser_") || lc.startsWith("email_") || lc.startsWith("vault_")
-      || lc.startsWith("image_") || lc.startsWith("video_") || lc.startsWith("audio_");
+    return lc.startsWith("browser_") || lc.startsWith("email_")
+      || lc.startsWith("image_") || lc.startsWith("video_") || lc.startsWith("audio_")
+      || lc.startsWith("excel_") || lc.startsWith("pdf_") || lc.startsWith("docx_");
   }) ?? false;
 
   // Derive output directory from context (per-task output dir for deliverables)
@@ -234,8 +237,13 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
     effectiveAllowedPaths = undefined;
   }
 
+  // Resolve agent vault credentials upfront — vault tools are core (always available)
+  const vaultEntries = ctx?.vaultStore?.getAllForAgent(agentConfig.name);
+  const vault = resolveAgentVault(vaultEntries);
+
   // Start with core coding tools (sync); extended tools loaded async in the run phase
-  const codingTools = createCodingTools(cwd, agentConfig.allowedTools, effectiveAllowedPaths, outputDir);
+  // Vault is passed here so vault_get/vault_list are available from the start
+  const codingTools = createCodingTools(cwd, agentConfig.allowedTools, effectiveAllowedPaths, outputDir, vault);
 
   // MCP client manager — initialized later (async) if mcpServers are configured
   let mcpManager: McpClientManager | null = null;
@@ -358,11 +366,8 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
   // Run the agent and capture result
   handle.done = (async (): Promise<TaskResult> => {
     try {
-      // Resolve agent vault credentials from encrypted store
-      const vaultEntries = ctx?.vaultStore?.getAllForAgent(agentConfig.name);
-      const vault = resolveAgentVault(vaultEntries);
-
       // Resolve all tools (browser/email auto-detected from allowedTools) and MCP servers before prompting
+      // Note: vault is already resolved above and included in codingTools as core tools
       let allTools = codingTools;
       if (hasExtendedTools) {
         allTools = await createAllTools({
