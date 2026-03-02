@@ -436,7 +436,7 @@ export class ChannelGateway {
       const modelSpec = resolveModelSpec(settings?.orchestratorModel);
       const m = resolveModel(modelSpec);
       const apiKey = await resolveApiKeyAsync(m.provider as string);
-      const streamOpts = buildStreamOpts(apiKey, settings?.reasoning);
+      const streamOpts = buildStreamOpts(apiKey, settings?.reasoning, m.maxTokens);
 
       // Run the agentic loop (non-streaming for messaging)
       const MAX_TURNS = 15;

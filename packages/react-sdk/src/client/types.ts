@@ -262,12 +262,40 @@ export interface Team {
 
 // === Assessment ===
 
+/** Serializable representation of a single message in the reviewer's conversation */
+export interface ReviewerMessage {
+  role: "user" | "assistant" | "toolResult";
+  /** For user/assistant: text content. For toolResult: the tool output text. */
+  content: string;
+  /** Tool calls made by the assistant (if role === "assistant") */
+  toolCalls?: { id: string; name: string; arguments: Record<string, unknown> }[];
+  /** For toolResult messages */
+  toolCallId?: string;
+  toolName?: string;
+  isError?: boolean;
+  timestamp: number;
+}
+
+/** Phase 1 exploration trace from a single reviewer */
+export interface ReviewerExploration {
+  /** Full analysis text produced by the reviewer during exploration */
+  analysis: string;
+  /** Files read by the reviewer during exploration */
+  filesRead: string[];
+  /** Complete conversation (user prompts, assistant responses, tool calls & results) */
+  messages: ReviewerMessage[];
+}
+
 /** Individual reviewer result from llm_review multi-evaluator consensus */
 export interface ReviewerResult {
   index: number;
   scores: { dimension: string; score: number; reasoning: string; evidence?: { file: string; line: number; note: string }[] }[];
   summary: string;
   globalScore: number;
+  /** Phase 1 exploration trace (analysis, files read, full conversation) */
+  exploration?: ReviewerExploration;
+  /** Errors from scoring strategy attempts (Phase 2 fallback chain) */
+  scoringAttemptErrors?: string[];
 }
 
 export interface CheckResult {
@@ -946,7 +974,7 @@ export interface ChatCompletionChunkDelta {
 
 // === Tool Call streaming ===
 
-export type ToolCallState = "calling" | "completed" | "error" | "interrupted";
+export type ToolCallState = "preparing" | "calling" | "completed" | "error" | "interrupted";
 
 export interface ToolCallEvent {
   /** Tool call ID from the LLM */

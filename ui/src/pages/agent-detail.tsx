@@ -709,20 +709,6 @@ export function AgentDetailPage() {
                   <span className="text-muted-foreground/60 shrink-0">Timezone</span>
                   <span className={cn("ml-auto", identity?.timezone ? "text-muted-foreground" : "text-muted-foreground/30 italic")}>{identity?.timezone || "not set"}</span>
                 </div>
-                {identity?.socials && Object.keys(identity.socials).length > 0 && (
-                  <div className="flex items-center gap-2 py-1.5">
-                    <Globe className="h-3 w-3 text-muted-foreground shrink-0" />
-                    <span className="text-muted-foreground/60 shrink-0">Socials</span>
-                    <div className="ml-auto flex flex-wrap gap-1.5 justify-end">
-                      {Object.entries(identity.socials).map(([platform, handle]) => (
-                        <Badge key={platform} variant="secondary" className="text-[9px] font-mono gap-1">
-                          {platform}
-                          <span className="text-muted-foreground">{handle}</span>
-                        </Badge>
-                      ))}
-                    </div>
-                  </div>
-                )}
                 <div className="flex items-center gap-2 py-1.5">
                   <Zap className="h-3 w-3 text-muted-foreground shrink-0" />
                   <span className="text-muted-foreground/60 shrink-0">Model</span>
@@ -765,6 +751,23 @@ export function AgentDetailPage() {
               </div>
             </CardContent>
           </Card>
+
+          {/* ── Socials ── */}
+          {identity?.socials && Object.keys(identity.socials).length > 0 && (
+            <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0">
+              <CardContent className="pt-4 pb-4 space-y-2">
+                <SectionHeader title="Socials" icon={Globe} />
+                <div className="flex flex-wrap gap-1.5">
+                  {Object.entries(identity.socials).map(([platform, handle]) => (
+                    <Badge key={platform} variant="secondary" className="text-[9px] font-mono gap-1">
+                      {platform}
+                      <span className="text-muted-foreground">{handle}</span>
+                    </Badge>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          )}
 
           {/* ── Reporting hierarchy ── */}
           {(agent.reportsTo || subordinates.length > 0) && (

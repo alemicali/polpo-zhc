@@ -57,7 +57,7 @@ export interface VaultPreviewData {
 export type VaultPreviewAction = "confirm" | "cancel";
 
 // Local mirror of SDK tool call types
-export type ToolCallState = "calling" | "completed" | "error" | "interrupted";
+export type ToolCallState = "preparing" | "calling" | "completed" | "error" | "interrupted";
 
 export interface ToolCallInfo {
   id: string;
@@ -113,6 +113,8 @@ export function useChat() {
   const conversationRef = useRef<ChatCompletionMessage[]>([]);
   /** Currently active stream (for abort support) */
   const streamRef = useRef<ChatCompletionStream | null>(null);
+  /** True when the user explicitly requested a new session — consumed on first send */
+  const wantsNewSessionRef = useRef(false);
 
   // Reconstruct interactive state from persisted "interrupted" tool calls on the last assistant message.
   // If the last message is an assistant with an interrupted ask_user/create_mission, restore the pending state.
@@ -266,14 +268,19 @@ export function useChat() {
     setPendingMission(null);
     setPendingVault(null);
     conversationRef.current = [];
+    wantsNewSessionRef.current = true;
   }, [setSessionId]);
 
   // Core streaming function (shared between send and answerQuestions)
   const streamCompletion = useCallback(
     async (assistantId: string) => {
+      // If user explicitly requested a new session, send "new" sentinel to force server-side creation.
+      // Otherwise send the current sessionId (or undefined to let server auto-select).
+      const effectiveSessionId = wantsNewSessionRef.current ? "new" : (sessionId ?? undefined);
+      wantsNewSessionRef.current = false;
       const stream = client.chatCompletionsStream({
         messages: conversationRef.current,
-        sessionId: sessionId ?? undefined,
+        sessionId: effectiveSessionId,
       });
       streamRef.current = stream;
 
@@ -314,15 +321,16 @@ export function useChat() {
         const tc = (choice as any)?.tool_call as ToolCallInfo | undefined;
         if (tc) {
           const existing = toolCalls.find((t) => t.id === tc.id);
-          if (existing) {
-            // Update existing tool call (calling → completed/error)
-            existing.state = tc.state;
-            if (tc.result !== undefined) existing.result = tc.result;
-            // Also update the segment in-place
-            const segIdx = segments.findIndex((s) => s.type === "tool" && s.tool.id === tc.id);
-            if (segIdx >= 0) {
-              (segments[segIdx] as { type: "tool"; tool: ToolCallInfo }).tool = { ...existing };
-            }
+            if (existing) {
+              // Update existing tool call (preparing → calling → completed/error)
+              existing.state = tc.state;
+              if (tc.arguments !== undefined) existing.arguments = tc.arguments;
+              if (tc.result !== undefined) existing.result = tc.result;
+              // Also update the segment in-place
+              const segIdx = segments.findIndex((s) => s.type === "tool" && s.tool.id === tc.id);
+              if (segIdx >= 0) {
+                (segments[segIdx] as { type: "tool"; tool: ToolCallInfo }).tool = { ...existing };
+              }
           } else {
             // New tool call — push to flat list and add a new segment
             const info = { ...tc };

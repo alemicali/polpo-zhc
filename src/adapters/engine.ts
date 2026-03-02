@@ -253,18 +253,20 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
   const thinkingLevel = agentConfig.reasoning ?? ctx?.reasoning ?? "off";
 
   // Create the pi-agent-core Agent (starts with coding tools only; MCP tools added before prompt)
+  // Pass model.maxTokens to override pi-ai's 32K default cap, so each model uses its full output capacity.
   const agent = new Agent({
     getApiKey: (provider: string) => resolveApiKeyAsync(provider),
     initialState: {
       systemPrompt: buildSystemPrompt(agentConfig, cwd, ctx?.polpoDir, outputDir),
       model,
       thinkingLevel,
+      maxTokens: model.maxTokens,
       tools: codingTools,
       messages: [],
       isStreaming: false,
       streamMessage: null,
       pendingToolCalls: new Set(),
-    },
+    } as any,
   });
 
   const handle: AgentHandle = {

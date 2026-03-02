@@ -1,0 +1,23 @@
+import { useSyncExternalStore } from "react";
+import { usePolpoContext } from "../provider/polpo-context.js";
+import { selectAssessmentProgress } from "../store/selectors.js";
+import type { AssessmentProgressEntry } from "../store/types.js";
+
+export interface UseAssessmentProgressReturn {
+  /** Live assessment progress messages for this task. Empty when no assessment is running. */
+  progress: AssessmentProgressEntry[];
+  /** Whether an assessment is currently in progress (progress array is non-empty). */
+  isAssessing: boolean;
+}
+
+export function useAssessmentProgress(taskId: string): UseAssessmentProgressReturn {
+  const { store } = usePolpoContext();
+
+  const progress = useSyncExternalStore(
+    store.subscribe,
+    () => selectAssessmentProgress(store.getSnapshot(), taskId),
+    () => [],
+  );
+
+  return { progress, isAssessing: progress.length > 0 };
+}

@@ -134,8 +134,21 @@ export function reduceEvent(state: StoreState, sseEvent: SSEEvent): StoreState {
 
     // ── Assessment ────────────────────────────────────────────
 
-    case "assessment:started":
-    case "assessment:progress":
+    case "assessment:started": {
+      const { taskId } = data as { taskId: string };
+      const assessmentProgress = new Map(state.assessmentProgress);
+      assessmentProgress.set(taskId, [{ message: "Assessment started", timestamp: Date.now() }]);
+      return { ...next, assessmentProgress };
+    }
+
+    case "assessment:progress": {
+      const { taskId, message } = data as { taskId: string; message: string };
+      const assessmentProgress = new Map(state.assessmentProgress);
+      const existing = assessmentProgress.get(taskId) ?? [];
+      assessmentProgress.set(taskId, [...existing, { message, timestamp: Date.now() }]);
+      return { ...next, assessmentProgress };
+    }
+
     case "assessment:corrected":
       return next;
 
@@ -147,6 +160,11 @@ export function reduceEvent(state: StoreState, sseEvent: SSEEvent): StoreState {
         globalScore?: number;
         message?: string;
       };
+      // Clear assessment progress for this task
+      const assessmentProgress = new Map(state.assessmentProgress);
+      assessmentProgress.delete(taskId);
+      next = { ...next, assessmentProgress };
+
       const existing = state.tasks.get(taskId);
       if (existing?.result) {
         const tasks = new Map(state.tasks);

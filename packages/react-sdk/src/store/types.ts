@@ -16,6 +16,11 @@ export interface PolpoStats {
   queued: number;
 }
 
+export interface AssessmentProgressEntry {
+  message: string;
+  timestamp: number;
+}
+
 export interface StoreState {
   tasks: Map<string, Task>;
   missions: Map<string, Mission>;
@@ -28,4 +33,6 @@ export interface StoreState {
   recentEvents: SSEEvent[];
   missionsStale: boolean;
   memory: { exists: boolean; content: string } | null;
+  /** Live assessment progress messages keyed by taskId. Cleared on assessment:complete. */
+  assessmentProgress: Map<string, AssessmentProgressEntry[]>;
 }

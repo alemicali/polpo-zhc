@@ -23,6 +23,7 @@ function createInitialState(): StoreState {
     recentEvents: [],
     missionsStale: false,
     memory: null,
+    assessmentProgress: new Map(),
   };
 }
 

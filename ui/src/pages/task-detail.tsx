@@ -48,6 +48,10 @@ import {
   File,
   Download,
   ArrowRightLeft,
+  Search,
+  MessageSquare,
+  AlertCircle,
+  FolderOpen,
 } from "lucide-react";
 import { MessageResponse } from "@/components/ai-elements/message";
 import {
@@ -63,7 +67,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { useTask, useTasks, useProcesses, useTaskActivity } from "@lumea-labs/polpo-react";
+import { useTask, useTasks, useProcesses, useTaskActivity, useAssessmentProgress } from "@lumea-labs/polpo-react";
 import type { TaskStatus, TaskOutcome, DimensionScore, CheckResult, ReviewerResult, EvalDimension, AssessmentResult, AssessmentTrigger, AgentProcess, RunActivityEntry } from "@lumea-labs/polpo-react";
 import { useAsyncAction } from "@/hooks/use-polpo";
 import { toast } from "sonner";
@@ -530,6 +534,7 @@ export function TaskDetailPage() {
   const { task, isLoading, error, updateTask, retryTask, killTask, reassessTask, queueTask } = useTask(taskId ?? "");
   const { tasks: allTasks } = useTasks();
   const { processes } = useProcesses();
+  const { progress: assessmentProgress, isAssessing } = useAssessmentProgress(taskId ?? "");
 
   // Resolve dependsOn IDs to task titles
   const depTitleMap: Record<string, string> = {};
@@ -633,6 +638,14 @@ export function TaskDetailPage() {
   const assessment = task.result?.assessment;
   const phase = task.phase && task.phase !== "execution" ? phaseConfig[task.phase] : null;
 
+  // Show dedicated Assessment tab when we have rich review data (exploration traces)
+  // OR when an assessment is actively running (review state / live progress)
+  const hasExplorationData = assessment?.checks.some(c =>
+    c.type === "llm_review" && c.reviewers?.some(r => r.exploration),
+  ) ?? false;
+  const isReviewing = task.status === "review" || isAssessing;
+  const showAssessmentTab = (!!assessment && hasExplorationData) || isReviewing;
+
   return (
     <div className="flex flex-col flex-1 min-h-0 gap-4">
       {/* Back + title bar */}
@@ -723,304 +736,514 @@ export function TaskDetailPage() {
       {/* Live activity for running tasks */}
       {process && <LiveActivityStrip process={process} />}
 
-      {/* Content — tabs: Detail (default) | Activity */}
-      <Tabs defaultValue="detail" className="flex flex-col flex-1 min-h-0">
+      {/* Content — tabs: Assessment (conditional) | Detail | Activity */}
+      <Tabs defaultValue={showAssessmentTab ? "assessment" : "detail"} className="flex flex-col flex-1 min-h-0">
         <TabsList className="shrink-0 w-fit">
-          <TabsTrigger value="detail">Detail</TabsTrigger>
-          <TabsTrigger value="activity">Activity</TabsTrigger>
+          {showAssessmentTab && <TabsTrigger value="assessment" className="gap-1.5"><Scale className="h-3 w-3" /> Assessment</TabsTrigger>}
+          <TabsTrigger value="detail" className="gap-1.5"><FileText className="h-3 w-3" /> Detail</TabsTrigger>
+          <TabsTrigger value="activity" className="gap-1.5"><Activity className="h-3 w-3" /> Activity</TabsTrigger>
         </TabsList>
+
+        {/* ── Assessment tab (conditional) ── */}
+        {showAssessmentTab && (
+          <TabsContent value="assessment" className="mt-4 flex-1 min-h-0">
+            <ScrollArea className="h-full">
+
+              {/* Live assessment progress feed (shown while reviewing) */}
+              {isReviewing && assessmentProgress.length > 0 && (
+                <Card className="bg-card/80 backdrop-blur-sm border-border/40 border-l-2 border-l-sky-500 py-0 gap-0 mb-4">
+                  <CardContent className="pt-4 pb-4 space-y-3">
+                    <div className="flex items-center gap-2">
+                      <Loader2 className="h-4 w-4 animate-spin text-sky-400" />
+                      <p className="text-xs font-medium text-sky-400">Assessment in progress...</p>
+                      <span className="text-[10px] text-muted-foreground ml-auto">{assessmentProgress.length} steps</span>
+                    </div>
+                    <div className="space-y-0.5 max-h-64 overflow-y-auto pr-1">
+                      {assessmentProgress.map((entry, i) => {
+                        const isLatest = i === assessmentProgress.length - 1;
+                        // Categorize the message for styling
+                        const isPhase = entry.message.startsWith("Phase ");
+                        const isExploration = entry.message.includes("Exploring") || entry.message.startsWith("Reading ") || entry.message.startsWith("Searching ") || entry.message.startsWith("Grep:");
+                        const isScoring = entry.message.includes("Scoring") || entry.message.includes("scoring");
+                        const isComplete = entry.message.includes("complete") || entry.message.includes("consensus");
+                        const isFailed = entry.message.includes("failed") || entry.message.includes("Failed");
+                        const isGeneration = entry.message.includes("Generating") || entry.message.includes("Generated");
+
+                        const dotColor = isFailed ? "bg-red-500" : isComplete ? "bg-emerald-500" : isScoring ? "bg-violet-500" : isExploration ? "bg-sky-500" : isPhase ? "bg-amber-500" : isGeneration ? "bg-indigo-500" : "bg-zinc-500";
+                        const textColor = isFailed ? "text-red-400" : isComplete ? "text-emerald-400" : isLatest ? "text-foreground" : "text-muted-foreground/70";
+                        const MsgIcon = isFailed ? XCircle : isComplete ? CheckCircle2 : isScoring ? Scale : isExploration ? Search : isPhase ? Zap : isGeneration ? Star : Activity;
+                        const iconColor = isFailed ? "text-red-400" : isComplete ? "text-emerald-400" : isScoring ? "text-violet-400" : isExploration ? "text-sky-400" : isPhase ? "text-amber-400" : isGeneration ? "text-indigo-400" : "text-zinc-400";
+
+                        return (
+                          <div key={i} className={cn(
+                            "flex items-center gap-2 px-2.5 py-1.5 rounded-md transition-colors",
+                            isLatest && "bg-accent/10",
+                          )}>
+                            <div className={cn("h-1.5 w-1.5 rounded-full shrink-0", dotColor, isLatest && "animate-pulse")} />
+                            <MsgIcon className={cn("h-3 w-3 shrink-0", iconColor)} />
+                            <span className={cn("text-[11px] truncate min-w-0", textColor, isLatest && "font-medium")}>
+                              {entry.message}
+                            </span>
+                            <span className="text-[9px] text-muted-foreground/40 ml-auto shrink-0 tabular-nums font-mono">
+                              {new Date(entry.timestamp).toLocaleTimeString()}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Review in progress but no progress events yet */}
+              {isReviewing && assessmentProgress.length === 0 && (
+                <Card className="bg-card/80 backdrop-blur-sm border-border/40 border-l-2 border-l-sky-500 py-0 gap-0 mb-4">
+                  <CardContent className="flex items-center gap-3 py-6 justify-center">
+                    <Loader2 className="h-5 w-5 animate-spin text-sky-400" />
+                    <p className="text-sm text-muted-foreground">Waiting for assessment to start...</p>
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Completed assessment results */}
+              {assessment && (
+              <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 pr-4 pb-6">
+
+                {/* ── Left column (3/5): score card, breakdown, judge votes ── */}
+                <div className="lg:col-span-3 space-y-4">
+
+                  {/* Score hero card */}
+                  <Card className={cn(
+                    "bg-card/80 backdrop-blur-sm border-border/40 overflow-hidden py-0 gap-0",
+                    assessment.passed ? "border-l-2 border-l-emerald-500" : "border-l-2 border-l-red-500"
+                  )}>
+                    <CardContent className="pt-4 pb-4 space-y-3">
+                      <div className="flex items-center gap-4">
+                        {assessment.globalScore != null ? (
+                          <div className={cn(
+                            "flex items-center justify-center h-14 w-14 rounded-xl text-xl font-bold shrink-0",
+                            assessment.passed ? "bg-emerald-500/10 text-emerald-500" : "bg-red-500/10 text-red-500"
+                          )}>
+                            {assessment.globalScore.toFixed(1)}
+                          </div>
+                        ) : (
+                          <div className={cn(
+                            "flex items-center justify-center h-14 w-14 rounded-xl shrink-0",
+                            assessment.passed ? "bg-emerald-500/10 text-emerald-500" : "bg-red-500/10 text-red-500"
+                          )}>
+                            {assessment.passed ? <CheckCircle2 className="h-6 w-6" /> : <XCircle className="h-6 w-6" />}
+                          </div>
+                        )}
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="text-sm font-semibold">
+                              Assessment {assessment.passed ? "Passed" : "Failed"}
+                            </span>
+                            <TriggerBadge trigger={assessment.trigger} />
+                            {assessment.timestamp && (
+                              <span className="text-[10px] text-muted-foreground ml-auto shrink-0">
+                                {formatDistanceToNow(new Date(assessment.timestamp), { addSuffix: true })}
+                              </span>
+                            )}
+                          </div>
+                          {assessment.scores && assessment.scores.length > 0 && (
+                            <div className="space-y-1 mt-2">
+                              {assessment.scores.map((s) => (
+                                <ScoreBar key={s.dimension} score={s.score / 5} label={s.dimension} />
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  {/* Score Breakdown — dimension tiles */}
+                  {assessment.scores && assessment.scores.some(s => s.reasoning || (s.evidence && s.evidence.length > 0)) && (
+                    <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0">
+                      <CardContent className="pt-4 pb-4 space-y-3">
+                        <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-widest flex items-center gap-1.5">
+                          <Scale className="h-3 w-3" /> Score Breakdown
+                        </p>
+                        <div className="grid grid-cols-1 gap-2">
+                          {assessment.scores.filter(s => s.reasoning || (s.evidence && s.evidence.length > 0)).map((s) => {
+                            const pct = Math.round((s.score / 5) * 100);
+                            const scoreColor = pct >= 80 ? "text-emerald-400" : pct >= 60 ? "text-amber-400" : "text-red-400";
+                            const barColor = pct >= 80 ? "bg-emerald-500" : pct >= 60 ? "bg-amber-500" : "bg-red-500";
+                            const bgGlow = pct >= 80 ? "from-emerald-500/[0.03]" : pct >= 60 ? "from-amber-500/[0.03]" : "from-red-500/[0.03]";
+                            return (
+                              <div key={s.dimension} className={cn(
+                                "relative rounded-lg border border-border/30 overflow-hidden",
+                                "bg-gradient-to-r to-transparent", bgGlow
+                              )}>
+                                <div className={cn("absolute inset-y-0 left-0 opacity-[0.04]", barColor)} style={{ width: `${pct}%` }} />
+                                <div className="relative flex items-start gap-3 p-3">
+                                  <div className="shrink-0 flex flex-col items-center gap-0.5">
+                                    <div
+                                      className="relative h-10 w-10 rounded-full flex items-center justify-center"
+                                      style={{ background: `conic-gradient(${pct >= 80 ? 'rgb(52 211 153)' : pct >= 60 ? 'rgb(251 191 36)' : 'rgb(248 113 113)'} ${pct * 3.6}deg, rgba(128,128,128,0.1) 0deg)` }}
+                                    >
+                                      <div className="h-7 w-7 rounded-full bg-card flex items-center justify-center">
+                                        <span className={cn("text-[11px] font-bold font-mono tabular-nums", scoreColor)}>{s.score.toFixed(1)}</span>
+                                      </div>
+                                    </div>
+                                    <span className="text-[8px] text-muted-foreground/50 font-mono">w:{s.weight}</span>
+                                  </div>
+                                  <div className="flex-1 min-w-0 space-y-1.5">
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-xs font-semibold capitalize tracking-tight">{s.dimension}</span>
+                                      <span className={cn("text-[10px] font-mono font-bold", scoreColor)}>{pct}%</span>
+                                    </div>
+                                    {s.reasoning && <p className="text-[11px] text-muted-foreground/80 leading-relaxed">{s.reasoning}</p>}
+                                    {s.evidence && s.evidence.length > 0 && (
+                                      <div className="flex flex-wrap gap-1 pt-0.5">
+                                        {s.evidence.map((e, i) => (
+                                          <span key={i} className="inline-flex items-center gap-1 rounded-md bg-muted/40 px-1.5 py-0.5 text-[9px] font-mono text-muted-foreground hover:bg-muted/60 transition-colors" title={e.note}>
+                                            <FileCode className="h-2.5 w-2.5 shrink-0 opacity-60" />
+                                            {e.file.split('/').pop()}:{e.line}
+                                          </span>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  )}
+
+                </div>{/* end left column */}
+
+                {/* ── Right column (2/5): judge votes, metrics, history ── */}
+                <div className="lg:col-span-2 space-y-4">
+
+                  {/* Judge Votes — reviewer cards with tabbed exploration traces */}
+                  {(() => {
+                    const llmCheck = assessment.checks.find(c => c.type === "llm_review");
+                    const reviewers = llmCheck?.reviewers as ReviewerResult[] | undefined;
+                    if (!reviewers || reviewers.length === 0) return null;
+                    const medianScore = llmCheck?.globalScore ?? 3;
+                    return (
+                      <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0">
+                        <CardContent className="pt-4 pb-4 space-y-3">
+                          <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-widest flex items-center gap-1.5">
+                            <Star className="h-3 w-3" /> Judge Votes ({reviewers.length})
+                          </p>
+                          <div className="space-y-2">
+                            {reviewers.map((r) => {
+                              const isAboveMedian = r.globalScore >= medianScore;
+                              const rPct = Math.round((r.globalScore / 5) * 100);
+                              const rColor = rPct >= 80 ? "text-emerald-400" : rPct >= 60 ? "text-amber-400" : "text-red-400";
+                              const hasExploration = !!r.exploration;
+                              const hasFiles = hasExploration && r.exploration!.filesRead.length > 0;
+                              const hasMessages = hasExploration && r.exploration!.messages.length > 0;
+                              const hasRetries = r.scoringAttemptErrors && r.scoringAttemptErrors.length > 0;
+                              return (
+                                <Collapsible key={r.index} defaultOpen>
+                                  <div className="rounded-lg border border-border/30 overflow-hidden">
+                                    <CollapsibleTrigger className="flex items-center gap-2.5 w-full px-3 py-2 hover:bg-muted/20 transition-colors cursor-pointer group/rv">
+                                      <div className={cn(
+                                        "flex h-7 items-center justify-center rounded-md text-[10px] font-bold font-mono shrink-0 px-2",
+                                        isAboveMedian
+                                          ? "bg-emerald-500/10 text-emerald-400 ring-1 ring-emerald-500/20"
+                                          : "bg-amber-500/10 text-amber-400 ring-1 ring-amber-500/20"
+                                      )}>
+                                        Judge {r.index}
+                                      </div>
+                                      <span className={cn("text-sm font-bold font-mono tabular-nums", rColor)}>
+                                        {r.globalScore.toFixed(1)}
+                                      </span>
+                                      <div className="flex-1 flex items-center gap-px h-2 rounded-sm overflow-hidden bg-muted/30">
+                                        {r.scores.map((s, si) => {
+                                          const sPct = (s.score / 5) * 100;
+                                          const sColor = sPct >= 80 ? "bg-emerald-500" : sPct >= 60 ? "bg-amber-500" : "bg-red-500";
+                                          return (
+                                            <div key={si} className="flex-1 h-full relative" title={`${s.dimension}: ${s.score.toFixed(1)}/5`}>
+                                              <div className={cn("absolute inset-y-0 left-0 rounded-[1px]", sColor)} style={{ width: `${sPct}%` }} />
+                                            </div>
+                                          );
+                                        })}
+                                      </div>
+                                      <ChevronDown className="h-3 w-3 text-muted-foreground/50 transition-transform group-data-[state=open]/rv:rotate-180 shrink-0" />
+                                    </CollapsibleTrigger>
+                                    <CollapsibleContent>
+                                      <div className="px-3 pb-3 pt-1 space-y-3 border-t border-border/20">
+                                        <p className="text-[11px] text-muted-foreground/80 leading-relaxed">{r.summary}</p>
+                                        <div className="grid grid-cols-2 gap-x-3 gap-y-1.5">
+                                          {r.scores.map((s) => {
+                                            const dimPct = Math.round((s.score / 5) * 100);
+                                            const dimColor = dimPct >= 80 ? "text-emerald-400" : dimPct >= 60 ? "text-amber-400" : "text-red-400";
+                                            const dimBg = dimPct >= 80 ? "bg-emerald-500/5" : dimPct >= 60 ? "bg-amber-500/5" : "bg-red-500/5";
+                                            return (
+                                              <div key={s.dimension} className={cn("rounded-md px-2.5 py-2 border border-border/15", dimBg)}>
+                                                <div className="flex items-center justify-between gap-1.5">
+                                                  <span className="text-[10px] text-muted-foreground/70 capitalize truncate">{s.dimension}</span>
+                                                  <span className={cn("text-sm font-mono font-bold tabular-nums shrink-0", dimColor)}>{s.score.toFixed(1)}</span>
+                                                </div>
+                                              </div>
+                                            );
+                                          })}
+                                        </div>
+
+                                        {/* Exploration tabs */}
+                                        {(hasExploration || hasRetries) && (
+                                          <Tabs defaultValue={hasExploration ? "analysis" : "retries"} className="w-full">
+                                            <TabsList className="h-7 w-full justify-start bg-muted/30 p-0.5 gap-0">
+                                              {hasExploration && (
+                                                <TabsTrigger value="analysis" className="text-[9px] h-6 px-2 gap-1 data-[state=active]:bg-background">
+                                                  <Search className="h-3 w-3" /> Analysis
+                                                </TabsTrigger>
+                                              )}
+                                              {hasMessages && (
+                                                <TabsTrigger value="conversation" className="text-[9px] h-6 px-2 gap-1 data-[state=active]:bg-background">
+                                                  <MessageSquare className="h-3 w-3" /> Conversation
+                                                  <span className="text-[8px] text-muted-foreground">({r.exploration!.messages.length})</span>
+                                                </TabsTrigger>
+                                              )}
+                                              {hasFiles && (
+                                                <TabsTrigger value="files" className="text-[9px] h-6 px-2 gap-1 data-[state=active]:bg-background">
+                                                  <FolderOpen className="h-3 w-3" /> Files
+                                                  <span className="text-[8px] text-muted-foreground">({r.exploration!.filesRead.length})</span>
+                                                </TabsTrigger>
+                                              )}
+                                              {hasRetries && (
+                                                <TabsTrigger value="retries" className="text-[9px] h-6 px-2 gap-1 text-amber-400/70 data-[state=active]:bg-background data-[state=active]:text-amber-400">
+                                                  <AlertCircle className="h-3 w-3" /> Retries
+                                                  <span className="text-[8px]">({r.scoringAttemptErrors!.length})</span>
+                                                </TabsTrigger>
+                                              )}
+                                            </TabsList>
+
+                                            {/* Analysis tab */}
+                                            {hasExploration && (
+                                              <TabsContent value="analysis" className="mt-2">
+                                                <div className="rounded-md bg-muted/10 border-l-2 border-sky-500/30 pl-3 pr-2.5 py-2.5 max-h-72 overflow-y-auto">
+                                                  <MessageResponse mode="static" className="text-[11px] leading-[1.7] text-muted-foreground/90 [&_p]:mb-1.5 [&_ul]:mb-1.5 [&_ol]:mb-1.5 [&_li]:text-[11px] [&_code]:text-[10px] [&_h1]:text-xs [&_h2]:text-xs [&_h3]:text-[11px]">
+                                                    {r.exploration!.analysis}
+                                                  </MessageResponse>
+                                                </div>
+                                              </TabsContent>
+                                            )}
+
+                                            {/* Conversation tab */}
+                                            {hasMessages && (
+                                              <TabsContent value="conversation" className="mt-2">
+                                                <div className="max-h-[28rem] overflow-y-auto pr-1 space-y-0.5">
+                                                  {r.exploration!.messages.map((msg, mi) => {
+                                                    const isAssistantMsg = msg.role === "assistant";
+                                                    const isTResult = msg.role === "toolResult";
+                                                    const isError = msg.isError;
+                                                    const msgDot = isError ? "bg-red-500" : isAssistantMsg ? "bg-sky-500" : isTResult ? "bg-emerald-500" : "bg-zinc-500";
+                                                    const MsgIcon = isError ? XCircle : isAssistantMsg ? Bot : isTResult ? CheckCircle2 : FileText;
+                                                    const msgIconColor = isError ? "text-red-400" : isAssistantMsg ? "text-sky-400" : isTResult ? "text-emerald-400" : "text-zinc-400";
+                                                    const roleLabel = isTResult ? (msg.toolName ?? "tool") : msg.role;
+                                                    let inlineSummary: string | undefined;
+                                                    if (isAssistantMsg && msg.toolCalls && msg.toolCalls.length > 0) {
+                                                      inlineSummary = msg.toolCalls.map(tc => tc.name).join(", ");
+                                                    } else if (isAssistantMsg && msg.content) {
+                                                      inlineSummary = msg.content.slice(0, 100).replace(/\n/g, " ");
+                                                    } else if (isTResult && msg.content) {
+                                                      inlineSummary = msg.content.slice(0, 80).replace(/\n/g, " ");
+                                                    }
+                                                    const hasContent = (msg.content && msg.content.length > 0) || (msg.toolCalls && msg.toolCalls.length > 0);
+                                                    return (
+                                                      <Collapsible key={mi}>
+                                                        <CollapsibleTrigger asChild>
+                                                          <div className="flex items-center gap-2 px-2.5 py-2 rounded-md cursor-pointer transition-colors hover:bg-accent/20">
+                                                            <div className={cn("h-1.5 w-1.5 rounded-full shrink-0", msgDot)} />
+                                                            <MsgIcon className={cn("h-3.5 w-3.5 shrink-0", msgIconColor)} />
+                                                            <Badge variant="outline" className="text-[9px] font-mono px-1.5 py-0 shrink-0">
+                                                              {roleLabel}
+                                                            </Badge>
+                                                            {msg.toolCalls && msg.toolCalls.length > 0 && (
+                                                              <>
+                                                                {msg.toolCalls.slice(0, 2).map((tc, tci) => (
+                                                                  <Badge key={tci} variant="secondary" className="text-[9px] font-mono px-1.5 py-0 shrink-0">
+                                                                    {tc.name}
+                                                                  </Badge>
+                                                                ))}
+                                                                {msg.toolCalls.length > 2 && (
+                                                                  <span className="text-[9px] text-muted-foreground">+{msg.toolCalls.length - 2}</span>
+                                                                )}
+                                                              </>
+                                                            )}
+                                                            {isError && (
+                                                              <Badge variant="destructive" className="text-[8px] px-1 py-0 shrink-0">error</Badge>
+                                                            )}
+                                                            {inlineSummary && !msg.toolCalls?.length && (
+                                                              <span className="text-[10px] text-muted-foreground truncate min-w-0">
+                                                                {inlineSummary}
+                                                              </span>
+                                                            )}
+                                                            {hasContent && (
+                                                              <ChevronDown className="h-3 w-3 text-muted-foreground/50 ml-auto shrink-0 transition-transform group-data-[state=open]:rotate-180" />
+                                                            )}
+                                                          </div>
+                                                        </CollapsibleTrigger>
+                                                        {hasContent && (
+                                                          <CollapsibleContent>
+                                                            <div className="ml-6 mr-2 mb-0.5">
+                                                              {msg.toolCalls && msg.toolCalls.length > 0 && (
+                                                                <div className="space-y-1 mb-1.5">
+                                                                  {msg.toolCalls.map((tc, tci) => (
+                                                                    <div key={tci} className="rounded border border-border/30 bg-muted/20 px-2.5 py-1.5">
+                                                                      <span className="text-[10px] font-mono font-semibold text-amber-400/90">{tc.name}</span>
+                                                                      <pre className="text-[9px] text-muted-foreground/60 font-mono whitespace-pre-wrap break-words mt-0.5 max-h-24 overflow-y-auto">
+                                                                        {JSON.stringify(tc.arguments, null, 2)}
+                                                                      </pre>
+                                                                    </div>
+                                                                  ))}
+                                                                </div>
+                                                              )}
+                                                              {msg.content && (
+                                                                <div className={cn(
+                                                                  "rounded px-2.5 py-2 max-h-56 overflow-y-auto border",
+                                                                  isError ? "bg-red-500/5 border-red-500/20" : "bg-muted/20 border-border/30"
+                                                                )}>
+                                                                  <MessageResponse mode="static" className={cn(
+                                                                    "text-[11px] leading-[1.6] [&_p]:mb-1.5 [&_ul]:mb-1.5 [&_ol]:mb-1.5 [&_li]:text-[11px] [&_code]:text-[10px] [&_pre]:text-[10px] [&_pre]:max-h-32 [&_pre]:overflow-y-auto [&_h1]:text-xs [&_h2]:text-xs [&_h3]:text-[11px]",
+                                                                    isError ? "text-red-400/80" : "text-muted-foreground"
+                                                                  )}>
+                                                                    {msg.content.length > 2000 ? msg.content.slice(0, 2000) + "\n...truncated" : msg.content}
+                                                                  </MessageResponse>
+                                                                </div>
+                                                              )}
+                                                            </div>
+                                                          </CollapsibleContent>
+                                                        )}
+                                                      </Collapsible>
+                                                    );
+                                                  })}
+                                                </div>
+                                              </TabsContent>
+                                            )}
+
+                                            {/* Files tab */}
+                                            {hasFiles && (
+                                              <TabsContent value="files" className="mt-2">
+                                                <div className="rounded-md border border-border/20 bg-muted/10 divide-y divide-border/10 overflow-hidden max-h-72 overflow-y-auto">
+                                                  {r.exploration!.filesRead.map((f, fi) => {
+                                                    const parts = f.split("/");
+                                                    const fileName = parts.pop() ?? f;
+                                                    const dirPath = parts.length > 0 ? parts.join("/") + "/" : "";
+                                                    return (
+                                                      <div key={fi} className="flex items-center gap-2 px-2.5 py-1.5 hover:bg-muted/20 transition-colors">
+                                                        <FileText className="h-3 w-3 shrink-0 text-sky-400/60" />
+                                                        <span className="text-[10px] font-mono truncate text-muted-foreground/50">{dirPath}</span>
+                                                        <span className="text-[10px] font-mono font-semibold text-foreground/80 shrink-0">{fileName}</span>
+                                                      </div>
+                                                    );
+                                                  })}
+                                                </div>
+                                              </TabsContent>
+                                            )}
+
+                                            {/* Retries tab */}
+                                            {hasRetries && (
+                                              <TabsContent value="retries" className="mt-2">
+                                                <div className="space-y-1.5">
+                                                  {r.scoringAttemptErrors!.map((err, ei) => (
+                                                    <div key={ei} className="rounded-md bg-amber-500/5 border border-amber-500/15 px-3 py-2">
+                                                      <p className="text-[10px] font-mono text-amber-400/70 leading-[1.6] break-words">{err}</p>
+                                                    </div>
+                                                  ))}
+                                                </div>
+                                              </TabsContent>
+                                            )}
+                                          </Tabs>
+                                        )}
+                                      </div>
+                                    </CollapsibleContent>
+                                  </div>
+                                </Collapsible>
+                              );
+                            })}
+                          </div>
+                        </CardContent>
+                      </Card>
+                    );
+                  })()}
+
+                  {/* Metrics */}
+                  {assessment.metrics && assessment.metrics.length > 0 && (
+                    <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0">
+                      <CardContent className="pt-4 pb-4 space-y-3">
+                        <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-widest flex items-center gap-1.5">
+                          <Activity className="h-3 w-3" /> Metrics ({assessment.metrics.length})
+                        </p>
+                        <div className="space-y-1.5">
+                          {assessment.metrics.map((m, i) => (
+                            <div key={i} className={cn(
+                              "flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs",
+                              m.passed ? "bg-emerald-500/8 text-emerald-600 dark:text-emerald-400" : "bg-red-500/8 text-red-600 dark:text-red-400"
+                            )}>
+                              {m.passed ? <CheckCircle2 className="h-3 w-3 shrink-0" /> : <XCircle className="h-3 w-3 shrink-0" />}
+                              <span className="font-medium">{m.name}</span>
+                              <span className="font-mono text-[10px] opacity-60 ml-auto">{m.value}/{m.threshold}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  )}
+
+                  {/* Assessment History */}
+                  {task.result?.assessmentHistory && task.result.assessmentHistory.length > 0 && (
+                    <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0">
+                      <CardContent className="pt-4 pb-4 space-y-3">
+                        <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-widest flex items-center gap-1.5">
+                          <Clock className="h-3 w-3" /> Previous Assessments ({task.result.assessmentHistory.length})
+                        </p>
+                        <div className="rounded-lg border border-border/50 divide-y divide-border/30">
+                          {task.result.assessmentHistory.map((a, i) => (
+                            <AssessmentHistoryRow key={i} assessment={a} index={i} />
+                          ))}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  )}
+
+                </div>{/* end right column */}
+              </div>
+              )}
+            </ScrollArea>
+          </TabsContent>
+        )}
 
         <TabsContent value="detail" className="mt-4 flex-1 min-h-0">
           <ScrollArea className="h-full">
             <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 pr-4 pb-6">
 
-              {/* ── Left column (3/5): assessment, output, description ── */}
+              {/* ── Left column (3/5): output, description ── */}
               <div className="lg:col-span-3 space-y-4">
 
-              {/* ── Assessment summary (collapsible, open by default) ── */}
-              {assessment && (
-                <Collapsible defaultOpen>
+              {/* Assessment compact summary (when not in dedicated tab) */}
+              {assessment && !showAssessmentTab && (
                 <Card className={cn(
                   "bg-card/80 backdrop-blur-sm border-border/40 overflow-hidden py-0 gap-0",
                   assessment.passed ? "border-l-2 border-l-emerald-500" : "border-l-2 border-l-red-500"
                 )}>
-                  <CardContent className="pt-3 pb-3 space-y-3">
-                    <CollapsibleTrigger className="flex items-center gap-1.5 text-[10px] font-medium text-muted-foreground uppercase tracking-widest hover:text-foreground transition-colors cursor-pointer group w-full">
-                      {assessment.passed ? <CheckCircle2 className="h-3 w-3 text-emerald-500" /> : <XCircle className="h-3 w-3 text-red-500" />}
-                      Assessment {assessment.passed ? "Passed" : "Failed"}
-                      {assessment.globalScore != null && <span className="font-mono ml-1">({assessment.globalScore.toFixed(1)}/5)</span>}
-                      <ChevronDown className="h-3 w-3 ml-auto transition-transform group-data-[state=open]:rotate-180" />
-                    </CollapsibleTrigger>
-                    <CollapsibleContent>
-                    <div className="space-y-3 pt-0.5">
-                    {/* Score hero row */}
-                    <div className="flex items-center gap-4">
-                      {assessment.globalScore != null ? (
-                        <div className={cn(
-                          "flex items-center justify-center h-14 w-14 rounded-xl text-xl font-bold shrink-0",
-                          assessment.passed
-                            ? "bg-emerald-500/10 text-emerald-500"
-                            : "bg-red-500/10 text-red-500"
+                  <CardContent className="pt-3 pb-3">
+                    <div className="flex items-center gap-3">
+                      {assessment.passed ? <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" /> : <XCircle className="h-4 w-4 text-red-500 shrink-0" />}
+                      <span className="text-xs font-medium">
+                        Assessment {assessment.passed ? "Passed" : "Failed"}
+                      </span>
+                      {assessment.globalScore != null && (
+                        <span className={cn(
+                          "text-sm font-bold font-mono tabular-nums",
+                          assessment.passed ? "text-emerald-400" : "text-red-400"
                         )}>
-                          {assessment.globalScore.toFixed(1)}
-                        </div>
-                      ) : (
-                        <div className={cn(
-                          "flex items-center justify-center h-14 w-14 rounded-xl shrink-0",
-                          assessment.passed
-                            ? "bg-emerald-500/10 text-emerald-500"
-                            : "bg-red-500/10 text-red-500"
-                        )}>
-                          {assessment.passed ? <CheckCircle2 className="h-6 w-6" /> : <XCircle className="h-6 w-6" />}
-                        </div>
+                          {assessment.globalScore.toFixed(1)}/5
+                        </span>
                       )}
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 mb-1">
-                          <span className="text-sm font-semibold">
-                            Assessment {assessment.passed ? "Passed" : "Failed"}
-                          </span>
-                          <TriggerBadge trigger={assessment.trigger} />
-                          {assessment.timestamp && (
-                            <span className="text-[10px] text-muted-foreground ml-auto shrink-0">
-                              {formatDistanceToNow(new Date(assessment.timestamp), { addSuffix: true })}
-                            </span>
-                          )}
-                        </div>
-                        {/* Dimension scores as compact bar grid */}
-                        {assessment.scores && assessment.scores.length > 0 && (
-                          <div className="space-y-1 mt-2">
-                            {assessment.scores.map((s) => (
-                              <ScoreBar key={s.dimension} score={s.score / 5} label={s.dimension} />
-                            ))}
-                          </div>
-                        )}
-                      </div>
+                      {assessment.trigger && <TriggerBadge trigger={assessment.trigger} />}
                     </div>
-
-                    {/* Checks — compact pass/fail list */}
-                    {assessment.checks.length > 0 && (
-                      <div className="flex flex-wrap gap-2">
-                        {assessment.checks.map((c: CheckResult, i: number) => (
-                          <div key={i} className={cn(
-                            "flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs",
-                            c.passed ? "bg-emerald-500/8 text-emerald-600 dark:text-emerald-400" : "bg-red-500/8 text-red-600 dark:text-red-400"
-                          )}>
-                            {c.passed
-                              ? <CheckCircle2 className="h-3 w-3 shrink-0" />
-                              : <XCircle className="h-3 w-3 shrink-0" />}
-                            <Badge variant="outline" className="text-[8px] font-mono px-1 py-0 border-current/20">{c.type}</Badge>
-                            <span className="break-words">{c.message}</span>
-                            {c.globalScore != null && (
-                              <span className="text-[10px] font-mono opacity-60 shrink-0">{c.globalScore.toFixed(1)}/5</span>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-
-                    {/* Metric results */}
-                    {assessment.metrics && assessment.metrics.length > 0 && (
-                      <div className="flex flex-wrap gap-2">
-                        {assessment.metrics.map((m, i) => (
-                          <div key={i} className={cn(
-                            "flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs",
-                            m.passed ? "bg-emerald-500/8 text-emerald-600 dark:text-emerald-400" : "bg-red-500/8 text-red-600 dark:text-red-400"
-                          )}>
-                            {m.passed
-                              ? <CheckCircle2 className="h-3 w-3 shrink-0" />
-                              : <XCircle className="h-3 w-3 shrink-0" />}
-                            <span className="font-medium">{m.name}</span>
-                            <span className="font-mono text-[10px] opacity-60">{m.value}/{m.threshold}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-
-                    {/* ── Dimension breakdown — visual score tiles ── */}
-                    {assessment.scores && assessment.scores.some(s => s.reasoning || (s.evidence && s.evidence.length > 0)) && (
-                      <Collapsible defaultOpen>
-                        <CollapsibleTrigger className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer group">
-                          <ChevronDown className="h-3 w-3 transition-transform group-data-[state=open]:rotate-180" />
-                          <Scale className="h-3 w-3" />
-                          Score Breakdown
-                        </CollapsibleTrigger>
-                        <CollapsibleContent>
-                          <div className="mt-2.5 grid grid-cols-1 gap-2">
-                            {assessment.scores.filter(s => s.reasoning || (s.evidence && s.evidence.length > 0)).map((s) => {
-                              const pct = Math.round((s.score / 5) * 100);
-                              const scoreColor = pct >= 80 ? "text-emerald-400" : pct >= 60 ? "text-amber-400" : "text-red-400";
-                              const barColor = pct >= 80 ? "bg-emerald-500" : pct >= 60 ? "bg-amber-500" : "bg-red-500";
-                              const bgGlow = pct >= 80 ? "from-emerald-500/[0.03]" : pct >= 60 ? "from-amber-500/[0.03]" : "from-red-500/[0.03]";
-                              return (
-                                <div key={s.dimension} className={cn(
-                                  "relative rounded-lg border border-border/30 overflow-hidden",
-                                  "bg-gradient-to-r to-transparent",
-                                  bgGlow
-                                )}>
-                                  {/* Score fill bar — background visual */}
-                                  <div
-                                    className={cn("absolute inset-y-0 left-0 opacity-[0.04]", barColor)}
-                                    style={{ width: `${pct}%` }}
-                                  />
-                                  <div className="relative flex items-start gap-3 p-3">
-                                    {/* Score ring */}
-                                    <div className="shrink-0 flex flex-col items-center gap-0.5">
-                                      <div
-                                        className="relative h-10 w-10 rounded-full flex items-center justify-center"
-                                        style={{
-                                          background: `conic-gradient(${pct >= 80 ? 'rgb(52 211 153)' : pct >= 60 ? 'rgb(251 191 36)' : 'rgb(248 113 113)'} ${pct * 3.6}deg, rgba(128,128,128,0.1) 0deg)`
-                                        }}
-                                      >
-                                        <div className="h-7 w-7 rounded-full bg-card flex items-center justify-center">
-                                          <span className={cn("text-[11px] font-bold font-mono tabular-nums", scoreColor)}>
-                                            {s.score.toFixed(1)}
-                                          </span>
-                                        </div>
-                                      </div>
-                                      <span className="text-[8px] text-muted-foreground/50 font-mono">w:{s.weight}</span>
-                                    </div>
-                                    {/* Content */}
-                                    <div className="flex-1 min-w-0 space-y-1.5">
-                                      <div className="flex items-center gap-2">
-                                        <span className="text-xs font-semibold capitalize tracking-tight">{s.dimension}</span>
-                                        <span className={cn("text-[10px] font-mono font-bold", scoreColor)}>{pct}%</span>
-                                      </div>
-                                      {s.reasoning && (
-                                        <p className="text-[11px] text-muted-foreground/80 leading-relaxed">{s.reasoning}</p>
-                                      )}
-                                      {s.evidence && s.evidence.length > 0 && (
-                                        <div className="flex flex-wrap gap-1 pt-0.5">
-                                          {s.evidence.map((e, i) => (
-                                            <span
-                                              key={i}
-                                              className="inline-flex items-center gap-1 rounded-md bg-muted/40 px-1.5 py-0.5 text-[9px] font-mono text-muted-foreground hover:bg-muted/60 transition-colors"
-                                              title={e.note}
-                                            >
-                                              <FileCode className="h-2.5 w-2.5 shrink-0 opacity-60" />
-                                              {e.file.split('/').pop()}:{e.line}
-                                            </span>
-                                          ))}
-                                        </div>
-                                      )}
-                                    </div>
-                                  </div>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </CollapsibleContent>
-                      </Collapsible>
-                    )}
-
-                    {/* ── Reviewer votes — horizontal judge cards ── */}
-                    {(() => {
-                      const llmCheck = assessment.checks.find(c => c.type === "llm_review");
-                      const reviewers = llmCheck?.reviewers as ReviewerResult[] | undefined;
-                      if (!reviewers || reviewers.length === 0) return null;
-                      const medianScore = llmCheck?.globalScore ?? 3;
-                      return (
-                        <Collapsible>
-                          <CollapsibleTrigger className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer group">
-                            <ChevronDown className="h-3 w-3 transition-transform group-data-[state=open]:rotate-180" />
-                            <Star className="h-3 w-3" />
-                             Judge Votes ({reviewers.length})
-                          </CollapsibleTrigger>
-                          <CollapsibleContent>
-                            <div className="mt-2.5 space-y-2">
-                              {reviewers.map((r) => {
-                                const isAboveMedian = r.globalScore >= medianScore;
-                                const rPct = Math.round((r.globalScore / 5) * 100);
-                                const rColor = rPct >= 80 ? "text-emerald-400" : rPct >= 60 ? "text-amber-400" : "text-red-400";
-                                return (
-                                  <Collapsible key={r.index}>
-                                    <div className="rounded-lg border border-border/30 overflow-hidden">
-                                      <CollapsibleTrigger className="flex items-center gap-2.5 w-full px-3 py-2 hover:bg-muted/20 transition-colors cursor-pointer group/rv">
-                                        {/* Reviewer avatar */}
-                                        <div className={cn(
-                                          "flex h-7 items-center justify-center rounded-md text-[10px] font-bold font-mono shrink-0 px-2",
-                                          isAboveMedian
-                                            ? "bg-emerald-500/10 text-emerald-400 ring-1 ring-emerald-500/20"
-                                            : "bg-amber-500/10 text-amber-400 ring-1 ring-amber-500/20"
-                                        )}>
-                                          Judge {r.index}
-                                        </div>
-                                        {/* Score */}
-                                        <span className={cn("text-sm font-bold font-mono tabular-nums", rColor)}>
-                                          {r.globalScore.toFixed(1)}
-                                        </span>
-                                        {/* Mini dimension bar — segmented horizontal visualization */}
-                                        <div className="flex-1 flex items-center gap-px h-2 rounded-sm overflow-hidden bg-muted/30">
-                                          {r.scores.map((s, si) => {
-                                            const sPct = (s.score / 5) * 100;
-                                            const sColor = sPct >= 80 ? "bg-emerald-500" : sPct >= 60 ? "bg-amber-500" : "bg-red-500";
-                                            return (
-                                              <div
-                                                key={si}
-                                                className="flex-1 h-full relative"
-                                                title={`${s.dimension}: ${s.score.toFixed(1)}/5`}
-                                              >
-                                                <div className={cn("absolute inset-y-0 left-0 rounded-[1px]", sColor)} style={{ width: `${sPct}%` }} />
-                                              </div>
-                                            );
-                                          })}
-                                        </div>
-                                        <ChevronDown className="h-3 w-3 text-muted-foreground/50 transition-transform group-data-[state=open]/rv:rotate-180 shrink-0" />
-                                      </CollapsibleTrigger>
-                                      <CollapsibleContent>
-                                        <div className="px-3 pb-3 pt-1 space-y-2 border-t border-border/20">
-                                          {/* Summary */}
-                                          <p className="text-[11px] text-muted-foreground/80 leading-relaxed">{r.summary}</p>
-                                          {/* Scores grid */}
-                                          <div className="grid grid-cols-2 gap-x-3 gap-y-1">
-                                            {r.scores.map((s) => {
-                                              const dimPct = Math.round((s.score / 5) * 100);
-                                              const dimColor = dimPct >= 80 ? "text-emerald-400" : dimPct >= 60 ? "text-amber-400" : "text-red-400";
-                                              return (
-                                                <div key={s.dimension} className="flex items-center gap-1.5 text-[10px]">
-                                                  <span className="text-muted-foreground/60 capitalize truncate flex-1">{s.dimension}</span>
-                                                  <span className={cn("font-mono font-bold tabular-nums shrink-0", dimColor)}>
-                                                    {s.score.toFixed(1)}
-                                                  </span>
-                                                </div>
-                                              );
-                                            })}
-                                          </div>
-                                        </div>
-                                      </CollapsibleContent>
-                                    </div>
-                                  </Collapsible>
-                                );
-                              })}
-                            </div>
-                          </CollapsibleContent>
-                        </Collapsible>
-                      );
-                    })()}
-
-
-                    </div>
-                    </CollapsibleContent>
                   </CardContent>
                 </Card>
-                </Collapsible>
-              )}
-
-              {/* Assessment history — compact collapsible */}
-              {task.result?.assessmentHistory && task.result.assessmentHistory.length > 0 && (
-                <Collapsible>
-                  <CollapsibleTrigger className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer group w-full">
-                    <ChevronDown className="h-3 w-3 transition-transform group-data-[state=open]:rotate-180" />
-                    <Clock className="h-3 w-3" />
-                    Previous Assessments ({task.result.assessmentHistory.length})
-                  </CollapsibleTrigger>
-                  <CollapsibleContent>
-                    <div className="rounded-lg border border-border/50 divide-y divide-border/30 mt-2">
-                      {task.result.assessmentHistory.map((a, i) => (
-                        <AssessmentHistoryRow key={i} assessment={a} index={i} />
-                      ))}
-                    </div>
-                  </CollapsibleContent>
-                </Collapsible>
               )}
 
               {/* ── Output (stdout/stderr — collapsible, open by default) ── */}

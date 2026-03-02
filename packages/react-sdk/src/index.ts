@@ -25,6 +25,7 @@ export { useTemplates } from "./hooks/use-templates.js";
 export { useSchedules } from "./hooks/use-schedules.js";
 export { useVaultEntries } from "./hooks/use-vault-entries.js";
 export { useAuthStatus } from "./hooks/use-auth-status.js";
+export { useAssessmentProgress } from "./hooks/use-assessment-progress.js";
 
 // Client (re-export for convenience)
 export { PolpoClient, ChatCompletionStream } from "./client/polpo-client.js";
@@ -56,6 +57,8 @@ export type {
   EvalDimension,
   CheckResult,
   ReviewerResult,
+  ReviewerMessage,
+  ReviewerExploration,
   MetricResult,
   PolpoState,
   PolpoConfig,
@@ -125,5 +128,5 @@ export type {
 } from "./client/types.js";
 
 export type { ConnectionStatus } from "./client/event-source.js";
-export type { PolpoStats, StoreState } from "./store/types.js";
+export type { PolpoStats, StoreState, AssessmentProgressEntry } from "./store/types.js";
 export type { TaskFilter } from "./store/selectors.js";

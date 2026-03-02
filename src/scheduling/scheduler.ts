@@ -24,6 +24,8 @@ export class Scheduler {
   private checkIntervalMs: number;
   /** Callback to execute a mission — injected to avoid circular dependency with MissionExecutor */
   private executeMissionFn?: (missionId: string) => void;
+  /** Bound listener for cleanup in dispose() */
+  private missionCompletedHandler?: (evt: { missionId: string }) => void;
 
   constructor(
     private ctx: OrchestratorContext,
@@ -34,18 +36,35 @@ export class Scheduler {
 
   /**
    * Initialize: scan all missions for schedule definitions and build the schedule registry.
-   * Registers missions that are schedulable:
-   *  - scheduled: one-shot waiting for trigger
-   *  - recurring: waiting for next scheduled run (any non-active state)
+   *
+   * Registers ALL missions that have a `schedule` field, except terminal states
+   * (completed, cancelled, draft). This ensures crash recovery works correctly:
+   * if the server crashes while a recurring mission is "active", the schedule
+   * entry is rebuilt on restart. The `triggerSchedule()` method already guards
+   * against executing missions that aren't in a triggerable state, so
+   * registering an "active" or "failed" mission is safe — it simply keeps the
+   * entry ready for when the mission returns to "scheduled" or "recurring".
    */
   init(): void {
     const missions = this.ctx.registry.getAllMissions?.() ?? [];
+    const terminalStates = new Set(["completed", "cancelled", "draft"]);
     for (const mission of missions) {
       if (!mission.schedule) continue;
-      if (mission.status === "scheduled" || mission.status === "recurring") {
+      if (terminalStates.has(mission.status)) continue;
+      this.registerMission(mission);
+    }
+
+    // Listen for mission completions — re-register recurring missions that
+    // return to "recurring" status so the next cron tick is computed.
+    // Also handles edge cases like manual status changes via API.
+    this.missionCompletedHandler = ({ missionId }) => {
+      const mission = this.ctx.registry.getMission?.(missionId);
+      if (!mission?.schedule) return;
+      if (mission.status === "recurring" || mission.status === "scheduled") {
         this.registerMission(mission);
       }
-    }
+    };
+    this.ctx.emitter.on("mission:completed", this.missionCompletedHandler);
   }
 
   /**
@@ -246,6 +265,10 @@ export class Scheduler {
   }
 
   dispose(): void {
+    if (this.missionCompletedHandler) {
+      this.ctx.emitter.off("mission:completed", this.missionCompletedHandler);
+      this.missionCompletedHandler = undefined;
+    }
     this.schedules.clear();
     this.executeMissionFn = undefined;
   }

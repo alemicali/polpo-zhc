@@ -120,6 +120,34 @@ Task completes → Run expectations in order:
   → Agent work wrong? → fix phase (or retry)
 ```
 
+## Two-Phase Reviewer Architecture
+
+Each of the 3 independent reviewer agents follows a two-phase process:
+
+### Phase 1 — Exploration
+
+The reviewer freely explores the codebase using `read_file`, `glob`, and `grep` tools (up to 20 turns). It builds a detailed analysis for each evaluation dimension, noting specific `file:line` references as evidence. No scoring happens in this phase — the reviewer just investigates.
+
+### Phase 2 — Scoring
+
+A separate LLM call receives the full Phase 1 analysis and must produce structured scores by calling the `submit_review` tool. Polpo uses up to 5 escalating strategies to extract structured scores (forced tool choice → JSON schema → prompt-based → forceful → raw JSON), ensuring reliability across different model providers.
+
+### Reviewer Trace Persistence
+
+The complete trace of each reviewer is persisted on the task result for full transparency and debugging:
+
+| Data | Where it's stored |
+|------|-------------------|
+| Phase 1 analysis text | `task.result.assessment.checks[].reviewers[].exploration.analysis` |
+| Files read during exploration | `task.result.assessment.checks[].reviewers[].exploration.filesRead` |
+| Full conversation (prompts, responses, tool calls, tool results) | `task.result.assessment.checks[].reviewers[].exploration.messages` |
+| Per-dimension scores with reasoning and evidence | `task.result.assessment.checks[].reviewers[].scores` |
+| Scoring strategy attempt errors | `task.result.assessment.checks[].reviewers[].scoringAttemptErrors` |
+
+This means you can reconstruct exactly what each reviewer read, how it reasoned, which files it inspected, and how it arrived at its scores — even after the assessment is complete.
+
+---
+
 ## Retry with Feedback
 
 When the review fails, the feedback includes:

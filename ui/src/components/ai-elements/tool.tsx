@@ -26,7 +26,7 @@ import {
 
 // ── Types ──
 
-export type ToolState = "calling" | "completed" | "error" | "interrupted";
+export type ToolState = "preparing" | "calling" | "completed" | "error" | "interrupted";
 
 export interface ToolCallInfo {
   id: string;
@@ -66,6 +66,8 @@ function formatToolName(name: string): string {
 
 function getStateIcon(state: ToolState) {
   switch (state) {
+    case "preparing":
+      return <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />;
     case "calling":
       return <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />;
     case "completed":
@@ -79,6 +81,12 @@ function getStateIcon(state: ToolState) {
 
 function getStateBadge(state: ToolState) {
   switch (state) {
+    case "preparing":
+      return (
+        <Badge variant="outline" className="text-[9px] font-normal border-muted-foreground/30 text-muted-foreground">
+          Preparing
+        </Badge>
+      );
     case "calling":
       return (
         <Badge variant="outline" className="text-[9px] font-normal border-primary/30 text-primary">
@@ -219,9 +227,9 @@ export interface ToolCallGroupProps extends HTMLAttributes<HTMLDivElement> {
 
 /** Grouped collapsible for 2+ consecutive tool calls — shows a summary row */
 export function ToolCallGroup({ tools, className, ...props }: ToolCallGroupProps) {
-  const callingCount = tools.filter((t) => t.state === "calling").length;
+  const activeCount = tools.filter((t) => t.state === "calling" || t.state === "preparing").length;
   const errorCount = tools.filter((t) => t.state === "error").length;
-  const isCalling = callingCount > 0;
+  const isCalling = activeCount > 0;
   const hasError = errorCount > 0;
 
   const summaryIcon = isCalling
@@ -250,7 +258,7 @@ export function ToolCallGroup({ tools, className, ...props }: ToolCallGroupProps
         <CollapsibleTrigger className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-accent/30 transition-colors group">
           <Wrench className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
           <span className="text-xs text-muted-foreground">
-            {isCalling ? `Running ${tools.length} tools` : `Used ${tools.length} tools`}
+            {isCalling ? `Working on ${tools.length} tools` : `Used ${tools.length} tools`}
           </span>
           <span className="text-[10px] text-muted-foreground/60 truncate flex-1">
             {preview}

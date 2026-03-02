@@ -301,23 +301,31 @@ export function completionRoutes(orchestrator: Orchestrator, apiKeys?: string[])
     const m = resolveModel(modelSpec);
     const apiKey = await resolveApiKeyAsync(m.provider as string);
     const reasoning = settings?.reasoning;
-    const streamOpts = buildStreamOpts(apiKey, reasoning);
+    const streamOpts = buildStreamOpts(apiKey, reasoning, m.maxTokens);
 
     const completionId = `chatcmpl-${nanoid(24)}`;
 
     // ── Session persistence ──
     const sessionStore = orchestrator.getSessionStore();
-    let sessionId: string | null = c.req.header("x-session-id") ?? null;
+    const rawSessionHeader = c.req.header("x-session-id") ?? null;
+    const forceNewSession = rawSessionHeader === "new";
+    let sessionId: string | null = forceNewSession ? null : rawSessionHeader;
     if (sessionStore) {
       if (!sessionId) {
-        // Reuse latest session if recent (< 30 min), otherwise create new
-        const latest = sessionStore.getLatestSession();
-        const timeout = 30 * 60 * 1000;
-        if (latest && Date.now() - new Date(latest.updatedAt).getTime() < timeout) {
-          sessionId = latest.id;
-        } else {
+        if (forceNewSession) {
+          // Client explicitly requested a new session — skip recency heuristic
           const firstUserMsg = body.messages.find(m => m.role === "user");
           sessionId = sessionStore.create(firstUserMsg ? extractText(firstUserMsg.content).slice(0, 60) : undefined);
+        } else {
+          // Reuse latest session if recent (< 30 min), otherwise create new
+          const latest = sessionStore.getLatestSession();
+          const timeout = 30 * 60 * 1000;
+          if (latest && Date.now() - new Date(latest.updatedAt).getTime() < timeout) {
+            sessionId = latest.id;
+          } else {
+            const firstUserMsg = body.messages.find(m => m.role === "user");
+            sessionId = sessionStore.create(firstUserMsg ? extractText(firstUserMsg.content).slice(0, 60) : undefined);
+          }
         }
       }
       // Persist user message (only the last one — earlier messages are already persisted)
@@ -372,6 +380,18 @@ export function completionRoutes(orchestrator: Orchestrator, apiKeys?: string[])
               if (event.type === "text_delta") {
                 turnText += event.delta;
                 await stream.writeSSE({ data: sseChunk(completionId, { content: event.delta }) });
+              } else if (event.type === "toolcall_start") {
+                // Emit early "preparing" signal — the LLM has started generating a tool call
+                // but arguments are not yet complete. Lets the UI show immediate feedback.
+                const block = event.partial.content[event.contentIndex] as
+                  | { type: "toolCall"; id: string; name: string } | undefined;
+                if (block?.type === "toolCall") {
+                  await stream.writeSSE({
+                    data: sseChunk(completionId, {}, null, {
+                      tool_call: { id: block.id, name: block.name, state: "preparing" },
+                    }),
+                  });
+                }
               } else if (event.type === "error") {
                 streamError = (event as any).error?.errorMessage ?? "Model returned an error";
               }

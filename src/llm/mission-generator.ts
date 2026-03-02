@@ -292,11 +292,11 @@ async function _runMissionStep(
     systemPrompt,
     messages,
     tools,
-  }, buildStreamOpts(apiKey, reasoning));
+    }, buildStreamOpts(apiKey, reasoning, m.maxTokens));
 
-  // Track tokens if callback provided
-  if (onTokens && "usage" in response && response.usage && typeof response.usage === "object") {
-    const u = response.usage as { totalTokens?: number };
+    // Track tokens if callback provided
+    if (onTokens && "usage" in response && response.usage && typeof response.usage === "object") {
+      const u = response.usage as { totalTokens?: number };
     if (typeof u.totalTokens === "number") onTokens(u.totalTokens);
   }
 
@@ -455,7 +455,7 @@ export async function generateTaskPrep(
       systemPrompt,
       messages,
       tools: [submitTaskTool],
-    }, buildStreamOpts(apiKey, reasoning));
+    }, buildStreamOpts(apiKey, reasoning, m.maxTokens));
 
     // Track tokens if callback provided
     if (onTokens && "usage" in response && response.usage && typeof response.usage === "object") {
@@ -509,7 +509,7 @@ export async function generateTeam(
       systemPrompt,
       messages,
       tools: [submitTeamTool],
-    }, buildStreamOpts(apiKey, reasoning));
+    }, buildStreamOpts(apiKey, reasoning, m.maxTokens));
 
     // Extract from tool call (primary path)
     const toolCall = response.content.find(

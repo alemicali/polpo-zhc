@@ -803,14 +803,16 @@ async function handleBillingDisable(provider: string): Promise<void> {
 export function buildStreamOpts(
   apiKey?: string,
   reasoning?: ReasoningLevel,
+  maxTokens?: number,
 ): Record<string, unknown> | undefined {
   const reasoningVal = reasoning && reasoning !== "off" ? reasoning : undefined;
 
-  if (!apiKey && !reasoningVal) return undefined;
+  if (!apiKey && !reasoningVal && !maxTokens) return undefined;
 
   const opts: Record<string, unknown> = {};
   if (apiKey) opts.apiKey = apiKey;
   if (reasoningVal) opts.reasoning = reasoningVal;
+  if (maxTokens) opts.maxTokens = maxTokens;
   return opts;
 }
 
@@ -828,7 +830,7 @@ export async function queryText(prompt: string, model?: string, reasoning?: Reas
   try {
     const response = await completeSimple(m, {
       messages: [{ role: "user", content: prompt, timestamp: Date.now() }],
-    }, buildStreamOpts(apiKey, reasoning));
+    }, buildStreamOpts(apiKey, reasoning, m.maxTokens));
     const textBlocks = response.content.filter((c): c is { type: "text"; text: string } => c.type === "text");
     const text = textBlocks.map(b => b.text).join("\n").trim();
     // Success — clear any cooldown for this provider
@@ -868,7 +870,7 @@ export async function queryStream(
   try {
     const s = streamSimple(m, {
       messages: [{ role: "user", content: prompt, timestamp: Date.now() }],
-    }, buildStreamOpts(apiKey, reasoning));
+    }, buildStreamOpts(apiKey, reasoning, m.maxTokens));
 
     for await (const event of s) {
       if (event.type === "text_delta" && onProgress) {

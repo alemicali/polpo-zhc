@@ -23,7 +23,7 @@ import { readFileSync } from "node:fs";
 import { execSync } from "node:child_process";
 import { resolve, relative } from "node:path";
 import { Type } from "@sinclair/typebox";
-import type { TaskExpectation, EvalDimension, DimensionScore, CheckResult, ReviewContext } from "../core/types.js";
+import type { TaskExpectation, EvalDimension, DimensionScore, CheckResult, ReviewContext, ReviewerMessage } from "../core/types.js";
 import { DEFAULT_DIMENSIONS, buildRubricSection, computeWeightedScore, computeMedianScores } from "./scoring.js";
 import { withRetry } from "../llm/retry.js";
 import { resolveModel, resolveApiKeyAsync, buildStreamOpts } from "../llm/pi-client.js";
@@ -35,6 +35,14 @@ export type LLMQueryFn = (prompt: string, cwd: string) => Promise<string>;
 interface ReviewPayload {
   scores: { dimension: string; score: number; reasoning: string; evidence?: { file: string; line: number; note: string }[] }[];
   summary: string;
+  /** Phase 1 exploration trace — carried through for persistence */
+  exploration?: {
+    analysis: string;
+    filesRead: string[];
+    messages: import("../core/types.js").ReviewerMessage[];
+  };
+  /** Errors from Phase 2 scoring strategy attempts */
+  scoringAttemptErrors?: string[];
 }
 
 // ── Tool Definitions ───────────────────────────────────────────────────
@@ -140,6 +148,43 @@ function executeExplorationTool(
 const MAX_EXPLORATION_TURNS = 20;
 const NUDGE_AT_TURN = 15;
 
+/** Convert pi-ai Message[] to serializable ReviewerMessage[] */
+function serializeMessages(messages: Message[]): ReviewerMessage[] {
+  return messages.map(msg => {
+    if (msg.role === "user") {
+      return {
+        role: "user" as const,
+        content: typeof msg.content === "string" ? msg.content : msg.content.map(c => c.type === "text" ? c.text : `[image: ${c.mimeType}]`).join("\n"),
+        timestamp: msg.timestamp,
+      };
+    }
+    if (msg.role === "assistant") {
+      const textParts: string[] = [];
+      const toolCalls: ReviewerMessage["toolCalls"] = [];
+      for (const block of msg.content) {
+        if (block.type === "text") textParts.push(block.text);
+        if (block.type === "thinking") textParts.push(`<thinking>${block.thinking}</thinking>`);
+        if (block.type === "toolCall") toolCalls.push({ id: block.id, name: block.name, arguments: block.arguments });
+      }
+      return {
+        role: "assistant" as const,
+        content: textParts.join("\n"),
+        ...(toolCalls.length > 0 ? { toolCalls } : {}),
+        timestamp: msg.timestamp,
+      };
+    }
+    // toolResult
+    return {
+      role: "toolResult" as const,
+      content: msg.content.map(c => c.type === "text" ? c.text : `[image: ${c.mimeType}]`).join("\n"),
+      toolCallId: msg.toolCallId,
+      toolName: msg.toolName,
+      isError: msg.isError,
+      timestamp: msg.timestamp,
+    };
+  });
+}
+
 /**
  * Phase 1: Let the reviewer freely explore the codebase.
  * Returns the accumulated analysis text from all assistant messages.
@@ -150,10 +195,10 @@ async function runExploration(
   model: string | undefined,
   onProgress?: (msg: string) => void,
   reasoning?: ReasoningLevel,
-): Promise<{ analysis: string; filesRead: string[] }> {
+): Promise<{ analysis: string; filesRead: string[]; messages: ReviewerMessage[] }> {
   const m = resolveModel(model);
   const apiKey = await resolveApiKeyAsync(m.provider as string);
-  const opts = buildStreamOpts(apiKey, reasoning);
+  const opts = buildStreamOpts(apiKey, reasoning, m.maxTokens);
 
   const filesRead: string[] = [];
 
@@ -225,6 +270,7 @@ async function runExploration(
   return {
     analysis: analysisBlocks.join("\n\n") || "The reviewer explored the codebase but produced no written analysis.",
     filesRead,
+    messages: serializeMessages(messages),
   };
 }
 
@@ -250,7 +296,7 @@ async function runScoring(
   model: string | undefined,
   onProgress?: (msg: string) => void,
   reasoning?: ReasoningLevel,
-): Promise<ReviewPayload | null> {
+): Promise<{ payload: ReviewPayload | null; attemptErrors: string[] }> {
   const m = resolveModel(model);
   const apiKey = await resolveApiKeyAsync(m.provider as string);
 
@@ -337,7 +383,7 @@ RULES:
     } as any);
 
     const payload = extractSubmitReview(response);
-    if (payload) return payload;
+    if (payload) return { payload, attemptErrors };
     attemptErrors.push(`Attempt 1 (toolChoice): tool call received but extraction failed. Response types: ${response.content.map(c => c.type).join(", ")}`);
   } catch (err) {
     attemptErrors.push(`Attempt 1 (toolChoice): ${err instanceof Error ? err.message : String(err)}`);
@@ -382,7 +428,7 @@ Return a JSON object with "scores" array and "summary" string.`,
 
       const fullText = extractText(response);
       const parsed = tryParseReviewJSON(fullText);
-      if (parsed) return parsed;
+      if (parsed) return { payload: parsed, attemptErrors };
       attemptErrors.push(`Attempt 2 (json_schema): structured output parse failed. Text preview: ${fullText.slice(0, 200)}`);
     } catch (err) {
       attemptErrors.push(`Attempt 2 (json_schema): ${err instanceof Error ? err.message : String(err)}`);
@@ -392,16 +438,16 @@ Return a JSON object with "scores" array and "summary" string.`,
   // Attempt 3: Strong prompting without toolChoice (cross-provider)
   onProgress?.("Scoring with prompt-based enforcement...");
   try {
-    const response = await completeSimple(m, context, buildStreamOpts(apiKey, reasoning));
+    const response = await completeSimple(m, context, buildStreamOpts(apiKey, reasoning, m.maxTokens));
 
     // Check for tool call
     const payload = extractSubmitReview(response);
-    if (payload) return payload;
+    if (payload) return { payload, attemptErrors };
 
     // Check for text-based JSON fallback
     const fullText = extractText(response);
     const parsed = tryParseReviewJSON(fullText);
-    if (parsed) return parsed;
+    if (parsed) return { payload: parsed, attemptErrors };
     attemptErrors.push(`Attempt 3 (prompt): no tool call, text fallback failed. Response types: ${response.content.map(c => c.type).join(", ")}. Text length: ${fullText.length}`);
   } catch (err) {
     attemptErrors.push(`Attempt 3 (prompt): ${err instanceof Error ? err.message : String(err)}`);
@@ -424,14 +470,14 @@ Call submit_review immediately. No text output.`,
       systemPrompt: "Call submit_review immediately with the scores. No other output.",
       messages: forcefulMessages,
       tools: [submitReviewTool],
-    }, buildStreamOpts(apiKey, reasoning));
+    }, buildStreamOpts(apiKey, reasoning, m.maxTokens));
 
     const payload = extractSubmitReview(response);
-    if (payload) return payload;
+    if (payload) return { payload, attemptErrors };
 
     const fullText = extractText(response);
     const parsed = tryParseReviewJSON(fullText);
-    if (parsed) return parsed;
+    if (parsed) return { payload: parsed, attemptErrors };
     attemptErrors.push(`Attempt 4 (forceful): no tool call, text fallback failed. Response types: ${response.content.map(c => c.type).join(", ")}. Text length: ${fullText.length}`);
   } catch (err) {
     attemptErrors.push(`Attempt 4 (forceful): ${err instanceof Error ? err.message : String(err)}`);
@@ -459,11 +505,11 @@ Return this exact JSON structure (nothing else):
       systemPrompt: "You are a JSON-only scorer. Output ONLY valid JSON matching the requested schema. No markdown fences, no explanations, no commentary — just the raw JSON object.",
       messages: jsonMessages,
       tools: [],
-    }, buildStreamOpts(apiKey, reasoning));
+    }, buildStreamOpts(apiKey, reasoning, m.maxTokens));
 
     const fullText = extractText(response);
     const parsed = tryParseReviewJSON(fullText);
-    if (parsed) return parsed;
+    if (parsed) return { payload: parsed, attemptErrors };
     attemptErrors.push(`Attempt 5 (raw JSON): parse failed. Text preview: ${fullText.slice(0, 200)}`);
   } catch (err) {
     attemptErrors.push(`Attempt 5 (raw JSON): ${err instanceof Error ? err.message : String(err)}`);
@@ -471,7 +517,7 @@ Return this exact JSON structure (nothing else):
 
   // All attempts failed — report details
   onProgress?.(`All scoring attempts failed (provider: ${m.provider}, api: ${m.api}):\n${attemptErrors.join("\n")}`);
-  return null;
+  return { payload: null, attemptErrors };
 }
 
 /** Extract ReviewPayload from a submit_review tool call in the response. */
@@ -556,20 +602,23 @@ async function runSingleReview(
 ): Promise<ReviewPayload | null> {
   // Phase 1: Explore
   onProgress?.("Phase 1: Exploring codebase...");
-  const { analysis, filesRead } = await runExploration(explorationPrompt, cwd, model, onProgress, reasoning);
+  const { analysis, filesRead, messages: explorationMessages } = await runExploration(explorationPrompt, cwd, model, onProgress, reasoning);
   onProgress?.(`Exploration complete — read ${filesRead.length} files, ${analysis.length} chars of analysis.`);
 
   // Phase 2: Score
   onProgress?.("Phase 2: Producing structured scores...");
-  const payload = await runScoring(analysis, rubricSection, dimNames, model, onProgress, reasoning);
+  const { payload, attemptErrors } = await runScoring(analysis, rubricSection, dimNames, model, onProgress, reasoning);
 
   if (payload) {
     onProgress?.(`Scoring complete — ${payload.scores.length} dimensions scored.`);
+    // Attach exploration trace and scoring attempt errors to the payload
+    payload.exploration = { analysis, filesRead, messages: explorationMessages };
+    if (attemptErrors.length > 0) payload.scoringAttemptErrors = attemptErrors;
+    return payload;
   } else {
     onProgress?.("Scoring failed — reviewer could not produce structured scores.");
+    return null;
   }
-
-  return payload;
 }
 
 // ── Single Review with Retry ───────────────────────────────────────────
@@ -685,6 +734,8 @@ function buildCheckResult(
       scores: review.scores,
       summary: review.summary,
       globalScore: Math.round(computeWeightedScore(reviewDimScores) * 100) / 100,
+      exploration: review.exploration,
+      scoringAttemptErrors: review.scoringAttemptErrors,
     };
   });
 
@@ -743,7 +794,7 @@ Example for an image generation task:
       systemPrompt: "You are an evaluation expert. Output ONLY a valid JSON array. No markdown fences, no explanations.",
       messages,
       tools: [],
-    }, buildStreamOpts(apiKey));
+    }, buildStreamOpts(apiKey, undefined, m.maxTokens));
 
     // Extract text from response
     let text = "";

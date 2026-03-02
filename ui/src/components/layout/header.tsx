@@ -1,5 +1,6 @@
 import { useLocation } from "react-router-dom";
 import { Sun, Moon, Monitor } from "lucide-react";
+import { useProjectInfo } from "@/hooks/use-polpo";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -29,13 +30,14 @@ function resolveTitle(pathname: string): string {
   if (pathname.startsWith("/missions/")) return "Mission Detail";
   if (pathname.startsWith("/tasks/")) return "Task Detail";
   if (pathname.startsWith("/agents/")) return "Agent Detail";
-  return "Polpo";
+  return "";
 }
 
 export function Header() {
   const { pathname } = useLocation();
   const title = resolveTitle(pathname);
   const { theme, resolved, setTheme } = useTheme();
+  const { info } = useProjectInfo();
 
   return (
     <header className="flex h-14 shrink-0 items-center justify-between border-b border-border/50 bg-background/80 backdrop-blur-md px-5 lg:px-8 pt-safe">
@@ -50,7 +52,7 @@ export function Header() {
         <h2 className="text-lg font-bold tracking-tight">{title}</h2>
         <div className="h-4 w-px bg-border/60" />
         <span className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground/60">
-          Polpo
+          {info?.project ?? "Polpo"}
         </span>
       </div>
 

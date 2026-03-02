@@ -104,3 +104,13 @@ function matchesEventFilter(eventName: string, patterns: string[]): boolean {
     return eventName === pattern;
   });
 }
+
+// ── Assessment progress selector ────────────────────────────
+
+import type { AssessmentProgressEntry } from "./types.js";
+
+const EMPTY_PROGRESS: AssessmentProgressEntry[] = [];
+
+export function selectAssessmentProgress(state: StoreState, taskId: string): AssessmentProgressEntry[] {
+  return state.assessmentProgress.get(taskId) ?? EMPTY_PROGRESS;
+}
