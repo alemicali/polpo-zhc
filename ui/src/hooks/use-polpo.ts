@@ -56,6 +56,18 @@ export interface VaultPreviewData {
 
 export type VaultPreviewAction = "confirm" | "cancel";
 
+// Client-side tool types
+export interface GoToFileData {
+  path: string;
+}
+
+export interface PreviewFileData {
+  title: string;
+  content: string;
+  format: "html" | "markdown" | "code" | "image";
+  language?: string;
+}
+
 // Local mirror of SDK tool call types
 export type ToolCallState = "preparing" | "calling" | "completed" | "error" | "interrupted";
 
@@ -72,11 +84,13 @@ export type MessageSegment =
   | { type: "text"; content: string }
   | { type: "tool"; tool: ToolCallInfo };
 
-/** A chat message enriched with optional ask_user questions, tool calls, mission preview, and vault preview */
+/** A chat message enriched with optional ask_user questions, tool calls, mission preview, vault preview, and client-side actions */
 export interface ChatMessageWithQuestions extends ChatMessage {
   askUserQuestions?: AskUserQuestion[];
   missionPreview?: MissionPreviewData;
   vaultPreview?: VaultPreviewData;
+  goToFile?: GoToFileData;
+  previewFile?: PreviewFileData;
   toolCalls?: ToolCallInfo[];
   /** Chronologically ordered segments (text interleaved with tool calls) */
   segments?: MessageSegment[];
@@ -108,6 +122,10 @@ export function useChat() {
   const [pendingMission, setPendingMission] = useState<MissionPreviewData | null>(null);
   /** Vault entry preview waiting for user confirmation (null = no pending vault) */
   const [pendingVault, setPendingVault] = useState<VaultPreviewData | null>(null);
+  /** Client-side go_to_file — path to navigate to (consumed immediately) */
+  const [pendingGoToFile, setPendingGoToFile] = useState<GoToFileData | null>(null);
+  /** Client-side preview_file content — opens a dialog */
+  const [pendingPreviewFile, setPendingPreviewFile] = useState<PreviewFileData | null>(null);
   const initialLoadDone = useRef(false);
   /** Conversation history sent to the completions endpoint */
   const conversationRef = useRef<ChatCompletionMessage[]>([]);
@@ -155,6 +173,23 @@ export function useChat() {
         };
         lastMsg.vaultPreview = vaultPreview;
         setPendingVault(vaultPreview);
+      } else if (tc.name === "go_to_file" && tc.arguments) {
+        const args = tc.arguments as Record<string, unknown>;
+        const goToFileData: GoToFileData = {
+          path: (args.path as string) ?? "",
+        };
+        lastMsg.goToFile = goToFileData;
+        setPendingGoToFile(goToFileData);
+      } else if (tc.name === "preview_file" && tc.arguments) {
+        const args = tc.arguments as Record<string, unknown>;
+        const previewData: PreviewFileData = {
+          title: (args.title as string) ?? "Preview",
+          content: (args.content as string) ?? "",
+          format: (args.format as PreviewFileData["format"]) ?? "html",
+          language: args.language as string | undefined,
+        };
+        lastMsg.previewFile = previewData;
+        setPendingPreviewFile(previewData);
       }
     }
   };
@@ -398,10 +433,50 @@ export function useChat() {
         setPendingQuestions(null);
         setPendingMission(null);
         conversationRef.current.push({ role: "assistant", content: fullContent });
+      } else if ((stream as any).goToFile) {
+        // Client-side go_to_file — navigate to file browser immediately
+        const goToFileData: GoToFileData = {
+          path: (stream as any).goToFile.path,
+        };
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantId
+              ? { ...m, content: fullContent, goToFile: goToFileData, toolCalls: toolCalls.length > 0 ? toolCalls : undefined, segments: [...segments] }
+              : m
+          )
+        );
+        setPendingGoToFile(goToFileData);
+        setPendingQuestions(null);
+        setPendingMission(null);
+        setPendingVault(null);
+        conversationRef.current.push({ role: "assistant", content: fullContent });
+      } else if ((stream as any).previewFile) {
+        // Client-side preview_file — open inline dialog
+        const pf = (stream as any).previewFile;
+        const previewData: PreviewFileData = {
+          title: pf.title,
+          content: pf.content,
+          format: pf.format as PreviewFileData["format"],
+          language: pf.language ?? undefined,
+        };
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantId
+              ? { ...m, content: fullContent, previewFile: previewData, toolCalls: toolCalls.length > 0 ? toolCalls : undefined, segments: [...segments] }
+              : m
+          )
+        );
+        setPendingPreviewFile(previewData);
+        setPendingQuestions(null);
+        setPendingMission(null);
+        setPendingVault(null);
+        conversationRef.current.push({ role: "assistant", content: fullContent });
       } else {
         setPendingQuestions(null);
         setPendingMission(null);
         setPendingVault(null);
+        setPendingGoToFile(null);
+        setPendingPreviewFile(null);
         conversationRef.current.push({ role: "assistant", content: fullContent });
       }
 
@@ -765,6 +840,81 @@ export function useChat() {
     [pendingVault, client, streamCompletion]
   );
 
+  // Consume the go_to_file pending state after the caller has navigated.
+  // Called by the page component after performing the navigation.
+  const consumeGoToFile = useCallback(() => {
+    if (!pendingGoToFile) return;
+    const data = pendingGoToFile;
+    setPendingGoToFile(null);
+
+    // Tell the LLM the navigation happened — fire-and-forget continuation
+    const responseText = `Navigated to file "${data.path}".`;
+    const userMsg: ChatMessageWithQuestions = {
+      id: `temp-${Date.now()}`,
+      role: "user",
+      content: responseText,
+      ts: new Date().toISOString(),
+    };
+    setMessages((prev) => [...prev, userMsg]);
+    conversationRef.current.push({ role: "user", content: responseText });
+
+    const assistantId = `temp-${Date.now()}-a`;
+    setMessages((prev) => [
+      ...prev,
+      { id: assistantId, role: "assistant", content: "", ts: new Date().toISOString() },
+    ]);
+    setIsLoading(true);
+
+    streamCompletion(assistantId)
+      .catch((e) => {
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantId
+              ? { ...m, content: `Error: ${(e as Error).message}` }
+              : m
+          )
+        );
+      })
+      .finally(() => setIsLoading(false));
+  }, [pendingGoToFile, streamCompletion]);
+
+  // Consume the preview_file pending state after the dialog is opened.
+  // The dialog is opened by the page component; this resumes the LLM conversation.
+  const consumePreviewFile = useCallback(() => {
+    if (!pendingPreviewFile) return;
+    const data = pendingPreviewFile;
+    setPendingPreviewFile(null);
+
+    const responseText = `Preview "${data.title}" shown to user.`;
+    const userMsg: ChatMessageWithQuestions = {
+      id: `temp-${Date.now()}`,
+      role: "user",
+      content: responseText,
+      ts: new Date().toISOString(),
+    };
+    setMessages((prev) => [...prev, userMsg]);
+    conversationRef.current.push({ role: "user", content: responseText });
+
+    const assistantId = `temp-${Date.now()}-a`;
+    setMessages((prev) => [
+      ...prev,
+      { id: assistantId, role: "assistant", content: "", ts: new Date().toISOString() },
+    ]);
+    setIsLoading(true);
+
+    streamCompletion(assistantId)
+      .catch((e) => {
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantId
+              ? { ...m, content: `Error: ${(e as Error).message}` }
+              : m
+          )
+        );
+      })
+      .finally(() => setIsLoading(false));
+  }, [pendingPreviewFile, streamCompletion]);
+
   // Delete a session — clear messages if active
   const deleteSession = useCallback(
     async (id: string) => {
@@ -776,6 +926,8 @@ export function useChat() {
           setPendingQuestions(null);
           setPendingMission(null);
           setPendingVault(null);
+          setPendingGoToFile(null);
+          setPendingPreviewFile(null);
         }
       } catch {
         // silent
@@ -790,6 +942,8 @@ export function useChat() {
     setPendingQuestions(null);
     setPendingMission(null);
     setPendingVault(null);
+    setPendingGoToFile(null);
+    setPendingPreviewFile(null);
     conversationRef.current = [];
   }, [setSessionId]);
 
@@ -803,11 +957,15 @@ export function useChat() {
     pendingQuestions,
     pendingMission,
     pendingVault,
+    pendingGoToFile,
+    pendingPreviewFile,
     send,
     stop,
     answerQuestions,
     respondToMission,
     respondToVault,
+    consumeGoToFile,
+    consumePreviewFile,
     clear,
     loadSession,
     newSession,

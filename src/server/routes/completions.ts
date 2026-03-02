@@ -462,6 +462,27 @@ export function completionRoutes(orchestrator: Orchestrator, apiKeys?: string[])
                     },
                   }),
                 });
+              } else if (interactiveCall.name === "go_to_file") {
+                const args = interactiveCall.arguments as Record<string, unknown>;
+                await stream.writeSSE({
+                  data: sseChunk(completionId, {}, "go_to_file", {
+                    go_to_file: {
+                      path: args.path as string,
+                    },
+                  }),
+                });
+              } else if (interactiveCall.name === "preview_file") {
+                const args = interactiveCall.arguments as Record<string, unknown>;
+                await stream.writeSSE({
+                  data: sseChunk(completionId, {}, "preview_file", {
+                    preview_file: {
+                      title: args.title as string,
+                      content: args.content as string,
+                      format: args.format as string,
+                      language: args.language as string | undefined,
+                    },
+                  }),
+                });
               }
               await stream.writeSSE({ data: "[DONE]" });
               return; // finally block will persist whatever finalText we have
@@ -650,6 +671,39 @@ export function completionRoutes(orchestrator: Orchestrator, apiKeys?: string[])
                     type: args.type as string,
                     label: args.label as string | undefined,
                     credentials: args.credentials as Record<string, string>,
+                  },
+                }],
+              });
+            }
+
+            if (interactiveCall.name === "go_to_file") {
+              const args = interactiveCall.arguments as Record<string, unknown>;
+              return c.json({
+                ...baseResponse,
+                choices: [{
+                  index: 0,
+                  message: { role: "assistant" as const, content: finalText },
+                  finish_reason: "go_to_file" as const,
+                  go_to_file: {
+                    path: args.path as string,
+                  },
+                }],
+              });
+            }
+
+            if (interactiveCall.name === "preview_file") {
+              const args = interactiveCall.arguments as Record<string, unknown>;
+              return c.json({
+                ...baseResponse,
+                choices: [{
+                  index: 0,
+                  message: { role: "assistant" as const, content: finalText },
+                  finish_reason: "preview_file" as const,
+                  preview_file: {
+                    title: args.title as string,
+                    content: args.content as string,
+                    format: args.format as string,
+                    language: args.language as string | undefined,
                   },
                 }],
               });

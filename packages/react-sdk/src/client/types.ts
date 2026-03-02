@@ -945,13 +945,17 @@ export interface ChatCompletionRequest {
 export interface ChatCompletionChoice {
   index: number;
   message: { role: "assistant"; content: string };
-  finish_reason: "stop" | "length" | "ask_user" | "mission_preview" | "vault_preview";
+  finish_reason: "stop" | "length" | "ask_user" | "mission_preview" | "vault_preview" | "go_to_file" | "preview_file";
   /** Present when finish_reason is "ask_user" — structured questions for the user. */
   ask_user?: AskUserPayload;
   /** Present when finish_reason is "mission_preview" — proposed mission for user review. */
   mission_preview?: MissionPreviewPayload;
   /** Present when finish_reason is "vault_preview" — proposed vault entry for user review. */
   vault_preview?: VaultPreviewPayload;
+  /** Present when finish_reason is "go_to_file" — navigate to file browser with this file selected. */
+  go_to_file?: GoToFilePayload;
+  /** Present when finish_reason is "preview_file" — content to render inline in a dialog. */
+  preview_file?: PreviewFilePayload;
 }
 
 export interface ChatCompletionResponse {
@@ -1004,6 +1008,10 @@ export interface ChatCompletionChunk {
     mission_preview?: MissionPreviewPayload;
     /** Present when finish_reason is "vault_preview" — proposed vault entry for user review. */
     vault_preview?: VaultPreviewPayload;
+    /** Present when finish_reason is "go_to_file" — navigate to file browser with this file selected. */
+    go_to_file?: GoToFilePayload;
+    /** Present when finish_reason is "preview_file" — content to render inline in a dialog. */
+    preview_file?: PreviewFilePayload;
     /** Present when the server is executing a tool call. */
     tool_call?: ToolCallEvent;
   }>;
@@ -1119,4 +1127,22 @@ export interface VaultPreviewPayload {
   label?: string;
   /** Credential key-value pairs — user can edit before confirming */
   credentials: Record<string, string>;
+}
+
+// === Client-side tools (executed on the user's device, not the server) ===
+
+export interface GoToFilePayload {
+  /** File path relative to project root */
+  path: string;
+}
+
+export interface PreviewFilePayload {
+  /** Dialog title */
+  title: string;
+  /** The content to preview */
+  content: string;
+  /** Content format */
+  format: "html" | "markdown" | "code" | "image";
+  /** Programming language for syntax highlighting (when format is "code") */
+  language?: string;
 }

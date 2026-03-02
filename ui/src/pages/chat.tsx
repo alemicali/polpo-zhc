@@ -66,7 +66,9 @@ import {
 } from "@/components/ai-elements/prompt-input";
 import type { PromptInputMessage } from "@/components/ai-elements/prompt-input";
 import { useChat } from "@/hooks/use-polpo";
-import type { AskUserQuestion, AskUserAnswer, MessageSegment, ToolCallInfo, MissionPreviewData, MissionPreviewAction, VaultPreviewData, VaultPreviewAction } from "@/hooks/use-polpo";
+import type { AskUserQuestion, AskUserAnswer, MessageSegment, ToolCallInfo, MissionPreviewData, MissionPreviewAction, VaultPreviewData, VaultPreviewAction, PreviewFileData } from "@/hooks/use-polpo";
+import { useNavigate } from "react-router-dom";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ToolCallList, ToolInvocation, ToolCallGroup } from "@/components/ai-elements/tool";
 import { MentionPopover, MentionText, type MentionPopoverHandle, type MentionFile } from "@/components/ai-elements/mention-popover";
 import { useAgents, useTasks, useMissions } from "@lumea-labs/polpo-react";
@@ -1464,11 +1466,15 @@ export function ChatPage() {
     pendingQuestions,
     pendingMission,
     pendingVault,
+    pendingGoToFile,
+    pendingPreviewFile,
     send,
     stop,
     answerQuestions,
     respondToMission,
     respondToVault,
+    consumeGoToFile,
+    consumePreviewFile,
     clear,
     loadSession,
     newSession,
@@ -1481,6 +1487,31 @@ export function ChatPage() {
   const inputWrapperRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const mentionRef = useRef<MentionPopoverHandle>(null);
+
+  const navigate = useNavigate();
+
+  // preview_file dialog state — keeps the dialog open independently of the pending state
+  const [previewDialog, setPreviewDialog] = useState<PreviewFileData | null>(null);
+
+  // Auto-open preview dialog when preview_file fires
+  useEffect(() => {
+    if (!pendingPreviewFile) return;
+    setPreviewDialog({ ...pendingPreviewFile });
+    // Resume the LLM conversation immediately — user can view the dialog at their own pace
+    consumePreviewFile();
+  }, [pendingPreviewFile, consumePreviewFile]);
+
+  // Auto-navigate to file browser when go_to_file fires
+  useEffect(() => {
+    if (!pendingGoToFile) return;
+    const filePath = pendingGoToFile.path;
+    // Navigate to the files page with the file's parent dir, and highlight the file
+    const parts = filePath.split("/");
+    const dir = parts.length > 1 ? parts.slice(0, -1).join("/") : ".";
+    navigate(`/files?path=${encodeURIComponent(dir)}&highlight=${encodeURIComponent(filePath)}`);
+    // Tell the LLM navigation happened and resume the conversation
+    consumeGoToFile();
+  }, [pendingGoToFile, navigate, consumeGoToFile]);
 
   // Mention autocomplete data
   const { agents } = useAgents();
@@ -1867,6 +1898,19 @@ export function ChatPage() {
                                 disabled={isLoading || !pendingVault}
                               />
                             )}
+                            {msg.goToFile && (
+                              <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+                                <FileCode className="h-3.5 w-3.5" />
+                                <span>Navigated to <code className="font-mono text-foreground">{msg.goToFile.path}</code></span>
+                              </div>
+                            )}
+                            {msg.previewFile && (
+                              <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground cursor-pointer hover:text-foreground transition-colors" onClick={() => setPreviewDialog(msg.previewFile!)}>
+                                <Eye className="h-3.5 w-3.5" />
+                                <span>Preview: <code className="font-mono text-foreground">{msg.previewFile.title}</code></span>
+                                <span className="text-[10px]">(click to reopen)</span>
+                              </div>
+                            )}
                           </div>
                         </div>
                       </Message>
@@ -1924,8 +1968,8 @@ export function ChatPage() {
               >
                 <AttachmentPreview />
                 <PromptInputTextarea
-                  placeholder={isLoading ? "Polpo is working..." : pendingQuestions ? "Answer the questions above first..." : pendingMission ? "Review the mission preview above..." : pendingVault ? "Review the vault entry above..." : "Message Polpo..."}
-                  disabled={isLoading || !!pendingQuestions || !!pendingMission || !!pendingVault}
+                  placeholder={isLoading ? "Polpo is working..." : pendingQuestions ? "Answer the questions above first..." : pendingMission ? "Review the mission preview above..." : pendingVault ? "Review the vault entry above..." : pendingGoToFile ? "Review the file action above..." : pendingPreviewFile ? "Review the preview above..." : "Message Polpo..."}
+                  disabled={isLoading || !!pendingQuestions || !!pendingMission || !!pendingVault || !!pendingGoToFile || !!pendingPreviewFile}
                   onKeyDown={(e) => mentionRef.current?.handleTextareaKeyDown(e)}
                   onInput={(e) => {
                     if (!textareaRef.current) textareaRef.current = e.currentTarget;
@@ -1934,13 +1978,13 @@ export function ChatPage() {
                 />
                 <PromptInputFooter>
                   <div className="flex items-center gap-1">
-                    <AttachButton disabled={isLoading || !!pendingQuestions || !!pendingMission || !!pendingVault} />
+                    <AttachButton disabled={isLoading || !!pendingQuestions || !!pendingMission || !!pendingVault || !!pendingGoToFile || !!pendingPreviewFile} />
                   </div>
                   <div className="flex items-center gap-1">
-                    <MicButton onTranscript={setTextareaValue} disabled={isLoading || !!pendingQuestions || !!pendingMission || !!pendingVault} />
+                    <MicButton onTranscript={setTextareaValue} disabled={isLoading || !!pendingQuestions || !!pendingMission || !!pendingVault || !!pendingGoToFile || !!pendingPreviewFile} />
                     <PromptInputSubmit
                       status={isLoading ? "streaming" : undefined}
-                      disabled={!!pendingQuestions || !!pendingMission || !!pendingVault}
+                      disabled={!!pendingQuestions || !!pendingMission || !!pendingVault || !!pendingGoToFile || !!pendingPreviewFile}
                       onStop={stop}
                     />
                   </div>
@@ -1956,6 +2000,34 @@ export function ChatPage() {
           </div>
         </div>
       </div>
+
+      {/* Preview file dialog — opened by preview_file tool, closed by user */}
+      <Dialog open={!!previewDialog} onOpenChange={(open) => !open && setPreviewDialog(null)}>
+        <DialogContent className="max-w-[calc(100vw-2rem)] w-[calc(100vw-2rem)] max-h-[calc(100vh-2rem)] h-[calc(100vh-2rem)] flex flex-col p-0 gap-0">
+          <DialogHeader className="flex flex-row items-center gap-2 px-4 py-2.5 border-b border-border/40 shrink-0">
+            <DialogTitle className="text-sm font-medium truncate flex-1">
+              {previewDialog?.title ?? "Preview"}
+            </DialogTitle>
+            {previewDialog?.language && (
+              <Badge variant="outline" className="text-[9px] shrink-0">{previewDialog.language}</Badge>
+            )}
+            <Badge variant="outline" className="text-[9px] shrink-0">{previewDialog?.format ?? "text"}</Badge>
+          </DialogHeader>
+          <div className="flex-1 min-h-0 overflow-auto">
+            {previewDialog?.format === "html" ? (
+              <iframe srcDoc={previewDialog.content} className="w-full h-full border-0" sandbox="allow-scripts allow-same-origin" title={previewDialog.title} />
+            ) : previewDialog?.format === "image" ? (
+              <div className="flex items-center justify-center h-full p-4 bg-muted/20">
+                <img src={previewDialog.content} alt={previewDialog.title} className="max-w-full max-h-full object-contain rounded" />
+              </div>
+            ) : previewDialog?.format === "code" ? (
+              <MessageResponse>{`\`\`\`${previewDialog.language ?? ""}\n${previewDialog.content}\n\`\`\``}</MessageResponse>
+            ) : previewDialog?.format === "markdown" ? (
+              <div className="p-4"><MessageResponse>{previewDialog.content}</MessageResponse></div>
+            ) : null}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

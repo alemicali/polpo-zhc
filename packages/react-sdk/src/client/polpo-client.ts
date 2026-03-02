@@ -30,6 +30,8 @@ import type {
   AskUserPayload,
   MissionPreviewPayload,
   VaultPreviewPayload,
+  GoToFilePayload,
+  PreviewFilePayload,
   RunActivityEntry,
   SkillInfo,
   LoadedSkill,
@@ -73,6 +75,12 @@ export class ChatCompletionStream implements AsyncIterable<ChatCompletionChunk> 
 
   /** If the stream ended with finish_reason "vault_preview", this contains the proposed vault entry. */
   vaultPreview: VaultPreviewPayload | null = null;
+
+  /** If the stream ended with finish_reason "go_to_file", this contains the file path to navigate to. */
+  goToFile: GoToFilePayload | null = null;
+
+  /** If the stream ended with finish_reason "preview_file", this contains the content to render. */
+  previewFile: PreviewFilePayload | null = null;
 
   /** Whether abort() has been called. */
   aborted = false;
@@ -178,6 +186,14 @@ export class ChatCompletionStream implements AsyncIterable<ChatCompletionChunk> 
             // Capture vault_preview payload from the chunk
             if (choice?.finish_reason === "vault_preview" && choice.vault_preview) {
               this.vaultPreview = choice.vault_preview;
+            }
+            // Capture go_to_file payload from the chunk
+            if (choice?.finish_reason === "go_to_file" && choice.go_to_file) {
+              this.goToFile = choice.go_to_file;
+            }
+            // Capture preview_file payload from the chunk
+            if (choice?.finish_reason === "preview_file" && choice.preview_file) {
+              this.previewFile = choice.preview_file;
             }
             yield chunk;
           } catch {

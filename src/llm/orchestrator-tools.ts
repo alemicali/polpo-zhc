@@ -847,6 +847,41 @@ const httpDownloadTool: Tool = {
 };
 
 // ═══════════════════════════════════════════════════════
+//  CLIENT-SIDE TOOLS (executed on the user's browser, not the server)
+// ═══════════════════════════════════════════════════════
+
+const goToFileTool: Tool = {
+  name: "go_to_file",
+  description: `Navigate the user's UI to the file browser and highlight a specific file.
+Use this when you want to point the user to a file in the project — the UI navigates directly
+to the /files page with the file's directory open and the file selected/previewed.
+This is a client-side navigation — no new tab, no download. The user stays in the app.
+Examples: show a generated output, point to a config file, highlight a source file.`,
+  parameters: Type.Object({
+    path: Type.String({ description: "File path relative to project root (e.g. 'output/report.pdf', 'src/index.ts', '.polpo/polpo.json')" }),
+  }),
+};
+
+const previewFileTool: Tool = {
+  name: "preview_file",
+  description: `Open an inline preview dialog for the user, right inside the chat. Renders content
+in a fullscreen-capable dialog without navigating away from the conversation.
+Use this to show HTML previews, rendered markdown, code with syntax highlighting, or images.
+Prefer this over go_to_file when you want the user to see content WITHOUT leaving the chat.`,
+  parameters: Type.Object({
+    title: Type.String({ description: "Dialog title (e.g. 'Email Template', 'Generated Handler', 'Setup Guide')" }),
+    content: Type.String({ description: "The content to preview. For HTML, provide the full markup. For markdown, provide raw markdown. For code, provide the source code." }),
+    format: Type.Union([
+      Type.Literal("html"),
+      Type.Literal("markdown"),
+      Type.Literal("code"),
+      Type.Literal("image"),
+    ], { description: "Content format: html (rendered in iframe), markdown (rendered), code (syntax-highlighted), image (data URL or path)" }),
+    language: Type.Optional(Type.String({ description: "Programming language for syntax highlighting (only used when format is 'code', e.g. 'typescript', 'python', 'json')" })),
+  }),
+};
+
+// ═══════════════════════════════════════════════════════
 //  INTERACTIVE TOOLS
 // ═══════════════════════════════════════════════════════
 
@@ -921,7 +956,7 @@ export const WRITE_TOOLS = new Set([
 ]);
 
 /** Tools that pause the conversation to collect user input / show a preview. */
-export const INTERACTIVE_TOOLS = new Set(["ask_user", "create_mission", "set_vault_entry"]);
+export const INTERACTIVE_TOOLS = new Set(["ask_user", "create_mission", "set_vault_entry", "go_to_file", "preview_file"]);
 
 export function needsApproval(toolName: string): boolean {
   return WRITE_TOOLS.has(toolName);
@@ -969,6 +1004,8 @@ export const ALL_ORCHESTRATOR_TOOLS: Tool[] = [
   httpFetchTool, httpDownloadTool,
   // Interactive (1)
   askUserTool,
+  // Client-side (2)
+  goToFileTool, previewFileTool,
 ];
 
 /** Tool action labels for the approval prompt title. */
