@@ -93,7 +93,15 @@ export function templateRoutes(): OpenAPIHono<ServerEnv> {
     },
     responses: {
       201: {
-        content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.any() }) } },
+        content: { "application/json": { schema: z.object({
+          ok: z.boolean(),
+          data: z.object({
+            mission: z.any(),
+            tasks: z.number(),
+            group: z.string(),
+            warnings: z.array(z.string()).optional(),
+          }),
+        }) } },
         description: "Template executed",
       },
       400: {

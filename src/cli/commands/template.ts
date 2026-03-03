@@ -6,7 +6,7 @@ import { Command } from "commander";
 import chalk from "chalk";
 import { resolve } from "node:path";
 import { Orchestrator } from "../../core/orchestrator.js";
-import { discoverTemplates, loadTemplate, validateParams, instantiateTemplate } from "../../core/template.js";
+import { discoverTemplates, loadTemplate, validateParams, instantiateTemplate, validateTemplateDefinition } from "../../core/template.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -210,35 +210,7 @@ export function registerTemplateCommands(program: Command): void {
           process.exit(1);
         }
 
-        const errors: string[] = [];
-
-        // Check required fields
-        if (!template.name) errors.push("Missing field: name");
-        if (!template.description) errors.push("Missing field: description");
-        if (!template.mission) errors.push("Missing field: mission");
-
-        // Check mission has tasks
-        const mission = template.mission as { tasks?: unknown[] };
-        if (!mission.tasks || !Array.isArray(mission.tasks) || mission.tasks.length === 0) {
-          errors.push("Mission must have at least one task");
-        }
-
-        // Check all placeholders have matching parameters
-        const json = JSON.stringify(template.mission);
-        const placeholders = json.match(/\{\{([^}]+)\}\}/g) ?? [];
-        const paramNames = new Set((template.parameters ?? []).map(p => p.name));
-        const undeclared = [...new Set(placeholders.map(m => m.slice(2, -2)))]
-          .filter(name => !paramNames.has(name));
-        if (undeclared.length > 0) {
-          errors.push(`Undeclared placeholders: ${undeclared.join(", ")}`);
-        }
-
-        // Check parameters with no matching placeholder
-        for (const p of template.parameters ?? []) {
-          if (!json.includes(`{{${p.name}}}`)) {
-            errors.push(`Parameter "${p.name}" is declared but never used in the mission template`);
-          }
-        }
+        const errors = validateTemplateDefinition(template);
 
         if (errors.length > 0) {
           console.error(chalk.red("  Validation errors:"));
@@ -248,10 +220,13 @@ export function registerTemplateCommands(program: Command): void {
           process.exit(1);
         }
 
+        const mission = template.mission as { tasks?: unknown[]; team?: unknown[] };
+        const taskCount = Array.isArray(mission.tasks) ? mission.tasks.length : 0;
+        const teamSize = Array.isArray(mission.team) ? mission.team.length : 0;
+
         console.log(chalk.green(`  Template "${template.name}" is valid.`));
         console.log(chalk.dim(`    ${(template.parameters ?? []).length} parameter(s)`));
-        console.log(chalk.dim(`    ${(mission.tasks as unknown[]).length} task(s)`));
-        const teamSize = (template.mission as { team?: unknown[] }).team?.length ?? 0;
+        console.log(chalk.dim(`    ${taskCount} task(s)`));
         if (teamSize > 0) console.log(chalk.dim(`    ${teamSize} volatile agent(s)`));
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);

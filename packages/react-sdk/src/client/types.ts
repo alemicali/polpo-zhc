@@ -564,6 +564,8 @@ export interface TemplateRunResult {
   mission: Mission;
   tasks: number;
   group: string;
+  /** Non-blocking validation warnings (e.g. unknown parameters). */
+  warnings?: string[];
 }
 
 // === Config ===

@@ -363,10 +363,11 @@ polpo template validate code-review
 
 The validator checks:
 
-- Required fields (`name`, `description`, `mission`) are present
-- The mission has at least one task
+- Required fields (`name`, `description`, `mission`) are present and valid
+- Name is kebab-case (e.g. `bug-fix`, `code-review`)
 - All `{{placeholders}}` in the mission have matching parameter declarations
-- All declared parameters are actually used somewhere in the mission
+- Optional parameters without a `default` value are not used as `{{placeholders}}` in the mission (would fail at runtime if omitted)
+- Parameter definitions have valid `name`, `description`, and `type` fields
 
 ## Example: Full Template
 
