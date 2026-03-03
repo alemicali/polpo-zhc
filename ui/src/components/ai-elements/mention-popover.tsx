@@ -10,7 +10,7 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
-import { User, ListChecks, Target, FileText } from "lucide-react";
+import { User, ListChecks, Target, FileText, Sparkles, Workflow } from "lucide-react";
 import {
   Popover,
   PopoverAnchor,
@@ -18,14 +18,14 @@ import {
 } from "@/components/ui/popover";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import type { AgentConfig, Task, Mission } from "@lumea-labs/polpo-react";
+import type { AgentConfig, Task, Mission, SkillWithAssignment, TemplateInfo } from "@lumea-labs/polpo-react";
 
 // ────────────────────────────────────────────────────────────────────────────
 // Types
 // ────────────────────────────────────────────────────────────────────────────
 
 /** All mentions use @ as trigger — categories are visual only in the menu */
-type MentionCategory = "agent" | "task" | "mission" | "file";
+type MentionCategory = "agent" | "task" | "mission" | "skill" | "template" | "file";
 
 /** A mentionable file entry (path relative to project root) */
 export interface MentionFile {
@@ -78,6 +78,8 @@ export interface MentionPopoverProps {
   agents: AgentConfig[];
   tasks: Task[];
   missions: Mission[];
+  skills?: SkillWithAssignment[];
+  templates?: TemplateInfo[];
   files?: MentionFile[];
   children: ReactNode;
 }
@@ -140,6 +142,8 @@ const CATEGORY_LABELS: Record<MentionCategory, string> = {
   agent: "Agents",
   task: "Tasks",
   mission: "Missions",
+  skill: "Skills",
+  template: "Templates",
   file: "Files",
 };
 
@@ -229,7 +233,7 @@ export const MentionPopover = forwardRef<
   MentionPopoverHandle,
   MentionPopoverProps
 >(function MentionPopover(
-  { textareaRef, agents, tasks, missions, files = [], children },
+  { textareaRef, agents, tasks, missions, skills = [], templates = [], files = [], children },
   ref,
 ) {
   const { isOpen, query, triggerIndex, close, handleInput } =
@@ -289,6 +293,30 @@ export const MentionPopover = forwardRef<
       });
     }
 
+    for (const s of skills) {
+      if (lowerQ && !s.name.toLowerCase().includes(lowerQ)) continue;
+      result.push({
+        id: `skill:${s.name}`,
+        label: s.name,
+        value: s.name,
+        secondary: s.description,
+        icon: <Sparkles className="size-4 shrink-0 text-violet-500" />,
+        category: "skill",
+      });
+    }
+
+    for (const t of templates) {
+      if (lowerQ && !t.name.toLowerCase().includes(lowerQ)) continue;
+      result.push({
+        id: `template:${t.name}`,
+        label: t.name,
+        value: t.name,
+        secondary: t.description,
+        icon: <Workflow className="size-4 shrink-0 text-teal-500" />,
+        category: "template",
+      });
+    }
+
     for (const f of files) {
       const matchText = `${f.name} ${f.path}`.toLowerCase();
       if (lowerQ && !matchText.includes(lowerQ)) continue;
@@ -303,7 +331,7 @@ export const MentionPopover = forwardRef<
     }
 
     return result;
-  }, [query, agents, tasks, missions, files]);
+  }, [query, agents, tasks, missions, skills, templates, files]);
 
   const filteredItems = useMemo(
     () => categoryFilter === "all" ? items : items.filter(i => i.category === categoryFilter),
@@ -312,7 +340,7 @@ export const MentionPopover = forwardRef<
 
   const availableCategories = useMemo(() => {
     const cats = new Set(items.map(i => i.category));
-    return (["agent", "task", "mission", "file"] as MentionCategory[]).filter(c => cats.has(c));
+    return (["agent", "task", "mission", "skill", "template", "file"] as MentionCategory[]).filter(c => cats.has(c));
   }, [items]);
 
   // Reset selection when the query or filtered count changes
@@ -532,7 +560,7 @@ export const MentionPopover = forwardRef<
                     type="button"
                     data-mention-index={i}
                     className={cn(
-                      "flex w-full items-center gap-2 px-2 py-1.5 text-sm text-left cursor-default rounded-sm outline-hidden select-none",
+                      "flex w-full items-start gap-2 px-2 py-1.5 text-sm text-left cursor-default rounded-sm outline-hidden select-none",
                       i === selectedIndex
                         ? "bg-accent text-accent-foreground"
                         : "text-popover-foreground hover:bg-accent/50",
@@ -543,18 +571,22 @@ export const MentionPopover = forwardRef<
                       insertMention(item);
                     }}
                   >
-                    {item.icon}
-                    <span className="truncate font-medium">{item.label}</span>
-                    {item.secondary && item.category !== "task" && (
-                      <span className="truncate text-muted-foreground text-xs">
-                        {item.secondary}
-                      </span>
-                    )}
-                    {item.badge && (
-                      <Badge variant="outline" className="ml-auto text-[10px] shrink-0">
-                        {item.badge}
-                      </Badge>
-                    )}
+                    <span className="mt-0.5">{item.icon}</span>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-1.5">
+                        <span className="truncate font-medium">{item.label}</span>
+                        {item.badge && (
+                          <Badge variant="outline" className="ml-auto text-[10px] shrink-0">
+                            {item.badge}
+                          </Badge>
+                        )}
+                      </div>
+                      {item.secondary && item.category !== "task" && (
+                        <p className="truncate text-muted-foreground text-xs mt-0.5">
+                          {item.secondary}
+                        </p>
+                      )}
+                    </div>
                   </button>
                 </div>
               );

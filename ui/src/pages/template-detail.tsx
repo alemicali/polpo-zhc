@@ -7,7 +7,6 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Card, CardContent } from "@/components/ui/card";
 import {
   ArrowLeft,
-  Play,
   Loader2,
   Workflow,
   Hash,
@@ -73,7 +72,6 @@ export function TemplateDetailPage() {
 
   const [template, setTemplate] = useState<TemplateDefinition | null>(null);
   const [loading, setLoading] = useState(true);
-  const [running] = useState(false);
 
   useEffect(() => {
     if (!name) return;
@@ -150,15 +148,7 @@ export function TemplateDetailPage() {
           <p className="text-xs text-muted-foreground mt-0.5">{template.description}</p>
         </div>
 
-        <Button
-          size="sm"
-          className="h-8 gap-1.5 bg-teal-600 hover:bg-teal-700 text-white shrink-0"
-          disabled={running}
-          onClick={() => navigate(`/templates?run=${encodeURIComponent(template.name)}`)}
-        >
-          <Play className="h-3.5 w-3.5" />
-          Run
-        </Button>
+
       </div>
 
       {/* Tabs */}

@@ -36,7 +36,7 @@ import {
   FolderOpen,
   Hash,
   Asterisk,
-  Code2,
+
 } from "lucide-react";
 import { useTemplates } from "@lumea-labs/polpo-react";
 import type {
@@ -264,19 +264,20 @@ function RunTemplateDialog({
 
 function TemplateCard({
   template,
-  onRun,
-  onInspect,
+  onClick,
 }: {
   template: TemplateInfo;
-  onRun: () => void;
-  onInspect: () => void;
+  onClick: () => void;
 }) {
   const params = template.parameters ?? [];
   const requiredParams = params.filter((p) => p.required);
 
   return (
-    <Card className="group transition-all bg-card/80 backdrop-blur-sm border-border/40 hover:border-primary/20 hover:shadow-[0_0_15px_oklch(0.7_0.15_200_/_8%)]">
-      <CardContent className="p-4">
+    <Card
+      className="group transition-all bg-card/80 backdrop-blur-sm border-border/40 hover:border-primary/20 hover:shadow-[0_0_15px_oklch(0.7_0.15_200_/_8%)] cursor-pointer"
+      onClick={onClick}
+    >
+      <CardContent className="px-4 py-3">
         <div className="flex items-start gap-3">
           {/* Icon */}
           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10">
@@ -343,33 +344,6 @@ function TemplateCard({
                 {template.path}
               </span>
             </div>
-          </div>
-
-          {/* Actions */}
-          <div className="flex flex-col gap-1.5 shrink-0">
-            <Button
-              size="sm"
-              className="h-8 gap-1.5 bg-teal-600 hover:bg-teal-700 text-white"
-              onClick={(e) => {
-                e.stopPropagation();
-                onRun();
-              }}
-            >
-              <Play className="h-3.5 w-3.5" />
-              Run
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-8 gap-1.5 border-border/50 hover:bg-accent/50"
-              onClick={(e) => {
-                e.stopPropagation();
-                onInspect();
-              }}
-            >
-              <Code2 className="h-3.5 w-3.5" />
-              Inspect
-            </Button>
           </div>
         </div>
       </CardContent>
@@ -477,8 +451,7 @@ export function TemplatesPage() {
               <TemplateCard
                 key={w.name}
                 template={w}
-                onRun={() => setRunTarget(w)}
-                onInspect={() => navigate(`/templates/${encodeURIComponent(w.name)}`)}
+                onClick={() => navigate(`/templates/${encodeURIComponent(w.name)}`)}
               />
             ))}
           </div>
