@@ -7,16 +7,26 @@ export interface TaskFilter {
   assignTo?: string;
 }
 
-// ── Memoized task selector ──────────────────────────────────
+// ── Multi-key task selector cache ───────────────────────────
+// Uses a Map keyed by serialized filter so that multiple components
+// with different filters don't thrash a single-slot cache.
 
-let lastTasksMap: Map<string, Task> | null = null;
-let lastTaskFilter = "";
-let lastTaskResult: Task[] = [];
+interface TaskCacheEntry {
+  mapRef: Map<string, Task>;
+  result: Task[];
+}
+
+const taskCacheByFilter = new Map<string, TaskCacheEntry>();
+// Limit cache size to prevent unbounded growth
+const MAX_TASK_CACHE_ENTRIES = 8;
 
 export function selectTasks(state: StoreState, filter?: TaskFilter): Task[] {
   const filterKey = JSON.stringify(filter ?? {});
-  if (state.tasks === lastTasksMap && filterKey === lastTaskFilter) {
-    return lastTaskResult;
+  const cached = taskCacheByFilter.get(filterKey);
+
+  // Cache hit: same Map reference for this filter key
+  if (cached && cached.mapRef === state.tasks) {
+    return cached.result;
   }
 
   let tasks = Array.from(state.tasks.values());
@@ -35,9 +45,13 @@ export function selectTasks(state: StoreState, filter?: TaskFilter): Task[] {
   // Default sort: most recently updated first
   tasks.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
 
-  lastTasksMap = state.tasks;
-  lastTaskFilter = filterKey;
-  lastTaskResult = tasks;
+  // Evict oldest entries if cache is full
+  if (taskCacheByFilter.size >= MAX_TASK_CACHE_ENTRIES) {
+    const firstKey = taskCacheByFilter.keys().next().value!;
+    taskCacheByFilter.delete(firstKey);
+  }
+
+  taskCacheByFilter.set(filterKey, { mapRef: state.tasks, result: tasks });
   return tasks;
 }
 
@@ -73,16 +87,22 @@ export function selectProcesses(state: StoreState): AgentProcess[] {
   return state.processes;
 }
 
-// ── Events selector with filter ─────────────────────────────
+// ── Events selector with multi-key cache ────────────────────
 
-let lastEventsRef: SSEEvent[] | null = null;
-let lastEventFilter = "";
-let lastEventResult: SSEEvent[] = [];
+interface EventCacheEntry {
+  eventsRef: SSEEvent[];
+  result: SSEEvent[];
+}
+
+const eventCacheByFilter = new Map<string, EventCacheEntry>();
+const MAX_EVENT_CACHE_ENTRIES = 8;
 
 export function selectEvents(state: StoreState, filter?: string[]): SSEEvent[] {
   const filterKey = filter?.join(",") ?? "";
-  if (state.recentEvents === lastEventsRef && filterKey === lastEventFilter) {
-    return lastEventResult;
+  const cached = eventCacheByFilter.get(filterKey);
+
+  if (cached && cached.eventsRef === state.recentEvents) {
+    return cached.result;
   }
 
   let events = state.recentEvents;
@@ -90,9 +110,12 @@ export function selectEvents(state: StoreState, filter?: string[]): SSEEvent[] {
     events = events.filter((e) => matchesEventFilter(e.event, filter));
   }
 
-  lastEventsRef = state.recentEvents;
-  lastEventFilter = filterKey;
-  lastEventResult = events;
+  if (eventCacheByFilter.size >= MAX_EVENT_CACHE_ENTRIES) {
+    const firstKey = eventCacheByFilter.keys().next().value!;
+    eventCacheByFilter.delete(firstKey);
+  }
+
+  eventCacheByFilter.set(filterKey, { eventsRef: state.recentEvents, result: events });
   return events;
 }
 

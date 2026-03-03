@@ -3,6 +3,7 @@ import { Sidebar } from "./sidebar";
 import { Header } from "./header";
 import { BottomNav } from "./bottom-nav";
 import { ChatSidebar } from "./chat-sidebar";
+import { ChatNavigationEffects } from "./chat-navigation-effects";
 
 export function AppLayout() {
   return (
@@ -21,6 +22,8 @@ export function AppLayout() {
         </div>
       </div>
       <BottomNav />
+      {/* Root-level chat navigation effects (go_to_file, open_file, navigate_to) */}
+      <ChatNavigationEffects />
     </div>
   );
 }

@@ -1,5 +1,4 @@
-import { useState, useMemo } from "react";
-import { useNavigate } from "react-router-dom";
+import { useState, useMemo, memo } from "react";
 import {
   Card,
   CardContent,
@@ -22,7 +21,6 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
@@ -45,7 +43,6 @@ import {
   Hammer,
   Zap,
   FileEdit,
-  Filter,
   LayoutList,
   Columns3,
   Target,
@@ -62,13 +59,23 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
-import { useTasks, usePolpo, useProcesses, useMissions, useAgents } from "@lumea-labs/polpo-react";
 import type { Task, TaskStatus, AgentProcess } from "@lumea-labs/polpo-react";
-import { Skeleton } from "@/components/ui/skeleton";
-import { useAsyncAction } from "@/hooks/use-polpo";
-import { toast } from "sonner";
 import { formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
+import { MultiSelectFilter } from "@/components/shared/multi-select-filter";
+import {
+  useTasksPageState,
+  useTaskActions,
+  TaskActionsProvider,
+} from "@/hooks/use-tasks-page";
+import type {
+  GroupByKey,
+  ColumnByKey,
+  SortKey,
+  TimeField,
+  TimeFilterState,
+  TimeRange,
+} from "@/hooks/use-tasks-page";
 
 // ── Status config ──
 
@@ -105,8 +112,6 @@ const statusKanbanColumns: { key: string; label: string; filter: (t: Task) => bo
 ];
 
 // ── Column-by modes for Kanban ──
-
-type ColumnByKey = "status" | "mission" | "team" | "agent";
 
 const columnByOptions: { value: ColumnByKey; label: string; icon: React.ElementType }[] = [
   { value: "status", label: "Status", icon: Columns3 },
@@ -175,8 +180,6 @@ function buildDynamicColumns(
 
 // ── Sort options ──
 
-type SortKey = "updated" | "created" | "name" | "status" | "priority" | "score";
-
 const sortOptions: { value: SortKey; label: string }[] = [
   { value: "updated", label: "Last updated" },
   { value: "created", label: "Created" },
@@ -186,190 +189,12 @@ const sortOptions: { value: SortKey; label: string }[] = [
   { value: "score", label: "Score" },
 ];
 
-const statusOrder: Record<TaskStatus, number> = {
-  in_progress: 0,
-  review: 1,
-  awaiting_approval: 2,
-  assigned: 3,
-  pending: 4,
-  draft: 5,
-  failed: 6,
-  done: 7,
-};
-
-function sortTasks(tasks: Task[], key: SortKey): Task[] {
-  const sorted = [...tasks];
-  switch (key) {
-    case "updated":
-      return sorted.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
-    case "created":
-      return sorted.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-    case "name":
-      return sorted.sort((a, b) => a.title.localeCompare(b.title));
-    case "status":
-      return sorted.sort((a, b) => (statusOrder[a.status] ?? 99) - (statusOrder[b.status] ?? 99));
-    case "priority":
-      return sorted.sort((a, b) => (b.priority ?? 1) - (a.priority ?? 1)); // higher first
-    case "score": {
-      return sorted.sort((a, b) => {
-        const sa = a.result?.assessment?.globalScore ?? -1;
-        const sb = b.result?.assessment?.globalScore ?? -1;
-        return sb - sa; // higher first
-      });
-    }
-    default:
-      return sorted;
-  }
-}
-
-// ── Mission filter popover ──
-
-function MissionFilter({
-  missions,
-  selected,
-  onToggle,
-}: {
-  missions: { id: string; name: string }[];
-  selected: Set<string>;
-  onToggle: (name: string) => void;
-}) {
-  const hasFilter = selected.size > 0;
-
-  return (
-    <Popover>
-      <PopoverTrigger asChild>
-        <Button variant={hasFilter ? "default" : "outline"} size="sm" className="gap-1.5">
-          <Filter className="h-3.5 w-3.5" />
-          Missions
-          {hasFilter && (
-            <Badge variant="secondary" className="text-[9px] ml-1">{selected.size}</Badge>
-          )}
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent className="w-56 p-2" align="start">
-        <div className="space-y-1 max-h-64 overflow-y-auto">
-          {missions.length === 0 ? (
-            <p className="text-xs text-muted-foreground text-center py-3">No missions</p>
-          ) : (
-            missions.map((p) => (
-              <button
-                key={p.name}
-                className={cn(
-                  "flex items-center gap-2 w-full rounded-md px-2 py-1.5 text-left text-sm transition-colors",
-                  selected.has(p.name) ? "bg-accent text-accent-foreground" : "hover:bg-muted"
-                )}
-                onClick={() => onToggle(p.name)}
-              >
-                <div className={cn(
-                  "flex h-4 w-4 shrink-0 items-center justify-center rounded border",
-                  selected.has(p.name) ? "bg-primary border-primary" : "border-muted-foreground/30"
-                )}>
-                  {selected.has(p.name) && <Check className="h-3 w-3 text-primary-foreground" />}
-                </div>
-                <Target className="h-3 w-3 text-muted-foreground shrink-0" />
-                <span className="truncate">{p.name}</span>
-              </button>
-            ))
-          )}
-        </div>
-        {hasFilter && (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="w-full mt-1 text-xs"
-            onClick={() => missions.forEach(p => { if (selected.has(p.name)) onToggle(p.name); })}
-          >
-            Clear all
-          </Button>
-        )}
-      </PopoverContent>
-    </Popover>
-  );
-}
-
-// ── Team filter popover ──
-
-function TeamFilter({
-  teams,
-  selected,
-  onToggle,
-  isLoading,
-}: {
-  teams: { name: string }[];
-  selected: Set<string>;
-  onToggle: (name: string) => void;
-  isLoading?: boolean;
-}) {
-  const hasFilter = selected.size > 0;
-
-  return (
-    <Popover>
-      <PopoverTrigger asChild>
-        <Button variant={hasFilter ? "default" : "outline"} size="sm" className="gap-1.5">
-          <Users className="h-3.5 w-3.5" />
-          Teams
-          {hasFilter && (
-            <Badge variant="secondary" className="text-[9px] ml-1">{selected.size}</Badge>
-          )}
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent className="w-56 p-2" align="start">
-        <div className="space-y-1 max-h-64 overflow-y-auto">
-          {isLoading ? (
-            <div className="space-y-2 py-1">
-              <Skeleton className="h-7 w-full rounded-md" />
-              <Skeleton className="h-7 w-full rounded-md" />
-              <Skeleton className="h-7 w-3/4 rounded-md" />
-            </div>
-          ) : teams.length === 0 ? (
-            <p className="text-xs text-muted-foreground text-center py-3">No teams</p>
-          ) : (
-            teams.map((t) => (
-              <button
-                key={t.name}
-                className={cn(
-                  "flex items-center gap-2 w-full rounded-md px-2 py-1.5 text-left text-sm transition-colors",
-                  selected.has(t.name) ? "bg-accent text-accent-foreground" : "hover:bg-muted"
-                )}
-                onClick={() => onToggle(t.name)}
-              >
-                <div className={cn(
-                  "flex h-4 w-4 shrink-0 items-center justify-center rounded border",
-                  selected.has(t.name) ? "bg-primary border-primary" : "border-muted-foreground/30"
-                )}>
-                  {selected.has(t.name) && <Check className="h-3 w-3 text-primary-foreground" />}
-                </div>
-                <Users className="h-3 w-3 text-muted-foreground shrink-0" />
-                <span className="truncate">{t.name}</span>
-              </button>
-            ))
-          )}
-        </div>
-        {hasFilter && (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="w-full mt-1 text-xs"
-            onClick={() => teams.forEach(t => { if (selected.has(t.name)) onToggle(t.name); })}
-          >
-            Clear all
-          </Button>
-        )}
-      </PopoverContent>
-    </Popover>
-  );
-}
-
 // ── Time filter ──
-
-type TimeField = "createdAt" | "updatedAt";
 
 const timeFieldOptions: { value: TimeField; label: string }[] = [
   { value: "createdAt", label: "Created" },
   { value: "updatedAt", label: "Updated" },
 ];
-
-type TimeRange = "1h" | "6h" | "24h" | "7d" | "30d" | "custom";
 
 const timeRangePresets: { value: TimeRange; label: string; ms: number }[] = [
   { value: "1h", label: "Last hour", ms: 60 * 60 * 1000 },
@@ -379,12 +204,7 @@ const timeRangePresets: { value: TimeRange; label: string; ms: number }[] = [
   { value: "30d", label: "Last 30 days", ms: 30 * 24 * 60 * 60 * 1000 },
 ];
 
-interface TimeFilterState {
-  field: TimeField;
-  range: TimeRange;
-  /** Epoch ms — resolved from preset or custom input */
-  after: number;
-}
+
 
 function TimeFilter({
   value,
@@ -471,27 +291,21 @@ function TimeFilter({
   );
 }
 
-// ── Compact task card (used in both list and kanban) ──
+// ── Task card ──
 
-function TaskCard({
+const TaskCard = memo(function TaskCard({
   task,
   process,
-  compact,
+  size = "default",
   allTasks,
-  onRetry,
-  onKill,
-  onQueue,
-  onClick,
 }: {
   task: Task;
   process?: AgentProcess;
-  compact?: boolean;
+  size?: "default" | "compact";
   allTasks?: Task[];
-  onRetry: () => void;
-  onKill: () => void;
-  onQueue?: () => void;
-  onClick: () => void;
 }) {
+  const { retry, kill, queue, click } = useTaskActions();
+  const compact = size === "compact";
   const cfg = statusConfig[task.status];
   const Icon = cfg.icon;
   const assessment = task.result?.assessment;
@@ -513,7 +327,7 @@ function TaskCard({
         compact && "p-2.5",
         !compact && "p-3",
       )}
-      onClick={onClick}
+      onClick={() => click(task.id)}
     >
       <div className="flex items-start gap-2 w-full min-w-0">
         <div className={cn("flex shrink-0 items-center justify-center rounded-md mt-0.5", compact ? "h-6 w-6" : "h-7 w-7", cfg.bg)}>
@@ -631,29 +445,27 @@ function TaskCard({
 
       {/* Inline actions — only on hover, stop propagation */}
       <div className="flex items-center gap-1 mt-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
-        {task.status === "draft" && onQueue && (
-          <Button variant="ghost" size="sm" className="h-5 px-1.5 text-[10px] text-muted-foreground hover:text-blue-400" onClick={(e) => { e.stopPropagation(); onQueue(); }}>
+        {task.status === "draft" && (
+          <Button variant="ghost" size="sm" className="h-5 px-1.5 text-[10px] text-muted-foreground hover:text-blue-400" onClick={(e) => { e.stopPropagation(); queue(task.id); }}>
             <Zap className="h-2.5 w-2.5 mr-0.5" /> Queue
           </Button>
         )}
         {task.status === "failed" && (
-          <Button variant="ghost" size="sm" className="h-5 px-1.5 text-[10px] text-muted-foreground hover:text-amber-400" onClick={(e) => { e.stopPropagation(); onRetry(); }}>
+          <Button variant="ghost" size="sm" className="h-5 px-1.5 text-[10px] text-muted-foreground hover:text-amber-400" onClick={(e) => { e.stopPropagation(); retry(task.id); }}>
             <RotateCcw className="h-2.5 w-2.5 mr-0.5" /> Retry
           </Button>
         )}
         {(task.status === "in_progress" || task.status === "assigned") && (
-          <Button variant="ghost" size="sm" className="h-5 px-1.5 text-[10px] text-muted-foreground hover:text-red-400" onClick={(e) => { e.stopPropagation(); onKill(); }}>
+          <Button variant="ghost" size="sm" className="h-5 px-1.5 text-[10px] text-muted-foreground hover:text-red-400" onClick={(e) => { e.stopPropagation(); kill(task.id); }}>
             <XCircle className="h-2.5 w-2.5 mr-0.5" /> Kill
           </Button>
         )}
       </div>
     </div>
   );
-}
+});
 
 // ── Group-by logic ──
-
-type GroupByKey = "none" | "status" | "mission" | "team" | "agent";
 
 const groupByOptions: { value: GroupByKey; label: string; icon: React.ElementType }[] = [
   { value: "none", label: "None", icon: Layers },
@@ -723,20 +535,12 @@ function GroupBlock({
   tasks,
   processes,
   allTasks,
-  onRetry,
-  onKill,
-  onQueue,
-  onClick,
 }: {
   label: string;
   icon: React.ElementType;
   tasks: Task[];
   processes: AgentProcess[];
   allTasks: Task[];
-  onRetry: (id: string) => void;
-  onKill: (id: string) => void;
-  onQueue: (id: string) => void;
-  onClick: (id: string) => void;
 }) {
   const [open, setOpen] = useState(false);
 
@@ -791,12 +595,8 @@ function GroupBlock({
               key={task.id}
               task={task}
               process={processes.find(p => p.taskId === task.id)}
-              compact
+              size="compact"
               allTasks={allTasks}
-              onRetry={() => onRetry(task.id)}
-              onKill={() => onKill(task.id)}
-              onQueue={() => onQueue(task.id)}
-              onClick={() => onClick(task.id)}
             />
           ))}
         </div>
@@ -815,10 +615,6 @@ function KanbanColumn({
   groupBy,
   columnBy,
   agentTeamMap,
-  onRetry,
-  onKill,
-  onQueue,
-  onClick,
 }: {
   col: DynamicColumn;
   tasks: Task[];
@@ -827,10 +623,6 @@ function KanbanColumn({
   groupBy: GroupByKey;
   columnBy: ColumnByKey;
   agentTeamMap: Record<string, string>;
-  onRetry: (id: string) => void;
-  onKill: (id: string) => void;
-  onQueue: (id: string) => void;
-  onClick: (id: string) => void;
 }) {
   const colTasks = useMemo(() => tasks.filter(col.filter), [tasks, col]);
 
@@ -881,10 +673,6 @@ function KanbanColumn({
                 tasks={groupTasks}
                 processes={processes}
                 allTasks={allTasks}
-                onRetry={onRetry}
-                onKill={onKill}
-                onQueue={onQueue}
-                onClick={onClick}
               />
             ))
           ) : (
@@ -893,12 +681,8 @@ function KanbanColumn({
                 key={task.id}
                 task={task}
                 process={processes.find(p => p.taskId === task.id)}
-                compact
+                size="compact"
                 allTasks={allTasks}
-                onRetry={() => onRetry(task.id)}
-                onKill={() => onKill(task.id)}
-                onQueue={() => onQueue(task.id)}
-                onClick={() => onClick(task.id)}
               />
             ))
           )}
@@ -915,10 +699,6 @@ function KanbanBoard({
   columnBy,
   showEmptyColumns,
   agentTeamMap,
-  onRetry,
-  onKill,
-  onQueue,
-  onClick,
 }: {
   tasks: Task[];
   processes: AgentProcess[];
@@ -926,10 +706,6 @@ function KanbanBoard({
   columnBy: ColumnByKey;
   showEmptyColumns: boolean;
   agentTeamMap: Record<string, string>;
-  onRetry: (id: string) => void;
-  onKill: (id: string) => void;
-  onQueue: (id: string) => void;
-  onClick: (id: string) => void;
 }) {
   const columns = useMemo(
     () => buildDynamicColumns(columnBy, tasks, agentTeamMap),
@@ -954,10 +730,6 @@ function KanbanBoard({
           groupBy={groupBy}
           columnBy={columnBy}
           agentTeamMap={agentTeamMap}
-          onRetry={onRetry}
-          onKill={onKill}
-          onQueue={onQueue}
-          onClick={onClick}
         />
       ))}
     </div>
@@ -969,17 +741,9 @@ function KanbanBoard({
 function ListView({
   tasks,
   processes,
-  onRetry,
-  onKill,
-  onQueue,
-  onClick,
 }: {
   tasks: Task[];
   processes: AgentProcess[];
-  onRetry: (id: string) => void;
-  onKill: (id: string) => void;
-  onQueue: (id: string) => void;
-  onClick: (id: string) => void;
 }) {
   const [tab, setTab] = useState("all");
 
@@ -990,14 +754,18 @@ function ListView({
       return true;
     });
 
-  const counts = {
-    all: tasks.length,
-    pending: tasks.filter(t => t.status === "pending" || t.status === "assigned").length,
-    in_progress: tasks.filter(t => t.status === "in_progress").length,
-    review: tasks.filter(t => t.status === "review").length,
-    done: tasks.filter(t => t.status === "done").length,
-    failed: tasks.filter(t => t.status === "failed").length,
-  };
+  // Single-pass count reduction instead of 5 separate .filter() calls
+  const counts = useMemo(() => {
+    const c = { all: tasks.length, pending: 0, in_progress: 0, review: 0, done: 0, failed: 0 };
+    for (const t of tasks) {
+      if (t.status === "pending" || t.status === "assigned") c.pending++;
+      else if (t.status === "in_progress") c.in_progress++;
+      else if (t.status === "review") c.review++;
+      else if (t.status === "done") c.done++;
+      else if (t.status === "failed") c.failed++;
+    }
+    return c;
+  }, [tasks]);
 
   const tabs = [
     { value: "all", label: "All", count: counts.all },
@@ -1050,10 +818,6 @@ function ListView({
                 task={task}
                 process={processes.find(p => p.taskId === task.id)}
                 allTasks={tasks}
-                onRetry={() => onRetry(task.id)}
-                onKill={() => onKill(task.id)}
-                onQueue={() => onQueue(task.id)}
-                onClick={() => onClick(task.id)}
               />
             ))
           )}
@@ -1065,158 +829,21 @@ function ListView({
 
 // ── Main page ──
 
-type ViewMode = "list" | "kanban";
-
 export function TasksPage() {
-  const navigate = useNavigate();
-  const { tasks, isLoading: loading, refetch, retryTask } = useTasks();
-  const { processes } = useProcesses();
-  const { client } = usePolpo();
-  const { missions } = useMissions();
-  const { teams, isLoading: teamsLoading } = useAgents();
-  const [search, setSearch] = useState("");
-  const [viewMode, setViewMode] = useState<ViewMode>(() => {
-    return (localStorage.getItem("polpo-tasks-view") as ViewMode) ?? "list";
-  });
-  const [selectedMissions, setSelectedMissions] = useState<Set<string>>(new Set());
-  const [selectedTeams, setSelectedTeams] = useState<Set<string>>(new Set());
-  const [sortKey, setSortKey] = useState<SortKey>(() => {
-    return (localStorage.getItem("polpo-tasks-sort") as SortKey) ?? "updated";
-  });
-  const [groupBy, setGroupBy] = useState<GroupByKey>(() => {
-    // Migrate old boolean setting
-    const legacy = localStorage.getItem("polpo-tasks-group-mission");
-    if (legacy !== null) {
-      localStorage.removeItem("polpo-tasks-group-mission");
-      const val = legacy === "true" ? "mission" : "none";
-      localStorage.setItem("polpo-tasks-group-by", val);
-      return val as GroupByKey;
-    }
-    return (localStorage.getItem("polpo-tasks-group-by") as GroupByKey) ?? "mission";
-  });
-  const [columnBy, setColumnBy] = useState<ColumnByKey>(() => {
-    return (localStorage.getItem("polpo-tasks-column-by") as ColumnByKey) ?? "status";
-  });
-  const [timeFilter, setTimeFilter] = useState<TimeFilterState | null>(null);
-  const [showEmptyColumns, setShowEmptyColumns] = useState(() => {
-    return localStorage.getItem("polpo-tasks-show-empty-cols") === "true";
-  });
-
-  const toggleEmptyColumns = () => {
-    setShowEmptyColumns(prev => {
-      const next = !prev;
-      localStorage.setItem("polpo-tasks-show-empty-cols", String(next));
-      return next;
-    });
-  };
-
-  const setView = (mode: ViewMode) => {
-    setViewMode(mode);
-    localStorage.setItem("polpo-tasks-view", mode);
-  };
-
-  const toggleMission = (name: string) => {
-    setSelectedMissions(prev => {
-      const next = new Set(prev);
-      if (next.has(name)) next.delete(name);
-      else next.add(name);
-      return next;
-    });
-  };
-
-  const toggleTeam = (name: string) => {
-    setSelectedTeams(prev => {
-      const next = new Set(prev);
-      if (next.has(name)) next.delete(name);
-      else next.add(name);
-      return next;
-    });
-  };
-
-  // Map agent name → team name for team filtering
-  const agentTeamMap = useMemo(() => {
-    const m: Record<string, string> = {};
-    for (const team of teams) {
-      for (const agent of team.agents) {
-        m[agent.name] = team.name;
-      }
-    }
-    return m;
-  }, [teams]);
-
-  const killTask = async (id: string) => { await client.killTask(id); refetch(); };
-  const queueTask = async (id: string) => { await client.queueTask(id); refetch(); };
-
-  const [handleRefresh, isRefreshing] = useAsyncAction(async () => {
-    await refetch();
-  });
-
-  const handleAction = async (action: (id: string) => Promise<void>, id: string, label: string) => {
-    try {
-      await action(id);
-      toast.success(`Task ${label}`);
-      refetch();
-    } catch (e) {
-      toast.error((e as Error).message);
-    }
-  };
-
-  const setSort = (key: SortKey) => {
-    setSortKey(key);
-    localStorage.setItem("polpo-tasks-sort", key);
-  };
-
-  const changeGroupBy = (key: GroupByKey) => {
-    setGroupBy(key);
-    localStorage.setItem("polpo-tasks-group-by", key);
-  };
-
-  const changeColumnBy = (key: ColumnByKey) => {
-    setColumnBy(key);
-    localStorage.setItem("polpo-tasks-column-by", key);
-  };
-
-  // Filtered + sorted tasks by search + mission filter + team filter + time filter
-  const filtered = useMemo(() => {
-    const result = tasks.filter(t => {
-      // Mission filter
-      if (selectedMissions.size > 0 && !selectedMissions.has(t.group ?? "")) {
-        return false;
-      }
-      // Team filter
-      if (selectedTeams.size > 0) {
-        const agentTeam = agentTeamMap[t.assignTo];
-        if (!agentTeam || !selectedTeams.has(agentTeam)) return false;
-      }
-      // Time filter
-      if (timeFilter) {
-        const ts = new Date(t[timeFilter.field]).getTime();
-        if (ts < timeFilter.after) return false;
-      }
-      // Search filter
-      if (search) {
-        const q = search.toLowerCase();
-        return (
-          t.title.toLowerCase().includes(q) ||
-          t.assignTo.toLowerCase().includes(q) ||
-          (t.group ?? "").toLowerCase().includes(q)
-        );
-      }
-      return true;
-    });
-    return sortTasks(result, sortKey);
-  }, [tasks, search, selectedMissions, selectedTeams, agentTeamMap, sortKey, timeFilter]);
-
-  // Unique mission names for the filter
-  const missionOptions = useMemo((): { name: string; id: string }[] => {
-    const names: Record<string, string> = {};
-    for (const p of missions) names[p.name] = p.id;
-    // Also include groups from tasks that may not match a mission name
-    for (const t of tasks) {
-      if (t.group && !(t.group in names)) names[t.group] = "";
-    }
-    return Object.entries(names).map(([name, id]) => ({ name, id }));
-  }, [missions, tasks]);
+  const state = useTasksPageState();
+  const {
+    tasks, filtered, processes, loading, teamsLoading,
+    search, setSearch,
+    selectedMissions, setSelectedMissions, selectedTeams, setSelectedTeams,
+    timeFilter, setTimeFilter, hasActiveFilters, clearAllFilters,
+    toggleMission, toggleTeam,
+    missionFilterOptions, teamFilterOptions,
+    viewMode, setViewMode, sortKey, setSortKey,
+    groupBy, setGroupBy, columnBy, setColumnBy,
+    showEmptyColumns, toggleEmptyColumns,
+    taskActions, handleRefresh, isRefreshing,
+    agentTeamMap,
+  } = state;
 
   if (loading) {
     return (
@@ -1227,266 +854,266 @@ export function TasksPage() {
   }
 
   return (
-    <div className="flex flex-col flex-1 min-h-0 gap-3">
-      {/* Toolbar */}
-      <div className="flex flex-wrap items-center gap-2 lg:gap-3 shrink-0">
-        {/* Search */}
-        <div className="relative w-full sm:w-64">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-          <Input
-            placeholder="Search tasks..."
-            className="pl-8 h-8 text-sm bg-input/50 backdrop-blur-sm border-border/40 focus:border-primary/50"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
+    <TaskActionsProvider actions={taskActions}>
+      <div className="flex flex-col flex-1 min-h-0 gap-3">
+        {/* Toolbar */}
+        <div className="flex flex-wrap items-center gap-2 lg:gap-3 shrink-0">
+          {/* Search */}
+          <div className="relative w-full sm:w-64">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+            <Input
+              placeholder="Search tasks..."
+              className="pl-8 h-8 text-sm bg-input/50 backdrop-blur-sm border-border/40 focus:border-primary/50"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </div>
+
+          {/* Mission filter */}
+          <MultiSelectFilter
+            icon={<Target className="h-3.5 w-3.5" />}
+            label="Missions"
+            options={missionFilterOptions}
+            selected={selectedMissions}
+            onToggle={toggleMission}
+            onClear={() => setSelectedMissions(new Set())}
           />
+
+          {/* Team filter */}
+          <MultiSelectFilter
+            icon={<Users className="h-3.5 w-3.5" />}
+            label="Teams"
+            options={teamFilterOptions}
+            selected={selectedTeams}
+            onToggle={toggleTeam}
+            onClear={() => setSelectedTeams(new Set())}
+            isLoading={teamsLoading}
+          />
+
+          {/* Time filter */}
+          <TimeFilter
+            value={timeFilter}
+            onChange={setTimeFilter}
+            onClear={() => setTimeFilter(null)}
+          />
+
+          {/* Spacer */}
+          <div className="flex-1" />
+
+          {/* Sort */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" className="h-7 gap-1.5 text-xs">
+                <ArrowUpDown className="h-3 w-3" />
+                {sortOptions.find(o => o.value === sortKey)?.label ?? "Sort"}
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              {sortOptions.map((opt) => (
+                <DropdownMenuItem
+                  key={opt.value}
+                  className={cn("text-xs gap-2", sortKey === opt.value && "font-medium")}
+                  onClick={() => setSortKey(opt.value)}
+                >
+                  {sortKey === opt.value && <Check className="h-3 w-3" />}
+                  {sortKey !== opt.value && <span className="w-3" />}
+                  {opt.label}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          {/* Kanban-only controls: Columns by + Group by Mission */}
+          {viewMode === "kanban" && (
+            <>
+              {/* Columns by dropdown */}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="sm" className="h-7 gap-1.5 text-xs">
+                    <Columns3 className="h-3 w-3" />
+                    Columns: {columnByOptions.find(o => o.value === columnBy)?.label ?? "Status"}
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  {columnByOptions.map((opt) => {
+                    const OptIcon = opt.icon;
+                    return (
+                      <DropdownMenuItem
+                        key={opt.value}
+                        className={cn("text-xs gap-2", columnBy === opt.value && "font-medium")}
+                        onClick={() => setColumnBy(opt.value)}
+                      >
+                        {columnBy === opt.value ? <Check className="h-3 w-3" /> : <span className="w-3" />}
+                        <OptIcon className="h-3 w-3" />
+                        {opt.label}
+                      </DropdownMenuItem>
+                    );
+                  })}
+                </DropdownMenuContent>
+              </DropdownMenu>
+
+              {/* Group by dropdown */}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant={groupBy !== "none" ? "default" : "outline"} size="sm" className="h-7 gap-1.5 text-xs">
+                    <Layers className="h-3 w-3" />
+                    {groupBy === "none" ? "Group" : `Group: ${groupByOptions.find(o => o.value === groupBy)?.label}`}
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  {groupByOptions.map((opt) => {
+                    const OptIcon = opt.icon;
+                    // Skip the option that matches current columnBy (redundant grouping)
+                    const isRedundant = opt.value === columnBy;
+                    if (isRedundant) return null;
+                    return (
+                      <DropdownMenuItem
+                        key={opt.value}
+                        className={cn("text-xs gap-2", groupBy === opt.value && "font-medium")}
+                        onClick={() => setGroupBy(opt.value)}
+                      >
+                        {groupBy === opt.value ? <Check className="h-3 w-3" /> : <span className="w-3" />}
+                        <OptIcon className="h-3 w-3" />
+                        {opt.label}
+                      </DropdownMenuItem>
+                    );
+                  })}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            {/* Toggle empty columns */}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 px-2"
+                  onClick={toggleEmptyColumns}
+                >
+                  {showEmptyColumns ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">
+                <p className="text-xs">{showEmptyColumns ? "Hide empty columns" : "Show empty columns"}</p>
+              </TooltipContent>
+            </Tooltip>
+            </>
+          )}
+
+          {/* View toggle */}
+          <div className="flex items-center rounded-md border border-border/50">
+            <Button
+              variant={viewMode === "list" ? "default" : "ghost"}
+              size="sm"
+              className="h-7 px-2 rounded-r-none"
+              onClick={() => setViewMode("list")}
+            >
+              <LayoutList className="h-3.5 w-3.5" />
+            </Button>
+            <Button
+              variant={viewMode === "kanban" ? "default" : "ghost"}
+              size="sm"
+              className="h-7 px-2 rounded-l-none"
+              onClick={() => setViewMode("kanban")}
+            >
+              <Columns3 className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+
+          {/* Refresh */}
+          <Button variant="outline" size="sm" className="h-7" onClick={handleRefresh} disabled={isRefreshing}>
+            <RefreshCw className={cn("h-3.5 w-3.5", isRefreshing && "animate-spin")} />
+          </Button>
         </div>
 
-        {/* Mission filter */}
-        <MissionFilter
-          missions={missionOptions}
-          selected={selectedMissions}
-          onToggle={toggleMission}
-        />
-
-        {/* Team filter */}
-        <TeamFilter
-          teams={teams}
-          selected={selectedTeams}
-          onToggle={toggleTeam}
-          isLoading={teamsLoading}
-        />
-
-        {/* Time filter */}
-        <TimeFilter
-          value={timeFilter}
-          onChange={setTimeFilter}
-          onClear={() => setTimeFilter(null)}
-        />
-
-        {/* Spacer */}
-        <div className="flex-1" />
-
-        {/* Sort */}
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="outline" size="sm" className="h-7 gap-1.5 text-xs">
-              <ArrowUpDown className="h-3 w-3" />
-              {sortOptions.find(o => o.value === sortKey)?.label ?? "Sort"}
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            {sortOptions.map((opt) => (
-              <DropdownMenuItem
-                key={opt.value}
-                className={cn("text-xs gap-2", sortKey === opt.value && "font-medium")}
-                onClick={() => setSort(opt.value)}
+        {/* Active filter indicators */}
+        {hasActiveFilters && (
+          <div className="flex items-center gap-2 shrink-0 flex-wrap">
+            <span className="text-[10px] text-muted-foreground">Filtering by:</span>
+            {Array.from(selectedMissions).map((name) => (
+              <Badge
+                key={`mission-${name}`}
+                variant="secondary"
+                className="text-[10px] gap-1 cursor-pointer bg-primary/10 text-primary hover:bg-destructive/20"
+                onClick={() => toggleMission(name)}
               >
-                {sortKey === opt.value && <Check className="h-3 w-3" />}
-                {sortKey !== opt.value && <span className="w-3" />}
-                {opt.label}
-              </DropdownMenuItem>
+                <Target className="h-2.5 w-2.5" />
+                {name}
+                <XCircle className="h-2.5 w-2.5" />
+              </Badge>
             ))}
-          </DropdownMenuContent>
-        </DropdownMenu>
-
-        {/* Kanban-only controls: Columns by + Group by Mission */}
-        {viewMode === "kanban" && (
-          <>
-            {/* Columns by dropdown */}
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="sm" className="h-7 gap-1.5 text-xs">
-                  <Columns3 className="h-3 w-3" />
-                  Columns: {columnByOptions.find(o => o.value === columnBy)?.label ?? "Status"}
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                {columnByOptions.map((opt) => {
-                  const OptIcon = opt.icon;
-                  return (
-                    <DropdownMenuItem
-                      key={opt.value}
-                      className={cn("text-xs gap-2", columnBy === opt.value && "font-medium")}
-                      onClick={() => changeColumnBy(opt.value)}
-                    >
-                      {columnBy === opt.value ? <Check className="h-3 w-3" /> : <span className="w-3" />}
-                      <OptIcon className="h-3 w-3" />
-                      {opt.label}
-                    </DropdownMenuItem>
-                  );
-                })}
-              </DropdownMenuContent>
-            </DropdownMenu>
-
-            {/* Group by dropdown */}
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant={groupBy !== "none" ? "default" : "outline"} size="sm" className="h-7 gap-1.5 text-xs">
-                  <Layers className="h-3 w-3" />
-                  {groupBy === "none" ? "Group" : `Group: ${groupByOptions.find(o => o.value === groupBy)?.label}`}
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                {groupByOptions.map((opt) => {
-                  const OptIcon = opt.icon;
-                  // Skip the option that matches current columnBy (redundant grouping)
-                  const isRedundant = opt.value === columnBy;
-                  if (isRedundant) return null;
-                  return (
-                    <DropdownMenuItem
-                      key={opt.value}
-                      className={cn("text-xs gap-2", groupBy === opt.value && "font-medium")}
-                      onClick={() => changeGroupBy(opt.value)}
-                    >
-                      {groupBy === opt.value ? <Check className="h-3 w-3" /> : <span className="w-3" />}
-                      <OptIcon className="h-3 w-3" />
-                      {opt.label}
-                    </DropdownMenuItem>
-                  );
-                })}
-              </DropdownMenuContent>
-            </DropdownMenu>
-          {/* Toggle empty columns */}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-7 px-2"
-                onClick={toggleEmptyColumns}
+            {Array.from(selectedTeams).map((name) => (
+              <Badge
+                key={`team-${name}`}
+                variant="secondary"
+                className="text-[10px] gap-1 cursor-pointer bg-violet-500/10 text-violet-400 hover:bg-destructive/20"
+                onClick={() => toggleTeam(name)}
               >
-                {showEmptyColumns ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom">
-              <p className="text-xs">{showEmptyColumns ? "Hide empty columns" : "Show empty columns"}</p>
-            </TooltipContent>
-          </Tooltip>
-          </>
+                <Users className="h-2.5 w-2.5" />
+                {name}
+                <XCircle className="h-2.5 w-2.5" />
+              </Badge>
+            ))}
+            {timeFilter && (
+              <Badge
+                variant="secondary"
+                className="text-[10px] gap-1 cursor-pointer bg-blue-500/10 text-blue-400 hover:bg-destructive/20"
+                onClick={() => setTimeFilter(null)}
+              >
+                <Calendar className="h-2.5 w-2.5" />
+                {timeFieldOptions.find(f => f.value === timeFilter.field)?.label}:{" "}
+                {timeRangePresets.find(p => p.value === timeFilter.range)?.label ?? timeFilter.range}
+                <XCircle className="h-2.5 w-2.5" />
+              </Badge>
+            )}
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-5 px-1.5 text-[10px] text-muted-foreground"
+              onClick={clearAllFilters}
+            >
+              Clear all
+            </Button>
+          </div>
         )}
 
-        {/* View toggle */}
-        <div className="flex items-center rounded-md border border-border/50">
-          <Button
-            variant={viewMode === "list" ? "default" : "ghost"}
-            size="sm"
-            className="h-7 px-2 rounded-r-none"
-            onClick={() => setView("list")}
-          >
-            <LayoutList className="h-3.5 w-3.5" />
-          </Button>
-          <Button
-            variant={viewMode === "kanban" ? "default" : "ghost"}
-            size="sm"
-            className="h-7 px-2 rounded-l-none"
-            onClick={() => setView("kanban")}
-          >
-            <Columns3 className="h-3.5 w-3.5" />
-          </Button>
+        {/* Task count */}
+        <div className="flex items-center gap-2 shrink-0">
+          <span className="text-xs text-muted-foreground">
+            {filtered.length} task{filtered.length !== 1 ? "s" : ""}
+            {hasActiveFilters && ` (filtered from ${tasks.length})`}
+          </span>
         </div>
 
-        {/* Refresh */}
-        <Button variant="outline" size="sm" className="h-7" onClick={handleRefresh} disabled={isRefreshing}>
-          <RefreshCw className={cn("h-3.5 w-3.5", isRefreshing && "animate-spin")} />
-        </Button>
+        {/* Content */}
+        {tasks.length === 0 ? (
+          <Card className="bg-card/60 backdrop-blur-sm">
+            <CardContent className="flex flex-col items-center justify-center py-16 text-muted-foreground">
+              <ListChecks className="h-12 w-12 mb-4 opacity-40" />
+              <p className="text-sm font-medium">No tasks yet</p>
+              <p className="text-xs mt-1 text-center max-w-xs">
+                Tasks are created when a mission is executed. Use the TUI or Chat to create and run a mission.
+              </p>
+              <kbd className="mt-3 rounded border border-border bg-muted px-2 py-1 font-mono text-[10px]">
+                polpo mission &lt;prompt&gt;
+              </kbd>
+            </CardContent>
+          </Card>
+        ) : viewMode === "kanban" ? (
+          <KanbanBoard
+            tasks={filtered}
+            processes={processes}
+            groupBy={groupBy}
+            columnBy={columnBy}
+            showEmptyColumns={showEmptyColumns}
+            agentTeamMap={agentTeamMap}
+          />
+        ) : (
+          <ListView
+            tasks={filtered}
+            processes={processes}
+          />
+        )}
       </div>
-
-      {/* Active filter indicators */}
-      {(selectedMissions.size > 0 || selectedTeams.size > 0 || timeFilter) && (
-        <div className="flex items-center gap-2 shrink-0 flex-wrap">
-          <span className="text-[10px] text-muted-foreground">Filtering by:</span>
-          {Array.from(selectedMissions).map((name) => (
-            <Badge
-              key={`mission-${name}`}
-              variant="secondary"
-              className="text-[10px] gap-1 cursor-pointer bg-primary/10 text-primary hover:bg-destructive/20"
-              onClick={() => toggleMission(name)}
-            >
-              <Target className="h-2.5 w-2.5" />
-              {name}
-              <XCircle className="h-2.5 w-2.5" />
-            </Badge>
-          ))}
-          {Array.from(selectedTeams).map((name) => (
-            <Badge
-              key={`team-${name}`}
-              variant="secondary"
-              className="text-[10px] gap-1 cursor-pointer bg-violet-500/10 text-violet-400 hover:bg-destructive/20"
-              onClick={() => toggleTeam(name)}
-            >
-              <Users className="h-2.5 w-2.5" />
-              {name}
-              <XCircle className="h-2.5 w-2.5" />
-            </Badge>
-          ))}
-          {timeFilter && (
-            <Badge
-              variant="secondary"
-              className="text-[10px] gap-1 cursor-pointer bg-blue-500/10 text-blue-400 hover:bg-destructive/20"
-              onClick={() => setTimeFilter(null)}
-            >
-              <Calendar className="h-2.5 w-2.5" />
-              {timeFieldOptions.find(f => f.value === timeFilter.field)?.label}:{" "}
-              {timeRangePresets.find(p => p.value === timeFilter.range)?.label ?? timeFilter.range}
-              <XCircle className="h-2.5 w-2.5" />
-            </Badge>
-          )}
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-5 px-1.5 text-[10px] text-muted-foreground"
-            onClick={() => { setSelectedMissions(new Set()); setSelectedTeams(new Set()); setTimeFilter(null); }}
-          >
-            Clear all
-          </Button>
-        </div>
-      )}
-
-      {/* Task count */}
-      <div className="flex items-center gap-2 shrink-0">
-        <span className="text-xs text-muted-foreground">
-          {filtered.length} task{filtered.length !== 1 ? "s" : ""}
-          {(selectedMissions.size > 0 || selectedTeams.size > 0 || timeFilter) && ` (filtered from ${tasks.length})`}
-        </span>
-      </div>
-
-      {/* Content */}
-      {tasks.length === 0 ? (
-        <Card className="bg-card/60 backdrop-blur-sm">
-          <CardContent className="flex flex-col items-center justify-center py-16 text-muted-foreground">
-            <ListChecks className="h-12 w-12 mb-4 opacity-40" />
-            <p className="text-sm font-medium">No tasks yet</p>
-            <p className="text-xs mt-1 text-center max-w-xs">
-              Tasks are created when a mission is executed. Use the TUI or Chat to create and run a mission.
-            </p>
-            <kbd className="mt-3 rounded border border-border bg-muted px-2 py-1 font-mono text-[10px]">
-              polpo mission &lt;prompt&gt;
-            </kbd>
-          </CardContent>
-        </Card>
-      ) : viewMode === "kanban" ? (
-        <KanbanBoard
-          tasks={filtered}
-          processes={processes}
-          groupBy={groupBy}
-          columnBy={columnBy}
-          showEmptyColumns={showEmptyColumns}
-          agentTeamMap={agentTeamMap}
-          onRetry={(id) => handleAction(retryTask, id, "retried")}
-          onKill={(id) => handleAction(killTask, id, "killed")}
-          onQueue={(id) => handleAction(queueTask, id, "queued")}
-          onClick={(id) => navigate(`/tasks/${id}`)}
-        />
-      ) : (
-        <ListView
-          tasks={filtered}
-          processes={processes}
-          onRetry={(id) => handleAction(retryTask, id, "retried")}
-          onKill={(id) => handleAction(killTask, id, "killed")}
-          onQueue={(id) => handleAction(queueTask, id, "queued")}
-          onClick={(id) => navigate(`/tasks/${id}`)}
-        />
-      )}
-    </div>
+    </TaskActionsProvider>
   );
 }

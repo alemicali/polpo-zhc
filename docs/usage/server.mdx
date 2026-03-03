@@ -146,6 +146,7 @@ curl http://localhost:3000/v1/chat/completions \
 |--------|------|-------------|
 | `GET` | `/chat/sessions` | List all sessions |
 | `GET` | `/chat/sessions/:id/messages` | Get messages for a session |
+| `PATCH` | `/chat/sessions/:id` | Rename a session (`{ title }`) |
 | `DELETE` | `/chat/sessions/:id` | Delete a session |
 
 ### Logs

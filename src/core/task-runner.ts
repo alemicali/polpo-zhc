@@ -17,6 +17,8 @@ export class TaskRunner {
   private staleWarned = new Set<string>();
   /** Last known activity snapshot per taskId, used to diff and emit SSE events */
   private lastActivity = new Map<string, string>();
+  /** Tracks files already seen per task to emit incremental file:changed events */
+  private knownFiles = new Map<string, Set<string>>();
 
   constructor(private ctx: OrchestratorContext) {}
 
@@ -231,12 +233,31 @@ export class TaskRunner {
           file: r.activity.lastFile,
           summary: r.activity.summary,
         });
+
+        // Emit file:changed for newly created/edited files
+        let known = this.knownFiles.get(r.taskId);
+        if (!known) { known = new Set(); this.knownFiles.set(r.taskId, known); }
+        for (const f of r.activity.filesCreated ?? []) {
+          if (!known.has(f)) {
+            known.add(f);
+            this.ctx.emitter.emit("file:changed", { path: f, dir: dirname(f), action: "created", source: "agent" });
+          }
+        }
+        for (const f of r.activity.filesEdited ?? []) {
+          if (!known.has(f)) {
+            known.add(f);
+            this.ctx.emitter.emit("file:changed", { path: f, dir: dirname(f), action: "modified", source: "agent" });
+          }
+        }
       }
     }
 
     // Cleanup stale entries for tasks no longer active
     for (const taskId of this.lastActivity.keys()) {
-      if (!seenTaskIds.has(taskId)) this.lastActivity.delete(taskId);
+      if (!seenTaskIds.has(taskId)) {
+        this.lastActivity.delete(taskId);
+        this.knownFiles.delete(taskId);
+      }
     }
 
     this.ctx.registry.setState({

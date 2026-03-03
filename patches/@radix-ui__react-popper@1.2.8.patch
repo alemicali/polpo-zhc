@@ -1,0 +1,70 @@
+diff --git a/dist/index.js b/dist/index.js
+index 5cb1fd007d32021ad950d961dd4a0868576a2c0d..e5badec6f2f2ae1a41b815b117eb8d5fc91ca5f2 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -63,7 +63,14 @@ var [createPopperContext, createPopperScope] = (0, import_react_context.createCo
+ var [PopperProvider, usePopperContext] = createPopperContext(POPPER_NAME);
+ var Popper = (props) => {
+   const { __scopePopper, children } = props;
+-  const [anchor, setAnchor] = React.useState(null);
++  const anchorRef = React.useRef(null);
++  const [anchor, _setAnchor] = React.useState(null);
++  const setAnchor = React.useCallback((node) => {
++    if (anchorRef.current !== node) {
++      anchorRef.current = node;
++      _setAnchor(node);
++    }
++  }, []);
+   return /* @__PURE__ */ (0, import_jsx_runtime.jsx)(PopperProvider, { scope: __scopePopper, anchor, onAnchorChange: setAnchor, children });
+ };
+ Popper.displayName = POPPER_NAME;
+@@ -74,13 +81,8 @@ var PopperAnchor = React.forwardRef(
+     const context = usePopperContext(ANCHOR_NAME, __scopePopper);
+     const ref = React.useRef(null);
+     const composedRefs = (0, import_react_compose_refs.useComposedRefs)(forwardedRef, ref);
+-    const anchorRef = React.useRef(null);
+     React.useEffect(() => {
+-      const previousAnchor = anchorRef.current;
+-      anchorRef.current = virtualRef?.current || ref.current;
+-      if (previousAnchor !== anchorRef.current) {
+-        context.onAnchorChange(anchorRef.current);
+-      }
++      context.onAnchorChange(virtualRef?.current || ref.current);
+     });
+     return virtualRef ? null : /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_react_primitive.Primitive.div, { ...anchorProps, ref: composedRefs });
+   }
+diff --git a/dist/index.mjs b/dist/index.mjs
+index 9f84984eab84e32d20d6c052217da0e3b8374b40..df3ce02eb902193714a17d6f72a6684971935fd0 100644
+--- a/dist/index.mjs
++++ b/dist/index.mjs
+@@ -28,7 +28,14 @@ var [createPopperContext, createPopperScope] = createContextScope(POPPER_NAME);
+ var [PopperProvider, usePopperContext] = createPopperContext(POPPER_NAME);
+ var Popper = (props) => {
+   const { __scopePopper, children } = props;
+-  const [anchor, setAnchor] = React.useState(null);
++  const anchorRef = React.useRef(null);
++  const [anchor, _setAnchor] = React.useState(null);
++  const setAnchor = React.useCallback((node) => {
++    if (anchorRef.current !== node) {
++      anchorRef.current = node;
++      _setAnchor(node);
++    }
++  }, []);
+   return /* @__PURE__ */ jsx(PopperProvider, { scope: __scopePopper, anchor, onAnchorChange: setAnchor, children });
+ };
+ Popper.displayName = POPPER_NAME;
+@@ -39,13 +46,8 @@ var PopperAnchor = React.forwardRef(
+     const context = usePopperContext(ANCHOR_NAME, __scopePopper);
+     const ref = React.useRef(null);
+     const composedRefs = useComposedRefs(forwardedRef, ref);
+-    const anchorRef = React.useRef(null);
+     React.useEffect(() => {
+-      const previousAnchor = anchorRef.current;
+-      anchorRef.current = virtualRef?.current || ref.current;
+-      if (previousAnchor !== anchorRef.current) {
+-        context.onAnchorChange(anchorRef.current);
+-      }
++      context.onAnchorChange(virtualRef?.current || ref.current);
+     });
+     return virtualRef ? null : /* @__PURE__ */ jsx(Primitive.div, { ...anchorProps, ref: composedRefs });
+   }

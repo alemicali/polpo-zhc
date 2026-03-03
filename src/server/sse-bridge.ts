@@ -24,6 +24,7 @@ const ALL_EVENTS: PolpoEvent[] = [
   "peer:paired", "peer:message", "peer:blocked", "peer:presence",
   "watcher:created", "watcher:fired", "watcher:removed",
   "action:triggered",
+  "file:changed",
   "log",
 ];
 

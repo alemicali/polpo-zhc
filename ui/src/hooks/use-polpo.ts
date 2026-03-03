@@ -65,6 +65,14 @@ export interface OpenFileData {
   path: string;
 }
 
+export interface NavigateToData {
+  target: string;
+  id?: string;
+  name?: string;
+  path?: string;
+  highlight?: string;
+}
+
 // Local mirror of SDK tool call types
 export type ToolCallState = "preparing" | "calling" | "completed" | "error" | "interrupted";
 
@@ -88,6 +96,7 @@ export interface ChatMessageWithQuestions extends ChatMessage {
   vaultPreview?: VaultPreviewData;
   goToFile?: GoToFileData;
   openFile?: OpenFileData;
+  navigateTo?: NavigateToData;
   toolCalls?: ToolCallInfo[];
   /** Chronologically ordered segments (text interleaved with tool calls) */
   segments?: MessageSegment[];
@@ -123,6 +132,8 @@ export function useChat() {
   const [pendingGoToFile, setPendingGoToFile] = useState<GoToFileData | null>(null);
   /** Client-side open_file — path of file to open in preview dialog */
   const [pendingOpenFile, setPendingOpenFile] = useState<OpenFileData | null>(null);
+  /** Client-side navigate_to — target page + params (consumed immediately) */
+  const [pendingNavigateTo, setPendingNavigateTo] = useState<NavigateToData | null>(null);
   const initialLoadDone = useRef(false);
   /** Conversation history sent to the completions endpoint */
   const conversationRef = useRef<ChatCompletionMessage[]>([]);
@@ -170,20 +181,30 @@ export function useChat() {
         };
         lastMsg.vaultPreview = vaultPreview;
         setPendingVault(vaultPreview);
+      // NOTE: go_to_file, open_file, navigate_to are one-shot navigation actions.
+      // They must NOT be restored as pending because:
+      // 1. They were already consumed when originally fired (navigate + streamCompletion).
+      // 2. Restoring them triggers the useEffect in ChatPage → consume* → new
+      //    streamCompletion, creating an infinite loop on every visibility change
+      //    or session reload.
+      // Only interactive prompts (ask_user, create_mission, set_vault_entry) that
+      // require explicit user input should be restored.
       } else if (tc.name === "go_to_file" && tc.arguments) {
+        // Reconstruct display data on the message, but do NOT set pending state
         const args = tc.arguments as Record<string, unknown>;
-        const goToFileData: GoToFileData = {
-          path: (args.path as string) ?? "",
-        };
-        lastMsg.goToFile = goToFileData;
-        setPendingGoToFile(goToFileData);
+        lastMsg.goToFile = { path: (args.path as string) ?? "" };
       } else if (tc.name === "open_file" && tc.arguments) {
         const args = tc.arguments as Record<string, unknown>;
-        const openFileData: OpenFileData = {
-          path: (args.path as string) ?? "",
+        lastMsg.openFile = { path: (args.path as string) ?? "" };
+      } else if (tc.name === "navigate_to" && tc.arguments) {
+        const args = tc.arguments as Record<string, unknown>;
+        lastMsg.navigateTo = {
+          target: (args.target as string) ?? "dashboard",
+          id: args.id as string | undefined,
+          name: args.name as string | undefined,
+          path: args.path as string | undefined,
+          highlight: args.highlight as string | undefined,
         };
-        lastMsg.openFile = openFileData;
-        setPendingOpenFile(openFileData);
       }
     }
   };
@@ -462,12 +483,35 @@ export function useChat() {
         setPendingMission(null);
         setPendingVault(null);
         conversationRef.current.push({ role: "assistant", content: fullContent });
+      } else if ((stream as any).navigateTo) {
+        // Client-side navigate_to — navigate the UI to a specific page
+        const nav = (stream as any).navigateTo;
+        const navData: NavigateToData = {
+          target: nav.target,
+          id: nav.id,
+          name: nav.name,
+          path: nav.path,
+          highlight: nav.highlight,
+        };
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantId
+              ? { ...m, content: fullContent, navigateTo: navData, toolCalls: toolCalls.length > 0 ? toolCalls : undefined, segments: [...segments] }
+              : m
+          )
+        );
+        setPendingNavigateTo(navData);
+        setPendingQuestions(null);
+        setPendingMission(null);
+        setPendingVault(null);
+        conversationRef.current.push({ role: "assistant", content: fullContent });
       } else {
         setPendingQuestions(null);
         setPendingMission(null);
         setPendingVault(null);
         setPendingGoToFile(null);
         setPendingOpenFile(null);
+        setPendingNavigateTo(null);
         conversationRef.current.push({ role: "assistant", content: fullContent });
       }
 
@@ -906,6 +950,47 @@ export function useChat() {
       .finally(() => setIsLoading(false));
   }, [pendingOpenFile, streamCompletion]);
 
+  // Consume navigate_to — build a human-readable description and resume conversation
+  const consumeNavigateTo = useCallback(() => {
+    if (!pendingNavigateTo) return;
+    const data = pendingNavigateTo;
+    setPendingNavigateTo(null);
+
+    // Build a descriptive response
+    let label = data.target;
+    if (data.id) label += ` "${data.id}"`;
+    if (data.name) label += ` "${data.name}"`;
+    if (data.path) label += ` (${data.path})`;
+    const responseText = `Navigated to ${label}.`;
+    const userMsg: ChatMessageWithQuestions = {
+      id: `temp-${Date.now()}`,
+      role: "user",
+      content: responseText,
+      ts: new Date().toISOString(),
+    };
+    setMessages((prev) => [...prev, userMsg]);
+    conversationRef.current.push({ role: "user", content: responseText });
+
+    const assistantId = `temp-${Date.now()}-a`;
+    setMessages((prev) => [
+      ...prev,
+      { id: assistantId, role: "assistant", content: "", ts: new Date().toISOString() },
+    ]);
+    setIsLoading(true);
+
+    streamCompletion(assistantId)
+      .catch((e) => {
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantId
+              ? { ...m, content: `Error: ${(e as Error).message}` }
+              : m
+          )
+        );
+      })
+      .finally(() => setIsLoading(false));
+  }, [pendingNavigateTo, streamCompletion]);
+
   // Delete a session — clear messages if active
   const deleteSession = useCallback(
     async (id: string) => {
@@ -950,6 +1035,7 @@ export function useChat() {
     pendingVault,
     pendingGoToFile,
     pendingOpenFile,
+    pendingNavigateTo,
     send,
     stop,
     answerQuestions,
@@ -957,6 +1043,7 @@ export function useChat() {
     respondToVault,
     consumeGoToFile,
     consumeOpenFile,
+    consumeNavigateTo,
     clear,
     loadSession,
     newSession,

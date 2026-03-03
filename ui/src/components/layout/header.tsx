@@ -1,7 +1,7 @@
 import { useLocation } from "react-router-dom";
 import { Sun, Moon, Monitor, MessageCircle } from "lucide-react";
 import { useProjectInfo } from "@/hooks/use-polpo";
-import { useChatContext } from "@/hooks/chat-context";
+import { useSidebarOpen, sidebarActions } from "@/hooks/chat-context";
 import { Button } from "@/components/ui/button";
 import {
   Tooltip,
@@ -21,6 +21,7 @@ const titles: Record<string, string> = {
   "/missions": "Missions",
   "/tasks": "Tasks",
   "/agents": "Agents",
+  "/skills": "Skills",
   "/activity": "Activity",
   "/chat": "Chat",
   "/memory": "Memory",
@@ -28,6 +29,7 @@ const titles: Record<string, string> = {
   "/notifications": "Notifications",
   "/approvals": "Approvals",
   "/templates": "Templates",
+  "/files": "Files",
   "/config": "Configuration",
 };
 
@@ -36,6 +38,7 @@ function resolveTitle(pathname: string): string {
   if (pathname.startsWith("/missions/")) return "Mission Detail";
   if (pathname.startsWith("/tasks/")) return "Task Detail";
   if (pathname.startsWith("/agents/")) return "Agent Detail";
+  if (pathname.startsWith("/skills/")) return "Skill Detail";
   return "";
 }
 
@@ -44,7 +47,7 @@ export function Header() {
   const title = resolveTitle(pathname);
   const { theme, resolved, setTheme } = useTheme();
   const { info } = useProjectInfo();
-  const { sidebarOpen, toggleSidebar } = useChatContext();
+  const sidebarOpen = useSidebarOpen();
   const isOnChatPage = pathname === "/chat";
 
   return (
@@ -74,7 +77,7 @@ export function Header() {
                 variant="ghost"
                 size="icon"
                 className={`hidden lg:inline-flex h-8 w-8 rounded-lg transition-all ${sidebarOpen ? "text-primary bg-primary/10 hover:bg-primary/15" : "text-muted-foreground hover:text-foreground hover:bg-accent/50"}`}
-                onClick={toggleSidebar}
+                onClick={sidebarActions.toggleSidebar}
               >
                 <MessageCircle className="h-4 w-4" />
                 <span className="sr-only">{sidebarOpen ? "Close chat" : "Open chat"}</span>

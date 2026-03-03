@@ -874,6 +874,44 @@ Prefer this over go_to_file when the user wants to SEE the file content without 
   }),
 };
 
+const navigateToTool: Tool = {
+  name: "navigate_to",
+  description: `Navigate the user's UI to any page in the dashboard.
+Use this when the user asks to see a specific section or detail page, e.g. "show me the dashboard",
+"go to the agents page", "open mission X", "show me agent coder".
+This is a client-side navigation — the user stays in the app.
+
+Available targets:
+- "dashboard" — Main dashboard overview
+- "tasks" — Task list / kanban board
+- "task" — Specific task detail (requires id)
+- "missions" — Mission list
+- "mission" — Specific mission detail (requires id)
+- "agents" — Agent list
+- "agent" — Specific agent detail (requires name)
+- "skills" — Skills page
+- "skill" — Specific skill detail (requires name)
+- "files" — File browser (optional path to navigate to a directory, optional highlight to select a file)
+- "activity" — Activity / event log
+- "chat" — Chat page
+- "memory" — Memory page
+- "settings" — Settings page
+
+Examples:
+- navigate_to({ target: "dashboard" })
+- navigate_to({ target: "mission", id: "abc123" })
+- navigate_to({ target: "agent", name: "coder" })
+- navigate_to({ target: "files", path: "src/", highlight: "index.ts" })
+- navigate_to({ target: "task", id: "task-xyz" })`,
+  parameters: Type.Object({
+    target: Type.String({ description: "Page target: dashboard, tasks, task, missions, mission, agents, agent, skills, skill, files, activity, chat, memory, settings" }),
+    id: Type.Optional(Type.String({ description: "Entity ID for detail pages (task, mission)" })),
+    name: Type.Optional(Type.String({ description: "Entity name for detail pages (agent, skill)" })),
+    path: Type.Optional(Type.String({ description: "Directory path for files target" })),
+    highlight: Type.Optional(Type.String({ description: "File to highlight/select for files target" })),
+  }),
+};
+
 // ═══════════════════════════════════════════════════════
 //  INTERACTIVE TOOLS
 // ═══════════════════════════════════════════════════════
@@ -949,7 +987,7 @@ export const WRITE_TOOLS = new Set([
 ]);
 
 /** Tools that pause the conversation to collect user input / show a preview. */
-export const INTERACTIVE_TOOLS = new Set(["ask_user", "create_mission", "set_vault_entry", "go_to_file", "open_file"]);
+export const INTERACTIVE_TOOLS = new Set(["ask_user", "create_mission", "set_vault_entry", "go_to_file", "open_file", "navigate_to"]);
 
 export function needsApproval(toolName: string): boolean {
   return WRITE_TOOLS.has(toolName);
@@ -997,8 +1035,8 @@ export const ALL_ORCHESTRATOR_TOOLS: Tool[] = [
   httpFetchTool, httpDownloadTool,
   // Interactive (1)
   askUserTool,
-  // Client-side (2)
-  goToFileTool, openFileTool,
+  // Client-side (3)
+  goToFileTool, openFileTool, navigateToTool,
 ];
 
 /** Tool action labels for the approval prompt title. */

@@ -430,6 +430,12 @@ export function fileRoutes(): OpenAPIHono<ServerEnv> {
       uploaded.push({ name: file.name, size: buffer.byteLength });
     }
 
+    // Emit file:changed for each uploaded file
+    const orchestrator = c.get("orchestrator");
+    for (const u of uploaded) {
+      orchestrator.emit("file:changed", { path: resolve(resolvedDir, u.name), dir: resolvedDir, action: "created", source: "server" });
+    }
+
     return c.json({ ok: true, data: { uploaded, count: uploaded.length } }, 200);
   });
 
@@ -447,6 +453,7 @@ export function fileRoutes(): OpenAPIHono<ServerEnv> {
     if (existsSync(newDir)) return c.json({ ok: false, error: "Directory already exists" }, 400);
 
     mkdirSync(newDir, { recursive: true });
+    c.get("orchestrator").emit("file:changed", { path: newDir, dir: resolvedParent, action: "created", source: "server" });
     return c.json({ ok: true, data: { path: body.path } }, 200);
   });
 
@@ -467,6 +474,7 @@ export function fileRoutes(): OpenAPIHono<ServerEnv> {
     if (existsSync(newPath)) return c.json({ ok: false, error: "A file with that name already exists" }, 400);
 
     renameSync(resolved, newPath);
+    c.get("orchestrator").emit("file:changed", { path: resolved, dir: dirname(resolved), action: "renamed", source: "server" });
     return c.json({ ok: true, data: { oldPath: body.path, newName: body.newName } }, 200);
   });
 
@@ -492,6 +500,7 @@ export function fileRoutes(): OpenAPIHono<ServerEnv> {
     }
 
     rmSync(resolved, { force: true });
+    c.get("orchestrator").emit("file:changed", { path: resolved, dir: dirname(resolved), action: "deleted", source: "server" });
     return c.json({ ok: true, data: { path: body.path } }, 200);
   });
 

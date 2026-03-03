@@ -42,6 +42,7 @@ Each session stores:
 | `POST` | `/v1/chat/completions` | Talk to Polpo (OpenAI-compatible, primary endpoint) |
 | `GET` | `/chat/sessions` | List all sessions |
 | `GET` | `/chat/sessions/:id/messages` | Get messages for a session |
+| `PATCH` | `/chat/sessions/:id` | Rename a session (`{ title: string }`) |
 | `DELETE` | `/chat/sessions/:id` | Delete a session |
 
 The TUI auto-resumes the latest session if it's less than 30 minutes old. Otherwise, it creates a new one.

@@ -6,70 +6,190 @@
  * Without this, navigating away from /chat unmounts ChatPage and destroys all
  * state. With the provider, the state lives at the app root and can be consumed
  * by both the dedicated ChatPage and the ChatSidebar.
+ *
+ * Split into two contexts to prevent re-render cascades:
+ * - ChatStateContext: reactive data (messages, loading, pending*, sessions)
+ * - ChatActionsContext: stable callback refs (send, stop, loadSession, etc.)
+ *
+ * Components that only dispatch actions (e.g., prompt input) subscribe to
+ * ChatActionsContext and never re-render when messages update.
+ *
+ * Sidebar open/closed state is managed separately via a lightweight external
+ * store (useSyncExternalStore) so that Header and ChatSidebar can subscribe
+ * to it without re-rendering on every chat state change.
  */
 
-import { createContext, useContext, useState, useCallback } from "react";
+import { createContext, use, useMemo, useSyncExternalStore } from "react";
 import { useChat } from "./use-polpo";
+import type {
+  AskUserQuestion,
+  MissionPreviewData,
+  VaultPreviewData,
+  GoToFileData,
+  OpenFileData,
+  NavigateToData,
+  ChatMessageWithQuestions,
+  AskUserAnswer,
+  MissionPreviewAction,
+  VaultPreviewAction,
+} from "./use-polpo";
 
-// ── Types ──
+// ═══════════════════════════════════════════════════════
+//  Sidebar store — external, no context, no re-render cascade
+// ═══════════════════════════════════════════════════════
 
-export type ChatContextValue = ReturnType<typeof useChat> & {
-  /** Whether the right-side chat sidebar is open */
-  sidebarOpen: boolean;
-  /** Toggle the chat sidebar open/closed */
-  setSidebarOpen: (open: boolean) => void;
-  /** Toggle helper */
-  toggleSidebar: () => void;
-};
+let _sidebarOpen: boolean;
+try {
+  _sidebarOpen = localStorage.getItem("polpo-chat-sidebar") === "true";
+} catch {
+  _sidebarOpen = false;
+}
 
-// ── Context ──
+const listeners = new Set<() => void>();
+function subscribe(cb: () => void) {
+  listeners.add(cb);
+  return () => { listeners.delete(cb); };
+}
+function getSnapshot() { return _sidebarOpen; }
 
-const ChatContext = createContext<ChatContextValue | null>(null);
+function setSidebarOpen(open: boolean) {
+  if (_sidebarOpen === open) return;
+  _sidebarOpen = open;
+  try { localStorage.setItem("polpo-chat-sidebar", String(open)); } catch { /* ignore */ }
+  listeners.forEach(cb => cb());
+}
 
-// ── Provider ──
+function toggleSidebar() {
+  setSidebarOpen(!_sidebarOpen);
+}
+
+/** Hook to read sidebar open state — only re-renders when sidebar state changes */
+export function useSidebarOpen(): boolean {
+  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+}
+
+/** Imperative sidebar controls — stable references, never cause re-renders */
+export const sidebarActions = { setSidebarOpen, toggleSidebar } as const;
+
+// ═══════════════════════════════════════════════════════
+//  Chat contexts — split state from actions
+// ═══════════════════════════════════════════════════════
+
+/** Reactive state — changes on every message, loading toggle, etc. */
+export interface ChatStateValue {
+  messages: ChatMessageWithQuestions[];
+  isLoading: boolean;
+  messagesLoading: boolean;
+  sessionId: string | null;
+  sessions: { id: string; title?: string; createdAt: string; updatedAt: string; messageCount: number }[];
+  sessionsLoading: boolean;
+  pendingQuestions: AskUserQuestion[] | null;
+  pendingMission: MissionPreviewData | null;
+  pendingVault: VaultPreviewData | null;
+  pendingGoToFile: GoToFileData | null;
+  pendingOpenFile: OpenFileData | null;
+  pendingNavigateTo: NavigateToData | null;
+}
+
+/** Stable action callbacks — never change identity (wrapped in useCallback upstream) */
+export interface ChatActionsValue {
+  send: (message: string, images?: { url: string; mimeType: string }[]) => Promise<void>;
+  stop: () => void;
+  answerQuestions: (answers: AskUserAnswer[]) => Promise<void>;
+  respondToMission: (action: MissionPreviewAction, feedback?: string) => Promise<{ missionId?: string; error?: string }>;
+  respondToVault: (action: VaultPreviewAction, editedCredentials?: Record<string, string>) => Promise<void>;
+  consumeGoToFile: () => void;
+  consumeOpenFile: () => void;
+  consumeNavigateTo: () => void;
+  clear: () => void;
+  loadSession: (id: string) => Promise<void>;
+  newSession: () => void;
+  deleteSession: (id: string) => Promise<void>;
+}
+
+const ChatStateContext = createContext<ChatStateValue | null>(null);
+const ChatActionsContext = createContext<ChatActionsValue | null>(null);
 
 export function ChatProvider({ children }: { children: React.ReactNode }) {
   const chat = useChat();
 
-  // Sidebar open/closed state — persisted to localStorage
-  const [sidebarOpen, setSidebarOpenRaw] = useState(() => {
-    try {
-      return localStorage.getItem("polpo-chat-sidebar") === "true";
-    } catch {
-      return false;
-    }
-  });
+  // Split into state (reactive) and actions (stable)
+  const state: ChatStateValue = useMemo(() => ({
+    messages: chat.messages,
+    isLoading: chat.isLoading,
+    messagesLoading: chat.messagesLoading,
+    sessionId: chat.sessionId,
+    sessions: chat.sessions,
+    sessionsLoading: chat.sessionsLoading,
+    pendingQuestions: chat.pendingQuestions,
+    pendingMission: chat.pendingMission,
+    pendingVault: chat.pendingVault,
+    pendingGoToFile: chat.pendingGoToFile,
+    pendingOpenFile: chat.pendingOpenFile,
+    pendingNavigateTo: chat.pendingNavigateTo,
+  }), [
+    chat.messages, chat.isLoading, chat.messagesLoading,
+    chat.sessionId, chat.sessions, chat.sessionsLoading,
+    chat.pendingQuestions, chat.pendingMission, chat.pendingVault,
+    chat.pendingGoToFile, chat.pendingOpenFile, chat.pendingNavigateTo,
+  ]);
 
-  const setSidebarOpen = useCallback((open: boolean) => {
-    setSidebarOpenRaw(open);
-    try {
-      localStorage.setItem("polpo-chat-sidebar", String(open));
-    } catch {
-      // ignore
-    }
-  }, []);
-
-  const toggleSidebar = useCallback(() => {
-    setSidebarOpen(!sidebarOpen);
-  }, [sidebarOpen, setSidebarOpen]);
+  const actions: ChatActionsValue = useMemo(() => ({
+    send: chat.send,
+    stop: chat.stop,
+    answerQuestions: chat.answerQuestions,
+    respondToMission: chat.respondToMission,
+    respondToVault: chat.respondToVault,
+    consumeGoToFile: chat.consumeGoToFile,
+    consumeOpenFile: chat.consumeOpenFile,
+    consumeNavigateTo: chat.consumeNavigateTo,
+    clear: chat.clear,
+    loadSession: chat.loadSession,
+    newSession: chat.newSession,
+    deleteSession: chat.deleteSession,
+  }), [
+    chat.send, chat.stop, chat.answerQuestions,
+    chat.respondToMission, chat.respondToVault,
+    chat.consumeGoToFile, chat.consumeOpenFile, chat.consumeNavigateTo,
+    chat.clear, chat.loadSession, chat.newSession, chat.deleteSession,
+  ]);
 
   return (
-    <ChatContext.Provider value={{ ...chat, sidebarOpen, setSidebarOpen, toggleSidebar }}>
-      {children}
-    </ChatContext.Provider>
+    <ChatStateContext.Provider value={state}>
+      <ChatActionsContext.Provider value={actions}>
+        {children}
+      </ChatActionsContext.Provider>
+    </ChatStateContext.Provider>
   );
 }
 
-// ── Consumer hook ──
-
-/**
- * Access the shared chat state. Must be called within <ChatProvider>.
- * This replaces direct `useChat()` calls in components that need shared state.
- */
-export function useChatContext(): ChatContextValue {
-  const ctx = useContext(ChatContext);
-  if (!ctx) {
-    throw new Error("useChatContext must be used within a <ChatProvider>");
-  }
+/** Access reactive chat state. Re-renders when messages, loading, pending* change. */
+export function useChatState(): ChatStateValue {
+  const ctx = use(ChatStateContext);
+  if (!ctx) throw new Error("useChatState must be used within a <ChatProvider>");
   return ctx;
 }
+
+/** Access stable chat actions. Never re-renders due to message/state changes. */
+export function useChatActions(): ChatActionsValue {
+  const ctx = use(ChatActionsContext);
+  if (!ctx) throw new Error("useChatActions must be used within a <ChatProvider>");
+  return ctx;
+}
+
+/**
+ * Derived hook — true when the chat input should be disabled.
+ * Centralises the boolean chain so consumers don't repeat it.
+ */
+export function useChatInputDisabled(): boolean {
+  const {
+    isLoading, pendingQuestions, pendingMission, pendingVault,
+    pendingGoToFile, pendingOpenFile, pendingNavigateTo,
+  } = useChatState();
+  return (
+    isLoading || !!pendingQuestions || !!pendingMission || !!pendingVault
+    || !!pendingGoToFile || !!pendingOpenFile || !!pendingNavigateTo
+  );
+}
+
+

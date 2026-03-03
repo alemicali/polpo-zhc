@@ -18,7 +18,6 @@ import {
   ArrowDown,
   Mic,
   MicOff,
-  ImagePlus,
   X,
   Play,
   Save,
@@ -38,6 +37,8 @@ import {
   SkipForward,
   PauseCircle,
   BarChart3,
+  AtSign,
+  Compass,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -65,9 +66,8 @@ import {
   usePromptInputAttachments,
 } from "@/components/ai-elements/prompt-input";
 import type { PromptInputMessage } from "@/components/ai-elements/prompt-input";
-import { useChatContext } from "@/hooks/chat-context";
+import { useChatState, useChatActions, useChatInputDisabled } from "@/hooks/chat-context";
 import type { AskUserQuestion, AskUserAnswer, MessageSegment, ToolCallInfo, MissionPreviewData, MissionPreviewAction, VaultPreviewData, VaultPreviewAction } from "@/hooks/use-polpo";
-import { useNavigate } from "react-router-dom";
 import { FilePreviewDialog, useFilePreview, mimeFromPath } from "@/components/shared/file-preview";
 import { ToolCallList, ToolInvocation, ToolCallGroup } from "@/components/ai-elements/tool";
 import { MentionPopover, MentionText, type MentionPopoverHandle, type MentionFile } from "@/components/ai-elements/mention-popover";
@@ -281,11 +281,38 @@ function AttachButton({ disabled }: { disabled?: boolean }) {
           onClick={openFileDialog}
           disabled={disabled}
         >
-          <ImagePlus className="h-4 w-4" />
+          <Plus className="h-4 w-4" />
         </Button>
       </TooltipTrigger>
       <TooltipContent side="top" className="text-xs">
         Attach image
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
+// ── Mention @ button (lives inside PromptInput) ──
+
+function MentionButton({ disabled, onOpen }: { disabled?: boolean; onOpen: () => void }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8 rounded-full text-muted-foreground hover:text-foreground hover:bg-accent"
+          onMouseDown={(e) => {
+            e.preventDefault(); // Prevent stealing focus from textarea
+            onOpen();
+          }}
+          disabled={disabled}
+        >
+          <AtSign className="h-4 w-4" />
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent side="top" className="text-xs">
+        Mention agent, task, or mission
       </TooltipContent>
     </Tooltip>
   );
@@ -1371,6 +1398,41 @@ const suggestions = [
   },
 ];
 
+// ── Session ID copy button ──
+
+function SessionIdCopy({ sessionId }: { sessionId: string }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = useCallback(() => {
+    navigator.clipboard.writeText(sessionId);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }, [sessionId]);
+
+  return (
+    <span
+      className="inline-flex items-center gap-1 cursor-pointer group"
+      onClick={handleCopy}
+      title="Click to copy session ID"
+    >
+      {copied ? (
+        <>
+          <Check className="inline h-2.5 w-2.5 text-emerald-500" />
+          <span className="text-emerald-500">Copied!</span>
+        </>
+      ) : (
+        <>
+          {" Session "}
+          <code className="font-mono hover:text-foreground transition-colors">
+            {sessionId.slice(0, 8)}
+          </code>
+          <Copy className="inline h-2.5 w-2.5 opacity-0 group-hover:opacity-100 transition-opacity" />
+        </>
+      )}
+    </span>
+  );
+}
+
 // ── Session sidebar ──
 
 function SessionSidebar({
@@ -1453,67 +1515,380 @@ function SessionSidebar({
   );
 }
 
-// ── Main ──
+// ── Message skeleton (reused in initial load and session switching) ──
 
-export function ChatPage() {
-  const {
-    messages,
-    isLoading,
-    messagesLoading,
-    sessionId,
-    sessions,
-    sessionsLoading,
-    pendingQuestions,
-    pendingMission,
-    pendingVault,
-    pendingGoToFile,
-    pendingOpenFile,
-    send,
-    stop,
-    answerQuestions,
-    respondToMission,
-    respondToVault,
-    consumeGoToFile,
-    consumeOpenFile,
-    clear,
-    loadSession,
-    newSession,
-    deleteSession,
-  } = useChatContext();
+function ChatMessagesSkeleton() {
+  return (
+    <div className="mx-auto max-w-3xl p-4 space-y-6">
+      {/* User message skeleton */}
+      <div className="flex justify-end">
+        <Skeleton className="h-10 w-48 rounded-2xl rounded-br-sm" />
+      </div>
+      {/* Assistant message skeleton */}
+      <div className="flex gap-3">
+        <Skeleton className="h-7 w-7 rounded-full shrink-0" />
+        <div className="flex-1 space-y-2">
+          <Skeleton className="h-3 w-16 rounded" />
+          <Skeleton className="h-4 w-full rounded" />
+          <Skeleton className="h-4 w-3/4 rounded" />
+          <Skeleton className="h-4 w-5/6 rounded" />
+        </div>
+      </div>
+      {/* User message skeleton */}
+      <div className="flex justify-end">
+        <Skeleton className="h-10 w-36 rounded-2xl rounded-br-sm" />
+      </div>
+      {/* Assistant message skeleton */}
+      <div className="flex gap-3">
+        <Skeleton className="h-7 w-7 rounded-full shrink-0" />
+        <div className="flex-1 space-y-2">
+          <Skeleton className="h-3 w-16 rounded" />
+          <Skeleton className="h-4 w-full rounded" />
+          <Skeleton className="h-4 w-2/3 rounded" />
+        </div>
+      </div>
+    </div>
+  );
+}
 
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+// ── ChatToolbar — top bar with session toggle, title, message count, clear ──
+
+function ChatToolbar({
+  sidebarOpen,
+  onToggleSidebar,
+  compact,
+}: {
+  sidebarOpen: boolean;
+  onToggleSidebar: () => void;
+  compact?: boolean;
+}) {
+  const { messages, isLoading, sessionId, sessions } = useChatState();
+  const { newSession, clear } = useChatActions();
+
+  return (
+    <div className="flex items-center gap-2 px-4 py-2 border-b border-border/40 bg-background/80 backdrop-blur-md shrink-0">
+      {!compact && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7"
+              onClick={onToggleSidebar}
+            >
+              {sidebarOpen ? <ChevronsLeft className="h-4 w-4" /> : <History className="h-4 w-4" />}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom" className="text-xs">
+            {sidebarOpen ? "Hide history" : "Session history"}
+          </TooltipContent>
+        </Tooltip>
+      )}
+      {/* New session — only when sidebar is closed (or in compact mode) */}
+      {(!sidebarOpen || compact) && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7"
+              onClick={newSession}
+            >
+              <Plus className="h-4 w-4" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom" className="text-xs">
+            New session
+          </TooltipContent>
+        </Tooltip>
+      )}
+      <div className="flex-1 min-w-0 truncate">
+        {sessionId ? (
+          <span className="text-sm font-medium">
+            {sessions.find((s: { id: string; title?: string }) => s.id === sessionId)?.title || "Session"}
+          </span>
+        ) : (
+          <span className="text-sm text-muted-foreground">New session</span>
+        )}
+      </div>
+      {messages.length > 0 && (
+        <>
+          <Badge variant="secondary" className="text-[10px]">
+            {messages.length} messages
+          </Badge>
+          {!isLoading && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                  onClick={clear}
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" className="text-xs">
+                Clear session
+              </TooltipContent>
+            </Tooltip>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+// ── ChatEmptyState — shown when no messages ──
+
+function ChatEmptyState() {
+  const { send } = useChatActions();
+
+  return (
+    <div className="flex flex-col items-center justify-center h-full pt-24">
+      <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10 mb-4 text-3xl">
+        🐙
+      </div>
+      <h2 className="text-2xl font-semibold mb-2">How can I help you?</h2>
+      <p className="text-sm text-muted-foreground mb-8 max-w-md text-center">
+        I can manage your tasks, create execution plans, monitor agents,
+        and help you orchestrate your AI coding team.
+      </p>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-xl w-full px-4">
+        {suggestions.map((s) => (
+          <button
+            key={s.title}
+            onClick={() => send(s.title)}
+            className="flex items-start gap-3 rounded-xl border border-border/40 p-4 text-left transition-all hover:bg-accent/30 hover:border-primary/20"
+          >
+            <s.icon className="h-5 w-5 text-muted-foreground shrink-0 mt-0.5" />
+            <div>
+              <p className="text-sm font-medium">{s.title}</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                {s.description}
+              </p>
+            </div>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── ChatMessages — Virtuoso message list, empty state, scroll-to-bottom ──
+
+function ChatMessages() {
+  const { messages, isLoading, messagesLoading, pendingQuestions, pendingMission, pendingVault } = useChatState();
+  const { answerQuestions, respondToMission, respondToVault } = useChatActions();
+
   const [atBottom, setAtBottom] = useState(true);
   const virtuosoRef = useRef<VirtuosoHandle>(null);
+
+  // File preview for inline open_file indicators (re-open on click)
+  const { previewState, openPreview, closePreview } = useFilePreview();
+
+  const isEmpty = messages.length === 0 && !messagesLoading;
+
+  return (
+    <div className="relative flex-1 min-h-0">
+      {messagesLoading ? (
+        <div className="flex-1 overflow-hidden">
+          <ChatMessagesSkeleton />
+        </div>
+      ) : isEmpty ? (
+        <ChatEmptyState />
+      ) : (
+        <Virtuoso
+          ref={virtuosoRef}
+          data={messages}
+          followOutput="smooth"
+          initialTopMostItemIndex={messages.length - 1}
+          atBottomStateChange={setAtBottom}
+          atBottomThreshold={80}
+          increaseViewportBy={600}
+          itemContent={(i, msg) => {
+            const isStreaming = isLoading && i === messages.length - 1;
+
+            return msg.role === "user" ? (
+              <div className="group w-full py-4 px-4">
+                <div className="mx-auto max-w-3xl">
+                  <div className="flex justify-end">
+                    <div className="max-w-[85%]">
+                      <div className="rounded-2xl rounded-br-sm bg-primary text-primary-foreground px-4 py-2.5">
+                        <p className="text-sm leading-relaxed whitespace-pre-wrap">
+                          <MentionText text={msg.content} variant="inverted" />
+                        </p>
+                      </div>
+                      <div className="flex items-center justify-end gap-1.5 mt-1">
+                        {msg.ts && (
+                          <span className="text-[10px] text-muted-foreground">
+                            {formatDistanceToNow(new Date(msg.ts), { addSuffix: true })}
+                          </span>
+                        )}
+                        <span className="opacity-0 group-hover:opacity-100 transition-opacity">
+                          <CopyAction text={msg.content} />
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="group w-full py-4 px-4">
+                <div className="mx-auto max-w-3xl">
+                  <Message from="assistant">
+                    <div className="flex gap-3">
+                      <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/10 mt-0.5 text-sm">
+                        🐙
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-1">
+                          <p className="text-xs font-semibold">Polpo</p>
+                          {msg.ts && (
+                            <span className="text-[10px] text-muted-foreground">
+                              {formatDistanceToNow(new Date(msg.ts), { addSuffix: true })}
+                            </span>
+                          )}
+                        </div>
+                        {/* Render segments chronologically, grouping consecutive tools */}
+                        {msg.segments && msg.segments.length > 0 ? (
+                          (() => {
+                            const groups: Array<{ type: "text"; content: string } | { type: "tools"; tools: ToolCallInfo[] }> = [];
+                            for (const seg of msg.segments as MessageSegment[]) {
+                              if (seg.type === "text") {
+                                groups.push({ type: "text", content: seg.content });
+                              } else {
+                                const last = groups[groups.length - 1];
+                                if (last && last.type === "tools") {
+                                  last.tools.push(seg.tool);
+                                } else {
+                                  groups.push({ type: "tools", tools: [seg.tool] });
+                                }
+                              }
+                            }
+                            return groups.map((g, gi) =>
+                              g.type === "text" ? (
+                                <MessageContent key={`g-${gi}`}>
+                                  <MessageResponse mode={isStreaming ? "streaming" : "static"}>{g.content}</MessageResponse>
+                                </MessageContent>
+                              ) : g.tools.length === 1 ? (
+                                <ToolInvocation key={g.tools[0].id} tool={g.tools[0]} />
+                              ) : (
+                                <ToolCallGroup key={`tg-${gi}`} tools={g.tools} />
+                              )
+                            );
+                          })()
+                        ) : (
+                          <>
+                            {msg.toolCalls && msg.toolCalls.length > 0 && (
+                              <ToolCallList tools={msg.toolCalls} />
+                            )}
+                            <MessageContent>
+                              <MessageResponse mode={isStreaming ? "streaming" : "static"}>{msg.content}</MessageResponse>
+                            </MessageContent>
+                          </>
+                        )}
+                        {!isStreaming && !msg.askUserQuestions?.length && !msg.missionPreview && !msg.vaultPreview && (
+                          <MessageActions className="mt-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <CopyAction text={msg.content} />
+                          </MessageActions>
+                        )}
+                        {msg.askUserQuestions && msg.askUserQuestions.length > 0 && (
+                          <AskUserCards
+                            questions={msg.askUserQuestions}
+                            onSubmit={answerQuestions}
+                            disabled={isLoading || !pendingQuestions}
+                          />
+                        )}
+                        {msg.missionPreview && (
+                          <MissionPreviewCard
+                            preview={msg.missionPreview}
+                            onRespond={respondToMission}
+                            disabled={isLoading || !pendingMission}
+                          />
+                        )}
+                        {msg.vaultPreview && (
+                          <VaultPreviewCard
+                            preview={msg.vaultPreview}
+                            onRespond={respondToVault}
+                            disabled={isLoading || !pendingVault}
+                          />
+                        )}
+                        {msg.goToFile && (
+                          <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+                            <FileCode className="h-3.5 w-3.5" />
+                            <span>Navigated to <code className="font-mono text-foreground">{msg.goToFile.path}</code></span>
+                          </div>
+                        )}
+                        {msg.openFile && (
+                          <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground cursor-pointer hover:text-foreground transition-colors" onClick={() => { const p = msg.openFile!.path; openPreview({ label: p.split("/").pop() ?? p, path: p, mimeType: mimeFromPath(p) }); }}>
+                            <Eye className="h-3.5 w-3.5" />
+                            <span>Opened: <code className="font-mono text-foreground">{msg.openFile.path}</code></span>
+                            <span className="text-[10px]">(click to reopen)</span>
+                          </div>
+                        )}
+                        {msg.navigateTo && (
+                          <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+                            <Compass className="h-3.5 w-3.5" />
+                            <span>Navigated to <code className="font-mono text-foreground">{msg.navigateTo.target}{msg.navigateTo.id ? ` / ${msg.navigateTo.id}` : ""}{msg.navigateTo.name ? ` / ${msg.navigateTo.name}` : ""}</code></span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </Message>
+                </div>
+              </div>
+            );
+          }}
+          components={{
+            Footer: () => isLoading ? (
+              <div className="w-full py-2 px-4">
+                <div className="mx-auto max-w-3xl">
+                  <div className="flex items-center gap-2.5 pl-10 py-1.5">
+                    <div className="flex items-center gap-1">
+                      <span className="h-1.5 w-1.5 rounded-full bg-primary/60 animate-bounce [animation-delay:0ms]" />
+                      <span className="h-1.5 w-1.5 rounded-full bg-primary/60 animate-bounce [animation-delay:150ms]" />
+                      <span className="h-1.5 w-1.5 rounded-full bg-primary/60 animate-bounce [animation-delay:300ms]" />
+                    </div>
+                    <span className="text-[11px] text-muted-foreground animate-pulse">
+                      Polpo is thinking...
+                    </span>
+                  </div>
+                </div>
+              </div>
+            ) : null,
+          }}
+        />
+      )}
+
+      {/* Scroll to bottom button */}
+      {!atBottom && !isEmpty && (
+        <Button
+          className="absolute bottom-4 left-1/2 -translate-x-1/2 rounded-full shadow-md"
+          size="icon"
+          variant="outline"
+          onClick={() => virtuosoRef.current?.scrollToIndex({ index: messages.length - 1, align: "end", behavior: "smooth" })}
+        >
+          <ArrowDown className="h-4 w-4" />
+        </Button>
+      )}
+
+      {/* File preview dialog — for inline reopen clicks */}
+      <FilePreviewDialog preview={previewState} onClose={closePreview} />
+    </div>
+  );
+}
+
+// ── ChatInput — prompt input area with mentions, attachments, mic ──
+
+function ChatInput() {
+  const { isLoading, pendingQuestions, pendingMission, pendingVault, sessionId } = useChatState();
+  const { send, stop } = useChatActions();
+  const inputDisabled = useChatInputDisabled();
+
   const inputWrapperRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const mentionRef = useRef<MentionPopoverHandle>(null);
-
-  const navigate = useNavigate();
-
-  // open_file — reuse the same FilePreviewDialog from the file browser
-  const { previewState, openPreview, closePreview } = useFilePreview();
-
-  // Auto-open file preview when open_file fires
-  useEffect(() => {
-    if (!pendingOpenFile) return;
-    const filePath = pendingOpenFile.path;
-    const basename = filePath.split("/").pop() ?? filePath;
-    openPreview({ label: basename, path: filePath, mimeType: mimeFromPath(filePath) });
-    // Resume the LLM conversation immediately — user closes the preview when they want
-    consumeOpenFile();
-  }, [pendingOpenFile, openPreview, consumeOpenFile]);
-
-  // Auto-navigate to file browser when go_to_file fires
-  useEffect(() => {
-    if (!pendingGoToFile) return;
-    const filePath = pendingGoToFile.path;
-    // Navigate to the files page with the file's parent dir, and highlight the file
-    const parts = filePath.split("/");
-    const dir = parts.length > 1 ? parts.slice(0, -1).join("/") : ".";
-    navigate(`/files?path=${encodeURIComponent(dir)}&highlight=${encodeURIComponent(filePath)}`);
-    // Tell the LLM navigation happened and resume the conversation
-    consumeGoToFile();
-  }, [pendingGoToFile, navigate, consumeGoToFile]);
 
   // Mention autocomplete data
   const { agents } = useAgents();
@@ -1530,18 +1905,11 @@ export function ChatPage() {
       .catch(() => {});
   }, []);
 
-  // Filter out empty/orphan sessions — server creates placeholder sessions
-  // before streaming starts; if streaming fails these remain empty
-  const visibleSessions = sessions.filter(
-    (s) => s.messageCount > 1 || (s.messageCount === 1 && s.title),
-  );
-
   const handleSubmit = useCallback(
     async (message: PromptInputMessage) => {
       if (!message.text.trim() || isLoading) return;
-      // Resolve display mentions (@"Fix auth flow") → wire mentions (@task_abc123)
+      // Resolve display mentions → wire mentions
       const resolvedText = mentionRef.current?.resolveMessage(message.text.trim()) ?? message.text.trim();
-      // Convert attached files to image data URLs for the API
       const images = message.files
         .filter((f) => f.url && f.mediaType?.startsWith("image/"))
         .map((f) => ({ url: f.url!, mimeType: f.mediaType ?? "image/png" }));
@@ -1554,85 +1922,132 @@ export function ChatPage() {
   const setTextareaValue = useCallback((text: string) => {
     const textarea = inputWrapperRef.current?.querySelector<HTMLTextAreaElement>("textarea[name='message']");
     if (!textarea) return;
-    // Use native setter to trigger React's internal tracking for uncontrolled inputs
     const nativeSetter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
     nativeSetter?.call(textarea, text);
     textarea.dispatchEvent(new Event("input", { bubbles: true }));
   }, []);
 
-  const isEmpty = messages.length === 0 && !messagesLoading;
+  return (
+    <div className="bg-background/80 backdrop-blur-md px-4 pt-2 pb-1.5 shrink-0" ref={inputWrapperRef}>
+      <div className="mx-auto max-w-3xl">
+        <MentionPopover ref={mentionRef} textareaRef={textareaRef} agents={agents} tasks={tasks} missions={missions} files={mentionFiles}>
+          <PromptInput
+            onSubmit={handleSubmit}
+            accept="image/*"
+            multiple
+            globalDrop
+            maxFiles={5}
+            maxFileSize={10 * 1024 * 1024}
+            onError={(err) => toast.error(err.message)}
+            className="[&_[data-slot=input-group]]:rounded-2xl [&_[data-slot=input-group]]:focus-within:ring-0 [&_[data-slot=input-group]]:focus-within:border-input"
+          >
+            <AttachmentPreview />
+            <PromptInputTextarea
+              placeholder={isLoading ? "Polpo is working..." : pendingQuestions ? "Answer the questions above first..." : pendingMission ? "Review the mission preview above..." : pendingVault ? "Review the vault entry above..." : "Message Polpo..."}
+              disabled={inputDisabled}
+              onKeyDown={(e) => mentionRef.current?.handleTextareaKeyDown(e)}
+              onInput={(e) => {
+                if (!textareaRef.current) textareaRef.current = e.currentTarget;
+                mentionRef.current?.handleInput();
+              }}
+            />
+            <PromptInputFooter>
+              <div className="flex items-center gap-1">
+                <AttachButton disabled={inputDisabled} />
+                <MentionButton
+                  disabled={inputDisabled}
+                  onOpen={() => mentionRef.current?.toggle()}
+                />
+              </div>
+              <div className="flex items-center gap-1">
+                <MicButton onTranscript={setTextareaValue} disabled={inputDisabled} />
+                <PromptInputSubmit
+                  status={isLoading ? "streaming" : undefined}
+                  disabled={inputDisabled}
+                  onStop={stop}
+                />
+              </div>
+            </PromptInputFooter>
+          </PromptInput>
+        </MentionPopover>
+        <p className="text-[10px] text-muted-foreground text-center mt-0.5">
+          @ to mention · Enter to send · Shift+Enter for new line.
+          {sessionId && (
+            <SessionIdCopy sessionId={sessionId} />
+          )}
+        </p>
+      </div>
+    </div>
+  );
+}
 
-  // ── Loading skeleton ──
-  if (sessionsLoading) {
-    return (
-      <div className="flex -mx-4 -mt-4 -mb-2 lg:-mx-6 lg:-mt-6 lg:-mb-3 flex-1 min-h-0">
-        <div className="flex-1 flex flex-col min-w-0 h-full">
-          {/* Skeleton toolbar */}
-          <div className="flex items-center gap-2 px-4 py-2 border-b border-border/40 shrink-0">
-            <Skeleton className="h-7 w-7 rounded-md" />
-            <Skeleton className="h-7 w-7 rounded-md" />
-            <Skeleton className="h-4 w-32 rounded" />
-            <div className="flex-1" />
-            <Skeleton className="h-5 w-20 rounded-full" />
-          </div>
+// ── ChatLoadingSkeleton — full-page skeleton while sessions are loading ──
 
-          {/* Skeleton messages */}
-          <div className="flex-1 overflow-hidden">
-            <div className="mx-auto max-w-3xl p-4 space-y-6">
-              {/* User message skeleton */}
-              <div className="flex justify-end">
-                <Skeleton className="h-10 w-48 rounded-2xl rounded-br-sm" />
-              </div>
-              {/* Assistant message skeleton */}
-              <div className="flex gap-3">
-                <Skeleton className="h-7 w-7 rounded-full shrink-0" />
-                <div className="flex-1 space-y-2">
-                  <Skeleton className="h-3 w-16 rounded" />
-                  <Skeleton className="h-4 w-full rounded" />
-                  <Skeleton className="h-4 w-3/4 rounded" />
-                  <Skeleton className="h-4 w-5/6 rounded" />
-                </div>
-              </div>
-              {/* User message skeleton */}
-              <div className="flex justify-end">
-                <Skeleton className="h-10 w-36 rounded-2xl rounded-br-sm" />
-              </div>
-              {/* Assistant message skeleton */}
-              <div className="flex gap-3">
-                <Skeleton className="h-7 w-7 rounded-full shrink-0" />
-                <div className="flex-1 space-y-2">
-                  <Skeleton className="h-3 w-16 rounded" />
-                  <Skeleton className="h-4 w-full rounded" />
-                  <Skeleton className="h-4 w-2/3 rounded" />
-                </div>
-              </div>
-            </div>
-          </div>
+function ChatLoadingSkeleton({ compact }: { compact?: boolean }) {
+  return (
+    <div className={cn(
+      "flex flex-1 min-h-0",
+      !compact && "-mx-4 -mt-4 -mb-2 lg:-mx-6 lg:-mt-6 lg:-mb-3",
+    )}>
+      <div className="flex-1 flex flex-col min-w-0 h-full">
+        {/* Skeleton toolbar */}
+        <div className="flex items-center gap-2 px-4 py-2 border-b border-border/40 shrink-0">
+          <Skeleton className="h-7 w-7 rounded-md" />
+          <Skeleton className="h-7 w-7 rounded-md" />
+          <Skeleton className="h-4 w-32 rounded" />
+          <div className="flex-1" />
+          <Skeleton className="h-5 w-20 rounded-full" />
+        </div>
 
-          {/* Prompt input — shown immediately even during loading */}
-          <div className="bg-background/80 backdrop-blur-md px-4 pt-2 pb-1.5 shrink-0">
-            <div className="mx-auto max-w-3xl">
-              <PromptInput onSubmit={handleSubmit} className="[&_[data-slot=input-group]]:rounded-2xl">
-                <PromptInputTextarea placeholder="Message Polpo..." disabled />
-                <PromptInputFooter>
-                  <div className="flex items-center gap-1" />
-                  <PromptInputSubmit disabled />
-                </PromptInputFooter>
-              </PromptInput>
-              <p className="text-[10px] text-muted-foreground text-center mt-0.5">
-                @ to mention · Enter to send · Shift+Enter for new line.
-              </p>
-            </div>
+        {/* Skeleton messages */}
+        <div className="flex-1 overflow-hidden">
+          <ChatMessagesSkeleton />
+        </div>
+
+        {/* Disabled prompt input */}
+        <div className="bg-background/80 backdrop-blur-md px-4 pt-2 pb-1.5 shrink-0">
+          <div className="mx-auto max-w-3xl">
+            <PromptInput onSubmit={() => {}} className="[&_[data-slot=input-group]]:rounded-2xl">
+              <PromptInputTextarea placeholder="Message Polpo..." disabled />
+              <PromptInputFooter>
+                <div className="flex items-center gap-1" />
+                <PromptInputSubmit disabled />
+              </PromptInputFooter>
+            </PromptInput>
+            <p className="text-[10px] text-muted-foreground text-center mt-0.5">
+              @ to mention · Enter to send · Shift+Enter for new line.
+            </p>
           </div>
         </div>
       </div>
-    );
+    </div>
+  );
+}
+
+// ── ChatPage — full-page composition with session sidebar ──
+
+export function ChatPage({ compact }: { compact?: boolean } = {}) {
+  const { sessions, sessionsLoading, sessionId } = useChatState();
+  const { loadSession, newSession, deleteSession } = useChatActions();
+
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  // Filter out empty/orphan sessions
+  const visibleSessions = sessions.filter(
+    (s: { messageCount: number; title?: string }) => s.messageCount > 1 || (s.messageCount === 1 && s.title),
+  );
+
+  if (sessionsLoading) {
+    return <ChatLoadingSkeleton compact={compact} />;
   }
 
   return (
-    <div className="flex -mx-4 -mt-4 -mb-2 lg:-mx-6 lg:-mt-6 lg:-mb-3 flex-1 min-h-0">
-      {/* Session sidebar — hidden on mobile */}
-      {sidebarOpen && (
+    <div className={cn(
+      "flex flex-1 min-h-0",
+      !compact && "-mx-4 -mt-4 -mb-2 lg:-mx-6 lg:-mt-6 lg:-mb-3",
+    )}>
+      {/* Session sidebar — only in full-page mode, hidden on mobile */}
+      {!compact && sidebarOpen && (
         <div className="hidden lg:flex">
           <SessionSidebar
             sessions={visibleSessions}
@@ -1646,365 +2061,14 @@ export function ChatPage() {
 
       {/* Main chat area */}
       <div className="flex-1 flex flex-col min-w-0 h-full">
-        {/* Chat toolbar */}
-        <div className="flex items-center gap-2 px-4 py-2 border-b border-border/40 bg-background/80 backdrop-blur-md shrink-0">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7"
-                onClick={() => setSidebarOpen(!sidebarOpen)}
-              >
-                {sidebarOpen ? <ChevronsLeft className="h-4 w-4" /> : <History className="h-4 w-4" />}
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom" className="text-xs">
-              {sidebarOpen ? "Hide history" : "Session history"}
-            </TooltipContent>
-          </Tooltip>
-          {/* New session — only when sidebar is closed */}
-          {!sidebarOpen && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-7 w-7"
-                  onClick={newSession}
-                >
-                  <Plus className="h-4 w-4" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="bottom" className="text-xs">
-                New session
-              </TooltipContent>
-            </Tooltip>
-          )}
-          <div className="flex-1 min-w-0">
-            {sessionId ? (
-              <div className="flex items-center gap-2">
-                <span className="text-sm font-medium truncate">
-                  {sessions.find((s) => s.id === sessionId)?.title || "Session"}
-                </span>
-                <Badge variant="outline" className="text-[10px] font-mono">
-                  {sessionId.slice(0, 8)}
-                </Badge>
-              </div>
-            ) : (
-              <span className="text-sm text-muted-foreground">New session</span>
-            )}
-          </div>
-          {messages.length > 0 && (
-            <>
-              <Badge variant="secondary" className="text-[10px]">
-                {messages.length} messages
-              </Badge>
-              {!isLoading && (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-7 w-7 text-muted-foreground hover:text-destructive"
-                      onClick={clear}
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom" className="text-xs">
-                    Clear session
-                  </TooltipContent>
-                </Tooltip>
-              )}
-            </>
-          )}
-        </div>
-
-        {/* Messages area */}
-        <div className="relative flex-1 min-h-0">
-          {messagesLoading ? (
-            <div className="flex-1 overflow-hidden">
-              <div className="mx-auto max-w-3xl p-4 space-y-6">
-                {/* User message skeleton */}
-                <div className="flex justify-end">
-                  <Skeleton className="h-10 w-48 rounded-2xl rounded-br-sm" />
-                </div>
-                {/* Assistant message skeleton */}
-                <div className="flex gap-3">
-                  <Skeleton className="h-7 w-7 rounded-full shrink-0" />
-                  <div className="flex-1 space-y-2">
-                    <Skeleton className="h-3 w-16 rounded" />
-                    <Skeleton className="h-4 w-full rounded" />
-                    <Skeleton className="h-4 w-3/4 rounded" />
-                    <Skeleton className="h-4 w-5/6 rounded" />
-                  </div>
-                </div>
-                {/* User message skeleton */}
-                <div className="flex justify-end">
-                  <Skeleton className="h-10 w-36 rounded-2xl rounded-br-sm" />
-                </div>
-                {/* Assistant message skeleton */}
-                <div className="flex gap-3">
-                  <Skeleton className="h-7 w-7 rounded-full shrink-0" />
-                  <div className="flex-1 space-y-2">
-                    <Skeleton className="h-3 w-16 rounded" />
-                    <Skeleton className="h-4 w-full rounded" />
-                    <Skeleton className="h-4 w-2/3 rounded" />
-                  </div>
-                </div>
-              </div>
-            </div>
-          ) : isEmpty ? (
-            <div className="flex flex-col items-center justify-center h-full pt-24">
-              <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10 mb-4 text-3xl">
-                🐙
-              </div>
-              <h2 className="text-2xl font-semibold mb-2">How can I help you?</h2>
-              <p className="text-sm text-muted-foreground mb-8 max-w-md text-center">
-                I can manage your tasks, create execution plans, monitor agents,
-                and help you orchestrate your AI coding team.
-              </p>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-xl w-full px-4">
-                {suggestions.map((s) => (
-                  <button
-                    key={s.title}
-                    onClick={() => send(s.title)}
-                    className="flex items-start gap-3 rounded-xl border border-border/40 p-4 text-left transition-all hover:bg-accent/30 hover:border-primary/20"
-                  >
-                    <s.icon className="h-5 w-5 text-muted-foreground shrink-0 mt-0.5" />
-                    <div>
-                      <p className="text-sm font-medium">{s.title}</p>
-                      <p className="text-xs text-muted-foreground mt-0.5">
-                        {s.description}
-                      </p>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            </div>
-          ) : (
-            <Virtuoso
-              ref={virtuosoRef}
-              data={messages}
-              followOutput="smooth"
-              initialTopMostItemIndex={messages.length - 1}
-              atBottomStateChange={setAtBottom}
-              atBottomThreshold={80}
-              increaseViewportBy={600}
-              itemContent={(i, msg) => {
-                const isStreaming = isLoading && i === messages.length - 1;
-
-                return msg.role === "user" ? (
-                  <div className="group w-full py-4 px-4">
-                    <div className="mx-auto max-w-3xl">
-                      <div className="flex justify-end">
-                        <div className="max-w-[85%]">
-                          <div className="rounded-2xl rounded-br-sm bg-primary text-primary-foreground px-4 py-2.5">
-                            <p className="text-sm leading-relaxed whitespace-pre-wrap">
-                              <MentionText text={msg.content} variant="inverted" />
-                            </p>
-                          </div>
-                          <div className="flex items-center justify-end gap-1.5 mt-1">
-                            {msg.ts && (
-                              <span className="text-[10px] text-muted-foreground">
-                                {formatDistanceToNow(new Date(msg.ts), { addSuffix: true })}
-                              </span>
-                            )}
-                            <span className="opacity-0 group-hover:opacity-100 transition-opacity">
-                              <CopyAction text={msg.content} />
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="group w-full py-4 px-4">
-                    <div className="mx-auto max-w-3xl">
-                      <Message from="assistant">
-                        <div className="flex gap-3">
-                          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/10 mt-0.5 text-sm">
-                            🐙
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 mb-1">
-                              <p className="text-xs font-semibold">Polpo</p>
-                              {msg.ts && (
-                                <span className="text-[10px] text-muted-foreground">
-                                  {formatDistanceToNow(new Date(msg.ts), { addSuffix: true })}
-                                </span>
-                              )}
-                            </div>
-                            {/* Render segments chronologically, grouping consecutive tools */}
-                            {msg.segments && msg.segments.length > 0 ? (
-                              (() => {
-                                const groups: Array<{ type: "text"; content: string } | { type: "tools"; tools: ToolCallInfo[] }> = [];
-                                for (const seg of msg.segments as MessageSegment[]) {
-                                  if (seg.type === "text") {
-                                    groups.push({ type: "text", content: seg.content });
-                                  } else {
-                                    const last = groups[groups.length - 1];
-                                    if (last && last.type === "tools") {
-                                      last.tools.push(seg.tool);
-                                    } else {
-                                      groups.push({ type: "tools", tools: [seg.tool] });
-                                    }
-                                  }
-                                }
-                                return groups.map((g, gi) =>
-                                  g.type === "text" ? (
-                                    <MessageContent key={`g-${gi}`}>
-                                      <MessageResponse mode={isStreaming ? "streaming" : "static"}>{g.content}</MessageResponse>
-                                    </MessageContent>
-                                  ) : g.tools.length === 1 ? (
-                                    <ToolInvocation key={g.tools[0].id} tool={g.tools[0]} />
-                                  ) : (
-                                    <ToolCallGroup key={`tg-${gi}`} tools={g.tools} />
-                                  )
-                                );
-                              })()
-                            ) : (
-                              <>
-                                {msg.toolCalls && msg.toolCalls.length > 0 && (
-                                  <ToolCallList tools={msg.toolCalls} />
-                                )}
-                                <MessageContent>
-                                  <MessageResponse mode={isStreaming ? "streaming" : "static"}>{msg.content}</MessageResponse>
-                                </MessageContent>
-                              </>
-                            )}
-                            {!isStreaming && !msg.askUserQuestions?.length && !msg.missionPreview && !msg.vaultPreview && (
-                              <MessageActions className="mt-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                <CopyAction text={msg.content} />
-                              </MessageActions>
-                            )}
-                            {msg.askUserQuestions && msg.askUserQuestions.length > 0 && (
-                              <AskUserCards
-                                questions={msg.askUserQuestions}
-                                onSubmit={answerQuestions}
-                                disabled={isLoading || !pendingQuestions}
-                              />
-                            )}
-                            {msg.missionPreview && (
-                              <MissionPreviewCard
-                                preview={msg.missionPreview}
-                                onRespond={respondToMission}
-                                disabled={isLoading || !pendingMission}
-                              />
-                            )}
-                            {msg.vaultPreview && (
-                              <VaultPreviewCard
-                                preview={msg.vaultPreview}
-                                onRespond={respondToVault}
-                                disabled={isLoading || !pendingVault}
-                              />
-                            )}
-                            {msg.goToFile && (
-                              <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
-                                <FileCode className="h-3.5 w-3.5" />
-                                <span>Navigated to <code className="font-mono text-foreground">{msg.goToFile.path}</code></span>
-                              </div>
-                            )}
-                            {msg.openFile && (
-                              <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground cursor-pointer hover:text-foreground transition-colors" onClick={() => { const p = msg.openFile!.path; openPreview({ label: p.split("/").pop() ?? p, path: p, mimeType: mimeFromPath(p) }); }}>
-                                <Eye className="h-3.5 w-3.5" />
-                                <span>Opened: <code className="font-mono text-foreground">{msg.openFile.path}</code></span>
-                                <span className="text-[10px]">(click to reopen)</span>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      </Message>
-                    </div>
-                  </div>
-                );
-              }}
-              components={{
-                Footer: () => isLoading ? (
-                  <div className="w-full py-2 px-4">
-                    <div className="mx-auto max-w-3xl">
-                      <div className="flex items-center gap-2.5 pl-10 py-1.5">
-                        <div className="flex items-center gap-1">
-                          <span className="h-1.5 w-1.5 rounded-full bg-primary/60 animate-bounce [animation-delay:0ms]" />
-                          <span className="h-1.5 w-1.5 rounded-full bg-primary/60 animate-bounce [animation-delay:150ms]" />
-                          <span className="h-1.5 w-1.5 rounded-full bg-primary/60 animate-bounce [animation-delay:300ms]" />
-                        </div>
-                        <span className="text-[11px] text-muted-foreground animate-pulse">
-                          Polpo is thinking...
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                ) : null,
-              }}
-            />
-          )}
-
-          {/* Scroll to bottom button */}
-          {!atBottom && !isEmpty && (
-            <Button
-              className="absolute bottom-4 left-1/2 -translate-x-1/2 rounded-full shadow-md"
-              size="icon"
-              variant="outline"
-              onClick={() => virtuosoRef.current?.scrollToIndex({ index: messages.length - 1, align: "end", behavior: "smooth" })}
-            >
-              <ArrowDown className="h-4 w-4" />
-            </Button>
-          )}
-        </div>
-
-        {/* Input */}
-        <div className="bg-background/80 backdrop-blur-md px-4 pt-2 pb-1.5 shrink-0" ref={inputWrapperRef}>
-          <div className="mx-auto max-w-3xl">
-            <MentionPopover ref={mentionRef} textareaRef={textareaRef} agents={agents} tasks={tasks} missions={missions} files={mentionFiles}>
-              <PromptInput
-                onSubmit={handleSubmit}
-                accept="image/*"
-                multiple
-                globalDrop
-                maxFiles={5}
-                maxFileSize={10 * 1024 * 1024}
-                onError={(err) => toast.error(err.message)}
-                className="[&_[data-slot=input-group]]:rounded-2xl"
-              >
-                <AttachmentPreview />
-                <PromptInputTextarea
-                  placeholder={isLoading ? "Polpo is working..." : pendingQuestions ? "Answer the questions above first..." : pendingMission ? "Review the mission preview above..." : pendingVault ? "Review the vault entry above..." : pendingGoToFile ? "Review the file action above..." : pendingOpenFile ? "Review the preview above..." : "Message Polpo..."}
-                  disabled={isLoading || !!pendingQuestions || !!pendingMission || !!pendingVault || !!pendingGoToFile || !!pendingOpenFile}
-                  onKeyDown={(e) => mentionRef.current?.handleTextareaKeyDown(e)}
-                  onInput={(e) => {
-                    if (!textareaRef.current) textareaRef.current = e.currentTarget;
-                    mentionRef.current?.handleInput();
-                  }}
-                />
-                <PromptInputFooter>
-                  <div className="flex items-center gap-1">
-                    <AttachButton disabled={isLoading || !!pendingQuestions || !!pendingMission || !!pendingVault || !!pendingGoToFile || !!pendingOpenFile} />
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <MicButton onTranscript={setTextareaValue} disabled={isLoading || !!pendingQuestions || !!pendingMission || !!pendingVault || !!pendingGoToFile || !!pendingOpenFile} />
-                    <PromptInputSubmit
-                      status={isLoading ? "streaming" : undefined}
-                      disabled={!!pendingQuestions || !!pendingMission || !!pendingVault || !!pendingGoToFile || !!pendingOpenFile}
-                      onStop={stop}
-                    />
-                  </div>
-                </PromptInputFooter>
-              </PromptInput>
-            </MentionPopover>
-            <p className="text-[10px] text-muted-foreground text-center mt-0.5">
-              @ to mention · Enter to send · Shift+Enter for new line.
-              {sessionId && (
-                <> Session <code className="font-mono">{sessionId.slice(0, 8)}</code> — shared with TUI.</>
-              )}
-            </p>
-          </div>
-        </div>
+        <ChatToolbar
+          sidebarOpen={sidebarOpen}
+          onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
+          compact={compact}
+        />
+        <ChatMessages />
+        <ChatInput />
       </div>
-
-      {/* File preview dialog — opened by open_file tool, reusable from file browser */}
-      <FilePreviewDialog preview={previewState} onClose={closePreview} />
     </div>
   );
 }

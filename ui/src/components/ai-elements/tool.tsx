@@ -64,6 +64,7 @@ const INTERACTIVE_LABELS: Record<string, string> = {
   open_file: "Opening file…",
   create_mission: "Creating mission…",
   set_vault_entry: "Saving to vault…",
+  navigate_to: "Navigating…",
 };
 
 /** Convert tool_name to "Tool Name" */
@@ -151,15 +152,20 @@ export function ToolInvocation({
     });
   };
 
-  // Interactive tools in "preparing" state → minimal inline label
+  // Interactive / client-side tools: show a minimal inline label while
+  // preparing, then hide completely once executed (completed/error/etc.)
   const interactiveLabel = INTERACTIVE_LABELS[tool.name];
-  if (interactiveLabel && tool.state === "preparing") {
-    return (
-      <div className={cn("flex items-center gap-2 py-2 text-xs text-muted-foreground", className)} {...props}>
-        <Loader2 className="h-3 w-3 animate-spin" />
-        <span>{interactiveLabel}</span>
-      </div>
-    );
+  if (interactiveLabel) {
+    if (tool.state === "preparing") {
+      return (
+        <div className={cn("flex items-center gap-2 py-2 text-xs text-muted-foreground", className)} {...props}>
+          <Loader2 className="h-3 w-3 animate-spin" />
+          <span>{interactiveLabel}</span>
+        </div>
+      );
+    }
+    // Already executed — don't render anything
+    return null;
   }
 
   return (
@@ -251,12 +257,24 @@ export interface ToolCallGroupProps extends HTMLAttributes<HTMLDivElement> {
   tools: ToolCallInfo[];
 }
 
+/** Is this an interactive tool that has already been executed? (should be hidden) */
+function isHiddenInteractive(t: ToolCallInfo): boolean {
+  return t.name in INTERACTIVE_LABELS && t.state !== "preparing";
+}
+
 /** Grouped collapsible for 2+ consecutive tool calls — shows a summary row */
 export function ToolCallGroup({ tools, className, ...props }: ToolCallGroupProps) {
-  const activeCount = tools.filter((t) => t.state === "calling" || t.state === "preparing").length;
-  const errorCount = tools.filter((t) => t.state === "error").length;
+  // Separate: interactive tools preparing (inline), hidden interactive (executed), visible tools
+  const preparingInteractive = tools.filter((t) => t.name in INTERACTIVE_LABELS && t.state === "preparing");
+  const visibleTools = tools.filter((t) => !isHiddenInteractive(t));
+
+  const activeCount = visibleTools.filter((t) => t.state === "calling" || t.state === "preparing").length;
+  const errorCount = visibleTools.filter((t) => t.state === "error").length;
   const isCalling = activeCount > 0;
   const hasError = errorCount > 0;
+
+  // Only non-interactive tools for the group card
+  const cardTools = visibleTools.filter((t) => !(t.name in INTERACTIVE_LABELS));
 
   const summaryIcon = isCalling
     ? <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
@@ -264,44 +282,54 @@ export function ToolCallGroup({ tools, className, ...props }: ToolCallGroupProps
       ? <AlertCircle className="h-3.5 w-3.5 text-destructive" />
       : <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />;
 
-  const names = tools.map((t) => formatToolName(t.name));
+  const names = cardTools.map((t) => formatToolName(t.name));
   // Show first 2 names + "and N more" if > 2
   const preview = names.length <= 2
     ? names.join(", ")
     : `${names[0]}, ${names[1]} +${names.length - 2}`;
 
   return (
-    <Collapsible defaultOpen={hasError} {...props}>
-      <div
-        className={cn(
-          "rounded-lg border bg-card/50 text-card-foreground overflow-hidden my-4",
-          isCalling && "border-primary/20",
-          hasError && "border-destructive/30",
-          !isCalling && !hasError && "border-border/50",
-          className,
-        )}
-      >
-        <CollapsibleTrigger className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-accent/30 transition-colors group">
-          <Wrench className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-          <span className="text-xs text-muted-foreground">
-            {isCalling ? `Working on ${tools.length} tools` : `Used ${tools.length} tools`}
-          </span>
-          <span className="text-[10px] text-muted-foreground/60 truncate flex-1">
-            {preview}
-          </span>
-          {summaryIcon}
-          <ChevronRight className="h-3 w-3 text-muted-foreground transition-transform group-data-[state=open]:rotate-90 shrink-0" />
-        </CollapsibleTrigger>
+    <>
+      {/* Interactive tools in preparing state — shown inline above the card */}
+      {preparingInteractive.map((tool) => (
+        <ToolInvocation key={tool.id} tool={tool} />
+      ))}
 
-        <CollapsibleContent>
-          <div className="border-t border-border/40 px-2 py-2 space-y-1.5">
-            {tools.map((tool) => (
-              <ToolInvocation key={tool.id} tool={tool} />
-            ))}
+      {/* Non-interactive tools — grouped card (skip if none left) */}
+      {cardTools.length > 0 && (
+        <Collapsible defaultOpen={hasError} {...props}>
+          <div
+            className={cn(
+              "rounded-lg border bg-card/50 text-card-foreground overflow-hidden my-4",
+              isCalling && "border-primary/20",
+              hasError && "border-destructive/30",
+              !isCalling && !hasError && "border-border/50",
+              className,
+            )}
+          >
+            <CollapsibleTrigger className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-accent/30 transition-colors group">
+              <Wrench className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+              <span className="text-xs text-muted-foreground">
+                {isCalling ? `Working on ${cardTools.length} tools` : `Used ${cardTools.length} tools`}
+              </span>
+              <span className="text-[10px] text-muted-foreground/60 truncate flex-1">
+                {preview}
+              </span>
+              {summaryIcon}
+              <ChevronRight className="h-3 w-3 text-muted-foreground transition-transform group-data-[state=open]:rotate-90 shrink-0" />
+            </CollapsibleTrigger>
+
+            <CollapsibleContent>
+              <div className="border-t border-border/40 px-2 py-2 space-y-1.5">
+                {cardTools.map((tool) => (
+                  <ToolInvocation key={tool.id} tool={tool} />
+                ))}
+              </div>
+            </CollapsibleContent>
           </div>
-        </CollapsibleContent>
-      </div>
-    </Collapsible>
+        </Collapsible>
+      )}
+    </>
   );
 }
 

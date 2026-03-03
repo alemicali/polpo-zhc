@@ -211,6 +211,13 @@ export class SqliteSessionStore implements SessionStore {
     return row ? this.rowToSession(row) : undefined;
   }
 
+  renameSession(sessionId: string, title: string): boolean {
+    const result = this.db.prepare(
+      `UPDATE sessions SET title = @title, updated_at = @updated_at WHERE id = @id`
+    ).run({ id: sessionId, title, updated_at: new Date().toISOString() });
+    return result.changes > 0;
+  }
+
   deleteSession(sessionId: string): boolean {
     const result = this.deleteSessionStmt.run(sessionId);
     return result.changes > 0;

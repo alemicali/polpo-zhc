@@ -25,8 +25,29 @@ import {
 } from "../../llm/orchestrator-tools.js";
 import type { AskUserQuestion } from "../../core/types.js";
 import type { ToolCallInfo } from "../../core/session-store.js";
+import { dirname } from "node:path";
 
 const MAX_TURNS = 20;
+
+/** Tools that write/modify files — emit file:changed after successful execution */
+const FILE_WRITE_TOOLS: Record<string, "created" | "modified"> = {
+  write_file: "created",
+  edit_file: "modified",
+};
+
+/** Emit file:changed if a file-writing tool succeeded */
+function emitFileChanged(
+  toolName: string,
+  args: Record<string, unknown>,
+  result: string,
+  orchestrator: Orchestrator,
+): void {
+  const action = FILE_WRITE_TOOLS[toolName];
+  if (!action || result.startsWith("Error:")) return;
+  const path = args.path as string | undefined;
+  if (!path) return;
+  orchestrator.emit("file:changed", { path, dir: dirname(path), action, source: "chat" });
+}
 
 /**
  * Redact sensitive credential values from vault tool call arguments before persistence.
@@ -480,6 +501,19 @@ export function completionRoutes(orchestrator: Orchestrator, apiKeys?: string[])
                     },
                   }),
                 });
+              } else if (interactiveCall.name === "navigate_to") {
+                const args = interactiveCall.arguments as Record<string, unknown>;
+                await stream.writeSSE({
+                  data: sseChunk(completionId, {}, "navigate_to", {
+                    navigate_to: {
+                      target: args.target as string,
+                      id: args.id as string | undefined,
+                      name: args.name as string | undefined,
+                      path: args.path as string | undefined,
+                      highlight: args.highlight as string | undefined,
+                    },
+                  }),
+                });
               }
               await stream.writeSSE({ data: "[DONE]" });
               return; // finally block will persist whatever finalText we have
@@ -498,6 +532,7 @@ export function completionRoutes(orchestrator: Orchestrator, apiKeys?: string[])
 
               const result = await executeOrchestratorTool(call.name, call.arguments, orchestrator);
               const isError = result.startsWith("Error:");
+              emitFileChanged(call.name, call.arguments, result, orchestrator);
 
               // Accumulate for persistence
               toolCallsAccum.push({
@@ -702,12 +737,32 @@ export function completionRoutes(orchestrator: Orchestrator, apiKeys?: string[])
                 }],
               });
             }
+
+            if (interactiveCall.name === "navigate_to") {
+              const args = interactiveCall.arguments as Record<string, unknown>;
+              return c.json({
+                ...baseResponse,
+                choices: [{
+                  index: 0,
+                  message: { role: "assistant" as const, content: finalText },
+                  finish_reason: "navigate_to" as const,
+                  navigate_to: {
+                    target: args.target as string,
+                    id: args.id as string | undefined,
+                    name: args.name as string | undefined,
+                    path: args.path as string | undefined,
+                    highlight: args.highlight as string | undefined,
+                  },
+                }],
+              });
+            }
             // Note: finally block persists finalText + toolCallsAccum
           }
 
           for (const call of toolCalls) {
             const result = await executeOrchestratorTool(call.name, call.arguments, orchestrator);
             const isError = result.startsWith("Error:");
+            emitFileChanged(call.name, call.arguments, result, orchestrator);
 
             // Accumulate for persistence
             toolCallsAccum.push({

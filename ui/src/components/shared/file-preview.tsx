@@ -194,6 +194,161 @@ export function useFilePreview() {
   return { previewState, openPreview, closePreview };
 }
 
+// ── Preview content resolver ──
+// Replaces deeply nested ternary chain with early-return pattern.
+
+function PreviewContent({
+  loading,
+  error,
+  category,
+  readUrl,
+  downloadUrl,
+  content,
+  item: o,
+}: {
+  loading: boolean;
+  error?: string;
+  category: ReturnType<typeof previewCategory>;
+  readUrl?: string;
+  downloadUrl?: string;
+  content?: string;
+  item: FilePreviewItem;
+}) {
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex items-center justify-center h-full text-sm text-destructive">{error}</div>
+    );
+  }
+
+  // Media types served directly from URL
+  if (category === "image" && readUrl) {
+    return (
+      <div className="flex items-center justify-center h-full p-4 bg-muted/20">
+        <img src={readUrl} alt={o.label} className="max-w-full max-h-full object-contain rounded" />
+      </div>
+    );
+  }
+
+  if (category === "audio" && readUrl) {
+    return (
+      <div className="flex items-center justify-center p-8">
+        <audio controls src={readUrl} className="w-full max-w-2xl" />
+      </div>
+    );
+  }
+
+  if (category === "video" && readUrl) {
+    return (
+      <div className="flex items-center justify-center h-full p-4 bg-black">
+        <video controls src={readUrl} className="max-w-full max-h-full" />
+      </div>
+    );
+  }
+
+  if (category === "pdf" && readUrl) {
+    return <iframe src={readUrl} className="w-full h-full" title={o.label} />;
+  }
+
+  // HTML files: dual preview/code tab
+  if ((o.mimeType === "text/html" || /\.html?$/i.test(o.path ?? "")) && (content || readUrl)) {
+    return (
+      <Tabs defaultValue="preview" className="h-full flex flex-col">
+        <div className="px-4 pt-2 shrink-0">
+          <TabsList className="w-fit">
+            <TabsTrigger value="preview">Preview</TabsTrigger>
+            <TabsTrigger value="code">Code</TabsTrigger>
+          </TabsList>
+        </div>
+        <div className="flex-1 min-h-0">
+          <TabsContent value="preview" className="h-full m-0 p-0">
+            <iframe
+              src={readUrl}
+              className="w-full h-full border-0"
+              title={o.label}
+              sandbox="allow-same-origin allow-scripts allow-popups allow-forms"
+            />
+          </TabsContent>
+          <TabsContent value="code" className="h-full m-0 overflow-auto">
+            <ScrollArea className="h-full">
+              <div className="p-6">
+                <MessageResponse mode="static" className="text-sm">
+                  {content ? `\`\`\`html\n${content}\n\`\`\`` : "Loading..."}
+                </MessageResponse>
+              </div>
+            </ScrollArea>
+          </TabsContent>
+        </div>
+      </Tabs>
+    );
+  }
+
+  // Code and text files
+  if ((category === "code" || category === "text") && content) {
+    const formatted = category === "code"
+      ? `\`\`\`${langFromMime(o.mimeType)}\n${content}\n\`\`\``
+      : o.mimeType === "text/markdown" ? content : `\`\`\`\n${content}\n\`\`\``;
+    return (
+      <ScrollArea className="h-full">
+        <div className="p-6">
+          <MessageResponse mode="static" className="text-sm">{formatted}</MessageResponse>
+        </div>
+      </ScrollArea>
+    );
+  }
+
+  // Inline JSON
+  if (o.type === "json" && content) {
+    return (
+      <ScrollArea className="h-full">
+        <div className="p-6">
+          <MessageResponse mode="static" className="text-sm">
+            {"```json\n" + content + "\n```"}
+          </MessageResponse>
+        </div>
+      </ScrollArea>
+    );
+  }
+
+  // Plain text fallback
+  if (o.text) {
+    return (
+      <ScrollArea className="h-full">
+        <div className="p-6">
+          <MessageResponse mode="static" className="text-sm">{o.text}</MessageResponse>
+        </div>
+      </ScrollArea>
+    );
+  }
+
+  // External URL with no local path — iframe
+  if (o.url && !o.path) {
+    return <iframe src={o.url} className="w-full h-full" title={o.label} sandbox="allow-same-origin allow-scripts" />;
+  }
+
+  // Fallback: binary / unknown
+  return (
+    <div className="flex flex-col items-center justify-center h-full gap-3 text-muted-foreground">
+      <File className="h-10 w-10" />
+      <p className="text-sm">Preview not available for this file type</p>
+      {downloadUrl && (
+        <Button variant="outline" size="sm" asChild>
+          <a href={downloadUrl} download>
+            <Download className="h-3.5 w-3.5 mr-1.5" /> Download
+          </a>
+        </Button>
+      )}
+    </div>
+  );
+}
+
 // ── Dialog component ──
 
 export function FilePreviewDialog({
@@ -262,93 +417,15 @@ export function FilePreviewDialog({
 
         {/* Content area */}
         <div className="flex-1 min-h-0 overflow-auto">
-          {loading ? (
-            <div className="flex items-center justify-center h-full">
-              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-            </div>
-          ) : error ? (
-            <div className="flex items-center justify-center h-full text-sm text-destructive">{error}</div>
-          ) : category === "image" && readUrl ? (
-            <div className="flex items-center justify-center h-full p-4 bg-muted/20">
-              <img src={readUrl} alt={o.label} className="max-w-full max-h-full object-contain rounded" />
-            </div>
-          ) : category === "audio" && readUrl ? (
-            <div className="flex items-center justify-center p-8">
-              <audio controls src={readUrl} className="w-full max-w-2xl" />
-            </div>
-          ) : category === "video" && readUrl ? (
-            <div className="flex items-center justify-center h-full p-4 bg-black">
-              <video controls src={readUrl} className="max-w-full max-h-full" />
-            </div>
-          ) : category === "pdf" && readUrl ? (
-            <iframe src={readUrl} className="w-full h-full" title={o.label} />
-          ) : (o.mimeType === "text/html" || /\.html?$/i.test(o.path ?? "")) && (content || readUrl) ? (
-            <Tabs defaultValue="preview" className="h-full flex flex-col">
-              <div className="px-4 pt-2 shrink-0">
-                <TabsList className="w-fit">
-                  <TabsTrigger value="preview">Preview</TabsTrigger>
-                  <TabsTrigger value="code">Code</TabsTrigger>
-                </TabsList>
-              </div>
-              <div className="flex-1 min-h-0">
-                <TabsContent value="preview" className="h-full m-0 p-0">
-                  <iframe
-                    src={readUrl}
-                    className="w-full h-full border-0"
-                    title={o.label}
-                    sandbox="allow-same-origin allow-scripts allow-popups allow-forms"
-                  />
-                </TabsContent>
-                <TabsContent value="code" className="h-full m-0 overflow-auto">
-                  <ScrollArea className="h-full">
-                    <div className="p-6">
-                      <MessageResponse mode="static" className="text-sm">
-                        {content ? `\`\`\`html\n${content}\n\`\`\`` : "Loading..."}
-                      </MessageResponse>
-                    </div>
-                  </ScrollArea>
-                </TabsContent>
-              </div>
-            </Tabs>
-          ) : (category === "code" || category === "text") && content ? (
-            <ScrollArea className="h-full">
-              <div className="p-6">
-                <MessageResponse mode="static" className="text-sm">
-                  {category === "code"
-                    ? `\`\`\`${langFromMime(o.mimeType)}\n${content}\n\`\`\``
-                    : o.mimeType === "text/markdown" ? content : `\`\`\`\n${content}\n\`\`\``}
-                </MessageResponse>
-              </div>
-            </ScrollArea>
-          ) : o.type === "json" && content ? (
-            <ScrollArea className="h-full">
-              <div className="p-6">
-                <MessageResponse mode="static" className="text-sm">
-                  {"```json\n" + content + "\n```"}
-                </MessageResponse>
-              </div>
-            </ScrollArea>
-          ) : o.text ? (
-            <ScrollArea className="h-full">
-              <div className="p-6">
-                <MessageResponse mode="static" className="text-sm">{o.text}</MessageResponse>
-              </div>
-            </ScrollArea>
-          ) : o.url && !o.path ? (
-            <iframe src={o.url} className="w-full h-full" title={o.label} sandbox="allow-same-origin allow-scripts" />
-          ) : (
-            <div className="flex flex-col items-center justify-center h-full gap-3 text-muted-foreground">
-              <File className="h-10 w-10" />
-              <p className="text-sm">Preview not available for this file type</p>
-              {downloadUrl && (
-                <Button variant="outline" size="sm" asChild>
-                  <a href={downloadUrl} download>
-                    <Download className="h-3.5 w-3.5 mr-1.5" /> Download
-                  </a>
-                </Button>
-              )}
-            </div>
-          )}
+          <PreviewContent
+            loading={loading}
+            error={error}
+            category={category}
+            readUrl={readUrl}
+            downloadUrl={downloadUrl}
+            content={content}
+            item={o}
+          />
         </div>
       </DialogContent>
     </Dialog>

@@ -127,6 +127,68 @@ const PendingBadge = memo(function PendingBadge({ collapsed }: { collapsed: bool
   );
 });
 
+// ── Nav item variants ──
+
+function NavItemCollapsed({ to, icon: Icon, label }: NavItem) {
+  const linkClasses = ({ isActive }: { isActive: boolean }) =>
+    cn(
+      "flex items-center rounded-lg transition-all duration-200 group/link relative",
+      "justify-center h-10 w-10",
+      isActive
+        ? "bg-primary/10 text-primary shadow-sm ring-1 ring-primary/20"
+        : "text-muted-foreground hover:bg-accent/40 hover:text-foreground"
+    );
+
+  return (
+    <Tooltip delayDuration={0}>
+      <TooltipTrigger asChild>
+        <div>
+          <NavLink to={to} className={linkClasses}>
+            {({ isActive }) => (
+              <>
+                {isActive && (
+                  <span className="absolute left-0 top-1/2 -translate-y-1/2 h-5 w-1 rounded-r-full bg-primary" />
+                )}
+                <Icon className="h-[18px] w-[18px]" />
+                {to === "/approvals" && <PendingBadge collapsed />}
+              </>
+            )}
+          </NavLink>
+        </div>
+      </TooltipTrigger>
+      <TooltipContent side="right" className="text-xs font-medium">
+        {label}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
+function NavItemExpanded({ to, icon: Icon, label }: NavItem) {
+  const linkClasses = ({ isActive }: { isActive: boolean }) =>
+    cn(
+      "flex items-center rounded-lg transition-all duration-200 group/link relative",
+      "gap-3 px-3 py-2.5 text-[13px] font-medium",
+      isActive
+        ? "bg-primary/10 text-primary shadow-sm ring-1 ring-primary/20"
+        : "text-muted-foreground hover:bg-accent/40 hover:text-foreground"
+    );
+
+  return (
+    <NavLink to={to} className={linkClasses}>
+      {({ isActive }) => (
+        <>
+          {isActive && (
+            <span className="absolute left-0 top-1/2 -translate-y-1/2 h-5 w-1 rounded-r-full bg-primary" />
+          )}
+          <Icon className="h-[18px] w-[18px] shrink-0" />
+          <span className="truncate">{label}</span>
+          {to === "/approvals" && <PendingBadge collapsed={false} />}
+        </>
+      )}
+    </NavLink>
+  );
+}
+
 export function Sidebar() {
   const { connectionStatus } = usePolpo();
   const { info } = useProjectInfo();
@@ -209,54 +271,13 @@ export function Sidebar() {
               </div>
             )}
             <div className={cn("flex flex-col gap-0.5", collapsed && "items-center")}>
-              {items.map(({ to, icon: Icon, label }) => {
-                const linkClasses = ({ isActive }: { isActive: boolean }) =>
-                  cn(
-                    "flex items-center rounded-lg transition-all duration-200 group/link relative",
-                    collapsed
-                      ? "justify-center h-10 w-10"
-                      : "gap-3 px-3 py-2.5 text-[13px] font-medium",
-                    isActive
-                      ? "bg-primary/10 text-primary shadow-sm ring-1 ring-primary/20"
-                      : "text-muted-foreground hover:bg-accent/40 hover:text-foreground"
-                  );
-
-                return collapsed ? (
-                  <Tooltip key={to} delayDuration={0}>
-                    <TooltipTrigger asChild>
-                      <div>
-                        <NavLink to={to} className={linkClasses}>
-                          {({ isActive }) => (
-                            <>
-                              {isActive && (
-                                <span className="absolute left-0 top-1/2 -translate-y-1/2 h-5 w-1 rounded-r-full bg-primary" />
-                              )}
-                              <Icon className="h-[18px] w-[18px]" />
-                              {to === "/approvals" && <PendingBadge collapsed />}
-                            </>
-                          )}
-                        </NavLink>
-                      </div>
-                    </TooltipTrigger>
-                    <TooltipContent side="right" className="text-xs font-medium">
-                      {label}
-                    </TooltipContent>
-                  </Tooltip>
+              {items.map((item) =>
+                collapsed ? (
+                  <NavItemCollapsed key={item.to} {...item} />
                 ) : (
-                  <NavLink key={to} to={to} className={linkClasses}>
-                    {({ isActive }) => (
-                      <>
-                        {isActive && (
-                          <span className="absolute left-0 top-1/2 -translate-y-1/2 h-5 w-1 rounded-r-full bg-primary" />
-                        )}
-                        <Icon className="h-[18px] w-[18px] shrink-0" />
-                        <span className="truncate">{label}</span>
-                        {to === "/approvals" && <PendingBadge collapsed={false} />}
-                      </>
-                    )}
-                  </NavLink>
-                );
-              })}
+                  <NavItemExpanded key={item.to} {...item} />
+                )
+              )}
             </div>
           </div>
         ))}

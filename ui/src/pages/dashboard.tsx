@@ -1,3 +1,4 @@
+import { memo, useMemo } from "react";
 import { Link } from "react-router-dom";
 import {
   Card,
@@ -53,31 +54,35 @@ function PhaseIcon({ phase }: { phase?: string }) {
 
 // ── Live ticker ──
 
-function LiveTicker({ stats }: { stats: PolpoStats | null }) {
+const TICKER_ITEMS = [
+  { label: "Pending", key: "pending" as const, color: "bg-zinc-500", glow: "" },
+  { label: "Queued", key: "queued" as const, color: "bg-indigo-500", glow: "shadow-[0_0_6px_rgba(99,102,241,0.5)]" },
+  { label: "Running", key: "running" as const, color: "bg-cyan-400", glow: "shadow-[0_0_6px_rgba(34,211,238,0.6)]" },
+  { label: "Done", key: "done" as const, color: "bg-teal-400", glow: "shadow-[0_0_6px_rgba(45,212,191,0.5)]" },
+  { label: "Failed", key: "failed" as const, color: "bg-rose-500", glow: "shadow-[0_0_6px_rgba(244,63,94,0.5)]" },
+] satisfies { label: string; key: keyof PolpoStats; color: string; glow: string }[];
+
+const LiveTicker = memo(function LiveTicker({ stats }: { stats: PolpoStats | null }) {
   if (!stats) return null;
-  const items = [
-    { label: "Pending", value: stats.pending, color: "bg-zinc-500", glow: "" },
-    { label: "Queued", value: stats.queued, color: "bg-indigo-500", glow: "shadow-[0_0_6px_rgba(99,102,241,0.5)]" },
-    { label: "Running", value: stats.running, color: "bg-cyan-400", glow: "shadow-[0_0_6px_rgba(34,211,238,0.6)]" },
-    { label: "Done", value: stats.done, color: "bg-teal-400", glow: "shadow-[0_0_6px_rgba(45,212,191,0.5)]" },
-    { label: "Failed", value: stats.failed, color: "bg-rose-500", glow: "shadow-[0_0_6px_rgba(244,63,94,0.5)]" },
-  ];
   const total = stats.pending + stats.running + stats.done + stats.failed;
 
   return (
     <div className="flex items-center gap-4">
-      {items.map((item) => (
-        <div key={item.label} className="flex items-center gap-1.5">
-          <div className={cn(
-            "h-2 w-2 rounded-full",
-            item.color,
-            item.value > 0 && item.glow,
-            item.value > 0 && item.label === "Running" && "animate-pulse",
-          )} />
-          <span className="text-xs text-muted-foreground">{item.label}</span>
-          <span className="text-xs font-bold font-mono">{item.value}</span>
-        </div>
-      ))}
+      {TICKER_ITEMS.map((item) => {
+        const value = stats[item.key];
+        return (
+          <div key={item.label} className="flex items-center gap-1.5">
+            <div className={cn(
+              "h-2 w-2 rounded-full",
+              item.color,
+              value > 0 && item.glow,
+              value > 0 && item.key === "running" && "animate-pulse",
+            )} />
+            <span className="text-xs text-muted-foreground">{item.label}</span>
+            <span className="text-xs font-bold font-mono">{value}</span>
+          </div>
+        );
+      })}
       {total > 0 && (
         <div className="text-[10px] text-muted-foreground ml-2 font-mono">
           Total: {total}
@@ -85,7 +90,7 @@ function LiveTicker({ stats }: { stats: PolpoStats | null }) {
       )}
     </div>
   );
-}
+});
 
 // ── Stat card ──
 
@@ -97,7 +102,7 @@ const ACCENT_BAR_COLORS: Record<string, string> = {
   "text-muted-foreground": "bg-primary/30",
 };
 
-function StatCard({
+const StatCard = memo(function StatCard({
   title,
   value,
   icon: Icon,
@@ -126,7 +131,7 @@ function StatCard({
       <div className={cn("absolute bottom-0 left-0 right-0 h-[2px]", accentBar)} />
     </Card>
   );
-}
+});
 
 // ── Task progress donut chart ──
 
@@ -144,14 +149,19 @@ const STATUS_COLORS = {
   queued: "#6366f1",
 };
 
-function TaskProgress({ tasks }: { tasks: Task[] }) {
+const TaskProgress = memo(function TaskProgress({ tasks }: { tasks: Task[] }) {
   const total = tasks.length;
-  const counts = {
-    done: tasks.filter((t) => t.status === "done").length,
-    failed: tasks.filter((t) => t.status === "failed").length,
-    running: tasks.filter((t) => t.status === "in_progress" || t.status === "review").length,
-    queued: tasks.filter((t) => t.status === "pending" || t.status === "assigned").length,
-  };
+  // Single-pass count reduction instead of 4 separate .filter() calls
+  const counts = useMemo(() => {
+    const c = { done: 0, failed: 0, running: 0, queued: 0 };
+    for (const t of tasks) {
+      if (t.status === "done") c.done++;
+      else if (t.status === "failed") c.failed++;
+      else if (t.status === "in_progress" || t.status === "review") c.running++;
+      else if (t.status === "pending" || t.status === "assigned") c.queued++;
+    }
+    return c;
+  }, [tasks]);
   const completionRate = total > 0 ? Math.round((counts.done / total) * 100) : 0;
   const successRate = counts.done + counts.failed > 0
     ? Math.round((counts.done / (counts.done + counts.failed)) * 100)
@@ -256,11 +266,11 @@ function TaskProgress({ tasks }: { tasks: Task[] }) {
       </CardContent>
     </Card>
   );
-}
+});
 
 // ── Active agents with narrative ──
 
-function ActiveAgents({ processes }: { processes: AgentProcess[] }) {
+const ActiveAgents = memo(function ActiveAgents({ processes }: { processes: AgentProcess[] }) {
   if (processes.length === 0) {
     return (
       <Card className="bg-card/80 backdrop-blur-sm border-border/50">
@@ -324,11 +334,11 @@ function ActiveAgents({ processes }: { processes: AgentProcess[] }) {
       </CardContent>
     </Card>
   );
-}
+});
 
 // ── Recent tasks with richer info ──
 
-function RecentTasks({ tasks }: { tasks: Task[] }) {
+const RecentTasks = memo(function RecentTasks({ tasks }: { tasks: Task[] }) {
   const recent = [...tasks]
     .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
     .slice(0, 8);
@@ -419,7 +429,7 @@ function RecentTasks({ tasks }: { tasks: Task[] }) {
       </CardContent>
     </Card>
   );
-}
+});
 
 // ── Main ──
 
@@ -430,9 +440,16 @@ export function DashboardPage() {
   const { agents } = useAgents();
   const stats = useStats();
 
-  const activeMissions = missions.filter((p) => p.status === "active").length;
-  const doneCount = tasks.filter((t) => t.status === "done").length;
-  const failedCount = tasks.filter((t) => t.status === "failed").length;
+  // Single-pass count reduction instead of 3 separate .filter() calls
+  const { activeMissions, doneCount, failedCount } = useMemo(() => {
+    let active = 0, done = 0, failed = 0;
+    for (const p of missions) if (p.status === "active") active++;
+    for (const t of tasks) {
+      if (t.status === "done") done++;
+      else if (t.status === "failed") failed++;
+    }
+    return { activeMissions: active, doneCount: done, failedCount: failed };
+  }, [missions, tasks]);
 
   if (tasksLoading) {
     return (
@@ -478,7 +495,13 @@ export function DashboardPage() {
           }
           icon={Zap}
           description={failedCount > 0 ? `${failedCount} failed` : "All clear"}
-          color={failedCount === 0 && doneCount > 0 ? "text-emerald-500" : failedCount > 0 ? "text-red-500" : undefined}
+          color={(() => {
+            if (doneCount + failedCount === 0) return undefined;
+            const rate = Math.round((doneCount / (doneCount + failedCount)) * 100);
+            if (rate >= 90) return "text-emerald-500";
+            if (rate >= 70) return "text-amber-500";
+            return "text-red-500";
+          })()}
         />
       </div>
 

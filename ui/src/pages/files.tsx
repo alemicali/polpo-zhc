@@ -64,6 +64,7 @@ import {
 import { cn } from "@/lib/utils";
 import { config } from "@/lib/config";
 import { toast } from "sonner";
+import { useEvents } from "@lumea-labs/polpo-react";
 
 // ── Types ──
 
@@ -434,6 +435,29 @@ export function FilesPage() {
 
   const refresh = useCallback(() => fetchDir(currentPath), [currentPath, fetchDir]);
 
+  // ── Reactive file updates via SSE ──
+  const FILE_EVENTS = useMemo(() => ["file:changed"], []);
+  const { events: fileEvents } = useEvents(FILE_EVENTS, 1);
+  const lastFileEventRef = useRef<string>("");
+  useEffect(() => {
+    if (fileEvents.length === 0) return;
+    const latest = fileEvents[fileEvents.length - 1];
+    // Skip if we already processed this event
+    if (latest.id === lastFileEventRef.current) return;
+    lastFileEventRef.current = latest.id;
+    // Only refresh if the changed file is in the directory we're currently viewing
+    const data = latest.data as { dir?: string; source?: string } | undefined;
+    if (!data?.dir) { refresh(); return; }
+    // Resolve both paths for comparison (server emits absolute paths, we use relative)
+    // Simple check: refresh if dir ends with currentPath or currentPath ends with dir basename
+    const normalizedDir = data.dir.replace(/\\/g, "/").replace(/\/$/, "");
+    const normalizedCurrent = currentPath.replace(/\\/g, "/").replace(/\/$/, "");
+    // If currentPath is "." (root), always refresh. Otherwise check if the dir matches.
+    if (normalizedCurrent === "." || normalizedDir.endsWith(`/${normalizedCurrent}`) || normalizedDir === normalizedCurrent) {
+      refresh();
+    }
+  }, [fileEvents, currentPath, refresh]);
+
   // Navigation
   const navigateTo = useCallback((path: string) => {
     setSearch("");
@@ -455,31 +479,16 @@ export function FilesPage() {
     navigateTo(parts.slice(0, index + 1).join("/"));
   }, [currentPath, navigateTo]);
 
-  // Timer for delayed rename (OS-style: click-on-selected waits 500ms before rename)
-  const renameTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => () => { if (renameTimerRef.current) clearTimeout(renameTimerRef.current); }, []);
-
-  /** Single click: select entry. If already selected → schedule rename after 500ms. */
+  /** Single click: select entry */
   const handleEntryClick = useCallback((entry: FileEntry) => {
     if (renamingEntry === entry.name) return;
-    if (selectedEntry === entry.name) {
-      // Already selected → schedule rename (cancelled by double-click)
-      renameTimerRef.current = setTimeout(() => {
-        setRenamingEntry(entry.name);
-        renameTimerRef.current = null;
-      }, 500);
-    } else {
+    if (selectedEntry !== entry.name) {
       setSelectedEntry(entry.name);
     }
   }, [renamingEntry, selectedEntry]);
 
-  /** Double click: cancel pending rename, open preview (files) or navigate into (directories) */
+  /** Double click: open preview (files) or navigate into (directories) */
   const handleEntryDoubleClick = useCallback((entry: FileEntry) => {
-    // Cancel any pending rename timer
-    if (renameTimerRef.current) {
-      clearTimeout(renameTimerRef.current);
-      renameTimerRef.current = null;
-    }
     if (renamingEntry === entry.name) return;
     if (entry.type === "directory") {
       navigateTo(entryPath(currentPath, entry.name));
@@ -593,6 +602,7 @@ export function FilesPage() {
       <div
         onClick={() => !isRenaming && handleEntryClick(entry)}
         onDoubleClick={() => !isRenaming && handleEntryDoubleClick(entry)}
+        onContextMenu={() => setSelectedEntry(entry.name)}
         className={cn(
           "flex items-center gap-3 w-full px-3 py-2 text-left group cursor-pointer select-none",
           isSelected ? "bg-primary/10 hover:bg-primary/15" : "hover:bg-accent/30",
@@ -667,6 +677,9 @@ export function FilesPage() {
             </>
           )}
           <ContextMenuSeparator />
+          <ContextMenuItem onSelect={() => { navigator.clipboard.writeText(entry.name); toast.success("Name copied"); }}>
+            <Copy className="h-3.5 w-3.5 mr-2" /> Copy name
+          </ContextMenuItem>
           <ContextMenuItem onSelect={() => setRenamingEntry(entry.name)}>
             <Pencil className="h-3.5 w-3.5 mr-2" /> Rename
           </ContextMenuItem>
@@ -689,6 +702,7 @@ export function FilesPage() {
       <div
         onClick={() => handleEntryClick(entry)}
         onDoubleClick={() => handleEntryDoubleClick(entry)}
+        onContextMenu={() => setSelectedEntry(entry.name)}
         className={cn(
           "flex flex-col items-center gap-1.5 p-3 rounded-lg group cursor-pointer select-none",
           isSelectedGrid ? "bg-primary/10 ring-1 ring-primary/30 hover:bg-primary/15" : "hover:bg-accent/30",
@@ -725,6 +739,9 @@ export function FilesPage() {
             </>
           )}
           <ContextMenuSeparator />
+          <ContextMenuItem onSelect={() => { navigator.clipboard.writeText(entry.name); toast.success("Name copied"); }}>
+            <Copy className="h-3.5 w-3.5 mr-2" /> Copy name
+          </ContextMenuItem>
           <ContextMenuItem onSelect={() => setRenamingEntry(entry.name)}>
             <Pencil className="h-3.5 w-3.5 mr-2" /> Rename
           </ContextMenuItem>

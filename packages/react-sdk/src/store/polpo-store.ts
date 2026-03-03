@@ -55,6 +55,16 @@ export class PolpoStore {
   // ── Bulk setters (from REST initial fetch) ─────────────────
 
   setTasks(tasks: Task[]): void {
+    // Avoid creating a new Map (and breaking selector cache) when the
+    // task list hasn't actually changed.  Two concurrent useTasks() hooks
+    // (e.g. agent-detail page + chat sidebar) each fire an initial fetch;
+    // without this guard the second setTasks creates a new Map reference,
+    // which causes a selectTasks cache miss → new array → useSyncExternalStore
+    // re-render → useEffect re-fires → infinite loop.
+    const prev = this.state.tasks;
+    if (prev.size === tasks.length && tasks.every((t) => prev.get(t.id) === t)) {
+      return;
+    }
     this.state = {
       ...this.state,
       tasks: new Map(tasks.map((t) => [t.id, t])),
@@ -63,6 +73,10 @@ export class PolpoStore {
   }
 
   setMissions(missions: Mission[]): void {
+    const prev = this.state.missions;
+    if (prev.size === missions.length && missions.every((m) => prev.get(m.id) === m)) {
+      if (!this.state.missionsStale) return;
+    }
     this.state = {
       ...this.state,
       missions: new Map(missions.map((m) => [m.id, m])),
@@ -72,6 +86,10 @@ export class PolpoStore {
   }
 
   setAgents(agents: AgentConfig[]): void {
+    const prev = this.state.agents;
+    if (prev.length === agents.length && agents.every((a, i) => prev[i] === a)) {
+      return;
+    }
     this.state = { ...this.state, agents };
     this.notify();
   }

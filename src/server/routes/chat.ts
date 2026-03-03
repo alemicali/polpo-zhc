@@ -40,6 +40,33 @@ const getSessionMessagesRoute = createRoute({
   },
 });
 
+const renameSessionRoute = createRoute({
+  method: "patch",
+  path: "/sessions/{id}",
+  tags: ["Chat Sessions"],
+  summary: "Rename a session",
+  request: {
+    params: z.object({ id: z.string() }),
+    body: {
+      content: { "application/json": { schema: z.object({ title: z.string().min(1) }) } },
+    },
+  },
+  responses: {
+    200: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.any() }) } },
+      description: "Session renamed",
+    },
+    404: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string(), code: z.string() }) } },
+      description: "Session not found",
+    },
+    503: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string(), code: z.string() }) } },
+      description: "Session store not available",
+    },
+  },
+});
+
 const deleteSessionRoute = createRoute({
   method: "delete",
   path: "/sessions/{id}",
@@ -119,6 +146,22 @@ export function chatRoutes(): OpenAPIHono<ServerEnv> {
       };
     });
     return c.json({ ok: true, data: { session, messages: safeMessages } }, 200);
+  });
+
+  // PATCH /chat/sessions/:id — rename a session
+  app.openapi(renameSessionRoute, (c) => {
+    const orchestrator = c.get("orchestrator");
+    const sessionStore = orchestrator.getSessionStore();
+    if (!sessionStore) {
+      return c.json({ ok: false, error: "Session store not available", code: "NOT_AVAILABLE" }, 503);
+    }
+    const { id } = c.req.valid("param");
+    const { title } = c.req.valid("json");
+    const renamed = sessionStore.renameSession(id, title);
+    if (!renamed) {
+      return c.json({ ok: false, error: "Session not found", code: "NOT_FOUND" }, 404);
+    }
+    return c.json({ ok: true, data: { renamed: true } }, 200);
   });
 
   // DELETE /chat/sessions/:id — delete a session

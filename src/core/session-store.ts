@@ -5,7 +5,7 @@
 
 export type MessageRole = "user" | "assistant";
 
-export type ToolCallState = "calling" | "completed" | "error" | "interrupted";
+export type ToolCallState = "preparing" | "calling" | "completed" | "error" | "interrupted";
 
 export interface ToolCallInfo {
   /** Tool call ID from the LLM */
@@ -47,6 +47,8 @@ export interface SessionStore {
   listSessions(): Session[];
   getSession(sessionId: string): Session | undefined;
   getLatestSession(): Session | undefined;
+  /** Rename (update the title of) an existing session. */
+  renameSession(sessionId: string, title: string): boolean;
   deleteSession(sessionId: string): boolean;
   prune(keepSessions: number): number;
   close(): void;

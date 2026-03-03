@@ -17,7 +17,6 @@ import {
 } from "@/components/ui/dropdown-menu";
 import {
   Play,
-  Pause,
   MoreVertical,
   Loader2,
   Target,
@@ -25,9 +24,6 @@ import {
   XCircle,
   RefreshCw,
   ListChecks,
-  CheckCircle2,
-  AlertTriangle,
-  Clock,
   ArrowRight,
   Search,
   Filter,
@@ -49,6 +45,7 @@ import { toast } from "sonner";
 import { formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
 import { cronToHuman } from "@/lib/cron";
+import { missionStatusStyles, missionStatusFilterOptions } from "@/lib/mission-status";
 
 // ── Parse mission data (lightweight — only extract counts) ──
 
@@ -63,50 +60,56 @@ function parseMissionCounts(data: string): { taskCount: number } {
   }
 }
 
-// ── Status styles ──
 
-const statusStyles: Record<MissionStatus, { color: string; bg: string; label: string; icon: React.ElementType }> = {
-  draft: { color: "text-zinc-400", bg: "bg-zinc-500/10", label: "Draft", icon: Clock },
-  scheduled: { color: "text-blue-400", bg: "bg-blue-500/10", label: "Scheduled", icon: Calendar },
-  recurring: { color: "text-violet-400", bg: "bg-violet-500/10", label: "Recurring", icon: Repeat },
-  active: { color: "text-blue-400", bg: "bg-blue-500/10", label: "Running", icon: Loader2 },
-  paused: { color: "text-amber-400", bg: "bg-amber-500/10", label: "Paused", icon: Pause },
-  completed: { color: "text-emerald-400", bg: "bg-emerald-500/10", label: "Completed", icon: CheckCircle2 },
-  failed: { color: "text-red-400", bg: "bg-red-500/10", label: "Failed", icon: AlertTriangle },
-  cancelled: { color: "text-zinc-500", bg: "bg-zinc-500/10", label: "Cancelled", icon: XCircle },
-};
+
+// ── Mission stats shape ──
+
+export interface MissionStats {
+  done: number;
+  failed: number;
+  running: number;
+  total: number;
+}
+
+// ── Deadline badge (extracted from inline IIFE) ──
+
+function DeadlineBadge({ deadline }: { deadline: string }) {
+  const deadlineDate = new Date(deadline);
+  const isOverdue = deadlineDate.getTime() < Date.now();
+  return (
+    <Badge variant="outline" className={cn("text-[10px] gap-1", isOverdue ? "text-red-400 border-red-500/30" : "text-amber-400")}>
+      <Timer className="h-2.5 w-2.5" />
+      {isOverdue ? "Overdue" : `due ${formatDistanceToNow(deadlineDate, { addSuffix: true })}`}
+    </Badge>
+  );
+}
 
 // ── Mission row ──
 
+const actionableStatuses = new Set<MissionStatus>(["draft", "scheduled", "recurring", "active", "failed", "paused"]);
+
 function MissionRow({
   mission,
-  doneCount,
-  failedCount,
-  runningCount,
-  totalCount,
+  stats,
   onExecute,
   onResume,
   onAbort,
   onClick,
 }: {
   mission: Mission;
-  doneCount: number;
-  failedCount: number;
-  runningCount: number;
-  totalCount: number;
+  stats: MissionStats;
   onExecute: () => void;
   onResume: () => void;
   onAbort: () => void;
   onClick: () => void;
 }) {
-  const style = statusStyles[mission.status];
+  const style = missionStatusStyles[mission.status];
   const StatusIcon = style.icon;
-  const progress = totalCount > 0 ? Math.round((doneCount / totalCount) * 100) : 0;
+  const progress = stats.total > 0 ? Math.round((stats.done / stats.total) * 100) : 0;
   const counts = useMemo(() => parseMissionCounts(mission.data), [mission.data]);
 
   const isActive = mission.status === "active";
-  const hasActions = mission.status === "draft" || mission.status === "scheduled" || mission.status === "recurring" ||
-    mission.status === "active" || mission.status === "failed" || mission.status === "paused";
+  const hasActions = actionableStatuses.has(mission.status);
 
   return (
     <div
@@ -121,7 +124,7 @@ function MissionRow({
     >
       {/* Status icon */}
       <div className={cn("flex h-10 w-10 shrink-0 items-center justify-center rounded-xl", style.bg)}>
-        <StatusIcon className={cn("h-4 w-4", style.color, mission.status === "active" && "animate-spin")} />
+        <StatusIcon className={cn("h-4 w-4", style.color, isActive && "animate-spin")} />
       </div>
 
       {/* Name + meta */}
@@ -159,16 +162,7 @@ function MissionRow({
                 until {new Date(mission.endDate).toLocaleDateString()}
               </Badge>
             )}
-            {mission.deadline && (() => {
-              const deadlineDate = new Date(mission.deadline);
-              const isOverdue = deadlineDate.getTime() < Date.now();
-              return (
-                <Badge variant="outline" className={cn("text-[10px] gap-1", isOverdue ? "text-red-400 border-red-500/30" : "text-amber-400")}>
-                  <Timer className="h-2.5 w-2.5" />
-                  {isOverdue ? "Overdue" : `due ${formatDistanceToNow(deadlineDate, { addSuffix: true })}`}
-                </Badge>
-              );
-            })()}
+            {mission.deadline && <DeadlineBadge deadline={mission.deadline} />}
             {mission.qualityThreshold != null && (
               <Badge variant="outline" className="text-[10px] gap-1 text-amber-400">
                 <Star className="h-2.5 w-2.5" />
@@ -180,23 +174,23 @@ function MissionRow({
       </div>
 
       {/* Progress for active missions */}
-      {mission.status === "active" && totalCount > 0 && (
+      {isActive && stats.total > 0 && (
         <div className="flex items-center gap-2 shrink-0">
           <Progress value={progress} className="h-1.5 w-20 [&>div]:bg-primary" />
-          <span className="text-[10px] text-muted-foreground font-mono">{doneCount}/{totalCount}</span>
+          <span className="text-[10px] text-muted-foreground font-mono">{stats.done}/{stats.total}</span>
         </div>
       )}
 
       {/* Status badges */}
       <div className="flex items-center gap-1.5 shrink-0">
-        {runningCount > 0 && (
-          <Badge variant="secondary" className="text-[10px]">{runningCount} running</Badge>
+        {stats.running > 0 && (
+          <Badge variant="secondary" className="text-[10px]">{stats.running} running</Badge>
         )}
-        {failedCount > 0 && (
-          <Badge variant="destructive" className="text-[10px]">{failedCount} failed</Badge>
+        {stats.failed > 0 && (
+          <Badge variant="destructive" className="text-[10px]">{stats.failed} failed</Badge>
         )}
-        {mission.status === "completed" && doneCount > 0 && (
-          <Badge variant="secondary" className="text-[10px]">{doneCount} done</Badge>
+        {mission.status === "completed" && stats.done > 0 && (
+          <Badge variant="secondary" className="text-[10px]">{stats.done} done</Badge>
         )}
       </div>
 
@@ -243,17 +237,6 @@ function MissionRow({
 
 // ── Status filter popover ──
 
-const statusFilterOptions: { value: MissionStatus; label: string; color: string }[] = [
-  { value: "active", label: "Running", color: "text-blue-400" },
-  { value: "scheduled", label: "Scheduled", color: "text-blue-400" },
-  { value: "recurring", label: "Recurring", color: "text-violet-400" },
-  { value: "paused", label: "Paused", color: "text-amber-400" },
-  { value: "draft", label: "Draft", color: "text-zinc-400" },
-  { value: "completed", label: "Completed", color: "text-emerald-400" },
-  { value: "failed", label: "Failed", color: "text-red-400" },
-  { value: "cancelled", label: "Cancelled", color: "text-zinc-500" },
-];
-
 function StatusFilter({
   selected,
   onToggle,
@@ -276,7 +259,7 @@ function StatusFilter({
       </PopoverTrigger>
       <PopoverContent className="w-48 p-2" align="start">
         <div className="space-y-1">
-          {statusFilterOptions.map((opt) => (
+          {missionStatusFilterOptions.map((opt) => (
             <button
               key={opt.value}
               className={cn(
@@ -300,7 +283,7 @@ function StatusFilter({
             variant="ghost"
             size="sm"
             className="w-full mt-1 text-xs"
-            onClick={() => statusFilterOptions.forEach(o => { if (selected.has(o.value)) onToggle(o.value); })}
+            onClick={() => missionStatusFilterOptions.forEach(o => { if (selected.has(o.value)) onToggle(o.value); })}
           >
             Clear all
           </Button>
@@ -446,7 +429,7 @@ export function MissionsPage() {
         <div className="flex items-center gap-2 shrink-0 flex-wrap">
           <span className="text-[10px] text-muted-foreground">Filtering by:</span>
           {Array.from(selectedStatuses).map((status) => {
-            const opt = statusFilterOptions.find(o => o.value === status);
+            const opt = missionStatusFilterOptions.find(o => o.value === status);
             return (
               <Badge
                 key={status}
@@ -495,23 +478,17 @@ export function MissionsPage() {
                   <div className="mt-1.5 h-px bg-border/40" />
                 </div>
                 <div className="space-y-2">
-                  {sectionMissions.map((mission) => {
-                    const stats = missionStats[mission.id] ?? { done: 0, failed: 0, running: 0, total: 0 };
-                    return (
+                  {sectionMissions.map((mission) => (
                       <MissionRow
                         key={mission.id}
                         mission={mission}
-                        doneCount={stats.done}
-                        failedCount={stats.failed}
-                        runningCount={stats.running}
-                        totalCount={stats.total}
+                        stats={missionStats[mission.id] ?? { done: 0, failed: 0, running: 0, total: 0 }}
                         onExecute={() => handleAction(() => executeMission(mission.id), "Mission executed")}
                         onResume={() => handleAction(() => resumeMission(mission.id), "Mission resumed")}
                         onAbort={() => handleAction(() => abortMission(mission.id), "Mission aborted")}
                         onClick={() => navigate(`/missions/${mission.id}`)}
                       />
-                    );
-                  })}
+                    ))}
                 </div>
               </section>
             ))}

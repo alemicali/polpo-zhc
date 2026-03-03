@@ -57,11 +57,12 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { useMission, useTasks, useSchedules } from "@lumea-labs/polpo-react";
-import type { MissionStatus, MissionReport, TaskStatus, Task } from "@lumea-labs/polpo-react";
+import type { MissionReport, TaskStatus, Task } from "@lumea-labs/polpo-react";
 import { toast } from "sonner";
 import { formatDistanceToNow, format } from "date-fns";
 import { cn } from "@/lib/utils";
 import { cronToHuman } from "@/lib/cron";
+import { missionStatusStyles } from "@/lib/mission-status";
 import { JsonBlock } from "@/components/json-block";
 import { Calendar, Repeat } from "lucide-react";
 
@@ -168,18 +169,7 @@ function parseMissionData(data: string): ParsedMission | null {
   }
 }
 
-// ── Status styles ──
 
-const statusStyles: Record<MissionStatus, { color: string; bg: string; label: string; icon: React.ElementType }> = {
-  draft: { color: "text-zinc-400", bg: "bg-zinc-500/10", label: "Draft", icon: Clock },
-  scheduled: { color: "text-blue-400", bg: "bg-blue-500/10", label: "Scheduled", icon: Calendar },
-  recurring: { color: "text-violet-400", bg: "bg-violet-500/10", label: "Recurring", icon: Repeat },
-  active: { color: "text-blue-400", bg: "bg-blue-500/10", label: "Running", icon: Loader2 },
-  paused: { color: "text-amber-400", bg: "bg-amber-500/10", label: "Paused", icon: Clock },
-  completed: { color: "text-emerald-400", bg: "bg-emerald-500/10", label: "Completed", icon: CheckCircle2 },
-  failed: { color: "text-red-400", bg: "bg-red-500/10", label: "Failed", icon: AlertTriangle },
-  cancelled: { color: "text-zinc-500", bg: "bg-zinc-500/10", label: "Cancelled", icon: XCircle },
-};
 
 const taskStatusConfig: Record<TaskStatus, { icon: React.ElementType; color: string; label: string; nodeColor: string }> = {
   draft: { icon: Clock, color: "text-zinc-500", label: "Draft", nodeColor: "border-zinc-500/40" },
@@ -1358,7 +1348,7 @@ export function MissionDetailPage() {
     );
   }
 
-  const style = statusStyles[mission.status];
+  const style = missionStatusStyles[mission.status];
   const StatusIcon = style.icon;
 
   return (

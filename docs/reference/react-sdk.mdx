@@ -396,7 +396,7 @@ const { templates, loading, getTemplate, runTemplate, refetch } = useTemplates()
 Chat session management.
 
 ```tsx
-const { sessions, activeSessionId, setActiveSessionId, getMessages, deleteSession } = useSessions();
+const { sessions, activeSessionId, setActiveSessionId, getMessages, renameSession, deleteSession } = useSessions();
 ```
 
 ### Returns
@@ -409,6 +409,7 @@ const { sessions, activeSessionId, setActiveSessionId, getMessages, deleteSessio
 | `activeSessionId` | `string \| null` | Currently selected session |
 | `setActiveSessionId` | `(id: string \| null) => void` | Select a session |
 | `getMessages` | `(sessionId: string) => Promise<ChatMessage[]>` | Fetch messages for a session |
+| `renameSession` | `(sessionId: string, title: string) => Promise<void>` | Rename a session |
 | `deleteSession` | `(sessionId: string) => Promise<void>` | Delete a session |
 | `refetch` | `() => Promise<void>` | Force refetch |
 

@@ -9,6 +9,7 @@ export interface UseSessionsReturn {
   activeSessionId: string | null;
   setActiveSessionId: (id: string | null) => void;
   getMessages: (sessionId: string) => Promise<ChatMessage[]>;
+  renameSession: (sessionId: string, title: string) => Promise<void>;
   deleteSession: (sessionId: string) => Promise<void>;
   refetch: () => Promise<void>;
 }
@@ -43,6 +44,16 @@ export function useSessions(): UseSessionsReturn {
     [client],
   );
 
+  const renameSession = useCallback(
+    async (sessionId: string, title: string) => {
+      await client.renameSession(sessionId, title);
+      setSessions((prev) =>
+        prev.map((s) => (s.id === sessionId ? { ...s, title } : s)),
+      );
+    },
+    [client],
+  );
+
   const deleteSession = useCallback(
     async (sessionId: string) => {
       await client.deleteSession(sessionId);
@@ -61,6 +72,7 @@ export function useSessions(): UseSessionsReturn {
     activeSessionId,
     setActiveSessionId,
     getMessages,
+    renameSession,
     deleteSession,
     refetch,
   };

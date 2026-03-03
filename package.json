@@ -127,6 +127,10 @@
       "better-sqlite3",
       "esbuild",
       "sharp"
-    ]
+    ],
+    "patchedDependencies": {
+      "@radix-ui/react-popper@1.2.8": "patches/@radix-ui__react-popper@1.2.8.patch",
+      "@radix-ui/react-slot@1.2.3": "patches/@radix-ui__react-slot@1.2.3.patch"
+    }
   }
 }

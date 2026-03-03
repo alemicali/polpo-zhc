@@ -1,31 +1,79 @@
 /**
- * ChatSidebar — a right-side panel that renders the full ChatPage component.
+ * ChatSidebar — a right-side panel that renders an explicit compact variant
+ * of the chat UI.
  *
- * This is a zero-refactor wrapper: ChatPage is rendered exactly as-is inside a
- * resizable right panel. The panel auto-hides when the user is on /chat (since
- * the full-page chat is already visible). State is shared via ChatProvider context.
+ * Uses ChatPage with `compact` prop — no session sidebar, no negative margin
+ * hacks. The panel auto-hides when the user is on /chat (since the full-page
+ * chat is already visible). State is shared via ChatProvider context.
  */
 
 import { lazy, Suspense } from "react";
 import { useLocation } from "react-router-dom";
-import { useChatContext } from "@/hooks/chat-context";
-import { Loader2 } from "lucide-react";
+import { useSidebarOpen } from "@/hooks/chat-context";
+import { Skeleton } from "@/components/ui/skeleton";
 
 // Lazy-load ChatPage so it stays code-split (same as the route in app.tsx)
 const ChatPage = lazy(() =>
   import("@/pages/chat").then((m) => ({ default: m.ChatPage }))
 );
 
-function SidebarLoader() {
+/**
+ * Suspense fallback — matches the ChatLoadingSkeleton layout so there's no
+ * visual shift when the JS chunk finishes loading.
+ */
+function SidebarSkeleton() {
   return (
-    <div className="flex items-center justify-center flex-1">
-      <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+    <div className="flex flex-col flex-1 min-h-0">
+      {/* Toolbar skeleton */}
+      <div className="flex items-center gap-2 px-4 py-2 border-b border-border/40 shrink-0">
+        <Skeleton className="h-7 w-7 rounded-md" />
+        <Skeleton className="h-7 w-7 rounded-md" />
+        <Skeleton className="h-4 w-32 rounded" />
+        <div className="flex-1" />
+        <Skeleton className="h-5 w-20 rounded-full" />
+      </div>
+
+      {/* Messages skeleton */}
+      <div className="flex-1 overflow-hidden">
+        <div className="mx-auto max-w-3xl p-4 space-y-6">
+          <div className="flex justify-end">
+            <Skeleton className="h-10 w-48 rounded-2xl rounded-br-sm" />
+          </div>
+          <div className="flex gap-3">
+            <Skeleton className="h-7 w-7 rounded-full shrink-0" />
+            <div className="flex-1 space-y-2">
+              <Skeleton className="h-3 w-16 rounded" />
+              <Skeleton className="h-4 w-full rounded" />
+              <Skeleton className="h-4 w-3/4 rounded" />
+              <Skeleton className="h-4 w-5/6 rounded" />
+            </div>
+          </div>
+          <div className="flex justify-end">
+            <Skeleton className="h-10 w-36 rounded-2xl rounded-br-sm" />
+          </div>
+          <div className="flex gap-3">
+            <Skeleton className="h-7 w-7 rounded-full shrink-0" />
+            <div className="flex-1 space-y-2">
+              <Skeleton className="h-3 w-16 rounded" />
+              <Skeleton className="h-4 w-full rounded" />
+              <Skeleton className="h-4 w-2/3 rounded" />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Input skeleton */}
+      <div className="px-4 pt-2 pb-1.5 shrink-0">
+        <div className="mx-auto max-w-3xl">
+          <Skeleton className="h-[52px] w-full rounded-2xl" />
+        </div>
+      </div>
     </div>
   );
 }
 
 export function ChatSidebar() {
-  const { sidebarOpen } = useChatContext();
+  const sidebarOpen = useSidebarOpen();
   const { pathname } = useLocation();
 
   // Auto-hide on /chat — the full-page chat is already visible
@@ -35,11 +83,10 @@ export function ChatSidebar() {
   if (!visible) return null;
 
   return (
-    <div className="hidden lg:flex flex-col border-l border-border/50 bg-background w-[480px] shrink-0 h-full overflow-hidden">
-      {/* Provide the padding that ChatPage's negative margins expect to cancel */}
-      <div className="flex flex-col flex-1 min-h-0 p-4 lg:p-6 pb-2 lg:pb-3">
-        <Suspense fallback={<SidebarLoader />}>
-          <ChatPage />
+    <div className="hidden lg:flex flex-col w-[480px] shrink-0 h-full py-2 pr-2">
+      <div className="flex flex-col flex-1 min-h-0 rounded-xl border bg-card/50 overflow-hidden">
+        <Suspense fallback={<SidebarSkeleton />}>
+          <ChatPage compact />
         </Suspense>
       </div>
     </div>

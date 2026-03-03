@@ -70,6 +70,7 @@ export interface MentionPopoverHandle {
    * Replaces all display mentions with their wire equivalents.
    */
   resolveMessage: (displayText: string) => string;
+  toggle: () => void;
 }
 
 export interface MentionPopoverProps {
@@ -134,6 +135,13 @@ function useMentionTrigger(textareaRef: RefObject<HTMLTextAreaElement | null>) {
 // ────────────────────────────────────────────────────────────────────────────
 // Helpers
 // ────────────────────────────────────────────────────────────────────────────
+
+const CATEGORY_LABELS: Record<MentionCategory, string> = {
+  agent: "Agents",
+  task: "Tasks",
+  mission: "Missions",
+  file: "Files",
+};
 
 /** Format a name as @name or @"name with spaces" */
 function formatMention(name: string): string {
@@ -228,6 +236,7 @@ export const MentionPopover = forwardRef<
     useMentionTrigger(textareaRef);
 
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const [categoryFilter, setCategoryFilter] = useState<"all" | MentionCategory>("all");
   const listRef = useRef<HTMLDivElement>(null);
 
   /**
@@ -237,7 +246,7 @@ export const MentionPopover = forwardRef<
    */
   const mentionsMapRef = useRef<Map<string, string>>(new Map());
 
-  // Build structured list: agents → tasks → missions, all triggered by @
+  // Build structured list: agents → tasks → missions → files, all triggered by @
   const items = useMemo<MentionItem[]>(() => {
     const lowerQ = query.toLowerCase();
     const result: MentionItem[] = [];
@@ -296,18 +305,35 @@ export const MentionPopover = forwardRef<
     return result;
   }, [query, agents, tasks, missions, files]);
 
-  // Reset selection when the query or item count changes — NOT on every items
-  // reference change (parent arrays may be new refs each render).
-  const itemCount = items.length;
+  const filteredItems = useMemo(
+    () => categoryFilter === "all" ? items : items.filter(i => i.category === categoryFilter),
+    [items, categoryFilter],
+  );
+
+  const availableCategories = useMemo(() => {
+    const cats = new Set(items.map(i => i.category));
+    return (["agent", "task", "mission", "file"] as MentionCategory[]).filter(c => cats.has(c));
+  }, [items]);
+
+  // Reset selection when the query or filtered count changes
+  const filteredCount = filteredItems.length;
   useEffect(() => {
     setSelectedIndex(0);
-  }, [query, itemCount]);
+  }, [query, filteredCount, categoryFilter]);
+
+  useEffect(() => {
+    if (!isOpen) setCategoryFilter("all");
+  }, [isOpen]);
 
   useEffect(() => {
     if (!listRef.current) return;
     const el = listRef.current.querySelector(`[data-mention-index="${selectedIndex}"]`);
     el?.scrollIntoView({ block: "nearest" });
   }, [selectedIndex]);
+
+  // Ref to hold latest values for stable callbacks (avoids stale closures)
+  const stateRef = useRef({ isOpen, filteredItems, selectedIndex, triggerIndex });
+  stateRef.current = { isOpen, filteredItems, selectedIndex, triggerIndex };
 
   const insertMention = useCallback(
     (item: MentionItem) => {
@@ -328,7 +354,8 @@ export const MentionPopover = forwardRef<
       }
 
       const mention = displayMention + " ";
-      const before = value.slice(0, triggerIndex);
+      const ti = stateRef.current.triggerIndex;
+      const before = value.slice(0, ti);
       const after = value.slice(cursorPos);
       const newValue = before + mention + after;
 
@@ -340,7 +367,7 @@ export const MentionPopover = forwardRef<
 
       close();
     },
-    [textareaRef, triggerIndex, close],
+    [textareaRef, close],
   );
 
   /**
@@ -367,17 +394,18 @@ export const MentionPopover = forwardRef<
     ref,
     () => ({
       handleTextareaKeyDown: (e) => {
-        if (!isOpen || items.length === 0) return;
+        const { isOpen: open, filteredItems: fi, selectedIndex: si } = stateRef.current;
+        if (!open || fi.length === 0) return;
 
         if (e.key === "ArrowDown") {
           e.preventDefault();
-          setSelectedIndex((prev) => (prev + 1) % items.length);
+          setSelectedIndex((prev) => (prev + 1) % fi.length);
         } else if (e.key === "ArrowUp") {
           e.preventDefault();
-          setSelectedIndex((prev) => (prev - 1 + items.length) % items.length);
+          setSelectedIndex((prev) => (prev - 1 + fi.length) % fi.length);
         } else if (e.key === "Enter" || e.key === "Tab") {
           e.preventDefault();
-          insertMention(items[selectedIndex]);
+          insertMention(fi[si]);
         } else if (e.key === "Escape") {
           e.preventDefault();
           close();
@@ -385,9 +413,52 @@ export const MentionPopover = forwardRef<
       },
       handleInput,
       resolveMessage,
+      toggle: () => {
+        const textarea = textareaRef.current;
+        if (!textarea) return;
+
+        const { isOpen: open, triggerIndex: ti } = stateRef.current;
+
+        if (open) {
+          const { value } = textarea;
+          if (ti >= 0) {
+            const cursor = textarea.selectionStart ?? value.length;
+            const before = value.slice(0, ti);
+            const trimBefore = before.endsWith(" ") && ti > 0 ? before.slice(0, -1) : before;
+            const after = value.slice(cursor);
+            setNativeValue(textarea, trimBefore + after);
+            textarea.setSelectionRange(trimBefore.length, trimBefore.length);
+          }
+          close();
+          textarea.focus();
+          return;
+        }
+
+        // Focus first — selectionStart is null in some browsers without focus
+        textarea.focus();
+
+        const { value, selectionStart } = textarea;
+        const cursor = selectionStart ?? value.length;
+
+        const needsSpace = cursor > 0 && value[cursor - 1] !== " " && value[cursor - 1] !== "\n";
+        const insert = needsSpace ? " @" : "@";
+
+        const before = value.slice(0, cursor);
+        const after = value.slice(cursor);
+        const newValue = before + insert + after;
+
+        setNativeValue(textarea, newValue);
+
+        const newCursor = cursor + insert.length;
+        textarea.setSelectionRange(newCursor, newCursor);
+
+        handleInput();
+      },
     }),
-    [isOpen, items, selectedIndex, insertMention, close, handleInput, resolveMessage],
+    [insertMention, close, handleInput, resolveMessage, textareaRef],
   );
+
+  const showTabs = availableCategories.length > 1;
 
   return (
     <Popover open={isOpen && items.length > 0} modal={false}>
@@ -395,28 +466,66 @@ export const MentionPopover = forwardRef<
       <PopoverContent
         side="top"
         align="start"
-        className="w-72 p-0 max-h-64 overflow-hidden"
+        className="w-80 p-0 h-72 overflow-hidden flex flex-col"
         onOpenAutoFocus={(e) => e.preventDefault()}
         onInteractOutside={(e) => e.preventDefault()}
         onCloseAutoFocus={(e) => e.preventDefault()}
       >
-        <div ref={listRef} className="overflow-y-auto max-h-64 py-1">
-          {(() => {
+        {/* Category tabs */}
+        {showTabs && (
+          <div className="flex items-center gap-0.5 px-1.5 pt-1.5 pb-1 border-b border-border/50">
+            <button
+              type="button"
+              className={cn(
+                "px-2 py-0.5 text-[11px] font-medium rounded-md transition-colors select-none",
+                categoryFilter === "all"
+                  ? "bg-accent text-accent-foreground"
+                  : "text-muted-foreground hover:text-foreground hover:bg-accent/50",
+              )}
+              onMouseDown={(e) => {
+                e.preventDefault();
+                setCategoryFilter("all");
+              }}
+            >
+              All
+            </button>
+            {availableCategories.map((cat) => (
+              <button
+                key={cat}
+                type="button"
+                className={cn(
+                  "px-2 py-0.5 text-[11px] font-medium rounded-md transition-colors select-none",
+                  categoryFilter === cat
+                    ? "bg-accent text-accent-foreground"
+                    : "text-muted-foreground hover:text-foreground hover:bg-accent/50",
+                )}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  setCategoryFilter(cat);
+                }}
+              >
+                {CATEGORY_LABELS[cat]}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Item list */}
+        <div ref={listRef} className="overflow-y-auto flex-1 py-1">
+          {filteredItems.length === 0 ? (
+            <div className="px-2 py-3 text-xs text-muted-foreground text-center">
+              No matches
+            </div>
+          ) : (() => {
             let lastCategory: MentionCategory | null = null;
-            const categoryLabels: Record<MentionCategory, string> = {
-              agent: "Agents",
-              task: "Tasks",
-              mission: "Missions",
-              file: "Files",
-            };
-            return items.map((item, i) => {
-              const showHeader = item.category !== lastCategory;
+            return filteredItems.map((item, i) => {
+              const showHeader = categoryFilter === "all" && item.category !== lastCategory;
               lastCategory = item.category;
               return (
                 <div key={item.id}>
                   {showHeader && (
                     <div className="px-2 pt-1.5 pb-0.5 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
-                      {categoryLabels[item.category]}
+                      {CATEGORY_LABELS[item.category]}
                     </div>
                   )}
                   <button

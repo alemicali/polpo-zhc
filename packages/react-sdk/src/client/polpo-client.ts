@@ -32,6 +32,7 @@ import type {
   VaultPreviewPayload,
   GoToFilePayload,
   OpenFilePayload,
+  NavigateToPayload,
   RunActivityEntry,
   SkillInfo,
   LoadedSkill,
@@ -81,6 +82,9 @@ export class ChatCompletionStream implements AsyncIterable<ChatCompletionChunk> 
 
   /** If the stream ended with finish_reason "open_file", this contains the file path to open. */
   openFile: OpenFilePayload | null = null;
+
+  /** If the stream ended with finish_reason "navigate_to", this contains navigation target info. */
+  navigateTo: NavigateToPayload | null = null;
 
   /** Whether abort() has been called. */
   aborted = false;
@@ -194,6 +198,10 @@ export class ChatCompletionStream implements AsyncIterable<ChatCompletionChunk> 
             // Capture open_file payload from the chunk
             if (choice?.finish_reason === "open_file" && choice.open_file) {
               this.openFile = choice.open_file;
+            }
+            // Capture navigate_to payload from the chunk
+            if (choice?.finish_reason === "navigate_to" && choice.navigate_to) {
+              this.navigateTo = choice.navigate_to;
             }
             yield chunk;
           } catch {
@@ -570,6 +578,10 @@ export class PolpoClient {
 
   getSessionMessages(sessionId: string): Promise<{ session: ChatSession; messages: ChatMessage[] }> {
     return this.get<{ session: ChatSession; messages: ChatMessage[] }>(`/chat/sessions/${sessionId}/messages`);
+  }
+
+  renameSession(sessionId: string, title: string): Promise<{ renamed: boolean }> {
+    return this.patch<{ renamed: boolean }>(`/chat/sessions/${sessionId}`, { title });
   }
 
   deleteSession(sessionId: string): Promise<{ deleted: boolean }> {

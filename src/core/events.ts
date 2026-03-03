@@ -108,6 +108,9 @@ export interface PolpoEventMap {
   // Notification rule actions
   "action:triggered": { ruleId: string; actionType: string; result?: string; error?: string };
 
+  // Filesystem
+  "file:changed": { path: string; dir: string; action: "created" | "modified" | "deleted" | "renamed"; source: "agent" | "server" | "chat" };
+
   // General
   "log": { level: "info" | "warn" | "error" | "debug"; message: string };
 }

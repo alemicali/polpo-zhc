@@ -945,7 +945,7 @@ export interface ChatCompletionRequest {
 export interface ChatCompletionChoice {
   index: number;
   message: { role: "assistant"; content: string };
-  finish_reason: "stop" | "length" | "ask_user" | "mission_preview" | "vault_preview" | "go_to_file" | "open_file";
+  finish_reason: "stop" | "length" | "ask_user" | "mission_preview" | "vault_preview" | "go_to_file" | "open_file" | "navigate_to";
   /** Present when finish_reason is "ask_user" — structured questions for the user. */
   ask_user?: AskUserPayload;
   /** Present when finish_reason is "mission_preview" — proposed mission for user review. */
@@ -956,6 +956,8 @@ export interface ChatCompletionChoice {
   go_to_file?: GoToFilePayload;
   /** Present when finish_reason is "open_file" — file path to open in preview dialog. */
   open_file?: OpenFilePayload;
+  /** Present when finish_reason is "navigate_to" — navigate the UI to a specific page. */
+  navigate_to?: NavigateToPayload;
 }
 
 export interface ChatCompletionResponse {
@@ -1012,6 +1014,8 @@ export interface ChatCompletionChunk {
     go_to_file?: GoToFilePayload;
     /** Present when finish_reason is "open_file" — file path to open in preview dialog. */
     open_file?: OpenFilePayload;
+    /** Present when finish_reason is "navigate_to" — navigate the UI to a specific page. */
+    navigate_to?: NavigateToPayload;
     /** Present when the server is executing a tool call. */
     tool_call?: ToolCallEvent;
   }>;
@@ -1139,4 +1143,17 @@ export interface GoToFilePayload {
 export interface OpenFilePayload {
   /** File path relative to project root */
   path: string;
+}
+
+export interface NavigateToPayload {
+  /** Target page: dashboard, tasks, task, missions, mission, agents, agent, skills, skill, files, activity, chat, memory, settings */
+  target: string;
+  /** Entity ID for detail pages (task, mission) */
+  id?: string;
+  /** Entity name for detail pages (agent, skill) */
+  name?: string;
+  /** Directory path for files target */
+  path?: string;
+  /** File to highlight/select for files target */
+  highlight?: string;
 }

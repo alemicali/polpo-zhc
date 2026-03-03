@@ -169,6 +169,24 @@ export class FileSessionStore implements SessionStore {
     return sessions[0];
   }
 
+  renameSession(sessionId: string, title: string): boolean {
+    const file = this.sessionFile(sessionId);
+    if (!existsSync(file)) return false;
+    try {
+      const raw = readFileSync(file, "utf-8");
+      const lines = raw.split("\n").filter(Boolean);
+      if (lines.length === 0) return false;
+      const header = JSON.parse(lines[0]);
+      if (!header._session) return false;
+      header.title = title;
+      lines[0] = JSON.stringify(header);
+      writeFileSync(file, lines.join("\n") + "\n", "utf-8");
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   deleteSession(sessionId: string): boolean {
     const file = this.sessionFile(sessionId);
     if (!existsSync(file)) return false;
