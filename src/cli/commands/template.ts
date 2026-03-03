@@ -159,6 +159,11 @@ export function registerTemplateCommands(program: Command): void {
           }
           process.exit(1);
         }
+        if (validation.warnings.length > 0) {
+          for (const w of validation.warnings) {
+            console.warn(chalk.yellow(`    ⚠ ${w}`));
+          }
+        }
 
         // Instantiate
         const instance = instantiateTemplate(template, validation.resolved);

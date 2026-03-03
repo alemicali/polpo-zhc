@@ -174,6 +174,8 @@ export function loadTemplate(cwd: string, polpoDir: string | undefined, name: st
 export interface ValidationResult {
   valid: boolean;
   errors: string[];
+  /** Non-blocking issues (e.g. unknown parameters). */
+  warnings: string[];
   /** Resolved params with defaults applied. */
   resolved: Record<string, string | number | boolean>;
 }
@@ -187,6 +189,7 @@ export function validateParams(
   params: Record<string, string | number | boolean>,
 ): ValidationResult {
   const errors: string[] = [];
+  const warnings: string[] = [];
   const resolved: Record<string, string | number | boolean> = {};
   const defs = template.parameters ?? [];
 
@@ -241,11 +244,11 @@ export function validateParams(
   // Warn about unknown parameters (non-blocking)
   for (const key of Object.keys(params)) {
     if (!defs.some(d => d.name === key)) {
-      errors.push(`Unknown parameter: ${key}`);
+      warnings.push(`Unknown parameter: ${key}`);
     }
   }
 
-  return { valid: errors.length === 0, errors, resolved };
+  return { valid: errors.length === 0, errors, warnings, resolved };
 }
 
 // ── Instantiation ──────────────────────────────────────────────────────
@@ -342,11 +345,22 @@ export function validateTemplateDefinition(def: Partial<TemplateDefinition>): st
     const json = JSON.stringify(def.mission);
     const placeholders = json.match(/\{\{([^}]+)\}\}/g);
     if (placeholders) {
-      const names = [...new Set(placeholders.map(m => m.slice(2, -2)))];
+      const usedNames = new Set(placeholders.map(m => m.slice(2, -2)));
       const declaredNames = new Set(def.parameters.map(p => p.name));
-      for (const name of names) {
+      for (const name of usedNames) {
         if (!declaredNames.has(name)) {
           errors.push(`Placeholder "{{${name}}}" in mission has no matching parameter declaration.`);
+        }
+      }
+
+      // Check that optional params without defaults don't have placeholders in the mission.
+      // If they do, omitting the param at runtime would leave the placeholder unreplaced and crash.
+      for (const p of def.parameters) {
+        if (!p.required && p.default === undefined && usedNames.has(p.name)) {
+          errors.push(
+            `Parameter "${p.name}" is optional with no default but is used as "{{${p.name}}}" in the mission. ` +
+            `Either mark it as required, provide a default value, or remove the placeholder.`,
+          );
         }
       }
     }

@@ -3624,7 +3624,8 @@ function execInstantiateTemplate(polpo: Orchestrator, args: Record<string, unkno
       name: instance.name,
     });
 
-    return `Mission "${mission.name}" created from template "${name}" (ID: ${mission.id}, status: ${mission.status}). Use execute_mission to run it.`;
+    const warns = validation.warnings.length > 0 ? `\nWarnings:\n  - ${validation.warnings.join("\n  - ")}` : "";
+    return `Mission "${mission.name}" created from template "${name}" (ID: ${mission.id}, status: ${mission.status}). Use execute_mission to run it.${warns}`;
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     return `Error instantiating template: ${msg}`;
@@ -3659,7 +3660,8 @@ function execRunTemplate(polpo: Orchestrator, args: Record<string, unknown>): st
     });
 
     const result = polpo.executeMission(mission.id);
-    return `Template "${name}" executed — mission "${mission.name}" (ID: ${mission.id}), ${result.tasks.length} task(s), group: ${result.group}.`;
+    const warns = validation.warnings.length > 0 ? `\nWarnings:\n  - ${validation.warnings.join("\n  - ")}` : "";
+    return `Template "${name}" executed — mission "${mission.name}" (ID: ${mission.id}), ${result.tasks.length} task(s), group: ${result.group}.${warns}`;
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     return `Error running template: ${msg}`;

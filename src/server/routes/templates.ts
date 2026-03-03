@@ -150,6 +150,7 @@ export function templateRoutes(): OpenAPIHono<ServerEnv> {
         mission,
         tasks: result.tasks.length,
         group: result.group,
+        ...(validation.warnings.length > 0 ? { warnings: validation.warnings } : {}),
       },
     }, 201);
   });

@@ -6,6 +6,7 @@ import {
   loadTemplate,
   validateParams,
   instantiateTemplate,
+  validateTemplateDefinition,
 } from "../core/template.js";
 import type { TemplateDefinition } from "../core/template.js";
 
@@ -178,10 +179,11 @@ describe("validateParams", () => {
     expect(result.errors[0]).toContain("must be a number");
   });
 
-  it("warns about unknown parameters", () => {
+  it("warns about unknown parameters (non-blocking)", () => {
     const result = validateParams(wf, { module: "src", unknown_param: "value" });
-    expect(result.valid).toBe(false);
-    expect(result.errors).toContain("Unknown parameter: unknown_param");
+    expect(result.valid).toBe(true);
+    expect(result.warnings).toContain("Unknown parameter: unknown_param");
+    expect(result.errors).toHaveLength(0);
   });
 
   it("validates boolean type coercion", () => {
@@ -277,5 +279,83 @@ describe("instantiateTemplate", () => {
     expect(result.prompt).toBe("template:test-template");
     const mission = JSON.parse(result.data);
     expect(mission.tasks[0].title).toBe("Simple task");
+  });
+});
+
+// ── validateTemplateDefinition ─────────────────────────────────────────
+
+describe("validateTemplateDefinition", () => {
+  it("accepts a valid template", () => {
+    const errors = validateTemplateDefinition(makeTemplate());
+    expect(errors).toHaveLength(0);
+  });
+
+  it("rejects missing name", () => {
+    const errors = validateTemplateDefinition({ description: "d", mission: { tasks: [] } });
+    expect(errors.some(e => e.includes("name"))).toBe(true);
+  });
+
+  it("rejects non-kebab-case name", () => {
+    const errors = validateTemplateDefinition({ name: "Bad Name!", description: "d", mission: { tasks: [] } });
+    expect(errors.some(e => e.includes("kebab-case"))).toBe(true);
+  });
+
+  it("rejects undeclared placeholders", () => {
+    const errors = validateTemplateDefinition({
+      name: "test",
+      description: "d",
+      parameters: [],
+      mission: { tasks: [{ title: "{{undeclared}}" }] },
+    });
+    expect(errors.some(e => e.includes("undeclared"))).toBe(true);
+  });
+
+  it("errors on optional param without default that has placeholder in mission", () => {
+    const errors = validateTemplateDefinition({
+      name: "test",
+      description: "d",
+      parameters: [
+        { name: "opt", description: "optional param", type: "string" },
+        // required is undefined (defaults to false), no default value
+      ],
+      mission: { tasks: [{ title: "Do {{opt}}" }] },
+    });
+    expect(errors.some(e => e.includes('"opt"') && e.includes("optional with no default"))).toBe(true);
+  });
+
+  it("accepts optional param without default when NOT used as placeholder", () => {
+    const errors = validateTemplateDefinition({
+      name: "test",
+      description: "d",
+      parameters: [
+        { name: "opt", description: "optional extra metadata", type: "string" },
+      ],
+      mission: { tasks: [{ title: "Do something" }] },
+    });
+    expect(errors).toHaveLength(0);
+  });
+
+  it("accepts optional param WITH default used as placeholder", () => {
+    const errors = validateTemplateDefinition({
+      name: "test",
+      description: "d",
+      parameters: [
+        { name: "opt", description: "has a default", type: "string", default: "fallback" },
+      ],
+      mission: { tasks: [{ title: "Do {{opt}}" }] },
+    });
+    expect(errors).toHaveLength(0);
+  });
+
+  it("accepts required param without default used as placeholder", () => {
+    const errors = validateTemplateDefinition({
+      name: "test",
+      description: "d",
+      parameters: [
+        { name: "req", description: "required", type: "string", required: true },
+      ],
+      mission: { tasks: [{ title: "Do {{req}}" }] },
+    });
+    expect(errors).toHaveLength(0);
   });
 });
