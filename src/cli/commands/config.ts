@@ -4,8 +4,8 @@ import { resolve } from "node:path";
 import { Orchestrator } from "../../core/orchestrator.js";
 import { parseConfig } from "../../core/config.js";
 
-async function initOrchestrator(configPath: string): Promise<Orchestrator> {
-  const o = new Orchestrator(resolve(configPath));
+async function initOrchestrator(workDir: string): Promise<Orchestrator> {
+  const o = new Orchestrator(resolve(workDir));
   await o.init();
   return o;
 }

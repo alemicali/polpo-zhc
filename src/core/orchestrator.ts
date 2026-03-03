@@ -81,6 +81,8 @@ export class Orchestrator extends TypedEmitter {
   private config!: PolpoConfig;
   private polpoDir: string;
   private workDir: string;
+  /** Cached resolved agent working directory (invalidated on config reload). */
+  private cachedAgentWorkDir: string | null = null;
   private interactive = false;
   private stopped = false;
   private assessFn: AssessFn;
@@ -113,7 +115,12 @@ export class Orchestrator extends TypedEmitter {
   private assessor!: AssessmentOrchestrator;
 
   getWorkDir(): string { return this.workDir; }
-  getAgentWorkDir(): string { return this.resolveAgentWorkDir(); }
+  getAgentWorkDir(): string {
+    if (!this.cachedAgentWorkDir) {
+      this.cachedAgentWorkDir = this.resolveAgentWorkDir();
+    }
+    return this.cachedAgentWorkDir;
+  }
   getHooks(): HookRegistry { return this.hookRegistry; }
   getNotificationRouter(): NotificationRouter | undefined { return this.notificationRouter; }
   getPeerStore(): PeerStore | undefined { return this.peerStore; }
@@ -851,7 +858,8 @@ export class Orchestrator extends TypedEmitter {
       setModelAllowlist(newSettings.modelAllowlist);
     }
 
-    // 3. Rebuild the OrchestratorContext so new subsystems get fresh references
+    // 3. Invalidate cached agent work dir and rebuild OrchestratorContext
+    this.cachedAgentWorkDir = null;
     const ctx: OrchestratorContext = {
       emitter: this,
       registry: this.registry,
@@ -862,7 +870,7 @@ export class Orchestrator extends TypedEmitter {
       hooks: this.hookRegistry,
       config: this.config,
       workDir: this.workDir,
-      agentWorkDir: this.resolveAgentWorkDir(),
+      agentWorkDir: this.getAgentWorkDir(),
       polpoDir: this.polpoDir,
       assessFn: this.assessFn,
     };

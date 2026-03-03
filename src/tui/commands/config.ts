@@ -98,7 +98,7 @@ function configEdit(
 
           // Persist to .polpo/polpo.json
           try {
-            const polpoDir = (polpo as any).polpoDir as string;
+            const polpoDir = polpo.getPolpoDir();
             if (polpoDir) {
               savePolpoConfig(polpoDir, {
                 project: config.project,

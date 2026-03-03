@@ -14,7 +14,9 @@ const PKG_VERSION = existsSync(pkgPath)
   ? JSON.parse(readFileSync(pkgPath, "utf-8")).version
   : "0.0.0";
 
-// Load .env files (project-local, then .polpo/.env)
+// Load .env files from process.cwd() (project-local, then .polpo/.env).
+// NOTE: This runs at module top-level, before --dir is parsed. When --dir differs
+// from cwd, the correct .env is loaded later via parseConfig/provider overrides.
 for (const envPath of [".env", ".polpo/.env"]) {
   try {
     const abs = resolve(envPath);

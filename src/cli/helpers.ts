@@ -3,20 +3,20 @@ import { resolve } from "node:path";
 import { Orchestrator } from "../core/orchestrator.js";
 import type { Task, Mission, TaskStatus } from "../core/types.js";
 
-/** Create and initialize an Orchestrator for the given config path. */
-export async function createOrchestrator(configPath: string): Promise<Orchestrator> {
-  const o = new Orchestrator(resolve(configPath));
+/** Create and initialize an Orchestrator for the given working directory. */
+export async function createOrchestrator(workDir: string): Promise<Orchestrator> {
+  const o = new Orchestrator(resolve(workDir));
   await o.init();
   return o;
 }
 
 /** Wrap orchestrator lifecycle: create, run callback, handle errors. */
 export async function withOrchestrator(
-  configPath: string,
+  workDir: string,
   fn: (orchestrator: Orchestrator) => Promise<void>,
 ): Promise<void> {
   try {
-    const o = await createOrchestrator(configPath);
+    const o = await createOrchestrator(workDir);
     await fn(o);
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);

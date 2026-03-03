@@ -32,9 +32,9 @@ export function templateRoutes(): OpenAPIHono<ServerEnv> {
 
   app.openapi(listTemplatesRoute, (c) => {
     const orchestrator = c.get("orchestrator");
-    const cwd = orchestrator.getWorkDir();
+    const workDir = orchestrator.getWorkDir();
     const polpoDir = orchestrator.getPolpoDir?.();
-    const templates = discoverTemplates(cwd, polpoDir);
+    const templates = discoverTemplates(workDir, polpoDir);
     return c.json({ ok: true, data: templates });
   });
 
@@ -61,10 +61,10 @@ export function templateRoutes(): OpenAPIHono<ServerEnv> {
 
   app.openapi(getTemplateRoute, (c) => {
     const orchestrator = c.get("orchestrator");
-    const cwd = orchestrator.getWorkDir();
+    const workDir = orchestrator.getWorkDir();
     const polpoDir = orchestrator.getPolpoDir?.();
     const { name } = c.req.valid("param");
-    const template = loadTemplate(cwd, polpoDir, name);
+    const template = loadTemplate(workDir, polpoDir, name);
 
     if (!template) {
       return c.json({ ok: false, error: "Template not found", code: "NOT_FOUND" }, 404);
@@ -117,11 +117,11 @@ export function templateRoutes(): OpenAPIHono<ServerEnv> {
 
   app.openapi(runTemplateRoute, (c) => {
     const orchestrator = c.get("orchestrator");
-    const cwd = orchestrator.getWorkDir();
+    const workDir = orchestrator.getWorkDir();
     const polpoDir = orchestrator.getPolpoDir?.();
     const { name } = c.req.valid("param");
 
-    const template = loadTemplate(cwd, polpoDir, name);
+    const template = loadTemplate(workDir, polpoDir, name);
     if (!template) {
       return c.json({ ok: false, error: "Template not found", code: "NOT_FOUND" }, 404);
     }
@@ -249,11 +249,11 @@ export function templateRoutes(): OpenAPIHono<ServerEnv> {
 
   app.openapi(deleteTemplateRoute, (c) => {
     const orchestrator = c.get("orchestrator");
-    const cwd = orchestrator.getWorkDir();
+    const workDir = orchestrator.getWorkDir();
     const polpoDir = orchestrator.getPolpoDir?.();
     const { name } = c.req.valid("param");
 
-    const deleted = deleteTemplate(cwd, polpoDir, name);
+    const deleted = deleteTemplate(workDir, polpoDir, name);
     if (!deleted) {
       return c.json({ ok: false, error: "Template not found", code: "NOT_FOUND" }, 404);
     }
