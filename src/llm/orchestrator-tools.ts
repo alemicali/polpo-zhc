@@ -266,6 +266,178 @@ const deleteMissionTool: Tool = {
 };
 
 // ═══════════════════════════════════════════════════════
+//  ATOMIC MISSION DATA TOOLS (14)
+// ═══════════════════════════════════════════════════════
+
+// Tasks
+const addMissionTaskTool: Tool = {
+  name: "add_mission_task",
+  description: "Add a task to a draft mission's task list. The mission must be in draft status.",
+  parameters: Type.Object({
+    missionId: Type.String({ description: "Mission ID" }),
+    title: Type.String({ description: "Unique task title" }),
+    description: Type.String({ description: "Task description / instructions for the agent" }),
+    assignTo: Type.Optional(Type.String({ description: "Agent name to assign to" })),
+    dependsOn: Type.Optional(Type.Array(Type.String(), { description: "Task titles this depends on" })),
+    expectations: Type.Optional(Type.Array(Type.Any(), { description: "Expectations array" })),
+    expectedOutcomes: Type.Optional(Type.Array(Type.Any(), { description: "Expected outcome descriptors" })),
+    maxDuration: Type.Optional(Type.Number({ description: "Max duration in seconds" })),
+  }),
+};
+
+const updateMissionTaskTool: Tool = {
+  name: "update_mission_task",
+  description: "Update an existing task in a draft mission by its current title.",
+  parameters: Type.Object({
+    missionId: Type.String({ description: "Mission ID" }),
+    taskTitle: Type.String({ description: "Current task title to update" }),
+    title: Type.Optional(Type.String({ description: "New title" })),
+    description: Type.Optional(Type.String({ description: "New description" })),
+    assignTo: Type.Optional(Type.String({ description: "New agent assignment" })),
+    dependsOn: Type.Optional(Type.Array(Type.String(), { description: "New dependency list" })),
+    expectations: Type.Optional(Type.Array(Type.Any(), { description: "New expectations" })),
+    expectedOutcomes: Type.Optional(Type.Array(Type.Any(), { description: "New expected outcomes" })),
+  }),
+};
+
+const removeMissionTaskTool: Tool = {
+  name: "remove_mission_task",
+  description: "Remove a task from a draft mission by its title.",
+  parameters: Type.Object({
+    missionId: Type.String({ description: "Mission ID" }),
+    taskTitle: Type.String({ description: "Task title to remove" }),
+  }),
+};
+
+const reorderMissionTasksTool: Tool = {
+  name: "reorder_mission_tasks",
+  description: "Reorder tasks in a draft mission. Provide all task titles in the desired order.",
+  parameters: Type.Object({
+    missionId: Type.String({ description: "Mission ID" }),
+    titles: Type.Array(Type.String(), { description: "All task titles in desired order" }),
+  }),
+};
+
+// Checkpoints
+const addMissionCheckpointTool: Tool = {
+  name: "add_mission_checkpoint",
+  description: "Add a human-in-the-loop checkpoint to a draft mission.",
+  parameters: Type.Object({
+    missionId: Type.String({ description: "Mission ID" }),
+    name: Type.String({ description: "Unique checkpoint name" }),
+    afterTasks: Type.Array(Type.String(), { description: "Task titles that trigger this checkpoint when all complete" }),
+    blocksTasks: Type.Array(Type.String(), { description: "Task titles blocked until checkpoint is resumed" }),
+    message: Type.Optional(Type.String({ description: "Message shown when checkpoint activates" })),
+  }),
+};
+
+const updateMissionCheckpointTool: Tool = {
+  name: "update_mission_checkpoint",
+  description: "Update an existing checkpoint in a draft mission.",
+  parameters: Type.Object({
+    missionId: Type.String({ description: "Mission ID" }),
+    checkpointName: Type.String({ description: "Current checkpoint name" }),
+    name: Type.Optional(Type.String({ description: "New name" })),
+    afterTasks: Type.Optional(Type.Array(Type.String(), { description: "New afterTasks" })),
+    blocksTasks: Type.Optional(Type.Array(Type.String(), { description: "New blocksTasks" })),
+    message: Type.Optional(Type.String({ description: "New message" })),
+  }),
+};
+
+const removeMissionCheckpointTool: Tool = {
+  name: "remove_mission_checkpoint",
+  description: "Remove a checkpoint from a draft mission.",
+  parameters: Type.Object({
+    missionId: Type.String({ description: "Mission ID" }),
+    checkpointName: Type.String({ description: "Checkpoint name to remove" }),
+  }),
+};
+
+// Quality gates
+const addMissionQualityGateTool: Tool = {
+  name: "add_mission_quality_gate",
+  description: "Add a quality gate to a draft mission. Gates block downstream tasks until predecessors meet a minimum score.",
+  parameters: Type.Object({
+    missionId: Type.String({ description: "Mission ID" }),
+    name: Type.String({ description: "Unique gate name" }),
+    afterTasks: Type.Array(Type.String(), { description: "Task titles whose scores are evaluated" }),
+    blocksTasks: Type.Array(Type.String(), { description: "Task titles blocked until gate passes" }),
+    minScore: Type.Optional(Type.Number({ description: "Minimum average score (1-5) required" })),
+    requireAllPassed: Type.Optional(Type.Boolean({ description: "Require all afterTasks to be done (not failed)" })),
+  }),
+};
+
+const updateMissionQualityGateTool: Tool = {
+  name: "update_mission_quality_gate",
+  description: "Update an existing quality gate in a draft mission.",
+  parameters: Type.Object({
+    missionId: Type.String({ description: "Mission ID" }),
+    gateName: Type.String({ description: "Current gate name" }),
+    name: Type.Optional(Type.String({ description: "New name" })),
+    afterTasks: Type.Optional(Type.Array(Type.String(), { description: "New afterTasks" })),
+    blocksTasks: Type.Optional(Type.Array(Type.String(), { description: "New blocksTasks" })),
+    minScore: Type.Optional(Type.Number({ description: "New minimum score" })),
+    requireAllPassed: Type.Optional(Type.Boolean({ description: "New requireAllPassed" })),
+  }),
+};
+
+const removeMissionQualityGateTool: Tool = {
+  name: "remove_mission_quality_gate",
+  description: "Remove a quality gate from a draft mission.",
+  parameters: Type.Object({
+    missionId: Type.String({ description: "Mission ID" }),
+    gateName: Type.String({ description: "Gate name to remove" }),
+  }),
+};
+
+// Team members (volatile agents)
+const addMissionTeamMemberTool: Tool = {
+  name: "add_mission_team_member",
+  description: "Add a volatile team member to a draft mission. Created on execute, cleaned up on completion.",
+  parameters: Type.Object({
+    missionId: Type.String({ description: "Mission ID" }),
+    name: Type.String({ description: "Agent name" }),
+    role: Type.Optional(Type.String({ description: "Agent role description" })),
+    model: Type.Optional(Type.String({ description: "LLM model (provider:model format)" })),
+    systemPrompt: Type.Optional(Type.String({ description: "Custom system prompt" })),
+    allowedTools: Type.Optional(Type.Array(Type.String(), { description: "Allowed tool names" })),
+  }),
+};
+
+const updateMissionTeamMemberTool: Tool = {
+  name: "update_mission_team_member",
+  description: "Update a volatile team member in a draft mission.",
+  parameters: Type.Object({
+    missionId: Type.String({ description: "Mission ID" }),
+    memberName: Type.String({ description: "Current member name" }),
+    name: Type.Optional(Type.String({ description: "New name" })),
+    role: Type.Optional(Type.String({ description: "New role" })),
+    model: Type.Optional(Type.String({ description: "New model" })),
+    systemPrompt: Type.Optional(Type.String({ description: "New system prompt" })),
+    allowedTools: Type.Optional(Type.Array(Type.String(), { description: "New allowed tools" })),
+  }),
+};
+
+const removeMissionTeamMemberTool: Tool = {
+  name: "remove_mission_team_member",
+  description: "Remove a volatile team member from a draft mission.",
+  parameters: Type.Object({
+    missionId: Type.String({ description: "Mission ID" }),
+    memberName: Type.String({ description: "Member name to remove" }),
+  }),
+};
+
+// Notifications
+const updateMissionNotificationsTool: Tool = {
+  name: "update_mission_notifications",
+  description: "Update or clear mission-scoped notification rules. Pass null to clear.",
+  parameters: Type.Object({
+    missionId: Type.String({ description: "Mission ID" }),
+    notifications: Type.Any({ description: "Scoped notification rules object, or null to clear" }),
+  }),
+};
+
+// ═══════════════════════════════════════════════════════
 //  TEAM & AGENT TOOLS (4)
 // ═══════════════════════════════════════════════════════
 
@@ -1009,8 +1181,13 @@ export const ALL_ORCHESTRATOR_TOOLS: Tool[] = [
   // Task (8)
   createTaskTool, updateTaskTool, deleteTaskTool, deleteTasksTool,
   retryTaskTool, killTaskTool, reassessTaskTool, forceFailTaskTool,
-  // Mission (6)
+  // Mission (6 + 14 atomic)
   createMissionTool, updateMissionTool, executeMissionTool, resumeMissionTool, abortMissionTool, deleteMissionTool,
+  addMissionTaskTool, updateMissionTaskTool, removeMissionTaskTool, reorderMissionTasksTool,
+  addMissionCheckpointTool, updateMissionCheckpointTool, removeMissionCheckpointTool,
+  addMissionQualityGateTool, updateMissionQualityGateTool, removeMissionQualityGateTool,
+  addMissionTeamMemberTool, updateMissionTeamMemberTool, removeMissionTeamMemberTool,
+  updateMissionNotificationsTool,
   // Team (7)
   listTeamsTool, addAgentTool, removeAgentTool, updateAgentTool, renameTeamTool, addTeamTool, removeTeamTool,
   // Vault (3)
@@ -1058,6 +1235,20 @@ const TOOL_LABELS: Record<string, string> = {
   resume_mission: "Resume Mission",
   abort_mission: "Abort Mission",
   delete_mission: "Delete Mission",
+  add_mission_task: "Add Mission Task",
+  update_mission_task: "Update Mission Task",
+  remove_mission_task: "Remove Mission Task",
+  reorder_mission_tasks: "Reorder Mission Tasks",
+  add_mission_checkpoint: "Add Mission Checkpoint",
+  update_mission_checkpoint: "Update Mission Checkpoint",
+  remove_mission_checkpoint: "Remove Mission Checkpoint",
+  add_mission_quality_gate: "Add Mission Quality Gate",
+  update_mission_quality_gate: "Update Mission Quality Gate",
+  remove_mission_quality_gate: "Remove Mission Quality Gate",
+  add_mission_team_member: "Add Mission Team Member",
+  update_mission_team_member: "Update Mission Team Member",
+  remove_mission_team_member: "Remove Mission Team Member",
+  update_mission_notifications: "Update Mission Notifications",
   add_agent: "Add Agent",
   remove_agent: "Remove Agent",
   update_agent: "Update Agent",
@@ -1192,6 +1383,22 @@ export async function executeOrchestratorTool(
       case "resume_mission":   return execResumeMission(polpo, args);
       case "abort_mission":    return execAbortMission(polpo, args);
       case "delete_mission":   return execDeleteMission(polpo, args);
+
+      // ── Atomic mission data ──
+      case "add_mission_task":             return execAddMissionTask(polpo, args);
+      case "update_mission_task":          return execUpdateMissionTask(polpo, args);
+      case "remove_mission_task":          return execRemoveMissionTask(polpo, args);
+      case "reorder_mission_tasks":        return execReorderMissionTasks(polpo, args);
+      case "add_mission_checkpoint":       return execAddMissionCheckpoint(polpo, args);
+      case "update_mission_checkpoint":    return execUpdateMissionCheckpoint(polpo, args);
+      case "remove_mission_checkpoint":    return execRemoveMissionCheckpoint(polpo, args);
+      case "add_mission_quality_gate":     return execAddMissionQualityGate(polpo, args);
+      case "update_mission_quality_gate":  return execUpdateMissionQualityGate(polpo, args);
+      case "remove_mission_quality_gate":  return execRemoveMissionQualityGate(polpo, args);
+      case "add_mission_team_member":      return execAddMissionTeamMember(polpo, args);
+      case "update_mission_team_member":   return execUpdateMissionTeamMember(polpo, args);
+      case "remove_mission_team_member":   return execRemoveMissionTeamMember(polpo, args);
+      case "update_mission_notifications": return execUpdateMissionNotifications(polpo, args);
 
       // ── Team ──
       case "list_teams":       return execListTeams(polpo);
@@ -1837,6 +2044,134 @@ function execDeleteMission(polpo: Orchestrator, args: Record<string, unknown>): 
   if (!mission) return `Error: Mission "${missionId}" not found.`;
   polpo.deleteMission(missionId);
   return `Mission "${mission.name}" deleted.`;
+}
+
+// ═══════════════════════════════════════════════════════
+//  ATOMIC MISSION DATA IMPLEMENTATIONS
+// ═══════════════════════════════════════════════════════
+
+function execAddMissionTask(polpo: Orchestrator, args: Record<string, unknown>): string {
+  try {
+    const m = polpo.addMissionTask(args.missionId as string, {
+      title: args.title as string,
+      description: args.description as string,
+      assignTo: args.assignTo as string | undefined,
+      dependsOn: args.dependsOn as string[] | undefined,
+      expectations: args.expectations as unknown[] | undefined,
+      expectedOutcomes: args.expectedOutcomes as unknown[] | undefined,
+      maxDuration: args.maxDuration as number | undefined,
+    });
+    const parsed = m.data ? JSON.parse(m.data) : {};
+    return `Task "${args.title}" added to mission "${m.name}" (${parsed.tasks?.length ?? "?"} tasks total).`;
+  } catch (e) { return `Error: ${(e as Error).message}`; }
+}
+
+function execUpdateMissionTask(polpo: Orchestrator, args: Record<string, unknown>): string {
+  try {
+    const { missionId, taskTitle, ...updates } = args;
+    const m = polpo.updateMissionTask(missionId as string, taskTitle as string, updates);
+    return `Task "${taskTitle}" updated in mission "${m.name}".`;
+  } catch (e) { return `Error: ${(e as Error).message}`; }
+}
+
+function execRemoveMissionTask(polpo: Orchestrator, args: Record<string, unknown>): string {
+  try {
+    const m = polpo.removeMissionTask(args.missionId as string, args.taskTitle as string);
+    const parsed = m.data ? JSON.parse(m.data) : {};
+    return `Task "${args.taskTitle}" removed from mission "${m.name}" (${parsed.tasks?.length ?? 0} tasks remaining).`;
+  } catch (e) { return `Error: ${(e as Error).message}`; }
+}
+
+function execReorderMissionTasks(polpo: Orchestrator, args: Record<string, unknown>): string {
+  try {
+    const m = polpo.reorderMissionTasks(args.missionId as string, args.titles as string[]);
+    return `Tasks reordered in mission "${m.name}".`;
+  } catch (e) { return `Error: ${(e as Error).message}`; }
+}
+
+function execAddMissionCheckpoint(polpo: Orchestrator, args: Record<string, unknown>): string {
+  try {
+    const m = polpo.addMissionCheckpoint(args.missionId as string, {
+      name: args.name as string,
+      afterTasks: args.afterTasks as string[],
+      blocksTasks: args.blocksTasks as string[],
+      message: args.message as string | undefined,
+    });
+    return `Checkpoint "${args.name}" added to mission "${m.name}".`;
+  } catch (e) { return `Error: ${(e as Error).message}`; }
+}
+
+function execUpdateMissionCheckpoint(polpo: Orchestrator, args: Record<string, unknown>): string {
+  try {
+    const { missionId, checkpointName, ...updates } = args;
+    const m = polpo.updateMissionCheckpoint(missionId as string, checkpointName as string, updates as { name?: string; afterTasks?: string[]; blocksTasks?: string[]; message?: string });
+    return `Checkpoint "${checkpointName}" updated in mission "${m.name}".`;
+  } catch (e) { return `Error: ${(e as Error).message}`; }
+}
+
+function execRemoveMissionCheckpoint(polpo: Orchestrator, args: Record<string, unknown>): string {
+  try {
+    const m = polpo.removeMissionCheckpoint(args.missionId as string, args.checkpointName as string);
+    return `Checkpoint "${args.checkpointName}" removed from mission "${m.name}".`;
+  } catch (e) { return `Error: ${(e as Error).message}`; }
+}
+
+function execAddMissionQualityGate(polpo: Orchestrator, args: Record<string, unknown>): string {
+  try {
+    const m = polpo.addMissionQualityGate(args.missionId as string, {
+      name: args.name as string,
+      afterTasks: args.afterTasks as string[],
+      blocksTasks: args.blocksTasks as string[],
+      minScore: args.minScore as number | undefined,
+      requireAllPassed: args.requireAllPassed as boolean | undefined,
+    });
+    return `Quality gate "${args.name}" added to mission "${m.name}".`;
+  } catch (e) { return `Error: ${(e as Error).message}`; }
+}
+
+function execUpdateMissionQualityGate(polpo: Orchestrator, args: Record<string, unknown>): string {
+  try {
+    const { missionId, gateName, ...updates } = args;
+    const m = polpo.updateMissionQualityGate(missionId as string, gateName as string, updates as { name?: string; afterTasks?: string[]; blocksTasks?: string[]; minScore?: number; requireAllPassed?: boolean });
+    return `Quality gate "${gateName}" updated in mission "${m.name}".`;
+  } catch (e) { return `Error: ${(e as Error).message}`; }
+}
+
+function execRemoveMissionQualityGate(polpo: Orchestrator, args: Record<string, unknown>): string {
+  try {
+    const m = polpo.removeMissionQualityGate(args.missionId as string, args.gateName as string);
+    return `Quality gate "${args.gateName}" removed from mission "${m.name}".`;
+  } catch (e) { return `Error: ${(e as Error).message}`; }
+}
+
+function execAddMissionTeamMember(polpo: Orchestrator, args: Record<string, unknown>): string {
+  try {
+    const { missionId, ...member } = args;
+    const m = polpo.addMissionTeamMember(missionId as string, member as { name: string; role?: string; model?: string });
+    return `Team member "${member.name}" added to mission "${m.name}".`;
+  } catch (e) { return `Error: ${(e as Error).message}`; }
+}
+
+function execUpdateMissionTeamMember(polpo: Orchestrator, args: Record<string, unknown>): string {
+  try {
+    const { missionId, memberName, ...updates } = args;
+    const m = polpo.updateMissionTeamMember(missionId as string, memberName as string, updates as { name?: string; role?: string; model?: string });
+    return `Team member "${memberName}" updated in mission "${m.name}".`;
+  } catch (e) { return `Error: ${(e as Error).message}`; }
+}
+
+function execRemoveMissionTeamMember(polpo: Orchestrator, args: Record<string, unknown>): string {
+  try {
+    const m = polpo.removeMissionTeamMember(args.missionId as string, args.memberName as string);
+    return `Team member "${args.memberName}" removed from mission "${m.name}".`;
+  } catch (e) { return `Error: ${(e as Error).message}`; }
+}
+
+function execUpdateMissionNotifications(polpo: Orchestrator, args: Record<string, unknown>): string {
+  try {
+    const m = polpo.updateMissionNotifications(args.missionId as string, args.notifications as import("../core/types.js").ScopedNotificationRules | null);
+    return args.notifications ? `Notification rules updated for mission "${m.name}".` : `Notification rules cleared for mission "${m.name}".`;
+  } catch (e) { return `Error: ${(e as Error).message}`; }
 }
 
 // ═══════════════════════════════════════════════════════

@@ -545,7 +545,7 @@ export function TaskDetailPage() {
   const { task, isLoading, error, updateTask, retryTask, killTask, reassessTask, queueTask } = useTask(taskId ?? "");
   const { tasks: allTasks } = useTasks();
   const { processes } = useProcesses();
-  const { progress: assessmentProgress, isAssessing } = useAssessmentProgress(taskId ?? "");
+  const { progress: assessmentProgress, isAssessing, checks: assessmentChecks } = useAssessmentProgress(taskId ?? "");
 
   // Resolve dependsOn IDs to task titles
   const depTitleMap: Record<string, string> = {};
@@ -1360,12 +1360,35 @@ export function TaskDetailPage() {
                       <Wrench className="h-3 w-3" /> Expectations ({task.expectations.length})
                     </p>
                     <div className="space-y-2">
-                      {task.expectations.map((exp, i) => (
-                        <div key={i} className="rounded-md border border-border p-3 space-y-2">
+                      {task.expectations.map((exp, i) => {
+                        // Per-expectation live status from assessment events
+                        const checkStarted = assessmentChecks.find(c => c.index === i && c.phase === "started");
+                        const checkComplete = assessmentChecks.find(c => c.index === i && c.phase === "complete");
+                        const isRunning = !!checkStarted && !checkComplete;
+                        const isDone = !!checkComplete;
+                        const checkPassed = checkComplete?.passed;
+
+                        return (
+                        <div key={i} className={cn(
+                          "rounded-md border p-3 space-y-2 transition-colors",
+                          isRunning ? "border-sky-500/60 bg-sky-500/5" : isDone ? (checkPassed ? "border-emerald-500/40 bg-emerald-500/5" : "border-red-500/40 bg-red-500/5") : "border-border",
+                        )}>
                           <div className="flex items-center gap-2 flex-wrap">
                             <Badge variant="outline" className="text-[10px] shrink-0">{exp.type}</Badge>
                             {exp.confidence && (
                               <Badge variant="secondary" className="text-[9px] shrink-0">{exp.confidence}</Badge>
+                            )}
+                            {/* Live status indicator */}
+                            {isRunning && (
+                              <span className="flex items-center gap-1 text-[10px] text-sky-400">
+                                <Loader2 className="h-3 w-3 animate-spin" /> Running...
+                              </span>
+                            )}
+                            {isDone && (
+                              <span className={cn("flex items-center gap-1 text-[10px]", checkPassed ? "text-emerald-400" : "text-red-400")}>
+                                {checkPassed ? <CheckCircle2 className="h-3 w-3" /> : <XCircle className="h-3 w-3" />}
+                                {checkPassed ? "Passed" : "Failed"}
+                              </span>
                             )}
                             {exp.threshold != null && (
                               <span className="text-[11px] text-muted-foreground ml-auto shrink-0">
@@ -1374,9 +1397,9 @@ export function TaskDetailPage() {
                             )}
                           </div>
                           {exp.command && (
-                            <code className="block text-[11px] bg-muted/40 rounded px-2 py-1.5 font-mono text-muted-foreground whitespace-pre-wrap break-all">
-                              {exp.command}
-                            </code>
+                            <MessageResponse mode="static" className="text-[11px] [&_pre]:my-0 [&_code]:text-[11px]">
+                              {`\`\`\`bash\n${exp.command}\n\`\`\``}
+                            </MessageResponse>
                           )}
                           {exp.paths && exp.paths.length > 0 && (
                             <div className="flex flex-wrap gap-1">
@@ -1437,7 +1460,8 @@ export function TaskDetailPage() {
                             </Collapsible>
                           )}
                         </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </CardContent>
                 </Card>

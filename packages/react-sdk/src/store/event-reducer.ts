@@ -149,6 +149,21 @@ export function reduceEvent(state: StoreState, sseEvent: SSEEvent): StoreState {
       return { ...next, assessmentProgress };
     }
 
+    case "assessment:check:started":
+    case "assessment:check:complete": {
+      const { taskId, index, total, type, label, phase, passed, message: checkMsg } = data as {
+        taskId: string; index: number; total: number; type: string; label: string;
+        phase: "started" | "complete"; passed?: boolean; message?: string;
+      };
+      const assessmentChecks = new Map(state.assessmentChecks);
+      const existing = assessmentChecks.get(taskId) ?? [];
+      // Replace if same index+phase already exists, otherwise append
+      const filtered = existing.filter(c => !(c.index === index && c.phase === phase));
+      filtered.push({ index, total, type, label, phase, passed, message: checkMsg, timestamp: Date.now() });
+      assessmentChecks.set(taskId, filtered);
+      return { ...next, assessmentChecks };
+    }
+
     case "assessment:corrected":
       return next;
 
@@ -160,10 +175,12 @@ export function reduceEvent(state: StoreState, sseEvent: SSEEvent): StoreState {
         globalScore?: number;
         message?: string;
       };
-      // Clear assessment progress for this task
+      // Clear assessment progress and check status for this task
       const assessmentProgress = new Map(state.assessmentProgress);
       assessmentProgress.delete(taskId);
-      next = { ...next, assessmentProgress };
+      const assessmentChecks2 = new Map(state.assessmentChecks);
+      assessmentChecks2.delete(taskId);
+      next = { ...next, assessmentProgress, assessmentChecks: assessmentChecks2 };
 
       const existing = state.tasks.get(taskId);
       if (existing?.result) {
@@ -271,8 +288,16 @@ export function reduceEvent(state: StoreState, sseEvent: SSEEvent): StoreState {
       return { ...next, missionsStale: true, missionReports };
     }
 
-    case "mission:resumed":
+    case "mission:resumed": {
+      const { missionId, name } = data as { missionId: string; name: string; retried: number; pending: number };
+      const existing = state.missions.get(missionId);
+      if (existing) {
+        const missions = new Map(state.missions);
+        missions.set(missionId, { ...existing, name, status: "active" as MissionStatus, updatedAt: new Date().toISOString() });
+        return { ...next, missions, missionsStale: true };
+      }
       return { ...next, missionsStale: true };
+    }
 
     case "mission:deleted": {
       const { missionId } = data as { missionId: string };

@@ -1,13 +1,15 @@
 import { useSyncExternalStore } from "react";
 import { usePolpoContext } from "../provider/polpo-context.js";
-import { selectAssessmentProgress } from "../store/selectors.js";
-import type { AssessmentProgressEntry } from "../store/types.js";
+import { selectAssessmentProgress, selectAssessmentChecks } from "../store/selectors.js";
+import type { AssessmentProgressEntry, AssessmentCheckStatus } from "../store/types.js";
 
 export interface UseAssessmentProgressReturn {
   /** Live assessment progress messages for this task. Empty when no assessment is running. */
   progress: AssessmentProgressEntry[];
   /** Whether an assessment is currently in progress (progress array is non-empty). */
   isAssessing: boolean;
+  /** Per-expectation check status (started/complete). Empty when no assessment is running. */
+  checks: AssessmentCheckStatus[];
 }
 
 export function useAssessmentProgress(taskId: string): UseAssessmentProgressReturn {
@@ -19,5 +21,11 @@ export function useAssessmentProgress(taskId: string): UseAssessmentProgressRetu
     () => [],
   );
 
-  return { progress, isAssessing: progress.length > 0 };
+  const checks = useSyncExternalStore(
+    store.subscribe,
+    () => selectAssessmentChecks(store.getSnapshot(), taskId),
+    () => [],
+  );
+
+  return { progress, isAssessing: progress.length > 0, checks };
 }

@@ -73,6 +73,16 @@ export type {
   UpdateTaskRequest,
   CreateMissionRequest,
   UpdateMissionRequest,
+  AddMissionTaskRequest,
+  UpdateMissionTaskRequest,
+  ReorderMissionTasksRequest,
+  AddMissionCheckpointRequest,
+  UpdateMissionCheckpointRequest,
+  AddMissionQualityGateRequest,
+  UpdateMissionQualityGateRequest,
+  AddMissionTeamMemberRequest,
+  UpdateMissionTeamMemberRequest,
+  UpdateMissionNotificationsRequest,
   AddAgentRequest,
   AddTeamRequest,
   TaskFilters,
@@ -128,5 +138,5 @@ export type {
 } from "./client/types.js";
 
 export type { ConnectionStatus } from "./client/event-source.js";
-export type { PolpoStats, StoreState, AssessmentProgressEntry } from "./store/types.js";
+export type { PolpoStats, StoreState, AssessmentProgressEntry, AssessmentCheckStatus } from "./store/types.js";
 export type { TaskFilter } from "./store/selectors.js";

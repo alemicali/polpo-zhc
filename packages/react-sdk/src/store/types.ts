@@ -21,6 +21,17 @@ export interface AssessmentProgressEntry {
   timestamp: number;
 }
 
+export interface AssessmentCheckStatus {
+  index: number;
+  total: number;
+  type: string;
+  label: string;
+  phase: "started" | "complete";
+  passed?: boolean;
+  message?: string;
+  timestamp: number;
+}
+
 export interface StoreState {
   tasks: Map<string, Task>;
   missions: Map<string, Mission>;
@@ -35,4 +46,6 @@ export interface StoreState {
   memory: { exists: boolean; content: string } | null;
   /** Live assessment progress messages keyed by taskId. Cleared on assessment:complete. */
   assessmentProgress: Map<string, AssessmentProgressEntry[]>;
+  /** Per-check status keyed by taskId. Tracks which expectations are running/done. Cleared on assessment:complete. */
+  assessmentChecks: Map<string, AssessmentCheckStatus[]>;
 }

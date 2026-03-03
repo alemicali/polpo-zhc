@@ -166,15 +166,45 @@ export async function runMetric(
   }
 }
 
+/** Label for an expectation — used in progress events. */
+function expectationLabel(exp: TaskExpectation): string {
+  if (exp.type === "test") return exp.command ?? "npm test";
+  if (exp.type === "file_exists") return (exp.paths ?? []).join(", ") || "file_exists";
+  if (exp.type === "script") {
+    const cmd = exp.command ?? "";
+    return cmd.includes("\n") ? `script (${cmd.split("\n").length} lines)` : cmd;
+  }
+  if (exp.type === "llm_review") return exp.criteria ? exp.criteria.slice(0, 60) : "LLM review";
+  return exp.type;
+}
+
+export interface CheckProgressEvent {
+  index: number;
+  total: number;
+  type: string;
+  label: string;
+  phase: "started" | "complete";
+  passed?: boolean;
+  message?: string;
+}
+
 export async function assessTask(
   task: Task,
   cwd: string,
   onProgress?: (msg: string) => void,
   context?: ReviewContext,
   reasoning?: ReasoningLevel,
+  onCheckProgress?: (event: CheckProgressEvent) => void,
 ): Promise<AssessmentResult> {
+  const total = task.expectations.length;
   const checks = await Promise.all(
-    task.expectations.map((exp) => runCheck(exp, cwd, onProgress, context, reasoning))
+    task.expectations.map(async (exp, i) => {
+      const label = expectationLabel(exp);
+      onCheckProgress?.({ index: i, total, type: exp.type, label, phase: "started" });
+      const result = await runCheck(exp, cwd, onProgress, context, reasoning);
+      onCheckProgress?.({ index: i, total, type: exp.type, label, phase: "complete", passed: result.passed, message: result.message });
+      return result;
+    })
   );
   const metrics = await Promise.all(
     task.metrics.map((m) => runMetric(m, cwd))

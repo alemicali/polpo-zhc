@@ -130,10 +130,15 @@ function matchesEventFilter(eventName: string, patterns: string[]): boolean {
 
 // ── Assessment progress selector ────────────────────────────
 
-import type { AssessmentProgressEntry } from "./types.js";
+import type { AssessmentProgressEntry, AssessmentCheckStatus } from "./types.js";
 
 const EMPTY_PROGRESS: AssessmentProgressEntry[] = [];
+const EMPTY_CHECKS: AssessmentCheckStatus[] = [];
 
 export function selectAssessmentProgress(state: StoreState, taskId: string): AssessmentProgressEntry[] {
   return state.assessmentProgress.get(taskId) ?? EMPTY_PROGRESS;
+}
+
+export function selectAssessmentChecks(state: StoreState, taskId: string): AssessmentCheckStatus[] {
+  return state.assessmentChecks.get(taskId) ?? EMPTY_CHECKS;
 }

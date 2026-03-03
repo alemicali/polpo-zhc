@@ -24,6 +24,7 @@ function createInitialState(): StoreState {
     missionsStale: false,
     memory: null,
     assessmentProgress: new Map(),
+    assessmentChecks: new Map(),
   };
 }
 
@@ -82,6 +83,17 @@ export class PolpoStore {
       missions: new Map(missions.map((m) => [m.id, m])),
       missionsStale: false,
     };
+    this.notify();
+  }
+
+  /** Upsert a single mission into the store without replacing the entire map. */
+  upsertMission(mission: Mission): void {
+    const prev = this.state.missions.get(mission.id);
+    // Skip if the object is referentially identical (no change)
+    if (prev === mission) return;
+    const missions = new Map(this.state.missions);
+    missions.set(mission.id, mission);
+    this.state = { ...this.state, missions };
     this.notify();
   }
 

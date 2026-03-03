@@ -17,6 +17,8 @@ export interface PolpoEventMap {
   // Assessment
   "assessment:started": { taskId: string };
   "assessment:progress": { taskId: string; message: string };
+  "assessment:check:started": { taskId: string; index: number; total: number; type: string; label: string };
+  "assessment:check:complete": { taskId: string; index: number; total: number; type: string; label: string; passed: boolean; message?: string };
   "assessment:complete": { taskId: string; passed: boolean; scores?: DimensionScore[]; globalScore?: number; message?: string };
   "assessment:corrected": { taskId: string; corrections: number };
 
@@ -53,7 +55,7 @@ export interface PolpoEventMap {
   "mission:executed": { missionId: string; group: string; taskCount: number };
   "mission:completed": { missionId: string; group: string; allPassed: boolean; report: MissionReport };
   "mission:resumed": { missionId: string; name: string; retried: number; pending: number };
-  "mission:deleted": { missionId: string };
+  "mission:deleted": { missionId: string; deletedTasks?: number };
 
   // Chat sessions
   "session:created": { sessionId: string; title?: string };

@@ -612,7 +612,52 @@ export class Orchestrator extends TypedEmitter {
     return result;
   }
 
-  // ─── Project Memory ──────────────────────────────────
+  // ─── Atomic Mission Data Operations (delegates to MissionExecutor) ──
+
+  addMissionTask(missionId: string, task: { title: string; description: string; assignTo?: string; dependsOn?: string[]; expectations?: unknown[]; expectedOutcomes?: unknown[]; maxDuration?: number; retryPolicy?: { escalateAfter?: number; fallbackAgent?: string }; notifications?: unknown }): Mission {
+    return this.missionExec.addMissionTask(missionId, task);
+  }
+  updateMissionTask(missionId: string, taskTitle: string, updates: { title?: string; description?: string; assignTo?: string; dependsOn?: string[]; expectations?: unknown[]; expectedOutcomes?: unknown[]; maxDuration?: number; retryPolicy?: { escalateAfter?: number; fallbackAgent?: string }; notifications?: unknown }): Mission {
+    return this.missionExec.updateMissionTask(missionId, taskTitle, updates);
+  }
+  removeMissionTask(missionId: string, taskTitle: string): Mission {
+    return this.missionExec.removeMissionTask(missionId, taskTitle);
+  }
+  reorderMissionTasks(missionId: string, titles: string[]): Mission {
+    return this.missionExec.reorderMissionTasks(missionId, titles);
+  }
+  addMissionCheckpoint(missionId: string, cp: { name: string; afterTasks: string[]; blocksTasks: string[]; notifyChannels?: string[]; message?: string }): Mission {
+    return this.missionExec.addMissionCheckpoint(missionId, cp);
+  }
+  updateMissionCheckpoint(missionId: string, name: string, updates: { name?: string; afterTasks?: string[]; blocksTasks?: string[]; notifyChannels?: string[]; message?: string }): Mission {
+    return this.missionExec.updateMissionCheckpoint(missionId, name, updates);
+  }
+  removeMissionCheckpoint(missionId: string, name: string): Mission {
+    return this.missionExec.removeMissionCheckpoint(missionId, name);
+  }
+  addMissionQualityGate(missionId: string, gate: { name: string; afterTasks: string[]; blocksTasks: string[]; minScore?: number; requireAllPassed?: boolean; condition?: string; notifyChannels?: string[] }): Mission {
+    return this.missionExec.addMissionQualityGate(missionId, gate);
+  }
+  updateMissionQualityGate(missionId: string, name: string, updates: { name?: string; afterTasks?: string[]; blocksTasks?: string[]; minScore?: number; requireAllPassed?: boolean; condition?: string; notifyChannels?: string[] }): Mission {
+    return this.missionExec.updateMissionQualityGate(missionId, name, updates);
+  }
+  removeMissionQualityGate(missionId: string, name: string): Mission {
+    return this.missionExec.removeMissionQualityGate(missionId, name);
+  }
+  addMissionTeamMember(missionId: string, member: { name: string; role?: string; model?: string; [key: string]: unknown }): Mission {
+    return this.missionExec.addMissionTeamMember(missionId, member);
+  }
+  updateMissionTeamMember(missionId: string, memberName: string, updates: { name?: string; role?: string; model?: string; [key: string]: unknown }): Mission {
+    return this.missionExec.updateMissionTeamMember(missionId, memberName, updates);
+  }
+  removeMissionTeamMember(missionId: string, memberName: string): Mission {
+    return this.missionExec.removeMissionTeamMember(missionId, memberName);
+  }
+  updateMissionNotifications(missionId: string, notifications: ScopedNotificationRules | null): Mission {
+    return this.missionExec.updateMissionNotifications(missionId, notifications);
+  }
+
+  // ─── Project Memory ────────────────────────────────── 
 
   /** Check if project memory exists. */
   hasMemory(): boolean {

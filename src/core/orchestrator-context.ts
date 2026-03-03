@@ -6,6 +6,7 @@ import type { LogStore } from "./log-store.js";
 import type { SessionStore } from "./session-store.js";
 import type { PolpoConfig, Task, AssessmentResult, ReviewContext, ReasoningLevel } from "./types.js";
 import type { HookRegistry } from "./hooks.js";
+import type { CheckProgressEvent } from "../assessment/assessor.js";
 
 export type AssessFn = (
   task: Task,
@@ -13,6 +14,7 @@ export type AssessFn = (
   onProgress?: (msg: string) => void,
   context?: ReviewContext,
   reasoning?: ReasoningLevel,
+  onCheckProgress?: (event: CheckProgressEvent) => void,
 ) => Promise<AssessmentResult>;
 
 /**

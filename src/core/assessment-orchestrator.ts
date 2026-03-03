@@ -154,12 +154,13 @@ export class AssessmentOrchestrator {
   private async runAssessmentWithRetry(
     task: Task, cwd: string, progressCb: (msg: string) => void,
     context?: ReviewContext,
+    checkProgressCb?: (ev: { index: number; total: number; type: string; label: string; phase: "started" | "complete"; passed?: boolean; message?: string }) => void,
   ): Promise<AssessmentResult> {
     const maxRetries = this.ctx.config.settings.maxAssessmentRetries ?? 1;
 
     const reasoning = this.ctx.config.settings.reasoning;
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
-      const assessment = await this.ctx.assessFn(task, cwd, progressCb, context, reasoning);
+      const assessment = await this.ctx.assessFn(task, cwd, progressCb, context, reasoning, checkProgressCb);
 
       // Check if failure is due to all evaluators failing (not low scores)
       const allEvalsFailed = !assessment.passed && assessment.checks.some(
@@ -177,7 +178,7 @@ export class AssessmentOrchestrator {
     }
 
     // Unreachable — satisfies TypeScript
-    return this.ctx.assessFn(task, cwd, progressCb, context, reasoning);
+    return this.ctx.assessFn(task, cwd, progressCb, context, reasoning, checkProgressCb);
   }
 
   /**
@@ -221,6 +222,13 @@ export class AssessmentOrchestrator {
   private runAssessmentFlow(taskId: string, task: Task, result: TaskResult): void {
     this.ctx.emitter.emit("assessment:started", { taskId });
       const progressCb = (msg: string) => this.ctx.emitter.emit("assessment:progress", { taskId, message: msg });
+      const checkProgressCb = (ev: { index: number; total: number; type: string; label: string; phase: "started" | "complete"; passed?: boolean; message?: string }) => {
+        if (ev.phase === "started") {
+          this.ctx.emitter.emit("assessment:check:started", { taskId, index: ev.index, total: ev.total, type: ev.type, label: ev.label });
+        } else {
+          this.ctx.emitter.emit("assessment:check:complete", { taskId, index: ev.index, total: ev.total, type: ev.type, label: ev.label, passed: ev.passed ?? false, message: ev.message });
+        }
+      };
 
       // Build review context from RunStore activity
       const run = this.ctx.runStore.getRunByTaskId(taskId);
@@ -233,7 +241,7 @@ export class AssessmentOrchestrator {
         filesEdited: activity?.filesEdited,
       };
 
-      this.runAssessmentWithRetry(task, this.ctx.agentWorkDir, progressCb, reviewContext).then(assessment => {
+      this.runAssessmentWithRetry(task, this.ctx.agentWorkDir, progressCb, reviewContext, checkProgressCb).then(assessment => {
         setAssessment(result, assessment, "initial");
         this.ctx.registry.updateTask(taskId, { result });
 

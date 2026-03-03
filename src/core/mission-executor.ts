@@ -246,8 +246,52 @@ export class MissionExecutor {
 
   deleteMission(missionId: string): boolean {
     if (!this.ctx.registry.deleteMission) throw new Error("Store does not support missions");
+    const mission = this.getMission(missionId);
+    if (!mission) return false;
+
+    // ── Cascade cleanup ──────────────────────────────────
+
+    // 1. Kill running processes and remove all tasks belonging to this mission
+    const missionGroup = mission.name;
+    const deletedTasks = this.taskMgr.clearTasks(
+      t => t.missionId === missionId || t.group === missionGroup,
+    );
+
+    // 2. Clean up volatile agents registered for this mission group
+    this.agentMgr.cleanupVolatileAgents(missionGroup);
+
+    // 3. Clean up in-memory quality gates
+    this.gatesByGroup.delete(missionGroup);
+    // Also clean numbered groups for recurring missions (e.g. "mission-1 #2", "mission-1 #3")
+    for (const key of this.gatesByGroup.keys()) {
+      if (key.startsWith(missionGroup + " #")) this.gatesByGroup.delete(key);
+    }
+
+    // 4. Clean up persisted checkpoints
+    this.cpState = this.cpStore.removeGroup(this.cpState, missionGroup);
+    for (const key of Object.keys(this.cpState.definitions)) {
+      if (key.startsWith(missionGroup + " #")) {
+        this.cpState = this.cpStore.removeGroup(this.cpState, key);
+      }
+    }
+
+    // 5. Clean up scheduled origin cache
+    this.scheduledOrigin.delete(missionGroup);
+    for (const key of this.scheduledOrigin.keys()) {
+      if (key.startsWith(missionGroup + " #")) this.scheduledOrigin.delete(key);
+    }
+
+    // 6. Allow re-cleanup if the group is ever recreated
+    this.cleanedGroups.delete(missionGroup);
+    for (const key of this.cleanedGroups) {
+      if (key.startsWith(missionGroup + " #")) this.cleanedGroups.delete(key);
+    }
+
+    // ── Delete the mission record ────────────────────────
     const result = this.ctx.registry.deleteMission(missionId);
-    if (result) this.ctx.emitter.emit("mission:deleted", { missionId });
+    if (result) {
+      this.ctx.emitter.emit("mission:deleted", { missionId, deletedTasks });
+    }
     return result;
   }
 
@@ -528,6 +572,293 @@ export class MissionExecutor {
         this.cpState = this.cpStore.removeGroup(this.cpState, group);
       }
     }
+  }
+
+  // ═══════════════════════════════════════════════════════
+  //  ATOMIC MISSION DATA OPERATIONS
+  //  Read-modify-write the `data` JSON blob without full replacement.
+  // ═══════════════════════════════════════════════════════
+
+  /**
+   * Parse a mission's `data` JSON and return the structured document.
+   * Throws if the mission is not found or if `data` is not valid JSON.
+   */
+  private parseMissionData(missionId: string): { mission: Mission; doc: MissionDocumentParsed } {
+    const mission = this.getMission(missionId);
+    if (!mission) throw new Error("Mission not found");
+    const doc = parseMissionDocument(JSON.parse(mission.data));
+    return { mission, doc };
+  }
+
+  /**
+   * Persist an updated document back onto the mission record.
+   * Re-validates through Zod to ensure integrity.
+   */
+  private persistMissionData(missionId: string, doc: MissionDocumentParsed): Mission {
+    // Re-validate to catch any structural issue before persisting
+    parseMissionDocument(doc);
+    const mission = this.updateMission(missionId, { data: JSON.stringify(doc) });
+    // Notify listeners so SSE clients (e.g. mission detail page) refetch updated data
+    this.ctx.emitter.emit("mission:saved", { missionId: mission.id, name: mission.name, status: mission.status });
+    return mission;
+  }
+
+  // ─── Task operations ────────────────────────────────
+
+  /** Add a task to a draft mission's data. */
+  addMissionTask(missionId: string, task: {
+    title: string;
+    description: string;
+    assignTo?: string;
+    dependsOn?: string[];
+    expectations?: unknown[];
+    expectedOutcomes?: unknown[];
+    maxDuration?: number;
+    retryPolicy?: { escalateAfter?: number; fallbackAgent?: string };
+    notifications?: unknown;
+  }): Mission {
+    const { doc } = this.parseMissionData(missionId);
+    // Enforce unique title
+    if (doc.tasks.some(t => t.title === task.title)) {
+      throw new Error(`Task title "${task.title}" already exists in this mission`);
+    }
+    doc.tasks.push(task as MissionDocumentParsed["tasks"][number]);
+    return this.persistMissionData(missionId, doc);
+  }
+
+  /** Update a specific task within the mission data (matched by title). */
+  updateMissionTask(missionId: string, taskTitle: string, updates: {
+    title?: string;
+    description?: string;
+    assignTo?: string;
+    dependsOn?: string[];
+    expectations?: unknown[];
+    expectedOutcomes?: unknown[];
+    maxDuration?: number;
+    retryPolicy?: { escalateAfter?: number; fallbackAgent?: string };
+    notifications?: unknown;
+  }): Mission {
+    const { doc } = this.parseMissionData(missionId);
+    const idx = doc.tasks.findIndex(t => t.title === taskTitle);
+    if (idx === -1) throw new Error(`Task "${taskTitle}" not found in mission`);
+    // If renaming, enforce unique title
+    if (updates.title && updates.title !== taskTitle && doc.tasks.some(t => t.title === updates.title)) {
+      throw new Error(`Task title "${updates.title}" already exists in this mission`);
+    }
+    doc.tasks[idx] = { ...doc.tasks[idx], ...updates } as MissionDocumentParsed["tasks"][number];
+    return this.persistMissionData(missionId, doc);
+  }
+
+  /** Remove a task from the mission data (by title). Also cleans up dependsOn references. */
+  removeMissionTask(missionId: string, taskTitle: string): Mission {
+    const { doc } = this.parseMissionData(missionId);
+    const idx = doc.tasks.findIndex(t => t.title === taskTitle);
+    if (idx === -1) throw new Error(`Task "${taskTitle}" not found in mission`);
+    doc.tasks.splice(idx, 1);
+    // Clean up dependsOn references in remaining tasks
+    for (const t of doc.tasks) {
+      if (t.dependsOn) {
+        t.dependsOn = t.dependsOn.filter(d => d !== taskTitle);
+      }
+    }
+    // Clean up quality gates and checkpoints that reference this task
+    if (doc.qualityGates) {
+      for (const gate of doc.qualityGates) {
+        gate.afterTasks = gate.afterTasks.filter(t => t !== taskTitle);
+        gate.blocksTasks = gate.blocksTasks.filter(t => t !== taskTitle);
+      }
+      // Remove gates that became empty
+      doc.qualityGates = doc.qualityGates.filter(g => g.afterTasks.length > 0 && g.blocksTasks.length > 0);
+    }
+    if (doc.checkpoints) {
+      for (const cp of doc.checkpoints) {
+        cp.afterTasks = cp.afterTasks.filter(t => t !== taskTitle);
+        cp.blocksTasks = cp.blocksTasks.filter(t => t !== taskTitle);
+      }
+      doc.checkpoints = doc.checkpoints.filter(cp => cp.afterTasks.length > 0 && cp.blocksTasks.length > 0);
+    }
+    // Ensure at least 1 task remains (Zod will catch this, but give a nicer error)
+    if (doc.tasks.length === 0) throw new Error("Cannot remove the last task from a mission");
+    return this.persistMissionData(missionId, doc);
+  }
+
+  /** Reorder tasks within the mission data. Accepts an array of task titles in the desired order. */
+  reorderMissionTasks(missionId: string, titles: string[]): Mission {
+    const { doc } = this.parseMissionData(missionId);
+    const titleSet = new Set(titles);
+    if (titleSet.size !== titles.length) throw new Error("Duplicate titles in reorder list");
+    const existing = new Set(doc.tasks.map(t => t.title));
+    for (const t of titles) {
+      if (!existing.has(t)) throw new Error(`Task "${t}" not found in mission`);
+    }
+    if (titles.length !== doc.tasks.length) throw new Error("Reorder list must include all task titles");
+    const taskMap = new Map(doc.tasks.map(t => [t.title, t]));
+    doc.tasks = titles.map(t => taskMap.get(t)!);
+    return this.persistMissionData(missionId, doc);
+  }
+
+  // ─── Checkpoint operations ──────────────────────────
+
+  /** Add a checkpoint to a mission's data. */
+  addMissionCheckpoint(missionId: string, checkpoint: {
+    name: string;
+    afterTasks: string[];
+    blocksTasks: string[];
+    notifyChannels?: string[];
+    message?: string;
+  }): Mission {
+    const { doc } = this.parseMissionData(missionId);
+    if (!doc.checkpoints) doc.checkpoints = [];
+    if (doc.checkpoints.some(c => c.name === checkpoint.name)) {
+      throw new Error(`Checkpoint "${checkpoint.name}" already exists in this mission`);
+    }
+    doc.checkpoints.push(checkpoint);
+    return this.persistMissionData(missionId, doc);
+  }
+
+  /** Update a checkpoint in the mission data (matched by name). */
+  updateMissionCheckpoint(missionId: string, checkpointName: string, updates: {
+    name?: string;
+    afterTasks?: string[];
+    blocksTasks?: string[];
+    notifyChannels?: string[];
+    message?: string;
+  }): Mission {
+    const { doc } = this.parseMissionData(missionId);
+    if (!doc.checkpoints) throw new Error(`Checkpoint "${checkpointName}" not found in mission`);
+    const idx = doc.checkpoints.findIndex(c => c.name === checkpointName);
+    if (idx === -1) throw new Error(`Checkpoint "${checkpointName}" not found in mission`);
+    if (updates.name && updates.name !== checkpointName && doc.checkpoints.some(c => c.name === updates.name)) {
+      throw new Error(`Checkpoint "${updates.name}" already exists in this mission`);
+    }
+    doc.checkpoints[idx] = { ...doc.checkpoints[idx], ...updates };
+    return this.persistMissionData(missionId, doc);
+  }
+
+  /** Remove a checkpoint from the mission data (by name). */
+  removeMissionCheckpoint(missionId: string, checkpointName: string): Mission {
+    const { doc } = this.parseMissionData(missionId);
+    if (!doc.checkpoints) throw new Error(`Checkpoint "${checkpointName}" not found in mission`);
+    const idx = doc.checkpoints.findIndex(c => c.name === checkpointName);
+    if (idx === -1) throw new Error(`Checkpoint "${checkpointName}" not found in mission`);
+    doc.checkpoints.splice(idx, 1);
+    if (doc.checkpoints.length === 0) delete (doc as any).checkpoints;
+    return this.persistMissionData(missionId, doc);
+  }
+
+  // ─── Quality gate operations ────────────────────────
+
+  /** Add a quality gate to a mission's data. */
+  addMissionQualityGate(missionId: string, gate: {
+    name: string;
+    afterTasks: string[];
+    blocksTasks: string[];
+    minScore?: number;
+    requireAllPassed?: boolean;
+    condition?: string;
+    notifyChannels?: string[];
+  }): Mission {
+    const { doc } = this.parseMissionData(missionId);
+    if (!doc.qualityGates) doc.qualityGates = [];
+    if (doc.qualityGates.some(g => g.name === gate.name)) {
+      throw new Error(`Quality gate "${gate.name}" already exists in this mission`);
+    }
+    doc.qualityGates.push(gate);
+    return this.persistMissionData(missionId, doc);
+  }
+
+  /** Update a quality gate in the mission data (matched by name). */
+  updateMissionQualityGate(missionId: string, gateName: string, updates: {
+    name?: string;
+    afterTasks?: string[];
+    blocksTasks?: string[];
+    minScore?: number;
+    requireAllPassed?: boolean;
+    condition?: string;
+    notifyChannels?: string[];
+  }): Mission {
+    const { doc } = this.parseMissionData(missionId);
+    if (!doc.qualityGates) throw new Error(`Quality gate "${gateName}" not found in mission`);
+    const idx = doc.qualityGates.findIndex(g => g.name === gateName);
+    if (idx === -1) throw new Error(`Quality gate "${gateName}" not found in mission`);
+    if (updates.name && updates.name !== gateName && doc.qualityGates.some(g => g.name === updates.name)) {
+      throw new Error(`Quality gate "${updates.name}" already exists in this mission`);
+    }
+    doc.qualityGates[idx] = { ...doc.qualityGates[idx], ...updates };
+    return this.persistMissionData(missionId, doc);
+  }
+
+  /** Remove a quality gate from the mission data (by name). */
+  removeMissionQualityGate(missionId: string, gateName: string): Mission {
+    const { doc } = this.parseMissionData(missionId);
+    if (!doc.qualityGates) throw new Error(`Quality gate "${gateName}" not found in mission`);
+    const idx = doc.qualityGates.findIndex(g => g.name === gateName);
+    if (idx === -1) throw new Error(`Quality gate "${gateName}" not found in mission`);
+    doc.qualityGates.splice(idx, 1);
+    if (doc.qualityGates.length === 0) delete (doc as any).qualityGates;
+    return this.persistMissionData(missionId, doc);
+  }
+
+  // ─── Team (volatile agents) operations ──────────────
+
+  /** Add a team member to the mission's volatile team. */
+  addMissionTeamMember(missionId: string, member: {
+    name: string;
+    role?: string;
+    model?: string;
+    [key: string]: unknown;
+  }): Mission {
+    const { doc } = this.parseMissionData(missionId);
+    if (!doc.team) doc.team = [];
+    if ((doc.team as any[]).some((m: any) => m.name === member.name)) {
+      throw new Error(`Team member "${member.name}" already exists in this mission`);
+    }
+    (doc.team as any[]).push(member);
+    return this.persistMissionData(missionId, doc);
+  }
+
+  /** Update a team member in the mission data (matched by name). */
+  updateMissionTeamMember(missionId: string, memberName: string, updates: {
+    name?: string;
+    role?: string;
+    model?: string;
+    [key: string]: unknown;
+  }): Mission {
+    const { doc } = this.parseMissionData(missionId);
+    if (!doc.team) throw new Error(`Team member "${memberName}" not found in mission`);
+    const team = doc.team as any[];
+    const idx = team.findIndex((m: any) => m.name === memberName);
+    if (idx === -1) throw new Error(`Team member "${memberName}" not found in mission`);
+    if (updates.name && updates.name !== memberName && team.some((m: any) => m.name === updates.name)) {
+      throw new Error(`Team member "${updates.name}" already exists in this mission`);
+    }
+    team[idx] = { ...team[idx], ...updates };
+    return this.persistMissionData(missionId, doc);
+  }
+
+  /** Remove a team member from the mission data (by name). */
+  removeMissionTeamMember(missionId: string, memberName: string): Mission {
+    const { doc } = this.parseMissionData(missionId);
+    if (!doc.team) throw new Error(`Team member "${memberName}" not found in mission`);
+    const team = doc.team as any[];
+    const idx = team.findIndex((m: any) => m.name === memberName);
+    if (idx === -1) throw new Error(`Team member "${memberName}" not found in mission`);
+    team.splice(idx, 1);
+    if (team.length === 0) delete (doc as any).team;
+    return this.persistMissionData(missionId, doc);
+  }
+
+  // ─── Notifications operations ───────────────────────
+
+  /** Update the mission-level notification rules. */
+  updateMissionNotifications(missionId: string, notifications: ScopedNotificationRules | null): Mission {
+    const { doc } = this.parseMissionData(missionId);
+    if (notifications === null) {
+      delete (doc as any).notifications;
+    } else {
+      (doc as any).notifications = notifications;
+    }
+    return this.persistMissionData(missionId, doc);
   }
 
   buildMissionReport(missionId: string, group: string, groupTasks: Task[], allPassed: boolean): MissionReport {

@@ -15,6 +15,16 @@ import type {
   UpdateTaskRequest,
   CreateMissionRequest,
   UpdateMissionRequest,
+  AddMissionTaskRequest,
+  UpdateMissionTaskRequest,
+  ReorderMissionTasksRequest,
+  AddMissionCheckpointRequest,
+  UpdateMissionCheckpointRequest,
+  AddMissionQualityGateRequest,
+  UpdateMissionQualityGateRequest,
+  AddMissionTeamMemberRequest,
+  UpdateMissionTeamMemberRequest,
+  UpdateMissionNotificationsRequest,
   AddAgentRequest,
   AddTeamRequest,
   ExecuteMissionResult,
@@ -359,6 +369,64 @@ export class PolpoClient {
 
   abortMission(missionId: string): Promise<{ aborted: number }> {
     return this.post<{ aborted: number }>(`/missions/${missionId}/abort`);
+  }
+
+  // ── Atomic Mission Data ───────────────────────────────────
+
+  addMissionTask(missionId: string, req: AddMissionTaskRequest): Promise<Mission> {
+    return this.post<Mission>(`/missions/${missionId}/tasks`, req);
+  }
+
+  updateMissionTask(missionId: string, taskTitle: string, req: UpdateMissionTaskRequest): Promise<Mission> {
+    return this.patch<Mission>(`/missions/${missionId}/tasks/${encodeURIComponent(taskTitle)}`, req);
+  }
+
+  removeMissionTask(missionId: string, taskTitle: string): Promise<Mission> {
+    return this.del<Mission>(`/missions/${missionId}/tasks/${encodeURIComponent(taskTitle)}`);
+  }
+
+  reorderMissionTasks(missionId: string, req: ReorderMissionTasksRequest): Promise<Mission> {
+    return this.put<Mission>(`/missions/${missionId}/tasks/reorder`, req);
+  }
+
+  addMissionCheckpoint(missionId: string, req: AddMissionCheckpointRequest): Promise<Mission> {
+    return this.post<Mission>(`/missions/${missionId}/checkpoints`, req);
+  }
+
+  updateMissionCheckpoint(missionId: string, checkpointName: string, req: UpdateMissionCheckpointRequest): Promise<Mission> {
+    return this.patch<Mission>(`/missions/${missionId}/checkpoints/${encodeURIComponent(checkpointName)}`, req);
+  }
+
+  removeMissionCheckpoint(missionId: string, checkpointName: string): Promise<Mission> {
+    return this.del<Mission>(`/missions/${missionId}/checkpoints/${encodeURIComponent(checkpointName)}`);
+  }
+
+  addMissionQualityGate(missionId: string, req: AddMissionQualityGateRequest): Promise<Mission> {
+    return this.post<Mission>(`/missions/${missionId}/quality-gates`, req);
+  }
+
+  updateMissionQualityGate(missionId: string, gateName: string, req: UpdateMissionQualityGateRequest): Promise<Mission> {
+    return this.patch<Mission>(`/missions/${missionId}/quality-gates/${encodeURIComponent(gateName)}`, req);
+  }
+
+  removeMissionQualityGate(missionId: string, gateName: string): Promise<Mission> {
+    return this.del<Mission>(`/missions/${missionId}/quality-gates/${encodeURIComponent(gateName)}`);
+  }
+
+  addMissionTeamMember(missionId: string, req: AddMissionTeamMemberRequest): Promise<Mission> {
+    return this.post<Mission>(`/missions/${missionId}/team`, req);
+  }
+
+  updateMissionTeamMember(missionId: string, memberName: string, req: UpdateMissionTeamMemberRequest): Promise<Mission> {
+    return this.patch<Mission>(`/missions/${missionId}/team/${encodeURIComponent(memberName)}`, req);
+  }
+
+  removeMissionTeamMember(missionId: string, memberName: string): Promise<Mission> {
+    return this.del<Mission>(`/missions/${missionId}/team/${encodeURIComponent(memberName)}`);
+  }
+
+  updateMissionNotifications(missionId: string, req: UpdateMissionNotificationsRequest): Promise<Mission> {
+    return this.put<Mission>(`/missions/${missionId}/notifications`, req);
   }
 
   // ── Vault ─────────────────────────────────────────────────

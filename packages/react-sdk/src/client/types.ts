@@ -734,6 +734,92 @@ export interface UpdateMissionRequest {
   name?: string;
 }
 
+// === Atomic Mission Data Request DTOs ===
+
+export interface AddMissionTaskRequest {
+  title: string;
+  description: string;
+  assignTo?: string;
+  dependsOn?: string[];
+  expectations?: TaskExpectation[];
+  expectedOutcomes?: ExpectedOutcome[];
+  maxDuration?: number;
+  retryPolicy?: RetryPolicy;
+  notifications?: ScopedNotificationRules;
+}
+
+export interface UpdateMissionTaskRequest {
+  title?: string;
+  description?: string;
+  assignTo?: string;
+  dependsOn?: string[];
+  expectations?: TaskExpectation[];
+  expectedOutcomes?: ExpectedOutcome[];
+  maxDuration?: number;
+  retryPolicy?: RetryPolicy;
+  notifications?: ScopedNotificationRules;
+}
+
+export interface ReorderMissionTasksRequest {
+  titles: string[];
+}
+
+export interface AddMissionCheckpointRequest {
+  name: string;
+  afterTasks: string[];
+  blocksTasks: string[];
+  message?: string;
+  notifyChannels?: string[];
+}
+
+export interface UpdateMissionCheckpointRequest {
+  name?: string;
+  afterTasks?: string[];
+  blocksTasks?: string[];
+  message?: string;
+  notifyChannels?: string[];
+}
+
+export interface AddMissionQualityGateRequest {
+  name: string;
+  afterTasks: string[];
+  blocksTasks: string[];
+  minScore?: number;
+  requireAllPassed?: boolean;
+  condition?: string;
+  notifyChannels?: string[];
+}
+
+export interface UpdateMissionQualityGateRequest {
+  name?: string;
+  afterTasks?: string[];
+  blocksTasks?: string[];
+  minScore?: number;
+  requireAllPassed?: boolean;
+  condition?: string;
+  notifyChannels?: string[];
+}
+
+export interface AddMissionTeamMemberRequest {
+  name: string;
+  role?: string;
+  model?: string;
+  systemPrompt?: string;
+  allowedTools?: string[];
+}
+
+export interface UpdateMissionTeamMemberRequest {
+  name?: string;
+  role?: string;
+  model?: string;
+  systemPrompt?: string;
+  allowedTools?: string[];
+}
+
+export interface UpdateMissionNotificationsRequest {
+  notifications: ScopedNotificationRules | null;
+}
+
 export interface AddAgentRequest {
   name: string;
   role?: string;
