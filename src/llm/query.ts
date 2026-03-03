@@ -27,7 +27,7 @@ export interface QueryResult {
  * Query LLM for text-only response (no tools).
  * Uses pi-ai multi-provider backend. Model can be "provider:model" or bare model ID.
  */
-export async function querySDKText(prompt: string, _cwd: string, model?: string): Promise<string> {
+export async function querySDKText(prompt: string, model?: string): Promise<string> {
   return withRetry(async () => {
     const result = await queryText(prompt, model);
     return result.text;
@@ -37,7 +37,7 @@ export async function querySDKText(prompt: string, _cwd: string, model?: string)
 /**
  * Query LLM with full result metadata (usage, cost, model info).
  */
-export async function querySDKTextDetailed(prompt: string, _cwd: string, model?: string): Promise<QueryResult> {
+export async function querySDKTextDetailed(prompt: string, model?: string): Promise<QueryResult> {
   return withRetry(async () => {
     const result = await queryText(prompt, model);
     const { calculateCost } = await import("@mariozechner/pi-ai");
@@ -65,7 +65,6 @@ export async function querySDKTextDetailed(prompt: string, _cwd: string, model?:
  */
 export async function querySDKWithFallback(
   prompt: string,
-  _cwd: string,
   modelConfig: ModelConfig,
 ): Promise<QueryResult> {
   return withRetry(async () => {
@@ -95,13 +94,12 @@ export async function querySDKWithFallback(
 export async function querySDK(
   prompt: string,
   allowedTools: string[],
-  cwd: string,
   onProgress?: OnProgress,
   model?: string,
 ): Promise<string> {
   // Tools are handled by the built-in engine at spawn time;
   // for orchestrator-level queries, use text-only.
-  return querySDKText(prompt, cwd, model);
+  return querySDKText(prompt, model);
 }
 
 /**
@@ -110,7 +108,6 @@ export async function querySDK(
  */
 export async function querySDKStream(
   prompt: string,
-  _cwd: string,
   model?: string,
   onChunk?: (delta: string) => void,
 ): Promise<string> {
@@ -125,7 +122,6 @@ export async function querySDKStream(
  */
 export async function querySDKStreamDetailed(
   prompt: string,
-  _cwd: string,
   model?: string,
   onChunk?: (delta: string) => void,
 ): Promise<QueryResult> {
@@ -162,7 +158,6 @@ export async function querySDKStreamDetailed(
  */
 export async function queryOrchestratorText(
   prompt: string,
-  cwd: string,
   model: string | ModelConfig | undefined,
 ): Promise<QueryResult> {
   // If ModelConfig with fallbacks, use fallback-aware query

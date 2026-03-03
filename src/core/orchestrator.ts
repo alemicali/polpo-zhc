@@ -1206,7 +1206,7 @@ export class Orchestrator extends TypedEmitter {
         });
 
         // Async LLM resolution (same pattern as question detection)
-        resolveDeadlock(analysis, this, this.workDir).catch(err => {
+        resolveDeadlock(analysis, this).catch(err => {
           this.emit("log", { level: "error", message: `Deadlock resolution failed: ${err.message}` });
           for (const t of pending) this.forceFailTask(t.id);
         });

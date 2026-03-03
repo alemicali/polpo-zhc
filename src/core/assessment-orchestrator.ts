@@ -102,7 +102,7 @@ export class AssessmentOrchestrator {
    * LLM-classify a potential question, then either resolve+rerun or proceed to assessment.
    */
   private handlePossibleQuestion(taskId: string, task: Task, result: TaskResult): void {
-    classifyAsQuestion(result.stdout, this.ctx.workDir, this.ctx.config.settings.orchestratorModel).then(classification => {
+    classifyAsQuestion(result.stdout, this.ctx.config.settings.orchestratorModel).then(classification => {
       if (classification.isQuestion) {
         this.resolveAndRerun(taskId, task, result, classification.question);
       } else {
@@ -120,7 +120,7 @@ export class AssessmentOrchestrator {
   private resolveAndRerun(taskId: string, task: Task, result: TaskResult, question: string): void {
     this.ctx.emitter.emit("task:question", { taskId, question });
 
-    generateAnswer(this.ctx.emitter as unknown as Orchestrator, task, question, this.ctx.workDir, this.ctx.config.settings.orchestratorModel).then(answer => {
+    generateAnswer(this.ctx.emitter as unknown as Orchestrator, task, question, this.ctx.config.settings.orchestratorModel).then(answer => {
       this.ctx.emitter.emit("task:answered", { taskId, question, answer });
 
       const current = this.ctx.registry.getTask(taskId);
@@ -433,9 +433,19 @@ export class AssessmentOrchestrator {
     return false;
   }
 
-  /** Search for a file by name in common project locations. */
+  /** Search for a file by name in common project locations.
+   *  Searches agentWorkDir first (where the agent actually created files),
+   *  then falls back to workDir (the project root) when they differ. */
   private findFileByName(name: string): string | null {
-    const searchDirs = [this.ctx.workDir, join(this.ctx.workDir, "src")];
+    const searchDirs = [
+      this.ctx.agentWorkDir,
+      join(this.ctx.agentWorkDir, "src"),
+    ];
+    // When agentWorkDir differs from workDir (settings.workDir is set),
+    // also search the project root as a fallback.
+    if (this.ctx.agentWorkDir !== this.ctx.workDir) {
+      searchDirs.push(this.ctx.workDir, join(this.ctx.workDir, "src"));
+    }
     for (const dir of searchDirs) {
       const found = this.searchDir(dir, name, 4);
       if (found) return found;
@@ -471,7 +481,7 @@ export class AssessmentOrchestrator {
 
     let response: string;
     try {
-      response = (await queryOrchestratorText(prompt, this.ctx.workDir, this.ctx.config.settings.orchestratorModel)).text;
+      response = (await queryOrchestratorText(prompt, this.ctx.config.settings.orchestratorModel)).text;
     } catch { /* LLM query failed */
       return false;
     }

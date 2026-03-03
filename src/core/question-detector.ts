@@ -37,7 +37,6 @@ export function looksLikeQuestion(result: TaskResult, activity?: AgentActivity):
  */
 export async function classifyAsQuestion(
   stdout: string,
-  cwd: string,
   model?: string | ModelConfig,
 ): Promise<{ isQuestion: boolean; question: string }> {
   const prompt = [
@@ -54,7 +53,7 @@ export async function classifyAsQuestion(
     `{"isQuestion": false, "question": ""}`,
   ].join("\n");
 
-  const response = (await queryOrchestratorText(prompt, cwd, model)).text;
+  const response = (await queryOrchestratorText(prompt, model)).text;
   try {
     const cleaned = response.replace(/```json?\n?/g, "").replace(/```/g, "").trim();
     const parsed = JSON.parse(cleaned);

@@ -274,7 +274,7 @@ function TemplateCard({
 
   return (
     <Card
-      className="group transition-all bg-card/80 backdrop-blur-sm border-border/40 hover:border-primary/20 hover:shadow-[0_0_15px_oklch(0.7_0.15_200_/_8%)] cursor-pointer"
+      className="group transition-all py-0 bg-card/80 backdrop-blur-sm border-border/40 hover:border-primary/20 hover:shadow-[0_0_15px_oklch(0.7_0.15_200_/_8%)] cursor-pointer"
       onClick={onClick}
     >
       <CardContent className="px-4 py-3">

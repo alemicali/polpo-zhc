@@ -194,7 +194,6 @@ export class EscalationManager {
 
       const newDescription = (await queryOrchestratorText(
         prompt,
-        this.ctx.workDir,
         this.ctx.config.settings.orchestratorModel,
       )).text;
 

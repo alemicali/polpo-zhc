@@ -119,7 +119,6 @@ function findRootFailure(task: Task, taskMap: Map<string, Task>, visited: Set<st
 export async function resolveDeadlock(
   analysis: BlockageAnalysis,
   orchestrator: Orchestrator,
-  cwd: string,
 ): Promise<void> {
   resolving = true;
   try {
@@ -155,7 +154,7 @@ export async function resolveDeadlock(
 
       let decision: ResolutionDecision;
       try {
-        decision = await classifyBlockage(task, failedDep, allTasks, memory, cwd, model);
+        decision = await classifyBlockage(task, failedDep, allTasks, memory, model);
       } catch { /* LLM classification failed */
         orchestrator.emit("deadlock:unresolvable", {
           taskId: task.id,
@@ -188,11 +187,10 @@ async function classifyBlockage(
   failedDep: Task,
   allTasks: Task[],
   memory: string,
-  cwd: string,
   model?: string | ModelConfig,
 ): Promise<ResolutionDecision> {
   const prompt = buildResolutionPrompt(blockedTask, failedDep, allTasks, memory);
-  const response = (await queryOrchestratorText(prompt, cwd, model)).text;
+  const response = (await queryOrchestratorText(prompt, model)).text;
 
   try {
     const cleaned = response.replace(/```json?\n?/g, "").replace(/```/g, "").trim();

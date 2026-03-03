@@ -111,12 +111,14 @@ function detectProviders(): DetectedProvider[] {
 
 export interface SetupOptions {
   polpoDir?: string;
+  /** Explicit project root directory. Falls back to process.cwd() when omitted. */
+  workDir?: string;
   nonInteractive?: boolean;
 }
 
 export async function runSetupWizard(options?: SetupOptions): Promise<void> {
-  const cwd = process.cwd();
-  const polpoDir = options?.polpoDir ?? resolve(cwd, ".polpo");
+  const workDir = options?.workDir ?? process.cwd();
+  const polpoDir = options?.polpoDir ?? resolve(workDir, ".polpo");
   const isInteractive = !options?.nonInteractive && process.stdin.isTTY;
 
   // Load existing config for defaults
@@ -129,7 +131,7 @@ export async function runSetupWizard(options?: SetupOptions): Promise<void> {
   if (!isInteractive) {
     // Non-interactive: use env or defaults, skip prompts
     const model = process.env.POLPO_MODEL;
-    const projectName = existing?.project ?? basename(cwd);
+    const projectName = existing?.project ?? basename(workDir);
     const config = generatePolpoConfigDefault(projectName, { model: model ?? undefined });
     savePolpoConfig(polpoDir, config);
     if (!model) {
@@ -141,7 +143,7 @@ export async function runSetupWizard(options?: SetupOptions): Promise<void> {
   }
 
   // ── Step 1: Project name ──
-  const defaultProject = existing?.project ?? basename(cwd);
+  const defaultProject = existing?.project ?? basename(workDir);
   const projectName = await promptWithDefault("Project name", defaultProject);
 
   // ── Step 2: Detect providers ──
@@ -280,7 +282,9 @@ export function registerSetupCommand(parent: Command): void {
   parent
     .command("setup")
     .description("Interactive setup wizard — configure model, team, and providers")
-    .action(async () => {
-      await runSetupWizard();
+    .option("-d, --dir <path>", "Working directory", ".")
+    .action(async (opts) => {
+      const workDir = resolve(opts.dir);
+      await runSetupWizard({ workDir });
     });
 }

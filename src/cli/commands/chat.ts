@@ -78,7 +78,7 @@ export function registerChatCommands(program: Command): void {
         );
 
         const fullPrompt = parts.join("\n");
-        const response = (await queryOrchestratorText(fullPrompt, orchestrator.getWorkDir(), orchestrator.getConfig()?.settings?.orchestratorModel)).text;
+        const response = (await queryOrchestratorText(fullPrompt, orchestrator.getConfig()?.settings?.orchestratorModel)).text;
 
         if (response) {
           // Persist assistant response

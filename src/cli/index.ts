@@ -170,11 +170,12 @@ program
 program
   .command("init")
   .description("Initialize Polpo in the current project")
-  .action(async () => {
+  .option("-d, --dir <path>", "Working directory", ".")
+  .action(async (opts) => {
     console.log(LOGO_CENTER());
 
-    const cwd = process.cwd();
-    const polpoDir = resolve(cwd, ".polpo");
+    const workDir = resolve(opts.dir);
+    const polpoDir = resolve(workDir, ".polpo");
 
     await mkdir(polpoDir, { recursive: true });
     await mkdir(resolve(polpoDir, "logs"), { recursive: true });
@@ -188,7 +189,7 @@ program
       console.log(chalk.dim("  Run 'polpo setup' to reconfigure.\n"));
     } catch {
       const { runSetupWizard } = await import("./commands/setup.js");
-      await runSetupWizard({ polpoDir });
+      await runSetupWizard({ polpoDir, workDir });
     }
 
     console.log(chalk.green("\n  Polpo initialized!"));

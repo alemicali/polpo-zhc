@@ -195,7 +195,14 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
   // Create all tools scoped to working directory with path sandboxing
   // Core tools (always available): read, write, edit, bash, glob, grep, ls, http_fetch, http_download, register_outcome, vault_get, vault_list
   // Extended tools are auto-loaded when their names appear in allowedTools (e.g. "browser_*", "email_*", "image_*", "video_*", "audio_*", "excel_*", "pdf_*", "docx_*")
-  const polpoDir = ctx?.polpoDir ?? join(cwd, ".polpo");
+  // polpoDir must always be provided via SpawnContext.
+  // Fallback to join(cwd, ".polpo") is WRONG when settings.workDir points to a
+  // subdirectory — cwd would be e.g. /project/packages/app while .polpo/ lives
+  // at /project/.polpo/.  Throw early to catch misconfiguration.
+  if (!ctx?.polpoDir) {
+    throw new Error("spawnEngine: ctx.polpoDir is required (cannot derive .polpo from cwd when settings.workDir is set)");
+  }
+  const polpoDir = ctx.polpoDir;
 
   // Browser profile directory for agent-browser persistent state (cookies, auth, localStorage)
   const browserProfileDir = join(polpoDir, "browser-profiles", agentConfig.browserProfile || agentConfig.name);

@@ -15,7 +15,6 @@ export async function generateAnswer(
   orchestrator: Orchestrator,
   task: Task,
   question: string,
-  cwd: string,
   model?: string | ModelConfig,
 ): Promise<string> {
   const memory = orchestrator.getMemory();
@@ -27,7 +26,7 @@ export async function generateAnswer(
     : [];
 
   const prompt = buildAnswerPrompt(memory, task, siblings, question);
-  return (await queryOrchestratorText(prompt, cwd, model)).text;
+  return (await queryOrchestratorText(prompt, model)).text;
 }
 
 function buildAnswerPrompt(
