@@ -90,6 +90,98 @@ export const UpdateMissionSchema = z.object({
   endDate: z.string().datetime().nullable().optional(),
 });
 
+// ── Atomic mission data schemas ──────────────────────────────────
+
+export const AddMissionTaskSchema = z.object({
+  title: z.string().min(1),
+  description: z.string().min(1),
+  assignTo: z.string().min(1).optional(),
+  dependsOn: z.array(z.string().min(1)).optional(),
+  expectations: z.array(z.any()).optional(),
+  expectedOutcomes: z.array(z.any()).optional(),
+  maxDuration: z.number().positive().optional(),
+  retryPolicy: z.object({
+    escalateAfter: z.number().int().min(0).optional(),
+    fallbackAgent: z.string().optional(),
+  }).optional(),
+  notifications: z.any().optional(),
+});
+
+export const UpdateMissionTaskSchema = z.object({
+  title: z.string().min(1).optional(),
+  description: z.string().min(1).optional(),
+  assignTo: z.string().min(1).optional(),
+  dependsOn: z.array(z.string().min(1)).optional(),
+  expectations: z.array(z.any()).optional(),
+  expectedOutcomes: z.array(z.any()).optional(),
+  maxDuration: z.number().positive().optional(),
+  retryPolicy: z.object({
+    escalateAfter: z.number().int().min(0).optional(),
+    fallbackAgent: z.string().optional(),
+  }).optional(),
+  notifications: z.any().optional(),
+});
+
+export const ReorderMissionTasksSchema = z.object({
+  titles: z.array(z.string().min(1)).min(1),
+});
+
+export const AddMissionCheckpointSchema = z.object({
+  name: z.string().min(1),
+  afterTasks: z.array(z.string().min(1)).min(1),
+  blocksTasks: z.array(z.string().min(1)).min(1),
+  message: z.string().optional(),
+  notifyChannels: z.array(z.string().min(1)).optional(),
+});
+
+export const UpdateMissionCheckpointSchema = z.object({
+  name: z.string().min(1).optional(),
+  afterTasks: z.array(z.string().min(1)).min(1).optional(),
+  blocksTasks: z.array(z.string().min(1)).min(1).optional(),
+  message: z.string().optional(),
+  notifyChannels: z.array(z.string().min(1)).optional(),
+});
+
+export const AddMissionQualityGateSchema = z.object({
+  name: z.string().min(1),
+  afterTasks: z.array(z.string().min(1)).min(1),
+  blocksTasks: z.array(z.string().min(1)).min(1),
+  minScore: z.number().min(1).max(5).optional(),
+  requireAllPassed: z.boolean().optional(),
+  condition: z.string().optional(),
+  notifyChannels: z.array(z.string().min(1)).optional(),
+});
+
+export const UpdateMissionQualityGateSchema = z.object({
+  name: z.string().min(1).optional(),
+  afterTasks: z.array(z.string().min(1)).min(1).optional(),
+  blocksTasks: z.array(z.string().min(1)).min(1).optional(),
+  minScore: z.number().min(1).max(5).optional(),
+  requireAllPassed: z.boolean().optional(),
+  condition: z.string().optional(),
+  notifyChannels: z.array(z.string().min(1)).optional(),
+});
+
+export const AddMissionTeamMemberSchema = z.object({
+  name: z.string().min(1),
+  role: z.string().optional(),
+  model: z.string().optional(),
+  systemPrompt: z.string().optional(),
+  allowedTools: z.array(z.string()).optional(),
+});
+
+export const UpdateMissionTeamMemberSchema = z.object({
+  name: z.string().min(1).optional(),
+  role: z.string().optional(),
+  model: z.string().optional(),
+  systemPrompt: z.string().optional(),
+  allowedTools: z.array(z.string()).optional(),
+});
+
+export const UpdateMissionNotificationsSchema = z.object({
+  notifications: ScopedNotificationRulesSchema.nullable(),
+});
+
 // ── Agent schemas ─────────────────────────────────────────────────────
 
 const AgentResponsibilitySchema = z.object({

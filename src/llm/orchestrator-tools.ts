@@ -1410,6 +1410,61 @@ export function formatToolDetails(
       main.push(["Mission", resolveMission(args.missionId)]);
       if (args.retryFailed) main.push(["Retry failed", "yes"]);
       break;
+    // Atomic mission data tools
+    case "add_mission_task":
+      main.push(["Mission", resolveMission(args.missionId)]);
+      main.push(["Task", String(args.title)]);
+      if (args.assignTo) main.push(["Agent", String(args.assignTo)]);
+      if (args.description) extra.push(["Description", trunc(args.description, 200)]);
+      break;
+    case "update_mission_task":
+      main.push(["Mission", resolveMission(args.missionId)]);
+      main.push(["Task", String(args.taskTitle)]);
+      if (args.title) extra.push(["New title", String(args.title)]);
+      if (args.description) extra.push(["New description", trunc(args.description, 200)]);
+      break;
+    case "remove_mission_task":
+      main.push(["Mission", resolveMission(args.missionId)]);
+      main.push(["Task", String(args.taskTitle)]);
+      break;
+    case "reorder_mission_tasks":
+      main.push(["Mission", resolveMission(args.missionId)]);
+      main.push(["Order", trunc(args.titles)]);
+      break;
+    case "add_mission_checkpoint":
+    case "remove_mission_checkpoint":
+      main.push(["Mission", resolveMission(args.missionId)]);
+      main.push(["Checkpoint", String(args.name ?? args.checkpointName)]);
+      break;
+    case "update_mission_checkpoint":
+      main.push(["Mission", resolveMission(args.missionId)]);
+      main.push(["Checkpoint", String(args.checkpointName)]);
+      if (args.name) extra.push(["New name", String(args.name)]);
+      break;
+    case "add_mission_quality_gate":
+    case "remove_mission_quality_gate":
+      main.push(["Mission", resolveMission(args.missionId)]);
+      main.push(["Gate", String(args.name ?? args.gateName)]);
+      break;
+    case "update_mission_quality_gate":
+      main.push(["Mission", resolveMission(args.missionId)]);
+      main.push(["Gate", String(args.gateName)]);
+      if (args.name) extra.push(["New name", String(args.name)]);
+      break;
+    case "add_mission_team_member":
+    case "remove_mission_team_member":
+      main.push(["Mission", resolveMission(args.missionId)]);
+      main.push(["Member", String(args.name ?? args.memberName)]);
+      break;
+    case "update_mission_team_member":
+      main.push(["Mission", resolveMission(args.missionId)]);
+      main.push(["Member", String(args.memberName)]);
+      if (args.name) extra.push(["New name", String(args.name)]);
+      break;
+    case "update_mission_notifications":
+      main.push(["Mission", resolveMission(args.missionId)]);
+      main.push(["Action", args.notifications ? "Update rules" : "Clear rules"]);
+      break;
     case "delete_tasks":
       if (args.all) main.push(["Scope", "ALL tasks"]);
       if (args.status) main.push(["Status filter", String(args.status)]);

@@ -1,6 +1,13 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import type { ServerEnv } from "../app.js";
-import { CreateMissionSchema, UpdateMissionSchema } from "../schemas.js";
+import {
+  CreateMissionSchema, UpdateMissionSchema,
+  AddMissionTaskSchema, UpdateMissionTaskSchema, ReorderMissionTasksSchema,
+  AddMissionCheckpointSchema, UpdateMissionCheckpointSchema,
+  AddMissionQualityGateSchema, UpdateMissionQualityGateSchema,
+  AddMissionTeamMemberSchema, UpdateMissionTeamMemberSchema,
+  UpdateMissionNotificationsSchema,
+} from "../schemas.js";
 
 // ── Route definitions ─────────────────────────────────────────────────
 
@@ -196,6 +203,122 @@ const abortMissionRoute = createRoute({
   },
 });
 
+// ── Atomic mission data route definitions ─────────────────────────────
+
+const missionOkResponse = {
+  200: {
+    content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.any() }) } },
+    description: "Updated mission",
+  },
+  404: {
+    content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string(), code: z.string() }) } },
+    description: "Mission or entity not found",
+  },
+};
+
+// Tasks
+const addMissionTaskRoute = createRoute({
+  method: "post", path: "/{missionId}/tasks", tags: ["Missions"],
+  summary: "Add a task to mission data",
+  request: { params: z.object({ missionId: z.string() }), body: { content: { "application/json": { schema: AddMissionTaskSchema } } } },
+  responses: { ...missionOkResponse, 201: missionOkResponse[200] },
+});
+
+const updateMissionTaskRoute = createRoute({
+  method: "patch", path: "/{missionId}/tasks/{taskTitle}", tags: ["Missions"],
+  summary: "Update a task in mission data",
+  request: { params: z.object({ missionId: z.string(), taskTitle: z.string() }), body: { content: { "application/json": { schema: UpdateMissionTaskSchema } } } },
+  responses: missionOkResponse,
+});
+
+const removeMissionTaskRoute = createRoute({
+  method: "delete", path: "/{missionId}/tasks/{taskTitle}", tags: ["Missions"],
+  summary: "Remove a task from mission data",
+  request: { params: z.object({ missionId: z.string(), taskTitle: z.string() }) },
+  responses: missionOkResponse,
+});
+
+const reorderMissionTasksRoute = createRoute({
+  method: "put", path: "/{missionId}/tasks/reorder", tags: ["Missions"],
+  summary: "Reorder tasks in mission data",
+  request: { params: z.object({ missionId: z.string() }), body: { content: { "application/json": { schema: ReorderMissionTasksSchema } } } },
+  responses: missionOkResponse,
+});
+
+// Checkpoints
+const addMissionCheckpointRoute = createRoute({
+  method: "post", path: "/{missionId}/checkpoints", tags: ["Missions"],
+  summary: "Add a checkpoint to mission data",
+  request: { params: z.object({ missionId: z.string() }), body: { content: { "application/json": { schema: AddMissionCheckpointSchema } } } },
+  responses: { ...missionOkResponse, 201: missionOkResponse[200] },
+});
+
+const updateMissionCheckpointRoute = createRoute({
+  method: "patch", path: "/{missionId}/checkpoints/{checkpointName}", tags: ["Missions"],
+  summary: "Update a checkpoint in mission data",
+  request: { params: z.object({ missionId: z.string(), checkpointName: z.string() }), body: { content: { "application/json": { schema: UpdateMissionCheckpointSchema } } } },
+  responses: missionOkResponse,
+});
+
+const removeMissionCheckpointRoute2 = createRoute({
+  method: "delete", path: "/{missionId}/checkpoints/{checkpointName}", tags: ["Missions"],
+  summary: "Remove a checkpoint from mission data",
+  request: { params: z.object({ missionId: z.string(), checkpointName: z.string() }) },
+  responses: missionOkResponse,
+});
+
+// Quality gates
+const addMissionQualityGateRoute = createRoute({
+  method: "post", path: "/{missionId}/quality-gates", tags: ["Missions"],
+  summary: "Add a quality gate to mission data",
+  request: { params: z.object({ missionId: z.string() }), body: { content: { "application/json": { schema: AddMissionQualityGateSchema } } } },
+  responses: { ...missionOkResponse, 201: missionOkResponse[200] },
+});
+
+const updateMissionQualityGateRoute = createRoute({
+  method: "patch", path: "/{missionId}/quality-gates/{gateName}", tags: ["Missions"],
+  summary: "Update a quality gate in mission data",
+  request: { params: z.object({ missionId: z.string(), gateName: z.string() }), body: { content: { "application/json": { schema: UpdateMissionQualityGateSchema } } } },
+  responses: missionOkResponse,
+});
+
+const removeMissionQualityGateRoute = createRoute({
+  method: "delete", path: "/{missionId}/quality-gates/{gateName}", tags: ["Missions"],
+  summary: "Remove a quality gate from mission data",
+  request: { params: z.object({ missionId: z.string(), gateName: z.string() }) },
+  responses: missionOkResponse,
+});
+
+// Team members
+const addMissionTeamMemberRoute = createRoute({
+  method: "post", path: "/{missionId}/team", tags: ["Missions"],
+  summary: "Add a volatile team member to mission data",
+  request: { params: z.object({ missionId: z.string() }), body: { content: { "application/json": { schema: AddMissionTeamMemberSchema } } } },
+  responses: { ...missionOkResponse, 201: missionOkResponse[200] },
+});
+
+const updateMissionTeamMemberRoute = createRoute({
+  method: "patch", path: "/{missionId}/team/{memberName}", tags: ["Missions"],
+  summary: "Update a volatile team member in mission data",
+  request: { params: z.object({ missionId: z.string(), memberName: z.string() }), body: { content: { "application/json": { schema: UpdateMissionTeamMemberSchema } } } },
+  responses: missionOkResponse,
+});
+
+const removeMissionTeamMemberRoute = createRoute({
+  method: "delete", path: "/{missionId}/team/{memberName}", tags: ["Missions"],
+  summary: "Remove a volatile team member from mission data",
+  request: { params: z.object({ missionId: z.string(), memberName: z.string() }) },
+  responses: missionOkResponse,
+});
+
+// Notifications
+const updateMissionNotificationsRoute = createRoute({
+  method: "put", path: "/{missionId}/notifications", tags: ["Missions"],
+  summary: "Update or clear mission-level notification rules",
+  request: { params: z.object({ missionId: z.string() }), body: { content: { "application/json": { schema: UpdateMissionNotificationsSchema } } } },
+  responses: missionOkResponse,
+});
+
 // ── Route handlers ────────────────────────────────────────────────────
 
 /**
@@ -312,6 +435,186 @@ export function missionRoutes(): OpenAPIHono<ServerEnv> {
     }
     const count = orchestrator.abortGroup(mission.name);
     return c.json({ ok: true, data: { aborted: count } }, 200);
+  });
+
+  // ── Atomic mission data handlers ──────────────────────────────────
+
+  // POST /missions/:missionId/tasks — add task
+  app.openapi(addMissionTaskRoute, (c) => {
+    const orchestrator = c.get("orchestrator");
+    const { missionId } = c.req.valid("param");
+    const body = c.req.valid("json");
+    try {
+      const mission = orchestrator.addMissionTask(missionId, body);
+      return c.json({ ok: true, data: mission }, 201);
+    } catch (e: any) {
+      return c.json({ ok: false, error: e.message, code: "BAD_REQUEST" }, 404);
+    }
+  });
+
+  // PATCH /missions/:missionId/tasks/:taskTitle — update task
+  app.openapi(updateMissionTaskRoute, (c) => {
+    const orchestrator = c.get("orchestrator");
+    const { missionId, taskTitle } = c.req.valid("param");
+    const body = c.req.valid("json");
+    try {
+      const mission = orchestrator.updateMissionTask(missionId, decodeURIComponent(taskTitle), body);
+      return c.json({ ok: true, data: mission }, 200);
+    } catch (e: any) {
+      return c.json({ ok: false, error: e.message, code: "NOT_FOUND" }, 404);
+    }
+  });
+
+  // DELETE /missions/:missionId/tasks/:taskTitle — remove task
+  app.openapi(removeMissionTaskRoute, (c) => {
+    const orchestrator = c.get("orchestrator");
+    const { missionId, taskTitle } = c.req.valid("param");
+    try {
+      const mission = orchestrator.removeMissionTask(missionId, decodeURIComponent(taskTitle));
+      return c.json({ ok: true, data: mission }, 200);
+    } catch (e: any) {
+      return c.json({ ok: false, error: e.message, code: "NOT_FOUND" }, 404);
+    }
+  });
+
+  // PUT /missions/:missionId/tasks/reorder — reorder tasks
+  app.openapi(reorderMissionTasksRoute, (c) => {
+    const orchestrator = c.get("orchestrator");
+    const { missionId } = c.req.valid("param");
+    const { titles } = c.req.valid("json");
+    try {
+      const mission = orchestrator.reorderMissionTasks(missionId, titles);
+      return c.json({ ok: true, data: mission }, 200);
+    } catch (e: any) {
+      return c.json({ ok: false, error: e.message, code: "BAD_REQUEST" }, 404);
+    }
+  });
+
+  // POST /missions/:missionId/checkpoints — add checkpoint (data-level)
+  app.openapi(addMissionCheckpointRoute, (c) => {
+    const orchestrator = c.get("orchestrator");
+    const { missionId } = c.req.valid("param");
+    const body = c.req.valid("json");
+    try {
+      const mission = orchestrator.addMissionCheckpoint(missionId, body);
+      return c.json({ ok: true, data: mission }, 201);
+    } catch (e: any) {
+      return c.json({ ok: false, error: e.message, code: "BAD_REQUEST" }, 404);
+    }
+  });
+
+  // PATCH /missions/:missionId/checkpoints/:checkpointName — update checkpoint (data-level)
+  app.openapi(updateMissionCheckpointRoute, (c) => {
+    const orchestrator = c.get("orchestrator");
+    const { missionId, checkpointName } = c.req.valid("param");
+    const body = c.req.valid("json");
+    try {
+      const mission = orchestrator.updateMissionCheckpoint(missionId, decodeURIComponent(checkpointName), body);
+      return c.json({ ok: true, data: mission }, 200);
+    } catch (e: any) {
+      return c.json({ ok: false, error: e.message, code: "NOT_FOUND" }, 404);
+    }
+  });
+
+  // DELETE /missions/:missionId/checkpoints/:checkpointName — remove checkpoint (data-level)
+  app.openapi(removeMissionCheckpointRoute2, (c) => {
+    const orchestrator = c.get("orchestrator");
+    const { missionId, checkpointName } = c.req.valid("param");
+    try {
+      const mission = orchestrator.removeMissionCheckpoint(missionId, decodeURIComponent(checkpointName));
+      return c.json({ ok: true, data: mission }, 200);
+    } catch (e: any) {
+      return c.json({ ok: false, error: e.message, code: "NOT_FOUND" }, 404);
+    }
+  });
+
+  // POST /missions/:missionId/quality-gates — add quality gate
+  app.openapi(addMissionQualityGateRoute, (c) => {
+    const orchestrator = c.get("orchestrator");
+    const { missionId } = c.req.valid("param");
+    const body = c.req.valid("json");
+    try {
+      const mission = orchestrator.addMissionQualityGate(missionId, body);
+      return c.json({ ok: true, data: mission }, 201);
+    } catch (e: any) {
+      return c.json({ ok: false, error: e.message, code: "BAD_REQUEST" }, 404);
+    }
+  });
+
+  // PATCH /missions/:missionId/quality-gates/:gateName — update quality gate
+  app.openapi(updateMissionQualityGateRoute, (c) => {
+    const orchestrator = c.get("orchestrator");
+    const { missionId, gateName } = c.req.valid("param");
+    const body = c.req.valid("json");
+    try {
+      const mission = orchestrator.updateMissionQualityGate(missionId, decodeURIComponent(gateName), body);
+      return c.json({ ok: true, data: mission }, 200);
+    } catch (e: any) {
+      return c.json({ ok: false, error: e.message, code: "NOT_FOUND" }, 404);
+    }
+  });
+
+  // DELETE /missions/:missionId/quality-gates/:gateName — remove quality gate
+  app.openapi(removeMissionQualityGateRoute, (c) => {
+    const orchestrator = c.get("orchestrator");
+    const { missionId, gateName } = c.req.valid("param");
+    try {
+      const mission = orchestrator.removeMissionQualityGate(missionId, decodeURIComponent(gateName));
+      return c.json({ ok: true, data: mission }, 200);
+    } catch (e: any) {
+      return c.json({ ok: false, error: e.message, code: "NOT_FOUND" }, 404);
+    }
+  });
+
+  // POST /missions/:missionId/team — add team member
+  app.openapi(addMissionTeamMemberRoute, (c) => {
+    const orchestrator = c.get("orchestrator");
+    const { missionId } = c.req.valid("param");
+    const body = c.req.valid("json");
+    try {
+      const mission = orchestrator.addMissionTeamMember(missionId, body);
+      return c.json({ ok: true, data: mission }, 201);
+    } catch (e: any) {
+      return c.json({ ok: false, error: e.message, code: "BAD_REQUEST" }, 404);
+    }
+  });
+
+  // PATCH /missions/:missionId/team/:memberName — update team member
+  app.openapi(updateMissionTeamMemberRoute, (c) => {
+    const orchestrator = c.get("orchestrator");
+    const { missionId, memberName } = c.req.valid("param");
+    const body = c.req.valid("json");
+    try {
+      const mission = orchestrator.updateMissionTeamMember(missionId, decodeURIComponent(memberName), body);
+      return c.json({ ok: true, data: mission }, 200);
+    } catch (e: any) {
+      return c.json({ ok: false, error: e.message, code: "NOT_FOUND" }, 404);
+    }
+  });
+
+  // DELETE /missions/:missionId/team/:memberName — remove team member
+  app.openapi(removeMissionTeamMemberRoute, (c) => {
+    const orchestrator = c.get("orchestrator");
+    const { missionId, memberName } = c.req.valid("param");
+    try {
+      const mission = orchestrator.removeMissionTeamMember(missionId, decodeURIComponent(memberName));
+      return c.json({ ok: true, data: mission }, 200);
+    } catch (e: any) {
+      return c.json({ ok: false, error: e.message, code: "NOT_FOUND" }, 404);
+    }
+  });
+
+  // PUT /missions/:missionId/notifications — update notifications
+  app.openapi(updateMissionNotificationsRoute, (c) => {
+    const orchestrator = c.get("orchestrator");
+    const { missionId } = c.req.valid("param");
+    const { notifications } = c.req.valid("json");
+    try {
+      const mission = orchestrator.updateMissionNotifications(missionId, notifications);
+      return c.json({ ok: true, data: mission }, 200);
+    } catch (e: any) {
+      return c.json({ ok: false, error: e.message, code: "NOT_FOUND" }, 404);
+    }
   });
 
   return app;
