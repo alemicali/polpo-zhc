@@ -63,6 +63,10 @@ export interface AgentDetailState {
   agentAllowedTools: string[];
   /** Tool categories that are enabled based on allowedTools */
   enabledCategories: typeof toolCategories;
+  /** Team name this agent belongs to */
+  teamName: string | null;
+  /** Team color index (position in the teams array, for consistent colors) */
+  teamColorIndex: number;
 }
 
 export interface AgentDetailActions {
@@ -100,7 +104,7 @@ export function AgentDetailProvider({ children }: { children: React.ReactNode })
   const agentName = name ?? "";
 
   const { agent, isLoading, error, refetch } = useAgent(agentName);
-  const { agents } = useAgents();
+  const { agents, teams } = useAgents();
   const { processes } = useProcesses();
   const { skills: allSkills } = useSkills();
   const { entries: vaultEntries } = useVaultEntries(agentName);
@@ -164,6 +168,16 @@ export function AgentDetailProvider({ children }: { children: React.ReactNode })
     [agentTasks],
   );
 
+  // Team membership
+  const teamInfo = useMemo(() => {
+    for (let i = 0; i < teams.length; i++) {
+      if (teams[i].agents.some((a: AgentConfig) => a.name === agentName)) {
+        return { teamName: teams[i].name, teamColorIndex: i };
+      }
+    }
+    return { teamName: null as string | null, teamColorIndex: 0 };
+  }, [teams, agentName]);
+
   // MCP entries
   const mcpEntries = agent?.mcpServers ? Object.entries(agent.mcpServers) : [];
 
@@ -186,13 +200,15 @@ export function AgentDetailProvider({ children }: { children: React.ReactNode })
       mcpEntries,
       agentAllowedTools,
       enabledCategories,
+      teamName: teamInfo.teamName,
+      teamColorIndex: teamInfo.teamColorIndex,
     },
     actions: { refetch },
     meta: { agentName },
   }), [
     agent, isLoading, error, process, subordinates, manager,
     taskStats, sortedTasks, skillPool, vaultEntries, mcpEntries,
-    agentAllowedTools, enabledCategories, refetch, agentName,
+    agentAllowedTools, enabledCategories, teamInfo, refetch, agentName,
   ]);
 
   return (

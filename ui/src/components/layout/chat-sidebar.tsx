@@ -11,6 +11,12 @@ import { lazy, Suspense } from "react";
 import { useLocation } from "react-router-dom";
 import { useSidebarOpen } from "@/hooks/chat-context";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  PromptInput,
+  PromptInputTextarea,
+  PromptInputFooter,
+  PromptInputSubmit,
+} from "@/components/ai-elements/prompt-input";
 
 // Lazy-load ChatPage so it stays code-split (same as the route in app.tsx)
 const ChatPage = lazy(() =>
@@ -20,6 +26,7 @@ const ChatPage = lazy(() =>
 /**
  * Suspense fallback — matches the ChatLoadingSkeleton layout so there's no
  * visual shift when the JS chunk finishes loading.
+ * The prompt input is real (disabled) so the user always sees a consistent UI.
  */
 function SidebarSkeleton() {
   return (
@@ -62,10 +69,19 @@ function SidebarSkeleton() {
         </div>
       </div>
 
-      {/* Input skeleton */}
-      <div className="px-4 pt-2 pb-1.5 shrink-0">
+      {/* Real prompt input — disabled during loading */}
+      <div className="bg-background/80 backdrop-blur-md px-4 pt-2 pb-1.5 shrink-0">
         <div className="mx-auto max-w-3xl">
-          <Skeleton className="h-[52px] w-full rounded-2xl" />
+          <PromptInput onSubmit={() => {}} className="[&_[data-slot=input-group]]:rounded-2xl">
+            <PromptInputTextarea placeholder="Message Polpo..." disabled />
+            <PromptInputFooter>
+              <div className="flex items-center gap-1" />
+              <PromptInputSubmit disabled />
+            </PromptInputFooter>
+          </PromptInput>
+          <p className="text-[10px] text-muted-foreground text-center mt-0.5">
+            @ to mention · Enter to send · Shift+Enter for new line.
+          </p>
         </div>
       </div>
     </div>

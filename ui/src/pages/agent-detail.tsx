@@ -13,7 +13,6 @@
 
 import { Link } from "react-router-dom";
 import { Card, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -44,6 +43,7 @@ import { ActivityHeatmap } from "@/components/agents/activity-heatmap";
 import { AgentOverviewTab } from "@/components/agents/agent-overview-tab";
 import { AgentInstructionsTab } from "@/components/agents/agent-instructions-tab";
 import { AgentToolsTab } from "@/components/agents/agent-tools-tab";
+import { AgentCredentialsTab } from "@/components/agents/agent-credentials-tab";
 import { AgentConfigTab } from "@/components/agents/agent-config-tab";
 import { AgentTasksTab } from "@/components/agents/agent-tasks-tab";
 
@@ -107,7 +107,7 @@ function MobileIdentitySummary() {
 
 function AgentDetailContent() {
   const {
-    state: { agent, process, taskStats, sortedTasks, enabledCategories },
+    state: { agent, process, taskStats, sortedTasks, enabledCategories, vaultEntries },
   } = useAgentDetail();
 
   return (
@@ -132,15 +132,21 @@ function AgentDetailContent() {
           <TabsTrigger value="instructions">Instructions</TabsTrigger>
           <TabsTrigger value="tools">
             Tools & Skills
-            <Badge variant="secondary" className="ml-1.5 text-[9px]">
-              {(agent.allowedTools?.length ?? 0) + enabledCategories.length + (agent.skills?.length ?? 0) + (agent.mcpServers ? Object.keys(agent.mcpServers).length : 0)}
-            </Badge>
+            <span className="text-muted-foreground font-normal ml-0.5">
+              ({(agent.allowedTools?.length ?? 0) + enabledCategories.length + (agent.skills?.length ?? 0) + (agent.mcpServers ? Object.keys(agent.mcpServers).length : 0)})
+            </span>
+          </TabsTrigger>
+          <TabsTrigger value="credentials">
+            Credentials
+            {vaultEntries.length > 0 && (
+              <span className="text-muted-foreground font-normal ml-0.5">({vaultEntries.length})</span>
+            )}
           </TabsTrigger>
           <TabsTrigger value="config">Config</TabsTrigger>
           <TabsTrigger value="tasks">
             Tasks
             {taskStats.total > 0 && (
-              <Badge variant="secondary" className="ml-1.5 text-[9px]">{taskStats.total}</Badge>
+              <span className="text-muted-foreground font-normal ml-0.5">({taskStats.total})</span>
             )}
           </TabsTrigger>
         </TabsList>
@@ -155,6 +161,10 @@ function AgentDetailContent() {
 
         <TabsContent value="tools" className="mt-4 flex-1 min-h-0">
           <AgentToolsTab />
+        </TabsContent>
+
+        <TabsContent value="credentials" className="mt-4 flex-1 min-h-0">
+          <AgentCredentialsTab />
         </TabsContent>
 
         <TabsContent value="config" className="mt-4 flex-1 min-h-0">

@@ -69,25 +69,7 @@ export function Header() {
 
       {/* Actions */}
       <div className="flex items-center gap-2">
-        {/* Chat sidebar toggle — hidden on /chat page and on mobile */}
-        {!isOnChatPage && (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className={`hidden lg:inline-flex h-8 w-8 rounded-lg transition-all ${sidebarOpen ? "text-primary bg-primary/10 hover:bg-primary/15" : "text-muted-foreground hover:text-foreground hover:bg-accent/50"}`}
-                onClick={sidebarActions.toggleSidebar}
-              >
-                <MessageCircle className="h-4 w-4" />
-                <span className="sr-only">{sidebarOpen ? "Close chat" : "Open chat"}</span>
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom" className="text-xs">
-              {sidebarOpen ? "Close chat sidebar" : "Open chat sidebar"}
-            </TooltipContent>
-          </Tooltip>
-        )}
+        {/* Theme toggle */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button
@@ -139,6 +121,25 @@ export function Header() {
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
+        {/* Chat sidebar toggle — hidden on /chat page and on mobile */}
+        {!isOnChatPage && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className={`hidden lg:inline-flex h-8 w-8 rounded-lg transition-all ${sidebarOpen ? "text-primary bg-primary/10 hover:bg-primary/15" : "text-muted-foreground hover:text-foreground hover:bg-accent/50"}`}
+                onClick={sidebarActions.toggleSidebar}
+              >
+                <MessageCircle className="h-4 w-4" />
+                <span className="sr-only">{sidebarOpen ? "Close chat" : "Open chat"}</span>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" className="text-xs">
+              {sidebarOpen ? "Close chat sidebar" : "Open chat sidebar"}
+            </TooltipContent>
+          </Tooltip>
+        )}
       </div>
     </header>
   );

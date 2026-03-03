@@ -24,20 +24,22 @@ import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { cn } from "@/lib/utils";
 import { useAgentDetail } from "./agent-detail-provider";
 import { reasoningMeta, formatAgentAge } from "@/lib/agent-meta";
+import { getTeamColor } from "./agents-team-colors";
 
 export function AgentHeroCard() {
-  const { state: { agent, process }, actions: { refetch } } = useAgentDetail();
+  const { state: { agent, process, teamColorIndex }, actions: { refetch } } = useAgentDetail();
   const identity = agent.identity;
+  const tc = getTeamColor(teamColorIndex);
 
   return (
     <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0">
-      {/* Gradient header bar */}
-      <div className="h-10 rounded-t-xl bg-gradient-to-r from-primary/20 via-primary/10 to-transparent" />
+      {/* Gradient header bar — colored by team */}
+      <div className={cn("h-10 rounded-t-xl bg-gradient-to-r to-transparent", tc.gradientFrom, tc.gradientVia)} />
       <CardContent className="pt-0 -mt-5 pb-4 space-y-3">
         {/* Avatar + name */}
         <div className="flex items-center gap-3">
-          <div className="relative flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-card border-2 border-background shadow-lg z-10">
-            <AgentAvatar avatar={identity?.avatar} name={agent.name} size="xl" iconClassName="text-primary" />
+          <div className={cn("relative flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-card border-2 shadow-lg z-10", tc.border)}>
+            <AgentAvatar avatar={identity?.avatar} name={agent.name} size="xl" iconClassName={tc.text} />
           </div>
           <div className="min-w-0">
             <div className="flex items-center gap-2">

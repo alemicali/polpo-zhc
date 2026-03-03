@@ -66,10 +66,22 @@ export function AgentInstructionsTab() {
             )}
           </Card>
         ) : (
-          <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
+          <div className="flex flex-col items-center justify-center py-16 text-muted-foreground max-w-md mx-auto text-center">
             <Terminal className="h-10 w-10 mb-3 opacity-40" />
-            <p className="text-sm">No system prompt configured</p>
-            <p className="text-xs text-muted-foreground/60 mt-1">Add a <code className="font-mono text-[10px]">systemPrompt</code> field in the agent config</p>
+            <p className="text-sm font-medium">No additional instructions</p>
+            <p className="text-xs text-muted-foreground/60 mt-2 leading-relaxed">
+              The <code className="font-mono text-[10px]">systemPrompt</code> field lets you add custom instructions that are appended to the agent's built-in prompt.
+            </p>
+            <p className="text-xs text-muted-foreground/60 mt-2 leading-relaxed">
+              The following are injected dynamically from the agent's identity and config — no need to repeat them here:
+            </p>
+            <div className="flex flex-wrap justify-center gap-1.5 mt-2">
+              {["role", "tone", "personality", "bio", "displayName", "title", "responsibilities", "timezone", "language", "model", "allowedTools", "skills"].map(f => (
+                <span key={f} className="rounded bg-muted/50 border border-border/30 px-2 py-0.5 text-[10px] font-mono text-muted-foreground">
+                  {f}
+                </span>
+              ))}
+            </div>
           </div>
         )}
       </div>

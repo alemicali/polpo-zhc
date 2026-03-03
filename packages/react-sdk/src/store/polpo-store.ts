@@ -95,6 +95,13 @@ export class PolpoStore {
   }
 
   setProcesses(processes: AgentProcess[]): void {
+    const prev = this.state.processes;
+    if (
+      prev.length === processes.length &&
+      processes.every((p, i) => prev[i] === p)
+    ) {
+      return;
+    }
     this.state = { ...this.state, processes };
     this.notify();
   }

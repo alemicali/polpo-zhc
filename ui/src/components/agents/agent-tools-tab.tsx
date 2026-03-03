@@ -3,7 +3,6 @@
  * Reads data from AgentDetailContext.
  */
 
-import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import {
   Tooltip,
@@ -21,20 +20,18 @@ import {
   CheckCircle2,
   XCircle,
   Layers,
-  KeyRound,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { SectionHeader } from "@/components/shared/section-header";
 import { useAgentDetail } from "./agent-detail-provider";
 import { getToolMeta, getSkillMeta, toolCategories } from "@/lib/agent-meta";
-import type { VaultEntryMeta } from "@lumea-labs/polpo-react";
+
 
 export function AgentToolsTab() {
   const {
     state: {
       agent,
       skillPool,
-      vaultEntries,
       mcpEntries,
       agentAllowedTools,
       enabledCategories,
@@ -248,50 +245,7 @@ export function AgentToolsTab() {
           </div>
         )}
 
-        {/* Credential Vault */}
-        <div>
-          <SectionHeader title="Credential Vault" icon={KeyRound} count={vaultEntries.length || undefined} />
-          {vaultEntries.length > 0 ? (
-            <div className="space-y-2">
-              {vaultEntries.map((entry: VaultEntryMeta) => (
-                <div
-                  key={entry.service}
-                  className="rounded-md border border-border/30 bg-card/60 px-4 py-3 space-y-2"
-                >
-                  <div className="flex items-center gap-2">
-                    <KeyRound className="h-3.5 w-3.5 text-primary shrink-0" />
-                    <span className="text-sm font-medium">{entry.service}</span>
-                    <Badge variant="outline" className="text-[10px] ml-auto">{entry.type}</Badge>
-                  </div>
-                  {entry.label && (
-                    <p className="text-xs text-muted-foreground ml-5.5">{entry.label}</p>
-                  )}
-                  <div className="flex flex-wrap gap-1.5 ml-5.5">
-                    {entry.keys.map((k: string) => (
-                      <span
-                        key={k}
-                        className="inline-flex items-center gap-1 rounded bg-muted/50 border border-border/30 px-2 py-0.5 text-[11px] font-mono text-muted-foreground"
-                      >
-                        {k}: <span className="text-[10px] opacity-60">***</span>
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              ))}
-              <p className="text-[10px] text-muted-foreground/60 mt-1">
-                Encrypted with AES-256-GCM in <code className="font-mono">.polpo/vault.enc</code>. Use the chat to manage entries.
-              </p>
-            </div>
-          ) : (
-            <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0">
-              <CardContent className="pt-4 pb-4">
-                <p className="text-xs text-muted-foreground leading-relaxed">
-                  No credentials configured for this agent. Use the chat to add vault entries — they are encrypted with AES-256-GCM in <code className="text-[10px] font-mono">.polpo/vault.enc</code>.
-                </p>
-              </CardContent>
-            </Card>
-          )}
-        </div>
+
       </div>
     </ScrollArea>
   );

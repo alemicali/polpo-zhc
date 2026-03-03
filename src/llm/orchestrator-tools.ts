@@ -895,7 +895,10 @@ Available targets:
 - "activity" — Activity / event log
 - "chat" — Chat page
 - "memory" — Memory page
-- "settings" — Settings page
+- "notifications" — Notifications page
+- "approvals" — Approvals page
+- "templates" — Templates page
+- "config" — Configuration / settings page
 
 Examples:
 - navigate_to({ target: "dashboard" })
@@ -904,7 +907,7 @@ Examples:
 - navigate_to({ target: "files", path: "src/", highlight: "index.ts" })
 - navigate_to({ target: "task", id: "task-xyz" })`,
   parameters: Type.Object({
-    target: Type.String({ description: "Page target: dashboard, tasks, task, missions, mission, agents, agent, skills, skill, files, activity, chat, memory, settings" }),
+    target: Type.String({ description: "Page target: dashboard, tasks, task, missions, mission, agents, agent, skills, skill, files, activity, chat, memory, notifications, approvals, templates, config" }),
     id: Type.Optional(Type.String({ description: "Entity ID for detail pages (task, mission)" })),
     name: Type.Optional(Type.String({ description: "Entity name for detail pages (agent, skill)" })),
     path: Type.Optional(Type.String({ description: "Directory path for files target" })),
