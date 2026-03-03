@@ -18,7 +18,7 @@ function describeAgentCapabilities(agent: AgentConfig, skillPool?: SkillInfo[]):
   const allowed = agent.allowedTools ?? [];
   const hasPattern = (prefix: string) => allowed.some(t => t.toLowerCase().startsWith(prefix));
   if (hasPattern("browser_")) caps.push("browser_navigate/snapshot/click/fill/eval (18 browser tools via agent-browser)");
-  if (hasPattern("email_")) caps.push("email_send, email_verify, email_list, email_read, email_search");
+  if (hasPattern("email_")) caps.push("email_send, email_draft, email_verify, email_list, email_read, email_search");
   if (hasPattern("image_")) caps.push("image_generate (fal.ai FLUX), image_analyze (OpenAI/Anthropic vision)");
   if (hasPattern("video_")) caps.push("video_generate (fal.ai Wan 2.2 text-to-video)");
   if (hasPattern("audio_")) caps.push("audio_transcribe (STT: OpenAI Whisper / Deepgram Nova), audio_speak (TTS: OpenAI / Deepgram / ElevenLabs / Edge — free fallback)");
@@ -747,7 +747,7 @@ export function buildChatSystemPrompt(
     `- For browser automation: "Use browser_navigate then browser_screenshot" (requires browser_* in allowedTools)`,
     `- For HTTP/API calls: "Use http_fetch to call the API" (always available). For simple lookups,`,
     `  you can also call http_fetch directly yourself instead of creating a task.`,
-    `- For email: "Use email_send" (requires email_* in allowedTools + vault credentials)`,
+    `- For email: "Use email_send" to send immediately or "Use email_draft" to save a draft (requires email_* in allowedTools + vault credentials)`,
     `- For image generation: "Use image_generate" (requires image_* in allowedTools + vault fal-ai key or FAL_KEY env var)`,
     `- For video generation: "Use video_generate" (requires video_* in allowedTools + vault fal-ai key or FAL_KEY env var)`,
     `- For image analysis/vision: "Use image_analyze" (requires image_* in allowedTools + vault or OPENAI_API_KEY/ANTHROPIC_API_KEY)`,

@@ -233,7 +233,7 @@ export class AssessmentOrchestrator {
         filesEdited: activity?.filesEdited,
       };
 
-      this.runAssessmentWithRetry(task, this.ctx.workDir, progressCb, reviewContext).then(assessment => {
+      this.runAssessmentWithRetry(task, this.ctx.agentWorkDir, progressCb, reviewContext).then(assessment => {
         setAssessment(result, assessment, "initial");
         this.ctx.registry.updateTask(taskId, { result });
 
@@ -405,7 +405,7 @@ export class AssessmentOrchestrator {
         filesCreated: activity?.filesCreated,
         filesEdited: activity?.filesEdited,
       };
-      const newAssessment = await this.ctx.assessFn(current, this.ctx.workDir, progressCb, reCtx, this.ctx.config.settings.reasoning);
+      const newAssessment = await this.ctx.assessFn(current, this.ctx.agentWorkDir, progressCb, reCtx, this.ctx.config.settings.reasoning);
       setAssessment(result, newAssessment, "auto-correct");
       this.ctx.registry.updateTask(taskId, { result });
 
@@ -523,7 +523,7 @@ export class AssessmentOrchestrator {
         filesCreated: activity?.filesCreated,
         filesEdited: activity?.filesEdited,
       };
-      const newAssessment = await this.ctx.assessFn(current, this.ctx.workDir, progressCb, judgeCtx, this.ctx.config.settings.reasoning);
+      const newAssessment = await this.ctx.assessFn(current, this.ctx.agentWorkDir, progressCb, judgeCtx, this.ctx.config.settings.reasoning);
       setAssessment(result, newAssessment, "judge");
       this.ctx.registry.updateTask(taskId, { result });
 

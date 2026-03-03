@@ -148,7 +148,7 @@ export class TaskManager {
     };
 
     try {
-      const assessment = await this.ctx.assessFn(task, this.ctx.workDir, onProgress, reviewContext, this.ctx.config.settings.reasoning);
+      const assessment = await this.ctx.assessFn(task, this.ctx.agentWorkDir, onProgress, reviewContext, this.ctx.config.settings.reasoning);
       setAssessment(result, assessment, "reassess");
       this.ctx.registry.updateTask(taskId, { result });
 

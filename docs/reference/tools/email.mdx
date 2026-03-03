@@ -1,10 +1,10 @@
 ---
 title: "Email Tools"
 sidebarTitle: "Email"
-description: "5 tools to send, read, and search email via SMTP and IMAP"
+description: "6 tools to send, draft, read, and search email via SMTP and IMAP"
 ---
 
-Send, read, and search emails. Enable by including `"email_*"` in the agent's `allowedTools` array.
+Send, draft, read, and search emails. Enable by including `"email_*"` in the agent's `allowedTools` array.
 
 <Note>
 **SMTP** (send): Uses **nodemailer**. Credentials from agent vault (`"email"` entry with type `"smtp"`), env vars (`SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`), or per-call parameter overrides.
@@ -15,6 +15,42 @@ Send, read, and search emails. Enable by including `"email_*"` in the agent's `a
 <Tip>
 The easiest way to configure email credentials is through the **onboarding wizard**: `polpo agent onboard <name>`. Step 4 walks you through SMTP and IMAP setup, creates vault entries with `${ENV_VAR}` references, and adds `email_*` to `allowedTools` automatically. See [Onboarding walkthrough](/guides/build-your-team#onboard-your-agents).
 </Tip>
+
+---
+
+## `email_draft` — Save Draft Email
+
+Create an email draft and save it to the IMAP Drafts folder.
+
+### Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `to` | string \| string[] | no | Recipient email address(es) |
+| `subject` | string | no | Email subject line |
+| `body` | string | no | Draft body content |
+| `html` | boolean | no | Save body as HTML draft (auto-detected if omitted) |
+| `cc` | string \| string[] | no | CC recipient(s) |
+| `bcc` | string \| string[] | no | BCC recipient(s) |
+| `from` | string | no | Sender address (defaults to SMTP_FROM or IMAP user) |
+| `reply_to` | string | no | Reply-to address |
+| `attachments` | array of `{path, filename?}` | no | File attachments |
+| `folder` | string | no | Drafts folder path (default: auto-detect, then `"Drafts"`) |
+| `imap_host` | string | no | IMAP host (overrides vault/env) |
+| `imap_port` | number | no | IMAP port (overrides vault/env) |
+| `imap_user` | string | no | IMAP username (overrides vault/env) |
+| `imap_pass` | string | no | IMAP password (overrides vault/env) |
+| `imap_tls` | boolean | no | IMAP TLS setting (overrides vault/env) |
+
+### Returns
+
+Confirmation with the target folder and append metadata.
+
+### Notes
+
+- Drafts are saved via IMAP `APPEND` with the `\\Draft` flag
+- If `folder` is omitted, Polpo auto-detects the mailbox with special-use `\\Drafts`, then falls back to `Drafts`
+- Attachment paths are sandboxed exactly like `email_send`
 
 ---
 
@@ -116,7 +152,10 @@ Search emails by criteria.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `query` | string | yes | Search query — matched against subject, from, and body |
+| `from` | string | no | Search by sender address |
+| `subject` | string | no | Search by subject (substring) |
+| `since` | string | no | Search emails since date (YYYY-MM-DD) |
+| `body` | string | no | Search by body text (substring) |
 | `folder` | string | no | Mailbox folder (default: `"INBOX"`) |
 | `limit` | number | no | Max results (default: 20) |
 

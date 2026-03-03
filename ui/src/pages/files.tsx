@@ -415,9 +415,10 @@ export function FilesPage() {
 
   useEffect(() => {
     fetchDir(currentPath);
-    // Clear selection when navigating to a new directory (unless highlight is set)
-    if (!highlightParam) setSelectedEntry(null);
-  }, [currentPath, fetchDir, highlightParam]);
+    // Clear selection only when directory changes.
+    // Do not clear on highlight query cleanup, otherwise selection flashes then disappears.
+    setSelectedEntry(null);
+  }, [currentPath, fetchDir]);
 
   // Auto-select file from ?highlight= param (set by go_to_file tool)
   useEffect(() => {

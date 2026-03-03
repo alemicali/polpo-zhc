@@ -65,7 +65,7 @@ For authenticated browsing, set up a persistent profile with `polpo browser logi
   Full parameter schemas and usage for all 18 browser tools.
 </Card>
 
-### Email (5 tools)
+### Email (6 tools)
 
 Send, read, and search emails via SMTP and IMAP — useful for communication agents, notification bots, or inbox monitoring.
 
@@ -73,12 +73,12 @@ Send, read, and search emails via SMTP and IMAP — useful for communication age
 { "name": "alice", "allowedTools": ["read", "write", "edit", "bash", "glob", "grep", "ls", "email_*"] }
 ```
 
-Tools: `email_send`, `email_verify`, `email_list`, `email_read`, `email_search`.
+Tools: `email_send`, `email_draft`, `email_verify`, `email_list`, `email_read`, `email_search`.
 
 Email tools require SMTP/IMAP credentials. The easiest way to set them up is through the [onboarding wizard](/guides/build-your-team#onboard-your-agents) (`polpo agent onboard alice`), which creates vault entries with `${ENV_VAR}` references. Credentials can also be set via environment variables (`SMTP_HOST`, `IMAP_HOST`, etc.) or tool parameter overrides.
 
 <Card title="Email tools reference" icon="arrow-right" href="/reference/tools/email">
-  Full parameter schemas, credential resolution, and usage for all 5 email tools.
+  Full parameter schemas, credential resolution, and usage for all 6 email tools.
 </Card>
 
 ### Vault (2 tools)

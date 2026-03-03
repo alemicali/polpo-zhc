@@ -1,7 +1,7 @@
 import { exec } from "node:child_process";
 import { access } from "node:fs/promises";
 import { mkdir, writeFile, unlink } from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { nanoid } from "nanoid";
 import type {
@@ -50,8 +50,9 @@ export async function runCheck(
       }
       const missing: string[] = [];
       for (const p of paths) {
+        const resolvedPath = resolve(cwd, p);
         try {
-          await access(p);
+          await access(resolvedPath);
         } catch {
           missing.push(p);
         }

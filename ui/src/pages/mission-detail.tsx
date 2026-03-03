@@ -144,6 +144,17 @@ interface ParsedMission {
   checkpoints?: MissionCheckpointDef[];
 }
 
+function filesLinkForPath(filePath: string): string | null {
+  const normalized = filePath
+    .replace(/\\/g, "/")
+    .trim();
+  if (!normalized) return null;
+  const parts = normalized.split("/");
+  const dir = parts.length > 1 ? (parts.slice(0, -1).join("/") || "/") : ".";
+  const params = new URLSearchParams({ path: dir, highlight: normalized });
+  return `/files?${params.toString()}`;
+}
+
 function parseMissionData(data: string): ParsedMission | null {
   try {
     const parsed = JSON.parse(data);
@@ -377,9 +388,31 @@ function TaskNodeComponent({ data, selected }: NodeProps<Node<TaskNodeData>>) {
                               <span className="text-[8px] text-muted-foreground">thr: {exp.threshold}</span>
                             )}
                           </div>
-                          <p className="text-muted-foreground leading-snug mt-0.5">
-                            {exp.criteria ?? exp.command ?? exp.paths?.join(", ") ?? "LLM review"}
-                          </p>
+                          {exp.type === "file_exists" && exp.paths && exp.paths.length > 0 ? (
+                            <div className="flex flex-wrap gap-1 mt-0.5">
+                              {exp.paths.map((path, j) => {
+                                const fileTarget = filesLinkForPath(path);
+                                return (
+                                  <button
+                                    key={j}
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      if (fileTarget) navigate(fileTarget);
+                                    }}
+                                    className="rounded bg-muted/40 px-1.5 py-0.5 font-mono text-[10px] text-primary/90 hover:bg-muted/70 hover:text-primary transition-colors"
+                                    title="Open in file editor"
+                                  >
+                                    {path}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          ) : (
+                            <p className="text-muted-foreground leading-snug mt-0.5">
+                              {exp.criteria ?? exp.command ?? exp.paths?.join(", ") ?? "LLM review"}
+                            </p>
+                          )}
                         </div>
                       </div>
                     );
@@ -1062,9 +1095,31 @@ function TaskStepCard({
                                 <span className="text-[9px] text-muted-foreground ml-auto">threshold: {exp.threshold}</span>
                               )}
                             </div>
-                            <p className="text-muted-foreground leading-relaxed">
-                              {exp.criteria ?? exp.command ?? exp.paths?.join(", ") ?? "LLM review"}
-                            </p>
+                            {exp.type === "file_exists" && exp.paths && exp.paths.length > 0 ? (
+                              <div className="mt-0.5 flex flex-wrap gap-1">
+                                {exp.paths.map((path, j) => {
+                                  const fileTarget = filesLinkForPath(path);
+                                  return (
+                                    <button
+                                      key={j}
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        if (fileTarget) navigate(fileTarget);
+                                      }}
+                                      className="rounded bg-muted/50 px-1.5 py-0.5 font-mono text-[11px] text-primary/90 hover:bg-muted/70 hover:text-primary transition-colors"
+                                      title="Open in file editor"
+                                    >
+                                      {path}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            ) : (
+                              <p className="text-muted-foreground leading-relaxed">
+                                {exp.criteria ?? exp.command ?? exp.paths?.join(", ") ?? "LLM review"}
+                              </p>
+                            )}
                             {exp.dimensions && exp.dimensions.length > 0 && (
                               <div className="mt-1.5 space-y-0.5">
                                 {exp.dimensions.map((d, k) => (

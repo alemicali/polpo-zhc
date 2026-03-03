@@ -96,7 +96,7 @@ export function getSkillMeta(name: string): { icon: LucideIcon; color: string } 
 
 export const toolCategories: { prefix: string; label: string; tools: string }[] = [
   { prefix: "browser_", label: "Browser", tools: "browser_navigate, browser_click, browser_fill, browser_snapshot, browser_screenshot, ..." },
-  { prefix: "email_", label: "Email", tools: "email_send, email_verify, email_list, email_read, email_search" },
+  { prefix: "email_", label: "Email", tools: "email_send, email_draft, email_verify, email_list, email_read, email_search" },
   { prefix: "vault_", label: "Vault", tools: "vault_get, vault_list" },
   { prefix: "image_", label: "Image", tools: "image_generate (fal.ai FLUX), image_analyze (OpenAI/Anthropic vision)" },
   { prefix: "video_", label: "Video", tools: "video_generate (fal.ai Wan 2.2 text-to-video)" },

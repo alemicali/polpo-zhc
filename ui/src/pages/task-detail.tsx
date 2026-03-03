@@ -106,6 +106,17 @@ const triggerLabels: Record<AssessmentTrigger, { label: string; color: string }>
   judge: { label: "Judge Review", color: "text-sky-400" },
 };
 
+function filesLinkForPath(filePath: string): string | null {
+  const normalized = filePath
+    .replace(/\\/g, "/")
+    .trim();
+  if (!normalized) return null;
+  const parts = normalized.split("/");
+  const dir = parts.length > 1 ? (parts.slice(0, -1).join("/") || "/") : ".";
+  const params = new URLSearchParams({ path: dir, highlight: normalized });
+  return `/files?${params.toString()}`;
+}
+
 function TriggerBadge({ trigger }: { trigger?: AssessmentTrigger }) {
   if (!trigger) return null;
   const cfg = triggerLabels[trigger];
@@ -1369,9 +1380,24 @@ export function TaskDetailPage() {
                           )}
                           {exp.paths && exp.paths.length > 0 && (
                             <div className="flex flex-wrap gap-1">
-                              {exp.paths.map((p, j) => (
-                                <code key={j} className="text-[11px] bg-muted/40 rounded px-2 py-0.5 font-mono text-muted-foreground break-all">{p}</code>
-                              ))}
+                              {exp.paths.map((p, j) => {
+                                const fileTarget = filesLinkForPath(p);
+                                if (exp.type === "file_exists" && fileTarget) {
+                                  return (
+                                    <Link
+                                      key={j}
+                                      to={fileTarget}
+                                      className="text-[11px] bg-muted/40 rounded px-2 py-0.5 font-mono text-primary/90 break-all hover:bg-muted/70 hover:text-primary transition-colors"
+                                      title="Open in file editor"
+                                    >
+                                      {p}
+                                    </Link>
+                                  );
+                                }
+                                return (
+                                  <code key={j} className="text-[11px] bg-muted/40 rounded px-2 py-0.5 font-mono text-muted-foreground break-all">{p}</code>
+                                );
+                              })}
                             </div>
                           )}
                           {exp.criteria && (

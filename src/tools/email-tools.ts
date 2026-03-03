@@ -3,6 +3,7 @@
  *
  * Provides tools for agents to:
  * - Send emails with HTML or plain text (SMTP)
+ * - Save draft emails to IMAP Drafts folder
  * - Add attachments from local files
  * - Send to multiple recipients (to, cc, bcc)
  * - List, read, and search emails (IMAP)
@@ -50,6 +51,33 @@ const EmailSendSchema = Type.Object({
   smtp_user: Type.Optional(Type.String({ description: "SMTP user (overrides vault/env)" })),
   smtp_pass: Type.Optional(Type.String({ description: "SMTP password (overrides vault/env)" })),
   smtp_secure: Type.Optional(Type.Boolean({ description: "Use TLS (default: true for port 465, STARTTLS for others)" })),
+});
+
+const EmailDraftSchema = Type.Object({
+  to: Type.Optional(Type.Union([
+    Type.String(),
+    Type.Array(Type.String()),
+  ], { description: "Recipient email address(es)" })),
+  subject: Type.Optional(Type.String({ description: "Email subject line" })),
+  body: Type.Optional(Type.String({ description: "Draft body content (plain text or HTML)" })),
+  html: Type.Optional(Type.Boolean({ description: "Treat body as HTML (default: auto-detect)" })),
+  cc: Type.Optional(Type.Union([Type.String(), Type.Array(Type.String())], { description: "CC recipients" })),
+  bcc: Type.Optional(Type.Union([Type.String(), Type.Array(Type.String())], { description: "BCC recipients" })),
+  from: Type.Optional(Type.String({ description: "Sender address (defaults to SMTP_FROM or IMAP user)" })),
+  reply_to: Type.Optional(Type.String({ description: "Reply-to address" })),
+  attachments: Type.Optional(Type.Array(
+    Type.Object({
+      path: Type.String({ description: "File path of the attachment" }),
+      filename: Type.Optional(Type.String({ description: "Override filename in the draft" })),
+    }),
+    { description: "File attachments" },
+  )),
+  folder: Type.Optional(Type.String({ description: "Drafts folder path (default: auto-detect from IMAP special-use, then 'Drafts')" })),
+  imap_host: Type.Optional(Type.String({ description: "IMAP host (overrides vault/env)" })),
+  imap_port: Type.Optional(Type.Number({ description: "IMAP port (overrides vault/env)" })),
+  imap_user: Type.Optional(Type.String({ description: "IMAP user (overrides vault/env)" })),
+  imap_pass: Type.Optional(Type.String({ description: "IMAP password (overrides vault/env)" })),
+  imap_tls: Type.Optional(Type.Boolean({ description: "Use TLS for IMAP (overrides vault/env)" })),
 });
 
 /**
@@ -157,6 +185,93 @@ function createEmailSendTool(cwd: string, sandbox: string[], vault?: ResolvedVau
   };
 }
 
+function createEmailDraftTool(cwd: string, sandbox: string[], vault?: ResolvedVault, emailAllowedDomains?: string[]): AgentTool<typeof EmailDraftSchema> {
+  return {
+    name: "email_draft",
+    label: "Save Draft Email",
+    description: "Create a draft email by appending a composed message to the IMAP Drafts folder. " +
+      "Supports HTML content, multiple recipients (to/cc/bcc), and file attachments.",
+    parameters: EmailDraftSchema,
+    async execute(_id, params) {
+      if (emailAllowedDomains && emailAllowedDomains.length > 0) {
+        if (params.to) validateRecipientDomains(params.to, emailAllowedDomains);
+        if (params.cc) validateRecipientDomains(params.cc, emailAllowedDomains);
+        if (params.bcc) validateRecipientDomains(params.bcc, emailAllowedDomains);
+      }
+
+      const vaultSmtp = vault?.getSmtp();
+      const vaultImap = vault?.getImap();
+      const from = params.from ?? vaultSmtp?.from ?? process.env.SMTP_FROM ?? vaultImap?.user ?? process.env.IMAP_USER;
+
+      const attachments: Array<{ filename: string; content: Buffer }> = [];
+      if (params.attachments) {
+        for (const att of params.attachments) {
+          const attPath = resolve(cwd, att.path);
+          assertPathAllowed(attPath, sandbox, "email_draft");
+          if (!existsSync(attPath)) throw new Error(`Attachment not found: ${att.path}`);
+          attachments.push({
+            filename: att.filename ?? basename(attPath),
+            content: readFileSync(attPath),
+          });
+        }
+      }
+
+      const body = params.body ?? "";
+      const isHtml = params.html ?? (body.includes("<") && body.includes(">"));
+
+      const nodemailer = await import("nodemailer");
+      const streamTransport = nodemailer.default.createTransport({
+        streamTransport: true,
+        buffer: true,
+        newline: "windows",
+      });
+
+      const mailOptions: Record<string, any> = {
+        ...(from && { from }),
+        ...(params.to && { to: Array.isArray(params.to) ? params.to.join(", ") : params.to }),
+        ...(params.cc && { cc: Array.isArray(params.cc) ? params.cc.join(", ") : params.cc }),
+        ...(params.bcc && { bcc: Array.isArray(params.bcc) ? params.bcc.join(", ") : params.bcc }),
+        subject: params.subject ?? "",
+        ...(isHtml ? { html: body } : { text: body }),
+        ...(params.reply_to && { replyTo: params.reply_to }),
+        ...(attachments.length > 0 && { attachments }),
+      };
+
+      const composed = await streamTransport.sendMail(mailOptions) as { message?: Buffer };
+      const rawMessage = composed.message;
+      if (!rawMessage || !Buffer.isBuffer(rawMessage)) {
+        throw new Error("Failed to compose draft message as RFC822 buffer");
+      }
+
+      const client = await connectImap(vault, {
+        host: params.imap_host,
+        port: params.imap_port,
+        user: params.imap_user,
+        pass: params.imap_pass,
+        tls: params.imap_tls,
+      });
+
+      try {
+        const folder = params.folder ?? await detectDraftFolder(client);
+        const appendResult = await client.append(folder, rawMessage, ["\\Draft"]);
+
+        return {
+          content: [{ type: "text", text: `Draft saved successfully!\nFolder: ${folder}\nSubject: ${params.subject ?? "(no subject)"}${params.to ? `\nTo: ${params.to}` : ""}` }],
+          details: {
+            folder,
+            subject: params.subject ?? "",
+            to: params.to,
+            attachments: attachments.length,
+            append: appendResult,
+          },
+        };
+      } finally {
+        await client.logout();
+      }
+    },
+  };
+}
+
 // ─── Tool: email_verify ───
 
 const EmailVerifySchema = Type.Object({
@@ -203,13 +318,21 @@ function createEmailVerifyTool(vault?: ResolvedVault): AgentTool<typeof EmailVer
 // ─── IMAP Tools ───
 
 /** Helper: connect to IMAP server using vault or env vars */
-async function connectImap(vault?: ResolvedVault) {
+type ImapConnectionOverrides = {
+  host?: string;
+  port?: number;
+  user?: string;
+  pass?: string;
+  tls?: boolean;
+};
+
+async function connectImap(vault?: ResolvedVault, overrides?: ImapConnectionOverrides) {
   const vaultImap = vault?.getImap();
-  const host = vaultImap?.host ?? process.env.IMAP_HOST;
-  const port = vaultImap?.port ?? Number(process.env.IMAP_PORT ?? "993");
-  const user = vaultImap?.user ?? process.env.IMAP_USER;
-  const pass = vaultImap?.pass ?? process.env.IMAP_PASS;
-  const tls = vaultImap?.tls ?? true;
+  const host = overrides?.host ?? vaultImap?.host ?? process.env.IMAP_HOST;
+  const port = overrides?.port ?? vaultImap?.port ?? Number(process.env.IMAP_PORT ?? "993");
+  const user = overrides?.user ?? vaultImap?.user ?? process.env.IMAP_USER;
+  const pass = overrides?.pass ?? vaultImap?.pass ?? process.env.IMAP_PASS;
+  const tls = overrides?.tls ?? vaultImap?.tls ?? true;
 
   if (!host) throw new Error("IMAP host not configured. Set IMAP_HOST env var or configure vault.");
   if (!user) throw new Error("IMAP user not configured. Set IMAP_USER env var or configure vault.");
@@ -224,6 +347,26 @@ async function connectImap(vault?: ResolvedVault) {
   });
   await client.connect();
   return client;
+}
+
+async function detectDraftFolder(client: any): Promise<string> {
+  try {
+    for await (const mailbox of client.list()) {
+      if (mailbox?.specialUse === "\\Drafts") {
+        return mailbox.path;
+      }
+      const flags = mailbox?.flags;
+      if (flags instanceof Set && flags.has("\\Drafts")) {
+        return mailbox.path;
+      }
+      if (Array.isArray(flags) && flags.includes("\\Drafts")) {
+        return mailbox.path;
+      }
+    }
+  } catch {
+    // Fall back to conventional Drafts folder name.
+  }
+  return "Drafts";
 }
 
 // ─── Tool: email_list ───
@@ -428,9 +571,9 @@ function createEmailSearchTool(vault?: ResolvedVault): AgentTool<typeof EmailSea
 
 // ─── Factory ───
 
-export type EmailToolName = "email_send" | "email_verify" | "email_list" | "email_read" | "email_search";
+export type EmailToolName = "email_send" | "email_draft" | "email_verify" | "email_list" | "email_read" | "email_search";
 
-export const ALL_EMAIL_TOOL_NAMES: EmailToolName[] = ["email_send", "email_verify", "email_list", "email_read", "email_search"];
+export const ALL_EMAIL_TOOL_NAMES: EmailToolName[] = ["email_send", "email_draft", "email_verify", "email_list", "email_read", "email_search"];
 
 /**
  * Create email tools.
@@ -446,6 +589,7 @@ export function createEmailTools(cwd: string, allowedPaths?: string[], allowedTo
 
   const factories: Record<EmailToolName, () => AgentTool<any>> = {
     email_send: () => createEmailSendTool(cwd, sandbox, vault, emailAllowedDomains),
+    email_draft: () => createEmailDraftTool(cwd, sandbox, vault, emailAllowedDomains),
     email_verify: () => createEmailVerifyTool(vault),
     email_list: () => createEmailListTool(vault),
     email_read: () => createEmailReadTool(vault),

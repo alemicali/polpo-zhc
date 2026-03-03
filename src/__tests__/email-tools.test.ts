@@ -6,7 +6,12 @@ import type { ResolvedVault, SmtpCredentials } from "../vault/resolver.js";
 vi.mock("nodemailer", () => ({
   default: {
     createTransport: vi.fn(() => ({
-      sendMail: vi.fn().mockResolvedValue({ messageId: "test-id", accepted: ["to@test.com"], rejected: [] }),
+      sendMail: vi.fn().mockResolvedValue({
+        messageId: "test-id",
+        accepted: ["to@test.com"],
+        rejected: [],
+        message: Buffer.from("From: alice@test.com\r\nSubject: Test\r\n\r\nBody"),
+      }),
       verify: vi.fn().mockResolvedValue(true),
     })),
   },
@@ -18,6 +23,10 @@ vi.mock("imapflow", () => ({
     connect: vi.fn().mockResolvedValue(undefined),
     getMailboxLock: vi.fn().mockResolvedValue({ release: vi.fn() }),
     search: vi.fn().mockResolvedValue([]),
+    list: vi.fn().mockImplementation(async function* () {
+      yield { path: "Drafts", specialUse: "\\Drafts" };
+    }),
+    append: vi.fn().mockResolvedValue({ uid: 42 }),
     logout: vi.fn().mockResolvedValue(undefined),
   })),
 }));
@@ -46,9 +55,9 @@ function createMockVault(smtp?: SmtpCredentials): ResolvedVault {
 // ─── Factory tests ───────────────────────────────────
 
 describe("createEmailTools — factory", () => {
-  it("returns all 5 tools by default", () => {
+  it("returns all 6 tools by default", () => {
     const tools = createEmailTools(CWD);
-    expect(tools).toHaveLength(5);
+    expect(tools).toHaveLength(6);
     const names = tools.map(t => t.name);
     expect(names).toEqual(ALL_EMAIL_TOOL_NAMES);
   });
@@ -63,10 +72,32 @@ describe("createEmailTools — factory", () => {
     const tools = createEmailTools(CWD);
     const names = tools.map(t => t.name);
     expect(names).toContain("email_send");
+    expect(names).toContain("email_draft");
     expect(names).toContain("email_verify");
     expect(names).toContain("email_list");
     expect(names).toContain("email_read");
     expect(names).toContain("email_search");
+  });
+});
+
+describe("email_draft", () => {
+  afterEach(clearEnv);
+
+  it("saves draft email using IMAP credentials from env", async () => {
+    setEnv("IMAP_HOST", "imap.test.com");
+    setEnv("IMAP_USER", "alice@test.com");
+
+    const tools = createEmailTools(CWD);
+    const draftTool = tools.find(t => t.name === "email_draft")!;
+    const result = await draftTool.execute("test-id", {
+      to: "bob@test.com",
+      subject: "Draft subject",
+      body: "Draft body",
+    } as any);
+
+    const firstContent = result.content[0] as any;
+    expect(firstContent.text).toContain("Draft saved successfully");
+    expect(result.details?.folder).toBe("Drafts");
   });
 });
 
