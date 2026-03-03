@@ -31,7 +31,7 @@ import type {
   MissionPreviewPayload,
   VaultPreviewPayload,
   GoToFilePayload,
-  PreviewFilePayload,
+  OpenFilePayload,
   RunActivityEntry,
   SkillInfo,
   LoadedSkill,
@@ -79,8 +79,8 @@ export class ChatCompletionStream implements AsyncIterable<ChatCompletionChunk> 
   /** If the stream ended with finish_reason "go_to_file", this contains the file path to navigate to. */
   goToFile: GoToFilePayload | null = null;
 
-  /** If the stream ended with finish_reason "preview_file", this contains the content to render. */
-  previewFile: PreviewFilePayload | null = null;
+  /** If the stream ended with finish_reason "open_file", this contains the file path to open. */
+  openFile: OpenFilePayload | null = null;
 
   /** Whether abort() has been called. */
   aborted = false;
@@ -191,9 +191,9 @@ export class ChatCompletionStream implements AsyncIterable<ChatCompletionChunk> 
             if (choice?.finish_reason === "go_to_file" && choice.go_to_file) {
               this.goToFile = choice.go_to_file;
             }
-            // Capture preview_file payload from the chunk
-            if (choice?.finish_reason === "preview_file" && choice.preview_file) {
-              this.previewFile = choice.preview_file;
+            // Capture open_file payload from the chunk
+            if (choice?.finish_reason === "open_file" && choice.open_file) {
+              this.openFile = choice.open_file;
             }
             yield chunk;
           } catch {

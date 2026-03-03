@@ -159,15 +159,21 @@ export function ToolInvocation({
             <span className="text-xs font-medium truncate">
               {formatToolName(tool.name)}
             </span>
-            {/* Clickable file path for write/edit/read tools */}
-            {filePath && tool.state === "completed" && (
+            {/* File path for write/edit/read tools — shown in all states */}
+            {filePath && (
               <button
                 onClick={handleFileClick}
-                className="flex items-center gap-1 text-[11px] text-primary hover:text-primary/80 hover:underline truncate max-w-[50%] cursor-pointer"
-                title={`Preview ${filePath}`}
+                className={cn(
+                  "flex items-center gap-1 text-[11px] truncate max-w-[50%]",
+                  tool.state === "completed"
+                    ? "text-primary hover:text-primary/80 hover:underline cursor-pointer"
+                    : "text-muted-foreground cursor-default",
+                )}
+                title={filePath}
+                disabled={tool.state !== "completed"}
               >
                 <FileText className="h-3 w-3 shrink-0" />
-                <span className="truncate">{filePath}</span>
+                <span className="truncate">{filePath.split("/").pop()}</span>
               </button>
             )}
             <span className="flex-1" />

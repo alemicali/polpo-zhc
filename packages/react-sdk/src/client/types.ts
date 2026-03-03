@@ -945,7 +945,7 @@ export interface ChatCompletionRequest {
 export interface ChatCompletionChoice {
   index: number;
   message: { role: "assistant"; content: string };
-  finish_reason: "stop" | "length" | "ask_user" | "mission_preview" | "vault_preview" | "go_to_file" | "preview_file";
+  finish_reason: "stop" | "length" | "ask_user" | "mission_preview" | "vault_preview" | "go_to_file" | "open_file";
   /** Present when finish_reason is "ask_user" — structured questions for the user. */
   ask_user?: AskUserPayload;
   /** Present when finish_reason is "mission_preview" — proposed mission for user review. */
@@ -954,8 +954,8 @@ export interface ChatCompletionChoice {
   vault_preview?: VaultPreviewPayload;
   /** Present when finish_reason is "go_to_file" — navigate to file browser with this file selected. */
   go_to_file?: GoToFilePayload;
-  /** Present when finish_reason is "preview_file" — content to render inline in a dialog. */
-  preview_file?: PreviewFilePayload;
+  /** Present when finish_reason is "open_file" — file path to open in preview dialog. */
+  open_file?: OpenFilePayload;
 }
 
 export interface ChatCompletionResponse {
@@ -1010,8 +1010,8 @@ export interface ChatCompletionChunk {
     vault_preview?: VaultPreviewPayload;
     /** Present when finish_reason is "go_to_file" — navigate to file browser with this file selected. */
     go_to_file?: GoToFilePayload;
-    /** Present when finish_reason is "preview_file" — content to render inline in a dialog. */
-    preview_file?: PreviewFilePayload;
+    /** Present when finish_reason is "open_file" — file path to open in preview dialog. */
+    open_file?: OpenFilePayload;
     /** Present when the server is executing a tool call. */
     tool_call?: ToolCallEvent;
   }>;
@@ -1136,13 +1136,7 @@ export interface GoToFilePayload {
   path: string;
 }
 
-export interface PreviewFilePayload {
-  /** Dialog title */
-  title: string;
-  /** The content to preview */
-  content: string;
-  /** Content format */
-  format: "html" | "markdown" | "code" | "image";
-  /** Programming language for syntax highlighting (when format is "code") */
-  language?: string;
+export interface OpenFilePayload {
+  /** File path relative to project root */
+  path: string;
 }

@@ -862,22 +862,15 @@ Examples: show a generated output, point to a config file, highlight a source fi
   }),
 };
 
-const previewFileTool: Tool = {
-  name: "preview_file",
-  description: `Open an inline preview dialog for the user, right inside the chat. Renders content
-in a fullscreen-capable dialog without navigating away from the conversation.
-Use this to show HTML previews, rendered markdown, code with syntax highlighting, or images.
-Prefer this over go_to_file when you want the user to see content WITHOUT leaving the chat.`,
+const openFileTool: Tool = {
+  name: "open_file",
+  description: `Open a file for the user in an inline preview dialog, without navigating away.
+Use this when the user says "open the file", "show me the file", "let me see it", etc.
+The file is read from disk and rendered in a fullscreen-capable dialog (code with syntax
+highlighting, images, PDFs, HTML, markdown — same as the file browser preview).
+Prefer this over go_to_file when the user wants to SEE the file content without leaving the chat.`,
   parameters: Type.Object({
-    title: Type.String({ description: "Dialog title (e.g. 'Email Template', 'Generated Handler', 'Setup Guide')" }),
-    content: Type.String({ description: "The content to preview. For HTML, provide the full markup. For markdown, provide raw markdown. For code, provide the source code." }),
-    format: Type.Union([
-      Type.Literal("html"),
-      Type.Literal("markdown"),
-      Type.Literal("code"),
-      Type.Literal("image"),
-    ], { description: "Content format: html (rendered in iframe), markdown (rendered), code (syntax-highlighted), image (data URL or path)" }),
-    language: Type.Optional(Type.String({ description: "Programming language for syntax highlighting (only used when format is 'code', e.g. 'typescript', 'python', 'json')" })),
+    path: Type.String({ description: "File path relative to project root (e.g. 'output/report.pdf', 'src/index.ts', 'templates/email.html')" }),
   }),
 };
 
@@ -956,7 +949,7 @@ export const WRITE_TOOLS = new Set([
 ]);
 
 /** Tools that pause the conversation to collect user input / show a preview. */
-export const INTERACTIVE_TOOLS = new Set(["ask_user", "create_mission", "set_vault_entry", "go_to_file", "preview_file"]);
+export const INTERACTIVE_TOOLS = new Set(["ask_user", "create_mission", "set_vault_entry", "go_to_file", "open_file"]);
 
 export function needsApproval(toolName: string): boolean {
   return WRITE_TOOLS.has(toolName);
@@ -1005,7 +998,7 @@ export const ALL_ORCHESTRATOR_TOOLS: Tool[] = [
   // Interactive (1)
   askUserTool,
   // Client-side (2)
-  goToFileTool, previewFileTool,
+  goToFileTool, openFileTool,
 ];
 
 /** Tool action labels for the approval prompt title. */

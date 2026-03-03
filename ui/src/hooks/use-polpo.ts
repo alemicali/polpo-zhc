@@ -61,11 +61,8 @@ export interface GoToFileData {
   path: string;
 }
 
-export interface PreviewFileData {
-  title: string;
-  content: string;
-  format: "html" | "markdown" | "code" | "image";
-  language?: string;
+export interface OpenFileData {
+  path: string;
 }
 
 // Local mirror of SDK tool call types
@@ -90,7 +87,7 @@ export interface ChatMessageWithQuestions extends ChatMessage {
   missionPreview?: MissionPreviewData;
   vaultPreview?: VaultPreviewData;
   goToFile?: GoToFileData;
-  previewFile?: PreviewFileData;
+  openFile?: OpenFileData;
   toolCalls?: ToolCallInfo[];
   /** Chronologically ordered segments (text interleaved with tool calls) */
   segments?: MessageSegment[];
@@ -124,8 +121,8 @@ export function useChat() {
   const [pendingVault, setPendingVault] = useState<VaultPreviewData | null>(null);
   /** Client-side go_to_file — path to navigate to (consumed immediately) */
   const [pendingGoToFile, setPendingGoToFile] = useState<GoToFileData | null>(null);
-  /** Client-side preview_file content — opens a dialog */
-  const [pendingPreviewFile, setPendingPreviewFile] = useState<PreviewFileData | null>(null);
+  /** Client-side open_file — path of file to open in preview dialog */
+  const [pendingOpenFile, setPendingOpenFile] = useState<OpenFileData | null>(null);
   const initialLoadDone = useRef(false);
   /** Conversation history sent to the completions endpoint */
   const conversationRef = useRef<ChatCompletionMessage[]>([]);
@@ -180,16 +177,13 @@ export function useChat() {
         };
         lastMsg.goToFile = goToFileData;
         setPendingGoToFile(goToFileData);
-      } else if (tc.name === "preview_file" && tc.arguments) {
+      } else if (tc.name === "open_file" && tc.arguments) {
         const args = tc.arguments as Record<string, unknown>;
-        const previewData: PreviewFileData = {
-          title: (args.title as string) ?? "Preview",
-          content: (args.content as string) ?? "",
-          format: (args.format as PreviewFileData["format"]) ?? "html",
-          language: args.language as string | undefined,
+        const openFileData: OpenFileData = {
+          path: (args.path as string) ?? "",
         };
-        lastMsg.previewFile = previewData;
-        setPendingPreviewFile(previewData);
+        lastMsg.openFile = openFileData;
+        setPendingOpenFile(openFileData);
       }
     }
   };
@@ -450,23 +444,20 @@ export function useChat() {
         setPendingMission(null);
         setPendingVault(null);
         conversationRef.current.push({ role: "assistant", content: fullContent });
-      } else if ((stream as any).previewFile) {
-        // Client-side preview_file — open inline dialog
-        const pf = (stream as any).previewFile;
-        const previewData: PreviewFileData = {
-          title: pf.title,
-          content: pf.content,
-          format: pf.format as PreviewFileData["format"],
-          language: pf.language ?? undefined,
+      } else if ((stream as any).openFile) {
+        // Client-side open_file — open file preview dialog
+        const of = (stream as any).openFile;
+        const openFileData: OpenFileData = {
+          path: of.path,
         };
         setMessages((prev) =>
           prev.map((m) =>
             m.id === assistantId
-              ? { ...m, content: fullContent, previewFile: previewData, toolCalls: toolCalls.length > 0 ? toolCalls : undefined, segments: [...segments] }
+              ? { ...m, content: fullContent, openFile: openFileData, toolCalls: toolCalls.length > 0 ? toolCalls : undefined, segments: [...segments] }
               : m
           )
         );
-        setPendingPreviewFile(previewData);
+        setPendingOpenFile(openFileData);
         setPendingQuestions(null);
         setPendingMission(null);
         setPendingVault(null);
@@ -476,7 +467,7 @@ export function useChat() {
         setPendingMission(null);
         setPendingVault(null);
         setPendingGoToFile(null);
-        setPendingPreviewFile(null);
+        setPendingOpenFile(null);
         conversationRef.current.push({ role: "assistant", content: fullContent });
       }
 
@@ -880,12 +871,12 @@ export function useChat() {
 
   // Consume the preview_file pending state after the dialog is opened.
   // The dialog is opened by the page component; this resumes the LLM conversation.
-  const consumePreviewFile = useCallback(() => {
-    if (!pendingPreviewFile) return;
-    const data = pendingPreviewFile;
-    setPendingPreviewFile(null);
+  const consumeOpenFile = useCallback(() => {
+    if (!pendingOpenFile) return;
+    const data = pendingOpenFile;
+    setPendingOpenFile(null);
 
-    const responseText = `Preview "${data.title}" shown to user.`;
+    const responseText = `File "${data.path}" opened for user.`;
     const userMsg: ChatMessageWithQuestions = {
       id: `temp-${Date.now()}`,
       role: "user",
@@ -913,7 +904,7 @@ export function useChat() {
         );
       })
       .finally(() => setIsLoading(false));
-  }, [pendingPreviewFile, streamCompletion]);
+  }, [pendingOpenFile, streamCompletion]);
 
   // Delete a session — clear messages if active
   const deleteSession = useCallback(
@@ -927,7 +918,7 @@ export function useChat() {
           setPendingMission(null);
           setPendingVault(null);
           setPendingGoToFile(null);
-          setPendingPreviewFile(null);
+          setPendingOpenFile(null);
         }
       } catch {
         // silent
@@ -943,7 +934,7 @@ export function useChat() {
     setPendingMission(null);
     setPendingVault(null);
     setPendingGoToFile(null);
-    setPendingPreviewFile(null);
+    setPendingOpenFile(null);
     conversationRef.current = [];
   }, [setSessionId]);
 
@@ -958,14 +949,14 @@ export function useChat() {
     pendingMission,
     pendingVault,
     pendingGoToFile,
-    pendingPreviewFile,
+    pendingOpenFile,
     send,
     stop,
     answerQuestions,
     respondToMission,
     respondToVault,
     consumeGoToFile,
-    consumePreviewFile,
+    consumeOpenFile,
     clear,
     loadSession,
     newSession,

@@ -471,15 +471,12 @@ export function completionRoutes(orchestrator: Orchestrator, apiKeys?: string[])
                     },
                   }),
                 });
-              } else if (interactiveCall.name === "preview_file") {
+              } else if (interactiveCall.name === "open_file") {
                 const args = interactiveCall.arguments as Record<string, unknown>;
                 await stream.writeSSE({
-                  data: sseChunk(completionId, {}, "preview_file", {
-                    preview_file: {
-                      title: args.title as string,
-                      content: args.content as string,
-                      format: args.format as string,
-                      language: args.language as string | undefined,
+                  data: sseChunk(completionId, {}, "open_file", {
+                    open_file: {
+                      path: args.path as string,
                     },
                   }),
                 });
@@ -691,19 +688,16 @@ export function completionRoutes(orchestrator: Orchestrator, apiKeys?: string[])
               });
             }
 
-            if (interactiveCall.name === "preview_file") {
+            if (interactiveCall.name === "open_file") {
               const args = interactiveCall.arguments as Record<string, unknown>;
               return c.json({
                 ...baseResponse,
                 choices: [{
                   index: 0,
                   message: { role: "assistant" as const, content: finalText },
-                  finish_reason: "preview_file" as const,
-                  preview_file: {
-                    title: args.title as string,
-                    content: args.content as string,
-                    format: args.format as string,
-                    language: args.language as string | undefined,
+                  finish_reason: "open_file" as const,
+                  open_file: {
+                    path: args.path as string,
                   },
                 }],
               });

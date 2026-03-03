@@ -1,7 +1,13 @@
 import { useLocation } from "react-router-dom";
-import { Sun, Moon, Monitor } from "lucide-react";
+import { Sun, Moon, Monitor, MessageCircle } from "lucide-react";
 import { useProjectInfo } from "@/hooks/use-polpo";
+import { useChatContext } from "@/hooks/chat-context";
 import { Button } from "@/components/ui/button";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -38,6 +44,8 @@ export function Header() {
   const title = resolveTitle(pathname);
   const { theme, resolved, setTheme } = useTheme();
   const { info } = useProjectInfo();
+  const { sidebarOpen, toggleSidebar } = useChatContext();
+  const isOnChatPage = pathname === "/chat";
 
   return (
     <header className="flex h-14 shrink-0 items-center justify-between border-b border-border/50 bg-background/80 backdrop-blur-md px-5 lg:px-8 pt-safe">
@@ -56,8 +64,27 @@ export function Header() {
         </span>
       </div>
 
-      {/* Theme switcher */}
+      {/* Actions */}
       <div className="flex items-center gap-2">
+        {/* Chat sidebar toggle — hidden on /chat page and on mobile */}
+        {!isOnChatPage && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className={`hidden lg:inline-flex h-8 w-8 rounded-lg transition-all ${sidebarOpen ? "text-primary bg-primary/10 hover:bg-primary/15" : "text-muted-foreground hover:text-foreground hover:bg-accent/50"}`}
+                onClick={toggleSidebar}
+              >
+                <MessageCircle className="h-4 w-4" />
+                <span className="sr-only">{sidebarOpen ? "Close chat" : "Open chat"}</span>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" className="text-xs">
+              {sidebarOpen ? "Close chat sidebar" : "Open chat sidebar"}
+            </TooltipContent>
+          </Tooltip>
+        )}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button

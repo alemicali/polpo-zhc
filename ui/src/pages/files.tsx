@@ -350,12 +350,15 @@ export function FilesPage() {
   const [dragging, setDragging] = useState(false);
   const [renamingEntry, setRenamingEntry] = useState<string | null>(null);
   const [creatingFolder, setCreatingFolder] = useState(false);
+  /** Currently selected (highlighted) file name — single click selects, double click opens */
+  const [selectedEntry, setSelectedEntry] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dragCounter = useRef(0);
   const { previewState, openPreview, closePreview } = useFilePreview();
 
   // Current path from URL
   const currentPath = searchParams.get("path") || ".";
+  const highlightParam = searchParams.get("highlight");
   const activeRoot = roots.find(r => currentPath === r.path || (r.path !== "." && currentPath.startsWith(r.path + "/"))) || roots[0];
 
   // Path segments for breadcrumb
@@ -411,7 +414,23 @@ export function FilesPage() {
 
   useEffect(() => {
     fetchDir(currentPath);
-  }, [currentPath, fetchDir]);
+    // Clear selection when navigating to a new directory (unless highlight is set)
+    if (!highlightParam) setSelectedEntry(null);
+  }, [currentPath, fetchDir, highlightParam]);
+
+  // Auto-select file from ?highlight= param (set by go_to_file tool)
+  useEffect(() => {
+    if (!highlightParam || entries.length === 0) return;
+    // highlight param is the full path — extract the filename
+    const filename = highlightParam.split("/").pop();
+    if (filename && entries.some(e => e.name === filename)) {
+      setSelectedEntry(filename);
+      // Clean up the highlight param from URL so refreshing doesn't re-select
+      const next = new URLSearchParams(searchParams);
+      next.delete("highlight");
+      setSearchParams(next, { replace: true });
+    }
+  }, [highlightParam, entries, searchParams, setSearchParams]);
 
   const refresh = useCallback(() => fetchDir(currentPath), [currentPath, fetchDir]);
 
@@ -419,6 +438,7 @@ export function FilesPage() {
   const navigateTo = useCallback((path: string) => {
     setSearch("");
     setRenamingEntry(null);
+    setSelectedEntry(null);
     setCreatingFolder(false);
     setSearchParams({ path });
   }, [setSearchParams]);
@@ -435,7 +455,19 @@ export function FilesPage() {
     navigateTo(parts.slice(0, index + 1).join("/"));
   }, [currentPath, navigateTo]);
 
+  /** Single click: select entry. If already selected → start rename. */
   const handleEntryClick = useCallback((entry: FileEntry) => {
+    if (renamingEntry === entry.name) return;
+    if (selectedEntry === entry.name) {
+      // Already selected → start inline rename
+      setRenamingEntry(entry.name);
+    } else {
+      setSelectedEntry(entry.name);
+    }
+  }, [renamingEntry, selectedEntry]);
+
+  /** Double click: open preview (files) or navigate into (directories) */
+  const handleEntryDoubleClick = useCallback((entry: FileEntry) => {
     if (renamingEntry === entry.name) return;
     if (entry.type === "directory") {
       navigateTo(entryPath(currentPath, entry.name));
@@ -544,12 +576,14 @@ export function FilesPage() {
     const canPreview = isPreviewableEntry(entry);
     const isRenaming = renamingEntry === entry.name;
 
+    const isSelected = selectedEntry === entry.name;
     const row = (
       <div
         onClick={() => !isRenaming && handleEntryClick(entry)}
+        onDoubleClick={() => !isRenaming && handleEntryDoubleClick(entry)}
         className={cn(
-          "flex items-center gap-3 w-full px-3 py-2 text-left transition-colors group cursor-pointer",
-          "hover:bg-accent/30",
+          "flex items-center gap-3 w-full px-3 py-2 text-left group cursor-pointer",
+          isSelected ? "bg-primary/10 hover:bg-primary/15" : "hover:bg-accent/30",
         )}
       >
         <Icon className={cn("h-4 w-4 shrink-0", color)} />
@@ -638,10 +672,15 @@ export function FilesPage() {
     const color = fileIconColor(entry);
     const canPreview = isPreviewableEntry(entry);
 
+    const isSelectedGrid = selectedEntry === entry.name;
     const card = (
       <div
         onClick={() => handleEntryClick(entry)}
-        className="flex flex-col items-center gap-1.5 p-3 rounded-lg transition-colors group hover:bg-accent/30 cursor-pointer"
+        onDoubleClick={() => handleEntryDoubleClick(entry)}
+        className={cn(
+          "flex flex-col items-center gap-1.5 p-3 rounded-lg group cursor-pointer",
+          isSelectedGrid ? "bg-primary/10 ring-1 ring-primary/30 hover:bg-primary/15" : "hover:bg-accent/30",
+        )}
       >
         <Icon className={cn("h-8 w-8", color)} />
         <span className="text-[11px] text-center leading-tight max-w-full truncate w-full">{entry.name}</span>
