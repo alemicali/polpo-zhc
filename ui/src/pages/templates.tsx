@@ -33,7 +33,6 @@ import {
   Loader2,
   RefreshCw,
   Settings2,
-  FileJson2,
   FolderOpen,
   Hash,
   Asterisk,
@@ -42,12 +41,10 @@ import {
 import { useTemplates } from "@lumea-labs/polpo-react";
 import type {
   TemplateInfo,
-  TemplateDefinition,
   TemplateParameter,
 } from "@lumea-labs/polpo-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { JsonBlock } from "@/components/json-block";
 
 // ── Parameter type badge colors ──
 
@@ -261,39 +258,7 @@ function RunTemplateDialog({
   );
 }
 
-// ── Template definition viewer dialog ──
 
-function DefinitionDialog({
-  definition,
-  open,
-  onOpenChange,
-}: {
-  definition: TemplateDefinition | null;
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-}) {
-  if (!definition) return null;
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-2xl max-h-[80vh] overflow-hidden flex flex-col bg-popover/95 backdrop-blur-xl border-border/40">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2 text-sm">
-            <FileJson2 className="h-4 w-4 text-muted-foreground" />
-            {definition.name} — Mission Template
-          </DialogTitle>
-        </DialogHeader>
-        <p className="text-xs text-muted-foreground">{definition.description}</p>
-        <ScrollArea className="flex-1 min-h-0 mt-2">
-          <JsonBlock
-            data={definition.mission}
-            className="text-[10px] leading-relaxed font-mono bg-muted/30 border border-border/20 rounded-lg p-4 whitespace-pre-wrap overflow-x-auto"
-          />
-        </ScrollArea>
-      </DialogContent>
-    </Dialog>
-  );
-}
 
 // ── Template card ──
 
@@ -416,16 +381,11 @@ function TemplateCard({
 
 export function TemplatesPage() {
   const navigate = useNavigate();
-  const { templates, loading, refetch, getTemplate, runTemplate } = useTemplates();
+  const { templates, loading, refetch, runTemplate } = useTemplates();
   const [search, setSearch] = useState("");
 
   // Run dialog state
   const [runTarget, setRunTarget] = useState<TemplateInfo | null>(null);
-
-  // Inspect dialog state
-  const [inspecting, setInspecting] = useState(false);
-  const [definition, setDefinition] = useState<TemplateDefinition | null>(null);
-  const [inspectLoading, setInspectLoading] = useState(false);
 
   const filtered = useMemo(() => {
     if (!search) return templates;
@@ -437,21 +397,6 @@ export function TemplatesPage() {
         w.parameters.some((p) => p.name.toLowerCase().includes(q))
     );
   }, [templates, search]);
-
-  const handleInspect = async (name: string) => {
-    setInspecting(true);
-    setInspectLoading(true);
-    setDefinition(null);
-    try {
-      const def = await getTemplate(name);
-      setDefinition(def);
-    } catch (e) {
-      toast.error(`Failed to load template: ${(e as Error).message}`);
-      setInspecting(false);
-    } finally {
-      setInspectLoading(false);
-    }
-  };
 
   const handleRun = async (
     name: string,
@@ -533,7 +478,7 @@ export function TemplatesPage() {
                 key={w.name}
                 template={w}
                 onRun={() => setRunTarget(w)}
-                onInspect={() => handleInspect(w.name)}
+                onInspect={() => navigate(`/templates/${encodeURIComponent(w.name)}`)}
               />
             ))}
           </div>
@@ -550,22 +495,6 @@ export function TemplatesPage() {
         />
       )}
 
-      {/* Inspect dialog */}
-      <DefinitionDialog
-        definition={definition}
-        open={inspecting}
-        onOpenChange={(open) => {
-          setInspecting(open);
-          if (!open) setDefinition(null);
-        }}
-      />
-
-      {/* Inspect loading overlay */}
-      {inspectLoading && (
-        <div className="fixed inset-0 flex items-center justify-center bg-background/50 z-50">
-          <Loader2 className="h-6 w-6 animate-spin text-primary" />
-        </div>
-      )}
     </div>
   );
 }

@@ -109,7 +109,7 @@ function CopyButton({ text }: { text: string }) {
 
 // ── Parsed mission shape ──
 
-interface MissionTaskDef {
+export interface MissionTaskDef {
   title: string;
   description?: string;
   assignTo?: string;
@@ -130,7 +130,7 @@ interface MissionTaskDef {
   retryPolicy?: { escalateAfter?: number; fallbackAgent?: string; escalateModel?: string };
 }
 
-interface MissionCheckpointDef {
+export interface MissionCheckpointDef {
   name: string;
   afterTasks: string[];
   blocksTasks: string[];
@@ -138,7 +138,7 @@ interface MissionCheckpointDef {
   notifyChannels?: string[];
 }
 
-interface ParsedMission {
+export interface ParsedMission {
   name?: string;
   tasks: MissionTaskDef[];
   checkpoints?: MissionCheckpointDef[];
@@ -155,7 +155,7 @@ function filesLinkForPath(filePath: string): string | null {
   return `/files?${params.toString()}`;
 }
 
-function parseMissionData(data: string): ParsedMission | null {
+export function parseMissionData(data: string): ParsedMission | null {
   try {
     const parsed = JSON.parse(data);
     // Filter valid checkpoints (strict: requires name, afterTasks[], blocksTasks[])
@@ -788,7 +788,7 @@ function shiftTaskAndDependents(
 
 // ── Graph inner (needs ReactFlow context) ──
 
-function MissionGraphInner({
+export function MissionGraphInner({
   taskDefs,
   findLiveTask,
   checkpoints,
@@ -873,7 +873,7 @@ function MissionGraphInner({
 
 // ── Task step card (collapsible, markdown description) ──
 
-function TaskStepCard({
+export function TaskStepCard({
   taskDef,
   index,
   isLast,
