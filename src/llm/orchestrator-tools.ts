@@ -22,6 +22,11 @@ import {
   discoverSkills, installSkills, removeSkill, createAgentSkill,
   getSkillByName, updateSkillIndex,
 } from "./skills.js";
+import {
+  discoverTemplates, loadTemplate, validateParams, instantiateTemplate,
+  saveTemplate, deleteTemplate, validateTemplateDefinition,
+} from "../core/template.js";
+import type { TemplateDefinition, TemplateParameter } from "../core/template.js";
 
 // ═══════════════════════════════════════════════════════
 //  READ TOOLS (12)
@@ -924,6 +929,71 @@ const tagSkillTool: Tool = {
 };
 
 // ═══════════════════════════════════════════════════════
+//  TEMPLATE TOOLS (5) — reusable parameterized missions
+// ═══════════════════════════════════════════════════════
+
+const listTemplatesTool: Tool = {
+  name: "list_templates",
+  description: "List all available mission templates discovered from .polpo/templates/ and ~/.polpo/templates/. Returns template names, descriptions, and parameter summaries.",
+  parameters: Type.Object({}),
+};
+
+const getTemplateTool: Tool = {
+  name: "get_template",
+  description: "Get full details of a template by name, including the mission body and all parameter definitions.",
+  parameters: Type.Object({
+    name: Type.String({ description: "Template name (kebab-case, e.g. 'bug-fix')" }),
+  }),
+};
+
+const createTemplateTool: Tool = {
+  name: "create_template",
+  description: "Create or update a reusable mission template. Saves to .polpo/templates/<name>/template.json. The mission body can use {{placeholder}} syntax for parameter substitution.",
+  parameters: Type.Object({
+    name: Type.String({ description: "Template name (kebab-case, e.g. 'bug-fix', 'code-review')" }),
+    description: Type.String({ description: "Human-readable description of what this template does" }),
+    mission: Type.Object({}, { additionalProperties: true, description: "The mission template body — same shape as a MissionDocument. Use {{paramName}} placeholders for dynamic values." }),
+    parameters: Type.Optional(Type.Array(
+      Type.Object({
+        name: Type.String({ description: "Parameter name (used as {{name}} in the mission)" }),
+        description: Type.String({ description: "Human-readable description" }),
+        type: Type.Optional(Type.String({ description: "Value type: 'string' (default), 'number', or 'boolean'" })),
+        required: Type.Optional(Type.Boolean({ description: "Whether this parameter must be provided (default: false)" })),
+        default: Type.Optional(Type.Union([Type.String(), Type.Number(), Type.Boolean()], { description: "Default value when not provided" })),
+        enum: Type.Optional(Type.Array(Type.Union([Type.String(), Type.Number()]), { description: "Allowed values (enum constraint)" })),
+      }),
+      { description: "Parameter declarations for the template" },
+    )),
+  }),
+};
+
+const instantiateTemplateTool: Tool = {
+  name: "instantiate_template",
+  description: "Create a mission from a template WITHOUT executing it. Validates params, replaces {{placeholders}}, saves as a draft mission. The user can review it before running execute_mission.",
+  parameters: Type.Object({
+    name: Type.String({ description: "Template name to instantiate" }),
+    params: Type.Optional(Type.Object({}, { additionalProperties: true, description: "Parameter values as key-value pairs (e.g. { module: 'src/api', test_command: 'npm test' })" })),
+  }),
+};
+
+const runTemplateTool: Tool = {
+  name: "run_template",
+  description: "Execute a template end-to-end: validates parameters, instantiates the mission (replacing {{placeholders}}), saves and immediately executes it. Returns the created mission ID and task count. Use instantiate_template if the user wants to review before executing.",
+  parameters: Type.Object({
+    name: Type.String({ description: "Template name to execute" }),
+    params: Type.Optional(Type.Object({}, { additionalProperties: true, description: "Parameter values as key-value pairs (e.g. { module: 'src/api', test_command: 'npm test' })" })),
+  }),
+};
+
+const deleteTemplateTool: Tool = {
+  name: "delete_template",
+  description: "Delete a template by name. Removes the template directory from disk.",
+  parameters: Type.Object({
+    name: Type.String({ description: "Template name to delete" }),
+  }),
+};
+
+// ═══════════════════════════════════════════════════════
 //  FILE SYSTEM TOOLS (6) — core coding capabilities
 // ═══════════════════════════════════════════════════════
 
@@ -1125,6 +1195,8 @@ export const READ_TOOLS = new Set([
   "list_schedules", "list_notification_rules", "list_watchers",
   // Skills (read-only)
   "list_orchestrator_skills", "list_agent_skills", "search_skills", "get_skill",
+  // Templates (read-only)
+  "list_templates", "get_template",
   // File System (read-only)
   "read_file", "list_directory", "grep_files",
   // HTTP (read-only)
@@ -1155,6 +1227,8 @@ export const WRITE_TOOLS = new Set([
   "create_orchestrator_skill", "update_orchestrator_skill", "remove_orchestrator_skill",
   "install_orchestrator_skill", "create_agent_skill", "install_agent_skill", "remove_agent_skill",
   "tag_skill",
+  // Templates (write)
+  "create_template", "instantiate_template", "run_template", "delete_template",
   // File System (write)
   "write_file", "edit_file", "run_command",
   // HTTP (write — downloads files to disk)
@@ -1209,6 +1283,8 @@ export const ALL_ORCHESTRATOR_TOOLS: Tool[] = [
   removeOrchestratorSkillTool, installOrchestratorSkillTool,
   listAgentSkillsTool, createAgentSkillTool, installAgentSkillTool, removeAgentSkillTool,
   searchSkillsTool, getSkillTool, tagSkillTool,
+  // Templates (6)
+  listTemplatesTool, getTemplateTool, createTemplateTool, instantiateTemplateTool, runTemplateTool, deleteTemplateTool,
   // File System (6)
   readFileTool, writeFileTool, editFileTool, listDirectoryTool, grepFilesTool, runCommandTool,
   // HTTP (2)
@@ -1285,6 +1361,11 @@ const TOOL_LABELS: Record<string, string> = {
   create_agent_skill: "Create Agent Skill",
   install_agent_skill: "Install Agent Skill",
   remove_agent_skill: "Remove Agent Skill",
+  // Templates
+  create_template: "Create Template",
+  instantiate_template: "Instantiate Template",
+  run_template: "Run Template",
+  delete_template: "Delete Template",
   // File System
   write_file: "Write File",
   edit_file: "Edit File",
@@ -1459,6 +1540,14 @@ export async function executeOrchestratorTool(
       case "search_skills":              return execSearchSkills(args);
       case "get_skill":                  return execGetSkill(polpo, args);
       case "tag_skill":                  return execTagSkill(polpo, args);
+
+      // ── Templates ──
+      case "list_templates":         return execListTemplates(polpo);
+      case "get_template":           return execGetTemplate(polpo, args);
+      case "create_template":        return execCreateTemplate(polpo, args);
+      case "instantiate_template":   return execInstantiateTemplate(polpo, args);
+      case "run_template":           return execRunTemplate(polpo, args);
+      case "delete_template":        return execDeleteTemplate(polpo, args);
 
       // ── File System ──
       case "read_file":        return execReadFile(polpo, args);
@@ -3450,6 +3539,142 @@ async function execHttpDownload(polpo: Orchestrator, args: Record<string, unknow
     const message = err.name === "AbortError" ? "Download timed out" : err.message;
     return `Error: Download ${url} — ${message}`;
   }
+}
+
+// ═══════════════════════════════════════════════════════
+//  TEMPLATE EXECUTORS
+// ═══════════════════════════════════════════════════════
+
+function execListTemplates(polpo: Orchestrator): string {
+  const cwd = polpo.getWorkDir();
+  const polpoDir = polpo.getPolpoDir();
+  const templates = discoverTemplates(cwd, polpoDir);
+  if (templates.length === 0) return "No templates found. Templates are discovered from .polpo/templates/ and ~/.polpo/templates/.";
+  const lines = templates.map(t => {
+    const params = t.parameters;
+    const paramSummary = params.length === 0
+      ? "no params"
+      : params.map(p => `${p.name}${p.required ? " (required)" : ""}${p.default !== undefined ? `=${p.default}` : ""}`).join(", ");
+    return `- ${t.name}: ${t.description} [${paramSummary}]`;
+  });
+  return `${templates.length} template(s):\n${lines.join("\n")}`;
+}
+
+function execGetTemplate(polpo: Orchestrator, args: Record<string, unknown>): string {
+  const name = args.name as string;
+  if (!name) return "Error: 'name' is required.";
+  const cwd = polpo.getWorkDir();
+  const polpoDir = polpo.getPolpoDir();
+  const template = loadTemplate(cwd, polpoDir, name);
+  if (!template) {
+    const available = discoverTemplates(cwd, polpoDir);
+    const names = available.map(t => t.name).join(", ");
+    return `Error: Template "${name}" not found.${names ? ` Available: ${names}` : ""}`;
+  }
+  return JSON.stringify(template, null, 2);
+}
+
+function execCreateTemplate(polpo: Orchestrator, args: Record<string, unknown>): string {
+  const name = args.name as string;
+  const description = args.description as string;
+  const mission = args.mission as Record<string, unknown>;
+  const parameters = args.parameters as TemplateParameter[] | undefined;
+
+  if (!name) return "Error: 'name' is required.";
+  if (!description) return "Error: 'description' is required.";
+  if (!mission) return "Error: 'mission' is required.";
+
+  const definition: TemplateDefinition = { name, description, mission, parameters };
+
+  try {
+    const dir = saveTemplate(polpo.getPolpoDir(), definition);
+    const paramCount = parameters?.length ?? 0;
+    return `Template "${name}" saved to ${dir} (${paramCount} parameter${paramCount !== 1 ? "s" : ""}).`;
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return `Error: ${msg}`;
+  }
+}
+
+function execInstantiateTemplate(polpo: Orchestrator, args: Record<string, unknown>): string {
+  const name = args.name as string;
+  const params = (args.params ?? {}) as Record<string, string | number | boolean>;
+
+  if (!name) return "Error: 'name' is required.";
+
+  const cwd = polpo.getWorkDir();
+  const polpoDir = polpo.getPolpoDir();
+  const template = loadTemplate(cwd, polpoDir, name);
+  if (!template) return `Error: Template "${name}" not found.`;
+
+  // Validate parameters
+  const validation = validateParams(template, params);
+  if (!validation.valid) {
+    return `Parameter validation failed:\n  - ${validation.errors.join("\n  - ")}`;
+  }
+
+  // Instantiate (replace placeholders)
+  try {
+    const instance = instantiateTemplate(template, validation.resolved);
+
+    // Save as draft mission (do NOT execute)
+    const mission = polpo.saveMission({
+      data: instance.data,
+      prompt: instance.prompt,
+      name: instance.name,
+    });
+
+    return `Mission "${mission.name}" created from template "${name}" (ID: ${mission.id}, status: ${mission.status}). Use execute_mission to run it.`;
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return `Error instantiating template: ${msg}`;
+  }
+}
+
+function execRunTemplate(polpo: Orchestrator, args: Record<string, unknown>): string {
+  const name = args.name as string;
+  const params = (args.params ?? {}) as Record<string, string | number | boolean>;
+
+  if (!name) return "Error: 'name' is required.";
+
+  const cwd = polpo.getWorkDir();
+  const polpoDir = polpo.getPolpoDir();
+  const template = loadTemplate(cwd, polpoDir, name);
+  if (!template) return `Error: Template "${name}" not found.`;
+
+  // Validate parameters
+  const validation = validateParams(template, params);
+  if (!validation.valid) {
+    return `Parameter validation failed:\n  - ${validation.errors.join("\n  - ")}`;
+  }
+
+  // Instantiate + save + execute
+  try {
+    const instance = instantiateTemplate(template, validation.resolved);
+
+    const mission = polpo.saveMission({
+      data: instance.data,
+      prompt: instance.prompt,
+      name: instance.name,
+    });
+
+    const result = polpo.executeMission(mission.id);
+    return `Template "${name}" executed — mission "${mission.name}" (ID: ${mission.id}), ${result.tasks.length} task(s), group: ${result.group}.`;
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return `Error running template: ${msg}`;
+  }
+}
+
+function execDeleteTemplate(polpo: Orchestrator, args: Record<string, unknown>): string {
+  const name = args.name as string;
+  if (!name) return "Error: 'name' is required.";
+
+  const cwd = polpo.getWorkDir();
+  const polpoDir = polpo.getPolpoDir();
+  const deleted = deleteTemplate(cwd, polpoDir, name);
+  if (!deleted) return `Error: Template "${name}" not found.`;
+  return `Template "${name}" deleted.`;
 }
 
 /**

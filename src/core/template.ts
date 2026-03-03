@@ -18,7 +18,7 @@
  *       template.json
  */
 
-import { readdirSync, readFileSync, existsSync, realpathSync, statSync } from "node:fs";
+import { readdirSync, readFileSync, existsSync, realpathSync, statSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { homedir } from "node:os";
 
@@ -294,4 +294,105 @@ export function instantiateTemplate(
   const prompt = `template:${template.name}${paramDesc ? ` (${paramDesc})` : ""}`;
 
   return { name: template.name, data: json, prompt };
+}
+
+// ── Persistence ────────────────────────────────────────────────────────
+
+/**
+ * Validate a template definition object structurally.
+ * Returns an array of error strings (empty = valid).
+ */
+export function validateTemplateDefinition(def: Partial<TemplateDefinition>): string[] {
+  const errors: string[] = [];
+
+  if (!def.name || typeof def.name !== "string") {
+    errors.push("Missing or invalid 'name' (must be a non-empty string).");
+  } else if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(def.name)) {
+    errors.push(`Invalid name "${def.name}" — must be kebab-case (e.g. "bug-fix", "code-review").`);
+  }
+
+  if (!def.description || typeof def.description !== "string") {
+    errors.push("Missing or invalid 'description' (must be a non-empty string).");
+  }
+
+  if (!def.mission || typeof def.mission !== "object") {
+    errors.push("Missing or invalid 'mission' (must be an object).");
+  }
+
+  if (def.parameters !== undefined) {
+    if (!Array.isArray(def.parameters)) {
+      errors.push("'parameters' must be an array if provided.");
+    } else {
+      for (const [i, p] of def.parameters.entries()) {
+        if (!p.name || typeof p.name !== "string") {
+          errors.push(`Parameter [${i}]: missing or invalid 'name'.`);
+        }
+        if (!p.description || typeof p.description !== "string") {
+          errors.push(`Parameter [${i}]: missing or invalid 'description'.`);
+        }
+        if (p.type && !["string", "number", "boolean"].includes(p.type)) {
+          errors.push(`Parameter [${i}]: invalid type "${p.type}" (must be string|number|boolean).`);
+        }
+      }
+    }
+  }
+
+  // Check that all placeholders in the mission have matching parameter declarations
+  if (def.mission && typeof def.mission === "object" && def.parameters) {
+    const json = JSON.stringify(def.mission);
+    const placeholders = json.match(/\{\{([^}]+)\}\}/g);
+    if (placeholders) {
+      const names = [...new Set(placeholders.map(m => m.slice(2, -2)))];
+      const declaredNames = new Set(def.parameters.map(p => p.name));
+      for (const name of names) {
+        if (!declaredNames.has(name)) {
+          errors.push(`Placeholder "{{${name}}}" in mission has no matching parameter declaration.`);
+        }
+      }
+    }
+  }
+
+  return errors;
+}
+
+/**
+ * Save a template to disk.
+ *
+ * Creates/overwrites `<polpoDir>/templates/<name>/template.json`.
+ * Validates the definition structure before writing.
+ *
+ * @returns The absolute path to the saved template directory.
+ * @throws If validation fails or the write fails.
+ */
+export function saveTemplate(polpoDir: string, definition: TemplateDefinition): string {
+  const errors = validateTemplateDefinition(definition);
+  if (errors.length > 0) {
+    throw new Error(`Invalid template definition:\n  - ${errors.join("\n  - ")}`);
+  }
+
+  const templateDir = join(polpoDir, "templates", definition.name);
+  mkdirSync(templateDir, { recursive: true });
+
+  const templateFile = join(templateDir, "template.json");
+  writeFileSync(templateFile, JSON.stringify(definition, null, 2), "utf-8");
+
+  return templateDir;
+}
+
+/**
+ * Delete a template from disk.
+ *
+ * Removes the `<polpoDir>/templates/<name>/` directory entirely.
+ * Also checks `~/.polpo/templates/<name>/` if not found in polpoDir.
+ *
+ * @returns true if deleted, false if not found.
+ */
+export function deleteTemplate(cwd: string, polpoDir: string | undefined, name: string): boolean {
+  // Find where the template lives
+  const templates = discoverTemplates(cwd, polpoDir);
+  const info = templates.find(t => t.name === name);
+  if (!info) return false;
+
+  rmSync(info.path, { recursive: true, force: true });
+  return true;
 }

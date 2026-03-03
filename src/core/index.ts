@@ -52,5 +52,5 @@ export { parseCron, matchesCron, nextCronOccurrence, isCronExpression } from "..
 export { TaskWatcherManager } from "./task-watcher.js";
 
 // Templates
-export { discoverTemplates, loadTemplate, validateParams, instantiateTemplate } from "./template.js";
+export { discoverTemplates, loadTemplate, validateParams, instantiateTemplate, validateTemplateDefinition, saveTemplate, deleteTemplate } from "./template.js";
 export type { TemplateParameter, TemplateDefinition, TemplateInfo, ValidationResult } from "./template.js";

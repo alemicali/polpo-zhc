@@ -5,7 +5,10 @@ import {
   loadTemplate,
   validateParams,
   instantiateTemplate,
+  saveTemplate,
+  deleteTemplate,
 } from "../../core/template.js";
+import type { TemplateParameter } from "../../core/template.js";
 
 /**
  * Template routes — discover, inspect, and execute reusable plan templates.
@@ -149,6 +152,104 @@ export function templateRoutes(): OpenAPIHono<ServerEnv> {
         group: result.group,
       },
     }, 201);
+  });
+
+  // POST /templates — create or update a template
+  const createTemplateRoute = createRoute({
+    method: "post",
+    path: "/",
+    tags: ["Templates"],
+    summary: "Create or update a template",
+    request: {
+      body: {
+        content: {
+          "application/json": {
+            schema: z.object({
+              name: z.string().describe("Template name (kebab-case)"),
+              description: z.string().describe("Human-readable description"),
+              mission: z.record(z.string(), z.any()).describe("Mission template body with {{placeholder}} syntax"),
+              parameters: z.array(z.object({
+                name: z.string(),
+                description: z.string(),
+                type: z.enum(["string", "number", "boolean"]).optional(),
+                required: z.boolean().optional(),
+                default: z.union([z.string(), z.number(), z.boolean()]).optional(),
+                enum: z.array(z.union([z.string(), z.number()])).optional(),
+              })).optional(),
+            }),
+          },
+        },
+      },
+    },
+    responses: {
+      201: {
+        content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.any() }) } },
+        description: "Template created",
+      },
+      400: {
+        content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string(), code: z.string() }) } },
+        description: "Invalid template definition",
+      },
+    },
+  });
+
+  app.openapi(createTemplateRoute, (c) => {
+    const orchestrator = c.get("orchestrator");
+    const polpoDir = orchestrator.getPolpoDir?.();
+    if (!polpoDir) {
+      return c.json({ ok: false, error: "Polpo directory not available", code: "NO_POLPO_DIR" }, 400);
+    }
+
+    const body = c.req.valid("json");
+    const definition = {
+      name: body.name,
+      description: body.description,
+      mission: body.mission,
+      parameters: body.parameters as TemplateParameter[] | undefined,
+    };
+
+    try {
+      const dir = saveTemplate(polpoDir, definition);
+      return c.json({ ok: true, data: { name: definition.name, path: dir } }, 201);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return c.json({ ok: false, error: msg, code: "VALIDATION_ERROR" }, 400);
+    }
+  });
+
+  // DELETE /templates/:name — delete a template
+  const deleteTemplateRoute = createRoute({
+    method: "delete",
+    path: "/{name}",
+    tags: ["Templates"],
+    summary: "Delete a template",
+    request: {
+      params: z.object({ name: z.string() }),
+    },
+    responses: {
+      200: {
+        content: { "application/json": { schema: z.object({ ok: z.boolean() }) } },
+        description: "Template deleted",
+      },
+      404: {
+        content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string(), code: z.string() }) } },
+        description: "Template not found",
+      },
+    },
+  });
+
+  app.openapi(deleteTemplateRoute, (c) => {
+    const orchestrator = c.get("orchestrator");
+    const cwd = orchestrator.getWorkDir();
+    const polpoDir = orchestrator.getPolpoDir?.();
+    const { name } = c.req.valid("param");
+
+    const deleted = deleteTemplate(cwd, polpoDir, name);
+    if (!deleted) {
+      return c.json({ ok: false, error: "Template not found", code: "NOT_FOUND" }, 404);
+    }
+
+    return c.json({ ok: true }, 200);
   });
 
   return app;

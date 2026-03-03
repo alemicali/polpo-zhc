@@ -67,7 +67,7 @@ export { createAudioTools, ALL_AUDIO_TOOL_NAMES } from "./tools/audio-tools.js";
 export { createImageTools, ALL_IMAGE_TOOL_NAMES } from "./tools/image-tools.js";
 
 // Templates
-export { discoverTemplates, loadTemplate, validateParams, instantiateTemplate } from "./core/template.js";
+export { discoverTemplates, loadTemplate, validateParams, instantiateTemplate, validateTemplateDefinition, saveTemplate, deleteTemplate } from "./core/template.js";
 export type { TemplateParameter, TemplateDefinition, TemplateInfo, ValidationResult } from "./core/template.js";
 
 // Quality Layer
