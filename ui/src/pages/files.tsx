@@ -29,7 +29,7 @@ import {
   FolderPlus,
   Pencil,
   Trash2,
-
+  Copy,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -455,19 +455,31 @@ export function FilesPage() {
     navigateTo(parts.slice(0, index + 1).join("/"));
   }, [currentPath, navigateTo]);
 
-  /** Single click: select entry. If already selected → start rename. */
+  // Timer for delayed rename (OS-style: click-on-selected waits 500ms before rename)
+  const renameTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (renameTimerRef.current) clearTimeout(renameTimerRef.current); }, []);
+
+  /** Single click: select entry. If already selected → schedule rename after 500ms. */
   const handleEntryClick = useCallback((entry: FileEntry) => {
     if (renamingEntry === entry.name) return;
     if (selectedEntry === entry.name) {
-      // Already selected → start inline rename
-      setRenamingEntry(entry.name);
+      // Already selected → schedule rename (cancelled by double-click)
+      renameTimerRef.current = setTimeout(() => {
+        setRenamingEntry(entry.name);
+        renameTimerRef.current = null;
+      }, 500);
     } else {
       setSelectedEntry(entry.name);
     }
   }, [renamingEntry, selectedEntry]);
 
-  /** Double click: open preview (files) or navigate into (directories) */
+  /** Double click: cancel pending rename, open preview (files) or navigate into (directories) */
   const handleEntryDoubleClick = useCallback((entry: FileEntry) => {
+    // Cancel any pending rename timer
+    if (renameTimerRef.current) {
+      clearTimeout(renameTimerRef.current);
+      renameTimerRef.current = null;
+    }
     if (renamingEntry === entry.name) return;
     if (entry.type === "directory") {
       navigateTo(entryPath(currentPath, entry.name));
@@ -582,7 +594,7 @@ export function FilesPage() {
         onClick={() => !isRenaming && handleEntryClick(entry)}
         onDoubleClick={() => !isRenaming && handleEntryDoubleClick(entry)}
         className={cn(
-          "flex items-center gap-3 w-full px-3 py-2 text-left group cursor-pointer",
+          "flex items-center gap-3 w-full px-3 py-2 text-left group cursor-pointer select-none",
           isSelected ? "bg-primary/10 hover:bg-primary/15" : "hover:bg-accent/30",
         )}
       >
@@ -678,7 +690,7 @@ export function FilesPage() {
         onClick={() => handleEntryClick(entry)}
         onDoubleClick={() => handleEntryDoubleClick(entry)}
         className={cn(
-          "flex flex-col items-center gap-1.5 p-3 rounded-lg group cursor-pointer",
+          "flex flex-col items-center gap-1.5 p-3 rounded-lg group cursor-pointer select-none",
           isSelectedGrid ? "bg-primary/10 ring-1 ring-primary/30 hover:bg-primary/15" : "hover:bg-accent/30",
         )}
       >

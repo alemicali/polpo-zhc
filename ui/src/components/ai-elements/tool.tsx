@@ -57,6 +57,15 @@ function extractFilePath(tool: ToolCallInfo): string | undefined {
   return p;
 }
 
+/** Friendly labels for client-side interactive tools (preparing state) */
+const INTERACTIVE_LABELS: Record<string, string> = {
+  ask_user: "Asking a question…",
+  go_to_file: "Navigating to file…",
+  open_file: "Opening file…",
+  create_mission: "Creating mission…",
+  set_vault_entry: "Saving to vault…",
+};
+
 /** Convert tool_name to "Tool Name" */
 function formatToolName(name: string): string {
   return name
@@ -141,6 +150,17 @@ export function ToolInvocation({
       mimeType: mimeFromPath(filePath),
     });
   };
+
+  // Interactive tools in "preparing" state → minimal inline label
+  const interactiveLabel = INTERACTIVE_LABELS[tool.name];
+  if (interactiveLabel && tool.state === "preparing") {
+    return (
+      <div className={cn("flex items-center gap-2 py-2 text-xs text-muted-foreground", className)} {...props}>
+        <Loader2 className="h-3 w-3 animate-spin" />
+        <span>{interactiveLabel}</span>
+      </div>
+    );
+  }
 
   return (
     <>

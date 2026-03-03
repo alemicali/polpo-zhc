@@ -1,0 +1,1150 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Fattura — Insurtech Solutions S.r.l.</title>
+  
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+  <style>
+    /* ═══════════════════════════════════════════════
+       CSS CUSTOM PROPERTIES — Brand Palette
+       ═══════════════════════════════════════════════ */
+    :root {
+      /* Navy spectrum */
+      --navy-950: #070b16;
+      --navy-900: #0c1225;
+      --navy-800: #121c38;
+      --navy-700: #19264e;
+      --navy-600: #223268;
+      --navy-500: #2f4585;
+      --navy-400: #4661a8;
+      --navy-300: #6d86c2;
+      --navy-200: #9db0d9;
+      --navy-100: #cdd7ec;
+      --navy-50:  #eaeff7;
+      
+      /* Gold spectrum */
+      --gold-800: #6b5210;
+      --gold-700: #876816;
+      --gold-600: #a47e1d;
+      --gold-500: #c49628;
+      --gold-400: #d1a83e;
+      --gold-300: #debb62;
+      --gold-200: #ebcf8c;
+      --gold-100: #f3e4b8;
+      --gold-50:  #faf5e5;
+      
+      /* Warm neutrals */
+      --stone-900: #1c1b20;
+      --stone-800: #2e2d33;
+      --stone-700: #434249;
+      --stone-600: #5a5961;
+      --stone-500: #74737b;
+      --stone-400: #929198;
+      --stone-300: #b2b1b7;
+      --stone-200: #d2d1d5;
+      --stone-150: #e3e2e6;
+      --stone-100: #eeeeef;
+      --stone-50:  #f8f8f9;
+      
+      /* Functional */
+      --white: #ffffff;
+      --success: #1d7a47;
+      --danger: #b5332a;
+      
+      /* Typography */
+      --font-display: 'Cormorant Garamond', 'Georgia', 'Times New Roman', serif;
+      --font-body: 'DM Sans', 'Helvetica Neue', Arial, sans-serif;
+      --font-mono: 'IBM Plex Mono', 'Consolas', monospace;
+      
+      /* Spacing */
+      --page-pad-x: 28mm;
+      --page-pad-right: 24mm;
+    }
+
+    /* ═══════════════════════════════════════════════
+       RESET & BASE
+       ═══════════════════════════════════════════════ */
+    *, *::before, *::after {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    html {
+      font-size: 10px;
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
+      color-adjust: exact !important;
+    }
+
+    body {
+      font-family: var(--font-body);
+      font-size: 1.35rem;
+      line-height: 1.55;
+      color: var(--stone-900);
+      background: #dddce1;
+    }
+
+    /* ═══════════════════════════════════════════════
+       PAGE / A4 SETUP
+       ═══════════════════════════════════════════════ */
+    @page {
+      size: A4 portrait;
+      margin: 0;
+    }
+
+    .invoice-page {
+      width: 210mm;
+      min-height: 297mm;
+      margin: 24px auto;
+      background: var(--white);
+      position: relative;
+      overflow: hidden;
+      box-shadow: 
+        0 2px 8px rgba(12, 18, 37, 0.06),
+        0 12px 48px rgba(12, 18, 37, 0.12);
+    }
+
+    .invoice-content {
+      padding: 0 var(--page-pad-right) 30mm var(--page-pad-x);
+      position: relative;
+      z-index: 2;
+    }
+
+    /* ═══════════════════════════════════════════════
+       DECORATIVE ELEMENTS
+       ═══════════════════════════════════════════════ */
+
+    /* Top gold rule with gradient */
+    .invoice-page::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 4px;
+      background: linear-gradient(90deg,
+        var(--gold-700) 0%,
+        var(--gold-500) 20%,
+        var(--gold-300) 50%,
+        var(--gold-500) 80%,
+        var(--gold-700) 100%
+      );
+      z-index: 10;
+    }
+
+    /* Left navy sidebar */
+    .sidebar {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 10mm;
+      height: 100%;
+      background: var(--navy-900);
+      z-index: 1;
+    }
+
+    /* Gold trim on sidebar */
+    .sidebar::after {
+      content: '';
+      position: absolute;
+      top: 4px;
+      right: 0;
+      width: 1px;
+      height: 45%;
+      background: linear-gradient(180deg,
+        var(--gold-400) 0%,
+        var(--gold-600) 60%,
+        transparent 100%
+      );
+    }
+
+    /* Geometric watermark */
+    .watermark {
+      position: absolute;
+      bottom: 50mm;
+      right: 10mm;
+      width: 90mm;
+      height: 90mm;
+      opacity: 0.018;
+      z-index: 1;
+      pointer-events: none;
+    }
+
+    /* Subtle paper texture via noise */
+    .invoice-page::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.025'/%3E%3C/svg%3E");
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* ═══════════════════════════════════════════════
+       HEADER
+       ═══════════════════════════════════════════════ */
+    .header {
+      padding-top: 20mm;
+      padding-bottom: 7mm;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 16px;
+    }
+
+    .company-block {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .company-logo-row {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      margin-bottom: 10px;
+    }
+
+    .company-logo-row svg {
+      flex-shrink: 0;
+    }
+
+    .company-name-block h1 {
+      font-family: var(--font-display);
+      font-size: 2.4rem;
+      font-weight: 700;
+      color: var(--navy-900);
+      letter-spacing: -0.01em;
+      line-height: 1.05;
+    }
+
+    .company-name-block .tagline {
+      font-family: var(--font-body);
+      font-size: 0.98rem;
+      font-weight: 600;
+      color: var(--gold-600);
+      letter-spacing: 0.25em;
+      text-transform: uppercase;
+      margin-top: 4px;
+    }
+
+    .company-info {
+      font-size: 1.1rem;
+      color: var(--stone-600);
+      line-height: 1.7;
+      margin-top: 6px;
+    }
+
+    .company-info strong {
+      color: var(--stone-800);
+      font-weight: 600;
+    }
+
+    /* Invoice badge (right) */
+    .invoice-badge {
+      text-align: right;
+      flex-shrink: 0;
+      padding-left: 16px;
+    }
+
+    .invoice-title {
+      font-family: var(--font-display);
+      font-size: 3.6rem;
+      font-weight: 700;
+      color: var(--navy-900);
+      letter-spacing: -0.02em;
+      line-height: 1;
+    }
+
+    .invoice-title-accent {
+      display: block;
+      width: 48px;
+      height: 3px;
+      background: linear-gradient(90deg, var(--gold-500), var(--gold-300));
+      margin-left: auto;
+      margin-top: 8px;
+      border-radius: 2px;
+    }
+
+    .invoice-meta-grid {
+      display: grid;
+      grid-template-columns: auto auto;
+      gap: 4px 16px;
+      justify-content: end;
+      margin-top: 14px;
+    }
+
+    .invoice-meta-grid dt {
+      font-size: 0.98rem;
+      font-weight: 600;
+      color: var(--stone-400);
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      text-align: right;
+      padding-top: 1px;
+    }
+
+    .invoice-meta-grid dd {
+      font-size: 1.28rem;
+      font-weight: 600;
+      color: var(--navy-800);
+      font-family: var(--font-mono);
+      text-align: right;
+    }
+
+    .invoice-meta-grid dd.primary {
+      color: var(--navy-900);
+      font-size: 1.4rem;
+      font-weight: 700;
+    }
+
+    /* Header divider */
+    .header-rule {
+      height: 1.5px;
+      background: linear-gradient(90deg,
+        var(--stone-200) 0%,
+        var(--stone-150) 40%,
+        var(--stone-200) 100%
+      );
+      margin-bottom: 7mm;
+    }
+
+    /* ═══════════════════════════════════════════════
+       CLIENT SECTION
+       ═══════════════════════════════════════════════ */
+    .client-section {
+      margin-bottom: 6mm;
+    }
+
+    .client-card {
+      background: var(--stone-50);
+      border: 1px solid var(--stone-150);
+      border-radius: 5px;
+      padding: 14px 18px 14px 20px;
+      position: relative;
+      max-width: 62%;
+    }
+
+    .client-card::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 10px;
+      bottom: 10px;
+      width: 3px;
+      background: linear-gradient(180deg, var(--gold-500), var(--gold-300));
+      border-radius: 0 2px 2px 0;
+    }
+
+    .section-label {
+      font-size: 0.9rem;
+      font-weight: 700;
+      color: var(--navy-500);
+      text-transform: uppercase;
+      letter-spacing: 0.18em;
+      margin-bottom: 6px;
+      display: flex;
+      align-items: center;
+      gap: 7px;
+    }
+
+    .section-label::before {
+      content: '';
+      width: 5px;
+      height: 5px;
+      background: var(--gold-500);
+      border-radius: 50%;
+      display: inline-block;
+    }
+
+    .client-name {
+      font-family: var(--font-display);
+      font-size: 1.7rem;
+      font-weight: 600;
+      color: var(--navy-900);
+      margin-bottom: 4px;
+    }
+
+    .client-details {
+      font-size: 1.15rem;
+      color: var(--stone-600);
+      line-height: 1.65;
+    }
+
+    .client-details strong {
+      font-weight: 600;
+      color: var(--stone-700);
+    }
+
+    /* ═══════════════════════════════════════════════
+       REFERENCE BAR
+       ═══════════════════════════════════════════════ */
+    .ref-bar {
+      background: var(--navy-900);
+      color: var(--white);
+      padding: 9px 18px;
+      border-radius: 4px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 6mm;
+      font-size: 1.1rem;
+    }
+
+    .ref-bar .ref-item {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+    }
+
+    .ref-bar .ref-key {
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      font-size: 0.95rem;
+      color: var(--gold-300);
+    }
+
+    .ref-bar .ref-val {
+      font-family: var(--font-mono);
+      font-weight: 500;
+      font-size: 1.12rem;
+    }
+
+    /* ═══════════════════════════════════════════════
+       TABLE — Invoice Lines
+       ═══════════════════════════════════════════════ */
+    .table-wrap {
+      margin-bottom: 5mm;
+    }
+
+    .inv-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 1.22rem;
+    }
+
+    .inv-table thead th {
+      background: var(--navy-50);
+      color: var(--navy-700);
+      font-weight: 700;
+      font-size: 0.95rem;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      padding: 10px 12px 9px;
+      border-bottom: 2px solid var(--navy-200);
+      text-align: left;
+      white-space: nowrap;
+    }
+
+    .inv-table thead th:first-child {
+      border-radius: 4px 0 0 0;
+      padding-left: 14px;
+    }
+
+    .inv-table thead th:last-child {
+      border-radius: 0 4px 0 0;
+      padding-right: 14px;
+    }
+
+    .inv-table .th-right {
+      text-align: right;
+    }
+
+    .inv-table tbody td {
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--stone-100);
+      vertical-align: top;
+    }
+
+    .inv-table tbody tr:last-child td {
+      border-bottom: 2px solid var(--navy-200);
+    }
+
+    .inv-table tbody tr:nth-child(even) {
+      background: rgba(234, 239, 247, 0.35);
+    }
+
+    /* Column styles */
+    .c-num {
+      width: 28px;
+      color: var(--stone-400);
+      font-family: var(--font-mono);
+      font-size: 1.05rem;
+      text-align: center;
+    }
+
+    .c-desc {}
+
+    .c-qty, .c-price, .c-iva, .c-amt {
+      text-align: right;
+      white-space: nowrap;
+      font-family: var(--font-mono);
+      font-size: 1.15rem;
+    }
+
+    .c-amt {
+      font-weight: 600;
+      color: var(--navy-800);
+      padding-right: 14px !important;
+    }
+
+    .row-title {
+      font-weight: 600;
+      color: var(--navy-900);
+      font-size: 1.25rem;
+      line-height: 1.35;
+    }
+
+    .row-sub {
+      font-size: 1.05rem;
+      color: var(--stone-500);
+      margin-top: 2px;
+      line-height: 1.4;
+    }
+
+    /* ═══════════════════════════════════════════════
+       TOTALS
+       ═══════════════════════════════════════════════ */
+    .totals-wrapper {
+      display: flex;
+      justify-content: flex-end;
+      margin-bottom: 7mm;
+    }
+
+    .totals-box {
+      width: 52%;
+      max-width: 280px;
+      border-collapse: collapse;
+    }
+
+    .totals-box tr td {
+      padding: 5px 14px;
+      font-size: 1.22rem;
+    }
+
+    .totals-box tr td:first-child {
+      color: var(--stone-600);
+      font-weight: 500;
+      text-align: left;
+    }
+
+    .totals-box tr td:last-child {
+      font-family: var(--font-mono);
+      font-weight: 600;
+      text-align: right;
+      color: var(--navy-800);
+    }
+
+    .totals-box .row-sub-total td {
+      border-bottom: 1px solid var(--stone-200);
+      padding-bottom: 8px;
+    }
+
+    .totals-box .row-iva td {
+      font-size: 1.15rem;
+      color: var(--stone-500);
+    }
+
+    .totals-box .row-iva td:last-child {
+      color: var(--stone-600);
+    }
+
+    .totals-box .row-exempt td {
+      font-size: 1.15rem;
+      color: var(--stone-500);
+      border-bottom: 1px solid var(--stone-200);
+      padding-bottom: 8px;
+    }
+
+    .totals-box .row-exempt td:last-child {
+      color: var(--stone-600);
+    }
+
+    .totals-box .row-grand td {
+      border-top: 2.5px solid var(--navy-800);
+      padding-top: 10px;
+      padding-bottom: 10px;
+      font-size: 1.55rem;
+      font-weight: 700;
+    }
+
+    .totals-box .row-grand td:first-child {
+      color: var(--navy-900);
+      font-family: var(--font-display);
+      font-size: 1.5rem;
+      font-weight: 700;
+    }
+
+    .totals-box .row-grand td:last-child {
+      color: var(--navy-900);
+      font-size: 1.85rem;
+      letter-spacing: -0.02em;
+    }
+
+    /* ═══════════════════════════════════════════════
+       PAYMENT & BANKING
+       ═══════════════════════════════════════════════ */
+    .payment-row {
+      display: flex;
+      gap: 14px;
+      margin-bottom: 5mm;
+    }
+
+    .pay-card {
+      flex: 1;
+      background: var(--stone-50);
+      border: 1px solid var(--stone-150);
+      border-radius: 5px;
+      padding: 12px 14px;
+    }
+
+    .pay-card--bank {
+      border-left: 3px solid var(--navy-600);
+    }
+
+    .pay-card--terms {
+      border-left: 3px solid var(--gold-500);
+    }
+
+    .pay-card-title {
+      font-size: 0.92rem;
+      font-weight: 700;
+      color: var(--navy-600);
+      text-transform: uppercase;
+      letter-spacing: 0.14em;
+      margin-bottom: 7px;
+    }
+
+    .pay-card p,
+    .pay-card div {
+      font-size: 1.1rem;
+      color: var(--stone-700);
+      line-height: 1.55;
+    }
+
+    .pay-detail {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      padding: 2px 0;
+    }
+
+    .pay-detail .k {
+      font-weight: 600;
+      color: var(--stone-500);
+      font-size: 1rem;
+    }
+
+    .pay-detail .v {
+      font-weight: 600;
+      color: var(--navy-800);
+    }
+
+    .iban-box {
+      font-family: var(--font-mono);
+      font-size: 1.18rem !important;
+      font-weight: 600;
+      color: var(--navy-900) !important;
+      letter-spacing: 0.05em;
+      background: var(--white);
+      border: 1px solid var(--stone-200);
+      border-radius: 3px;
+      padding: 5px 10px;
+      display: inline-block;
+      margin-top: 4px;
+    }
+
+    /* ═══════════════════════════════════════════════
+       NOTES & LEGAL
+       ═══════════════════════════════════════════════ */
+    .notes-block {
+      margin-bottom: 5mm;
+    }
+
+    .notes-block h4 {
+      font-size: 0.92rem;
+      font-weight: 700;
+      color: var(--navy-600);
+      text-transform: uppercase;
+      letter-spacing: 0.14em;
+      margin-bottom: 5px;
+    }
+
+    .notes-block p {
+      font-size: 1.08rem;
+      color: var(--stone-500);
+      line-height: 1.55;
+    }
+
+    .legal-section {
+      border-top: 1px solid var(--stone-200);
+      padding-top: 4mm;
+      margin-bottom: 4mm;
+    }
+
+    .legal-section p {
+      font-size: 0.95rem;
+      color: var(--stone-400);
+      line-height: 1.6;
+      text-align: justify;
+      hyphens: auto;
+    }
+
+    .legal-section p + p {
+      margin-top: 3px;
+    }
+
+    /* ═══════════════════════════════════════════════
+       FOOTER
+       ═══════════════════════════════════════════════ */
+    .page-footer {
+      position: absolute;
+      bottom: 0;
+      left: 10mm;
+      right: 0;
+      padding: 10px var(--page-pad-right) 12px 20mm;
+      background: var(--navy-900);
+      z-index: 5;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .footer-l {
+      font-size: 0.95rem;
+      color: var(--navy-300);
+    }
+
+    .footer-l a {
+      color: var(--gold-300);
+      text-decoration: none;
+      font-weight: 500;
+    }
+
+    .footer-c {
+      font-size: 0.88rem;
+      color: var(--navy-400);
+      text-align: center;
+      font-style: italic;
+    }
+
+    .footer-r {
+      font-family: var(--font-mono);
+      font-size: 0.95rem;
+      color: var(--navy-300);
+    }
+
+    .footer-r strong {
+      color: var(--gold-300);
+      font-weight: 600;
+    }
+
+    /* ═══════════════════════════════════════════════
+       PAID STAMP OVERLAY (add .is-paid to .invoice-page)
+       ═══════════════════════════════════════════════ */
+    .stamp-overlay {
+      display: none;
+    }
+
+    .invoice-page.is-paid .stamp-overlay {
+      display: block;
+      position: absolute;
+      top: 44%;
+      left: 50%;
+      transform: translate(-50%, -50%) rotate(-20deg);
+      z-index: 8;
+      font-family: var(--font-display);
+      font-size: 7.5rem;
+      font-weight: 700;
+      color: rgba(29, 122, 71, 0.1);
+      border: 6px solid rgba(29, 122, 71, 0.1);
+      border-radius: 14px;
+      padding: 6px 44px;
+      text-transform: uppercase;
+      letter-spacing: 0.18em;
+      pointer-events: none;
+    }
+
+    /* ═══════════════════════════════════════════════
+       SECTION DIVIDER
+       ═══════════════════════════════════════════════ */
+    .divider {
+      height: 1px;
+      background: linear-gradient(90deg,
+        transparent 0%,
+        var(--stone-200) 12%,
+        var(--stone-200) 88%,
+        transparent 100%
+      );
+      margin: 4mm 0;
+    }
+
+    /* ═══════════════════════════════════════════════
+       PRINT STYLES
+       ═══════════════════════════════════════════════ */
+    @media print {
+      html {
+        font-size: 10px;
+      }
+
+      body {
+        background: none;
+        margin: 0;
+        padding: 0;
+      }
+
+      .invoice-page {
+        margin: 0;
+        box-shadow: none;
+        width: 100%;
+        min-height: auto;
+        page-break-after: always;
+        page-break-inside: avoid;
+      }
+
+      .inv-table tbody tr {
+        page-break-inside: avoid;
+      }
+
+      .page-footer {
+        position: fixed;
+        bottom: 0;
+      }
+
+      /* Force color printing */
+      .sidebar,
+      .invoice-page::before,
+      .ref-bar,
+      .pay-card,
+      .client-card,
+      .inv-table thead th,
+      .inv-table tbody tr:nth-child(even),
+      .page-footer {
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+      }
+    }
+  </style>
+</head>
+
+<body>
+
+<div class="invoice-page">
+
+  <!-- Sidebar accent -->
+  <div class="sidebar"></div>
+
+  <!-- Watermark SVG -->
+  <svg class="watermark" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+    <!-- Shield outline -->
+    <path d="M100 10 L180 55 L180 125 C180 160 145 188 100 198 C55 188 20 160 20 125 L20 55 Z"
+          fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.5"/>
+    <path d="M100 30 L160 65 L160 120 C160 148 133 170 100 178 C67 170 40 148 40 120 L40 65 Z"
+          fill="none" stroke="currentColor" stroke-width="1" opacity="0.3"/>
+    <!-- Inner monogram -->
+    <text x="100" y="118" text-anchor="middle" font-family="Georgia, serif" font-size="36" font-weight="700" fill="currentColor" opacity="0.3">IS</text>
+    <!-- Decorative arcs -->
+    <path d="M70 135 Q100 155 130 135" fill="none" stroke="currentColor" stroke-width="0.8" opacity="0.2"/>
+    <path d="M60 70 Q100 50 140 70" fill="none" stroke="currentColor" stroke-width="0.8" opacity="0.2"/>
+  </svg>
+
+  <!-- PAID stamp (toggle with .is-paid on .invoice-page) -->
+  <div class="stamp-overlay">Pagata</div>
+
+  <div class="invoice-content">
+
+    <!-- ════════════════════════════════════════════
+         HEADER
+         ════════════════════════════════════════════ -->
+    <header class="header">
+      <div class="company-block">
+        <div class="company-logo-row">
+          <!-- Logo placeholder SVG -->
+          <svg width="52" height="52" viewBox="0 0 52 52" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+              <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" style="stop-color:#0c1225"/>
+                <stop offset="100%" style="stop-color:#223268"/>
+              </linearGradient>
+              <linearGradient id="accentGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" style="stop-color:#c49628"/>
+                <stop offset="100%" style="stop-color:#d1a83e"/>
+              </linearGradient>
+            </defs>
+            <rect width="52" height="52" rx="9" fill="url(#bgGrad)"/>
+            <!-- Shield -->
+            <path d="M26 8 L42 17 L42 30 C42 37 35 43 26 45 C17 43 10 37 10 30 L10 17 Z"
+                  fill="none" stroke="url(#accentGrad)" stroke-width="1.6" opacity="0.9"/>
+            <!-- Monogram -->
+            <text x="26" y="33" text-anchor="middle" font-family="Georgia, serif"
+                  font-size="15" font-weight="700" fill="#d1a83e" letter-spacing="0.5">IS</text>
+          </svg>
+          <div class="company-name-block">
+            <h1>Insurtech Solutions</h1>
+            <div class="tagline">MGA Surety &amp; Cauzioni</div>
+          </div>
+        </div>
+        <div class="company-info">
+          <strong>Insurtech Solutions S.r.l.</strong><br>
+          Via Roma, 42 — 20121 Milano (MI)<br>
+          P.IVA / C.F.: 12345678901<br>
+          REA: MI-2098765 — Cap. Soc. € 100.000 i.v.<br>
+          Iscr. RUI Sez. A n° A000XXXXXX
+        </div>
+      </div>
+
+      <div class="invoice-badge">
+        <div class="invoice-title">Fattura</div>
+        <div class="invoice-title-accent"></div>
+        <dl class="invoice-meta-grid">
+          <dt>N° Fattura</dt>
+          <dd class="primary">FT-2025/0042</dd>
+          <dt>Data emissione</dt>
+          <dd>15/01/2025</dd>
+          <dt>Data scadenza</dt>
+          <dd>14/02/2025</dd>
+        </dl>
+      </div>
+    </header>
+
+    <div class="header-rule"></div>
+
+    <!-- ════════════════════════════════════════════
+         DESTINATARIO
+         ════════════════════════════════════════════ -->
+    <div class="client-section">
+      <div class="client-card">
+        <div class="section-label">Destinatario</div>
+        <div class="client-name">Edilizia Moderna S.p.A.</div>
+        <div class="client-details">
+          Viale dell'Industria, 18<br>
+          35100 Padova (PD)<br>
+          <strong>P.IVA:</strong> 09876543210 &nbsp;·&nbsp; <strong>C.F.:</strong> 09876543210<br>
+          <strong>SDI:</strong> M5UXCR1 &nbsp;·&nbsp; <strong>PEC:</strong> fatture@pec.ediliziamoderna.it
+        </div>
+      </div>
+    </div>
+
+    <!-- ════════════════════════════════════════════
+         REFERENCE BAR
+         ════════════════════════════════════════════ -->
+    <div class="ref-bar">
+      <span class="ref-item">
+        <span class="ref-key">Rif. Polizza:</span>
+        <span class="ref-val">CAU-2025-001234</span>
+      </span>
+      <span class="ref-item">
+        <span class="ref-key">Contraente:</span>
+        <span class="ref-val">Edilizia Moderna S.p.A.</span>
+      </span>
+      <span class="ref-item">
+        <span class="ref-key">Scad. polizza:</span>
+        <span class="ref-val">31/12/2025</span>
+      </span>
+    </div>
+
+    <!-- ════════════════════════════════════════════
+         TABELLA VOCI FATTURA
+         ════════════════════════════════════════════ -->
+    <div class="table-wrap">
+      <table class="inv-table">
+        <thead>
+          <tr>
+            <th class="c-num">#</th>
+            <th>Descrizione</th>
+            <th class="th-right">Qtà</th>
+            <th class="th-right">Prezzo Unit.</th>
+            <th class="th-right">IVA</th>
+            <th class="th-right">Importo</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="c-num">1</td>
+            <td class="c-desc">
+              <div class="row-title">Premio polizza cauzione provvisoria</div>
+              <div class="row-sub">Art. 106 D.Lgs 36/2023 — Gara Appalto ID CIG 9A1B2C3D4E — Importo garantito € 250.000,00</div>
+            </td>
+            <td class="c-qty">1</td>
+            <td class="c-price">€ 1.875,00</td>
+            <td class="c-iva">22%</td>
+            <td class="c-amt">€ 1.875,00</td>
+          </tr>
+          <tr>
+            <td class="c-num">2</td>
+            <td class="c-desc">
+              <div class="row-title">Diritti di emissione e spese istruttoria</div>
+              <div class="row-sub">Analisi documentale, verifica bilanci e scoring merito creditizio</div>
+            </td>
+            <td class="c-qty">1</td>
+            <td class="c-price">€ 150,00</td>
+            <td class="c-iva">22%</td>
+            <td class="c-amt">€ 150,00</td>
+          </tr>
+          <tr>
+            <td class="c-num">3</td>
+            <td class="c-desc">
+              <div class="row-title">Contributo SSN</div>
+              <div class="row-sub">Contributo Servizio Sanitario Nazionale — 2,5% sul premio imponibile</div>
+            </td>
+            <td class="c-qty">1</td>
+            <td class="c-price">€ 46,88</td>
+            <td class="c-iva">Esente</td>
+            <td class="c-amt">€ 46,88</td>
+          </tr>
+          <tr>
+            <td class="c-num">4</td>
+            <td class="c-desc">
+              <div class="row-title">Imposta sulle assicurazioni</div>
+              <div class="row-sub">Imposta premi assicurativi ex L. 1216/1961 — aliquota 2,5%</div>
+            </td>
+            <td class="c-qty">1</td>
+            <td class="c-price">€ 46,88</td>
+            <td class="c-iva">Esente</td>
+            <td class="c-amt">€ 46,88</td>
+          </tr>
+          <tr>
+            <td class="c-num">5</td>
+            <td class="c-desc">
+              <div class="row-title">Spese accessorie e bolli</div>
+              <div class="row-sub">Bollo su polizza, spese postali e invio documentazione originale</div>
+            </td>
+            <td class="c-qty">1</td>
+            <td class="c-price">€ 35,00</td>
+            <td class="c-iva">22%</td>
+            <td class="c-amt">€ 35,00</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- ════════════════════════════════════════════
+         TOTALI
+         ════════════════════════════════════════════ -->
+    <div class="totals-wrapper">
+      <table class="totals-box">
+        <tr class="row-sub-total">
+          <td>Imponibile IVA 22%</td>
+          <td>€ 2.060,00</td>
+        </tr>
+        <tr class="row-iva">
+          <td>IVA 22%</td>
+          <td>€ 453,20</td>
+        </tr>
+        <tr class="row-exempt">
+          <td>Importi esenti IVA</td>
+          <td>€ 93,76</td>
+        </tr>
+        <tr class="row-grand">
+          <td>Totale Fattura</td>
+          <td>€ 2.606,96</td>
+        </tr>
+      </table>
+    </div>
+
+    <!-- ════════════════════════════════════════════
+         PAGAMENTO E COORDINATE BANCARIE
+         ════════════════════════════════════════════ -->
+    <div class="payment-row">
+      <div class="pay-card pay-card--bank">
+        <div class="pay-card-title">Coordinate Bancarie</div>
+        <div>
+          <div class="pay-detail">
+            <span class="k">Intestatario</span>
+            <span class="v">Insurtech Solutions S.r.l.</span>
+          </div>
+          <div class="pay-detail">
+            <span class="k">Banca</span>
+            <span class="v">Banca Intesa Sanpaolo</span>
+          </div>
+          <div class="pay-detail" style="margin-top: 4px;">
+            <span class="k">IBAN</span>
+          </div>
+          <div class="iban-box">IT60 X054 2811 1010 0000 0123 456</div>
+          <div class="pay-detail" style="margin-top: 5px;">
+            <span class="k">BIC/SWIFT</span>
+            <span class="v">BCITITMM</span>
+          </div>
+        </div>
+      </div>
+      <div class="pay-card pay-card--terms">
+        <div class="pay-card-title">Condizioni di Pagamento</div>
+        <div>
+          <div class="pay-detail">
+            <span class="k">Modalità</span>
+            <span class="v">Bonifico bancario</span>
+          </div>
+          <div class="pay-detail">
+            <span class="k">Termini</span>
+            <span class="v">30 giorni DFFM</span>
+          </div>
+          <div class="pay-detail">
+            <span class="k">Scadenza</span>
+            <span class="v">14/02/2025</span>
+          </div>
+          <p style="margin-top: 7px; font-size: 1rem; color: var(--stone-500);">
+            Indicare nella causale: <strong style="color: var(--navy-800);">FT-2025/0042</strong>
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ════════════════════════════════════════════
+         NOTE
+         ════════════════════════════════════════════ -->
+    <div class="notes-block">
+      <h4>Note</h4>
+      <p>
+        Polizza cauzione provvisoria emessa a garanzia della partecipazione alla gara d'appalto pubblico.
+        La copertura decorre dalla data di emissione della polizza fino alla data indicata nel certificato di garanzia.
+      </p>
+    </div>
+
+    <!-- ════════════════════════════════════════════
+         NOTE LEGALI
+         ════════════════════════════════════════════ -->
+    <div class="legal-section">
+      <p>
+        Operazione effettuata ai sensi dell'art. 10, comma 1, n. 2, D.P.R. 633/1972 per la parte relativa ai premi assicurativi.
+        Contributo SSN applicato ai sensi della L. 27/12/2006 n. 296. Imposta sulle assicurazioni ai sensi della L. 29/10/1961 n. 1216.
+      </p>
+      <p>
+        Insurtech Solutions S.r.l. opera in qualità di Managing General Agent (MGA) — intermediario assicurativo iscritto al Registro Unico degli
+        Intermediari (RUI), Sezione A, tenuto dall'IVASS ai sensi del D.Lgs. 209/2005 e del Regolamento IVASS n. 40/2018.
+        Informativa privacy ai sensi del Reg. UE 2016/679 (GDPR) disponibile su insurtechsolutions.it/privacy.
+      </p>
+      <p>
+        In caso di mancato pagamento entro i termini stabiliti, verranno applicati gli interessi moratori ai sensi del D.Lgs. 231/2002.
+        Per eventuali reclami: reclami@insurtechsolutions.it — Procedura reclami disponibile su insurtechsolutions.it/reclami.
+      </p>
+    </div>
+
+  </div><!-- /.invoice-content -->
+
+  <!-- ════════════════════════════════════════════
+       FOOTER
+       ════════════════════════════════════════════ -->
+  <footer class="page-footer">
+    <div class="footer-l">
+      <a href="https://insurtechsolutions.it">insurtechsolutions.it</a> &nbsp;·&nbsp;
+      info@insurtechsolutions.it &nbsp;·&nbsp; +39 02 1234 5678
+    </div>
+    <div class="footer-c">
+      Documento generato elettronicamente — Valido ai sensi di legge
+    </div>
+    <div class="footer-r">
+      Pag. <strong>1</strong> / 1
+    </div>
+  </footer>
+
+</div>
+
+</body>
+</html>

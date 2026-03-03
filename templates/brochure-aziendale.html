@@ -1,0 +1,1189 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Insurtech Solutions — Brochure Aziendale</title>
+  <style>
+    /* ============================================
+       INSURTECH SOLUTIONS — BROCHURE AZIENDALE
+       Template HTML per generazione PDF (A4)
+       ============================================ */
+
+    @page {
+      size: A4;
+      margin: 0;
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    :root {
+      --primary: #0B2545;       /* Blu navy scuro */
+      --secondary: #13497B;     /* Blu medio */
+      --accent: #1B98E0;        /* Blu accento */
+      --accent-light: #E8F4FD;  /* Blu chiaro sfondo */
+      --gold: #C5930C;          /* Oro/ambra per dettagli premium */
+      --gold-light: #FFF8E7;    /* Oro chiaro sfondo */
+      --text: #1A1A2E;          /* Testo principale */
+      --text-light: #5A6170;    /* Testo secondario */
+      --white: #FFFFFF;
+      --gray-50: #F8F9FA;
+      --gray-100: #F0F2F5;
+      --gray-200: #E2E6EA;
+      --gray-300: #CED4DA;
+      --border-radius: 12px;
+    }
+
+    body {
+      font-family: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+      color: var(--text);
+      line-height: 1.6;
+      background: var(--white);
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+
+    /* ============================================
+       PAGINA 1 — COPERTINA
+       ============================================ */
+    .page {
+      width: 210mm;
+      min-height: 297mm;
+      padding: 0;
+      position: relative;
+      overflow: hidden;
+      page-break-after: always;
+    }
+
+    .page-cover {
+      background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 50%, var(--accent) 100%);
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      text-align: center;
+      color: var(--white);
+    }
+
+    .cover-decoration {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      opacity: 0.06;
+      background-image:
+        radial-gradient(circle at 20% 30%, var(--white) 1px, transparent 1px),
+        radial-gradient(circle at 80% 70%, var(--white) 1px, transparent 1px),
+        radial-gradient(circle at 50% 50%, var(--white) 2px, transparent 2px);
+      background-size: 60px 60px, 80px 80px, 100px 100px;
+    }
+
+    .cover-top-bar {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 6px;
+      background: linear-gradient(90deg, var(--gold), var(--accent), var(--gold));
+    }
+
+    .cover-content {
+      position: relative;
+      z-index: 2;
+      padding: 60px 50px;
+    }
+
+    .cover-logo {
+      width: 120px;
+      height: 120px;
+      background: rgba(255,255,255,0.12);
+      border-radius: 24px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto 40px;
+      border: 2px solid rgba(255,255,255,0.2);
+      backdrop-filter: blur(10px);
+    }
+
+    .cover-logo svg {
+      width: 70px;
+      height: 70px;
+      fill: var(--white);
+    }
+
+    .cover-company {
+      font-size: 42px;
+      font-weight: 700;
+      letter-spacing: 2px;
+      margin-bottom: 12px;
+      text-transform: uppercase;
+    }
+
+    .cover-tagline {
+      font-size: 18px;
+      font-weight: 300;
+      letter-spacing: 4px;
+      text-transform: uppercase;
+      opacity: 0.85;
+      margin-bottom: 50px;
+    }
+
+    .cover-divider {
+      width: 80px;
+      height: 3px;
+      background: var(--gold);
+      margin: 0 auto 50px;
+      border-radius: 2px;
+    }
+
+    .cover-subtitle {
+      font-size: 24px;
+      font-weight: 400;
+      line-height: 1.4;
+      max-width: 500px;
+      margin: 0 auto 60px;
+      opacity: 0.9;
+    }
+
+    .cover-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      background: rgba(255,255,255,0.12);
+      border: 1px solid rgba(255,255,255,0.25);
+      border-radius: 50px;
+      padding: 12px 28px;
+      font-size: 14px;
+      letter-spacing: 1px;
+      backdrop-filter: blur(8px);
+    }
+
+    .cover-footer {
+      position: absolute;
+      bottom: 30px;
+      left: 0;
+      right: 0;
+      text-align: center;
+      font-size: 12px;
+      opacity: 0.5;
+      letter-spacing: 1px;
+    }
+
+    /* ============================================
+       PAGINA 2 — CHI SIAMO
+       ============================================ */
+    .page-inner {
+      padding: 50px;
+      min-height: 297mm;
+    }
+
+    .page-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 40px;
+      padding-bottom: 20px;
+      border-bottom: 2px solid var(--gray-200);
+    }
+
+    .page-header-logo {
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--primary);
+      letter-spacing: 1px;
+      text-transform: uppercase;
+    }
+
+    .page-header-title {
+      font-size: 12px;
+      color: var(--text-light);
+      letter-spacing: 2px;
+      text-transform: uppercase;
+    }
+
+    .section-label {
+      display: inline-block;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 3px;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin-bottom: 12px;
+    }
+
+    .section-title {
+      font-size: 32px;
+      font-weight: 700;
+      color: var(--primary);
+      margin-bottom: 20px;
+      line-height: 1.2;
+    }
+
+    .section-intro {
+      font-size: 16px;
+      color: var(--text-light);
+      line-height: 1.8;
+      max-width: 600px;
+      margin-bottom: 40px;
+    }
+
+    /* Card info */
+    .info-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 24px;
+      margin-bottom: 40px;
+    }
+
+    .info-card {
+      background: var(--gray-50);
+      border-radius: var(--border-radius);
+      padding: 28px;
+      border-left: 4px solid var(--accent);
+      transition: transform 0.2s;
+    }
+
+    .info-card.gold {
+      border-left-color: var(--gold);
+      background: var(--gold-light);
+    }
+
+    .info-card-icon {
+      width: 44px;
+      height: 44px;
+      background: var(--accent-light);
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 16px;
+      font-size: 20px;
+    }
+
+    .info-card.gold .info-card-icon {
+      background: rgba(197, 147, 12, 0.12);
+    }
+
+    .info-card h3 {
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--primary);
+      margin-bottom: 8px;
+    }
+
+    .info-card p {
+      font-size: 13px;
+      color: var(--text-light);
+      line-height: 1.6;
+    }
+
+    /* Highlight box */
+    .highlight-box {
+      background: linear-gradient(135deg, var(--primary), var(--secondary));
+      color: var(--white);
+      border-radius: var(--border-radius);
+      padding: 32px 36px;
+      display: flex;
+      align-items: center;
+      gap: 24px;
+    }
+
+    .highlight-box .number {
+      font-size: 48px;
+      font-weight: 800;
+      opacity: 0.9;
+      line-height: 1;
+    }
+
+    .highlight-box .label {
+      font-size: 14px;
+      opacity: 0.8;
+      line-height: 1.5;
+    }
+
+    /* ============================================
+       PAGINA 3 — SERVIZI
+       ============================================ */
+    .services-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+      margin-bottom: 30px;
+    }
+
+    .service-card {
+      border: 1px solid var(--gray-200);
+      border-radius: var(--border-radius);
+      padding: 28px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .service-card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 4px;
+      background: linear-gradient(90deg, var(--accent), var(--secondary));
+    }
+
+    .service-card.premium::before {
+      background: linear-gradient(90deg, var(--gold), #E8A30E);
+    }
+
+    .service-number {
+      font-size: 36px;
+      font-weight: 800;
+      color: var(--gray-200);
+      position: absolute;
+      top: 16px;
+      right: 20px;
+      line-height: 1;
+    }
+
+    .service-card h3 {
+      font-size: 17px;
+      font-weight: 700;
+      color: var(--primary);
+      margin-bottom: 10px;
+      padding-right: 40px;
+    }
+
+    .service-card p {
+      font-size: 13px;
+      color: var(--text-light);
+      line-height: 1.6;
+    }
+
+    .service-card ul {
+      list-style: none;
+      margin-top: 12px;
+    }
+
+    .service-card ul li {
+      font-size: 12px;
+      color: var(--text-light);
+      padding: 4px 0;
+      padding-left: 18px;
+      position: relative;
+    }
+
+    .service-card ul li::before {
+      content: '✓';
+      position: absolute;
+      left: 0;
+      color: var(--accent);
+      font-weight: 700;
+    }
+
+    .service-card.premium ul li::before {
+      color: var(--gold);
+    }
+
+    /* ============================================
+       PAGINA 4 — TIPOLOGIE CAUZIONI
+       ============================================ */
+    .caution-table {
+      width: 100%;
+      border-collapse: separate;
+      border-spacing: 0;
+      border-radius: var(--border-radius);
+      overflow: hidden;
+      border: 1px solid var(--gray-200);
+      margin-bottom: 30px;
+    }
+
+    .caution-table thead {
+      background: var(--primary);
+      color: var(--white);
+    }
+
+    .caution-table th {
+      padding: 14px 20px;
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      text-align: left;
+    }
+
+    .caution-table td {
+      padding: 14px 20px;
+      font-size: 13px;
+      color: var(--text);
+      border-bottom: 1px solid var(--gray-100);
+    }
+
+    .caution-table tr:nth-child(even) {
+      background: var(--gray-50);
+    }
+
+    .caution-table tr:last-child td {
+      border-bottom: none;
+    }
+
+    .badge {
+      display: inline-block;
+      padding: 3px 10px;
+      border-radius: 50px;
+      font-size: 11px;
+      font-weight: 600;
+    }
+
+    .badge-public {
+      background: var(--accent-light);
+      color: var(--secondary);
+    }
+
+    .badge-private {
+      background: var(--gold-light);
+      color: var(--gold);
+    }
+
+    /* ============================================
+       PAGINA 5 — PERCHÉ SCEGLIERCI
+       ============================================ */
+    .value-props {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 20px;
+      margin-bottom: 40px;
+    }
+
+    .value-card {
+      text-align: center;
+      padding: 30px 20px;
+      border-radius: var(--border-radius);
+      background: var(--gray-50);
+    }
+
+    .value-icon {
+      width: 60px;
+      height: 60px;
+      background: linear-gradient(135deg, var(--accent), var(--secondary));
+      border-radius: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto 18px;
+      font-size: 26px;
+    }
+
+    .value-card h3 {
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--primary);
+      margin-bottom: 8px;
+    }
+
+    .value-card p {
+      font-size: 12px;
+      color: var(--text-light);
+      line-height: 1.6;
+    }
+
+    /* Testimonial / Quote */
+    .quote-block {
+      background: var(--primary);
+      color: var(--white);
+      border-radius: var(--border-radius);
+      padding: 36px 40px;
+      position: relative;
+      margin-bottom: 30px;
+    }
+
+    .quote-block::before {
+      content: '"';
+      font-size: 80px;
+      position: absolute;
+      top: -10px;
+      left: 20px;
+      opacity: 0.15;
+      font-family: Georgia, serif;
+      line-height: 1;
+    }
+
+    .quote-text {
+      font-size: 16px;
+      font-style: italic;
+      line-height: 1.7;
+      margin-bottom: 16px;
+      position: relative;
+      z-index: 1;
+    }
+
+    .quote-author {
+      font-size: 13px;
+      opacity: 0.7;
+    }
+
+    /* Stats row */
+    .stats-row {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 16px;
+      margin-bottom: 30px;
+    }
+
+    .stat-item {
+      text-align: center;
+      padding: 24px 12px;
+      background: var(--accent-light);
+      border-radius: var(--border-radius);
+    }
+
+    .stat-number {
+      font-size: 32px;
+      font-weight: 800;
+      color: var(--primary);
+      line-height: 1;
+      margin-bottom: 6px;
+    }
+
+    .stat-label {
+      font-size: 11px;
+      color: var(--text-light);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+
+    /* ============================================
+       PAGINA 6 — PROCESSO OPERATIVO
+       ============================================ */
+    .process-steps {
+      position: relative;
+      padding-left: 40px;
+      margin-bottom: 30px;
+    }
+
+    .process-steps::before {
+      content: '';
+      position: absolute;
+      left: 15px;
+      top: 0;
+      bottom: 0;
+      width: 2px;
+      background: linear-gradient(to bottom, var(--accent), var(--secondary), var(--primary));
+    }
+
+    .process-step {
+      position: relative;
+      padding: 20px 24px;
+      margin-bottom: 16px;
+      background: var(--gray-50);
+      border-radius: var(--border-radius);
+    }
+
+    .process-step::before {
+      content: attr(data-step);
+      position: absolute;
+      left: -40px;
+      top: 20px;
+      width: 30px;
+      height: 30px;
+      background: var(--accent);
+      color: var(--white);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 13px;
+      font-weight: 700;
+      border: 3px solid var(--white);
+    }
+
+    .process-step h4 {
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--primary);
+      margin-bottom: 6px;
+    }
+
+    .process-step p {
+      font-size: 13px;
+      color: var(--text-light);
+      line-height: 1.5;
+    }
+
+    .process-step .duration {
+      display: inline-block;
+      margin-top: 8px;
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--accent);
+      background: var(--accent-light);
+      padding: 3px 10px;
+      border-radius: 50px;
+    }
+
+    /* ============================================
+       PAGINA 7 — CONTATTI / BACK COVER
+       ============================================ */
+    .page-contact {
+      background: linear-gradient(160deg, var(--primary) 0%, #0D2E54 100%);
+      color: var(--white);
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      text-align: center;
+    }
+
+    .contact-content {
+      position: relative;
+      z-index: 2;
+      padding: 60px 50px;
+      max-width: 500px;
+    }
+
+    .contact-title {
+      font-size: 28px;
+      font-weight: 700;
+      margin-bottom: 12px;
+    }
+
+    .contact-subtitle {
+      font-size: 15px;
+      opacity: 0.7;
+      margin-bottom: 50px;
+      line-height: 1.6;
+    }
+
+    .contact-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 24px;
+      text-align: left;
+      margin-bottom: 50px;
+    }
+
+    .contact-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 14px;
+    }
+
+    .contact-icon {
+      width: 40px;
+      height: 40px;
+      background: rgba(255,255,255,0.1);
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+      flex-shrink: 0;
+    }
+
+    .contact-item .label {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      opacity: 0.5;
+      margin-bottom: 4px;
+    }
+
+    .contact-item .value {
+      font-size: 14px;
+      font-weight: 500;
+      line-height: 1.4;
+    }
+
+    .contact-cta {
+      display: inline-block;
+      background: var(--gold);
+      color: var(--primary);
+      padding: 14px 36px;
+      border-radius: 50px;
+      font-size: 14px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      text-decoration: none;
+      margin-bottom: 40px;
+    }
+
+    .contact-legal {
+      font-size: 11px;
+      opacity: 0.4;
+      line-height: 1.6;
+    }
+
+    /* ============================================
+       UTILITIES
+       ============================================ */
+    .page-number {
+      position: absolute;
+      bottom: 24px;
+      right: 50px;
+      font-size: 11px;
+      color: var(--text-light);
+      letter-spacing: 1px;
+    }
+
+    .two-col {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 30px;
+    }
+
+    .mt-20 { margin-top: 20px; }
+    .mb-20 { margin-bottom: 20px; }
+    .mb-30 { margin-bottom: 30px; }
+
+    @media print {
+      .page { page-break-after: always; }
+      .page:last-child { page-break-after: avoid; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- =============================================
+       PAGINA 1 — COPERTINA
+       ============================================= -->
+  <div class="page page-cover">
+    <div class="cover-decoration"></div>
+    <div class="cover-top-bar"></div>
+    <div class="cover-content">
+      <div class="cover-logo">
+        <svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+          <path d="M32 4C16.536 4 4 16.536 4 32s12.536 28 28 28 28-12.536 28-28S47.464 4 32 4zm0 4c13.255 0 24 10.745 24 24S45.255 56 32 56 8 45.255 8 32 18.745 8 32 8zm-2 10v14H16v4h14v14h4V36h14v-4H34V18h-4z"/>
+        </svg>
+      </div>
+      <div class="cover-company">Insurtech Solutions</div>
+      <div class="cover-tagline">Managing General Agent</div>
+      <div class="cover-divider"></div>
+      <div class="cover-subtitle">
+        Soluzioni assicurative specializzate nel ramo cauzioni e fideiussioni per il mercato italiano
+      </div>
+      <div class="cover-badge">
+        🛡️&nbsp; Iscritta al RUI — Sezione A
+      </div>
+    </div>
+    <div class="cover-footer">
+      insurtechsolutions.it &nbsp;|&nbsp; info@insurtechsolutions.it &nbsp;|&nbsp; Anno 2025
+    </div>
+  </div>
+
+  <!-- =============================================
+       PAGINA 2 — CHI SIAMO
+       ============================================= -->
+  <div class="page">
+    <div class="page-inner">
+      <div class="page-header">
+        <div class="page-header-logo">Insurtech Solutions</div>
+        <div class="page-header-title">Brochure Aziendale</div>
+      </div>
+
+      <div class="section-label">La nostra identità</div>
+      <div class="section-title">Chi Siamo</div>
+      <div class="section-intro">
+        Insurtech Solutions è una <strong>Managing General Agent (MGA)</strong> specializzata 
+        nel ramo cauzioni e fideiussioni, al servizio di imprese, professionisti e pubblica 
+        amministrazione nel mercato italiano.
+      </div>
+
+      <div class="info-grid">
+        <div class="info-card">
+          <div class="info-card-icon">🎯</div>
+          <h3>Missione</h3>
+          <p>Rendere l'accesso alle cauzioni semplice, veloce e trasparente, combinando competenza assicurativa e innovazione tecnologica.</p>
+        </div>
+        <div class="info-card gold">
+          <div class="info-card-icon">💡</div>
+          <h3>Visione</h3>
+          <p>Diventare il punto di riferimento in Italia per le soluzioni fideiussorie digitali, riducendo tempi e burocrazia.</p>
+        </div>
+        <div class="info-card">
+          <div class="info-card-icon">⚖️</div>
+          <h3>Valori</h3>
+          <p>Trasparenza, affidabilità, rapidità operativa e conformità normativa sono i pilastri del nostro agire quotidiano.</p>
+        </div>
+        <div class="info-card gold">
+          <div class="info-card-icon">🏛️</div>
+          <h3>Compliance</h3>
+          <p>Operiamo nel pieno rispetto di IVASS, Codice Appalti (D.Lgs 36/2023), normativa antiriciclaggio e GDPR.</p>
+        </div>
+      </div>
+
+      <div class="highlight-box">
+        <div>
+          <div class="number">MGA</div>
+        </div>
+        <div>
+          <div class="label">
+            <strong>Managing General Agent</strong> — Sottoscriviamo rischi per conto di compagnie 
+            assicurative primarie, con autorità di binding, pricing e gestione sinistri nel ramo cauzioni.
+          </div>
+        </div>
+      </div>
+
+      <span class="page-number">02</span>
+    </div>
+  </div>
+
+  <!-- =============================================
+       PAGINA 3 — I NOSTRI SERVIZI
+       ============================================= -->
+  <div class="page">
+    <div class="page-inner">
+      <div class="page-header">
+        <div class="page-header-logo">Insurtech Solutions</div>
+        <div class="page-header-title">Servizi</div>
+      </div>
+
+      <div class="section-label">Cosa facciamo</div>
+      <div class="section-title">I Nostri Servizi</div>
+
+      <div class="services-grid">
+        <div class="service-card">
+          <div class="service-number">01</div>
+          <h3>Cauzioni per Appalti Pubblici</h3>
+          <p>Garanzie fideiussorie conformi al D.Lgs 36/2023 per la partecipazione e l'esecuzione di contratti pubblici.</p>
+          <ul>
+            <li>Cauzione provvisoria (art. 106)</li>
+            <li>Cauzione definitiva (art. 117)</li>
+            <li>Garanzia anticipazione</li>
+            <li>Svincolo progressivo</li>
+          </ul>
+        </div>
+        <div class="service-card premium">
+          <div class="service-number">02</div>
+          <h3>Fideiussioni Commerciali</h3>
+          <p>Garanzie a supporto di obbligazioni contrattuali tra privati e operazioni commerciali.</p>
+          <ul>
+            <li>Fideiussioni per affitto</li>
+            <li>Garanzie contrattuali</li>
+            <li>Fideiussioni doganali</li>
+            <li>Cauzioni per concessioni</li>
+          </ul>
+        </div>
+        <div class="service-card">
+          <div class="service-number">03</div>
+          <h3>Fideiussioni Immobiliari</h3>
+          <p>Garanzie ai sensi del D.Lgs 122/2005 a tutela degli acquirenti di immobili da costruire.</p>
+          <ul>
+            <li>Garanzia acconti su immobili</li>
+            <li>Tutela acquirente</li>
+            <li>Conformità D.Lgs 122/2005</li>
+            <li>Assistenza documentale</li>
+          </ul>
+        </div>
+        <div class="service-card premium">
+          <div class="service-number">04</div>
+          <h3>Analisi Rischio e Scoring</h3>
+          <p>Valutazione professionale del merito creditizio e capacità tecnico-economica del contraente.</p>
+          <ul>
+            <li>Analisi di bilancio</li>
+            <li>Scoring finanziario</li>
+            <li>Due diligence documentale</li>
+            <li>Report di valutazione</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="highlight-box">
+        <div>
+          <div class="number" style="font-size:36px;">🚀</div>
+        </div>
+        <div>
+          <div class="label">
+            <strong>Emissione rapida</strong> — Dalla richiesta all'emissione della polizza 
+            in tempi ridotti, grazie ai nostri processi digitali e alla delega di sottoscrizione.
+          </div>
+        </div>
+      </div>
+
+      <span class="page-number">03</span>
+    </div>
+  </div>
+
+  <!-- =============================================
+       PAGINA 4 — TIPOLOGIE CAUZIONI
+       ============================================= -->
+  <div class="page">
+    <div class="page-inner">
+      <div class="page-header">
+        <div class="page-header-logo">Insurtech Solutions</div>
+        <div class="page-header-title">Cauzioni</div>
+      </div>
+
+      <div class="section-label">Dettaglio prodotti</div>
+      <div class="section-title">Tipologie di Cauzioni</div>
+      <p class="section-intro">
+        Offriamo una gamma completa di prodotti fideiussori per ogni esigenza, 
+        sia nel settore pubblico che privato.
+      </p>
+
+      <table class="caution-table">
+        <thead>
+          <tr>
+            <th>Tipologia</th>
+            <th>Riferimento</th>
+            <th>Ambito</th>
+            <th>Importo Tipo</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Cauzione Provvisoria</strong></td>
+            <td>Art. 106 D.Lgs 36/2023</td>
+            <td><span class="badge badge-public">Pubblico</span></td>
+            <td>2% base d'asta</td>
+          </tr>
+          <tr>
+            <td><strong>Cauzione Definitiva</strong></td>
+            <td>Art. 117 D.Lgs 36/2023</td>
+            <td><span class="badge badge-public">Pubblico</span></td>
+            <td>10% importo contratto</td>
+          </tr>
+          <tr>
+            <td><strong>Garanzia Anticipazione</strong></td>
+            <td>Art. 125 D.Lgs 36/2023</td>
+            <td><span class="badge badge-public">Pubblico</span></td>
+            <td>Pari all'anticipazione</td>
+          </tr>
+          <tr>
+            <td><strong>Fideiussione Immobiliare</strong></td>
+            <td>D.Lgs 122/2005</td>
+            <td><span class="badge badge-private">Privato</span></td>
+            <td>Acconti versati</td>
+          </tr>
+          <tr>
+            <td><strong>Fideiussione Doganale</strong></td>
+            <td>Reg. UE 952/2013</td>
+            <td><span class="badge badge-private">Privato</span></td>
+            <td>Variabile</td>
+          </tr>
+          <tr>
+            <td><strong>Fideiussione per Affitto</strong></td>
+            <td>Art. 1936 c.c.</td>
+            <td><span class="badge badge-private">Privato</span></td>
+            <td>6-12 mensilità</td>
+          </tr>
+          <tr>
+            <td><strong>Garanzia Contrattuale</strong></td>
+            <td>Art. 1936-1957 c.c.</td>
+            <td><span class="badge badge-private">Privato</span></td>
+            <td>% valore contratto</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="info-grid">
+        <div class="info-card">
+          <div class="info-card-icon">📋</div>
+          <h3>Documentazione Semplificata</h3>
+          <p>Richiediamo solo i documenti essenziali: visura, bilanci e documenti di gara. Nessuna burocrazia inutile.</p>
+        </div>
+        <div class="info-card gold">
+          <div class="info-card-icon">⏱️</div>
+          <h3>Tempi di Emissione</h3>
+          <p>Cauzioni provvisorie entro 24h. Cauzioni definitive entro 48-72h dalla documentazione completa.</p>
+        </div>
+      </div>
+
+      <span class="page-number">04</span>
+    </div>
+  </div>
+
+  <!-- =============================================
+       PAGINA 5 — PERCHÉ SCEGLIERCI
+       ============================================= -->
+  <div class="page">
+    <div class="page-inner">
+      <div class="page-header">
+        <div class="page-header-logo">Insurtech Solutions</div>
+        <div class="page-header-title">Vantaggi</div>
+      </div>
+
+      <div class="section-label">I nostri punti di forza</div>
+      <div class="section-title">Perché Sceglierci</div>
+
+      <div class="value-props">
+        <div class="value-card">
+          <div class="value-icon">⚡</div>
+          <h3>Velocità</h3>
+          <p>Processi digitali che riducono drasticamente i tempi di emissione rispetto ai canali tradizionali.</p>
+        </div>
+        <div class="value-card">
+          <div class="value-icon">🎯</div>
+          <h3>Specializzazione</h3>
+          <p>Focus esclusivo sul ramo cauzioni: competenza verticale e profonda conoscenza del settore.</p>
+        </div>
+        <div class="value-card">
+          <div class="value-icon">🤝</div>
+          <h3>Assistenza Dedicata</h3>
+          <p>Un referente per ogni cliente. Supporto personalizzato dalla richiesta all'emissione.</p>
+        </div>
+      </div>
+
+      <div class="stats-row">
+        <div class="stat-item">
+          <div class="stat-number">24h</div>
+          <div class="stat-label">Emissione provvisorie</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-number">98%</div>
+          <div class="stat-label">Tasso accettazione</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-number">100+</div>
+          <div class="stat-label">Broker partner</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-number">€50M+</div>
+          <div class="stat-label">Volume garantito</div>
+        </div>
+      </div>
+
+      <div class="quote-block">
+        <div class="quote-text">
+          La collaborazione con Insurtech Solutions ha trasformato il modo in cui gestiamo 
+          le cauzioni per i nostri clienti. Tempi dimezzati e servizio impeccabile.
+        </div>
+        <div class="quote-author">
+          — Testimonial Broker Partner
+        </div>
+      </div>
+
+      <div class="info-grid">
+        <div class="info-card">
+          <div class="info-card-icon">🏦</div>
+          <h3>Compagnie Primarie</h3>
+          <p>Operiamo con mandato di compagnie assicurative di primario standing, garantendo solidità e affidabilità.</p>
+        </div>
+        <div class="info-card gold">
+          <div class="info-card-icon">🔒</div>
+          <h3>Conformità Totale</h3>
+          <p>IVASS, GDPR, D.Lgs 231/2007, Codice Appalti: piena compliance su ogni fronte normativo.</p>
+        </div>
+      </div>
+
+      <span class="page-number">05</span>
+    </div>
+  </div>
+
+  <!-- =============================================
+       PAGINA 6 — PROCESSO OPERATIVO
+       ============================================= -->
+  <div class="page">
+    <div class="page-inner">
+      <div class="page-header">
+        <div class="page-header-logo">Insurtech Solutions</div>
+        <div class="page-header-title">Processo</div>
+      </div>
+
+      <div class="section-label">Come lavoriamo</div>
+      <div class="section-title">Il Nostro Processo</div>
+      <p class="section-intro">
+        Un flusso operativo snello e digitale, dalla richiesta all'emissione.
+      </p>
+
+      <div class="process-steps">
+        <div class="process-step" data-step="1">
+          <h4>Richiesta e Raccolta Documentazione</h4>
+          <p>Il broker o il contraente invia la richiesta con i documenti necessari: visura camerale, ultimi 2 bilanci, documentazione di gara (per appalti pubblici).</p>
+          <span class="duration">📄 Invio digitale</span>
+        </div>
+        <div class="process-step" data-step="2">
+          <h4>Analisi e Scoring</h4>
+          <p>Il nostro team di underwriting analizza il merito creditizio del contraente, verifica la documentazione e assegna uno scoring finanziario.</p>
+          <span class="duration">⏱️ Entro 24 ore</span>
+        </div>
+        <div class="process-step" data-step="3">
+          <h4>Verifica Compliance</h4>
+          <p>Controlli AML/KYC, verifica antiriciclaggio (D.Lgs 231/2007), adeguata verifica della clientela e conformità IVASS.</p>
+          <span class="duration">🔍 Automatizzata</span>
+        </div>
+        <div class="process-step" data-step="4">
+          <h4>Quotazione e Approvazione</h4>
+          <p>Definizione del premio, condizioni di polizza e comunicazione dell'offerta al broker/contraente. Approvazione e conferma.</p>
+          <span class="duration">💰 Pricing competitivo</span>
+        </div>
+        <div class="process-step" data-step="5">
+          <h4>Emissione Polizza</h4>
+          <p>Emissione della polizza fideiussoria con invio digitale. La cauzione è immediatamente operativa e valida ai fini di legge.</p>
+          <span class="duration">✅ Emissione digitale</span>
+        </div>
+        <div class="process-step" data-step="6">
+          <h4>Gestione Post-Emissione</h4>
+          <p>Monitoraggio scadenze, rinnovi, svincoli progressivi, gestione eventuali escussioni e supporto continuativo.</p>
+          <span class="duration">🔄 Supporto continuo</span>
+        </div>
+      </div>
+
+      <span class="page-number">06</span>
+    </div>
+  </div>
+
+  <!-- =============================================
+       PAGINA 7 — CONTATTI (BACK COVER)
+       ============================================= -->
+  <div class="page page-contact">
+    <div class="cover-decoration"></div>
+    <div class="cover-top-bar"></div>
+    <div class="contact-content">
+      <div class="cover-logo" style="margin-bottom: 30px;">
+        <svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+          <path d="M32 4C16.536 4 4 16.536 4 32s12.536 28 28 28 28-12.536 28-28S47.464 4 32 4zm0 4c13.255 0 24 10.745 24 24S45.255 56 32 56 8 45.255 8 32 18.745 8 32 8zm-2 10v14H16v4h14v14h4V36h14v-4H34V18h-4z"/>
+        </svg>
+      </div>
+      <div class="contact-title">Contattaci</div>
+      <div class="contact-subtitle">
+        Siamo a disposizione per ogni esigenza nel ramo cauzioni e fideiussioni. 
+        Richiedi una quotazione senza impegno.
+      </div>
+
+      <div class="contact-grid">
+        <div class="contact-item">
+          <div class="contact-icon">🌐</div>
+          <div>
+            <div class="label">Sito Web</div>
+            <div class="value">insurtechsolutions.it</div>
+          </div>
+        </div>
+        <div class="contact-item">
+          <div class="contact-icon">📧</div>
+          <div>
+            <div class="label">Email</div>
+            <div class="value">info@insurtechsolutions.it</div>
+          </div>
+        </div>
+        <div class="contact-item">
+          <div class="contact-icon">📞</div>
+          <div>
+            <div class="label">Telefono</div>
+            <div class="value">+39 0XX XXX XXXX</div>
+          </div>
+        </div>
+        <div class="contact-item">
+          <div class="contact-icon">📍</div>
+          <div>
+            <div class="label">Sede</div>
+            <div class="value">[Indirizzo sede]<br>[CAP Città (Provincia)]</div>
+          </div>
+        </div>
+      </div>
+
+      <a href="#" class="contact-cta">Richiedi Preventivo</a>
+
+      <div class="contact-legal">
+        Insurtech Solutions S.r.l. — P.IVA XXXXXXXXXXX<br>
+        Iscritta al RUI — Sezione A n° XXXXXXX<br>
+        © 2025 Tutti i diritti riservati
+      </div>
+    </div>
+  </div>
+
+</body>
+</html>

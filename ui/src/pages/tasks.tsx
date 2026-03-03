@@ -35,6 +35,7 @@ import {
   Search,
   RefreshCw,
   Eye,
+  EyeOff,
   Star,
   ListChecks,
   Bot,
@@ -912,6 +913,7 @@ function KanbanBoard({
   processes,
   groupBy,
   columnBy,
+  showEmptyColumns,
   agentTeamMap,
   onRetry,
   onKill,
@@ -922,6 +924,7 @@ function KanbanBoard({
   processes: AgentProcess[];
   groupBy: GroupByKey;
   columnBy: ColumnByKey;
+  showEmptyColumns: boolean;
   agentTeamMap: Record<string, string>;
   onRetry: (id: string) => void;
   onKill: (id: string) => void;
@@ -933,9 +936,15 @@ function KanbanBoard({
     [columnBy, tasks, agentTeamMap],
   );
 
+  // Filter out empty columns unless showEmptyColumns is on
+  const visibleColumns = useMemo(() => {
+    if (showEmptyColumns) return columns;
+    return columns.filter((col) => tasks.some(col.filter));
+  }, [columns, tasks, showEmptyColumns]);
+
   return (
     <div className="flex gap-3 flex-1 min-h-0 overflow-x-auto pb-2">
-      {columns.map((col) => (
+      {visibleColumns.map((col) => (
         <KanbanColumn
           key={col.key}
           col={col}
@@ -1089,6 +1098,17 @@ export function TasksPage() {
     return (localStorage.getItem("polpo-tasks-column-by") as ColumnByKey) ?? "status";
   });
   const [timeFilter, setTimeFilter] = useState<TimeFilterState | null>(null);
+  const [showEmptyColumns, setShowEmptyColumns] = useState(() => {
+    return localStorage.getItem("polpo-tasks-show-empty-cols") === "true";
+  });
+
+  const toggleEmptyColumns = () => {
+    setShowEmptyColumns(prev => {
+      const next = !prev;
+      localStorage.setItem("polpo-tasks-show-empty-cols", String(next));
+      return next;
+    });
+  };
 
   const setView = (mode: ViewMode) => {
     setViewMode(mode);
@@ -1326,6 +1346,22 @@ export function TasksPage() {
                 })}
               </DropdownMenuContent>
             </DropdownMenu>
+          {/* Toggle empty columns */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 px-2"
+                onClick={toggleEmptyColumns}
+              >
+                {showEmptyColumns ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">
+              <p className="text-xs">{showEmptyColumns ? "Hide empty columns" : "Show empty columns"}</p>
+            </TooltipContent>
+          </Tooltip>
           </>
         )}
 
@@ -1434,6 +1470,7 @@ export function TasksPage() {
           processes={processes}
           groupBy={groupBy}
           columnBy={columnBy}
+          showEmptyColumns={showEmptyColumns}
           agentTeamMap={agentTeamMap}
           onRetry={(id) => handleAction(retryTask, id, "retried")}
           onKill={(id) => handleAction(killTask, id, "killed")}
