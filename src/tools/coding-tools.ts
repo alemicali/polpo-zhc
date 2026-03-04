@@ -17,6 +17,7 @@ import { createOutcomeTools as createOutcomeToolsCore } from "./outcome-tools.js
 import { createHttpTools as createHttpToolsCore, ALL_HTTP_TOOL_NAMES as CORE_HTTP_TOOL_NAMES } from "./http-tools.js";
 import { createVaultToolsCore } from "./vault-tools.js";
 import type { ResolvedVault } from "../vault/index.js";
+import type { WhatsAppStore } from "../stores/whatsapp-store.js";
 
 const MAX_READ_LINES = 500;
 const MAX_OUTPUT_BYTES = 30_000;
@@ -408,6 +409,7 @@ import { createExcelTools, ALL_EXCEL_TOOL_NAMES } from "./excel-tools.js";
 import { createPdfTools, ALL_PDF_TOOL_NAMES } from "./pdf-tools.js";
 import { createDocxTools, ALL_DOCX_TOOL_NAMES } from "./docx-tools.js";
 import { createSearchTools, ALL_SEARCH_TOOL_NAMES } from "./search-tools.js";
+import { createWhatsAppTools, ALL_WHATSAPP_TOOL_NAMES } from "./whatsapp-tools.js";
 import { ALL_OUTCOME_TOOL_NAMES } from "./outcome-tools.js";
 
 export type { BrowserToolName } from "./browser-tools.js";
@@ -421,6 +423,7 @@ export type { ExcelToolName } from "./excel-tools.js";
 export type { PdfToolName } from "./pdf-tools.js";
 export type { DocxToolName } from "./docx-tools.js";
 export type { SearchToolName } from "./search-tools.js";
+export type { WhatsAppToolName } from "./whatsapp-tools.js";
 
 /** All known tool names across all categories */
 export type ExtendedToolName = CodingToolName
@@ -434,7 +437,8 @@ export type ExtendedToolName = CodingToolName
   | import("./excel-tools.js").ExcelToolName
   | import("./pdf-tools.js").PdfToolName
   | import("./docx-tools.js").DocxToolName
-  | import("./search-tools.js").SearchToolName;
+  | import("./search-tools.js").SearchToolName
+  | import("./whatsapp-tools.js").WhatsAppToolName;
 
 /** All available tool names for documentation/config validation */
 export const ALL_EXTENDED_TOOL_NAMES: string[] = [
@@ -450,6 +454,7 @@ export const ALL_EXTENDED_TOOL_NAMES: string[] = [
   ...ALL_PDF_TOOL_NAMES,
   ...ALL_DOCX_TOOL_NAMES,
   ...ALL_SEARCH_TOOL_NAMES,
+  ...ALL_WHATSAPP_TOOL_NAMES,
 ];
 
 export interface CreateAllToolsOptions {
@@ -472,6 +477,10 @@ export interface CreateAllToolsOptions {
   emailAllowedDomains?: string[];
   /** Per-task output directory for deliverables. Passed to outcome tools. */
   outputDir?: string;
+  /** WhatsApp message store (for whatsapp_* tools). */
+  whatsappStore?: WhatsAppStore;
+  /** WhatsApp send function (for whatsapp_send tool). */
+  whatsappSendMessage?: (jid: string, text: string) => Promise<string | undefined>;
 }
 
 /**
@@ -541,6 +550,14 @@ export async function createAllTools(options: CreateAllToolsOptions): Promise<Ag
   // Search tools (Exa) — activated when any search_* tool is in allowedTools
   if (categoryRequested(ALL_SEARCH_TOOL_NAMES)) {
     tools.push(...createSearchTools(options.vault, allowedTools));
+  }
+
+  // WhatsApp tools — activated when any whatsapp_* tool is in allowedTools AND store is available
+  if (categoryRequested(ALL_WHATSAPP_TOOL_NAMES) && options.whatsappStore && options.whatsappSendMessage) {
+    tools.push(...createWhatsAppTools(
+      { store: options.whatsappStore, sendMessage: options.whatsappSendMessage },
+      allowedTools,
+    ));
   }
 
   // HTTP, register_outcome, and vault are already included via createCodingTools() above — no need to add again

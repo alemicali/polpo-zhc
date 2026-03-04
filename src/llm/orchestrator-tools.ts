@@ -448,7 +448,7 @@ const updateMissionNotificationsTool: Tool = {
 
 const addAgentTool: Tool = {
   name: "add_agent",
-  description: "Add a new agent to a team. If no team is specified, adds to the default (first) team. Use allowedTools to grant extended tool access (e.g. ['browser_*', 'email_*', 'image_*', 'video_*', 'audio_*', 'excel_*', 'pdf_*', 'docx_*']). Core tools (including vault_get/vault_list) are always available. Use allowedTools to restrict to specific tool names.",
+  description: "Add a new agent to a team. If no team is specified, adds to the default (first) team. Use allowedTools to grant extended tool access (e.g. ['browser_*', 'email_*', 'image_*', 'video_*', 'audio_*', 'excel_*', 'pdf_*', 'docx_*', 'whatsapp_*']). Core tools (including vault_get/vault_list) are always available. Use allowedTools to restrict to specific tool names.",
   parameters: Type.Object({
     name: Type.String({ description: "Agent name (unique identifier, must be globally unique across all teams)" }),
     role: Type.Optional(Type.String({ description: "Agent role description (e.g. 'Frontend developer')" })),
@@ -456,7 +456,7 @@ const addAgentTool: Tool = {
     systemPrompt: Type.Optional(Type.String({ description: "Custom system prompt for this agent" })),
     skills: Type.Optional(Type.Array(Type.String(), { description: "Skill names to assign" })),
     allowedPaths: Type.Optional(Type.Array(Type.String(), { description: "Filesystem paths this agent can access (relative to workDir)" })),
-    allowedTools: Type.Optional(Type.Array(Type.String(), { description: "Tool names/wildcards to enable (e.g. ['read','write','bash','browser_*','email_*','image_*','video_*','audio_*','excel_*','pdf_*','docx_*']). Vault tools are always available. Omit for core coding tools only." })),
+    allowedTools: Type.Optional(Type.Array(Type.String(), { description: "Tool names/wildcards to enable (e.g. ['read','write','bash','browser_*','email_*','image_*','video_*','audio_*','excel_*','pdf_*','docx_*','whatsapp_*']). Vault tools are always available. Omit for core coding tools only." })),
     reportsTo: Type.Optional(Type.String({ description: "Name of the agent this one reports to (org chart hierarchy, e.g. 'lead-dev')" })),
     team: Type.Optional(Type.String({ description: "Team name to add the agent to (default: first team)" })),
     reasoning: Type.Optional(Type.Union([Type.Literal("off"), Type.Literal("low"), Type.Literal("medium"), Type.Literal("high")], { description: "Agent thinking/reasoning level. Overrides global settings.reasoning." })),
@@ -485,7 +485,7 @@ const updateAgentTool: Tool = {
     systemPrompt: Type.Optional(Type.String({ description: "New system prompt" })),
     skills: Type.Optional(Type.Array(Type.String(), { description: "New skill list (replaces existing)" })),
     allowedPaths: Type.Optional(Type.Array(Type.String(), { description: "New allowed paths (replaces existing)" })),
-    allowedTools: Type.Optional(Type.Array(Type.String(), { description: "Tool names/wildcards to enable (replaces existing). Include 'browser_*', 'email_*', 'image_*', 'video_*', 'audio_*', 'excel_*', 'pdf_*', or 'docx_*' to grant those categories. Vault tools are always available. Omit to keep current." })),
+    allowedTools: Type.Optional(Type.Array(Type.String(), { description: "Tool names/wildcards to enable (replaces existing). Include 'browser_*', 'email_*', 'image_*', 'video_*', 'audio_*', 'excel_*', 'pdf_*', 'docx_*', or 'whatsapp_*' to grant those categories. Vault tools are always available. Omit to keep current." })),
     reportsTo: Type.Optional(Type.String({ description: "Name of the agent this one reports to. Use empty string to remove." })),
     team: Type.Optional(Type.String({ description: "Move agent to a different team" })),
     reasoning: Type.Optional(Type.Union([Type.Literal("off"), Type.Literal("low"), Type.Literal("medium"), Type.Literal("high")], { description: "Agent thinking/reasoning level" })),
@@ -1104,6 +1104,35 @@ const searchWebTool: Tool = {
 };
 
 // ═══════════════════════════════════════════════════════
+//  WHATSAPP TOOLS (2)
+// ═══════════════════════════════════════════════════════
+
+const whatsappSendTool: Tool = {
+  name: "whatsapp_send",
+  description: "Send a WhatsApp message to a contact. Resolves recipients by name, phone number, or JID. Requires a WhatsApp channel configured and connected.",
+  parameters: Type.Object({
+    to: Type.String({ description: "Recipient: phone number (with country code, no +), contact name, or JID (e.g. '393387172954', 'Marco', '393387172954@s.whatsapp.net')" }),
+    text: Type.String({ description: "Message text to send" }),
+  }),
+};
+
+const whatsappReadTool: Tool = {
+  name: "whatsapp_read",
+  description: "Read WhatsApp messages. List recent chats, read messages from a specific chat, or search across all chats. Requires a WhatsApp channel configured.",
+  parameters: Type.Object({
+    action: Type.Union([
+      Type.Literal("list_chats"),
+      Type.Literal("read_chat"),
+      Type.Literal("search"),
+      Type.Literal("contacts"),
+    ], { description: "Action: list_chats (recent conversations), read_chat (messages from a chat), search (search across all chats), contacts (list known contacts)" }),
+    chatId: Type.Optional(Type.String({ description: "Chat phone/name/JID for read_chat (required for read_chat)" })),
+    query: Type.Optional(Type.String({ description: "Search query (required for search)" })),
+    limit: Type.Optional(Type.Number({ description: "Max results (default: 30)" })),
+  }),
+};
+
+// ═══════════════════════════════════════════════════════
 //  CLIENT-SIDE TOOLS (executed on the user's browser, not the server)
 // ═══════════════════════════════════════════════════════
 
@@ -1218,6 +1247,8 @@ export const READ_TOOLS = new Set([
   "http_fetch",
   // Search (read-only)
   "search_web",
+  // WhatsApp (read-only)
+  "whatsapp_read",
 ]);
 
 export const WRITE_TOOLS = new Set([
@@ -1250,6 +1281,8 @@ export const WRITE_TOOLS = new Set([
   "write_file", "edit_file", "run_command",
   // HTTP (write — downloads files to disk)
   "http_download",
+  // WhatsApp (write — sends messages)
+  "whatsapp_send",
 ]);
 
 /** Tools that pause the conversation to collect user input / show a preview. */
@@ -1308,6 +1341,8 @@ export const ALL_ORCHESTRATOR_TOOLS: Tool[] = [
   httpFetchTool, httpDownloadTool,
   // Search (1)
   searchWebTool,
+  // WhatsApp (2)
+  whatsappSendTool, whatsappReadTool,
   // Interactive (1)
   askUserTool,
   // Client-side (3)
@@ -1392,6 +1427,9 @@ const TOOL_LABELS: Record<string, string> = {
   // HTTP
   http_fetch: "HTTP Fetch",
   http_download: "HTTP Download",
+  // WhatsApp
+  whatsapp_send: "WhatsApp Send",
+  whatsapp_read: "WhatsApp Read",
 };
 
 // ═══════════════════════════════════════════════════════
@@ -1582,6 +1620,10 @@ export async function executeOrchestratorTool(
 
       // ── Search ──
       case "search_web":       return await execSearchWeb(polpo, args);
+
+      // ── WhatsApp ──
+      case "whatsapp_send":    return await execWhatsAppSend(polpo, args);
+      case "whatsapp_read":    return execWhatsAppRead(polpo, args);
 
       // ── Interactive (handled by the calling loop, not here) ──
       case "ask_user":
@@ -1809,6 +1851,15 @@ export function formatToolDetails(
       main.push(["Agent", String(args.agent)]);
       { const fields = Object.keys(args).filter(k => k !== "agent" && args[k] !== undefined);
         if (fields.length) main.push(["Fields", fields.join(", ")]); }
+      break;
+    case "whatsapp_send":
+      main.push(["To", String(args.to)]);
+      if (args.text) extra.push(["Message", trunc(args.text, 200)]);
+      break;
+    case "whatsapp_read":
+      main.push(["Action", String(args.action)]);
+      if (args.chatId) main.push(["Chat", String(args.chatId)]);
+      if (args.query) main.push(["Query", String(args.query)]);
       break;
     default:
       for (const [k, v] of Object.entries(args)) {
@@ -3647,6 +3698,128 @@ async function execSearchWeb(polpo: Orchestrator, args: Record<string, unknown>)
   } catch (err: any) {
     const message = err.name === "AbortError" ? "Search timed out" : err.message;
     return `Error: Web search failed — ${message}`;
+  }
+}
+
+// ═══════════════════════════════════════════════════════
+//  WHATSAPP EXECUTORS
+// ═══════════════════════════════════════════════════════
+
+async function execWhatsAppSend(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
+  const bridge = polpo.getWhatsAppBridge();
+  if (!bridge) return "Error: WhatsApp not configured or not connected. Configure a WhatsApp channel in polpo.json.";
+
+  const store = polpo.getWhatsAppStore();
+  const to = args.to as string;
+  const text = args.text as string;
+
+  // Resolve recipient to JID
+  let jid: string;
+  if (to.includes("@")) {
+    // Already a JID
+    jid = to;
+  } else if (/^\d+$/.test(to.replace(/[+\s-]/g, ""))) {
+    // Phone number
+    const clean = to.replace(/[+\s-]/g, "");
+    jid = `${clean}@s.whatsapp.net`;
+  } else if (store) {
+    // Try resolving by contact name
+    const contact = store.resolveContact(to);
+    if (!contact) return `Error: Contact "${to}" not found. Use a phone number (with country code, no +) or a name that matches a known contact.`;
+    jid = contact.jid;
+  } else {
+    return `Error: Cannot resolve "${to}" — WhatsApp store not available. Use a phone number or JID.`;
+  }
+
+  try {
+    const msgId = await bridge.sendMessage(jid, text);
+    const phone = jid.replace(/@.*$/, "");
+    return `Message sent to ${phone}${msgId ? ` (id: ${msgId})` : ""}.`;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return `Error sending WhatsApp message: ${msg}`;
+  }
+}
+
+function execWhatsAppRead(polpo: Orchestrator, args: Record<string, unknown>): string {
+  const store = polpo.getWhatsAppStore();
+  if (!store) return "Error: WhatsApp store not available. Configure a WhatsApp channel in polpo.json.";
+
+  const action = args.action as string;
+  const limit = (args.limit as number | undefined) ?? 30;
+
+  switch (action) {
+    case "list_chats": {
+      const chats = store.listChats(limit);
+      if (chats.length === 0) return "No WhatsApp chats found.";
+      const lines = chats.map(c => {
+        const name = c.name ? `${c.name} (${c.phone})` : c.phone;
+        const preview = c.lastMessage ? ` — "${c.lastMessage.slice(0, 60)}${c.lastMessage.length > 60 ? "..." : ""}"` : "";
+        const unread = c.unread > 0 ? ` [${c.unread} unread]` : "";
+        return `  ${name}: ${c.messageCount} msgs${unread}${preview}`;
+      });
+      return `${chats.length} chat(s):\n${lines.join("\n")}`;
+    }
+
+    case "read_chat": {
+      const chatId = args.chatId as string;
+      if (!chatId) return "Error: 'chatId' is required for read_chat. Provide a phone number, contact name, or JID.";
+
+      // Resolve chatId to JID
+      let jid: string;
+      if (chatId.includes("@")) {
+        jid = chatId;
+      } else if (/^\d+$/.test(chatId.replace(/[+\s-]/g, ""))) {
+        const clean = chatId.replace(/[+\s-]/g, "");
+        jid = `${clean}@s.whatsapp.net`;
+      } else {
+        const contact = store.resolveContact(chatId);
+        if (!contact) return `Error: Contact "${chatId}" not found. Use a phone number or JID.`;
+        jid = contact.jid;
+      }
+
+      const messages = store.listMessages(jid, limit);
+      if (messages.length === 0) return `No messages found for ${chatId}.`;
+
+      // Reverse to chronological order
+      const sorted = [...messages].reverse();
+      const lines = sorted.map(m => {
+        const ts = new Date(m.timestamp * 1000).toLocaleString();
+        const sender = m.fromMe ? "Me" : (m.senderName ?? m.senderJid.replace(/@.*$/, ""));
+        const media = m.mediaType ? ` [${m.mediaType}]` : "";
+        return `  [${ts}] ${sender}: ${m.text}${media}`;
+      });
+      return `${messages.length} message(s) from ${chatId}:\n${lines.join("\n")}`;
+    }
+
+    case "search": {
+      const query = args.query as string;
+      if (!query) return "Error: 'query' is required for search.";
+
+      const results = store.searchMessages(query, limit);
+      if (results.length === 0) return `No messages matching "${query}".`;
+
+      const lines = results.map(m => {
+        const ts = new Date(m.timestamp * 1000).toLocaleString();
+        const sender = m.fromMe ? "Me" : (m.senderName ?? m.senderJid.replace(/@.*$/, ""));
+        const phone = m.chatJid.replace(/@.*$/, "");
+        return `  [${ts}] ${phone} — ${sender}: ${m.text.slice(0, 150)}${m.text.length > 150 ? "..." : ""}`;
+      });
+      return `${results.length} result(s) for "${query}":\n${lines.join("\n")}`;
+    }
+
+    case "contacts": {
+      const contacts = store.listContacts(limit);
+      if (contacts.length === 0) return "No WhatsApp contacts found.";
+      const lines = contacts.map(c => {
+        const lastSeen = new Date(c.lastSeen * 1000).toLocaleString();
+        return `  ${c.name} — ${c.phone} (last seen: ${lastSeen})`;
+      });
+      return `${contacts.length} contact(s):\n${lines.join("\n")}`;
+    }
+
+    default:
+      return `Error: Unknown action "${action}". Use: list_chats, read_chat, search, contacts.`;
   }
 }
 

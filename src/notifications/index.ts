@@ -9,6 +9,7 @@ import { SlackChannel } from "./channels/slack.js";
 import { TelegramChannel } from "./channels/telegram.js";
 import { EmailChannel } from "./channels/email.js";
 import { WebhookChannel } from "./channels/webhook.js";
+import { WhatsAppChannel } from "./channels/whatsapp.js";
 
 export type { NotificationChannel, Notification, OutcomeAttachment } from "./types.js";
 export type { NotificationStore, NotificationRecord, NotificationStatus } from "../core/notification-store.js";
@@ -42,6 +43,8 @@ export class NotificationRouter {
   /** Optional callback to resolve scoped notification rules from event payload.
    *  Returns task-level and plan-level notifications for scope resolution. */
   private scopeResolver?: (data: unknown) => { taskNotifications?: ScopedNotificationRules; planNotifications?: ScopedNotificationRules } | undefined;
+
+  private polpoDir?: string;
 
   constructor(private emitter: TypedEmitter) {}
 
@@ -82,7 +85,8 @@ export class NotificationRouter {
    * Initialize from configuration.
    * Creates channel instances and registers rules.
    */
-  init(config: NotificationsConfig): void {
+  init(config: NotificationsConfig, polpoDir?: string): void {
+    this.polpoDir = polpoDir;
     // Create channel instances
     for (const [id, channelConfig] of Object.entries(config.channels)) {
       try {
@@ -633,6 +637,9 @@ export class NotificationRouter {
         return new TelegramChannel(config);
       case "email":
         return new EmailChannel(config);
+      case "whatsapp":
+        if (!this.polpoDir) throw new Error("WhatsApp channel requires polpoDir (pass it via init())");
+        return new WhatsAppChannel(config, this.polpoDir);
       case "webhook":
         return new WebhookChannel(config);
       default:

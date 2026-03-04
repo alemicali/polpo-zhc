@@ -1,5 +1,6 @@
 import type { AgentConfig, AgentActivity, Task, TaskResult, TaskOutcome, ReasoningLevel } from "./types.js";
 import type { EncryptedVaultStore } from "../vault/encrypted-store.js";
+import type { WhatsAppStore } from "../stores/whatsapp-store.js";
 
 /**
  * Handle returned by the engine after spawning an agent.
@@ -51,4 +52,8 @@ export interface SpawnContext {
   reasoning?: ReasoningLevel;
   /** Encrypted vault store — for resolving agent credentials at runtime. */
   vaultStore?: EncryptedVaultStore;
+  /** WhatsApp message store — for whatsapp_* agent tools. */
+  whatsappStore?: WhatsAppStore;
+  /** WhatsApp send function — for whatsapp_send agent tool. */
+  whatsappSendMessage?: (jid: string, text: string) => Promise<string | undefined>;
 }

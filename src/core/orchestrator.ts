@@ -52,6 +52,9 @@ import { TelegramCallbackPoller } from "../notifications/channels/telegram.js";
 import type { ApprovalCallbackResolver } from "../notifications/channels/telegram.js";
 import { ChannelGateway } from "../notifications/channel-gateway.js";
 import { TelegramGatewayAdapter } from "../notifications/telegram-gateway-adapter.js";
+import { WhatsAppBridge, WhatsAppChannel } from "../notifications/channels/whatsapp.js";
+import { WhatsAppGatewayAdapter } from "../notifications/whatsapp-gateway-adapter.js";
+import { WhatsAppStore } from "../stores/whatsapp-store.js";
 import { FilePeerStore } from "./peer-store.js";
 import type { PeerStore } from "./peer-store.js";
 import { EscalationManager } from "./escalation-manager.js";
@@ -101,6 +104,8 @@ export class Orchestrator extends TypedEmitter {
   private scheduler?: Scheduler;
   private watcherMgr?: TaskWatcherManager;
   private telegramPoller?: TelegramCallbackPoller;
+  private whatsappBridge?: WhatsAppBridge;
+  private whatsappStore?: WhatsAppStore;
   private peerStore?: PeerStore;
   private channelGateway?: ChannelGateway;
   private configWatcher?: FSWatcher;
@@ -129,6 +134,8 @@ export class Orchestrator extends TypedEmitter {
   getQualityController(): QualityController | undefined { return this.qualityController; }
   getScheduler(): Scheduler | undefined { return this.scheduler; }
   getWatcherManager(): TaskWatcherManager | undefined { return this.watcherMgr; }
+  getWhatsAppStore(): WhatsAppStore | undefined { return this.whatsappStore; }
+  getWhatsAppBridge(): WhatsAppBridge | undefined { return this.whatsappBridge; }
 
   constructor(workDirOrOptions?: string | OrchestratorOptions) {
     super();
@@ -284,7 +291,7 @@ export class Orchestrator extends TypedEmitter {
     // Initialize notification router if configured
     if (this.config.settings.notifications) {
       this.notificationRouter = new NotificationRouter(this);
-      this.notificationRouter.init(this.config.settings.notifications);
+      this.notificationRouter.init(this.config.settings.notifications, this.polpoDir);
       // Attach persistent notification store
       const notifStore = new FileNotificationStore(this.polpoDir);
       this.notificationRouter.setStore(notifStore);
@@ -338,6 +345,11 @@ export class Orchestrator extends TypedEmitter {
     } else if (this.notificationRouter && this.hasTelegramGatewayEnabled()) {
       // Start Telegram poller even without approval gates when gateway inbound is enabled
       this.startTelegramApprovalPoller();
+    }
+
+    // Start WhatsApp bridge if configured
+    if (this.notificationRouter && this.hasWhatsAppConfigured()) {
+      this.startWhatsAppBridge();
     }
 
     // Initialize escalation manager if configured
@@ -797,6 +809,9 @@ export class Orchestrator extends TypedEmitter {
     if (this.configReloadTimer) clearTimeout(this.configReloadTimer);
     this.configWatcher?.close();
     this.telegramPoller?.stop();
+    this.whatsappBridge?.stop();
+    this.whatsappStore?.close();
+    this.whatsappStore = undefined;
     this.notificationServer?.close();
     this.approvalMgr?.dispose();
     this.notificationRouter?.dispose();
@@ -835,6 +850,10 @@ export class Orchestrator extends TypedEmitter {
     // 1. Dispose optional subsystems (scheduler is handled separately to preserve state)
     this.telegramPoller?.stop();
     this.telegramPoller = undefined;
+    this.whatsappBridge?.stop();
+    this.whatsappBridge = undefined;
+    this.whatsappStore?.close();
+    this.whatsappStore = undefined;
     this.qualityController?.dispose();
     this.qualityController = undefined;
     this.slaMonitor?.dispose();
@@ -887,7 +906,7 @@ export class Orchestrator extends TypedEmitter {
     // Notification router
     if (this.config.settings.notifications) {
       this.notificationRouter = new NotificationRouter(this);
-      this.notificationRouter.init(this.config.settings.notifications);
+      this.notificationRouter.init(this.config.settings.notifications, this.polpoDir);
       const notifStore = new FileNotificationStore(this.polpoDir);
       this.notificationRouter.setStore(notifStore);
       this.notificationRouter.start();
@@ -926,6 +945,11 @@ export class Orchestrator extends TypedEmitter {
         return task?.outcomes;
       });
       this.startTelegramApprovalPoller();
+    }
+
+    // Restart WhatsApp bridge if configured (independent of approval gates)
+    if (this.notificationRouter && this.hasWhatsAppConfigured()) {
+      this.startWhatsAppBridge();
     }
 
     // Escalation manager
@@ -1067,6 +1091,112 @@ export class Orchestrator extends TypedEmitter {
     this.telegramPoller = poller;
 
     this.emit("log", { level: "info", message: "Telegram callback poller started" });
+  }
+
+  // ── WhatsApp Bridge ──
+
+  /** Check if any WhatsApp channel is configured. */
+  private hasWhatsAppConfigured(): boolean {
+    const channels = this.config.settings.notifications?.channels;
+    if (!channels) return false;
+    return Object.values(channels).some(ch => ch.type === "whatsapp");
+  }
+
+  /** Start the WhatsApp bridge (Baileys connection + inbound message routing). */
+  private startWhatsAppBridge(): void {
+    if (!this.notificationRouter) return;
+
+    // Stop existing bridge
+    if (this.whatsappBridge) {
+      this.whatsappBridge.stop();
+      this.whatsappBridge = undefined;
+    }
+
+    // Find the WhatsApp channel instance
+    const waConfigKey = Object.keys(this.config.settings.notifications?.channels ?? {})
+      .find(k => this.config.settings.notifications?.channels[k]?.type === "whatsapp");
+    if (!waConfigKey) return;
+
+    const ch = this.notificationRouter.getChannel(waConfigKey);
+    if (!ch || ch.type !== "whatsapp") return;
+    const waChannel = ch as WhatsAppChannel;
+
+    // Create or reuse WhatsApp message store (SQLite)
+    if (!this.whatsappStore) {
+      const dbPath = join(this.polpoDir, "whatsapp.db");
+      this.whatsappStore = new WhatsAppStore(dbPath);
+      this.emit("log", { level: "info", message: `WhatsApp store opened: ${dbPath}` });
+    }
+
+    // Create the bridge
+    const bridge = new WhatsAppBridge(waChannel, (level, msg) => {
+      this.emit("log", { level: level as "info" | "warn" | "verbose", message: msg });
+    });
+
+    // Attach store to bridge (buffers all messages for tool access)
+    bridge.setStore(this.whatsappStore);
+
+    // Build approval resolver (same as Telegram)
+    const approvalMgr = this.approvalMgr;
+    let resolver: ApprovalCallbackResolver | undefined;
+    if (approvalMgr) {
+      resolver = {
+        approve: async (requestId, resolvedBy) => {
+          const result = approvalMgr.approve(requestId, resolvedBy);
+          return result ? { ok: true } : { ok: false, error: "Not found or already resolved" };
+        },
+        reject: async (requestId, feedback, resolvedBy) => {
+          const result = approvalMgr.reject(requestId, feedback, resolvedBy);
+          return result ? { ok: true } : { ok: false, error: "Not found, already resolved, or max rejections reached" };
+        },
+      };
+    }
+
+    // Set up gateway if inbound is enabled
+    const channelConfig = this.config.settings.notifications?.channels[waConfigKey];
+    if (channelConfig?.gateway?.enableInbound) {
+      // Initialize peer store (shared with Telegram if already created)
+      if (!this.peerStore) {
+        this.peerStore = new FilePeerStore(this.polpoDir);
+      }
+
+      // Create or reuse ChannelGateway
+      if (!this.channelGateway) {
+        this.channelGateway = new ChannelGateway({
+          orchestrator: this,
+          peerStore: this.peerStore,
+          sessionStore: this.sessionStore,
+          channelConfig,
+          approvalResolver: resolver,
+          onTyping: (chatId) => waChannel.sendTyping(chatId),
+        });
+      }
+
+      // Send partial responses as separate messages during multi-turn tool loops
+      this.channelGateway.setPartialResponseHandler((chatId, text) =>
+        waChannel.sendText(chatId, text),
+      );
+
+      // Attach gateway adapter to bridge
+      const adapter = new WhatsAppGatewayAdapter(this.channelGateway);
+      bridge.setGateway(adapter);
+
+      this.emit("log", {
+        level: "info",
+        message: `WhatsApp channel gateway configured (dmPolicy: ${channelConfig.gateway.dmPolicy ?? "allowlist"}, inbound: enabled)`,
+      });
+    }
+
+    // Start the bridge (async — connection happens in background)
+    bridge.start().catch(err => {
+      this.emit("log", {
+        level: "warn",
+        message: `WhatsApp bridge start failed: ${err instanceof Error ? err.message : String(err)}`,
+      });
+    });
+
+    this.whatsappBridge = bridge;
+    this.emit("log", { level: "info", message: "WhatsApp bridge starting..." });
   }
 
   private seedTasks(): void {

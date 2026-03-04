@@ -85,6 +85,9 @@ Polpo supports four notification channels. Each has its own configuration page w
   <Card title="Telegram" icon="telegram" iconType="brands" href="/notifications/telegram">
     Bot API with HTML formatting, file attachments, and interactive approval buttons
   </Card>
+  <Card title="WhatsApp" icon="whatsapp" iconType="brands" href="/notifications/whatsapp">
+    Personal WhatsApp via Baileys — text notifications and interactive gateway
+  </Card>
   <Card title="Email" icon="envelope" href="/notifications/email">
     Resend, SendGrid, or SMTP with dual plain text and HTML delivery
   </Card>
@@ -97,6 +100,7 @@ Polpo supports four notification channels. Each has its own configuration page w
 |---------|----------------|-------------|
 | `slack` | `webhookUrl` | Posts to a Slack incoming webhook |
 | `telegram` | `botToken`, `chatId` | Sends via Telegram Bot API |
+| `whatsapp` | *(none required)* | Personal WhatsApp via Baileys (unofficial) |
 | `email` | `provider`, `to`, `host`/`port` or `apiKey` | Email delivery via Resend, SendGrid, or SMTP |
 | `webhook` | `url` | Generic HTTP POST with JSON payload |
 

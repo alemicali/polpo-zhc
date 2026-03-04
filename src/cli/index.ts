@@ -54,6 +54,7 @@ import { registerBrowserCommands } from "./commands/browser-profile.js";
 import { registerScheduleCommands } from "./commands/schedule.js";
 import { registerAgentOnboardCommands } from "./commands/agent-onboard.js";
 import { registerUpdateCommand } from "./commands/update.js";
+import { registerWhatsAppCommands } from "./commands/whatsapp.js";
 import { ensureSetup } from "./ensure-setup.js";
 import { startUpdateCheck } from "./update-check.js";
 
@@ -521,6 +522,7 @@ registerBrowserCommands(program);
 registerScheduleCommands(program);
 registerAgentOnboardCommands(program);
 registerUpdateCommand(program);
+registerWhatsAppCommands(program);
 
 // Non-blocking update check — prints notice at exit if a new version exists
 const printUpdateNotice = startUpdateCheck(PKG_VERSION);

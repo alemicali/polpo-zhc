@@ -24,7 +24,8 @@ The gateway is **channel-agnostic**. Each messaging platform has a thin adapter 
 | **ChannelGateway** | Core message router — DM policy, slash commands, chat completions |
 | **PeerStore** | Peer identity, allowlist, pairing, session mapping, presence |
 | **TelegramGatewayAdapter** | Bridges Telegram polling to the gateway |
-| **Channel adapters** (future) | WhatsApp, Slack, Discord — same pattern |
+| **WhatsAppGatewayAdapter** | Bridges WhatsApp (Baileys) to the gateway |
+| **Channel adapters** (future) | Slack, Discord — same pattern |
 
 ## Enabling the Gateway
 

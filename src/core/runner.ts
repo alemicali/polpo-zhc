@@ -21,6 +21,7 @@ import type { RunnerConfig, TaskResult } from "./types.js";
 import { notifyRunComplete } from "./notification.js";
 import { sanitizeTranscriptEntry } from "../server/security.js";
 import { EncryptedVaultStore } from "../vault/encrypted-store.js";
+import type { WhatsAppStore } from "../stores/whatsapp-store.js";
 
 const ACTIVITY_POLL_MS = 1500;
 
@@ -114,6 +115,51 @@ async function main(): Promise<void> {
   try {
     let vaultStore: EncryptedVaultStore | undefined;
     try { vaultStore = new EncryptedVaultStore(config.polpoDir); } catch { /* vault unavailable */ }
+
+    // WhatsApp store + send function (if configured)
+    let waStore: WhatsAppStore | undefined;
+    let waSendMessage: ((jid: string, text: string) => Promise<string | undefined>) | undefined;
+    if (config.whatsappDbPath && config.whatsappProfilePath) {
+      try {
+        const { WhatsAppStore: WAStore } = await import("../stores/whatsapp-store.js");
+        waStore = new WAStore(config.whatsappDbPath);
+
+        // Lazy Baileys connection for sending — only connects when first send is called
+        let waSock: any;
+        waSendMessage = async (jid: string, text: string): Promise<string | undefined> => {
+          if (!waSock) {
+            const {
+              default: makeWASocket,
+              useMultiFileAuthState,
+              fetchLatestBaileysVersion,
+              makeCacheableSignalKeyStore,
+            } = await import("@whiskeysockets/baileys");
+            const { state, saveCreds } = await useMultiFileAuthState(config.whatsappProfilePath!);
+            const { version } = await fetchLatestBaileysVersion();
+            waSock = makeWASocket({
+              version,
+              auth: { creds: state.creds, keys: makeCacheableSignalKeyStore(state.keys, undefined as any) },
+              printQRInTerminal: false,
+              browser: ["Polpo Agent", "Desktop", "1.0.0"],
+              generateHighQualityLinkPreview: false,
+              syncFullHistory: false,
+            });
+            waSock.ev.on("creds.update", saveCreds);
+            // Wait for connection
+            await new Promise<void>((resolve, reject) => {
+              const timeout = setTimeout(() => reject(new Error("WhatsApp connection timeout")), 15000);
+              waSock.ev.on("connection.update", (update: any) => {
+                if (update.connection === "open") { clearTimeout(timeout); resolve(); }
+                if (update.connection === "close") { clearTimeout(timeout); reject(new Error("WhatsApp connection closed")); }
+              });
+            });
+          }
+          const result = await waSock.sendMessage(jid, { text });
+          return result?.key?.id ?? undefined;
+        };
+      } catch { /* WhatsApp unavailable in runner — tools will be skipped */ }
+    }
+
     const spawnCtx = {
       polpoDir: config.polpoDir,
       outputDir: config.outputDir,
@@ -121,6 +167,8 @@ async function main(): Promise<void> {
       mcpToolAllowlist: config.mcpToolAllowlist,
       reasoning: config.reasoning,
       vaultStore,
+      whatsappStore: waStore,
+      whatsappSendMessage: waSendMessage,
     };
     handle = spawnEngine(config.agent, config.task, config.cwd, spawnCtx);
     // Wire transcript persistence — every agent message gets written to the run log

@@ -414,7 +414,7 @@ export interface MissionReport {
 // === Notifications ===
 
 export type NotificationSeverity = "info" | "warning" | "critical";
-export type NotificationChannelType = "slack" | "email" | "telegram" | "webhook";
+export type NotificationChannelType = "slack" | "email" | "telegram" | "whatsapp" | "webhook";
 export type NotificationStatus = "sent" | "failed";
 
 export interface NotificationRule {

@@ -517,6 +517,10 @@ export interface RunnerConfig {
   mcpToolAllowlist?: Record<string, string[]>;
   /** Global reasoning level from settings — used as fallback for agents that don't specify one. */
   reasoning?: ReasoningLevel;
+  /** WhatsApp message DB path (for whatsapp_* agent tools). */
+  whatsappDbPath?: string;
+  /** WhatsApp Baileys profile path (for whatsapp_send — creates a temporary connection). */
+  whatsappProfilePath?: string;
 }
 
 // === Polpo File Config (.polpo/polpo.json — persistent project configuration) ===
@@ -858,7 +862,7 @@ export interface PresenceEntry {
 
 // === Notification System ===
 
-export type NotificationChannelType = "slack" | "email" | "telegram" | "webhook";
+export type NotificationChannelType = "slack" | "email" | "telegram" | "whatsapp" | "webhook";
 
 export interface NotificationChannelConfig {
   type: NotificationChannelType;
@@ -874,6 +878,8 @@ export interface NotificationChannelConfig {
   botToken?: string;
   /** Telegram: chat ID. */
   chatId?: string;
+  /** WhatsApp: credentials directory path (relative to .polpo/). Defaults to "whatsapp-profiles/default". */
+  profileDir?: string;
   /** Webhook: target URL. */
   url?: string;
   /** Webhook: custom headers. */

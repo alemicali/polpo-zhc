@@ -224,7 +224,7 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
     return lc.startsWith("browser_") || lc.startsWith("email_")
       || lc.startsWith("image_") || lc.startsWith("video_") || lc.startsWith("audio_")
       || lc.startsWith("excel_") || lc.startsWith("pdf_") || lc.startsWith("docx_")
-      || lc.startsWith("search_");
+      || lc.startsWith("search_") || lc.startsWith("whatsapp_");
   }) ?? false;
 
   // Derive output directory from context (per-task output dir for deliverables)
@@ -399,6 +399,8 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
           vault,
           emailAllowedDomains: agentConfig.emailAllowedDomains ?? ctx?.emailAllowedDomains,
           outputDir,
+          whatsappStore: ctx?.whatsappStore,
+          whatsappSendMessage: ctx?.whatsappSendMessage,
         });
         agent.setTools(allTools);
       }

@@ -73,7 +73,8 @@
               "usage/tui",
               "usage/server",
               "usage/web-ui",
-              "usage/telegram"
+              "usage/telegram",
+              "usage/whatsapp"
             ]
           },
           {
@@ -123,6 +124,7 @@
                 "pages": [
                   "notifications/slack",
                   "notifications/telegram",
+                  "notifications/whatsapp",
                   "notifications/email",
                   "notifications/webhook"
                 ]
