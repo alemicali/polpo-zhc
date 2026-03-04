@@ -1,9 +1,9 @@
 ---
 title: "Tools & MCP"
-description: "9 core tools (including HTTP), 6 extended tool categories, filesystem sandboxing, and MCP server connections."
+description: "9 core tools (including HTTP), 7 extended tool categories, filesystem sandboxing, and MCP server connections."
 ---
 
-Agents need tools to do their job. Polpo gives every agent a set of **core tools** for reading, writing, searching files, and making HTTP requests — **6 extended tool categories** (browser, email, vault, image, video, and audio) — plus the ability to connect to external **MCP servers** for additional capabilities.
+Agents need tools to do their job. Polpo gives every agent a set of **core tools** for reading, writing, searching files, and making HTTP requests — **7 extended tool categories** (browser, email, vault, image, video, audio, and search) — plus the ability to connect to external **MCP servers** for additional capabilities.
 
 ## Core Tools
 
@@ -43,7 +43,7 @@ This agent can browse code but can't write, edit, or run commands — useful for
 
 ## Extended Tools
 
-Beyond the 9 core tools, Polpo offers **6 optional tool categories** that can be enabled per-agent via the `allowedTools` array.
+Beyond the 9 core tools, Polpo offers **7 optional tool categories** that can be enabled per-agent via the `allowedTools` array.
 
 <Note>
 **Simplified toolset**: Git, multi-file operations, dependency management, Excel/CSV, PDF, and Word/DOCX tools have been removed as built-in tool categories. Agents should use the `bash` tool with appropriate CLI commands or install [skills](/features/skills) for these operations instead. HTTP tools (`http_fetch`, `http_download`) are now always-on core tools — no flag needed.
@@ -137,6 +137,22 @@ Credentials are resolved from vault first, then environment variables (`OPENAI_A
   Full parameter schemas and usage for speech-to-text and text-to-speech tools.
 </Card>
 
+### Search (2 tools)
+
+Semantic web search and similar-page discovery powered by **Exa AI**. Useful for research agents, competitive analysis, fact-checking, and finding documentation.
+
+```json
+{ "name": "researcher", "allowedTools": ["read", "write", "edit", "bash", "glob", "grep", "ls", "search_*"] }
+```
+
+Tools: `search_web` (semantic search with content extraction), `search_find_similar` (find pages similar to a URL).
+
+Search tools require the `EXA_API_KEY` environment variable or a vault entry (service `"exa"`, key `"key"`).
+
+<Card title="Search tools reference" icon="arrow-right" href="/reference/tools/search">
+  Full parameter schemas and usage for web search tools.
+</Card>
+
 ### Summary
 
 | Category | Tools | Enable via `allowedTools` | Description |
@@ -147,6 +163,7 @@ Credentials are resolved from vault first, then environment variables (`OPENAI_A
 | Image | 3 | `"image_*"` | Image generation (fal.ai FLUX) and vision analysis (OpenAI/Anthropic) |
 | Video | 1 | `"video_*"` | Text-to-video generation via fal.ai Wan 2.2 |
 | [Audio](/reference/tools/audio) | 2 | `"audio_*"` | Speech-to-text (STT) and text-to-speech (TTS) |
+| [Search](/reference/tools/search) | 2 | `"search_*"` | Semantic web search and similar-page discovery via Exa AI |
 
 ### Enabling Multiple Categories
 
@@ -155,7 +172,7 @@ You can enable multiple extended categories on a single agent:
 ```json
 {
   "name": "outreach-agent",
-  "allowedTools": ["read", "write", "edit", "bash", "glob", "grep", "ls", "browser_*", "email_*", "vault_*", "image_*", "video_*", "audio_*"]
+  "allowedTools": ["read", "write", "edit", "bash", "glob", "grep", "ls", "browser_*", "email_*", "vault_*", "image_*", "video_*", "audio_*", "search_*"]
 }
 ```
 

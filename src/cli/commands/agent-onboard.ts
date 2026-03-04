@@ -311,6 +311,7 @@ export function registerAgentOnboardCommands(program: Command): void {
         if (aTools.some(t => t.toLowerCase().startsWith("excel_"))) flags.push("excel");
         if (aTools.some(t => t.toLowerCase().startsWith("pdf_"))) flags.push("pdf");
         if (aTools.some(t => t.toLowerCase().startsWith("docx_"))) flags.push("docx");
+        if (aTools.some(t => t.toLowerCase().startsWith("search_"))) flags.push("search");
         if (vaultCount > 0) flags.push(`vault:${vaultCount}`);
 
         console.log(`${prefix}${connector}${chalk.bold(display)}${titleStr ? chalk.dim(` — ${titleStr}`) : ""}${flags.length ? chalk.cyan(` [${flags.join(", ")}]`) : ""}`);
@@ -402,6 +403,7 @@ export function registerAgentOnboardCommands(program: Command): void {
       if (showTools.some(t => t.toLowerCase().startsWith("excel_"))) showFlags.push("excel");
       if (showTools.some(t => t.toLowerCase().startsWith("pdf_"))) showFlags.push("pdf");
       if (showTools.some(t => t.toLowerCase().startsWith("docx_"))) showFlags.push("docx");
+      if (showTools.some(t => t.toLowerCase().startsWith("search_"))) showFlags.push("search");
       if (showFlags.length > 0) {
         console.log(chalk.cyan(`\n  Tool categories: `) + showFlags.join(", "));
       }

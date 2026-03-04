@@ -630,7 +630,7 @@ function OrgChartInner() {
         proOptions={{ hideAttribution: true }}
         className="[&_.react-flow__background]:!bg-transparent"
       >
-        <Background gap={20} size={1} className="!text-border/20" />
+        <Background gap={20} size={1} className="!text-zinc-800/40" />
         <Controls
           showInteractive={false}
           className="!bg-card !border-border/40 !shadow-md [&>button]:!bg-card [&>button]:!border-border/30 [&>button]:!text-muted-foreground [&>button:hover]:!bg-muted/50"

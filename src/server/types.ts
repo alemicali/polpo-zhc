@@ -81,7 +81,7 @@ export interface AddAgentRequest {
   // Identity & hierarchy (vault credentials managed via encrypted store)
   identity?: import("../core/types.js").AgentIdentity;
   reportsTo?: string;
-  // Extended tool categories (browser, email, vault, image, video, audio — HTTP is always-on core)
+  // Extended tool categories (browser, email, vault, image, video, audio, excel, pdf, docx, search — HTTP is always-on core)
   browserProfile?: string;
 }
 

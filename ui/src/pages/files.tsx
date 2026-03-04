@@ -21,7 +21,6 @@ import {
   LayoutList,
   Search,
   HardDrive,
-  Settings2,
   Loader2,
   FolderOpen,
   ChevronDown,
@@ -239,7 +238,7 @@ function RootItem({
   active: boolean;
   onClick: () => void;
 }) {
-  const Icon = root.id === "polpo" ? Settings2 : root.id === "workspace" ? FolderOpen : HardDrive;
+  const Icon = root.id === "polpo" ? HardDrive : FolderOpen;
   return (
     <button
       onClick={onClick}

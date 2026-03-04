@@ -407,6 +407,7 @@ import { createAudioTools, ALL_AUDIO_TOOL_NAMES } from "./audio-tools.js";
 import { createExcelTools, ALL_EXCEL_TOOL_NAMES } from "./excel-tools.js";
 import { createPdfTools, ALL_PDF_TOOL_NAMES } from "./pdf-tools.js";
 import { createDocxTools, ALL_DOCX_TOOL_NAMES } from "./docx-tools.js";
+import { createSearchTools, ALL_SEARCH_TOOL_NAMES } from "./search-tools.js";
 import { ALL_OUTCOME_TOOL_NAMES } from "./outcome-tools.js";
 
 export type { BrowserToolName } from "./browser-tools.js";
@@ -419,6 +420,7 @@ export type { AudioToolName } from "./audio-tools.js";
 export type { ExcelToolName } from "./excel-tools.js";
 export type { PdfToolName } from "./pdf-tools.js";
 export type { DocxToolName } from "./docx-tools.js";
+export type { SearchToolName } from "./search-tools.js";
 
 /** All known tool names across all categories */
 export type ExtendedToolName = CodingToolName
@@ -431,7 +433,8 @@ export type ExtendedToolName = CodingToolName
   | import("./audio-tools.js").AudioToolName
   | import("./excel-tools.js").ExcelToolName
   | import("./pdf-tools.js").PdfToolName
-  | import("./docx-tools.js").DocxToolName;
+  | import("./docx-tools.js").DocxToolName
+  | import("./search-tools.js").SearchToolName;
 
 /** All available tool names for documentation/config validation */
 export const ALL_EXTENDED_TOOL_NAMES: string[] = [
@@ -446,6 +449,7 @@ export const ALL_EXTENDED_TOOL_NAMES: string[] = [
   ...ALL_EXCEL_TOOL_NAMES,
   ...ALL_PDF_TOOL_NAMES,
   ...ALL_DOCX_TOOL_NAMES,
+  ...ALL_SEARCH_TOOL_NAMES,
 ];
 
 export interface CreateAllToolsOptions {
@@ -532,6 +536,11 @@ export async function createAllTools(options: CreateAllToolsOptions): Promise<Ag
   // Docx tools — activated when any docx_* tool is in allowedTools
   if (categoryRequested(ALL_DOCX_TOOL_NAMES)) {
     tools.push(...createDocxTools(cwd, allowedPaths, allowedTools));
+  }
+
+  // Search tools (Exa) — activated when any search_* tool is in allowedTools
+  if (categoryRequested(ALL_SEARCH_TOOL_NAMES)) {
+    tools.push(...createSearchTools(options.vault, allowedTools));
   }
 
   // HTTP, register_outcome, and vault are already included via createCodingTools() above — no need to add again

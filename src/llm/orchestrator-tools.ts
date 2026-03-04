@@ -1001,7 +1001,7 @@ const readFileTool: Tool = {
   name: "read_file",
   description: "Read the contents of a file. Returns numbered lines. Use offset/limit for large files.",
   parameters: Type.Object({
-    path: Type.String({ description: "File path (relative to project root or absolute)" }),
+    path: Type.String({ description: "File path (relative to workspace or absolute)" }),
     offset: Type.Optional(Type.Number({ description: "Start line (1-indexed, default: 1)" })),
     limit: Type.Optional(Type.Number({ description: "Max lines to return (default: 500)" })),
   }),
@@ -1011,7 +1011,7 @@ const writeFileTool: Tool = {
   name: "write_file",
   description: "Write content to a file. Creates parent directories if needed. Overwrites existing files.",
   parameters: Type.Object({
-    path: Type.String({ description: "File path (relative to project root or absolute)" }),
+    path: Type.String({ description: "File path (relative to workspace or absolute)" }),
     content: Type.String({ description: "File content to write" }),
   }),
 };
@@ -1020,7 +1020,7 @@ const editFileTool: Tool = {
   name: "edit_file",
   description: "Replace an exact string in a file. The oldString must match exactly (including whitespace). Use replaceAll to replace every occurrence.",
   parameters: Type.Object({
-    path: Type.String({ description: "File path (relative to project root or absolute)" }),
+    path: Type.String({ description: "File path (relative to workspace or absolute)" }),
     oldString: Type.String({ description: "The exact text to find and replace" }),
     newString: Type.String({ description: "The replacement text" }),
     replaceAll: Type.Optional(Type.Boolean({ description: "Replace all occurrences (default: false)" })),
@@ -1085,6 +1085,21 @@ const httpDownloadTool: Tool = {
     url: Type.String({ description: "URL to download from" }),
     path: Type.String({ description: "Local file path to save the downloaded content (relative to project root or absolute)" }),
     headers: Type.Optional(Type.Record(Type.String(), Type.String(), { description: "Optional request headers" })),
+  }),
+};
+
+// ═══════════════════════════════════════════════════════
+//  WEB SEARCH TOOLS (Exa)
+// ═══════════════════════════════════════════════════════
+
+const searchWebTool: Tool = {
+  name: "search_web",
+  description: "Search the web using Exa's semantic search. Returns relevant pages with titles, URLs, and content summaries. Use natural language queries — Exa understands meaning, not just keywords. Requires EXA_API_KEY in vault (service: exa, key: key) or environment.",
+  parameters: Type.Object({
+    query: Type.String({ description: "Natural language search query" }),
+    numResults: Type.Optional(Type.Number({ description: "Number of results (default: 5, max: 20)" })),
+    includeDomains: Type.Optional(Type.Array(Type.String(), { description: "Only return results from these domains" })),
+    category: Type.Optional(Type.String({ description: "Filter: company, research_paper, news, pdf, github, tweet, personal_site, linkedin_profile" })),
   }),
 };
 
@@ -1201,6 +1216,8 @@ export const READ_TOOLS = new Set([
   "read_file", "list_directory", "grep_files",
   // HTTP (read-only)
   "http_fetch",
+  // Search (read-only)
+  "search_web",
 ]);
 
 export const WRITE_TOOLS = new Set([
@@ -1289,6 +1306,8 @@ export const ALL_ORCHESTRATOR_TOOLS: Tool[] = [
   readFileTool, writeFileTool, editFileTool, listDirectoryTool, grepFilesTool, runCommandTool,
   // HTTP (2)
   httpFetchTool, httpDownloadTool,
+  // Search (1)
+  searchWebTool,
   // Interactive (1)
   askUserTool,
   // Client-side (3)
@@ -1560,6 +1579,9 @@ export async function executeOrchestratorTool(
       // ── HTTP ──
       case "http_fetch":       return await execHttpFetch(polpo, args);
       case "http_download":    return await execHttpDownload(polpo, args);
+
+      // ── Search ──
+      case "search_web":       return await execSearchWeb(polpo, args);
 
       // ── Interactive (handled by the calling loop, not here) ──
       case "ask_user":
@@ -3249,7 +3271,7 @@ export function resetSkillCreatorGate(): void { _skillCreatorRead = false; }
 /** Resolve a path argument relative to the project work directory. */
 function resolveFilePath(polpo: Orchestrator, pathArg: string): string {
   if (isAbsolute(pathArg)) return pathArg;
-  return resolve(polpo.getWorkDir(), pathArg);
+  return resolve(polpo.getAgentWorkDir(), pathArg);
 }
 
 function execReadFile(polpo: Orchestrator, args: Record<string, unknown>): string {
@@ -3288,8 +3310,8 @@ function execWriteFile(polpo: Orchestrator, args: Record<string, unknown>): stri
 
   writeFileSync(filePath, content, "utf-8");
   const lines = content.split("\n").length;
-  const relPath = relative(polpo.getWorkDir(), filePath);
-  return `Wrote ${lines} lines to ${relPath}`;
+  const relPath = relative(polpo.getAgentWorkDir(), filePath);
+    return `Wrote ${lines} lines to ${relPath}`;
 }
 
 function execEditFile(polpo: Orchestrator, args: Record<string, unknown>): string {
@@ -3303,7 +3325,7 @@ function execEditFile(polpo: Orchestrator, args: Record<string, unknown>): strin
   let content = readFileSync(filePath, "utf-8");
 
   if (!content.includes(oldString)) {
-    return `Error: oldString not found in ${relative(polpo.getWorkDir(), filePath)}`;
+    return `Error: oldString not found in ${relative(polpo.getAgentWorkDir(), filePath)}`;
   }
 
   if (!replaceAll) {
@@ -3311,7 +3333,7 @@ function execEditFile(polpo: Orchestrator, args: Record<string, unknown>): strin
     const firstIdx = content.indexOf(oldString);
     const secondIdx = content.indexOf(oldString, firstIdx + 1);
     if (secondIdx !== -1) {
-      return `Error: Found multiple matches for oldString in ${relative(polpo.getWorkDir(), filePath)}. Use replaceAll=true or provide more context to make the match unique.`;
+      return `Error: Found multiple matches for oldString in ${relative(polpo.getAgentWorkDir(), filePath)}. Use replaceAll=true or provide more context to make the match unique.`;
     }
     content = content.replace(oldString, newString);
   } else {
@@ -3319,7 +3341,7 @@ function execEditFile(polpo: Orchestrator, args: Record<string, unknown>): strin
   }
 
   writeFileSync(filePath, content, "utf-8");
-  return `Edited ${relative(polpo.getWorkDir(), filePath)}`;
+  return `Edited ${relative(polpo.getAgentWorkDir(), filePath)}`;
 }
 
 function execListDirectory(polpo: Orchestrator, args: Record<string, unknown>): string {
@@ -3329,7 +3351,7 @@ function execListDirectory(polpo: Orchestrator, args: Record<string, unknown>): 
   if (pathArg.includes("*") || pathArg.includes("?")) {
     // Use find/glob via shell — more reliable for glob patterns
     try {
-      const cwd = polpo.getWorkDir();
+      const cwd = polpo.getAgentWorkDir();
       const result = execSync(`find . -path '${pathArg}' -not -path '*/node_modules/*' -not -path '*/.git/*' 2>/dev/null | head -200`, {
         cwd,
         encoding: "utf-8",
@@ -3375,17 +3397,17 @@ function execGrepFiles(polpo: Orchestrator, args: Record<string, unknown>): stri
 
   try {
     const result = execSync(cmd, {
-      cwd: polpo.getWorkDir(),
+      cwd: polpo.getAgentWorkDir(),
       encoding: "utf-8",
       timeout: 15000,
     }).trim();
     if (!result) return "(no matches)";
 
     // Make paths relative
-    const workDir = polpo.getWorkDir();
+    const agentWorkDir = polpo.getAgentWorkDir();
     return result.split("\n").map(line => {
-      if (line.startsWith(workDir)) {
-        return line.slice(workDir.length + 1);
+      if (line.startsWith(agentWorkDir)) {
+        return line.slice(agentWorkDir.length + 1);
       }
       return line;
     }).join("\n");
@@ -3397,7 +3419,7 @@ function execGrepFiles(polpo: Orchestrator, args: Record<string, unknown>): stri
 function execRunCommand(polpo: Orchestrator, args: Record<string, unknown>): string {
   const command = args.command as string;
   const cwdArg = args.cwd as string | undefined;
-  const cwd = cwdArg ? resolveFilePath(polpo, cwdArg) : polpo.getWorkDir();
+  const cwd = cwdArg ? resolveFilePath(polpo, cwdArg) : polpo.getAgentWorkDir();
 
   // Block obviously dangerous commands
   const dangerous = ["rm -rf /", "rm -rf /*", "mkfs", "dd if=", ":(){", "chmod -R 777 /"];
@@ -3533,11 +3555,98 @@ async function execHttpDownload(polpo: Orchestrator, args: Record<string, unknow
     mkdirSync(dirname(filePath), { recursive: true });
     writeFileSync(filePath, buffer);
 
-    const relPath = relative(polpo.getWorkDir(), filePath);
+    const relPath = relative(polpo.getAgentWorkDir(), filePath);
     return `Downloaded ${buffer.byteLength} bytes to ${relPath}`;
   } catch (err: any) {
     const message = err.name === "AbortError" ? "Download timed out" : err.message;
     return `Error: Download ${url} — ${message}`;
+  }
+}
+
+// ═══════════════════════════════════════════════════════
+//  SEARCH EXECUTORS
+// ═══════════════════════════════════════════════════════
+
+async function execSearchWeb(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
+  const query = args.query as string;
+  if (!query) return "Error: 'query' is required.";
+
+  // Resolve API key — check environment first, then vault (search across all agents)
+  let apiKey = process.env.EXA_API_KEY;
+  if (!apiKey) {
+    const vaultStore = polpo.getVaultStore();
+    if (vaultStore) {
+      for (const agent of polpo.getAgents()) {
+        const entry = vaultStore.get(agent.name, "exa");
+        if (entry?.credentials?.key) { apiKey = entry.credentials.key; break; }
+      }
+    }
+  }
+  if (!apiKey) {
+    return "Error: EXA_API_KEY not found. Set EXA_API_KEY environment variable or add to any agent's vault (service: exa, type: api_key, credentials: {key: \"...\"}).";
+  }
+
+  const numResults = Math.min((args.numResults as number | undefined) ?? 5, 20);
+
+  const body: Record<string, unknown> = {
+    query,
+    numResults,
+    type: "auto",
+    contents: {
+      text: { maxCharacters: 2000 },
+      highlights: { numSentences: 3 },
+      summary: { query },
+    },
+  };
+
+  if (args.includeDomains) body.includeDomains = args.includeDomains;
+  if (args.category) body.category = args.category;
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15_000);
+
+    const response = await fetch("https://api.exa.ai/search", {
+      method: "POST",
+      headers: {
+        "x-api-key": apiKey,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeout);
+
+    if (!response.ok) {
+      const errText = await response.text().catch(() => "");
+      return `Error: Exa API returned ${response.status}: ${errText}`;
+    }
+
+    const data = await response.json() as { results: Array<{ title: string; url: string; publishedDate?: string; summary?: string; text?: string; highlights?: string[] }> };
+
+    if (!data.results?.length) return `No results found for: "${query}"`;
+
+    const lines = data.results.map((r, i) => {
+      const parts = [`${i + 1}. **${r.title}**`, `   ${r.url}`];
+      if (r.publishedDate) parts.push(`   Published: ${r.publishedDate}`);
+      if (r.summary) parts.push(`   Summary: ${r.summary}`);
+      else if (r.text) {
+        const text = r.text.length > 1500 ? r.text.slice(0, 1500) + "..." : r.text;
+        parts.push(`   Content: ${text}`);
+      }
+      if (r.highlights?.length) {
+        for (const h of r.highlights.slice(0, 3)) {
+          parts.push(`   - ${h}`);
+        }
+      }
+      return parts.join("\n");
+    });
+
+    return `Found ${data.results.length} result(s) for: "${query}"\n\n${lines.join("\n\n")}`;
+  } catch (err: any) {
+    const message = err.name === "AbortError" ? "Search timed out" : err.message;
+    return `Error: Web search failed — ${message}`;
   }
 }
 

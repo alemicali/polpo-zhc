@@ -102,6 +102,16 @@ export function buildSystemPrompt(agent: AgentConfig, cwd: string, polpoDir?: st
     if (skillBlock) parts.push("", skillBlock);
   }
 
+  // Working directory — tell the agent where it is so it uses correct relative paths
+  parts.push(
+    "",
+    "## Working Directory",
+    `Your working directory is: ${cwd}`,
+    "All file tools (read, write, edit, glob, grep, ls) and bash resolve paths relative to this directory.",
+    "Use relative paths from here — do NOT prepend the workspace directory name to your paths.",
+    "For example, if your cwd is /data/project/workspace, use `brand/file.html` NOT `workspace/brand/file.html`.",
+  );
+
   // Output directory for task deliverables
   if (outputDir) {
     parts.push(
@@ -194,7 +204,7 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
 
   // Create all tools scoped to working directory with path sandboxing
   // Core tools (always available): read, write, edit, bash, glob, grep, ls, http_fetch, http_download, register_outcome, vault_get, vault_list
-  // Extended tools are auto-loaded when their names appear in allowedTools (e.g. "browser_*", "email_*", "image_*", "video_*", "audio_*", "excel_*", "pdf_*", "docx_*")
+  // Extended tools are auto-loaded when their names appear in allowedTools (e.g. "browser_*", "email_*", "image_*", "video_*", "audio_*", "excel_*", "pdf_*", "docx_*", "search_*")
   // polpoDir must always be provided via SpawnContext.
   // Fallback to join(cwd, ".polpo") is WRONG when settings.workDir points to a
   // subdirectory — cwd would be e.g. /project/packages/app while .polpo/ lives
@@ -213,7 +223,8 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
     const lc = t.toLowerCase();
     return lc.startsWith("browser_") || lc.startsWith("email_")
       || lc.startsWith("image_") || lc.startsWith("video_") || lc.startsWith("audio_")
-      || lc.startsWith("excel_") || lc.startsWith("pdf_") || lc.startsWith("docx_");
+      || lc.startsWith("excel_") || lc.startsWith("pdf_") || lc.startsWith("docx_")
+      || lc.startsWith("search_");
   }) ?? false;
 
   // Derive output directory from context (per-task output dir for deliverables)

@@ -64,6 +64,7 @@ export function getToolMeta(name: string): ToolMeta {
   if (n.startsWith("audio_")) return { icon: Mic, color: "text-pink-400", bg: "bg-pink-500/10" };
   if (n.startsWith("image_")) return { icon: Image, color: "text-emerald-400", bg: "bg-emerald-500/10" };
   if (n.startsWith("video_")) return { icon: Video, color: "text-red-400", bg: "bg-red-500/10" };
+  if (n.startsWith("search_")) return { icon: Search, color: "text-cyan-400", bg: "bg-cyan-500/10" };
   if (n.startsWith("dep_") || n === "bulk_rename") return { icon: Package, color: "text-amber-400", bg: "bg-amber-500/10" };
   if (n === "register_outcome") return { icon: Target, color: "text-teal-400", bg: "bg-teal-500/10" };
   return { icon: Wrench, color: "text-muted-foreground", bg: "bg-muted/30" };
@@ -94,13 +95,13 @@ export function getSkillMeta(name: string): { icon: LucideIcon; color: string } 
 
 // ── Tool category definitions ──
 
-export const toolCategories: { prefix: string; label: string; tools: string }[] = [
-  { prefix: "browser_", label: "Browser", tools: "browser_navigate, browser_click, browser_fill, browser_snapshot, browser_screenshot, ..." },
-  { prefix: "email_", label: "Email", tools: "email_send, email_draft, email_verify, email_list, email_read, email_search" },
-  { prefix: "vault_", label: "Vault", tools: "vault_get, vault_list" },
-  { prefix: "image_", label: "Image", tools: "image_generate (fal.ai FLUX), image_analyze (OpenAI/Anthropic vision)" },
-  { prefix: "video_", label: "Video", tools: "video_generate (fal.ai Wan 2.2 text-to-video)" },
-  { prefix: "audio_", label: "Audio", tools: "audio_transcribe (STT), audio_speak (TTS)" },
+export const toolCategories: { prefix: string; label: string; tools: string; icon: LucideIcon; color: string }[] = [
+  { prefix: "browser_", label: "Browser", tools: "browser_navigate, browser_click, browser_fill, browser_snapshot, browser_screenshot, ...", icon: Globe, color: "text-indigo-400" },
+  { prefix: "email_", label: "Email", tools: "email_send, email_draft, email_verify, email_list, email_read, email_search", icon: Mail, color: "text-rose-400" },
+  { prefix: "image_", label: "Image", tools: "image_generate (fal.ai FLUX), image_analyze (OpenAI/Anthropic vision)", icon: Image, color: "text-emerald-400" },
+  { prefix: "video_", label: "Video", tools: "video_generate (fal.ai Wan 2.2 text-to-video)", icon: Video, color: "text-red-400" },
+  { prefix: "audio_", label: "Audio", tools: "audio_transcribe (STT), audio_speak (TTS)", icon: Mic, color: "text-pink-400" },
+  { prefix: "search_", label: "Web Search", tools: "search_web (Exa semantic search), search_find_similar", icon: Search, color: "text-cyan-400" },
 ];
 
 // ── Task status display config ──

@@ -275,7 +275,7 @@ export interface AgentConfig {
   // Core tools (always available): read, write, edit, bash, glob, grep, ls, http_fetch, http_download, register_outcome, vault_get, vault_list.
   // Extended tool categories are activated via allowedTools (e.g. ["browser_*", "email_*"]).
   // No enable flags needed — if a tool name appears in allowedTools, it's loaded.
-  // Available extension categories: browser_*, email_*, image_*, video_*, audio_*, excel_*, pdf_*, docx_*.
+  // Available extension categories: browser_*, email_*, image_*, video_*, audio_*, excel_*, pdf_*, docx_*, search_*.
   // Git, multifile, and dependency operations should be done via bash + skills instead of dedicated tools.
 
   /** Browser profile name for persistent context (cookies, auth, localStorage).

@@ -69,9 +69,9 @@ export function AgentToolsTab() {
 
         {/* Tool categories */}
         <div>
-          <SectionHeader title="Tool Extensions" icon={Layers} count={enabledCategories.length} />
+          <SectionHeader title="Opt-in Tool Extensions" icon={Layers} count={enabledCategories.length} />
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
-            {toolCategories.map(({ prefix, label, tools }) => {
+            {toolCategories.map(({ prefix, label, tools, icon: CategoryIcon, color: categoryColor }) => {
               const enabled = agentAllowedTools.some(t => t.toLowerCase().startsWith(prefix));
               return (
                 <Tooltip key={prefix}>
@@ -82,14 +82,15 @@ export function AgentToolsTab() {
                         ? "border-teal-500/30 bg-teal-500/5"
                         : "border-border/30 bg-card/30"
                     )}>
-                      {enabled ? (
-                        <CheckCircle2 className="h-3.5 w-3.5 text-teal-500 shrink-0" />
-                      ) : (
-                        <XCircle className="h-3.5 w-3.5 text-zinc-600 shrink-0" />
-                      )}
+                      <CategoryIcon className={cn("h-3.5 w-3.5 shrink-0", enabled ? categoryColor : "text-zinc-600")} />
                       <span className={cn("text-xs font-medium", enabled ? "text-foreground" : "text-muted-foreground/60")}>
                         {label}
                       </span>
+                      {enabled ? (
+                        <CheckCircle2 className="h-3 w-3 text-teal-500 shrink-0 ml-auto" />
+                      ) : (
+                        <XCircle className="h-3 w-3 text-zinc-600 shrink-0 ml-auto" />
+                      )}
                     </div>
                   </TooltipTrigger>
                   <TooltipContent className="text-xs max-w-72">

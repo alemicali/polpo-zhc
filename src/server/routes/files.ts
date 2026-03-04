@@ -158,7 +158,8 @@ export function fileRoutes(): OpenAPIHono<ServerEnv> {
 
   function getAllowedRoots(c: { get: (key: "orchestrator") => { getPolpoDir(): string; getWorkDir(): string; getAgentWorkDir(): string } }): string[] {
     const orchestrator = c.get("orchestrator");
-    const roots = [orchestrator.getPolpoDir(), orchestrator.getWorkDir()];
+    // workDir must come before polpoDir so that "." resolves to the project root, not .polpo
+    const roots = [orchestrator.getWorkDir(), orchestrator.getPolpoDir()];
     const agentDir = orchestrator.getAgentWorkDir();
     if (!roots.includes(agentDir)) roots.push(agentDir);
     return roots;
@@ -201,32 +202,20 @@ export function fileRoutes(): OpenAPIHono<ServerEnv> {
 
     const roots: any[] = [];
 
-    // If agents have a custom workspace, show it first (most relevant)
-    if (hasCustomWorkspace) {
-      const wsStats = dirStats(agentWorkDir);
-      roots.push({
-        id: "workspace",
-        name: basename(agentWorkDir),
-        path: agentWorkRel,
-        absolutePath: agentWorkDir,
-        description: "Agent workspace",
-        icon: "folder-open",
-        totalFiles: wsStats.files,
-        totalSize: wsStats.bytes,
-      });
-    }
-
-    // Project root
-    const workDirStats = dirStats(workDir);
+    // Workspace — where agents operate.
+    // When settings.workDir is a subdirectory, show it with its relative path.
+    // When settings.workDir is "." (workspace = project root), show the root as workspace.
+    const wsDir = hasCustomWorkspace ? agentWorkDir : workDir;
+    const wsStats = dirStats(wsDir);
     roots.push({
-      id: "workdir",
-      name: basename(workDir),
-      path: ".",
-      absolutePath: workDir,
-      description: "Project root",
-      icon: "folder-root",
-      totalFiles: workDirStats.files,
-      totalSize: workDirStats.bytes,
+      id: "workspace",
+      name: hasCustomWorkspace ? basename(agentWorkDir) : basename(workDir),
+      path: hasCustomWorkspace ? agentWorkRel : ".",
+      absolutePath: wsDir,
+      description: "Agent workspace",
+      icon: "folder-open",
+      totalFiles: wsStats.files,
+      totalSize: wsStats.bytes,
     });
 
     // .polpo config dir
