@@ -373,6 +373,24 @@ export interface MissionCheckpoint {
   notifyChannels?: string[];
 }
 
+/** Delay defined within a mission — timed wait between task groups.
+ * Unlike checkpoints (which pause until a human resumes), delays automatically
+ * resume after a specified duration elapses. */
+export interface MissionDelay {
+  /** Delay name (unique within the mission). */
+  name: string;
+  /** Task titles that must all complete before the delay timer starts. */
+  afterTasks: string[];
+  /** Task titles that are blocked until the delay timer expires. */
+  blocksTasks: string[];
+  /** ISO 8601 duration (e.g. "PT2H" = 2 hours, "PT30M" = 30 minutes, "P1D" = 1 day). */
+  duration: string;
+  /** Optional message shown when the delay starts. */
+  message?: string;
+  /** Notification channels to alert when the delay starts / expires. */
+  notifyChannels?: string[];
+}
+
 /** Quality gate defined within a mission — automatic score-based blocking between task phases. */
 export interface MissionQualityGate {
   /** Gate name (unique within the mission). */
@@ -778,6 +796,24 @@ export interface UpdateMissionCheckpointRequest {
   name?: string;
   afterTasks?: string[];
   blocksTasks?: string[];
+  message?: string;
+  notifyChannels?: string[];
+}
+
+export interface AddMissionDelayRequest {
+  name: string;
+  afterTasks: string[];
+  blocksTasks: string[];
+  duration: string;
+  message?: string;
+  notifyChannels?: string[];
+}
+
+export interface UpdateMissionDelayRequest {
+  name?: string;
+  afterTasks?: string[];
+  blocksTasks?: string[];
+  duration?: string;
   message?: string;
   notifyChannels?: string[];
 }

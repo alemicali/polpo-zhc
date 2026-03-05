@@ -1,11 +1,12 @@
 import type { OrchestratorContext } from "./orchestrator-context.js";
 import type { TaskManager } from "./task-manager.js";
 import type { AgentManager } from "./agent-manager.js";
-import type { Mission, MissionStatus, MissionReport, Task, TaskExpectation, ExpectedOutcome, MissionQualityGate, MissionCheckpoint, ScopedNotificationRules } from "./types.js";
+import type { Mission, MissionStatus, MissionReport, Task, TaskExpectation, ExpectedOutcome, MissionQualityGate, MissionCheckpoint, MissionDelay, ScopedNotificationRules } from "./types.js";
 import type { QualityController } from "../quality/quality-controller.js";
 import { sanitizeExpectations, parseMissionDocument, type MissionDocumentParsed } from "./schemas.js";
 import { validateProviderKeys } from "../llm/pi-client.js";
 import { FileCheckpointStore, type CheckpointState } from "../stores/file-checkpoint-store.js";
+import { FileDelayStore, type DelayState } from "../stores/file-delay-store.js";
 
 /**
  * Mission CRUD + execution + resume + group lifecycle.
@@ -24,6 +25,12 @@ export class MissionExecutor {
   private notificationRouter?: import("../notifications/index.js").NotificationRouter;
   /** Track which checkpoint notification rules have been registered (by cpKey) */
   private registeredCheckpointRules = new Set<string>();
+  /** Persistent delay store — survives server restarts */
+  private delayStore: FileDelayStore;
+  /** In-memory mirror of persisted delay state (synced on every mutation) */
+  private delayState: DelayState;
+  /** Track which delay notification rules have been registered (by delayKey) */
+  private registeredDelayRules = new Set<string>();
   /** Track the pre-execution status for scheduled/recurring missions (by group name).
    *  When a mission completes/fails, this determines whether to return to scheduled/recurring. */
   private scheduledOrigin = new Map<string, "scheduled" | "recurring">();
@@ -35,6 +42,8 @@ export class MissionExecutor {
   ) {
     this.cpStore = new FileCheckpointStore(ctx.polpoDir);
     this.cpState = this.cpStore.load();
+    this.delayStore = new FileDelayStore(ctx.polpoDir);
+    this.delayState = this.delayStore.load();
 
     // Rebuild cleanedGroups from persisted task state — groups where ALL tasks
     // are already terminal don't need to be re-processed after a server restart.
@@ -213,6 +222,148 @@ export class MissionExecutor {
     });
   }
 
+  // ─── Delay runtime ──────────────────────────────────
+
+  /** Get delays for a mission group. Returns empty array if none defined. */
+  getDelays(group: string): MissionDelay[] {
+    return this.delayState.definitions[group] ?? [];
+  }
+
+  /**
+   * Check if a task is blocked by an active (unexpired) delay.
+   * If afterTasks are all done and the delay hasn't started yet, starts the timer.
+   * If the timer has expired, marks the delay as expired and unblocks.
+   * Returns the blocking delay if found, undefined if the task can proceed.
+   */
+  getBlockingDelay(
+    group: string,
+    taskTitle: string,
+    taskId: string,
+    tasks: Task[],
+  ): { delay: MissionDelay; startedAt: string; expiresAt: string } | undefined {
+    const delays = this.delayState.definitions[group];
+    if (!delays) return undefined;
+
+    for (const dl of delays) {
+      // Task must be in blocksTasks
+      if (!dl.blocksTasks.includes(taskTitle) && !dl.blocksTasks.includes(taskId)) {
+        continue;
+      }
+
+      const dlKey = `${group}:${dl.name}`;
+
+      // Already expired — don't block
+      if (this.delayState.expired.includes(dlKey)) continue;
+
+      // Check if all afterTasks are done
+      const afterTasks = tasks.filter(
+        t => dl.afterTasks.includes(t.title) || dl.afterTasks.includes(t.id),
+      );
+      const allDone = afterTasks.length >= dl.afterTasks.length &&
+        afterTasks.every(t => t.status === "done" || t.status === "failed");
+
+      if (!allDone) {
+        // afterTasks not finished yet — delay not triggered, don't block (deps will block naturally)
+        continue;
+      }
+
+      // Delay triggered — activate timer if not already active
+      if (!this.delayState.active[dlKey]) {
+        const startedAt = new Date().toISOString();
+        const durationMs = parseISO8601Duration(dl.duration);
+        const expiresAt = new Date(Date.now() + durationMs).toISOString();
+        this.delayState.active[dlKey] = { delay: dl, startedAt, expiresAt };
+        this.delayStore.save(this.delayState);
+
+        // Register notification rules for this delay's channels
+        this.ensureDelayNotificationRules(dlKey, dl);
+
+        // Emit event
+        const mission = this.resolveMissionForGroupByName(group);
+        this.ctx.emitter.emit("delay:started", {
+          missionId: mission?.id,
+          group,
+          delayName: dl.name,
+          duration: dl.duration,
+          message: dl.message,
+          afterTasks: dl.afterTasks,
+          blocksTasks: dl.blocksTasks,
+          startedAt,
+          expiresAt,
+        });
+      }
+
+      // Check if the timer has expired
+      const active = this.delayState.active[dlKey];
+      if (new Date(active.expiresAt).getTime() <= Date.now()) {
+        // Timer expired — mark as expired and unblock
+        this.delayState.expired.push(dlKey);
+        delete this.delayState.active[dlKey];
+        this.delayStore.save(this.delayState);
+
+        const mission = this.resolveMissionForGroupByName(group);
+        this.ctx.emitter.emit("delay:expired", {
+          missionId: mission?.id,
+          group,
+          delayName: dl.name,
+        });
+
+        continue; // Unblocked — check next delay
+      }
+
+      // Still waiting — return the blocking delay
+      return active;
+    }
+
+    return undefined;
+  }
+
+  /** Get all active (unexpired) delays across all mission groups. */
+  getActiveDelays(): Array<{ group: string; delayName: string; delay: MissionDelay; startedAt: string; expiresAt: string }> {
+    const result: Array<{ group: string; delayName: string; delay: MissionDelay; startedAt: string; expiresAt: string }> = [];
+    for (const [dlKey, data] of Object.entries(this.delayState.active)) {
+      const [group, ...nameParts] = dlKey.split(":");
+      const delayName = nameParts.join(":");
+      result.push({ group, delayName, delay: data.delay, startedAt: data.startedAt, expiresAt: data.expiresAt });
+    }
+    return result;
+  }
+
+  /** Register dynamic notification rules for a delay's notifyChannels (once per delay). */
+  private ensureDelayNotificationRules(dlKey: string, dl: MissionDelay): void {
+    if (!this.notificationRouter) return;
+    if (!dl.notifyChannels || dl.notifyChannels.length === 0) return;
+    if (this.registeredDelayRules.has(dlKey)) return;
+
+    this.registeredDelayRules.add(dlKey);
+
+    // Rule for delay started
+    this.notificationRouter.addRule({
+      id: `delay-started-${dlKey}`,
+      name: `Delay "${dl.name}" Started (auto-registered)`,
+      events: ["delay:started"],
+      condition: { field: "delayName", op: "==", value: dl.name },
+      channels: dl.notifyChannels,
+      severity: "info",
+    });
+
+    // Rule for delay expired
+    this.notificationRouter.addRule({
+      id: `delay-expired-${dlKey}`,
+      name: `Delay "${dl.name}" Expired (auto-registered)`,
+      events: ["delay:expired"],
+      condition: { field: "delayName", op: "==", value: dl.name },
+      channels: dl.notifyChannels,
+      severity: "info",
+    });
+  }
+
+  /** Resolve a mission by group name (helper for delay/checkpoint events). */
+  private resolveMissionForGroupByName(group: string): Mission | undefined {
+    const groupTasks = this.ctx.registry.getAllTasks().filter(t => t.group === group);
+    return this.resolveMissionForGroup(groupTasks, group);
+  }
+
   saveMission(opts: { data: string; prompt?: string; name?: string; status?: MissionStatus; notifications?: ScopedNotificationRules }): Mission {
     if (!this.ctx.registry.saveMission) throw new Error("Store does not support missions");
     const name = opts.name ?? this.ctx.registry.nextMissionName?.() ?? `mission-${Date.now()}`;
@@ -272,6 +423,14 @@ export class MissionExecutor {
     for (const key of Object.keys(this.cpState.definitions)) {
       if (key.startsWith(missionGroup + " #")) {
         this.cpState = this.cpStore.removeGroup(this.cpState, key);
+      }
+    }
+
+    // 4b. Clean up persisted delays
+    this.delayState = this.delayStore.removeGroup(this.delayState, missionGroup);
+    for (const key of Object.keys(this.delayState.definitions)) {
+      if (key.startsWith(missionGroup + " #")) {
+        this.delayState = this.delayStore.removeGroup(this.delayState, key);
       }
     }
 
@@ -467,6 +626,10 @@ export class MissionExecutor {
       this.cpState.definitions[group] = doc.checkpoints as MissionCheckpoint[];
       this.cpStore.save(this.cpState);
     }
+    if (doc.delays && doc.delays.length > 0) {
+      this.delayState.definitions[group] = doc.delays as MissionDelay[];
+      this.delayStore.save(this.delayState);
+    }
 
     // Track scheduled origin so we know where to return after completion
     if (scheduledStatus) {
@@ -565,11 +728,13 @@ export class MissionExecutor {
         // Aggregate mission metrics
         this.qualityCtrl?.aggregateMissionMetrics(mission.id, groupTasks);
 
-        // Clean up gate, checkpoint, and scheduled-origin caches
+        // Clean up gate, checkpoint, delay, and scheduled-origin caches
         this.gatesByGroup.delete(group);
         this.scheduledOrigin.delete(group);
         // Clean up persisted checkpoint entries for this group
         this.cpState = this.cpStore.removeGroup(this.cpState, group);
+        // Clean up persisted delay entries for this group
+        this.delayState = this.delayStore.removeGroup(this.delayState, group);
       }
     }
   }
@@ -677,6 +842,13 @@ export class MissionExecutor {
       }
       doc.checkpoints = doc.checkpoints.filter(cp => cp.afterTasks.length > 0 && cp.blocksTasks.length > 0);
     }
+    if (doc.delays) {
+      for (const dl of doc.delays) {
+        dl.afterTasks = dl.afterTasks.filter(t => t !== taskTitle);
+        dl.blocksTasks = dl.blocksTasks.filter(t => t !== taskTitle);
+      }
+      doc.delays = doc.delays.filter(dl => dl.afterTasks.length > 0 && dl.blocksTasks.length > 0);
+    }
     // Ensure at least 1 task remains (Zod will catch this, but give a nicer error)
     if (doc.tasks.length === 0) throw new Error("Cannot remove the last task from a mission");
     return this.persistMissionData(missionId, doc);
@@ -743,6 +915,60 @@ export class MissionExecutor {
     if (idx === -1) throw new Error(`Checkpoint "${checkpointName}" not found in mission`);
     doc.checkpoints.splice(idx, 1);
     if (doc.checkpoints.length === 0) delete (doc as any).checkpoints;
+    return this.persistMissionData(missionId, doc);
+  }
+
+  // ─── Delay operations ───────────────────────────────
+
+  /** Add a delay to a mission's data. */
+  addMissionDelay(missionId: string, delay: {
+    name: string;
+    afterTasks: string[];
+    blocksTasks: string[];
+    duration: string;
+    notifyChannels?: string[];
+    message?: string;
+  }): Mission {
+    // Validate duration format
+    parseISO8601Duration(delay.duration);
+    const { doc } = this.parseMissionData(missionId);
+    if (!doc.delays) doc.delays = [];
+    if (doc.delays.some(d => d.name === delay.name)) {
+      throw new Error(`Delay "${delay.name}" already exists in this mission`);
+    }
+    doc.delays.push(delay);
+    return this.persistMissionData(missionId, doc);
+  }
+
+  /** Update a delay in the mission data (matched by name). */
+  updateMissionDelay(missionId: string, delayName: string, updates: {
+    name?: string;
+    afterTasks?: string[];
+    blocksTasks?: string[];
+    duration?: string;
+    notifyChannels?: string[];
+    message?: string;
+  }): Mission {
+    if (updates.duration) parseISO8601Duration(updates.duration);
+    const { doc } = this.parseMissionData(missionId);
+    if (!doc.delays) throw new Error(`Delay "${delayName}" not found in mission`);
+    const idx = doc.delays.findIndex(d => d.name === delayName);
+    if (idx === -1) throw new Error(`Delay "${delayName}" not found in mission`);
+    if (updates.name && updates.name !== delayName && doc.delays.some(d => d.name === updates.name)) {
+      throw new Error(`Delay "${updates.name}" already exists in this mission`);
+    }
+    doc.delays[idx] = { ...doc.delays[idx], ...updates };
+    return this.persistMissionData(missionId, doc);
+  }
+
+  /** Remove a delay from the mission data (by name). */
+  removeMissionDelay(missionId: string, delayName: string): Mission {
+    const { doc } = this.parseMissionData(missionId);
+    if (!doc.delays) throw new Error(`Delay "${delayName}" not found in mission`);
+    const idx = doc.delays.findIndex(d => d.name === delayName);
+    if (idx === -1) throw new Error(`Delay "${delayName}" not found in mission`);
+    doc.delays.splice(idx, 1);
+    if (doc.delays.length === 0) delete (doc as any).delays;
     return this.persistMissionData(missionId, doc);
   }
 
@@ -916,4 +1142,25 @@ export class MissionExecutor {
       avgScore,
     };
   }
+}
+
+// ── ISO 8601 Duration Parser ──────────────────────────────────────────
+// Supports: P[nY][nM][nW][nD][T[nH][nM][nS]]
+// Examples: PT2H (2 hours), PT30M (30 min), P1D (1 day), P1DT6H (1 day 6 hours)
+
+const ISO_DURATION_RE = /^P(?:(\d+)Y)?(?:(\d+)M)?(?:(\d+)W)?(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+(?:\.\d+)?)S)?)?$/;
+
+function parseISO8601Duration(duration: string): number {
+  const m = ISO_DURATION_RE.exec(duration);
+  if (!m) throw new Error(`Invalid ISO 8601 duration: "${duration}"`);
+  const years   = parseInt(m[1] || "0", 10);
+  const months  = parseInt(m[2] || "0", 10);
+  const weeks   = parseInt(m[3] || "0", 10);
+  const days    = parseInt(m[4] || "0", 10);
+  const hours   = parseInt(m[5] || "0", 10);
+  const minutes = parseInt(m[6] || "0", 10);
+  const seconds = parseFloat(m[7] || "0");
+  // Approximate: 1 year ≈ 365.25 days, 1 month ≈ 30.44 days
+  const totalDays = years * 365.25 + months * 30.44 + weeks * 7 + days;
+  return ((totalDays * 24 + hours) * 60 + minutes) * 60000 + seconds * 1000;
 }

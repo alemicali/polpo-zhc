@@ -142,6 +142,24 @@ export const UpdateMissionCheckpointSchema = z.object({
   notifyChannels: z.array(z.string().min(1)).optional(),
 });
 
+export const AddMissionDelaySchema = z.object({
+  name: z.string().min(1),
+  afterTasks: z.array(z.string().min(1)).min(1),
+  blocksTasks: z.array(z.string().min(1)).min(1),
+  duration: z.string().min(1),
+  message: z.string().optional(),
+  notifyChannels: z.array(z.string().min(1)).optional(),
+});
+
+export const UpdateMissionDelaySchema = z.object({
+  name: z.string().min(1).optional(),
+  afterTasks: z.array(z.string().min(1)).min(1).optional(),
+  blocksTasks: z.array(z.string().min(1)).min(1).optional(),
+  duration: z.string().min(1).optional(),
+  message: z.string().optional(),
+  notifyChannels: z.array(z.string().min(1)).optional(),
+});
+
 export const AddMissionQualityGateSchema = z.object({
   name: z.string().min(1),
   afterTasks: z.array(z.string().min(1)).min(1),

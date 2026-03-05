@@ -22,6 +22,7 @@ import {
   discoverSkills, installSkills, removeSkill, createAgentSkill,
   getSkillByName, updateSkillIndex,
 } from "./skills.js";
+import { parseMissionDocument } from "../core/schemas.js";
 import {
   discoverTemplates, loadTemplate, validateParams, instantiateTemplate,
   saveTemplate, deleteTemplate, validateTemplateDefinition,
@@ -111,6 +112,12 @@ const listApprovalsTool: Tool = {
 const listCheckpointsTool: Tool = {
   name: "list_checkpoints",
   description: "List all active (unresumed) checkpoints across missions.",
+  parameters: Type.Object({}),
+};
+
+const listDelaysTool: Tool = {
+  name: "list_delays",
+  description: "List all active (unexpired) delays across missions.",
   parameters: Type.Object({}),
 };
 
@@ -216,12 +223,67 @@ const forceFailTaskTool: Tool = {
 //  MISSION TOOLS (6)
 // ═══════════════════════════════════════════════════════
 
+// ── Structured schema for mission document (used by create_mission tool) ──
+
+const MissionTaskSchema = Type.Object({
+  title: Type.String({ description: "Unique task title — used as reference in dependsOn/afterTasks/blocksTasks" }),
+  description: Type.String({ description: "Detailed instructions for the agent" }),
+  assignTo: Type.Optional(Type.String({ description: "Agent name. If omitted, uses first available agent" })),
+  dependsOn: Type.Optional(Type.Array(Type.String(), { description: "Task titles that must complete first. CRITICAL: if a checkpoint/delay/qualityGate has this task in blocksTasks, this task MUST have dependsOn listing at least the afterTasks of that flow-control element" })),
+  expectations: Type.Optional(Type.Array(Type.Any(), { description: "Verification expectations (test, file_exists, script, llm_review)" })),
+  expectedOutcomes: Type.Optional(Type.Array(Type.Any(), { description: "Expected outcome descriptors" })),
+  metrics: Type.Optional(Type.Array(Type.Any(), { description: "Custom metrics" })),
+  maxRetries: Type.Optional(Type.Number({ description: "Max retry count" })),
+  maxDuration: Type.Optional(Type.Number({ description: "Max duration in seconds" })),
+});
+
+const MissionCheckpointSchema = Type.Object({
+  name: Type.String({ description: "Unique checkpoint identifier" }),
+  afterTasks: Type.Array(Type.String(), { description: "Task titles that trigger the checkpoint when all complete" }),
+  blocksTasks: Type.Array(Type.String(), { description: "Task titles blocked until checkpoint is resumed. These tasks MUST have dependsOn including the afterTasks" }),
+  message: Type.Optional(Type.String({ description: "Human-readable description shown when checkpoint activates" })),
+});
+
+const MissionDelaySchema = Type.Object({
+  name: Type.String({ description: "Unique delay identifier" }),
+  afterTasks: Type.Array(Type.String(), { description: "Task titles that start the delay timer when all complete" }),
+  blocksTasks: Type.Array(Type.String(), { description: "Task titles blocked until the delay timer expires. These tasks MUST have dependsOn including the afterTasks" }),
+  duration: Type.String({ description: "ISO 8601 duration (e.g. PT30S, PT5M, PT2H, P1D)" }),
+  message: Type.Optional(Type.String({ description: "Human-readable description shown when delay starts" })),
+});
+
+const MissionQualityGateSchema = Type.Object({
+  name: Type.String({ description: "Unique gate identifier" }),
+  afterTasks: Type.Array(Type.String(), { description: "Task titles whose scores are evaluated" }),
+  blocksTasks: Type.Array(Type.String(), { description: "Task titles blocked until gate passes. These tasks MUST have dependsOn including the afterTasks" }),
+  minScore: Type.Optional(Type.Number({ description: "Minimum average score (1-5) required to pass" })),
+  requireAllPassed: Type.Optional(Type.Boolean({ description: "If true, all afterTasks must be done (not failed)" })),
+  condition: Type.Optional(Type.String({ description: "Custom condition expression" })),
+});
+
+const MissionTeamMemberSchema = Type.Object({
+  name: Type.String({ description: "Agent name" }),
+  role: Type.Optional(Type.String({ description: "Agent role description" })),
+  model: Type.Optional(Type.String({ description: "LLM model override" })),
+  systemPrompt: Type.Optional(Type.String({ description: "Custom system prompt" })),
+  allowedTools: Type.Optional(Type.Array(Type.String(), { description: "Allowed tool names" })),
+});
+
+const MissionDataSchema = Type.Object({
+  tasks: Type.Array(MissionTaskSchema, { description: "Task list (at least one required)" }),
+  checkpoints: Type.Optional(Type.Array(MissionCheckpointSchema, { description: "Human-in-the-loop pause points" })),
+  delays: Type.Optional(Type.Array(MissionDelaySchema, { description: "Timed pause points (auto-expire after duration)" })),
+  qualityGates: Type.Optional(Type.Array(MissionQualityGateSchema, { description: "Score/pass gates between tasks" })),
+  team: Type.Optional(Type.Array(MissionTeamMemberSchema, { description: "Volatile agents created for this mission" })),
+  notifications: Type.Optional(Type.Any({ description: "Mission-scoped notification rules" })),
+});
+
 const createMissionTool: Tool = {
   name: "create_mission",
-  description: "Create a new mission. Provide the mission content as a JSON string with tasks, dependencies, expectations, and optionally quality gates.",
+  description: "Create a new mission with structured data. Tasks blocked by checkpoints/delays/qualityGates MUST have dependsOn listing the afterTasks of those flow-control elements — otherwise tasks will run in parallel ignoring the flow control.",
   parameters: Type.Object({
     name: Type.String({ description: "Mission name" }),
-    data: Type.String({ description: "JSON mission content (tasks array, qualityGates, etc.)" }),
+    data: MissionDataSchema,
     prompt: Type.Optional(Type.String({ description: "Original user request that generated this mission" })),
   }),
 };
@@ -355,6 +417,43 @@ const removeMissionCheckpointTool: Tool = {
   parameters: Type.Object({
     missionId: Type.String({ description: "Mission ID" }),
     checkpointName: Type.String({ description: "Checkpoint name to remove" }),
+  }),
+};
+
+// Delays
+const addMissionDelayTool: Tool = {
+  name: "add_mission_delay",
+  description: "Add a timed delay to a draft mission. Delays automatically unblock after the specified duration elapses (unlike checkpoints which require manual resume).",
+  parameters: Type.Object({
+    missionId: Type.String({ description: "Mission ID" }),
+    name: Type.String({ description: "Unique delay name" }),
+    afterTasks: Type.Array(Type.String(), { description: "Task titles that trigger this delay timer when all complete" }),
+    blocksTasks: Type.Array(Type.String(), { description: "Task titles blocked until delay expires" }),
+    duration: Type.String({ description: "ISO 8601 duration (e.g. 'PT2H' = 2 hours, 'PT30M' = 30 min, 'P1D' = 1 day)" }),
+    message: Type.Optional(Type.String({ description: "Message shown when delay starts" })),
+  }),
+};
+
+const updateMissionDelayTool: Tool = {
+  name: "update_mission_delay",
+  description: "Update an existing delay in a draft mission.",
+  parameters: Type.Object({
+    missionId: Type.String({ description: "Mission ID" }),
+    delayName: Type.String({ description: "Current delay name" }),
+    name: Type.Optional(Type.String({ description: "New name" })),
+    afterTasks: Type.Optional(Type.Array(Type.String(), { description: "New afterTasks" })),
+    blocksTasks: Type.Optional(Type.Array(Type.String(), { description: "New blocksTasks" })),
+    duration: Type.Optional(Type.String({ description: "New duration (ISO 8601)" })),
+    message: Type.Optional(Type.String({ description: "New message" })),
+  }),
+};
+
+const removeMissionDelayTool: Tool = {
+  name: "remove_mission_delay",
+  description: "Remove a delay from a draft mission.",
+  parameters: Type.Object({
+    missionId: Type.String({ description: "Mission ID" }),
+    delayName: Type.String({ description: "Delay name to remove" }),
   }),
 };
 
@@ -1234,7 +1333,7 @@ After receiving answers, continue with the task using the clarified information.
 export const READ_TOOLS = new Set([
   "get_status", "list_tasks", "get_task", "list_missions", "get_mission",
   "list_agents", "get_team", "get_memory", "get_config",
-  "list_approvals", "list_checkpoints", "get_logs",
+  "list_approvals", "list_checkpoints", "list_delays", "get_logs",
   // Read-only listing tools
   "list_schedules", "list_notification_rules", "list_watchers",
   // Skills (read-only)
@@ -1300,7 +1399,7 @@ export const ALL_ORCHESTRATOR_TOOLS: Tool[] = [
   // Read (15)
   getStatusTool, listTasksTool, getTaskTool, listMissionsTool, getMissionTool,
   listAgentsTool, getTeamsTool, getMemoryTool, getConfigTool,
-  listApprovalsTool, listCheckpointsTool, getLogsTool,
+  listApprovalsTool, listCheckpointsTool, listDelaysTool, getLogsTool,
   listSchedulesTool, listNotificationRulesTool, listWatchersTool,
   // Task (8)
   createTaskTool, updateTaskTool, deleteTaskTool, deleteTasksTool,
@@ -1309,6 +1408,7 @@ export const ALL_ORCHESTRATOR_TOOLS: Tool[] = [
   createMissionTool, updateMissionTool, executeMissionTool, resumeMissionTool, abortMissionTool, deleteMissionTool,
   addMissionTaskTool, updateMissionTaskTool, removeMissionTaskTool, reorderMissionTasksTool,
   addMissionCheckpointTool, updateMissionCheckpointTool, removeMissionCheckpointTool,
+  addMissionDelayTool, updateMissionDelayTool, removeMissionDelayTool,
   addMissionQualityGateTool, updateMissionQualityGateTool, removeMissionQualityGateTool,
   addMissionTeamMemberTool, updateMissionTeamMemberTool, removeMissionTeamMemberTool,
   updateMissionNotificationsTool,
@@ -1502,6 +1602,7 @@ export async function executeOrchestratorTool(
       case "get_config":       return execGetConfig(polpo);
       case "list_approvals":   return execListApprovals(polpo, args);
       case "list_checkpoints": return execListCheckpoints(polpo);
+      case "list_delays":      return execListDelays(polpo);
       case "get_logs":         return execGetLogs(polpo, args);
 
       // ── Task ──
@@ -1530,6 +1631,9 @@ export async function executeOrchestratorTool(
       case "add_mission_checkpoint":       return execAddMissionCheckpoint(polpo, args);
       case "update_mission_checkpoint":    return execUpdateMissionCheckpoint(polpo, args);
       case "remove_mission_checkpoint":    return execRemoveMissionCheckpoint(polpo, args);
+      case "add_mission_delay":            return execAddMissionDelay(polpo, args);
+      case "update_mission_delay":         return execUpdateMissionDelay(polpo, args);
+      case "remove_mission_delay":         return execRemoveMissionDelay(polpo, args);
       case "add_mission_quality_gate":     return execAddMissionQualityGate(polpo, args);
       case "update_mission_quality_gate":  return execUpdateMissionQualityGate(polpo, args);
       case "remove_mission_quality_gate":  return execRemoveMissionQualityGate(polpo, args);
@@ -1801,6 +1905,18 @@ export function formatToolDetails(
       main.push(["Checkpoint", String(args.checkpointName)]);
       if (args.name) extra.push(["New name", String(args.name)]);
       break;
+    case "add_mission_delay":
+    case "remove_mission_delay":
+      main.push(["Mission", resolveMission(args.missionId)]);
+      main.push(["Delay", String(args.name ?? args.delayName)]);
+      if (args.duration) extra.push(["Duration", String(args.duration)]);
+      break;
+    case "update_mission_delay":
+      main.push(["Mission", resolveMission(args.missionId)]);
+      main.push(["Delay", String(args.delayName)]);
+      if (args.name) extra.push(["New name", String(args.name)]);
+      if (args.duration) extra.push(["Duration", String(args.duration)]);
+      break;
     case "add_mission_quality_gate":
     case "remove_mission_quality_gate":
       main.push(["Mission", resolveMission(args.missionId)]);
@@ -2036,6 +2152,15 @@ function execListCheckpoints(polpo: Orchestrator): string {
   return `${checkpoints.length} checkpoint(s):\n${lines.join("\n")}`;
 }
 
+function execListDelays(polpo: Orchestrator): string {
+  const delays = polpo.getActiveDelays();
+  if (!delays || delays.length === 0) return "No active delays.";
+  const lines = delays.map((d: { group: string; delayName: string; startedAt: string; expiresAt: string; delay: { duration: string } }) =>
+    `• ${d.delayName} (group: ${d.group}, duration: ${d.delay.duration}, started: ${d.startedAt}, expires: ${d.expiresAt})`
+  );
+  return `${delays.length} delay(s):\n${lines.join("\n")}`;
+}
+
 function execGetLogs(polpo: Orchestrator, args: Record<string, unknown>): string {
   const logStore = polpo.getLogStore?.();
   if (!logStore) return "Log store not available.";
@@ -2150,8 +2275,20 @@ function execForceFailTask(polpo: Orchestrator, args: Record<string, unknown>): 
 // ═══════════════════════════════════════════════════════
 
 function execCreateMission(polpo: Orchestrator, args: Record<string, unknown>): string {
+  // data arrives as a structured object from the tool call — serialize to JSON for the store
+  const dataObj = args.data;
+  const dataStr = typeof dataObj === "string" ? dataObj : JSON.stringify(dataObj);
+
+  // Validate with Zod schema as safety net
+  try {
+    const parsed = typeof dataObj === "string" ? JSON.parse(dataObj) : dataObj;
+    parseMissionDocument(parsed);
+  } catch (e: any) {
+    return `Error: ${e.message}`;
+  }
+
   const mission = polpo.saveMission({
-    data: args.data as string,
+    data: dataStr,
     name: args.name as string,
     prompt: args.prompt as string | undefined,
     status: "draft",
@@ -2275,6 +2412,34 @@ function execRemoveMissionCheckpoint(polpo: Orchestrator, args: Record<string, u
   try {
     const m = polpo.removeMissionCheckpoint(args.missionId as string, args.checkpointName as string);
     return `Checkpoint "${args.checkpointName}" removed from mission "${m.name}".`;
+  } catch (e) { return `Error: ${(e as Error).message}`; }
+}
+
+function execAddMissionDelay(polpo: Orchestrator, args: Record<string, unknown>): string {
+  try {
+    const m = polpo.addMissionDelay(args.missionId as string, {
+      name: args.name as string,
+      afterTasks: args.afterTasks as string[],
+      blocksTasks: args.blocksTasks as string[],
+      duration: args.duration as string,
+      message: args.message as string | undefined,
+    });
+    return `Delay "${args.name}" (${args.duration}) added to mission "${m.name}".`;
+  } catch (e) { return `Error: ${(e as Error).message}`; }
+}
+
+function execUpdateMissionDelay(polpo: Orchestrator, args: Record<string, unknown>): string {
+  try {
+    const { missionId, delayName, ...updates } = args;
+    const m = polpo.updateMissionDelay(missionId as string, delayName as string, updates as { name?: string; afterTasks?: string[]; blocksTasks?: string[]; duration?: string; message?: string });
+    return `Delay "${delayName}" updated in mission "${m.name}".`;
+  } catch (e) { return `Error: ${(e as Error).message}`; }
+}
+
+function execRemoveMissionDelay(polpo: Orchestrator, args: Record<string, unknown>): string {
+  try {
+    const m = polpo.removeMissionDelay(args.missionId as string, args.delayName as string);
+    return `Delay "${args.delayName}" removed from mission "${m.name}".`;
   } catch (e) { return `Error: ${(e as Error).message}`; }
 }
 

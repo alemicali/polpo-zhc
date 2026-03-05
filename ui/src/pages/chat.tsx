@@ -36,6 +36,7 @@ import {
   AlertTriangle,
   SkipForward,
   PauseCircle,
+  Timer,
   BarChart3,
   AtSign,
   Compass,
@@ -354,11 +355,21 @@ interface MissionQualityGateShape {
   notifyChannels?: string[];
 }
 
+interface MissionDelayShape {
+  name: string;
+  afterTasks: string[];
+  blocksTasks: string[];
+  duration: string;
+  message?: string;
+  notifyChannels?: string[];
+}
+
 interface MissionDataShape {
   name?: string;
   tasks: MissionTaskShape[];
   team?: Array<{ name: string; role?: string }>;
   checkpoints?: MissionCheckpointShape[];
+  delays?: MissionDelayShape[];
   qualityGates?: MissionQualityGateShape[];
 }
 
@@ -445,152 +456,116 @@ function MissionPreviewCard({
         </Badge>
       </div>
 
-      {/* Task list */}
+      {/* Task list — interleaved with checkpoints, delays, quality gates at correct positions */}
       <div className="px-4 py-3 space-y-1 max-h-80 overflow-y-auto">
-        {tasks.map((task, idx) => {
-          const isExpanded = expandedTasks.has(idx);
-          return (
-            <div key={idx} className="rounded-lg transition-colors hover:bg-primary/[0.03]">
-              {/* Task header — clickable */}
-              <button
-                type="button"
-                className="flex items-start gap-2 py-2 px-1.5 w-full text-left"
-                onClick={() => toggleTask(idx)}
-              >
-                <span className="text-[11px] font-mono text-muted-foreground mt-0.5 w-5 text-right shrink-0">
-                  {idx + 1}.
-                </span>
-                <div className="flex-1 min-w-0">
-                  <p className="font-medium text-sm leading-snug">{task.title}</p>
-                  <div className="flex items-center gap-3 mt-0.5">
-                    <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
-                      <User className="h-3 w-3" />
-                      {task.assignTo}
-                    </span>
-                    {task.dependsOn && task.dependsOn.length > 0 && (
-                      <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
-                        <GitBranch className="h-3 w-3" />
-                        {task.dependsOn.join(", ")}
+        {(() => {
+          // Build a title→index map for positioning flow-control elements
+          const titleIndex = new Map<string, number>();
+          tasks.forEach((t, i) => titleIndex.set(t.title, i));
+
+          // Compute insertion position for a flow-control element: after the last of its afterTasks
+          const insertionPos = (afterTasks: string[]) => {
+            let maxIdx = -1;
+            for (const t of afterTasks) {
+              const idx = titleIndex.get(t);
+              if (idx != null && idx > maxIdx) maxIdx = idx;
+            }
+            return maxIdx;
+          };
+
+          type FlowItem =
+            | { kind: "checkpoint"; data: MissionCheckpointShape }
+            | { kind: "delay"; data: MissionDelayShape }
+            | { kind: "gate"; data: MissionQualityGateShape };
+
+          // Group flow items by their insertion position (task index they follow)
+          const flowAfter = new Map<number, FlowItem[]>();
+          const flowEnd: FlowItem[] = []; // items that don't match any task go to the end
+
+          for (const cp of mission?.checkpoints ?? []) {
+            const pos = insertionPos(cp.afterTasks);
+            if (pos >= 0) {
+              const arr = flowAfter.get(pos) ?? [];
+              arr.push({ kind: "checkpoint", data: cp });
+              flowAfter.set(pos, arr);
+            } else {
+              flowEnd.push({ kind: "checkpoint", data: cp });
+            }
+          }
+          for (const dl of mission?.delays ?? []) {
+            const pos = insertionPos(dl.afterTasks);
+            if (pos >= 0) {
+              const arr = flowAfter.get(pos) ?? [];
+              arr.push({ kind: "delay", data: dl });
+              flowAfter.set(pos, arr);
+            } else {
+              flowEnd.push({ kind: "delay", data: dl });
+            }
+          }
+          for (const qg of mission?.qualityGates ?? []) {
+            const pos = insertionPos(qg.afterTasks);
+            if (pos >= 0) {
+              const arr = flowAfter.get(pos) ?? [];
+              arr.push({ kind: "gate", data: qg });
+              flowAfter.set(pos, arr);
+            } else {
+              flowEnd.push({ kind: "gate", data: qg });
+            }
+          }
+
+          // Render a flow-control item
+          const renderFlowItem = (item: FlowItem, key: string) => {
+            if (item.kind === "checkpoint") {
+              const cp = item.data;
+              return (
+                <div key={key} className="flex items-start gap-2 rounded-lg border border-amber-500/15 bg-amber-500/[0.03] px-3 py-2 ml-6">
+                  <PauseCircle className="h-3.5 w-3.5 text-amber-500 mt-0.5 shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-medium">{cp.name}</p>
+                      <span className="text-[9px] font-medium uppercase tracking-wider text-amber-500">Checkpoint</span>
+                    </div>
+                    {cp.message && <p className="text-[11px] text-muted-foreground mt-0.5">{cp.message}</p>}
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-1">
+                      <span className="text-[10px] text-muted-foreground">
+                        Blocks: <span className="font-medium text-foreground/70">{cp.blocksTasks.join(", ")}</span>
                       </span>
-                    )}
+                    </div>
                   </div>
                 </div>
-                {isExpanded ? (
-                  <ChevronUp className="h-3.5 w-3.5 text-muted-foreground mt-1 shrink-0" />
-                ) : (
-                  <ChevronDown className="h-3.5 w-3.5 text-muted-foreground mt-1 shrink-0" />
-                )}
-              </button>
-
-              {/* Expanded detail */}
-              {isExpanded && (
-                <div className="pl-9 pr-2 pb-2.5 space-y-2">
-                  {/* Description — rendered as markdown */}
-                  {task.description && (
-                    <div className="text-xs text-muted-foreground leading-relaxed [&_p]:my-1 [&_ul]:my-1 [&_ol]:my-1 [&_li]:my-0 [&_code]:text-[11px] [&_pre]:text-[11px]">
-                      <MessageResponse>{task.description}</MessageResponse>
+              );
+            }
+            if (item.kind === "delay") {
+              const dl = item.data;
+              return (
+                <div key={key} className="flex items-start gap-2 rounded-lg border border-blue-500/15 bg-blue-500/[0.03] px-3 py-2 ml-6">
+                  <Timer className="h-3.5 w-3.5 text-blue-500 mt-0.5 shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-medium">{dl.name}</p>
+                      <span className="text-[9px] font-medium uppercase tracking-wider text-blue-500">Delay</span>
                     </div>
-                  )}
-
-                  {/* Expectations */}
-                  {task.expectations && task.expectations.length > 0 && (
-                    <div className="flex flex-wrap gap-1.5">
-                      {task.expectations.map((exp, ei) => (
-                        <Tooltip key={ei}>
-                          <TooltipTrigger asChild>
-                            <Badge
-                              variant="secondary"
-                              className="text-[10px] gap-1 cursor-default"
-                            >
-                              {expectationIcon(exp.type)}
-                              {expectationLabel(exp.type)}
-                            </Badge>
-                          </TooltipTrigger>
-                          <TooltipContent side="top" className="text-xs max-w-xs">
-                            {exp.command && <p className="font-mono">{exp.command}</p>}
-                            {exp.paths && exp.paths.length > 0 && (
-                              <p className="font-mono">{exp.paths.join(", ")}</p>
-                            )}
-                            {exp.criteria && <p>{exp.criteria}</p>}
-                            {!exp.command && !exp.paths?.length && !exp.criteria && (
-                              <p>{exp.type} check</p>
-                            )}
-                          </TooltipContent>
-                        </Tooltip>
-                      ))}
+                    {dl.message && <p className="text-[11px] text-muted-foreground mt-0.5">{dl.message}</p>}
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-1">
+                      <span className="text-[10px] text-muted-foreground">
+                        Blocks: <span className="font-medium text-foreground/70">{dl.blocksTasks.join(", ")}</span>
+                      </span>
                     </div>
-                  )}
-
-                  {/* Max retries */}
-                  {task.maxRetries != null && task.maxRetries > 0 && (
-                    <p className="text-[11px] text-muted-foreground">
-                      Max retries: {task.maxRetries}
-                    </p>
-                  )}
-                </div>
-              )}
-            </div>
-          );
-        })}
-        {tasks.length === 0 && (
-          <p className="text-xs text-muted-foreground italic">No tasks in this mission.</p>
-        )}
-
-        {/* Checkpoints */}
-        {mission?.checkpoints && mission.checkpoints.length > 0 && (
-          <div className="mt-3 pt-3 border-t border-primary/10 space-y-1.5">
-            <div className="flex items-center gap-1.5 px-1.5 mb-1">
-              <PauseCircle className="h-3.5 w-3.5 text-amber-500" />
-              <span className="text-[11px] font-semibold text-amber-600 dark:text-amber-400 uppercase tracking-wider">
-                Checkpoints
-              </span>
-            </div>
-            {mission.checkpoints.map((cp, ci) => (
-              <div
-                key={ci}
-                className="flex items-start gap-2 rounded-lg border border-amber-500/15 bg-amber-500/[0.03] px-3 py-2"
-              >
-                <PauseCircle className="h-3.5 w-3.5 text-amber-500 mt-0.5 shrink-0" />
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium">{cp.name}</p>
-                  {cp.message && (
-                    <p className="text-[11px] text-muted-foreground mt-0.5">{cp.message}</p>
-                  )}
-                  <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-1">
-                    <span className="text-[10px] text-muted-foreground">
-                      After: <span className="font-medium text-foreground/70">{cp.afterTasks.join(", ")}</span>
-                    </span>
-                    <span className="text-[10px] text-muted-foreground">
-                      Blocks: <span className="font-medium text-foreground/70">{cp.blocksTasks.join(", ")}</span>
-                    </span>
                   </div>
                 </div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* Quality Gates */}
-        {mission?.qualityGates && mission.qualityGates.length > 0 && (
-          <div className="mt-3 pt-3 border-t border-primary/10 space-y-1.5">
-            <div className="flex items-center gap-1.5 px-1.5 mb-1">
-              <BarChart3 className="h-3.5 w-3.5 text-violet-500" />
-              <span className="text-[11px] font-semibold text-violet-600 dark:text-violet-400 uppercase tracking-wider">
-                Quality Gates
-              </span>
-            </div>
-            {mission.qualityGates.map((qg, qi) => (
-              <div
-                key={qi}
-                className="flex items-start gap-2 rounded-lg border border-violet-500/15 bg-violet-500/[0.03] px-3 py-2"
-              >
+              );
+            }
+            // gate
+            const qg = item.data as MissionQualityGateShape;
+            return (
+              <div key={key} className="flex items-start gap-2 rounded-lg border border-violet-500/15 bg-violet-500/[0.03] px-3 py-2 ml-6">
                 <BarChart3 className="h-3.5 w-3.5 text-violet-500 mt-0.5 shrink-0" />
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium">{qg.name}</p>
+                  <div className="flex items-center gap-2">
+                    <p className="text-sm font-medium">{qg.name}</p>
+                    <span className="text-[9px] font-medium uppercase tracking-wider text-violet-500">Quality Gate</span>
+                  </div>
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-1">
-                    <span className="text-[10px] text-muted-foreground">
-                      After: <span className="font-medium text-foreground/70">{qg.afterTasks.join(", ")}</span>
-                    </span>
                     <span className="text-[10px] text-muted-foreground">
                       Blocks: <span className="font-medium text-foreground/70">{qg.blocksTasks.join(", ")}</span>
                     </span>
@@ -624,9 +599,108 @@ function MissionPreviewCard({
                   </div>
                 </div>
               </div>
-            ))}
-          </div>
-        )}
+            );
+          };
+
+          // Build interleaved output
+          const elements: React.ReactNode[] = [];
+
+          tasks.forEach((task, idx) => {
+            const isExpanded = expandedTasks.has(idx);
+            elements.push(
+              <div key={`task-${idx}`} className="rounded-lg transition-colors hover:bg-primary/[0.03]">
+                <button
+                  type="button"
+                  className="flex items-start gap-2 py-2 px-1.5 w-full text-left"
+                  onClick={() => toggleTask(idx)}
+                >
+                  <span className="text-[11px] font-mono text-muted-foreground mt-0.5 w-5 text-right shrink-0">
+                    {idx + 1}.
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium text-sm leading-snug">{task.title}</p>
+                    <div className="flex items-center gap-3 mt-0.5">
+                      <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+                        <User className="h-3 w-3" />
+                        {task.assignTo}
+                      </span>
+                      {task.dependsOn && task.dependsOn.length > 0 && (
+                        <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+                          <GitBranch className="h-3 w-3" />
+                          {task.dependsOn.join(", ")}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  {isExpanded ? (
+                    <ChevronUp className="h-3.5 w-3.5 text-muted-foreground mt-1 shrink-0" />
+                  ) : (
+                    <ChevronDown className="h-3.5 w-3.5 text-muted-foreground mt-1 shrink-0" />
+                  )}
+                </button>
+                {isExpanded && (
+                  <div className="pl-9 pr-2 pb-2.5 space-y-2">
+                    {task.description && (
+                      <div className="text-xs text-muted-foreground leading-relaxed [&_p]:my-1 [&_ul]:my-1 [&_ol]:my-1 [&_li]:my-0 [&_code]:text-[11px] [&_pre]:text-[11px]">
+                        <MessageResponse>{task.description}</MessageResponse>
+                      </div>
+                    )}
+                    {task.expectations && task.expectations.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5">
+                        {task.expectations.map((exp, ei) => (
+                          <Tooltip key={ei}>
+                            <TooltipTrigger asChild>
+                              <Badge variant="secondary" className="text-[10px] gap-1 cursor-default">
+                                {expectationIcon(exp.type)}
+                                {expectationLabel(exp.type)}
+                              </Badge>
+                            </TooltipTrigger>
+                            <TooltipContent side="top" className="text-xs max-w-xs">
+                              {exp.command && <p className="font-mono">{exp.command}</p>}
+                              {exp.paths && exp.paths.length > 0 && (
+                                <p className="font-mono">{exp.paths.join(", ")}</p>
+                              )}
+                              {exp.criteria && <p>{exp.criteria}</p>}
+                              {!exp.command && !exp.paths?.length && !exp.criteria && (
+                                <p>{exp.type} check</p>
+                              )}
+                            </TooltipContent>
+                          </Tooltip>
+                        ))}
+                      </div>
+                    )}
+                    {task.maxRetries != null && task.maxRetries > 0 && (
+                      <p className="text-[11px] text-muted-foreground">
+                        Max retries: {task.maxRetries}
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>,
+            );
+
+            // Insert any flow-control items that follow this task
+            const items = flowAfter.get(idx);
+            if (items) {
+              for (let fi = 0; fi < items.length; fi++) {
+                elements.push(renderFlowItem(items[fi], `flow-${idx}-${fi}`));
+              }
+            }
+          });
+
+          // Append any flow items that didn't match a task position
+          for (let fi = 0; fi < flowEnd.length; fi++) {
+            elements.push(renderFlowItem(flowEnd[fi], `flow-end-${fi}`));
+          }
+
+          if (elements.length === 0) {
+            elements.push(
+              <p key="empty" className="text-xs text-muted-foreground italic">No tasks in this mission.</p>,
+            );
+          }
+
+          return elements;
+        })()}
       </div>
 
       {/* Refine feedback input */}

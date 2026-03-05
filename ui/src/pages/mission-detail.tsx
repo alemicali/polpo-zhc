@@ -138,10 +138,20 @@ export interface MissionCheckpointDef {
   notifyChannels?: string[];
 }
 
+export interface MissionDelayDef {
+  name: string;
+  afterTasks: string[];
+  blocksTasks: string[];
+  duration: string;
+  message?: string;
+  notifyChannels?: string[];
+}
+
 export interface ParsedMission {
   name?: string;
   tasks: MissionTaskDef[];
   checkpoints?: MissionCheckpointDef[];
+  delays?: MissionDelayDef[];
 }
 
 function filesLinkForPath(filePath: string): string | null {
@@ -170,10 +180,24 @@ export function parseMissionData(data: string): ParsedMission | null {
       );
       if (valid.length > 0) checkpoints = valid;
     }
+    // Filter valid delays (strict: requires name, afterTasks[], blocksTasks[], duration)
+    let delays: MissionDelayDef[] | undefined;
+    if (Array.isArray(parsed.delays)) {
+      const valid = parsed.delays.filter(
+        (dl: unknown): dl is MissionDelayDef =>
+          typeof dl === "object" && dl !== null &&
+          typeof (dl as Record<string, unknown>).name === "string" &&
+          Array.isArray((dl as Record<string, unknown>).afterTasks) &&
+          Array.isArray((dl as Record<string, unknown>).blocksTasks) &&
+          typeof (dl as Record<string, unknown>).duration === "string",
+      );
+      if (valid.length > 0) delays = valid;
+    }
     return {
       name: parsed.name,
       tasks: Array.isArray(parsed.tasks) ? parsed.tasks : [],
       checkpoints,
+      delays,
     };
   } catch {
     return null;
@@ -215,6 +239,15 @@ interface CheckpointNodeData {
   isActive?: boolean;
   /** Whether this checkpoint has been resumed */
   isResumed?: boolean;
+  [key: string]: unknown;
+}
+
+interface DelayNodeData {
+  delay: MissionDelayDef;
+  /** Whether this delay timer is currently active (started but not expired) */
+  isActive?: boolean;
+  /** Whether this delay has expired */
+  isExpired?: boolean;
   [key: string]: unknown;
 }
 
@@ -534,7 +567,62 @@ function CheckpointNodeComponent({ data, selected }: NodeProps<Node<CheckpointNo
   );
 }
 
-const nodeTypes = { taskNode: TaskNodeComponent, checkpointNode: CheckpointNodeComponent };
+// ── Delay node component for ReactFlow ──
+
+const DELAY_SIZE = 140;
+const DELAY_WIDTH = DELAY_SIZE;
+const DELAY_HEIGHT = DELAY_SIZE;
+
+function DelayNodeComponent({ data, selected }: NodeProps<Node<DelayNodeData>>) {
+  const { delay, isActive, isExpired } = data;
+
+  const borderColor = isExpired
+    ? "border-emerald-400/60"
+    : isActive
+      ? "border-blue-400/80"
+      : "border-blue-500/40";
+
+  const bgColor = isExpired
+    ? "bg-emerald-500/5"
+    : isActive
+      ? "bg-blue-500/8"
+      : "bg-card/60";
+
+  const statusLabel = isExpired ? "Expired" : isActive ? "Waiting" : "Delay";
+  const statusColor = isExpired ? "text-emerald-400" : isActive ? "text-blue-400" : "text-blue-500/70";
+
+  return (
+    <>
+      <Handle type="target" position={Position.Top} className="!bg-blue-500/50 !border-none !w-2 !h-2" />
+      <div
+        className={cn(
+          "rounded-full border-2 border-dashed backdrop-blur-sm transition-all duration-200",
+          "flex items-center justify-center",
+          borderColor,
+          bgColor,
+          selected && "ring-2 ring-blue-400/30 shadow-[0_0_16px_oklch(0.65_0.15_240/0.15)]",
+        )}
+        style={{ width: DELAY_SIZE, height: DELAY_SIZE }}
+      >
+        <div className="flex flex-col items-center gap-1 px-3 max-w-[120px]">
+          <Timer className={cn("h-4 w-4 shrink-0", statusColor)} />
+          <span className="text-[10px] font-semibold text-foreground/90 truncate max-w-full text-center">{delay.name}</span>
+          <span className={cn("text-[8px] font-medium uppercase tracking-wider", statusColor)}>
+            {statusLabel}
+          </span>
+          <span className="text-[8px] text-muted-foreground text-center leading-tight">
+            {delay.afterTasks.length} trigger{delay.afterTasks.length !== 1 ? "s" : ""}
+            {" → "}
+            {delay.blocksTasks.length} blocked
+          </span>
+        </div>
+      </div>
+      <Handle type="source" position={Position.Bottom} className="!bg-blue-500/50 !border-none !w-2 !h-2" />
+    </>
+  );
+}
+
+const nodeTypes = { taskNode: TaskNodeComponent, checkpointNode: CheckpointNodeComponent, delayNode: DelayNodeComponent };
 
 // ── Graph layout computation ──
 
@@ -549,6 +637,9 @@ function buildGraphLayout(
   checkpoints?: MissionCheckpointDef[],
   activeCheckpoints?: Set<string>,
   resumedCheckpoints?: Set<string>,
+  delays?: MissionDelayDef[],
+  activeDelays?: Set<string>,
+  expiredDelays?: Set<string>,
 ): { nodes: Node[]; edges: Edge[] } {
   // Build dependency graph for layering (topological sort into levels)
   const titleIndex = new Map<string, number>();
@@ -601,7 +692,6 @@ function buildGraphLayout(
       const idx = titleIndex.get(title);
       if (idx != null && layers[idx] <= cpLayer) {
         const shift = cpLayer + 1 - layers[idx];
-        // Shift this task and all its transitive dependents
         shiftTaskAndDependents(idx, shift, taskDefs, titleIndex, layers);
       }
     }
@@ -622,8 +712,46 @@ function buildGraphLayout(
     }
   }
 
-  // Recompute max layer after checkpoint pushes
-  const maxLayer = Math.max(...layers, ...cpLayers, 0);
+  // ── Delay layer computation (same pattern as checkpoints) ──
+  const dlDefs = delays ?? [];
+  const dlLayers: number[] = [];
+
+  for (let di = 0; di < dlDefs.length; di++) {
+    const dl = dlDefs[di];
+    let maxAfterLayer = 0;
+    for (const title of dl.afterTasks) {
+      const idx = titleIndex.get(title);
+      if (idx != null) maxAfterLayer = Math.max(maxAfterLayer, layers[idx]);
+    }
+    const dlLayer = maxAfterLayer + 1;
+    dlLayers.push(dlLayer);
+
+    // Push blocksTasks down so they sit below the delay
+    for (const title of dl.blocksTasks) {
+      const idx = titleIndex.get(title);
+      if (idx != null && layers[idx] <= dlLayer) {
+        const shift = dlLayer + 1 - layers[idx];
+        shiftTaskAndDependents(idx, shift, taskDefs, titleIndex, layers);
+      }
+    }
+
+    // Mark intercepted edges
+    for (const after of dl.afterTasks) {
+      const ai = titleIndex.get(after);
+      if (ai == null) continue;
+      for (const blocked of dl.blocksTasks) {
+        const bi = titleIndex.get(blocked);
+        if (bi == null) continue;
+        const deps = taskDefs[bi].dependsOn ?? [];
+        if (deps.includes(after)) {
+          interceptedEdges.add(`${ai}-${bi}`);
+        }
+      }
+    }
+  }
+
+  // Recompute max layer after checkpoint and delay pushes
+  const maxLayer = Math.max(...layers, ...cpLayers, ...dlLayers, 0);
 
   // Group task nodes by layer
   const layerGroups: number[][] = Array.from({ length: maxLayer + 1 }, () => []);
@@ -676,6 +804,30 @@ function buildGraphLayout(
         isActive: activeCheckpoints?.has(cp.name) ?? false,
         isResumed: resumedCheckpoints?.has(cp.name) ?? false,
       } as CheckpointNodeData,
+    });
+  }
+
+  // ── Position delay nodes ──
+  for (let di = 0; di < dlDefs.length; di++) {
+    const dl = dlDefs[di];
+    const dlLayer = dlLayers[di];
+    const dlsInSameLayer = dlLayers.filter(l => l === dlLayer).length;
+    const dlPosInLayer = dlLayers.slice(0, di).filter(l => l === dlLayer).length;
+    const totalDlWidth = dlsInSameLayer * DELAY_WIDTH + (dlsInSameLayer - 1) * H_GAP;
+    const dlStartX = -totalDlWidth / 2;
+
+    nodes.push({
+      id: `delay-${di}`,
+      type: "delayNode",
+      position: {
+        x: dlStartX + dlPosInLayer * (DELAY_WIDTH + H_GAP),
+        y: dlLayer * (NODE_HEIGHT + V_GAP) + (NODE_HEIGHT - DELAY_HEIGHT) / 2,
+      },
+      data: {
+        delay: dl,
+        isActive: activeDelays?.has(dl.name) ?? false,
+        isExpired: expiredDelays?.has(dl.name) ?? false,
+      } as DelayNodeData,
     });
   }
 
@@ -763,6 +915,57 @@ function buildGraphLayout(
     }
   }
 
+  // Delay edges: afterTasks → delay → blocksTasks
+  for (let di = 0; di < dlDefs.length; di++) {
+    const dl = dlDefs[di];
+    const dlId = `delay-${di}`;
+    const isActiveDl = activeDelays?.has(dl.name) ?? false;
+    const isExpiredDl = expiredDelays?.has(dl.name) ?? false;
+
+    // afterTasks → delay
+    for (const title of dl.afterTasks) {
+      const ai = titleIndex.get(title);
+      if (ai == null) continue;
+      const sourceLive = findLive(title);
+      const isDone = sourceLive?.status === "done";
+      edges.push({
+        id: `e-task${ai}-dl${di}`,
+        source: `task-${ai}`,
+        target: dlId,
+        markerEnd: { type: MarkerType.ArrowClosed, width: 12, height: 12 },
+        style: {
+          stroke: isDone
+            ? "oklch(0.65 0.15 240)"     // blue
+            : "oklch(0.55 0 0 / 0.3)",
+          strokeWidth: isDone ? 2 : 1.5,
+          strokeDasharray: "6 3",
+        },
+      });
+    }
+
+    // delay → blocksTasks
+    for (const title of dl.blocksTasks) {
+      const bi = titleIndex.get(title);
+      if (bi == null) continue;
+      edges.push({
+        id: `e-dl${di}-task${bi}`,
+        source: dlId,
+        target: `task-${bi}`,
+        markerEnd: { type: MarkerType.ArrowClosed, width: 12, height: 12 },
+        style: {
+          stroke: isExpiredDl
+            ? "oklch(0.72 0.17 155)"      // green — expired
+            : isActiveDl
+              ? "oklch(0.65 0.15 240)"    // blue — waiting
+              : "oklch(0.55 0 0 / 0.3)",  // muted
+          strokeWidth: isActiveDl || isExpiredDl ? 2 : 1.5,
+          strokeDasharray: "6 3",
+        },
+        animated: isActiveDl,
+      });
+    }
+  }
+
   return { nodes, edges };
 }
 
@@ -794,17 +997,23 @@ export function MissionGraphInner({
   checkpoints,
   activeCheckpoints,
   resumedCheckpoints,
+  delays,
+  activeDelays,
+  expiredDelays,
 }: {
   taskDefs: MissionTaskDef[];
   findLiveTask: (title: string) => Task | undefined;
   checkpoints?: MissionCheckpointDef[];
   activeCheckpoints?: Set<string>;
   resumedCheckpoints?: Set<string>;
+  delays?: MissionDelayDef[];
+  activeDelays?: Set<string>;
+  expiredDelays?: Set<string>;
 }) {
   const { fitView } = useReactFlow();
   const { nodes: initial, edges: initialEdges } = useMemo(
-    () => buildGraphLayout(taskDefs, findLiveTask, checkpoints, activeCheckpoints, resumedCheckpoints),
-    [taskDefs, findLiveTask, checkpoints, activeCheckpoints, resumedCheckpoints],
+    () => buildGraphLayout(taskDefs, findLiveTask, checkpoints, activeCheckpoints, resumedCheckpoints, delays, activeDelays, expiredDelays),
+    [taskDefs, findLiveTask, checkpoints, activeCheckpoints, resumedCheckpoints, delays, activeDelays, expiredDelays],
   );
 
   const [nodes, setNodes, onNodesChange] = useNodesState(initial);
@@ -812,7 +1021,7 @@ export function MissionGraphInner({
 
   // Sync when live task status changes
   useEffect(() => {
-    const { nodes: n, edges: e } = buildGraphLayout(taskDefs, findLiveTask, checkpoints, activeCheckpoints, resumedCheckpoints);
+    const { nodes: n, edges: e } = buildGraphLayout(taskDefs, findLiveTask, checkpoints, activeCheckpoints, resumedCheckpoints, delays, activeDelays, expiredDelays);
     // Preserve expanded state across syncs
     setNodes((prev: Node[]) =>
       n.map((node: Node) => {
@@ -824,7 +1033,7 @@ export function MissionGraphInner({
       }),
     );
     setEdges(e);
-  }, [taskDefs, findLiveTask, checkpoints, activeCheckpoints, resumedCheckpoints, setNodes, setEdges]);
+  }, [taskDefs, findLiveTask, checkpoints, activeCheckpoints, resumedCheckpoints, delays, activeDelays, expiredDelays, setNodes, setEdges]);
 
   useEffect(() => {
     const t = setTimeout(() => fitView({ padding: 0.2 }), 50);
@@ -1587,6 +1796,7 @@ export function MissionDetailPage() {
                   taskDefs={parsed.tasks}
                   findLiveTask={isBlueprint ? findBlueprintTask : findLiveTask}
                   checkpoints={parsed.checkpoints}
+                  delays={parsed.delays}
                 />
               </ReactFlowProvider>
             </div>

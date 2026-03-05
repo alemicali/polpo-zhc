@@ -4,6 +4,7 @@ import {
   CreateMissionSchema, UpdateMissionSchema,
   AddMissionTaskSchema, UpdateMissionTaskSchema, ReorderMissionTasksSchema,
   AddMissionCheckpointSchema, UpdateMissionCheckpointSchema,
+  AddMissionDelaySchema, UpdateMissionDelaySchema,
   AddMissionQualityGateSchema, UpdateMissionQualityGateSchema,
   AddMissionTeamMemberSchema, UpdateMissionTeamMemberSchema,
   UpdateMissionNotificationsSchema,
@@ -267,6 +268,34 @@ const removeMissionCheckpointRoute2 = createRoute({
   responses: missionOkResponse,
 });
 
+// Delays
+const listDelaysRoute = createRoute({
+  method: "get", path: "/delays", tags: ["Missions"],
+  summary: "List all active delays",
+  responses: { 200: { content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.array(z.any()) }) } }, description: "List of active delays" } },
+});
+
+const addMissionDelayRoute = createRoute({
+  method: "post", path: "/{missionId}/delays", tags: ["Missions"],
+  summary: "Add a delay to mission data",
+  request: { params: z.object({ missionId: z.string() }), body: { content: { "application/json": { schema: AddMissionDelaySchema } } } },
+  responses: { ...missionOkResponse, 201: missionOkResponse[200] },
+});
+
+const updateMissionDelayRoute = createRoute({
+  method: "patch", path: "/{missionId}/delays/{delayName}", tags: ["Missions"],
+  summary: "Update a delay in mission data",
+  request: { params: z.object({ missionId: z.string(), delayName: z.string() }), body: { content: { "application/json": { schema: UpdateMissionDelaySchema } } } },
+  responses: missionOkResponse,
+});
+
+const removeMissionDelayRoute = createRoute({
+  method: "delete", path: "/{missionId}/delays/{delayName}", tags: ["Missions"],
+  summary: "Remove a delay from mission data",
+  request: { params: z.object({ missionId: z.string(), delayName: z.string() }) },
+  responses: missionOkResponse,
+});
+
 // Quality gates
 const addMissionQualityGateRoute = createRoute({
   method: "post", path: "/{missionId}/quality-gates", tags: ["Missions"],
@@ -522,6 +551,50 @@ export function missionRoutes(): OpenAPIHono<ServerEnv> {
     const { missionId, checkpointName } = c.req.valid("param");
     try {
       const mission = orchestrator.removeMissionCheckpoint(missionId, decodeURIComponent(checkpointName));
+      return c.json({ ok: true, data: mission }, 200);
+    } catch (e: any) {
+      return c.json({ ok: false, error: e.message, code: "NOT_FOUND" }, 404);
+    }
+  });
+
+  // GET /missions/delays — list active delays
+  app.openapi(listDelaysRoute, (c) => {
+    const orchestrator = c.get("orchestrator");
+    return c.json({ ok: true, data: orchestrator.getActiveDelays() });
+  });
+
+  // POST /missions/:missionId/delays — add delay (data-level)
+  app.openapi(addMissionDelayRoute, (c) => {
+    const orchestrator = c.get("orchestrator");
+    const { missionId } = c.req.valid("param");
+    const body = c.req.valid("json");
+    try {
+      const mission = orchestrator.addMissionDelay(missionId, body);
+      return c.json({ ok: true, data: mission }, 201);
+    } catch (e: any) {
+      return c.json({ ok: false, error: e.message, code: "BAD_REQUEST" }, 404);
+    }
+  });
+
+  // PATCH /missions/:missionId/delays/:delayName — update delay (data-level)
+  app.openapi(updateMissionDelayRoute, (c) => {
+    const orchestrator = c.get("orchestrator");
+    const { missionId, delayName } = c.req.valid("param");
+    const body = c.req.valid("json");
+    try {
+      const mission = orchestrator.updateMissionDelay(missionId, decodeURIComponent(delayName), body);
+      return c.json({ ok: true, data: mission }, 200);
+    } catch (e: any) {
+      return c.json({ ok: false, error: e.message, code: "NOT_FOUND" }, 404);
+    }
+  });
+
+  // DELETE /missions/:missionId/delays/:delayName — remove delay (data-level)
+  app.openapi(removeMissionDelayRoute, (c) => {
+    const orchestrator = c.get("orchestrator");
+    const { missionId, delayName } = c.req.valid("param");
+    try {
+      const mission = orchestrator.removeMissionDelay(missionId, decodeURIComponent(delayName));
       return c.json({ ok: true, data: mission }, 200);
     } catch (e: any) {
       return c.json({ ok: false, error: e.message, code: "NOT_FOUND" }, 404);

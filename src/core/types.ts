@@ -1085,6 +1085,27 @@ export interface MissionCheckpoint {
   message?: string;
 }
 
+/** Delay defined within a mission — timed wait between task groups.
+ *
+ * Unlike checkpoints (which pause until a human resumes), delays
+ * automatically resume after a specified duration elapses.
+ * The timer starts when ALL afterTasks reach a terminal state (done/failed).
+ * Use delays for cooldown periods, staggered rollouts, rate-limiting, etc. */
+export interface MissionDelay {
+  /** Delay name (used in events and notifications). */
+  name: string;
+  /** Tasks that must be completed before this delay timer starts. */
+  afterTasks: string[];
+  /** Tasks that are blocked until the delay timer expires. */
+  blocksTasks: string[];
+  /** ISO 8601 duration (e.g. "PT2H" = 2 hours, "PT30M" = 30 minutes, "P1D" = 1 day). */
+  duration: string;
+  /** Notification channels to alert when the delay starts / expires. */
+  notifyChannels?: string[];
+  /** Optional message included in the notification when the delay starts. */
+  message?: string;
+}
+
 /** SLA configuration for deadline monitoring. */
 export interface SLAConfig {
   /** Percentage of deadline elapsed before emitting a warning (0-1). Default: 0.8 */

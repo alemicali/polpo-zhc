@@ -94,6 +94,17 @@ export const missionCheckpointSchema = z.object({
   notifyChannels: z.array(z.string().min(1)).optional(),
 });
 
+// ── Mission Delay Schema ────────────────────────────────────────────
+
+export const missionDelaySchema = z.object({
+  name: z.string().min(1, "delay requires a name"),
+  afterTasks: z.array(z.string().min(1)).min(1, "delay requires at least one task in afterTasks"),
+  blocksTasks: z.array(z.string().min(1)).min(1, "delay requires at least one task in blocksTasks"),
+  duration: z.string().min(1, "delay requires a duration (ISO 8601, e.g. PT2H, PT30M, P1D)"),
+  message: z.string().optional(),
+  notifyChannels: z.array(z.string().min(1)).optional(),
+});
+
 // ── Mission Quality Gate Schema ─────────────────────────────────────
 
 export const missionQualityGateSchema = z.object({
@@ -132,6 +143,7 @@ export const missionDocumentSchema = z.object({
   team: z.array(z.any()).optional(),
   qualityGates: z.array(missionQualityGateSchema).optional(),
   checkpoints: z.array(missionCheckpointSchema).optional(),
+  delays: z.array(missionDelaySchema).optional(),
   notifications: z.any().optional(),
 }).superRefine((doc, ctx) => {
   // Enforce unique task titles within a mission document
@@ -147,6 +159,56 @@ export const missionDocumentSchema = z.object({
     }
     seen.add(title);
   }
+
+  // Build task lookup: title → dependsOn set
+  const taskDeps = new Map<string, Set<string>>();
+  for (const t of doc.tasks) {
+    taskDeps.set(t.title, new Set(t.dependsOn ?? []));
+  }
+
+  // Validate flow-control elements: blocksTasks must have dependsOn including afterTasks
+  const validateFlowControl = (
+    kind: "checkpoints" | "delays" | "qualityGates",
+    items: Array<{ name: string; afterTasks: string[]; blocksTasks: string[] }>,
+  ) => {
+    for (let i = 0; i < items.length; i++) {
+      const fc = items[i];
+      // Check afterTasks reference valid task titles
+      for (const t of fc.afterTasks) {
+        if (!taskDeps.has(t)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `${kind}[${i}] "${fc.name}": afterTasks references unknown task "${t}"`,
+            path: [kind, i, "afterTasks"],
+          });
+        }
+      }
+      // Check blocksTasks reference valid titles AND have dependsOn on afterTasks
+      for (const bt of fc.blocksTasks) {
+        if (!taskDeps.has(bt)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `${kind}[${i}] "${fc.name}": blocksTasks references unknown task "${bt}"`,
+            path: [kind, i, "blocksTasks"],
+          });
+          continue;
+        }
+        const deps = taskDeps.get(bt)!;
+        const missingDeps = fc.afterTasks.filter(at => !deps.has(at));
+        if (missingDeps.length > 0) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `${kind}[${i}] "${fc.name}": task "${bt}" is in blocksTasks but missing dependsOn: [${missingDeps.map(d => `"${d}"`).join(", ")}]. Without dependsOn, the task will start in parallel ignoring the ${kind.slice(0, -1)}`,
+            path: ["tasks", doc.tasks.findIndex(t => t.title === bt), "dependsOn"],
+          });
+        }
+      }
+    }
+  };
+
+  if (doc.checkpoints) validateFlowControl("checkpoints", doc.checkpoints);
+  if (doc.delays) validateFlowControl("delays", doc.delays);
+  if (doc.qualityGates) validateFlowControl("qualityGates", doc.qualityGates);
 });
 
 export type MissionDocumentParsed = z.infer<typeof missionDocumentSchema>;

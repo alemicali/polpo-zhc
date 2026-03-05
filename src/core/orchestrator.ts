@@ -663,6 +663,15 @@ export class Orchestrator extends TypedEmitter {
   removeMissionQualityGate(missionId: string, name: string): Mission {
     return this.missionExec.removeMissionQualityGate(missionId, name);
   }
+  addMissionDelay(missionId: string, delay: { name: string; afterTasks: string[]; blocksTasks: string[]; duration: string; notifyChannels?: string[]; message?: string }): Mission {
+    return this.missionExec.addMissionDelay(missionId, delay);
+  }
+  updateMissionDelay(missionId: string, name: string, updates: { name?: string; afterTasks?: string[]; blocksTasks?: string[]; duration?: string; notifyChannels?: string[]; message?: string }): Mission {
+    return this.missionExec.updateMissionDelay(missionId, name, updates);
+  }
+  removeMissionDelay(missionId: string, name: string): Mission {
+    return this.missionExec.removeMissionDelay(missionId, name);
+  }
   addMissionTeamMember(missionId: string, member: { name: string; role?: string; model?: string; [key: string]: unknown }): Mission {
     return this.missionExec.addMissionTeamMember(missionId, member);
   }
@@ -745,6 +754,11 @@ export class Orchestrator extends TypedEmitter {
     if (!mission) return false;
     return this.missionExec.resumeCheckpoint(mission.name, checkpointName);
   }
+
+  // ─── Delays ──────────────────────────────────────────
+
+  /** Get all active (unexpired) delays across all mission groups. */
+  getActiveDelays() { return this.missionExec.getActiveDelays(); }
 
   /** Stop the supervisor loop (non-graceful — use gracefulStop for clean shutdown) */
   stop(): void {
@@ -1321,6 +1335,18 @@ export class Orchestrator extends TypedEmitter {
           );
           if (blockingCp) return false; // Blocked by checkpoint
         }
+
+        // Check delays — task may be blocked by a timed delay
+        const delays = this.missionExec.getDelays(task.group);
+        if (delays.length > 0) {
+          const blockingDelay = this.missionExec.getBlockingDelay(
+            task.group,
+            task.title,
+            task.id,
+            tasks,
+          );
+          if (blockingDelay) return false; // Blocked by delay
+        }
       }
       return task.dependsOn.every(depId => {
         const dep = tasks.find(t => t.id === depId);
@@ -1329,9 +1355,10 @@ export class Orchestrator extends TypedEmitter {
     });
 
     // Check for deadlock: no tasks ready, none running, but some pending
-    // Don't consider it a deadlock if tasks are awaiting approval or blocked by checkpoints
+    // Don't consider it a deadlock if tasks are awaiting approval, blocked by checkpoints, or waiting on delays
     const hasActiveCheckpoints = this.missionExec.getActiveCheckpoints().length > 0;
-    if (ready.length === 0 && inProgress.length === 0 && pending.length > 0 && awaitingApproval.length === 0 && !hasActiveCheckpoints) {
+    const hasActiveDelays = this.missionExec.getActiveDelays().length > 0;
+    if (ready.length === 0 && inProgress.length === 0 && pending.length > 0 && awaitingApproval.length === 0 && !hasActiveCheckpoints && !hasActiveDelays) {
       // Async resolution already in progress — wait for next tick
       if (isResolving()) return false;
 
