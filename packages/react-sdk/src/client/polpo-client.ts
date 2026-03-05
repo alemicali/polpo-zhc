@@ -20,6 +20,9 @@ import type {
   ReorderMissionTasksRequest,
   AddMissionCheckpointRequest,
   UpdateMissionCheckpointRequest,
+  AddMissionDelayRequest,
+  UpdateMissionDelayRequest,
+  ActiveDelay,
   AddMissionQualityGateRequest,
   UpdateMissionQualityGateRequest,
   AddMissionTeamMemberRequest,
@@ -399,6 +402,24 @@ export class PolpoClient {
 
   removeMissionCheckpoint(missionId: string, checkpointName: string): Promise<Mission> {
     return this.del<Mission>(`/missions/${missionId}/checkpoints/${encodeURIComponent(checkpointName)}`);
+  }
+
+  // ── Delays ──
+
+  listDelays(): Promise<ActiveDelay[]> {
+    return this.get<ActiveDelay[]>("/missions/delays");
+  }
+
+  addMissionDelay(missionId: string, req: AddMissionDelayRequest): Promise<Mission> {
+    return this.post<Mission>(`/missions/${missionId}/delays`, req);
+  }
+
+  updateMissionDelay(missionId: string, delayName: string, req: UpdateMissionDelayRequest): Promise<Mission> {
+    return this.patch<Mission>(`/missions/${missionId}/delays/${encodeURIComponent(delayName)}`, req);
+  }
+
+  removeMissionDelay(missionId: string, delayName: string): Promise<Mission> {
+    return this.del<Mission>(`/missions/${missionId}/delays/${encodeURIComponent(delayName)}`);
   }
 
   addMissionQualityGate(missionId: string, req: AddMissionQualityGateRequest): Promise<Mission> {

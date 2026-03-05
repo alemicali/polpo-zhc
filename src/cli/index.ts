@@ -131,6 +131,26 @@ function wireConsoleEvents(orchestrator: Orchestrator): void {
       : chalk.dim;
     console.log(chalk.dim(`[${ts}]`) + ` ${color(message)}`);
   });
+
+  orchestrator.on("checkpoint:reached", ({ group, checkpointName, message }) => {
+    const ts = new Date().toLocaleTimeString();
+    console.log(chalk.dim(`[${ts}]`) + ` ${chalk.yellow(`[${group}] Checkpoint reached: "${checkpointName}"${message ? ` — ${message}` : ""}`)}`);
+  });
+
+  orchestrator.on("checkpoint:resumed", ({ group, checkpointName }) => {
+    const ts = new Date().toLocaleTimeString();
+    console.log(chalk.dim(`[${ts}]`) + ` ${chalk.green(`[${group}] Checkpoint resumed: "${checkpointName}"`)}`);
+  });
+
+  orchestrator.on("delay:started", ({ group, delayName, duration, message }) => {
+    const ts = new Date().toLocaleTimeString();
+    console.log(chalk.dim(`[${ts}]`) + ` ${chalk.blue(`[${group}] Delay started: "${delayName}" (${duration})${message ? ` — ${message}` : ""}`)}`);
+  });
+
+  orchestrator.on("delay:expired", ({ group, delayName }) => {
+    const ts = new Date().toLocaleTimeString();
+    console.log(chalk.dim(`[${ts}]`) + ` ${chalk.green(`[${group}] Delay expired: "${delayName}" — blocked tasks unblocked`)}`);
+  });
 }
 
 // Gradient from pink (#F78B97) to indigo (#3B3E73) — 6 rows

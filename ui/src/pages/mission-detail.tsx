@@ -56,8 +56,8 @@ import {
   type NodeProps,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { useMission, useTasks, useSchedules } from "@lumea-labs/polpo-react";
-import type { MissionReport, TaskStatus, Task } from "@lumea-labs/polpo-react";
+import { useMission, useTasks, useSchedules, useActiveDelays } from "@lumea-labs/polpo-react";
+import type { MissionReport, TaskStatus, Task, ActiveDelay } from "@lumea-labs/polpo-react";
 import { toast } from "sonner";
 import { formatDistanceToNow, format } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -248,6 +248,10 @@ interface DelayNodeData {
   isActive?: boolean;
   /** Whether this delay has expired */
   isExpired?: boolean;
+  /** ISO timestamp when the delay timer started */
+  startedAt?: string;
+  /** ISO timestamp when the delay will expire */
+  expiresAt?: string;
   [key: string]: unknown;
 }
 
@@ -573,8 +577,33 @@ const DELAY_SIZE = 140;
 const DELAY_WIDTH = DELAY_SIZE;
 const DELAY_HEIGHT = DELAY_SIZE;
 
+/** Format a remaining-milliseconds value as a human-friendly countdown string. */
+function formatCountdown(ms: number): string {
+  if (ms <= 0) return "now";
+  const totalSec = Math.ceil(ms / 1000);
+  const d = Math.floor(totalSec / 86400);
+  const h = Math.floor((totalSec % 86400) / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  if (d > 0) return `${d}d ${h}h`;
+  if (h > 0) return `${h}h ${m}m`;
+  if (m > 0) return `${m}m ${s}s`;
+  return `${s}s`;
+}
+
 function DelayNodeComponent({ data, selected }: NodeProps<Node<DelayNodeData>>) {
-  const { delay, isActive, isExpired } = data;
+  const { delay, isActive, isExpired, startedAt, expiresAt } = data;
+
+  // Live countdown: re-render every second while active
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!isActive || !expiresAt) return;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [isActive, expiresAt]);
+
+  const remaining = expiresAt ? new Date(expiresAt).getTime() - now : 0;
+  const startedAgo = startedAt ? formatDistanceToNow(new Date(startedAt), { addSuffix: true }) : null;
 
   const borderColor = isExpired
     ? "border-emerald-400/60"
@@ -597,24 +626,38 @@ function DelayNodeComponent({ data, selected }: NodeProps<Node<DelayNodeData>>) 
       <div
         className={cn(
           "rounded-full border-2 border-dashed backdrop-blur-sm transition-all duration-200",
-          "flex items-center justify-center",
+          "flex items-center justify-center relative",
           borderColor,
           bgColor,
+          isActive && "animate-pulse",
           selected && "ring-2 ring-blue-400/30 shadow-[0_0_16px_oklch(0.65_0.15_240/0.15)]",
         )}
         style={{ width: DELAY_SIZE, height: DELAY_SIZE }}
       >
-        <div className="flex flex-col items-center gap-1 px-3 max-w-[120px]">
+        <div className="flex flex-col items-center gap-0.5 px-3 max-w-[120px]">
           <Timer className={cn("h-4 w-4 shrink-0", statusColor)} />
           <span className="text-[10px] font-semibold text-foreground/90 truncate max-w-full text-center">{delay.name}</span>
           <span className={cn("text-[8px] font-medium uppercase tracking-wider", statusColor)}>
             {statusLabel}
           </span>
-          <span className="text-[8px] text-muted-foreground text-center leading-tight">
-            {delay.afterTasks.length} trigger{delay.afterTasks.length !== 1 ? "s" : ""}
-            {" → "}
-            {delay.blocksTasks.length} blocked
-          </span>
+          {isActive && remaining > 0 ? (
+            <>
+              <span className="text-[9px] font-mono font-bold text-blue-300 tabular-nums">
+                {formatCountdown(remaining)}
+              </span>
+              {startedAgo && (
+                <span className="text-[7px] text-muted-foreground/70">
+                  {startedAgo}
+                </span>
+              )}
+            </>
+          ) : (
+            <span className="text-[8px] text-muted-foreground text-center leading-tight">
+              {delay.afterTasks.length} trigger{delay.afterTasks.length !== 1 ? "s" : ""}
+              {" \u2192 "}
+              {delay.blocksTasks.length} blocked
+            </span>
+          )}
         </div>
       </div>
       <Handle type="source" position={Position.Bottom} className="!bg-blue-500/50 !border-none !w-2 !h-2" />
@@ -638,7 +681,7 @@ function buildGraphLayout(
   activeCheckpoints?: Set<string>,
   resumedCheckpoints?: Set<string>,
   delays?: MissionDelayDef[],
-  activeDelays?: Set<string>,
+  activeDelayMap?: Map<string, ActiveDelay>,
   expiredDelays?: Set<string>,
 ): { nodes: Node[]; edges: Edge[] } {
   // Build dependency graph for layering (topological sort into levels)
@@ -825,8 +868,10 @@ function buildGraphLayout(
       },
       data: {
         delay: dl,
-        isActive: activeDelays?.has(dl.name) ?? false,
+        isActive: activeDelayMap?.has(dl.name) ?? false,
         isExpired: expiredDelays?.has(dl.name) ?? false,
+        startedAt: activeDelayMap?.get(dl.name)?.startedAt,
+        expiresAt: activeDelayMap?.get(dl.name)?.expiresAt,
       } as DelayNodeData,
     });
   }
@@ -919,7 +964,7 @@ function buildGraphLayout(
   for (let di = 0; di < dlDefs.length; di++) {
     const dl = dlDefs[di];
     const dlId = `delay-${di}`;
-    const isActiveDl = activeDelays?.has(dl.name) ?? false;
+    const isActiveDl = activeDelayMap?.has(dl.name) ?? false;
     const isExpiredDl = expiredDelays?.has(dl.name) ?? false;
 
     // afterTasks → delay
@@ -998,7 +1043,7 @@ export function MissionGraphInner({
   activeCheckpoints,
   resumedCheckpoints,
   delays,
-  activeDelays,
+  activeDelayMap,
   expiredDelays,
 }: {
   taskDefs: MissionTaskDef[];
@@ -1007,13 +1052,13 @@ export function MissionGraphInner({
   activeCheckpoints?: Set<string>;
   resumedCheckpoints?: Set<string>;
   delays?: MissionDelayDef[];
-  activeDelays?: Set<string>;
+  activeDelayMap?: Map<string, ActiveDelay>;
   expiredDelays?: Set<string>;
 }) {
   const { fitView } = useReactFlow();
   const { nodes: initial, edges: initialEdges } = useMemo(
-    () => buildGraphLayout(taskDefs, findLiveTask, checkpoints, activeCheckpoints, resumedCheckpoints, delays, activeDelays, expiredDelays),
-    [taskDefs, findLiveTask, checkpoints, activeCheckpoints, resumedCheckpoints, delays, activeDelays, expiredDelays],
+    () => buildGraphLayout(taskDefs, findLiveTask, checkpoints, activeCheckpoints, resumedCheckpoints, delays, activeDelayMap, expiredDelays),
+    [taskDefs, findLiveTask, checkpoints, activeCheckpoints, resumedCheckpoints, delays, activeDelayMap, expiredDelays],
   );
 
   const [nodes, setNodes, onNodesChange] = useNodesState(initial);
@@ -1021,7 +1066,7 @@ export function MissionGraphInner({
 
   // Sync when live task status changes
   useEffect(() => {
-    const { nodes: n, edges: e } = buildGraphLayout(taskDefs, findLiveTask, checkpoints, activeCheckpoints, resumedCheckpoints, delays, activeDelays, expiredDelays);
+    const { nodes: n, edges: e } = buildGraphLayout(taskDefs, findLiveTask, checkpoints, activeCheckpoints, resumedCheckpoints, delays, activeDelayMap, expiredDelays);
     // Preserve expanded state across syncs
     setNodes((prev: Node[]) =>
       n.map((node: Node) => {
@@ -1033,7 +1078,7 @@ export function MissionGraphInner({
       }),
     );
     setEdges(e);
-  }, [taskDefs, findLiveTask, checkpoints, activeCheckpoints, resumedCheckpoints, delays, activeDelays, expiredDelays, setNodes, setEdges]);
+  }, [taskDefs, findLiveTask, checkpoints, activeCheckpoints, resumedCheckpoints, delays, activeDelayMap, expiredDelays, setNodes, setEdges]);
 
   useEffect(() => {
     const t = setTimeout(() => fitView({ padding: 0.2 }), 50);
@@ -1543,6 +1588,7 @@ export function MissionDetailPage() {
   const { mission, report, isLoading, error, executeMission, resumeMission, abortMission } = useMission(missionId ?? "");
   const { tasks: allTasks } = useTasks();
   const { schedules } = useSchedules();
+  const { activeDelays: liveDelays } = useActiveDelays();
 
   const parsed = useMemo(() => mission ? parseMissionData(mission.data) : null, [mission]);
 
@@ -1570,6 +1616,35 @@ export function MissionDetailPage() {
   const isBlueprint = isRecurring || isScheduled;
 
   const findBlueprintTask = useCallback(() => undefined, []);
+
+  // Build active delay map and expired set for the current mission group
+  const activeDelayMap = useMemo(() => {
+    if (!missionGroup) return new Map<string, ActiveDelay>();
+    const map = new Map<string, ActiveDelay>();
+    for (const d of liveDelays) {
+      if (d.group === missionGroup) map.set(d.delayName, d);
+    }
+    return map;
+  }, [liveDelays, missionGroup]);
+
+  // Expired delays: tasks in blocksTasks that are already running/done indicate the delay expired.
+  // We detect this from groupTasks — if ALL blocksTasks of a delay are no longer "pending"/"assigned", it expired.
+  const expiredDelays = useMemo(() => {
+    const set = new Set<string>();
+    if (!parsed?.delays || !missionGroup) return set;
+    for (const dl of parsed.delays) {
+      // If it's currently active, it hasn't expired yet
+      if (activeDelayMap.has(dl.name)) continue;
+      // If any afterTask is done, the delay was at least triggered.
+      // If all afterTasks are done/failed and it's NOT in activeDelayMap, it must have expired.
+      const allAfterDone = dl.afterTasks.every(t => {
+        const live = groupTasks.find(gt => gt.title === t);
+        return live && (live.status === "done" || live.status === "failed");
+      });
+      if (allAfterDone) set.add(dl.name);
+    }
+    return set;
+  }, [parsed?.delays, missionGroup, activeDelayMap, groupTasks]);
 
   const scheduleEntry = useMemo(
     () => missionId ? schedules.find((s: { missionId: string }) => s.missionId === missionId) : undefined,
@@ -1797,6 +1872,8 @@ export function MissionDetailPage() {
                   findLiveTask={isBlueprint ? findBlueprintTask : findLiveTask}
                   checkpoints={parsed.checkpoints}
                   delays={parsed.delays}
+                  activeDelayMap={isBlueprint ? undefined : activeDelayMap}
+                  expiredDelays={isBlueprint ? undefined : expiredDelays}
                 />
               </ReactFlowProvider>
             </div>

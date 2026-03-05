@@ -77,6 +77,14 @@ export interface PolpoEventMap {
   "sla:violated": { entityId: string; entityType: "task" | "mission"; deadline: string; overdueMs: number };
   "sla:met": { entityId: string; entityType: "task" | "mission"; deadline: string; marginMs: number };
 
+  // Checkpoints (mission-level)
+  "checkpoint:reached": { missionId?: string; group: string; checkpointName: string; message?: string; afterTasks: string[]; blocksTasks: string[]; reachedAt: string };
+  "checkpoint:resumed": { missionId?: string; group: string; checkpointName: string };
+
+  // Delays (mission-level)
+  "delay:started": { missionId?: string; group: string; delayName: string; duration: string; message?: string; afterTasks: string[]; blocksTasks: string[]; startedAt: string; expiresAt: string };
+  "delay:expired": { missionId?: string; group: string; delayName: string };
+
   // Quality gates (mission-level)
   "quality:gate:passed": { missionId: string; gateName: string; avgScore?: number };
   "quality:gate:failed": { missionId: string; gateName: string; avgScore?: number; reason: string };

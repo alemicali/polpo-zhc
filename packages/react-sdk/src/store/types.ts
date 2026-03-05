@@ -2,6 +2,7 @@ import type {
   Task,
   Mission,
   MissionReport,
+  ActiveDelay,
   AgentConfig,
   AgentProcess,
   SSEEvent,
@@ -48,4 +49,6 @@ export interface StoreState {
   assessmentProgress: Map<string, AssessmentProgressEntry[]>;
   /** Per-check status keyed by taskId. Tracks which expectations are running/done. Cleared on assessment:complete. */
   assessmentChecks: Map<string, AssessmentCheckStatus[]>;
+  /** Active delay timers keyed by "group:delayName". Updated from delay:started/delay:expired SSE events. */
+  activeDelays: Map<string, ActiveDelay>;
 }

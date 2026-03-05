@@ -6,6 +6,7 @@ import type {
   DimensionScore,
   MissionReport,
   MissionStatus,
+  MissionDelay,
 } from "../client/types.js";
 import type { StoreState } from "./types.js";
 
@@ -340,6 +341,38 @@ export function reduceEvent(state: StoreState, sseEvent: SSEEvent): StoreState {
     case "sla:violated":
     case "sla:met":
       return next;
+
+    // ── Checkpoints ─────────────────────────────────────────
+
+    case "checkpoint:reached":
+    case "checkpoint:resumed":
+      return next;
+
+    // ── Delays ────────────────────────────────────────────────
+
+    case "delay:started": {
+      const { group, delayName, delay, startedAt, expiresAt } = data as {
+        group: string; delayName: string; delay?: MissionDelay;
+        duration: string; message?: string; afterTasks: string[]; blocksTasks: string[];
+        startedAt: string; expiresAt: string;
+      };
+      const activeDelays = new Map(state.activeDelays);
+      activeDelays.set(`${group}:${delayName}`, {
+        group,
+        delayName,
+        delay: delay ?? { name: delayName, afterTasks: (data as any).afterTasks ?? [], blocksTasks: (data as any).blocksTasks ?? [], duration: (data as any).duration ?? "" },
+        startedAt,
+        expiresAt,
+      });
+      return { ...next, activeDelays };
+    }
+
+    case "delay:expired": {
+      const { group, delayName } = data as { group: string; delayName: string };
+      const activeDelays = new Map(state.activeDelays);
+      activeDelays.delete(`${group}:${delayName}`);
+      return { ...next, activeDelays };
+    }
 
     // ── Quality gates ─────────────────────────────────────────
 

@@ -21,6 +21,7 @@ export { useSkills } from "./hooks/use-skills.js";
 export { useOrchestratorSkills } from "./hooks/use-orchestrator-skills.js";
 export { useNotifications } from "./hooks/use-notifications.js";
 export { useApprovals } from "./hooks/use-approvals.js";
+export { useActiveDelays } from "./hooks/use-active-delays.js";
 export { useTemplates } from "./hooks/use-templates.js";
 export { useSchedules } from "./hooks/use-schedules.js";
 export { useVaultEntries } from "./hooks/use-vault-entries.js";
@@ -78,6 +79,9 @@ export type {
   ReorderMissionTasksRequest,
   AddMissionCheckpointRequest,
   UpdateMissionCheckpointRequest,
+  AddMissionDelayRequest,
+  UpdateMissionDelayRequest,
+  ActiveDelay,
   AddMissionQualityGateRequest,
   UpdateMissionQualityGateRequest,
   AddMissionTeamMemberRequest,

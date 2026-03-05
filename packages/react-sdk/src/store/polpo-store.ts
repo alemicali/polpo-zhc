@@ -25,6 +25,7 @@ function createInitialState(): StoreState {
     memory: null,
     assessmentProgress: new Map(),
     assessmentChecks: new Map(),
+    activeDelays: new Map(),
   };
 }
 
