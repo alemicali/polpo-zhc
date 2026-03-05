@@ -67,9 +67,10 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { useTask, useTasks, useProcesses, useTaskActivity, useAssessmentProgress } from "@lumea-labs/polpo-react";
+import { useTask, useTasks, useProcesses, useTaskActivity, useAssessmentProgress, useAgents } from "@lumea-labs/polpo-react";
 import type { TaskStatus, TaskOutcome, DimensionScore, CheckResult, ReviewerResult, EvalDimension, AssessmentResult, AssessmentTrigger, AgentProcess, RunActivityEntry } from "@lumea-labs/polpo-react";
 import { useAsyncAction } from "@/hooks/use-polpo";
+import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { toast } from "sonner";
 import { formatDistanceToNow, format } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -545,6 +546,7 @@ export function TaskDetailPage() {
   const { task, isLoading, error, updateTask, retryTask, killTask, reassessTask, queueTask } = useTask(taskId ?? "");
   const { tasks: allTasks } = useTasks();
   const { processes } = useProcesses();
+  const { agents } = useAgents();
   const { progress: assessmentProgress, isAssessing, checks: assessmentChecks } = useAssessmentProgress(taskId ?? "");
 
   // Resolve dependsOn IDs to task titles
@@ -556,6 +558,8 @@ export function TaskDetailPage() {
     }
   }
   const process = task ? processes.find(p => p.taskId === task.id) : undefined;
+  const agentConfig = task ? agents.find(a => a.name === task.assignTo) : undefined;
+  const identity = agentConfig?.identity;
 
   const [actionPending, setActionPending] = useState<string | null>(null);
   const handleAction = async (action: () => Promise<unknown>, label: string) => {
@@ -681,9 +685,15 @@ export function TaskDetailPage() {
             </div>
             <div className="flex items-center gap-3 mt-0.5 text-xs text-muted-foreground">
               <CopyableId id={task.id} label="Task ID" />
-              <span className="flex items-center gap-1">
-                <Bot className="h-3 w-3" /> {task.assignTo}
-              </span>
+              <Link to={`/agents/${task.assignTo}`} className="flex items-center gap-1.5 hover:text-foreground transition-colors">
+                <AgentAvatar avatar={identity?.avatar} name={task.assignTo} size="xs" />
+                {identity?.displayName && (
+                  <span className="font-medium text-foreground/80">{identity.displayName}</span>
+                )}
+                <span className={identity?.displayName ? "text-muted-foreground" : ""}>
+                  {identity?.displayName ? `@${task.assignTo}` : task.assignTo}
+                </span>
+              </Link>
               {task.group && (
                 <Link to={`/missions`} className="flex items-center gap-1 hover:text-foreground transition-colors">
                   <Target className="h-3 w-3" /> {task.group}
