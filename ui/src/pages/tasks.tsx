@@ -1,4 +1,4 @@
-import { useState, useMemo, memo } from "react";
+import { useState, useMemo, memo, createContext, use } from "react";
 import {
   Card,
   CardContent,
@@ -53,16 +53,18 @@ import {
   ChevronRight,
   ChevronDown,
   Calendar,
+  Settings2,
 } from "lucide-react";
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
-import type { Task, TaskStatus, AgentProcess } from "@lumea-labs/polpo-react";
+import type { Task, TaskStatus, AgentProcess, AgentConfig } from "@lumea-labs/polpo-react";
 import { formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
 import { MultiSelectFilter } from "@/components/shared/multi-select-filter";
+import { AgentAvatar } from "@/components/shared/agent-avatar";
 import {
   useTasksPageState,
   useTaskActions,
@@ -75,7 +77,23 @@ import type {
   TimeField,
   TimeFilterState,
   TimeRange,
+  CardFieldVisibility,
 } from "@/hooks/use-tasks-page";
+
+// ── Card settings context (avoids prop drilling) ──
+
+interface CardSettingsCtx {
+  fields: CardFieldVisibility;
+  agentConfigMap: Record<string, AgentConfig>;
+}
+
+const CardSettingsContext = createContext<CardSettingsCtx | null>(null);
+
+function useCardSettings(): CardSettingsCtx {
+  const ctx = use(CardSettingsContext);
+  if (!ctx) throw new Error("useCardSettings must be used within CardSettingsContext");
+  return ctx;
+}
 
 // ── Status config ──
 
@@ -305,11 +323,15 @@ const TaskCard = memo(function TaskCard({
   allTasks?: Task[];
 }) {
   const { retry, kill, queue, click } = useTaskActions();
+  const { fields, agentConfigMap } = useCardSettings();
   const compact = size === "compact";
   const cfg = statusConfig[task.status];
   const Icon = cfg.icon;
   const assessment = task.result?.assessment;
   const phase = task.phase && task.phase !== "execution" ? phaseConfig[task.phase] : null;
+  const agent = agentConfigMap[task.assignTo];
+  const identity = agent?.identity;
+  const hasAvatar = !!identity?.avatar;
 
   // Check if task is blocked by unresolved dependencies
   const unresolvedDeps = task.dependsOn.filter((depId) => {
@@ -318,99 +340,128 @@ const TaskCard = memo(function TaskCard({
   });
   const isBlocked = unresolvedDeps.length > 0 && (task.status === "pending" || task.status === "assigned");
 
+  // Show the agent row? (at least one agent-related field is on)
+  const showAgentRow = fields.avatar || fields.identityName || fields.agentId;
+
    return (
     <div
       className={cn(
         "group rounded-lg border border-border/40 bg-card/80 backdrop-blur-sm transition-all cursor-pointer",
         "hover:border-primary/20 hover:shadow-[0_0_15px_oklch(0.7_0.15_200_/_8%)]",
         "w-full max-w-full overflow-hidden box-border",
-        compact && "p-2.5",
-        !compact && "p-3",
+        compact ? "p-2.5" : "p-3",
       )}
       onClick={() => click(task.id)}
     >
+      {/* Header: status icon + title + phase */}
       <div className="flex items-start gap-2 w-full min-w-0">
         <div className={cn("flex shrink-0 items-center justify-center rounded-md mt-0.5", compact ? "h-6 w-6" : "h-7 w-7", cfg.bg)}>
           <Icon className={cn(compact ? "h-3 w-3" : "h-3.5 w-3.5", cfg.color, task.status === "in_progress" && "animate-spin")} />
         </div>
         <div className="min-w-0 flex-1">
           <p className={cn("font-medium leading-snug", compact ? "text-xs" : "text-sm")} style={{ overflowWrap: "anywhere", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{task.title}</p>
-          {phase && (
+          {fields.phase && phase && (
             <Badge variant="outline" className={cn("text-[8px] gap-0.5 px-1 py-0 mt-0.5 inline-flex", phase.color)}>
               <phase.icon className="h-2 w-2" />
               {phase.label}
             </Badge>
           )}
-          <div className="flex items-center gap-1.5 mt-1 flex-wrap min-w-0">
-            <span className="text-[10px] text-muted-foreground inline-flex items-center gap-0.5 max-w-full min-w-0">
-              <Bot className="h-2.5 w-2.5 shrink-0" />
-              <span className="truncate">{task.assignTo}</span>
-            </span>
-            {task.group && (
-              <Badge variant="secondary" className="text-[8px] px-1 py-0 max-w-full truncate">{task.group}</Badge>
-            )}
-            <span className="text-[10px] text-muted-foreground whitespace-nowrap">
-              {formatDistanceToNow(new Date(task.updatedAt), { addSuffix: true })}
-            </span>
-          </div>
-          {/* Indicators row */}
-          <div className="flex items-center gap-1 mt-1 flex-wrap">
-            {assessment?.globalScore != null && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <div className={cn(
-                    "flex items-center gap-0.5 rounded px-1.5 py-0.5",
-                    assessment.passed ? "bg-emerald-500/10" : "bg-red-500/10"
-                  )}>
-                    <Star className={cn("h-2.5 w-2.5", assessment.passed ? "text-emerald-500" : "text-red-500")} />
-                    <span className={cn("text-[10px] font-bold", assessment.passed ? "text-emerald-500" : "text-red-500")}>
-                      {assessment.globalScore.toFixed(1)}
-                    </span>
-                  </div>
-                </TooltipTrigger>
-                <TooltipContent className="text-xs">
-                  {assessment.passed ? "Passed" : "Failed"} — {assessment.checks.length} check{assessment.checks.length !== 1 ? "s" : ""}
-                </TooltipContent>
-              </Tooltip>
-            )}
-            {task.retries > 0 && (
-              <Badge variant="secondary" className="text-[9px] px-1 py-0">
-                <RotateCcw className="h-2 w-2 mr-0.5" />{task.retries}
-              </Badge>
-            )}
-            {task.dependsOn.length > 0 && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Badge
-                    variant={isBlocked ? "destructive" : "outline"}
-                    className={cn("text-[9px] px-1 py-0 cursor-help", isBlocked && "bg-amber-500/15 text-amber-500 border-amber-500/30 hover:bg-amber-500/20")}
-                  >
-                    <GitBranch className="h-2 w-2 mr-0.5" />
-                    {isBlocked ? `Blocked (${unresolvedDeps.length})` : task.dependsOn.length}
-                  </Badge>
-                </TooltipTrigger>
-                <TooltipContent className="text-xs max-w-xs">
-                  <p className="font-medium mb-1">{isBlocked ? "Waiting for:" : "Depends on:"}</p>
-                  {task.dependsOn.map((depId) => {
-                    const dep = allTasks?.find(t => t.id === depId);
-                    const done = dep?.status === "done";
-                    return (
-                      <p key={depId} className={done ? "text-muted-foreground line-through" : ""}>
-                        {done ? "✓" : "○"} {dep ? dep.title : depId}
-                      </p>
-                    );
-                  })}
-                </TooltipContent>
-              </Tooltip>
-            )}
-            {task.expectations.length > 0 && !assessment && (
-              <Badge variant="outline" className="text-[9px] px-1 py-0">
-                <Wrench className="h-2 w-2 mr-0.5" />{task.expectations.length}
-              </Badge>
-            )}
-          </div>
         </div>
       </div>
+
+      {/* Agent row: avatar + displayName + @id */}
+      {showAgentRow && (
+        <div className="flex items-center gap-1.5 mt-1.5 min-w-0">
+          {fields.avatar && (
+            hasAvatar
+              ? <AgentAvatar avatar={identity?.avatar} name={task.assignTo} size="xs" />
+              : <Bot className="h-3.5 w-3.5 shrink-0 text-muted-foreground/60" />
+          )}
+          {fields.identityName && identity?.displayName && (
+            <span className={cn("font-medium text-foreground/80 truncate", compact ? "text-[10px]" : "text-[11px]")}>
+              {identity.displayName}
+            </span>
+          )}
+          {fields.agentId && (
+            <span className="text-[10px] text-muted-foreground/60 truncate">
+              {fields.identityName && identity?.displayName ? `@${task.assignTo}` : task.assignTo}
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* Meta row: mission, time */}
+      {(fields.mission || fields.time) && (
+        <div className="flex items-center gap-1.5 mt-1 min-w-0 flex-wrap">
+          {fields.mission && task.group && (
+            <Badge variant="secondary" className="text-[8px] px-1 py-0 max-w-[140px] truncate">{task.group}</Badge>
+          )}
+          {fields.time && (
+            <span className="text-[10px] text-muted-foreground/60 whitespace-nowrap">
+              {formatDistanceToNow(new Date(task.updatedAt), { addSuffix: true })}
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* Indicators row: score, retries, deps, expectations */}
+      {(fields.score || fields.retries || fields.deps || fields.expectations) && (
+        <div className="flex items-center gap-1 mt-1 flex-wrap">
+          {fields.score && assessment?.globalScore != null && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <div className={cn(
+                  "flex items-center gap-0.5 rounded px-1.5 py-0.5",
+                  assessment.passed ? "bg-emerald-500/10" : "bg-red-500/10"
+                )}>
+                  <Star className={cn("h-2.5 w-2.5", assessment.passed ? "text-emerald-500" : "text-red-500")} />
+                  <span className={cn("text-[10px] font-bold", assessment.passed ? "text-emerald-500" : "text-red-500")}>
+                    {assessment.globalScore.toFixed(1)}
+                  </span>
+                </div>
+              </TooltipTrigger>
+              <TooltipContent className="text-xs">
+                {assessment.passed ? "Passed" : "Failed"} — {assessment.checks.length} check{assessment.checks.length !== 1 ? "s" : ""}
+              </TooltipContent>
+            </Tooltip>
+          )}
+          {fields.retries && task.retries > 0 && (
+            <Badge variant="secondary" className="text-[9px] px-1 py-0">
+              <RotateCcw className="h-2 w-2 mr-0.5" />{task.retries}
+            </Badge>
+          )}
+          {fields.deps && task.dependsOn.length > 0 && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Badge
+                  variant={isBlocked ? "destructive" : "outline"}
+                  className={cn("text-[9px] px-1 py-0 cursor-help", isBlocked && "bg-amber-500/15 text-amber-500 border-amber-500/30 hover:bg-amber-500/20")}
+                >
+                  <GitBranch className="h-2 w-2 mr-0.5" />
+                  {isBlocked ? `Blocked (${unresolvedDeps.length})` : task.dependsOn.length}
+                </Badge>
+              </TooltipTrigger>
+              <TooltipContent className="text-xs max-w-xs">
+                <p className="font-medium mb-1">{isBlocked ? "Waiting for:" : "Depends on:"}</p>
+                {task.dependsOn.map((depId) => {
+                  const dep = allTasks?.find(t => t.id === depId);
+                  const done = dep?.status === "done";
+                  return (
+                    <p key={depId} className={done ? "text-muted-foreground line-through" : ""}>
+                      {done ? "\u2713" : "\u25CB"} {dep ? dep.title : depId}
+                    </p>
+                  );
+                })}
+              </TooltipContent>
+            </Tooltip>
+          )}
+          {fields.expectations && task.expectations.length > 0 && !assessment && (
+            <Badge variant="outline" className="text-[9px] px-1 py-0">
+              <Wrench className="h-2 w-2 mr-0.5" />{task.expectations.length}
+            </Badge>
+          )}
+        </div>
+      )}
 
       {/* Live activity strip for running tasks */}
       {process && (
@@ -827,6 +878,74 @@ function ListView({
   );
 }
 
+// ── Card field settings popover ──
+
+const CARD_FIELD_LABELS: Record<keyof CardFieldVisibility, string> = {
+  avatar: "Agent avatar",
+  identityName: "Identity name",
+  agentId: "Agent ID",
+  mission: "Mission group",
+  time: "Updated time",
+  score: "Assessment score",
+  retries: "Retry count",
+  deps: "Dependencies",
+  expectations: "Expectations",
+  phase: "Phase badge",
+};
+
+const CARD_FIELD_ORDER: (keyof CardFieldVisibility)[] = [
+  "avatar", "identityName", "agentId", "mission", "time",
+  "phase", "score", "deps", "retries", "expectations",
+];
+
+function CardFieldSettings({
+  fields,
+  onToggle,
+}: {
+  fields: CardFieldVisibility;
+  onToggle: (field: keyof CardFieldVisibility) => void;
+}) {
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button variant="outline" size="sm" className="h-7 gap-1.5 text-xs">
+          <Settings2 className="h-3 w-3" />
+          Card fields
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-52 p-2" align="end">
+        <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-2 px-1">
+          Visible fields
+        </p>
+        <div className="space-y-0.5">
+          {CARD_FIELD_ORDER.map((key) => (
+            <button
+              key={key}
+              className={cn(
+                "flex items-center gap-2 w-full rounded-md px-2 py-1.5 text-left text-sm transition-colors",
+                "hover:bg-muted",
+              )}
+              onClick={() => onToggle(key)}
+            >
+              <div className={cn(
+                "flex h-4 w-4 shrink-0 items-center justify-center rounded border transition-colors",
+                fields[key]
+                  ? "bg-primary border-primary"
+                  : "border-muted-foreground/30",
+              )}>
+                {fields[key] && (
+                  <Check className="h-2.5 w-2.5 text-primary-foreground" />
+                )}
+              </div>
+              <span className="text-xs">{CARD_FIELD_LABELS[key]}</span>
+            </button>
+          ))}
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 // ── Main page ──
 
 export function TasksPage() {
@@ -841,9 +960,15 @@ export function TasksPage() {
     viewMode, setViewMode, sortKey, setSortKey,
     groupBy, setGroupBy, columnBy, setColumnBy,
     showEmptyColumns, toggleEmptyColumns,
+    cardFields, toggleCardField,
     taskActions, handleRefresh, isRefreshing,
-    agentTeamMap,
+    agentTeamMap, agentConfigMap,
   } = state;
+
+  const cardSettingsCtx = useMemo<CardSettingsCtx>(
+    () => ({ fields: cardFields, agentConfigMap }),
+    [cardFields, agentConfigMap],
+  );
 
   if (loading) {
     return (
@@ -855,6 +980,7 @@ export function TasksPage() {
 
   return (
     <TaskActionsProvider actions={taskActions}>
+      <CardSettingsContext value={cardSettingsCtx}>
       <div className="flex flex-col flex-1 min-h-0 gap-3">
         {/* Toolbar */}
         <div className="flex flex-wrap items-center gap-2 lg:gap-3 shrink-0">
@@ -999,6 +1125,9 @@ export function TasksPage() {
             </>
           )}
 
+          {/* Card field settings */}
+          <CardFieldSettings fields={cardFields} onToggle={toggleCardField} />
+
           {/* View toggle */}
           <div className="flex items-center rounded-md border border-border/50">
             <Button
@@ -1114,6 +1243,7 @@ export function TasksPage() {
           />
         )}
       </div>
+      </CardSettingsContext>
     </TaskActionsProvider>
   );
 }

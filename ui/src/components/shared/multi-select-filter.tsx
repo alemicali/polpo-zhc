@@ -5,7 +5,6 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Check, Filter } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -77,7 +76,7 @@ export function MultiSelectFilter({
         </Button>
       </PopoverTrigger>
       <PopoverContent className={cn(popoverClassName, "p-2")} align={align}>
-        <ScrollArea className="max-h-64">
+        <div className="max-h-64 overflow-y-auto">
           <div className="space-y-1">
             {isLoading ? (
               <div className="space-y-2 py-1">
@@ -124,7 +123,7 @@ export function MultiSelectFilter({
               })
             )}
           </div>
-        </ScrollArea>
+        </div>
         {count > 0 && (
           <Button
             variant="ghost"

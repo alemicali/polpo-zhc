@@ -25,6 +25,43 @@ export type ColumnByKey = "status" | "mission" | "team" | "agent";
 export type TimeField = "createdAt" | "updatedAt";
 export type TimeRange = "1h" | "6h" | "24h" | "7d" | "30d" | "custom";
 
+/** Toggleable fields on task cards. */
+export interface CardFieldVisibility {
+  avatar: boolean;
+  identityName: boolean;
+  agentId: boolean;
+  mission: boolean;
+  time: boolean;
+  score: boolean;
+  retries: boolean;
+  deps: boolean;
+  expectations: boolean;
+  phase: boolean;
+}
+
+const DEFAULT_CARD_FIELDS: CardFieldVisibility = {
+  avatar: true,
+  identityName: true,
+  agentId: true,
+  mission: true,
+  time: true,
+  score: true,
+  retries: false,
+  deps: true,
+  expectations: false,
+  phase: true,
+};
+
+const CARD_FIELDS_KEY = "polpo-tasks-card-fields";
+
+function loadCardFields(): CardFieldVisibility {
+  try {
+    const raw = localStorage.getItem(CARD_FIELDS_KEY);
+    if (raw) return { ...DEFAULT_CARD_FIELDS, ...JSON.parse(raw) };
+  } catch { /* ignore */ }
+  return { ...DEFAULT_CARD_FIELDS };
+}
+
 export interface TimeFilterState {
   field: TimeField;
   range: TimeRange;
@@ -111,7 +148,7 @@ export function useTasksPageState() {
   const { processes } = useProcesses();
   const { client } = usePolpo();
   const { missions } = useMissions();
-  const { teams, isLoading: teamsLoading } = useAgents();
+  const { agents, teams, isLoading: teamsLoading } = useAgents();
 
   // ── Filter state ──
   const [search, setSearch] = useState("");
@@ -143,6 +180,7 @@ export function useTasksPageState() {
   const [showEmptyColumns, setShowEmptyColumnsState] = useState(() => {
     return localStorage.getItem("polpo-tasks-show-empty-cols") === "true";
   });
+  const [cardFields, setCardFieldsState] = useState<CardFieldVisibility>(loadCardFields);
 
   // ── Persisted setters ──
   const setViewMode = useCallback((mode: ViewMode) => {
@@ -169,6 +207,14 @@ export function useTasksPageState() {
     setShowEmptyColumnsState((prev) => {
       const next = !prev;
       localStorage.setItem("polpo-tasks-show-empty-cols", String(next));
+      return next;
+    });
+  }, []);
+
+  const toggleCardField = useCallback((field: keyof CardFieldVisibility) => {
+    setCardFieldsState((prev) => {
+      const next = { ...prev, [field]: !prev[field] };
+      localStorage.setItem(CARD_FIELDS_KEY, JSON.stringify(next));
       return next;
     });
   }, []);
@@ -208,6 +254,13 @@ export function useTasksPageState() {
     }
     return m;
   }, [teams]);
+
+  /** Lookup map: agent name → AgentConfig (for avatar, identity, etc.) */
+  const agentConfigMap = useMemo(() => {
+    const m: Record<string, (typeof agents)[number]> = {};
+    for (const a of agents) m[a.name] = a;
+    return m;
+  }, [agents]);
 
   const filtered = useMemo(() => {
     const result = tasks.filter((t) => {
@@ -340,6 +393,8 @@ export function useTasksPageState() {
     setColumnBy,
     showEmptyColumns,
     toggleEmptyColumns,
+    cardFields,
+    toggleCardField,
 
     // Actions
     taskActions,
@@ -348,5 +403,6 @@ export function useTasksPageState() {
 
     // Derived
     agentTeamMap,
+    agentConfigMap,
   } as const;
 }
