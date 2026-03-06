@@ -40,7 +40,7 @@ Tasks pass when `globalScore >= threshold` (default: 3.0).
 
 ## Multi-Judge Consensus
 
-Each of the 3 reviewer agents independently reads code, runs tools, and submits a structured review with per-dimension scores. Polpo merges results using **median scoring** — entries that deviate more than 1.5 from the median are excluded as outliers. At least 2 of 3 reviewers must succeed; if only 1 succeeds, its scores are used directly.
+Each of the 3 reviewer agents independently analyzes the agent's work and submits a structured review with per-dimension scores. For file-based tasks, reviewers explore the codebase with tools; for output-based tasks (APIs, emails, etc.), reviewers assess the execution timeline and outcomes directly. Polpo merges results using **median scoring** — entries that deviate more than 1.5 from the median are excluded as outliers. At least 2 of 3 reviewers must succeed; if only 1 succeeds, its scores are used directly.
 
 Each reviewer produces chain-of-thought reasoning per dimension:
 

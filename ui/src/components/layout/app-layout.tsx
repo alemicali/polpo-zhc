@@ -22,7 +22,7 @@ export function AppLayout() {
         </div>
       </div>
       <BottomNav />
-      {/* Root-level chat navigation effects (go_to_file, open_file, navigate_to) */}
+      {/* Root-level chat navigation effects (open_file, navigate_to, open_tab) */}
       <ChatNavigationEffects />
     </div>
   );

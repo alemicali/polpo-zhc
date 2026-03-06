@@ -3,7 +3,7 @@ title: "Review"
 description: "Multi-judge G-Eval system, expectations, expectation correction, and retry flow"
 ---
 
-When an agent finishes a task, Polpo reviews the work automatically. Three independent G-Eval reviewer agents run in parallel, each exploring the agent's output with tools (file reads, grep, glob) and scoring it across multiple dimensions. Their scores are merged via **median consensus** — outliers are filtered, and the final score reflects agreement between reviewers.
+When an agent finishes a task, Polpo reviews the work automatically. Three independent G-Eval reviewer agents run in parallel, scoring the agent's work across multiple dimensions. For tasks that produce file changes, reviewers explore the codebase with tools (file reads, grep, glob). For tasks that work via external tools, APIs, or text output (e.g. email drafts, web requests), reviewers analyze the agent's execution timeline, tool usage, and registered outcomes directly — no filesystem exploration needed. Scores are merged via **median consensus** — outliers are filtered, and the final score reflects agreement between reviewers.
 
 A separate **expectation judge** acts as a meta-judge: when a task fails, Polpo first checks whether the expectations themselves were wrong (bad test command, wrong file path, threshold too strict) before blaming the agent.
 
@@ -13,7 +13,7 @@ A separate **expectation judge** acts as a meta-judge: when a task fails, Polpo 
 
 The review pipeline runs in order:
 
-1. **Collect context** — gather task description, expectations, and agent output
+1. **Collect context** — gather task description, expectations, agent output, stderr, execution timeline (from JSONL transcript logs), tool usage stats, and registered outcomes
 2. **File existence checks** — verify required files exist
 3. **Test/script execution** — run test commands and validation scripts
 4. **Diff analysis** — analyze files created and edited by the agent
@@ -124,13 +124,18 @@ Task completes → Run expectations in order:
 
 Each of the 3 independent reviewer agents follows a two-phase process:
 
-### Phase 1 — Exploration
+### Phase 1 — Evidence Gathering
 
-The reviewer freely explores the codebase using `read_file`, `glob`, and `grep` tools (up to 20 turns). It builds a detailed analysis for each evaluation dimension, noting specific `file:line` references as evidence. No scoring happens in this phase — the reviewer just investigates.
+Polpo determines the review mode based on whether the agent produced file changes:
+
+- **File-based tasks**: The reviewer explores the codebase using `read_file`, `glob`, and `grep` tools (up to 20 turns), building a detailed analysis with specific `file:line` evidence.
+- **Output-based tasks** (no files created/edited): The reviewer analyzes the execution timeline, agent output, stderr, tool call results, and registered outcomes that are provided inline — no filesystem exploration is needed.
+
+In both cases, the reviewer builds a detailed analysis for each evaluation dimension. No scoring happens in this phase.
 
 ### Phase 2 — Scoring
 
-A separate LLM call receives the full Phase 1 analysis and must produce structured scores by calling the `submit_review` tool. Polpo uses up to 5 escalating strategies to extract structured scores (forced tool choice → JSON schema → prompt-based → forceful → raw JSON), ensuring reliability across different model providers.
+A separate LLM call receives the full Phase 1 analysis and must produce structured scores by calling the `submit_review` tool. Polpo uses 3 scoring strategies as fallback (forced tool choice → prompt-based → raw JSON), and validates all output with Zod schemas for type safety and coercion.
 
 ### Reviewer Trace Persistence
 
@@ -154,6 +159,9 @@ When the review fails, the feedback includes:
 
 - **Which expectations failed** and why
 - **Per-dimension scores** with reasoning
+- **Execution timeline** — what the agent did step-by-step (tool calls, outputs, errors)
+- **Agent stderr** — errors and warnings from execution
+- **Registered outcomes** — explicit deliverables the agent produced
 - **Specific suggestions** for improvement
 - **Original task description** (preserved across retries)
 

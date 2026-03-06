@@ -25,6 +25,7 @@ import { resolve, relative } from "node:path";
 import { Type } from "@sinclair/typebox";
 import type { TaskExpectation, EvalDimension, DimensionScore, CheckResult, ReviewContext, ReviewerMessage } from "../core/types.js";
 import { DEFAULT_DIMENSIONS, buildRubricSection, computeWeightedScore, computeMedianScores } from "./scoring.js";
+import { validateReviewPayload, REVIEW_JSON_SCHEMA, type ValidatedReviewPayload } from "./schemas.js";
 import { withRetry } from "../llm/retry.js";
 import { resolveModel, resolveApiKeyAsync, buildStreamOpts } from "../llm/pi-client.js";
 import type { ReasoningLevel } from "../core/types.js";
@@ -338,42 +339,7 @@ RULES:
       .filter((c): c is { type: "text"; text: string } => c.type === "text")
       .map(b => b.text).join("\n");
 
-  // Detect provider API type for strategy selection
-  const isOpenAI = m.api === "openai-completions" || m.api === "openai-responses";
-
-  // ── JSON Schema for structured output (OpenAI response_format) ──
-  // pi-ai doesn't natively support response_format, but the onPayload callback
-  // lets us mutate the request params before they're sent to the API.
-  const reviewJsonSchema = {
-    type: "json_schema" as const,
-    json_schema: {
-      name: "review_scores",
-      strict: true,
-      schema: {
-        type: "object",
-        properties: {
-          scores: {
-            type: "array",
-            items: {
-              type: "object",
-              properties: {
-                dimension: { type: "string", description: "Dimension name" },
-                score: { type: "number", description: "Score 1-5" },
-                reasoning: { type: "string", description: "Brief reasoning with file:line evidence" },
-              },
-              required: ["dimension", "score", "reasoning"],
-              additionalProperties: false,
-            },
-          },
-          summary: { type: "string", description: "Overall review summary" },
-        },
-        required: ["scores", "summary"],
-        additionalProperties: false,
-      },
-    },
-  };
-
-  // Attempt 1: Force toolChoice (works on Anthropic, OpenAI completions, Bedrock)
+  // Strategy 1: Force toolChoice (works on Anthropic, OpenAI completions, Bedrock)
   onProgress?.("Scoring with forced tool choice...");
   try {
     const response = await complete(m, context, {
@@ -384,63 +350,23 @@ RULES:
 
     const payload = extractSubmitReview(response);
     if (payload) return { payload, attemptErrors };
-    attemptErrors.push(`Attempt 1 (toolChoice): tool call received but extraction failed. Response types: ${response.content.map(c => c.type).join(", ")}`);
+
+    // toolChoice worked but extraction/validation failed — try text fallback
+    const fallbackText = extractText(response);
+    const fallback = tryParseReviewJSON(fallbackText);
+    if (fallback) return { payload: fallback, attemptErrors };
+
+    attemptErrors.push(`Strategy 1 (toolChoice): tool call received but Zod validation failed. Response types: ${response.content.map(c => c.type).join(", ")}`);
   } catch (err) {
-    attemptErrors.push(`Attempt 1 (toolChoice): ${err instanceof Error ? err.message : String(err)}`);
+    attemptErrors.push(`Strategy 1 (toolChoice): ${err instanceof Error ? err.message : String(err)}`);
   }
 
-  // Attempt 2: Structured JSON output via response_format (OpenAI only)
-  // For OpenAI providers, use the onPayload hack to inject response_format.
-  // For others, fall through to prompt-based attempt.
-  if (isOpenAI) {
-    onProgress?.("Scoring with OpenAI structured output (json_schema)...");
-    try {
-      const jsonMessages: Message[] = [
-        {
-          role: "user",
-          content: `Score these dimensions based on the code analysis below.
-
-ANALYSIS:
-${analysis.slice(0, 12000)}
-
-DIMENSIONS AND RUBRICS:
-${rubricSection}
-
-DIMENSIONS TO SCORE: ${dimNames}
-
-Score each dimension 1-5. Reference specific file:line evidence in your reasoning.
-Return a JSON object with "scores" array and "summary" string.`,
-          timestamp: Date.now(),
-        },
-      ];
-      const response = await complete(m, {
-        systemPrompt: "You are a code review scorer. Return structured JSON scores.",
-        messages: jsonMessages,
-        tools: [],
-      }, {
-        apiKey,
-        ...(reasoningVal ? { reasoning: reasoningVal } : {}),
-        // Inject response_format into the API request via onPayload mutation
-        onPayload: (payload: any) => {
-          payload.response_format = reviewJsonSchema;
-        },
-      } as any);
-
-      const fullText = extractText(response);
-      const parsed = tryParseReviewJSON(fullText);
-      if (parsed) return { payload: parsed, attemptErrors };
-      attemptErrors.push(`Attempt 2 (json_schema): structured output parse failed. Text preview: ${fullText.slice(0, 200)}`);
-    } catch (err) {
-      attemptErrors.push(`Attempt 2 (json_schema): ${err instanceof Error ? err.message : String(err)}`);
-    }
-  }
-
-  // Attempt 3: Strong prompting without toolChoice (cross-provider)
+  // Strategy 2: Strong prompting without toolChoice (cross-provider fallback)
   onProgress?.("Scoring with prompt-based enforcement...");
   try {
     const response = await completeSimple(m, context, buildStreamOpts(apiKey, reasoning, m.maxTokens));
 
-    // Check for tool call
+    // Check for tool call first
     const payload = extractSubmitReview(response);
     if (payload) return { payload, attemptErrors };
 
@@ -448,42 +374,12 @@ Return a JSON object with "scores" array and "summary" string.`,
     const fullText = extractText(response);
     const parsed = tryParseReviewJSON(fullText);
     if (parsed) return { payload: parsed, attemptErrors };
-    attemptErrors.push(`Attempt 3 (prompt): no tool call, text fallback failed. Response types: ${response.content.map(c => c.type).join(", ")}. Text length: ${fullText.length}`);
+    attemptErrors.push(`Strategy 2 (prompt): no tool call, text fallback failed. Response types: ${response.content.map(c => c.type).join(", ")}. Text length: ${fullText.length}`);
   } catch (err) {
-    attemptErrors.push(`Attempt 3 (prompt): ${err instanceof Error ? err.message : String(err)}`);
+    attemptErrors.push(`Strategy 2 (prompt): ${err instanceof Error ? err.message : String(err)}`);
   }
 
-  // Attempt 4: Minimal forceful prompt — fresh context, tools available
-  onProgress?.("Final scoring attempt (forceful)...");
-  try {
-    const forcefulMessages: Message[] = [
-      {
-        role: "user",
-        content: `You MUST call the submit_review tool NOW with scores for these dimensions: ${dimNames}.
-Based on this analysis: ${analysis.slice(0, 6000)}
-
-Call submit_review immediately. No text output.`,
-        timestamp: Date.now(),
-      },
-    ];
-    const response = await completeSimple(m, {
-      systemPrompt: "Call submit_review immediately with the scores. No other output.",
-      messages: forcefulMessages,
-      tools: [submitReviewTool],
-    }, buildStreamOpts(apiKey, reasoning, m.maxTokens));
-
-    const payload = extractSubmitReview(response);
-    if (payload) return { payload, attemptErrors };
-
-    const fullText = extractText(response);
-    const parsed = tryParseReviewJSON(fullText);
-    if (parsed) return { payload: parsed, attemptErrors };
-    attemptErrors.push(`Attempt 4 (forceful): no tool call, text fallback failed. Response types: ${response.content.map(c => c.type).join(", ")}. Text length: ${fullText.length}`);
-  } catch (err) {
-    attemptErrors.push(`Attempt 4 (forceful): ${err instanceof Error ? err.message : String(err)}`);
-  }
-
-  // Attempt 5: Pure JSON output — no tools, no schema, just raw JSON request
+  // Strategy 3: Pure JSON output — no tools, just raw JSON request
   onProgress?.("Fallback: requesting raw JSON scores...");
   try {
     const jsonMessages: Message[] = [
@@ -510,30 +406,30 @@ Return this exact JSON structure (nothing else):
     const fullText = extractText(response);
     const parsed = tryParseReviewJSON(fullText);
     if (parsed) return { payload: parsed, attemptErrors };
-    attemptErrors.push(`Attempt 5 (raw JSON): parse failed. Text preview: ${fullText.slice(0, 200)}`);
+    attemptErrors.push(`Strategy 3 (raw JSON): parse failed. Text preview: ${fullText.slice(0, 200)}`);
   } catch (err) {
-    attemptErrors.push(`Attempt 5 (raw JSON): ${err instanceof Error ? err.message : String(err)}`);
+    attemptErrors.push(`Strategy 3 (raw JSON): ${err instanceof Error ? err.message : String(err)}`);
   }
 
-  // All attempts failed — report details
-  onProgress?.(`All scoring attempts failed (provider: ${m.provider}, api: ${m.api}):\n${attemptErrors.join("\n")}`);
+  // All strategies failed — report details
+  onProgress?.(`All scoring strategies failed (provider: ${m.provider}, api: ${m.api}):\n${attemptErrors.join("\n")}`);
   return { payload: null, attemptErrors };
 }
 
-/** Extract ReviewPayload from a submit_review tool call in the response. */
+/** Extract ReviewPayload from a submit_review tool call in the response, validated with Zod. */
 function extractSubmitReview(response: AssistantMessage): ReviewPayload | null {
   for (const block of response.content) {
     if (block.type === "toolCall" && block.name === "submit_review") {
-      const args = block.arguments as Record<string, any>;
-      if (args?.scores && Array.isArray(args.scores) && args.scores.length > 0) {
-        return args as ReviewPayload;
+      const result = validateReviewPayload(block.arguments);
+      if (result.success) {
+        return result.data as ReviewPayload;
       }
     }
   }
   return null;
 }
 
-/** Try to extract a ReviewPayload from free-text JSON output. */
+/** Try to extract a ReviewPayload from free-text JSON output, validated with Zod. */
 function tryParseReviewJSON(output: string): ReviewPayload | null {
   if (!output || !output.trim()) return null;
   let text = output.trim();
@@ -552,24 +448,12 @@ function tryParseReviewJSON(output: string): ReviewPayload | null {
   jsonStr = jsonStr.replace(/\/\/[^\n]*/g, "");                          // single-line comments
   jsonStr = jsonStr.replace(/\/\*[\s\S]*?\*\//g, "");                   // block comments
 
-  // Try parsing as-is first
+  // Try parsing and validating with Zod
   const tryParse = (s: string): ReviewPayload | null => {
     try {
       const parsed = JSON.parse(s);
-      if (parsed.scores && Array.isArray(parsed.scores) && parsed.scores.length > 0) {
-        // Ensure each score has required fields, fill defaults
-        const validScores = parsed.scores.filter(
-          (s: any) => s && typeof s.dimension === "string" && typeof s.score === "number",
-        ).map((s: any) => ({
-          dimension: s.dimension,
-          score: Math.max(1, Math.min(5, Math.round(s.score))),  // clamp 1-5
-          reasoning: s.reasoning || s.reason || s.explanation || "(no reasoning provided)",
-          ...(s.evidence ? { evidence: s.evidence } : {}),
-        }));
-        if (validScores.length > 0) {
-          return { scores: validScores, summary: parsed.summary || "(no summary)" };
-        }
-      }
+      const result = validateReviewPayload(parsed);
+      if (result.success) return result.data as ReviewPayload;
     } catch { /* fall through */ }
     return null;
   };
@@ -579,7 +463,6 @@ function tryParseReviewJSON(output: string): ReviewPayload | null {
   if (direct) return direct;
 
   // Attempt 2: replace single quotes with double quotes (common LLM mistake)
-  // Only do this if there are no double quotes in the string (to avoid breaking valid JSON)
   if (!jsonStr.includes('"') && jsonStr.includes("'")) {
     const doubleQuoted = jsonStr.replace(/'/g, '"');
     const sq = tryParse(doubleQuoted);
@@ -599,11 +482,48 @@ async function runSingleReview(
   model: string | undefined,
   onProgress?: (msg: string) => void,
   reasoning?: ReasoningLevel,
+  skipExploration?: boolean,
 ): Promise<ReviewPayload | null> {
-  // Phase 1: Explore
-  onProgress?.("Phase 1: Exploring codebase...");
-  const { analysis, filesRead, messages: explorationMessages } = await runExploration(explorationPrompt, cwd, model, onProgress, reasoning);
-  onProgress?.(`Exploration complete — read ${filesRead.length} files, ${analysis.length} chars of analysis.`);
+  let analysis: string;
+  let filesRead: string[] = [];
+  let explorationMessages: ReviewerMessage[] = [];
+
+  if (skipExploration) {
+    // Output-based review: the prompt already contains all the evidence.
+    // Run a single LLM call to produce the analysis from the provided context.
+    onProgress?.("Analyzing execution evidence (no file exploration needed)...");
+    const m = resolveModel(model);
+    const apiKey = await resolveApiKeyAsync(m.provider as string);
+    const opts = buildStreamOpts(apiKey, reasoning, m.maxTokens);
+
+    const messages: Message[] = [
+      { role: "user", content: explorationPrompt, timestamp: Date.now() },
+    ];
+
+    const response = await completeSimple(m, {
+      systemPrompt: "You are a thorough reviewer. Analyze the provided execution evidence and write a detailed assessment for each evaluation dimension. Do NOT attempt to output scores as text — you will be given a dedicated scoring step after your analysis.",
+      messages,
+      tools: [], // No tools — all evidence is in the prompt
+    }, opts);
+
+    // Extract analysis text
+    const analysisBlocks: string[] = [];
+    for (const block of response.content) {
+      if (block.type === "text" && block.text.trim()) {
+        analysisBlocks.push(block.text);
+      }
+    }
+    analysis = analysisBlocks.join("\n\n") || "The reviewer analyzed the execution evidence but produced no written analysis.";
+    explorationMessages = serializeMessages([...messages, response]);
+  } else {
+    // File-based review: explore the codebase with tools
+    onProgress?.("Phase 1: Exploring codebase...");
+    const result = await runExploration(explorationPrompt, cwd, model, onProgress, reasoning);
+    analysis = result.analysis;
+    filesRead = result.filesRead;
+    explorationMessages = result.messages;
+    onProgress?.(`Exploration complete — read ${filesRead.length} files, ${analysis.length} chars of analysis.`);
+  }
 
   // Phase 2: Score
   onProgress?.("Phase 2: Producing structured scores...");
@@ -631,11 +551,12 @@ async function runSingleReviewWithRetry(
   model: string | undefined,
   onProgress?: (msg: string) => void,
   reasoning?: ReasoningLevel,
+  skipExploration?: boolean,
 ): Promise<ReviewPayload | null> {
   try {
     return await withRetry(
       async () => {
-        const result = await runSingleReview(explorationPrompt, rubricSection, dimNames, cwd, model, onProgress, reasoning);
+        const result = await runSingleReview(explorationPrompt, rubricSection, dimNames, cwd, model, onProgress, reasoning, skipExploration);
         if (!result) throw new Error("Reviewer produced no structured result after Phase 1 + Phase 2");
         return result;
       },
@@ -647,7 +568,61 @@ async function runSingleReviewWithRetry(
   }
 }
 
+// ── Context Classification ─────────────────────────────────────────────
+
+/**
+ * Determine if this review involves file changes that need filesystem exploration,
+ * or if the execution evidence (stdout, transcript, outcomes) is sufficient.
+ */
+function hasFileChanges(context?: ReviewContext): boolean {
+  if (!context) return true; // conservative: explore when unknown
+  return (context.filesCreated?.length ?? 0) > 0 || (context.filesEdited?.length ?? 0) > 0;
+}
+
 // ── Prompt Builder (Phase 1 only — no submit_review instructions) ──────
+
+function buildContextSection(context?: ReviewContext): string {
+  if (!context) return "";
+
+  const parts: string[] = [
+    `TASK CONTEXT:`,
+    `Title: ${context.taskTitle}`,
+    `Description: ${context.taskDescription}`,
+  ];
+
+  if (context.exitCode !== undefined) parts.push(`Exit code: ${context.exitCode}`);
+  if (context.duration !== undefined) parts.push(`Duration: ${Math.round(context.duration / 1000)}s`);
+  if (context.toolCalls !== undefined) parts.push(`Total tool calls: ${context.toolCalls}`);
+  if (context.toolsSummary) parts.push(`Tools used: ${context.toolsSummary}`);
+
+  if (context.filesCreated?.length) parts.push(`\nFiles created by agent: ${context.filesCreated.join(", ")}`);
+  if (context.filesEdited?.length) parts.push(`Files edited by agent: ${context.filesEdited.join(", ")}`);
+
+  if (context.outcomes?.length) {
+    parts.push(`\nREGISTERED OUTCOMES:`);
+    for (const o of context.outcomes) {
+      let desc = `- [${o.type}] ${o.label}`;
+      if (o.path) desc += ` (${o.path})`;
+      if (o.url) desc += ` → ${o.url}`;
+      if (o.text) desc += `: ${o.text.slice(0, 300)}${o.text.length > 300 ? "..." : ""}`;
+      parts.push(desc);
+    }
+  }
+
+  if (context.executionSummary) {
+    parts.push(`\n${context.executionSummary}`);
+  }
+
+  if (context.agentOutput) {
+    parts.push(`\nAGENT FINAL OUTPUT:\n${context.agentOutput.slice(-3000)}`);
+  }
+
+  if (context.agentStderr) {
+    parts.push(`\nAGENT STDERR:\n${context.agentStderr.slice(-1000)}`);
+  }
+
+  return parts.join("\n");
+}
 
 function buildExplorationPrompt(
   criteria: string,
@@ -655,35 +630,71 @@ function buildExplorationPrompt(
   dimNames: string,
   context?: ReviewContext,
 ): string {
-  const contextSection = context ? `
-TASK CONTEXT:
-Title: ${context.taskTitle}
-Description: ${context.taskDescription}
-${context.filesCreated?.length ? `\nFiles created by agent: ${context.filesCreated.join(", ")}` : ""}${context.filesEdited?.length ? `\nFiles edited by agent: ${context.filesEdited.join(", ")}` : ""}
-${context.agentOutput ? `\nAGENT OUTPUT (last 2000 chars):\n${context.agentOutput.slice(-2000)}` : ""}
-` : "";
+  const contextSection = buildContextSection(context);
 
   return `You are a senior code reviewer performing a G-Eval evaluation.
 Your task is to EXPLORE the codebase and build a detailed analysis for each evaluation dimension.
 
 ACCEPTANCE CRITERIA:
 ${criteria}
+
 ${contextSection}
+
 EVALUATION DIMENSIONS:
 ${rubricSection}
 
 INSTRUCTIONS:
 1. Use read_file, glob, and grep tools to explore the codebase and find relevant files.
-2. Read the code carefully and understand what it does relative to the acceptance criteria.
-3. For EACH dimension (${dimNames}), write your analysis noting:
+2. Start by examining the files listed above (created/edited by the agent) — they are the primary evidence.
+3. Read the code carefully and understand what it does relative to the acceptance criteria.
+4. For EACH dimension (${dimNames}), write your analysis noting:
    - Specific file:line references as evidence
    - How the code performs on this dimension
    - What score (1-5) you would give based on the rubric
-4. Be thorough — read all relevant files before concluding.
+5. Be thorough — read all relevant files before concluding.
 
 OUTPUT:
 Write your analysis as free text. Include specific file:line references for each dimension.
 You will be asked to submit structured scores in a separate step after exploration.`;
+}
+
+/**
+ * Build a prompt for output-based review (no file exploration needed).
+ * Used when the agent worked via external tools, APIs, or text output only.
+ */
+function buildOutputBasedReviewPrompt(
+  criteria: string,
+  rubricSection: string,
+  dimNames: string,
+  context: ReviewContext,
+): string {
+  const contextSection = buildContextSection(context);
+
+  return `You are a senior reviewer performing a G-Eval evaluation.
+The agent completed a task that did NOT produce file changes on disk. Instead, the agent's work
+is evidenced by its execution timeline, tool usage, registered outcomes, and text output below.
+
+ACCEPTANCE CRITERIA:
+${criteria}
+
+${contextSection}
+
+EVALUATION DIMENSIONS:
+${rubricSection}
+
+INSTRUCTIONS:
+1. Carefully review the execution timeline, agent output, and registered outcomes above.
+2. Assess whether the agent correctly completed the task based on the acceptance criteria.
+3. For EACH dimension (${dimNames}), write your analysis noting:
+   - Specific evidence from the execution timeline or agent output
+   - How the agent's work performs on this dimension
+   - What score (1-5) you would give based on the rubric
+4. Note: the agent may have used external tools (email, APIs, web requests, etc.) — the tool call
+   results in the timeline ARE the evidence of work. Do NOT penalize for lack of file changes.
+
+OUTPUT:
+Write your analysis as free text. Reference specific timeline entries or output sections as evidence.
+You will be asked to submit structured scores in a separate step.`;
 }
 
 // ── CheckResult Builder ────────────────────────────────────────────────
@@ -880,18 +891,27 @@ export async function runLLMReview(
 
   const dimNames = dimensions.map((d: EvalDimension) => d.name).join(", ");
   const rubricSection = buildRubricSection(dimensions);
-  const explorationPrompt = buildExplorationPrompt(criteria, rubricSection, dimNames, context);
+
+  // Decide review mode: file-based (with exploration) or output-based (no exploration)
+  const needsExploration = hasFileChanges(context);
+  const skipExploration = !needsExploration;
+
+  const reviewPrompt = needsExploration
+    ? buildExplorationPrompt(criteria, rubricSection, dimNames, context)
+    : buildOutputBasedReviewPrompt(criteria, rubricSection, dimNames, context!);
+
   // Judge reasoning: explicit param > POLPO_JUDGE_REASONING env var > undefined
   const judgeReasoning = reasoning ?? (process.env.POLPO_JUDGE_REASONING as ReasoningLevel | undefined);
 
-  onProgress?.("Starting 3 independent review agents (2-phase: explore → score)...");
+  const modeLabel = skipExploration ? "output-based" : "file-exploration";
+  onProgress?.(`Starting 3 independent review agents (${modeLabel} → score)...`);
 
   // Stagger reviewers by 1s to reduce rate-limit collisions on same provider
   const delay = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
   const settled = await Promise.allSettled([
-    runSingleReviewWithRetry(explorationPrompt, rubricSection, dimNames, cwd, reviewModel, onProgress, judgeReasoning),
-    delay(1000).then(() => runSingleReviewWithRetry(explorationPrompt, rubricSection, dimNames, cwd, reviewModel, onProgress, judgeReasoning)),
-    delay(2000).then(() => runSingleReviewWithRetry(explorationPrompt, rubricSection, dimNames, cwd, reviewModel, onProgress, judgeReasoning)),
+    runSingleReviewWithRetry(reviewPrompt, rubricSection, dimNames, cwd, reviewModel, onProgress, judgeReasoning, skipExploration),
+    delay(1000).then(() => runSingleReviewWithRetry(reviewPrompt, rubricSection, dimNames, cwd, reviewModel, onProgress, judgeReasoning, skipExploration)),
+    delay(2000).then(() => runSingleReviewWithRetry(reviewPrompt, rubricSection, dimNames, cwd, reviewModel, onProgress, judgeReasoning, skipExploration)),
   ]);
 
   const successfulReviews: ReviewPayload[] = [];
@@ -903,7 +923,7 @@ export async function runLLMReview(
     } else {
       const reason = result.status === "rejected"
         ? (result.reason instanceof Error ? result.reason.message : String(result.reason))
-        : "Reviewer returned null — all scoring strategies failed (toolChoice, json_schema, prompt, forceful, raw JSON)";
+        : "Reviewer returned null — all scoring strategies failed";
       failures.push(reason);
       onProgress?.(`Reviewer ${i + 1}/3 failed: ${reason}`);
     }
@@ -929,6 +949,6 @@ export async function runLLMReview(
     type: "llm_review",
     passed: false,
     message: `Review failed — all evaluators failed to produce structured scores${modelInfo}`,
-    details: `All 3 reviewers failed after 5 scoring strategies (toolChoice → json_schema → prompt → forceful → raw JSON) × 2 retries each.${modelInfo}\n\nThis usually means: (1) the judge model doesn't support tool calling well, (2) API auth/rate-limit errors, or (3) the model can't produce valid JSON.\n\nTry: set POLPO_JUDGE_MODEL to a capable model (e.g. claude-sonnet-4-20250514, gpt-4o), check API keys, or reduce concurrent tasks.${failureDetail}`,
+    details: `All 3 reviewers failed after scoring strategies (toolChoice → prompt → raw JSON) × 2 retries each.${modelInfo}\n\nThis usually means: (1) the judge model doesn't support tool calling well, (2) API auth/rate-limit errors, or (3) the model can't produce valid JSON.\n\nTry: set POLPO_JUDGE_MODEL to a capable model (e.g. claude-sonnet-4-20250514, gpt-4o), check API keys, or reduce concurrent tasks.${failureDetail}`,
   };
 }

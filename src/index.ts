@@ -13,8 +13,9 @@ export { spawnEngine } from "./adapters/engine.js";
 
 // Assessment
 export { assessTask, runCheck, runMetric } from "./assessment/assessor.js";
-export { runLLMReview, computeWeightedScore, buildRubricSection, DEFAULT_DIMENSIONS } from "./assessment/index.js";
+export { runLLMReview, computeWeightedScore, buildRubricSection, DEFAULT_DIMENSIONS, validateReviewPayload, ReviewPayloadSchema, findLogForTask, buildExecutionSummary } from "./assessment/index.js";
 export type { LLMQueryFn } from "./assessment/llm-review.js";
+export type { ValidatedReviewPayload, ExecutionSummaryResult } from "./assessment/index.js";
 
 // Config
 export { parseConfig, loadPolpoConfig, savePolpoConfig, generatePolpoConfigDefault, validateAgents } from "./core/config.js";

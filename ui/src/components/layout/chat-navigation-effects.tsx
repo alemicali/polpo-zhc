@@ -1,6 +1,6 @@
 /**
  * ChatNavigationEffects — root-level component that handles navigation side
- * effects triggered by the chat LLM (go_to_file, open_file, navigate_to).
+ * effects triggered by the chat LLM (open_file, navigate_to, open_tab).
  *
  * These effects are lifted out of ChatPage so they fire regardless of which
  * chat surface is active (full page, sidebar, or even none — the provider

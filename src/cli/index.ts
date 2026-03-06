@@ -422,7 +422,7 @@ program
         if (task.result?.assessment?.scores && task.result.assessment.scores.length > 0) {
           const a = task.result.assessment;
           const scoreBar = a.scores!.map(s => {
-            const stars = "★".repeat(s.score) + "☆".repeat(5 - s.score);
+            const stars = "★".repeat(Math.round(s.score)) + "☆".repeat(5 - Math.round(s.score));
             const color = s.score >= 4 ? chalk.green : s.score >= 3 ? chalk.yellow : chalk.red;
             return `${s.dimension}: ${color(stars)}`;
           }).join("  ");

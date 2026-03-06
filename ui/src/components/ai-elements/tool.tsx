@@ -60,11 +60,11 @@ function extractFilePath(tool: ToolCallInfo): string | undefined {
 /** Friendly labels for client-side interactive tools (preparing state) */
 const INTERACTIVE_LABELS: Record<string, string> = {
   ask_user: "Asking a question…",
-  go_to_file: "Navigating to file…",
   open_file: "Opening file…",
   create_mission: "Creating mission…",
   set_vault_entry: "Saving to vault…",
   navigate_to: "Navigating…",
+  open_tab: "Opening tab…",
 };
 
 /** Convert tool_name to "Tool Name" */

@@ -7,7 +7,7 @@ import { buildFixPrompt, buildRetryPrompt, buildJudgePrompt, type JudgeVerdict, 
 import { looksLikeQuestion, classifyAsQuestion } from "./question-detector.js";
 import { generateAnswer } from "../llm/answer-generator.js";
 import { queryOrchestratorText } from "../llm/query.js";
-// resolveModelSpec no longer needed — queryOrchestratorText handles ModelConfig directly
+import { findLogForTask, buildExecutionSummary } from "../assessment/transcript-parser.js";
 import type { Orchestrator } from "./orchestrator.js";
 
 /**
@@ -16,6 +16,46 @@ import type { Orchestrator } from "./orchestrator.js";
  */
 export class AssessmentOrchestrator {
   constructor(private ctx: OrchestratorContext) {}
+
+  /**
+   * Build a rich ReviewContext from all available data sources:
+   * - RunStore activity (files, tool counts)
+   * - TaskResult (stdout, stderr, exit code, duration)
+   * - JSONL transcript log (execution timeline)
+   * - Task outcomes
+   */
+  private buildReviewContext(taskId: string, task: Task, result: TaskResult): ReviewContext {
+    const run = this.ctx.runStore.getRunByTaskId(taskId);
+    const activity = run?.activity;
+    const outcomes = run?.outcomes ?? task.outcomes;
+
+    // Build execution summary from JSONL transcript log
+    let executionSummary: string | undefined;
+    let toolsSummary: string | undefined;
+    try {
+      const logPath = findLogForTask(this.ctx.polpoDir, taskId, run?.id);
+      if (logPath) {
+        const summaryResult = buildExecutionSummary(logPath);
+        executionSummary = summaryResult.summary;
+        toolsSummary = summaryResult.toolsSummary;
+      }
+    } catch { /* best effort — don't fail assessment if log parsing fails */ }
+
+    return {
+      taskTitle: task.title,
+      taskDescription: task.originalDescription ?? task.description,
+      agentOutput: result.stdout || undefined,
+      agentStderr: result.stderr || undefined,
+      exitCode: result.exitCode,
+      duration: result.duration,
+      filesCreated: activity?.filesCreated,
+      filesEdited: activity?.filesEdited,
+      toolCalls: activity?.toolCalls,
+      toolsSummary: toolsSummary || undefined,
+      executionSummary,
+      outcomes: outcomes?.length ? outcomes : undefined,
+    };
+  }
 
   /**
    * Attempt to transition a task to "done", but first run the before:task:complete
@@ -230,16 +270,8 @@ export class AssessmentOrchestrator {
         }
       };
 
-      // Build review context from RunStore activity
-      const run = this.ctx.runStore.getRunByTaskId(taskId);
-      const activity = run?.activity;
-      const reviewContext: ReviewContext = {
-        taskTitle: task.title,
-        taskDescription: task.originalDescription ?? task.description,
-        agentOutput: result.stdout || undefined,
-        filesCreated: activity?.filesCreated,
-        filesEdited: activity?.filesEdited,
-      };
+      // Build rich review context from RunStore, JSONL transcript, and outcomes
+      const reviewContext = this.buildReviewContext(taskId, task, result);
 
       this.runAssessmentWithRetry(task, this.ctx.agentWorkDir, progressCb, reviewContext, checkProgressCb).then(assessment => {
         setAssessment(result, assessment, "initial");
@@ -406,13 +438,7 @@ export class AssessmentOrchestrator {
 
     try {
       const progressCb = (msg: string) => this.ctx.emitter.emit("assessment:progress", { taskId, message: msg });
-      const reCtx: ReviewContext = {
-        taskTitle: task.title,
-        taskDescription: task.originalDescription ?? task.description,
-        agentOutput: result.stdout || undefined,
-        filesCreated: activity?.filesCreated,
-        filesEdited: activity?.filesEdited,
-      };
+      const reCtx = this.buildReviewContext(taskId, task, result);
       const newAssessment = await this.ctx.assessFn(current, this.ctx.agentWorkDir, progressCb, reCtx, this.ctx.config.settings.reasoning);
       setAssessment(result, newAssessment, "auto-correct");
       this.ctx.registry.updateTask(taskId, { result });
@@ -534,13 +560,7 @@ export class AssessmentOrchestrator {
 
     try {
       const progressCb = (msg: string) => this.ctx.emitter.emit("assessment:progress", { taskId, message: msg });
-      const judgeCtx: ReviewContext = {
-        taskTitle: task.title,
-        taskDescription: task.originalDescription ?? task.description,
-        agentOutput: result.stdout || undefined,
-        filesCreated: activity?.filesCreated,
-        filesEdited: activity?.filesEdited,
-      };
+      const judgeCtx = this.buildReviewContext(taskId, task, result);
       const newAssessment = await this.ctx.assessFn(current, this.ctx.agentWorkDir, progressCb, judgeCtx, this.ctx.config.settings.reasoning);
       setAssessment(result, newAssessment, "judge");
       this.ctx.registry.updateTask(taskId, { result });

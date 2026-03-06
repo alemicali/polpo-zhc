@@ -2,6 +2,7 @@ import type { OrchestratorContext } from "./orchestrator-context.js";
 import type { Task, TaskExpectation, ExpectedOutcome, RetryPolicy, ReviewContext, ScopedNotificationRules } from "./types.js";
 import { setAssessment } from "./types.js";
 import { sanitizeExpectations } from "./schemas.js";
+import { findLogForTask, buildExecutionSummary } from "../assessment/transcript-parser.js";
 
 /**
  * Task CRUD: add, update, retry, reassess, kill, abort, clear.
@@ -136,15 +137,35 @@ export class TaskManager {
     const result = task.result ?? { exitCode: 0, stdout: "", stderr: "", duration: 0 };
     const onProgress = (msg: string) => this.ctx.emitter.emit("assessment:progress", { taskId, message: msg });
 
-    // Build ReviewContext from RunStore (same as initial assessment)
+    // Build rich ReviewContext from RunStore, JSONL transcript, and outcomes
     const run = this.ctx.runStore.getRunByTaskId(taskId);
     const activity = run?.activity;
+    const outcomes = run?.outcomes ?? task.outcomes;
+
+    let executionSummary: string | undefined;
+    let toolsSummary: string | undefined;
+    try {
+      const logPath = findLogForTask(this.ctx.polpoDir, taskId, run?.id);
+      if (logPath) {
+        const summaryResult = buildExecutionSummary(logPath);
+        executionSummary = summaryResult.summary;
+        toolsSummary = summaryResult.toolsSummary;
+      }
+    } catch { /* best effort */ }
+
     const reviewContext: ReviewContext = {
       taskTitle: task.title,
       taskDescription: task.originalDescription ?? task.description,
       agentOutput: result.stdout || undefined,
+      agentStderr: result.stderr || undefined,
+      exitCode: result.exitCode,
+      duration: result.duration,
       filesCreated: activity?.filesCreated,
       filesEdited: activity?.filesEdited,
+      toolCalls: activity?.toolCalls,
+      toolsSummary: toolsSummary || undefined,
+      executionSummary,
+      outcomes: outcomes?.length ? outcomes : undefined,
     };
 
     try {

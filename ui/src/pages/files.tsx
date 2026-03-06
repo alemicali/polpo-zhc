@@ -419,7 +419,7 @@ export function FilesPage() {
     setSelectedEntry(null);
   }, [currentPath, fetchDir]);
 
-  // Auto-select file from ?highlight= param (set by go_to_file tool)
+  // Auto-select file from ?highlight= param (set by navigate_to tool with target="files")
   useEffect(() => {
     if (!highlightParam || entries.length === 0) return;
     // highlight param is the full path — extract the filename

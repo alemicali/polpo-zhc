@@ -411,9 +411,38 @@ export function setAssessment(result: TaskResult, assessment: AssessmentResult, 
 export interface ReviewContext {
   taskTitle: string;
   taskDescription: string;
-  agentOutput?: string;       // stdout truncated to last 2000 chars
+
+  // --- Agent output ---
+  /** Last assistant message from the agent conversation. */
+  agentOutput?: string;
+  /** Agent stderr (errors, warnings). */
+  agentStderr?: string;
+  /** Agent exit code. */
+  exitCode?: number;
+  /** Agent execution duration in ms. */
+  duration?: number;
+
+  // --- File activity ---
   filesCreated?: string[];
   filesEdited?: string[];
+
+  // --- Execution metadata ---
+  /** Total tool calls made by the agent. */
+  toolCalls?: number;
+  /** Summary of tools used (name → count). */
+  toolsSummary?: string;
+
+  // --- Execution transcript ---
+  /**
+   * Structured execution timeline built from the JSONL activity log.
+   * Shows what the agent did step-by-step: tool calls, text messages, outcomes.
+   * This is the primary evidence for reviewing non-file-based tasks.
+   */
+  executionSummary?: string;
+
+  // --- Registered outcomes ---
+  /** Explicit outcomes registered by the agent (files, text, URLs, JSON data). */
+  outcomes?: TaskOutcome[];
 }
 
 // === Ask User (structured clarification questions) ===
