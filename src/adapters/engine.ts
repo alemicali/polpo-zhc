@@ -205,7 +205,7 @@ function describeToolsForAgent(agent: AgentConfig): string {
 /**
  * Build the system prompt for the agent, including loaded skills.
  */
-export function buildSystemPrompt(agent: AgentConfig, cwd: string, polpoDir?: string, outputDir?: string): string {
+export function buildSystemPrompt(agent: AgentConfig, cwd: string, polpoDir?: string, outputDir?: string, allowedPaths?: string[]): string {
   const parts = [
     "You are a coding agent managed by Polpo, an AI agent orchestrator.",
     "Complete your assigned task autonomously. Make reasonable decisions and proceed without asking questions.",
@@ -300,6 +300,18 @@ export function buildSystemPrompt(agent: AgentConfig, cwd: string, polpoDir?: st
       "This directory is pre-created and writable. Other tasks have separate output directories.",
     );
   }
+
+  // Sandbox boundaries — tell the agent exactly where it can read/write.
+  // Without this, agents waste tokens trying /tmp, /home, etc. and hitting sandbox errors.
+  const sandboxDirs = allowedPaths ?? [cwd];
+  parts.push(
+    "",
+    "## File Access Sandbox",
+    `You can ONLY read and write files within these directories:`,
+    ...sandboxDirs.map(p => `- ${p}`),
+    "Any file operation outside these paths will be REJECTED.",
+    "Do NOT use /tmp, /home, or any other directory. Use your working directory or output directory for temporary files.",
+  );
 
   return parts.join("\n");
 }
@@ -452,7 +464,7 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
   const agent = new Agent({
     getApiKey: (provider: string) => resolveApiKeyAsync(provider),
     initialState: {
-      systemPrompt: buildSystemPrompt(agentConfig, cwd, ctx?.polpoDir, outputDir),
+      systemPrompt: buildSystemPrompt(agentConfig, cwd, ctx?.polpoDir, outputDir, effectiveAllowedPaths),
       model,
       thinkingLevel,
       maxTokens: model.maxTokens,

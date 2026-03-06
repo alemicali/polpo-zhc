@@ -210,8 +210,8 @@ export function MentionText({
   }
   const mentionClass =
     variant === "inverted"
-      ? "text-blue-200 dark:text-blue-300 font-semibold"
-      : "text-blue-600 dark:text-blue-400 font-semibold";
+      ? "text-white font-semibold"
+      : "text-blue-700 dark:text-blue-300 font-semibold";
   return (
     <span className={className}>
       {segments.map((seg, i) =>
