@@ -61,12 +61,13 @@ function createMockCtx(overrides: Partial<OrchestratorContext> = {}): Orchestrat
     emitter: new TypedEmitter(),
     registry,
     runStore: new InMemoryRunStore(),
-    memoryStore: { exists: () => false, get: () => "", save: () => {}, append: () => {} },
+    memoryStore: { exists: () => false, get: () => "", save: () => {}, append: () => {}, update: () => true as true | string },
     logStore: { startSession: () => "s", getSessionId: () => "s", append: () => {}, getSessionEntries: () => [], listSessions: () => [], prune: () => 0, close: () => {} },
-    sessionStore: { create: () => "s1", addMessage: () => ({ id: "m1", role: "user" as const, content: "", ts: "" }), getMessages: () => [], getRecentMessages: () => [], listSessions: () => [], getSession: () => undefined, getLatestSession: () => undefined, deleteSession: () => false, prune: () => 0, close: () => {} },
+    sessionStore: { create: () => "s1", addMessage: () => ({ id: "m1", role: "user" as const, content: "", ts: "" }), updateMessage: () => false, getMessages: () => [], getRecentMessages: () => [], listSessions: () => [], getSession: () => undefined, getLatestSession: () => undefined, renameSession: () => false, deleteSession: () => false, prune: () => 0, close: () => {} },
     hooks: new HookRegistry(),
     config: createMinimalConfig(),
     workDir: "/tmp/test",
+    agentWorkDir: "/tmp/test",
     polpoDir: "/tmp/test/.polpo",
     assessFn: vi.fn(),
     ...overrides,
@@ -116,7 +117,7 @@ describe("Checkpoints", () => {
       const missionData = JSON.stringify({
         tasks: [
           { title: "Task A", description: "Do A" },
-          { title: "Task B", description: "Do B" },
+          { title: "Task B", description: "Do B", dependsOn: ["Task A"] },
         ],
         checkpoints: [
           { name: "review-a", afterTasks: ["Task A"], blocksTasks: ["Task B"] },
@@ -143,7 +144,7 @@ describe("Checkpoints", () => {
       const missionData = JSON.stringify({
         tasks: [
           { title: "Task A", description: "Do A" },
-          { title: "Task B", description: "Do B" },
+          { title: "Task B", description: "Do B", dependsOn: ["Task A"] },
         ],
         checkpoints: [
           { name: "review-a", afterTasks: ["Task A"], blocksTasks: ["Task B"] },
@@ -162,7 +163,7 @@ describe("Checkpoints", () => {
       const missionData = JSON.stringify({
         tasks: [
           { title: "Task A", description: "Do A" },
-          { title: "Task B", description: "Do B" },
+          { title: "Task B", description: "Do B", dependsOn: ["Task A"] },
         ],
         checkpoints: [
           { name: "review-a", afterTasks: ["Task A"], blocksTasks: ["Task B"] },
@@ -183,7 +184,7 @@ describe("Checkpoints", () => {
       const missionData = JSON.stringify({
         tasks: [
           { title: "Task A", description: "Do A" },
-          { title: "Task B", description: "Do B" },
+          { title: "Task B", description: "Do B", dependsOn: ["Task A"] },
           { title: "Task C", description: "Do C" },
         ],
         checkpoints: [
@@ -206,7 +207,7 @@ describe("Checkpoints", () => {
       const missionData = JSON.stringify({
         tasks: [
           { title: "Task A", description: "Do A" },
-          { title: "Task B", description: "Do B" },
+          { title: "Task B", description: "Do B", dependsOn: ["Task A"] },
         ],
         checkpoints: [
           { name: "review-a", afterTasks: ["Task A"], blocksTasks: ["Task B"], message: "Review Task A output" },
@@ -233,7 +234,7 @@ describe("Checkpoints", () => {
       const missionData = JSON.stringify({
         tasks: [
           { title: "Task A", description: "Do A" },
-          { title: "Task B", description: "Do B" },
+          { title: "Task B", description: "Do B", dependsOn: ["Task A"] },
         ],
         checkpoints: [
           { name: "review-a", afterTasks: ["Task A"], blocksTasks: ["Task B"] },
@@ -257,7 +258,7 @@ describe("Checkpoints", () => {
       const missionData = JSON.stringify({
         tasks: [
           { title: "Task A", description: "Do A" },
-          { title: "Task B", description: "Do B" },
+          { title: "Task B", description: "Do B", dependsOn: ["Task A"] },
         ],
         checkpoints: [
           { name: "review-a", afterTasks: ["Task A"], blocksTasks: ["Task B"] },
@@ -286,7 +287,7 @@ describe("Checkpoints", () => {
       const missionData = JSON.stringify({
         tasks: [
           { title: "Task A", description: "Do A" },
-          { title: "Task B", description: "Do B" },
+          { title: "Task B", description: "Do B", dependsOn: ["Task A"] },
         ],
         checkpoints: [
           { name: "review-a", afterTasks: ["Task A"], blocksTasks: ["Task B"] },
@@ -314,7 +315,7 @@ describe("Checkpoints", () => {
       const missionData = JSON.stringify({
         tasks: [
           { title: "Task A", description: "Do A" },
-          { title: "Task B", description: "Do B" },
+          { title: "Task B", description: "Do B", dependsOn: ["Task A"] },
         ],
         checkpoints: [
           { name: "review-a", afterTasks: ["Task A"], blocksTasks: ["Task B"] },
@@ -338,7 +339,7 @@ describe("Checkpoints", () => {
       const missionData = JSON.stringify({
         tasks: [
           { title: "Task A", description: "Do A" },
-          { title: "Task B", description: "Do B" },
+          { title: "Task B", description: "Do B", dependsOn: ["Task A"] },
         ],
         checkpoints: [
           { name: "review-a", afterTasks: ["Task A"], blocksTasks: ["Task B"] },
@@ -365,7 +366,7 @@ describe("Checkpoints", () => {
       const missionData = JSON.stringify({
         tasks: [
           { title: "Task A", description: "Do A" },
-          { title: "Task B", description: "Do B" },
+          { title: "Task B", description: "Do B", dependsOn: ["Task A"] },
         ],
         checkpoints: [
           { name: "review-a", afterTasks: ["Task A"], blocksTasks: ["Task B"] },
@@ -394,7 +395,7 @@ describe("Checkpoints", () => {
       const missionData = JSON.stringify({
         tasks: [
           { title: "Task A", description: "Do A" },
-          { title: "Task B", description: "Do B" },
+          { title: "Task B", description: "Do B", dependsOn: ["Task A"] },
         ],
         checkpoints: [
           { name: "review-a", afterTasks: ["Task A"], blocksTasks: ["Task B"] },
@@ -416,7 +417,7 @@ describe("Checkpoints", () => {
       const missionData = JSON.stringify({
         tasks: [
           { title: "Task A", description: "Do A" },
-          { title: "Task B", description: "Do B" },
+          { title: "Task B", description: "Do B", dependsOn: ["Task A"] },
         ],
         checkpoints: [
           { name: "review-a", afterTasks: ["Task A"], blocksTasks: ["Task B"] },
@@ -439,8 +440,8 @@ describe("Checkpoints", () => {
       const missionData = JSON.stringify({
         tasks: [
           { title: "Task A", description: "Do A" },
-          { title: "Task B", description: "Do B" },
-          { title: "Task C", description: "Do C" },
+          { title: "Task B", description: "Do B", dependsOn: ["Task A"] },
+          { title: "Task C", description: "Do C", dependsOn: ["Task B"] },
         ],
         checkpoints: [
           { name: "cp-1", afterTasks: ["Task A"], blocksTasks: ["Task B"] },
@@ -483,7 +484,7 @@ describe("Checkpoints", () => {
       const missionData = JSON.stringify({
         tasks: [
           { title: "Task A", description: "Do A" },
-          { title: "Task B", description: "Do B" },
+          { title: "Task B", description: "Do B", dependsOn: ["Task A"] },
         ],
         checkpoints: [
           { name: "review-a", afterTasks: ["Task A"], blocksTasks: ["Task B"] },
@@ -506,7 +507,7 @@ describe("Checkpoints", () => {
       const missionData = JSON.stringify({
         tasks: [
           { title: "Task A", description: "Do A" },
-          { title: "Task B", description: "Do B" },
+          { title: "Task B", description: "Do B", dependsOn: ["Task A"] },
         ],
         checkpoints: [
           { name: "review-a", afterTasks: ["Task A"], blocksTasks: ["Task B"] },
@@ -534,7 +535,7 @@ describe("Checkpoints", () => {
       const missionData = JSON.stringify({
         tasks: [
           { title: "Task A", description: "Do A" },
-          { title: "Task B", description: "Do B" },
+          { title: "Task B", description: "Do B", dependsOn: ["Task A"] },
         ],
         checkpoints: [
           { name: "review-a", afterTasks: ["Task A"], blocksTasks: ["Task B"] },
@@ -558,7 +559,7 @@ describe("Checkpoints", () => {
       const missionData = JSON.stringify({
         tasks: [
           { title: "Task A", description: "Do A" },
-          { title: "Task B", description: "Do B" },
+          { title: "Task B", description: "Do B", dependsOn: ["Task A"] },
         ],
         checkpoints: [
           { name: "review-a", afterTasks: ["Task A"], blocksTasks: ["Task B"] },
@@ -594,7 +595,7 @@ describe("Checkpoints", () => {
       const missionData = JSON.stringify({
         tasks: [
           { title: "Task A", description: "Do A" },
-          { title: "Task B", description: "Do B" },
+          { title: "Task B", description: "Do B", dependsOn: ["Task A"] },
         ],
         checkpoints: [
           { name: "review-a", afterTasks: ["Task A"], blocksTasks: ["Task B"], notifyChannels: ["slack-alerts"] },
@@ -622,7 +623,7 @@ describe("Checkpoints", () => {
       const missionData = JSON.stringify({
         tasks: [
           { title: "Task A", description: "Do A" },
-          { title: "Task B", description: "Do B" },
+          { title: "Task B", description: "Do B", dependsOn: ["Task A"] },
         ],
         checkpoints: [
           { name: "review-a", afterTasks: ["Task A"], blocksTasks: ["Task B"] },

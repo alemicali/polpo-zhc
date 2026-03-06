@@ -55,9 +55,9 @@ function createMockVault(smtp?: SmtpCredentials): ResolvedVault {
 // ─── Factory tests ───────────────────────────────────
 
 describe("createEmailTools — factory", () => {
-  it("returns all 6 tools by default", () => {
+  it("returns all 7 tools by default", () => {
     const tools = createEmailTools(CWD);
-    expect(tools).toHaveLength(6);
+    expect(tools).toHaveLength(7);
     const names = tools.map(t => t.name);
     expect(names).toEqual(ALL_EMAIL_TOOL_NAMES);
   });
@@ -77,6 +77,7 @@ describe("createEmailTools — factory", () => {
     expect(names).toContain("email_list");
     expect(names).toContain("email_read");
     expect(names).toContain("email_search");
+    expect(names).toContain("email_download_attachment");
   });
 });
 

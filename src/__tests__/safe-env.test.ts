@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { safeEnv, bashSafeEnv, mcpSafeEnv } from "../tools/safe-env.js";
+import { safeEnv, bashSafeEnv } from "../tools/safe-env.js";
 
 describe("safeEnv", () => {
   const originalEnv = { ...process.env };
@@ -91,28 +91,4 @@ describe("bashSafeEnv", () => {
   });
 });
 
-describe("mcpSafeEnv", () => {
-  const originalEnv = { ...process.env };
 
-  beforeEach(() => {
-    process.env.PATH = "/usr/bin";
-    process.env.ANTHROPIC_API_KEY = "secret";
-  });
-
-  afterEach(() => {
-    process.env = { ...originalEnv };
-  });
-
-  it("returns safe env with MCP config overrides", () => {
-    const env = mcpSafeEnv({ MY_MCP_TOKEN: "tok123" });
-    expect(env.PATH).toBe("/usr/bin");
-    expect(env.MY_MCP_TOKEN).toBe("tok123");
-    expect(env.ANTHROPIC_API_KEY).toBeUndefined();
-  });
-
-  it("returns safe env without config overrides", () => {
-    const env = mcpSafeEnv();
-    expect(env.PATH).toBe("/usr/bin");
-    expect(env.ANTHROPIC_API_KEY).toBeUndefined();
-  });
-});

@@ -86,6 +86,11 @@ function createMemoryStore() {
     get: () => content,
     save: (c: string) => { content = c; },
     append: (line: string) => { content += `\n${line}`; },
+    update: (oldText: string, newText: string): true | string => {
+      if (!content.includes(oldText)) return "oldText not found";
+      content = content.replace(oldText, newText);
+      return true;
+    },
   };
 }
 
@@ -107,11 +112,13 @@ function createSessionStore() {
   return {
     create: () => "s1",
     addMessage: () => ({ id: "m1", role: "user" as const, content: "", ts: new Date().toISOString() }),
+    updateMessage: () => false,
     getMessages: () => [],
     getRecentMessages: () => [],
     listSessions: () => [],
     getSession: () => undefined,
     getLatestSession: () => undefined,
+    renameSession: () => false,
     deleteSession: () => false,
     prune: () => 0,
     close: () => {},
@@ -162,6 +169,7 @@ function createHarness(configOverrides: Partial<PolpoConfig["settings"]> = {}): 
     hooks: new HookRegistry(),
     config,
     workDir: "/tmp/test",
+    agentWorkDir: "/tmp/test",
     polpoDir: "/tmp/test/.polpo",
     assessFn,
   };
