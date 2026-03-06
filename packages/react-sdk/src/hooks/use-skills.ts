@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { usePolpoContext } from "../provider/polpo-context.js";
-import type { SkillWithAssignment } from "../client/types.js";
+import type { SkillWithAssignment } from "@lumea-labs/polpo-client";
 
 export interface UseSkillsReturn {
   skills: SkillWithAssignment[];

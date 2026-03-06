@@ -1,6 +1,6 @@
 import { useSyncExternalStore, useCallback, useEffect, useState } from "react";
 import { usePolpoContext } from "../provider/polpo-context.js";
-import type { AgentConfig, Team, AddAgentRequest, AddTeamRequest } from "../client/types.js";
+import type { AgentConfig, Team, AddAgentRequest, AddTeamRequest } from "@lumea-labs/polpo-client";
 
 export interface UseAgentsReturn {
   agents: AgentConfig[];

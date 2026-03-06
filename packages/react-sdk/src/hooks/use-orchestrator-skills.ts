@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { usePolpoContext } from "../provider/polpo-context.js";
-import type { SkillInfo } from "../client/types.js";
+import type { SkillInfo } from "@lumea-labs/polpo-client";
 
 export interface UseOrchestratorSkillsReturn {
   skills: SkillInfo[];

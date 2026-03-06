@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from "react";
 import { usePolpoContext } from "../provider/polpo-context.js";
-import { selectAssessmentProgress, selectAssessmentChecks } from "../store/selectors.js";
-import type { AssessmentProgressEntry, AssessmentCheckStatus } from "../store/types.js";
+import { selectAssessmentProgress, selectAssessmentChecks } from "@lumea-labs/polpo-client";
+import type { AssessmentProgressEntry, AssessmentCheckStatus } from "@lumea-labs/polpo-client";
 
 export interface UseAssessmentProgressReturn {
   /** Live assessment progress messages for this task. Empty when no assessment is running. */

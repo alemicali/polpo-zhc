@@ -1,0 +1,249 @@
+---
+title: "TypeScript Client SDK"
+sidebarTitle: "TypeScript Client"
+description: "Framework-agnostic TypeScript client for the Polpo REST API"
+---
+
+The `@lumea-labs/polpo-client` package provides a typed HTTP client, SSE streaming, and reactive store for interacting with the Polpo API from any TypeScript/JavaScript environment — Node.js, Deno, Bun, browser, or edge runtimes.
+
+<Note>
+This is the **framework-agnostic** foundation. For React hooks, see [`@lumea-labs/polpo-react`](/reference/react-sdk) which builds on top of this package.
+</Note>
+
+## Installation
+
+```bash
+npm install @lumea-labs/polpo-client
+```
+
+No peer dependencies. Works in Node.js 18+, Deno, Bun, and modern browsers.
+
+## Quick Start
+
+```ts
+import { PolpoClient } from "@lumea-labs/polpo-client";
+
+const client = new PolpoClient({
+  baseUrl: "http://localhost:3000",
+  apiKey: "my-api-key",
+});
+
+// List all tasks
+const tasks = await client.getTasks();
+
+// Create a mission
+const mission = await client.createMission({
+  name: "Deploy v2",
+  tasks: [
+    { title: "Run tests", assignTo: "backend-dev" },
+    { title: "Build Docker image", assignTo: "devops", dependsOn: ["Run tests"] },
+  ],
+});
+
+// Execute it
+await client.executeMission(mission.id);
+
+// Stream a chat completion
+const stream = client.streamChatCompletion({
+  messages: [{ role: "user", content: "Create a REST API for user management" }],
+});
+
+for await (const chunk of stream) {
+  process.stdout.write(chunk.choices[0]?.delta?.content ?? "");
+}
+```
+
+## PolpoClient
+
+The main HTTP client class. All methods return typed promises.
+
+```ts
+const client = new PolpoClient({
+  baseUrl: "http://localhost:3000",
+  apiKey: "optional-api-key",          // sent as X-API-Key header
+  fetch: customFetch,                   // optional: inject a custom fetch implementation
+});
+```
+
+### Tasks
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `getTasks(filters?)` | `Task[]` | List tasks with optional status/group/agent filters |
+| `getTask(id)` | `Task` | Get a single task |
+| `createTask(opts)` | `Task` | Create a new task |
+| `updateTask(id, opts)` | `Task` | Update a task |
+| `deleteTask(id)` | `void` | Delete a task |
+| `retryTask(id)` | `void` | Retry a failed task |
+| `killTask(id)` | `void` | Kill a running task's agent |
+| `reassessTask(id)` | `void` | Re-run assessment on a task |
+| `queueTask(id)` | `void` | Queue a task for execution |
+
+### Missions
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `getMissions()` | `Mission[]` | List all missions |
+| `getMission(id)` | `Mission` | Get a single mission |
+| `createMission(opts)` | `Mission` | Create a new mission |
+| `updateMission(id, opts)` | `Mission` | Update mission metadata |
+| `deleteMission(id)` | `void` | Delete a mission |
+| `executeMission(id)` | `ExecuteMissionResult` | Execute a draft mission |
+| `resumeMission(id, opts?)` | `ResumeMissionResult` | Resume a failed/paused mission |
+| `abortMission(id)` | `{ aborted: number }` | Abort an active mission |
+
+### Agents
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `getAgents()` | `AgentConfig[]` | List all agents |
+| `getAgent(name)` | `AgentConfig` | Get a single agent |
+| `addAgent(opts)` | `void` | Register a new agent |
+| `removeAgent(name)` | `void` | Remove an agent |
+| `getProcesses()` | `AgentProcess[]` | List active agent processes |
+
+### Chat
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `chatCompletion(opts)` | `ChatCompletionResponse` | Non-streaming chat completion |
+| `streamChatCompletion(opts)` | `ChatCompletionStream` | Streaming chat (async iterable) |
+| `getSessions()` | `ChatSession[]` | List chat sessions |
+| `getSessionMessages(id)` | `ChatMessage[]` | Get messages for a session |
+
+### Other
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `getTemplates()` | `TemplateInfo[]` | List available templates |
+| `runTemplate(name, params?)` | `TemplateRunResult` | Execute a template |
+| `getSkills()` | `SkillWithAssignment[]` | List skills |
+| `getApprovals(status?)` | `ApprovalRequest[]` | List approval requests |
+| `approve(id, opts?)` | `void` | Approve a request |
+| `reject(id, feedback)` | `void` | Reject a request |
+| `getNotifications(opts?)` | `NotificationRecord[]` | List notifications |
+| `getMemory()` | `{ exists, content }` | Get project memory |
+| `updateMemory(content)` | `void` | Update project memory |
+| `getAuthStatus()` | `AuthStatusResponse` | Per-provider auth health |
+
+## ChatCompletionStream
+
+Async iterable for streaming chat completions:
+
+```ts
+const stream = client.streamChatCompletion({
+  messages: [{ role: "user", content: "Hello" }],
+});
+
+for await (const chunk of stream) {
+  // chunk: ChatCompletionChunk
+  const content = chunk.choices[0]?.delta?.content;
+  if (content) process.stdout.write(content);
+}
+```
+
+## EventSourceManager
+
+SSE connection manager with auto-reconnect:
+
+```ts
+import { EventSourceManager } from "@lumea-labs/polpo-client";
+
+const es = new EventSourceManager({
+  url: client.getEventsUrl(),
+  onEvent: (event) => {
+    console.log(event.event, event.data);
+  },
+  onStatusChange: (status) => {
+    console.log("Connection:", status); // "connected" | "connecting" | "disconnected"
+  },
+});
+
+es.connect();
+// ... later
+es.disconnect();
+```
+
+<Note>
+`EventSource` is a browser API. In Node.js, use a polyfill like [`eventsource`](https://www.npmjs.com/package/eventsource) or use the `PolpoStore` approach below for a higher-level API.
+</Note>
+
+## PolpoStore
+
+A framework-agnostic reactive store that consumes SSE events and maintains application state:
+
+```ts
+import { PolpoClient, PolpoStore, EventSourceManager } from "@lumea-labs/polpo-client";
+
+const client = new PolpoClient({ baseUrl: "http://localhost:3000" });
+const store = new PolpoStore();
+
+// Populate initial state
+const [tasks, missions, agents] = await Promise.all([
+  client.getTasks(),
+  client.getMissions(),
+  client.getAgents(),
+]);
+store.setTasks(tasks);
+store.setMissions(missions);
+store.setAgents(agents);
+
+// Subscribe to changes
+store.subscribe(() => {
+  const state = store.getSnapshot();
+  console.log("Tasks:", state.tasks.size, "Missions:", state.missions.size);
+});
+
+// Connect SSE for real-time updates
+const es = new EventSourceManager({
+  url: client.getEventsUrl(),
+  onEvent: (event) => store.applyEvent(event),
+  onStatusChange: (status) => store.setConnectionStatus(status),
+});
+es.connect();
+```
+
+### Store API
+
+| Method | Description |
+|--------|-------------|
+| `subscribe(listener)` | Subscribe to state changes. Returns unsubscribe function. |
+| `getSnapshot()` | Get current state |
+| `setTasks(tasks)` | Bulk-set tasks (deduplicates) |
+| `setMissions(missions)` | Bulk-set missions |
+| `setAgents(agents)` | Bulk-set agents |
+| `setProcesses(processes)` | Bulk-set processes |
+| `applyEvent(event)` | Apply a single SSE event |
+| `applyEventBatch(events)` | Apply multiple SSE events atomically |
+
+### Selectors
+
+Memoized selector functions for extracting data from the store state:
+
+```ts
+import { selectTasks, selectMission, selectEvents } from "@lumea-labs/polpo-client";
+
+const state = store.getSnapshot();
+
+// Filter tasks
+const runningTasks = selectTasks(state, { status: "in_progress" });
+
+// Get a specific mission
+const mission = selectMission(state, "mission-123");
+
+// Filter events
+const taskEvents = selectEvents(state, ["task:*"]);
+```
+
+## Subpath Exports
+
+```ts
+// Full import
+import { PolpoClient, PolpoStore } from "@lumea-labs/polpo-client";
+
+// Client-only import
+import { PolpoClient } from "@lumea-labs/polpo-client/client";
+
+// Store-only import
+import { PolpoStore, reduceEvent } from "@lumea-labs/polpo-client/store";
+```

@@ -1,6 +1,6 @@
 import { useSyncExternalStore, useCallback, useEffect, useRef, useState } from "react";
 import { usePolpoContext } from "../provider/polpo-context.js";
-import { selectMission, selectMissionReport } from "../store/selectors.js";
+import { selectMission, selectMissionReport } from "@lumea-labs/polpo-client";
 import type {
   Mission, MissionReport, UpdateMissionRequest, ExecuteMissionResult, ResumeMissionResult,
   AddMissionTaskRequest, UpdateMissionTaskRequest, ReorderMissionTasksRequest,
@@ -8,7 +8,7 @@ import type {
   AddMissionQualityGateRequest, UpdateMissionQualityGateRequest,
   AddMissionTeamMemberRequest, UpdateMissionTeamMemberRequest,
   UpdateMissionNotificationsRequest,
-} from "../client/types.js";
+} from "@lumea-labs/polpo-client";
 
 export interface UseMissionReturn {
   mission: Mission | undefined;

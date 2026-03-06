@@ -1,9 +1,13 @@
 ---
 title: "React SDK"
-description: "Provider, hooks, and client API for the React SDK"
+description: "React hooks with real-time SSE updates, built on @lumea-labs/polpo-client"
 ---
 
-The `@lumea-labs/polpo-react` package provides type-safe React hooks with real-time SSE updates.
+The `@lumea-labs/polpo-react` package provides type-safe React hooks with real-time SSE updates, built on top of [`@lumea-labs/polpo-client`](/reference/client-sdk).
+
+<Note>
+For non-React environments (Node.js scripts, Vue, Svelte, server-side), use [`@lumea-labs/polpo-client`](/reference/client-sdk) directly. The React SDK re-exports all client types and classes for convenience.
+</Note>
 
 ## Installation
 
@@ -11,7 +15,7 @@ The `@lumea-labs/polpo-react` package provides type-safe React hooks with real-t
 npm install @lumea-labs/polpo-react
 ```
 
-Peer dependencies: React 18 or 19.
+This automatically installs `@lumea-labs/polpo-client` as a dependency. Peer dependencies: React 18 or 19.
 
 ## PolpoProvider
 
@@ -499,18 +503,19 @@ const { sessions, isLoading, getLogEntries, refetch } = useLogs();
 
 ## Imports
 
-The SDK supports subpath exports for tree-shaking:
-
 ```tsx
-// Full import
+// Full import (hooks + re-exported client types)
 import { PolpoProvider, useTasks, useMissions } from "@lumea-labs/polpo-react";
-
-// Direct client import (no React dependency)
-import { PolpoClient } from "@lumea-labs/polpo-react/client";
+import type { Task, Mission } from "@lumea-labs/polpo-react";
 
 // Individual hook imports
 import { useTasks } from "@lumea-labs/polpo-react/hooks/use-tasks";
+
+// Use the client SDK directly for non-React code
+import { PolpoClient } from "@lumea-labs/polpo-client";
 ```
+
+All types and classes from `@lumea-labs/polpo-client` are re-exported from `@lumea-labs/polpo-react` for backward compatibility.
 
 ---
 
@@ -518,12 +523,12 @@ import { useTasks } from "@lumea-labs/polpo-react/hooks/use-tasks";
 
 The SDK uses `useSyncExternalStore` for push-based state management:
 
-1. **PolpoClient** — HTTP client with automatic request deduplication
-2. **EventSourceManager** — SSE with auto-reconnect and exponential backoff
-3. **PolpoStore** — Central state with `reduceEvent()` for 55+ event types
-4. **Memoized selectors** — WeakMap-cached selectors for each hook
+1. **[`@lumea-labs/polpo-client`](/reference/client-sdk)** — Framework-agnostic HTTP client, SSE manager, reactive store
+2. **`PolpoProvider`** — Wires client + SSE + store into React context
+3. **24 hooks** — Thin wrappers that subscribe to the store and expose mutation callbacks
+4. **Memoized selectors** — Multi-key cached selectors per hook
 5. **Microtask batching** — `queueMicrotask` for batched re-renders
 
 <Note>
-The SDK has zero runtime dependencies (React is a peer dependency) and is tree-shakeable with `sideEffects: false`.
+The React SDK depends on `@lumea-labs/polpo-client` (auto-installed) and has React as a peer dependency. Both packages are tree-shakeable with `sideEffects: false`.
 </Note>

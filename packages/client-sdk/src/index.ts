@@ -1,41 +1,14 @@
-// Provider
-export { PolpoProvider } from "./provider/polpo-provider.js";
-export type { PolpoProviderProps } from "./provider/polpo-provider.js";
+// ── Client ────────────────────────────────────────────────────
+export { PolpoClient, ChatCompletionStream } from "./client/polpo-client.js";
+export type { PolpoClientConfig } from "./client/polpo-client.js";
+export { EventSourceManager } from "./client/event-source.js";
+export type { ConnectionStatus, EventSourceConfig } from "./client/event-source.js";
+export { PolpoApiError } from "./client/errors.js";
 
-// Hooks
-export { usePolpo } from "./hooks/use-polpo.js";
-export { useTasks } from "./hooks/use-tasks.js";
-export { useTask } from "./hooks/use-task.js";
-export { useMissions } from "./hooks/use-missions.js";
-export { useMission } from "./hooks/use-mission.js";
-export { useAgents } from "./hooks/use-agents.js";
-export { useAgent } from "./hooks/use-agent.js";
-export { useProcesses } from "./hooks/use-processes.js";
-export { useEvents } from "./hooks/use-events.js";
-export { useStats } from "./hooks/use-stats.js";
-export { useMemory } from "./hooks/use-memory.js";
-export { useLogs } from "./hooks/use-logs.js";
-export { useSessions } from "./hooks/use-sessions.js";
-export { useTaskActivity } from "./hooks/use-task-activity.js";
-export { useSkills } from "./hooks/use-skills.js";
-export { useOrchestratorSkills } from "./hooks/use-orchestrator-skills.js";
-export { useNotifications } from "./hooks/use-notifications.js";
-export { useApprovals } from "./hooks/use-approvals.js";
-export { useActiveDelays } from "./hooks/use-active-delays.js";
-export { useTemplates } from "./hooks/use-templates.js";
-export { useSchedules } from "./hooks/use-schedules.js";
-export { useVaultEntries } from "./hooks/use-vault-entries.js";
-export { useAuthStatus } from "./hooks/use-auth-status.js";
-export { useAssessmentProgress } from "./hooks/use-assessment-progress.js";
-
-// Re-export client SDK for convenience (backward compat — consumers can also use @lumea-labs/polpo-client directly)
+// ── Store ─────────────────────────────────────────────────────
+export { PolpoStore } from "./store/polpo-store.js";
+export { reduceEvent } from "./store/event-reducer.js";
 export {
-  PolpoClient,
-  ChatCompletionStream,
-  PolpoApiError,
-  EventSourceManager,
-  PolpoStore,
-  reduceEvent,
   selectTasks,
   selectTask,
   selectMissions,
@@ -45,13 +18,10 @@ export {
   selectEvents,
   selectAssessmentProgress,
   selectAssessmentChecks,
-} from "@lumea-labs/polpo-client";
+} from "./store/selectors.js";
 
-// Re-export all types from client SDK
+// ── Types ─────────────────────────────────────────────────────
 export type {
-  PolpoClientConfig,
-  ConnectionStatus,
-  EventSourceConfig,
   Task,
   TaskStatus,
   TaskResult,
@@ -160,9 +130,7 @@ export type {
   TemplateInfo,
   TemplateDefinition,
   TemplateRunResult,
-  StoreState,
-  PolpoStats,
-  AssessmentProgressEntry,
-  AssessmentCheckStatus,
-  TaskFilter,
-} from "@lumea-labs/polpo-client";
+} from "./client/types.js";
+
+export type { StoreState, PolpoStats, AssessmentProgressEntry, AssessmentCheckStatus } from "./store/types.js";
+export type { TaskFilter } from "./store/selectors.js";

@@ -5,7 +5,7 @@ import type {
   NotificationStats,
   SendNotificationRequest,
   SendNotificationResult,
-} from "../client/types.js";
+} from "@lumea-labs/polpo-client";
 
 export interface UseNotificationsReturn {
   notifications: NotificationRecord[];

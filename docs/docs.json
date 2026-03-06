@@ -204,10 +204,46 @@
         ]
       },
       {
-        "tab": "SDK & Tools",
+        "tab": "Tools",
         "groups": [
           {
-            "group": "Core",
+            "group": "Core Tools",
+            "pages": [
+              "reference/coding-tools",
+              "reference/tools/http",
+              "reference/tools/vault"
+            ]
+          },
+          {
+            "group": "Web & Communication",
+            "pages": [
+              "reference/tools/browser",
+              "reference/tools/email",
+              "reference/tools/search"
+            ]
+          },
+          {
+            "group": "File Formats",
+            "pages": [
+              "reference/tools/excel",
+              "reference/tools/pdf",
+              "reference/tools/docx"
+            ]
+          },
+          {
+            "group": "Media",
+            "pages": [
+              "reference/tools/audio",
+              "reference/tools/image"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "SDKs",
+        "groups": [
+          {
+            "group": "Reference",
             "pages": [
               "reference/cli",
               "reference/config",
@@ -216,27 +252,9 @@
             ]
           },
           {
-            "group": "Tools",
+            "group": "Client SDKs",
             "pages": [
-              "reference/coding-tools",
-              "reference/tools/browser",
-              "reference/tools/git",
-              "reference/tools/http",
-              "reference/tools/multifile",
-              "reference/tools/deps",
-              "reference/tools/excel",
-              "reference/tools/pdf",
-              "reference/tools/docx",
-              "reference/tools/email",
-              "reference/tools/vault",
-              "reference/tools/audio",
-              "reference/tools/image",
-              "reference/tools/search"
-            ]
-          },
-          {
-            "group": "Development",
-            "pages": [
+              "reference/client-sdk",
               "reference/react-sdk"
             ]
           }

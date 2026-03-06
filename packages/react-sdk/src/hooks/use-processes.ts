@@ -1,7 +1,7 @@
 import { useSyncExternalStore, useCallback, useEffect, useState } from "react";
 import { usePolpoContext } from "../provider/polpo-context.js";
-import { selectProcesses } from "../store/selectors.js";
-import type { AgentProcess } from "../client/types.js";
+import { selectProcesses } from "@lumea-labs/polpo-client";
+import type { AgentProcess } from "@lumea-labs/polpo-client";
 
 export interface UseProcessesReturn {
   processes: AgentProcess[];

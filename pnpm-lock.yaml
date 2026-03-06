@@ -136,7 +136,17 @@ importers:
         specifier: ^1.52.0
         version: 1.58.2
 
+  packages/client-sdk:
+    devDependencies:
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
   packages/react-sdk:
+    dependencies:
+      '@lumea-labs/polpo-client':
+        specifier: workspace:*
+        version: link:../client-sdk
     devDependencies:
       '@types/react':
         specifier: ^19.0.0

@@ -1,7 +1,7 @@
 {
-  "name": "@lumea-labs/polpo-react",
+  "name": "@lumea-labs/polpo-client",
   "version": "0.1.0",
-  "description": "React SDK for OpenPolpo — hooks with real-time SSE updates, built on @lumea-labs/polpo-client",
+  "description": "TypeScript client for OpenPolpo — typed HTTP client, SSE streaming, and reactive store (framework-agnostic)",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -10,9 +10,13 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
-    "./hooks/*": {
-      "types": "./dist/hooks/*.d.ts",
-      "import": "./dist/hooks/*.js"
+    "./client": {
+      "types": "./dist/client/index.d.ts",
+      "import": "./dist/client/index.js"
+    },
+    "./store": {
+      "types": "./dist/store/index.d.ts",
+      "import": "./dist/store/index.js"
     }
   },
   "sideEffects": false,
@@ -21,15 +25,7 @@
     "dev": "tsc --watch",
     "prepublishOnly": "tsc"
   },
-  "dependencies": {
-    "@lumea-labs/polpo-client": "workspace:*"
-  },
-  "peerDependencies": {
-    "react": "^18.0.0 || ^19.0.0"
-  },
   "devDependencies": {
-    "@types/react": "^19.0.0",
-    "react": "^19.0.0",
     "typescript": "^5.7.0"
   },
   "files": ["dist", "README.md"],
@@ -38,8 +34,9 @@
     "polpo",
     "ai-agents",
     "orchestration",
-    "react",
-    "hooks",
+    "typescript",
+    "client",
+    "sdk",
     "sse",
     "real-time"
   ],
@@ -53,9 +50,9 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/lumea-labs/polpo.git",
-    "directory": "packages/react-sdk"
+    "directory": "packages/client-sdk"
   },
-  "homepage": "https://github.com/lumea-labs/polpo/tree/main/packages/react-sdk",
+  "homepage": "https://github.com/lumea-labs/polpo/tree/main/packages/client-sdk",
   "bugs": {
     "url": "https://github.com/lumea-labs/polpo/issues"
   }

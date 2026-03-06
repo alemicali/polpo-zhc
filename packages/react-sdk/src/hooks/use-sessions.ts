@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { usePolpoContext } from "../provider/polpo-context.js";
-import type { ChatSession, ChatMessage } from "../client/types.js";
+import type { ChatSession, ChatMessage } from "@lumea-labs/polpo-client";
 
 export interface UseSessionsReturn {
   sessions: ChatSession[];

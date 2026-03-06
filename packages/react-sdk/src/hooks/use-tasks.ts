@@ -1,8 +1,8 @@
 import { useSyncExternalStore, useCallback, useEffect, useState } from "react";
 import { usePolpoContext } from "../provider/polpo-context.js";
-import { selectTasks, type TaskFilter } from "../store/selectors.js";
+import { selectTasks, type TaskFilter } from "@lumea-labs/polpo-client";
 import { useStableValue } from "./use-stable-value.js";
-import type { Task, CreateTaskRequest } from "../client/types.js";
+import type { Task, CreateTaskRequest } from "@lumea-labs/polpo-client";
 
 export interface UseTasksReturn {
   tasks: Task[];
