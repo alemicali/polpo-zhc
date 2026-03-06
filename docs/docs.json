@@ -204,7 +204,7 @@
         ]
       },
       {
-        "tab": "Reference",
+        "tab": "SDK & Tools",
         "groups": [
           {
             "group": "Core",
@@ -239,11 +239,188 @@
             "pages": [
               "reference/react-sdk"
             ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "openapi": "openapi.json",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": [
+              "reference/rest-api"
+            ]
           },
           {
-            "group": "REST API",
-            "root": "reference/rest-api",
-            "openapi": "openapi.json"
+            "group": "Core",
+            "pages": [
+              "GET /api/v1/health",
+              "GET /api/v1/state",
+              "GET /api/v1/orchestrator-config",
+              "GET /api/v1/config",
+              "POST /api/v1/config/reload",
+              "GET /api/v1/auth/status"
+            ]
+          },
+          {
+            "group": "Chat Completions",
+            "pages": [
+              "POST /v1/chat/completions",
+              "GET /api/v1/chat/sessions",
+              "GET /api/v1/chat/sessions/{id}/messages",
+              "PATCH /api/v1/chat/sessions/{id}",
+              "DELETE /api/v1/chat/sessions/{id}"
+            ]
+          },
+          {
+            "group": "Agents",
+            "pages": [
+              "GET /api/v1/agents",
+              "POST /api/v1/agents",
+              "GET /api/v1/agents/{name}",
+              "DELETE /api/v1/agents/{name}",
+              "GET /api/v1/agents/teams",
+              "POST /api/v1/agents/teams",
+              "GET /api/v1/agents/team",
+              "PATCH /api/v1/agents/team",
+              "DELETE /api/v1/agents/teams/{name}",
+              "GET /api/v1/agents/processes",
+              "GET /api/v1/agents/processes/{taskId}/activity"
+            ]
+          },
+          {
+            "group": "Tasks",
+            "pages": [
+              "GET /api/v1/tasks",
+              "POST /api/v1/tasks",
+              "GET /api/v1/tasks/{taskId}",
+              "PATCH /api/v1/tasks/{taskId}",
+              "DELETE /api/v1/tasks/{taskId}",
+              "POST /api/v1/tasks/{taskId}/retry",
+              "POST /api/v1/tasks/{taskId}/kill",
+              "POST /api/v1/tasks/{taskId}/reassess",
+              "POST /api/v1/tasks/{taskId}/queue"
+            ]
+          },
+          {
+            "group": "Missions",
+            "pages": [
+              "GET /api/v1/missions",
+              "POST /api/v1/missions",
+              "GET /api/v1/missions/resumable",
+              "GET /api/v1/missions/{missionId}",
+              "PATCH /api/v1/missions/{missionId}",
+              "DELETE /api/v1/missions/{missionId}",
+              "POST /api/v1/missions/{missionId}/execute",
+              "POST /api/v1/missions/{missionId}/resume",
+              "POST /api/v1/missions/{missionId}/abort",
+              "POST /api/v1/missions/{missionId}/tasks",
+              "PATCH /api/v1/missions/{missionId}/tasks/{taskTitle}",
+              "DELETE /api/v1/missions/{missionId}/tasks/{taskTitle}",
+              "PUT /api/v1/missions/{missionId}/tasks/reorder",
+              "GET /api/v1/missions/checkpoints",
+              "POST /api/v1/missions/{missionId}/checkpoints",
+              "POST /api/v1/missions/{missionId}/checkpoints/{checkpointName}/resume",
+              "PATCH /api/v1/missions/{missionId}/checkpoints/{checkpointName}",
+              "DELETE /api/v1/missions/{missionId}/checkpoints/{checkpointName}",
+              "GET /api/v1/missions/delays",
+              "POST /api/v1/missions/{missionId}/delays",
+              "PATCH /api/v1/missions/{missionId}/delays/{delayName}",
+              "DELETE /api/v1/missions/{missionId}/delays/{delayName}",
+              "POST /api/v1/missions/{missionId}/quality-gates",
+              "PATCH /api/v1/missions/{missionId}/quality-gates/{gateName}",
+              "DELETE /api/v1/missions/{missionId}/quality-gates/{gateName}",
+              "POST /api/v1/missions/{missionId}/team",
+              "PATCH /api/v1/missions/{missionId}/team/{memberName}",
+              "DELETE /api/v1/missions/{missionId}/team/{memberName}",
+              "PUT /api/v1/missions/{missionId}/notifications"
+            ]
+          },
+          {
+            "group": "Templates",
+            "pages": [
+              "GET /api/v1/templates",
+              "POST /api/v1/templates",
+              "GET /api/v1/templates/{name}",
+              "DELETE /api/v1/templates/{name}",
+              "POST /api/v1/templates/{name}/run"
+            ]
+          },
+          {
+            "group": "Skills",
+            "pages": [
+              "GET /api/v1/skills",
+              "POST /api/v1/skills/add",
+              "POST /api/v1/skills/create",
+              "DELETE /api/v1/skills/{name}",
+              "POST /api/v1/skills/{name}/assign",
+              "POST /api/v1/skills/{name}/unassign",
+              "GET /api/v1/skills/{name}/content",
+              "GET /api/v1/skills/orchestrator",
+              "POST /api/v1/skills/orchestrator",
+              "PUT /api/v1/skills/orchestrator/{name}",
+              "DELETE /api/v1/skills/orchestrator/{name}",
+              "GET /api/v1/skills/orchestrator/{name}/content",
+              "POST /api/v1/skills/orchestrator/add",
+              "GET /api/v1/skills/index",
+              "PUT /api/v1/skills/{name}/index"
+            ]
+          },
+          {
+            "group": "Approvals",
+            "pages": [
+              "GET /api/v1/approvals",
+              "GET /api/v1/approvals/{id}",
+              "POST /api/v1/approvals/{id}/approve",
+              "POST /api/v1/approvals/{id}/reject"
+            ]
+          },
+          {
+            "group": "Notifications",
+            "pages": [
+              "GET /api/v1/notifications",
+              "GET /api/v1/notifications/stats",
+              "POST /api/v1/notifications/send"
+            ]
+          },
+          {
+            "group": "Schedules",
+            "pages": [
+              "GET /api/v1/schedules"
+            ]
+          },
+          {
+            "group": "Memory & Storage",
+            "pages": [
+              "GET /api/v1/memory",
+              "PUT /api/v1/memory",
+              "POST /api/v1/vault/entries",
+              "GET /api/v1/vault/entries/{agent}",
+              "DELETE /api/v1/vault/entries/{agent}/{service}",
+              "GET /api/v1/files/roots",
+              "GET /api/v1/files/list",
+              "GET /api/v1/files/preview"
+            ]
+          },
+          {
+            "group": "Peers",
+            "pages": [
+              "GET /api/v1/peers",
+              "GET /api/v1/peers/presence",
+              "GET /api/v1/peers/allowlist",
+              "POST /api/v1/peers/allowlist",
+              "DELETE /api/v1/peers/allowlist/{peerId}",
+              "POST /api/v1/peers/pair",
+              "POST /api/v1/peers/link"
+            ]
+          },
+          {
+            "group": "Logs",
+            "pages": [
+              "GET /api/v1/logs",
+              "GET /api/v1/logs/{sessionId}"
+            ]
           }
         ]
       }

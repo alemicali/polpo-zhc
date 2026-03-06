@@ -17,8 +17,8 @@
  * IMAP env vars: IMAP_HOST, IMAP_PORT, IMAP_USER, IMAP_PASS
  */
 
-import { readFileSync, existsSync } from "node:fs";
-import { resolve, basename } from "node:path";
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
+import { resolve, basename, join, dirname } from "node:path";
 import { Type } from "@sinclair/typebox";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 import { resolveAllowedPaths, assertPathAllowed } from "./path-sandbox.js";
@@ -426,19 +426,74 @@ function createEmailListTool(vault?: ResolvedVault): AgentTool<typeof EmailListS
   };
 }
 
+// ─── Attachment Helpers ───
+
+interface AttachmentInfo {
+  /** MIME part number (e.g. "2", "1.2") — pass this to email_download_attachment */
+  part: string;
+  /** Filename from Content-Disposition or Content-Type name parameter */
+  filename: string;
+  /** MIME type (e.g. "application/pdf") */
+  mimeType: string;
+  /** Approximate size in bytes */
+  size?: number;
+  /** Content-Transfer-Encoding */
+  encoding?: string;
+}
+
+/**
+ * Walk a bodyStructure tree and collect attachment metadata.
+ * Attachments are parts with disposition=attachment, or non-text/non-multipart
+ * inline parts that have a filename.
+ */
+function findAttachments(node: any, path: number[] = []): AttachmentInfo[] {
+  const attachments: AttachmentInfo[] = [];
+  if (!node) return attachments;
+
+  const isAttachment =
+    node.disposition === "attachment" ||
+    (node.disposition === "inline" && (node.dispositionParameters?.filename || node.parameters?.name)) ||
+    (node.type && node.type !== "text" && node.type !== "multipart" && !node.disposition &&
+      (node.dispositionParameters?.filename || node.parameters?.name));
+
+  if (isAttachment) {
+    const filename =
+      node.dispositionParameters?.filename ??
+      node.parameters?.name ??
+      `attachment-${path.join(".")}`;
+    attachments.push({
+      part: path.length ? path.join(".") : "1",
+      filename,
+      mimeType: `${node.type ?? "application"}/${node.subtype ?? "octet-stream"}`,
+      size: node.size,
+      encoding: node.encoding,
+    });
+  }
+
+  if (node.childNodes && Array.isArray(node.childNodes)) {
+    for (let i = 0; i < node.childNodes.length; i++) {
+      attachments.push(...findAttachments(node.childNodes[i], [...path, i + 1]));
+    }
+  }
+
+  return attachments;
+}
+
 // ─── Tool: email_read ───
 
 const EmailReadSchema = Type.Object({
   uid: Type.Number({ description: "Email UID (from email_list)" }),
   folder: Type.Optional(Type.String({ description: "Mail folder (default: INBOX)" })),
   mark_read: Type.Optional(Type.Boolean({ description: "Mark as read after fetching (default: true)" })),
+  download_attachments: Type.Optional(Type.Boolean({ description: "Download all attachments to the output directory (default: false). Use email_download_attachment for selective download." })),
 });
 
-function createEmailReadTool(vault?: ResolvedVault): AgentTool<typeof EmailReadSchema> {
+function createEmailReadTool(vault?: ResolvedVault, outputDir?: string, sandbox?: string[]): AgentTool<typeof EmailReadSchema> {
   return {
     name: "email_read",
     label: "Read Email",
-    description: "Read the full content of an email by UID. Returns headers and body text.",
+    description: "Read the full content of an email by UID. Returns headers, body text, and attachment metadata (filename, size, part ID). " +
+      "Set download_attachments=true to save all attachments to the output directory, or use email_download_attachment for selective download.",
     parameters: EmailReadSchema,
     async execute(_id, params) {
       const client = await connectImap(vault);
@@ -450,6 +505,7 @@ function createEmailReadTool(vault?: ResolvedVault): AgentTool<typeof EmailReadS
         const msg = await client.fetchOne(String(params.uid), {
           envelope: true,
           source: true,
+          bodyStructure: true,
           uid: true,
           flags: true,
         }, { uid: true }) as any;
@@ -465,14 +521,33 @@ function createEmailReadTool(vault?: ResolvedVault): AgentTool<typeof EmailReadS
         let bodyText = "";
         if (msg.source) {
           const source = msg.source.toString("utf-8");
-          // Simple extraction: look for text after headers
           const headerEnd = source.indexOf("\r\n\r\n");
           if (headerEnd >= 0) {
             bodyText = source.slice(headerEnd + 4);
-            // If it's too long, truncate
             if (bodyText.length > 10000) {
               bodyText = bodyText.slice(0, 10000) + "\n... (truncated)";
             }
+          }
+        }
+
+        // Extract attachment metadata from bodyStructure
+        const attachments = findAttachments(msg.bodyStructure);
+
+        // Optionally download all attachments
+        const downloadedFiles: string[] = [];
+        if (params.download_attachments && attachments.length > 0) {
+          const downloadDir = outputDir ?? process.cwd();
+          for (const att of attachments) {
+            const { content } = await client.download(String(params.uid), att.part, { uid: true }) as any;
+            const chunks: Buffer[] = [];
+            for await (const chunk of content) {
+              chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+            }
+            const buffer = Buffer.concat(chunks);
+            const filePath = join(downloadDir, att.filename);
+            mkdirSync(dirname(filePath), { recursive: true });
+            writeFileSync(filePath, buffer);
+            downloadedFiles.push(filePath);
           }
         }
 
@@ -489,13 +564,114 @@ function createEmailReadTool(vault?: ResolvedVault): AgentTool<typeof EmailReadS
           `Date: ${date}`,
           `Subject: ${env?.subject ?? "(no subject)"}`,
           `UID: ${msg.uid}`,
-          ``,
-          bodyText || "(empty body)",
         ];
+
+        if (attachments.length > 0) {
+          parts.push(``, `Attachments (${attachments.length}):`);
+          for (const att of attachments) {
+            const sizeStr = att.size ? ` (${(att.size / 1024).toFixed(1)} KB)` : "";
+            parts.push(`  - [part ${att.part}] ${att.filename} — ${att.mimeType}${sizeStr}`);
+          }
+          if (downloadedFiles.length > 0) {
+            parts.push(``, `Downloaded to:`);
+            for (const f of downloadedFiles) parts.push(`  - ${f}`);
+          }
+        }
+
+        parts.push(``, bodyText || "(empty body)");
 
         return {
           content: [{ type: "text", text: parts.join("\n") }],
-          details: { uid: params.uid, subject: env?.subject },
+          details: {
+            uid: params.uid,
+            subject: env?.subject,
+            attachments: attachments.map(a => ({ part: a.part, filename: a.filename, mimeType: a.mimeType, size: a.size })),
+            downloadedFiles: downloadedFiles.length > 0 ? downloadedFiles : undefined,
+          },
+        };
+      } finally {
+        lock.release();
+        await client.logout();
+      }
+    },
+  };
+}
+
+// ─── Tool: email_download_attachment ───
+
+const EmailDownloadAttachmentSchema = Type.Object({
+  uid: Type.Number({ description: "Email UID (from email_list or email_read)" }),
+  part: Type.String({ description: "MIME part number of the attachment (from email_read attachment list, e.g. '2', '1.2')" }),
+  folder: Type.Optional(Type.String({ description: "Mail folder (default: INBOX)" })),
+  filename: Type.Optional(Type.String({ description: "Override the output filename (default: uses the attachment's original filename)" })),
+  output_path: Type.Optional(Type.String({ description: "Custom output path relative to working directory (default: output directory)" })),
+});
+
+function createEmailDownloadAttachmentTool(vault?: ResolvedVault, cwd?: string, outputDir?: string, sandbox?: string[]): AgentTool<typeof EmailDownloadAttachmentSchema> {
+  return {
+    name: "email_download_attachment",
+    label: "Download Email Attachment",
+    description: "Download a specific attachment from an email by UID and MIME part number. " +
+      "Use email_read first to see the list of attachments with their part numbers.",
+    parameters: EmailDownloadAttachmentSchema,
+    async execute(_id, params) {
+      const client = await connectImap(vault);
+      const folder = params.folder ?? "INBOX";
+
+      const lock = await client.getMailboxLock(folder);
+      try {
+        // If no filename override, fetch bodyStructure to get the original filename
+        let filename = params.filename;
+        if (!filename) {
+          const msg = await client.fetchOne(String(params.uid), { bodyStructure: true }, { uid: true }) as any;
+          if (msg?.bodyStructure) {
+            const attachments = findAttachments(msg.bodyStructure);
+            const match = attachments.find(a => a.part === params.part);
+            filename = match?.filename ?? `attachment-${params.part}`;
+          } else {
+            filename = `attachment-${params.part}`;
+          }
+        }
+
+        // Download the part
+        const { meta, content } = await client.download(String(params.uid), params.part, { uid: true }) as any;
+        const chunks: Buffer[] = [];
+        for await (const chunk of content) {
+          chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+        }
+        const buffer = Buffer.concat(chunks);
+
+        if (buffer.length === 0) {
+          throw new Error(`Attachment part ${params.part} is empty or not found in UID ${params.uid}`);
+        }
+
+        // Determine output path
+        let filePath: string;
+        if (params.output_path) {
+          filePath = resolve(cwd ?? process.cwd(), params.output_path);
+        } else {
+          filePath = join(outputDir ?? cwd ?? process.cwd(), filename);
+        }
+
+        // Sandbox check
+        if (sandbox) {
+          assertPathAllowed(filePath, sandbox, "email_download_attachment");
+        }
+
+        mkdirSync(dirname(filePath), { recursive: true });
+        writeFileSync(filePath, buffer);
+
+        const contentType = meta?.contentType ?? "application/octet-stream";
+        return {
+          content: [{ type: "text", text: `Attachment downloaded:\n  File: ${filePath}\n  Size: ${(buffer.length / 1024).toFixed(1)} KB\n  Type: ${contentType}\n  Part: ${params.part}` }],
+          details: {
+            path: filePath,
+            size: buffer.length,
+            contentType,
+            part: params.part,
+            uid: params.uid,
+            filename,
+          },
         };
       } finally {
         lock.release();
@@ -571,9 +747,9 @@ function createEmailSearchTool(vault?: ResolvedVault): AgentTool<typeof EmailSea
 
 // ─── Factory ───
 
-export type EmailToolName = "email_send" | "email_draft" | "email_verify" | "email_list" | "email_read" | "email_search";
+export type EmailToolName = "email_send" | "email_draft" | "email_verify" | "email_list" | "email_read" | "email_search" | "email_download_attachment";
 
-export const ALL_EMAIL_TOOL_NAMES: EmailToolName[] = ["email_send", "email_draft", "email_verify", "email_list", "email_read", "email_search"];
+export const ALL_EMAIL_TOOL_NAMES: EmailToolName[] = ["email_send", "email_draft", "email_verify", "email_list", "email_read", "email_search", "email_download_attachment"];
 
 /**
  * Create email tools.
@@ -583,8 +759,9 @@ export const ALL_EMAIL_TOOL_NAMES: EmailToolName[] = ["email_send", "email_draft
  * @param allowedTools - Optional filter
  * @param vault - Resolved vault credentials (per-agent SMTP/IMAP)
  * @param emailAllowedDomains - Allowed recipient email domains (omit for unrestricted)
+ * @param outputDir - Per-task output directory for downloaded attachments
  */
-export function createEmailTools(cwd: string, allowedPaths?: string[], allowedTools?: string[], vault?: ResolvedVault, emailAllowedDomains?: string[]): AgentTool<any>[] {
+export function createEmailTools(cwd: string, allowedPaths?: string[], allowedTools?: string[], vault?: ResolvedVault, emailAllowedDomains?: string[], outputDir?: string): AgentTool<any>[] {
   const sandbox = resolveAllowedPaths(cwd, allowedPaths);
 
   const factories: Record<EmailToolName, () => AgentTool<any>> = {
@@ -592,8 +769,9 @@ export function createEmailTools(cwd: string, allowedPaths?: string[], allowedTo
     email_draft: () => createEmailDraftTool(cwd, sandbox, vault, emailAllowedDomains),
     email_verify: () => createEmailVerifyTool(vault),
     email_list: () => createEmailListTool(vault),
-    email_read: () => createEmailReadTool(vault),
+    email_read: () => createEmailReadTool(vault, outputDir, sandbox),
     email_search: () => createEmailSearchTool(vault),
+    email_download_attachment: () => createEmailDownloadAttachmentTool(vault, cwd, outputDir, sandbox),
   };
 
   const names = allowedTools

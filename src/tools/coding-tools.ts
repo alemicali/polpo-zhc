@@ -519,7 +519,7 @@ export async function createAllTools(options: CreateAllToolsOptions): Promise<Ag
 
   // Email tools — activated when any email_* tool is in allowedTools
   if (categoryRequested(ALL_EMAIL_TOOL_NAMES)) {
-    tools.push(...createEmailTools(cwd, allowedPaths, allowedTools, options.vault, options.emailAllowedDomains));
+    tools.push(...createEmailTools(cwd, allowedPaths, allowedTools, options.vault, options.emailAllowedDomains, options.outputDir));
   }
 
   // Image & video tools — activated when any image_* or video_* tool is in allowedTools

@@ -1,10 +1,10 @@
 ---
 title: "Email Tools"
 sidebarTitle: "Email"
-description: "6 tools to send, draft, read, and search email via SMTP and IMAP"
+description: "7 tools to send, draft, read, search, and download email attachments via SMTP and IMAP"
 ---
 
-Send, draft, read, and search emails. Enable by including `"email_*"` in the agent's `allowedTools` array.
+Send, draft, read, search emails, and download attachments. Enable by including `"email_*"` in the agent's `allowedTools` array.
 
 <Note>
 **SMTP** (send): Uses **nodemailer**. Credentials from agent vault (`"email"` entry with type `"smtp"`), env vars (`SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`), or per-call parameter overrides.
@@ -128,7 +128,7 @@ List of emails with UID, subject, from address, date, and read/unread status.
 
 ## `email_read` — Read Email
 
-Read a single email by its UID.
+Read a single email by its UID. Returns the full email content plus **attachment metadata** (filename, size, MIME type, part ID) for any attachments present.
 
 ### Parameters
 
@@ -137,10 +137,48 @@ Read a single email by its UID.
 | `uid` | number | yes | Email UID (from `email_list`) |
 | `folder` | string | no | Mailbox folder (default: `"INBOX"`) |
 | `mark_read` | boolean | no | Mark as read after fetching (default: true) |
+| `download_attachments` | boolean | no | Download all attachments to the task output directory (default: false). Use `email_download_attachment` for selective download. |
 
 ### Returns
 
-Full email content: subject, from, to, date, and text/HTML body.
+Full email content: subject, from, to, date, text/HTML body, and an **attachments** section listing each attachment with:
+- **Part number** — the MIME part ID needed for `email_download_attachment`
+- **Filename** — original filename from the email
+- **MIME type** — e.g. `application/pdf`, `image/png`
+- **Size** — approximate size in KB
+
+If `download_attachments` is `true`, also includes the list of file paths where attachments were saved.
+
+### Notes
+
+- Attachment metadata is extracted from the IMAP `bodyStructure` response — no additional download is needed just to see what's attached
+- Use `email_download_attachment` to selectively download individual attachments by part number
+
+---
+
+## `email_download_attachment` — Download Email Attachment
+
+Download a specific attachment from an email by UID and MIME part number. Use `email_read` first to see the list of attachments with their part numbers.
+
+### Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `uid` | number | yes | Email UID (from `email_list` or `email_read`) |
+| `part` | string | yes | MIME part number of the attachment (from `email_read` attachment list, e.g. `"2"`, `"1.2"`) |
+| `folder` | string | no | Mailbox folder (default: `"INBOX"`) |
+| `filename` | string | no | Override the output filename (default: uses the attachment's original filename) |
+| `output_path` | string | no | Custom output path relative to working directory (default: task output directory) |
+
+### Returns
+
+Confirmation with the saved file path, size, content type, and part number.
+
+### Notes
+
+- The output file is sandboxed to the agent's allowed paths
+- If no `output_path` is specified, the file is saved to the task's output directory
+- Typical workflow: `email_list` → `email_read` (see attachments) → `email_download_attachment` (download specific ones)
 
 ---
 

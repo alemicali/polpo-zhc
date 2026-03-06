@@ -18,7 +18,7 @@ function describeAgentCapabilities(agent: AgentConfig, skillPool?: SkillInfo[]):
   const allowed = agent.allowedTools ?? [];
   const hasPattern = (prefix: string) => allowed.some(t => t.toLowerCase().startsWith(prefix));
   if (hasPattern("browser_")) caps.push("browser_navigate/snapshot/click/fill/eval (18 browser tools via agent-browser)");
-  if (hasPattern("email_")) caps.push("email_send, email_draft, email_verify, email_list, email_read, email_search");
+  if (hasPattern("email_")) caps.push("email_send, email_draft, email_verify, email_list, email_read, email_search, email_download_attachment");
   if (hasPattern("image_")) caps.push("image_generate (fal.ai FLUX), image_analyze (OpenAI/Anthropic vision)");
   if (hasPattern("video_")) caps.push("video_generate (fal.ai Wan 2.2 text-to-video)");
   if (hasPattern("audio_")) caps.push("audio_transcribe (STT: OpenAI Whisper / Deepgram Nova), audio_speak (TTS: OpenAI / Deepgram / ElevenLabs / Edge — free fallback)");
