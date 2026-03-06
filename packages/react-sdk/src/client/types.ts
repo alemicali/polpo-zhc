@@ -1083,19 +1083,19 @@ export interface ChatCompletionRequest {
 export interface ChatCompletionChoice {
   index: number;
   message: { role: "assistant"; content: string };
-  finish_reason: "stop" | "length" | "ask_user" | "mission_preview" | "vault_preview" | "go_to_file" | "open_file" | "navigate_to";
+  finish_reason: "stop" | "length" | "ask_user" | "mission_preview" | "vault_preview" | "open_file" | "navigate_to" | "open_tab";
   /** Present when finish_reason is "ask_user" — structured questions for the user. */
   ask_user?: AskUserPayload;
   /** Present when finish_reason is "mission_preview" — proposed mission for user review. */
   mission_preview?: MissionPreviewPayload;
   /** Present when finish_reason is "vault_preview" — proposed vault entry for user review. */
   vault_preview?: VaultPreviewPayload;
-  /** Present when finish_reason is "go_to_file" — navigate to file browser with this file selected. */
-  go_to_file?: GoToFilePayload;
   /** Present when finish_reason is "open_file" — file path to open in preview dialog. */
   open_file?: OpenFilePayload;
   /** Present when finish_reason is "navigate_to" — navigate the UI to a specific page. */
   navigate_to?: NavigateToPayload;
+  /** Present when finish_reason is "open_tab" — open a URL in a new browser tab. */
+  open_tab?: OpenTabPayload;
 }
 
 export interface ChatCompletionResponse {
@@ -1148,12 +1148,12 @@ export interface ChatCompletionChunk {
     mission_preview?: MissionPreviewPayload;
     /** Present when finish_reason is "vault_preview" — proposed vault entry for user review. */
     vault_preview?: VaultPreviewPayload;
-    /** Present when finish_reason is "go_to_file" — navigate to file browser with this file selected. */
-    go_to_file?: GoToFilePayload;
     /** Present when finish_reason is "open_file" — file path to open in preview dialog. */
     open_file?: OpenFilePayload;
     /** Present when finish_reason is "navigate_to" — navigate the UI to a specific page. */
     navigate_to?: NavigateToPayload;
+    /** Present when finish_reason is "open_tab" — open a URL in a new browser tab. */
+    open_tab?: OpenTabPayload;
     /** Present when the server is executing a tool call. */
     tool_call?: ToolCallEvent;
   }>;
@@ -1273,11 +1273,6 @@ export interface VaultPreviewPayload {
 
 // === Client-side tools (executed on the user's device, not the server) ===
 
-export interface GoToFilePayload {
-  /** File path relative to project root */
-  path: string;
-}
-
 export interface OpenFilePayload {
   /** File path relative to project root */
   path: string;
@@ -1294,4 +1289,12 @@ export interface NavigateToPayload {
   path?: string;
   /** File to highlight/select for files target */
   highlight?: string;
+}
+
+/** Payload for open_tab — opens a URL in a new browser tab. */
+export interface OpenTabPayload {
+  /** The URL to open */
+  url: string;
+  /** Optional human-readable label */
+  label?: string;
 }

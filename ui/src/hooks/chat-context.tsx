@@ -25,9 +25,9 @@ import type {
   AskUserQuestion,
   MissionPreviewData,
   VaultPreviewData,
-  GoToFileData,
   OpenFileData,
   NavigateToData,
+  OpenTabData,
   ChatMessageWithQuestions,
   AskUserAnswer,
   MissionPreviewAction,
@@ -86,9 +86,9 @@ export interface ChatStateValue {
   pendingQuestions: AskUserQuestion[] | null;
   pendingMission: MissionPreviewData | null;
   pendingVault: VaultPreviewData | null;
-  pendingGoToFile: GoToFileData | null;
   pendingOpenFile: OpenFileData | null;
   pendingNavigateTo: NavigateToData | null;
+  pendingOpenTab: OpenTabData | null;
 }
 
 /** Stable action callbacks — never change identity (wrapped in useCallback upstream) */
@@ -98,9 +98,9 @@ export interface ChatActionsValue {
   answerQuestions: (answers: AskUserAnswer[]) => Promise<void>;
   respondToMission: (action: MissionPreviewAction, feedback?: string) => Promise<{ missionId?: string; error?: string }>;
   respondToVault: (action: VaultPreviewAction, editedCredentials?: Record<string, string>) => Promise<void>;
-  consumeGoToFile: () => void;
   consumeOpenFile: () => void;
   consumeNavigateTo: () => void;
+  consumeOpenTab: () => void;
   clear: () => void;
   loadSession: (id: string) => Promise<void>;
   newSession: () => void;
@@ -124,14 +124,15 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     pendingQuestions: chat.pendingQuestions,
     pendingMission: chat.pendingMission,
     pendingVault: chat.pendingVault,
-    pendingGoToFile: chat.pendingGoToFile,
     pendingOpenFile: chat.pendingOpenFile,
     pendingNavigateTo: chat.pendingNavigateTo,
+    pendingOpenTab: chat.pendingOpenTab,
   }), [
     chat.messages, chat.isLoading, chat.messagesLoading,
     chat.sessionId, chat.sessions, chat.sessionsLoading,
     chat.pendingQuestions, chat.pendingMission, chat.pendingVault,
-    chat.pendingGoToFile, chat.pendingOpenFile, chat.pendingNavigateTo,
+    chat.pendingOpenFile, chat.pendingNavigateTo,
+    chat.pendingOpenTab,
   ]);
 
   const actions: ChatActionsValue = useMemo(() => ({
@@ -140,9 +141,9 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     answerQuestions: chat.answerQuestions,
     respondToMission: chat.respondToMission,
     respondToVault: chat.respondToVault,
-    consumeGoToFile: chat.consumeGoToFile,
     consumeOpenFile: chat.consumeOpenFile,
     consumeNavigateTo: chat.consumeNavigateTo,
+    consumeOpenTab: chat.consumeOpenTab,
     clear: chat.clear,
     loadSession: chat.loadSession,
     newSession: chat.newSession,
@@ -150,7 +151,8 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
   }), [
     chat.send, chat.stop, chat.answerQuestions,
     chat.respondToMission, chat.respondToVault,
-    chat.consumeGoToFile, chat.consumeOpenFile, chat.consumeNavigateTo,
+    chat.consumeOpenFile, chat.consumeNavigateTo,
+    chat.consumeOpenTab,
     chat.clear, chat.loadSession, chat.newSession, chat.deleteSession,
   ]);
 
@@ -184,11 +186,11 @@ export function useChatActions(): ChatActionsValue {
 export function useChatInputDisabled(): boolean {
   const {
     isLoading, pendingQuestions, pendingMission, pendingVault,
-    pendingGoToFile, pendingOpenFile, pendingNavigateTo,
+    pendingOpenFile, pendingNavigateTo, pendingOpenTab,
   } = useChatState();
   return (
     isLoading || !!pendingQuestions || !!pendingMission || !!pendingVault
-    || !!pendingGoToFile || !!pendingOpenFile || !!pendingNavigateTo
+    || !!pendingOpenFile || !!pendingNavigateTo || !!pendingOpenTab
   );
 }
 

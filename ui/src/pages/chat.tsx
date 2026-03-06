@@ -78,6 +78,13 @@ import { config } from "@/lib/config";
 import { toast } from "sonner";
 import { formatDistanceToNow } from "date-fns";
 
+/** Like formatDistanceToNow but returns "just now" for < 30 s */
+function chatTimeAgo(date: Date): string {
+  const diffMs = Date.now() - date.getTime();
+  if (diffMs < 30_000) return "just now";
+  return formatDistanceToNow(date, { addSuffix: true });
+}
+
 // ── Speech-to-text hook (Web Speech API) ──
 
 // Minimal type shim — Web Speech API types aren't in TS's default DOM lib
@@ -1796,7 +1803,7 @@ function ChatMessages() {
                       <div className="flex items-center justify-end gap-1.5 mt-1">
                         {msg.ts && (
                           <span className="text-[10px] text-muted-foreground">
-                            {formatDistanceToNow(new Date(msg.ts), { addSuffix: true })}
+                            {chatTimeAgo(new Date(msg.ts))}
                           </span>
                         )}
                         <span className="opacity-0 group-hover:opacity-100 transition-opacity">
@@ -1820,7 +1827,7 @@ function ChatMessages() {
                           <p className="text-xs font-semibold">Polpo</p>
                           {msg.ts && (
                             <span className="text-[10px] text-muted-foreground">
-                              {formatDistanceToNow(new Date(msg.ts), { addSuffix: true })}
+                              {chatTimeAgo(new Date(msg.ts))}
                             </span>
                           )}
                         </div>
@@ -1887,12 +1894,6 @@ function ChatMessages() {
                             onRespond={respondToVault}
                             disabled={isLoading || !pendingVault}
                           />
-                        )}
-                        {msg.goToFile && (
-                          <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
-                            <FileCode className="h-3.5 w-3.5" />
-                            <span>Navigated to <code className="font-mono text-foreground">{msg.goToFile.path}</code></span>
-                          </div>
                         )}
                         {msg.openFile && (
                           <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground cursor-pointer hover:text-foreground transition-colors" onClick={() => { const p = msg.openFile!.path; openPreview({ label: p.split("/").pop() ?? p, path: p, mimeType: mimeFromPath(p) }); }}>

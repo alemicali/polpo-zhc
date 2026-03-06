@@ -907,6 +907,15 @@ const appendMemoryTool: Tool = {
   }),
 };
 
+const updateMemoryTool: Tool = {
+  name: "update_memory",
+  description: "Replace a specific section of the project memory (.polpo/memory.md). Works like edit_file: find an exact substring and replace it. The oldString must appear exactly once.",
+  parameters: Type.Object({
+    oldString: Type.String({ description: "The exact text to find in memory (must be unique)" }),
+    newString: Type.String({ description: "The replacement text" }),
+  }),
+};
+
 const appendSystemContextTool: Tool = {
   name: "append_system_context",
   description: "Add persistent instructions to Polpo's system context (.polpo/system-context.md). These are included in every future conversation. Use when the user says 'remember that...' or gives you a standing instruction about the project.",
@@ -1235,25 +1244,13 @@ const whatsappReadTool: Tool = {
 //  CLIENT-SIDE TOOLS (executed on the user's browser, not the server)
 // ═══════════════════════════════════════════════════════
 
-const goToFileTool: Tool = {
-  name: "go_to_file",
-  description: `Navigate the user's UI to the file browser and highlight a specific file.
-Use this when you want to point the user to a file in the project — the UI navigates directly
-to the /files page with the file's directory open and the file selected/previewed.
-This is a client-side navigation — no new tab, no download. The user stays in the app.
-Examples: show a generated output, point to a config file, highlight a source file.`,
-  parameters: Type.Object({
-    path: Type.String({ description: "File path relative to project root (e.g. 'output/report.pdf', 'src/index.ts', '.polpo/polpo.json')" }),
-  }),
-};
-
 const openFileTool: Tool = {
   name: "open_file",
   description: `Open a file for the user in an inline preview dialog, without navigating away.
 Use this when the user says "open the file", "show me the file", "let me see it", etc.
 The file is read from disk and rendered in a fullscreen-capable dialog (code with syntax
 highlighting, images, PDFs, HTML, markdown — same as the file browser preview).
-Prefer this over go_to_file when the user wants to SEE the file content without leaving the chat.`,
+Prefer this over navigate_to with target="files" when the user wants to SEE the file content without leaving the chat.`,
   parameters: Type.Object({
     path: Type.String({ description: "File path relative to project root (e.g. 'output/report.pdf', 'src/index.ts', 'templates/email.html')" }),
   }),
@@ -1297,6 +1294,18 @@ Examples:
     name: Type.Optional(Type.String({ description: "Entity name for detail pages (agent, skill)" })),
     path: Type.Optional(Type.String({ description: "Directory path for files target" })),
     highlight: Type.Optional(Type.String({ description: "File to highlight/select for files target" })),
+  }),
+};
+
+const openTabTool: Tool = {
+  name: "open_tab",
+  description: `Open a URL in a new browser tab on the user's device.
+Use this when the user asks to open a link, website, documentation page, PR, issue, deploy URL, etc.
+Examples: "open the GitHub repo", "apri la PR", "open localhost:3000", "show me the docs".
+This is a client-side action — calls window.open() in the user's browser.`,
+  parameters: Type.Object({
+    url: Type.String({ description: "The full URL to open (e.g. 'https://github.com/org/repo', 'http://localhost:3000')" }),
+    label: Type.Optional(Type.String({ description: "Human-readable label for the tab (e.g. 'GitHub PR #42')" })),
   }),
 };
 
@@ -1369,7 +1378,7 @@ export const WRITE_TOOLS = new Set([
   // Task watchers
   "watch_task", "remove_watcher",
   // Config & Self
-  "reload_config", "save_memory", "append_memory", "append_system_context",
+  "reload_config", "save_memory", "append_memory", "update_memory", "append_system_context",
   // Skills (write)
   "create_orchestrator_skill", "update_orchestrator_skill", "remove_orchestrator_skill",
   "install_orchestrator_skill", "create_agent_skill", "install_agent_skill", "remove_agent_skill",
@@ -1385,7 +1394,7 @@ export const WRITE_TOOLS = new Set([
 ]);
 
 /** Tools that pause the conversation to collect user input / show a preview. */
-export const INTERACTIVE_TOOLS = new Set(["ask_user", "create_mission", "set_vault_entry", "go_to_file", "open_file", "navigate_to"]);
+export const INTERACTIVE_TOOLS = new Set(["ask_user", "create_mission", "set_vault_entry", "open_file", "navigate_to", "open_tab"]);
 
 export function needsApproval(toolName: string): boolean {
   return WRITE_TOOLS.has(toolName);
@@ -1427,7 +1436,7 @@ export const ALL_ORCHESTRATOR_TOOLS: Tool[] = [
   // Task watchers (2 write + 1 read above)
   watchTaskTool, removeWatcherTool,
   // Config & Self (4)
-  reloadConfigTool, saveMemoryTool, appendMemoryTool, appendSystemContextTool,
+  reloadConfigTool, saveMemoryTool, appendMemoryTool, updateMemoryTool, appendSystemContextTool,
   // Skills (10)
   listOrchestratorSkillsTool, createOrchestratorSkillTool, updateOrchestratorSkillTool,
   removeOrchestratorSkillTool, installOrchestratorSkillTool,
@@ -1446,7 +1455,7 @@ export const ALL_ORCHESTRATOR_TOOLS: Tool[] = [
   // Interactive (1)
   askUserTool,
   // Client-side (3)
-  goToFileTool, openFileTool, navigateToTool,
+  openFileTool, navigateToTool, openTabTool,
 ];
 
 /** Tool action labels for the approval prompt title. */
@@ -1506,6 +1515,7 @@ const TOOL_LABELS: Record<string, string> = {
   reload_config: "Reload Config",
   save_memory: "Save Memory",
   append_memory: "Append Memory",
+  update_memory: "Update Memory",
   append_system_context: "Remember",
   // Skills
   create_orchestrator_skill: "Create Orchestrator Skill",
@@ -1530,6 +1540,8 @@ const TOOL_LABELS: Record<string, string> = {
   // WhatsApp
   whatsapp_send: "WhatsApp Send",
   whatsapp_read: "WhatsApp Read",
+  // Client-side
+  open_tab: "Open Tab",
 };
 
 // ═══════════════════════════════════════════════════════
@@ -1686,6 +1698,7 @@ export async function executeOrchestratorTool(
       case "reload_config":        return execReloadConfig(polpo);
       case "save_memory":          return execSaveMemory(polpo, args);
       case "append_memory":        return execAppendMemory(polpo, args);
+      case "update_memory":        return execUpdateMemory(polpo, args);
       case "append_system_context": return execAppendSystemContext(polpo, args);
 
       // ── Skills ──
@@ -1952,6 +1965,10 @@ export function formatToolDetails(
       main.push(["Content length", `${String(args.content ?? "").length} chars`]);
       extra.push(["Content", trunc(args.content, 300)]);
       break;
+    case "update_memory":
+      main.push(["Old", trunc(args.oldString, 80)]);
+      main.push(["New", trunc(args.newString, 80)]);
+      break;
     case "set_vault_entry":
       main.push(["Agent", String(args.agent)]);
       main.push(["Service", String(args.service)]);
@@ -1976,6 +1993,10 @@ export function formatToolDetails(
       main.push(["Action", String(args.action)]);
       if (args.chatId) main.push(["Chat", String(args.chatId)]);
       if (args.query) main.push(["Query", String(args.query)]);
+      break;
+    case "open_tab":
+      main.push(["URL", trunc(args.url)]);
+      if (args.label) main.push(["Label", trunc(args.label)]);
       break;
     default:
       for (const [k, v] of Object.entries(args)) {
@@ -2908,6 +2929,17 @@ function execSaveMemory(polpo: Orchestrator, args: Record<string, unknown>): str
 function execAppendMemory(polpo: Orchestrator, args: Record<string, unknown>): string {
   polpo.appendMemory(args.content as string);
   return "Appended to project memory.";
+}
+
+function execUpdateMemory(polpo: Orchestrator, args: Record<string, unknown>): string {
+  const oldString = args.oldString as string;
+  const newString = args.newString as string;
+  if (!oldString) return "Error: oldString is required.";
+  const result = polpo.updateMemory(oldString, newString);
+  if (result === true) {
+    return `Memory updated: replaced ${oldString.length} chars with ${newString.length} chars.`;
+  }
+  return `Error: ${result}`;
 }
 
 function execAppendSystemContext(polpo: Orchestrator, args: Record<string, unknown>): string {

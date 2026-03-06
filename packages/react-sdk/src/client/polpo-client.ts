@@ -43,9 +43,9 @@ import type {
   AskUserPayload,
   MissionPreviewPayload,
   VaultPreviewPayload,
-  GoToFilePayload,
   OpenFilePayload,
   NavigateToPayload,
+  OpenTabPayload,
   RunActivityEntry,
   SkillInfo,
   LoadedSkill,
@@ -90,14 +90,14 @@ export class ChatCompletionStream implements AsyncIterable<ChatCompletionChunk> 
   /** If the stream ended with finish_reason "vault_preview", this contains the proposed vault entry. */
   vaultPreview: VaultPreviewPayload | null = null;
 
-  /** If the stream ended with finish_reason "go_to_file", this contains the file path to navigate to. */
-  goToFile: GoToFilePayload | null = null;
-
   /** If the stream ended with finish_reason "open_file", this contains the file path to open. */
   openFile: OpenFilePayload | null = null;
 
   /** If the stream ended with finish_reason "navigate_to", this contains navigation target info. */
   navigateTo: NavigateToPayload | null = null;
+
+  /** If the stream ended with finish_reason "open_tab", this contains the URL to open. */
+  openTab: OpenTabPayload | null = null;
 
   /** Whether abort() has been called. */
   aborted = false;
@@ -204,10 +204,6 @@ export class ChatCompletionStream implements AsyncIterable<ChatCompletionChunk> 
             if (choice?.finish_reason === "vault_preview" && choice.vault_preview) {
               this.vaultPreview = choice.vault_preview;
             }
-            // Capture go_to_file payload from the chunk
-            if (choice?.finish_reason === "go_to_file" && choice.go_to_file) {
-              this.goToFile = choice.go_to_file;
-            }
             // Capture open_file payload from the chunk
             if (choice?.finish_reason === "open_file" && choice.open_file) {
               this.openFile = choice.open_file;
@@ -215,6 +211,10 @@ export class ChatCompletionStream implements AsyncIterable<ChatCompletionChunk> 
             // Capture navigate_to payload from the chunk
             if (choice?.finish_reason === "navigate_to" && choice.navigate_to) {
               this.navigateTo = choice.navigate_to;
+            }
+            // Capture open_tab payload from the chunk
+            if (choice?.finish_reason === "open_tab" && choice.open_tab) {
+              this.openTab = choice.open_tab;
             }
             yield chunk;
           } catch {

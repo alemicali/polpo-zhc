@@ -11,4 +11,6 @@ export interface MemoryStore {
   save(content: string): void;
   /** Append a line to the memory (with timestamp). */
   append(line: string): void;
+  /** Replace a unique substring in the memory. Returns true if replaced, string error otherwise. */
+  update(oldText: string, newText: string): true | string;
 }

@@ -95,6 +95,187 @@ function useCardSettings(): CardSettingsCtx {
   return ctx;
 }
 
+// ── Task row for list view ──
+
+const TaskRow = memo(function TaskRow({
+  task,
+  process,
+  allTasks,
+}: {
+  task: Task;
+  process?: AgentProcess;
+  allTasks?: Task[];
+}) {
+  const { retry, kill, queue, click } = useTaskActions();
+  const { fields, agentConfigMap } = useCardSettings();
+  const cfg = statusConfig[task.status];
+  const Icon = cfg.icon;
+  const assessment = task.result?.assessment;
+  const phase = task.phase && task.phase !== "execution" ? phaseConfig[task.phase] : null;
+  const agent = agentConfigMap[task.assignTo];
+  const identity = agent?.identity;
+  const hasAvatar = !!identity?.avatar;
+
+  const unresolvedDeps = task.dependsOn.filter((depId) => {
+    const dep = allTasks?.find(t => t.id === depId);
+    return !dep || dep.status !== "done";
+  });
+  const isBlocked = unresolvedDeps.length > 0 && (task.status === "pending" || task.status === "assigned");
+
+  return (
+    <div
+      className={cn(
+        "group flex items-center gap-3 px-3 py-2 rounded-lg border transition-all cursor-pointer",
+        "hover:shadow-[0_1px_6px_oklch(0_0_0/0.1)] hover:border-primary/25",
+        "bg-card/80 backdrop-blur-sm",
+        isBlocked ? "border-amber-500/40 bg-amber-500/[0.03]" : "border-border/40",
+      )}
+      onClick={() => click(task.id)}
+    >
+      {/* Status icon */}
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Icon className={cn("h-4 w-4 shrink-0", cfg.color, task.status === "in_progress" && "animate-spin")} />
+        </TooltipTrigger>
+        <TooltipContent side="left" className="text-xs">{cfg.label}</TooltipContent>
+      </Tooltip>
+
+      {/* Title — takes remaining space */}
+      <span className="text-sm font-medium truncate min-w-0 flex-1">{task.title}</span>
+
+      {/* Phase badge */}
+      {fields.phase && phase && (
+        <span className={cn(
+          "inline-flex items-center gap-0.5 rounded-sm px-1.5 py-0.5 text-[9px] font-medium leading-none shrink-0",
+          phase.color, "bg-current/10",
+        )}>
+          <phase.icon className="h-2.5 w-2.5" />
+          {phase.label}
+        </span>
+      )}
+
+      {/* Blocked indicator */}
+      {fields.deps && isBlocked && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="inline-flex items-center gap-0.5 rounded-sm bg-amber-500/15 text-amber-500 px-1.5 py-0.5 text-[9px] font-semibold leading-none shrink-0">
+              <AlertTriangle className="h-2.5 w-2.5" />
+              Blocked
+            </span>
+          </TooltipTrigger>
+          <TooltipContent className="text-xs">
+            {unresolvedDeps.map((depId) => {
+              const dep = allTasks?.find(t => t.id === depId);
+              return <div key={depId}>Blocked by {dep ? dep.title : depId.slice(0, 8)}</div>;
+            })}
+          </TooltipContent>
+        </Tooltip>
+      )}
+
+      {/* Mission */}
+      {fields.mission && task.group && (
+        <span className="inline-block rounded-sm bg-primary/10 text-primary px-1.5 py-0.5 text-[9px] font-medium leading-none truncate max-w-[100px] shrink-0">
+          {task.group}
+        </span>
+      )}
+
+      {/* Agent */}
+      {(fields.identityName || fields.agentId) && (
+        <div className="flex items-center gap-1.5 shrink-0 min-w-0 max-w-[140px]">
+          {fields.avatar && (
+            <div className="shrink-0">
+              {hasAvatar
+                ? <AgentAvatar avatar={identity?.avatar} name={task.assignTo} size="xs" />
+                : <div className="flex items-center justify-center rounded-lg size-5 bg-muted/50">
+                    <Bot className="h-3 w-3 text-muted-foreground/60" />
+                  </div>
+              }
+            </div>
+          )}
+          <span className="text-[10px] text-muted-foreground truncate">
+            {fields.identityName && identity?.displayName ? identity.displayName : task.assignTo}
+          </span>
+        </div>
+      )}
+
+      {/* Score */}
+      {fields.score && assessment?.globalScore != null && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <div className={cn(
+              "flex items-center gap-0.5 rounded-sm px-1 py-0.5 shrink-0",
+              assessment.passed ? "bg-emerald-500/10" : "bg-red-500/10"
+            )}>
+              <Star className={cn("h-2.5 w-2.5", assessment.passed ? "text-emerald-500" : "text-red-500")} />
+              <span className={cn("text-[10px] font-bold tabular-nums", assessment.passed ? "text-emerald-500" : "text-red-500")}>
+                {assessment.globalScore.toFixed(1)}
+              </span>
+            </div>
+          </TooltipTrigger>
+          <TooltipContent className="text-xs">
+            {assessment.passed ? "Passed" : "Failed"} — {assessment.checks.length} check{assessment.checks.length !== 1 ? "s" : ""}
+          </TooltipContent>
+        </Tooltip>
+      )}
+
+      {/* Dependencies count */}
+      {fields.deps && task.dependsOn.length > 0 && !isBlocked && (
+        <span className="inline-flex items-center gap-0.5 text-[10px] text-muted-foreground/50 shrink-0">
+          <GitBranch className="h-2.5 w-2.5" />{task.dependsOn.length}
+        </span>
+      )}
+
+      {/* Retries */}
+      {fields.retries && task.retries > 0 && (
+        <span className="inline-flex items-center gap-0.5 text-[10px] text-muted-foreground shrink-0">
+          <RotateCcw className="h-2.5 w-2.5" />{task.retries}
+        </span>
+      )}
+
+      {/* Live activity (compact) */}
+      {process && (
+        <div className="flex items-center gap-1.5 shrink-0 min-w-0 max-w-[150px]">
+          <div className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse shrink-0" />
+          {process.activity.lastTool && (
+            <span className="text-[9px] font-mono text-primary truncate">{process.activity.lastTool}</span>
+          )}
+          {process.activity.toolCalls > 0 && (
+            <span className="text-[9px] text-muted-foreground/50 flex items-center gap-0.5 shrink-0">
+              <Zap className="h-2 w-2" />{process.activity.toolCalls}
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* Time */}
+      {fields.time && (
+        <span className="text-[10px] text-muted-foreground/40 shrink-0 tabular-nums w-[70px] text-right">
+          {formatDistanceToNow(new Date(task.updatedAt), { addSuffix: true })}
+        </span>
+      )}
+
+      {/* Actions */}
+      <div className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+        {task.status === "draft" && (
+          <Button variant="ghost" size="sm" className="h-5 w-5 p-0 text-muted-foreground hover:text-blue-400" onClick={(e) => { e.stopPropagation(); queue(task.id); }}>
+            <Zap className="h-3 w-3" />
+          </Button>
+        )}
+        {task.status === "failed" && (
+          <Button variant="ghost" size="sm" className="h-5 w-5 p-0 text-muted-foreground hover:text-amber-400" onClick={(e) => { e.stopPropagation(); retry(task.id); }}>
+            <RotateCcw className="h-3 w-3" />
+          </Button>
+        )}
+        {(task.status === "in_progress" || task.status === "assigned") && (
+          <Button variant="ghost" size="sm" className="h-5 w-5 p-0 text-muted-foreground hover:text-red-400" onClick={(e) => { e.stopPropagation(); kill(task.id); }}>
+            <XCircle className="h-3 w-3" />
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+});
+
 // ── Status config ──
 
 const statusConfig: Record<
@@ -522,7 +703,7 @@ const TaskCard = memo(function TaskCard({
 
           {/* Time — last row */}
           {fields.time && (
-            <span className="text-[10px] text-muted-foreground/40 mt-1 text-right">
+            <span className="block text-[10px] text-muted-foreground/40 mt-1 text-right">
               {formatDistanceToNow(new Date(task.updatedAt), { addSuffix: true })}
             </span>
           )}
@@ -881,7 +1062,7 @@ function ListView({
             </Card>
           ) : (
             filtered.map((task) => (
-              <TaskCard
+              <TaskRow
                 key={task.id}
                 task={task}
                 process={processes.find(p => p.taskId === task.id)}

@@ -57,10 +57,6 @@ export interface VaultPreviewData {
 export type VaultPreviewAction = "confirm" | "cancel";
 
 // Client-side tool types
-export interface GoToFileData {
-  path: string;
-}
-
 export interface OpenFileData {
   path: string;
 }
@@ -71,6 +67,11 @@ export interface NavigateToData {
   name?: string;
   path?: string;
   highlight?: string;
+}
+
+export interface OpenTabData {
+  url: string;
+  label?: string;
 }
 
 // Local mirror of SDK tool call types
@@ -94,9 +95,9 @@ export interface ChatMessageWithQuestions extends ChatMessage {
   askUserQuestions?: AskUserQuestion[];
   missionPreview?: MissionPreviewData;
   vaultPreview?: VaultPreviewData;
-  goToFile?: GoToFileData;
   openFile?: OpenFileData;
   navigateTo?: NavigateToData;
+  openTab?: OpenTabData;
   toolCalls?: ToolCallInfo[];
   /** Chronologically ordered segments (text interleaved with tool calls) */
   segments?: MessageSegment[];
@@ -128,12 +129,12 @@ export function useChat() {
   const [pendingMission, setPendingMission] = useState<MissionPreviewData | null>(null);
   /** Vault entry preview waiting for user confirmation (null = no pending vault) */
   const [pendingVault, setPendingVault] = useState<VaultPreviewData | null>(null);
-  /** Client-side go_to_file — path to navigate to (consumed immediately) */
-  const [pendingGoToFile, setPendingGoToFile] = useState<GoToFileData | null>(null);
   /** Client-side open_file — path of file to open in preview dialog */
   const [pendingOpenFile, setPendingOpenFile] = useState<OpenFileData | null>(null);
   /** Client-side navigate_to — target page + params (consumed immediately) */
   const [pendingNavigateTo, setPendingNavigateTo] = useState<NavigateToData | null>(null);
+  /** Client-side open_tab — opens URL in new browser tab (consumed immediately) */
+  const [pendingOpenTab, setPendingOpenTab] = useState<OpenTabData | null>(null);
   const initialLoadDone = useRef(false);
   /** Conversation history sent to the completions endpoint */
   const conversationRef = useRef<ChatCompletionMessage[]>([]);
@@ -181,7 +182,7 @@ export function useChat() {
         };
         lastMsg.vaultPreview = vaultPreview;
         setPendingVault(vaultPreview);
-      // NOTE: go_to_file, open_file, navigate_to are one-shot navigation actions.
+      // NOTE: open_file, navigate_to, open_tab are one-shot navigation actions.
       // They must NOT be restored as pending because:
       // 1. They were already consumed when originally fired (navigate + streamCompletion).
       // 2. Restoring them triggers the useEffect in ChatPage → consume* → new
@@ -189,10 +190,6 @@ export function useChat() {
       //    or session reload.
       // Only interactive prompts (ask_user, create_mission, set_vault_entry) that
       // require explicit user input should be restored.
-      } else if (tc.name === "go_to_file" && tc.arguments) {
-        // Reconstruct display data on the message, but do NOT set pending state
-        const args = tc.arguments as Record<string, unknown>;
-        lastMsg.goToFile = { path: (args.path as string) ?? "" };
       } else if (tc.name === "open_file" && tc.arguments) {
         const args = tc.arguments as Record<string, unknown>;
         lastMsg.openFile = { path: (args.path as string) ?? "" };
@@ -204,6 +201,13 @@ export function useChat() {
           name: args.name as string | undefined,
           path: args.path as string | undefined,
           highlight: args.highlight as string | undefined,
+        };
+      } else if (tc.name === "open_tab" && tc.arguments) {
+        // Display-only — do NOT set pending state (one-shot action)
+        const args = tc.arguments as Record<string, unknown>;
+        lastMsg.openTab = {
+          url: (args.url as string) ?? "",
+          label: args.label as string | undefined,
         };
       }
     }
@@ -448,23 +452,6 @@ export function useChat() {
         setPendingQuestions(null);
         setPendingMission(null);
         conversationRef.current.push({ role: "assistant", content: fullContent });
-      } else if ((stream as any).goToFile) {
-        // Client-side go_to_file — navigate to file browser immediately
-        const goToFileData: GoToFileData = {
-          path: (stream as any).goToFile.path,
-        };
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === assistantId
-              ? { ...m, content: fullContent, goToFile: goToFileData, toolCalls: toolCalls.length > 0 ? toolCalls : undefined, segments: [...segments] }
-              : m
-          )
-        );
-        setPendingGoToFile(goToFileData);
-        setPendingQuestions(null);
-        setPendingMission(null);
-        setPendingVault(null);
-        conversationRef.current.push({ role: "assistant", content: fullContent });
       } else if ((stream as any).openFile) {
         // Client-side open_file — open file preview dialog
         const of = (stream as any).openFile;
@@ -505,13 +492,32 @@ export function useChat() {
         setPendingMission(null);
         setPendingVault(null);
         conversationRef.current.push({ role: "assistant", content: fullContent });
+      } else if ((stream as any).openTab) {
+        // Client-side open_tab — open URL in new browser tab
+        const tab = (stream as any).openTab;
+        const openTabData: OpenTabData = {
+          url: tab.url,
+          label: tab.label,
+        };
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantId
+              ? { ...m, content: fullContent, openTab: openTabData, toolCalls: toolCalls.length > 0 ? toolCalls : undefined, segments: [...segments] }
+              : m
+          )
+        );
+        setPendingOpenTab(openTabData);
+        setPendingQuestions(null);
+        setPendingMission(null);
+        setPendingVault(null);
+        conversationRef.current.push({ role: "assistant", content: fullContent });
       } else {
         setPendingQuestions(null);
         setPendingMission(null);
         setPendingVault(null);
-        setPendingGoToFile(null);
         setPendingOpenFile(null);
         setPendingNavigateTo(null);
+        setPendingOpenTab(null);
         conversationRef.current.push({ role: "assistant", content: fullContent });
       }
 
@@ -875,44 +881,6 @@ export function useChat() {
     [pendingVault, client, streamCompletion]
   );
 
-  // Consume the go_to_file pending state after the caller has navigated.
-  // Called by the page component after performing the navigation.
-  const consumeGoToFile = useCallback(() => {
-    if (!pendingGoToFile) return;
-    const data = pendingGoToFile;
-    setPendingGoToFile(null);
-
-    // Tell the LLM the navigation happened — fire-and-forget continuation
-    const responseText = `Navigated to file "${data.path}".`;
-    const userMsg: ChatMessageWithQuestions = {
-      id: `temp-${Date.now()}`,
-      role: "user",
-      content: responseText,
-      ts: new Date().toISOString(),
-    };
-    setMessages((prev) => [...prev, userMsg]);
-    conversationRef.current.push({ role: "user", content: responseText });
-
-    const assistantId = `temp-${Date.now()}-a`;
-    setMessages((prev) => [
-      ...prev,
-      { id: assistantId, role: "assistant", content: "", ts: new Date().toISOString() },
-    ]);
-    setIsLoading(true);
-
-    streamCompletion(assistantId)
-      .catch((e) => {
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === assistantId
-              ? { ...m, content: `Error: ${(e as Error).message}` }
-              : m
-          )
-        );
-      })
-      .finally(() => setIsLoading(false));
-  }, [pendingGoToFile, streamCompletion]);
-
   // Consume the preview_file pending state after the dialog is opened.
   // The dialog is opened by the page component; this resumes the LLM conversation.
   const consumeOpenFile = useCallback(() => {
@@ -991,6 +959,43 @@ export function useChat() {
       .finally(() => setIsLoading(false));
   }, [pendingNavigateTo, streamCompletion]);
 
+  // Consume open_tab — open URL in new tab and resume conversation
+  const consumeOpenTab = useCallback(() => {
+    if (!pendingOpenTab) return;
+    const data = pendingOpenTab;
+    setPendingOpenTab(null);
+
+    const label = data.label ?? data.url;
+    const responseText = `Opened tab: ${label}`;
+    const userMsg: ChatMessageWithQuestions = {
+      id: `temp-${Date.now()}`,
+      role: "user",
+      content: responseText,
+      ts: new Date().toISOString(),
+    };
+    setMessages((prev) => [...prev, userMsg]);
+    conversationRef.current.push({ role: "user", content: responseText });
+
+    const assistantId = `temp-${Date.now()}-a`;
+    setMessages((prev) => [
+      ...prev,
+      { id: assistantId, role: "assistant", content: "", ts: new Date().toISOString() },
+    ]);
+    setIsLoading(true);
+
+    streamCompletion(assistantId)
+      .catch((e) => {
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantId
+              ? { ...m, content: `Error: ${(e as Error).message}` }
+              : m
+          )
+        );
+      })
+      .finally(() => setIsLoading(false));
+  }, [pendingOpenTab, streamCompletion]);
+
   // Delete a session — clear messages if active
   const deleteSession = useCallback(
     async (id: string) => {
@@ -1002,8 +1007,8 @@ export function useChat() {
           setPendingQuestions(null);
           setPendingMission(null);
           setPendingVault(null);
-          setPendingGoToFile(null);
           setPendingOpenFile(null);
+          setPendingOpenTab(null);
         }
       } catch {
         // silent
@@ -1018,8 +1023,8 @@ export function useChat() {
     setPendingQuestions(null);
     setPendingMission(null);
     setPendingVault(null);
-    setPendingGoToFile(null);
     setPendingOpenFile(null);
+    setPendingOpenTab(null);
     conversationRef.current = [];
   }, [setSessionId]);
 
@@ -1033,17 +1038,17 @@ export function useChat() {
     pendingQuestions,
     pendingMission,
     pendingVault,
-    pendingGoToFile,
     pendingOpenFile,
     pendingNavigateTo,
+    pendingOpenTab,
     send,
     stop,
     answerQuestions,
     respondToMission,
     respondToVault,
-    consumeGoToFile,
     consumeOpenFile,
     consumeNavigateTo,
+    consumeOpenTab,
     clear,
     loadSession,
     newSession,

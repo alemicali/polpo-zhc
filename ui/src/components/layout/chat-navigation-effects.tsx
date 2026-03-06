@@ -17,14 +17,14 @@ import { useFilePreview, mimeFromPath, FilePreviewDialog } from "@/components/sh
 
 export function ChatNavigationEffects() {
   const {
-    pendingGoToFile,
     pendingOpenFile,
     pendingNavigateTo,
+    pendingOpenTab,
   } = useChatState();
   const {
-    consumeGoToFile,
     consumeOpenFile,
     consumeNavigateTo,
+    consumeOpenTab,
   } = useChatActions();
 
   const navigate = useNavigate();
@@ -41,18 +41,6 @@ export function ChatNavigationEffects() {
     // Resume the LLM conversation immediately — user closes the preview when they want
     consumeOpenFile();
   }, [pendingOpenFile, openPreview, consumeOpenFile]);
-
-  // Auto-navigate to file browser when go_to_file fires
-  useEffect(() => {
-    if (!pendingGoToFile) return;
-    const filePath = pendingGoToFile.path;
-    // Navigate to the files page with the file's parent dir, and highlight the file
-    const parts = filePath.split("/");
-    const dir = parts.length > 1 ? parts.slice(0, -1).join("/") : ".";
-    navigate(`/files?path=${encodeURIComponent(dir)}&highlight=${encodeURIComponent(filePath)}`);
-    sidebarActions.setSidebarOpen(true);
-    consumeGoToFile();
-  }, [pendingGoToFile, navigate, consumeGoToFile]);
 
   // Auto-navigate to any page when navigate_to fires
   useEffect(() => {
@@ -95,6 +83,13 @@ export function ChatNavigationEffects() {
     }
     consumeNavigateTo();
   }, [pendingNavigateTo, navigate, consumeNavigateTo]);
+
+  // Auto-open URL in new tab when open_tab fires
+  useEffect(() => {
+    if (!pendingOpenTab) return;
+    window.open(pendingOpenTab.url, "_blank");
+    consumeOpenTab();
+  }, [pendingOpenTab, consumeOpenTab]);
 
   return <FilePreviewDialog preview={previewState} onClose={closePreview} />;
 }

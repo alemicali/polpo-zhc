@@ -707,6 +707,12 @@ export class Orchestrator extends TypedEmitter {
     this.memoryStore?.append(line);
   }
 
+  /** Replace a unique substring in the project memory. */
+  updateMemory(oldText: string, newText: string): true | string {
+    if (!this.memoryStore) return "No memory store configured.";
+    return this.memoryStore.update(oldText, newText);
+  }
+
   /** Get the persistent log store. */
   getLogStore(): LogStore | undefined {
     return this.logStore;

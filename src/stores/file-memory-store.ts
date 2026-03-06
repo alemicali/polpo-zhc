@@ -40,4 +40,20 @@ export class FileMemoryStore implements MemoryStore {
     const ts = new Date().toISOString().slice(0, 10);
     appendFileSync(this.filePath, `\n- ${ts}: ${line}\n`, "utf-8");
   }
+
+  update(oldText: string, newText: string): true | string {
+    if (!this.exists()) return "Memory file does not exist. Use save_memory to create it first.";
+    const content = this.get();
+    if (!content.includes(oldText)) {
+      return "oldString not found in memory. Use get_memory to see the current content.";
+    }
+    const firstIdx = content.indexOf(oldText);
+    const secondIdx = content.indexOf(oldText, firstIdx + 1);
+    if (secondIdx !== -1) {
+      return "oldString found multiple times in memory. Provide more surrounding context to make the match unique.";
+    }
+    const updated = content.replace(oldText, newText);
+    this.save(updated);
+    return true;
+  }
 }

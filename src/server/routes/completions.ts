@@ -483,15 +483,6 @@ export function completionRoutes(orchestrator: Orchestrator, apiKeys?: string[])
                     },
                   }),
                 });
-              } else if (interactiveCall.name === "go_to_file") {
-                const args = interactiveCall.arguments as Record<string, unknown>;
-                await stream.writeSSE({
-                  data: sseChunk(completionId, {}, "go_to_file", {
-                    go_to_file: {
-                      path: args.path as string,
-                    },
-                  }),
-                });
               } else if (interactiveCall.name === "open_file") {
                 const args = interactiveCall.arguments as Record<string, unknown>;
                 await stream.writeSSE({
@@ -511,6 +502,16 @@ export function completionRoutes(orchestrator: Orchestrator, apiKeys?: string[])
                       name: args.name as string | undefined,
                       path: args.path as string | undefined,
                       highlight: args.highlight as string | undefined,
+                    },
+                  }),
+                });
+              } else if (interactiveCall.name === "open_tab") {
+                const args = interactiveCall.arguments as Record<string, unknown>;
+                await stream.writeSSE({
+                  data: sseChunk(completionId, {}, "open_tab", {
+                    open_tab: {
+                      url: args.url as string,
+                      label: args.label as string | undefined,
                     },
                   }),
                 });
@@ -708,21 +709,6 @@ export function completionRoutes(orchestrator: Orchestrator, apiKeys?: string[])
               });
             }
 
-            if (interactiveCall.name === "go_to_file") {
-              const args = interactiveCall.arguments as Record<string, unknown>;
-              return c.json({
-                ...baseResponse,
-                choices: [{
-                  index: 0,
-                  message: { role: "assistant" as const, content: finalText },
-                  finish_reason: "go_to_file" as const,
-                  go_to_file: {
-                    path: args.path as string,
-                  },
-                }],
-              });
-            }
-
             if (interactiveCall.name === "open_file") {
               const args = interactiveCall.arguments as Record<string, unknown>;
               return c.json({
@@ -752,6 +738,22 @@ export function completionRoutes(orchestrator: Orchestrator, apiKeys?: string[])
                     name: args.name as string | undefined,
                     path: args.path as string | undefined,
                     highlight: args.highlight as string | undefined,
+                  },
+                }],
+              });
+            }
+
+            if (interactiveCall.name === "open_tab") {
+              const args = interactiveCall.arguments as Record<string, unknown>;
+              return c.json({
+                ...baseResponse,
+                choices: [{
+                  index: 0,
+                  message: { role: "assistant" as const, content: finalText },
+                  finish_reason: "open_tab" as const,
+                  open_tab: {
+                    url: args.url as string,
+                    label: args.label as string | undefined,
                   },
                 }],
               });
