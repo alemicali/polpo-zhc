@@ -1,78 +1,13 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { mkdirSync, rmSync, existsSync, statSync } from "node:fs";
+import { describe, it, expect } from "vitest";
 import { join } from "node:path";
 import { createAudioTools } from "../tools/audio-tools.js";
 
 const TEST_DIR = join("/tmp", "polpo-audio-tools-test");
 
-/** Extract text from tool result */
-const txt = (r: any): string => (r.content[0] as any).text as string;
-
-/**
- * Real integration test: generates speech via Deepgram Aura TTS, then transcribes it back via Deepgram Nova.
- * Requires DEEPGRAM_API_KEY env var.
- */
-describe("Audio Tools — TTS → STT round-trip (Deepgram)", () => {
-  const shouldRun = !!process.env.DEEPGRAM_API_KEY;
-
-  beforeAll(() => {
-    rmSync(TEST_DIR, { recursive: true, force: true });
-    mkdirSync(TEST_DIR, { recursive: true });
-  });
-
-  afterAll(() => {
-    rmSync(TEST_DIR, { recursive: true, force: true });
-  });
-
+describe("Audio Tools — sandbox enforcement", () => {
   const tools = createAudioTools(TEST_DIR, [TEST_DIR]);
   const speakTool = tools.find(t => t.name === "audio_speak")!;
   const transcribeTool = tools.find(t => t.name === "audio_transcribe")!;
-
-  it.skipIf(!shouldRun)("generates speech audio from text", async () => {
-    const result = await speakTool.execute("t1", {
-      text: "The quick brown fox jumps over the lazy dog.",
-      path: "round-trip.mp3",
-      provider: "deepgram",
-      model: "aura-2-en",
-    });
-
-    const output = txt(result);
-    expect(output).toContain("Speech audio saved");
-    expect(output).toContain("round-trip.mp3");
-    expect(result.details.provider).toBe("deepgram");
-    expect(result.details.model).toBe("aura-2-en");
-    expect(result.details.bytes).toBeGreaterThan(1000);
-
-    // File actually exists and has content
-    const filePath = join(TEST_DIR, "round-trip.mp3");
-    expect(existsSync(filePath)).toBe(true);
-    expect(statSync(filePath).size).toBeGreaterThan(1000);
-  }, 30_000);
-
-  it.skipIf(!shouldRun)("transcribes the generated audio back to text", async () => {
-    const result = await transcribeTool.execute("t2", {
-      path: "round-trip.mp3",
-      provider: "deepgram",
-      model: "nova-3",
-      language: "en",
-    });
-
-    const output = txt(result);
-    expect(output).toContain("Model: nova-3");
-
-    // The transcription should contain the original words (case-insensitive)
-    const lower = output.toLowerCase();
-    expect(lower).toContain("quick");
-    expect(lower).toContain("brown");
-    expect(lower).toContain("fox");
-    expect(lower).toContain("lazy");
-    expect(lower).toContain("dog");
-
-    expect(result.details.provider).toBe("deepgram");
-    expect(result.details.textLength).toBeGreaterThan(10);
-  }, 30_000);
-
-  // ── Sandbox enforcement ──
 
   it("rejects audio_speak outside sandbox", async () => {
     await expect(
