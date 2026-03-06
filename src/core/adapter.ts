@@ -46,8 +46,6 @@ export interface SpawnContext {
   outputDir?: string;
   /** Email domain allowlist — restricts email_send tool to these domains. */
   emailAllowedDomains?: string[];
-  /** MCP tool allowlist — keys are server names, values are allowed tool names. */
-  mcpToolAllowlist?: Record<string, string[]>;
   /** Global reasoning level from settings — used as fallback when agent doesn't specify one. */
   reasoning?: ReasoningLevel;
   /** Encrypted vault store — for resolving agent credentials at runtime. */

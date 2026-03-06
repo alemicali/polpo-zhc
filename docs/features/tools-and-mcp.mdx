@@ -1,9 +1,9 @@
 ---
-title: "Tools & MCP"
-description: "9 core tools (including HTTP), 7 extended tool categories, filesystem sandboxing, and MCP server connections."
+title: "Tools"
+description: "Core system tools, extended tool categories (browser, email, vault, media, search), and filesystem sandboxing."
 ---
 
-Agents need tools to do their job. Polpo gives every agent a set of **core tools** for reading, writing, searching files, and making HTTP requests — **7 extended tool categories** (browser, email, vault, image, video, audio, and search) — plus the ability to connect to external **MCP servers** for additional capabilities.
+Agents need tools to do their job. Polpo gives every agent a set of **system tools** for reading, writing, searching files, and making HTTP requests — plus **extended tool categories** (browser, email, vault, image, audio, and search) for specialized capabilities.
 
 ## Core Tools
 
@@ -200,7 +200,7 @@ This is path-prefix matching with separator awareness — `./src/ui` allows `./s
 
 ## Safe Environment
 
-When agents run shell commands (`bash` tool) or spawn MCP servers, Polpo filters the environment variables to prevent leaking API keys and secrets.
+When agents run shell commands (`bash` tool), Polpo filters the environment variables to prevent leaking API keys and secrets.
 
 The `safeEnv()` function only passes through system-essential variables:
 
@@ -213,62 +213,4 @@ Everything else — `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, database passwords, c
 
 See [Security](/features/security) for more details on environment filtering.
 
-## MCP (Model Context Protocol)
 
-Agents can connect to external [MCP](https://modelcontextprotocol.io/) servers for additional capabilities — databases, APIs, custom tools, anything with an MCP interface.
-
-<Note>
-Polpo is an MCP **client**, not a server. When you configure `mcpServers` on an agent, you're telling Polpo which external MCP servers to connect to. The agent discovers tools from those servers and can call them alongside the built-in core tools.
-</Note>
-
-Polpo supports all three MCP transport types:
-
-<Tabs>
-  <Tab title="stdio">
-    ```json
-    {
-      "name": "dev-with-db",
-      "mcpServers": {
-        "postgres": {
-          "command": "npx",
-          "args": ["-y", "@modelcontextprotocol/server-postgres", "postgresql://localhost/mydb"],
-          "env": { "NODE_ENV": "development" }
-        }
-      }
-    }
-    ```
-    The server is spawned as a child process using `safeEnv()` — your API keys won't leak to the MCP server process.
-  </Tab>
-
-  <Tab title="SSE">
-    ```json
-    {
-      "name": "dev-with-remote-tools",
-      "mcpServers": {
-        "my-tools": {
-          "type": "sse",
-          "url": "https://my-mcp-server.example.com/sse",
-          "headers": { "Authorization": "Bearer token123" }
-        }
-      }
-    }
-    ```
-  </Tab>
-
-  <Tab title="HTTP (Streamable)">
-    ```json
-    {
-      "name": "dev-with-http-tools",
-      "mcpServers": {
-        "my-tools": {
-          "type": "http",
-          "url": "https://my-mcp-server.example.com/mcp",
-          "headers": { "Authorization": "Bearer token123" }
-        }
-      }
-    }
-    ```
-  </Tab>
-</Tabs>
-
-Tools discovered from connected MCP servers are added to the agent's tool set alongside the built-in core tools. The agent doesn't know (or care) whether a tool is built-in or comes from an MCP server — it just uses what's available.

@@ -31,9 +31,6 @@ importers:
       '@mariozechner/pi-ai':
         specifier: ^0.52.12
         version: 0.52.12(@modelcontextprotocol/sdk@1.26.0(zod@4.3.6))(ws@8.19.0)(zod@4.3.6)
-      '@modelcontextprotocol/sdk':
-        specifier: ^1.26.0
-        version: 1.26.0(zod@4.3.6)
       '@sinclair/typebox':
         specifier: ^0.34.48
         version: 0.34.48
@@ -9232,6 +9229,7 @@ snapshots:
       zod-to-json-schema: 3.25.1(zod@4.3.6)
     transitivePeerDependencies:
       - supports-color
+    optional: true
 
   '@mswjs/interceptors@0.41.3':
     dependencies:

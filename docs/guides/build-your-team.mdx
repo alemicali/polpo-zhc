@@ -53,7 +53,6 @@ Each agent supports these fields:
 | `systemPrompt` | `string` | — | Custom instructions prepended to the default prompt |
 | `skills` | `string[]` | — | Named skill files to load |
 | `maxTurns` | `number` | `150` | Maximum tool-use turns before the agent is stopped |
-| `mcpServers` | `object` | — | MCP server connections |
 
 <Tip>
   The `role` field matters. Polpo includes it in the agent's system prompt, so be specific: "Backend developer specializing in Node.js and PostgreSQL" works better than just "developer".

@@ -82,7 +82,6 @@
     "@hono/zod-openapi": "^1.2.2",
     "@mariozechner/pi-agent-core": "^0.52.12",
     "@mariozechner/pi-ai": "^0.52.12",
-    "@modelcontextprotocol/sdk": "^1.26.0",
     "@sinclair/typebox": "^0.34.48",
     "@whiskeysockets/baileys": "7.0.0-rc.9",
     "chalk": "^5.4.1",

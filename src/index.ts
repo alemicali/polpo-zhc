@@ -49,16 +49,13 @@ export { EmailChannel } from "./notifications/channels/email.js";
 export { WebhookChannel } from "./notifications/channels/webhook.js";
 
 // Security
-export { safeEnv, bashSafeEnv, mcpSafeEnv } from "./tools/safe-env.js";
+export { safeEnv, bashSafeEnv } from "./tools/safe-env.js";
 
 // Extended Tools
 export { createCodingTools, createAllTools, ALL_EXTENDED_TOOL_NAMES } from "./tools/coding-tools.js";
 export type { ExtendedToolName, CreateAllToolsOptions } from "./tools/coding-tools.js";
 export { createBrowserTools, ALL_BROWSER_TOOL_NAMES } from "./tools/browser-tools.js";
 export { createHttpTools, ALL_HTTP_TOOL_NAMES } from "./tools/http-tools.js";
-export { createGitTools, ALL_GIT_TOOL_NAMES } from "./tools/git-tools.js";
-export { createMultifileTools, ALL_MULTIFILE_TOOL_NAMES } from "./tools/multifile-tools.js";
-export { createDepTools, ALL_DEP_TOOL_NAMES } from "./tools/dep-tools.js";
 export { createExcelTools, ALL_EXCEL_TOOL_NAMES } from "./tools/excel-tools.js";
 export { createPdfTools, ALL_PDF_TOOL_NAMES } from "./tools/pdf-tools.js";
 export { createDocxTools, ALL_DOCX_TOOL_NAMES } from "./tools/docx-tools.js";

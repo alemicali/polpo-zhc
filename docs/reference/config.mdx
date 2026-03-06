@@ -31,7 +31,6 @@ Missions and tasks are stored separately in `.polpo/missions/` and `.polpo/tasks
 | `model` | string | — | LLM model. Format: `provider:model` (e.g. `"anthropic:claude-sonnet-4-6"`) or bare model ID |
 | `allowedTools` | string[] | — | Allowed tool names |
 | `allowedPaths` | string[] | `[workDir]` | Filesystem sandbox — directories the agent can access. Absolute or relative to `workDir` |
-| `mcpServers` | object | — | MCP server configuration. Keys are server names, values are stdio or HTTP configs |
 | `identity` | AgentIdentity | — | Agent's identity — persona, responsibilities, communication style. See [Identity](#agentidentity-fields) |
 | `reportsTo` | string | — | Agent this one reports to — org chart hierarchy for escalation. Must match another agent's `name` |
 | `systemPrompt` | string | — | Additional system prompt appended to base |

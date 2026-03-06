@@ -480,7 +480,6 @@ export class TaskRunner {
       storage: this.ctx.config.settings.storage,
       notifySocket: getSocketPath(this.ctx.polpoDir),
       emailAllowedDomains: agent.emailAllowedDomains ?? this.ctx.config.settings.emailAllowedDomains,
-      mcpToolAllowlist: this.ctx.config.settings.mcpToolAllowlist,
       reasoning: this.ctx.config.settings.reasoning,
       whatsappDbPath,
       whatsappProfilePath,

@@ -26,8 +26,6 @@ import { join, sep } from "node:path";
 import { resolveModel, resolveApiKeyAsync, enforceModelAllowlist } from "../llm/pi-client.js";
 import { createCodingTools, createAllTools } from "../tools/coding-tools.js";
 import { loadAgentSkills, buildSkillPrompt } from "../llm/skills.js";
-import { McpClientManager } from "../mcp/client.js";
-import type { McpServerConfig } from "../mcp/types.js";
 import { nanoid } from "nanoid";
 
 /**
@@ -181,16 +179,6 @@ function describeToolsForAgent(agent: AgentConfig): string {
     lines.push(...extended);
   }
 
-  // --- MCP servers (tools discovered at runtime) ---
-  if (agent.mcpServers && Object.keys(agent.mcpServers).length > 0) {
-    const serverNames = Object.keys(agent.mcpServers);
-    lines.push(
-      "",
-      "**MCP Servers (external tools):**",
-      `Connected MCP servers: ${serverNames.join(", ")}`,
-      "These provide additional tools discovered at runtime. Use them when relevant to your task.",
-    );
-  }
 
   // --- Guidance ---
   lines.push(
@@ -453,14 +441,11 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
   // Vault is passed here so vault_get/vault_list are available from the start
   const codingTools = createCodingTools(cwd, agentConfig.allowedTools, effectiveAllowedPaths, outputDir, vault);
 
-  // MCP client manager — initialized later (async) if mcpServers are configured
-  let mcpManager: McpClientManager | null = null;
-  const hasMcp = agentConfig.mcpServers && Object.keys(agentConfig.mcpServers).length > 0;
 
   // Resolve reasoning level: agent config > global settings (via SpawnContext) > "off"
   const thinkingLevel = agentConfig.reasoning ?? ctx?.reasoning ?? "off";
 
-  // Create the pi-agent-core Agent (starts with coding tools only; MCP tools added before prompt)
+  // Create the pi-agent-core Agent (starts with coding tools only; extended tools added before prompt)
   // Pass model.maxTokens to override pi-ai's 32K default cap, so each model uses its full output capacity.
   const agent = new Agent({
     getApiKey: (provider: string) => resolveApiKeyAsync(provider),
@@ -488,8 +473,7 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
     kill: () => {
       agent.abort();
       alive = false;
-      // Best-effort MCP cleanup on kill
-      if (mcpManager) mcpManager.close().catch(() => {});
+
     },
   };
 
@@ -576,7 +560,7 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
   // Run the agent and capture result
   handle.done = (async (): Promise<TaskResult> => {
     try {
-      // Resolve all tools (browser/email auto-detected from allowedTools) and MCP servers before prompting
+      // Resolve all tools (browser/email auto-detected from allowedTools) before prompting
       // Note: vault is already resolved above and included in codingTools as core tools
       let allTools = codingTools;
       if (hasExtendedTools) {
@@ -595,21 +579,6 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
         agent.setTools(allTools);
       }
 
-      // Connect to MCP servers if configured (async — must happen before prompt)
-      if (hasMcp) {
-        mcpManager = new McpClientManager(cwd);
-        const log = (msg: string) => handle.onTranscript?.({ type: "assistant", text: msg });
-        await mcpManager.connectAll(
-          agentConfig.mcpServers as Record<string, McpServerConfig>,
-          log,
-          ctx?.mcpToolAllowlist,
-        );
-        const mcpTools = mcpManager.getTools();
-        if (mcpTools.length > 0) {
-          // Merge all tools (coding + extended) with MCP tools
-          agent.setTools([...allTools, ...mcpTools]);
-        }
-      }
 
       const prompt = buildPrompt(task);
       await agent.prompt(prompt);
@@ -648,10 +617,6 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
         duration: Date.now() - start,
       };
     } finally {
-      // Always disconnect MCP servers on completion/failure
-      if (mcpManager) {
-        await mcpManager.close().catch(() => {});
-      }
       // Close agent-browser session (profile data auto-persisted by --profile)
       if (hasExtendedTools) {
         const { cleanupAgentBrowserSession } = await import("../tools/browser-tools.js");

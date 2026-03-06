@@ -164,7 +164,6 @@ async function main(): Promise<void> {
       polpoDir: config.polpoDir,
       outputDir: config.outputDir,
       emailAllowedDomains: config.emailAllowedDomains,
-      mcpToolAllowlist: config.mcpToolAllowlist,
       reasoning: config.reasoning,
       vaultStore,
       whatsappStore: waStore,

@@ -1,6 +1,3 @@
-import type { McpServerConfig } from "../mcp/types.js";
-export type { McpServerConfig } from "../mcp/types.js";
-
 // === Reasoning / Thinking ===
 
 /** Reasoning level for LLM calls (maps to pi-ai ThinkingLevel). */
@@ -252,8 +249,6 @@ export interface AgentConfig {
    *  Paths can be absolute or relative to workDir. When set, all file tool operations
    *  and bash cwd are validated against these paths. When omitted, defaults to [workDir]. */
   allowedPaths?: string[];
-  /** MCP servers to connect to. Keys are server names, values are server configs (stdio or HTTP). */
-  mcpServers?: Record<string, McpServerConfig>;
   /** Agent's identity — persona, responsibilities, communication style */
   identity?: AgentIdentity;
   // NOTE: Vault credentials are stored in .polpo/vault.enc (encrypted).
@@ -283,7 +278,7 @@ export interface AgentConfig {
   // Extended tool categories are activated via allowedTools (e.g. ["browser_*", "email_*"]).
   // No enable flags needed — if a tool name appears in allowedTools, it's loaded.
   // Available extension categories: browser_*, email_*, image_*, video_*, audio_*, excel_*, pdf_*, docx_*, search_*.
-  // Git, multifile, and dependency operations should be done via bash + skills instead of dedicated tools.
+  // Git and dependency operations should be done via bash.
 
   /** Browser profile name for persistent context (cookies, auth, localStorage).
    *  Defaults to agent name. Used with agent-browser's --profile flag.
@@ -549,8 +544,6 @@ export interface RunnerConfig {
   notifySocket?: string;
   /** Email domain allowlist (from settings or agent config). */
   emailAllowedDomains?: string[];
-  /** MCP tool allowlist — keys are server names, values are allowed tool names. */
-  mcpToolAllowlist?: Record<string, string[]>;
   /** Global reasoning level from settings — used as fallback for agents that don't specify one. */
   reasoning?: ReasoningLevel;
   /** WhatsApp message DB path (for whatsapp_* agent tools). */
@@ -695,9 +688,6 @@ export interface PolpoSettings {
   defaultQualityThreshold?: number;
   /** Allowed recipient email domains — applies to all agents (can be overridden per-agent). */
   emailAllowedDomains?: string[];
-  /** MCP tool allowlist — keys are server names, values are arrays of allowed tool names.
-   *  When set for a server, only listed tools are exposed to agents. Unlisted servers are unrestricted. */
-  mcpToolAllowlist?: Record<string, string[]>;
 }
 
 // === Polpo State (persisted in .polpo/state.json) ===

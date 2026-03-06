@@ -44,13 +44,10 @@ const env = safeEnv(undefined, ["DATABASE_URL", "REDIS_URL"]);
 Convenience helpers are available for common use cases:
 
 ```typescript
-import { bashSafeEnv, mcpSafeEnv } from "polpo/tools/safe-env";
+import { bashSafeEnv } from "polpo/tools/safe-env";
 
 // For bash tool commands — system vars only
 const bashEnv = bashSafeEnv();
-
-// For MCP stdio transport — system vars + explicit config overrides
-const mcpEnv = mcpSafeEnv({ SOME_CONFIG: "value" });
 ```
 
 ## JSON Condition DSL

@@ -62,27 +62,6 @@ export function validateAgents(agents: any[]): void {
         }
       }
     }
-    // Validate MCP server configs
-    if (agent.mcpServers) {
-      if (typeof agent.mcpServers !== "object" || Array.isArray(agent.mcpServers)) {
-        throw new Error(`Agent "${agent.name}": mcpServers must be an object`);
-      }
-      for (const [serverName, cfg] of Object.entries(agent.mcpServers)) {
-        const config = cfg as Record<string, unknown>;
-        const hasCommand = typeof config.command === "string";
-        const hasUrl = typeof config.url === "string";
-        if (!hasCommand && !hasUrl) {
-          throw new Error(
-            `Agent "${agent.name}": MCP server "${serverName}" must have either "command" (stdio) or "url" (http/sse)`,
-          );
-        }
-        if (hasCommand && hasUrl) {
-          throw new Error(
-            `Agent "${agent.name}": MCP server "${serverName}" cannot have both "command" and "url"`,
-          );
-        }
-      }
-    }
     // Validate browser profile name
     if (agent.browserProfile !== undefined) {
       if (typeof agent.browserProfile !== "string" || !/^[a-zA-Z0-9_-]+$/.test(agent.browserProfile)) {

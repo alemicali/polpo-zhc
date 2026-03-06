@@ -7,7 +7,6 @@
  *
  * Security motivation:
  *   - Bash tool commands can read env vars via `env`, `echo $SECRET`, etc.
- *   - MCP stdio servers inherit the full env of their parent process.
  *   - Any subprocess with full env access has all API keys and credentials.
  */
 
@@ -85,10 +84,3 @@ export function bashSafeEnv(): Record<string, string> {
   return safeEnv();
 }
 
-/**
- * Convenience: create safe env for MCP stdio transport.
- * Includes system vars + any explicit env overrides from MCP config.
- */
-export function mcpSafeEnv(configEnv?: Record<string, string>): Record<string, string> {
-  return safeEnv(configEnv);
-}
