@@ -20,6 +20,7 @@ import { stateRoutes } from "./routes/state.js";
 import { completionRoutes } from "./routes/completions.js";
 import { peerRoutes } from "./routes/peers.js";
 import { scheduleRoutes } from "./routes/schedules.js";
+import { watcherRoutes } from "./routes/watchers.js";
 import { vaultRoutes } from "./routes/vault.js";
 import { authRoutes } from "./routes/auth.js";
 import { fileRoutes } from "./routes/files.js";
@@ -93,6 +94,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
   authed.route("/config", configRoutes());
   authed.route("/peers", peerRoutes());
   authed.route("/schedules", scheduleRoutes());
+  authed.route("/watchers", watcherRoutes());
   authed.route("/vault", vaultRoutes());
   authed.route("/auth", authRoutes());
   authed.route("/files", fileRoutes());

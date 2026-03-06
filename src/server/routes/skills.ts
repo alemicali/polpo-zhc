@@ -32,7 +32,7 @@ export function skillRoutes(): OpenAPIHono<ServerEnv> {
     method: "get",
     path: "/",
     tags: ["Skills"],
-    summary: "List skills with agent assignments",
+    summary: "List skills",
     responses: {
       200: {
         content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.array(z.any()) }) } },
@@ -70,7 +70,7 @@ export function skillRoutes(): OpenAPIHono<ServerEnv> {
     method: "post",
     path: "/add",
     tags: ["Skills"],
-    summary: "Install skills from a source",
+    summary: "Install skills",
     request: {
       body: {
         content: {
@@ -121,7 +121,7 @@ export function skillRoutes(): OpenAPIHono<ServerEnv> {
     method: "post",
     path: "/create",
     tags: ["Skills"],
-    summary: "Create a new agent skill",
+    summary: "Create skill",
     request: {
       body: {
         content: {
@@ -172,7 +172,7 @@ export function skillRoutes(): OpenAPIHono<ServerEnv> {
     method: "delete",
     path: "/{name}",
     tags: ["Skills"],
-    summary: "Remove a skill from the pool",
+    summary: "Remove skill",
     request: {
       params: z.object({ name: z.string() }),
       query: z.object({ global: z.string().optional() }),
@@ -209,7 +209,7 @@ export function skillRoutes(): OpenAPIHono<ServerEnv> {
     method: "post",
     path: "/{name}/assign",
     tags: ["Skills"],
-    summary: "Assign a skill to an agent",
+    summary: "Assign skill",
     request: {
       params: z.object({ name: z.string() }),
       body: {
@@ -255,7 +255,7 @@ export function skillRoutes(): OpenAPIHono<ServerEnv> {
     method: "post",
     path: "/{name}/unassign",
     tags: ["Skills"],
-    summary: "Unassign a skill from an agent",
+    summary: "Unassign skill",
     request: {
       params: z.object({ name: z.string() }),
       body: {
@@ -296,7 +296,7 @@ export function skillRoutes(): OpenAPIHono<ServerEnv> {
     method: "get",
     path: "/{name}/content",
     tags: ["Skills"],
-    summary: "Get agent skill content",
+    summary: "Get skill content",
     request: {
       params: z.object({ name: z.string() }),
     },
@@ -354,7 +354,7 @@ export function skillRoutes(): OpenAPIHono<ServerEnv> {
     method: "post",
     path: "/orchestrator",
     tags: ["Skills"],
-    summary: "Create a new orchestrator skill",
+    summary: "Create orchestrator skill",
     request: {
       body: {
         content: {
@@ -402,7 +402,7 @@ export function skillRoutes(): OpenAPIHono<ServerEnv> {
     method: "put",
     path: "/orchestrator/{name}",
     tags: ["Skills"],
-    summary: "Update an orchestrator skill",
+    summary: "Update orchestrator skill",
     request: {
       params: z.object({ name: z.string() }),
       body: {
@@ -447,7 +447,7 @@ export function skillRoutes(): OpenAPIHono<ServerEnv> {
     method: "delete",
     path: "/orchestrator/{name}",
     tags: ["Skills"],
-    summary: "Remove an orchestrator skill",
+    summary: "Remove orchestrator skill",
     request: {
       params: z.object({ name: z.string() }),
     },
@@ -480,7 +480,7 @@ export function skillRoutes(): OpenAPIHono<ServerEnv> {
     method: "get",
     path: "/orchestrator/{name}/content",
     tags: ["Skills"],
-    summary: "Get orchestrator skill content",
+    summary: "Get orchestrator content",
     request: {
       params: z.object({ name: z.string() }),
     },
@@ -514,7 +514,7 @@ export function skillRoutes(): OpenAPIHono<ServerEnv> {
     method: "post",
     path: "/orchestrator/add",
     tags: ["Skills"],
-    summary: "Install orchestrator skills from a source",
+    summary: "Install orchestrator skills",
     request: {
       body: {
         content: {
@@ -563,7 +563,7 @@ export function skillRoutes(): OpenAPIHono<ServerEnv> {
     method: "get",
     path: "/index",
     tags: ["Skills"],
-    summary: "Get the skills index (tags and categories)",
+    summary: "Get skills index",
     responses: {
       200: {
         content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.any() }) } },
@@ -584,7 +584,7 @@ export function skillRoutes(): OpenAPIHono<ServerEnv> {
     method: "put",
     path: "/{name}/index",
     tags: ["Skills"],
-    summary: "Update a skill's tags and category",
+    summary: "Update skill index",
     request: {
       params: z.object({ name: z.string() }),
       body: {

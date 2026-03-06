@@ -16,7 +16,7 @@ const listMissionsRoute = createRoute({
   method: "get",
   path: "/",
   tags: ["Missions"],
-  summary: "List all missions",
+  summary: "List missions",
   responses: {
     200: {
       content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.array(z.any()) }) } },
@@ -42,7 +42,7 @@ const getMissionRoute = createRoute({
   method: "get",
   path: "/{missionId}",
   tags: ["Missions"],
-  summary: "Get a mission by ID",
+  summary: "Get mission",
   request: {
     params: z.object({ missionId: z.string() }),
   },
@@ -62,7 +62,7 @@ const createMissionRoute = createRoute({
   method: "post",
   path: "/",
   tags: ["Missions"],
-  summary: "Save a new mission",
+  summary: "Create mission",
   request: {
     body: { content: { "application/json": { schema: CreateMissionSchema } } },
   },
@@ -78,7 +78,7 @@ const updateMissionRoute = createRoute({
   method: "patch",
   path: "/{missionId}",
   tags: ["Missions"],
-  summary: "Update a mission",
+  summary: "Update mission",
   request: {
     params: z.object({ missionId: z.string() }),
     body: { content: { "application/json": { schema: UpdateMissionSchema } } },
@@ -95,7 +95,7 @@ const deleteMissionRoute = createRoute({
   method: "delete",
   path: "/{missionId}",
   tags: ["Missions"],
-  summary: "Delete a mission",
+  summary: "Delete mission",
   request: {
     params: z.object({ missionId: z.string() }),
   },
@@ -115,7 +115,7 @@ const executeMissionRoute = createRoute({
   method: "post",
   path: "/{missionId}/execute",
   tags: ["Missions"],
-  summary: "Execute a mission",
+  summary: "Execute mission",
   request: {
     params: z.object({ missionId: z.string() }),
   },
@@ -131,7 +131,7 @@ const resumeMissionRoute = createRoute({
   method: "post",
   path: "/{missionId}/resume",
   tags: ["Missions"],
-  summary: "Resume a mission",
+  summary: "Resume mission",
   request: {
     params: z.object({ missionId: z.string() }),
     body: {
@@ -155,7 +155,7 @@ const listCheckpointsRoute = createRoute({
   method: "get",
   path: "/checkpoints",
   tags: ["Missions"],
-  summary: "List all active checkpoints",
+  summary: "List checkpoints",
   responses: {
     200: {
       content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.array(z.any()) }) } },
@@ -168,7 +168,7 @@ const resumeCheckpointRoute = createRoute({
   method: "post",
   path: "/{missionId}/checkpoints/{checkpointName}/resume",
   tags: ["Missions"],
-  summary: "Resume a checkpoint",
+  summary: "Resume checkpoint",
   request: {
     params: z.object({ missionId: z.string(), checkpointName: z.string() }),
   },
@@ -188,7 +188,7 @@ const abortMissionRoute = createRoute({
   method: "post",
   path: "/{missionId}/abort",
   tags: ["Missions"],
-  summary: "Abort a mission",
+  summary: "Abort mission",
   request: {
     params: z.object({ missionId: z.string() }),
   },
@@ -220,28 +220,28 @@ const missionOkResponse = {
 // Tasks
 const addMissionTaskRoute = createRoute({
   method: "post", path: "/{missionId}/tasks", tags: ["Missions"],
-  summary: "Add a task to mission data",
+  summary: "Add mission task",
   request: { params: z.object({ missionId: z.string() }), body: { content: { "application/json": { schema: AddMissionTaskSchema } } } },
   responses: { ...missionOkResponse, 201: missionOkResponse[200] },
 });
 
 const updateMissionTaskRoute = createRoute({
   method: "patch", path: "/{missionId}/tasks/{taskTitle}", tags: ["Missions"],
-  summary: "Update a task in mission data",
+  summary: "Update mission task",
   request: { params: z.object({ missionId: z.string(), taskTitle: z.string() }), body: { content: { "application/json": { schema: UpdateMissionTaskSchema } } } },
   responses: missionOkResponse,
 });
 
 const removeMissionTaskRoute = createRoute({
   method: "delete", path: "/{missionId}/tasks/{taskTitle}", tags: ["Missions"],
-  summary: "Remove a task from mission data",
+  summary: "Remove mission task",
   request: { params: z.object({ missionId: z.string(), taskTitle: z.string() }) },
   responses: missionOkResponse,
 });
 
 const reorderMissionTasksRoute = createRoute({
   method: "put", path: "/{missionId}/tasks/reorder", tags: ["Missions"],
-  summary: "Reorder tasks in mission data",
+  summary: "Reorder mission tasks",
   request: { params: z.object({ missionId: z.string() }), body: { content: { "application/json": { schema: ReorderMissionTasksSchema } } } },
   responses: missionOkResponse,
 });
@@ -249,21 +249,21 @@ const reorderMissionTasksRoute = createRoute({
 // Checkpoints
 const addMissionCheckpointRoute = createRoute({
   method: "post", path: "/{missionId}/checkpoints", tags: ["Missions"],
-  summary: "Add a checkpoint to mission data",
+  summary: "Add mission checkpoint",
   request: { params: z.object({ missionId: z.string() }), body: { content: { "application/json": { schema: AddMissionCheckpointSchema } } } },
   responses: { ...missionOkResponse, 201: missionOkResponse[200] },
 });
 
 const updateMissionCheckpointRoute = createRoute({
   method: "patch", path: "/{missionId}/checkpoints/{checkpointName}", tags: ["Missions"],
-  summary: "Update a checkpoint in mission data",
+  summary: "Update mission checkpoint",
   request: { params: z.object({ missionId: z.string(), checkpointName: z.string() }), body: { content: { "application/json": { schema: UpdateMissionCheckpointSchema } } } },
   responses: missionOkResponse,
 });
 
 const removeMissionCheckpointRoute2 = createRoute({
   method: "delete", path: "/{missionId}/checkpoints/{checkpointName}", tags: ["Missions"],
-  summary: "Remove a checkpoint from mission data",
+  summary: "Remove mission checkpoint",
   request: { params: z.object({ missionId: z.string(), checkpointName: z.string() }) },
   responses: missionOkResponse,
 });
@@ -271,27 +271,27 @@ const removeMissionCheckpointRoute2 = createRoute({
 // Delays
 const listDelaysRoute = createRoute({
   method: "get", path: "/delays", tags: ["Missions"],
-  summary: "List all active delays",
+  summary: "List delays",
   responses: { 200: { content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.array(z.any()) }) } }, description: "List of active delays" } },
 });
 
 const addMissionDelayRoute = createRoute({
   method: "post", path: "/{missionId}/delays", tags: ["Missions"],
-  summary: "Add a delay to mission data",
+  summary: "Add mission delay",
   request: { params: z.object({ missionId: z.string() }), body: { content: { "application/json": { schema: AddMissionDelaySchema } } } },
   responses: { ...missionOkResponse, 201: missionOkResponse[200] },
 });
 
 const updateMissionDelayRoute = createRoute({
   method: "patch", path: "/{missionId}/delays/{delayName}", tags: ["Missions"],
-  summary: "Update a delay in mission data",
+  summary: "Update mission delay",
   request: { params: z.object({ missionId: z.string(), delayName: z.string() }), body: { content: { "application/json": { schema: UpdateMissionDelaySchema } } } },
   responses: missionOkResponse,
 });
 
 const removeMissionDelayRoute = createRoute({
   method: "delete", path: "/{missionId}/delays/{delayName}", tags: ["Missions"],
-  summary: "Remove a delay from mission data",
+  summary: "Remove mission delay",
   request: { params: z.object({ missionId: z.string(), delayName: z.string() }) },
   responses: missionOkResponse,
 });
@@ -299,21 +299,21 @@ const removeMissionDelayRoute = createRoute({
 // Quality gates
 const addMissionQualityGateRoute = createRoute({
   method: "post", path: "/{missionId}/quality-gates", tags: ["Missions"],
-  summary: "Add a quality gate to mission data",
+  summary: "Add quality gate",
   request: { params: z.object({ missionId: z.string() }), body: { content: { "application/json": { schema: AddMissionQualityGateSchema } } } },
   responses: { ...missionOkResponse, 201: missionOkResponse[200] },
 });
 
 const updateMissionQualityGateRoute = createRoute({
   method: "patch", path: "/{missionId}/quality-gates/{gateName}", tags: ["Missions"],
-  summary: "Update a quality gate in mission data",
+  summary: "Update quality gate",
   request: { params: z.object({ missionId: z.string(), gateName: z.string() }), body: { content: { "application/json": { schema: UpdateMissionQualityGateSchema } } } },
   responses: missionOkResponse,
 });
 
 const removeMissionQualityGateRoute = createRoute({
   method: "delete", path: "/{missionId}/quality-gates/{gateName}", tags: ["Missions"],
-  summary: "Remove a quality gate from mission data",
+  summary: "Remove quality gate",
   request: { params: z.object({ missionId: z.string(), gateName: z.string() }) },
   responses: missionOkResponse,
 });
@@ -321,21 +321,21 @@ const removeMissionQualityGateRoute = createRoute({
 // Team members
 const addMissionTeamMemberRoute = createRoute({
   method: "post", path: "/{missionId}/team", tags: ["Missions"],
-  summary: "Add a volatile team member to mission data",
+  summary: "Add team member",
   request: { params: z.object({ missionId: z.string() }), body: { content: { "application/json": { schema: AddMissionTeamMemberSchema } } } },
   responses: { ...missionOkResponse, 201: missionOkResponse[200] },
 });
 
 const updateMissionTeamMemberRoute = createRoute({
   method: "patch", path: "/{missionId}/team/{memberName}", tags: ["Missions"],
-  summary: "Update a volatile team member in mission data",
+  summary: "Update team member",
   request: { params: z.object({ missionId: z.string(), memberName: z.string() }), body: { content: { "application/json": { schema: UpdateMissionTeamMemberSchema } } } },
   responses: missionOkResponse,
 });
 
 const removeMissionTeamMemberRoute = createRoute({
   method: "delete", path: "/{missionId}/team/{memberName}", tags: ["Missions"],
-  summary: "Remove a volatile team member from mission data",
+  summary: "Remove team member",
   request: { params: z.object({ missionId: z.string(), memberName: z.string() }) },
   responses: missionOkResponse,
 });
@@ -343,7 +343,7 @@ const removeMissionTeamMemberRoute = createRoute({
 // Notifications
 const updateMissionNotificationsRoute = createRoute({
   method: "put", path: "/{missionId}/notifications", tags: ["Missions"],
-  summary: "Update or clear mission-level notification rules",
+  summary: "Update mission notifications",
   request: { params: z.object({ missionId: z.string() }), body: { content: { "application/json": { schema: UpdateMissionNotificationsSchema } } } },
   responses: missionOkResponse,
 });

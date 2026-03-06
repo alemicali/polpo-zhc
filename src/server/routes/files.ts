@@ -86,7 +86,7 @@ const listRootsRoute = createRoute({
   method: "get",
   path: "/roots",
   tags: ["Files"],
-  summary: "List browsable root directories",
+  summary: "List file roots",
   description: "Returns the filesystem roots that the file browser can navigate: the project working directory and the .polpo configuration directory.",
   responses: {
     200: {
@@ -127,7 +127,7 @@ const previewFileRoute = createRoute({
   method: "get",
   path: "/preview",
   tags: ["Files"],
-  summary: "Get file preview data",
+  summary: "Preview file",
   description: "Returns structured preview metadata for a file. For text files, includes the file content (optionally truncated). For binary files (images, audio, video, PDF), returns a URL to stream the content via the /files/read endpoint. Response includes: path, name, mimeType, size, previewable (boolean), type (text|image|pdf|audio|video|binary), url, and optionally content and truncated for text files.",
   request: {
     query: z.object({

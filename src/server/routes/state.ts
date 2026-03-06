@@ -9,7 +9,7 @@ const getStateRoute = createRoute({
   method: "get",
   path: "/state",
   tags: ["State"],
-  summary: "Get full state snapshot",
+  summary: "Get state",
   responses: {
     200: {
       content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.any() }) } },
@@ -77,7 +77,7 @@ const getLogSessionRoute = createRoute({
   method: "get",
   path: "/logs/{sessionId}",
   tags: ["Logs"],
-  summary: "Get log entries for a session",
+  summary: "Get log entries",
   request: {
     params: z.object({ sessionId: z.string() }),
   },

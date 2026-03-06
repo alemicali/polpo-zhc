@@ -37,7 +37,7 @@ const getPresenceRoute = createRoute({
   method: "get",
   path: "/presence",
   tags: ["Peers"],
-  summary: "Get current presence (online peers)",
+  summary: "Get presence",
   responses: {
     200: { content: { "application/json": { schema: SuccessResponse } }, description: "Presence list" },
     404: { content: { "application/json": { schema: ErrorResponse } }, description: "Gateway not configured" },
@@ -59,7 +59,7 @@ const addToAllowlistRoute = createRoute({
   method: "post",
   path: "/allowlist",
   tags: ["Peers"],
-  summary: "Add peer to allowlist",
+  summary: "Allow peer",
   request: {
     body: { content: { "application/json": { schema: z.object({ peerId: z.string() }) } } },
   },
@@ -74,7 +74,7 @@ const removeFromAllowlistRoute = createRoute({
   method: "delete",
   path: "/allowlist/{peerId}",
   tags: ["Peers"],
-  summary: "Remove peer from allowlist",
+  summary: "Remove peer",
   request: {
     params: z.object({ peerId: z.string() }),
   },
@@ -88,7 +88,7 @@ const approvePairingRoute = createRoute({
   method: "post",
   path: "/pair",
   tags: ["Peers"],
-  summary: "Approve a pairing code",
+  summary: "Approve pairing",
   request: {
     body: { content: { "application/json": { schema: z.object({ code: z.string() }) } } },
   },
@@ -103,7 +103,7 @@ const linkPeersRoute = createRoute({
   method: "post",
   path: "/link",
   tags: ["Peers"],
-  summary: "Link two peer identities across channels",
+  summary: "Link peers",
   request: {
     body: {
       content: {

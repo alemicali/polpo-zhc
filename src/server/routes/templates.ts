@@ -78,7 +78,7 @@ export function templateRoutes(): OpenAPIHono<ServerEnv> {
     method: "post",
     path: "/{name}/run",
     tags: ["Templates"],
-    summary: "Execute template with parameters",
+    summary: "Run template",
     request: {
       params: z.object({ name: z.string() }),
       body: {
@@ -168,7 +168,7 @@ export function templateRoutes(): OpenAPIHono<ServerEnv> {
     method: "post",
     path: "/",
     tags: ["Templates"],
-    summary: "Create or update a template",
+    summary: "Save template",
     request: {
       body: {
         content: {
@@ -231,7 +231,7 @@ export function templateRoutes(): OpenAPIHono<ServerEnv> {
     method: "delete",
     path: "/{name}",
     tags: ["Templates"],
-    summary: "Delete a template",
+    summary: "Delete template",
     request: {
       params: z.object({ name: z.string() }),
     },

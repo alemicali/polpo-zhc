@@ -1,0 +1,87 @@
+---
+title: "Tools"
+description: "What agents can do — files, shell, browser, email, media, search, and more."
+---
+
+Agents need tools to do their job. Polpo gives every agent a set of **system tools** for reading, writing, searching files, and making HTTP requests — plus **extended tool categories** (browser, email, vault, image, audio, and search) for specialized capabilities.
+
+## What Agents Can Do
+
+Out of the box, every agent can:
+
+- **Read, write, and edit** files in the project
+- **Run shell commands** to build, test, and deploy
+- **Search** code with glob patterns and regex
+- **Make HTTP requests** and download files
+
+With extended tools enabled, agents can also:
+
+- **Browse the web** — navigate pages, fill forms, take screenshots, extract data
+- **Send and read emails** — via SMTP and IMAP
+- **Generate images and video** — via fal.ai (FLUX, Wan 2.2)
+- **Transcribe and speak** — speech-to-text and text-to-speech
+- **Search the web** — semantic search via Exa AI
+- **Access credentials** — read-only vault access at runtime
+
+## Configuring Tools
+
+Each agent gets all 9 core tools by default. Extended tools are opt-in via `allowedTools`:
+
+```json
+{
+  "name": "outreach-agent",
+  "allowedTools": ["read", "write", "edit", "bash", "glob", "grep", "ls", "browser_*", "email_*"]
+}
+```
+
+### Enabling Multiple Categories
+
+You can enable multiple extended categories on a single agent:
+
+```json
+{
+  "name": "outreach-agent",
+  "allowedTools": ["read", "write", "edit", "bash", "glob", "grep", "ls", "browser_*", "email_*", "vault_*", "image_*", "video_*", "audio_*", "search_*"]
+}
+```
+
+## Filesystem Sandbox
+
+Agents are sandboxed by default to the **project root directory**. They can't read or write files outside it. You can tighten this further with `allowedPaths`:
+
+```json
+{
+  "name": "frontend-dev",
+  "allowedPaths": ["./src/ui", "./public", "./tests/ui"]
+}
+```
+
+Now this agent can only touch files in those three directories (and their subdirectories). Any attempt to access `./src/api/` or `../` will be rejected with a clear error.
+
+This is path-prefix matching with separator awareness — `./src/ui` allows `./src/ui/Button.tsx` but not `./src/ui-legacy/old.js`.
+
+### How It Works
+
+1. Paths are resolved to absolute paths at tool creation time
+2. When no `allowedPaths` are set, the default is `[cwd]` (project root)
+3. Every file operation checks `isPathAllowed()` before proceeding
+4. Violations throw a descriptive error that tells the agent what it tried and where it's allowed
+
+## Safe Environment
+
+When agents run shell commands (`bash` tool), Polpo filters the environment variables to prevent leaking API keys and secrets.
+
+The `safeEnv()` function only passes through system-essential variables:
+
+- System: `PATH`, `HOME`, `USER`, `SHELL`, `TERM`, `LANG`, `NODE_ENV`
+- Git: `GIT_AUTHOR_NAME`, `GIT_COMMITTER_NAME`, `GIT_SSH_COMMAND`, etc.
+- Network: `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`
+- SSH: `SSH_AUTH_SOCK`
+
+Everything else — `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, database passwords, custom secrets — is stripped. This means agent subprocesses can't exfiltrate your secrets via tool calls.
+
+See [Security](/features/security) for more details on environment filtering.
+
+<Card title="Tools Reference" icon="wrench" href="/reference/system-tools">
+  Full documentation on every tool category, parameter schemas, and configuration.
+</Card>

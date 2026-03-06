@@ -20,7 +20,7 @@ export function vaultRoutes(): OpenAPIHono<ServerEnv> {
     method: "post",
     path: "/entries",
     tags: ["Vault"],
-    summary: "Save a vault entry",
+    summary: "Save vault entry",
     description: "Save credentials to the encrypted vault store. Credentials are encrypted at rest (AES-256-GCM) and never logged or persisted in chat history.",
     request: {
       body: {
@@ -94,7 +94,7 @@ export function vaultRoutes(): OpenAPIHono<ServerEnv> {
     method: "get",
     path: "/entries/{agent}",
     tags: ["Vault"],
-    summary: "List vault entries for an agent",
+    summary: "List vault entries",
     description: "Returns metadata (service name, type, label, credential key names) without any secret values.",
     request: {
       params: z.object({
@@ -142,7 +142,7 @@ export function vaultRoutes(): OpenAPIHono<ServerEnv> {
     method: "delete",
     path: "/entries/{agent}/{service}",
     tags: ["Vault"],
-    summary: "Remove a vault entry",
+    summary: "Remove vault entry",
     request: {
       params: z.object({
         agent: z.string(),

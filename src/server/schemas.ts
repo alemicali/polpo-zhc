@@ -243,6 +243,23 @@ export const AddAgentSchema = z.object({
   browserProfile: z.string().optional(),
 });
 
+export const UpdateAgentSchema = z.object({
+  role: z.string().optional(),
+  model: z.string().optional(),
+  allowedTools: z.array(z.string()).optional(),
+  allowedPaths: z.array(z.string()).optional(),
+  systemPrompt: z.string().optional(),
+  skills: z.array(z.string()).optional(),
+  maxTurns: z.number().int().positive().optional(),
+  maxConcurrency: z.number().int().positive().optional(),
+  identity: AgentIdentitySchema.optional(),
+  reportsTo: z.string().optional(),
+  reasoning: z.string().optional(),
+  browserProfile: z.string().optional(),
+  emailAllowedDomains: z.array(z.string()).optional(),
+  team: z.string().optional(),
+});
+
 export const RenameTeamSchema = z.object({
   oldName: z.string().min(1),
   name: z.string().min(1),

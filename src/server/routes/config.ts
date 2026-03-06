@@ -8,7 +8,7 @@ const reloadConfigRoute = createRoute({
   method: "post",
   path: "/reload",
   tags: ["Config"],
-  summary: "Reload configuration from polpo.json",
+  summary: "Reload config",
   responses: {
     200: {
       content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.object({ message: z.string() }) }) } },
@@ -25,7 +25,7 @@ const getConfigRoute = createRoute({
   method: "get",
   path: "/",
   tags: ["Config"],
-  summary: "Get current configuration (redacted)",
+  summary: "Get config",
   responses: {
     200: {
       content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.any() }) } },

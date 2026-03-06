@@ -148,7 +148,7 @@ const chatCompletionsRoute = createRoute({
   method: "post",
   path: "/",
   tags: ["Chat Completions"],
-  summary: "Talk to Polpo (OpenAI-compatible)",
+  summary: "Chat completions",
   description: "Polpo's primary conversational interface. Send messages in OpenAI format, receive responses in OpenAI format. Polpo runs its full 37-tool agentic loop internally — you describe what you need, Polpo handles the rest. Supports streaming (SSE) and non-streaming modes.",
   request: {
     body: {

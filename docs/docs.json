@@ -93,7 +93,7 @@
         "tab": "Documentation",
         "groups": [
           {
-            "group": "Core Concepts",
+            "group": "Core",
             "pages": [
               "concepts/agents",
               "concepts/teams",
@@ -108,7 +108,7 @@
           {
             "group": "Agent Capabilities",
             "pages": [
-              "features/tools-and-mcp",
+"features/tools",
               "features/skills"
             ]
           },
@@ -158,10 +158,47 @@
         ]
       },
       {
+        "tab": "Tools",
+        "groups": [
+          {
+            "group": "Core Tools",
+            "pages": [
+              "reference/system-tools",
+              "reference/tools/http",
+              "reference/tools/search",
+              "reference/tools/vault"
+            ]
+          },
+          {
+            "group": "Productivity",
+            "pages": [
+              "reference/tools/browser",
+              "reference/tools/email",
+              "reference/tools/excel",
+              "reference/tools/pdf",
+              "reference/tools/docx"
+            ]
+          },
+          {
+            "group": "Media",
+            "pages": [
+              "reference/tools/image",
+              "reference/tools/video"
+            ]
+          },
+          {
+            "group": "Audio",
+            "pages": [
+              "reference/tools/audio"
+            ]
+          }
+        ]
+      },
+      {
         "tab": "Models & Providers",
         "groups": [
           {
-            "group": "Overview",
+            "group": "LLM Models",
             "pages": [
               "models/overview",
               "models/providers",
@@ -204,55 +241,26 @@
         ]
       },
       {
-        "tab": "Tools",
+        "tab": "CLI & Reference",
         "groups": [
           {
-            "group": "Core Tools",
-            "pages": [
-              "reference/coding-tools",
-              "reference/tools/http",
-              "reference/tools/vault"
-            ]
-          },
-          {
-            "group": "Web & Communication",
-            "pages": [
-              "reference/tools/browser",
-              "reference/tools/email",
-              "reference/tools/search"
-            ]
-          },
-          {
-            "group": "File Formats",
-            "pages": [
-              "reference/tools/excel",
-              "reference/tools/pdf",
-              "reference/tools/docx"
-            ]
-          },
-          {
-            "group": "Media",
-            "pages": [
-              "reference/tools/audio",
-              "reference/tools/image"
-            ]
-          }
-        ]
-      },
-      {
-        "tab": "SDKs",
-        "groups": [
-          {
-            "group": "Reference",
+            "group": "Core Reference",
             "pages": [
               "reference/cli",
               "reference/config",
-              "reference/events",
-              "reference/store-backends"
+              "reference/events"
             ]
           },
           {
-            "group": "Client SDKs",
+            "group": "Backends",
+            "pages": [
+              "reference/store-backends",
+              "reference/stores/file",
+              "reference/stores/sqlite"
+            ]
+          },
+          {
+            "group": "Development",
             "pages": [
               "reference/client-sdk",
               "reference/react-sdk"
@@ -262,14 +270,9 @@
       },
       {
         "tab": "API Reference",
+        "root": "reference/rest-api",
         "openapi": "openapi.json",
         "groups": [
-          {
-            "group": "Overview",
-            "pages": [
-              "reference/rest-api"
-            ]
-          },
           {
             "group": "Core",
             "pages": [
@@ -279,6 +282,13 @@
               "GET /api/v1/config",
               "POST /api/v1/config/reload",
               "GET /api/v1/auth/status"
+            ]
+          },
+          {
+            "group": "Memory",
+            "pages": [
+              "GET /api/v1/memory",
+              "PUT /api/v1/memory"
             ]
           },
           {
@@ -297,14 +307,42 @@
               "GET /api/v1/agents",
               "POST /api/v1/agents",
               "GET /api/v1/agents/{name}",
+              "PATCH /api/v1/agents/{name}",
               "DELETE /api/v1/agents/{name}",
+              "GET /api/v1/agents/processes",
+              "GET /api/v1/agents/processes/{taskId}/activity"
+            ]
+          },
+          {
+            "group": "Agent Teams",
+            "pages": [
               "GET /api/v1/agents/teams",
               "POST /api/v1/agents/teams",
               "GET /api/v1/agents/team",
               "PATCH /api/v1/agents/team",
-              "DELETE /api/v1/agents/teams/{name}",
-              "GET /api/v1/agents/processes",
-              "GET /api/v1/agents/processes/{taskId}/activity"
+              "DELETE /api/v1/agents/teams/{name}"
+            ]
+          },
+          {
+            "group": "Agent Skills",
+            "pages": [
+              "GET /api/v1/skills",
+              "POST /api/v1/skills/add",
+              "POST /api/v1/skills/create",
+              "DELETE /api/v1/skills/{name}",
+              "POST /api/v1/skills/{name}/assign",
+              "POST /api/v1/skills/{name}/unassign",
+              "GET /api/v1/skills/{name}/content",
+              "GET /api/v1/skills/index",
+              "PUT /api/v1/skills/{name}/index"
+            ]
+          },
+          {
+            "group": "Agent Vault",
+            "pages": [
+              "POST /api/v1/vault/entries",
+              "GET /api/v1/vault/entries/{agent}",
+              "DELETE /api/v1/vault/entries/{agent}/{service}"
             ]
           },
           {
@@ -318,7 +356,9 @@
               "POST /api/v1/tasks/{taskId}/retry",
               "POST /api/v1/tasks/{taskId}/kill",
               "POST /api/v1/tasks/{taskId}/reassess",
-              "POST /api/v1/tasks/{taskId}/queue"
+              "POST /api/v1/tasks/{taskId}/queue",
+              "POST /api/v1/tasks/{taskId}/force-fail",
+              "DELETE /api/v1/tasks"
             ]
           },
           {
@@ -332,23 +372,48 @@
               "DELETE /api/v1/missions/{missionId}",
               "POST /api/v1/missions/{missionId}/execute",
               "POST /api/v1/missions/{missionId}/resume",
-              "POST /api/v1/missions/{missionId}/abort",
+              "POST /api/v1/missions/{missionId}/abort"
+            ]
+          },
+          {
+            "group": "Mission Tasks",
+            "pages": [
               "POST /api/v1/missions/{missionId}/tasks",
               "PATCH /api/v1/missions/{missionId}/tasks/{taskTitle}",
               "DELETE /api/v1/missions/{missionId}/tasks/{taskTitle}",
-              "PUT /api/v1/missions/{missionId}/tasks/reorder",
+              "PUT /api/v1/missions/{missionId}/tasks/reorder"
+            ]
+          },
+          {
+            "group": "Mission Checkpoints",
+            "pages": [
               "GET /api/v1/missions/checkpoints",
               "POST /api/v1/missions/{missionId}/checkpoints",
               "POST /api/v1/missions/{missionId}/checkpoints/{checkpointName}/resume",
               "PATCH /api/v1/missions/{missionId}/checkpoints/{checkpointName}",
-              "DELETE /api/v1/missions/{missionId}/checkpoints/{checkpointName}",
+              "DELETE /api/v1/missions/{missionId}/checkpoints/{checkpointName}"
+            ]
+          },
+          {
+            "group": "Mission Delays",
+            "pages": [
               "GET /api/v1/missions/delays",
               "POST /api/v1/missions/{missionId}/delays",
               "PATCH /api/v1/missions/{missionId}/delays/{delayName}",
-              "DELETE /api/v1/missions/{missionId}/delays/{delayName}",
+              "DELETE /api/v1/missions/{missionId}/delays/{delayName}"
+            ]
+          },
+          {
+            "group": "Mission Quality Gates",
+            "pages": [
               "POST /api/v1/missions/{missionId}/quality-gates",
               "PATCH /api/v1/missions/{missionId}/quality-gates/{gateName}",
-              "DELETE /api/v1/missions/{missionId}/quality-gates/{gateName}",
+              "DELETE /api/v1/missions/{missionId}/quality-gates/{gateName}"
+            ]
+          },
+          {
+            "group": "Mission Team",
+            "pages": [
               "POST /api/v1/missions/{missionId}/team",
               "PATCH /api/v1/missions/{missionId}/team/{memberName}",
               "DELETE /api/v1/missions/{missionId}/team/{memberName}",
@@ -366,23 +431,14 @@
             ]
           },
           {
-            "group": "Skills",
+            "group": "Orchestrator Skills",
             "pages": [
-              "GET /api/v1/skills",
-              "POST /api/v1/skills/add",
-              "POST /api/v1/skills/create",
-              "DELETE /api/v1/skills/{name}",
-              "POST /api/v1/skills/{name}/assign",
-              "POST /api/v1/skills/{name}/unassign",
-              "GET /api/v1/skills/{name}/content",
               "GET /api/v1/skills/orchestrator",
               "POST /api/v1/skills/orchestrator",
               "PUT /api/v1/skills/orchestrator/{name}",
               "DELETE /api/v1/skills/orchestrator/{name}",
               "GET /api/v1/skills/orchestrator/{name}/content",
-              "POST /api/v1/skills/orchestrator/add",
-              "GET /api/v1/skills/index",
-              "PUT /api/v1/skills/{name}/index"
+              "POST /api/v1/skills/orchestrator/add"
             ]
           },
           {
@@ -399,23 +455,32 @@
             "pages": [
               "GET /api/v1/notifications",
               "GET /api/v1/notifications/stats",
-              "POST /api/v1/notifications/send"
+              "POST /api/v1/notifications/send",
+              "GET /api/v1/notifications/rules",
+              "POST /api/v1/notifications/rules",
+              "DELETE /api/v1/notifications/rules/{ruleId}"
             ]
           },
           {
             "group": "Schedules",
             "pages": [
-              "GET /api/v1/schedules"
+              "GET /api/v1/schedules",
+              "POST /api/v1/schedules",
+              "PATCH /api/v1/schedules/{missionId}",
+              "DELETE /api/v1/schedules/{missionId}"
             ]
           },
           {
-            "group": "Memory & Storage",
+            "group": "Watchers",
             "pages": [
-              "GET /api/v1/memory",
-              "PUT /api/v1/memory",
-              "POST /api/v1/vault/entries",
-              "GET /api/v1/vault/entries/{agent}",
-              "DELETE /api/v1/vault/entries/{agent}/{service}",
+              "GET /api/v1/watchers",
+              "POST /api/v1/watchers",
+              "DELETE /api/v1/watchers/{watcherId}"
+            ]
+          },
+          {
+            "group": "Storage",
+            "pages": [
               "GET /api/v1/files/roots",
               "GET /api/v1/files/list",
               "GET /api/v1/files/preview"
@@ -476,6 +541,10 @@
     {
       "source": "/guides/first-plan",
       "destination": "/guides/first-mission"
+    },
+    {
+      "source": "/features/tools-and-mcp",
+      "destination": "/features/tools"
     }
   ],
   "footer": {

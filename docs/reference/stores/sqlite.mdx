@@ -1,0 +1,56 @@
+---
+title: "SQLite Store"
+description: "SQLite persistence backend — concurrent access, transactional integrity, better performance at scale."
+---
+
+SQLite stores use an embedded database for higher concurrency and better query performance. All SQLite stores share the same database file.
+
+## Stores
+
+| Store | Purpose | Location |
+|-------|---------|----------|
+| `SqliteTaskStore` | Tasks and missions | `.polpo/state.db` |
+| `SqliteRunStore` | Execution run history | `.polpo/state.db` |
+| `SqliteSessionStore` | Chat sessions | `.polpo/state.db` |
+| `SqliteNotificationStore` | Notification records | `.polpo/state.db` |
+
+## Pros and Cons
+
+**Pros:** Safe concurrent access, better performance at scale, transactional integrity.
+
+**Cons:** Requires `better-sqlite3` dependency (in `optionalDependencies`), database file is not human-readable.
+
+## When to Use
+
+| Scenario | Recommended? |
+|----------|:---:|
+| Multiple concurrent orchestrators | Yes |
+| CI/CD pipelines | Yes |
+| Large task sets (100+ tasks) | Yes |
+| Getting started / single user | Optional — [File](/reference/stores/file) is simpler |
+
+## Configuration
+
+Set the storage backend in `.polpo/polpo.json`:
+
+```json
+{
+  "settings": {
+    "storage": "sqlite"
+  }
+}
+```
+
+## Programmatic Usage
+
+When using the programmatic API, you can pass stores directly:
+
+```typescript
+import { Orchestrator, SqliteTaskStore, SqliteRunStore } from "openpolpo";
+
+const orchestrator = new Orchestrator({
+  workDir: "./my-project",
+  taskStore: new SqliteTaskStore(".polpo"),
+  runStore: new SqliteRunStore(join(".polpo", "state.db")),
+});
+```

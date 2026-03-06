@@ -1131,6 +1131,408 @@ describe("Chat Sessions API", () => {
   });
 });
 
+// ── Update Agent API ─────────────────────────────────────────────────
+
+describe("Update Agent API", () => {
+  test("PATCH /agents/:name updates agent role", async () => {
+    const res = await app.request(
+      api("/agents/agent-1"),
+      jsonReq("PATCH", { role: "Updated role" }),
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(body.data.name).toBe("agent-1");
+    expect(body.data.role).toBe("Updated role");
+
+    // Restore
+    await app.request(api("/agents/agent-1"), jsonReq("PATCH", { role: "Test agent" }));
+  });
+
+  test("PATCH /agents/:name returns 404 for unknown agent", async () => {
+    const res = await app.request(
+      api("/agents/no-such-agent"),
+      jsonReq("PATCH", { role: "x" }),
+    );
+    expect(res.status).toBe(404);
+    const body = await res.json();
+    expect(body.ok).toBe(false);
+    expect(body.code).toBe("NOT_FOUND");
+  });
+
+  test("PATCH /agents/:name updates multiple fields", async () => {
+    // Add a temp agent
+    await app.request(api("/agents"), jsonReq("POST", { name: "agent-update-test", role: "original" }));
+
+    const res = await app.request(
+      api("/agents/agent-update-test"),
+      jsonReq("PATCH", {
+        role: "new role",
+        maxTurns: 10,
+      }),
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(body.data.role).toBe("new role");
+    expect(body.data.maxTurns).toBe(10);
+
+    // Cleanup
+    await app.request(api("/agents/agent-update-test"), { method: "DELETE" });
+  });
+});
+
+// ── Force Fail Task API ──────────────────────────────────────────────
+
+describe("Force Fail Task API", () => {
+  test("POST /tasks/:id/force-fail transitions task to failed", async () => {
+    const createRes = await app.request(
+      api("/tasks"),
+      jsonReq("POST", {
+        title: "Force fail test",
+        description: "Will be force-failed",
+        assignTo: "agent-1",
+      }),
+    );
+    const created = await createRes.json();
+    const taskId = created.data.id;
+
+    const res = await app.request(api(`/tasks/${taskId}/force-fail`), { method: "POST" });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(body.data.failed).toBe(true);
+
+    // Verify task is now failed
+    const getRes = await app.request(api(`/tasks/${taskId}`));
+    const task = await getRes.json();
+    expect(task.data.status).toBe("failed");
+  });
+
+  test("POST /tasks/:id/force-fail returns 404 for unknown task", async () => {
+    const res = await app.request(api("/tasks/nonexistent-id/force-fail"), { method: "POST" });
+    expect(res.status).toBe(404);
+    const body = await res.json();
+    expect(body.ok).toBe(false);
+    expect(body.code).toBe("NOT_FOUND");
+  });
+});
+
+// ── Bulk Delete Tasks API ────────────────────────────────────────────
+
+describe("Bulk Delete Tasks API", () => {
+  test("DELETE /tasks?status= removes tasks by status", async () => {
+    // Create several tasks
+    for (let i = 0; i < 3; i++) {
+      await app.request(
+        api("/tasks"),
+        jsonReq("POST", {
+          title: `Bulk del status ${i}`,
+          description: "For bulk delete by status",
+          assignTo: "agent-1",
+        }),
+      );
+    }
+
+    const res = await app.request(api("/tasks?status=pending"), { method: "DELETE" });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(typeof body.data.deleted).toBe("number");
+    expect(body.data.deleted).toBeGreaterThanOrEqual(3);
+  });
+
+  test("DELETE /tasks?group= removes tasks by group", async () => {
+    // Create tasks with a specific group via mission execution
+    const missionData = JSON.stringify({
+      tasks: [
+        { title: "Bulk grp 1", description: "For bulk delete", assignTo: "agent-1" },
+        { title: "Bulk grp 2", description: "For bulk delete", assignTo: "agent-1" },
+      ],
+    });
+    const createRes = await app.request(
+      api("/missions"),
+      jsonReq("POST", { data: missionData, name: "bulk-delete-grp" }),
+    );
+    const mission = await createRes.json();
+    await app.request(api(`/missions/${mission.data.id}/execute`), { method: "POST" });
+
+    // Now delete by group
+    const res = await app.request(api(`/tasks?group=bulk-delete-grp`), { method: "DELETE" });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(body.data.deleted).toBe(2);
+  });
+
+  test("DELETE /tasks without filter returns 400", async () => {
+    const res = await app.request(api("/tasks"), { method: "DELETE" });
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.ok).toBe(false);
+    expect(body.code).toBe("NO_FILTER");
+  });
+});
+
+// ── Queue Task API ───────────────────────────────────────────────────
+
+describe("Queue Task API", () => {
+  test("POST /tasks/:id/queue transitions draft to pending", async () => {
+    // Create a draft task
+    const createRes = await app.request(
+      api("/tasks"),
+      jsonReq("POST", {
+        title: "Queue test",
+        description: "Draft task to queue",
+        assignTo: "agent-1",
+        draft: true,
+      }),
+    );
+    const created = await createRes.json();
+    const taskId = created.data.id;
+    expect(created.data.status).toBe("draft");
+
+    // Queue it
+    const res = await app.request(api(`/tasks/${taskId}/queue`), { method: "POST" });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(body.data.queued).toBe(true);
+
+    // Verify it's now pending
+    const getRes = await app.request(api(`/tasks/${taskId}`));
+    const task = await getRes.json();
+    expect(task.data.status).toBe("pending");
+  });
+
+  test("POST /tasks/:id/queue returns 404 for unknown task", async () => {
+    const res = await app.request(api("/tasks/nonexistent-id/queue"), { method: "POST" });
+    expect(res.status).toBe(404);
+  });
+});
+
+// ── Watchers API ─────────────────────────────────────────────────────
+
+describe("Watchers API", () => {
+  test("GET /watchers returns 200 with array", async () => {
+    const res = await app.request(api("/watchers"));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(Array.isArray(body.data)).toBe(true);
+  });
+
+  test("watcher lifecycle: create, list, delete", async () => {
+    // Create a task to watch
+    const taskRes = await app.request(
+      api("/tasks"),
+      jsonReq("POST", {
+        title: "Watched task",
+        description: "Task for watcher test",
+        assignTo: "agent-1",
+      }),
+    );
+    const taskBody = await taskRes.json();
+    const taskId = taskBody.data.id;
+
+    // Create watcher
+    const createRes = await app.request(
+      api("/watchers"),
+      jsonReq("POST", {
+        taskId,
+        targetStatus: "done",
+        action: { type: "create_task", title: "Follow-up", description: "Auto-created", assignTo: "agent-1" },
+      }),
+    );
+    expect(createRes.status).toBe(201);
+    const created = await createRes.json();
+    expect(created.ok).toBe(true);
+    expect(created.data).toHaveProperty("id");
+    expect(created.data.taskId).toBe(taskId);
+    expect(created.data.targetStatus).toBe("done");
+    expect(created.data.fired).toBe(false);
+    const watcherId = created.data.id;
+
+    // List — should include our watcher
+    const listRes = await app.request(api("/watchers"));
+    const listBody = await listRes.json();
+    const found = listBody.data.find((w: any) => w.id === watcherId);
+    expect(found).toBeDefined();
+
+    // List active only
+    const activeRes = await app.request(api("/watchers?active=true"));
+    const activeBody = await activeRes.json();
+    const activeFound = activeBody.data.find((w: any) => w.id === watcherId);
+    expect(activeFound).toBeDefined();
+
+    // Delete
+    const deleteRes = await app.request(api(`/watchers/${watcherId}`), { method: "DELETE" });
+    expect(deleteRes.status).toBe(200);
+    const deleteBody = await deleteRes.json();
+    expect(deleteBody.ok).toBe(true);
+    expect(deleteBody.data.deleted).toBe(true);
+
+    // Verify gone
+    const listRes2 = await app.request(api("/watchers"));
+    const listBody2 = await listRes2.json();
+    const gone = listBody2.data.find((w: any) => w.id === watcherId);
+    expect(gone).toBeUndefined();
+  });
+
+  test("POST /watchers returns 400 for nonexistent task", async () => {
+    const res = await app.request(
+      api("/watchers"),
+      jsonReq("POST", {
+        taskId: "nonexistent-task-id",
+        targetStatus: "done",
+        action: { type: "create_task" },
+      }),
+    );
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.ok).toBe(false);
+    expect(body.code).toBe("NOT_FOUND");
+  });
+
+  test("DELETE /watchers/:id returns 404 for unknown watcher", async () => {
+    const res = await app.request(api("/watchers/nonexistent-watcher"), { method: "DELETE" });
+    expect(res.status).toBe(404);
+    const body = await res.json();
+    expect(body.ok).toBe(false);
+    expect(body.code).toBe("NOT_FOUND");
+  });
+});
+
+// ── Schedules API ────────────────────────────────────────────────────
+
+describe("Schedules API", () => {
+  test("GET /schedules returns 200 with array", async () => {
+    const res = await app.request(api("/schedules"));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(Array.isArray(body.data)).toBe(true);
+  });
+
+  test("schedule lifecycle: create, list, update, delete", async () => {
+    // Create a mission first
+    const missionData = JSON.stringify({
+      tasks: [{ title: "Sched task", description: "Scheduled", assignTo: "agent-1" }],
+    });
+    const missionRes = await app.request(
+      api("/missions"),
+      jsonReq("POST", { data: missionData, name: "sched-test" }),
+    );
+    const mission = await missionRes.json();
+    const missionId = mission.data.id;
+
+    // Create schedule (recurring cron expression)
+    const createRes = await app.request(
+      api("/schedules"),
+      jsonReq("POST", {
+        missionId,
+        expression: "0 9 * * *",
+        recurring: true,
+      }),
+    );
+    expect(createRes.status).toBe(201);
+    const created = await createRes.json();
+    expect(created.ok).toBe(true);
+    expect(created.data).toHaveProperty("missionId");
+
+    // List — should include our schedule
+    const listRes = await app.request(api("/schedules"));
+    const listBody = await listRes.json();
+    expect(listBody.data.length).toBeGreaterThanOrEqual(1);
+    const found = listBody.data.find((s: any) => s.missionId === missionId);
+    expect(found).toBeDefined();
+
+    // Update — change enabled
+    const updateRes = await app.request(
+      api(`/schedules/${missionId}`),
+      jsonReq("PATCH", { enabled: false }),
+    );
+    expect(updateRes.status).toBe(200);
+    const updated = await updateRes.json();
+    expect(updated.ok).toBe(true);
+
+    // Delete
+    const deleteRes = await app.request(api(`/schedules/${missionId}`), { method: "DELETE" });
+    expect(deleteRes.status).toBe(200);
+    const deleteBody = await deleteRes.json();
+    expect(deleteBody.ok).toBe(true);
+    expect(deleteBody.data.deleted).toBe(true);
+  });
+
+  test("POST /schedules returns 404 for nonexistent mission", async () => {
+    const res = await app.request(
+      api("/schedules"),
+      jsonReq("POST", {
+        missionId: "nonexistent-mission-id",
+        expression: "0 9 * * *",
+      }),
+    );
+    expect(res.status).toBe(404);
+    const body = await res.json();
+    expect(body.ok).toBe(false);
+    expect(body.code).toBe("NOT_FOUND");
+  });
+
+  test("PATCH /schedules/:missionId returns 404 for unknown schedule", async () => {
+    const res = await app.request(
+      api("/schedules/nonexistent-id"),
+      jsonReq("PATCH", { enabled: false }),
+    );
+    expect(res.status).toBe(404);
+    const body = await res.json();
+    expect(body.ok).toBe(false);
+    expect(body.code).toBe("NOT_FOUND");
+  });
+
+  test("DELETE /schedules/:missionId returns 404 for unknown schedule", async () => {
+    const res = await app.request(api("/schedules/nonexistent-id"), { method: "DELETE" });
+    expect(res.status).toBe(404);
+    const body = await res.json();
+    expect(body.ok).toBe(false);
+    expect(body.code).toBe("NOT_FOUND");
+  });
+});
+
+// ── Notification Rules API ───────────────────────────────────────────
+
+describe("Notification Rules API", () => {
+  test("GET /notifications/rules returns 200 with array", async () => {
+    const res = await app.request(api("/notifications/rules"));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(Array.isArray(body.data)).toBe(true);
+  });
+
+  test("POST /notifications/rules returns 400 when not configured", async () => {
+    // The test orchestrator has no notification config, so router is undefined
+    const res = await app.request(
+      api("/notifications/rules"),
+      jsonReq("POST", {
+        name: "test-rule",
+        events: ["task:done"],
+      }),
+    );
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.ok).toBe(false);
+    expect(body.code).toBe("NOT_CONFIGURED");
+  });
+
+  test("DELETE /notifications/rules/:ruleId returns 404 when not configured", async () => {
+    const res = await app.request(api("/notifications/rules/any-rule"), { method: "DELETE" });
+    expect(res.status).toBe(404);
+    const body = await res.json();
+    expect(body.ok).toBe(false);
+    expect(body.code).toBe("NOT_FOUND");
+  });
+});
+
 // ── OpenAPI Spec ─────────────────────────────────────────────────────
 
 describe("OpenAPI Spec", () => {

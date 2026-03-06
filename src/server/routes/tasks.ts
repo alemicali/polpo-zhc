@@ -8,7 +8,7 @@ const listTasksRoute = createRoute({
   method: "get",
   path: "/",
   tags: ["Tasks"],
-  summary: "List all tasks",
+  summary: "List tasks",
   request: {
     query: z.object({
       status: z.string().optional(),
@@ -28,7 +28,7 @@ const getTaskRoute = createRoute({
   method: "get",
   path: "/{taskId}",
   tags: ["Tasks"],
-  summary: "Get a single task",
+  summary: "Get task",
   request: {
     params: z.object({ taskId: z.string() }),
   },
@@ -48,7 +48,7 @@ const createTaskRoute = createRoute({
   method: "post",
   path: "/",
   tags: ["Tasks"],
-  summary: "Create a new task",
+  summary: "Create task",
   request: {
     body: { content: { "application/json": { schema: CreateTaskSchema } } },
   },
@@ -68,7 +68,7 @@ const updateTaskRoute = createRoute({
   method: "patch",
   path: "/{taskId}",
   tags: ["Tasks"],
-  summary: "Update a task",
+  summary: "Update task",
   request: {
     params: z.object({ taskId: z.string() }),
     body: { content: { "application/json": { schema: UpdateTaskSchema } } },
@@ -89,7 +89,7 @@ const deleteTaskRoute = createRoute({
   method: "delete",
   path: "/{taskId}",
   tags: ["Tasks"],
-  summary: "Delete a task",
+  summary: "Delete task",
   request: {
     params: z.object({ taskId: z.string() }),
   },
@@ -109,7 +109,7 @@ const retryTaskRoute = createRoute({
   method: "post",
   path: "/{taskId}/retry",
   tags: ["Tasks"],
-  summary: "Retry a failed task",
+  summary: "Retry task",
   request: {
     params: z.object({ taskId: z.string() }),
   },
@@ -125,7 +125,7 @@ const killTaskRoute = createRoute({
   method: "post",
   path: "/{taskId}/kill",
   tags: ["Tasks"],
-  summary: "Kill a running task",
+  summary: "Kill task",
   request: {
     params: z.object({ taskId: z.string() }),
   },
@@ -161,7 +161,7 @@ const queueTaskRoute = createRoute({
   method: "post",
   path: "/{taskId}/queue",
   tags: ["Tasks"],
-  summary: "Queue a draft task (transition draft → pending)",
+  summary: "Queue task",
   request: {
     params: z.object({ taskId: z.string() }),
   },
@@ -173,6 +173,50 @@ const queueTaskRoute = createRoute({
     404: {
       content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string(), code: z.string() }) } },
       description: "Task not found",
+    },
+  },
+});
+
+const forceFailTaskRoute = createRoute({
+  method: "post",
+  path: "/{taskId}/force-fail",
+  tags: ["Tasks"],
+  summary: "Force fail task",
+  request: {
+    params: z.object({ taskId: z.string() }),
+  },
+  responses: {
+    200: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.object({ failed: z.boolean() }) }) } },
+      description: "Task force-failed",
+    },
+    404: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string(), code: z.string() }) } },
+      description: "Task not found",
+    },
+  },
+});
+
+const bulkDeleteTasksRoute = createRoute({
+  method: "delete",
+  path: "/",
+  tags: ["Tasks"],
+  summary: "Bulk delete tasks",
+  request: {
+    query: z.object({
+      status: z.string().optional(),
+      group: z.string().optional(),
+      all: z.string().optional(),
+    }),
+  },
+  responses: {
+    200: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.object({ deleted: z.number() }) }) } },
+      description: "Tasks deleted",
+    },
+    400: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string(), code: z.string() }) } },
+      description: "No filter specified",
     },
   },
 });
@@ -322,6 +366,42 @@ export function taskRoutes(): OpenAPIHono<ServerEnv> {
     }
     orchestrator.getStore().transition(taskId, "pending");
     return c.json({ ok: true, data: { queued: true } }, 200);
+  });
+
+  // POST /tasks/:taskId/force-fail — force a task to failed state
+  app.openapi(forceFailTaskRoute, (c) => {
+    const orchestrator = c.get("orchestrator");
+    const { taskId } = c.req.valid("param");
+    const task = orchestrator.getStore().getTask(taskId);
+    if (!task) {
+      return c.json({ ok: false, error: "Task not found", code: "NOT_FOUND" }, 404);
+    }
+    orchestrator.forceFailTask(taskId);
+    return c.json({ ok: true, data: { failed: true } }, 200);
+  });
+
+  // DELETE /tasks — bulk delete tasks by filter
+  app.openapi(bulkDeleteTasksRoute, (c) => {
+    const orchestrator = c.get("orchestrator");
+    const query = c.req.valid("query");
+
+    if (!query.status && !query.group && query.all !== "true") {
+      return c.json({ ok: false, error: "Specify ?status=, ?group=, or ?all=true", code: "NO_FILTER" }, 400);
+    }
+
+    let filter: (t: any) => boolean;
+    if (query.all === "true") {
+      filter = () => true;
+    } else if (query.status && query.group) {
+      filter = (t: any) => t.status === query.status && t.group === query.group;
+    } else if (query.status) {
+      filter = (t: any) => t.status === query.status;
+    } else {
+      filter = (t: any) => t.group === query.group;
+    }
+
+    const deleted = orchestrator.getStore().removeTasks(filter);
+    return c.json({ ok: true, data: { deleted } }, 200);
   });
 
   return app;

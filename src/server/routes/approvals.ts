@@ -27,7 +27,7 @@ const getApprovalRoute = createRoute({
   method: "get",
   path: "/{id}",
   tags: ["Approvals"],
-  summary: "Get single approval request",
+  summary: "Get approval",
   request: {
     params: z.object({ id: z.string() }),
   },
@@ -47,7 +47,7 @@ const approveRoute = createRoute({
   method: "post",
   path: "/{id}/approve",
   tags: ["Approvals"],
-  summary: "Approve a pending request",
+  summary: "Approve request",
   request: {
     params: z.object({ id: z.string() }),
     body: {

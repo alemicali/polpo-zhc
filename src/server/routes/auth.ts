@@ -19,7 +19,7 @@ export function authRoutes(): OpenAPIHono<ServerEnv> {
     method: "get",
     path: "/status",
     tags: ["Auth"],
-    summary: "Get authentication status per provider",
+    summary: "Auth status",
     description:
       "Returns per-provider auth health: config key, env var, OAuth profiles (metadata only — tokens never exposed), cooldown/billing status.",
     responses: {

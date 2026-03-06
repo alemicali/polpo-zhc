@@ -81,7 +81,7 @@
         "tags": [
           "Chat Completions"
         ],
-        "summary": "Talk to Polpo (OpenAI-compatible)",
+        "summary": "Chat completions",
         "description": "Polpo's primary conversational interface. Send messages in OpenAI format, receive responses in OpenAI format. Polpo runs its full 37-tool agentic loop internally — you describe what you need, Polpo handles the rest. Supports streaming (SSE) and non-streaming modes.",
         "requestBody": {
           "content": {
@@ -387,7 +387,7 @@
         "tags": [
           "Tasks"
         ],
-        "summary": "List all tasks",
+        "summary": "List tasks",
         "parameters": [
           {
             "schema": {
@@ -446,7 +446,7 @@
         "tags": [
           "Tasks"
         ],
-        "summary": "Create a new task",
+        "summary": "Create task",
         "requestBody": {
           "content": {
             "application/json": {
@@ -633,6 +633,9 @@
                     "required": [
                       "rules"
                     ]
+                  },
+                  "sideEffects": {
+                    "type": "boolean"
                   }
                 },
                 "required": [
@@ -693,6 +696,96 @@
             }
           }
         }
+      },
+      "delete": {
+        "tags": [
+          "Tasks"
+        ],
+        "summary": "Bulk delete tasks",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "status",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "group",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "all",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Tasks deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "deleted": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "deleted"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "No filter specified",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/v1/tasks/{taskId}": {
@@ -700,7 +793,7 @@
         "tags": [
           "Tasks"
         ],
-        "summary": "Get a single task",
+        "summary": "Get task",
         "parameters": [
           {
             "schema": {
@@ -765,7 +858,7 @@
         "tags": [
           "Tasks"
         ],
-        "summary": "Update a task",
+        "summary": "Update task",
         "parameters": [
           {
             "schema": {
@@ -816,6 +909,9 @@
                   "maxRetries": {
                     "type": "integer",
                     "minimum": 0
+                  },
+                  "sideEffects": {
+                    "type": "boolean"
                   }
                 }
               }
@@ -876,7 +972,7 @@
         "tags": [
           "Tasks"
         ],
-        "summary": "Delete a task",
+        "summary": "Delete task",
         "parameters": [
           {
             "schema": {
@@ -952,7 +1048,7 @@
         "tags": [
           "Tasks"
         ],
-        "summary": "Retry a failed task",
+        "summary": "Retry task",
         "parameters": [
           {
             "schema": {
@@ -1002,7 +1098,7 @@
         "tags": [
           "Tasks"
         ],
-        "summary": "Kill a running task",
+        "summary": "Kill task",
         "parameters": [
           {
             "schema": {
@@ -1128,7 +1224,7 @@
         "tags": [
           "Tasks"
         ],
-        "summary": "Queue a draft task (transition draft → pending)",
+        "summary": "Queue task",
         "parameters": [
           {
             "schema": {
@@ -1199,12 +1295,88 @@
         }
       }
     },
+    "/api/v1/tasks/{taskId}/force-fail": {
+      "post": {
+        "tags": [
+          "Tasks"
+        ],
+        "summary": "Force fail task",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "taskId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Task force-failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "failed": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "failed"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Task not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/missions": {
       "get": {
         "tags": [
           "Missions"
         ],
-        "summary": "List all missions",
+        "summary": "List missions",
         "responses": {
           "200": {
             "description": "List of missions",
@@ -1237,7 +1409,7 @@
         "tags": [
           "Missions"
         ],
-        "summary": "Save a new mission",
+        "summary": "Create mission",
         "requestBody": {
           "content": {
             "application/json": {
@@ -1431,7 +1603,7 @@
         "tags": [
           "Missions"
         ],
-        "summary": "Get a mission by ID",
+        "summary": "Get mission",
         "parameters": [
           {
             "schema": {
@@ -1496,7 +1668,7 @@
         "tags": [
           "Missions"
         ],
-        "summary": "Update a mission",
+        "summary": "Update mission",
         "parameters": [
           {
             "schema": {
@@ -1571,7 +1743,7 @@
         "tags": [
           "Missions"
         ],
-        "summary": "Delete a mission",
+        "summary": "Delete mission",
         "parameters": [
           {
             "schema": {
@@ -1647,7 +1819,7 @@
         "tags": [
           "Missions"
         ],
-        "summary": "Execute a mission",
+        "summary": "Execute mission",
         "parameters": [
           {
             "schema": {
@@ -1688,7 +1860,7 @@
         "tags": [
           "Missions"
         ],
-        "summary": "Resume a mission",
+        "summary": "Resume mission",
         "parameters": [
           {
             "schema": {
@@ -1744,7 +1916,7 @@
         "tags": [
           "Missions"
         ],
-        "summary": "List all active checkpoints",
+        "summary": "List checkpoints",
         "responses": {
           "200": {
             "description": "List of active checkpoints",
@@ -1779,7 +1951,7 @@
         "tags": [
           "Missions"
         ],
-        "summary": "Resume a checkpoint",
+        "summary": "Resume checkpoint",
         "parameters": [
           {
             "schema": {
@@ -1863,7 +2035,7 @@
         "tags": [
           "Missions"
         ],
-        "summary": "Abort a mission",
+        "summary": "Abort mission",
         "parameters": [
           {
             "schema": {
@@ -1939,7 +2111,7 @@
         "tags": [
           "Missions"
         ],
-        "summary": "Add a task to mission data",
+        "summary": "Add mission task",
         "parameters": [
           {
             "schema": {
@@ -2006,6 +2178,9 @@
                   },
                   "notifications": {
                     "nullable": true
+                  },
+                  "sideEffects": {
+                    "type": "boolean"
                   }
                 },
                 "required": [
@@ -2093,7 +2268,7 @@
         "tags": [
           "Missions"
         ],
-        "summary": "Update a task in mission data",
+        "summary": "Update mission task",
         "parameters": [
           {
             "schema": {
@@ -2168,6 +2343,9 @@
                   },
                   "notifications": {
                     "nullable": true
+                  },
+                  "sideEffects": {
+                    "type": "boolean"
                   }
                 }
               }
@@ -2228,7 +2406,7 @@
         "tags": [
           "Missions"
         ],
-        "summary": "Remove a task from mission data",
+        "summary": "Remove mission task",
         "parameters": [
           {
             "schema": {
@@ -2303,7 +2481,7 @@
         "tags": [
           "Missions"
         ],
-        "summary": "Reorder tasks in mission data",
+        "summary": "Reorder mission tasks",
         "parameters": [
           {
             "schema": {
@@ -2392,7 +2570,7 @@
         "tags": [
           "Missions"
         ],
-        "summary": "Add a checkpoint to mission data",
+        "summary": "Add mission checkpoint",
         "parameters": [
           {
             "schema": {
@@ -2526,7 +2704,7 @@
         "tags": [
           "Missions"
         ],
-        "summary": "Update a checkpoint in mission data",
+        "summary": "Update mission checkpoint",
         "parameters": [
           {
             "schema": {
@@ -2640,7 +2818,7 @@
         "tags": [
           "Missions"
         ],
-        "summary": "Remove a checkpoint from mission data",
+        "summary": "Remove mission checkpoint",
         "parameters": [
           {
             "schema": {
@@ -2715,7 +2893,7 @@
         "tags": [
           "Missions"
         ],
-        "summary": "List all active delays",
+        "summary": "List delays",
         "responses": {
           "200": {
             "description": "List of active delays",
@@ -2750,7 +2928,7 @@
         "tags": [
           "Missions"
         ],
-        "summary": "Add a delay to mission data",
+        "summary": "Add mission delay",
         "parameters": [
           {
             "schema": {
@@ -2889,7 +3067,7 @@
         "tags": [
           "Missions"
         ],
-        "summary": "Update a delay in mission data",
+        "summary": "Update mission delay",
         "parameters": [
           {
             "schema": {
@@ -3007,7 +3185,7 @@
         "tags": [
           "Missions"
         ],
-        "summary": "Remove a delay from mission data",
+        "summary": "Remove mission delay",
         "parameters": [
           {
             "schema": {
@@ -3082,7 +3260,7 @@
         "tags": [
           "Missions"
         ],
-        "summary": "Add a quality gate to mission data",
+        "summary": "Add quality gate",
         "parameters": [
           {
             "schema": {
@@ -3224,7 +3402,7 @@
         "tags": [
           "Missions"
         ],
-        "summary": "Update a quality gate in mission data",
+        "summary": "Update quality gate",
         "parameters": [
           {
             "schema": {
@@ -3346,7 +3524,7 @@
         "tags": [
           "Missions"
         ],
-        "summary": "Remove a quality gate from mission data",
+        "summary": "Remove quality gate",
         "parameters": [
           {
             "schema": {
@@ -3421,7 +3599,7 @@
         "tags": [
           "Missions"
         ],
-        "summary": "Add a volatile team member to mission data",
+        "summary": "Add team member",
         "parameters": [
           {
             "schema": {
@@ -3542,7 +3720,7 @@
         "tags": [
           "Missions"
         ],
-        "summary": "Update a volatile team member in mission data",
+        "summary": "Update team member",
         "parameters": [
           {
             "schema": {
@@ -3645,7 +3823,7 @@
         "tags": [
           "Missions"
         ],
-        "summary": "Remove a volatile team member from mission data",
+        "summary": "Remove team member",
         "parameters": [
           {
             "schema": {
@@ -3720,7 +3898,7 @@
         "tags": [
           "Missions"
         ],
-        "summary": "Update or clear mission-level notification rules",
+        "summary": "Update mission notifications",
         "parameters": [
           {
             "schema": {
@@ -3922,7 +4100,7 @@
         "tags": [
           "Agents"
         ],
-        "summary": "Add an agent",
+        "summary": "Add agent",
         "requestBody": {
           "content": {
             "application/json": {
@@ -4084,7 +4262,7 @@
         "tags": [
           "Agents"
         ],
-        "summary": "Remove an agent",
+        "summary": "Remove agent",
         "parameters": [
           {
             "schema": {
@@ -4154,11 +4332,214 @@
           }
         }
       },
+      "patch": {
+        "tags": [
+          "Agents"
+        ],
+        "summary": "Update agent",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "role": {
+                    "type": "string"
+                  },
+                  "model": {
+                    "type": "string"
+                  },
+                  "allowedTools": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "allowedPaths": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "systemPrompt": {
+                    "type": "string"
+                  },
+                  "skills": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "maxTurns": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "exclusiveMinimum": true
+                  },
+                  "maxConcurrency": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "exclusiveMinimum": true
+                  },
+                  "identity": {
+                    "type": "object",
+                    "properties": {
+                      "displayName": {
+                        "type": "string"
+                      },
+                      "title": {
+                        "type": "string"
+                      },
+                      "company": {
+                        "type": "string"
+                      },
+                      "email": {
+                        "type": "string"
+                      },
+                      "bio": {
+                        "type": "string"
+                      },
+                      "timezone": {
+                        "type": "string"
+                      },
+                      "avatar": {
+                        "type": "string"
+                      },
+                      "responsibilities": {
+                        "type": "array",
+                        "items": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "area": {
+                                  "type": "string"
+                                },
+                                "description": {
+                                  "type": "string"
+                                },
+                                "priority": {
+                                  "type": "string",
+                                  "enum": [
+                                    "critical",
+                                    "high",
+                                    "medium",
+                                    "low"
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "area",
+                                "description"
+                              ]
+                            }
+                          ]
+                        }
+                      },
+                      "tone": {
+                        "type": "string"
+                      },
+                      "personality": {
+                        "type": "string"
+                      },
+                      "socials": {
+                        "type": "object",
+                        "additionalProperties": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  },
+                  "reportsTo": {
+                    "type": "string"
+                  },
+                  "reasoning": {
+                    "type": "string"
+                  },
+                  "browserProfile": {
+                    "type": "string"
+                  },
+                  "emailAllowedDomains": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "team": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Agent updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Agent not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
       "get": {
         "tags": [
           "Agents"
         ],
-        "summary": "Get single agent detail",
+        "summary": "Get agent",
         "parameters": [
           {
             "schema": {
@@ -4225,7 +4606,7 @@
         "tags": [
           "Agents"
         ],
-        "summary": "List all teams",
+        "summary": "List teams",
         "responses": {
           "200": {
             "description": "All teams",
@@ -4258,7 +4639,7 @@
         "tags": [
           "Agents"
         ],
-        "summary": "Add a team",
+        "summary": "Add team",
         "requestBody": {
           "content": {
             "application/json": {
@@ -4402,7 +4783,7 @@
         "tags": [
           "Agents"
         ],
-        "summary": "Remove a team",
+        "summary": "Remove team",
         "parameters": [
           {
             "schema": {
@@ -4478,7 +4859,7 @@
         "tags": [
           "Agents"
         ],
-        "summary": "List active agent processes",
+        "summary": "List processes",
         "responses": {
           "200": {
             "description": "Active processes",
@@ -4513,7 +4894,7 @@
         "tags": [
           "Agents"
         ],
-        "summary": "Get activity history for a task",
+        "summary": "Get task activity",
         "parameters": [
           {
             "schema": {
@@ -4589,7 +4970,7 @@
         "tags": [
           "Chat Sessions"
         ],
-        "summary": "Get messages for a session",
+        "summary": "Get session messages",
         "parameters": [
           {
             "schema": {
@@ -4682,7 +5063,7 @@
         "tags": [
           "Chat Sessions"
         ],
-        "summary": "Rename a session",
+        "summary": "Rename session",
         "parameters": [
           {
             "schema": {
@@ -4791,7 +5172,7 @@
         "tags": [
           "Chat Sessions"
         ],
-        "summary": "Delete a session",
+        "summary": "Delete session",
         "parameters": [
           {
             "schema": {
@@ -4884,7 +5265,7 @@
         "tags": [
           "Skills"
         ],
-        "summary": "List skills with agent assignments",
+        "summary": "List skills",
         "responses": {
           "200": {
             "description": "List of skills",
@@ -4919,7 +5300,7 @@
         "tags": [
           "Skills"
         ],
-        "summary": "Install skills from a source",
+        "summary": "Install skills",
         "requestBody": {
           "content": {
             "application/json": {
@@ -5001,7 +5382,7 @@
         "tags": [
           "Skills"
         ],
-        "summary": "Create a new agent skill",
+        "summary": "Create skill",
         "requestBody": {
           "content": {
             "application/json": {
@@ -5108,7 +5489,7 @@
         "tags": [
           "Skills"
         ],
-        "summary": "Remove a skill from the pool",
+        "summary": "Remove skill",
         "parameters": [
           {
             "schema": {
@@ -5192,7 +5573,7 @@
         "tags": [
           "Skills"
         ],
-        "summary": "Assign a skill to an agent",
+        "summary": "Assign skill",
         "parameters": [
           {
             "schema": {
@@ -5290,7 +5671,7 @@
         "tags": [
           "Skills"
         ],
-        "summary": "Unassign a skill from an agent",
+        "summary": "Unassign skill",
         "parameters": [
           {
             "schema": {
@@ -5388,7 +5769,7 @@
         "tags": [
           "Skills"
         ],
-        "summary": "Get agent skill content",
+        "summary": "Get skill content",
         "parameters": [
           {
             "schema": {
@@ -5488,7 +5869,7 @@
         "tags": [
           "Skills"
         ],
-        "summary": "Create a new orchestrator skill",
+        "summary": "Create orchestrator skill",
         "requestBody": {
           "content": {
             "application/json": {
@@ -5592,7 +5973,7 @@
         "tags": [
           "Skills"
         ],
-        "summary": "Update an orchestrator skill",
+        "summary": "Update orchestrator skill",
         "parameters": [
           {
             "schema": {
@@ -5689,7 +6070,7 @@
         "tags": [
           "Skills"
         ],
-        "summary": "Remove an orchestrator skill",
+        "summary": "Remove orchestrator skill",
         "parameters": [
           {
             "schema": {
@@ -5765,7 +6146,7 @@
         "tags": [
           "Skills"
         ],
-        "summary": "Get orchestrator skill content",
+        "summary": "Get orchestrator content",
         "parameters": [
           {
             "schema": {
@@ -5832,7 +6213,7 @@
         "tags": [
           "Skills"
         ],
-        "summary": "Install orchestrator skills from a source",
+        "summary": "Install orchestrator skills",
         "requestBody": {
           "content": {
             "application/json": {
@@ -5911,7 +6292,7 @@
         "tags": [
           "Skills"
         ],
-        "summary": "Get the skills index (tags and categories)",
+        "summary": "Get skills index",
         "responses": {
           "200": {
             "description": "Skills index",
@@ -5942,7 +6323,7 @@
         "tags": [
           "Skills"
         ],
-        "summary": "Update a skill's tags and category",
+        "summary": "Update skill index",
         "parameters": [
           {
             "schema": {
@@ -6117,7 +6498,7 @@
         "tags": [
           "Notifications"
         ],
-        "summary": "Send a notification directly",
+        "summary": "Send notification",
         "requestBody": {
           "content": {
             "application/json": {
@@ -6209,6 +6590,227 @@
         }
       }
     },
+    "/api/v1/notifications/rules": {
+      "get": {
+        "tags": [
+          "Notifications"
+        ],
+        "summary": "List notification rules",
+        "responses": {
+          "200": {
+            "description": "Notification rules",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "nullable": true
+                      }
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Notifications"
+        ],
+        "summary": "Create notification rule",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "events": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "minItems": 1
+                  },
+                  "channels": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "condition": {
+                    "nullable": true
+                  },
+                  "severity": {
+                    "type": "string",
+                    "enum": [
+                      "info",
+                      "warning",
+                      "critical"
+                    ]
+                  },
+                  "cooldownMs": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "actions": {
+                    "type": "array",
+                    "items": {
+                      "nullable": true
+                    }
+                  }
+                },
+                "required": [
+                  "name",
+                  "events"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Rule created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Not configured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/notifications/rules/{ruleId}": {
+      "delete": {
+        "tags": [
+          "Notifications"
+        ],
+        "summary": "Delete notification rule",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "ruleId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Rule deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "deleted": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "deleted"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Rule not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/approvals": {
       "get": {
         "tags": [
@@ -6263,7 +6865,7 @@
         "tags": [
           "Approvals"
         ],
-        "summary": "Get single approval request",
+        "summary": "Get approval",
         "parameters": [
           {
             "schema": {
@@ -6330,7 +6932,7 @@
         "tags": [
           "Approvals"
         ],
-        "summary": "Approve a pending request",
+        "summary": "Approve request",
         "parameters": [
           {
             "schema": {
@@ -6614,7 +7216,7 @@
         "tags": [
           "Templates"
         ],
-        "summary": "Create or update a template",
+        "summary": "Save template",
         "requestBody": {
           "content": {
             "application/json": {
@@ -6822,7 +7424,7 @@
         "tags": [
           "Templates"
         ],
-        "summary": "Delete a template",
+        "summary": "Delete template",
         "parameters": [
           {
             "schema": {
@@ -6886,7 +7488,7 @@
         "tags": [
           "Templates"
         ],
-        "summary": "Execute template with parameters",
+        "summary": "Run template",
         "parameters": [
           {
             "schema": {
@@ -7031,7 +7633,7 @@
         "tags": [
           "Config"
         ],
-        "summary": "Reload configuration from polpo.json",
+        "summary": "Reload config",
         "responses": {
           "200": {
             "description": "Configuration reloaded successfully",
@@ -7093,7 +7695,7 @@
         "tags": [
           "Config"
         ],
-        "summary": "Get current configuration (redacted)",
+        "summary": "Get config",
         "responses": {
           "200": {
             "description": "Current configuration",
@@ -7209,7 +7811,7 @@
         "tags": [
           "Peers"
         ],
-        "summary": "Get current presence (online peers)",
+        "summary": "Get presence",
         "responses": {
           "200": {
             "description": "Presence list",
@@ -7313,7 +7915,7 @@
         "tags": [
           "Peers"
         ],
-        "summary": "Add peer to allowlist",
+        "summary": "Allow peer",
         "requestBody": {
           "content": {
             "application/json": {
@@ -7405,7 +8007,7 @@
         "tags": [
           "Peers"
         ],
-        "summary": "Remove peer from allowlist",
+        "summary": "Remove peer",
         "parameters": [
           {
             "schema": {
@@ -7468,7 +8070,7 @@
         "tags": [
           "Peers"
         ],
-        "summary": "Approve a pairing code",
+        "summary": "Approve pairing",
         "requestBody": {
           "content": {
             "application/json": {
@@ -7560,7 +8162,7 @@
         "tags": [
           "Peers"
         ],
-        "summary": "Link two peer identities across channels",
+        "summary": "Link peers",
         "requestBody": {
           "content": {
             "application/json": {
@@ -7656,7 +8258,7 @@
         "tags": [
           "Schedules"
         ],
-        "summary": "List all schedule entries",
+        "summary": "List schedules",
         "responses": {
           "200": {
             "description": "List of schedule entries",
@@ -7684,6 +8286,507 @@
             }
           }
         }
+      },
+      "post": {
+        "tags": [
+          "Schedules"
+        ],
+        "summary": "Create schedule",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "missionId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "expression": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "recurring": {
+                    "type": "boolean"
+                  },
+                  "endDate": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                },
+                "required": [
+                  "missionId",
+                  "expression"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Schedule created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid expression or scheduler unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Mission not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/schedules/{missionId}": {
+      "patch": {
+        "tags": [
+          "Schedules"
+        ],
+        "summary": "Update schedule",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "missionId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "expression": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "recurring": {
+                    "type": "boolean"
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "endDate": {
+                    "type": "string",
+                    "nullable": true,
+                    "format": "date-time"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Schedule updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Schedule not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Schedules"
+        ],
+        "summary": "Delete schedule",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "missionId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Schedule deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "deleted": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "deleted"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Schedule not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/watchers": {
+      "get": {
+        "tags": [
+          "Watchers"
+        ],
+        "summary": "List watchers",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "active",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of watchers",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "nullable": true
+                      }
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Watchers"
+        ],
+        "summary": "Create watcher",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "taskId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "targetStatus": {
+                    "type": "string",
+                    "enum": [
+                      "pending",
+                      "assigned",
+                      "in_progress",
+                      "review",
+                      "done",
+                      "failed",
+                      "awaiting_approval"
+                    ]
+                  },
+                  "action": {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "required": [
+                      "type"
+                    ],
+                    "additionalProperties": {
+                      "nullable": true
+                    }
+                  }
+                },
+                "required": [
+                  "taskId",
+                  "targetStatus",
+                  "action"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Watcher created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Watcher manager unavailable or task not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/watchers/{watcherId}": {
+      "delete": {
+        "tags": [
+          "Watchers"
+        ],
+        "summary": "Delete watcher",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "watcherId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Watcher deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "deleted": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "deleted"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Watcher not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/v1/vault/entries": {
@@ -7691,7 +8794,7 @@
         "tags": [
           "Vault"
         ],
-        "summary": "Save a vault entry",
+        "summary": "Save vault entry",
         "description": "Save credentials to the encrypted vault store. Credentials are encrypted at rest (AES-256-GCM) and never logged or persisted in chat history.",
         "requestBody": {
           "content": {
@@ -7819,7 +8922,7 @@
         "tags": [
           "Vault"
         ],
-        "summary": "List vault entries for an agent",
+        "summary": "List vault entries",
         "description": "Returns metadata (service name, type, label, credential key names) without any secret values.",
         "parameters": [
           {
@@ -7917,7 +9020,7 @@
         "tags": [
           "Vault"
         ],
-        "summary": "Remove a vault entry",
+        "summary": "Remove vault entry",
         "parameters": [
           {
             "schema": {
@@ -7997,7 +9100,7 @@
         "tags": [
           "Auth"
         ],
-        "summary": "Get authentication status per provider",
+        "summary": "Auth status",
         "description": "Returns per-provider auth health: config key, env var, OAuth profiles (metadata only — tokens never exposed), cooldown/billing status.",
         "responses": {
           "200": {
@@ -8135,7 +9238,7 @@
         "tags": [
           "Files"
         ],
-        "summary": "List browsable root directories",
+        "summary": "List file roots",
         "description": "Returns the filesystem roots that the file browser can navigate: the project working directory and the .polpo configuration directory.",
         "responses": {
           "200": {
@@ -8262,7 +9365,7 @@
         "tags": [
           "Files"
         ],
-        "summary": "Get file preview data",
+        "summary": "Preview file",
         "description": "Returns structured preview metadata for a file. For text files, includes the file content (optionally truncated). For binary files (images, audio, video, PDF), returns a URL to stream the content via the /files/read endpoint. Response includes: path, name, mimeType, size, previewable (boolean), type (text|image|pdf|audio|video|binary), url, and optionally content and truncated for text files.",
         "parameters": [
           {
@@ -8367,7 +9470,7 @@
         "tags": [
           "State"
         ],
-        "summary": "Get full state snapshot",
+        "summary": "Get state",
         "responses": {
           "200": {
             "description": "Full state snapshot",
@@ -8558,7 +9661,7 @@
         "tags": [
           "Logs"
         ],
-        "summary": "Get log entries for a session",
+        "summary": "Get log entries",
         "parameters": [
           {
             "schema": {

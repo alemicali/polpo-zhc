@@ -1,6 +1,6 @@
 ---
-title: "Store Backends"
-description: "File and SQLite persistence backends for Polpo"
+title: "Stores"
+description: "Pluggable persistence layer for tasks, missions, sessions, memory, and more."
 ---
 
 Polpo persists tasks, runs, missions, sessions, memory, logs, notifications, and approval state using a pluggable store layer. All stores implement a common interface and can be swapped via configuration.
@@ -47,57 +47,7 @@ interface TaskStore {
 `unsafeSetStatus` bypasses the state machine and should only be used for recovery, race-condition fallbacks, and fix/Q&A re-runs. A mandatory `reason` string is logged.
 </Warning>
 
-## Available Stores
-
-### File-Based Stores (Default)
-
-File-based stores persist data as individual files in the `.polpo/` directory. They are the simplest option and require no additional dependencies.
-
-| Store | Purpose | Location |
-|-------|---------|----------|
-| `FileTaskStore` | Tasks and missions | `.polpo/tasks/<id>.json` + `.polpo/missions/<id>.json` |
-| `FileRunStore` | Execution run history | `.polpo/runs/` |
-| `FileMemoryStore` | Project memory | `.polpo/memory.md` |
-| `FileLogStore` | Event log persistence | `.polpo/logs/` |
-| `FileSessionStore` | Chat sessions | `.polpo/sessions/` |
-| `FileApprovalStore` | Approval gate state | `.polpo/approvals.json` |
-| `FileNotificationStore` | Notification records | `.polpo/notifications.json` |
-
-The `FileTaskStore` uses a multi-file layout: each task and mission is stored as a separate JSON file, plus a `_meta.json` metadata file.
-
-```
-.polpo/
-├── tasks/
-│   ├── <taskId>.json
-│   └── ...
-├── missions/
-│   ├── <missionId>.json
-│   └── ...
-└── _meta.json
-```
-
-**Pros:** Zero config, human-readable files, easy to inspect and debug.
-**Cons:** No concurrent access safety, can degrade with very large task sets.
-
-### SQLite Stores
-
-SQLite stores use an embedded database for higher concurrency and better query performance. All SQLite stores share the same database file.
-
-| Store | Purpose | Location |
-|-------|---------|----------|
-| `SqliteTaskStore` | Tasks and missions | `.polpo/state.db` |
-| `SqliteRunStore` | Execution run history | `.polpo/state.db` |
-| `SqliteSessionStore` | Chat sessions | `.polpo/state.db` |
-| `SqliteNotificationStore` | Notification records | `.polpo/state.db` |
-
-```typescript
-import { SqliteTaskStore, SqliteRunStore, SqliteSessionStore } from "openpolpo/stores";
-```
-
-**Pros:** Safe concurrent access, better performance at scale, transactional integrity.
-**Cons:** Requires `better-sqlite3` dependency (in `optionalDependencies`), database file is not human-readable.
-
-### Configuration Stores
+## Configuration Stores
 
 | Store | Purpose | Location |
 |-------|---------|----------|
@@ -109,13 +59,11 @@ The `JsonConfigStore` (aliased as `PolpoConfigStore`) manages the `polpo.json` c
 
 | Scenario | Recommended Backend |
 |----------|-------------------|
-| Getting started / single user | File (default) |
-| Multiple concurrent orchestrators | SQLite |
-| CI/CD pipelines | SQLite |
-| Large task sets (100+ tasks) | SQLite |
-| Debugging / inspecting state | File |
-
-## Configuration
+| Getting started / single user | [File](/reference/stores/file) (default) |
+| Multiple concurrent orchestrators | [SQLite](/reference/stores/sqlite) |
+| CI/CD pipelines | [SQLite](/reference/stores/sqlite) |
+| Large task sets (100+ tasks) | [SQLite](/reference/stores/sqlite) |
+| Debugging / inspecting state | [File](/reference/stores/file) |
 
 Set the storage backend in `.polpo/polpo.json`:
 
@@ -128,18 +76,6 @@ Set the storage backend in `.polpo/polpo.json`:
 ```
 
 Supported values: `"file"` (default) and `"sqlite"`.
-
-When using the programmatic API, you can pass stores directly:
-
-```typescript
-import { Orchestrator, SqliteTaskStore, SqliteRunStore } from "openpolpo";
-
-const orchestrator = new Orchestrator({
-  workDir: "./my-project",
-  taskStore: new SqliteTaskStore(".polpo"),
-  runStore: new SqliteRunStore(join(".polpo", "state.db")),
-});
-```
 
 <Note>
 All stores share the same `.polpo/` directory by convention. The directory is created automatically by `polpo init`.

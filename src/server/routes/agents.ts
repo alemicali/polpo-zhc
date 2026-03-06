@@ -2,7 +2,7 @@ import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { join, extname } from "node:path";
 import { existsSync, readFileSync, readdirSync, mkdirSync, writeFileSync } from "node:fs";
 import type { ServerEnv } from "../app.js";
-import { AddAgentSchema, RenameTeamSchema, AddTeamSchema } from "../schemas.js";
+import { AddAgentSchema, UpdateAgentSchema, RenameTeamSchema, AddTeamSchema } from "../schemas.js";
 import { redactAgentConfig, redactTeam, sanitizeTranscriptEntry } from "../security.js";
 
 /**
@@ -35,7 +35,7 @@ export function agentRoutes(): OpenAPIHono<ServerEnv> {
     method: "post",
     path: "/",
     tags: ["Agents"],
-    summary: "Add an agent",
+    summary: "Add agent",
     request: {
       body: { content: { "application/json": { schema: AddAgentSchema } } },
     },
@@ -73,7 +73,7 @@ export function agentRoutes(): OpenAPIHono<ServerEnv> {
     method: "delete",
     path: "/{name}",
     tags: ["Agents"],
-    summary: "Remove an agent",
+    summary: "Remove agent",
     request: {
       params: z.object({ name: z.string() }),
     },
@@ -104,7 +104,7 @@ export function agentRoutes(): OpenAPIHono<ServerEnv> {
     method: "get",
     path: "/teams",
     tags: ["Agents"],
-    summary: "List all teams",
+    summary: "List teams",
     responses: {
       200: {
         content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.array(z.any()) }) } },
@@ -145,7 +145,7 @@ export function agentRoutes(): OpenAPIHono<ServerEnv> {
     method: "post",
     path: "/teams",
     tags: ["Agents"],
-    summary: "Add a team",
+    summary: "Add team",
     request: {
       body: { content: { "application/json": { schema: AddTeamSchema } } },
     },
@@ -169,7 +169,7 @@ export function agentRoutes(): OpenAPIHono<ServerEnv> {
     method: "delete",
     path: "/teams/{name}",
     tags: ["Agents"],
-    summary: "Remove a team",
+    summary: "Remove team",
     request: {
       params: z.object({ name: z.string() }),
     },
@@ -225,7 +225,7 @@ export function agentRoutes(): OpenAPIHono<ServerEnv> {
     method: "get",
     path: "/processes",
     tags: ["Agents"],
-    summary: "List active agent processes",
+    summary: "List processes",
     responses: {
       200: {
         content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.array(z.any()) }) } },
@@ -245,7 +245,7 @@ export function agentRoutes(): OpenAPIHono<ServerEnv> {
     method: "get",
     path: "/processes/{taskId}/activity",
     tags: ["Agents"],
-    summary: "Get activity history for a task",
+    summary: "Get task activity",
     request: {
       params: z.object({ taskId: z.string() }),
     },
@@ -307,12 +307,78 @@ export function agentRoutes(): OpenAPIHono<ServerEnv> {
     }
   });
 
+  // PATCH /agents/:name — update agent (registered after static routes to avoid conflicts with /team)
+  const updateAgentRoute = createRoute({
+    method: "patch",
+    path: "/{name}",
+    tags: ["Agents"],
+    summary: "Update agent",
+    request: {
+      params: z.object({ name: z.string() }),
+      body: { content: { "application/json": { schema: UpdateAgentSchema } } },
+    },
+    responses: {
+      200: {
+        content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.any() }) } },
+        description: "Agent updated",
+      },
+      404: {
+        content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string(), code: z.string() }) } },
+        description: "Agent not found",
+      },
+    },
+  });
+
+  app.openapi(updateAgentRoute, (c) => {
+    const orchestrator = c.get("orchestrator");
+    const { name } = c.req.valid("param");
+    const existing = orchestrator.getAgents().find(a => a.name === name);
+    if (!existing) {
+      return c.json({ ok: false, error: "Agent not found", code: "NOT_FOUND" }, 404);
+    }
+
+    const body = c.req.valid("json");
+    const currentTeam = orchestrator.findAgentTeam(name);
+    const originalTeamName = currentTeam?.name;
+
+    orchestrator.removeAgent(name);
+
+    // Handle reportsTo: empty string clears it
+    let reportsTo = existing.reportsTo;
+    if (typeof body.reportsTo === "string") {
+      reportsTo = body.reportsTo.trim() || undefined;
+    }
+
+    const merged = {
+      ...existing,
+      role: body.role ?? existing.role,
+      model: body.model ?? existing.model,
+      systemPrompt: body.systemPrompt ?? existing.systemPrompt,
+      skills: body.skills ?? existing.skills,
+      allowedPaths: body.allowedPaths ?? existing.allowedPaths,
+      allowedTools: body.allowedTools ?? existing.allowedTools,
+      reportsTo,
+      reasoning: body.reasoning ?? (existing as any).reasoning,
+      maxTurns: body.maxTurns ?? existing.maxTurns,
+      maxConcurrency: body.maxConcurrency ?? (existing as any).maxConcurrency,
+      browserProfile: body.browserProfile ?? existing.browserProfile,
+      emailAllowedDomains: body.emailAllowedDomains ?? (existing as any).emailAllowedDomains,
+      identity: body.identity ? { ...(existing.identity ?? {}), ...body.identity } : existing.identity,
+    };
+
+    const targetTeam = body.team ?? originalTeamName;
+    orchestrator.addAgent(merged as any, targetTeam);
+
+    const updated = orchestrator.getAgents().find(a => a.name === name);
+    return c.json({ ok: true, data: updated ? redactAgentConfig(updated) : merged }, 200);
+  });
+
   // GET /agents/:name — single agent detail (registered after static routes to avoid conflicts)
   const getAgentRoute = createRoute({
     method: "get",
     path: "/{name}",
     tags: ["Agents"],
-    summary: "Get single agent detail",
+    summary: "Get agent",
     request: {
       params: z.object({ name: z.string() }),
     },

@@ -20,7 +20,7 @@ const getSessionMessagesRoute = createRoute({
   method: "get",
   path: "/sessions/{id}/messages",
   tags: ["Chat Sessions"],
-  summary: "Get messages for a session",
+  summary: "Get session messages",
   request: {
     params: z.object({ id: z.string() }),
   },
@@ -44,7 +44,7 @@ const renameSessionRoute = createRoute({
   method: "patch",
   path: "/sessions/{id}",
   tags: ["Chat Sessions"],
-  summary: "Rename a session",
+  summary: "Rename session",
   request: {
     params: z.object({ id: z.string() }),
     body: {
@@ -71,7 +71,7 @@ const deleteSessionRoute = createRoute({
   method: "delete",
   path: "/sessions/{id}",
   tags: ["Chat Sessions"],
-  summary: "Delete a session",
+  summary: "Delete session",
   request: {
     params: z.object({ id: z.string() }),
   },
