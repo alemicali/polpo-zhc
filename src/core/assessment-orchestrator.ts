@@ -3,7 +3,7 @@ import { existsSync, readdirSync } from "node:fs";
 import type { OrchestratorContext } from "./orchestrator-context.js";
 import type { Task, TaskResult, AssessmentResult, TaskExpectation, ReviewContext } from "./types.js";
 import { setAssessment, findAgent } from "./types.js";
-import { buildFixPrompt, buildRetryPrompt, buildJudgePrompt, type JudgeVerdict, type JudgeCorrection } from "./assessment-prompts.js";
+import { buildFixPrompt, buildRetryPrompt, buildSideEffectFixPrompt, buildSideEffectRetryPrompt, buildJudgePrompt, type JudgeVerdict, type JudgeCorrection } from "./assessment-prompts.js";
 import { looksLikeQuestion, classifyAsQuestion } from "./question-detector.js";
 import { generateAnswer } from "../llm/answer-generator.js";
 import { queryOrchestratorText } from "../llm/query.js";
@@ -607,6 +607,25 @@ export class AssessmentOrchestrator {
     const current = this.ctx.registry.getTask(taskId);
     if (!current) return;
 
+    // Side-effects guard: block automatic fix/retry for tasks with irreversible actions.
+    // The task transitions to awaiting_approval so a human can decide whether to re-execute.
+    // We still save the fix prompt so the agent gets feedback if the human approves.
+    if (current.sideEffects) {
+      const reason = "Task has sideEffects — automatic fix/retry blocked. Awaiting human approval.";
+      this.ctx.emitter.emit("task:retry:blocked", { taskId, reason });
+      this.ctx.emitter.emit("log", { level: "warn", message: `[${taskId}] ${reason}` });
+      // Preserve original description and prepare fix prompt for when approval comes
+      if (!current.originalDescription) {
+        this.ctx.registry.updateTask(taskId, { originalDescription: current.description });
+      }
+      this.ctx.registry.updateTask(taskId, {
+        description: buildSideEffectFixPrompt(current, result),
+        phase: "fix",
+      });
+      this.ctx.registry.transition(taskId, "awaiting_approval");
+      return;
+    }
+
     const maxFix = this.ctx.config.settings.maxFixAttempts ?? 2;
     const fixAttempts = (current.fixAttempts ?? 0) + 1;
 
@@ -642,6 +661,23 @@ export class AssessmentOrchestrator {
   retryOrFail(taskId: string, _task: Task, result: TaskResult): void {
     const current = this.ctx.registry.getTask(taskId);
     if (!current) return;
+
+    // Side-effects guard: block automatic retry for tasks with irreversible actions.
+    if (current.sideEffects) {
+      const reason = "Task has sideEffects — automatic retry blocked. Awaiting human approval.";
+      this.ctx.emitter.emit("task:retry:blocked", { taskId, reason });
+      this.ctx.emitter.emit("log", { level: "warn", message: `[${taskId}] ${reason}` });
+      // Preserve original description and prepare retry prompt for when approval comes
+      if (!current.originalDescription) {
+        this.ctx.registry.updateTask(taskId, { originalDescription: current.description });
+      }
+      this.ctx.registry.updateTask(taskId, {
+        description: buildSideEffectRetryPrompt(current, result),
+        phase: "execution",
+      });
+      this.ctx.registry.transition(taskId, "awaiting_approval");
+      return;
+    }
 
     // Don't retry tasks from cancelled missions — resolve via missionId (direct FK) first
     if (current.group) {

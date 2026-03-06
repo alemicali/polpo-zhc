@@ -134,6 +134,7 @@ const missionTaskSchema = z.object({
     fallbackAgent: z.string().optional(),
   }).optional(),
   notifications: z.any().optional(),
+  sideEffects: z.boolean().optional(),
 });
 
 // ── Mission Document Schema ─────────────────────────────────────────

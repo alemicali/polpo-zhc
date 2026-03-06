@@ -7,7 +7,7 @@ const ALL_EVENTS: PolpoEvent[] = [
   "agent:spawned", "agent:finished", "agent:activity",
   "assessment:started", "assessment:progress", "assessment:check:started", "assessment:check:complete", "assessment:complete", "assessment:corrected",
   "orchestrator:started", "orchestrator:tick", "orchestrator:deadlock", "orchestrator:shutdown",
-  "task:retry", "task:fix", "task:maxRetries",
+  "task:retry", "task:retry:blocked", "task:fix", "task:maxRetries",
   "task:question", "task:answered",
   "deadlock:detected", "deadlock:resolving", "deadlock:resolved", "deadlock:unresolvable",
   "task:timeout", "agent:stale",

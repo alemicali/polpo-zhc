@@ -64,6 +64,7 @@ export function reduceEvent(state: StoreState, sseEvent: SSEEvent): StoreState {
     }
 
     case "task:fix":
+    case "task:retry:blocked":
     case "task:maxRetries":
     case "task:question":
     case "task:answered":

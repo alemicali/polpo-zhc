@@ -162,6 +162,13 @@ export interface Task {
   revisionCount?: number;
   /** Scoped notification rules — override or extend global/mission rules for this task. */
   notifications?: ScopedNotificationRules;
+  /**
+   * Whether this task produces irreversible side effects (email sends, API calls,
+   * WhatsApp messages, etc.). When true, automatic retry/fix is blocked and the
+   * task transitions to `awaiting_approval` so a human can approve re-execution.
+   * Set by the orchestrator LLM when creating/planning tasks.
+   */
+  sideEffects?: boolean;
   createdAt: string;
   updatedAt: string;
 }

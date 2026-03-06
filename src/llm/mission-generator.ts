@@ -62,6 +62,7 @@ const MissionTaskSchema = Type.Object({
   expectations: Type.Optional(Type.Array(ExpectationSchema)),
   expectedOutcomes: Type.Optional(Type.Array(ExpectedOutcomeSchema, { description: "Artifacts this task should produce (files, text, URLs, data). Auto-collected from tool results + validated." })),
   maxRetries: Type.Optional(Type.Number({ description: "Max retry attempts (default: 2)" })),
+  sideEffects: Type.Optional(Type.Boolean({ description: "Set to true if this task produces irreversible external effects (sending emails, WhatsApp messages, POST/PUT/DELETE API calls). Prevents automatic retry/fix — requires human approval before re-execution." })),
 });
 
 const MissionTeamSchema = Type.Object({
@@ -169,6 +170,8 @@ export interface MissionTaskData {
     tags?: string[];
   }>;
   maxRetries?: number;
+  /** Whether this task produces irreversible side effects (email sends, API calls, etc.). */
+  sideEffects?: boolean;
 }
 
 export interface MissionTeamData {

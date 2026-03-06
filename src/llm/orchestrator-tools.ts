@@ -149,6 +149,7 @@ const createTaskTool: Tool = {
       criteria: Type.Optional(Type.String()),
       threshold: Type.Optional(Type.Number()),
     }), { description: "Acceptance criteria for this task" })),
+    sideEffects: Type.Optional(Type.Boolean({ description: "True if this task produces irreversible external effects (email sends, API calls, etc.). Blocks automatic retry — requires human approval." })),
   }),
 };
 
@@ -166,6 +167,7 @@ const updateTaskTool: Tool = {
       criteria: Type.Optional(Type.String()),
       threshold: Type.Optional(Type.Number()),
     }), { description: "New acceptance criteria" })),
+    sideEffects: Type.Optional(Type.Boolean({ description: "True if this task produces irreversible external effects. Blocks automatic retry." })),
   }),
 };
 
@@ -2219,6 +2221,7 @@ function execCreateTask(polpo: Orchestrator, args: Record<string, unknown>): str
     dependsOn: args.dependsOn as string[] | undefined,
     group: args.group as string | undefined,
     expectations: args.expectations as any[] | undefined,
+    sideEffects: args.sideEffects as boolean | undefined,
   });
   return `Task created: [${task.id}] "${task.title}" → ${task.assignTo}`;
 }
@@ -2243,6 +2246,10 @@ function execUpdateTask(polpo: Orchestrator, args: Record<string, unknown>): str
   if (args.expectations) {
     polpo.updateTaskExpectations(taskId, args.expectations as any[]);
     changes.push("expectations");
+  }
+  if (args.sideEffects !== undefined) {
+    polpo.getStore().updateTask(taskId, { sideEffects: args.sideEffects as boolean });
+    changes.push(`sideEffects → ${args.sideEffects}`);
   }
   if (changes.length === 0) return "No changes specified.";
   return `Task ${taskId} updated: ${changes.join(", ")}`;

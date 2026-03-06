@@ -613,6 +613,7 @@ export class MissionExecutor {
         maxDuration: t.maxDuration,
         retryPolicy: t.retryPolicy,
         notifications: t.notifications,
+        sideEffects: t.sideEffects,
       });
       titleToId.set(t.title, task.id);
       tasks.push(task);

@@ -121,6 +121,8 @@ export interface Task {
   revisionCount?: number;
   /** Scoped notification rules for this task. */
   notifications?: ScopedNotificationRules;
+  /** Whether this task produces irreversible side effects. Blocks automatic retry/fix. */
+  sideEffects?: boolean;
   createdAt: string;
   updatedAt: string;
 }

@@ -30,6 +30,7 @@ export interface PolpoEventMap {
 
   // Retry & Fix
   "task:retry": { taskId: string; attempt: number; maxRetries: number };
+  "task:retry:blocked": { taskId: string; reason: string };
   "task:fix": { taskId: string; attempt: number; maxFix: number };
   "task:maxRetries": { taskId: string };
 

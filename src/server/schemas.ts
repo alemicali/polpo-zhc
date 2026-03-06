@@ -55,6 +55,8 @@ export const CreateTaskSchema = z.object({
     })
     .optional(),
   notifications: ScopedNotificationRulesSchema.optional(),
+  /** Whether this task produces irreversible side effects. Blocks automatic retry/fix. */
+  sideEffects: z.boolean().optional(),
 });
 
 export const UpdateTaskSchema = z.object({
@@ -64,6 +66,8 @@ export const UpdateTaskSchema = z.object({
   expectations: z.array(z.any()).optional(),
   retries: z.number().int().min(0).optional(),
   maxRetries: z.number().int().min(0).optional(),
+  /** Whether this task produces irreversible side effects. Blocks automatic retry/fix. */
+  sideEffects: z.boolean().optional(),
 });
 
 // ── Mission schemas ──────────────────────────────────────────────────
@@ -105,6 +109,7 @@ export const AddMissionTaskSchema = z.object({
     fallbackAgent: z.string().optional(),
   }).optional(),
   notifications: z.any().optional(),
+  sideEffects: z.boolean().optional(),
 });
 
 export const UpdateMissionTaskSchema = z.object({
@@ -120,6 +125,7 @@ export const UpdateMissionTaskSchema = z.object({
     fallbackAgent: z.string().optional(),
   }).optional(),
   notifications: z.any().optional(),
+  sideEffects: z.boolean().optional(),
 });
 
 export const ReorderMissionTasksSchema = z.object({

@@ -96,6 +96,7 @@ Events for the multi-stage retry system: fix attempts, full retries, and exhaust
 | Event | Description | Key Payload Fields |
 |-------|-------------|-------------------|
 | `task:retry` | Full retry started | `taskId`, `attempt`, `maxRetries` |
+| `task:retry:blocked` | Automatic retry/fix blocked (task has `sideEffects: true`) | `taskId`, `reason` |
 | `task:fix` | Fix phase started (targeted corrections) | `taskId`, `attempt`, `maxFix` |
 | `task:maxRetries` | All retries exhausted | `taskId` |
 

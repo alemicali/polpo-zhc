@@ -31,6 +31,178 @@ import type { McpServerConfig } from "../mcp/types.js";
 import { nanoid } from "nanoid";
 
 /**
+ * Build an "## Available Tools" section for the agent's system prompt.
+ *
+ * Lists every tool the agent has access to, grouped by category, so the agent
+ * knows its full capabilities upfront. Without this, the agent only discovers
+ * tools through the LLM tool-calling protocol and may resort to shell commands,
+ * npm installs, or manual workarounds for capabilities it already has.
+ *
+ * Mirrors the orchestrator-side `describeAgentCapabilities()` in prompts.ts
+ * but is more detailed — written for the agent itself, not the orchestrator.
+ */
+function describeToolsForAgent(agent: AgentConfig): string {
+  const lines: string[] = ["## Available Tools", ""];
+
+  // --- Core tools (always present) ---
+  lines.push(
+    "**Core (always available):**",
+    "- `read` — read file contents (supports offset/limit for large files)",
+    "- `write` — create or overwrite files",
+    "- `edit` — surgical string replacement in files (preferred over rewriting entire files)",
+    "- `bash` — execute shell commands (30s default timeout; pass explicit timeout for long commands)",
+    "- `glob` — find files by pattern (e.g. `**/*.ts`)",
+    "- `grep` — search file contents by regex",
+    "- `ls` — list directory contents",
+    "- `http_fetch` — make HTTP requests (GET, POST, PUT, DELETE)",
+    "- `http_download` — download files from URLs",
+    "- `register_outcome` — declare task deliverables (files, URLs, text, data)",
+    "- `vault_get` — retrieve stored credentials/secrets",
+    "- `vault_list` — list available vault entries",
+  );
+
+  // --- Extended tools (only if configured in allowedTools) ---
+  const allowed = agent.allowedTools ?? [];
+  const hasPattern = (prefix: string) => allowed.some(t => t.toLowerCase().startsWith(prefix));
+
+  const extended: string[] = [];
+
+  if (hasPattern("browser_")) {
+    extended.push(
+      "",
+      "**Browser (agent-browser):**",
+      "- `browser_navigate` — open a URL",
+      "- `browser_snapshot` — capture page accessibility snapshot",
+      "- `browser_click` / `browser_fill` / `browser_select` — interact with page elements",
+      "- `browser_eval` — run JavaScript in the page",
+      "- `browser_screenshot` — take a screenshot",
+      "- Plus: browser_scroll, browser_back, browser_forward, browser_wait, browser_tabs, browser_tab_new, browser_tab_close, browser_tab_switch, browser_pdf, browser_drag, browser_hover, browser_keypress",
+      "Use browser tools instead of curl/wget for pages that require JavaScript rendering or authentication.",
+    );
+  }
+
+  if (hasPattern("email_")) {
+    extended.push(
+      "",
+      "**Email:**",
+      "- `email_send` — send an email (WARNING: irreversible side effect)",
+      "- `email_draft` — create a draft without sending",
+      "- `email_list` — list inbox messages",
+      "- `email_read` — read a specific email",
+      "- `email_search` — search emails by query",
+      "- `email_verify` — verify an email address",
+      "ALWAYS use these tools for email operations. Never use bash/curl to send emails.",
+    );
+  }
+
+  if (hasPattern("whatsapp_")) {
+    extended.push(
+      "",
+      "**WhatsApp:**",
+      "- `whatsapp_send` — send a WhatsApp message (WARNING: irreversible side effect)",
+      "- `whatsapp_list` — list recent conversations",
+      "- `whatsapp_read` — read messages in a conversation",
+      "- `whatsapp_search` — search messages",
+      "- `whatsapp_contacts` — list contacts",
+    );
+  }
+
+  if (hasPattern("image_")) {
+    extended.push(
+      "",
+      "**Image:**",
+      "- `image_generate` — generate images with AI (fal.ai FLUX)",
+      "- `image_analyze` — analyze/describe images with vision models",
+    );
+  }
+
+  if (hasPattern("video_")) {
+    extended.push(
+      "",
+      "**Video:**",
+      "- `video_generate` — generate video with AI (fal.ai Wan 2.2)",
+    );
+  }
+
+  if (hasPattern("audio_")) {
+    extended.push(
+      "",
+      "**Audio:**",
+      "- `audio_transcribe` — speech-to-text (Whisper / Deepgram Nova)",
+      "- `audio_speak` — text-to-speech (OpenAI / Deepgram / ElevenLabs / Edge)",
+    );
+  }
+
+  if (hasPattern("excel_")) {
+    extended.push(
+      "",
+      "**Excel:**",
+      "- `excel_read` — read spreadsheet data",
+      "- `excel_write` — write/create spreadsheets",
+      "- `excel_query` — query spreadsheet data with SQL-like syntax",
+      "- `excel_info` — get spreadsheet metadata",
+      "Use these instead of installing npm packages for spreadsheet operations.",
+    );
+  }
+
+  if (hasPattern("pdf_")) {
+    extended.push(
+      "",
+      "**PDF:**",
+      "- `pdf_read` — extract text from PDFs",
+      "- `pdf_create` — create PDF documents",
+      "- `pdf_merge` — merge multiple PDFs",
+      "- `pdf_info` — get PDF metadata",
+      "Use these instead of installing npm packages for PDF operations.",
+    );
+  }
+
+  if (hasPattern("docx_")) {
+    extended.push(
+      "",
+      "**Word Documents:**",
+      "- `docx_read` — read .docx file contents",
+      "- `docx_create` — create .docx documents",
+    );
+  }
+
+  if (hasPattern("search_")) {
+    extended.push(
+      "",
+      "**Web Search (Exa AI):**",
+      "- `search_web` — search the web for information",
+      "- `search_find_similar` — find pages similar to a given URL",
+      "Use these for research instead of scraping or manual browsing.",
+    );
+  }
+
+  if (extended.length > 0) {
+    lines.push(...extended);
+  }
+
+  // --- MCP servers (tools discovered at runtime) ---
+  if (agent.mcpServers && Object.keys(agent.mcpServers).length > 0) {
+    const serverNames = Object.keys(agent.mcpServers);
+    lines.push(
+      "",
+      "**MCP Servers (external tools):**",
+      `Connected MCP servers: ${serverNames.join(", ")}`,
+      "These provide additional tools discovered at runtime. Use them when relevant to your task.",
+    );
+  }
+
+  // --- Guidance ---
+  lines.push(
+    "",
+    "**IMPORTANT:** ALWAYS prefer your available tools over shell commands, npm installs, or manual workarounds.",
+    "For example: use `email_send` not `curl`; use `pdf_read` not `pip install PyPDF2`; use `excel_read` not `npm install xlsx`.",
+    "If a task requires a capability you don't have listed above, use `bash` as a fallback.",
+  );
+
+  return lines.join("\n");
+}
+
+/**
  * Build the system prompt for the agent, including loaded skills.
  */
 export function buildSystemPrompt(agent: AgentConfig, cwd: string, polpoDir?: string, outputDir?: string): string {
@@ -101,6 +273,11 @@ export function buildSystemPrompt(agent: AgentConfig, cwd: string, polpoDir?: st
     const skillBlock = buildSkillPrompt(skills);
     if (skillBlock) parts.push("", skillBlock);
   }
+
+  // Available tools — enumerate what the agent can use so it doesn't resort to
+  // shell scripts, npm installs, or manual workarounds for capabilities it already has.
+  const toolSection = describeToolsForAgent(agent);
+  if (toolSection) parts.push("", toolSection);
 
   // Working directory — tell the agent where it is so it uses correct relative paths
   parts.push(

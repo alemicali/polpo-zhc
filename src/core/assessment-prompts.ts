@@ -55,6 +55,94 @@ export function buildFixPrompt(task: Task, result: TaskResult): string {
   return parts.join("\n");
 }
 
+/**
+ * Build a fix prompt for a task with side effects (sideEffects: true).
+ * Similar to buildFixPrompt but includes a critical warning about not repeating
+ * irreversible actions (emails sent, API calls made, etc.).
+ */
+export function buildSideEffectFixPrompt(task: Task, result: TaskResult): string {
+  const base = task.originalDescription ?? task.description;
+  const parts = [
+    `TARGETED FIX — Your previous execution was successful (exit code 0).`,
+    `The code you wrote is already on disk. Do NOT start over.`,
+    ``,
+    `⚠️ CRITICAL — SIDE EFFECTS WARNING:`,
+    `This task has ALREADY performed irreversible external actions in the previous attempt`,
+    `(e.g. emails sent, messages delivered, API calls made, deployments triggered).`,
+    `Do NOT repeat those actions. Only fix the specific issues listed below.`,
+    `If the task involved sending an email/message, do NOT send it again.`,
+    `If the task involved an API call, do NOT make the same call again.`,
+    ``,
+    `ORIGINAL TASK: ${base}`,
+    ``,
+    `The reviewer found these issues:`,
+  ];
+
+  if (result.assessment) {
+    const failed = result.assessment.checks.filter(c => !c.passed);
+    if (failed.length > 0) {
+      for (const c of failed) parts.push(`- ${c.type}: ${c.message} ${c.details || ""}`);
+    }
+    if (result.assessment.scores && result.assessment.scores.length > 0) {
+      parts.push(``, `SCORES (1-5):`);
+      for (const s of result.assessment.scores) {
+        parts.push(`- ${s.dimension}: ${s.score}/5 — ${s.reasoning}`);
+      }
+      if (result.assessment.globalScore !== undefined) {
+        parts.push(`Global score: ${result.assessment.globalScore.toFixed(1)}/5`);
+      }
+    } else if (result.assessment.llmReview) {
+      parts.push(``, `Reviewer feedback:`, result.assessment.llmReview);
+    }
+  }
+
+  parts.push(``, `Fix ONLY the issues listed above WITHOUT repeating any external actions.`);
+  return parts.join("\n");
+}
+
+/**
+ * Build a retry prompt for a task with side effects (sideEffects: true).
+ * Similar to buildRetryPrompt but includes a critical warning about not repeating
+ * irreversible actions from the previous attempt.
+ */
+export function buildSideEffectRetryPrompt(task: Task, result: TaskResult): string {
+  const base = task.originalDescription ?? task.description;
+  const parts = [
+    base,
+    ``,
+    `⚠️ CRITICAL — SIDE EFFECTS WARNING:`,
+    `This task may have ALREADY performed irreversible external actions in the previous attempt`,
+    `(e.g. emails sent, messages delivered, API calls made, deployments triggered).`,
+    `Before re-executing any external action, verify whether it was already completed.`,
+    `Do NOT blindly repeat emails, messages, API calls, or deployments.`,
+    ``,
+    `PREVIOUS ATTEMPT FAILED:`,
+    `Exit code: ${result.exitCode}`,
+  ];
+  if (result.stderr) parts.push(`Stderr: ${result.stderr.slice(0, 2000)}`);
+  if (result.assessment) {
+    const failed = result.assessment.checks.filter(c => !c.passed);
+    if (failed.length > 0) {
+      parts.push(`Failed checks:`);
+      for (const c of failed) parts.push(`- ${c.type}: ${c.message} ${c.details || ""}`);
+    }
+    if (result.assessment.scores && result.assessment.scores.length > 0) {
+      parts.push(``, `EVALUATION SCORES (1-5):`);
+      for (const s of result.assessment.scores) {
+        parts.push(`- ${s.dimension}: ${s.score}/5 — ${s.reasoning}`);
+      }
+      if (result.assessment.globalScore !== undefined) {
+        parts.push(`Global score: ${result.assessment.globalScore}/5`);
+      }
+      parts.push(``, `Focus on improving the lowest-scoring dimensions.`);
+    } else if (result.assessment.llmReview) {
+      parts.push(``, `LLM Reviewer feedback:`, result.assessment.llmReview);
+    }
+  }
+  parts.push(``, `Fix the issues and try again — but do NOT repeat any external actions that already succeeded.`);
+  return parts.join("\n");
+}
+
 /** Build the retry prompt with feedback from the previous attempt (full restart). */
 export function buildRetryPrompt(task: Task, result: TaskResult): string {
   const base = task.originalDescription ?? task.description;

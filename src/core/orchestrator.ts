@@ -539,7 +539,7 @@ export class Orchestrator extends TypedEmitter {
     title: string; description: string; assignTo: string;
     expectations?: TaskExpectation[]; expectedOutcomes?: ExpectedOutcome[];
     dependsOn?: string[]; group?: string; maxDuration?: number; retryPolicy?: RetryPolicy;
-    notifications?: ScopedNotificationRules; draft?: boolean;
+    notifications?: ScopedNotificationRules; sideEffects?: boolean; draft?: boolean;
   }): Task { return this.taskMgr.addTask(opts); }
   updateTaskDescription(taskId: string, description: string): void { this.taskMgr.updateTaskDescription(taskId, description); }
   updateTaskAssignment(taskId: string, agentName: string): void { this.taskMgr.updateTaskAssignment(taskId, agentName); }

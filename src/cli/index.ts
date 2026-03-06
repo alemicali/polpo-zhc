@@ -104,6 +104,11 @@ function wireConsoleEvents(orchestrator: Orchestrator): void {
     console.log(chalk.dim(`[${ts}]`) + ` ${chalk.yellow(`[${taskId}] Retrying (${attempt}/${maxRetries})...`)}`);
   });
 
+  orchestrator.on("task:retry:blocked", ({ taskId, reason }) => {
+    const ts = new Date().toLocaleTimeString();
+    console.log(chalk.dim(`[${ts}]`) + ` ${chalk.yellow(`[${taskId}] ⚠ Retry blocked: ${reason}`)}`);
+  });
+
   orchestrator.on("task:maxRetries", ({ taskId }) => {
     const ts = new Date().toLocaleTimeString();
     console.log(chalk.dim(`[${ts}]`) + ` ${chalk.red(`[${taskId}] Max retries reached — giving up`)}`);

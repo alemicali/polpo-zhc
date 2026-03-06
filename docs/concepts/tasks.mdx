@@ -95,6 +95,21 @@ When assessment fails, Polpo first tries a **fix phase** — sending the agent s
 4. Retries remaining → back to `pending` (new execution)
 5. No retries left → permanent `failed`
 
+### Side Effects Path
+
+Tasks with `sideEffects: true` follow a modified retry path to prevent duplicating irreversible actions (emails, API calls, deployments):
+
+1. Assessment fails → instead of automatic fix/retry, task transitions to `awaiting_approval`
+2. The task description is updated with failure feedback and a warning not to repeat external actions
+3. Human reviews and decides whether to approve re-execution
+4. **Approved** → task goes to `pending` and re-executes with side-effect warnings in the prompt
+5. **Rejected** → task transitions to `failed`
+
+Set `sideEffects: true` when a task uses tools that produce irreversible external effects:
+- `email_send`, `whatsapp_send`
+- Non-idempotent HTTP requests (POST, PUT, DELETE)
+- Deployments or external system modifications
+
 ### Question Path
 
 1. Agent asks a question during execution → phase becomes `clarification`
@@ -150,6 +165,7 @@ Key events during the task lifecycle:
 | `assessment:complete` | Assessment finished with pass/fail result |
 | `task:fix` | Fix phase started |
 | `task:retry` | Full retry started |
+| `task:retry:blocked` | Automatic retry blocked due to `sideEffects: true` |
 | `task:question` | Agent asked a question |
 | `task:answered` | Orchestrator answered the question |
 | `task:timeout` | Task exceeded `maxDuration` |

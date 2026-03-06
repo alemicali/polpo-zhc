@@ -227,6 +227,7 @@ export function taskRoutes(): OpenAPIHono<ServerEnv> {
       maxDuration: body.maxDuration,
       retryPolicy: body.retryPolicy,
       notifications: body.notifications,
+      sideEffects: body.sideEffects,
       draft: body.draft,
     });
 
@@ -261,6 +262,9 @@ export function taskRoutes(): OpenAPIHono<ServerEnv> {
       if (body.retries !== undefined) patch.retries = body.retries;
       if (body.maxRetries !== undefined) patch.maxRetries = body.maxRetries;
       orchestrator.getStore().updateTask(taskId, patch);
+    }
+    if (body.sideEffects !== undefined) {
+      orchestrator.getStore().updateTask(taskId, { sideEffects: body.sideEffects });
     }
 
     const updated = orchestrator.getStore().getTask(taskId);

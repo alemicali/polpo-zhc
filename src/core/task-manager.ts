@@ -24,6 +24,7 @@ export class TaskManager {
     maxDuration?: number;
     retryPolicy?: RetryPolicy;
     notifications?: ScopedNotificationRules;
+    sideEffects?: boolean;
     draft?: boolean;
   }): Task {
     if (!this.ctx.registry) throw new Error("Orchestrator not initialized");
@@ -41,6 +42,7 @@ export class TaskManager {
       maxDuration: opts.maxDuration,
       retryPolicy: opts.retryPolicy,
       notifications: opts.notifications,
+      sideEffects: opts.sideEffects,
       draft: opts.draft,
     });
     if (hookResult.cancelled) {
@@ -78,6 +80,7 @@ export class TaskManager {
       maxDuration: hookData.maxDuration,
       retryPolicy: hookData.retryPolicy,
       notifications: hookData.notifications,
+      sideEffects: hookData.sideEffects,
       status: hookData.draft ? "draft" : undefined,
     });
     this.ctx.emitter.emit("task:created", { task });
