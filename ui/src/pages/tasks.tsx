@@ -340,177 +340,194 @@ const TaskCard = memo(function TaskCard({
   });
   const isBlocked = unresolvedDeps.length > 0 && (task.status === "pending" || task.status === "assigned");
 
-  // Show the agent row? (at least one agent-related field is on)
-  const showAgentRow = fields.avatar || fields.identityName || fields.agentId;
-
-   return (
+  return (
     <div
       className={cn(
-        "group rounded-lg border border-border/40 bg-card/80 backdrop-blur-sm transition-all cursor-pointer",
-        "hover:border-primary/20 hover:shadow-[0_0_15px_oklch(0.7_0.15_200_/_8%)]",
+        "group rounded-lg border bg-card/80 backdrop-blur-sm transition-all cursor-pointer",
+        "hover:shadow-[0_2px_8px_oklch(0_0_0/0.12)] hover:border-primary/25",
         "w-full max-w-full overflow-hidden box-border",
-        compact ? "p-2.5" : "p-3",
+        isBlocked
+          ? "border-amber-500/40 bg-amber-500/[0.03]"
+          : "border-border/40",
+        compact ? "p-2" : "p-2.5",
       )}
       onClick={() => click(task.id)}
     >
-      {/* Header: status icon + title + phase */}
-      <div className="flex items-start gap-2 w-full min-w-0">
-        <div className={cn("flex shrink-0 items-center justify-center rounded-md mt-0.5", compact ? "h-6 w-6" : "h-7 w-7", cfg.bg)}>
-          <Icon className={cn(compact ? "h-3 w-3" : "h-3.5 w-3.5", cfg.color, task.status === "in_progress" && "animate-spin")} />
-        </div>
+      <div className="flex gap-2 w-full min-w-0">
+        {/* ── Content ── */}
         <div className="min-w-0 flex-1">
-          <p className={cn("font-medium leading-snug", compact ? "text-xs" : "text-sm")} style={{ overflowWrap: "anywhere", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{task.title}</p>
-          {fields.phase && phase && (
-            <Badge variant="outline" className={cn("text-[8px] gap-0.5 px-1 py-0 mt-0.5 inline-flex", phase.color)}>
-              <phase.icon className="h-2 w-2" />
-              {phase.label}
-            </Badge>
-          )}
-        </div>
-      </div>
+          {/* Top labels: phase, mission, blocked */}
+          <div className="flex items-center gap-1 flex-wrap mb-1">
+            {fields.phase && phase && (
+              <span className={cn(
+                "inline-flex items-center gap-0.5 rounded-sm px-1.5 py-0.5 text-[9px] font-medium leading-none",
+                phase.color, "bg-current/10",
+              )}>
+                <phase.icon className="h-2.5 w-2.5" />
+                {phase.label}
+              </span>
+            )}
+            {fields.mission && task.group && (
+              <span className="inline-block rounded-sm bg-primary/10 text-primary px-1.5 py-0.5 text-[9px] font-medium leading-none truncate max-w-[120px]">
+                {task.group}
+              </span>
+            )}
+            {fields.deps && isBlocked && unresolvedDeps.map((depId) => {
+              const dep = allTasks?.find(t => t.id === depId);
+              return (
+                <span key={depId} className="inline-flex items-center gap-0.5 rounded-sm bg-amber-500/15 text-amber-500 px-1.5 py-0.5 text-[9px] font-semibold leading-none truncate max-w-[200px]">
+                  <AlertTriangle className="h-2.5 w-2.5 shrink-0" />
+                  Blocked by {dep ? dep.title : depId.slice(0, 8)}
+                </span>
+              );
+            })}
+          </div>
 
-      {/* Agent row: avatar + displayName + @id */}
-      {showAgentRow && (
-        <div className="flex items-center gap-1.5 mt-1.5 min-w-0">
-          {fields.avatar && (
-            hasAvatar
-              ? <AgentAvatar avatar={identity?.avatar} name={task.assignTo} size="xs" />
-              : <Bot className="h-3.5 w-3.5 shrink-0 text-muted-foreground/60" />
-          )}
-          {fields.identityName && identity?.displayName && (
-            <span className={cn("font-medium text-foreground/80 truncate", compact ? "text-[10px]" : "text-[11px]")}>
-              {identity.displayName}
-            </span>
-          )}
-          {fields.agentId && (
-            <span className="text-[10px] text-muted-foreground/60 truncate">
-              {fields.identityName && identity?.displayName ? `@${task.assignTo}` : task.assignTo}
-            </span>
-          )}
-        </div>
-      )}
+          {/* Title with status icon inline */}
+          <div className="flex items-start gap-1.5 min-w-0">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Icon className={cn("h-3.5 w-3.5 shrink-0 mt-0.5", cfg.color, task.status === "in_progress" && "animate-spin")} />
+              </TooltipTrigger>
+              <TooltipContent side="left" className="text-xs">{cfg.label}</TooltipContent>
+            </Tooltip>
+            <p
+              className={cn("font-medium leading-snug", compact ? "text-xs" : "text-sm")}
+              style={{ overflowWrap: "anywhere", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}
+            >
+              {task.title}
+            </p>
+          </div>
 
-      {/* Meta row: mission, time */}
-      {(fields.mission || fields.time) && (
-        <div className="flex items-center gap-1.5 mt-1 min-w-0 flex-wrap">
-          {fields.mission && task.group && (
-            <Badge variant="secondary" className="text-[8px] px-1 py-0 max-w-[140px] truncate">{task.group}</Badge>
+          {/* Agent: avatar + identity name / @id */}
+          {(fields.identityName || fields.agentId) && (
+            <div className="flex items-center gap-1.5 mt-1 min-w-0">
+              {fields.avatar && (
+                <div className="shrink-0">
+                  {hasAvatar
+                    ? <AgentAvatar avatar={identity?.avatar} name={task.assignTo} size="xs" />
+                    : <div className="flex items-center justify-center rounded-lg size-5 bg-muted/50">
+                        <Bot className="h-3 w-3 text-muted-foreground/60" />
+                      </div>
+                  }
+                </div>
+              )}
+              <div className="flex flex-col min-w-0">
+                {fields.identityName && identity?.displayName && (
+                  <span className="text-[10px] font-medium text-foreground/70 truncate leading-tight">
+                    {identity.displayName}
+                  </span>
+                )}
+                {fields.agentId && (
+                  <span className="text-[10px] text-muted-foreground truncate leading-tight">
+                    {fields.identityName && identity?.displayName ? `@${task.assignTo}` : task.assignTo}
+                  </span>
+                )}
+              </div>
+            </div>
           )}
+
+          {/* Indicators: score, deps, retries, expectations */}
+          <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+            {fields.score && assessment?.globalScore != null && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div className={cn(
+                    "flex items-center gap-0.5 rounded-sm px-1 py-0.5",
+                    assessment.passed ? "bg-emerald-500/10" : "bg-red-500/10"
+                  )}>
+                    <Star className={cn("h-2.5 w-2.5", assessment.passed ? "text-emerald-500" : "text-red-500")} />
+                    <span className={cn("text-[10px] font-bold tabular-nums", assessment.passed ? "text-emerald-500" : "text-red-500")}>
+                      {assessment.globalScore.toFixed(1)}
+                    </span>
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent className="text-xs">
+                  {assessment.passed ? "Passed" : "Failed"} — {assessment.checks.length} check{assessment.checks.length !== 1 ? "s" : ""}
+                </TooltipContent>
+              </Tooltip>
+            )}
+            {fields.deps && task.dependsOn.length > 0 && task.dependsOn.map((depId) => {
+              const dep = allTasks?.find(t => t.id === depId);
+              const done = dep?.status === "done";
+              return (
+                <span key={depId} className={cn(
+                  "inline-flex items-center gap-0.5 text-[10px] truncate max-w-[180px]",
+                  done ? "text-muted-foreground/50 line-through" : isBlocked ? "text-amber-500 font-medium" : "text-muted-foreground",
+                )}>
+                  <GitBranch className="h-2.5 w-2.5 shrink-0" />
+                  {dep ? dep.title : depId.slice(0, 8)}
+                </span>
+              );
+            })}
+            {fields.retries && task.retries > 0 && (
+              <span className="inline-flex items-center gap-0.5 text-[10px] text-muted-foreground">
+                <RotateCcw className="h-2.5 w-2.5" />{task.retries}
+              </span>
+            )}
+            {fields.expectations && task.expectations.length > 0 && !assessment && (
+              <span className="inline-flex items-center gap-0.5 text-[10px] text-muted-foreground">
+                <Wrench className="h-2.5 w-2.5" />{task.expectations.length}
+              </span>
+            )}
+          </div>
+
+          {/* Live activity strip */}
+          {process && (
+            <div className="mt-1.5 pt-1.5 border-t border-primary/10 space-y-0.5 min-w-0 overflow-hidden">
+              <div className="flex items-center gap-1.5 min-w-0">
+                <div className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse shrink-0" />
+                {process.activity.lastTool && (
+                  <span className="text-[9px] font-mono text-primary truncate">{process.activity.lastTool}</span>
+                )}
+                <div className="flex items-center gap-1.5 ml-auto shrink-0">
+                  {process.activity.toolCalls > 0 && (
+                    <span className="text-[9px] text-muted-foreground/60 flex items-center gap-0.5">
+                      <Zap className="h-2 w-2" />{process.activity.toolCalls}
+                    </span>
+                  )}
+                  {(process.activity.filesCreated.length + process.activity.filesEdited.length) > 0 && (
+                    <span className="text-[9px] text-muted-foreground/60 flex items-center gap-0.5">
+                      <FileEdit className="h-2 w-2" />{process.activity.filesCreated.length + process.activity.filesEdited.length}
+                    </span>
+                  )}
+                </div>
+              </div>
+              {process.activity.lastFile && (
+                <p className="text-[9px] font-mono text-muted-foreground/50 truncate pl-3">
+                  {process.activity.lastFile}
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* Hover actions */}
+          <div className="flex items-center gap-1 mt-1 opacity-0 group-hover:opacity-100 transition-opacity">
+            {task.status === "draft" && (
+              <Button variant="ghost" size="sm" className="h-5 px-1.5 text-[10px] text-muted-foreground hover:text-blue-400" onClick={(e) => { e.stopPropagation(); queue(task.id); }}>
+                <Zap className="h-2.5 w-2.5 mr-0.5" /> Queue
+              </Button>
+            )}
+            {task.status === "failed" && (
+              <Button variant="ghost" size="sm" className="h-5 px-1.5 text-[10px] text-muted-foreground hover:text-amber-400" onClick={(e) => { e.stopPropagation(); retry(task.id); }}>
+                <RotateCcw className="h-2.5 w-2.5 mr-0.5" /> Retry
+              </Button>
+            )}
+            {(task.status === "in_progress" || task.status === "assigned") && (
+              <Button variant="ghost" size="sm" className="h-5 px-1.5 text-[10px] text-muted-foreground hover:text-red-400" onClick={(e) => { e.stopPropagation(); kill(task.id); }}>
+                <XCircle className="h-2.5 w-2.5 mr-0.5" /> Kill
+              </Button>
+            )}
+          </div>
+
+          {/* Time — last row */}
           {fields.time && (
-            <span className="text-[10px] text-muted-foreground/60 whitespace-nowrap">
+            <span className="text-[10px] text-muted-foreground/40 mt-1 text-right">
               {formatDistanceToNow(new Date(task.updatedAt), { addSuffix: true })}
             </span>
           )}
         </div>
-      )}
 
-      {/* Indicators row: score, retries, deps, expectations */}
-      {(fields.score || fields.retries || fields.deps || fields.expectations) && (
-        <div className="flex items-center gap-1 mt-1 flex-wrap">
-          {fields.score && assessment?.globalScore != null && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <div className={cn(
-                  "flex items-center gap-0.5 rounded px-1.5 py-0.5",
-                  assessment.passed ? "bg-emerald-500/10" : "bg-red-500/10"
-                )}>
-                  <Star className={cn("h-2.5 w-2.5", assessment.passed ? "text-emerald-500" : "text-red-500")} />
-                  <span className={cn("text-[10px] font-bold", assessment.passed ? "text-emerald-500" : "text-red-500")}>
-                    {assessment.globalScore.toFixed(1)}
-                  </span>
-                </div>
-              </TooltipTrigger>
-              <TooltipContent className="text-xs">
-                {assessment.passed ? "Passed" : "Failed"} — {assessment.checks.length} check{assessment.checks.length !== 1 ? "s" : ""}
-              </TooltipContent>
-            </Tooltip>
-          )}
-          {fields.retries && task.retries > 0 && (
-            <Badge variant="secondary" className="text-[9px] px-1 py-0">
-              <RotateCcw className="h-2 w-2 mr-0.5" />{task.retries}
-            </Badge>
-          )}
-          {fields.deps && task.dependsOn.length > 0 && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Badge
-                  variant={isBlocked ? "destructive" : "outline"}
-                  className={cn("text-[9px] px-1 py-0 cursor-help", isBlocked && "bg-amber-500/15 text-amber-500 border-amber-500/30 hover:bg-amber-500/20")}
-                >
-                  <GitBranch className="h-2 w-2 mr-0.5" />
-                  {isBlocked ? `Blocked (${unresolvedDeps.length})` : task.dependsOn.length}
-                </Badge>
-              </TooltipTrigger>
-              <TooltipContent className="text-xs max-w-xs">
-                <p className="font-medium mb-1">{isBlocked ? "Waiting for:" : "Depends on:"}</p>
-                {task.dependsOn.map((depId) => {
-                  const dep = allTasks?.find(t => t.id === depId);
-                  const done = dep?.status === "done";
-                  return (
-                    <p key={depId} className={done ? "text-muted-foreground line-through" : ""}>
-                      {done ? "\u2713" : "\u25CB"} {dep ? dep.title : depId}
-                    </p>
-                  );
-                })}
-              </TooltipContent>
-            </Tooltip>
-          )}
-          {fields.expectations && task.expectations.length > 0 && !assessment && (
-            <Badge variant="outline" className="text-[9px] px-1 py-0">
-              <Wrench className="h-2 w-2 mr-0.5" />{task.expectations.length}
-            </Badge>
-          )}
-        </div>
-      )}
-
-      {/* Live activity strip for running tasks */}
-      {process && (
-        <div className="mt-2 pt-2 border-t border-primary/10 space-y-1 min-w-0 overflow-hidden">
-          <div className="flex items-center gap-2 min-w-0">
-            <div className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse shrink-0" />
-            {process.activity.lastTool && (
-              <Badge variant="outline" className="text-[8px] font-mono px-1 py-0 text-primary border-primary/30 min-w-0 truncate">
-                <Wrench className="h-2 w-2 mr-0.5 shrink-0" /><span className="truncate">{process.activity.lastTool}</span>
-              </Badge>
-            )}
-            <div className="flex items-center gap-2 ml-auto shrink-0">
-              {process.activity.toolCalls > 0 && (
-                <span className="text-[10px] text-muted-foreground flex items-center gap-0.5">
-                  <Zap className="h-2.5 w-2.5" />{process.activity.toolCalls}
-                </span>
-              )}
-              {(process.activity.filesCreated.length + process.activity.filesEdited.length) > 0 && (
-                <span className="text-[10px] text-muted-foreground flex items-center gap-0.5">
-                  <FileEdit className="h-2.5 w-2.5" />{process.activity.filesCreated.length + process.activity.filesEdited.length}
-                </span>
-              )}
-            </div>
-          </div>
-          {process.activity.lastFile && (
-            <p className="text-[10px] font-mono text-muted-foreground truncate pl-3.5">
-              {process.activity.lastFile}
-            </p>
-          )}
-        </div>
-      )}
-
-      {/* Inline actions — only on hover, stop propagation */}
-      <div className="flex items-center gap-1 mt-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
-        {task.status === "draft" && (
-          <Button variant="ghost" size="sm" className="h-5 px-1.5 text-[10px] text-muted-foreground hover:text-blue-400" onClick={(e) => { e.stopPropagation(); queue(task.id); }}>
-            <Zap className="h-2.5 w-2.5 mr-0.5" /> Queue
-          </Button>
-        )}
-        {task.status === "failed" && (
-          <Button variant="ghost" size="sm" className="h-5 px-1.5 text-[10px] text-muted-foreground hover:text-amber-400" onClick={(e) => { e.stopPropagation(); retry(task.id); }}>
-            <RotateCcw className="h-2.5 w-2.5 mr-0.5" /> Retry
-          </Button>
-        )}
-        {(task.status === "in_progress" || task.status === "assigned") && (
-          <Button variant="ghost" size="sm" className="h-5 px-1.5 text-[10px] text-muted-foreground hover:text-red-400" onClick={(e) => { e.stopPropagation(); kill(task.id); }}>
-            <XCircle className="h-2.5 w-2.5 mr-0.5" /> Kill
-          </Button>
-        )}
       </div>
     </div>
   );
@@ -981,155 +998,98 @@ export function TasksPage() {
   return (
     <TaskActionsProvider actions={taskActions}>
       <CardSettingsContext value={cardSettingsCtx}>
-      <div className="flex flex-col flex-1 min-h-0 gap-3">
-        {/* Toolbar */}
-        <div className="flex flex-wrap items-center gap-2 lg:gap-3 shrink-0">
-          {/* Search */}
-          <div className="relative w-full sm:w-64">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+      <div className="flex flex-col flex-1 min-h-0 gap-2">
+        {/* ── Row 1: Search + data filters + active chips ── */}
+        <div className="flex items-center gap-2 shrink-0">
+          <div className="relative flex-1 min-w-[140px] max-w-xs">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground/50" />
             <Input
-              placeholder="Search tasks..."
-              className="pl-8 h-8 text-sm bg-input/50 backdrop-blur-sm border-border/40 focus:border-primary/50"
+              placeholder="Search..."
+              className="pl-8 h-8 text-sm bg-input/50 border-border/40 focus:border-primary/50"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
           </div>
-
-          {/* Mission filter */}
-          <MultiSelectFilter
-            icon={<Target className="h-3.5 w-3.5" />}
-            label="Missions"
-            options={missionFilterOptions}
-            selected={selectedMissions}
-            onToggle={toggleMission}
-            onClear={() => setSelectedMissions(new Set())}
-          />
-
-          {/* Team filter */}
-          <MultiSelectFilter
-            icon={<Users className="h-3.5 w-3.5" />}
-            label="Teams"
-            options={teamFilterOptions}
-            selected={selectedTeams}
-            onToggle={toggleTeam}
-            onClear={() => setSelectedTeams(new Set())}
-            isLoading={teamsLoading}
-          />
-
-          {/* Time filter */}
-          <TimeFilter
-            value={timeFilter}
-            onChange={setTimeFilter}
-            onClear={() => setTimeFilter(null)}
-          />
-
-          {/* Spacer */}
-          <div className="flex-1" />
-
-          {/* Sort */}
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="sm" className="h-7 gap-1.5 text-xs">
-                <ArrowUpDown className="h-3 w-3" />
-                {sortOptions.find(o => o.value === sortKey)?.label ?? "Sort"}
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              {sortOptions.map((opt) => (
-                <DropdownMenuItem
-                  key={opt.value}
-                  className={cn("text-xs gap-2", sortKey === opt.value && "font-medium")}
-                  onClick={() => setSortKey(opt.value)}
-                >
-                  {sortKey === opt.value && <Check className="h-3 w-3" />}
-                  {sortKey !== opt.value && <span className="w-3" />}
-                  {opt.label}
-                </DropdownMenuItem>
-              ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
-
-          {/* Kanban-only controls: Columns by + Group by Mission */}
-          {viewMode === "kanban" && (
+          <div className="flex items-center gap-1.5">
+            <MultiSelectFilter
+              icon={<Target className="h-3.5 w-3.5" />}
+              label="Missions"
+              options={missionFilterOptions}
+              selected={selectedMissions}
+              onToggle={toggleMission}
+              onClear={() => setSelectedMissions(new Set())}
+            />
+            <MultiSelectFilter
+              icon={<Users className="h-3.5 w-3.5" />}
+              label="Teams"
+              options={teamFilterOptions}
+              selected={selectedTeams}
+              onToggle={toggleTeam}
+              onClear={() => setSelectedTeams(new Set())}
+              isLoading={teamsLoading}
+            />
+            <TimeFilter
+              value={timeFilter}
+              onChange={setTimeFilter}
+              onClear={() => setTimeFilter(null)}
+            />
+          </div>
+          {/* Active filter chips (inline) */}
+          {hasActiveFilters && (
             <>
-              {/* Columns by dropdown */}
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="outline" size="sm" className="h-7 gap-1.5 text-xs">
-                    <Columns3 className="h-3 w-3" />
-                    Columns: {columnByOptions.find(o => o.value === columnBy)?.label ?? "Status"}
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  {columnByOptions.map((opt) => {
-                    const OptIcon = opt.icon;
-                    return (
-                      <DropdownMenuItem
-                        key={opt.value}
-                        className={cn("text-xs gap-2", columnBy === opt.value && "font-medium")}
-                        onClick={() => setColumnBy(opt.value)}
-                      >
-                        {columnBy === opt.value ? <Check className="h-3 w-3" /> : <span className="w-3" />}
-                        <OptIcon className="h-3 w-3" />
-                        {opt.label}
-                      </DropdownMenuItem>
-                    );
-                  })}
-                </DropdownMenuContent>
-              </DropdownMenu>
-
-              {/* Group by dropdown */}
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant={groupBy !== "none" ? "default" : "outline"} size="sm" className="h-7 gap-1.5 text-xs">
-                    <Layers className="h-3 w-3" />
-                    {groupBy === "none" ? "Group" : `Group: ${groupByOptions.find(o => o.value === groupBy)?.label}`}
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  {groupByOptions.map((opt) => {
-                    const OptIcon = opt.icon;
-                    // Skip the option that matches current columnBy (redundant grouping)
-                    const isRedundant = opt.value === columnBy;
-                    if (isRedundant) return null;
-                    return (
-                      <DropdownMenuItem
-                        key={opt.value}
-                        className={cn("text-xs gap-2", groupBy === opt.value && "font-medium")}
-                        onClick={() => setGroupBy(opt.value)}
-                      >
-                        {groupBy === opt.value ? <Check className="h-3 w-3" /> : <span className="w-3" />}
-                        <OptIcon className="h-3 w-3" />
-                        {opt.label}
-                      </DropdownMenuItem>
-                    );
-                  })}
-                </DropdownMenuContent>
-              </DropdownMenu>
-            {/* Toggle empty columns */}
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-7 px-2"
-                  onClick={toggleEmptyColumns}
-                >
-                  {showEmptyColumns ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="bottom">
-                <p className="text-xs">{showEmptyColumns ? "Hide empty columns" : "Show empty columns"}</p>
-              </TooltipContent>
-            </Tooltip>
+              <div className="h-4 w-px bg-border/50 mx-0.5" />
+              <div className="flex items-center gap-1 flex-wrap min-w-0">
+                {Array.from(selectedMissions).map((name) => (
+                  <Badge
+                    key={`m-${name}`}
+                    variant="secondary"
+                    className="text-[10px] gap-0.5 cursor-pointer bg-primary/10 text-primary hover:bg-destructive/20 py-0 h-5"
+                    onClick={() => toggleMission(name)}
+                  >
+                    {name}
+                    <XCircle className="h-2.5 w-2.5" />
+                  </Badge>
+                ))}
+                {Array.from(selectedTeams).map((name) => (
+                  <Badge
+                    key={`t-${name}`}
+                    variant="secondary"
+                    className="text-[10px] gap-0.5 cursor-pointer bg-violet-500/10 text-violet-400 hover:bg-destructive/20 py-0 h-5"
+                    onClick={() => toggleTeam(name)}
+                  >
+                    {name}
+                    <XCircle className="h-2.5 w-2.5" />
+                  </Badge>
+                ))}
+                {timeFilter && (
+                  <Badge
+                    variant="secondary"
+                    className="text-[10px] gap-0.5 cursor-pointer bg-blue-500/10 text-blue-400 hover:bg-destructive/20 py-0 h-5"
+                    onClick={() => setTimeFilter(null)}
+                  >
+                    {timeRangePresets.find(p => p.value === timeFilter.range)?.label ?? timeFilter.range}
+                    <XCircle className="h-2.5 w-2.5" />
+                  </Badge>
+                )}
+                <button className="text-[10px] text-muted-foreground/50 hover:text-foreground ml-0.5" onClick={clearAllFilters}>
+                  Clear
+                </button>
+              </div>
             </>
           )}
+          <div className="flex-1" />
+          <span className="text-[11px] text-muted-foreground/50 tabular-nums shrink-0">
+            {filtered.length}{hasActiveFilters ? `/${tasks.length}` : ""} task{filtered.length !== 1 ? "s" : ""}
+          </span>
+          <Button variant="outline" size="sm" className="h-7 px-2 shrink-0" onClick={handleRefresh} disabled={isRefreshing}>
+            <RefreshCw className={cn("h-3.5 w-3.5", isRefreshing && "animate-spin")} />
+          </Button>
+        </div>
 
-          {/* Card field settings */}
-          <CardFieldSettings fields={cardFields} onToggle={toggleCardField} />
-
+        {/* ── Row 2: View controls ── */}
+        <div className="flex items-center gap-1.5 shrink-0">
           {/* View toggle */}
-          <div className="flex items-center rounded-md border border-border/50">
+          <div className="flex items-center rounded-md border border-border/50 mr-1">
             <Button
               variant={viewMode === "list" ? "default" : "ghost"}
               size="sm"
@@ -1148,69 +1108,101 @@ export function TasksPage() {
             </Button>
           </div>
 
-          {/* Refresh */}
-          <Button variant="outline" size="sm" className="h-7" onClick={handleRefresh} disabled={isRefreshing}>
-            <RefreshCw className={cn("h-3.5 w-3.5", isRefreshing && "animate-spin")} />
-          </Button>
-        </div>
+          {/* Sort */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" className="h-7 gap-1 text-xs">
+                <ArrowUpDown className="h-3 w-3" />
+                {sortOptions.find(o => o.value === sortKey)?.label ?? "Sort"}
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start">
+              {sortOptions.map((opt) => (
+                <DropdownMenuItem
+                  key={opt.value}
+                  className={cn("text-xs gap-2", sortKey === opt.value && "font-medium")}
+                  onClick={() => setSortKey(opt.value)}
+                >
+                  {sortKey === opt.value ? <Check className="h-3 w-3" /> : <span className="w-3" />}
+                  {opt.label}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
 
-        {/* Active filter indicators */}
-        {hasActiveFilters && (
-          <div className="flex items-center gap-2 shrink-0 flex-wrap">
-            <span className="text-[10px] text-muted-foreground">Filtering by:</span>
-            {Array.from(selectedMissions).map((name) => (
-              <Badge
-                key={`mission-${name}`}
-                variant="secondary"
-                className="text-[10px] gap-1 cursor-pointer bg-primary/10 text-primary hover:bg-destructive/20"
-                onClick={() => toggleMission(name)}
-              >
-                <Target className="h-2.5 w-2.5" />
-                {name}
-                <XCircle className="h-2.5 w-2.5" />
-              </Badge>
-            ))}
-            {Array.from(selectedTeams).map((name) => (
-              <Badge
-                key={`team-${name}`}
-                variant="secondary"
-                className="text-[10px] gap-1 cursor-pointer bg-violet-500/10 text-violet-400 hover:bg-destructive/20"
-                onClick={() => toggleTeam(name)}
-              >
-                <Users className="h-2.5 w-2.5" />
-                {name}
-                <XCircle className="h-2.5 w-2.5" />
-              </Badge>
-            ))}
-            {timeFilter && (
-              <Badge
-                variant="secondary"
-                className="text-[10px] gap-1 cursor-pointer bg-blue-500/10 text-blue-400 hover:bg-destructive/20"
-                onClick={() => setTimeFilter(null)}
-              >
-                <Calendar className="h-2.5 w-2.5" />
-                {timeFieldOptions.find(f => f.value === timeFilter.field)?.label}:{" "}
-                {timeRangePresets.find(p => p.value === timeFilter.range)?.label ?? timeFilter.range}
-                <XCircle className="h-2.5 w-2.5" />
-              </Badge>
-            )}
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-5 px-1.5 text-[10px] text-muted-foreground"
-              onClick={clearAllFilters}
-            >
-              Clear all
-            </Button>
-          </div>
-        )}
+          {/* Kanban-only: Columns, Group, Empty cols — grouped with a separator */}
+          {viewMode === "kanban" && (
+            <>
+              <div className="h-4 w-px bg-border/50 mx-0.5" />
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="sm" className="h-7 gap-1 text-xs">
+                    <Columns3 className="h-3 w-3" />
+                    {columnByOptions.find(o => o.value === columnBy)?.label ?? "Status"}
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start">
+                  {columnByOptions.map((opt) => {
+                    const OptIcon = opt.icon;
+                    return (
+                      <DropdownMenuItem
+                        key={opt.value}
+                        className={cn("text-xs gap-2", columnBy === opt.value && "font-medium")}
+                        onClick={() => setColumnBy(opt.value)}
+                      >
+                        {columnBy === opt.value ? <Check className="h-3 w-3" /> : <span className="w-3" />}
+                        <OptIcon className="h-3 w-3" />
+                        {opt.label}
+                      </DropdownMenuItem>
+                    );
+                  })}
+                </DropdownMenuContent>
+              </DropdownMenu>
 
-        {/* Task count */}
-        <div className="flex items-center gap-2 shrink-0">
-          <span className="text-xs text-muted-foreground">
-            {filtered.length} task{filtered.length !== 1 ? "s" : ""}
-            {hasActiveFilters && ` (filtered from ${tasks.length})`}
-          </span>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant={groupBy !== "none" ? "default" : "outline"} size="sm" className="h-7 gap-1 text-xs">
+                    <Layers className="h-3 w-3" />
+                    {groupBy === "none" ? "Group" : groupByOptions.find(o => o.value === groupBy)?.label}
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start">
+                  {groupByOptions.map((opt) => {
+                    const OptIcon = opt.icon;
+                    if (opt.value === columnBy) return null;
+                    return (
+                      <DropdownMenuItem
+                        key={opt.value}
+                        className={cn("text-xs gap-2", groupBy === opt.value && "font-medium")}
+                        onClick={() => setGroupBy(opt.value)}
+                      >
+                        {groupBy === opt.value ? <Check className="h-3 w-3" /> : <span className="w-3" />}
+                        <OptIcon className="h-3 w-3" />
+                        {opt.label}
+                      </DropdownMenuItem>
+                    );
+                  })}
+                </DropdownMenuContent>
+              </DropdownMenu>
+
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button variant="outline" size="sm" className="h-7 px-2" onClick={toggleEmptyColumns}>
+                    {showEmptyColumns ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" className="text-xs">
+                  {showEmptyColumns ? "Hide empty columns" : "Show empty columns"}
+                </TooltipContent>
+              </Tooltip>
+            </>
+          )}
+
+          {/* Spacer */}
+          <div className="flex-1" />
+
+          {/* Card fields */}
+          <CardFieldSettings fields={cardFields} onToggle={toggleCardField} />
         </div>
 
         {/* Content */}

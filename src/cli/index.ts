@@ -481,6 +481,7 @@ program
   .option("-H, --host <host>", "Host to bind to", DEFAULT_SERVER_HOST)
   .option("-d, --dir <path>", "Working directory", ".")
   .option("--api-key <key>", "API key for authentication (optional)")
+  .option("--cors-origins <origins>", "Comma-separated allowed CORS origins (env: POLPO_CORS_ORIGINS)")
   .action(async (opts) => {
     console.log(LOGO);
     const { PolpoServer } = await import("../server/index.js");
@@ -489,6 +490,11 @@ program
     const port = parseInt(opts.port, 10);
 
     const apiKeys = opts.apiKey ? [opts.apiKey] : [];
+
+    const corsRaw = opts.corsOrigins ?? process.env.POLPO_CORS_ORIGINS;
+    const corsOrigins = corsRaw
+      ? corsRaw.split(",").map((o: string) => o.trim()).filter(Boolean)
+      : undefined;
 
     // Security warning: no authentication configured
     if (apiKeys.length === 0) {
@@ -508,6 +514,7 @@ program
       host: opts.host,
       workDir,
       apiKeys,
+      corsOrigins,
     });
 
     await server.start();
