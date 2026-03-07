@@ -5,6 +5,7 @@ package-lock.json
 # Build output
 dist/
 ui/dev-dist/
+coverage/
 
 # Polpo runtime data
 .polpo/

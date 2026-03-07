@@ -903,7 +903,7 @@ export function FilesPage() {
 
         {/* File list area — drop zone */}
         <div
-          className="flex-1 min-w-0 flex flex-col relative"
+          className="flex-1 min-w-0 min-h-0 flex flex-col relative"
           onDragEnter={handleDragEnter}
           onDragLeave={handleDragLeave}
           onDragOver={handleDragOver}
@@ -931,7 +931,7 @@ export function FilesPage() {
           {/* Entries — background context menu for empty space */}
           <ContextMenu>
             <ContextMenuTrigger asChild>
-              <ScrollArea className="flex-1">
+              <ScrollArea className="flex-1 min-h-0">
                 {loading ? (
                   <div className="flex items-center justify-center py-20">
                     <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />

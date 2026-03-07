@@ -1,5 +1,5 @@
 {
-  "name": "@lumea-labs/polpo-react",
+  "name": "@lumea-technologies/polpo-react",
   "version": "0.1.0",
   "description": "React SDK for OpenPolpo — hooks with real-time SSE updates, built on @lumea-labs/polpo-client",
   "type": "module",

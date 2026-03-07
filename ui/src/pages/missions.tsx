@@ -48,6 +48,56 @@ import { cn } from "@/lib/utils";
 import { cronToHuman } from "@/lib/cron";
 import { missionStatusStyles, missionStatusFilterOptions } from "@/lib/mission-status";
 
+// ── Schedule type filter ──
+
+type ScheduleType = "all" | "recurring" | "one-shot";
+
+const scheduleTypeOptions: { value: ScheduleType; label: string; icon: typeof Repeat }[] = [
+  { value: "all",       label: "All",       icon: Target },
+  { value: "recurring", label: "Recurring", icon: Repeat },
+  { value: "one-shot",  label: "One-shot",  icon: Calendar },
+];
+
+function ScheduleTypeFilter({
+  value,
+  onChange,
+}: {
+  value: ScheduleType;
+  onChange: (v: ScheduleType) => void;
+}) {
+  return (
+    <div className="inline-flex items-center rounded-md border border-border/40 bg-muted/30 p-0.5">
+      {scheduleTypeOptions.map((opt) => {
+        const Icon = opt.icon;
+        const active = value === opt.value;
+        return (
+          <button
+            key={opt.value}
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-[5px] px-2.5 py-1 text-xs font-medium transition-all",
+              active
+                ? "bg-background text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground"
+            )}
+            onClick={() => onChange(opt.value)}
+          >
+            <Icon className="h-3 w-3" />
+            {opt.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function isRecurringMission(m: Mission): boolean {
+  return m.status === "recurring";
+}
+
+function isOneShotMission(m: Mission): boolean {
+  return !isRecurringMission(m);
+}
+
 // ── Parse mission data (lightweight — only extract counts) ──
 
 function parseMissionCounts(data: string): { taskCount: number } {
@@ -395,6 +445,7 @@ export function MissionsPage() {
   const [search, setSearch] = useState("");
   const [selectedStatuses, setSelectedStatuses] = useState<Set<MissionStatus>>(new Set());
   const [selectedTeams, setSelectedTeams] = useState<Set<string>>(new Set());
+  const [scheduleType, setScheduleType] = useState<ScheduleType>("all");
 
   const [handleRefresh, isRefreshing] = useAsyncAction(async () => {
     await refetch();
@@ -457,9 +508,12 @@ export function MissionsPage() {
     return map;
   }, [missions, tasks]);
 
-  // Filter missions by search + status + team
+  // Filter missions by search + status + team + schedule type
   const filtered = useMemo(() => {
     return missions.filter(m => {
+      // Schedule type filter
+      if (scheduleType === "recurring" && !isRecurringMission(m)) return false;
+      if (scheduleType === "one-shot" && !isOneShotMission(m)) return false;
       // Status filter
       if (selectedStatuses.size > 0 && !selectedStatuses.has(m.status)) return false;
       // Team filter
@@ -475,7 +529,7 @@ export function MissionsPage() {
       }
       return true;
     });
-  }, [missions, search, selectedStatuses, selectedTeams, agentToTeam]);
+  }, [missions, search, selectedStatuses, selectedTeams, agentToTeam, scheduleType]);
 
   if (loading) {
     return (
@@ -485,7 +539,7 @@ export function MissionsPage() {
     );
   }
 
-  const hasFilters = search.length > 0 || selectedStatuses.size > 0 || selectedTeams.size > 0;
+  const hasFilters = search.length > 0 || selectedStatuses.size > 0 || selectedTeams.size > 0 || scheduleType !== "all";
 
   const active = filtered.filter(p => p.status === "active" || p.status === "paused");
   const scheduledOnce = filtered.filter(p => p.status === "scheduled");
@@ -522,6 +576,9 @@ export function MissionsPage() {
         {/* Team filter */}
         <TeamFilter teamNames={teamNames} selected={selectedTeams} onToggle={toggleTeam} />
 
+        {/* Schedule type toggle */}
+        <ScheduleTypeFilter value={scheduleType} onChange={setScheduleType} />
+
         {/* Spacer */}
         <div className="flex-1" />
 
@@ -542,9 +599,23 @@ export function MissionsPage() {
       </div>
 
       {/* Active filter indicators */}
-      {(selectedStatuses.size > 0 || selectedTeams.size > 0) && (
+      {(selectedStatuses.size > 0 || selectedTeams.size > 0 || scheduleType !== "all") && (
         <div className="flex items-center gap-2 shrink-0 flex-wrap">
           <span className="text-[10px] text-muted-foreground">Filtering by:</span>
+          {scheduleType !== "all" && (
+            <Badge
+              variant="secondary"
+              className={cn(
+                "text-[10px] gap-1 cursor-pointer hover:bg-destructive/20",
+                scheduleType === "recurring" ? "text-violet-400" : "text-blue-400"
+              )}
+              onClick={() => setScheduleType("all")}
+            >
+              {scheduleType === "recurring" ? <Repeat className="h-2.5 w-2.5" /> : <Calendar className="h-2.5 w-2.5" />}
+              {scheduleType === "recurring" ? "Recurring" : "One-shot"}
+              <XCircle className="h-2.5 w-2.5" />
+            </Badge>
+          )}
           {Array.from(selectedStatuses).map((status) => {
             const opt = missionStatusFilterOptions.find(o => o.value === status);
             return (
@@ -575,7 +646,7 @@ export function MissionsPage() {
             variant="ghost"
             size="sm"
             className="h-5 px-1.5 text-[10px] text-muted-foreground"
-            onClick={() => { setSelectedStatuses(new Set()); setSelectedTeams(new Set()); }}
+            onClick={() => { setSelectedStatuses(new Set()); setSelectedTeams(new Set()); setScheduleType("all"); }}
           >
             Clear all
           </Button>

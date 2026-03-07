@@ -75,7 +75,7 @@ export default defineConfig({
         manualChunks: {
           "vendor-react": ["react", "react-dom", "react-router-dom"],
           "vendor-recharts": ["recharts"],
-          "vendor-ui": ["@radix-ui/react-collapsible", "@radix-ui/react-tabs", "@radix-ui/react-tooltip", "@radix-ui/react-dropdown-menu"],
+          "vendor-ui": ["radix-ui"],
         },
       },
     },

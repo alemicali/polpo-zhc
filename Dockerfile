@@ -6,13 +6,18 @@ RUN corepack enable && corepack prepare pnpm@10.29.3 --activate
 WORKDIR /app
 
 # Dependencies first (cache layer)
-COPY package.json pnpm-lock.yaml ./
+# Include workspace manifests + patches so pnpm resolves workspace: refs
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY patches/ patches/
+COPY packages/client-sdk/package.json packages/client-sdk/
+COPY packages/react-sdk/package.json packages/react-sdk/
+COPY ui/package.json ui/
 RUN pnpm install --frozen-lockfile
 
 # Source + compile
 COPY tsconfig.json ./
 COPY src/ src/
-RUN pnpm run build
+RUN ./node_modules/.bin/tsc
 
 # ── Stage 2: Runtime ──────────────────────────────────────────────────────────
 FROM node:22-bookworm-slim
@@ -26,19 +31,22 @@ RUN corepack enable && corepack prepare pnpm@10.29.3 --activate
 WORKDIR /app
 
 # Production deps only
-COPY package.json pnpm-lock.yaml ./
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY patches/ patches/
+COPY packages/client-sdk/package.json packages/client-sdk/
+COPY packages/react-sdk/package.json packages/react-sdk/
+COPY ui/package.json ui/
 RUN pnpm install --frozen-lockfile --prod
 
-# Compiled output + templates
+# Compiled output
 COPY --from=builder /app/dist/ dist/
-COPY templates/ templates/
 
 # Workspace volume — this is where your project lives
 VOLUME /workspace
 
 ENV NODE_ENV=production
-EXPOSE 3000
+EXPOSE 3890
 
 # Default: headless server mode
 ENTRYPOINT ["node", "dist/cli/index.js"]
-CMD ["serve", "--host", "0.0.0.0", "--port", "3000", "--dir", "/workspace"]
+CMD ["serve", "--host", "0.0.0.0", "--port", "3890", "--dir", "/workspace"]
