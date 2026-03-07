@@ -1533,6 +1533,244 @@ describe("Notification Rules API", () => {
   });
 });
 
+// ── Vault API ────────────────────────────────────────────────────────
+
+describe("Vault API", () => {
+  // Helper for vault API paths (mounted at /api/v1/vault)
+  function vault(path: string): string {
+    return `/api/v1/vault${path}`;
+  }
+
+  test("POST /vault/entries saves a vault entry", async () => {
+    const res = await app.request(
+      vault("/entries"),
+      jsonReq("POST", {
+        agent: "agent-1",
+        service: "github",
+        type: "api_key",
+        label: "GitHub token",
+        credentials: { token: "ghp_test123" },
+      }),
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(body.data.agent).toBe("agent-1");
+    expect(body.data.service).toBe("github");
+    expect(body.data.type).toBe("api_key");
+    expect(body.data.keys).toEqual(["token"]);
+    // Ensure credentials are NOT returned
+    expect(body.data).not.toHaveProperty("credentials");
+  });
+
+  test("GET /vault/entries/:agent lists entries (metadata only)", async () => {
+    // Ensure there's an entry from the previous test
+    await app.request(
+      vault("/entries"),
+      jsonReq("POST", {
+        agent: "agent-1",
+        service: "slack",
+        type: "oauth",
+        credentials: { access_token: "xoxb-test", client_id: "abc" },
+      }),
+    );
+
+    const res = await app.request(vault("/entries/agent-1"));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(Array.isArray(body.data)).toBe(true);
+    const slack = body.data.find((e: any) => e.service === "slack");
+    expect(slack).toBeDefined();
+    expect(slack.type).toBe("oauth");
+    expect(slack.keys).toContain("access_token");
+    expect(slack.keys).toContain("client_id");
+    // No credential values exposed
+    expect(slack).not.toHaveProperty("credentials");
+  });
+
+  test("GET /vault/entries/:agent returns empty array for unknown agent", async () => {
+    const res = await app.request(vault("/entries/no-such-agent"));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(body.data).toEqual([]);
+  });
+
+  test("PATCH /vault/entries/:agent/:service merges credentials", async () => {
+    // Ensure a base entry exists
+    await app.request(
+      vault("/entries"),
+      jsonReq("POST", {
+        agent: "agent-1",
+        service: "smtp-patch",
+        type: "smtp",
+        credentials: { host: "smtp.example.com", port: "587", user: "old-user" },
+      }),
+    );
+
+    // Patch — update user, add pass (host and port should survive)
+    const res = await app.request(
+      vault("/entries/agent-1/smtp-patch"),
+      jsonReq("PATCH", {
+        credentials: { user: "new-user", pass: "secret" },
+      }),
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(body.data.agent).toBe("agent-1");
+    expect(body.data.service).toBe("smtp-patch");
+    expect(body.data.type).toBe("smtp");
+    // Merged keys: original host, port, user + new pass
+    expect(body.data.keys).toContain("host");
+    expect(body.data.keys).toContain("port");
+    expect(body.data.keys).toContain("user");
+    expect(body.data.keys).toContain("pass");
+    // No credential values returned
+    expect(body.data).not.toHaveProperty("credentials");
+
+    // Verify via the store directly that values were merged correctly
+    const vaultStore = orchestrator.getVaultStore()!;
+    const entry = vaultStore.get("agent-1", "smtp-patch")!;
+    expect(entry.credentials.host).toBe("smtp.example.com"); // preserved
+    expect(entry.credentials.port).toBe("587");               // preserved
+    expect(entry.credentials.user).toBe("new-user");           // updated
+    expect(entry.credentials.pass).toBe("secret");             // added
+  });
+
+  test("PATCH /vault/entries/:agent/:service updates type and label", async () => {
+    // Ensure a base entry exists
+    await app.request(
+      vault("/entries"),
+      jsonReq("POST", {
+        agent: "agent-1",
+        service: "patch-meta",
+        type: "custom",
+        label: "Old label",
+        credentials: { key: "val" },
+      }),
+    );
+
+    const res = await app.request(
+      vault("/entries/agent-1/patch-meta"),
+      jsonReq("PATCH", {
+        type: "api_key",
+        label: "New label",
+      }),
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(body.data.type).toBe("api_key");
+
+    // Verify label and type via store
+    const entry = orchestrator.getVaultStore()!.get("agent-1", "patch-meta")!;
+    expect(entry.type).toBe("api_key");
+    expect(entry.label).toBe("New label");
+    expect(entry.credentials.key).toBe("val"); // credentials unchanged
+  });
+
+  test("PATCH /vault/entries/:agent/:service returns 404 for nonexistent entry", async () => {
+    const res = await app.request(
+      vault("/entries/agent-1/nonexistent-service"),
+      jsonReq("PATCH", {
+        credentials: { key: "val" },
+      }),
+    );
+    expect(res.status).toBe(404);
+    const body = await res.json();
+    expect(body.ok).toBe(false);
+    expect(body.error).toContain("No vault entry");
+  });
+
+  test("DELETE /vault/entries/:agent/:service removes the entry", async () => {
+    // Ensure entry exists
+    await app.request(
+      vault("/entries"),
+      jsonReq("POST", {
+        agent: "agent-1",
+        service: "delete-me",
+        type: "login",
+        credentials: { user: "u", pass: "p" },
+      }),
+    );
+
+    const res = await app.request(vault("/entries/agent-1/delete-me"), { method: "DELETE" });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(body.data.removed).toBe(true);
+
+    // Verify gone
+    const entry = orchestrator.getVaultStore()!.get("agent-1", "delete-me");
+    expect(entry).toBeUndefined();
+  });
+
+  test("DELETE /vault/entries/:agent/:service returns removed:false for nonexistent", async () => {
+    const res = await app.request(vault("/entries/agent-1/no-such-service"), { method: "DELETE" });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(body.data.removed).toBe(false);
+  });
+
+  test("vault lifecycle: create, list, patch, verify, delete", async () => {
+    const ag = "agent-1";
+    const svc = "lifecycle-test";
+
+    // 1. Create
+    const createRes = await app.request(
+      vault("/entries"),
+      jsonReq("POST", {
+        agent: ag,
+        service: svc,
+        type: "smtp",
+        label: "SMTP creds",
+        credentials: { host: "mail.example.com", port: "465", user: "admin" },
+      }),
+    );
+    expect(createRes.status).toBe(200);
+
+    // 2. List — should include it
+    const listRes = await app.request(vault(`/entries/${ag}`));
+    const listBody = await listRes.json();
+    const found = listBody.data.find((e: any) => e.service === svc);
+    expect(found).toBeDefined();
+    expect(found.type).toBe("smtp");
+    expect(found.keys).toContain("host");
+
+    // 3. Patch — add password, change user
+    const patchRes = await app.request(
+      vault(`/entries/${ag}/${svc}`),
+      jsonReq("PATCH", {
+        credentials: { user: "new-admin", pass: "hunter2" },
+      }),
+    );
+    expect(patchRes.status).toBe(200);
+    const patchBody = await patchRes.json();
+    expect(patchBody.data.keys).toContain("pass");
+    expect(patchBody.data.keys).toContain("host"); // preserved
+
+    // 4. Verify merged state
+    const store = orchestrator.getVaultStore()!;
+    const entry = store.get(ag, svc)!;
+    expect(entry.credentials.host).toBe("mail.example.com");
+    expect(entry.credentials.port).toBe("465");
+    expect(entry.credentials.user).toBe("new-admin");
+    expect(entry.credentials.pass).toBe("hunter2");
+    expect(entry.label).toBe("SMTP creds");
+
+    // 5. Delete
+    const delRes = await app.request(vault(`/entries/${ag}/${svc}`), { method: "DELETE" });
+    expect(delRes.status).toBe(200);
+    expect((await delRes.json()).data.removed).toBe(true);
+
+    // 6. Verify deleted
+    expect(store.get(ag, svc)).toBeUndefined();
+  });
+});
+
 // ── OpenAPI Spec ─────────────────────────────────────────────────────
 
 describe("OpenAPI Spec", () => {
