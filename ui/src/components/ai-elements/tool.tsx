@@ -63,6 +63,7 @@ const INTERACTIVE_LABELS: Record<string, string> = {
   open_file: "Opening file…",
   create_mission: "Creating mission…",
   set_vault_entry: "Saving to vault…",
+  update_vault_credentials: "Updating vault credentials…",
   navigate_to: "Navigating…",
   open_tab: "Opening tab…",
 };

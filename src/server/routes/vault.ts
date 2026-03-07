@@ -137,6 +137,90 @@ export function vaultRoutes(): OpenAPIHono<ServerEnv> {
     return c.json({ ok: true, data: entries }, 200);
   });
 
+  // PATCH /vault/entries/:agent/:service — partially update credentials
+  const patchEntryRoute = createRoute({
+    method: "patch",
+    path: "/entries/{agent}/{service}",
+    tags: ["Vault"],
+    summary: "Update vault credentials",
+    description: "Partially update credential fields in an existing vault entry. Only the provided fields are merged — existing fields are preserved. Optionally update type and label.",
+    request: {
+      params: z.object({
+        agent: z.string(),
+        service: z.string(),
+      }),
+      body: {
+        content: {
+          "application/json": {
+            schema: z.object({
+              type: z.enum(["smtp", "imap", "oauth", "api_key", "login", "custom"]).optional().describe("Update credential type"),
+              label: z.string().optional().describe("Update human-readable label"),
+              credentials: z.record(z.string(), z.string()).optional().describe("Credential fields to add or update (merged with existing)"),
+            }),
+          },
+        },
+      },
+    },
+    responses: {
+      200: {
+        content: {
+          "application/json": {
+            schema: z.object({
+              ok: z.boolean(),
+              data: z.object({
+                agent: z.string(),
+                service: z.string(),
+                type: z.string(),
+                keys: z.array(z.string()),
+              }),
+            }),
+          },
+        },
+        description: "Vault entry updated successfully",
+      },
+      404: {
+        content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string() }) } },
+        description: "Vault entry not found",
+      },
+      503: {
+        content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string() }) } },
+        description: "Vault store not available",
+      },
+    },
+  });
+
+  app.openapi(patchEntryRoute, (c) => {
+    const orchestrator = c.get("orchestrator");
+    const vaultStore = orchestrator.getVaultStore();
+    if (!vaultStore) {
+      return c.json({ ok: false, error: "Vault store not available. Check POLPO_VAULT_KEY or ~/.polpo/vault.key." }, 503);
+    }
+
+    const { agent, service } = c.req.valid("param");
+    const existing = vaultStore.get(agent, service);
+    if (!existing) {
+      return c.json({ ok: false, error: `No vault entry "${service}" for agent "${agent}".` }, 404);
+    }
+
+    const body = c.req.valid("json");
+    const mergedKeys = vaultStore.patch(agent, service, {
+      type: body.type,
+      label: body.label,
+      credentials: body.credentials,
+    });
+
+    const updated = vaultStore.get(agent, service)!;
+    return c.json({
+      ok: true,
+      data: {
+        agent,
+        service,
+        type: updated.type,
+        keys: mergedKeys,
+      },
+    }, 200);
+  });
+
   // DELETE /vault/entries/:agent/:service — remove a vault entry
   const deleteEntryRoute = createRoute({
     method: "delete",

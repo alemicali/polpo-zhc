@@ -652,6 +652,16 @@ const setVaultEntryTool: Tool = {
   }),
 };
 
+const updateVaultCredentialsTool: Tool = {
+  name: "update_vault_credentials",
+  description: "Update specific credential fields in an existing vault entry without overwriting the entire entry. Only the provided fields are merged — existing fields are preserved. Use this instead of set_vault_entry when you only need to change a password, rotate a key, or add a field.",
+  parameters: Type.Object({
+    agent: Type.String({ description: "Agent name" }),
+    service: Type.String({ description: "Service name (vault key)" }),
+    credentials: Type.Record(Type.String(), Type.String(), { description: "Credential fields to add or update. Only these fields are changed — existing fields are preserved." }),
+  }),
+};
+
 const removeVaultEntryTool: Tool = {
   name: "remove_vault_entry",
   description: "Remove a credential from an agent's vault.",
@@ -1370,7 +1380,7 @@ export const WRITE_TOOLS = new Set([
   // Team
   "add_agent", "remove_agent", "update_agent", "rename_team", "add_team", "remove_team",
   // Vault & Identity
-  "set_vault_entry", "remove_vault_entry", "set_identity",
+  "set_vault_entry", "update_vault_credentials", "remove_vault_entry", "set_identity",
   // Approvals & Checkpoints
   "approve_request", "reject_request", "resume_checkpoint",
   // Scheduling
@@ -1425,8 +1435,8 @@ export const ALL_ORCHESTRATOR_TOOLS: Tool[] = [
   updateMissionNotificationsTool,
   // Team (7)
   listTeamsTool, addAgentTool, removeAgentTool, updateAgentTool, renameTeamTool, addTeamTool, removeTeamTool,
-  // Vault (3)
-  setVaultEntryTool, removeVaultEntryTool, listVaultTool,
+  // Vault (4)
+  setVaultEntryTool, updateVaultCredentialsTool, removeVaultEntryTool, listVaultTool,
   // Identity (2)
   setIdentityTool, getIdentityTool,
   // Approvals & Checkpoints (3)
@@ -1497,6 +1507,7 @@ const TOOL_LABELS: Record<string, string> = {
   add_team: "Add Team",
   remove_team: "Remove Team",
   set_vault_entry: "Set Vault Entry",
+  update_vault_credentials: "Update Vault Credentials",
   remove_vault_entry: "Remove Vault Entry",
   set_identity: "Set Agent Identity",
   approve_request: "Approve Request",
@@ -1666,9 +1677,10 @@ export async function executeOrchestratorTool(
       case "remove_team":      return execRemoveTeam(polpo, args);
 
       // ── Vault ──
-      case "set_vault_entry":    return execSetVaultEntry(polpo, args);
-      case "remove_vault_entry": return execRemoveVaultEntry(polpo, args);
-      case "list_vault":         return execListVault(polpo, args);
+      case "set_vault_entry":           return execSetVaultEntry(polpo, args);
+      case "update_vault_credentials": return execUpdateVaultCredentials(polpo, args);
+      case "remove_vault_entry":       return execRemoveVaultEntry(polpo, args);
+      case "list_vault":               return execListVault(polpo, args);
 
       // ── Identity ──
       case "set_identity":       return execSetIdentity(polpo, args);
@@ -1798,6 +1810,7 @@ function resolveTargetName(
   if (toolName === "remove_agent" && args.name) return `"${String(args.name)}"`;
   if (toolName === "update_agent" && args.name) return `"${String(args.name)}"`;
   if (toolName === "set_vault_entry" && args.agent) return `"${String(args.agent)}" → ${String(args.service)}`;
+  if (toolName === "update_vault_credentials" && args.agent) return `"${String(args.agent)}" → ${String(args.service)}`;
   if (toolName === "remove_vault_entry" && args.agent) return `"${String(args.agent)}" → ${String(args.service)}`;
   if (toolName === "list_vault" && args.agent) return `"${String(args.agent)}"`;
   if (toolName === "set_identity" && args.agent) return `"${String(args.agent)}"`;
@@ -1977,6 +1990,11 @@ export function formatToolDetails(
       main.push(["Type", String(args.type)]);
       if (args.label) main.push(["Label", String(args.label)]);
       extra.push(["Credential keys", Object.keys((args.credentials as Record<string, string>) ?? {}).join(", ")]);
+      break;
+    case "update_vault_credentials":
+      main.push(["Agent", String(args.agent)]);
+      main.push(["Service", String(args.service)]);
+      extra.push(["Updated keys", Object.keys((args.credentials as Record<string, string>) ?? {}).join(", ")]);
       break;
     case "remove_vault_entry":
       main.push(["Agent", String(args.agent)]);
@@ -2985,6 +3003,25 @@ function execSetVaultEntry(polpo: Orchestrator, args: Record<string, unknown>): 
   vaultStore.set(agentName, service, entry);
   const credKeys = Object.keys(entry.credentials).join(", ");
   return `Vault entry "${service}" (${entry.type}) set for agent "${agentName}". Credential fields: ${credKeys}`;
+}
+
+function execUpdateVaultCredentials(polpo: Orchestrator, args: Record<string, unknown>): string {
+  const agents = polpo.getAgents();
+  const resolved = resolveAgentName(agents, args.agent as string);
+  if ("error" in resolved) return resolved.error;
+  const agentName = resolved.name;
+
+  const vaultStore = polpo.getVaultStore();
+  if (!vaultStore) return `Error: Vault store not available. Check POLPO_VAULT_KEY or ~/.polpo/vault.key.`;
+
+  const service = args.service as string;
+  const existing = vaultStore.get(agentName, service);
+  if (!existing) return `Error: No vault entry "${service}" for agent "${agentName}". Use set_vault_entry to create one.`;
+
+  const credentials = args.credentials as Record<string, string>;
+  const mergedKeys = vaultStore.patch(agentName, service, { credentials });
+  const updatedKeys = Object.keys(credentials).join(", ");
+  return `Vault entry "${service}" updated for agent "${agentName}". Updated fields: ${updatedKeys}. All fields: ${mergedKeys.join(", ")}`;
 }
 
 function execRemoveVaultEntry(polpo: Orchestrator, args: Record<string, unknown>): string {

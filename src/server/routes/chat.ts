@@ -127,12 +127,12 @@ export function chatRoutes(): OpenAPIHono<ServerEnv> {
     // SECURITY: Redact vault credentials from persisted tool calls before serving to client
     const safeMessages = messages.map(m => {
       if (!m.toolCalls) return m;
-      const hasVault = m.toolCalls.some(tc => tc.name === "set_vault_entry");
+      const hasVault = m.toolCalls.some(tc => tc.name === "set_vault_entry" || tc.name === "update_vault_credentials");
       if (!hasVault) return m;
       return {
         ...m,
         toolCalls: m.toolCalls.map(tc => {
-          if (tc.name !== "set_vault_entry" || !tc.arguments) return tc;
+          if ((tc.name !== "set_vault_entry" && tc.name !== "update_vault_credentials") || !tc.arguments) return tc;
           const args = { ...tc.arguments };
           if (args.credentials && typeof args.credentials === "object") {
             const redacted: Record<string, string> = {};

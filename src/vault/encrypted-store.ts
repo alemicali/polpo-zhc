@@ -131,6 +131,25 @@ export class EncryptedVaultStore {
     this.save();
   }
 
+  /**
+   * Patch (partially update) a vault entry. Merges credentials with existing ones.
+   * If the entry doesn't exist, creates it (requires `type`).
+   * Returns the merged credential key list.
+   */
+  patch(agent: string, service: string, partial: { type?: VaultEntry["type"]; label?: string; credentials?: Record<string, string> }): string[] {
+    const existing = this.get(agent, service);
+    if (!existing && !partial.type) {
+      throw new Error(`No vault entry "${service}" for agent "${agent}" — type is required to create a new entry.`);
+    }
+    const merged: VaultEntry = {
+      type: partial.type ?? existing?.type ?? "custom",
+      ...(partial.label !== undefined ? { label: partial.label } : existing?.label ? { label: existing.label } : {}),
+      credentials: { ...(existing?.credentials ?? {}), ...(partial.credentials ?? {}) },
+    };
+    this.set(agent, service, merged);
+    return Object.keys(merged.credentials);
+  }
+
   /** Remove a vault entry. Returns true if found. */
   remove(agent: string, service: string): boolean {
     if (!this.data[agent]?.[service]) return false;

@@ -468,6 +468,21 @@ export class PolpoClient {
   }
 
   /**
+   * Partially update credential fields in an existing vault entry.
+   * Only the provided fields are merged — existing fields are preserved.
+   */
+  patchVaultEntry(
+    agent: string,
+    service: string,
+    patch: { type?: string; label?: string; credentials?: Record<string, string> },
+  ): Promise<{ agent: string; service: string; type: string; keys: string[] }> {
+    return this.patch<{ agent: string; service: string; type: string; keys: string[] }>(
+      `/vault/entries/${encodeURIComponent(agent)}/${encodeURIComponent(service)}`,
+      patch,
+    );
+  }
+
+  /**
    * Remove a vault entry from the encrypted store.
    */
   removeVaultEntry(agent: string, service: string): Promise<{ removed: boolean }> {

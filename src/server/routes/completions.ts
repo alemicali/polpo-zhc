@@ -55,7 +55,7 @@ function emitFileChanged(
  */
 function redactVaultToolCalls(toolCalls: ToolCallInfo[]): ToolCallInfo[] {
   return toolCalls.map(tc => {
-    if (tc.name !== "set_vault_entry" || !tc.arguments) return tc;
+    if ((tc.name !== "set_vault_entry" && tc.name !== "update_vault_credentials") || !tc.arguments) return tc;
     const args = { ...tc.arguments };
     if (args.credentials && typeof args.credentials === "object") {
       // Replace each credential value with a redacted marker, preserve keys for display
