@@ -55,9 +55,9 @@ function createMockVault(smtp?: SmtpCredentials): ResolvedVault {
 // ─── Factory tests ───────────────────────────────────
 
 describe("createEmailTools — factory", () => {
-  it("returns all 7 tools by default", () => {
+  it("returns all 8 tools by default", () => {
     const tools = createEmailTools(CWD);
-    expect(tools).toHaveLength(7);
+    expect(tools).toHaveLength(8);
     const names = tools.map(t => t.name);
     expect(names).toEqual(ALL_EMAIL_TOOL_NAMES);
   });
@@ -77,6 +77,7 @@ describe("createEmailTools — factory", () => {
     expect(names).toContain("email_list");
     expect(names).toContain("email_read");
     expect(names).toContain("email_search");
+    expect(names).toContain("email_count");
     expect(names).toContain("email_download_attachment");
   });
 });
@@ -228,5 +229,152 @@ describe("email_send — vault integration", () => {
       body: "Sent using vault credentials",
     } as any);
     expect(result.details?.messageId).toBe("test-id");
+  });
+});
+
+// ─── email_search — new filters ─────────────────────
+
+describe("email_search — new filters", () => {
+  afterEach(clearEnv);
+
+  it("accepts 'to' as a search criterion", async () => {
+    setEnv("IMAP_HOST", "imap.test.com");
+    setEnv("IMAP_USER", "alice@test.com");
+
+    const tools = createEmailTools(CWD);
+    const searchTool = tools.find(t => t.name === "email_search")!;
+    const result = await searchTool.execute("test-id", { to: "bob@test.com" } as any);
+    expect(result.content[0]).toBeDefined();
+    expect(result.details?.query).toHaveProperty("to", "bob@test.com");
+  });
+
+  it("accepts 'before' as a search criterion", async () => {
+    setEnv("IMAP_HOST", "imap.test.com");
+    setEnv("IMAP_USER", "alice@test.com");
+
+    const tools = createEmailTools(CWD);
+    const searchTool = tools.find(t => t.name === "email_search")!;
+    const result = await searchTool.execute("test-id", { before: "2025-01-01" } as any);
+    expect(result.content[0]).toBeDefined();
+    expect(result.details?.query).toHaveProperty("before", "2025-01-01");
+  });
+
+  it("accepts 'answered' as a search criterion", async () => {
+    setEnv("IMAP_HOST", "imap.test.com");
+    setEnv("IMAP_USER", "alice@test.com");
+
+    const tools = createEmailTools(CWD);
+    const searchTool = tools.find(t => t.name === "email_search")!;
+    const result = await searchTool.execute("test-id", { answered: true } as any);
+    expect(result.content[0]).toBeDefined();
+    expect(result.details?.query).toHaveProperty("answered", true);
+  });
+
+  it("accepts combined date range (since + before)", async () => {
+    setEnv("IMAP_HOST", "imap.test.com");
+    setEnv("IMAP_USER", "alice@test.com");
+
+    const tools = createEmailTools(CWD);
+    const searchTool = tools.find(t => t.name === "email_search")!;
+    const result = await searchTool.execute("test-id", {
+      since: "2025-01-01",
+      before: "2025-06-01",
+    } as any);
+    expect(result.content[0]).toBeDefined();
+    expect(result.details?.query).toHaveProperty("since", "2025-01-01");
+    expect(result.details?.query).toHaveProperty("before", "2025-06-01");
+  });
+
+  it("still rejects empty search criteria (including new fields)", async () => {
+    const tools = createEmailTools(CWD);
+    const searchTool = tools.find(t => t.name === "email_search")!;
+    await expect(searchTool.execute("test-id", {} as any)).rejects.toThrow("at least one search criterion");
+  });
+});
+
+// ─── email_count ─────────────────────────────────────
+
+describe("email_count", () => {
+  afterEach(clearEnv);
+
+  it("counts all emails in a folder with no filters", async () => {
+    setEnv("IMAP_HOST", "imap.test.com");
+    setEnv("IMAP_USER", "alice@test.com");
+
+    const tools = createEmailTools(CWD);
+    const countTool = tools.find(t => t.name === "email_count")!;
+    expect(countTool).toBeDefined();
+    expect(countTool.label).toBe("Count Emails");
+
+    const result = await countTool.execute("test-id", {} as any);
+    const text = (result.content[0] as any).text;
+    expect(text).toContain("INBOX");
+    expect(text).toContain("email(s)");
+    expect(result.details).toHaveProperty("total");
+    expect(result.details).toHaveProperty("unread");
+    expect(typeof result.details?.total).toBe("number");
+  });
+
+  it("counts emails with from filter", async () => {
+    setEnv("IMAP_HOST", "imap.test.com");
+    setEnv("IMAP_USER", "alice@test.com");
+
+    const tools = createEmailTools(CWD);
+    const countTool = tools.find(t => t.name === "email_count")!;
+    const result = await countTool.execute("test-id", { from: "boss@company.com" } as any);
+    expect(result.details?.filters).toHaveProperty("from", "boss@company.com");
+    expect(result.details).toHaveProperty("total");
+  });
+
+  it("counts emails with date range", async () => {
+    setEnv("IMAP_HOST", "imap.test.com");
+    setEnv("IMAP_USER", "alice@test.com");
+
+    const tools = createEmailTools(CWD);
+    const countTool = tools.find(t => t.name === "email_count")!;
+    const result = await countTool.execute("test-id", {
+      since: "2025-01-01",
+      before: "2025-06-01",
+    } as any);
+    expect(result.details?.filters).toHaveProperty("since", "2025-01-01");
+    expect(result.details?.filters).toHaveProperty("before", "2025-06-01");
+  });
+
+  it("counts unseen-only emails", async () => {
+    setEnv("IMAP_HOST", "imap.test.com");
+    setEnv("IMAP_USER", "alice@test.com");
+
+    const tools = createEmailTools(CWD);
+    const countTool = tools.find(t => t.name === "email_count")!;
+    const result = await countTool.execute("test-id", { unseen_only: true } as any);
+    expect(result.details).toHaveProperty("total");
+    // When unseen_only, unread === total
+    expect(result.details?.unread).toBe(result.details?.total);
+  });
+
+  it("counts answered emails", async () => {
+    setEnv("IMAP_HOST", "imap.test.com");
+    setEnv("IMAP_USER", "alice@test.com");
+
+    const tools = createEmailTools(CWD);
+    const countTool = tools.find(t => t.name === "email_count")!;
+    const result = await countTool.execute("test-id", { answered: false } as any);
+    expect(result.details?.filters).toHaveProperty("answered", false);
+  });
+
+  it("counts emails in a specific folder", async () => {
+    setEnv("IMAP_HOST", "imap.test.com");
+    setEnv("IMAP_USER", "alice@test.com");
+
+    const tools = createEmailTools(CWD);
+    const countTool = tools.find(t => t.name === "email_count")!;
+    const result = await countTool.execute("test-id", { folder: "Sent" } as any);
+    expect(result.details?.folder).toBe("Sent");
+  });
+
+  it("is included in email_* wildcard filtering", () => {
+    const tools = createEmailTools(CWD, undefined, ["email_count"]);
+    expect(tools).toHaveLength(1);
+    expect(tools[0].name).toBe("email_count");
   });
 });

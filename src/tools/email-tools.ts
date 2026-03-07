@@ -685,9 +685,12 @@ function createEmailDownloadAttachmentTool(vault?: ResolvedVault, cwd?: string, 
 
 const EmailSearchSchema = Type.Object({
   from: Type.Optional(Type.String({ description: "Search by sender address" })),
+  to: Type.Optional(Type.String({ description: "Search by recipient address" })),
   subject: Type.Optional(Type.String({ description: "Search by subject (substring)" })),
   since: Type.Optional(Type.String({ description: "Search emails since date (YYYY-MM-DD)" })),
+  before: Type.Optional(Type.String({ description: "Search emails before date (YYYY-MM-DD)" })),
   body: Type.Optional(Type.String({ description: "Search by body text (substring)" })),
+  answered: Type.Optional(Type.Boolean({ description: "Filter by answered flag (true = answered, false = unanswered)" })),
   folder: Type.Optional(Type.String({ description: "Mail folder (default: INBOX)" })),
   limit: Type.Optional(Type.Number({ description: "Max results (default: 20)" })),
 });
@@ -696,11 +699,11 @@ function createEmailSearchTool(vault?: ResolvedVault): AgentTool<typeof EmailSea
   return {
     name: "email_search",
     label: "Search Emails",
-    description: "Search emails by sender, subject, date, or body text. Returns matching messages with UID, subject, from, and date.",
+    description: "Search emails by sender, recipient, subject, date range, body text, or answered status. Returns matching messages with UID, subject, from, and date.",
     parameters: EmailSearchSchema,
     async execute(_id, params) {
-      if (!params.from && !params.subject && !params.since && !params.body) {
-        throw new Error("Provide at least one search criterion (from, subject, since, or body)");
+      if (!params.from && !params.to && !params.subject && !params.since && !params.before && !params.body && params.answered === undefined) {
+        throw new Error("Provide at least one search criterion (from, to, subject, since, before, body, or answered)");
       }
 
       const client = await connectImap(vault);
@@ -712,9 +715,13 @@ function createEmailSearchTool(vault?: ResolvedVault): AgentTool<typeof EmailSea
         // Build search query
         const query: Record<string, any> = {};
         if (params.from) query.from = params.from;
+        if (params.to) query.to = params.to;
         if (params.subject) query.subject = params.subject;
         if (params.since) query.since = params.since;
+        if (params.before) query.before = params.before;
         if (params.body) query.body = params.body;
+        if (params.answered === true) query.answered = true;
+        if (params.answered === false) query.unanswered = true;
 
         const searchResult = await client.search(query, { uid: true });
         const uids = Array.isArray(searchResult) ? searchResult : [];
@@ -745,11 +752,83 @@ function createEmailSearchTool(vault?: ResolvedVault): AgentTool<typeof EmailSea
   };
 }
 
+// ─── Tool: email_count ───
+
+const EmailCountSchema = Type.Object({
+  from: Type.Optional(Type.String({ description: "Count emails from sender" })),
+  to: Type.Optional(Type.String({ description: "Count emails to recipient" })),
+  subject: Type.Optional(Type.String({ description: "Count emails matching subject (substring)" })),
+  since: Type.Optional(Type.String({ description: "Count emails since date (YYYY-MM-DD)" })),
+  before: Type.Optional(Type.String({ description: "Count emails before date (YYYY-MM-DD)" })),
+  body: Type.Optional(Type.String({ description: "Count emails matching body text (substring)" })),
+  answered: Type.Optional(Type.Boolean({ description: "Filter by answered flag (true = answered, false = unanswered)" })),
+  unseen_only: Type.Optional(Type.Boolean({ description: "Count only unread emails (default: false)" })),
+  folder: Type.Optional(Type.String({ description: "Mail folder (default: INBOX)" })),
+});
+
+function createEmailCountTool(vault?: ResolvedVault): AgentTool<typeof EmailCountSchema> {
+  return {
+    name: "email_count",
+    label: "Count Emails",
+    description: "Count emails matching the given filters without downloading message contents. " +
+      "Returns total and unread counts. With no filters, counts all emails in the folder.",
+    parameters: EmailCountSchema,
+    async execute(_id, params) {
+      const client = await connectImap(vault);
+      const folder = params.folder ?? "INBOX";
+
+      const lock = await client.getMailboxLock(folder);
+      try {
+        // Build search query for the filtered count
+        const query: Record<string, any> = {};
+        let hasFilter = false;
+        if (params.from) { query.from = params.from; hasFilter = true; }
+        if (params.to) { query.to = params.to; hasFilter = true; }
+        if (params.subject) { query.subject = params.subject; hasFilter = true; }
+        if (params.since) { query.since = params.since; hasFilter = true; }
+        if (params.before) { query.before = params.before; hasFilter = true; }
+        if (params.body) { query.body = params.body; hasFilter = true; }
+        if (params.answered === true) { query.answered = true; hasFilter = true; }
+        if (params.answered === false) { query.unanswered = true; hasFilter = true; }
+        if (params.unseen_only) { query.seen = false; hasFilter = true; }
+
+        if (!hasFilter) query.all = true;
+
+        const searchResult = await client.search(query, { uid: true });
+        const total = Array.isArray(searchResult) ? searchResult.length : 0;
+
+        // Also get unread count within the same filter
+        let unread = 0;
+        if (!params.unseen_only) {
+          const unreadQuery: Record<string, any> = { ...query, seen: false };
+          delete unreadQuery.all;
+          const unreadResult = await client.search(unreadQuery, { uid: true });
+          unread = Array.isArray(unreadResult) ? unreadResult.length : 0;
+        } else {
+          unread = total; // already filtered to unseen
+        }
+
+        const filterDesc = hasFilter
+          ? Object.entries(params).filter(([k, v]) => v !== undefined && k !== "folder").map(([k, v]) => `${k}=${v}`).join(", ")
+          : "all";
+
+        return {
+          content: [{ type: "text", text: `${folder} — ${total} email(s) matching [${filterDesc}] (${unread} unread)` }],
+          details: { folder, total, unread, filters: params },
+        };
+      } finally {
+        lock.release();
+        await client.logout();
+      }
+    },
+  };
+}
+
 // ─── Factory ───
 
-export type EmailToolName = "email_send" | "email_draft" | "email_verify" | "email_list" | "email_read" | "email_search" | "email_download_attachment";
+export type EmailToolName = "email_send" | "email_draft" | "email_verify" | "email_list" | "email_read" | "email_search" | "email_count" | "email_download_attachment";
 
-export const ALL_EMAIL_TOOL_NAMES: EmailToolName[] = ["email_send", "email_draft", "email_verify", "email_list", "email_read", "email_search", "email_download_attachment"];
+export const ALL_EMAIL_TOOL_NAMES: EmailToolName[] = ["email_send", "email_draft", "email_verify", "email_list", "email_read", "email_search", "email_count", "email_download_attachment"];
 
 /**
  * Create email tools.
@@ -771,6 +850,7 @@ export function createEmailTools(cwd: string, allowedPaths?: string[], allowedTo
     email_list: () => createEmailListTool(vault),
     email_read: () => createEmailReadTool(vault, outputDir, sandbox),
     email_search: () => createEmailSearchTool(vault),
+    email_count: () => createEmailCountTool(vault),
     email_download_attachment: () => createEmailDownloadAttachmentTool(vault, cwd, outputDir, sandbox),
   };
 
