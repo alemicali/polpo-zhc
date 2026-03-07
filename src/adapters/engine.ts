@@ -88,8 +88,9 @@ function describeToolsForAgent(agent: AgentConfig): string {
       "- `email_list` — list inbox messages",
       "- `email_read` — read a specific email (includes attachment metadata; set download_attachments=true to save all)",
       "- `email_download_attachment` — download a specific attachment by part number",
-      "- `email_search` — search emails by query",
-      "- `email_verify` — verify an email address",
+      "- `email_search` — search emails by sender, recipient, subject, date range, body, or answered status",
+      "- `email_count` — count emails matching filters without downloading content (returns total and unread counts)",
+      "- `email_verify` — verify SMTP connection and credentials",
       "ALWAYS use these tools for email operations. Never use bash/curl to send emails.",
     );
   }

@@ -128,7 +128,7 @@ The primary way to talk to Polpo programmatically:
 |--------|------|-------------|
 | `POST` | `/v1/chat/completions` | Talk to Polpo (OpenAI-compatible, streaming + non-streaming) |
 
-This endpoint accepts standard OpenAI-format messages and returns responses in OpenAI format. Polpo runs its full tool loop internally (37 tools) — you describe what you need, Polpo handles the rest. Supports `"stream": true` for SSE streaming.
+This endpoint accepts standard OpenAI-format messages and returns responses in OpenAI format. Polpo runs its full tool loop internally (38 tools) — you describe what you need, Polpo handles the rest. Supports `"stream": true` for SSE streaming.
 
 ```bash
 curl http://localhost:3000/v1/chat/completions \

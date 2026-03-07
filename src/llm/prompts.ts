@@ -503,7 +503,7 @@ export function buildChatSystemPrompt(
     `  - **maxTurns**: Max conversation turns before forced stop (default 200).`,
     `  - **maxConcurrency**: Max concurrent tasks (default 1).`,
     `  - **allowedTools patterns**: Include "browser_*" in allowedTools for browser tools (navigate, click, screenshot — 18 tools via agent-browser).`,
-    `    Include "email_*" for email tools (send, list, read, search — requires vault SMTP/IMAP credentials).`,
+    `    Include "email_*" for email tools (send, draft, list, read, search, count — requires vault SMTP/IMAP credentials).`,
     `    Include "image_*" for image tools (image_generate via fal.ai FLUX, image_analyze via OpenAI/Anthropic vision — requires FAL_KEY for generation).`,
     `    Include "video_*" for video generation (video_generate via fal.ai Wan 2.2 — requires FAL_KEY).`,
     `    Include "audio_*" for audio tools (audio_transcribe for STT via OpenAI Whisper / Deepgram Nova, audio_speak for TTS via OpenAI / Deepgram / ElevenLabs / Edge).`,

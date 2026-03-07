@@ -1,10 +1,10 @@
 ---
 title: "Email Tools"
 sidebarTitle: "Email"
-description: "7 tools to send, draft, read, search, and download email attachments via SMTP and IMAP"
+description: "8 tools to send, draft, read, search, count, and download email attachments via SMTP and IMAP"
 ---
 
-Send, draft, read, search emails, and download attachments. Enable by including `"email_*"` in the agent's `allowedTools` array.
+Send, draft, read, search, count emails, and download attachments. Enable by including `"email_*"` in the agent's `allowedTools` array.
 
 <Note>
 **SMTP** (send): Uses **nodemailer**. Credentials from agent vault (`"email"` entry with type `"smtp"`), env vars (`SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`), or per-call parameter overrides.
@@ -191,12 +191,51 @@ Search emails by criteria.
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `from` | string | no | Search by sender address |
+| `to` | string | no | Search by recipient address |
 | `subject` | string | no | Search by subject (substring) |
 | `since` | string | no | Search emails since date (YYYY-MM-DD) |
+| `before` | string | no | Search emails before date (YYYY-MM-DD) |
 | `body` | string | no | Search by body text (substring) |
+| `answered` | boolean | no | Filter by answered flag (`true` = answered, `false` = unanswered) |
 | `folder` | string | no | Mailbox folder (default: `"INBOX"`) |
 | `limit` | number | no | Max results (default: 20) |
 
 ### Returns
 
 List of matching emails with UID, subject, from, and date.
+
+### Notes
+
+- At least one search criterion is required
+- Multiple criteria are AND-ed together (e.g. `from` + `since` returns emails from that sender after that date)
+- Use `since` + `before` together for date range queries
+
+---
+
+## `email_count` — Count Emails
+
+Count emails matching filters without downloading message contents. Uses IMAP SEARCH internally and returns the result count.
+
+### Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `from` | string | no | Count emails from sender |
+| `to` | string | no | Count emails to recipient |
+| `subject` | string | no | Count emails matching subject (substring) |
+| `since` | string | no | Count emails since date (YYYY-MM-DD) |
+| `before` | string | no | Count emails before date (YYYY-MM-DD) |
+| `body` | string | no | Count emails matching body text (substring) |
+| `answered` | boolean | no | Filter by answered flag (`true` = answered, `false` = unanswered) |
+| `unseen_only` | boolean | no | Count only unread emails (default: false) |
+| `folder` | string | no | Mailbox folder (default: `"INBOX"`) |
+
+### Returns
+
+Total count and unread count of emails matching the filters.
+
+### Notes
+
+- With no filters, counts all emails in the folder
+- No message content is downloaded — uses IMAP SEARCH for efficient counting
+- Useful for aggregations: "how many emails from X this month?", "how many unread?"

@@ -4,7 +4,7 @@
  * POST /v1/chat/completions
  *
  * This is Polpo's primary conversational interface. It accepts OpenAI-format
- * messages, runs the full agentic tool loop internally (37 tools), and returns
+ * messages, runs the full agentic tool loop internally (38 tools), and returns
  * responses in OpenAI-compatible format — both streaming (SSE) and non-streaming.
  *
  * The caller talks to Polpo. Polpo decides when and how to use its tools.
