@@ -32,13 +32,14 @@ import {
   Repeat,
   Timer,
   Star,
+  Users,
 } from "lucide-react";
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { useMissions, useTasks } from "@lumea-labs/polpo-react";
+import { useMissions, useTasks, useAgents } from "@lumea-labs/polpo-react";
 import type { Mission, MissionStatus } from "@lumea-labs/polpo-react";
 import { useAsyncAction } from "@/hooks/use-polpo";
 import { toast } from "sonner";
@@ -57,6 +58,27 @@ function parseMissionCounts(data: string): { taskCount: number } {
     };
   } catch {
     return { taskCount: 0 };
+  }
+}
+
+/** Extract unique agent names used by a mission (from tasks.assignTo + team[].name). */
+function parseMissionAgents(data: string): string[] {
+  try {
+    const parsed = JSON.parse(data);
+    const agents = new Set<string>();
+    if (Array.isArray(parsed.tasks)) {
+      for (const t of parsed.tasks) {
+        if (t.assignTo) agents.add(t.assignTo);
+      }
+    }
+    if (Array.isArray(parsed.team)) {
+      for (const a of parsed.team) {
+        if (a.name) agents.add(a.name);
+      }
+    }
+    return Array.from(agents);
+  } catch {
+    return [];
   }
 }
 
@@ -293,6 +315,68 @@ function StatusFilter({
   );
 }
 
+// ── Team filter popover ──
+
+function TeamFilter({
+  teamNames,
+  selected,
+  onToggle,
+}: {
+  teamNames: string[];
+  selected: Set<string>;
+  onToggle: (team: string) => void;
+}) {
+  const hasFilter = selected.size > 0;
+
+  if (teamNames.length === 0) return null;
+
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button variant={hasFilter ? "default" : "outline"} size="sm" className="gap-1.5">
+          <Users className="h-3.5 w-3.5" />
+          Team
+          {hasFilter && (
+            <Badge variant="secondary" className="text-[9px] ml-1">{selected.size}</Badge>
+          )}
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-48 p-2" align="start">
+        <div className="space-y-1">
+          {teamNames.map((name) => (
+            <button
+              key={name}
+              className={cn(
+                "flex items-center gap-2 w-full rounded-md px-2 py-1.5 text-left text-sm transition-colors",
+                selected.has(name) ? "bg-accent text-accent-foreground" : "hover:bg-muted"
+              )}
+              onClick={() => onToggle(name)}
+            >
+              <div className={cn(
+                "flex h-4 w-4 shrink-0 items-center justify-center rounded border",
+                selected.has(name) ? "bg-primary border-primary" : "border-muted-foreground/30"
+              )}>
+                {selected.has(name) && <Check className="h-3 w-3 text-primary-foreground" />}
+              </div>
+              <span className="truncate">{name}</span>
+            </button>
+          ))}
+        </div>
+        {hasFilter && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="w-full mt-1 text-xs"
+            onClick={() => teamNames.forEach(n => { if (selected.has(n)) onToggle(n); })}
+          >
+            Clear all
+          </Button>
+        )}
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 // ── Main page ──
 
 export function MissionsPage() {
@@ -307,8 +391,10 @@ export function MissionsPage() {
   } = useMissions();
 
   const { tasks } = useTasks();
+  const { teams } = useAgents();
   const [search, setSearch] = useState("");
   const [selectedStatuses, setSelectedStatuses] = useState<Set<MissionStatus>>(new Set());
+  const [selectedTeams, setSelectedTeams] = useState<Set<string>>(new Set());
 
   const [handleRefresh, isRefreshing] = useAsyncAction(async () => {
     await refetch();
@@ -333,6 +419,28 @@ export function MissionsPage() {
     });
   };
 
+  const toggleTeam = (team: string) => {
+    setSelectedTeams(prev => {
+      const next = new Set(prev);
+      if (next.has(team)) next.delete(team);
+      else next.add(team);
+      return next;
+    });
+  };
+
+  // Build agent → team name mapping
+  const agentToTeam = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const team of teams) {
+      for (const agent of team.agents) {
+        map[agent.name] = team.name;
+      }
+    }
+    return map;
+  }, [teams]);
+
+  const teamNames = useMemo(() => teams.map(t => t.name), [teams]);
+
   // Compute task stats per mission group
   const missionStats = useMemo(() => {
     const map: Record<string, { done: number; failed: number; running: number; total: number }> = {};
@@ -349,11 +457,17 @@ export function MissionsPage() {
     return map;
   }, [missions, tasks]);
 
-  // Filter missions by search + status
+  // Filter missions by search + status + team
   const filtered = useMemo(() => {
     return missions.filter(m => {
       // Status filter
       if (selectedStatuses.size > 0 && !selectedStatuses.has(m.status)) return false;
+      // Team filter
+      if (selectedTeams.size > 0) {
+        const missionAgents = parseMissionAgents(m.data);
+        const missionTeams = new Set(missionAgents.map(a => agentToTeam[a]).filter(Boolean));
+        if (!Array.from(selectedTeams).some(t => missionTeams.has(t))) return false;
+      }
       // Search filter
       if (search) {
         const q = search.toLowerCase();
@@ -361,7 +475,7 @@ export function MissionsPage() {
       }
       return true;
     });
-  }, [missions, search, selectedStatuses]);
+  }, [missions, search, selectedStatuses, selectedTeams, agentToTeam]);
 
   if (loading) {
     return (
@@ -371,7 +485,7 @@ export function MissionsPage() {
     );
   }
 
-  const hasFilters = search.length > 0 || selectedStatuses.size > 0;
+  const hasFilters = search.length > 0 || selectedStatuses.size > 0 || selectedTeams.size > 0;
 
   const active = filtered.filter(p => p.status === "active" || p.status === "paused");
   const scheduledOnce = filtered.filter(p => p.status === "scheduled");
@@ -405,6 +519,9 @@ export function MissionsPage() {
         {/* Status filter */}
         <StatusFilter selected={selectedStatuses} onToggle={toggleStatus} />
 
+        {/* Team filter */}
+        <TeamFilter teamNames={teamNames} selected={selectedTeams} onToggle={toggleTeam} />
+
         {/* Spacer */}
         <div className="flex-1" />
 
@@ -425,7 +542,7 @@ export function MissionsPage() {
       </div>
 
       {/* Active filter indicators */}
-      {(selectedStatuses.size > 0) && (
+      {(selectedStatuses.size > 0 || selectedTeams.size > 0) && (
         <div className="flex items-center gap-2 shrink-0 flex-wrap">
           <span className="text-[10px] text-muted-foreground">Filtering by:</span>
           {Array.from(selectedStatuses).map((status) => {
@@ -442,11 +559,23 @@ export function MissionsPage() {
               </Badge>
             );
           })}
+          {Array.from(selectedTeams).map((team) => (
+            <Badge
+              key={`team-${team}`}
+              variant="secondary"
+              className="text-[10px] gap-1 cursor-pointer hover:bg-destructive/20 text-blue-400"
+              onClick={() => toggleTeam(team)}
+            >
+              <Users className="h-2.5 w-2.5" />
+              {team}
+              <XCircle className="h-2.5 w-2.5" />
+            </Badge>
+          ))}
           <Button
             variant="ghost"
             size="sm"
             className="h-5 px-1.5 text-[10px] text-muted-foreground"
-            onClick={() => setSelectedStatuses(new Set())}
+            onClick={() => { setSelectedStatuses(new Set()); setSelectedTeams(new Set()); }}
           >
             Clear all
           </Button>
