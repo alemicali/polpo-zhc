@@ -1,0 +1,35 @@
+# Polpo
+
+> Open-source AI agent orchestration framework. Build your AI company — assemble agent teams that plan, execute, review their own work with LLM judges, and ping you only when it matters.
+
+Polpo is an autonomous multi-agent orchestrator. It acts as a project manager for AI agents: it plans work, delegates tasks to specialized agents, scores every output with LLM-as-Judge (G-Eval with 3 parallel evaluators), retries failures automatically, and notifies you via Slack, Telegram, email, or webhooks.
+
+Key capabilities: code generation, web browsing, email, document generation (PDF, Excel, Word), image/video/audio creation, web search, encrypted credential vault, reusable skills system, cron scheduling, approval gates, and crash-proof detached processes.
+
+Install: `npm install -g @polpo-ai/polpo`
+
+## Docs
+
+- [Introduction](https://docs.polpo.sh/introduction): Overview and motivation
+- [Getting Started](https://docs.polpo.sh/getting-started): Quickstart guide
+- [Missions](https://docs.polpo.sh/concepts/missions): Define goals, Polpo breaks them into tasks
+- [Teams](https://docs.polpo.sh/concepts/teams): Specialized agents with roles and skills
+- [Tasks](https://docs.polpo.sh/concepts/tasks): Task lifecycle, dependencies, quality gates
+- [Review Pipeline](https://docs.polpo.sh/features/review): LLM-as-Judge scoring system
+- [Skills](https://docs.polpo.sh/features/skills): Reusable agent capabilities
+- [Notifications](https://docs.polpo.sh/features/notifications): Slack, Telegram, email, webhooks
+- [Scheduling](https://docs.polpo.sh/features/scheduling): Cron-based mission automation
+- [Approval Gates](https://docs.polpo.sh/features/approval-gates): Human-in-the-loop checkpoints
+- [Installation](https://docs.polpo.sh/install): Install on laptop, VPS, Docker, Railway
+
+## Code
+
+- [GitHub Repository](https://github.com/lumea-labs/polpo): Source code, issues, contributing guide
+- [npm Package](https://www.npmjs.com/package/@polpo-ai/polpo): Published package
+
+## Optional
+
+- [TUI Guide](https://docs.polpo.sh/usage/tui): Terminal UI and chat interface
+- [Telegram Integration](https://docs.polpo.sh/usage/telegram): Chat with Polpo from Telegram
+- [Peer Identity](https://docs.polpo.sh/features/peer-identity): Cross-channel identity linking
+- [Channel Gateway](https://docs.polpo.sh/features/channel-gateway): Inbound messaging from any channel
