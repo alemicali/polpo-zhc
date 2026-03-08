@@ -1,14 +1,19 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdirSync, rmSync, existsSync } from "node:fs";
 import { join } from "node:path";
+import Database from "better-sqlite3";
+import { drizzle } from "drizzle-orm/better-sqlite3";
+import { createSqliteStores } from "@polpo/drizzle";
+import { ensureSqliteSchema } from "../core/drizzle-sqlite-schema.js";
 import { Orchestrator } from "../core/orchestrator.js";
-import { SqliteTaskStore } from "../stores/sqlite-task-store.js";
+import type { TaskStore } from "../core/task-store.js";
 import { InMemoryRunStore, createTestAgent } from "./fixtures.js";
 
 const TEST_DIR = join(process.cwd(), ".test-polpo-mission-resume");
 
 describe("Mission resume (Orchestrator)", () => {
-  let store: SqliteTaskStore;
+  let sqlite: InstanceType<typeof Database>;
+  let store: TaskStore;
   let runStore: InMemoryRunStore;
   let orchestrator: Orchestrator;
 
@@ -16,7 +21,12 @@ describe("Mission resume (Orchestrator)", () => {
     if (existsSync(TEST_DIR)) rmSync(TEST_DIR, { recursive: true });
     mkdirSync(TEST_DIR, { recursive: true });
 
-    store = new SqliteTaskStore(TEST_DIR);
+    sqlite = new Database(join(TEST_DIR, "state.db"));
+    sqlite.exec("PRAGMA journal_mode = WAL");
+    sqlite.exec("PRAGMA foreign_keys = ON");
+    ensureSqliteSchema(sqlite);
+    const db = drizzle(sqlite);
+    store = createSqliteStores(db).taskStore;
     runStore = new InMemoryRunStore();
 
     orchestrator = new Orchestrator({
@@ -38,7 +48,7 @@ describe("Mission resume (Orchestrator)", () => {
   });
 
   afterEach(() => {
-    store.close();
+    sqlite.close();
     runStore.close();
     if (existsSync(TEST_DIR)) rmSync(TEST_DIR, { recursive: true });
   });

@@ -6,7 +6,7 @@ export { Orchestrator, buildRetryPrompt } from "./core/orchestrator.js";
 export type { OrchestratorOptions, AssessFn } from "./core/orchestrator.js";
 
 // Stores
-export { FileTaskStore, FileRunStore, JsonTaskStore, SqliteTaskStore } from "./stores/index.js";
+export { FileTaskStore, FileRunStore, JsonTaskStore } from "./stores/index.js";
 
 // Engine
 export { spawnEngine } from "./adapters/engine.js";
@@ -42,7 +42,6 @@ export { NotificationRouter } from "./notifications/index.js";
 export type { NotificationChannel, Notification, OutcomeAttachment } from "./notifications/types.js";
 export type { NotificationStore, NotificationRecord, NotificationStatus } from "./core/notification-store.js";
 export { FileNotificationStore } from "./stores/file-notification-store.js";
-export { SqliteNotificationStore } from "./stores/sqlite-notification-store.js";
 export { SlackChannel } from "./notifications/channels/slack.js";
 export { TelegramChannel } from "./notifications/channels/telegram.js";
 export { EmailChannel } from "./notifications/channels/email.js";

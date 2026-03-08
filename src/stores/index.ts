@@ -1,14 +1,11 @@
 export { FileTaskStore } from "./file-task-store.js";
 export { FileRunStore } from "./file-run-store.js";
 export { JsonTaskStore } from "./json-task-store.js";
-export { SqliteTaskStore } from "./sqlite-task-store.js";
-export { SqliteRunStore } from "./sqlite-run-store.js";
 export { PolpoConfigStore, JsonConfigStore } from "./json-config-store.js";
 export { FileMemoryStore } from "./file-memory-store.js";
 export { FileLogStore } from "./file-log-store.js";
 export { FileSessionStore } from "./file-session-store.js";
-export { SqliteSessionStore } from "./sqlite-session-store.js";
 export { FileApprovalStore } from "./file-approval-store.js";
 export { FileCheckpointStore } from "./file-checkpoint-store.js";
 export { FileNotificationStore } from "./file-notification-store.js";
-export { SqliteNotificationStore } from "./sqlite-notification-store.js";
+export { WhatsAppStore } from "./whatsapp-store.js";

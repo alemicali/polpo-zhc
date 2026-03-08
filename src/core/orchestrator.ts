@@ -155,7 +155,7 @@ export class Orchestrator extends TypedEmitter {
     }
   }
 
-  /** Drizzle store bundle — populated when storage is "postgres". */
+  /** Drizzle store bundle — populated when storage is "sqlite" or "postgres". */
   private drizzleStores?: import("@polpo/drizzle").DrizzleStores;
 
   /** Create task + run stores based on the configured storage backend. */
@@ -180,12 +180,26 @@ export class Orchestrator extends TypedEmitter {
       };
     }
     if (storage === "sqlite") {
-      const { join } = await import("node:path");
-      const { SqliteTaskStore } = await import("../stores/sqlite-task-store.js");
-      const { SqliteRunStore } = await import("../stores/sqlite-run-store.js");
+      const { createSqliteStores } = await import("@polpo/drizzle");
+      const { createRequire } = await import("node:module");
+      const req = createRequire(import.meta.url);
+      const Database = req("better-sqlite3");
+      const dbPath = join(this.polpoDir, "state.db");
+      const sqlite = new Database(dbPath);
+      sqlite.exec("PRAGMA journal_mode = WAL");
+      sqlite.exec("PRAGMA synchronous = NORMAL");
+      sqlite.exec("PRAGMA foreign_keys = ON");
+      const { ensureSqliteSchema } = await import("./drizzle-sqlite-schema.js");
+      ensureSqliteSchema(sqlite);
+      const { drizzle } = await import("drizzle-orm/better-sqlite3");
+      const db = drizzle(sqlite);
+      this.drizzleStores = createSqliteStores(db);
       return {
-        task: new SqliteTaskStore(this.polpoDir),
-        run: new SqliteRunStore(join(this.polpoDir, "state.db")),
+        task: this.drizzleStores.taskStore,
+        run: this.drizzleStores.runStore,
+        logStore: this.drizzleStores.logStore,
+        sessionStore: this.drizzleStores.sessionStore,
+        memoryStore: this.drizzleStores.memoryStore,
       };
     }
     return {

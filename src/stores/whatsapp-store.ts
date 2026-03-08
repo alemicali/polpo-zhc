@@ -5,7 +5,24 @@
  * Stored in `.polpo/whatsapp.db`.
  */
 
-import { createDatabase, type PolpoDatabase } from "./sqlite-compat.js";
+import { createRequire } from "node:module";
+
+/** Minimal interface covering better-sqlite3 / bun:sqlite API surface */
+interface PolpoDatabase {
+  exec(sql: string): void;
+  prepare(sql: string): { run(...params: unknown[]): { changes: number }; get(...params: unknown[]): unknown; all(...params: unknown[]): unknown[] };
+  close(): void;
+}
+
+function createDatabase(dbPath: string): PolpoDatabase {
+  if (typeof process !== "undefined" && (process.versions as any)?.bun) {
+    const { Database } = require("bun:sqlite");
+    return new Database(dbPath, { strict: true });
+  }
+  const req = createRequire(import.meta.url);
+  const Database = req("better-sqlite3");
+  return new Database(dbPath);
+}
 
 // ─── Types ──────────────────────────────────────
 

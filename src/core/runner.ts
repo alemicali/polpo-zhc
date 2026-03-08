@@ -5,7 +5,7 @@
  * Spawned by the orchestrator for each agent task.
  * Lifecycle:
  *   1. Read --config <path> from args
- *   2. Open own SqliteRunStore connection
+ *   2. Open own RunStore connection (Drizzle SQLite or PG)
  *   3. Spawn agent via built-in engine
  *   4. Poll activity, write to RunStore
  *   5. Await handle.done, write result
@@ -92,9 +92,20 @@ async function createRunStore(config: RunnerConfig): Promise<RunStore> {
     return createPgStores(db).runStore;
   }
   if (config.storage === "sqlite") {
-    const { SqliteRunStore } = await import("../stores/sqlite-run-store.js");
-    const { join } = await import("node:path");
-    return new SqliteRunStore(join(config.polpoDir, "state.db"));
+    const { createSqliteStores } = await import("@polpo/drizzle");
+    const { createRequire } = await import("node:module");
+    const req = createRequire(import.meta.url);
+    const Database = req("better-sqlite3");
+    const dbPath = join(config.polpoDir, "state.db");
+    const sqlite = new Database(dbPath);
+    sqlite.exec("PRAGMA journal_mode = WAL");
+    sqlite.exec("PRAGMA synchronous = NORMAL");
+    sqlite.exec("PRAGMA foreign_keys = ON");
+    const { ensureSqliteSchema } = await import("./drizzle-sqlite-schema.js");
+    ensureSqliteSchema(sqlite);
+    const { drizzle } = await import("drizzle-orm/better-sqlite3");
+    const db = drizzle(sqlite);
+    return createSqliteStores(db).runStore;
   }
   return new FileRunStore(config.polpoDir);
 }
