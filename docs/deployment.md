@@ -58,7 +58,7 @@ Create `~/Library/LaunchAgents/io.polpo.server.plist`:
   <array>
     <string>/usr/bin/env</string>
     <string>npx</string>
-    <string>openpolpo</string>
+    <string>polpo-ai</string>
     <string>serve</string>
     <string>--dir</string>
     <string>/path/to/project</string>
@@ -93,7 +93,7 @@ Create `~/Library/LaunchAgents/io.polpo.server.plist`:
 FROM node:20-alpine
 RUN npm i -g polpo-ai
 WORKDIR /app
-CMD [\"npx\", \"openpolpo\", \"serve\", \"--dir\", \".\", \"--port\", \"3000\"]
+CMD [\"npx\", \"polpo-ai\", \"serve\", \"--dir\", \".\", \"--port\", \"3000\"]
 ```
 
 Verify with `./node_modules/.bin/tsc` after changes.

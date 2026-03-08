@@ -1,6 +1,6 @@
 /**
  * OpenPolpo API types — mirrors the server contract.
- * Intentionally decoupled from @openpolpo/core to avoid pulling
+ * Intentionally decoupled from @polpo-ai/core to avoid pulling
  * server-side dependencies (blessed, sqlite, etc.) into the client bundle.
  */
 

@@ -8,7 +8,7 @@ If you discover a security vulnerability in OpenPolpo, please report it responsi
 
 Use the GitHub Security Advisory ["Report a Vulnerability"](https://github.com/lumea-labs/polpo/security/advisories/new) tab to submit a private report.
 
-Alternatively, email **security@openpolpo.dev** with:
+Alternatively, email **security@polpo.sh** with:
 
 1. A description of the vulnerability
 2. Steps to reproduce
@@ -39,7 +39,7 @@ OpenPolpo includes several built-in security measures:
 
 ### Agent Sandboxing
 
-- **Filesystem sandbox** (`allowedPaths`) — restricts agent file access to configured directories. Agents cannot read or write outside the sandbox. See the [Security Guide](https://openpolpo.dev/guides/security/).
+- **Filesystem sandbox** (`allowedPaths`) — restricts agent file access to configured directories. Agents cannot read or write outside the sandbox. See the [Security Guide](https://polpo.sh/guides/security/).
 - **`safeEnv`** — strips sensitive environment variables (API keys, tokens, passwords) from agent subprocess environments. Only explicitly allowed variables are forwarded.
 
 ### Network

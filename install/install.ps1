@@ -196,8 +196,8 @@ function Show-NextSteps {
     Write-Host ""
     Write-Host "    docker run -it -p 3000:3000 -v ${PWD}:/workspace lumea-labs/polpo" -ForegroundColor Cyan
     Write-Host ""
-    Write-Host "  Documentation: https://openpolpo.dev" -ForegroundColor DarkGray
-    Write-Host "  GitHub:        https://github.com/openpolpo/openpolpo" -ForegroundColor DarkGray
+    Write-Host "  Documentation: https://polpo.sh" -ForegroundColor DarkGray
+    Write-Host "  GitHub:        https://github.com/lumea-labs/polpo" -ForegroundColor DarkGray
     Write-Host ""
 }
 

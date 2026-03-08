@@ -12,7 +12,7 @@
   <a href="#features">Features</a> &bull;
   <a href="#architecture">Architecture</a> &bull;
   <a href="#project-structure">Project Structure</a> &bull;
-  <a href="https://openpolpo.dev">Docs</a>
+  <a href="https://polpo.sh">Docs</a>
 </p>
 
 <p align="center">
@@ -248,7 +248,7 @@ polpo/
 
 ## Documentation
 
-Full documentation is available at [openpolpo.dev](https://openpolpo.dev), including:
+Full documentation is available at [polpo.sh](https://polpo.sh), including:
 
 - Configuration reference (`polpo.json` schema)
 - API endpoint documentation
