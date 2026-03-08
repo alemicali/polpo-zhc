@@ -530,9 +530,9 @@ function QualitySection() {
             <span className="text-neutral-400">Nothing ships broken.</span>
           </h2>
           <p className="mx-auto mt-4 max-w-2xl text-center text-neutral-500">
-            Like UFC judges, but for code. 3 independent LLM reviewers score
-            every task in parallel. Median wins, outliers get cut. Below
-            threshold? The agent goes back in the ring.
+            Like UFC judges, but for your agents' work. 3 independent LLM
+            reviewers score every task in parallel. Median wins, outliers get
+            cut. Below threshold? The agent goes back in the ring.
           </p>
         </Reveal>
 
