@@ -20,7 +20,7 @@
   },
   "dependencies": {
     "@polpo-ai/core": "workspace:*",
-    "drizzle-orm": "^0.44.0",
+    "drizzle-orm": "^0.45.1",
     "nanoid": "^5.1.2"
   },
   "peerDependencies": {

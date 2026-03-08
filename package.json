@@ -82,8 +82,8 @@
     "@polpo-ai/core": "workspace:*",
     "@hono/node-server": "^1.19.9",
     "@hono/zod-openapi": "^1.2.2",
-    "@mariozechner/pi-agent-core": "^0.52.12",
-    "@mariozechner/pi-ai": "^0.52.12",
+    "@mariozechner/pi-agent-core": "^0.57.1",
+    "@mariozechner/pi-ai": "^0.57.1",
     "@sinclair/typebox": "^0.34.48",
     "@whiskeysockets/baileys": "7.0.0-rc.9",
     "chalk": "^5.4.1",
@@ -110,7 +110,7 @@
   "optionalDependencies": {
     "@polpo-ai/drizzle": "workspace:*",
     "better-sqlite3": "^12.6.2",
-    "drizzle-orm": "^0.44.0",
+    "drizzle-orm": "^0.45.1",
     "playwright-core": "^1.52.0",
     "postgres": "^3.4.0"
   },
