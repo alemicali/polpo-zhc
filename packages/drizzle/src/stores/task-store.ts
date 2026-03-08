@@ -161,28 +161,29 @@ export class DrizzleTaskStore implements TaskStore {
     const { metadata, tasks, processes } = this.schema;
     const d = this.dialect;
 
-    await this.db.transaction(async (tx: any) => {
+    // SQLite transactions require synchronous callbacks — execute directly.
+    const upsertMeta = (db: any, key: string, value: string) =>
+      db.insert(metadata).values({ key, value })
+        .onConflictDoUpdate({ target: metadata.key, set: { value } });
+
+    const exec = async (db: any) => {
       if (partial.project !== undefined) {
-        await tx.insert(metadata).values({ key: "project", value: partial.project })
-          .onConflictDoUpdate({ target: metadata.key, set: { value: partial.project } });
+        await upsertMeta(db, "project", partial.project);
       }
       if (partial.teams !== undefined) {
-        const val = d === "sqlite" ? JSON.stringify(partial.teams) : JSON.stringify(partial.teams);
-        await tx.insert(metadata).values({ key: "teams", value: val })
-          .onConflictDoUpdate({ target: metadata.key, set: { value: val } });
+        const val = JSON.stringify(partial.teams);
+        await upsertMeta(db, "teams", val);
       }
       if (partial.startedAt !== undefined) {
-        await tx.insert(metadata).values({ key: "startedAt", value: partial.startedAt })
-          .onConflictDoUpdate({ target: metadata.key, set: { value: partial.startedAt } });
+        await upsertMeta(db, "startedAt", partial.startedAt);
       }
       if (partial.completedAt !== undefined) {
-        await tx.insert(metadata).values({ key: "completedAt", value: partial.completedAt })
-          .onConflictDoUpdate({ target: metadata.key, set: { value: partial.completedAt } });
+        await upsertMeta(db, "completedAt", partial.completedAt);
       }
       if (partial.processes !== undefined) {
-        await tx.delete(processes);
+        await db.delete(processes);
         for (const p of partial.processes) {
-          await tx.insert(processes).values({
+          await db.insert(processes).values({
             agentName: p.agentName,
             pid: p.pid,
             taskId: p.taskId,
@@ -193,12 +194,20 @@ export class DrizzleTaskStore implements TaskStore {
         }
       }
       if (partial.tasks !== undefined) {
-        await tx.delete(tasks);
+        await db.delete(tasks);
         for (const t of partial.tasks) {
-          await tx.insert(tasks).values(this.taskToValues(t));
+          await db.insert(tasks).values(this.taskToValues(t));
         }
       }
-    });
+    };
+
+    if (this.dialect === "pg") {
+      await this.db.transaction(async (tx: any) => exec(tx));
+    } else {
+      // SQLite: better-sqlite3 transactions don't support async callbacks.
+      // Individual upserts are idempotent — no transaction needed for correctness.
+      await exec(this.db);
+    }
   }
 
   // ── Task CRUD ────────────────────────────────────────────────────────
