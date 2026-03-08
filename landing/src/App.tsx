@@ -17,7 +17,6 @@ import {
   ArrowRight,
   Copy,
   Check,
-  Terminal,
   Target,
   Loader2,
   Users,
@@ -767,7 +766,7 @@ function HowItWorks() {
   ];
   return (
     <section className="py-24 md:py-32">
-      <div className="mx-auto max-w-2xl px-6">
+      <div className="mx-auto max-w-4xl px-6">
         <Reveal>
           <h2 className="text-center font-display text-3xl font-extrabold tracking-tight text-neutral-950 sm:text-4xl">
             Three commands.{" "}
@@ -775,20 +774,25 @@ function HowItWorks() {
           </h2>
         </Reveal>
         <Reveal delay={0.12}>
-          <div className="mt-12 overflow-hidden rounded-xl border border-neutral-200 bg-neutral-950">
-            <div className="flex items-center gap-2 border-b border-neutral-800 px-4 py-3">
-              <Terminal className="h-4 w-4 text-neutral-500" />
-              <span className="font-mono text-xs text-neutral-500">terminal</span>
+          <div className="mt-12 overflow-hidden rounded-2xl border border-neutral-700/50 bg-[#1e1e1e] shadow-2xl">
+            {/* macOS title bar */}
+            <div className="flex items-center gap-2 border-b border-neutral-700/50 px-4 py-3">
+              <div className="flex items-center gap-1.5">
+                <div className="h-3 w-3 rounded-full bg-[#ff5f57]" />
+                <div className="h-3 w-3 rounded-full bg-[#febc2e]" />
+                <div className="h-3 w-3 rounded-full bg-[#28c840]" />
+              </div>
+              <span className="ml-3 font-mono text-xs text-neutral-500">polpo — zsh — 80x24</span>
             </div>
-            <div className="space-y-1 p-5 font-mono text-sm">
+            <div className="space-y-3 p-6 md:p-8 font-mono text-sm md:text-base leading-relaxed">
               {steps.map((s, i) => (
                 <div key={i} className="flex items-start gap-3">
-                  <span className="select-none text-neutral-600">$</span>
+                  <span className="select-none text-emerald-500">$</span>
                   <span className="text-neutral-100">{s.cmd}</span>
                   <span className="ml-auto hidden text-neutral-600 sm:inline"># {s.note}</span>
                 </div>
               ))}
-              <div className="mt-4 flex items-start gap-3 border-t border-neutral-800 pt-4">
+              <div className="mt-5 flex items-start gap-3 border-t border-neutral-700/50 pt-5">
                 <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-500" />
                 <span className="text-neutral-400">
                   Mission complete. 4 tasks done, 0 failed. Report sent to Telegram.
@@ -818,8 +822,12 @@ function Differentiators() {
       <div className="relative mx-auto max-w-2xl px-6">
         <Reveal>
           <h2 className="text-center font-display text-3xl font-extrabold tracking-tight text-neutral-950 sm:text-4xl">
-            Software that <span className="text-neutral-400">runs itself.</span>
+            Software that <span className="text-neutral-400">learns and evolves.</span>
           </h2>
+          <p className="mx-auto mt-4 max-w-lg text-center text-neutral-500">
+            Polpo gets smarter over time. Skills, playbooks, and agent memory
+            compound — your AI company improves with every run.
+          </p>
         </Reveal>
         <div className="mt-12 space-y-1">
           {items.map((d, i) => {
