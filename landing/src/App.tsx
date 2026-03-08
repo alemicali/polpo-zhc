@@ -171,11 +171,11 @@ function Navbar() {
 
 function Hero() {
   return (
-    <section className="relative overflow-hidden pt-32 pb-24 md:pt-44 md:pb-32">
-      {/* Isometric grid background */}
-      <div className="dot-grid pointer-events-none absolute inset-0 opacity-60" />
-      {/* Radial glow */}
-      <div className="pointer-events-none absolute top-0 left-1/2 -translate-x-1/2 h-[700px] w-[900px] bg-[radial-gradient(ellipse,rgba(247,139,151,0.06)_0%,transparent_70%)]" />
+    <section className="relative overflow-hidden pt-28 pb-24 md:pt-40 md:pb-32">
+      {/* Mesh trama with bottom fade */}
+      <div className="hero-mesh pointer-events-none absolute inset-0" style={{ maskImage: "linear-gradient(to bottom, black 40%, transparent 90%)", WebkitMaskImage: "linear-gradient(to bottom, black 40%, transparent 90%)" }} />
+      {/* Radial glow — warm center */}
+      <div className="pointer-events-none absolute top-0 left-1/2 -translate-x-1/2 h-[700px] w-[900px] bg-[radial-gradient(ellipse,rgba(232,104,138,0.05)_0%,rgba(59,62,115,0.03)_40%,transparent_70%)]" />
 
       <div className="relative mx-auto max-w-3xl px-6 text-center">
         <Reveal>
@@ -507,94 +507,108 @@ function TeamFlow() {
 
 function QualitySection() {
   const dimensions = [
-    { label: "Correctness", weight: "35%", desc: "Logic errors, runtime exceptions, functional accuracy." },
-    { label: "Completeness", weight: "30%", desc: "All requirements met, nothing missing, nothing left half-done." },
-    { label: "Code Quality", weight: "20%", desc: "Clean structure, naming, maintainability." },
-    { label: "Edge Cases", weight: "15%", desc: "Error handling, boundary conditions, resilience." },
+    { label: "Correctness", weight: "35%", score: 4.6, color: "bg-emerald-500" },
+    { label: "Completeness", weight: "30%", score: 4.2, color: "bg-sky-500" },
+    { label: "Code Quality", weight: "20%", score: 4.8, color: "bg-violet-500" },
+    { label: "Edge Cases", weight: "15%", score: 3.9, color: "bg-amber-500" },
   ];
+
+  const globalScore = 4.4;
 
   return (
     <section className="relative border-y border-neutral-100 py-24 md:py-32 overflow-hidden">
-      <div
-        className="pointer-events-none absolute inset-0 opacity-[0.03]"
-        style={{ backgroundImage: "repeating-linear-gradient(135deg, #000 0px, #000 1px, transparent 1px, transparent 16px)" }}
-      />
+      <div className="hero-mesh pointer-events-none absolute inset-0 opacity-60" />
 
-      <div className="relative mx-auto max-w-4xl px-6">
+      <div className="relative mx-auto max-w-5xl px-6">
         <Reveal>
           <div className="flex items-center justify-center gap-2 mb-4">
-            <Scale className="h-5 w-5 text-neutral-400" />
-            <span className="font-mono text-xs uppercase tracking-wider text-neutral-400">G-Eval Review System</span>
+            <Scale className="h-5 w-5 text-violet-400" />
+            <span className="font-mono text-xs uppercase tracking-wider text-neutral-400">Mission Control &middot; G-Eval Review</span>
           </div>
           <h2 className="text-center font-display text-3xl font-extrabold tracking-tight text-neutral-950 sm:text-4xl">
             Every task judged.{" "}
             <span className="text-neutral-400">Nothing ships broken.</span>
           </h2>
           <p className="mx-auto mt-4 max-w-2xl text-center text-neutral-500">
-            3 independent LLM judges review every task output in parallel. Scores are
-            aggregated via median with outlier filtering. Below threshold? The
-            agent gets targeted feedback and retries automatically.
+            Like UFC judges, but for code. 3 independent LLM reviewers score
+            every task in parallel. Median wins, outliers get cut. Below
+            threshold? The agent goes back in the ring.
           </p>
         </Reveal>
 
-        <div className="mt-14 grid grid-cols-1 gap-8 md:grid-cols-2">
+        <div className="mt-14 grid grid-cols-1 gap-8 lg:grid-cols-3">
+          {/* Mock score card */}
           <Reveal delay={0.08}>
-            <div className="rounded-xl border border-neutral-200 bg-white overflow-hidden">
-              <div className="border-b border-neutral-100 bg-neutral-50 px-5 py-3">
-                <span className="font-mono text-xs uppercase tracking-wider text-neutral-400">Scoring dimensions</span>
+            <div className="rounded-xl border border-neutral-200 bg-white overflow-hidden shadow-sm">
+              <div className="border-b border-neutral-100 bg-gradient-to-r from-violet-50 to-rose-50 px-5 py-3 flex items-center justify-between">
+                <span className="font-mono text-xs uppercase tracking-wider text-neutral-500">Task Review</span>
+                <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-bold text-emerald-700">PASS</span>
               </div>
-              <div className="divide-y divide-neutral-100">
-                {dimensions.map((d, i) => (
-                  <div key={i} className="flex items-start gap-4 px-5 py-4">
-                    <span className="shrink-0 rounded-md bg-neutral-100 px-2 py-0.5 font-mono text-xs font-bold text-neutral-600">{d.weight}</span>
-                    <div>
-                      <span className="font-display text-sm font-bold text-neutral-900">{d.label}</span>
-                      <p className="mt-0.5 text-xs text-neutral-500 leading-relaxed">{d.desc}</p>
+              <div className="p-5">
+                <div className="flex items-center justify-between mb-5">
+                  <span className="text-sm text-neutral-500">Global score</span>
+                  <span className="font-display text-3xl font-extrabold text-neutral-950">{globalScore}<span className="text-lg text-neutral-400"> / 5</span></span>
+                </div>
+                <div className="space-y-3">
+                  {dimensions.map((d, i) => (
+                    <div key={i}>
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-xs font-medium text-neutral-600">{d.label}</span>
+                        <span className="font-mono text-xs text-neutral-500">{d.score}</span>
+                      </div>
+                      <div className="h-1.5 rounded-full bg-neutral-100 overflow-hidden">
+                        <motion.div
+                          className={`h-full rounded-full ${d.color}`}
+                          initial={{ width: 0 }}
+                          whileInView={{ width: `${(d.score / 5) * 100}%` }}
+                          viewport={{ once: true }}
+                          transition={{ duration: 0.8, delay: i * 0.1, ease: [0.22, 1, 0.36, 1] }}
+                        />
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  ))}
+                </div>
+                <div className="mt-4 pt-4 border-t border-neutral-100 flex items-center gap-2 text-xs text-neutral-400">
+                  <span className="font-mono">3 judges</span>
+                  <span>&middot;</span>
+                  <span className="font-mono">median</span>
+                  <span>&middot;</span>
+                  <span className="font-mono">threshold 3.0</span>
+                </div>
               </div>
             </div>
           </Reveal>
 
-          <Reveal delay={0.16}>
-            <div className="space-y-4">
-              <div className="rounded-xl border border-neutral-200 bg-white p-5">
-                <div className="flex items-center gap-3 mb-3">
-                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-neutral-950">
-                    <Search className="h-4 w-4 text-white" />
-                  </div>
-                  <span className="font-display text-sm font-bold text-neutral-900">Phase 1 — Exploration</span>
+          {/* How it works — phases */}
+          <Reveal delay={0.16} className="lg:col-span-2">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3 h-full">
+              <div className="rounded-xl border border-neutral-200 bg-white p-5 flex flex-col">
+                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-sky-50 mb-3">
+                  <Search className="h-4.5 w-4.5 text-sky-500" />
                 </div>
-                <p className="text-sm text-neutral-500 leading-relaxed">
-                  Each judge explores the codebase with tools — reads files, checks
-                  output, analyzes the execution timeline. No guessing.
+                <span className="font-display text-sm font-bold text-neutral-900">Explore</span>
+                <p className="mt-1.5 flex-1 text-xs text-neutral-500 leading-relaxed">
+                  Each judge reads files, checks output, and analyzes the execution timeline with real tools.
                 </p>
               </div>
 
-              <div className="rounded-xl border border-neutral-200 bg-white p-5">
-                <div className="flex items-center gap-3 mb-3">
-                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-neutral-950">
-                    <BarChart3 className="h-4 w-4 text-white" />
-                  </div>
-                  <span className="font-display text-sm font-bold text-neutral-900">Phase 2 — Scoring</span>
+              <div className="rounded-xl border border-neutral-200 bg-white p-5 flex flex-col">
+                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-violet-50 mb-3">
+                  <BarChart3 className="h-4.5 w-4.5 text-violet-500" />
                 </div>
-                <p className="text-sm text-neutral-500 leading-relaxed">
-                  Structured scores per dimension with reasoning and
-                  file:line evidence. Median aggregation filters outliers.
+                <span className="font-display text-sm font-bold text-neutral-900">Score</span>
+                <p className="mt-1.5 flex-1 text-xs text-neutral-500 leading-relaxed">
+                  Per-dimension scores with reasoning and file:line evidence. Outliers filtered via median.
                 </p>
               </div>
 
-              <div className="rounded-xl border border-neutral-200 bg-white p-5">
-                <div className="flex items-center gap-3 mb-3">
-                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-neutral-950">
-                    <AlertTriangle className="h-4 w-4 text-white" />
-                  </div>
-                  <span className="font-display text-sm font-bold text-neutral-900">Expectation Judge</span>
+              <div className="rounded-xl border border-neutral-200 bg-white p-5 flex flex-col">
+                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-amber-50 mb-3">
+                  <AlertTriangle className="h-4.5 w-4.5 text-amber-500" />
                 </div>
-                <p className="text-sm text-neutral-500 leading-relaxed">
-                  A meta-judge evaluates whether the expectations themselves are
-                  wrong — before blaming the agent. Prevents false failures.
+                <span className="font-display text-sm font-bold text-neutral-900">Meta-judge</span>
+                <p className="mt-1.5 flex-1 text-xs text-neutral-500 leading-relaxed">
+                  Evaluates if the expectations are wrong before blaming the agent. Prevents false failures.
                 </p>
               </div>
             </div>
@@ -708,10 +722,10 @@ function FeatureShowcase() {
 
 function DeployOptions() {
   const options: { icon: LucideIcon; title: string; desc: string; link: string }[] = [
-    { icon: Laptop, title: "Your laptop", desc: "npm install and go. Zero config.", link: "https://docs.polpo.sh/install" },
-    { icon: Server, title: "Any VPS", desc: "Hetzner, AWS, Railway, Fly.", link: "https://docs.polpo.sh/install/hetzner" },
-    { icon: Container, title: "Docker", desc: "One-line container, ready to serve.", link: "https://docs.polpo.sh/install#docker" },
-    { icon: Smartphone, title: "Mobile PWA", desc: "Install the web UI on your phone. Monitor from anywhere.", link: "https://docs.polpo.sh/install" },
+    { icon: Laptop, title: "Laptop", desc: "npm install, done.", link: "https://docs.polpo.sh/install" },
+    { icon: Server, title: "VPS / Cloud", desc: "Hetzner, AWS, Railway.", link: "https://docs.polpo.sh/install/hetzner" },
+    { icon: Container, title: "Docker", desc: "One-line container.", link: "https://docs.polpo.sh/install#docker" },
+    { icon: Smartphone, title: "Mobile", desc: "PWA, monitor anywhere.", link: "https://docs.polpo.sh/install" },
   ];
   return (
     <section className="py-24 md:py-32">
@@ -876,7 +890,7 @@ function Footer() {
         <div className="flex flex-col gap-8 md:flex-row md:items-start md:justify-between">
           <div>
             <img src="/logo-text.svg" alt="Polpo" className="h-5" />
-            <p className="mt-1 text-sm text-neutral-500">Open-source AI agent orchestration.</p>
+            <p className="mt-1 text-sm text-neutral-500">Orchestration, mission control, and reliability scoring for AI agent teams.</p>
           </div>
 
           <div className="flex gap-16">
