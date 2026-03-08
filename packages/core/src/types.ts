@@ -539,7 +539,9 @@ export interface RunnerConfig {
   cwd: string;
   /** Per-task output directory (.polpo/output/<taskId>/). Agents should write deliverables here. */
   outputDir: string;
-  storage?: "file" | "sqlite";
+  storage?: "file" | "sqlite" | "postgres";
+  /** PostgreSQL connection URL (for storage: "postgres"). */
+  databaseUrl?: string;
   /** UDS path for push-notifying the orchestrator on completion. */
   notifySocket?: string;
   /** Email domain allowlist (from settings or agent config). */
@@ -668,8 +670,12 @@ export interface PolpoSettings {
    *  "off" disables thinking (default). Can be overridden per-agent via AgentConfig.reasoning.
    *  Higher levels produce better results but are slower and more expensive. */
   reasoning?: ReasoningLevel;
-  /** Storage backend for tasks, missions, and runs. Default: "file" (filesystem JSON). */
-  storage?: "file" | "sqlite";
+  /** Storage backend for tasks, missions, and runs. Default: "file" (filesystem JSON).
+   *  "postgres" requires @polpo/drizzle and a databaseUrl. */
+  storage?: "file" | "sqlite" | "postgres";
+  /** PostgreSQL connection URL (required when storage is "postgres").
+   *  Example: "postgres://user:pass@localhost:5432/polpo" */
+  databaseUrl?: string;
   /** Max assessment retries when all reviewers fail before falling back to fix/retry. Default: 1 */
   maxAssessmentRetries?: number;
   /** Max concurrent agent processes. Default: unlimited (undefined). */

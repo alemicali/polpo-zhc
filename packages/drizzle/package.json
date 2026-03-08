@@ -1,0 +1,71 @@
+{
+  "name": "@polpo/drizzle",
+  "version": "0.1.0",
+  "description": "Drizzle ORM store implementations for the Polpo AI agent orchestration framework (PostgreSQL + SQLite)",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "prepublishOnly": "tsc"
+  },
+  "dependencies": {
+    "@polpo/core": "workspace:*",
+    "drizzle-orm": "^0.44.0",
+    "nanoid": "^5.1.2"
+  },
+  "peerDependencies": {
+    "postgres": "^3.4.0",
+    "better-sqlite3": "^11.0.0"
+  },
+  "peerDependenciesMeta": {
+    "postgres": {
+      "optional": true
+    },
+    "better-sqlite3": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "typescript": "^5.7.3",
+    "@types/better-sqlite3": "^7.6.8",
+    "postgres": "^3.4.0",
+    "better-sqlite3": "^11.0.0",
+    "drizzle-kit": "^0.31.0"
+  },
+  "files": ["dist", "README.md"],
+  "license": "MIT",
+  "keywords": [
+    "polpo",
+    "drizzle",
+    "orm",
+    "postgresql",
+    "sqlite",
+    "ai-agents",
+    "orchestration"
+  ],
+  "author": "OpenPolpo Contributors",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/lumea-labs/polpo.git",
+    "directory": "packages/drizzle"
+  },
+  "homepage": "https://github.com/lumea-labs/polpo/tree/main/packages/drizzle",
+  "bugs": {
+    "url": "https://github.com/lumea-labs/polpo/issues"
+  }
+}

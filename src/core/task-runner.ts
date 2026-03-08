@@ -478,6 +478,7 @@ export class TaskRunner {
       cwd: this.ctx.agentWorkDir,
       outputDir,
       storage: this.ctx.config.settings.storage,
+      databaseUrl: this.ctx.config.settings.databaseUrl,
       notifySocket: getSocketPath(this.ctx.polpoDir),
       emailAllowedDomains: agent.emailAllowedDomains ?? this.ctx.config.settings.emailAllowedDomains,
       reasoning: this.ctx.config.settings.reasoning,

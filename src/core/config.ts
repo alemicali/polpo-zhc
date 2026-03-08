@@ -177,6 +177,22 @@ function parseSettings(raw: any): PolpoSettings {
   if (raw?.enableScheduler != null) settings.enableScheduler = raw.enableScheduler;
   if (raw?.defaultQualityThreshold != null) settings.defaultQualityThreshold = raw.defaultQualityThreshold;
 
+  // Storage backend
+  if (raw?.storage && ["file", "sqlite", "postgres"].includes(raw.storage)) {
+    settings.storage = raw.storage;
+  }
+  if (raw?.databaseUrl && typeof raw.databaseUrl === "string") {
+    settings.databaseUrl = raw.databaseUrl;
+  }
+  // Allow DATABASE_URL env var as fallback
+  if (!settings.databaseUrl && process.env.DATABASE_URL) {
+    settings.databaseUrl = process.env.DATABASE_URL;
+  }
+  // Validate: postgres requires databaseUrl
+  if (settings.storage === "postgres" && !settings.databaseUrl) {
+    throw new Error('storage: "postgres" requires a databaseUrl in settings or DATABASE_URL env var');
+  }
+
   if (!["quiet", "normal", "verbose"].includes(settings.logLevel)) {
     throw new Error(`Invalid logLevel "${settings.logLevel}": must be quiet, normal, or verbose`);
   }

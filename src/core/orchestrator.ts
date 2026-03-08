@@ -156,7 +156,26 @@ export class Orchestrator extends TypedEmitter {
   }
 
   /** Create task + run stores based on the configured storage backend. */
-  private async createStores(storage?: "file" | "sqlite"): Promise<{ task: TaskStore; run: RunStore }> {
+  private async createStores(storage?: "file" | "sqlite" | "postgres"): Promise<{
+    task: TaskStore; run: RunStore;
+    logStore?: LogStore; sessionStore?: SessionStore; memoryStore?: MemoryStore;
+  }> {
+    if (storage === "postgres") {
+      const { createPgStores, ensurePgSchema } = await import("@polpo/drizzle");
+      const postgres = (await import("postgres")).default;
+      const { drizzle } = await import("drizzle-orm/postgres-js");
+      const sql = postgres(this.config.settings.databaseUrl!);
+      const db = drizzle(sql);
+      await ensurePgSchema(db);
+      const stores = createPgStores(db);
+      return {
+        task: stores.taskStore,
+        run: stores.runStore,
+        logStore: stores.logStore,
+        sessionStore: stores.sessionStore,
+        memoryStore: stores.memoryStore,
+      };
+    }
     if (storage === "sqlite") {
       const { join } = await import("node:path");
       const { SqliteTaskStore } = await import("../stores/sqlite-task-store.js");
@@ -193,9 +212,23 @@ export class Orchestrator extends TypedEmitter {
       : await this.createStores(this.config.settings.storage);
     this.registry = stores.task;
     this.runStore = stores.run;
-    this.memoryStore = new FileMemoryStore(this.polpoDir);
-    await this.initLogStore();
-    await this.initSessionStore();
+
+    // When storage is "postgres", Drizzle provides all stores; otherwise use file-based defaults
+    if ("logStore" in stores && stores.logStore) {
+      this.logStore = stores.logStore;
+      await this.logStore.startSession();
+      this.setLogSink(this.logStore);
+    } else {
+      await this.initLogStore();
+    }
+    if ("sessionStore" in stores && stores.sessionStore) {
+      this.sessionStore = stores.sessionStore;
+    } else {
+      await this.initSessionStore();
+    }
+    this.memoryStore = ("memoryStore" in stores && stores.memoryStore)
+      ? stores.memoryStore
+      : new FileMemoryStore(this.polpoDir);
     this.initManagers();
     this.initVaultStore();
   }
