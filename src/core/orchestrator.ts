@@ -2,7 +2,8 @@ import { resolve } from "node:path";
 import { mkdirSync, existsSync, watch, type FSWatcher } from "node:fs";
 import { join } from "node:path";
 import type { Server } from "node:net";
-import { parseConfig, loadPolpoConfig } from "./config.js";
+import { parseConfig, loadPolpoConfig, savePolpoConfig } from "./config.js";
+import { findLogForTask, buildExecutionSummary } from "../assessment/transcript-parser.js";
 import { FileTaskStore } from "../stores/file-task-store.js";
 import { FileRunStore } from "../stores/file-run-store.js";
 import { FileMemoryStore } from "../stores/file-memory-store.js";
@@ -266,6 +267,17 @@ export class Orchestrator extends TypedEmitter {
       agentWorkDir: this.resolveAgentWorkDir(),
       polpoDir: this.polpoDir,
       assessFn: this.assessFn,
+
+      // Shell-specific ports (Node.js implementations)
+      killProcess: (pid, signal) => { try { process.kill(pid, (signal ?? "SIGTERM") as NodeJS.Signals); } catch { /* already dead */ } },
+      loadConfig: () => loadPolpoConfig(this.polpoDir),
+      saveConfig: (config) => savePolpoConfig(this.polpoDir, config),
+      queryLLM: async (prompt, model) => {
+        const { queryOrchestratorText } = await import("../llm/query.js");
+        return queryOrchestratorText(prompt, model);
+      },
+      findLogForTask: (polpoDir, taskId, runId) => findLogForTask(polpoDir, taskId, runId),
+      buildExecutionSummary: (logPath) => buildExecutionSummary(logPath),
     };
     this.agentMgr = new AgentManager(ctx);
     this.taskMgr = new TaskManager(ctx);
