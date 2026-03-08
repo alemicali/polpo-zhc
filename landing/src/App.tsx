@@ -532,7 +532,7 @@ function QualitySection() {
           <p className="mx-auto mt-4 max-w-2xl text-center text-neutral-500">
             Like UFC judges, but for your agents' work. 3 independent LLM
             reviewers score every task in parallel. Median wins, outliers get
-            cut. Below threshold? The agent goes back in the ring.
+            cut. Below threshold? The agent goes back to work.
           </p>
         </Reveal>
 
