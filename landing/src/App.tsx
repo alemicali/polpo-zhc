@@ -25,7 +25,6 @@ import {
   BookOpen,
   Star,
   Scale,
-  AlertTriangle,
   ShieldCheck,
   Play,
   Laptop,
@@ -505,10 +504,10 @@ function TeamFlow() {
 
 function QualitySection() {
   const dimensions = [
-    { label: "Correctness", weight: "35%", score: 4.6, color: "bg-emerald-500" },
-    { label: "Completeness", weight: "30%", score: 4.2, color: "bg-sky-500" },
-    { label: "Code Quality", weight: "20%", score: 4.8, color: "bg-violet-500" },
-    { label: "Edge Cases", weight: "15%", score: 3.9, color: "bg-amber-500" },
+    { label: "Correctness", score: 4.6, color: "bg-emerald-500" },
+    { label: "Completeness", score: 4.2, color: "bg-sky-500" },
+    { label: "Code Quality", score: 4.8, color: "bg-violet-500" },
+    { label: "Edge Cases", score: 3.9, color: "bg-amber-500" },
   ];
 
   const globalScore = 4.4;
@@ -517,101 +516,90 @@ function QualitySection() {
     <section className="relative border-y border-neutral-100 py-24 md:py-32 overflow-hidden">
       <div className="hero-mesh pointer-events-none absolute inset-0 opacity-60" />
 
-      <div className="relative mx-auto max-w-5xl px-6">
+      <div className="relative mx-auto max-w-4xl px-6">
         <Reveal>
           <div className="flex items-center justify-center gap-2 mb-4">
             <Scale className="h-5 w-5 text-violet-400" />
-            <span className="font-mono text-xs uppercase tracking-wider text-neutral-400">Mission Control &middot; G-Eval Review</span>
+            <span className="font-mono text-xs uppercase tracking-wider text-neutral-400">G-Eval Review System</span>
           </div>
           <h2 className="text-center font-display text-3xl font-extrabold tracking-tight text-neutral-950 sm:text-4xl">
             Every task judged.{" "}
             <span className="text-neutral-400">Nothing ships broken.</span>
           </h2>
           <p className="mx-auto mt-4 max-w-2xl text-center text-neutral-500">
-            Like UFC judges, but for your agents' work. 3 independent LLM
-            reviewers score every task in parallel. Median wins, outliers get
-            cut. Below threshold? The agent goes back to work.
+            Like UFC judges, but for your agents' work. You define the scoring
+            criteria for each task. 3 independent LLM reviewers evaluate the
+            output in parallel. Median wins, outliers get cut. Below threshold?
+            The agent goes back to work.
           </p>
         </Reveal>
 
-        <div className="mt-14 grid grid-cols-1 gap-8 lg:grid-cols-3">
-          {/* Mock score card */}
-          <Reveal delay={0.08}>
-            <div className="rounded-xl border border-neutral-200 bg-white overflow-hidden shadow-sm">
-              <div className="border-b border-neutral-100 bg-gradient-to-r from-violet-50 to-rose-50 px-5 py-3 flex items-center justify-between">
-                <span className="font-mono text-xs uppercase tracking-wider text-neutral-500">Task Review</span>
-                <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-bold text-emerald-700">PASS</span>
-              </div>
-              <div className="p-5">
-                <div className="flex items-center justify-between mb-5">
-                  <span className="text-sm text-neutral-500">Global score</span>
-                  <span className="font-display text-3xl font-extrabold text-neutral-950">{globalScore}<span className="text-lg text-neutral-400"> / 5</span></span>
+        {/* How it works — 3 step flow */}
+        <Reveal delay={0.08}>
+          <div className="mt-14 flex flex-col items-center gap-4 sm:flex-row sm:gap-0 sm:justify-center">
+            {[
+              { step: "1", label: "You define criteria", sub: "Per task: what to check, what score to beat" },
+              { step: "2", label: "3 judges evaluate", sub: "Each explores output with real tools, scores per dimension" },
+              { step: "3", label: "Pass or retry", sub: "Median score vs threshold. Fail? Agent gets feedback and retries" },
+            ].map((s, i) => (
+              <div key={i} className="flex items-center">
+                <div className="flex flex-col items-center text-center w-52">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-full bg-neutral-950 font-display text-sm font-bold text-white mb-2">
+                    {s.step}
+                  </div>
+                  <span className="font-display text-sm font-bold text-neutral-900">{s.label}</span>
+                  <span className="mt-1 text-xs text-neutral-500 leading-snug">{s.sub}</span>
                 </div>
-                <div className="space-y-3">
-                  {dimensions.map((d, i) => (
-                    <div key={i}>
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="text-xs font-medium text-neutral-600">{d.label}</span>
-                        <span className="font-mono text-xs text-neutral-500">{d.score}</span>
-                      </div>
-                      <div className="h-1.5 rounded-full bg-neutral-100 overflow-hidden">
-                        <motion.div
-                          className={`h-full rounded-full ${d.color}`}
-                          initial={{ width: 0 }}
-                          whileInView={{ width: `${(d.score / 5) * 100}%` }}
-                          viewport={{ once: true }}
-                          transition={{ duration: 0.8, delay: i * 0.1, ease: [0.22, 1, 0.36, 1] }}
-                        />
-                      </div>
+                {i < 2 && <ArrowRight className="hidden sm:block h-4 w-4 text-neutral-300 mx-4 shrink-0" />}
+              </div>
+            ))}
+          </div>
+        </Reveal>
+
+        {/* Score card mock */}
+        <Reveal delay={0.16}>
+          <div className="mt-12 mx-auto max-w-md rounded-xl border border-neutral-200 bg-white overflow-hidden shadow-sm">
+            <div className="border-b border-neutral-100 bg-gradient-to-r from-violet-50 to-rose-50 px-5 py-3 flex items-center justify-between">
+              <div>
+                <span className="font-mono text-xs uppercase tracking-wider text-neutral-500">Task: </span>
+                <span className="font-mono text-xs text-neutral-700">Set up Express routes</span>
+              </div>
+              <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-bold text-emerald-700">PASS</span>
+            </div>
+            <div className="p-5">
+              <div className="flex items-center justify-between mb-5">
+                <span className="text-sm text-neutral-500">Global score</span>
+                <span className="font-display text-3xl font-extrabold text-neutral-950">{globalScore}<span className="text-lg text-neutral-400"> / 5</span></span>
+              </div>
+              <div className="space-y-3">
+                {dimensions.map((d, i) => (
+                  <div key={i}>
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-xs font-medium text-neutral-600">{d.label}</span>
+                      <span className="font-mono text-xs text-neutral-500">{d.score}</span>
                     </div>
-                  ))}
-                </div>
-                <div className="mt-4 pt-4 border-t border-neutral-100 flex items-center gap-2 text-xs text-neutral-400">
-                  <span className="font-mono">3 judges</span>
-                  <span>&middot;</span>
-                  <span className="font-mono">median</span>
-                  <span>&middot;</span>
-                  <span className="font-mono">threshold 3.0</span>
-                </div>
+                    <div className="h-1.5 rounded-full bg-neutral-100 overflow-hidden">
+                      <motion.div
+                        className={`h-full rounded-full ${d.color}`}
+                        initial={{ width: 0 }}
+                        whileInView={{ width: `${(d.score / 5) * 100}%` }}
+                        viewport={{ once: true }}
+                        transition={{ duration: 0.8, delay: i * 0.1, ease: [0.22, 1, 0.36, 1] }}
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="mt-4 pt-4 border-t border-neutral-100 flex items-center gap-2 text-xs text-neutral-400">
+                <span className="font-mono">3 judges</span>
+                <span>&middot;</span>
+                <span className="font-mono">median</span>
+                <span>&middot;</span>
+                <span className="font-mono">threshold 3.0</span>
               </div>
             </div>
-          </Reveal>
-
-          {/* How it works — phases */}
-          <Reveal delay={0.16} className="lg:col-span-2">
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3 h-full">
-              <div className="rounded-xl border border-neutral-200 bg-white p-5 flex flex-col">
-                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-sky-50 mb-3">
-                  <Search className="h-4.5 w-4.5 text-sky-500" />
-                </div>
-                <span className="font-display text-sm font-bold text-neutral-900">Explore</span>
-                <p className="mt-1.5 flex-1 text-xs text-neutral-500 leading-relaxed">
-                  Each judge reads files, checks output, and analyzes the execution timeline with real tools.
-                </p>
-              </div>
-
-              <div className="rounded-xl border border-neutral-200 bg-white p-5 flex flex-col">
-                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-violet-50 mb-3">
-                  <BarChart3 className="h-4.5 w-4.5 text-violet-500" />
-                </div>
-                <span className="font-display text-sm font-bold text-neutral-900">Score</span>
-                <p className="mt-1.5 flex-1 text-xs text-neutral-500 leading-relaxed">
-                  Per-dimension scores with reasoning and file:line evidence. Outliers filtered via median.
-                </p>
-              </div>
-
-              <div className="rounded-xl border border-neutral-200 bg-white p-5 flex flex-col">
-                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-amber-50 mb-3">
-                  <AlertTriangle className="h-4.5 w-4.5 text-amber-500" />
-                </div>
-                <span className="font-display text-sm font-bold text-neutral-900">Meta-judge</span>
-                <p className="mt-1.5 flex-1 text-xs text-neutral-500 leading-relaxed">
-                  Evaluates if the expectations are wrong before blaming the agent. Prevents false failures.
-                </p>
-              </div>
-            </div>
-          </Reveal>
-        </div>
+          </div>
+        </Reveal>
       </div>
     </section>
   );
