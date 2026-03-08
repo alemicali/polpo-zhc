@@ -139,6 +139,12 @@ export function useFilePreview() {
       return;
     }
 
+    // Binary/unknown types: skip fetch, let fallback UI handle it
+    if (category === "binary") {
+      setPreviewState({ item, loading: false });
+      return;
+    }
+
     // Inline text
     if (item.text) {
       setPreviewState({ item, content: item.text, loading: false });
@@ -224,7 +230,17 @@ function PreviewContent({
 
   if (error) {
     return (
-      <div className="flex items-center justify-center h-full text-sm text-destructive">{error}</div>
+      <div className="flex flex-col items-center justify-center h-full gap-3 text-muted-foreground">
+        <File className="h-10 w-10" />
+        <p className="text-sm">{error}</p>
+        {downloadUrl && (
+          <Button variant="outline" size="sm" asChild>
+            <a href={downloadUrl} download>
+              <Download className="h-3.5 w-3.5 mr-1.5" /> Download
+            </a>
+          </Button>
+        )}
+      </div>
     );
   }
 

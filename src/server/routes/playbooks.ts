@@ -1,84 +1,84 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import type { ServerEnv } from "../app.js";
 import {
-  discoverTemplates,
-  loadTemplate,
+  discoverPlaybooks,
+  loadPlaybook,
   validateParams,
-  instantiateTemplate,
-  saveTemplate,
-  deleteTemplate,
-} from "../../core/template.js";
-import type { TemplateParameter } from "../../core/template.js";
+  instantiatePlaybook,
+  savePlaybook,
+  deletePlaybook,
+} from "../../core/playbook.js";
+import type { PlaybookParameter } from "../../core/playbook.js";
 
 /**
- * Template routes — discover, inspect, and execute reusable plan templates.
+ * Playbook routes — discover, inspect, and execute reusable mission playbooks.
  */
-export function templateRoutes(): OpenAPIHono<ServerEnv> {
+export function playbookRoutes(): OpenAPIHono<ServerEnv> {
   const app = new OpenAPIHono<ServerEnv>();
 
-  // GET /templates — list available templates
-  const listTemplatesRoute = createRoute({
+  // GET /playbooks — list available playbooks
+  const listPlaybooksRoute = createRoute({
     method: "get",
     path: "/",
-    tags: ["Templates"],
-    summary: "List available templates",
+    tags: ["Playbooks"],
+    summary: "List available playbooks",
     responses: {
       200: {
         content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.array(z.any()) }) } },
-        description: "List of templates",
+        description: "List of playbooks",
       },
     },
   });
 
-  app.openapi(listTemplatesRoute, (c) => {
+  app.openapi(listPlaybooksRoute, (c) => {
     const orchestrator = c.get("orchestrator");
     const workDir = orchestrator.getWorkDir();
     const polpoDir = orchestrator.getPolpoDir?.();
-    const templates = discoverTemplates(workDir, polpoDir);
-    return c.json({ ok: true, data: templates });
+    const playbooks = discoverPlaybooks(workDir, polpoDir);
+    return c.json({ ok: true, data: playbooks });
   });
 
-  // GET /templates/:name — get template details
-  const getTemplateRoute = createRoute({
+  // GET /playbooks/:name — get playbook details
+  const getPlaybookRoute = createRoute({
     method: "get",
     path: "/{name}",
-    tags: ["Templates"],
-    summary: "Get template details",
+    tags: ["Playbooks"],
+    summary: "Get playbook details",
     request: {
       params: z.object({ name: z.string() }),
     },
     responses: {
       200: {
         content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.any() }) } },
-        description: "Template details",
+        description: "Playbook details",
       },
       404: {
         content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string(), code: z.string() }) } },
-        description: "Template not found",
+        description: "Playbook not found",
       },
     },
   });
 
-  app.openapi(getTemplateRoute, (c) => {
+  app.openapi(getPlaybookRoute, (c) => {
     const orchestrator = c.get("orchestrator");
     const workDir = orchestrator.getWorkDir();
     const polpoDir = orchestrator.getPolpoDir?.();
     const { name } = c.req.valid("param");
-    const template = loadTemplate(workDir, polpoDir, name);
+    const playbook = loadPlaybook(workDir, polpoDir, name);
 
-    if (!template) {
-      return c.json({ ok: false, error: "Template not found", code: "NOT_FOUND" }, 404);
+    if (!playbook) {
+      return c.json({ ok: false, error: "Playbook not found", code: "NOT_FOUND" }, 404);
     }
 
-    return c.json({ ok: true, data: template }, 200);
+    return c.json({ ok: true, data: playbook }, 200);
   });
 
-  // POST /templates/:name/run — execute template with parameters
-  const runTemplateRoute = createRoute({
+  // POST /playbooks/:name/run — execute playbook with parameters
+  const runPlaybookRoute = createRoute({
     method: "post",
     path: "/{name}/run",
-    tags: ["Templates"],
-    summary: "Run template",
+    tags: ["Playbooks"],
+    summary: "Run playbook",
     request: {
       params: z.object({ name: z.string() }),
       body: {
@@ -102,7 +102,7 @@ export function templateRoutes(): OpenAPIHono<ServerEnv> {
             warnings: z.array(z.string()).optional(),
           }),
         }) } },
-        description: "Template executed",
+        description: "Playbook executed",
       },
       400: {
         content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string(), code: z.string(), details: z.any() }) } },
@@ -110,27 +110,27 @@ export function templateRoutes(): OpenAPIHono<ServerEnv> {
       },
       404: {
         content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string(), code: z.string() }) } },
-        description: "Template not found",
+        description: "Playbook not found",
       },
     },
   });
 
-  app.openapi(runTemplateRoute, async (c) => {
+  app.openapi(runPlaybookRoute, async (c) => {
     const orchestrator = c.get("orchestrator");
     const workDir = orchestrator.getWorkDir();
     const polpoDir = orchestrator.getPolpoDir?.();
     const { name } = c.req.valid("param");
 
-    const template = loadTemplate(workDir, polpoDir, name);
-    if (!template) {
-      return c.json({ ok: false, error: "Template not found", code: "NOT_FOUND" }, 404);
+    const playbook = loadPlaybook(workDir, polpoDir, name);
+    if (!playbook) {
+      return c.json({ ok: false, error: "Playbook not found", code: "NOT_FOUND" }, 404);
     }
 
     const body = c.req.valid("json");
     const params = (body.params ?? {}) as Record<string, string | number | boolean>;
 
     // Validate parameters
-    const validation = validateParams(template, params);
+    const validation = validateParams(playbook, params);
     if (!validation.valid) {
       return c.json({
         ok: false,
@@ -141,7 +141,7 @@ export function templateRoutes(): OpenAPIHono<ServerEnv> {
     }
 
     // Instantiate
-    const instance = instantiateTemplate(template, validation.resolved);
+    const instance = instantiatePlaybook(playbook, validation.resolved);
 
     // Save as mission and execute
     const mission = await orchestrator.saveMission({
@@ -163,20 +163,20 @@ export function templateRoutes(): OpenAPIHono<ServerEnv> {
     }, 201);
   });
 
-  // POST /templates — create or update a template
-  const createTemplateRoute = createRoute({
+  // POST /playbooks — create or update a playbook
+  const createPlaybookRoute = createRoute({
     method: "post",
     path: "/",
-    tags: ["Templates"],
-    summary: "Save template",
+    tags: ["Playbooks"],
+    summary: "Save playbook",
     request: {
       body: {
         content: {
           "application/json": {
             schema: z.object({
-              name: z.string().describe("Template name (kebab-case)"),
+              name: z.string().describe("Playbook name (kebab-case)"),
               description: z.string().describe("Human-readable description"),
-              mission: z.record(z.string(), z.any()).describe("Mission template body with {{placeholder}} syntax"),
+              mission: z.record(z.string(), z.any()).describe("Mission playbook body with {{placeholder}} syntax"),
               parameters: z.array(z.object({
                 name: z.string(),
                 description: z.string(),
@@ -193,16 +193,16 @@ export function templateRoutes(): OpenAPIHono<ServerEnv> {
     responses: {
       201: {
         content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.any() }) } },
-        description: "Template created",
+        description: "Playbook created",
       },
       400: {
         content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string(), code: z.string() }) } },
-        description: "Invalid template definition",
+        description: "Invalid playbook definition",
       },
     },
   });
 
-  app.openapi(createTemplateRoute, (c) => {
+  app.openapi(createPlaybookRoute, (c) => {
     const orchestrator = c.get("orchestrator");
     const polpoDir = orchestrator.getPolpoDir?.();
     if (!polpoDir) {
@@ -214,11 +214,11 @@ export function templateRoutes(): OpenAPIHono<ServerEnv> {
       name: body.name,
       description: body.description,
       mission: body.mission,
-      parameters: body.parameters as TemplateParameter[] | undefined,
+      parameters: body.parameters as PlaybookParameter[] | undefined,
     };
 
     try {
-      const dir = saveTemplate(polpoDir, definition);
+      const dir = savePlaybook(polpoDir, definition);
       return c.json({ ok: true, data: { name: definition.name, path: dir } }, 201);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -226,36 +226,36 @@ export function templateRoutes(): OpenAPIHono<ServerEnv> {
     }
   });
 
-  // DELETE /templates/:name — delete a template
-  const deleteTemplateRoute = createRoute({
+  // DELETE /playbooks/:name — delete a playbook
+  const deletePlaybookRoute = createRoute({
     method: "delete",
     path: "/{name}",
-    tags: ["Templates"],
-    summary: "Delete template",
+    tags: ["Playbooks"],
+    summary: "Delete playbook",
     request: {
       params: z.object({ name: z.string() }),
     },
     responses: {
       200: {
         content: { "application/json": { schema: z.object({ ok: z.boolean() }) } },
-        description: "Template deleted",
+        description: "Playbook deleted",
       },
       404: {
         content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string(), code: z.string() }) } },
-        description: "Template not found",
+        description: "Playbook not found",
       },
     },
   });
 
-  app.openapi(deleteTemplateRoute, (c) => {
+  app.openapi(deletePlaybookRoute, (c) => {
     const orchestrator = c.get("orchestrator");
     const workDir = orchestrator.getWorkDir();
     const polpoDir = orchestrator.getPolpoDir?.();
     const { name } = c.req.valid("param");
 
-    const deleted = deleteTemplate(workDir, polpoDir, name);
+    const deleted = deletePlaybook(workDir, polpoDir, name);
     if (!deleted) {
-      return c.json({ ok: false, error: "Template not found", code: "NOT_FOUND" }, 404);
+      return c.json({ ok: false, error: "Playbook not found", code: "NOT_FOUND" }, 404);
     }
 
     return c.json({ ok: true }, 200);

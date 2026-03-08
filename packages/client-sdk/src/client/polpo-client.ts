@@ -59,9 +59,9 @@ import type {
   ApprovalRequest,
   ApprovalStatus,
   ScheduleEntry,
-  TemplateInfo,
-  TemplateDefinition,
-  TemplateRunResult,
+  PlaybookInfo,
+  PlaybookDefinition,
+  PlaybookRunResult,
 } from "./types.js";
 
 export interface PolpoClientConfig {
@@ -738,22 +738,30 @@ export class PolpoClient {
     return this.post<ApprovalRequest>(`/approvals/${requestId}/reject`, { feedback, resolvedBy });
   }
 
-  // ── Templates ────────────────────────────────────────────
+  // ── Playbooks ────────────────────────────────────────────
 
-  /** List available templates discovered from disk. */
-  getTemplates(): Promise<TemplateInfo[]> {
-    return this.get<TemplateInfo[]>("/templates");
+  /** List available playbooks discovered from disk. */
+  getPlaybooks(): Promise<PlaybookInfo[]> {
+    return this.get<PlaybookInfo[]>("/playbooks");
   }
 
-  /** Get full template definition including the mission template. */
-  getTemplate(name: string): Promise<TemplateDefinition> {
-    return this.get<TemplateDefinition>(`/templates/${encodeURIComponent(name)}`);
+  /** Get full playbook definition including the mission body. */
+  getPlaybook(name: string): Promise<PlaybookDefinition> {
+    return this.get<PlaybookDefinition>(`/playbooks/${encodeURIComponent(name)}`);
   }
 
-  /** Run a template with parameters. Returns the created mission + task count. */
-  runTemplate(name: string, params?: Record<string, string | number | boolean>): Promise<TemplateRunResult> {
-    return this.post<TemplateRunResult>(`/templates/${encodeURIComponent(name)}/run`, { params });
+  /** Run a playbook with parameters. Returns the created mission + task count. */
+  runPlaybook(name: string, params?: Record<string, string | number | boolean>): Promise<PlaybookRunResult> {
+    return this.post<PlaybookRunResult>(`/playbooks/${encodeURIComponent(name)}/run`, { params });
   }
+
+  // Backward-compat aliases
+  /** @deprecated Use getPlaybooks instead. */
+  getTemplates(): Promise<PlaybookInfo[]> { return this.getPlaybooks(); }
+  /** @deprecated Use getPlaybook instead. */
+  getTemplate(name: string): Promise<PlaybookDefinition> { return this.getPlaybook(name); }
+  /** @deprecated Use runPlaybook instead. */
+  runTemplate(name: string, params?: Record<string, string | number | boolean>): Promise<PlaybookRunResult> { return this.runPlaybook(name, params); }
 
   /** Health check (instance method — uses configured base URL). */
   getHealth(): Promise<HealthResponse> {

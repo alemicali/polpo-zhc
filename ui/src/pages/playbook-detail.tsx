@@ -17,10 +17,10 @@ import {
 } from "lucide-react";
 import { ReactFlowProvider } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { useTemplates } from "@polpo-ai/react";
+import { usePlaybooks } from "@polpo-ai/react";
 import type {
-  TemplateDefinition,
-  TemplateParameter,
+  PlaybookDefinition,
+  PlaybookParameter,
 } from "@polpo-ai/react";
 import { toast } from "sonner";
 import { JsonBlock } from "@/components/json-block";
@@ -33,7 +33,7 @@ import type { MissionTaskDef } from "@/pages/mission-detail";
 
 // ── Parameter detail card ──
 
-function ParamCard({ param }: { param: TemplateParameter }) {
+function ParamCard({ param }: { param: PlaybookParameter }) {
   return (
     <div className="flex items-start gap-3 rounded-lg border border-border/40 bg-card/60 px-3 py-2.5">
       <div className="flex-1 min-w-0">
@@ -65,38 +65,38 @@ function ParamCard({ param }: { param: TemplateParameter }) {
 
 // ── Main page ──
 
-export function TemplateDetailPage() {
+export function PlaybookDetailPage() {
   const { name } = useParams<{ name: string }>();
   const navigate = useNavigate();
-  const { getTemplate } = useTemplates();
+  const { getPlaybook } = usePlaybooks();
 
-  const [template, setTemplate] = useState<TemplateDefinition | null>(null);
+  const [playbook, setPlaybook] = useState<PlaybookDefinition | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (!name) return;
     setLoading(true);
-    getTemplate(name)
-      .then(setTemplate)
+    getPlaybook(name)
+      .then(setPlaybook)
       .catch((e) => {
-        toast.error(`Failed to load template: ${(e as Error).message}`);
-        navigate("/templates");
+        toast.error(`Failed to load playbook: ${(e as Error).message}`);
+        navigate("/playbooks");
       })
       .finally(() => setLoading(false));
-  }, [name, getTemplate, navigate]);
+  }, [name, getPlaybook, navigate]);
 
   // Parse the mission body for the graph
   const parsed = useMemo(() => {
-    if (!template?.mission) return null;
-    return parseMissionData(JSON.stringify(template.mission));
-  }, [template]);
+    if (!playbook?.mission) return null;
+    return parseMissionData(JSON.stringify(playbook.mission));
+  }, [playbook]);
 
   const taskDefs = parsed?.tasks ?? [];
   const checkpoints = parsed?.checkpoints;
-  const params = template?.parameters ?? [];
+  const params = playbook?.parameters ?? [];
   const requiredParams = params.filter((p) => p.required);
 
-  // No-op: template preview has no live tasks
+  // No-op: playbook preview has no live tasks
   const findLiveTask = () => undefined;
 
   if (loading) {
@@ -107,10 +107,10 @@ export function TemplateDetailPage() {
     );
   }
 
-  if (!template) {
+  if (!playbook) {
     return (
       <div className="flex items-center justify-center h-full text-muted-foreground">
-        Template not found
+        Playbook not found
       </div>
     );
   }
@@ -119,7 +119,7 @@ export function TemplateDetailPage() {
     <div className="flex flex-col flex-1 min-h-0 gap-4">
       {/* Header */}
       <div className="flex items-center gap-3 shrink-0">
-        <Button variant="ghost" size="sm" onClick={() => navigate("/templates")} className="shrink-0">
+        <Button variant="ghost" size="sm" onClick={() => navigate("/playbooks")} className="shrink-0">
           <ArrowLeft className="h-4 w-4" />
         </Button>
 
@@ -129,7 +129,7 @@ export function TemplateDetailPage() {
 
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
-            <h1 className="text-lg font-bold truncate">{template.name}</h1>
+            <h1 className="text-lg font-bold truncate">{playbook.name}</h1>
             <Badge variant="secondary" className="text-[9px] gap-1 px-1.5 py-0">
               <Hash className="h-2 w-2" />
               {params.length} param{params.length !== 1 ? "s" : ""}
@@ -145,7 +145,7 @@ export function TemplateDetailPage() {
               {taskDefs.length} task{taskDefs.length !== 1 ? "s" : ""}
             </Badge>
           </div>
-          <p className="text-xs text-muted-foreground mt-0.5">{template.description}</p>
+          <p className="text-xs text-muted-foreground mt-0.5">{playbook.description}</p>
         </div>
 
 
@@ -179,7 +179,7 @@ export function TemplateDetailPage() {
             <div className="flex items-center gap-2 px-4 py-2 border-b border-border/30 bg-muted/20">
               <Workflow className="h-3.5 w-3.5 text-primary/60" />
               <span className="text-[11px] text-muted-foreground">
-                Template preview — placeholders shown as <code className="text-[10px] bg-muted/50 px-1 rounded">{`{{param}}`}</code>
+                Playbook preview — placeholders shown as <code className="text-[10px] bg-muted/50 px-1 rounded">{`{{param}}`}</code>
               </span>
             </div>
             <div className="h-[calc(100%-36px)]">
@@ -202,7 +202,7 @@ export function TemplateDetailPage() {
               <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-border/30 bg-muted/20 mb-4">
                 <Workflow className="h-3.5 w-3.5 text-primary/60" />
                 <span className="text-[11px] text-muted-foreground">
-                  Template blueprint — {taskDefs.length} task{taskDefs.length !== 1 ? "s" : ""} defined
+                  Playbook blueprint — {taskDefs.length} task{taskDefs.length !== 1 ? "s" : ""} defined
                 </span>
               </div>
 
@@ -230,7 +230,7 @@ export function TemplateDetailPage() {
                 <Card className="bg-card/60 border-border/40">
                   <CardContent className="flex flex-col items-center justify-center py-12 text-muted-foreground">
                     <Hash className="h-8 w-8 mb-3 text-muted-foreground/30" />
-                    <p className="text-sm">This template takes no parameters</p>
+                    <p className="text-sm">This playbook takes no parameters</p>
                   </CardContent>
                 </Card>
               ) : (
@@ -250,11 +250,11 @@ export function TemplateDetailPage() {
               )}
 
               {/* Team section if volatile team is defined */}
-              {template.mission && (template.mission as any).team && Array.isArray((template.mission as any).team) && (
+              {playbook.mission && (playbook.mission as any).team && Array.isArray((playbook.mission as any).team) && (
                 <div className="mt-6">
                   <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-2">Volatile Team</p>
                   <div className="space-y-2">
-                    {((template.mission as any).team as Array<{ name: string; role?: string; model?: string }>).map((member, i) => (
+                    {((playbook.mission as any).team as Array<{ name: string; role?: string; model?: string }>).map((member, i) => (
                       <div key={i} className="flex items-center gap-3 rounded-lg border border-border/40 bg-card/60 px-3 py-2">
                         <Bot className="h-4 w-4 text-primary/60 shrink-0" />
                         <div className="min-w-0">
@@ -276,7 +276,7 @@ export function TemplateDetailPage() {
           <ScrollArea className="h-full">
             <div className="p-4">
               <JsonBlock
-                data={template}
+                data={playbook}
                 className="text-[11px] leading-relaxed font-mono bg-muted/30 border border-border/20 rounded-lg p-4 whitespace-pre-wrap overflow-x-auto"
               />
             </div>

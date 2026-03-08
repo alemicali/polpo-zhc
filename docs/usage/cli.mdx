@@ -158,25 +158,25 @@ polpo team <subcommand> [options]
 | `remove <name>` | Remove an agent |
 | `rename <newName>` | Rename the team |
 
-## `polpo template`
+## `polpo playbook`
 
-Manage and execute reusable [mission templates](/features/templates).
+Manage and execute reusable [mission playbooks](/features/playbooks).
 
 ```bash
-polpo template <subcommand> [options]
+polpo playbook <subcommand> [options]
 ```
 
 | Subcommand | Description |
 |------------|-------------|
-| `list` | List all available templates |
-| `show <name>` | Show template details, parameters, and mission body |
-| `run <name>` | Execute a template with parameters |
-| `validate <name>` | Validate a template definition |
+| `list` | List all available playbooks |
+| `show <name>` | Show playbook details, parameters, and mission body |
+| `run <name>` | Execute a playbook with parameters |
+| `validate <name>` | Validate a playbook definition |
 
-### `polpo template run`
+### `polpo playbook run`
 
 ```bash
-polpo template run <name> [options]
+polpo playbook run <name> [options]
 ```
 
 | Option | Default | Description |
@@ -187,13 +187,13 @@ polpo template run <name> [options]
 
 ```bash
 # Run a code review on the auth module
-polpo template run code-review --param module=src/auth --param focus=security
+polpo playbook run code-review --param module=src/auth --param focus=security
 
 # Preview what the mission would look like
-polpo template run code-review --param module=src/auth --dry-run
+polpo playbook run code-review --param module=src/auth --dry-run
 ```
 
-See [Templates](/features/templates) for how to create your own.
+See [Playbooks](/features/playbooks) for how to create your own.
 
 ## `polpo skills`
 

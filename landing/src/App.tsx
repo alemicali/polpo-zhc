@@ -808,7 +808,7 @@ function Differentiators() {
       <div className="relative mx-auto max-w-2xl px-6">
         <Reveal>
           <h2 className="text-center font-display text-3xl font-extrabold tracking-tight text-neutral-950 sm:text-4xl">
-            Software that <span className="text-neutral-400">learns and evolves.</span>
+            Agents that <span className="text-neutral-400">learn and evolve.</span>
           </h2>
           <p className="mx-auto mt-4 max-w-lg text-center text-neutral-500">
             Polpo gets smarter over time. Skills, playbooks, and agent memory

@@ -1,6 +1,6 @@
 /**
  * Command router — thin dispatch table.
- * Chat-only: removed task, mission, plan, template, skills, logs, status commands.
+ * Chat-only: removed task, mission, plan, playbook, skills, logs, status commands.
  */
 
 import type { CommandAPI } from "./types.js";

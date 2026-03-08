@@ -375,22 +375,22 @@ const { approvals, pending, approve, reject, loading, refetch } = useApprovals()
 
 ---
 
-## useTemplates
+## usePlaybooks
 
-Template discovery and execution.
+Playbook discovery and execution.
 
 ```tsx
-const { templates, loading, getTemplate, runTemplate, refetch } = useTemplates();
+const { playbooks, loading, getPlaybook, runPlaybook, refetch } = usePlaybooks();
 ```
 
 ### Returns
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `templates` | `TemplateInfo[]` | Available templates |
+| `playbooks` | `PlaybookInfo[]` | Available playbooks |
 | `loading` | `boolean` | Initial load in progress |
-| `getTemplate` | `(name) => Promise<TemplateDefinition>` | Fetch full template definition |
-| `runTemplate` | `(name, params?) => Promise<TemplateRunResult>` | Execute a template |
+| `getPlaybook` | `(name) => Promise<PlaybookDefinition>` | Fetch full playbook definition |
+| `runPlaybook` | `(name, params?) => Promise<PlaybookRunResult>` | Execute a playbook |
 | `refetch` | `() => void` | Force refetch |
 
 ---

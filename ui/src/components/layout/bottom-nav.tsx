@@ -35,7 +35,7 @@ const secondaryNav = [
   { to: "/memory", icon: Brain, label: "Memory" },
   { to: "/notifications", icon: Bell, label: "Notifications" },
   { to: "/approvals", icon: ShieldCheck, label: "Approvals" },
-  { to: "/templates", icon: Workflow, label: "Templates" },
+  { to: "/playbooks", icon: Workflow, label: "Playbooks" },
   { to: "/config", icon: Settings2, label: "Config" },
 ];
 

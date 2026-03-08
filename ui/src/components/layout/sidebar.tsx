@@ -49,7 +49,7 @@ const nav: NavSection[] = [
       { to: "/agents", icon: Bot, label: "Agents" },
       { to: "/skills", icon: Sparkles, label: "Skills" },
       { to: "/memory", icon: Brain, label: "Memory" },
-      { to: "/templates", icon: Workflow, label: "Templates" },
+      { to: "/playbooks", icon: Workflow, label: "Playbooks" },
     ],
   },
   {

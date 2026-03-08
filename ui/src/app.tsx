@@ -17,8 +17,8 @@ const MemoryPage = lazy(() => import("@/pages/memory").then(m => ({ default: m.M
 
 const NotificationsPage = lazy(() => import("@/pages/notifications").then(m => ({ default: m.NotificationsPage })));
 const ApprovalsPage = lazy(() => import("@/pages/approvals").then(m => ({ default: m.ApprovalsPage })));
-const TemplatesPage = lazy(() => import("@/pages/templates").then(m => ({ default: m.TemplatesPage })));
-const TemplateDetailPage = lazy(() => import("@/pages/template-detail").then(m => ({ default: m.TemplateDetailPage })));
+const PlaybooksPage = lazy(() => import("@/pages/playbooks").then(m => ({ default: m.PlaybooksPage })));
+const PlaybookDetailPage = lazy(() => import("@/pages/playbook-detail").then(m => ({ default: m.PlaybookDetailPage })));
 const ConfigPage = lazy(() => import("@/pages/config").then(m => ({ default: m.ConfigPage })));
 const SkillsPage = lazy(() => import("@/pages/skills").then(m => ({ default: m.SkillsPage })));
 const SkillDetailPage = lazy(() => import("@/pages/skill-detail").then(m => ({ default: m.SkillDetailPage })));
@@ -54,8 +54,8 @@ export function App() {
         <Route path="logs" element={<Navigate to="/activity" replace />} />
         <Route path="notifications" element={<Suspense fallback={<PageLoader />}><NotificationsPage /></Suspense>} />
         <Route path="approvals" element={<Suspense fallback={<PageLoader />}><ApprovalsPage /></Suspense>} />
-        <Route path="templates" element={<Suspense fallback={<PageLoader />}><TemplatesPage /></Suspense>} />
-        <Route path="templates/:name" element={<Suspense fallback={<PageLoader />}><TemplateDetailPage /></Suspense>} />
+        <Route path="playbooks" element={<Suspense fallback={<PageLoader />}><PlaybooksPage /></Suspense>} />
+        <Route path="playbooks/:name" element={<Suspense fallback={<PageLoader />}><PlaybookDetailPage /></Suspense>} />
         <Route path="schedules" element={<Navigate to="/missions" replace />} />
         <Route path="config" element={<Suspense fallback={<PageLoader />}><ConfigPage /></Suspense>} />
         <Route path="files" element={<Suspense fallback={<PageLoader />}><FilesPage /></Suspense>} />

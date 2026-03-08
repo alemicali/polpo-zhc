@@ -3,7 +3,7 @@
   "info": {
     "title": "Polpo API",
     "version": "1.0.0",
-    "description": "REST API for Polpo — an AI agent that manages teams of AI coding agents. Manage tasks, missions, agents, templates, skills, notifications, and approvals. For conversational interaction, use the OpenAI-compatible POST /v1/chat/completions endpoint."
+    "description": "REST API for Polpo — an AI agent that manages teams of AI coding agents. Manage tasks, missions, agents, playbooks, skills, notifications, and approvals. For conversational interaction, use the OpenAI-compatible POST /v1/chat/completions endpoint."
   },
   "servers": [
     {
@@ -7178,15 +7178,15 @@
         }
       }
     },
-    "/api/v1/templates": {
+    "/api/v1/playbooks": {
       "get": {
         "tags": [
-          "Templates"
+          "Playbooks"
         ],
-        "summary": "List available templates",
+        "summary": "List available playbooks",
         "responses": {
           "200": {
-            "description": "List of templates",
+            "description": "List of playbooks",
             "content": {
               "application/json": {
                 "schema": {
@@ -7214,9 +7214,9 @@
       },
       "post": {
         "tags": [
-          "Templates"
+          "Playbooks"
         ],
-        "summary": "Save template",
+        "summary": "Save playbook",
         "requestBody": {
           "content": {
             "application/json": {
@@ -7225,7 +7225,7 @@
                 "properties": {
                   "name": {
                     "type": "string",
-                    "description": "Template name (kebab-case)"
+                    "description": "Playbook name (kebab-case)"
                   },
                   "description": {
                     "type": "string",
@@ -7236,7 +7236,7 @@
                     "additionalProperties": {
                       "nullable": true
                     },
-                    "description": "Mission template body with {{placeholder}} syntax"
+                    "description": "Mission playbook body with {{placeholder}} syntax"
                   },
                   "parameters": {
                     "type": "array",
@@ -7305,7 +7305,7 @@
         },
         "responses": {
           "201": {
-            "description": "Template created",
+            "description": "Playbook created",
             "content": {
               "application/json": {
                 "schema": {
@@ -7326,7 +7326,7 @@
             }
           },
           "400": {
-            "description": "Invalid template definition",
+            "description": "Invalid playbook definition",
             "content": {
               "application/json": {
                 "schema": {
@@ -7354,12 +7354,12 @@
         }
       }
     },
-    "/api/v1/templates/{name}": {
+    "/api/v1/playbooks/{name}": {
       "get": {
         "tags": [
-          "Templates"
+          "Playbooks"
         ],
-        "summary": "Get template details",
+        "summary": "Get playbook details",
         "parameters": [
           {
             "schema": {
@@ -7372,7 +7372,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Template details",
+            "description": "Playbook details",
             "content": {
               "application/json": {
                 "schema": {
@@ -7393,7 +7393,7 @@
             }
           },
           "404": {
-            "description": "Template not found",
+            "description": "Playbook not found",
             "content": {
               "application/json": {
                 "schema": {
@@ -7422,9 +7422,9 @@
       },
       "delete": {
         "tags": [
-          "Templates"
+          "Playbooks"
         ],
-        "summary": "Delete template",
+        "summary": "Delete playbook",
         "parameters": [
           {
             "schema": {
@@ -7437,7 +7437,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Template deleted",
+            "description": "Playbook deleted",
             "content": {
               "application/json": {
                 "schema": {
@@ -7455,7 +7455,7 @@
             }
           },
           "404": {
-            "description": "Template not found",
+            "description": "Playbook not found",
             "content": {
               "application/json": {
                 "schema": {
@@ -7483,12 +7483,12 @@
         }
       }
     },
-    "/api/v1/templates/{name}/run": {
+    "/api/v1/playbooks/{name}/run": {
       "post": {
         "tags": [
-          "Templates"
+          "Playbooks"
         ],
-        "summary": "Run template",
+        "summary": "Run playbook",
         "parameters": [
           {
             "schema": {
@@ -7528,7 +7528,7 @@
         },
         "responses": {
           "201": {
-            "description": "Template executed",
+            "description": "Playbook executed",
             "content": {
               "application/json": {
                 "schema": {
@@ -7600,7 +7600,457 @@
             }
           },
           "404": {
-            "description": "Template not found",
+            "description": "Playbook not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/templates": {
+      "get": {
+        "tags": [
+          "Playbooks"
+        ],
+        "summary": "List available playbooks",
+        "responses": {
+          "200": {
+            "description": "List of playbooks",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "nullable": true
+                      }
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Playbooks"
+        ],
+        "summary": "Save playbook",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "description": "Playbook name (kebab-case)"
+                  },
+                  "description": {
+                    "type": "string",
+                    "description": "Human-readable description"
+                  },
+                  "mission": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "nullable": true
+                    },
+                    "description": "Mission playbook body with {{placeholder}} syntax"
+                  },
+                  "parameters": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "name": {
+                          "type": "string"
+                        },
+                        "description": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string",
+                          "enum": [
+                            "string",
+                            "number",
+                            "boolean"
+                          ]
+                        },
+                        "required": {
+                          "type": "boolean"
+                        },
+                        "default": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "number"
+                            },
+                            {
+                              "type": "boolean"
+                            }
+                          ]
+                        },
+                        "enum": {
+                          "type": "array",
+                          "items": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "number"
+                              }
+                            ]
+                          }
+                        }
+                      },
+                      "required": [
+                        "name",
+                        "description"
+                      ]
+                    }
+                  }
+                },
+                "required": [
+                  "name",
+                  "description",
+                  "mission"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Playbook created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid playbook definition",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/templates/{name}": {
+      "get": {
+        "tags": [
+          "Playbooks"
+        ],
+        "summary": "Get playbook details",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Playbook details",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Playbook not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Playbooks"
+        ],
+        "summary": "Delete playbook",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Playbook deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Playbook not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/templates/{name}/run": {
+      "post": {
+        "tags": [
+          "Playbooks"
+        ],
+        "summary": "Run playbook",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "params": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "boolean"
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Playbook executed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "mission": {
+                          "nullable": true
+                        },
+                        "tasks": {
+                          "type": "number"
+                        },
+                        "group": {
+                          "type": "string"
+                        },
+                        "warnings": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "required": [
+                        "tasks",
+                        "group"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Parameter validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Playbook not found",
             "content": {
               "application/json": {
                 "schema": {

@@ -38,10 +38,10 @@ import {
   Asterisk,
 
 } from "lucide-react";
-import { useTemplates } from "@polpo-ai/react";
+import { usePlaybooks } from "@polpo-ai/react";
 import type {
-  TemplateInfo,
-  TemplateParameter,
+  PlaybookInfo,
+  PlaybookParameter,
 } from "@polpo-ai/react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -61,7 +61,7 @@ function ParamField({
   value,
   onChange,
 }: {
-  param: TemplateParameter;
+  param: PlaybookParameter;
   value: string;
   onChange: (v: string) => void;
 }) {
@@ -141,20 +141,20 @@ function ParamField({
   );
 }
 
-// ── Run template dialog ──
+// ── Run playbook dialog ──
 
-function RunTemplateDialog({
-  template,
+function RunPlaybookDialog({
+  playbook,
   open,
   onOpenChange,
   onRun,
 }: {
-  template: TemplateInfo;
+  playbook: PlaybookInfo;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onRun: (name: string, params: Record<string, string | number | boolean>) => Promise<void>;
 }) {
-  const params = template.parameters ?? [];
+  const params = playbook.parameters ?? [];
   const [values, setValues] = useState<Record<string, string>>(() => {
     const init: Record<string, string> = {};
     for (const p of params) {
@@ -186,7 +186,7 @@ function RunTemplateDialog({
         else if (p.type === "boolean") resolved[p.name] = raw === "true";
         else resolved[p.name] = raw;
       }
-      await onRun(template.name, resolved);
+      await onRun(playbook.name, resolved);
       onOpenChange(false);
     } catch {
       // error handled by caller
@@ -201,16 +201,16 @@ function RunTemplateDialog({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-sm">
             <Play className="h-4 w-4 text-teal-400" />
-            Run "{template.name}"
+            Run "{playbook.name}"
           </DialogTitle>
         </DialogHeader>
 
-        <p className="text-xs text-muted-foreground">{template.description}</p>
+        <p className="text-xs text-muted-foreground">{playbook.description}</p>
 
         {params.length === 0 ? (
           <div className="flex items-center gap-2 py-4 text-xs text-muted-foreground">
             <Settings2 className="h-4 w-4" />
-            This template takes no parameters
+            This playbook takes no parameters
           </div>
         ) : (
           <div className="space-y-3 pt-2">
@@ -250,7 +250,7 @@ function RunTemplateDialog({
             ) : (
               <Play className="h-3.5 w-3.5" />
             )}
-            Run Template
+            Run Playbook
           </Button>
         </div>
       </DialogContent>
@@ -260,16 +260,16 @@ function RunTemplateDialog({
 
 
 
-// ── Template card ──
+// ── Playbook card ──
 
-function TemplateCard({
-  template,
+function PlaybookCard({
+  playbook,
   onClick,
 }: {
-  template: TemplateInfo;
+  playbook: PlaybookInfo;
   onClick: () => void;
 }) {
-  const params = template.parameters ?? [];
+  const params = playbook.parameters ?? [];
   const requiredParams = params.filter((p) => p.required);
 
   return (
@@ -287,7 +287,7 @@ function TemplateCard({
           {/* Content */}
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2">
-              <span className="text-sm font-semibold">{template.name}</span>
+              <span className="text-sm font-semibold">{playbook.name}</span>
               <Badge variant="secondary" className="text-[9px] gap-1 px-1.5 py-0">
                 <Hash className="h-2 w-2" />
                 {params.length} param{params.length !== 1 ? "s" : ""}
@@ -300,7 +300,7 @@ function TemplateCard({
               )}
             </div>
             <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
-              {template.description}
+              {playbook.description}
             </p>
 
             {/* Parameter tags */}
@@ -341,7 +341,7 @@ function TemplateCard({
             <div className="flex items-center gap-1 mt-2">
               <FolderOpen className="h-2.5 w-2.5 text-muted-foreground/50" />
               <span className="text-[9px] font-mono text-muted-foreground/50 truncate">
-                {template.path}
+                {playbook.path}
               </span>
             </div>
           </div>
@@ -353,33 +353,33 @@ function TemplateCard({
 
 // ── Main page ──
 
-export function TemplatesPage() {
+export function PlaybooksPage() {
   const navigate = useNavigate();
-  const { templates, loading, refetch, runTemplate } = useTemplates();
+  const { playbooks, loading, refetch, runPlaybook } = usePlaybooks();
   const [search, setSearch] = useState("");
 
   // Run dialog state
-  const [runTarget, setRunTarget] = useState<TemplateInfo | null>(null);
+  const [runTarget, setRunTarget] = useState<PlaybookInfo | null>(null);
 
   const filtered = useMemo(() => {
-    if (!search) return templates;
+    if (!search) return playbooks;
     const q = search.toLowerCase();
-    return templates.filter(
+    return playbooks.filter(
       (w) =>
         w.name.toLowerCase().includes(q) ||
         w.description.toLowerCase().includes(q) ||
         w.parameters.some((p) => p.name.toLowerCase().includes(q))
     );
-  }, [templates, search]);
+  }, [playbooks, search]);
 
   const handleRun = async (
     name: string,
     params: Record<string, string | number | boolean>
   ) => {
     try {
-      const result = await runTemplate(name, params);
+      const result = await runPlaybook(name, params);
       toast.success(
-        `Template "${name}" started — ${result.tasks} task${result.tasks !== 1 ? "s" : ""} created`
+        `Playbook "${name}" started — ${result.tasks} task${result.tasks !== 1 ? "s" : ""} created`
       );
       // Navigate to the created mission
       navigate(`/missions/${result.mission.id}`);
@@ -404,7 +404,7 @@ export function TemplatesPage() {
         <div className="relative w-72">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
           <Input
-            placeholder="Search templates..."
+            placeholder="Search playbooks..."
             className="pl-9 h-8 text-sm bg-input/50 border-border/40"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
@@ -414,7 +414,7 @@ export function TemplatesPage() {
         <div className="flex-1" />
 
         <Badge variant="secondary" className="text-xs shrink-0">
-          {filtered.length} template{filtered.length !== 1 ? "s" : ""}
+          {filtered.length} playbook{filtered.length !== 1 ? "s" : ""}
         </Badge>
 
         <Button variant="outline" size="sm" className="h-8 gap-1.5" onClick={refetch}>
@@ -422,21 +422,21 @@ export function TemplatesPage() {
         </Button>
       </div>
 
-      {/* Template list */}
+      {/* Playbook list */}
       {filtered.length === 0 ? (
         <Card className="flex-1 bg-card/60 border-border/40">
           <CardContent className="flex flex-col items-center justify-center py-20 text-muted-foreground">
             <Workflow className="h-12 w-12 mb-4 text-primary/30" />
             <p className="text-sm font-medium">
-              {templates.length === 0
-                ? "No templates found"
-                : "No matching templates"}
+              {playbooks.length === 0
+                ? "No playbooks found"
+                : "No matching playbooks"}
             </p>
             <p className="text-xs mt-1 text-center max-w-sm">
-              {templates.length === 0 ? (
+              {playbooks.length === 0 ? (
                 <>
-                  Templates are parameterized mission definitions.
-                  Create a <code className="text-[10px] bg-muted rounded px-1">.polpo/templates/my-template/template.json</code> file to get started.
+                  Playbooks are parameterized mission definitions.
+                  Create a <code className="text-[10px] bg-muted rounded px-1">.polpo/playbooks/my-playbook/playbook.json</code> file to get started.
                 </>
               ) : (
                 "Try adjusting your search"
@@ -448,10 +448,10 @@ export function TemplatesPage() {
         <ScrollArea className="flex-1 min-h-0">
           <div className="space-y-2 pr-4">
             {filtered.map((w) => (
-              <TemplateCard
+              <PlaybookCard
                 key={w.name}
-                template={w}
-                onClick={() => navigate(`/templates/${encodeURIComponent(w.name)}`)}
+                playbook={w}
+                onClick={() => navigate(`/playbooks/${encodeURIComponent(w.name)}`)}
               />
             ))}
           </div>
@@ -460,8 +460,8 @@ export function TemplatesPage() {
 
       {/* Run dialog */}
       {runTarget && (
-        <RunTemplateDialog
-          template={runTarget}
+        <RunPlaybookDialog
+          playbook={runTarget}
           open={true}
           onOpenChange={(open) => { if (!open) setRunTarget(null); }}
           onRun={handleRun}

@@ -388,26 +388,26 @@ Validates `.polpo/polpo.json`. Exits with code 0 on valid, 1 on invalid.
 
 ---
 
-## polpo template
+## polpo playbook
 
-Manage reusable mission templates.
+Manage reusable mission playbooks.
 
-### template list
+### playbook list
 
 ```bash
-polpo template list [-d <path>]
+polpo playbook list [-d <path>]
 ```
 
-### template show
+### playbook show
 
 ```bash
-polpo template show <name> [-d <path>]
+polpo playbook show <name> [-d <path>]
 ```
 
-### template run
+### playbook run
 
 ```bash
-polpo template run <name> [-d <path>] [-p key=value...] [--dry-run]
+polpo playbook run <name> [-d <path>] [-p key=value...] [--dry-run]
 ```
 
 | Flag | Description |
@@ -415,12 +415,12 @@ polpo template run <name> [-d <path>] [-p key=value...] [--dry-run]
 | `-p, --param` | Parameters as `key=value` pairs (repeatable) |
 | `--dry-run` | Show the instantiated mission without executing |
 
-### template validate
+### playbook validate
 
-Validate a template definition (checks fields, tasks, placeholders, unused params).
+Validate a playbook definition (checks fields, tasks, placeholders, unused params).
 
 ```bash
-polpo template validate <name> [-d <path>]
+polpo playbook validate <name> [-d <path>]
 ```
 
 ---

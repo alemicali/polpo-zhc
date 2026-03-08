@@ -1,36 +1,36 @@
 ---
-title: "Templates"
-description: "Parameterized, reusable mission templates — define a process once, run it with different parameters."
+title: "Playbooks"
+description: "Parameterized, reusable mission playbooks — define a process once, run it with different parameters."
 ---
 
-Templates are **parameterized mission templates** — JSON files that define a complete [Mission](/concepts/missions) with `{{placeholder}}` parameters. When you execute a template, Polpo substitutes your parameters, saves the result as a standard Mission, and runs it.
+Playbooks are **parameterized mission playbooks** — JSON files that define a complete [Mission](/concepts/missions) with `{{placeholder}}` parameters. When you execute a playbook, Polpo substitutes your parameters, saves the result as a standard Mission, and runs it.
 
 ```bash
 # Review the auth module, focusing on security
-polpo template run code-review --param module=src/auth --param focus=security
+polpo playbook run code-review --param module=src/auth --param focus=security
 
 # Fix a specific bug
-polpo template run bug-fix --param issue="Login fails when email has + character"
+polpo playbook run bug-fix --param issue="Login fails when email has + character"
 ```
 
-A template is data, not code — a JSON file on disk. When executed, it becomes a regular Mission with no new runtime concepts or special execution path.
+A playbook is data, not code — a JSON file on disk. When executed, it becomes a regular Mission with no new runtime concepts or special execution path.
 
 ## Quick Start
 
 <Steps>
 
-1. **Create the template directory**
+1. **Create the playbook directory**
 
    ```bash
-   mkdir -p .polpo/templates/my-template
+   mkdir -p .polpo/playbooks/my-playbook
    ```
 
-2. **Create `template.json`**
+2. **Create `playbook.json`**
 
    ```json
    {
-     "name": "my-template",
-     "description": "What this template does in one sentence",
+     "name": "my-playbook",
+     "description": "What this playbook does in one sentence",
      "parameters": [
        {
          "name": "target",
@@ -54,30 +54,30 @@ A template is data, not code — a JSON file on disk. When executed, it becomes 
 3. **Validate it**
 
    ```bash
-   polpo template validate my-template
+   polpo playbook validate my-playbook
    ```
 
 4. **Run it**
 
    ```bash
-   polpo template run my-template --param target=src/auth
+   polpo playbook run my-playbook --param target=src/auth
    ```
 
 </Steps>
 
-## Anatomy of a Template
+## Anatomy of a Playbook
 
-A template lives in a directory with a `template.json` file:
+A playbook lives in a directory with a `playbook.json` file:
 
 ```
-.polpo/templates/
+.polpo/playbooks/
   code-review/
-    template.json
+    playbook.json
   bug-fix/
-    template.json
+    playbook.json
 ```
 
-The `template.json` has three required fields and one optional:
+The `playbook.json` has three required fields and one optional:
 
 ```json
 {
@@ -90,7 +90,7 @@ The `template.json` has three required fields and one optional:
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `name` | string | Yes | Template identifier (kebab-case, must match directory name) |
+| `name` | string | Yes | Playbook identifier (kebab-case, must match directory name) |
 | `description` | string | Yes | Human-readable summary |
 | `parameters` | array | No | Declared parameters (see below) |
 | `mission` | object | Yes | Mission body — same shape as a MissionDocument, with `{{placeholders}}` |
@@ -137,7 +137,7 @@ Constrain a parameter to specific values:
 
 ### Parameter Design Tips
 
-- **Make the minimum required.** Only mark parameters `required` if the template literally cannot function without them. Everything else should have a sensible `default`.
+- **Make the minimum required.** Only mark parameters `required` if the playbook literally cannot function without them. Everything else should have a sensible `default`.
 - **Use enums for constrained choices.** If a parameter only makes sense with specific values, declare them.
 - **Use descriptive names.** The parameter `name` appears in CLI output, TUI pickers, and error messages. `test_command` is better than `tc`.
 - **Document defaults in `description`.** Mention what happens when the parameter isn't provided:
@@ -151,13 +151,13 @@ Constrain a parameter to specific values:
 }
 ```
 
-## Writing the Mission Template
+## Writing the Mission Playbook
 
 The `mission` field is a standard Mission structure — teams, tasks, dependencies, expectations, quality gates — with `{{placeholder}}` tokens wherever you want parameter substitution.
 
 ### Teams
 
-Define volatile agents specific to this template:
+Define volatile agents specific to this playbook:
 
 ```json
 {
@@ -178,7 +178,7 @@ Define volatile agents specific to this template:
 ```
 
 <Tip>
-You can omit the `team` field entirely if you want the template to use the project's existing agents. Just reference them by name in `assignTo`.
+You can omit the `team` field entirely if you want the playbook to use the project's existing agents. Just reference them by name in `assignTo`.
 </Tip>
 
 ### Tasks with Placeholders
@@ -229,7 +229,7 @@ Task dependencies work the same as in regular Missions — reference tasks by ti
 ```
 
 <Warning>
-Placeholders in `dependsOn` must match the **template** title of the dependency — use `"Diagnose {{issue}}"`, not the resolved `"Diagnose Login bug"`. Both sides get substituted at the same time.
+Placeholders in `dependsOn` must match the **playbook** title of the dependency — use `"Diagnose {{issue}}"`, not the resolved `"Diagnose Login bug"`. Both sides get substituted at the same time.
 </Warning>
 
 ### Expectations
@@ -280,73 +280,73 @@ Block progression until quality thresholds are met:
 
 ## Discovery
 
-Polpo discovers templates from three locations, in priority order (first match wins by name):
+Polpo discovers playbooks from three locations, in priority order (first match wins by name):
 
 | Priority | Location | Scope |
 |----------|----------|-------|
-| 1 | `<polpoDir>/templates/` | Project-level |
-| 2 | `<cwd>/.polpo/templates/` | Fallback (if polpoDir differs) |
-| 3 | `~/.polpo/templates/` | User-level (shared across projects) |
+| 1 | `<polpoDir>/playbooks/` | Project-level |
+| 2 | `<cwd>/.polpo/playbooks/` | Fallback (if polpoDir differs) |
+| 3 | `~/.polpo/playbooks/` | User-level (shared across projects) |
 
-Each template is a **directory** containing a `template.json` file. Directories without a valid `template.json` are silently skipped.
+Each playbook is a **directory** containing a `playbook.json` file. Directories without a valid `playbook.json` are silently skipped.
 
-If two templates share the same `name`, the higher-priority location wins. This lets you override a user-level template with a project-specific version.
+If two playbooks share the same `name`, the higher-priority location wins. This lets you override a user-level playbook with a project-specific version.
 
 ## Execution Flow
 
-When you run a template, four things happen:
+When you run a playbook, four things happen:
 
-1. **Load** — the template definition is loaded from disk
+1. **Load** — the playbook definition is loaded from disk
 2. **Validate** — parameters are checked against declared types, enums, and required flags. Defaults are applied.
 3. **Instantiate** — all `{{placeholder}}` tokens are replaced with resolved values. The result is validated as legal JSON.
 4. **Execute** — the instantiated mission is saved via `saveMission()` and executed via `executeMission()` — from here on it's a standard Mission
 
 ```
-template.json + params → validation → substitution → MissionDocument → executeMission()
+playbook.json + params → validation → substitution → MissionDocument → executeMission()
 ```
 
-The template system adds zero runtime overhead — once instantiated, the mission executes through the exact same path as any manually created mission. Same task lifecycle, same assessment, same quality gates, same hooks.
+The playbook system adds zero runtime overhead — once instantiated, the mission executes through the exact same path as any manually created mission. Same task lifecycle, same assessment, same quality gates, same hooks.
 
-## Running Templates
+## Running Playbooks
 
 <Tabs>
   <Tab title="CLI">
     ```bash
-    # List available templates
-    polpo template list
+    # List available playbooks
+    polpo playbook list
 
     # Show details and parameters
-    polpo template show code-review
+    polpo playbook show code-review
 
     # Run with parameters
-    polpo template run code-review --param module=src/auth --param focus=security
+    polpo playbook run code-review --param module=src/auth --param focus=security
 
     # Dry run — see the instantiated mission without executing
-    polpo template run code-review --param module=src/auth --dry-run
+    polpo playbook run code-review --param module=src/auth --dry-run
 
-    # Validate a template definition
-    polpo template validate code-review
+    # Validate a playbook definition
+    polpo playbook validate code-review
     ```
   </Tab>
 
   <Tab title="TUI">
     ```
-    /template              → interactive picker
-    /template list         → inline summary
-    /template code-review module=src/auth focus=security
+    /playbook              → interactive picker
+    /playbook list         → inline summary
+    /playbook code-review module=src/auth focus=security
     ```
   </Tab>
 
   <Tab title="HTTP API">
     ```bash
-    # List templates
-    curl http://localhost:3000/api/v1/projects/my-project/templates
+    # List playbooks
+    curl http://localhost:3000/api/v1/projects/my-project/playbooks
 
-    # Get template details
-    curl http://localhost:3000/api/v1/projects/my-project/templates/code-review
+    # Get playbook details
+    curl http://localhost:3000/api/v1/projects/my-project/playbooks/code-review
 
     # Execute with parameters
-    curl -X POST http://localhost:3000/api/v1/projects/my-project/templates/code-review/run \
+    curl -X POST http://localhost:3000/api/v1/projects/my-project/playbooks/code-review/run \
       -H "Content-Type: application/json" \
       -d '{ "params": { "module": "src/auth", "focus": "security" } }'
     ```
@@ -358,7 +358,7 @@ The template system adds zero runtime overhead — once instantiated, the missio
 Always validate before running:
 
 ```bash
-polpo template validate code-review
+polpo playbook validate code-review
 ```
 
 The validator checks:
@@ -369,9 +369,9 @@ The validator checks:
 - Optional parameters without a `default` value are not used as `{{placeholders}}` in the mission (would fail at runtime if omitted)
 - Parameter definitions have valid `name`, `description`, and `type` fields
 
-## Example: Full Template
+## Example: Full Playbook
 
-Here's a complete template that performs a focused code review:
+Here's a complete playbook that performs a focused code review:
 
 ```json
 {
@@ -458,11 +458,11 @@ Here's a complete template that performs a focused code review:
 }
 ```
 
-## Built-in Templates
+## Built-in Playbooks
 
-Polpo ships with 8 ready-to-use templates:
+Polpo ships with 8 ready-to-use playbooks:
 
-| Template | Description | Key Parameters |
+| Playbook | Description | Key Parameters |
 |----------|-------------|----------------|
 | `code-review` | Deep code review with analysis, fixes, and verification | `module` (required), `focus`, `test_command` |
 | `bug-fix` | Structured bug fix: reproduce, fix, test, verify | `issue` (required), `scope`, `test_command` |
@@ -470,39 +470,39 @@ Polpo ships with 8 ready-to-use templates:
 | `test-coverage` | Improve test coverage for a module | `module` (required), `target_coverage`, `test_command` |
 | `documentation` | Generate or improve documentation | `module` (required), `style`, `scope` |
 | `security-audit` | Security audit with vulnerability assessment | `module` (required), `severity`, `test_command` |
-| `migration` | Database or API migration template | `from` (required), `to` (required), `test_command` |
+| `migration` | Database or API migration playbook | `from` (required), `to` (required), `test_command` |
 | `onboarding` | Generate onboarding docs for a codebase | `module` (required), `audience` |
 
-## Sharing Templates
+## Sharing Playbooks
 
 ### Project-level
 
-Put templates in `.polpo/templates/` — they're committed to version control and shared with your team.
+Put playbooks in `.polpo/playbooks/` — they're committed to version control and shared with your team.
 
 ### User-level
 
-Put templates in `~/.polpo/templates/` — they're available across all your projects. Good for personal productivity templates.
+Put playbooks in `~/.polpo/playbooks/` — they're available across all your projects. Good for personal productivity playbooks.
 
 ### Override precedence
 
-If a project and user-level template share the same name, the project-level one wins. This lets teams override a personal template with a standardized version.
+If a project and user-level playbook share the same name, the project-level one wins. This lets teams override a personal playbook with a standardized version.
 
-## Templates vs Skills vs Missions
+## Playbooks vs Skills vs Missions
 
-| Dimension | Skills | Templates | Missions |
+| Dimension | Skills | Playbooks | Missions |
 |-----------|--------|-----------|----------|
 | **Layer** | Prompt | Orchestration | Execution |
-| **Format** | Markdown (`SKILL.md`) | JSON (`template.json`) | JSON (`.polpo/missions/`) |
-| **What it does** | Injects instructions into agent's system prompt | Generates a Mission from a parameterized template | Defines tasks, agents, and dependencies to execute |
+| **Format** | Markdown (`SKILL.md`) | JSON (`playbook.json`) | JSON (`.polpo/missions/`) |
+| **What it does** | Injects instructions into agent's system prompt | Generates a Mission from a parameterized playbook | Defines tasks, agents, and dependencies to execute |
 | **Reusability** | Assigned to agents across tasks | Instantiated with different parameters | Single-use (one execution) |
 | **Runtime impact** | Affects how the agent thinks | None — becomes a standard Mission | Drives task execution |
 
-Skills make agents smarter. Templates make processes repeatable. Missions are the execution unit.
+Skills make agents smarter. Playbooks make processes repeatable. Missions are the execution unit.
 
 ## Tips
 
-- **Start simple.** A template with one task and one parameter is still useful. You can add complexity later.
-- **Use quality gates for multi-step templates.** They prevent wasted work when an early step produces poor results.
+- **Start simple.** A playbook with one task and one parameter is still useful. You can add complexity later.
+- **Use quality gates for multi-step playbooks.** They prevent wasted work when an early step produces poor results.
 - **Write detailed task descriptions.** The agent only sees the resolved description — make it clear what "success" looks like.
 - **Test with `--dry-run`.** The CLI's `--dry-run` flag shows the fully instantiated mission without executing, so you can verify placeholders resolve correctly.
-- **Validate after editing.** Run `polpo template validate <name>` to catch placeholder/parameter mismatches early.
+- **Validate after editing.** Run `polpo playbook validate <name>` to catch placeholder/parameter mismatches early.

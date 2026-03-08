@@ -199,9 +199,9 @@ See [Notifications](/features/notifications) for channel configuration.
 | `checkpoint:reached` | A checkpoint is triggered (all `afterTasks` done) | `missionId`, `group`, `checkpointName`, `message`, `afterTasks`, `blocksTasks`, `reachedAt` |
 | `checkpoint:resumed` | A checkpoint is manually resumed | `missionId`, `group`, `checkpointName` |
 
-## Checkpoints in Templates
+## Checkpoints in Playbooks
 
-Checkpoints work in [Templates](/features/templates) — use `{{placeholders}}` in task titles referenced by `afterTasks` and `blocksTasks`:
+Checkpoints work in [Playbooks](/features/playbooks) — use `{{placeholders}}` in task titles referenced by `afterTasks` and `blocksTasks`:
 
 ```json
 {

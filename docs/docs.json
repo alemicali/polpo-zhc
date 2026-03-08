@@ -114,7 +114,7 @@
           {
             "group": "Mission Execution",
             "pages": [
-              "features/templates",
+              "features/playbooks",
               "features/scheduling",
               "features/hooks",
               {
@@ -420,13 +420,13 @@
             ]
           },
           {
-            "group": "Templates",
+            "group": "Playbooks",
             "pages": [
-              "GET /api/v1/templates",
-              "POST /api/v1/templates",
-              "GET /api/v1/templates/{name}",
-              "DELETE /api/v1/templates/{name}",
-              "POST /api/v1/templates/{name}/run"
+              "GET /api/v1/playbooks",
+              "POST /api/v1/playbooks",
+              "GET /api/v1/playbooks/{name}",
+              "DELETE /api/v1/playbooks/{name}",
+              "POST /api/v1/playbooks/{name}/run"
             ]
           },
           {
@@ -523,11 +523,15 @@
     },
     {
       "source": "/features/writing-workflows",
-      "destination": "/features/templates"
+      "destination": "/features/playbooks"
     },
     {
       "source": "/features/workflows",
-      "destination": "/features/templates"
+      "destination": "/features/playbooks"
+    },
+    {
+      "source": "/features/templates",
+      "destination": "/features/playbooks"
     },
     {
       "source": "/features/assessment",

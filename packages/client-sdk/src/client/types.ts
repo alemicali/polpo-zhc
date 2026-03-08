@@ -559,10 +559,10 @@ export interface QualityMetrics {
   updatedAt: string;
 }
 
-// === Templates ===
+// === Playbooks ===
 
-export interface TemplateParameter {
-  /** Parameter name — used as {{name}} in the mission template. */
+export interface PlaybookParameter {
+  /** Parameter name — used as {{name}} in the mission playbook. */
   name: string;
   /** Human-readable description. */
   description: string;
@@ -576,31 +576,41 @@ export interface TemplateParameter {
   enum?: (string | number)[];
 }
 
-/** Lightweight template metadata (no mission body). */
-export interface TemplateInfo {
+/** Lightweight playbook metadata (no mission body). */
+export interface PlaybookInfo {
   name: string;
   description: string;
-  parameters: TemplateParameter[];
-  /** Absolute path to the template directory. */
+  parameters: PlaybookParameter[];
+  /** Absolute path to the playbook directory. */
   path: string;
 }
 
-/** Full template definition including the mission template. */
-export interface TemplateDefinition {
+/** Full playbook definition including the mission body. */
+export interface PlaybookDefinition {
   name: string;
   description: string;
   mission: Record<string, unknown>;
-  parameters?: TemplateParameter[];
+  parameters?: PlaybookParameter[];
 }
 
-/** Result of running a template. */
-export interface TemplateRunResult {
+/** Result of running a playbook. */
+export interface PlaybookRunResult {
   mission: Mission;
   tasks: number;
   group: string;
   /** Non-blocking validation warnings (e.g. unknown parameters). */
   warnings?: string[];
 }
+
+// Backward-compat aliases
+/** @deprecated Use PlaybookParameter instead. */
+export type TemplateParameter = PlaybookParameter;
+/** @deprecated Use PlaybookInfo instead. */
+export type TemplateInfo = PlaybookInfo;
+/** @deprecated Use PlaybookDefinition instead. */
+export type TemplateDefinition = PlaybookDefinition;
+/** @deprecated Use PlaybookRunResult instead. */
+export type TemplateRunResult = PlaybookRunResult;
 
 // === Config ===
 

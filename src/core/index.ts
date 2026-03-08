@@ -51,6 +51,10 @@ export { parseCron, matchesCron, nextCronOccurrence, isCronExpression } from "..
 // Task Watchers
 export { TaskWatcherManager } from "./task-watcher.js";
 
-// Templates
-export { discoverTemplates, loadTemplate, validateParams, instantiateTemplate, validateTemplateDefinition, saveTemplate, deleteTemplate } from "./template.js";
-export type { TemplateParameter, TemplateDefinition, TemplateInfo, ValidationResult } from "./template.js";
+// Playbooks
+export { discoverPlaybooks, loadPlaybook, validateParams, instantiatePlaybook, validatePlaybookDefinition, savePlaybook, deletePlaybook } from "./playbook.js";
+export type { PlaybookParameter, PlaybookDefinition, PlaybookInfo, ValidationResult } from "./playbook.js";
+
+// Backward-compat aliases (deprecated)
+export { discoverTemplates, loadTemplate, instantiateTemplate, validateTemplateDefinition, saveTemplate, deleteTemplate } from "./playbook.js";
+export type { TemplateParameter, TemplateDefinition, TemplateInfo } from "./playbook.js";

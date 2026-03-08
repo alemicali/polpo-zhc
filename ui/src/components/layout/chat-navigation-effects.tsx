@@ -63,7 +63,7 @@ export function ChatNavigationEffects() {
       case "memory":         route = "/memory"; break;
       case "notifications":  route = "/notifications"; break;
       case "approvals":      route = "/approvals"; break;
-      case "templates":      route = "/templates"; break;
+      case "playbooks":      route = "/playbooks"; break;
       case "config":
       case "settings":       route = "/config"; break;
       case "files": {

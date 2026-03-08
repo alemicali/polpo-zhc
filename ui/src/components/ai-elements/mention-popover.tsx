@@ -18,14 +18,14 @@ import {
 } from "@/components/ui/popover";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import type { AgentConfig, Task, Mission, SkillWithAssignment, TemplateInfo } from "@polpo-ai/react";
+import type { AgentConfig, Task, Mission, SkillWithAssignment, PlaybookInfo } from "@polpo-ai/react";
 
 // ────────────────────────────────────────────────────────────────────────────
 // Types
 // ────────────────────────────────────────────────────────────────────────────
 
 /** All mentions use @ as trigger — categories are visual only in the menu */
-type MentionCategory = "agent" | "task" | "mission" | "skill" | "template" | "file";
+type MentionCategory = "agent" | "task" | "mission" | "skill" | "playbook" | "file";
 
 /** A mentionable file entry (path relative to project root) */
 export interface MentionFile {
@@ -79,7 +79,7 @@ export interface MentionPopoverProps {
   tasks: Task[];
   missions: Mission[];
   skills?: SkillWithAssignment[];
-  templates?: TemplateInfo[];
+  templates?: PlaybookInfo[];
   files?: MentionFile[];
   children: ReactNode;
 }
@@ -143,7 +143,7 @@ const CATEGORY_LABELS: Record<MentionCategory, string> = {
   task: "Tasks",
   mission: "Missions",
   skill: "Skills",
-  template: "Templates",
+  playbook: "Playbooks",
   file: "Files",
 };
 
@@ -308,12 +308,12 @@ export const MentionPopover = forwardRef<
     for (const t of templates) {
       if (lowerQ && !t.name.toLowerCase().includes(lowerQ)) continue;
       result.push({
-        id: `template:${t.name}`,
+        id: `playbook:${t.name}`,
         label: t.name,
         value: t.name,
         secondary: t.description,
         icon: <Workflow className="size-4 shrink-0 text-teal-500" />,
-        category: "template",
+        category: "playbook",
       });
     }
 
@@ -340,7 +340,7 @@ export const MentionPopover = forwardRef<
 
   const availableCategories = useMemo(() => {
     const cats = new Set(items.map(i => i.category));
-    return (["agent", "task", "mission", "skill", "template", "file"] as MentionCategory[]).filter(c => cats.has(c));
+    return (["agent", "task", "mission", "skill", "playbook", "file"] as MentionCategory[]).filter(c => cats.has(c));
   }, [items]);
 
   // Reset selection when the query or filtered count changes

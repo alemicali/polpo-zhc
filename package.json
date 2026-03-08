@@ -29,7 +29,7 @@
   "files": [
     "dist/",
     "!dist/__tests__/",
-    "templates/",
+    "playbooks/",
     "README.md",
     "LICENSE"
   ],

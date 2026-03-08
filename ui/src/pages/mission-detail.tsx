@@ -1471,14 +1471,14 @@ interface RunBatch {
   failedCount: number;
 }
 
-function groupTasksIntoRuns(tasks: Task[], templateTaskCount: number): RunBatch[] {
-  if (tasks.length === 0 || templateTaskCount === 0) return [];
+function groupTasksIntoRuns(tasks: Task[], playbookTaskCount: number): RunBatch[] {
+  if (tasks.length === 0 || playbookTaskCount === 0) return [];
   // Sort by creation time ascending
   const sorted = [...tasks].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
-  // Group into batches of templateTaskCount (each execution creates exactly N tasks)
+  // Group into batches of playbookTaskCount (each execution creates exactly N tasks)
   const runs: RunBatch[] = [];
-  for (let i = 0; i < sorted.length; i += templateTaskCount) {
-    const batch = sorted.slice(i, i + templateTaskCount);
+  for (let i = 0; i < sorted.length; i += playbookTaskCount) {
+    const batch = sorted.slice(i, i + playbookTaskCount);
     const doneCount = batch.filter(t => t.status === "done").length;
     const failedCount = batch.filter(t => t.status === "failed").length;
     const allTerminal = batch.every(t => t.status === "done" || t.status === "failed");
@@ -1505,8 +1505,8 @@ function RunsTimeline({
   parsed: ReturnType<typeof parseMissionData> | null;
   navigate: (path: string) => void;
 }) {
-  const templateTaskCount = parsed?.tasks.length ?? 0;
-  const runs = useMemo(() => groupTasksIntoRuns(tasks, templateTaskCount), [tasks, templateTaskCount]);
+  const playbookTaskCount = parsed?.tasks.length ?? 0;
+  const runs = useMemo(() => groupTasksIntoRuns(tasks, playbookTaskCount), [tasks, playbookTaskCount]);
   const [expandedRun, setExpandedRun] = useState<number | null>(runs.length > 0 ? runs[0].runIndex : null);
 
   if (runs.length === 0) {

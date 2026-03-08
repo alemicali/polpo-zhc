@@ -24,10 +24,10 @@ import {
 } from "./skills.js";
 import { parseMissionDocument } from "../core/schemas.js";
 import {
-  discoverTemplates, loadTemplate, validateParams, instantiateTemplate,
-  saveTemplate, deleteTemplate, validateTemplateDefinition,
-} from "../core/template.js";
-import type { TemplateDefinition, TemplateParameter } from "../core/template.js";
+  discoverPlaybooks, loadPlaybook, validateParams, instantiatePlaybook,
+  savePlaybook, deletePlaybook, validatePlaybookDefinition,
+} from "../core/playbook.js";
+import type { PlaybookDefinition, PlaybookParameter } from "../core/playbook.js";
 
 // ═══════════════════════════════════════════════════════
 //  READ TOOLS (12)
@@ -1049,30 +1049,30 @@ const tagSkillTool: Tool = {
 };
 
 // ═══════════════════════════════════════════════════════
-//  TEMPLATE TOOLS (5) — reusable parameterized missions
+//  PLAYBOOK TOOLS (5) — reusable parameterized missions
 // ═══════════════════════════════════════════════════════
 
-const listTemplatesTool: Tool = {
-  name: "list_templates",
-  description: "List all available mission templates discovered from .polpo/templates/ and ~/.polpo/templates/. Returns template names, descriptions, and parameter summaries.",
+const listPlaybooksTool: Tool = {
+  name: "list_playbooks",
+  description: "List all available mission playbooks discovered from .polpo/playbooks/ and ~/.polpo/playbooks/. Returns playbook names, descriptions, and parameter summaries.",
   parameters: Type.Object({}),
 };
 
-const getTemplateTool: Tool = {
-  name: "get_template",
-  description: "Get full details of a template by name, including the mission body and all parameter definitions.",
+const getPlaybookTool: Tool = {
+  name: "get_playbook",
+  description: "Get full details of a playbook by name, including the mission body and all parameter definitions.",
   parameters: Type.Object({
-    name: Type.String({ description: "Template name (kebab-case, e.g. 'bug-fix')" }),
+    name: Type.String({ description: "Playbook name (kebab-case, e.g. 'bug-fix')" }),
   }),
 };
 
-const createTemplateTool: Tool = {
-  name: "create_template",
-  description: "Create or update a reusable mission template. Saves to .polpo/templates/<name>/template.json. The mission body can use {{placeholder}} syntax for parameter substitution.",
+const createPlaybookTool: Tool = {
+  name: "create_playbook",
+  description: "Create or update a reusable mission playbook. Saves to .polpo/playbooks/<name>/playbook.json. The mission body can use {{placeholder}} syntax for parameter substitution.",
   parameters: Type.Object({
-    name: Type.String({ description: "Template name (kebab-case, e.g. 'bug-fix', 'code-review')" }),
-    description: Type.String({ description: "Human-readable description of what this template does" }),
-    mission: Type.Object({}, { additionalProperties: true, description: "The mission template body — same shape as a MissionDocument. Use {{paramName}} placeholders for dynamic values." }),
+    name: Type.String({ description: "Playbook name (kebab-case, e.g. 'bug-fix', 'code-review')" }),
+    description: Type.String({ description: "Human-readable description of what this playbook does" }),
+    mission: Type.Object({}, { additionalProperties: true, description: "The mission playbook body — same shape as a MissionDocument. Use {{paramName}} placeholders for dynamic values." }),
     parameters: Type.Optional(Type.Array(
       Type.Object({
         name: Type.String({ description: "Parameter name (used as {{name}} in the mission)" }),
@@ -1082,34 +1082,34 @@ const createTemplateTool: Tool = {
         default: Type.Optional(Type.Union([Type.String(), Type.Number(), Type.Boolean()], { description: "Default value when not provided" })),
         enum: Type.Optional(Type.Array(Type.Union([Type.String(), Type.Number()]), { description: "Allowed values (enum constraint)" })),
       }),
-      { description: "Parameter declarations for the template" },
+      { description: "Parameter declarations for the playbook" },
     )),
   }),
 };
 
-const instantiateTemplateTool: Tool = {
-  name: "instantiate_template",
-  description: "Create a mission from a template WITHOUT executing it. Validates params, replaces {{placeholders}}, saves as a draft mission. The user can review it before running execute_mission.",
+const instantiatePlaybookTool: Tool = {
+  name: "instantiate_playbook",
+  description: "Create a mission from a playbook WITHOUT executing it. Validates params, replaces {{placeholders}}, saves as a draft mission. The user can review it before running execute_mission.",
   parameters: Type.Object({
-    name: Type.String({ description: "Template name to instantiate" }),
+    name: Type.String({ description: "Playbook name to instantiate" }),
     params: Type.Optional(Type.Object({}, { additionalProperties: true, description: "Parameter values as key-value pairs (e.g. { module: 'src/api', test_command: 'npm test' })" })),
   }),
 };
 
-const runTemplateTool: Tool = {
-  name: "run_template",
-  description: "Execute a template end-to-end: validates parameters, instantiates the mission (replacing {{placeholders}}), saves and immediately executes it. Returns the created mission ID and task count. Use instantiate_template if the user wants to review before executing.",
+const runPlaybookTool: Tool = {
+  name: "run_playbook",
+  description: "Execute a playbook end-to-end: validates parameters, instantiates the mission (replacing {{placeholders}}), saves and immediately executes it. Returns the created mission ID and task count. Use instantiate_playbook if the user wants to review before executing.",
   parameters: Type.Object({
-    name: Type.String({ description: "Template name to execute" }),
+    name: Type.String({ description: "Playbook name to execute" }),
     params: Type.Optional(Type.Object({}, { additionalProperties: true, description: "Parameter values as key-value pairs (e.g. { module: 'src/api', test_command: 'npm test' })" })),
   }),
 };
 
-const deleteTemplateTool: Tool = {
-  name: "delete_template",
-  description: "Delete a template by name. Removes the template directory from disk.",
+const deletePlaybookTool: Tool = {
+  name: "delete_playbook",
+  description: "Delete a playbook by name. Removes the playbook directory from disk.",
   parameters: Type.Object({
-    name: Type.String({ description: "Template name to delete" }),
+    name: Type.String({ description: "Playbook name to delete" }),
   }),
 };
 
@@ -1291,7 +1291,7 @@ Available targets:
 - "memory" — Memory page
 - "notifications" — Notifications page
 - "approvals" — Approvals page
-- "templates" — Templates page
+- "playbooks" — Playbooks page
 - "config" — Configuration / settings page
 
 Examples:
@@ -1301,7 +1301,7 @@ Examples:
 - navigate_to({ target: "files", path: "src/", highlight: "index.ts" })
 - navigate_to({ target: "task", id: "task-xyz" })`,
   parameters: Type.Object({
-    target: Type.String({ description: "Page target: dashboard, tasks, task, missions, mission, agents, agent, skills, skill, files, activity, chat, memory, notifications, approvals, templates, config" }),
+    target: Type.String({ description: "Page target: dashboard, tasks, task, missions, mission, agents, agent, skills, skill, files, activity, chat, memory, notifications, approvals, playbooks, config" }),
     id: Type.Optional(Type.String({ description: "Entity ID for detail pages (task, mission)" })),
     name: Type.Optional(Type.String({ description: "Entity name for detail pages (agent, skill)" })),
     path: Type.Optional(Type.String({ description: "Directory path for files target" })),
@@ -1359,8 +1359,8 @@ export const READ_TOOLS = new Set([
   "list_schedules", "list_notification_rules", "list_watchers",
   // Skills (read-only)
   "list_orchestrator_skills", "list_agent_skills", "search_skills", "get_skill",
-  // Templates (read-only)
-  "list_templates", "get_template",
+  // Playbooks (read-only)
+  "list_playbooks", "get_playbook",
   // File System (read-only)
   "read_file", "list_directory", "grep_files",
   // HTTP (read-only)
@@ -1395,8 +1395,8 @@ export const WRITE_TOOLS = new Set([
   "create_orchestrator_skill", "update_orchestrator_skill", "remove_orchestrator_skill",
   "install_orchestrator_skill", "create_agent_skill", "install_agent_skill", "remove_agent_skill",
   "tag_skill",
-  // Templates (write)
-  "create_template", "instantiate_template", "run_template", "delete_template",
+  // Playbooks (write)
+  "create_playbook", "instantiate_playbook", "run_playbook", "delete_playbook",
   // File System (write)
   "write_file", "edit_file", "run_command",
   // HTTP (write — downloads files to disk)
@@ -1454,8 +1454,8 @@ export const ALL_ORCHESTRATOR_TOOLS: Tool[] = [
   removeOrchestratorSkillTool, installOrchestratorSkillTool,
   listAgentSkillsTool, createAgentSkillTool, installAgentSkillTool, removeAgentSkillTool,
   searchSkillsTool, getSkillTool, tagSkillTool,
-  // Templates (6)
-  listTemplatesTool, getTemplateTool, createTemplateTool, instantiateTemplateTool, runTemplateTool, deleteTemplateTool,
+  // Playbooks (6)
+  listPlaybooksTool, getPlaybookTool, createPlaybookTool, instantiatePlaybookTool, runPlaybookTool, deletePlaybookTool,
   // File System (6)
   readFileTool, writeFileTool, editFileTool, listDirectoryTool, grepFilesTool, runCommandTool,
   // HTTP (2)
@@ -1538,11 +1538,11 @@ const TOOL_LABELS: Record<string, string> = {
   create_agent_skill: "Create Agent Skill",
   install_agent_skill: "Install Agent Skill",
   remove_agent_skill: "Remove Agent Skill",
-  // Templates
-  create_template: "Create Template",
-  instantiate_template: "Instantiate Template",
-  run_template: "Run Template",
-  delete_template: "Delete Template",
+  // Playbooks
+  create_playbook: "Create Playbook",
+  instantiate_playbook: "Instantiate Playbook",
+  run_playbook: "Run Playbook",
+  delete_playbook: "Delete Playbook",
   // File System
   write_file: "Write File",
   edit_file: "Edit File",
@@ -1729,13 +1729,13 @@ export async function executeOrchestratorTool(
       case "get_skill":                  return execGetSkill(polpo, args);
       case "tag_skill":                  return execTagSkill(polpo, args);
 
-      // ── Templates ──
-      case "list_templates":         return execListTemplates(polpo);
-      case "get_template":           return execGetTemplate(polpo, args);
-      case "create_template":        return execCreateTemplate(polpo, args);
-      case "instantiate_template":   return execInstantiateTemplate(polpo, args);
-      case "run_template":           return execRunTemplate(polpo, args);
-      case "delete_template":        return execDeleteTemplate(polpo, args);
+      // ── Playbooks ──
+      case "list_playbooks":         return execListPlaybooks(polpo);
+      case "get_playbook":           return execGetPlaybook(polpo, args);
+      case "create_playbook":        return execCreatePlaybook(polpo, args);
+      case "instantiate_playbook":   return execInstantiatePlaybook(polpo, args);
+      case "run_playbook":           return execRunPlaybook(polpo, args);
+      case "delete_playbook":        return execDeletePlaybook(polpo, args);
 
       // ── File System ──
       case "read_file":        return execReadFile(polpo, args);
@@ -4065,61 +4065,61 @@ function execWhatsAppRead(polpo: Orchestrator, args: Record<string, unknown>): s
 }
 
 // ═══════════════════════════════════════════════════════
-//  TEMPLATE EXECUTORS
+//  PLAYBOOK EXECUTORS
 // ═══════════════════════════════════════════════════════
 
-function execListTemplates(polpo: Orchestrator): string {
+function execListPlaybooks(polpo: Orchestrator): string {
   const cwd = polpo.getWorkDir();
   const polpoDir = polpo.getPolpoDir();
-  const templates = discoverTemplates(cwd, polpoDir);
-  if (templates.length === 0) return "No templates found. Templates are discovered from .polpo/templates/ and ~/.polpo/templates/.";
-  const lines = templates.map(t => {
-    const params = t.parameters;
+  const playbooks = discoverPlaybooks(cwd, polpoDir);
+  if (playbooks.length === 0) return "No playbooks found. Playbooks are discovered from .polpo/playbooks/ and ~/.polpo/playbooks/.";
+  const lines = playbooks.map((pb: { name: string; description: string; parameters: Array<{ name: string; required?: boolean; default?: unknown }> }) => {
+    const params = pb.parameters;
     const paramSummary = params.length === 0
       ? "no params"
-      : params.map(p => `${p.name}${p.required ? " (required)" : ""}${p.default !== undefined ? `=${p.default}` : ""}`).join(", ");
-    return `- ${t.name}: ${t.description} [${paramSummary}]`;
+      : params.map((p: { name: string; required?: boolean; default?: unknown }) => `${p.name}${p.required ? " (required)" : ""}${p.default !== undefined ? `=${p.default}` : ""}`).join(", ");
+    return `- ${pb.name}: ${pb.description} [${paramSummary}]`;
   });
-  return `${templates.length} template(s):\n${lines.join("\n")}`;
+  return `${playbooks.length} playbook(s):\n${lines.join("\n")}`;
 }
 
-function execGetTemplate(polpo: Orchestrator, args: Record<string, unknown>): string {
+function execGetPlaybook(polpo: Orchestrator, args: Record<string, unknown>): string {
   const name = args.name as string;
   if (!name) return "Error: 'name' is required.";
   const cwd = polpo.getWorkDir();
   const polpoDir = polpo.getPolpoDir();
-  const template = loadTemplate(cwd, polpoDir, name);
-  if (!template) {
-    const available = discoverTemplates(cwd, polpoDir);
-    const names = available.map(t => t.name).join(", ");
-    return `Error: Template "${name}" not found.${names ? ` Available: ${names}` : ""}`;
+  const playbook = loadPlaybook(cwd, polpoDir, name);
+  if (!playbook) {
+    const available = discoverPlaybooks(cwd, polpoDir);
+    const names = available.map((p: { name: string }) => p.name).join(", ");
+    return `Error: Playbook "${name}" not found.${names ? ` Available: ${names}` : ""}`;
   }
-  return JSON.stringify(template, null, 2);
+  return JSON.stringify(playbook, null, 2);
 }
 
-function execCreateTemplate(polpo: Orchestrator, args: Record<string, unknown>): string {
+function execCreatePlaybook(polpo: Orchestrator, args: Record<string, unknown>): string {
   const name = args.name as string;
   const description = args.description as string;
   const mission = args.mission as Record<string, unknown>;
-  const parameters = args.parameters as TemplateParameter[] | undefined;
+  const parameters = args.parameters as PlaybookParameter[] | undefined;
 
   if (!name) return "Error: 'name' is required.";
   if (!description) return "Error: 'description' is required.";
   if (!mission) return "Error: 'mission' is required.";
 
-  const definition: TemplateDefinition = { name, description, mission, parameters };
+  const definition: PlaybookDefinition = { name, description, mission, parameters };
 
   try {
-    const dir = saveTemplate(polpo.getPolpoDir(), definition);
+    const dir = savePlaybook(polpo.getPolpoDir(), definition);
     const paramCount = parameters?.length ?? 0;
-    return `Template "${name}" saved to ${dir} (${paramCount} parameter${paramCount !== 1 ? "s" : ""}).`;
+    return `Playbook "${name}" saved to ${dir} (${paramCount} parameter${paramCount !== 1 ? "s" : ""}).`;
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     return `Error: ${msg}`;
   }
 }
 
-async function execInstantiateTemplate(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
+async function execInstantiatePlaybook(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
   const name = args.name as string;
   const params = (args.params ?? {}) as Record<string, string | number | boolean>;
 
@@ -4127,18 +4127,18 @@ async function execInstantiateTemplate(polpo: Orchestrator, args: Record<string,
 
   const cwd = polpo.getWorkDir();
   const polpoDir = polpo.getPolpoDir();
-  const template = loadTemplate(cwd, polpoDir, name);
-  if (!template) return `Error: Template "${name}" not found.`;
+  const playbook = loadPlaybook(cwd, polpoDir, name);
+  if (!playbook) return `Error: Playbook "${name}" not found.`;
 
   // Validate parameters
-  const validation = validateParams(template, params);
+  const validation = validateParams(playbook, params);
   if (!validation.valid) {
     return `Parameter validation failed:\n  - ${validation.errors.join("\n  - ")}`;
   }
 
   // Instantiate (replace placeholders)
   try {
-    const instance = instantiateTemplate(template, validation.resolved);
+    const instance = instantiatePlaybook(playbook, validation.resolved);
 
     // Save as draft mission (do NOT execute)
     const mission = await polpo.saveMission({
@@ -4148,14 +4148,14 @@ async function execInstantiateTemplate(polpo: Orchestrator, args: Record<string,
     });
 
     const warns = validation.warnings.length > 0 ? `\nWarnings:\n  - ${validation.warnings.join("\n  - ")}` : "";
-    return `Mission "${mission.name}" created from template "${name}" (ID: ${mission.id}, status: ${mission.status}). Use execute_mission to run it.${warns}`;
+    return `Mission "${mission.name}" created from playbook "${name}" (ID: ${mission.id}, status: ${mission.status}). Use execute_mission to run it.${warns}`;
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
-    return `Error instantiating template: ${msg}`;
+    return `Error instantiating playbook: ${msg}`;
   }
 }
 
-async function execRunTemplate(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
+async function execRunPlaybook(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
   const name = args.name as string;
   const params = (args.params ?? {}) as Record<string, string | number | boolean>;
 
@@ -4163,18 +4163,18 @@ async function execRunTemplate(polpo: Orchestrator, args: Record<string, unknown
 
   const cwd = polpo.getWorkDir();
   const polpoDir = polpo.getPolpoDir();
-  const template = loadTemplate(cwd, polpoDir, name);
-  if (!template) return `Error: Template "${name}" not found.`;
+  const playbook = loadPlaybook(cwd, polpoDir, name);
+  if (!playbook) return `Error: Playbook "${name}" not found.`;
 
   // Validate parameters
-  const validation = validateParams(template, params);
+  const validation = validateParams(playbook, params);
   if (!validation.valid) {
     return `Parameter validation failed:\n  - ${validation.errors.join("\n  - ")}`;
   }
 
   // Instantiate + save + execute
   try {
-    const instance = instantiateTemplate(template, validation.resolved);
+    const instance = instantiatePlaybook(playbook, validation.resolved);
 
     const mission = await polpo.saveMission({
       data: instance.data,
@@ -4184,22 +4184,22 @@ async function execRunTemplate(polpo: Orchestrator, args: Record<string, unknown
 
     const result = await polpo.executeMission(mission.id);
     const warns = validation.warnings.length > 0 ? `\nWarnings:\n  - ${validation.warnings.join("\n  - ")}` : "";
-    return `Template "${name}" executed — mission "${mission.name}" (ID: ${mission.id}), ${result.tasks.length} task(s), group: ${result.group}.${warns}`;
+    return `Playbook "${name}" executed — mission "${mission.name}" (ID: ${mission.id}), ${result.tasks.length} task(s), group: ${result.group}.${warns}`;
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
-    return `Error running template: ${msg}`;
+    return `Error running playbook: ${msg}`;
   }
 }
 
-function execDeleteTemplate(polpo: Orchestrator, args: Record<string, unknown>): string {
+function execDeletePlaybook(polpo: Orchestrator, args: Record<string, unknown>): string {
   const name = args.name as string;
   if (!name) return "Error: 'name' is required.";
 
   const cwd = polpo.getWorkDir();
   const polpoDir = polpo.getPolpoDir();
-  const deleted = deleteTemplate(cwd, polpoDir, name);
-  if (!deleted) return `Error: Template "${name}" not found.`;
-  return `Template "${name}" deleted.`;
+  const deleted = deletePlaybook(cwd, polpoDir, name);
+  if (!deleted) return `Error: Playbook "${name}" not found.`;
+  return `Playbook "${name}" deleted.`;
 }
 
 /**

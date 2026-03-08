@@ -14,7 +14,7 @@ import { chatRoutes } from "./routes/chat.js";
 import { skillRoutes } from "./routes/skills.js";
 import { notificationRoutes } from "./routes/notifications.js";
 import { approvalRoutes } from "./routes/approvals.js";
-import { templateRoutes } from "./routes/templates.js";
+import { playbookRoutes } from "./routes/playbooks.js";
 import { configRoutes } from "./routes/config.js";
 import { stateRoutes } from "./routes/state.js";
 import { completionRoutes } from "./routes/completions.js";
@@ -90,7 +90,9 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
   authed.route("/skills", skillRoutes());
   authed.route("/notifications", notificationRoutes());
   authed.route("/approvals", approvalRoutes());
-  authed.route("/templates", templateRoutes());
+  authed.route("/playbooks", playbookRoutes());
+  // Backward-compat: keep /templates as alias
+  authed.route("/templates", playbookRoutes());
   authed.route("/config", configRoutes());
   authed.route("/peers", peerRoutes());
   authed.route("/schedules", scheduleRoutes());
@@ -108,7 +110,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     info: {
       title: "Polpo API",
       version: "1.0.0",
-      description: "REST API for Polpo — an AI agent that manages teams of AI coding agents. Manage tasks, missions, agents, templates, skills, notifications, and approvals. For conversational interaction, use the OpenAI-compatible POST /v1/chat/completions endpoint.",
+      description: "REST API for Polpo — an AI agent that manages teams of AI coding agents. Manage tasks, missions, agents, playbooks, skills, notifications, and approvals. For conversational interaction, use the OpenAI-compatible POST /v1/chat/completions endpoint.",
     },
     servers: [
       { url: "http://localhost:3000", description: "Local development" },

@@ -25,7 +25,7 @@ polpo/
 │   └── react-sdk/        # @polpo-ai/react — React hooks + SSE client
 ├── ui/                   # Vite + React SPA dashboard
 ├── docs/                 # Mintlify documentation site
-└── templates/            # Built-in plan templates (JSON)
+└── playbooks/            # Built-in plan playbooks (JSON)
 ```
 
 ## Build Commands

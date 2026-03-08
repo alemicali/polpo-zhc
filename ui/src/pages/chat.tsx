@@ -72,7 +72,7 @@ import type { AskUserQuestion, AskUserAnswer, MessageSegment, ToolCallInfo, Miss
 import { FilePreviewDialog, useFilePreview, mimeFromPath } from "@/components/shared/file-preview";
 import { ToolCallList, ToolInvocation, ToolCallGroup } from "@/components/ai-elements/tool";
 import { MentionPopover, MentionText, type MentionPopoverHandle, type MentionFile } from "@/components/ai-elements/mention-popover";
-import { useAgents, useTasks, useMissions, useSkills, useTemplates } from "@polpo-ai/react";
+import { useAgents, useTasks, useMissions, useSkills, usePlaybooks } from "@polpo-ai/react";
 import { cn } from "@/lib/utils";
 import { config } from "@/lib/config";
 import { toast } from "sonner";
@@ -1970,7 +1970,7 @@ function ChatInput() {
   const { tasks } = useTasks();
   const { missions } = useMissions();
   const { skills } = useSkills();
-  const { templates } = useTemplates();
+  const { playbooks } = usePlaybooks();
 
   // Files for @mention autocomplete — fetch once on mount
   const [mentionFiles, setMentionFiles] = useState<MentionFile[]>([]);
@@ -2007,7 +2007,7 @@ function ChatInput() {
   return (
     <div className="bg-background/80 backdrop-blur-md px-4 pt-2 pb-1.5 shrink-0" ref={inputWrapperRef}>
       <div className="mx-auto max-w-3xl">
-        <MentionPopover ref={mentionRef} textareaRef={textareaRef} agents={agents} tasks={tasks} missions={missions} skills={skills} templates={templates} files={mentionFiles}>
+        <MentionPopover ref={mentionRef} textareaRef={textareaRef} agents={agents} tasks={tasks} missions={missions} skills={skills} templates={playbooks} files={mentionFiles}>
           <PromptInput
             onSubmit={handleSubmit}
             accept="image/*"

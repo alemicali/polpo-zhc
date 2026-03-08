@@ -63,9 +63,13 @@ export { createVaultTools, ALL_VAULT_TOOL_NAMES } from "./tools/vault-tools.js";
 export { createAudioTools, ALL_AUDIO_TOOL_NAMES } from "./tools/audio-tools.js";
 export { createImageTools, ALL_IMAGE_TOOL_NAMES } from "./tools/image-tools.js";
 
-// Templates
-export { discoverTemplates, loadTemplate, validateParams, instantiateTemplate, validateTemplateDefinition, saveTemplate, deleteTemplate } from "./core/template.js";
-export type { TemplateParameter, TemplateDefinition, TemplateInfo, ValidationResult } from "./core/template.js";
+// Playbooks
+export { discoverPlaybooks, loadPlaybook, validateParams, instantiatePlaybook, validatePlaybookDefinition, savePlaybook, deletePlaybook } from "./core/playbook.js";
+export type { PlaybookParameter, PlaybookDefinition, PlaybookInfo, ValidationResult } from "./core/playbook.js";
+
+// Backward-compat aliases (deprecated)
+export { discoverTemplates, loadTemplate, instantiateTemplate, validateTemplateDefinition, saveTemplate, deleteTemplate } from "./core/playbook.js";
+export type { TemplateParameter, TemplateDefinition, TemplateInfo } from "./core/playbook.js";
 
 // Quality Layer
 export { SLAMonitor } from "./quality/sla-monitor.js";

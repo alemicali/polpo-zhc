@@ -1,21 +1,23 @@
 /**
- * Template system — parameterized, reusable mission templates.
+ * Playbook system — parameterized, reusable mission playbooks.
  *
- * A template is a JSON file (template.json) that defines a MissionDocument with
+ * A playbook is a JSON file (playbook.json) that defines a MissionDocument with
  * placeholder parameters ({{name}}). When executed, parameters are resolved
  * and the result is saved + executed as a standard Mission.
  *
  * Discovery paths (in priority order, first occurrence wins):
- *   1. <polpoDir>/templates/          — project-level templates
- *   2. <cwd>/.polpo/templates/        — alias for polpoDir when polpoDir != .polpo
- *   3. ~/.polpo/templates/            — user-level templates
+ *   1. <polpoDir>/playbooks/          — project-level playbooks
+ *   2. <cwd>/.polpo/playbooks/        — alias for polpoDir when polpoDir != .polpo
+ *   3. ~/.polpo/playbooks/            — user-level playbooks
+ *
+ * Backward compatibility: also scans templates/ directories and template.json files.
  *
  * File layout:
- *   .polpo/templates/
+ *   .polpo/playbooks/
  *     code-review/
- *       template.json
+ *       playbook.json
  *     bug-fix/
- *       template.json
+ *       playbook.json
  */
 
 import { readdirSync, readFileSync, existsSync, realpathSync, statSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
@@ -24,8 +26,8 @@ import { homedir } from "node:os";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
-export interface TemplateParameter {
-  /** Parameter name — used as {{name}} in the mission template. */
+export interface PlaybookParameter {
+  /** Parameter name — used as {{name}} in the mission playbook. */
   name: string;
   /** Human-readable description. */
   description: string;
@@ -39,32 +41,41 @@ export interface TemplateParameter {
   enum?: (string | number)[];
 }
 
-export interface TemplateDefinition {
-  /** Template identifier (kebab-case). */
+export interface PlaybookDefinition {
+  /** Playbook identifier (kebab-case). */
   name: string;
   /** Human-readable description. */
   description: string;
-  /** Parameterized mission template — same shape as MissionDocument. */
+  /** Parameterized mission playbook — same shape as MissionDocument. */
   mission: Record<string, unknown>;
   /** Declared parameters. */
-  parameters?: TemplateParameter[];
+  parameters?: PlaybookParameter[];
 }
 
 /** Lightweight metadata returned by discovery (no mission body). */
-export interface TemplateInfo {
+export interface PlaybookInfo {
   name: string;
   description: string;
-  parameters: TemplateParameter[];
-  /** Absolute path to the template directory. */
+  parameters: PlaybookParameter[];
+  /** Absolute path to the playbook directory. */
   path: string;
 }
 
+// ── Backward-compat aliases ────────────────────────────────────────────
+
+/** @deprecated Use PlaybookParameter instead. */
+export type TemplateParameter = PlaybookParameter;
+/** @deprecated Use PlaybookDefinition instead. */
+export type TemplateDefinition = PlaybookDefinition;
+/** @deprecated Use PlaybookInfo instead. */
+export type TemplateInfo = PlaybookInfo;
+
 // ── Discovery ──────────────────────────────────────────────────────────
 
-function scanTemplateDir(dir: string): TemplateInfo[] {
+function scanPlaybookDir(dir: string): PlaybookInfo[] {
   if (!existsSync(dir)) return [];
 
-  const results: TemplateInfo[] = [];
+  const results: PlaybookInfo[] = [];
 
   let entries: string[];
   try {
@@ -91,13 +102,16 @@ function scanTemplateDir(dir: string): TemplateInfo[] {
       continue;
     }
 
-    // Must contain template.json
-    const templateFile = join(realPath, "template.json");
-    if (!existsSync(templateFile)) continue;
+    // Must contain playbook.json or template.json (backward compat)
+    let playbookFile = join(realPath, "playbook.json");
+    if (!existsSync(playbookFile)) {
+      playbookFile = join(realPath, "template.json");
+      if (!existsSync(playbookFile)) continue;
+    }
 
     try {
-      const raw = readFileSync(templateFile, "utf-8");
-      const def = JSON.parse(raw) as Partial<TemplateDefinition>;
+      const raw = readFileSync(playbookFile, "utf-8");
+      const def = JSON.parse(raw) as Partial<PlaybookDefinition>;
 
       if (!def.name || !def.description || !def.mission) continue;
 
@@ -116,34 +130,39 @@ function scanTemplateDir(dir: string): TemplateInfo[] {
 }
 
 /**
- * Discover all available templates from known locations.
+ * Discover all available playbooks from known locations.
  * Returns deduplicated list (first occurrence wins by name).
+ *
+ * Also scans legacy templates/ directories for backward compatibility.
  */
-export function discoverTemplates(cwd: string, polpoDir?: string): TemplateInfo[] {
+export function discoverPlaybooks(cwd: string, polpoDir?: string): PlaybookInfo[] {
   const seen = new Set<string>();
-  const results: TemplateInfo[] = [];
+  const results: PlaybookInfo[] = [];
 
   const dirs: string[] = [];
 
-  // 1. Project-level: <polpoDir>/templates/
+  // 1. Project-level: <polpoDir>/playbooks/ (+ legacy templates/)
   if (polpoDir) {
+    dirs.push(join(polpoDir, "playbooks"));
     dirs.push(join(polpoDir, "templates"));
   }
 
   // 2. Fallback if polpoDir is not the default .polpo
   const defaultPolpoDir = join(cwd, ".polpo");
   if (!polpoDir || resolve(polpoDir) !== resolve(defaultPolpoDir)) {
+    dirs.push(join(defaultPolpoDir, "playbooks"));
     dirs.push(join(defaultPolpoDir, "templates"));
   }
 
-  // 3. User-level: ~/.polpo/templates/
+  // 3. User-level: ~/.polpo/playbooks/ (+ legacy templates/)
+  dirs.push(join(homedir(), ".polpo", "playbooks"));
   dirs.push(join(homedir(), ".polpo", "templates"));
 
   for (const dir of dirs) {
-    for (const tpl of scanTemplateDir(dir)) {
-      if (!seen.has(tpl.name)) {
-        seen.add(tpl.name);
-        results.push(tpl);
+    for (const pb of scanPlaybookDir(dir)) {
+      if (!seen.has(pb.name)) {
+        seen.add(pb.name);
+        results.push(pb);
       }
     }
   }
@@ -152,18 +171,23 @@ export function discoverTemplates(cwd: string, polpoDir?: string): TemplateInfo[
 }
 
 /**
- * Load a full template definition by name.
+ * Load a full playbook definition by name.
  * Returns null if not found.
  */
-export function loadTemplate(cwd: string, polpoDir: string | undefined, name: string): TemplateDefinition | null {
-  const templates = discoverTemplates(cwd, polpoDir);
-  const info = templates.find(t => t.name === name);
+export function loadPlaybook(cwd: string, polpoDir: string | undefined, name: string): PlaybookDefinition | null {
+  const playbooks = discoverPlaybooks(cwd, polpoDir);
+  const info = playbooks.find(p => p.name === name);
   if (!info) return null;
 
-  const templateFile = join(info.path, "template.json");
+  // Try playbook.json first, then template.json (backward compat)
+  let playbookFile = join(info.path, "playbook.json");
+  if (!existsSync(playbookFile)) {
+    playbookFile = join(info.path, "template.json");
+  }
+
   try {
-    const raw = readFileSync(templateFile, "utf-8");
-    return JSON.parse(raw) as TemplateDefinition;
+    const raw = readFileSync(playbookFile, "utf-8");
+    return JSON.parse(raw) as PlaybookDefinition;
   } catch {
     return null;
   }
@@ -181,17 +205,17 @@ export interface ValidationResult {
 }
 
 /**
- * Validate user-provided parameters against the template definition.
+ * Validate user-provided parameters against the playbook definition.
  * Applies defaults, checks required fields, types, and enum constraints.
  */
 export function validateParams(
-  template: TemplateDefinition,
+  playbook: PlaybookDefinition,
   params: Record<string, string | number | boolean>,
 ): ValidationResult {
   const errors: string[] = [];
   const warnings: string[] = [];
   const resolved: Record<string, string | number | boolean> = {};
-  const defs = template.parameters ?? [];
+  const defs = playbook.parameters ?? [];
 
   for (const def of defs) {
     const value = params[def.name];
@@ -254,18 +278,18 @@ export function validateParams(
 // ── Instantiation ──────────────────────────────────────────────────────
 
 /**
- * Instantiate a template with resolved parameters.
+ * Instantiate a playbook with resolved parameters.
  *
  * 1. Serializes the mission to JSON string
  * 2. Replaces all {{placeholder}} with parameter values
  * 3. Re-parses the JSON to validate structural integrity
  * 4. Returns the mission data string ready for missionExecutor.saveMission()
  */
-export function instantiateTemplate(
-  template: TemplateDefinition,
+export function instantiatePlaybook(
+  playbook: PlaybookDefinition,
   resolved: Record<string, string | number | boolean>,
 ): { name: string; data: string; prompt: string } {
-  let json = JSON.stringify(template.mission);
+  let json = JSON.stringify(playbook.mission);
 
   // Replace all {{param}} placeholders
   for (const [key, value] of Object.entries(resolved)) {
@@ -278,7 +302,7 @@ export function instantiateTemplate(
   const unreplaced = json.match(/\{\{([^}]+)\}\}/g);
   if (unreplaced) {
     const names = [...new Set(unreplaced.map(m => m.slice(2, -2)))];
-    throw new Error(`Unreplaced placeholders in template "${template.name}": ${names.join(", ")}`);
+    throw new Error(`Unreplaced placeholders in playbook "${playbook.name}": ${names.join(", ")}`);
   }
 
   // Validate the resulting JSON is still valid
@@ -286,7 +310,7 @@ export function instantiateTemplate(
     JSON.parse(json);
   } catch (err) {
     throw new Error(
-      `Template "${template.name}" produced invalid JSON after parameter substitution: ${err instanceof Error ? err.message : String(err)}`,
+      `Playbook "${playbook.name}" produced invalid JSON after parameter substitution: ${err instanceof Error ? err.message : String(err)}`,
     );
   }
 
@@ -294,18 +318,18 @@ export function instantiateTemplate(
   const paramDesc = Object.entries(resolved)
     .map(([k, v]) => `${k}=${v}`)
     .join(", ");
-  const prompt = `template:${template.name}${paramDesc ? ` (${paramDesc})` : ""}`;
+  const prompt = `playbook:${playbook.name}${paramDesc ? ` (${paramDesc})` : ""}`;
 
-  return { name: template.name, data: json, prompt };
+  return { name: playbook.name, data: json, prompt };
 }
 
 // ── Persistence ────────────────────────────────────────────────────────
 
 /**
- * Validate a template definition object structurally.
+ * Validate a playbook definition object structurally.
  * Returns an array of error strings (empty = valid).
  */
-export function validateTemplateDefinition(def: Partial<TemplateDefinition>): string[] {
+export function validatePlaybookDefinition(def: Partial<PlaybookDefinition>): string[] {
   const errors: string[] = [];
 
   if (!def.name || typeof def.name !== "string") {
@@ -370,43 +394,58 @@ export function validateTemplateDefinition(def: Partial<TemplateDefinition>): st
 }
 
 /**
- * Save a template to disk.
+ * Save a playbook to disk.
  *
- * Creates/overwrites `<polpoDir>/templates/<name>/template.json`.
+ * Creates/overwrites `<polpoDir>/playbooks/<name>/playbook.json`.
  * Validates the definition structure before writing.
  *
- * @returns The absolute path to the saved template directory.
+ * @returns The absolute path to the saved playbook directory.
  * @throws If validation fails or the write fails.
  */
-export function saveTemplate(polpoDir: string, definition: TemplateDefinition): string {
-  const errors = validateTemplateDefinition(definition);
+export function savePlaybook(polpoDir: string, definition: PlaybookDefinition): string {
+  const errors = validatePlaybookDefinition(definition);
   if (errors.length > 0) {
-    throw new Error(`Invalid template definition:\n  - ${errors.join("\n  - ")}`);
+    throw new Error(`Invalid playbook definition:\n  - ${errors.join("\n  - ")}`);
   }
 
-  const templateDir = join(polpoDir, "templates", definition.name);
-  mkdirSync(templateDir, { recursive: true });
+  const playbookDir = join(polpoDir, "playbooks", definition.name);
+  mkdirSync(playbookDir, { recursive: true });
 
-  const templateFile = join(templateDir, "template.json");
-  writeFileSync(templateFile, JSON.stringify(definition, null, 2), "utf-8");
+  const playbookFile = join(playbookDir, "playbook.json");
+  writeFileSync(playbookFile, JSON.stringify(definition, null, 2), "utf-8");
 
-  return templateDir;
+  return playbookDir;
 }
 
 /**
- * Delete a template from disk.
+ * Delete a playbook from disk.
  *
- * Removes the `<polpoDir>/templates/<name>/` directory entirely.
- * Also checks `~/.polpo/templates/<name>/` if not found in polpoDir.
+ * Removes the `<polpoDir>/playbooks/<name>/` directory entirely.
+ * Also checks `~/.polpo/playbooks/<name>/` if not found in polpoDir.
  *
  * @returns true if deleted, false if not found.
  */
-export function deleteTemplate(cwd: string, polpoDir: string | undefined, name: string): boolean {
-  // Find where the template lives
-  const templates = discoverTemplates(cwd, polpoDir);
-  const info = templates.find(t => t.name === name);
+export function deletePlaybook(cwd: string, polpoDir: string | undefined, name: string): boolean {
+  // Find where the playbook lives
+  const playbooks = discoverPlaybooks(cwd, polpoDir);
+  const info = playbooks.find(p => p.name === name);
   if (!info) return false;
 
   rmSync(info.path, { recursive: true, force: true });
   return true;
 }
+
+// ── Backward-compat function aliases ───────────────────────────────────
+
+/** @deprecated Use discoverPlaybooks instead. */
+export const discoverTemplates = discoverPlaybooks;
+/** @deprecated Use loadPlaybook instead. */
+export const loadTemplate = loadPlaybook;
+/** @deprecated Use instantiatePlaybook instead. */
+export const instantiateTemplate = instantiatePlaybook;
+/** @deprecated Use validatePlaybookDefinition instead. */
+export const validateTemplateDefinition = validatePlaybookDefinition;
+/** @deprecated Use savePlaybook instead. */
+export const saveTemplate = savePlaybook;
+/** @deprecated Use deletePlaybook instead. */
+export const deleteTemplate = deletePlaybook;

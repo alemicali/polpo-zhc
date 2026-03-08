@@ -54,23 +54,23 @@ The default mode is Chat. Polpo handles most requests conversationally — use T
 | `/missions` | Browse, create, execute, and resume missions via interactive picker |
 | `/plan` | Switch to plan mode (free text generates missions with AI) |
 
-### Templates
+### Playbooks
 
 | Command | Description |
 |---------|-------------|
-| `/template` | Browse available templates via interactive picker |
-| `/template list` | Show a summary of all available templates |
-| `/template <name> [key=value ...]` | Execute a template with parameters |
+| `/playbook` | Browse available playbooks via interactive picker |
+| `/playbook list` | Show a summary of all available playbooks |
+| `/playbook <name> [key=value ...]` | Execute a playbook with parameters |
 
 ```
-# Browse and select a template interactively
-/template
+# Browse and select a playbook interactively
+/playbook
 
 # Run a code review directly
-/template code-review module=src/auth focus=security
+/playbook code-review module=src/auth focus=security
 ```
 
-See [Templates](/features/templates) for details on the template system.
+See [Playbooks](/features/playbooks) for details on the playbook system.
 
 ### Skills
 
