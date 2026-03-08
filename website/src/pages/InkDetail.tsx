@@ -1,4 +1,4 @@
-import { useRef, useState, type ReactNode } from "react";
+import { useRef, useState, useEffect, type ReactNode } from "react";
 import { Link, useParams, Navigate } from "react-router-dom";
 import { motion, useInView, AnimatePresence } from "motion/react";
 import {
@@ -17,7 +17,7 @@ import {
   ExternalLink,
   type LucideIcon,
 } from "lucide-react";
-import { findPackage, getPackagesBySource, type InkPackage, type PackageType } from "../data/ink-packages";
+import { type InkPackage, type PackageType } from "../data/ink-packages";
 
 /* ── Helpers ──────────────────────────────────────────────────────── */
 
@@ -145,27 +145,103 @@ function RelatedRow({ pkg }: { pkg: InkPackage }) {
 
 export function InkDetailPage() {
   const { "*": splat } = useParams();
+  const [pkg, setPkg] = useState<InkPackage | null>(null);
+  const [related, setRelated] = useState<InkPackage[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [notFound, setNotFound] = useState(false);
 
   // Route: /ink/:owner/:repo/:name
   // splat = "owner/repo/name"
   const parts = splat?.split("/") ?? [];
-  if (parts.length < 3) return <Navigate to="/ink" replace />;
-
   const owner = parts[0];
   const repo = parts[1];
   const name = parts.slice(2).join("/");
   const source = `${owner}/${repo}`;
 
-  const pkg = findPackage(source, name);
-  if (!pkg) return <Navigate to="/ink" replace />;
+  useEffect(() => {
+    if (parts.length < 3) { setNotFound(true); setLoading(false); return; }
+
+    let cancelled = false;
+
+    async function load() {
+      try {
+        // Fetch single package
+        const res = await fetch(`/api/packages/${owner}/${repo}/${name}`, {
+          signal: AbortSignal.timeout(5000),
+        });
+        if (!res.ok) { if (!cancelled) setNotFound(true); return; }
+
+        const data = await res.json() as { package: {
+          source: string; name: string; type: string; description: string;
+          tags: string[]; version: string; author: string; installs: number;
+          installs24h: number; firstSeen: string; lastInstalled: string;
+        } };
+        if (cancelled) return;
+
+        const p = data.package;
+        setPkg({
+          name: p.name,
+          type: p.type as PackageType,
+          description: p.description,
+          source: p.source,
+          tags: p.tags ?? [],
+          version: p.version,
+          author: p.author,
+          installs: p.installs,
+          installs24h: p.installs24h,
+          publishedAt: p.firstSeen,
+        });
+
+        // Fetch all packages to find related ones from same source
+        const allRes = await fetch("/api/packages", { signal: AbortSignal.timeout(5000) });
+        if (allRes.ok && !cancelled) {
+          const allData = await allRes.json() as { packages: Array<{
+            source: string; name: string; type: string; description: string;
+            tags: string[]; version: string; author: string; installs: number;
+            installs24h: number; firstSeen: string;
+          }> };
+          setRelated(
+            allData.packages
+              .filter((r) => r.source === p.source && r.name !== p.name)
+              .map((r) => ({
+                name: r.name,
+                type: r.type as PackageType,
+                description: r.description,
+                source: r.source,
+                tags: r.tags ?? [],
+                version: r.version,
+                author: r.author,
+                installs: r.installs,
+                installs24h: r.installs24h,
+                publishedAt: r.firstSeen,
+              })),
+          );
+        }
+      } catch {
+        if (!cancelled) setNotFound(true);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    load();
+    return () => { cancelled = true; };
+  }, [owner, repo, name]);
+
+  if (notFound) return <Navigate to="/ink" replace />;
+
+  if (loading || !pkg) {
+    return (
+      <div className="min-h-screen bg-white flex items-center justify-center">
+        <p className="text-neutral-400 font-mono text-sm">Loading...</p>
+      </div>
+    );
+  }
 
   const config = TYPE_CONFIG[pkg.type];
   const Icon = config.icon;
   const installCmd = `polpo ink add ${pkg.source}`;
   const ghUrl = `https://github.com/${pkg.source}`;
-
-  // Related packages from same source, excluding current
-  const related = getPackagesBySource(pkg.source).filter((p) => p.name !== pkg.name);
 
   return (
     <div className="min-h-screen bg-white text-neutral-950">

@@ -278,7 +278,7 @@ function VideoSection() {
           <div className="relative overflow-hidden rounded-xl border border-neutral-200 bg-neutral-950 aspect-video shadow-2xl shadow-neutral-950/10">
             <video
               className="absolute inset-0 w-full h-full object-contain cursor-pointer"
-              src="https://pub-3ebcd654a5c74a0ab00c87cbb7507f97.r2.dev/polpo-intro.mp4"
+              src="https://pub-3ebcd654a5c74a0ab00c87cbb7507f97.r2.dev/Polpo-Intro.mp4"
               autoPlay
               muted
               loop
