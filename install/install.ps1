@@ -148,18 +148,18 @@ function Install-Polpo {
         $pkgManager = "pnpm"
     }
 
-    Write-Info "Installing polpo-ai globally via $pkgManager..."
+    Write-Info "Installing @polpo-ai/polpo globally via $pkgManager..."
 
     switch ($pkgManager) {
-        "pnpm" { pnpm add -g polpo-ai }
-        "npm"  { npm install -g polpo-ai }
+        "pnpm" { pnpm add -g @polpo-ai/polpo }
+        "npm"  { npm install -g @polpo-ai/polpo }
     }
 
     # Verify installation
     try {
         $polpoVersion = (polpo --version 2>$null)
         if ($polpoVersion) {
-            Write-Ok "polpo-ai $polpoVersion installed successfully"
+            Write-Ok "@polpo-ai/polpo $polpoVersion installed successfully"
         }
         else {
             throw "not found"

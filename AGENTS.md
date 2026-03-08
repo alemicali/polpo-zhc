@@ -52,7 +52,7 @@ pnpm test
 ## Naming Conventions
 
 - **User-facing strings**: "Polpo" or "OpenPolpo" (CLI output, docs, prompts)
-- **npm package**: `polpo-ai` (root), `@polpo-ai/react` (SDK)
+- **npm package**: `@polpo-ai/polpo` (root), `@polpo-ai/react` (SDK)
 - **CLI command**: `polpo`
 - **Config directory**: `.polpo/`
 - **Internal types**: `OrchestraConfig`, `OrchestraState`, `OrchestraEvent` (historical, kept as-is)

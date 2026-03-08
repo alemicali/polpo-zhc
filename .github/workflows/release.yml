@@ -26,7 +26,7 @@ jobs:
       - run: pnpm run build
       - run: pnpm run --filter @polpo-ai/react build
 
-      - name: Publish polpo-ai
+      - name: Publish @polpo-ai/polpo
         run: pnpm publish --no-git-checks --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

@@ -38,7 +38,7 @@
         "label": "Releases",
         "icon": "npm",
         "iconType": "brands",
-        "href": "https://www.npmjs.com/package/polpo-ai"
+        "href": "https://www.npmjs.com/package/@polpo-ai/polpo"
       }
     ]
   },

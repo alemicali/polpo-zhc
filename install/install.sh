@@ -200,14 +200,14 @@ install_polpo() {
     pkg_manager="pnpm"
   fi
 
-  info "Installing polpo-ai globally via ${BOLD}${pkg_manager}${RESET}..."
+  info "Installing @polpo-ai/polpo globally via ${BOLD}${pkg_manager}${RESET}..."
 
   case "$pkg_manager" in
     pnpm)
-      pnpm add -g polpo-ai
+      pnpm add -g @polpo-ai/polpo
       ;;
     npm)
-      npm install -g polpo-ai
+      npm install -g @polpo-ai/polpo
       ;;
   esac
 
@@ -215,7 +215,7 @@ install_polpo() {
   if command -v polpo &>/dev/null; then
     local installed_ver
     installed_ver="$(polpo --version 2>/dev/null || echo 'unknown')"
-    ok "polpo-ai ${installed_ver} installed successfully"
+    ok "@polpo-ai/polpo ${installed_ver} installed successfully"
   else
     # npm global bin might not be in PATH
     warn "polpo was installed but is not in your PATH."

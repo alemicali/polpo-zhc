@@ -1,5 +1,5 @@
 {
-  "name": "polpo-ai",
+  "name": "@polpo-ai/polpo",
   "version": "0.1.2",
   "description": "Agent-agnostic framework for orchestrating teams of AI coding agents",
   "type": "module",

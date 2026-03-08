@@ -3,20 +3,19 @@
 </p>
 
 <p align="center">
-  <strong>An octopus AI agent that wrangles other agents into reliable teams.</strong><br/>
-  <sub>Builds and runs your personal assistant or your whole AI team — ensures quality, pings you only when it matters.</sub>
+  <strong>Build your AI company.</strong><br/>
+  <sub>Assemble AI agent teams that plan, execute, review their own work, and ping you only when it matters.</sub>
 </p>
 
 <p align="center">
   <a href="#quick-start">Quick Start</a> &bull;
+  <a href="#how-polpo-is-different">How it's different</a> &bull;
   <a href="#features">Features</a> &bull;
-  <a href="#architecture">Architecture</a> &bull;
-  <a href="#project-structure">Project Structure</a> &bull;
   <a href="https://polpo.sh">Docs</a>
 </p>
 
 <p align="center">
-  <img alt="npm" src="https://img.shields.io/npm/v/polpo-ai?style=flat-square&color=blue" />
+  <img alt="npm" src="https://img.shields.io/npm/v/@polpo-ai/polpo?style=flat-square&color=blue" />
   <img alt="license" src="https://img.shields.io/github/license/lumea-labs/polpo?style=flat-square" />
   <img alt="node" src="https://img.shields.io/badge/node-%3E%3D18-brightgreen?style=flat-square" />
   <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-ESM-blue?style=flat-square" />
@@ -26,18 +25,29 @@
 
 ## Why Polpo?
 
-AI agents are great at execution. They're terrible at finishing complex tasks autonomously. Without oversight they drift, conflict, and stall — and nobody tells you until it's too late. You end up babysitting the machines that were supposed to save you time.
+You don't need another AI coding assistant. You need a team that runs without you.
 
-**Polpo fixes this.** Eight arms, infinite patience, and a Telegram account. You talk to Polpo like you'd talk to a project manager — describe what you need, and it assembles the right agents, plans the work, checks every result, retries what's broken, and escalates what it can't fix. You define the goal, Polpo makes sure it actually gets done.
+AI agents are great at execution — terrible at finishing real work autonomously. Without oversight they drift, conflict, and stall. You end up babysitting the machines that were supposed to save you time: 4 monitors, 12 terminals, zero confidence anything actually works.
 
-**Who is it for?** Anyone who wants a personal AI team on their laptop, a $5 VPS, or a Docker container in their cloud. Tell Polpo to build an app, run a virtual AI company, or automate your workflows — and it handles the rest. One `npm install` and you're chatting. No hosted platform, no vendor lock-in — your hardware, your API keys, your rules.
+**Polpo gives you an AI company.** Describe what you need and walk away. Polpo assembles the right agents, plans the work, checks every result, retries what's broken, and escalates what it can't fix. It reaches you on Telegram, Slack, or email — only when it matters.
 
-### What's different
+One `npm install`, no hosted platform, no vendor lock-in. Your laptop, your API keys, your rules.
 
-- **Lives its own life.** Polpo builds missions, picks agents, and works through queued tasks on its own — 24/7 if you need it. Describe what you need and walk away.
-- **Reliable output, not best-effort.** Polpo scores every task with LLM judges. Below threshold? It sends the agent back to fix it. You get the result, not the retries.
-- **Crash-proof.** Agents run as detached processes. Kill Polpo, reboot the server, lose your connection — it picks up exactly where it left off.
-- **Proactive, not a chatbot.** You decide how and when Polpo should reach you — Slack, email, Telegram, webhooks — and it only does when it matters.
+## How Polpo is different
+
+| | What you get | How it works |
+|---|---|---|
+| **Claude Code / Cursor** | A developer | One agent, one chat, one task at a time. You drive. |
+| **OpenClaw** | A personal assistant | Multiple agents, no quality checks. You hope it works. |
+| **Polpo** | **A company** | Multiple agents working as a team — with a manager (Polpo) that plans, delegates, reviews, retries, and reports back. You're the CEO. |
+
+| | | |
+|:---:|---|---|
+| :robot: | **Autonomous** | Builds missions, picks agents, works through queued tasks 24/7. Walk away. |
+| :white_check_mark: | **Reliable** | Every task scored by LLM judges. Below threshold? The agent fixes it. You get results, not retries. |
+| :shield: | **Crash-proof** | Detached processes. Kill Polpo, reboot, lose connection — picks up where it left off. |
+| :bell: | **Proactive** | Reaches you on Slack, Telegram, email, or webhooks. You decide when and how. |
+| :repeat: | **Playbooks** | Define a mission once, run it forever. Schedule it, tweak it, improve it. Your AI company gets better over time. |
 
 ## Installation
 
@@ -55,12 +65,12 @@ curl -fsSL https://raw.githubusercontent.com/lumea-labs/polpo/main/install/insta
 irm https://raw.githubusercontent.com/lumea-labs/polpo/main/install/install.ps1 | iex
 ```
 
-The installer detects your platform, ensures Node.js >= 18 is available (installing it via your system package manager if needed), and installs `polpo-ai` globally.
+The installer detects your platform, ensures Node.js >= 18 is available, and installs Polpo globally.
 
 ### Manual install
 
 ```bash
-npm install -g polpo-ai    # or: pnpm add -g polpo-ai
+npm install -g @polpo-ai/polpo    # or: pnpm add -g @polpo-ai/polpo
 ```
 
 ### Docker
@@ -139,123 +149,15 @@ polpo status -w    # Live dashboard in another terminal
 polpo serve        # HTTP API + Web UI at http://localhost:3000
 ```
 
-## Features
+## What your agents can do
 
-### Core
+Code. Browse the web. Send emails. Generate PDFs, Excel, Word docs. Create images, videos, audio. Search the internet. Message on WhatsApp. Talk to your customers. Handle credentials securely. And learn — Polpo creates and installs its own skills over time. Your AI company gets smarter the more you use it.
 
-- **Multi-agent orchestration** — coordinate any number of agents with plan-based task execution, dependency resolution, and inter-agent communication
-- **7 task states** — `pending` → `awaiting_approval` → `assigned` → `in_progress` → `review` → `done` / `failed`, with validated transitions
-- **8-phase assessment pipeline** — G-Eval LLM-as-judge scoring across configurable dimensions (correctness, completeness, code quality, edge cases)
-- **Crash-resilient runners** — detached agent subprocesses tracked in a persistent RunStore; automatic reconnection on restart
-- **Deadlock detection** — identifies circular dependencies and uses LLM-assisted resolution
-
-### Quality & Operations
-
-- **15 lifecycle hooks** — `before`/`after` hooks on task, plan, assessment, quality, scheduling, and orchestrator events; before-hooks can cancel or modify operations
-- **Approval gates** — hybrid auto/human gates; automatic condition evaluation or blocking for human review with configurable timeouts
-- **Notification system** — Slack, Telegram, Email, and Webhook channels with template-based routing
-- **4-level escalation chain** — automatic escalation from retry → reassign → notify → human intervention
-- **Quality gates** — plan-level quality checkpoints that block progression until score thresholds are met
-- **SLA deadline monitoring** — warning and violation events for task and plan deadlines
-- **Cron-based plan scheduling** — recurring plan execution via cron expressions
-
-### Interfaces
-
-- **REST API** — Hono-based HTTP server with Zod-validated endpoints
-- **SSE** — real-time event streaming with reconnection support
-- **Terminal UI** — Ink-based TUI with Dashboard, Tasks, Plans, Agents, Logs, and Chat tabs
-- **Web UI** — Vite + React monitoring dashboard with shadcn/ui (see `ui/`)
-- **React SDK** — type-safe hooks with SSE-backed push updates (see `packages/react-sdk/`)
-
-### Developer Experience
-
-- **Multiple store backends** — File (default), SQLite, and PostgreSQL for tasks, runs, sessions, and logs
-- **MCP support** — connect external tool servers to any agent with automatic tool bridging
-- **Filesystem sandbox** — restrict agent file access via `allowedPaths`
-- **Skills system** — reusable agent instructions in `.polpo/skills/`, auto-injected into system prompts
-- **55+ typed events** — organized across 19 categories, consumed by TUI, SSE, and notifications
-- **Security** — `safeEnv` strips secrets from subprocesses, no-eval condition DSL, localhost-only default binding
-
-## Architecture
-
-```
-                       polpo.json
-                           |
-                           v
-                   ┌───────────────┐
-                   │  Orchestrator  │
-                   │   (5s tick)    │
-                   └───────┬───────┘
-                           |
-             ┌─────────────┼─────────────┐
-             v             v             v
-       ┌──────────┐ ┌──────────┐ ┌──────────┐
-       │  Runner   │ │  Runner   │ │  Runner   │
-       │ (detached)│ │ (detached)│ │ (detached)│
-       └─────┬────┘ └─────┬────┘ └─────┬────┘
-             v             v             v
-        Built-in      Built-in      Built-in
-         Engine         Engine        Engine
-```
-
-The orchestrator runs a supervisor loop every 5 seconds, assigning pending tasks to agents, monitoring health, and driving the assessment pipeline.
-
-### Task State Machine
-
-```
-                      ┌───────────────────┐
-                      v                   |
-pending ──> awaiting_approval ──> assigned ──> in_progress ──> review ──> done
-                |                                               |
-                v                                               v
-              failed <──────────────────────────────────────  failed
-                |
-                v
-             pending (retry)
-```
-
-Seven states with validated transitions. Tasks flow forward through assignment, execution, and review. Failed tasks can be retried back to `pending`. Approval gates optionally intercept the `pending → assigned` transition.
-
-## Project Structure
-
-```
-polpo/
-├── src/
-│   ├── core/               # Orchestrator, config, types, events, hooks, state machine
-│   │                       #   approval manager, escalation, task/plan managers
-│   ├── adapters/           # Built-in engine (Pi Agent)
-│   ├── assessment/         # G-Eval assessor, scoring dimensions, fix phase
-│   ├── quality/            # Quality controller, SLA monitor
-│   ├── scheduling/         # Cron parser, plan scheduler
-│   ├── notifications/      # Notification router + channels (Slack, Telegram, Email, Webhook)
-│   ├── tools/              # 7 coding tools, path sandbox, safeEnv
-│   ├── mcp/                # MCP client manager and tool bridging
-│   ├── stores/             # File stores (tasks, runs, sessions, logs, config)
-│   ├── llm/                # LLM queries, prompts, plan generation, skills
-│   ├── tui/                # Terminal UI (Ink) + TUI commands
-│   ├── server/             # Hono HTTP API, SSE bridge, routes
-│   ├── cli/                # Commander CLI entry point + subcommands
-│   └── index.ts            # Barrel exports
-├── ui/                     # Vite + React monitoring dashboard
-├── docs/                   # Mintlify documentation site
-├── packages/
-│   ├── core/               # @polpo-ai/core — pure business logic (zero Node.js deps)
-│   ├── drizzle/            # @polpo-ai/drizzle — Drizzle ORM stores (SQLite + PostgreSQL)
-│   ├── client-sdk/         # @polpo-ai/client — TypeScript HTTP client + SSE
-│   └── react-sdk/          # @polpo-ai/react — React hooks + real-time updates
-└── .polpo/polpo.json       # Your project configuration
-```
+22+ LLM providers. 70+ tools. 5,000+ community skills. Free default model included.
 
 ## Documentation
 
-Full documentation is available at [polpo.sh](https://polpo.sh), including:
-
-- Configuration reference (`polpo.json` schema)
-- API endpoint documentation
-- Built-in engine guide
-- Assessment and quality pipeline details
-- Notification and escalation setup
-- Hook and event reference
+Full docs at [polpo.sh](https://polpo.sh) — configuration, API reference, guides, and more.
 
 ## Contributing
 

@@ -11,7 +11,7 @@ function detectPackageManager(): "pnpm" | "npm" {
       encoding: "utf-8",
       timeout: 10_000,
     });
-    if (out.includes("polpo-ai")) return "pnpm";
+    if (out.includes("@polpo-ai/polpo")) return "pnpm";
   } catch { /* not pnpm */ }
   return "npm";
 }

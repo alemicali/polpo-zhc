@@ -12,7 +12,7 @@ import { resolve } from "node:path";
 import { homedir } from "node:os";
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 
-const PACKAGE_NAME = "polpo-ai";
+const PACKAGE_NAME = "@polpo-ai/polpo";
 const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
 /** File where we store the last check timestamp + latest version. */
