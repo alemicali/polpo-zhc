@@ -17,6 +17,15 @@ import {
   ArrowRight,
   Copy,
   Terminal,
+  Bot,
+  Target,
+  Loader2,
+  Clock,
+  Users,
+  BarChart3,
+  MessageSquare,
+  Rocket,
+  type LucideIcon,
 } from "lucide-react";
 
 /* ── Scroll-reveal ─────────────────────────────────────────────────── */
@@ -272,6 +281,349 @@ function Capabilities() {
   );
 }
 
+/* ── Mock: Agent Team Flow ─────────────────────────────────────────── */
+
+function AgentNode({
+  name,
+  role,
+  status,
+  className = "",
+}: {
+  name: string;
+  role: string;
+  status: "active" | "idle" | "done";
+  className?: string;
+}) {
+  const colors = {
+    active: "border-emerald-300 bg-emerald-50",
+    idle: "border-neutral-200 bg-white",
+    done: "border-neutral-200 bg-neutral-50",
+  };
+  const dots = {
+    active: "bg-emerald-500 animate-pulse",
+    idle: "bg-neutral-300",
+    done: "bg-neutral-400",
+  };
+  return (
+    <div
+      className={`rounded-lg border px-4 py-3 shadow-sm ${colors[status]} ${className}`}
+    >
+      <div className="flex items-center gap-2">
+        <div className={`h-2 w-2 rounded-full ${dots[status]}`} />
+        <span className="font-display text-sm font-bold text-neutral-900">
+          {name}
+        </span>
+      </div>
+      <p className="mt-0.5 text-xs text-neutral-500">{role}</p>
+    </div>
+  );
+}
+
+function TeamFlow() {
+  return (
+    <section className="py-24 md:py-32">
+      <div className="mx-auto max-w-4xl px-6">
+        <Reveal>
+          <h2 className="text-center font-display text-3xl font-extrabold tracking-tight text-neutral-950 sm:text-4xl">
+            Your AI team,{" "}
+            <span className="text-neutral-400">working together.</span>
+          </h2>
+          <p className="mx-auto mt-4 max-w-lg text-center text-neutral-500">
+            Polpo orchestrates multiple agents as a real team. Each agent has a
+            role, skills, and tools. Polpo manages the flow.
+          </p>
+        </Reveal>
+        <Reveal delay={0.12}>
+          <div className="relative mt-14 overflow-hidden rounded-xl border border-neutral-200 bg-white p-8">
+            {/* Polpo at center */}
+            <div className="flex flex-col items-center">
+              <div className="rounded-xl border-2 border-neutral-900 bg-neutral-950 px-6 py-3 text-center shadow-lg">
+                <div className="flex items-center gap-2">
+                  <Target className="h-4 w-4 text-white" />
+                  <span className="font-display text-sm font-bold text-white">
+                    Polpo Orchestrator
+                  </span>
+                </div>
+                <p className="mt-0.5 text-xs text-neutral-400">
+                  Plans &middot; Delegates &middot; Reviews &middot; Reports
+                </p>
+              </div>
+
+              {/* Connectors */}
+              <div className="my-4 flex items-center gap-12">
+                <div className="h-8 w-px bg-neutral-200" />
+                <div className="h-8 w-px bg-neutral-200" />
+                <div className="h-8 w-px bg-neutral-200" />
+                <div className="h-8 w-px bg-neutral-200" />
+              </div>
+
+              {/* Agents row */}
+              <div className="grid w-full max-w-2xl grid-cols-2 gap-3 sm:grid-cols-4">
+                <AgentNode
+                  name="backend-dev"
+                  role="Node.js & APIs"
+                  status="active"
+                />
+                <AgentNode
+                  name="frontend-dev"
+                  role="React & UI"
+                  status="active"
+                />
+                <AgentNode
+                  name="researcher"
+                  role="Web search & docs"
+                  status="idle"
+                />
+                <AgentNode
+                  name="reviewer"
+                  role="Code review & QA"
+                  status="done"
+                />
+              </div>
+            </div>
+
+            {/* Mock task feed */}
+            <div className="mt-8 space-y-2 rounded-lg border border-neutral-100 bg-neutral-50 p-4">
+              <p className="font-mono text-xs uppercase tracking-wider text-neutral-400">
+                Live activity
+              </p>
+              {[
+                {
+                  agent: "backend-dev",
+                  task: "Set up Express routes",
+                  status: "in_progress",
+                },
+                {
+                  agent: "frontend-dev",
+                  task: "Create React dashboard",
+                  status: "in_progress",
+                },
+                {
+                  agent: "reviewer",
+                  task: "Review API schema",
+                  status: "done",
+                  score: "9.2/10",
+                },
+                {
+                  agent: "researcher",
+                  task: "Waiting for dependencies",
+                  status: "pending",
+                },
+              ].map((t, i) => (
+                <div
+                  key={i}
+                  className="flex items-center gap-3 rounded-md bg-white px-3 py-2 text-sm"
+                >
+                  {t.status === "in_progress" && (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin text-emerald-500" />
+                  )}
+                  {t.status === "done" && (
+                    <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
+                  )}
+                  {t.status === "pending" && (
+                    <Clock className="h-3.5 w-3.5 text-neutral-400" />
+                  )}
+                  <span className="font-mono text-xs font-medium text-neutral-600">
+                    {t.agent}
+                  </span>
+                  <span className="text-neutral-500">{t.task}</span>
+                  {t.score && (
+                    <span className="ml-auto rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700">
+                      {t.score}
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        </Reveal>
+      </div>
+    </section>
+  );
+}
+
+/* ── Feature showcase with links ──────────────────────────────────── */
+
+function FeatureShowcase() {
+  const features: {
+    icon: LucideIcon;
+    title: string;
+    desc: string;
+    link: string;
+    linkLabel: string;
+  }[] = [
+    {
+      icon: Target,
+      title: "Missions & Plans",
+      desc: "Define complex goals, Polpo breaks them into tasks with dependencies and agent assignments.",
+      link: "https://docs.polpo.sh/concepts/missions",
+      linkLabel: "Mission guide",
+    },
+    {
+      icon: BarChart3,
+      title: "LLM-as-Judge Review",
+      desc: "Every task scored across multiple dimensions. Below threshold? Automatic retry with targeted fixes.",
+      link: "https://docs.polpo.sh/features/review",
+      linkLabel: "Review pipeline",
+    },
+    {
+      icon: Users,
+      title: "Teams & Roles",
+      desc: "Define specialized agents with roles, skills, and tool access. Assign them to teams.",
+      link: "https://docs.polpo.sh/concepts/teams",
+      linkLabel: "Team setup",
+    },
+    {
+      icon: Bell,
+      title: "Notifications",
+      desc: "Slack, Telegram, email, webhooks. Get pinged on approvals, completions, and failures.",
+      link: "https://docs.polpo.sh/features/notifications",
+      linkLabel: "Notification channels",
+    },
+    {
+      icon: Shield,
+      title: "Approval Gates",
+      desc: "Human-in-the-loop checkpoints. Block critical tasks until you review and approve.",
+      link: "https://docs.polpo.sh/features/approval-gates",
+      linkLabel: "Approval setup",
+    },
+    {
+      icon: MessageSquare,
+      title: "Chat Interface",
+      desc: "Talk to Polpo like a project manager. Describe what you need, it handles the rest.",
+      link: "https://docs.polpo.sh/usage/tui",
+      linkLabel: "Chat & TUI guide",
+    },
+    {
+      icon: Sparkles,
+      title: "Skills System",
+      desc: "Agents learn through reusable skills. Install from community, create custom, or let Polpo evolve them.",
+      link: "https://docs.polpo.sh/features/skills",
+      linkLabel: "Skills guide",
+    },
+    {
+      icon: RefreshCw,
+      title: "Scheduling",
+      desc: "Run missions on a cron schedule. Automate recurring workflows while you sleep.",
+      link: "https://docs.polpo.sh/features/scheduling",
+      linkLabel: "Scheduling guide",
+    },
+  ];
+
+  return (
+    <section className="border-y border-neutral-100 bg-neutral-50/50 py-24 md:py-32">
+      <div className="mx-auto max-w-5xl px-6">
+        <Reveal>
+          <h2 className="text-center font-display text-3xl font-extrabold tracking-tight text-neutral-950 sm:text-4xl">
+            Everything you need.{" "}
+            <span className="text-neutral-400">Nothing you don't.</span>
+          </h2>
+        </Reveal>
+        <div className="mt-14 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
+          {features.map((f, i) => {
+            const Icon = f.icon;
+            return (
+              <Reveal key={i} delay={i * 0.04}>
+                <div className="group flex h-full flex-col rounded-xl border border-neutral-200 bg-white p-5 transition hover:border-neutral-300 hover:shadow-sm">
+                  <Icon
+                    className="mb-3 h-5 w-5 text-neutral-400"
+                    strokeWidth={1.5}
+                  />
+                  <h3 className="font-display text-sm font-bold text-neutral-900">
+                    {f.title}
+                  </h3>
+                  <p className="mt-1.5 flex-1 text-sm leading-snug text-neutral-500">
+                    {f.desc}
+                  </p>
+                  <a
+                    href={f.link}
+                    className="mt-3 inline-flex items-center gap-1 text-xs font-medium text-neutral-400 transition group-hover:text-neutral-900"
+                  >
+                    {f.linkLabel}{" "}
+                    <ArrowRight className="h-3 w-3" />
+                  </a>
+                </div>
+              </Reveal>
+            );
+          })}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/* ── Deploy options ───────────────────────────────────────────────── */
+
+function DeployOptions() {
+  const options: {
+    icon: LucideIcon;
+    title: string;
+    desc: string;
+    link: string;
+  }[] = [
+    {
+      icon: Terminal,
+      title: "Your laptop",
+      desc: "npm install and go. Zero config.",
+      link: "https://docs.polpo.sh/install",
+    },
+    {
+      icon: Globe,
+      title: "Any VPS",
+      desc: "Hetzner, DigitalOcean, AWS, GCP.",
+      link: "https://docs.polpo.sh/install/hetzner",
+    },
+    {
+      icon: Bot,
+      title: "Docker",
+      desc: "One-line container, ready to serve.",
+      link: "https://docs.polpo.sh/install#docker",
+    },
+    {
+      icon: Rocket,
+      title: "Railway / Fly",
+      desc: "Deploy from Git in 60 seconds.",
+      link: "https://docs.polpo.sh/install/railway",
+    },
+  ];
+  return (
+    <section className="py-24 md:py-32">
+      <div className="mx-auto max-w-3xl px-6">
+        <Reveal>
+          <h2 className="text-center font-display text-3xl font-extrabold tracking-tight text-neutral-950 sm:text-4xl">
+            Deploy{" "}
+            <span className="text-neutral-400">anywhere.</span>
+          </h2>
+        </Reveal>
+        <div className="mt-12 grid grid-cols-2 gap-3 sm:grid-cols-4">
+          {options.map((o, i) => {
+            const Icon = o.icon;
+            return (
+              <Reveal key={i} delay={i * 0.05}>
+                <a
+                  href={o.link}
+                  className="group flex flex-col items-center rounded-xl border border-neutral-200 bg-white p-6 text-center transition hover:border-neutral-300 hover:shadow-sm"
+                >
+                  <Icon
+                    className="mb-3 h-6 w-6 text-neutral-400 transition group-hover:text-neutral-900"
+                    strokeWidth={1.5}
+                  />
+                  <span className="font-display text-sm font-bold text-neutral-900">
+                    {o.title}
+                  </span>
+                  <span className="mt-1 text-xs text-neutral-500">
+                    {o.desc}
+                  </span>
+                </a>
+              </Reveal>
+            );
+          })}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function HowItWorks() {
   const steps = [
     { cmd: "polpo init", note: "Initialize your project" },
@@ -492,9 +844,12 @@ export function App() {
       <div className="grain" />
       <Hero />
       <Comparison />
+      <TeamFlow />
       <Capabilities />
+      <FeatureShowcase />
       <HowItWorks />
       <Differentiators />
+      <DeployOptions />
       <Stats />
       <CTA />
       <Footer />

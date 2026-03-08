@@ -39,7 +39,7 @@ OpenPolpo includes several built-in security measures:
 
 ### Agent Sandboxing
 
-- **Filesystem sandbox** (`allowedPaths`) — restricts agent file access to configured directories. Agents cannot read or write outside the sandbox. See the [Security Guide](https://polpo.sh/guides/security/).
+- **Filesystem sandbox** (`allowedPaths`) — restricts agent file access to configured directories. Agents cannot read or write outside the sandbox. See the [Security Guide](https://docs.polpo.sh/guides/security/).
 - **`safeEnv`** — strips sensitive environment variables (API keys, tokens, passwords) from agent subprocess environments. Only explicitly allowed variables are forwarded.
 
 ### Network

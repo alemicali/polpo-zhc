@@ -252,7 +252,7 @@ print_next_steps() {
   echo ""
   printf "    ${CYAN}docker run -it -p 3000:3000 -v \$(pwd):/workspace lumea-labs/polpo${RESET}\n"
   echo ""
-  printf "  ${DIM}Documentation: https://polpo.sh${RESET}\n"
+  printf "  ${DIM}Documentation: https://docs.polpo.sh${RESET}\n"
   printf "  ${DIM}GitHub:        https://github.com/lumea-labs/polpo${RESET}\n"
   echo ""
 }

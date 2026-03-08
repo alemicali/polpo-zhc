@@ -73,8 +73,7 @@
               "usage/tui",
               "usage/server",
               "usage/web-ui",
-              "usage/telegram",
-              "usage/whatsapp"
+              "usage/telegram"
             ]
           },
           {

@@ -11,7 +11,7 @@
   <a href="#quick-start">Quick Start</a> &bull;
   <a href="#how-polpo-is-different">How it's different</a> &bull;
   <a href="#features">Features</a> &bull;
-  <a href="https://polpo.sh">Docs</a>
+  <a href="https://docs.polpo.sh">Docs</a>
 </p>
 
 <p align="center">
@@ -81,72 +81,36 @@ docker run -it -p 3000:3000 -v $(pwd):/workspace lumea-labs/polpo
 
 ## Quick Start
 
-### Path 1: Chat with an agent (30 seconds)
+### Chat with an agent
 
 ```bash
-mkdir my-project && cd my-project
-polpo init
-polpo
+polpo init && polpo
 ```
 
-That's it. You're in the interactive TUI. Type what you need, hit Enter, and the agent does it.
+The setup wizard detects your API keys, picks a model, and creates your first agent. Then you're in the interactive TUI — type what you need, hit Enter, and the agent does it.
 
-### Path 2: Orchestrate a team (5 minutes)
-
-**1. Init your project**
+### Orchestrate a team
 
 ```bash
-mkdir my-project && cd my-project
-polpo init
+polpo init                          # Set up project, agents, and roles
+polpo plan create "Build a REST API with auth and tests"
+polpo run                           # Agents execute tasks in parallel
 ```
 
-**2. Configure your team** in `.polpo/polpo.json`:
+Polpo generates a plan with tasks, dependencies, and agent assignments. Agents execute, LLM judges score every result, and failures retry automatically.
 
-```json
-{
-  "project": "my-project",
-  "team": {
-    "name": "default",
-    "agents": [
-      {
-        "name": "backend-dev",
-        "role": "Backend developer specializing in Node.js and databases"
-      },
-      {
-        "name": "frontend-dev",
-        "role": "Frontend developer specializing in React and TypeScript"
-      }
-    ]
-  },
-  "settings": {
-    "maxRetries": 3,
-    "workDir": ".",
-    "logLevel": "normal"
-  }
-}
-```
-
-**3. Create a plan**
-
-```bash
-polpo plan create "Build a REST API with SQLite database and Express endpoints"
-```
-
-Polpo uses AI to generate a plan with tasks, dependencies, and agent assignments. Review it, then:
-
-**4. Execute**
-
-```bash
-polpo run
-```
-
-Polpo assigns tasks to agents, respects dependencies, scores every result with LLM judges, retries what fails, and reports when it's done.
-
-**5. Monitor** (optional)
+**Monitor** (optional):
 
 ```bash
 polpo status -w    # Live dashboard in another terminal
 polpo serve        # HTTP API + Web UI at http://localhost:3000
+```
+
+### Docker
+
+```bash
+docker pull ghcr.io/lumea-labs/polpo:latest
+docker run -it -v $(pwd):/workspace ghcr.io/lumea-labs/polpo:latest
 ```
 
 ## What your agents can do
@@ -157,7 +121,7 @@ Code. Browse the web. Send emails. Generate PDFs, Excel, Word docs. Create image
 
 ## Documentation
 
-Full docs at [polpo.sh](https://polpo.sh) — configuration, API reference, guides, and more.
+Full docs at [docs.polpo.sh](https://docs.polpo.sh) — configuration, API reference, guides, and more.
 
 ## Contributing
 
