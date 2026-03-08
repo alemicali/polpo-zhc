@@ -3,7 +3,8 @@
 </p>
 
 <p align="center">
-  <strong>AI agent orchestration framework — build virtual AI companies.</strong>
+  <strong>An octopus AI agent that wrangles other agents into reliable teams.</strong><br/>
+  <sub>Builds and runs your personal assistant or your whole AI team — ensures quality, pings you only when it matters.</sub>
 </p>
 
 <p align="center">
@@ -23,9 +24,20 @@
 
 ---
 
-OpenPolpo coordinates teams of AI agents working together on complex software tasks. Define plans, assign tasks to specialized agents, and let Polpo handle orchestration, assessment, approval gates, notifications, and recovery.
+## Why Polpo?
 
-Polpo includes a **built-in engine** (Pi Agent) — a full agentic loop with 7 coding tools, 18+ LLM providers, and MCP support. No API key needed — the default model is free.
+AI agents are great at execution. They're terrible at finishing complex tasks autonomously. Without oversight they drift, conflict, and stall — and nobody tells you until it's too late. You end up babysitting the machines that were supposed to save you time.
+
+**Polpo fixes this.** Eight arms, infinite patience, and a Telegram account. You talk to Polpo like you'd talk to a project manager — describe what you need, and it assembles the right agents, plans the work, checks every result, retries what's broken, and escalates what it can't fix. You define the goal, Polpo makes sure it actually gets done.
+
+**Who is it for?** Anyone who wants a personal AI team on their laptop, a $5 VPS, or a Docker container in their cloud. Tell Polpo to build an app, run a virtual AI company, or automate your workflows — and it handles the rest. One `npm install` and you're chatting. No hosted platform, no vendor lock-in — your hardware, your API keys, your rules.
+
+### What's different
+
+- **Lives its own life.** Polpo builds missions, picks agents, and works through queued tasks on its own — 24/7 if you need it. Describe what you need and walk away.
+- **Reliable output, not best-effort.** Polpo scores every task with LLM judges. Below threshold? It sends the agent back to fix it. You get the result, not the retries.
+- **Crash-proof.** Agents run as detached processes. Kill Polpo, reboot the server, lose your connection — it picks up exactly where it left off.
+- **Proactive, not a chatbot.** You decide how and when Polpo should reach you — Slack, email, Telegram, webhooks — and it only does when it matters.
 
 ## Installation
 
