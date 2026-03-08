@@ -12,7 +12,7 @@ export interface DelayState {
 }
 
 export interface DelayStore {
-  load(): DelayState;
-  save(state: DelayState): void;
-  removeGroup(state: DelayState, group: string): DelayState;
+  load(): Promise<DelayState>;
+  save(state: DelayState): Promise<void>;
+  removeGroup(state: DelayState, group: string): Promise<DelayState>;
 }

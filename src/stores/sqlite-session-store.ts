@@ -143,7 +143,7 @@ export class SqliteSessionStore implements SessionStore {
     return msg;
   }
 
-  create(title?: string): string {
+  async create(title?: string): Promise<string> {
     const id = nanoid(10);
     const now = new Date().toISOString();
     this.createSessionStmt.run({
@@ -155,7 +155,7 @@ export class SqliteSessionStore implements SessionStore {
     return id;
   }
 
-  addMessage(sessionId: string, role: MessageRole, content: string): Message {
+  async addMessage(sessionId: string, role: MessageRole, content: string): Promise<Message> {
     const id = nanoid(10);
     const ts = new Date().toISOString();
     this.addMessageStmt.run({
@@ -172,7 +172,7 @@ export class SqliteSessionStore implements SessionStore {
     return { id, role, content, ts };
   }
 
-  updateMessage(sessionId: string, messageId: string, content: string, toolCalls?: ToolCallInfo[]): boolean {
+  async updateMessage(sessionId: string, messageId: string, content: string, toolCalls?: ToolCallInfo[]): Promise<boolean> {
     const toolCallsJson = toolCalls && toolCalls.length > 0 ? JSON.stringify(toolCalls) : null;
     const result = this.db.prepare(
       `UPDATE messages SET content = @content, tool_calls = @tool_calls WHERE id = @id AND session_id = @session_id`
@@ -186,44 +186,44 @@ export class SqliteSessionStore implements SessionStore {
     return result.changes > 0;
   }
 
-  getMessages(sessionId: string): Message[] {
+  async getMessages(sessionId: string): Promise<Message[]> {
     const rows = this.getMessagesStmt.all(sessionId) as MessageRow[];
     return rows.map(r => this.rowToMessage(r));
   }
 
-  getRecentMessages(sessionId: string, limit: number): Message[] {
+  async getRecentMessages(sessionId: string, limit: number): Promise<Message[]> {
     const rows = this.getRecentMessagesStmt.all(sessionId, limit) as MessageRow[];
     return rows.reverse().map(r => this.rowToMessage(r));
   }
 
-  listSessions(): Session[] {
+  async listSessions(): Promise<Session[]> {
     const rows = this.listSessionsStmt.all() as SessionRow[];
     return rows.map(r => this.rowToSession(r));
   }
 
-  getSession(sessionId: string): Session | undefined {
+  async getSession(sessionId: string): Promise<Session | undefined> {
     const row = this.getSessionStmt.get(sessionId) as SessionRow | undefined;
     return row ? this.rowToSession(row) : undefined;
   }
 
-  getLatestSession(): Session | undefined {
+  async getLatestSession(): Promise<Session | undefined> {
     const row = this.getLatestSessionStmt.get() as SessionRow | undefined;
     return row ? this.rowToSession(row) : undefined;
   }
 
-  renameSession(sessionId: string, title: string): boolean {
+  async renameSession(sessionId: string, title: string): Promise<boolean> {
     const result = this.db.prepare(
       `UPDATE sessions SET title = @title, updated_at = @updated_at WHERE id = @id`
     ).run({ id: sessionId, title, updated_at: new Date().toISOString() });
     return result.changes > 0;
   }
 
-  deleteSession(sessionId: string): boolean {
+  async deleteSession(sessionId: string): Promise<boolean> {
     const result = this.deleteSessionStmt.run(sessionId);
     return result.changes > 0;
   }
 
-  prune(keepSessions: number): number {
+  async prune(keepSessions: number): Promise<number> {
     const allSessions = this.db.prepare(`
       SELECT id FROM sessions ORDER BY updated_at ASC
     `).all() as { id: string }[];
@@ -231,14 +231,14 @@ export class SqliteSessionStore implements SessionStore {
     const toDelete = allSessions.slice(0, Math.max(0, allSessions.length - keepSessions));
     let deleted = 0;
     for (const { id } of toDelete) {
-      if (this.deleteSession(id)) {
+      if (await this.deleteSession(id)) {
         deleted++;
       }
     }
     return deleted;
   }
 
-  close(): void {
+  async close(): Promise<void> {
     this.db.close();
   }
 }

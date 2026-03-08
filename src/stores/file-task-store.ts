@@ -148,9 +148,9 @@ export class FileTaskStore implements TaskStore {
 
   // ── TaskStore interface ──
 
-  getState(): PolpoState {
+  async getState(): Promise<PolpoState> {
     const meta = this.readMeta();
-    const tasks = this.getAllTasks();
+    const tasks = await this.getAllTasks();
     return {
       project: meta.project,
       teams: meta.teams,
@@ -161,7 +161,7 @@ export class FileTaskStore implements TaskStore {
     };
   }
 
-  setState(partial: Partial<PolpoState>): void {
+  async setState(partial: Partial<PolpoState>): Promise<void> {
     const meta = this.readMeta();
 
     if (partial.project !== undefined) meta.project = partial.project;
@@ -183,9 +183,9 @@ export class FileTaskStore implements TaskStore {
     this.writeMeta(meta);
   }
 
-  addTask(
+  async addTask(
     task: Omit<Task, "id" | "status" | "retries" | "createdAt" | "updatedAt"> & { status?: TaskStatus },
-  ): Task {
+  ): Promise<Task> {
     const now = new Date().toISOString();
     const newTask: Task = {
       ...task,
@@ -199,11 +199,11 @@ export class FileTaskStore implements TaskStore {
     return newTask;
   }
 
-  getTask(taskId: string): Task | undefined {
+  async getTask(taskId: string): Promise<Task | undefined> {
     return this.readTask(taskId);
   }
 
-  getAllTasks(): Task[] {
+  async getAllTasks(): Promise<Task[]> {
     const ids = this.listTaskIds();
     const tasks: Task[] = [];
     for (const id of ids) {
@@ -214,7 +214,7 @@ export class FileTaskStore implements TaskStore {
     return tasks;
   }
 
-  unsafeSetStatus(taskId: string, newStatus: TaskStatus, reason: string): Task {
+  async unsafeSetStatus(taskId: string, newStatus: TaskStatus, reason: string): Promise<Task> {
     const existing = this.readTask(taskId);
     if (!existing) throw new Error(`Task not found: ${taskId}`);
     const from = existing.status;
@@ -224,7 +224,7 @@ export class FileTaskStore implements TaskStore {
     return updated;
   }
 
-  updateTask(taskId: string, updates: Partial<Omit<Task, "id" | "status">>): Task {
+  async updateTask(taskId: string, updates: Partial<Omit<Task, "id" | "status">>): Promise<Task> {
     const existing = this.readTask(taskId);
     if (!existing) throw new Error(`Task not found: ${taskId}`);
 
@@ -238,7 +238,7 @@ export class FileTaskStore implements TaskStore {
     return updated;
   }
 
-  removeTask(taskId: string): boolean {
+  async removeTask(taskId: string): Promise<boolean> {
     const path = this.taskPath(taskId);
     if (!existsSync(path)) return false;
     try {
@@ -249,8 +249,8 @@ export class FileTaskStore implements TaskStore {
     }
   }
 
-  removeTasks(filter: (task: Task) => boolean): number {
-    const all = this.getAllTasks();
+  async removeTasks(filter: (task: Task) => boolean): Promise<number> {
+    const all = await this.getAllTasks();
     const toRemove = all.filter(filter);
     for (const task of toRemove) {
       this.removeTask(task.id);
@@ -258,7 +258,7 @@ export class FileTaskStore implements TaskStore {
     return toRemove.length;
   }
 
-  transition(taskId: string, newStatus: TaskStatus): Task {
+  async transition(taskId: string, newStatus: TaskStatus): Promise<Task> {
     const existing = this.readTask(taskId);
     if (!existing) throw new Error(`Task not found: ${taskId}`);
 
@@ -281,7 +281,7 @@ export class FileTaskStore implements TaskStore {
 
   // ── Mission persistence ──
 
-  saveMission(mission: Omit<Mission, "id" | "createdAt" | "updatedAt">): Mission {
+  async saveMission(mission: Omit<Mission, "id" | "createdAt" | "updatedAt">): Promise<Mission> {
     const now = new Date().toISOString();
     const newMission: Mission = {
       ...mission,
@@ -293,11 +293,11 @@ export class FileTaskStore implements TaskStore {
     return newMission;
   }
 
-  getMission(missionId: string): Mission | undefined {
+  async getMission(missionId: string): Promise<Mission | undefined> {
     return this.readMission(missionId);
   }
 
-  getMissionByName(name: string): Mission | undefined {
+  async getMissionByName(name: string): Promise<Mission | undefined> {
     for (const id of this.listMissionIds()) {
       const mission = this.readMission(id);
       if (mission && mission.name === name) return mission;
@@ -305,7 +305,7 @@ export class FileTaskStore implements TaskStore {
     return undefined;
   }
 
-  getAllMissions(): Mission[] {
+  async getAllMissions(): Promise<Mission[]> {
     const missions: Mission[] = [];
     for (const id of this.listMissionIds()) {
       const mission = this.readMission(id);
@@ -315,7 +315,7 @@ export class FileTaskStore implements TaskStore {
     return missions;
   }
 
-  updateMission(missionId: string, updates: Partial<Omit<Mission, "id">>): Mission {
+  async updateMission(missionId: string, updates: Partial<Omit<Mission, "id">>): Promise<Mission> {
     const existing = this.readMission(missionId);
     if (!existing) throw new Error(`Mission not found: ${missionId}`);
 
@@ -329,7 +329,7 @@ export class FileTaskStore implements TaskStore {
     return updated;
   }
 
-  deleteMission(missionId: string): boolean {
+  async deleteMission(missionId: string): Promise<boolean> {
     const path = this.missionPath(missionId);
     if (!existsSync(path)) return false;
     try {
@@ -340,12 +340,12 @@ export class FileTaskStore implements TaskStore {
     }
   }
 
-  nextMissionName(): string {
+  async nextMissionName(): Promise<string> {
     const count = this.listMissionIds().length;
     return `mission-${count + 1}`;
   }
 
-  close(): void {
+  async close(): Promise<void> {
     // No-op for filesystem store
   }
 }

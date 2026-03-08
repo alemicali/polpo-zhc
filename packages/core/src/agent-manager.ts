@@ -14,7 +14,7 @@ export class AgentManager {
    * Merges into the existing file config to preserve providers/settings
    * that may have been edited outside the runtime.
    */
-  private persistConfig(): void {
+  private async persistConfig(): Promise<void> {
     if (!this.ctx.loadConfig || !this.ctx.saveConfig) return;
     const existing = this.ctx.loadConfig();
     if (!existing) return; // no polpo.json to update (e.g. headless / test mode)
@@ -57,17 +57,17 @@ export class AgentManager {
     return this.ctx.config.teams[0];
   }
 
-  addTeam(team: Team): void {
+  async addTeam(team: Team): Promise<void> {
     if (!this.ctx.config) throw new Error("Orchestrator not initialized");
     const existing = this.ctx.config.teams.find(t => t.name === team.name);
     if (existing) throw new Error(`Team "${team.name}" already exists`);
     this.ctx.config.teams.push(team);
-    this.ctx.registry.setState({ teams: this.ctx.config.teams });
-    this.persistConfig();
+    await this.ctx.registry.setState({ teams: this.ctx.config.teams });
+    await this.persistConfig();
     this.ctx.emitter.emit("log", { level: "info", message: `Team added: ${team.name}` });
   }
 
-  removeTeam(name: string): boolean {
+  async removeTeam(name: string): Promise<boolean> {
     if (!this.ctx.config) throw new Error("Orchestrator not initialized");
     const idx = this.ctx.config.teams.findIndex(t => t.name === name);
     if (idx < 0) return false;
@@ -75,13 +75,13 @@ export class AgentManager {
       throw new Error("Cannot remove the last team");
     }
     this.ctx.config.teams.splice(idx, 1);
-    this.ctx.registry.setState({ teams: this.ctx.config.teams });
-    this.persistConfig();
+    await this.ctx.registry.setState({ teams: this.ctx.config.teams });
+    await this.persistConfig();
     this.ctx.emitter.emit("log", { level: "info", message: `Team removed: ${name}` });
     return true;
   }
 
-  renameTeam(oldName: string, newName: string): void {
+  async renameTeam(oldName: string, newName: string): Promise<void> {
     if (!this.ctx.config) throw new Error("Orchestrator not initialized");
     const team = this.ctx.config.teams.find(t => t.name === oldName);
     if (!team) throw new Error(`Team "${oldName}" not found`);
@@ -89,8 +89,8 @@ export class AgentManager {
       throw new Error(`Team "${newName}" already exists`);
     }
     team.name = newName;
-    this.ctx.registry.setState({ teams: this.ctx.config.teams });
-    this.persistConfig();
+    await this.ctx.registry.setState({ teams: this.ctx.config.teams });
+    await this.persistConfig();
     this.ctx.emitter.emit("log", { level: "info", message: `Team renamed: "${oldName}" → "${newName}"` });
   }
 
@@ -111,7 +111,7 @@ export class AgentManager {
     return findAgentTeam(this.ctx.config?.teams ?? [], name);
   }
 
-  addAgent(agent: AgentConfig, teamName?: string): void {
+  async addAgent(agent: AgentConfig, teamName?: string): Promise<void> {
     if (!this.ctx.config) throw new Error("Orchestrator not initialized");
 
     // Globally unique names across all teams
@@ -125,12 +125,12 @@ export class AgentManager {
 
     if (!agent.createdAt) agent.createdAt = new Date().toISOString();
     team.agents.push(agent);
-    this.ctx.registry.setState({ teams: this.ctx.config.teams });
-    if (!agent.volatile) this.persistConfig();
+    await this.ctx.registry.setState({ teams: this.ctx.config.teams });
+    if (!agent.volatile) await this.persistConfig();
     this.ctx.emitter.emit("log", { level: "info", message: `Agent added: ${agent.name} (team: ${team.name})` });
   }
 
-  removeAgent(name: string): boolean {
+  async removeAgent(name: string): Promise<boolean> {
     if (!this.ctx.config) throw new Error("Orchestrator not initialized");
 
     for (const team of this.ctx.config.teams) {
@@ -138,8 +138,8 @@ export class AgentManager {
       if (idx >= 0) {
         const wasVolatile = team.agents[idx].volatile;
         team.agents.splice(idx, 1);
-        this.ctx.registry.setState({ teams: this.ctx.config.teams });
-        if (!wasVolatile) this.persistConfig();
+        await this.ctx.registry.setState({ teams: this.ctx.config.teams });
+        if (!wasVolatile) await this.persistConfig();
         this.ctx.emitter.emit("log", { level: "info", message: `Agent removed: ${name} (team: ${team.name})` });
         return true;
       }
@@ -147,7 +147,7 @@ export class AgentManager {
     return false;
   }
 
-  addVolatileAgent(agent: AgentConfig, group: string): void {
+  async addVolatileAgent(agent: AgentConfig, group: string): Promise<void> {
     if (!this.ctx.config) throw new Error("Orchestrator not initialized");
 
     const existing = this.findAgent(agent.name);
@@ -157,11 +157,11 @@ export class AgentManager {
     const team = this.getDefaultTeam();
     const volatileAgent: AgentConfig = { ...agent, volatile: true, missionGroup: group, createdAt: agent.createdAt ?? new Date().toISOString() };
     team.agents.push(volatileAgent);
-    this.ctx.registry.setState({ teams: this.ctx.config.teams });
+    await this.ctx.registry.setState({ teams: this.ctx.config.teams });
     this.ctx.emitter.emit("log", { level: "info", message: `Volatile agent added: ${agent.name} for ${group}` });
   }
 
-  cleanupVolatileAgents(group: string): number {
+  async cleanupVolatileAgents(group: string): Promise<number> {
     if (!this.ctx.config) return 0;
     let removed = 0;
     for (const team of this.ctx.config.teams) {
@@ -170,7 +170,7 @@ export class AgentManager {
       removed += before - team.agents.length;
     }
     if (removed > 0) {
-      this.ctx.registry.setState({ teams: this.ctx.config.teams });
+      await this.ctx.registry.setState({ teams: this.ctx.config.teams });
       this.ctx.emitter.emit("log", { level: "debug", message: `Cleaned up ${removed} volatile agent(s) from ${group}` });
     }
     return removed;

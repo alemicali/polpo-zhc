@@ -17,17 +17,17 @@ export interface SessionInfo {
 
 export interface LogStore {
   /** Start a new logging session. Returns session ID. */
-  startSession(): string;
+  startSession(): Promise<string>;
   /** Get current session ID (undefined if not started). */
-  getSessionId(): string | undefined;
+  getSessionId(): Promise<string | undefined>;
   /** Append a log entry to the current session. */
-  append(entry: LogEntry): void;
+  append(entry: LogEntry): Promise<void>;
   /** Read entries for a session (default: current). */
-  getSessionEntries(sessionId?: string): LogEntry[];
+  getSessionEntries(sessionId?: string): Promise<LogEntry[]>;
   /** List all sessions, most recent first. */
-  listSessions(): SessionInfo[];
+  listSessions(): Promise<SessionInfo[]>;
   /** Remove old sessions, keeping the most recent N. Returns number pruned. */
-  prune(keepSessions: number): number;
+  prune(keepSessions: number): Promise<number>;
   /** Flush/close. */
-  close(): void;
+  close(): Promise<void> | void;
 }

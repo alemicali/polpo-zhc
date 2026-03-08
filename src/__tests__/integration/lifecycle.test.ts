@@ -26,15 +26,15 @@ vi.mock("node:fs", async (importOriginal) => {
  * Helper: simulate what the runner subprocess does — populate RunStore with result.
  * In real usage, the runner.js process does this. In tests, we mock it.
  */
-function simulateRunnerResult(
+async function simulateRunnerResult(
   runStore: InMemoryRunStore,
   taskId: string,
   result: TaskResult,
-): void {
-  const run = runStore.getRunByTaskId(taskId);
+): Promise<void> {
+  const run = await runStore.getRunByTaskId(taskId);
   if (run && run.status === "running") {
     const status = result.exitCode === 0 ? "completed" : "failed";
-    runStore.completeRun(run.id, status, result);
+    await runStore.completeRun(run.id, status, result);
   }
 }
 
@@ -72,40 +72,40 @@ describe("integration: lifecycle", () => {
     orchestrator.on("agent:spawned", () => transitions.push("spawned"));
     orchestrator.on("task:transition", ({ to }) => transitions.push(to));
 
-    orchestrator.addTask({
+    await orchestrator.addTask({
       title: "Simple task",
       description: "Do something",
       assignTo: "worker",
     });
 
     // Tick 1: spawn agent (writes run record to RunStore)
-    orchestrator.tick();
+    await orchestrator.tick();
     expect(transitions).toContain("spawned");
 
     // Simulate the runner completing the task
-    const task = store.getAllTasks()[0];
-    simulateRunnerResult(runStore, task.id, {
+    const task = (await store.getAllTasks())[0];
+    await simulateRunnerResult(runStore, task.id, {
       exitCode: 0, stdout: "done", stderr: "", duration: 100,
     });
 
     // Tick 2: collect results from RunStore
-    orchestrator.tick();
+    await orchestrator.tick();
     await new Promise(r => setTimeout(r, 10));
 
-    expect(store.getTask(task.id)!.status).toBe("done");
+    expect((await store.getTask(task.id))!.status).toBe("done");
   });
 
   it("dependency resolution: B waits for A", async () => {
     const spawnOrder: string[] = [];
     orchestrator.on("agent:spawned", ({ taskTitle }) => spawnOrder.push(taskTitle));
 
-    const taskA = orchestrator.addTask({
+    const taskA = await orchestrator.addTask({
       title: "Task A",
       description: "First",
       assignTo: "worker",
     });
 
-    orchestrator.addTask({
+    await orchestrator.addTask({
       title: "Task B",
       description: "After A",
       assignTo: "worker",
@@ -113,20 +113,20 @@ describe("integration: lifecycle", () => {
     });
 
     // Tick 1: spawn A
-    orchestrator.tick();
+    await orchestrator.tick();
     expect(spawnOrder).toEqual(["Task A"]);
 
     // Simulate A completing
-    simulateRunnerResult(runStore, taskA.id, {
+    await simulateRunnerResult(runStore, taskA.id, {
       exitCode: 0, stdout: "ok", stderr: "", duration: 50,
     });
 
     // Tick 2: collect A result, A → done (async transition)
-    orchestrator.tick();
+    await orchestrator.tick();
     await new Promise(r => setTimeout(r, 50));
 
     // Tick 3: now A is done, B's dependency is satisfied → spawn B
-    orchestrator.tick();
+    await orchestrator.tick();
     await new Promise(r => setTimeout(r, 50));
 
     expect(spawnOrder).toContain("Task B");
@@ -136,58 +136,58 @@ describe("integration: lifecycle", () => {
     const retryEvents: any[] = [];
     orchestrator.on("task:retry", (e) => retryEvents.push(e));
 
-    orchestrator.addTask({
+    await orchestrator.addTask({
       title: "Flaky task",
       description: "Fails first, succeeds second",
       assignTo: "worker",
     });
 
     // Tick 1: spawn
-    orchestrator.tick();
-    const task = store.getAllTasks()[0];
+    await orchestrator.tick();
+    const task = (await store.getAllTasks())[0];
 
     // Simulate failure
-    simulateRunnerResult(runStore, task.id, {
+    await simulateRunnerResult(runStore, task.id, {
       exitCode: 1, stdout: "", stderr: "error", duration: 50,
     });
 
     // Tick 2: collect failure → retry
-    orchestrator.tick();
+    await orchestrator.tick();
     await new Promise(r => setTimeout(r, 10));
 
     expect(retryEvents.length).toBeGreaterThanOrEqual(1);
-    expect(store.getTask(task.id)!.status).toBe("pending");
+    expect((await store.getTask(task.id))!.status).toBe("pending");
 
     // Tick 3: respawn
-    orchestrator.tick();
+    await orchestrator.tick();
 
     // Simulate success
-    simulateRunnerResult(runStore, task.id, {
+    await simulateRunnerResult(runStore, task.id, {
       exitCode: 0, stdout: "ok", stderr: "", duration: 50,
     });
 
     // Tick 4: collect success → done
-    orchestrator.tick();
+    await orchestrator.tick();
     await new Promise(r => setTimeout(r, 10));
 
-    expect(store.getTask(task.id)!.status).toBe("done");
+    expect((await store.getTask(task.id))!.status).toBe("done");
   });
 
-  it("deadlock detection with unresolvable deps", () => {
+  it("deadlock detection with unresolvable deps", async () => {
     const deadlockEvents: any[] = [];
     orchestrator.on("orchestrator:deadlock", (e) => deadlockEvents.push(e));
 
-    orchestrator.addTask({
+    await orchestrator.addTask({
       title: "Blocked task",
       description: "Depends on nonexistent",
       assignTo: "worker",
       dependsOn: ["nonexistent-dep"],
     });
 
-    orchestrator.tick();
+    await orchestrator.tick();
 
     expect(deadlockEvents).toHaveLength(1);
-    const task = store.getAllTasks()[0];
+    const task = (await store.getAllTasks())[0];
     expect(task.status).toBe("failed");
   });
 });

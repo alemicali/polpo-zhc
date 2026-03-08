@@ -139,7 +139,7 @@ export class ChannelGateway {
     const peerId = `${msg.channel}:${msg.externalId}`;
 
     // Upsert peer identity
-    this.peerStore.upsertPeer({
+    await this.peerStore.upsertPeer({
       channel: msg.channel,
       externalId: msg.externalId,
       displayName: msg.displayName,
@@ -150,7 +150,7 @@ export class ChannelGateway {
     this.peerStore.updatePresence(peerId, "chatting");
 
     // ── DM Policy enforcement ──
-    if (!this.peerStore.isAllowed(peerId, this.gatewayConfig)) {
+    if (!await this.peerStore.isAllowed(peerId, this.gatewayConfig)) {
       return this.handleUnauthorized(msg, peerId);
     }
 
@@ -192,20 +192,20 @@ export class ChannelGateway {
 
   // ── Unauthorized handler ──────────────────────────────────────────
 
-  private handleUnauthorized(msg: InboundMessage, peerId: string): string | undefined {
+  private async handleUnauthorized(msg: InboundMessage, peerId: string): Promise<string | undefined> {
     const policy = this.gatewayConfig.dmPolicy ?? "allowlist";
 
     if (policy === "disabled") return undefined; // Silent ignore
 
     if (policy === "pairing") {
       // Check if already has a pending request
-      const existing = this.peerStore.getPendingPairing(peerId);
+      const existing = await this.peerStore.getPendingPairing(peerId);
       if (existing) {
         return `Your pairing request is pending approval.\nCode: ${existing.code}\nAsk the administrator to run: /pair ${existing.code}`;
       }
 
       // Create a new pairing request
-      const request = this.peerStore.createPairingRequest(
+      const request = await this.peerStore.createPairingRequest(
         msg.channel,
         msg.externalId,
         msg.displayName,
@@ -255,17 +255,17 @@ export class ChannelGateway {
     return { text: `Available commands:\n\n${lines.join("\n")}` };
   }
 
-  private cmdStatus(): CommandResult {
-    const tasks = this.orchestrator.getStore().getAllTasks();
+  private async cmdStatus(): Promise<CommandResult> {
+    const tasks = await this.orchestrator.getStore().getAllTasks();
     const pending = tasks.filter(t => t.status === "pending").length;
     const running = tasks.filter(t => t.status === "in_progress").length;
     const done = tasks.filter(t => t.status === "done").length;
     const failed = tasks.filter(t => t.status === "failed").length;
     const agents = this.orchestrator.getAgents();
-    const state = this.orchestrator.getStore().getState();
+    const state = await this.orchestrator.getStore().getState();
     const processes = state?.processes ?? [];
 
-    const presenceList = this.peerStore.getPresence();
+    const presenceList = await this.peerStore.getPresence();
 
     return {
       text: [
@@ -278,8 +278,8 @@ export class ChannelGateway {
     };
   }
 
-  private cmdTasks(): CommandResult {
-    const tasks = this.orchestrator.getStore().getAllTasks();
+  private async cmdTasks(): Promise<CommandResult> {
+    const tasks = await this.orchestrator.getStore().getAllTasks();
     if (tasks.length === 0) return { text: "No tasks." };
 
     const statusEmoji: Record<string, string> = {
@@ -296,8 +296,8 @@ export class ChannelGateway {
     return { text: lines.join("\n") };
   }
 
-  private cmdMissions(): CommandResult {
-    const missions = this.orchestrator.getAllMissions();
+  private async cmdMissions(): Promise<CommandResult> {
+    const missions = await this.orchestrator.getAllMissions();
     if (missions.length === 0) return { text: "No missions." };
 
     const lines = missions.slice(0, 10).map(m =>
@@ -306,9 +306,9 @@ export class ChannelGateway {
     return { text: lines.join("\n") };
   }
 
-  private cmdAgents(): CommandResult {
+  private async cmdAgents(): Promise<CommandResult> {
     const agents = this.orchestrator.getAgents();
-    const state = this.orchestrator.getStore().getState();
+    const state = await this.orchestrator.getStore().getState();
     const processes = state?.processes ?? [];
 
     const lines = agents.map(a => {
@@ -325,9 +325,9 @@ export class ChannelGateway {
       // List pending approvals — iterate store for pending requests
       const pendingRequests: { id: string; gateName: string; taskId?: string }[] = [];
       const store = this.orchestrator.getStore();
-      const tasks = store.getAllTasks().filter(t => t.status === "awaiting_approval");
+      const tasks = (await store.getAllTasks()).filter(t => t.status === "awaiting_approval");
       for (const t of tasks) {
-        const req = this.orchestrator.getApprovalRequest(t.id);
+        const req = await this.orchestrator.getApprovalRequest(t.id);
         if (req && req.status === "pending") {
           pendingRequests.push({ id: req.id, gateName: req.gateName, taskId: req.taskId });
         }
@@ -357,20 +357,20 @@ export class ChannelGateway {
     return { text: result.ok ? `Rejected: ${requestId} — ${feedback}` : `Error: ${result.error}` };
   }
 
-  private cmdNewSession(peerId: string): CommandResult {
-    this.peerStore.clearSession(peerId);
+  private async cmdNewSession(peerId: string): Promise<CommandResult> {
+    await this.peerStore.clearSession(peerId);
     return { text: "Session reset. Your next message starts a new conversation." };
   }
 
-  private cmdPair(args: string[], peerId: string): CommandResult {
+  private async cmdPair(args: string[], peerId: string): Promise<CommandResult> {
     if (args.length === 0) return { text: "Usage: /pair CODE" };
 
     // Only allowed peers can approve pairings (primitive admin check)
-    if (!this.peerStore.isAllowed(peerId, this.gatewayConfig)) {
+    if (!await this.peerStore.isAllowed(peerId, this.gatewayConfig)) {
       return { text: "You must be an authorized peer to approve pairings." };
     }
 
-    const request = this.peerStore.resolvePairing(args[0]);
+    const request = await this.peerStore.resolvePairing(args[0]);
     if (!request) return { text: "Invalid or expired pairing code." };
 
     return { text: `Approved! ${request.displayName ?? request.externalId} (${request.channel}) can now message the bot.` };
@@ -381,11 +381,11 @@ export class ChannelGateway {
   private async handleChat(msg: InboundMessage, peerId: string): Promise<string | undefined> {
     try {
       // Get or create session
-      let sessionId = this.peerStore.getSessionId(peerId);
+      let sessionId = await this.peerStore.getSessionId(peerId);
 
       // Check idle timeout
       if (sessionId) {
-        const session = this.sessionStore.getSession(sessionId);
+        const session = await this.sessionStore.getSession(sessionId);
         if (session) {
           const idleMinutes = this.gatewayConfig.sessionIdleMinutes ?? 60;
           const idleMs = Date.now() - new Date(session.updatedAt).getTime();
@@ -397,17 +397,17 @@ export class ChannelGateway {
       }
 
       if (!sessionId) {
-        sessionId = this.sessionStore.create(msg.text.slice(0, 60));
-        this.peerStore.setSessionId(peerId, sessionId);
+        sessionId = await this.sessionStore.create(msg.text.slice(0, 60));
+        await this.peerStore.setSessionId(peerId, sessionId);
       }
 
       // Store user message
-      this.sessionStore.addMessage(sessionId, "user", msg.text);
+      await this.sessionStore.addMessage(sessionId, "user", msg.text);
 
       // Build conversation history from session
       // Note: pi-ai uses "user" role for both user and assistant messages.
       // Assistant messages are wrapped with a prefix, matching the completions endpoint behavior.
-      const recentMessages = this.sessionStore.getRecentMessages(sessionId, 20);
+      const recentMessages = await this.sessionStore.getRecentMessages(sessionId, 20);
       const piMessages: Message[] = recentMessages
         .filter(m => m.role === "user" || m.role === "assistant")
         .map(m => ({
@@ -419,14 +419,14 @@ export class ChannelGateway {
         }));
 
       // Get system prompt
-      const state = (() => {
-        try { return this.orchestrator.getStore()?.getState() ?? null; }
+      const state = await (async () => {
+        try { return await this.orchestrator.getStore()?.getState() ?? null; }
         catch { return null; }
       })();
-      const systemPrompt = buildChatSystemPrompt(this.orchestrator, state);
+      const systemPrompt = await buildChatSystemPrompt(this.orchestrator, state);
 
       // Add peer context
-      const peer = this.peerStore.getPeer(peerId);
+      const peer = await this.peerStore.getPeer(peerId);
       const peerContext = peer
         ? `\n\n## Caller context\nName: ${peer.displayName ?? "Unknown"}\nChannel: ${peer.channel}\nPeer ID: ${peer.id}`
         : "";
@@ -511,7 +511,7 @@ export class ChannelGateway {
 
       // Store assistant response
       if (finalText) {
-        this.sessionStore.addMessage(sessionId, "assistant", finalText);
+        await this.sessionStore.addMessage(sessionId, "assistant", finalText);
       }
 
       // Telegram has a 4096 char limit

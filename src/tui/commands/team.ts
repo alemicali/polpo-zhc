@@ -93,7 +93,7 @@ function teamAdd(polpo: import("../../core/orchestrator.js").Orchestrator, store
   });
 }
 
-function teamRemove(
+async function teamRemove(
   polpo: import("../../core/orchestrator.js").Orchestrator,
   store: import("../store.js").TUIStore,
   name?: string,
@@ -107,7 +107,7 @@ function teamRemove(
 
   if (name) {
     // Direct removal
-    const removed = polpo.removeAgent(name);
+    const removed = await polpo.removeAgent(name);
     if (removed) {
       store.log(`Removed agent: ${name}`, [seg("- ", "red"), seg(name, undefined, true)]);
     } else {
@@ -125,9 +125,9 @@ function teamRemove(
       value: a.name,
       description: `${a.role ?? ""}${a.model ? ` • ${a.model}` : ""}`,
     })),
-    onSelect: (_idx, value) => {
+    onSelect: async (_idx, value) => {
       store.goMain();
-      const removed = polpo.removeAgent(value);
+      const removed = await polpo.removeAgent(value);
       if (removed) {
         store.log(`Removed agent: ${value}`, [seg("- ", "red"), seg(value, undefined, true)]);
       }

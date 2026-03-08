@@ -43,7 +43,7 @@ export function registerLogsCommands(program: Command): void {
         process.exit(1);
       }
 
-      const sessions = logStore.listSessions();
+      const sessions = await logStore.listSessions();
       if (sessions.length === 0) {
         console.log(chalk.dim("No log sessions found."));
         return;
@@ -74,13 +74,13 @@ export function registerLogsCommands(program: Command): void {
         process.exit(1);
       }
 
-      const resolvedId = sessionId ?? logStore.getSessionId();
+      const resolvedId = sessionId ?? await logStore.getSessionId();
       if (!resolvedId) {
         console.error(chalk.red("No session ID provided and no active session found."));
         process.exit(1);
       }
 
-      let entries = logStore.getSessionEntries(resolvedId);
+      let entries = await logStore.getSessionEntries(resolvedId);
 
       // Apply event filter
       if (opts.event) {

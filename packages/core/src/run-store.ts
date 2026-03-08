@@ -19,15 +19,15 @@ export interface RunRecord {
 }
 
 export interface RunStore {
-  upsertRun(run: RunRecord): void;
-  updateActivity(runId: string, activity: AgentActivity): void;
+  upsertRun(run: RunRecord): Promise<void>;
+  updateActivity(runId: string, activity: AgentActivity): Promise<void>;
   /** Store auto-collected outcomes on the run record (called before completeRun). */
-  updateOutcomes(runId: string, outcomes: TaskOutcome[]): void;
-  completeRun(runId: string, status: RunStatus, result: TaskResult): void;
-  getRun(runId: string): RunRecord | undefined;
-  getRunByTaskId(taskId: string): RunRecord | undefined;
-  getActiveRuns(): RunRecord[];
-  getTerminalRuns(): RunRecord[];
-  deleteRun(runId: string): void;
-  close(): void;
+  updateOutcomes(runId: string, outcomes: TaskOutcome[]): Promise<void>;
+  completeRun(runId: string, status: RunStatus, result: TaskResult): Promise<void>;
+  getRun(runId: string): Promise<RunRecord | undefined>;
+  getRunByTaskId(taskId: string): Promise<RunRecord | undefined>;
+  getActiveRuns(): Promise<RunRecord[]>;
+  getTerminalRuns(): Promise<RunRecord[]>;
+  deleteRun(runId: string): Promise<void>;
+  close(): Promise<void> | void;
 }

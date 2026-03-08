@@ -38,18 +38,18 @@ export interface Session {
 }
 
 export interface SessionStore {
-  create(title?: string): string;
-  addMessage(sessionId: string, role: MessageRole, content: string): Message;
+  create(title?: string): Promise<string>;
+  addMessage(sessionId: string, role: MessageRole, content: string): Promise<Message>;
   /** Update the content of an existing message (e.g. finalize a streaming response). */
-  updateMessage(sessionId: string, messageId: string, content: string, toolCalls?: ToolCallInfo[]): boolean;
-  getMessages(sessionId: string): Message[];
-  getRecentMessages(sessionId: string, limit: number): Message[];
-  listSessions(): Session[];
-  getSession(sessionId: string): Session | undefined;
-  getLatestSession(): Session | undefined;
+  updateMessage(sessionId: string, messageId: string, content: string, toolCalls?: ToolCallInfo[]): Promise<boolean>;
+  getMessages(sessionId: string): Promise<Message[]>;
+  getRecentMessages(sessionId: string, limit: number): Promise<Message[]>;
+  listSessions(): Promise<Session[]>;
+  getSession(sessionId: string): Promise<Session | undefined>;
+  getLatestSession(): Promise<Session | undefined>;
   /** Rename (update the title of) an existing session. */
-  renameSession(sessionId: string, title: string): boolean;
-  deleteSession(sessionId: string): boolean;
-  prune(keepSessions: number): number;
-  close(): void;
+  renameSession(sessionId: string, title: string): Promise<boolean>;
+  deleteSession(sessionId: string): Promise<boolean>;
+  prune(keepSessions: number): Promise<number>;
+  close(): Promise<void> | void;
 }

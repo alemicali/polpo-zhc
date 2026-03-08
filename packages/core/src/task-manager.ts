@@ -11,7 +11,7 @@ export class TaskManager {
 
   constructor(private ctx: OrchestratorContext) {}
 
-  addTask(opts: {
+  async addTask(opts: {
     title: string;
     description: string;
     assignTo: string;
@@ -25,7 +25,7 @@ export class TaskManager {
     notifications?: ScopedNotificationRules;
     sideEffects?: boolean;
     draft?: boolean;
-  }): Task {
+  }): Promise<Task> {
     if (!this.ctx.registry) throw new Error("Orchestrator not initialized");
 
     // Run before:task:create hook (sync — addTask is synchronous)
@@ -51,7 +51,7 @@ export class TaskManager {
     const hookData = hookResult.data;
 
     // Enforce unique title among active (non-terminal) tasks
-    const existingTasks = this.ctx.registry.getAllTasks();
+    const existingTasks = await this.ctx.registry.getAllTasks();
     const duplicate = existingTasks.find(
       t => t.title === hookData.title && t.status !== "done" && t.status !== "failed",
     );
@@ -65,7 +65,7 @@ export class TaskManager {
     const rawExps = hookData.expectations ?? [];
     const { valid: expectations, warnings } = sanitizeExpectations(rawExps);
     for (const w of warnings) this.ctx.emitter.emit("log", { level: "warn", message: `[addTask "${hookData.title}"] ${w}` });
-    const task = this.ctx.registry.addTask({
+    const task = await this.ctx.registry.addTask({
       title: hookData.title,
       description: hookData.description,
       assignTo: hookData.assignTo,
@@ -97,16 +97,16 @@ export class TaskManager {
     return task;
   }
 
-  updateTaskDescription(taskId: string, description: string): void {
-    this.ctx.registry.updateTask(taskId, { description });
+  async updateTaskDescription(taskId: string, description: string): Promise<void> {
+    await this.ctx.registry.updateTask(taskId, { description });
   }
 
-  updateTaskAssignment(taskId: string, agentName: string): void {
-    this.ctx.registry.updateTask(taskId, { assignTo: agentName });
+  async updateTaskAssignment(taskId: string, agentName: string): Promise<void> {
+    await this.ctx.registry.updateTask(taskId, { assignTo: agentName });
   }
 
-  updateTaskExpectations(taskId: string, expectations: TaskExpectation[]): void {
-    const task = this.ctx.registry.getTask(taskId);
+  async updateTaskExpectations(taskId: string, expectations: TaskExpectation[]): Promise<void> {
+    const task = await this.ctx.registry.getTask(taskId);
     if (!task) throw new Error("Task not found");
     const editable = ["pending", "failed", "done"];
     if (!editable.includes(task.status)) {
@@ -114,19 +114,19 @@ export class TaskManager {
     }
     const { valid, warnings } = sanitizeExpectations(expectations);
     for (const w of warnings) this.ctx.emitter.emit("log", { level: "warn", message: `[updateExpectations "${taskId}"] ${w}` });
-    this.ctx.registry.updateTask(taskId, { expectations: valid });
-    this.ctx.emitter.emit("task:updated", { task: this.ctx.registry.getTask(taskId)! });
+    await this.ctx.registry.updateTask(taskId, { expectations: valid });
+    this.ctx.emitter.emit("task:updated", { task: (await this.ctx.registry.getTask(taskId))! });
   }
 
-  retryTask(taskId: string): void {
-    const task = this.ctx.registry.getTask(taskId);
+  async retryTask(taskId: string): Promise<void> {
+    const task = await this.ctx.registry.getTask(taskId);
     if (!task) throw new Error("Task not found");
     if (task.status !== "failed") throw new Error(`Cannot retry task in "${task.status}" state`);
-    this.ctx.registry.transition(taskId, "pending");
+    await this.ctx.registry.transition(taskId, "pending");
   }
 
   async reassessTask(taskId: string): Promise<void> {
-    const task = this.ctx.registry.getTask(taskId);
+    const task = await this.ctx.registry.getTask(taskId);
     if (!task) throw new Error("Task not found");
     if (task.status !== "done" && task.status !== "failed") {
       throw new Error(`Cannot reassess task in "${task.status}" state`);
@@ -140,7 +140,7 @@ export class TaskManager {
     const onProgress = (msg: string) => this.ctx.emitter.emit("assessment:progress", { taskId, message: msg });
 
     // Build rich ReviewContext from RunStore, JSONL transcript, and outcomes
-    const run = this.ctx.runStore.getRunByTaskId(taskId);
+    const run = await this.ctx.runStore.getRunByTaskId(taskId);
     const activity = run?.activity;
     const outcomes = run?.outcomes ?? task.outcomes;
 
@@ -175,7 +175,7 @@ export class TaskManager {
     try {
       const assessment = await this.ctx.assessFn(task, this.ctx.agentWorkDir, onProgress, reviewContext, this.ctx.config.settings.reasoning);
       setAssessment(result, assessment, "reassess");
-      this.ctx.registry.updateTask(taskId, { result });
+      await this.ctx.registry.updateTask(taskId, { result });
 
       if (assessment.passed) {
         this.ctx.emitter.emit("assessment:complete", {
@@ -186,11 +186,11 @@ export class TaskManager {
           message: `Reassessment PASSED`,
         });
         if (task.status === "failed") {
-          this.ctx.registry.transition(taskId, "pending");
-          this.ctx.registry.transition(taskId, "assigned");
-          this.ctx.registry.transition(taskId, "in_progress");
-          this.ctx.registry.transition(taskId, "review");
-          this.ctx.registry.transition(taskId, "done");
+          await this.ctx.registry.transition(taskId, "pending");
+          await this.ctx.registry.transition(taskId, "assigned");
+          await this.ctx.registry.transition(taskId, "in_progress");
+          await this.ctx.registry.transition(taskId, "review");
+          await this.ctx.registry.transition(taskId, "done");
         }
       } else {
         const reasons = [
@@ -205,7 +205,7 @@ export class TaskManager {
           message: `Reassessment FAILED — ${reasons.join(", ")}`,
         });
         if (task.status === "done") {
-          this.ctx.registry.unsafeSetStatus(taskId, "failed", "reassessment invalidated done task");
+          await this.ctx.registry.unsafeSetStatus(taskId, "failed", "reassessment invalidated done task");
         }
       }
     } catch (err: unknown) {
@@ -214,61 +214,62 @@ export class TaskManager {
     }
   }
 
-  killTask(taskId: string): boolean {
-    const run = this.ctx.runStore.getRunByTaskId(taskId);
+  async killTask(taskId: string): Promise<boolean> {
+    const run = await this.ctx.runStore.getRunByTaskId(taskId);
     if (run && run.status === "running" && run.pid > 0) {
       if (this.ctx.killProcess) {
         try { this.ctx.killProcess(run.pid, "SIGTERM"); } catch { /* already dead */ }
       }
     }
-    const task = this.ctx.registry.getTask(taskId);
+    const task = await this.ctx.registry.getTask(taskId);
     if (!task) return false;
     if (task.status !== "done" && task.status !== "failed") {
       try {
-        if (task.status === "pending") this.ctx.registry.transition(taskId, "assigned");
-        if (task.status === "assigned") this.ctx.registry.transition(taskId, "in_progress");
-        this.ctx.registry.transition(taskId, "failed");
+        if (task.status === "pending") await this.ctx.registry.transition(taskId, "assigned");
+        if (task.status === "assigned") await this.ctx.registry.transition(taskId, "in_progress");
+        await this.ctx.registry.transition(taskId, "failed");
       } catch { /* transition race — force status */
-        this.ctx.registry.unsafeSetStatus(taskId, "failed", "killTask transition race fallback");
+        await this.ctx.registry.unsafeSetStatus(taskId, "failed", "killTask transition race fallback");
       }
     }
     return true;
   }
 
-  abortGroup(group: string): number {
-    const tasks = this.ctx.registry.getAllTasks().filter(t => t.group === group);
+  async abortGroup(group: string): Promise<number> {
+    const tasks = await this.ctx.registry.getAllTasks();
+    const groupTasks = tasks.filter(t => t.group === group);
     let count = 0;
-    for (const task of tasks) {
+    for (const task of groupTasks) {
       if (task.status === "done" || task.status === "failed") continue;
-      this.killTask(task.id);
+      await this.killTask(task.id);
       count++;
     }
     // Resolve mission via task.missionId (direct FK) first, fallback to group name
-    const mid = tasks.find(t => t.missionId)?.missionId;
+    const mid = groupTasks.find(t => t.missionId)?.missionId;
     const mission = mid
-      ? this.ctx.registry.getMission?.(mid)
-      : this.ctx.registry.getMissionByName?.(group);
+      ? await this.ctx.registry.getMission?.(mid)
+      : await this.ctx.registry.getMissionByName?.(group);
     if (mission && mission.status === "active") {
-      this.ctx.registry.updateMission?.(mission.id, { status: "cancelled" });
+      await this.ctx.registry.updateMission?.(mission.id, { status: "cancelled" });
     }
     return count;
   }
 
-  clearTasks(filter: (task: Task) => boolean): number {
-    const tasks = this.ctx.registry.getAllTasks().filter(filter);
+  async clearTasks(filter: (task: Task) => boolean): Promise<number> {
+    const tasks = (await this.ctx.registry.getAllTasks()).filter(filter);
     for (const task of tasks) {
-      const run = this.ctx.runStore.getRunByTaskId(task.id);
+      const run = await this.ctx.runStore.getRunByTaskId(task.id);
       if (run && run.status === "running" && run.pid > 0) {
         if (this.ctx.killProcess) {
           try { this.ctx.killProcess(run.pid, "SIGTERM"); } catch { /* already dead */ }
         }
       }
     }
-    return this.ctx.registry.removeTasks(filter);
+    return await this.ctx.registry.removeTasks(filter);
   }
 
   /** Load initial tasks from config (non-interactive mode). */
-  seedTasks(): void {
+  async seedTasks(): Promise<void> {
     if (!this.ctx.config.tasks.length) return;
 
     for (const ct of this.ctx.config.tasks) {
@@ -276,7 +277,7 @@ export class TaskManager {
       const { valid: expectations, warnings } = sanitizeExpectations(rawExps);
       for (const w of warnings) this.ctx.emitter.emit("log", { level: "warn", message: `[seed "${ct.title}"] ${w}` });
 
-      const task = this.ctx.registry.addTask({
+      const task = await this.ctx.registry.addTask({
         title: ct.title,
         description: ct.description,
         assignTo: ct.assignTo,
@@ -302,21 +303,21 @@ export class TaskManager {
         .map(dep => this.idMap.get(dep))
         .filter((id): id is string => !!id);
       if (resolved.length > 0) {
-        this.ctx.registry.updateTask(taskId, { dependsOn: resolved });
+        await this.ctx.registry.updateTask(taskId, { dependsOn: resolved });
       }
     }
   }
 
   /** Force a task through the state machine to failed (used by deadlock resolver). */
-  forceFailTask(taskId: string): void {
-    const task = this.ctx.registry.getTask(taskId);
+  async forceFailTask(taskId: string): Promise<void> {
+    const task = await this.ctx.registry.getTask(taskId);
     if (!task || task.status === "done" || task.status === "failed") return;
     try {
-      if (task.status === "pending") this.ctx.registry.transition(taskId, "assigned");
-      if (task.status === "assigned") this.ctx.registry.transition(taskId, "in_progress");
-      this.ctx.registry.transition(taskId, "failed");
+      if (task.status === "pending") await this.ctx.registry.transition(taskId, "assigned");
+      if (task.status === "assigned") await this.ctx.registry.transition(taskId, "in_progress");
+      await this.ctx.registry.transition(taskId, "failed");
     } catch { /* transition race — force status */
-      this.ctx.registry.unsafeSetStatus(taskId, "failed", "forceFailTask transition race fallback");
+      await this.ctx.registry.unsafeSetStatus(taskId, "failed", "forceFailTask transition race fallback");
     }
   }
 }

@@ -38,7 +38,7 @@ export class ApprovalManager {
   }
 
   /** Initialize: register hooks for all configured approval gates. */
-  init(): void {
+  async init(): Promise<void> {
     const gates = this.ctx.config.settings.approvalGates;
     if (!gates || gates.length === 0) return;
 
@@ -47,14 +47,14 @@ export class ApprovalManager {
     }
 
     // Resume any pending approval timeouts from previous session
-    const pending = this.store.list("pending");
+    const pending = await this.store.list("pending");
     for (const req of pending) {
       const gate = gates.find(g => g.id === req.gateId);
       if (gate?.timeoutMs && gate.timeoutMs > 0) {
         const elapsed = Date.now() - new Date(req.requestedAt).getTime();
         const remaining = gate.timeoutMs - elapsed;
         if (remaining <= 0) {
-          this.resolveTimeout(req, gate);
+          await this.resolveTimeout(req, gate);
         } else {
           this.startTimer(req.id, remaining, gate);
         }
@@ -126,9 +126,10 @@ export class ApprovalManager {
 
         const taskId = this.extractTaskId(ctx.data);
         if (taskId) {
-          try {
-            this.ctx.registry.transition(taskId, "awaiting_approval");
-          } catch { /* Task may already be in a state that doesn't allow this transition */ }
+          // Fire-and-forget async transition
+          this.ctx.registry.transition(taskId, "awaiting_approval").catch(() => {
+            /* Task may already be in a state that doesn't allow this transition */
+          });
         }
 
         this.ctx.emitter.emit("approval:requested", {
@@ -157,22 +158,23 @@ export class ApprovalManager {
       payload,
       requestedAt: new Date().toISOString(),
     };
-    this.store.upsert(request);
+    // Fire-and-forget async store write
+    this.store.upsert(request).catch(() => {});
     return request;
   }
 
-  approve(requestId: string, resolvedBy?: string, note?: string): ApprovalRequest | null {
+  async approve(requestId: string, resolvedBy?: string, note?: string): Promise<ApprovalRequest | null> {
     return this.resolve(requestId, "approved", resolvedBy, note);
   }
 
-  reject(requestId: string, feedback: string, resolvedBy?: string): ApprovalRequest | null {
-    const request = this.store.get(requestId);
+  async reject(requestId: string, feedback: string, resolvedBy?: string): Promise<ApprovalRequest | null> {
+    const request = await this.store.get(requestId);
     if (!request || request.status !== "pending") return null;
     if (!request.taskId) return null;
 
     const gate = this.ctx.config.settings.approvalGates?.find(g => g.id === request.gateId);
     const maxRevisions = gate?.maxRevisions ?? 3;
-    const task = this.ctx.registry.getTask(request.taskId);
+    const task = await this.ctx.registry.getTask(request.taskId);
     if (!task) return null;
 
     const currentCount = task.revisionCount ?? 0;
@@ -182,17 +184,17 @@ export class ApprovalManager {
     request.resolvedAt = new Date().toISOString();
     request.resolvedBy = resolvedBy ?? "user";
     request.note = feedback;
-    this.store.upsert(request);
+    await this.store.upsert(request);
 
     this.clearTimer(requestId);
 
     const newCount = currentCount + 1;
-    this.ctx.registry.updateTask(request.taskId, { revisionCount: newCount });
+    await this.ctx.registry.updateTask(request.taskId, { revisionCount: newCount });
 
     const separator = "\n\n---\n";
     const feedbackBlock = `**Rejection #${newCount} feedback:** ${feedback}`;
     const updatedDescription = task.description + separator + feedbackBlock;
-    this.ctx.registry.updateTask(request.taskId, { description: updatedDescription });
+    await this.ctx.registry.updateTask(request.taskId, { description: updatedDescription });
 
     this.ctx.emitter.emit("approval:rejected", {
       requestId,
@@ -202,43 +204,43 @@ export class ApprovalManager {
       resolvedBy: request.resolvedBy,
     });
 
-    this.ctx.registry.updateTask(request.taskId, { outcomes: [] });
+    await this.ctx.registry.updateTask(request.taskId, { outcomes: [] });
 
     try {
-      this.ctx.registry.transition(request.taskId, "pending");
+      await this.ctx.registry.transition(request.taskId, "pending");
     } catch { /* Task may have been modified externally */ }
 
     return request;
   }
 
-  canReject(requestId: string): { allowed: boolean; rejectionCount: number; maxRejections: number } {
-    const request = this.store.get(requestId);
+  async canReject(requestId: string): Promise<{ allowed: boolean; rejectionCount: number; maxRejections: number }> {
+    const request = await this.store.get(requestId);
     if (!request || request.status !== "pending" || !request.taskId) {
       return { allowed: false, rejectionCount: 0, maxRejections: 0 };
     }
 
     const gate = this.ctx.config.settings.approvalGates?.find(g => g.id === request.gateId);
     const maxRejections = gate?.maxRevisions ?? 3;
-    const task = this.ctx.registry.getTask(request.taskId);
+    const task = await this.ctx.registry.getTask(request.taskId);
     const currentCount = task?.revisionCount ?? 0;
 
     return { allowed: currentCount < maxRejections, rejectionCount: currentCount, maxRejections };
   }
 
-  private resolve(
+  private async resolve(
     requestId: string,
     status: "approved" | "rejected",
     resolvedBy?: string,
     note?: string,
-  ): ApprovalRequest | null {
-    const request = this.store.get(requestId);
+  ): Promise<ApprovalRequest | null> {
+    const request = await this.store.get(requestId);
     if (!request || request.status !== "pending") return null;
 
     request.status = status;
     request.resolvedAt = new Date().toISOString();
     request.resolvedBy = resolvedBy ?? "user";
     request.note = note;
-    this.store.upsert(request);
+    await this.store.upsert(request);
 
     this.clearTimer(requestId);
 
@@ -253,9 +255,9 @@ export class ApprovalManager {
         if (status === "approved") {
           const gate = this.ctx.config.settings.approvalGates?.find(g => g.id === request.gateId);
           const targetStatus = gate?.hook === "task:complete" ? "done" : "assigned";
-          this.ctx.registry.transition(request.taskId, targetStatus as any);
+          await this.ctx.registry.transition(request.taskId, targetStatus as any);
         } else {
-          this.ctx.registry.transition(request.taskId, "failed");
+          await this.ctx.registry.transition(request.taskId, "failed");
         }
       } catch { /* Task may have been modified externally */ }
     }
@@ -263,14 +265,14 @@ export class ApprovalManager {
     return request;
   }
 
-  private resolveTimeout(request: ApprovalRequest, gate: ApprovalGate): void {
+  private async resolveTimeout(request: ApprovalRequest, gate: ApprovalGate): Promise<void> {
     if (request.status !== "pending") return;
 
     const action = gate.timeoutAction ?? "reject";
     request.status = "timeout";
     request.resolvedAt = new Date().toISOString();
     request.resolvedBy = "timeout";
-    this.store.upsert(request);
+    await this.store.upsert(request);
 
     this.ctx.emitter.emit("approval:timeout", {
       requestId: request.id,
@@ -280,32 +282,32 @@ export class ApprovalManager {
     if (request.taskId) {
       try {
         if (action === "approve") {
-          this.ctx.registry.transition(request.taskId, "assigned");
+          await this.ctx.registry.transition(request.taskId, "assigned");
         } else {
-          this.ctx.registry.transition(request.taskId, "failed");
+          await this.ctx.registry.transition(request.taskId, "failed");
         }
       } catch { /* Task may have been modified externally */ }
     }
   }
 
-  getPending(): ApprovalRequest[] {
+  async getPending(): Promise<ApprovalRequest[]> {
     return this.store.list("pending");
   }
 
-  getAll(status?: ApprovalStatus): ApprovalRequest[] {
+  async getAll(status?: ApprovalStatus): Promise<ApprovalRequest[]> {
     return this.store.list(status);
   }
 
-  getRequest(id: string): ApprovalRequest | undefined {
+  async getRequest(id: string): Promise<ApprovalRequest | undefined> {
     return this.store.get(id);
   }
 
   // ─── Helpers ───────────────────────────────────────
 
   private startTimer(requestId: string, ms: number, gate: ApprovalGate): void {
-    const timer = setTimeout(() => {
-      const request = this.store.get(requestId);
-      if (request) this.resolveTimeout(request, gate);
+    const timer = setTimeout(async () => {
+      const request = await this.store.get(requestId);
+      if (request) await this.resolveTimeout(request, gate);
       this.timers.delete(requestId);
     }, ms);
     this.timers.set(requestId, timer);

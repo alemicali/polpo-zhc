@@ -40,14 +40,14 @@ function describeAgentCapabilities(agent: AgentConfig, skillPool?: SkillInfo[]):
 }
 
 /** Build the system prompt for chat mode responses */
-export function buildChatSystemPrompt(
+export async function buildChatSystemPrompt(
   orchestrator: Orchestrator,
   state: PolpoState | null,
   _workDir?: string,
-): string {
+): Promise<string> {
   const teams = orchestrator.getTeams();
   const config = orchestrator.getConfig();
-  const memory = orchestrator.getMemory();
+  const memory = await orchestrator.getMemory();
   const polpoDir = orchestrator.getPolpoDir();
   const systemContext = readSystemContext(polpoDir);
   const workDir = _workDir ?? ".";
@@ -1202,7 +1202,7 @@ export function buildChatSystemPrompt(
   }
 
   // ── Missions ──
-  const missions = orchestrator.getAllMissions();
+  const missions = await orchestrator.getAllMissions();
   const activeMissions = missions.filter(p =>
     p.status === "active" || p.status === "paused" ||
     p.status === "scheduled" || p.status === "recurring"
@@ -1217,7 +1217,7 @@ export function buildChatSystemPrompt(
   }
 
   // ── Pending approvals ──
-  const pending = orchestrator.getPendingApprovals();
+  const pending = await orchestrator.getPendingApprovals();
   if (pending.length > 0) {
     parts.push(``, `Pending approvals (${pending.length}):`);
     for (const a of pending) {
@@ -1330,12 +1330,12 @@ export function buildChatSystemPrompt(
 }
 
 /** Build the system prompt for mission generation */
-export function buildMissionSystemPrompt(
+export async function buildMissionSystemPrompt(
   orchestrator: Orchestrator,
   state: PolpoState | null,
   workDir: string,
-): string {
-  const orchestraKnowledge = buildChatSystemPrompt(orchestrator, state, workDir);
+): Promise<string> {
+  const orchestraKnowledge = await buildChatSystemPrompt(orchestrator, state, workDir);
   const teams = orchestrator.getTeams();
   const allAgents = teams.flatMap(t => t.agents);
   const availableSkills = discoverSkills(workDir, orchestrator.getPolpoDir());
@@ -1430,15 +1430,15 @@ export function buildMissionSystemPrompt(
 }
 
 /** Build the prompt for single-task LLM preparation */
-export function buildTaskPrepPrompt(
+export async function buildTaskPrepPrompt(
   orchestrator: Orchestrator,
   state: PolpoState | null,
   workDir: string,
   userInput: string,
   assignTo: string,
-): string {
-  const contextPrompt = buildChatSystemPrompt(orchestrator, state, workDir);
-  const memory = orchestrator.getMemory();
+): Promise<string> {
+  const contextPrompt = await buildChatSystemPrompt(orchestrator, state, workDir);
+  const memory = await orchestrator.getMemory();
 
   const memorySection = memory
     ? [`## Project Memory`, ``, memory, ``]

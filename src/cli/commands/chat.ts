@@ -19,14 +19,14 @@ async function initOrchestrator(configPath: string): Promise<Orchestrator> {
  * Resolve an existing recent session or create a new one.
  * Returns null only when no SessionStore is available.
  */
-function resolveSession(sessionStore: SessionStore | undefined, timeout = SESSION_TIMEOUT_MS): string | null {
+async function resolveSession(sessionStore: SessionStore | undefined, timeout = SESSION_TIMEOUT_MS): Promise<string | null> {
   if (!sessionStore) return null;
-  const latest = sessionStore.getLatestSession();
+  const latest = await sessionStore.getLatestSession();
   if (latest) {
     const age = Date.now() - new Date(latest.updatedAt).getTime();
     if (age < timeout) return latest.id;
   }
-  return sessionStore.create();
+  return await sessionStore.create();
 }
 
 export function registerChatCommands(program: Command): void {
@@ -40,23 +40,23 @@ export function registerChatCommands(program: Command): void {
       try {
         const orchestrator = await initOrchestrator(opts.dir);
         const sessionStore = orchestrator.getSessionStore();
-        const sessionId = resolveSession(sessionStore);
+        const sessionId = await resolveSession(sessionStore);
 
         // Persist user message
         if (sessionStore && sessionId) {
-          sessionStore.addMessage(sessionId, "user", message);
+          await sessionStore.addMessage(sessionId, "user", message);
         }
 
         // Build system prompt with current state
-        const state = (() => {
-          try { return orchestrator.getStore()?.getState() ?? null; }
+        const state = await (async () => {
+          try { return await orchestrator.getStore()?.getState() ?? null; }
           catch { return null; }
         })();
-        const systemPrompt = buildChatSystemPrompt(orchestrator, state);
+        const systemPrompt = await buildChatSystemPrompt(orchestrator, state);
 
         // Assemble full prompt with conversation history
         const history = sessionStore && sessionId
-          ? sessionStore.getRecentMessages(sessionId, MAX_HISTORY)
+          ? await sessionStore.getRecentMessages(sessionId, MAX_HISTORY)
           : [];
 
         const parts: string[] = [systemPrompt];
@@ -83,7 +83,7 @@ export function registerChatCommands(program: Command): void {
         if (response) {
           // Persist assistant response
           if (sessionStore && sessionId) {
-            sessionStore.addMessage(sessionId, "assistant", response);
+            await sessionStore.addMessage(sessionId, "assistant", response);
           }
           console.log(response);
         } else {

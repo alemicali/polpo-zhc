@@ -39,7 +39,7 @@ export function registerMissionCommands(program: Command): void {
     .action(async (opts) => {
       try {
         const orchestrator = await initOrchestrator(opts.dir);
-        const missions = orchestrator.getAllMissions();
+        const missions = await orchestrator.getAllMissions();
 
         if (missions.length === 0) {
           console.log(chalk.dim("  No missions found."));
@@ -83,7 +83,7 @@ export function registerMissionCommands(program: Command): void {
     .action(async (missionId: string, opts) => {
       try {
         const orchestrator = await initOrchestrator(opts.dir);
-        const m = orchestrator.getMission(missionId) ?? orchestrator.getMissionByName(missionId);
+        const m = await orchestrator.getMission(missionId) ?? await orchestrator.getMissionByName(missionId);
 
         if (!m) {
           console.error(chalk.red(`Mission not found: ${missionId}`));
@@ -128,12 +128,12 @@ export function registerMissionCommands(program: Command): void {
         const { buildMissionSystemPrompt } = await import("../../llm/prompts.js");
         const { generateMission, missionDataToJson } = await import("../../llm/mission-generator.js");
 
-        const state = (() => {
-          try { return orchestrator.getStore()?.getState() ?? null; }
+        const state = await (async () => {
+          try { return await orchestrator.getStore()?.getState() ?? null; }
           catch { return null; }
         })();
 
-        const systemPrompt = buildMissionSystemPrompt(orchestrator, state, orchestrator.getWorkDir());
+        const systemPrompt = await buildMissionSystemPrompt(orchestrator, state, orchestrator.getWorkDir());
         const userPrompt = `Generate a task mission for:\n"${prompt}"`;
         const settings = orchestrator.getConfig()?.settings;
         const model = resolveModelSpec(settings?.orchestratorModel);
@@ -143,7 +143,7 @@ export function registerMissionCommands(program: Command): void {
         const json = missionDataToJson(missionData);
 
         const missionName = slugify(missionData.name);
-        const mission = orchestrator.saveMission({
+        const mission = await orchestrator.saveMission({
           data: json,
           prompt,
           name: missionName,
@@ -151,7 +151,7 @@ export function registerMissionCommands(program: Command): void {
         });
 
         if (opts.execute) {
-          const result = orchestrator.executeMission(mission.id);
+          const result = await orchestrator.executeMission(mission.id);
           console.log(
             chalk.green(`  Mission "${mission.name}" created and executed — ${result.tasks.length} task(s), group: ${result.group}`),
           );
@@ -175,14 +175,14 @@ export function registerMissionCommands(program: Command): void {
     .action(async (missionId: string, opts) => {
       try {
         const orchestrator = await initOrchestrator(opts.dir);
-        const m = orchestrator.getMission(missionId) ?? orchestrator.getMissionByName(missionId);
+        const m = await orchestrator.getMission(missionId) ?? await orchestrator.getMissionByName(missionId);
 
         if (!m) {
           console.error(chalk.red(`Mission not found: ${missionId}`));
           process.exit(1);
         }
 
-        const result = orchestrator.executeMission(m.id);
+        const result = await orchestrator.executeMission(m.id);
         console.log(
           chalk.green(`  Mission "${m.name}" executed — ${result.tasks.length} task(s), group: ${result.group}`),
         );
@@ -202,7 +202,7 @@ export function registerMissionCommands(program: Command): void {
     .action(async (missionId: string, opts) => {
       try {
         const orchestrator = await initOrchestrator(opts.dir);
-        const m = orchestrator.getMission(missionId) ?? orchestrator.getMissionByName(missionId);
+        const m = await orchestrator.getMission(missionId) ?? await orchestrator.getMissionByName(missionId);
 
         if (!m) {
           console.error(chalk.red(`Mission not found: ${missionId}`));
@@ -210,7 +210,7 @@ export function registerMissionCommands(program: Command): void {
         }
 
         const retryFailed = opts.retryFailed !== false;
-        const result = orchestrator.resumeMission(m.id, { retryFailed });
+        const result = await orchestrator.resumeMission(m.id, { retryFailed });
         console.log(
           chalk.green(`  Mission "${m.name}" resumed — ${result.retried} retried, ${result.pending} pending`),
         );
@@ -229,14 +229,14 @@ export function registerMissionCommands(program: Command): void {
     .action(async (missionId: string, opts) => {
       try {
         const orchestrator = await initOrchestrator(opts.dir);
-        const m = orchestrator.getMission(missionId) ?? orchestrator.getMissionByName(missionId);
+        const m = await orchestrator.getMission(missionId) ?? await orchestrator.getMissionByName(missionId);
 
         if (!m) {
           console.error(chalk.red(`Mission not found: ${missionId}`));
           process.exit(1);
         }
 
-        orchestrator.deleteMission(m.id);
+        await orchestrator.deleteMission(m.id);
         console.log(chalk.green(`  Mission "${m.name}" deleted.`));
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -253,7 +253,7 @@ export function registerMissionCommands(program: Command): void {
     .action(async (group: string, opts) => {
       try {
         const orchestrator = await initOrchestrator(opts.dir);
-        const count = orchestrator.abortGroup(group);
+        const count = await orchestrator.abortGroup(group);
         console.log(chalk.green(`  Aborted ${count} task(s) in group "${group}".`));
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);

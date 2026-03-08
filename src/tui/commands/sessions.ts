@@ -5,14 +5,14 @@
 import type { CommandAPI } from "./types.js";
 import { seg } from "../format.js";
 
-export function cmdSessions({ polpo, store }: CommandAPI) {
+export async function cmdSessions({ polpo, store }: CommandAPI) {
   const sessionStore = polpo.getSessionStore();
   if (!sessionStore) {
     store.log("Session store not available", [seg("Session store not available", "gray")]);
     return;
   }
 
-  const sessions = sessionStore.listSessions();
+  const sessions = await sessionStore.listSessions();
   if (sessions.length === 0) {
     store.log("No sessions", [seg("No sessions", "gray")]);
     return;
@@ -27,11 +27,11 @@ export function cmdSessions({ polpo, store }: CommandAPI) {
       description: `${s.messageCount} messages — ${s.updatedAt.slice(0, 16)}`,
     })),
     hint: "Enter to view  d to delete  Esc back",
-    onSelect: (_idx, sessionId) => {
-      const session = sessionStore.getSession(sessionId);
+    onSelect: async (_idx, sessionId) => {
+      const session = await sessionStore.getSession(sessionId);
       if (!session) return;
 
-      const messages = sessionStore.getMessages(sessionId);
+      const messages = await sessionStore.getMessages(sessionId);
       const content = messages
         .map((m) => `[${m.role}] ${m.content}`)
         .join("\n\n");
@@ -49,8 +49,8 @@ export function cmdSessions({ polpo, store }: CommandAPI) {
         store.navigate({
           id: "confirm",
           message: `Delete session "${sessionId}"?`,
-          onConfirm: () => {
-            sessionStore.deleteSession(sessionId);
+          onConfirm: async () => {
+            await sessionStore.deleteSession(sessionId);
             store.goMain();
             store.log(`Deleted session: ${sessionId}`, [
               seg("- ", "red"),

@@ -102,9 +102,9 @@ export function stateRoutes(): OpenAPIHono<ServerEnv> {
   const app = new OpenAPIHono<ServerEnv>();
 
   // GET /state — full state snapshot
-  app.openapi(getStateRoute, (c) => {
+  app.openapi(getStateRoute, async (c) => {
     const orchestrator = c.get("orchestrator");
-    return c.json({ ok: true, data: redactPolpoState(orchestrator.getStore().getState()) });
+    return c.json({ ok: true, data: redactPolpoState(await orchestrator.getStore().getState()) });
   });
 
   // GET /orchestrator-config — orchestrator config
@@ -115,13 +115,13 @@ export function stateRoutes(): OpenAPIHono<ServerEnv> {
   });
 
   // GET /memory — memory
-  app.openapi(getMemoryRoute, (c) => {
+  app.openapi(getMemoryRoute, async (c) => {
     const orchestrator = c.get("orchestrator");
     return c.json({
       ok: true,
       data: {
-        exists: orchestrator.hasMemory(),
-        content: orchestrator.getMemory(),
+        exists: await orchestrator.hasMemory(),
+        content: await orchestrator.getMemory(),
       },
     });
   });
@@ -130,29 +130,29 @@ export function stateRoutes(): OpenAPIHono<ServerEnv> {
   app.openapi(updateMemoryRoute, async (c) => {
     const orchestrator = c.get("orchestrator");
     const body = c.req.valid("json");
-    orchestrator.saveMemory(body.content);
+    await orchestrator.saveMemory(body.content);
     return c.json({ ok: true, data: { saved: true } });
   });
 
   // GET /logs — list log sessions
-  app.openapi(listLogsRoute, (c) => {
+  app.openapi(listLogsRoute, async (c) => {
     const orchestrator = c.get("orchestrator");
     const logStore = orchestrator.getLogStore();
     if (!logStore) {
       return c.json({ ok: true, data: [] });
     }
-    return c.json({ ok: true, data: logStore.listSessions() });
+    return c.json({ ok: true, data: await logStore.listSessions() });
   });
 
   // GET /logs/:sessionId — get log entries for a session
-  app.openapi(getLogSessionRoute, (c) => {
+  app.openapi(getLogSessionRoute, async (c) => {
     const orchestrator = c.get("orchestrator");
     const logStore = orchestrator.getLogStore();
     if (!logStore) {
       return c.json({ ok: false, error: "Log store not available", code: "NOT_FOUND" }, 404);
     }
     const { sessionId } = c.req.valid("param");
-    const entries = logStore.getSessionEntries(sessionId).map(e => sanitizeTranscriptEntry(e as unknown as Record<string, unknown>));
+    const entries = (await logStore.getSessionEntries(sessionId)).map(e => sanitizeTranscriptEntry(e as unknown as Record<string, unknown>));
     return c.json({ ok: true, data: entries }, 200);
   });
 

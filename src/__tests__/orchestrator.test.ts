@@ -58,11 +58,11 @@ describe("Orchestrator", () => {
   });
 
   describe("addTask", () => {
-    it("creates a task and emits task:created", () => {
+    it("creates a task and emits task:created", async () => {
       const events: any[] = [];
       orchestrator.on("task:created", (e) => events.push(e));
 
-      const task = orchestrator.addTask({
+      const task = await orchestrator.addTask({
         title: "Test",
         description: "Test task",
         assignTo: "agent-1",
@@ -76,54 +76,54 @@ describe("Orchestrator", () => {
   });
 
   describe("tick", () => {
-    it("returns true when all tasks are terminal", () => {
-      const task = orchestrator.addTask({
+    it("returns true when all tasks are terminal", async () => {
+      const task = await orchestrator.addTask({
         title: "Test",
         description: "Done",
         assignTo: "agent-1",
       });
       // Manually set to done
-      store.transition(task.id, "assigned");
-      store.transition(task.id, "in_progress");
-      store.transition(task.id, "review");
-      store.transition(task.id, "done");
+      await store.transition(task.id, "assigned");
+      await store.transition(task.id, "in_progress");
+      await store.transition(task.id, "review");
+      await store.transition(task.id, "done");
 
-      expect(orchestrator.tick()).toBe(true);
+      expect(await orchestrator.tick()).toBe(true);
     });
 
-    it("detects deadlock with missing deps (unresolvable)", () => {
+    it("detects deadlock with missing deps (unresolvable)", async () => {
       const events: any[] = [];
       orchestrator.on("orchestrator:deadlock", (e) => events.push(e));
 
-      const taskA = orchestrator.addTask({
+      const taskA = await orchestrator.addTask({
         title: "Task A",
         description: "Depends on B",
         assignTo: "agent-1",
         dependsOn: ["nonexistent-id"],
       });
 
-      orchestrator.tick();
+      await orchestrator.tick();
 
       expect(events).toHaveLength(1);
       expect(events[0].taskIds).toContain(taskA.id);
     });
 
-    it("attempts resolution when dep is failed (resolvable)", () => {
+    it("attempts resolution when dep is failed (resolvable)", async () => {
       const detected: any[] = [];
       orchestrator.on("deadlock:detected", (e) => detected.push(e));
 
       // Create Task A (no deps) and force it to failed
-      const taskA = orchestrator.addTask({
+      const taskA = await orchestrator.addTask({
         title: "Task A",
         description: "Do something",
         assignTo: "agent-1",
       });
-      store.transition(taskA.id, "assigned");
-      store.transition(taskA.id, "in_progress");
-      store.transition(taskA.id, "failed");
+      await store.transition(taskA.id, "assigned");
+      await store.transition(taskA.id, "in_progress");
+      await store.transition(taskA.id, "failed");
 
       // Create Task B that depends on (now-failed) Task A
-      orchestrator.addTask({
+      await orchestrator.addTask({
         title: "Task B",
         description: "Depends on A",
         assignTo: "agent-1",
@@ -131,24 +131,24 @@ describe("Orchestrator", () => {
       });
 
       // tick should NOT force-fail B immediately — it should detect resolvable deadlock
-      const done = orchestrator.tick();
+      const done = await orchestrator.tick();
 
       expect(done).toBe(false); // loop continues (async resolution pending)
       expect(detected).toHaveLength(1);
       expect(detected[0].resolvableCount).toBe(1);
     });
 
-    it("emits orchestrator:tick with counts", () => {
+    it("emits orchestrator:tick with counts", async () => {
       const events: any[] = [];
       orchestrator.on("orchestrator:tick", (e) => events.push(e));
 
-      orchestrator.addTask({
+      await orchestrator.addTask({
         title: "Test",
         description: "Task",
         assignTo: "agent-1",
       });
 
-      orchestrator.tick();
+      await orchestrator.tick();
 
       expect(events.length).toBeGreaterThan(0);
       const lastTick = events[events.length - 1];
@@ -161,13 +161,13 @@ describe("Orchestrator", () => {
 
   describe("collectResults via RunStore", () => {
     it("processes terminal runs and transitions tasks", async () => {
-      const task = orchestrator.addTask({
+      const task = await orchestrator.addTask({
         title: "Collect me",
         description: "Test",
         assignTo: "agent-1",
       });
-      store.transition(task.id, "assigned");
-      store.transition(task.id, "in_progress");
+      await store.transition(task.id, "assigned");
+      await store.transition(task.id, "in_progress");
 
       const result: TaskResult = {
         exitCode: 0,
@@ -177,119 +177,119 @@ describe("Orchestrator", () => {
       };
 
       // Pre-populate RunStore with a completed run
-      runStore.upsertRun(createTestRunRecord({
+      await runStore.upsertRun(createTestRunRecord({
         id: "run-collect",
         taskId: task.id,
         status: "completed",
         result,
       }));
 
-      orchestrator.tick();
+      await orchestrator.tick();
       // transitionToDone is async (runs hooks) — wait for microtasks to settle
       await new Promise(r => setTimeout(r, 50));
 
       // Run should be consumed (deleted)
-      expect(runStore.getRun("run-collect")).toBeUndefined();
+      expect(await runStore.getRun("run-collect")).toBeUndefined();
       // Task should be done
-      expect(store.getTask(task.id)!.status).toBe("done");
+      expect((await store.getTask(task.id))!.status).toBe("done");
     });
 
-    it("handles failed runs", () => {
-      const task = orchestrator.addTask({
+    it("handles failed runs", async () => {
+      const task = await orchestrator.addTask({
         title: "Fail me",
         description: "Test",
         assignTo: "agent-1",
       });
-      store.transition(task.id, "assigned");
-      store.transition(task.id, "in_progress");
+      await store.transition(task.id, "assigned");
+      await store.transition(task.id, "in_progress");
 
-      runStore.upsertRun(createTestRunRecord({
+      await runStore.upsertRun(createTestRunRecord({
         id: "run-fail",
         taskId: task.id,
         status: "failed",
         result: { exitCode: 1, stdout: "", stderr: "boom", duration: 50 },
       }));
 
-      orchestrator.tick();
+      await orchestrator.tick();
 
       // Task should be retried (back to pending since retries < maxRetries)
-      expect(store.getTask(task.id)!.status).toBe("pending");
+      expect((await store.getTask(task.id))!.status).toBe("pending");
     });
   });
 
   describe("agent management", () => {
-    it("addAgent adds to team", () => {
-      orchestrator.addAgent(createTestAgent({ name: "new-agent" }));
+    it("addAgent adds to team", async () => {
+      await orchestrator.addAgent(createTestAgent({ name: "new-agent" }));
       expect(orchestrator.getAgents().find(a => a.name === "new-agent")).toBeDefined();
     });
 
-    it("addAgent throws for duplicate", () => {
-      expect(() => orchestrator.addAgent(createTestAgent({ name: "agent-1" })))
-        .toThrow("already exists");
+    it("addAgent throws for duplicate", async () => {
+      await expect(orchestrator.addAgent(createTestAgent({ name: "agent-1" })))
+        .rejects.toThrow("already exists");
     });
 
-    it("removeAgent removes from team", () => {
-      orchestrator.addAgent(createTestAgent({ name: "to-remove" }));
-      expect(orchestrator.removeAgent("to-remove")).toBe(true);
+    it("removeAgent removes from team", async () => {
+      await orchestrator.addAgent(createTestAgent({ name: "to-remove" }));
+      expect(await orchestrator.removeAgent("to-remove")).toBe(true);
       expect(orchestrator.getAgents().find(a => a.name === "to-remove")).toBeUndefined();
     });
 
-    it("removeAgent returns false for nonexistent", () => {
-      expect(orchestrator.removeAgent("nope")).toBe(false);
+    it("removeAgent returns false for nonexistent", async () => {
+      expect(await orchestrator.removeAgent("nope")).toBe(false);
     });
   });
 
   describe("volatile agents", () => {
-    it("addVolatileAgent marks agent as volatile", () => {
-      orchestrator.addVolatileAgent(createTestAgent({ name: "vol-1" }), "mission-1");
+    it("addVolatileAgent marks agent as volatile", async () => {
+      await orchestrator.addVolatileAgent(createTestAgent({ name: "vol-1" }), "mission-1");
       const agent = orchestrator.getAgents().find(a => a.name === "vol-1");
       expect(agent?.volatile).toBe(true);
       expect(agent?.missionGroup).toBe("mission-1");
     });
 
-    it("cleanupVolatileAgents removes agents for group", () => {
-      orchestrator.addVolatileAgent(createTestAgent({ name: "vol-1" }), "mission-1");
-      orchestrator.addVolatileAgent(createTestAgent({ name: "vol-2" }), "mission-1");
-      const removed = orchestrator.cleanupVolatileAgents("mission-1");
+    it("cleanupVolatileAgents removes agents for group", async () => {
+      await orchestrator.addVolatileAgent(createTestAgent({ name: "vol-1" }), "mission-1");
+      await orchestrator.addVolatileAgent(createTestAgent({ name: "vol-2" }), "mission-1");
+      const removed = await orchestrator.cleanupVolatileAgents("mission-1");
       expect(removed).toBe(2);
       expect(orchestrator.getAgents().find(a => a.name === "vol-1")).toBeUndefined();
     });
   });
 
   describe("killTask", () => {
-    it("marks task as failed", () => {
-      const task = orchestrator.addTask({
+    it("marks task as failed", async () => {
+      const task = await orchestrator.addTask({
         title: "Kill me",
         description: "Test",
         assignTo: "agent-1",
       });
-      orchestrator.killTask(task.id);
-      expect(store.getTask(task.id)!.status).toBe("failed");
+      await orchestrator.killTask(task.id);
+      expect((await store.getTask(task.id))!.status).toBe("failed");
     });
   });
 
   describe("retryTask", () => {
-    it("transitions failed task to pending", () => {
-      const task = orchestrator.addTask({
+    it("transitions failed task to pending", async () => {
+      const task = await orchestrator.addTask({
         title: "Retry me",
         description: "Test",
         assignTo: "agent-1",
       });
-      store.transition(task.id, "assigned");
-      store.transition(task.id, "in_progress");
-      store.transition(task.id, "failed");
+      await store.transition(task.id, "assigned");
+      await store.transition(task.id, "in_progress");
+      await store.transition(task.id, "failed");
 
-      orchestrator.retryTask(task.id);
-      expect(store.getTask(task.id)!.status).toBe("pending");
+      await orchestrator.retryTask(task.id);
+      expect((await store.getTask(task.id))!.status).toBe("pending");
     });
 
-    it("throws for non-failed task", () => {
-      const task = orchestrator.addTask({
+    it("throws for non-failed task", async () => {
+      const task = await orchestrator.addTask({
         title: "Not failed",
         description: "Test",
         assignTo: "agent-1",
       });
-      expect(() => orchestrator.retryTask(task.id)).toThrow('Cannot retry task in "pending" state');
+      await expect(orchestrator.retryTask(task.id)).rejects.toThrow('Cannot retry task in "pending" state');
     });
   });
 
@@ -303,8 +303,8 @@ describe("Orchestrator", () => {
   });
 
   describe("recoverOrphanedTasks", () => {
-    it("resets stuck tasks to pending", () => {
-      const task = store.addTask({
+    it("resets stuck tasks to pending", async () => {
+      const task = await store.addTask({
         title: "Stuck",
         description: "Was in_progress",
         assignTo: "agent-1",
@@ -313,16 +313,16 @@ describe("Orchestrator", () => {
         metrics: [],
         maxRetries: 2,
       });
-      store.transition(task.id, "assigned");
-      store.transition(task.id, "in_progress");
+      await store.transition(task.id, "assigned");
+      await store.transition(task.id, "in_progress");
 
-      const recovered = orchestrator.recoverOrphanedTasks();
+      const recovered = await orchestrator.recoverOrphanedTasks();
       expect(recovered).toBe(1);
-      expect(store.getTask(task.id)!.status).toBe("pending");
+      expect((await store.getTask(task.id))!.status).toBe("pending");
     });
 
-    it("requeues orphaned in_progress tasks to pending (shutdown is not a real failure)", () => {
-      const task = store.addTask({
+    it("requeues orphaned in_progress tasks to pending (shutdown is not a real failure)", async () => {
+      const task = await store.addTask({
         title: "Exhausted",
         description: "No retries left",
         assignTo: "agent-1",
@@ -331,27 +331,27 @@ describe("Orchestrator", () => {
         metrics: [],
         maxRetries: 0,
       });
-      store.transition(task.id, "assigned");
-      store.transition(task.id, "in_progress");
+      await store.transition(task.id, "assigned");
+      await store.transition(task.id, "in_progress");
 
-      orchestrator.recoverOrphanedTasks();
+      await orchestrator.recoverOrphanedTasks();
       // Recovery doesn't burn retries — task goes back to pending
-      expect(store.getTask(task.id)!.status).toBe("pending");
-      expect(store.getTask(task.id)!.retries).toBe(0);
+      expect((await store.getTask(task.id))!.status).toBe("pending");
+      expect((await store.getTask(task.id))!.retries).toBe(0);
     });
   });
 
   describe("syncProcessesFromRunStore", () => {
-    it("syncs active runs to processes state", () => {
-      const task = orchestrator.addTask({
+    it("syncs active runs to processes state", async () => {
+      const task = await orchestrator.addTask({
         title: "Running",
         description: "Test",
         assignTo: "agent-1",
       });
-      store.transition(task.id, "assigned");
-      store.transition(task.id, "in_progress");
+      await store.transition(task.id, "assigned");
+      await store.transition(task.id, "in_progress");
 
-      runStore.upsertRun(createTestRunRecord({
+      await runStore.upsertRun(createTestRunRecord({
         id: "run-sync",
         taskId: task.id,
         pid: 42,
@@ -359,9 +359,9 @@ describe("Orchestrator", () => {
         status: "running",
       }));
 
-      orchestrator.tick();
+      await orchestrator.tick();
 
-      const state = store.getState();
+      const state = await store.getState();
       expect(state.processes).toHaveLength(1);
       expect(state.processes[0].pid).toBe(42);
       expect(state.processes[0].agentName).toBe("agent-1");
@@ -376,24 +376,24 @@ describe("Orchestrator", () => {
   });
 
   describe("project memory", () => {
-    it("hasMemory returns false when no memory saved", () => {
-      expect(orchestrator.hasMemory()).toBe(false);
+    it("hasMemory returns false when no memory saved", async () => {
+      expect(await orchestrator.hasMemory()).toBe(false);
     });
 
-    it("getMemory returns empty string when no memory", () => {
-      expect(orchestrator.getMemory()).toBe("");
+    it("getMemory returns empty string when no memory", async () => {
+      expect(await orchestrator.getMemory()).toBe("");
     });
 
-    it("saveMemory + getMemory round-trips", () => {
-      orchestrator.saveMemory("# Architecture\nTypeScript project");
-      expect(orchestrator.hasMemory()).toBe(true);
-      expect(orchestrator.getMemory()).toBe("# Architecture\nTypeScript project");
+    it("saveMemory + getMemory round-trips", async () => {
+      await orchestrator.saveMemory("# Architecture\nTypeScript project");
+      expect(await orchestrator.hasMemory()).toBe(true);
+      expect(await orchestrator.getMemory()).toBe("# Architecture\nTypeScript project");
     });
 
-    it("appendMemory adds timestamped entry", () => {
-      orchestrator.saveMemory("# Memory");
-      orchestrator.appendMemory("New insight");
-      const content = orchestrator.getMemory();
+    it("appendMemory adds timestamped entry", async () => {
+      await orchestrator.saveMemory("# Memory");
+      await orchestrator.appendMemory("New insight");
+      const content = await orchestrator.getMemory();
       expect(content).toContain("# Memory");
       expect(content).toContain("New insight");
     });

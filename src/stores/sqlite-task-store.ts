@@ -315,7 +315,7 @@ export class SqliteTaskStore implements TaskStore {
 
   // === TaskStore interface ===
 
-  getState(): PolpoState {
+  async getState(): Promise<PolpoState> {
     const projectRow = this.getMetaStmt.get("project") as { value: string } | undefined;
     const teamRow = this.getMetaStmt.get("team") as { value: string } | undefined;
     const startedRow = this.getMetaStmt.get("startedAt") as { value: string } | undefined;
@@ -347,7 +347,7 @@ export class SqliteTaskStore implements TaskStore {
     return state;
   }
 
-  setState(partial: Partial<PolpoState>): void {
+  async setState(partial: Partial<PolpoState>): Promise<void> {
     this.db.transaction(() => {
       if (partial.project !== undefined) {
         this.upsertMetaStmt.run("project", partial.project);
@@ -383,9 +383,9 @@ export class SqliteTaskStore implements TaskStore {
     })();
   }
 
-  addTask(
+  async addTask(
     task: Omit<Task, "id" | "status" | "retries" | "createdAt" | "updatedAt"> & { status?: TaskStatus },
-  ): Task {
+  ): Promise<Task> {
     const now = new Date().toISOString();
     const newTask: Task = {
       ...task,
@@ -399,16 +399,16 @@ export class SqliteTaskStore implements TaskStore {
     return newTask;
   }
 
-  getTask(taskId: string): Task | undefined {
+  async getTask(taskId: string): Promise<Task | undefined> {
     const row = this.getTaskStmt.get(taskId) as TaskRow | undefined;
     return row ? this.rowToTask(row) : undefined;
   }
 
-  getAllTasks(): Task[] {
+  async getAllTasks(): Promise<Task[]> {
     return (this.getAllTasksStmt.all() as TaskRow[]).map(r => this.rowToTask(r));
   }
 
-  unsafeSetStatus(taskId: string, newStatus: TaskStatus, reason: string): Task {
+  async unsafeSetStatus(taskId: string, newStatus: TaskStatus, reason: string): Promise<Task> {
     const row = this.getTaskStmt.get(taskId) as TaskRow | undefined;
     if (!row) throw new Error(`Task not found: ${taskId}`);
     const from = row.status;
@@ -419,7 +419,7 @@ export class SqliteTaskStore implements TaskStore {
     return this.rowToTask(this.getTaskStmt.get(taskId) as TaskRow);
   }
 
-  updateTask(taskId: string, updates: Partial<Omit<Task, "id" | "status">>): Task {
+  async updateTask(taskId: string, updates: Partial<Omit<Task, "id" | "status">>): Promise<Task> {
     const existing = this.getTaskStmt.get(taskId) as TaskRow | undefined;
     if (!existing) throw new Error(`Task not found: ${taskId}`);
 
@@ -456,13 +456,13 @@ export class SqliteTaskStore implements TaskStore {
     return this.rowToTask(this.getTaskStmt.get(taskId) as TaskRow);
   }
 
-  removeTask(taskId: string): boolean {
+  async removeTask(taskId: string): Promise<boolean> {
     const result = this.deleteTaskStmt.run(taskId);
     return result.changes > 0;
   }
 
-  removeTasks(filter: (task: Task) => boolean): number {
-    const all = this.getAllTasks();
+  async removeTasks(filter: (task: Task) => boolean): Promise<number> {
+    const all = await this.getAllTasks();
     const toRemove = all.filter(filter);
     if (toRemove.length === 0) return 0;
 
@@ -472,7 +472,7 @@ export class SqliteTaskStore implements TaskStore {
     return toRemove.length;
   }
 
-  transition(taskId: string, newStatus: TaskStatus): Task {
+  async transition(taskId: string, newStatus: TaskStatus): Promise<Task> {
     const row = this.getTaskStmt.get(taskId) as TaskRow | undefined;
     if (!row) throw new Error(`Task not found: ${taskId}`);
 
@@ -507,7 +507,7 @@ export class SqliteTaskStore implements TaskStore {
     };
   }
 
-  saveMission(mission: Omit<Mission, "id" | "createdAt" | "updatedAt">): Mission {
+  async saveMission(mission: Omit<Mission, "id" | "createdAt" | "updatedAt">): Promise<Mission> {
     const now = new Date().toISOString();
     const newMission: Mission = {
       ...mission,
@@ -528,21 +528,21 @@ export class SqliteTaskStore implements TaskStore {
     return newMission;
   }
 
-  getMission(missionId: string): Mission | undefined {
+  async getMission(missionId: string): Promise<Mission | undefined> {
     const row = this.getMissionStmt.get(missionId) as MissionRow | undefined;
     return row ? this.rowToMission(row) : undefined;
   }
 
-  getMissionByName(name: string): Mission | undefined {
+  async getMissionByName(name: string): Promise<Mission | undefined> {
     const row = this.getMissionByNameStmt.get(name) as MissionRow | undefined;
     return row ? this.rowToMission(row) : undefined;
   }
 
-  getAllMissions(): Mission[] {
+  async getAllMissions(): Promise<Mission[]> {
     return (this.getAllMissionsStmt.all() as MissionRow[]).map(r => this.rowToMission(r));
   }
 
-  updateMission(missionId: string, updates: Partial<Omit<Mission, "id">>): Mission {
+  async updateMission(missionId: string, updates: Partial<Omit<Mission, "id">>): Promise<Mission> {
     const existing = this.getMissionStmt.get(missionId) as MissionRow | undefined;
     if (!existing) throw new Error(`Mission not found: ${missionId}`);
 
@@ -563,17 +563,17 @@ export class SqliteTaskStore implements TaskStore {
     return this.rowToMission(this.getMissionStmt.get(missionId) as MissionRow);
   }
 
-  deleteMission(missionId: string): boolean {
+  async deleteMission(missionId: string): Promise<boolean> {
     const result = this.deleteMissionStmt.run(missionId);
     return result.changes > 0;
   }
 
-  nextMissionName(): string {
+  async nextMissionName(): Promise<string> {
     const row = this.db.prepare("SELECT COUNT(*) as c FROM missions").get() as { c: number };
     return `mission-${row.c + 1}`;
   }
 
-  close(): void {
+  async close(): Promise<void> {
     this.db.close();
   }
 }

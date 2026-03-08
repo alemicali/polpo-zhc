@@ -20,32 +20,32 @@ export class FileApprovalStore implements ApprovalStore {
     this.load();
   }
 
-  upsert(request: ApprovalRequest): void {
+  async upsert(request: ApprovalRequest): Promise<void> {
     this.requests.set(request.id, request);
     this.save();
   }
 
-  get(id: string): ApprovalRequest | undefined {
+  async get(id: string): Promise<ApprovalRequest | undefined> {
     return this.requests.get(id);
   }
 
-  list(status?: ApprovalStatus): ApprovalRequest[] {
+  async list(status?: ApprovalStatus): Promise<ApprovalRequest[]> {
     const all = [...this.requests.values()];
     if (status) return all.filter(r => r.status === status);
     return all;
   }
 
-  listByTask(taskId: string): ApprovalRequest[] {
+  async listByTask(taskId: string): Promise<ApprovalRequest[]> {
     return [...this.requests.values()].filter(r => r.taskId === taskId);
   }
 
-  delete(id: string): boolean {
+  async delete(id: string): Promise<boolean> {
     const had = this.requests.delete(id);
     if (had) this.save();
     return had;
   }
 
-  close(): void {
+  async close(): Promise<void> {
     this.save();
   }
 

@@ -47,12 +47,12 @@ export function agentRoutes(): OpenAPIHono<ServerEnv> {
     },
   });
 
-  app.openapi(addAgentRoute, (c) => {
+  app.openapi(addAgentRoute, async (c) => {
     const orchestrator = c.get("orchestrator");
     const body = c.req.valid("json");
     const teamName = c.req.query("team");
 
-    orchestrator.addAgent({
+    await orchestrator.addAgent({
       name: body.name,
       role: body.role,
       model: body.model,
@@ -89,10 +89,10 @@ export function agentRoutes(): OpenAPIHono<ServerEnv> {
     },
   });
 
-  app.openapi(deleteAgentRoute, (c) => {
+  app.openapi(deleteAgentRoute, async (c) => {
     const orchestrator = c.get("orchestrator");
     const { name } = c.req.valid("param");
-    const removed = orchestrator.removeAgent(name);
+    const removed = await orchestrator.removeAgent(name);
     if (!removed) {
       return c.json({ ok: false, error: "Agent not found", code: "NOT_FOUND" }, 404);
     }
@@ -157,10 +157,10 @@ export function agentRoutes(): OpenAPIHono<ServerEnv> {
     },
   });
 
-  app.openapi(addTeamRoute, (c) => {
+  app.openapi(addTeamRoute, async (c) => {
     const orchestrator = c.get("orchestrator");
     const body = c.req.valid("json");
-    orchestrator.addTeam({ name: body.name, description: body.description, agents: [] });
+    await orchestrator.addTeam({ name: body.name, description: body.description, agents: [] });
     return c.json({ ok: true, data: { added: true } }, 201);
   });
 
@@ -185,10 +185,10 @@ export function agentRoutes(): OpenAPIHono<ServerEnv> {
     },
   });
 
-  app.openapi(deleteTeamRoute, (c) => {
+  app.openapi(deleteTeamRoute, async (c) => {
     const orchestrator = c.get("orchestrator");
     const { name } = c.req.valid("param");
-    const removed = orchestrator.removeTeam(name);
+    const removed = await orchestrator.removeTeam(name);
     if (!removed) {
       return c.json({ ok: false, error: "Team not found", code: "NOT_FOUND" }, 404);
     }
@@ -212,10 +212,10 @@ export function agentRoutes(): OpenAPIHono<ServerEnv> {
     },
   });
 
-  app.openapi(renameTeamRoute, (c) => {
+  app.openapi(renameTeamRoute, async (c) => {
     const orchestrator = c.get("orchestrator");
     const body = c.req.valid("json");
-    orchestrator.renameTeam(body.oldName, body.name);
+    await orchestrator.renameTeam(body.oldName, body.name);
     const updatedTeam = orchestrator.getTeam(body.name);
     return c.json({ ok: true, data: updatedTeam ? redactTeam(updatedTeam) : null });
   });
@@ -234,9 +234,9 @@ export function agentRoutes(): OpenAPIHono<ServerEnv> {
     },
   });
 
-  app.openapi(listProcessesRoute, (c) => {
+  app.openapi(listProcessesRoute, async (c) => {
     const orchestrator = c.get("orchestrator");
-    const state = orchestrator.getStore().getState();
+    const state = await orchestrator.getStore().getState();
     return c.json({ ok: true, data: state.processes || [] });
   });
 
@@ -257,7 +257,7 @@ export function agentRoutes(): OpenAPIHono<ServerEnv> {
     },
   });
 
-  app.openapi(getActivityRoute, (c) => {
+  app.openapi(getActivityRoute, async (c) => {
     const orchestrator = c.get("orchestrator");
     const { taskId } = c.req.valid("param");
     const logsDir = join(orchestrator.getPolpoDir(), "logs");
@@ -268,7 +268,7 @@ export function agentRoutes(): OpenAPIHono<ServerEnv> {
 
     // Strategy: first check active RunStore for the runId, otherwise scan JSONL headers
     let runId: string | undefined;
-    const run = orchestrator.getRunStore().getRunByTaskId(taskId);
+    const run = await orchestrator.getRunStore().getRunByTaskId(taskId);
     if (run) {
       runId = run.id;
     } else {
@@ -329,7 +329,7 @@ export function agentRoutes(): OpenAPIHono<ServerEnv> {
     },
   });
 
-  app.openapi(updateAgentRoute, (c) => {
+  app.openapi(updateAgentRoute, async (c) => {
     const orchestrator = c.get("orchestrator");
     const { name } = c.req.valid("param");
     const existing = orchestrator.getAgents().find(a => a.name === name);
@@ -341,7 +341,7 @@ export function agentRoutes(): OpenAPIHono<ServerEnv> {
     const currentTeam = orchestrator.findAgentTeam(name);
     const originalTeamName = currentTeam?.name;
 
-    orchestrator.removeAgent(name);
+    await orchestrator.removeAgent(name);
 
     // Handle reportsTo: empty string clears it
     let reportsTo = existing.reportsTo;
@@ -367,7 +367,7 @@ export function agentRoutes(): OpenAPIHono<ServerEnv> {
     };
 
     const targetTeam = body.team ?? originalTeamName;
-    orchestrator.addAgent(merged as any, targetTeam);
+    await orchestrator.addAgent(merged as any, targetTeam);
 
     const updated = orchestrator.getAgents().find(a => a.name === name);
     return c.json({ ok: true, data: updated ? redactAgentConfig(updated) : merged }, 200);
@@ -439,14 +439,14 @@ export function agentRoutes(): OpenAPIHono<ServerEnv> {
     // Update agent identity with avatar path — preserve original team
     const identity = { ...(agent.identity ?? {}), avatar: relativePath };
     const originalTeam = orchestrator.findAgentTeam(name)?.name;
-    orchestrator.removeAgent(name);
-    orchestrator.addAgent({ ...agent, identity }, originalTeam);
+    await orchestrator.removeAgent(name);
+    await orchestrator.addAgent({ ...agent, identity }, originalTeam);
 
     return c.json({ ok: true, data: { avatar: relativePath } }, 200);
   });
 
   // ── DELETE /agents/:name/avatar — remove agent avatar ──
-  app.delete("/:name/avatar", (c) => {
+  app.delete("/:name/avatar", async (c) => {
     const orchestrator = c.get("orchestrator");
     const name = c.req.param("name");
     const agent = orchestrator.getAgents().find(a => a.name === name);
@@ -455,8 +455,8 @@ export function agentRoutes(): OpenAPIHono<ServerEnv> {
     if (agent.identity?.avatar) {
       const identity = { ...agent.identity, avatar: undefined };
       const originalTeam = orchestrator.findAgentTeam(name)?.name;
-      orchestrator.removeAgent(name);
-      orchestrator.addAgent({ ...agent, identity }, originalTeam);
+      await orchestrator.removeAgent(name);
+      await orchestrator.addAgent({ ...agent, identity }, originalTeam);
     }
 
     return c.json({ ok: true }, 200);

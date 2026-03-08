@@ -41,11 +41,11 @@ export class FilePeerStore implements PeerStore {
 
   // ── Peer Identity ──────────────────────────────────────────────
 
-  getPeer(peerId: string): PeerIdentity | undefined {
+  async getPeer(peerId: string): Promise<PeerIdentity | undefined> {
     return this.peers.get(peerId);
   }
 
-  upsertPeer(input: Omit<PeerIdentity, "id" | "firstSeenAt"> & { id?: string }): PeerIdentity {
+  async upsertPeer(input: Omit<PeerIdentity, "id" | "firstSeenAt"> & { id?: string }): Promise<PeerIdentity> {
     const peerId = input.id ?? `${input.channel}:${input.externalId}`;
     const existing = this.peers.get(peerId);
     const now = new Date().toISOString();
@@ -65,14 +65,14 @@ export class FilePeerStore implements PeerStore {
     return peer;
   }
 
-  listPeers(channel?: ChannelType): PeerIdentity[] {
+  async listPeers(channel?: ChannelType): Promise<PeerIdentity[]> {
     const all = [...this.peers.values()];
     return channel ? all.filter(p => p.channel === channel) : all;
   }
 
   // ── Authorization ──────────────────────────────────────────────
 
-  isAllowed(peerId: string, channelConfig?: ChannelGatewayConfig): boolean {
+  async isAllowed(peerId: string, channelConfig?: ChannelGatewayConfig): Promise<boolean> {
     const policy: DmPolicy = channelConfig?.dmPolicy ?? "allowlist";
 
     switch (policy) {
@@ -98,23 +98,23 @@ export class FilePeerStore implements PeerStore {
     return config.allowFrom.includes(peerId) || (externalId ? config.allowFrom.includes(externalId) : false);
   }
 
-  addToAllowlist(peerId: string): void {
+  async addToAllowlist(peerId: string): Promise<void> {
     this.allowlist.add(peerId);
     this.saveAllowlist();
   }
 
-  removeFromAllowlist(peerId: string): void {
+  async removeFromAllowlist(peerId: string): Promise<void> {
     this.allowlist.delete(peerId);
     this.saveAllowlist();
   }
 
-  getAllowlist(): string[] {
+  async getAllowlist(): Promise<string[]> {
     return [...this.allowlist];
   }
 
   // ── Pairing ────────────────────────────────────────────────────
 
-  createPairingRequest(channel: ChannelType, externalId: string, displayName?: string): PairingRequest {
+  async createPairingRequest(channel: ChannelType, externalId: string, displayName?: string): Promise<PairingRequest> {
     const peerId = `${channel}:${externalId}`;
 
     // Clean expired first
@@ -155,7 +155,7 @@ export class FilePeerStore implements PeerStore {
     return request;
   }
 
-  resolvePairing(code: string): PairingRequest | undefined {
+  async resolvePairing(code: string): Promise<PairingRequest | undefined> {
     const request = this.pairings.get(code.toUpperCase());
     if (!request || request.resolved) return undefined;
 
@@ -174,13 +174,13 @@ export class FilePeerStore implements PeerStore {
     return request;
   }
 
-  getPendingPairing(peerId: string): PairingRequest | undefined {
+  async getPendingPairing(peerId: string): Promise<PairingRequest | undefined> {
     return [...this.pairings.values()].find(
       p => p.peerId === peerId && !p.resolved && Date.now() < new Date(p.expiresAt).getTime(),
     );
   }
 
-  cleanExpiredPairings(): number {
+  async cleanExpiredPairings(): Promise<number> {
     const now = Date.now();
     let cleaned = 0;
     for (const [code, req] of this.pairings) {
@@ -195,26 +195,26 @@ export class FilePeerStore implements PeerStore {
 
   // ── Session Mapping ────────────────────────────────────────────
 
-  getSessionId(peerId: string): string | undefined {
-    const canonicalId = this.resolveCanonicalId(peerId);
+  async getSessionId(peerId: string): Promise<string | undefined> {
+    const canonicalId = await this.resolveCanonicalId(peerId);
     return this.sessionMap.get(canonicalId);
   }
 
-  setSessionId(peerId: string, sessionId: string): void {
-    const canonicalId = this.resolveCanonicalId(peerId);
+  async setSessionId(peerId: string, sessionId: string): Promise<void> {
+    const canonicalId = await this.resolveCanonicalId(peerId);
     this.sessionMap.set(canonicalId, sessionId);
     this.saveSessions();
   }
 
-  clearSession(peerId: string): void {
-    const canonicalId = this.resolveCanonicalId(peerId);
+  async clearSession(peerId: string): Promise<void> {
+    const canonicalId = await this.resolveCanonicalId(peerId);
     this.sessionMap.delete(canonicalId);
     this.saveSessions();
   }
 
   // ── Identity Linking ───────────────────────────────────────────
 
-  linkPeers(peerId: string, linkedTo: string): void {
+  async linkPeers(peerId: string, linkedTo: string): Promise<void> {
     const peer = this.peers.get(peerId);
     if (peer) {
       peer.linkedTo = linkedTo;
@@ -222,7 +222,7 @@ export class FilePeerStore implements PeerStore {
     }
   }
 
-  resolveCanonicalId(peerId: string): string {
+  async resolveCanonicalId(peerId: string): Promise<string> {
     const peer = this.peers.get(peerId);
     if (peer?.linkedTo) {
       // One level of indirection max (avoid cycles)
@@ -233,7 +233,7 @@ export class FilePeerStore implements PeerStore {
 
   // ── Presence (in-memory only) ──────────────────────────────────
 
-  updatePresence(peerId: string, activity: PresenceEntry["activity"]): void {
+  async updatePresence(peerId: string, activity: PresenceEntry["activity"]): Promise<void> {
     const peer = this.peers.get(peerId);
     this.presence.set(peerId, {
       peerId,
@@ -244,12 +244,12 @@ export class FilePeerStore implements PeerStore {
     });
   }
 
-  getPresence(): PresenceEntry[] {
+  async getPresence(): Promise<PresenceEntry[]> {
     this.prunePresence();
     return [...this.presence.values()];
   }
 
-  prunePresence(ttlMs = PRESENCE_TTL_MS): number {
+  async prunePresence(ttlMs = PRESENCE_TTL_MS): Promise<number> {
     const cutoff = Date.now() - ttlMs;
     let pruned = 0;
     for (const [id, entry] of this.presence) {

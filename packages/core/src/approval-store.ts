@@ -5,15 +5,15 @@ import type { ApprovalRequest, ApprovalStatus } from "./types.js";
  */
 export interface ApprovalStore {
   /** Save or update an approval request. */
-  upsert(request: ApprovalRequest): void;
+  upsert(request: ApprovalRequest): Promise<void>;
   /** Get a request by ID. */
-  get(id: string): ApprovalRequest | undefined;
+  get(id: string): Promise<ApprovalRequest | undefined>;
   /** List all requests, optionally filtered by status. */
-  list(status?: ApprovalStatus): ApprovalRequest[];
+  list(status?: ApprovalStatus): Promise<ApprovalRequest[]>;
   /** List pending requests for a specific task. */
-  listByTask(taskId: string): ApprovalRequest[];
+  listByTask(taskId: string): Promise<ApprovalRequest[]>;
   /** Delete a request by ID. */
-  delete(id: string): boolean;
+  delete(id: string): Promise<boolean>;
   /** Close the store (cleanup). */
-  close?(): void;
+  close?(): Promise<void> | void;
 }

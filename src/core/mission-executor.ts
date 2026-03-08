@@ -47,7 +47,13 @@ export class MissionExecutor {
 
     // Rebuild cleanedGroups from persisted task state — groups where ALL tasks
     // are already terminal don't need to be re-processed after a server restart.
-    const allTasks = ctx.registry.getAllTasks();
+    // Constructor cannot be async — kick off async init and let it complete in background.
+    this.rebuildCleanedGroups();
+  }
+
+  /** Async init: rebuild cleanedGroups from persisted task state. */
+  private async rebuildCleanedGroups(): Promise<void> {
+    const allTasks = await this.ctx.registry.getAllTasks();
     const groups = new Set<string>();
     for (const t of allTasks) {
       if (t.group) groups.add(t.group);
@@ -84,12 +90,12 @@ export class MissionExecutor {
    * Check if a task is blocked by an active (unresumed) checkpoint.
    * Returns the blocking checkpoint if found, undefined if the task can proceed.
    */
-  getBlockingCheckpoint(
+  async getBlockingCheckpoint(
     group: string,
     taskTitle: string,
     taskId: string,
     tasks: Task[],
-  ): { checkpoint: MissionCheckpoint; reachedAt: string } | undefined {
+  ): Promise<{ checkpoint: MissionCheckpoint; reachedAt: string } | undefined> {
     const checkpoints = this.cpState.definitions[group];
     if (!checkpoints) return undefined;
 
@@ -125,10 +131,10 @@ export class MissionExecutor {
         // Pause the mission — use task.missionId when available
         const taskMissionId = tasks.find(t => t.group === group && t.missionId)?.missionId;
         const mission = taskMissionId
-          ? this.ctx.registry.getMission?.(taskMissionId)
-          : this.ctx.registry.getMissionByName?.(group);
+          ? await this.ctx.registry.getMission?.(taskMissionId)
+          : await this.ctx.registry.getMissionByName?.(group);
         if (mission && mission.status === "active") {
-          this.ctx.registry.updateMission?.(mission.id, { status: "paused" });
+          await this.ctx.registry.updateMission?.(mission.id, { status: "paused" });
         }
 
         // Register notification rules for this checkpoint's channels
@@ -157,7 +163,7 @@ export class MissionExecutor {
    * Resume a checkpoint, unblocking its blocksTasks.
    * Returns true if the checkpoint was active and is now resumed, false if not found.
    */
-  resumeCheckpoint(group: string, checkpointName: string): boolean {
+  async resumeCheckpoint(group: string, checkpointName: string): Promise<boolean> {
     const cpKey = `${group}:${checkpointName}`;
     const active = this.cpState.active[cpKey];
     if (!active) return false;
@@ -167,10 +173,10 @@ export class MissionExecutor {
     this.cpStore.save(this.cpState);
 
     // Un-pause the mission (back to active) — resolve via missionId from tasks
-    const groupTasks = this.ctx.registry.getAllTasks().filter(t => t.group === group);
-    const mission = this.resolveMissionForGroup(groupTasks, group);
+    const groupTasks = (await this.ctx.registry.getAllTasks()).filter(t => t.group === group);
+    const mission = await this.resolveMissionForGroup(groupTasks, group);
     if (mission && mission.status === "paused") {
-      this.ctx.registry.updateMission?.(mission.id, { status: "active" });
+      await this.ctx.registry.updateMission?.(mission.id, { status: "active" });
     }
 
     this.ctx.emitter.emit("checkpoint:resumed", {
@@ -235,12 +241,12 @@ export class MissionExecutor {
    * If the timer has expired, marks the delay as expired and unblocks.
    * Returns the blocking delay if found, undefined if the task can proceed.
    */
-  getBlockingDelay(
+  async getBlockingDelay(
     group: string,
     taskTitle: string,
     taskId: string,
     tasks: Task[],
-  ): { delay: MissionDelay; startedAt: string; expiresAt: string } | undefined {
+  ): Promise<{ delay: MissionDelay; startedAt: string; expiresAt: string } | undefined> {
     const delays = this.delayState.definitions[group];
     if (!delays) return undefined;
 
@@ -279,7 +285,7 @@ export class MissionExecutor {
         this.ensureDelayNotificationRules(dlKey, dl);
 
         // Emit event
-        const mission = this.resolveMissionForGroupByName(group);
+        const mission = await this.resolveMissionForGroupByName(group);
         this.ctx.emitter.emit("delay:started", {
           missionId: mission?.id,
           group,
@@ -301,7 +307,7 @@ export class MissionExecutor {
         delete this.delayState.active[dlKey];
         this.delayStore.save(this.delayState);
 
-        const mission = this.resolveMissionForGroupByName(group);
+        const mission = await this.resolveMissionForGroupByName(group);
         this.ctx.emitter.emit("delay:expired", {
           missionId: mission?.id,
           group,
@@ -359,15 +365,15 @@ export class MissionExecutor {
   }
 
   /** Resolve a mission by group name (helper for delay/checkpoint events). */
-  private resolveMissionForGroupByName(group: string): Mission | undefined {
-    const groupTasks = this.ctx.registry.getAllTasks().filter(t => t.group === group);
+  private async resolveMissionForGroupByName(group: string): Promise<Mission | undefined> {
+    const groupTasks = (await this.ctx.registry.getAllTasks()).filter(t => t.group === group);
     return this.resolveMissionForGroup(groupTasks, group);
   }
 
-  saveMission(opts: { data: string; prompt?: string; name?: string; status?: MissionStatus; notifications?: ScopedNotificationRules }): Mission {
+  async saveMission(opts: { data: string; prompt?: string; name?: string; status?: MissionStatus; notifications?: ScopedNotificationRules }): Promise<Mission> {
     if (!this.ctx.registry.saveMission) throw new Error("Store does not support missions");
-    const name = opts.name ?? this.ctx.registry.nextMissionName?.() ?? `mission-${Date.now()}`;
-    const mission = this.ctx.registry.saveMission({
+    const name = opts.name ?? (await this.ctx.registry.nextMissionName?.()) ?? `mission-${Date.now()}`;
+    const mission = await this.ctx.registry.saveMission({
       name,
       data: opts.data,
       prompt: opts.prompt,
@@ -378,38 +384,38 @@ export class MissionExecutor {
     return mission;
   }
 
-  getMission(missionId: string): Mission | undefined {
+  async getMission(missionId: string): Promise<Mission | undefined> {
     return this.ctx.registry.getMission?.(missionId);
   }
 
-  getMissionByName(name: string): Mission | undefined {
+  async getMissionByName(name: string): Promise<Mission | undefined> {
     return this.ctx.registry.getMissionByName?.(name);
   }
 
-  getAllMissions(): Mission[] {
-    return this.ctx.registry.getAllMissions?.() ?? [];
+  async getAllMissions(): Promise<Mission[]> {
+    return (await this.ctx.registry.getAllMissions?.()) ?? [];
   }
 
-  updateMission(missionId: string, updates: Partial<Omit<Mission, "id">>): Mission {
+  async updateMission(missionId: string, updates: Partial<Omit<Mission, "id">>): Promise<Mission> {
     if (!this.ctx.registry.updateMission) throw new Error("Store does not support missions");
     return this.ctx.registry.updateMission(missionId, updates);
   }
 
-  deleteMission(missionId: string): boolean {
+  async deleteMission(missionId: string): Promise<boolean> {
     if (!this.ctx.registry.deleteMission) throw new Error("Store does not support missions");
-    const mission = this.getMission(missionId);
+    const mission = await this.getMission(missionId);
     if (!mission) return false;
 
     // ── Cascade cleanup ──────────────────────────────────
 
     // 1. Kill running processes and remove all tasks belonging to this mission
     const missionGroup = mission.name;
-    const deletedTasks = this.taskMgr.clearTasks(
+    const deletedTasks = await this.taskMgr.clearTasks(
       t => t.missionId === missionId || t.group === missionGroup,
     );
 
     // 2. Clean up volatile agents registered for this mission group
-    this.agentMgr.cleanupVolatileAgents(missionGroup);
+    await this.agentMgr.cleanupVolatileAgents(missionGroup);
 
     // 3. Clean up in-memory quality gates
     this.gatesByGroup.delete(missionGroup);
@@ -447,16 +453,16 @@ export class MissionExecutor {
     }
 
     // ── Delete the mission record ────────────────────────
-    const result = this.ctx.registry.deleteMission(missionId);
+    const result = await this.ctx.registry.deleteMission(missionId);
     if (result) {
       this.ctx.emitter.emit("mission:deleted", { missionId, deletedTasks });
     }
     return result;
   }
 
-  getResumableMissions(): Mission[] {
-    const missions = this.getAllMissions();
-    const state = this.ctx.registry.getState();
+  async getResumableMissions(): Promise<Mission[]> {
+    const missions = await this.getAllMissions();
+    const state = await this.ctx.registry.getState();
     return missions.filter(m => {
       // Non-resumable statuses: draft (never executed), scheduled/recurring (scheduler handles),
       // completed (done), cancelled (aborted)
@@ -468,8 +474,8 @@ export class MissionExecutor {
     });
   }
 
-  resumeMission(missionId: string, opts?: { retryFailed?: boolean }): { retried: number; pending: number } {
-    const mission = this.getMission(missionId);
+  async resumeMission(missionId: string, opts?: { retryFailed?: boolean }): Promise<{ retried: number; pending: number }> {
+    const mission = await this.getMission(missionId);
     if (!mission) throw new Error("Mission not found");
 
     // Re-register volatile agents if they were cleaned up
@@ -482,7 +488,7 @@ export class MissionExecutor {
           for (const a of doc.team) {
             if (!a.name) continue;
             const { name, ...rest } = a;
-            this.agentMgr.addVolatileAgent({ name, ...rest }, mission.name);
+            await this.agentMgr.addVolatileAgent({ name, ...rest }, mission.name);
           }
         }
       } catch (err) {
@@ -490,7 +496,7 @@ export class MissionExecutor {
       }
     }
 
-    const state = this.ctx.registry.getState();
+    const state = await this.ctx.registry.getState();
     const tasks = state.tasks.filter(t => t.group === mission.name);
     const failedTasks = tasks.filter(t => t.status === "failed");
     const pendingTasks = tasks.filter(t => t.status === "pending");
@@ -499,7 +505,7 @@ export class MissionExecutor {
     if (opts?.retryFailed) {
       for (const task of failedTasks) {
         try {
-          this.taskMgr.retryTask(task.id);
+          await this.taskMgr.retryTask(task.id);
           retried++;
         } catch { /* no retries left — skip */
         }
@@ -507,15 +513,15 @@ export class MissionExecutor {
     }
 
     if (mission.status === "failed") {
-      this.updateMission(missionId, { status: "active" });
+      await this.updateMission(missionId, { status: "active" });
     }
 
     this.ctx.emitter.emit("mission:resumed", { missionId, name: mission.name, retried, pending: pendingTasks.length });
     return { retried, pending: pendingTasks.length };
   }
 
-  executeMission(missionId: string): { tasks: Task[]; group: string } {
-    const mission = this.ctx.registry.getMission?.(missionId);
+  async executeMission(missionId: string): Promise<{ tasks: Task[]; group: string }> {
+    const mission = await this.ctx.registry.getMission?.(missionId);
     if (!mission) throw new Error("Mission not found");
     const executableStates = ["draft", "scheduled", "recurring"];
     if (!executableStates.includes(mission.status)) {
@@ -526,7 +532,7 @@ export class MissionExecutor {
 
     // Increment execution count (tracks how many times this mission has run — useful for recurring)
     const runNumber = (mission.executionCount ?? 0) + 1;
-    this.ctx.registry.updateMission?.(missionId, { executionCount: runNumber });
+    await this.ctx.registry.updateMission?.(missionId, { executionCount: runNumber });
 
     // Validate mission document through Zod schema — throws with clear error on invalid shape
     const raw = JSON.parse(mission.data);
@@ -551,7 +557,7 @@ export class MissionExecutor {
       for (const a of doc.team) {
         if (!a.name) continue;
         const { name, ...rest } = a;
-        this.agentMgr.addVolatileAgent({ name, ...rest }, group);
+        await this.agentMgr.addVolatileAgent({ name, ...rest }, group);
       }
     }
 
@@ -601,7 +607,7 @@ export class MissionExecutor {
         }
       }
 
-      const task = this.taskMgr.addTask({
+      const task = await this.taskMgr.addTask({
         title: t.title,
         description: t.description || t.title,
         assignTo: t.assignTo || this.agentMgr.getAgents()[0]?.name || "default",
@@ -639,10 +645,10 @@ export class MissionExecutor {
 
     // Persist mission-level notifications from document onto the Mission record
     if (doc.notifications) {
-      this.ctx.registry.updateMission?.(missionId, { status: "active", notifications: doc.notifications });
+      await this.ctx.registry.updateMission?.(missionId, { status: "active", notifications: doc.notifications });
     } else {
       // Mark mission as active
-      this.ctx.registry.updateMission?.(missionId, { status: "active" });
+      await this.ctx.registry.updateMission?.(missionId, { status: "active" });
     }
     this.ctx.emitter.emit("mission:executed", { missionId, group, taskCount: tasks.length });
 
@@ -654,7 +660,7 @@ export class MissionExecutor {
    * Uses task.missionId (direct FK) when available, falls back to getMissionByName
    * for legacy tasks that pre-date the missionId field.
    */
-  private resolveMissionForGroup(groupTasks: Task[], group: string): Mission | undefined {
+  private async resolveMissionForGroup(groupTasks: Task[], group: string): Promise<Mission | undefined> {
     // Prefer the direct ID reference from any task in the group
     const mid = groupTasks.find(t => t.missionId)?.missionId;
     if (mid) return this.ctx.registry.getMission?.(mid);
@@ -663,7 +669,7 @@ export class MissionExecutor {
   }
 
   /** Check if any mission groups have all tasks terminal, and clean up their volatile agents */
-  cleanupCompletedGroups(tasks: Task[]): void {
+  async cleanupCompletedGroups(tasks: Task[]): Promise<void> {
     const groups = new Set<string>();
     for (const t of tasks) {
       if (t.group) groups.add(t.group);
@@ -684,12 +690,12 @@ export class MissionExecutor {
 
       const cleanupPolicy = this.ctx.config.settings.volatileCleanup ?? "on_complete";
       if (cleanupPolicy === "on_complete") {
-        this.agentMgr.cleanupVolatileAgents(group);
+        await this.agentMgr.cleanupVolatileAgents(group);
       }
       this.cleanedGroups.add(group);
 
       // Auto-update mission status
-      const mission = this.resolveMissionForGroup(groupTasks, group);
+      const mission = await this.resolveMissionForGroup(groupTasks, group);
       if (mission && mission.status === "active") {
         let allDone = groupTasks.every(t => t.status === "done");
 
@@ -722,8 +728,8 @@ export class MissionExecutor {
           // Normal missions or successful one-shot scheduled missions
           finalStatus = allDone ? "completed" : "failed";
         }
-        this.ctx.registry.updateMission?.(mission.id, { status: finalStatus });
-        const report = this.buildMissionReport(mission.id, group, groupTasks, allDone);
+        await this.ctx.registry.updateMission?.(mission.id, { status: finalStatus });
+        const report = await this.buildMissionReport(mission.id, group, groupTasks, allDone);
         this.ctx.emitter.emit("mission:completed", { missionId: mission.id, group, allPassed: allDone, report });
 
         // Aggregate mission metrics
@@ -749,8 +755,8 @@ export class MissionExecutor {
    * Parse a mission's `data` JSON and return the structured document.
    * Throws if the mission is not found or if `data` is not valid JSON.
    */
-  private parseMissionData(missionId: string): { mission: Mission; doc: MissionDocumentParsed } {
-    const mission = this.getMission(missionId);
+  private async parseMissionData(missionId: string): Promise<{ mission: Mission; doc: MissionDocumentParsed }> {
+    const mission = await this.getMission(missionId);
     if (!mission) throw new Error("Mission not found");
     const doc = parseMissionDocument(JSON.parse(mission.data));
     return { mission, doc };
@@ -760,10 +766,10 @@ export class MissionExecutor {
    * Persist an updated document back onto the mission record.
    * Re-validates through Zod to ensure integrity.
    */
-  private persistMissionData(missionId: string, doc: MissionDocumentParsed): Mission {
+  private async persistMissionData(missionId: string, doc: MissionDocumentParsed): Promise<Mission> {
     // Re-validate to catch any structural issue before persisting
     parseMissionDocument(doc);
-    const mission = this.updateMission(missionId, { data: JSON.stringify(doc) });
+    const mission = await this.updateMission(missionId, { data: JSON.stringify(doc) });
     // Notify listeners so SSE clients (e.g. mission detail page) refetch updated data
     this.ctx.emitter.emit("mission:saved", { missionId: mission.id, name: mission.name, status: mission.status });
     return mission;
@@ -772,7 +778,7 @@ export class MissionExecutor {
   // ─── Task operations ────────────────────────────────
 
   /** Add a task to a draft mission's data. */
-  addMissionTask(missionId: string, task: {
+  async addMissionTask(missionId: string, task: {
     title: string;
     description: string;
     assignTo?: string;
@@ -782,8 +788,8 @@ export class MissionExecutor {
     maxDuration?: number;
     retryPolicy?: { escalateAfter?: number; fallbackAgent?: string };
     notifications?: unknown;
-  }): Mission {
-    const { doc } = this.parseMissionData(missionId);
+  }): Promise<Mission> {
+    const { doc } = await this.parseMissionData(missionId);
     // Enforce unique title
     if (doc.tasks.some(t => t.title === task.title)) {
       throw new Error(`Task title "${task.title}" already exists in this mission`);
@@ -793,7 +799,7 @@ export class MissionExecutor {
   }
 
   /** Update a specific task within the mission data (matched by title). */
-  updateMissionTask(missionId: string, taskTitle: string, updates: {
+  async updateMissionTask(missionId: string, taskTitle: string, updates: {
     title?: string;
     description?: string;
     assignTo?: string;
@@ -803,8 +809,8 @@ export class MissionExecutor {
     maxDuration?: number;
     retryPolicy?: { escalateAfter?: number; fallbackAgent?: string };
     notifications?: unknown;
-  }): Mission {
-    const { doc } = this.parseMissionData(missionId);
+  }): Promise<Mission> {
+    const { doc } = await this.parseMissionData(missionId);
     const idx = doc.tasks.findIndex(t => t.title === taskTitle);
     if (idx === -1) throw new Error(`Task "${taskTitle}" not found in mission`);
     // If renaming, enforce unique title
@@ -816,8 +822,8 @@ export class MissionExecutor {
   }
 
   /** Remove a task from the mission data (by title). Also cleans up dependsOn references. */
-  removeMissionTask(missionId: string, taskTitle: string): Mission {
-    const { doc } = this.parseMissionData(missionId);
+  async removeMissionTask(missionId: string, taskTitle: string): Promise<Mission> {
+    const { doc } = await this.parseMissionData(missionId);
     const idx = doc.tasks.findIndex(t => t.title === taskTitle);
     if (idx === -1) throw new Error(`Task "${taskTitle}" not found in mission`);
     doc.tasks.splice(idx, 1);
@@ -856,8 +862,8 @@ export class MissionExecutor {
   }
 
   /** Reorder tasks within the mission data. Accepts an array of task titles in the desired order. */
-  reorderMissionTasks(missionId: string, titles: string[]): Mission {
-    const { doc } = this.parseMissionData(missionId);
+  async reorderMissionTasks(missionId: string, titles: string[]): Promise<Mission> {
+    const { doc } = await this.parseMissionData(missionId);
     const titleSet = new Set(titles);
     if (titleSet.size !== titles.length) throw new Error("Duplicate titles in reorder list");
     const existing = new Set(doc.tasks.map(t => t.title));
@@ -873,14 +879,14 @@ export class MissionExecutor {
   // ─── Checkpoint operations ──────────────────────────
 
   /** Add a checkpoint to a mission's data. */
-  addMissionCheckpoint(missionId: string, checkpoint: {
+  async addMissionCheckpoint(missionId: string, checkpoint: {
     name: string;
     afterTasks: string[];
     blocksTasks: string[];
     notifyChannels?: string[];
     message?: string;
-  }): Mission {
-    const { doc } = this.parseMissionData(missionId);
+  }): Promise<Mission> {
+    const { doc } = await this.parseMissionData(missionId);
     if (!doc.checkpoints) doc.checkpoints = [];
     if (doc.checkpoints.some(c => c.name === checkpoint.name)) {
       throw new Error(`Checkpoint "${checkpoint.name}" already exists in this mission`);
@@ -890,14 +896,14 @@ export class MissionExecutor {
   }
 
   /** Update a checkpoint in the mission data (matched by name). */
-  updateMissionCheckpoint(missionId: string, checkpointName: string, updates: {
+  async updateMissionCheckpoint(missionId: string, checkpointName: string, updates: {
     name?: string;
     afterTasks?: string[];
     blocksTasks?: string[];
     notifyChannels?: string[];
     message?: string;
-  }): Mission {
-    const { doc } = this.parseMissionData(missionId);
+  }): Promise<Mission> {
+    const { doc } = await this.parseMissionData(missionId);
     if (!doc.checkpoints) throw new Error(`Checkpoint "${checkpointName}" not found in mission`);
     const idx = doc.checkpoints.findIndex(c => c.name === checkpointName);
     if (idx === -1) throw new Error(`Checkpoint "${checkpointName}" not found in mission`);
@@ -909,8 +915,8 @@ export class MissionExecutor {
   }
 
   /** Remove a checkpoint from the mission data (by name). */
-  removeMissionCheckpoint(missionId: string, checkpointName: string): Mission {
-    const { doc } = this.parseMissionData(missionId);
+  async removeMissionCheckpoint(missionId: string, checkpointName: string): Promise<Mission> {
+    const { doc } = await this.parseMissionData(missionId);
     if (!doc.checkpoints) throw new Error(`Checkpoint "${checkpointName}" not found in mission`);
     const idx = doc.checkpoints.findIndex(c => c.name === checkpointName);
     if (idx === -1) throw new Error(`Checkpoint "${checkpointName}" not found in mission`);
@@ -922,17 +928,17 @@ export class MissionExecutor {
   // ─── Delay operations ───────────────────────────────
 
   /** Add a delay to a mission's data. */
-  addMissionDelay(missionId: string, delay: {
+  async addMissionDelay(missionId: string, delay: {
     name: string;
     afterTasks: string[];
     blocksTasks: string[];
     duration: string;
     notifyChannels?: string[];
     message?: string;
-  }): Mission {
+  }): Promise<Mission> {
     // Validate duration format
     parseISO8601Duration(delay.duration);
-    const { doc } = this.parseMissionData(missionId);
+    const { doc } = await this.parseMissionData(missionId);
     if (!doc.delays) doc.delays = [];
     if (doc.delays.some(d => d.name === delay.name)) {
       throw new Error(`Delay "${delay.name}" already exists in this mission`);
@@ -942,16 +948,16 @@ export class MissionExecutor {
   }
 
   /** Update a delay in the mission data (matched by name). */
-  updateMissionDelay(missionId: string, delayName: string, updates: {
+  async updateMissionDelay(missionId: string, delayName: string, updates: {
     name?: string;
     afterTasks?: string[];
     blocksTasks?: string[];
     duration?: string;
     notifyChannels?: string[];
     message?: string;
-  }): Mission {
+  }): Promise<Mission> {
     if (updates.duration) parseISO8601Duration(updates.duration);
-    const { doc } = this.parseMissionData(missionId);
+    const { doc } = await this.parseMissionData(missionId);
     if (!doc.delays) throw new Error(`Delay "${delayName}" not found in mission`);
     const idx = doc.delays.findIndex(d => d.name === delayName);
     if (idx === -1) throw new Error(`Delay "${delayName}" not found in mission`);
@@ -963,8 +969,8 @@ export class MissionExecutor {
   }
 
   /** Remove a delay from the mission data (by name). */
-  removeMissionDelay(missionId: string, delayName: string): Mission {
-    const { doc } = this.parseMissionData(missionId);
+  async removeMissionDelay(missionId: string, delayName: string): Promise<Mission> {
+    const { doc } = await this.parseMissionData(missionId);
     if (!doc.delays) throw new Error(`Delay "${delayName}" not found in mission`);
     const idx = doc.delays.findIndex(d => d.name === delayName);
     if (idx === -1) throw new Error(`Delay "${delayName}" not found in mission`);
@@ -976,7 +982,7 @@ export class MissionExecutor {
   // ─── Quality gate operations ────────────────────────
 
   /** Add a quality gate to a mission's data. */
-  addMissionQualityGate(missionId: string, gate: {
+  async addMissionQualityGate(missionId: string, gate: {
     name: string;
     afterTasks: string[];
     blocksTasks: string[];
@@ -984,8 +990,8 @@ export class MissionExecutor {
     requireAllPassed?: boolean;
     condition?: string;
     notifyChannels?: string[];
-  }): Mission {
-    const { doc } = this.parseMissionData(missionId);
+  }): Promise<Mission> {
+    const { doc } = await this.parseMissionData(missionId);
     if (!doc.qualityGates) doc.qualityGates = [];
     if (doc.qualityGates.some(g => g.name === gate.name)) {
       throw new Error(`Quality gate "${gate.name}" already exists in this mission`);
@@ -995,7 +1001,7 @@ export class MissionExecutor {
   }
 
   /** Update a quality gate in the mission data (matched by name). */
-  updateMissionQualityGate(missionId: string, gateName: string, updates: {
+  async updateMissionQualityGate(missionId: string, gateName: string, updates: {
     name?: string;
     afterTasks?: string[];
     blocksTasks?: string[];
@@ -1003,8 +1009,8 @@ export class MissionExecutor {
     requireAllPassed?: boolean;
     condition?: string;
     notifyChannels?: string[];
-  }): Mission {
-    const { doc } = this.parseMissionData(missionId);
+  }): Promise<Mission> {
+    const { doc } = await this.parseMissionData(missionId);
     if (!doc.qualityGates) throw new Error(`Quality gate "${gateName}" not found in mission`);
     const idx = doc.qualityGates.findIndex(g => g.name === gateName);
     if (idx === -1) throw new Error(`Quality gate "${gateName}" not found in mission`);
@@ -1016,8 +1022,8 @@ export class MissionExecutor {
   }
 
   /** Remove a quality gate from the mission data (by name). */
-  removeMissionQualityGate(missionId: string, gateName: string): Mission {
-    const { doc } = this.parseMissionData(missionId);
+  async removeMissionQualityGate(missionId: string, gateName: string): Promise<Mission> {
+    const { doc } = await this.parseMissionData(missionId);
     if (!doc.qualityGates) throw new Error(`Quality gate "${gateName}" not found in mission`);
     const idx = doc.qualityGates.findIndex(g => g.name === gateName);
     if (idx === -1) throw new Error(`Quality gate "${gateName}" not found in mission`);
@@ -1029,13 +1035,13 @@ export class MissionExecutor {
   // ─── Team (volatile agents) operations ──────────────
 
   /** Add a team member to the mission's volatile team. */
-  addMissionTeamMember(missionId: string, member: {
+  async addMissionTeamMember(missionId: string, member: {
     name: string;
     role?: string;
     model?: string;
     [key: string]: unknown;
-  }): Mission {
-    const { doc } = this.parseMissionData(missionId);
+  }): Promise<Mission> {
+    const { doc } = await this.parseMissionData(missionId);
     if (!doc.team) doc.team = [];
     if ((doc.team as any[]).some((m: any) => m.name === member.name)) {
       throw new Error(`Team member "${member.name}" already exists in this mission`);
@@ -1045,13 +1051,13 @@ export class MissionExecutor {
   }
 
   /** Update a team member in the mission data (matched by name). */
-  updateMissionTeamMember(missionId: string, memberName: string, updates: {
+  async updateMissionTeamMember(missionId: string, memberName: string, updates: {
     name?: string;
     role?: string;
     model?: string;
     [key: string]: unknown;
-  }): Mission {
-    const { doc } = this.parseMissionData(missionId);
+  }): Promise<Mission> {
+    const { doc } = await this.parseMissionData(missionId);
     if (!doc.team) throw new Error(`Team member "${memberName}" not found in mission`);
     const team = doc.team as any[];
     const idx = team.findIndex((m: any) => m.name === memberName);
@@ -1064,8 +1070,8 @@ export class MissionExecutor {
   }
 
   /** Remove a team member from the mission data (by name). */
-  removeMissionTeamMember(missionId: string, memberName: string): Mission {
-    const { doc } = this.parseMissionData(missionId);
+  async removeMissionTeamMember(missionId: string, memberName: string): Promise<Mission> {
+    const { doc } = await this.parseMissionData(missionId);
     if (!doc.team) throw new Error(`Team member "${memberName}" not found in mission`);
     const team = doc.team as any[];
     const idx = team.findIndex((m: any) => m.name === memberName);
@@ -1078,8 +1084,8 @@ export class MissionExecutor {
   // ─── Notifications operations ───────────────────────
 
   /** Update the mission-level notification rules. */
-  updateMissionNotifications(missionId: string, notifications: ScopedNotificationRules | null): Mission {
-    const { doc } = this.parseMissionData(missionId);
+  async updateMissionNotifications(missionId: string, notifications: ScopedNotificationRules | null): Promise<Mission> {
+    const { doc } = await this.parseMissionData(missionId);
     if (notifications === null) {
       delete (doc as any).notifications;
     } else {
@@ -1088,8 +1094,8 @@ export class MissionExecutor {
     return this.persistMissionData(missionId, doc);
   }
 
-  buildMissionReport(missionId: string, group: string, groupTasks: Task[], allPassed: boolean): MissionReport {
-    const state = this.ctx.registry.getState();
+  async buildMissionReport(missionId: string, group: string, groupTasks: Task[], allPassed: boolean): Promise<MissionReport> {
+    const state = await this.ctx.registry.getState();
     const processes = state?.processes ?? [];
 
     const allFilesCreated = new Set<string>();

@@ -26,8 +26,8 @@ export class Scheduler {
     this.checkIntervalMs = opts?.checkIntervalMs ?? 30_000;
   }
 
-  init(): void {
-    const missions = this.ctx.registry.getAllMissions?.() ?? [];
+  async init(): Promise<void> {
+    const missions = await this.ctx.registry.getAllMissions?.() ?? [];
     const terminalStates = new Set(["completed", "cancelled", "draft"]);
     for (const mission of missions) {
       if (!mission.schedule) continue;
@@ -35,8 +35,8 @@ export class Scheduler {
       this.registerMission(mission);
     }
 
-    this.missionCompletedHandler = ({ missionId }) => {
-      const mission = this.ctx.registry.getMission?.(missionId);
+    this.missionCompletedHandler = async ({ missionId }) => {
+      const mission = await this.ctx.registry.getMission?.(missionId);
       if (!mission?.schedule) return;
       if (mission.status === "recurring" || mission.status === "scheduled") {
         this.registerMission(mission);
@@ -95,7 +95,7 @@ export class Scheduler {
     return this.schedules.delete(schedId);
   }
 
-  check(): void {
+  async check(): Promise<void> {
     const now = Date.now();
 
     if (now - this.lastCheckMs < this.checkIntervalMs) return;
@@ -108,12 +108,12 @@ export class Scheduler {
       const nextRun = new Date(entry.nextRunAt).getTime();
       if (now < nextRun) continue;
 
-      this.triggerSchedule(schedId, entry);
+      await this.triggerSchedule(schedId, entry);
     }
   }
 
-  private triggerSchedule(schedId: string, entry: ScheduleEntry): void {
-    const mission = this.ctx.registry.getMission?.(entry.missionId);
+  private async triggerSchedule(schedId: string, entry: ScheduleEntry): Promise<void> {
+    const mission = await this.ctx.registry.getMission?.(entry.missionId);
     if (!mission) {
       entry.enabled = false;
       return;
@@ -128,7 +128,7 @@ export class Scheduler {
       if (Date.now() >= endTime) {
         entry.enabled = false;
         entry.nextRunAt = undefined;
-        this.ctx.registry.updateMission?.(entry.missionId, { status: "completed" });
+        await this.ctx.registry.updateMission?.(entry.missionId, { status: "completed" });
         this.ctx.emitter.emit("schedule:expired", {
           scheduleId: schedId,
           missionId: entry.missionId,

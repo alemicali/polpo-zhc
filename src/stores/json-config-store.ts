@@ -14,18 +14,18 @@ export class PolpoConfigStore implements ConfigStore {
     this.filePath = join(polpoDir, "polpo.json");
   }
 
-  exists(): boolean {
+  async exists(): Promise<boolean> {
     return existsSync(this.filePath);
   }
 
-  get(): PolpoConfig | undefined {
+  async get(): Promise<PolpoConfig | undefined> {
     if (!existsSync(this.filePath)) return undefined;
     try {
       return JSON.parse(readFileSync(this.filePath, "utf-8")) as PolpoConfig;
     } catch { return undefined; }
   }
 
-  save(config: PolpoConfig): void {
+  async save(config: PolpoConfig): Promise<void> {
     const dir = dirname(this.filePath);
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
     writeFileSync(this.filePath, JSON.stringify(config, null, 2), "utf-8");

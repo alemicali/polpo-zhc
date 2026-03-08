@@ -6,23 +6,23 @@
 import type { CommandAPI } from "./types.js";
 import { seg } from "../format.js";
 
-export function cmdMemory({ polpo, store, args }: CommandAPI) {
+export async function cmdMemory({ polpo, store, args }: CommandAPI) {
   const sub = args[0];
 
   if (sub === "edit") {
-    memoryEdit(polpo, store);
+    await memoryEdit(polpo, store);
     return;
   }
 
   // Default: view memory
-  memoryView(polpo, store);
+  await memoryView(polpo, store);
 }
 
-function memoryView(
+async function memoryView(
   polpo: import("../../core/orchestrator.js").Orchestrator,
   store: import("../store.js").TUIStore,
 ) {
-  if (!polpo.hasMemory()) {
+  if (!(await polpo.hasMemory())) {
     store.log("No project memory yet. Use /memory edit to create one.", [
       seg("No project memory. ", "gray"),
       seg("/memory edit", "cyan"),
@@ -31,7 +31,7 @@ function memoryView(
     return;
   }
 
-  const content = polpo.getMemory();
+  const content = await polpo.getMemory();
   store.navigate({
     id: "viewer",
     title: "Project Memory",
@@ -45,11 +45,11 @@ function memoryView(
   });
 }
 
-function memoryEdit(
+async function memoryEdit(
   polpo: import("../../core/orchestrator.js").Orchestrator,
   store: import("../store.js").TUIStore,
 ) {
-  const current = polpo.hasMemory() ? polpo.getMemory() : "";
+  const current = (await polpo.hasMemory()) ? await polpo.getMemory() : "";
 
   store.navigate({
     id: "editor",

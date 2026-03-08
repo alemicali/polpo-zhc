@@ -37,12 +37,12 @@ export class NotificationRouter {
   /** Optional persistent store for notification history. */
   private store?: NotificationStore;
   /** Optional callback to resolve task outcomes by taskId (for approval events etc.) */
-  private outcomeResolver?: (taskId: string) => TaskOutcome[] | undefined;
+  private outcomeResolver?: (taskId: string) => TaskOutcome[] | undefined | Promise<TaskOutcome[] | undefined>;
   /** Optional callback to execute notification actions (create_task, execute_plan, etc.) */
   private actionExecutor?: (action: NotificationAction) => Promise<string>;
   /** Optional callback to resolve scoped notification rules from event payload.
    *  Returns task-level and plan-level notifications for scope resolution. */
-  private scopeResolver?: (data: unknown) => { taskNotifications?: ScopedNotificationRules; planNotifications?: ScopedNotificationRules } | undefined;
+  private scopeResolver?: (data: unknown) => { taskNotifications?: ScopedNotificationRules; planNotifications?: ScopedNotificationRules } | undefined | Promise<{ taskNotifications?: ScopedNotificationRules; planNotifications?: ScopedNotificationRules } | undefined>;
 
   private polpoDir?: string;
 
@@ -50,13 +50,13 @@ export class NotificationRouter {
 
   /** Set a callback that resolves task outcomes by taskId.
    *  Used when the event payload doesn't include outcomes directly (e.g. approval:requested). */
-  setOutcomeResolver(resolver: (taskId: string) => TaskOutcome[] | undefined): void {
+  setOutcomeResolver(resolver: (taskId: string) => TaskOutcome[] | undefined | Promise<TaskOutcome[] | undefined>): void {
     this.outcomeResolver = resolver;
   }
 
   /** Set a callback that resolves scoped notification rules from event data.
    *  Used to look up task.notifications / plan.notifications for scope resolution. */
-  setScopeResolver(resolver: (data: unknown) => { taskNotifications?: ScopedNotificationRules; planNotifications?: ScopedNotificationRules } | undefined): void {
+  setScopeResolver(resolver: (data: unknown) => { taskNotifications?: ScopedNotificationRules; planNotifications?: ScopedNotificationRules } | undefined | Promise<{ taskNotifications?: ScopedNotificationRules; planNotifications?: ScopedNotificationRules } | undefined>): void {
     this.scopeResolver = resolver;
   }
 
@@ -149,13 +149,13 @@ export class NotificationRouter {
    * Uses resolveRules() to determine the effective rule set based on
    * task > plan > global scope precedence.
    */
-  private handleEvent(event: string, data: unknown): void {
+  private async handleEvent(event: string, data: unknown): Promise<void> {
     // Resolve scoped rules: task > plan > global
     let taskNotifications: ScopedNotificationRules | undefined;
     let planNotifications: ScopedNotificationRules | undefined;
     if (this.scopeResolver) {
       try {
-        const scope = this.scopeResolver(data);
+        const scope = await this.scopeResolver(data);
         taskNotifications = scope?.taskNotifications;
         planNotifications = scope?.planNotifications;
       } catch {
@@ -192,7 +192,7 @@ export class NotificationRouter {
   /**
    * Dispatch a notification to all channels specified by a rule.
    */
-  private dispatch(rule: NotificationRule, event: string, data: unknown): void {
+  private async dispatch(rule: NotificationRule, event: string, data: unknown): Promise<void> {
     const severity = rule.severity ?? "info";
     const templateCtx = { event, data, severity };
 
@@ -206,7 +206,7 @@ export class NotificationRouter {
 
     // Prepare outcome attachments if the rule requests them
     const attachments = rule.includeOutcomes
-      ? this.loadAttachments(data, rule.outcomeFilter, rule.maxAttachmentSize)
+      ? await this.loadAttachments(data, rule.outcomeFilter, rule.maxAttachmentSize)
       : [];
 
     for (const channelId of rule.channels) {
@@ -320,11 +320,11 @@ export class NotificationRouter {
    *   - mission:completed → data.report.outcomes
    *   - Direct outcomes array on data
    */
-   private loadAttachments(
+   private async loadAttachments(
     data: unknown,
     typeFilter?: OutcomeType[],
     maxSize?: number,
-  ): OutcomeAttachment[] {
+  ): Promise<OutcomeAttachment[]> {
     const maxBytes = maxSize ?? 10 * 1024 * 1024; // default 10MB
     let outcomes = extractOutcomes(data);
 
@@ -332,7 +332,7 @@ export class NotificationRouter {
     if (outcomes.length === 0 && this.outcomeResolver && data && typeof data === "object") {
       const taskId = (data as Record<string, unknown>).taskId as string | undefined;
       if (taskId) {
-        outcomes = this.outcomeResolver(taskId) ?? [];
+        outcomes = (await this.outcomeResolver(taskId)) ?? [];
       }
     }
 

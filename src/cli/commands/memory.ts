@@ -25,11 +25,11 @@ export function registerMemoryCommands(program: Command): void {
     .action(async (opts) => {
       try {
         const orchestrator = await initOrchestrator(opts.dir);
-        if (!orchestrator.hasMemory()) {
+        if (!(await orchestrator.hasMemory())) {
           console.log(chalk.dim("No project memory."));
           return;
         }
-        console.log(orchestrator.getMemory());
+        console.log(await orchestrator.getMemory());
       } catch (err: any) {
         console.error(chalk.red(`Error: ${err.message}`));
         process.exit(1);
@@ -45,7 +45,7 @@ export function registerMemoryCommands(program: Command): void {
       try {
         const orchestrator = await initOrchestrator(opts.dir);
         const text = content.join(" ");
-        orchestrator.saveMemory(text);
+        await orchestrator.saveMemory(text);
         console.log(chalk.green("Memory saved."));
       } catch (err: any) {
         console.error(chalk.red(`Error: ${err.message}`));
@@ -62,7 +62,7 @@ export function registerMemoryCommands(program: Command): void {
       try {
         const orchestrator = await initOrchestrator(opts.dir);
         const text = line.join(" ");
-        orchestrator.appendMemory(text);
+        await orchestrator.appendMemory(text);
         console.log(chalk.green("Memory updated."));
       } catch (err: any) {
         console.error(chalk.red(`Error: ${err.message}`));
@@ -79,7 +79,7 @@ export function registerMemoryCommands(program: Command): void {
       try {
         const orchestrator = await initOrchestrator(opts.dir);
         const editor = process.env.EDITOR || "vi";
-        const current = orchestrator.hasMemory() ? orchestrator.getMemory() : "";
+        const current = (await orchestrator.hasMemory()) ? await orchestrator.getMemory() : "";
         const tmpPath = resolve(tmpdir(), "polpo-memory-" + Date.now() + ".md");
 
         await writeFile(tmpPath, current, "utf-8");
@@ -92,7 +92,7 @@ export function registerMemoryCommands(program: Command): void {
         }
 
         const newContent = await readFile(tmpPath, "utf-8");
-        orchestrator.saveMemory(newContent);
+        await orchestrator.saveMemory(newContent);
         await unlink(tmpPath).catch(() => {});
         console.log(chalk.green("Memory saved."));
       } catch (err: any) {

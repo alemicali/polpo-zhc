@@ -5,9 +5,9 @@ import type { PolpoConfig } from "./types.js";
  */
 export interface ConfigStore {
   /** Check if a config has been saved. */
-  exists(): boolean;
+  exists(): Promise<boolean>;
   /** Load the saved config, or undefined if none. */
-  get(): PolpoConfig | undefined;
+  get(): Promise<PolpoConfig | undefined>;
   /** Persist the config. Creates the directory if needed. */
-  save(config: PolpoConfig): void;
+  save(config: PolpoConfig): Promise<void>;
 }

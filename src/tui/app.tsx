@@ -27,19 +27,19 @@ export function usePolpo(): Orchestrator {
 
 const SESSION_TIMEOUT_MS = 30 * 60 * 1000; // 30 min
 
-function restoreSession(orc: Orchestrator, store: ReturnType<typeof useStore.getState>): void {
+async function restoreSession(orc: Orchestrator, store: ReturnType<typeof useStore.getState>): Promise<void> {
   try {
     const sessionStore = orc.getSessionStore();
     if (!sessionStore) return;
 
-    const latest = sessionStore.getLatestSession();
+    const latest = await sessionStore.getLatestSession();
     if (!latest) return;
 
     // Only restore if session is recent
     const age = Date.now() - new Date(latest.updatedAt).getTime();
     if (age > SESSION_TIMEOUT_MS) return;
 
-    const messages = sessionStore.getRecentMessages(latest.id, 50);
+    const messages = await sessionStore.getRecentMessages(latest.id, 50);
     if (messages.length === 0) return;
 
     // Set active session so chat continues in the same thread
@@ -89,16 +89,16 @@ function useOrchestratorInit(workDir: string) {
       ? orc.init()
       : orc.initInteractive(basename(absDir), defaultTeam);
 
-    boot.then(() => {
+    boot.then(async () => {
       // Restore previous session messages into the stream
-      restoreSession(orc, store);
+      await restoreSession(orc, store);
       setPolpo(orc);
-    }).catch((err: unknown) => {
+    }).catch(async (err: unknown) => {
       const msg = err instanceof Error ? err.message : String(err);
       store.log(`Init error: ${msg}`, [seg(`Init error: ${msg}`, "red")]);
       // Fallback to interactive mode
-      orc.initInteractive(basename(absDir), defaultTeam).then(() => {
-        restoreSession(orc, store);
+      orc.initInteractive(basename(absDir), defaultTeam).then(async () => {
+        await restoreSession(orc, store);
         setPolpo(orc);
       });
     });

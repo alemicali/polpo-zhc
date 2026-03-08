@@ -127,7 +127,7 @@ export class SqliteNotificationStore implements NotificationStore {
     };
   }
 
-  append(record: NotificationRecord): void {
+  async append(record: NotificationRecord): Promise<void> {
     this.insertStmt.run({
       id: record.id,
       timestamp: record.timestamp,
@@ -148,45 +148,45 @@ export class SqliteNotificationStore implements NotificationStore {
     });
   }
 
-  list(limit = 100): NotificationRecord[] {
+  async list(limit = 100): Promise<NotificationRecord[]> {
     return (this.listStmt.all(limit) as NotificationRow[]).map(r =>
       this.rowToRecord(r),
     );
   }
 
-  listByChannel(channelId: string, limit = 100): NotificationRecord[] {
+  async listByChannel(channelId: string, limit = 100): Promise<NotificationRecord[]> {
     return (this.listByChannelStmt.all(channelId, limit) as NotificationRow[]).map(
       r => this.rowToRecord(r),
     );
   }
 
-  listByRule(ruleId: string, limit = 100): NotificationRecord[] {
+  async listByRule(ruleId: string, limit = 100): Promise<NotificationRecord[]> {
     return (this.listByRuleStmt.all(ruleId, limit) as NotificationRow[]).map(r =>
       this.rowToRecord(r),
     );
   }
 
-  listByStatus(status: NotificationStatus, limit = 100): NotificationRecord[] {
+  async listByStatus(status: NotificationStatus, limit = 100): Promise<NotificationRecord[]> {
     return (this.listByStatusStmt.all(status, limit) as NotificationRow[]).map(r =>
       this.rowToRecord(r),
     );
   }
 
-  count(status?: NotificationStatus): number {
+  async count(status?: NotificationStatus): Promise<number> {
     if (!status) {
       return (this.countAllStmt.get() as { cnt: number }).cnt;
     }
     return (this.countByStatusStmt.get(status) as { cnt: number }).cnt;
   }
 
-  prune(keep: number): number {
+  async prune(keep: number): Promise<number> {
     const total = (this.countTotalStmt.get() as { cnt: number }).cnt;
     if (total <= keep) return 0;
     this.pruneStmt.run(keep);
     return total - keep;
   }
 
-  close(): void {
+  async close(): Promise<void> {
     this.db.close();
   }
 }

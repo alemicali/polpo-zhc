@@ -106,7 +106,7 @@ export class EscalationManager {
         level: "warn",
         message: `[escalation] Agent level ${level.level} has no target — skipping to next level`,
       });
-      this.advanceLevel(taskId, task, level, policy);
+      await this.advanceLevel(taskId, task, level, policy);
       return;
     }
 
@@ -116,12 +116,12 @@ export class EscalationManager {
         level: "warn",
         message: `[escalation] Agent "${targetAgent}" not found — skipping to next level`,
       });
-      this.advanceLevel(taskId, task, level, policy);
+      await this.advanceLevel(taskId, task, level, policy);
       return;
     }
 
-    this.ctx.registry.updateTask(taskId, { assignTo: targetAgent });
-    this.ctx.registry.unsafeSetStatus(taskId, "pending", `escalation level ${level.level}: reassign to ${targetAgent}`);
+    await this.ctx.registry.updateTask(taskId, { assignTo: targetAgent });
+    await this.ctx.registry.unsafeSetStatus(taskId, "pending", `escalation level ${level.level}: reassign to ${targetAgent}`);
 
     this.ctx.emitter.emit("escalation:resolved", {
       taskId,
@@ -145,7 +145,7 @@ export class EscalationManager {
         level: "warn",
         message: `[escalation] No LLM query function available — skipping to next level`,
       });
-      this.advanceLevel(taskId, task, level, policy);
+      await this.advanceLevel(taskId, task, level, policy);
       return;
     }
 
@@ -174,12 +174,12 @@ export class EscalationManager {
       )).text;
 
       if (newDescription && newDescription.length > 20) {
-        this.ctx.registry.updateTask(taskId, {
+        await this.ctx.registry.updateTask(taskId, {
           description: `[Escalation: Reformulated by orchestrator]\n\n${newDescription}`,
           phase: "execution",
           fixAttempts: 0,
         });
-        this.ctx.registry.unsafeSetStatus(taskId, "pending", `escalation level ${level.level}: orchestrator reformulation`);
+        await this.ctx.registry.unsafeSetStatus(taskId, "pending", `escalation level ${level.level}: orchestrator reformulation`);
 
         this.ctx.emitter.emit("escalation:resolved", {
           taskId,
@@ -191,7 +191,7 @@ export class EscalationManager {
           this.startTimer(taskId, task, level, policy, level.timeoutMs);
         }
       } else {
-        this.advanceLevel(taskId, task, level, policy);
+        await this.advanceLevel(taskId, task, level, policy);
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -199,7 +199,7 @@ export class EscalationManager {
         level: "error",
         message: `[escalation] Orchestrator analysis failed: ${msg}`,
       });
-      this.advanceLevel(taskId, task, level, policy);
+      await this.advanceLevel(taskId, task, level, policy);
     }
   }
 
@@ -211,7 +211,7 @@ export class EscalationManager {
   ): Promise<void> {
     const failureContext = this.buildFailureContext(task);
 
-    this.ctx.registry.unsafeSetStatus(taskId, "awaiting_approval", `escalation level ${level.level}: human intervention`);
+    await this.ctx.registry.unsafeSetStatus(taskId, "awaiting_approval", `escalation level ${level.level}: human intervention`);
 
     this.ctx.emitter.emit("escalation:human", {
       taskId,
@@ -248,31 +248,33 @@ export class EscalationManager {
     }
   }
 
-  private advanceLevel(
+  private async advanceLevel(
     taskId: string,
     task: Task,
     currentLevel: EscalationLevel,
     policy: EscalationPolicy,
-  ): void {
+  ): Promise<void> {
     const nextLevel = policy.levels.find(l => l.level > currentLevel.level);
     if (nextLevel) {
-      this.escalate(taskId, task, nextLevel, policy).catch(() => {
-        this.finalFail(taskId);
-      });
+      try {
+        await this.escalate(taskId, task, nextLevel, policy);
+      } catch {
+        await this.finalFail(taskId);
+      }
     } else {
-      this.finalFail(taskId);
+      await this.finalFail(taskId);
     }
   }
 
-  private finalFail(taskId: string): void {
+  private async finalFail(taskId: string): Promise<void> {
     this.taskLevels.delete(taskId);
     this.clearTimer(taskId);
 
-    const task = this.ctx.registry.getTask(taskId);
+    const task = await this.ctx.registry.getTask(taskId);
     if (!task) return;
 
     if (task.status !== "done" && task.status !== "failed" && task.status !== "awaiting_approval") {
-      this.ctx.registry.unsafeSetStatus(taskId, "failed", "escalation exhausted");
+      await this.ctx.registry.unsafeSetStatus(taskId, "failed", "escalation exhausted");
     }
   }
 
@@ -310,15 +312,15 @@ export class EscalationManager {
     ms: number,
   ): void {
     this.clearTimer(taskId);
-    const timer = setTimeout(() => {
+    const timer = setTimeout(async () => {
       this.timers.delete(taskId);
-      const currentTask = this.ctx.registry.getTask(taskId);
+      const currentTask = await this.ctx.registry.getTask(taskId);
       if (currentTask && (currentTask.status === "pending" || currentTask.status === "in_progress" || currentTask.status === "failed")) {
         this.ctx.emitter.emit("log", {
           level: "warn",
           message: `[escalation] Level ${currentLevel.level} timed out for task ${taskId} — advancing`,
         });
-        this.advanceLevel(taskId, task, currentLevel, policy);
+        await this.advanceLevel(taskId, task, currentLevel, policy);
       }
     }, ms);
     this.timers.set(taskId, timer);

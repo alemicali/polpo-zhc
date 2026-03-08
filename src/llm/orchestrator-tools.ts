@@ -1772,25 +1772,25 @@ export async function executeOrchestratorTool(
 /**
  * Format the approval prompt title — short action label + target name.
  */
-export function formatToolDescription(
+export async function formatToolDescription(
   toolName: string,
   args: Record<string, unknown>,
   polpo?: Orchestrator,
-): string {
+): Promise<string> {
   const label = TOOL_LABELS[toolName] ?? toolName;
-  const target = resolveTargetName(toolName, args, polpo);
+  const target = await resolveTargetName(toolName, args, polpo);
   return target ? `${label}: ${target}` : label;
 }
 
 /** Resolve a human-readable target name from args. */
-function resolveTargetName(
+async function resolveTargetName(
   toolName: string,
   args: Record<string, unknown>,
   polpo?: Orchestrator,
-): string | null {
+): Promise<string | null> {
   if (args.taskId && polpo) {
     try {
-      const state = polpo.getStore()?.getState();
+      const state = await polpo.getStore()?.getState();
       const task = state?.tasks.find(t => t.id === args.taskId);
       if (task) return `"${task.title}"`;
     } catch { /* ignore */ }
@@ -1798,7 +1798,7 @@ function resolveTargetName(
   }
   if (args.missionId && polpo) {
     try {
-      const mission = polpo.getMission(String(args.missionId));
+      const mission = await polpo.getMission(String(args.missionId));
       if (mission) return `"${mission.name}"`;
     } catch { /* ignore */ }
     return String(args.missionId);
@@ -1830,11 +1830,11 @@ function resolveTargetName(
 /**
  * Structured detail lines for the approval prompt.
  */
-export function formatToolDetails(
+export async function formatToolDetails(
   toolName: string,
   args: Record<string, unknown>,
   polpo?: Orchestrator,
-): { main: Array<[string, string]>; extra: Array<[string, string]> } {
+): Promise<{ main: Array<[string, string]>; extra: Array<[string, string]> }> {
   const main: Array<[string, string]> = [];
   const extra: Array<[string, string]> = [];
   const trunc = (v: unknown, max = 100): string => {
@@ -1842,18 +1842,18 @@ export function formatToolDetails(
     return s.length > max ? s.slice(0, max - 3) + "..." : s;
   };
 
-  const resolveTask = (id: unknown): string => {
+  const resolveTask = async (id: unknown): Promise<string> => {
     if (!polpo || !id) return String(id);
     try {
-      const state = polpo.getStore()?.getState();
+      const state = await polpo.getStore()?.getState();
       const task = state?.tasks.find(t => t.id === id);
       return task ? `${task.title} (${id})` : String(id);
     } catch { return String(id); }
   };
-  const resolveMission = (id: unknown): string => {
+  const resolveMission = async (id: unknown): Promise<string> => {
     if (!polpo || !id) return String(id);
     try {
-      const mission = polpo.getMission(String(id));
+      const mission = await polpo.getMission(String(id));
       return mission ? `${mission.name} (${id})` : String(id);
     } catch { return String(id); }
   };
@@ -1870,7 +1870,7 @@ export function formatToolDetails(
       if (args.dependsOn) extra.push(["Depends on", trunc(args.dependsOn)]);
       break;
     case "update_task":
-      main.push(["Task", resolveTask(args.taskId)]);
+      main.push(["Task", await resolveTask(args.taskId)]);
       if (args.assignTo) main.push(["New agent", String(args.assignTo)]);
       if (args.description) extra.push(["New description", trunc(args.description, 200)]);
       break;
@@ -1893,80 +1893,80 @@ export function formatToolDetails(
     case "kill_task":
     case "reassess_task":
     case "force_fail_task":
-      main.push(["Task", resolveTask(args.taskId)]);
+      main.push(["Task", await resolveTask(args.taskId)]);
       break;
     case "execute_mission":
     case "resume_mission":
     case "abort_mission":
     case "delete_mission":
-      main.push(["Mission", resolveMission(args.missionId)]);
+      main.push(["Mission", await resolveMission(args.missionId)]);
       if (args.retryFailed) main.push(["Retry failed", "yes"]);
       break;
     // Atomic mission data tools
     case "add_mission_task":
-      main.push(["Mission", resolveMission(args.missionId)]);
+      main.push(["Mission", await resolveMission(args.missionId)]);
       main.push(["Task", String(args.title)]);
       if (args.assignTo) main.push(["Agent", String(args.assignTo)]);
       if (args.description) extra.push(["Description", trunc(args.description, 200)]);
       break;
     case "update_mission_task":
-      main.push(["Mission", resolveMission(args.missionId)]);
+      main.push(["Mission", await resolveMission(args.missionId)]);
       main.push(["Task", String(args.taskTitle)]);
       if (args.title) extra.push(["New title", String(args.title)]);
       if (args.description) extra.push(["New description", trunc(args.description, 200)]);
       break;
     case "remove_mission_task":
-      main.push(["Mission", resolveMission(args.missionId)]);
+      main.push(["Mission", await resolveMission(args.missionId)]);
       main.push(["Task", String(args.taskTitle)]);
       break;
     case "reorder_mission_tasks":
-      main.push(["Mission", resolveMission(args.missionId)]);
+      main.push(["Mission", await resolveMission(args.missionId)]);
       main.push(["Order", trunc(args.titles)]);
       break;
     case "add_mission_checkpoint":
     case "remove_mission_checkpoint":
-      main.push(["Mission", resolveMission(args.missionId)]);
+      main.push(["Mission", await resolveMission(args.missionId)]);
       main.push(["Checkpoint", String(args.name ?? args.checkpointName)]);
       break;
     case "update_mission_checkpoint":
-      main.push(["Mission", resolveMission(args.missionId)]);
+      main.push(["Mission", await resolveMission(args.missionId)]);
       main.push(["Checkpoint", String(args.checkpointName)]);
       if (args.name) extra.push(["New name", String(args.name)]);
       break;
     case "add_mission_delay":
     case "remove_mission_delay":
-      main.push(["Mission", resolveMission(args.missionId)]);
+      main.push(["Mission", await resolveMission(args.missionId)]);
       main.push(["Delay", String(args.name ?? args.delayName)]);
       if (args.duration) extra.push(["Duration", String(args.duration)]);
       break;
     case "update_mission_delay":
-      main.push(["Mission", resolveMission(args.missionId)]);
+      main.push(["Mission", await resolveMission(args.missionId)]);
       main.push(["Delay", String(args.delayName)]);
       if (args.name) extra.push(["New name", String(args.name)]);
       if (args.duration) extra.push(["Duration", String(args.duration)]);
       break;
     case "add_mission_quality_gate":
     case "remove_mission_quality_gate":
-      main.push(["Mission", resolveMission(args.missionId)]);
+      main.push(["Mission", await resolveMission(args.missionId)]);
       main.push(["Gate", String(args.name ?? args.gateName)]);
       break;
     case "update_mission_quality_gate":
-      main.push(["Mission", resolveMission(args.missionId)]);
+      main.push(["Mission", await resolveMission(args.missionId)]);
       main.push(["Gate", String(args.gateName)]);
       if (args.name) extra.push(["New name", String(args.name)]);
       break;
     case "add_mission_team_member":
     case "remove_mission_team_member":
-      main.push(["Mission", resolveMission(args.missionId)]);
+      main.push(["Mission", await resolveMission(args.missionId)]);
       main.push(["Member", String(args.name ?? args.memberName)]);
       break;
     case "update_mission_team_member":
-      main.push(["Mission", resolveMission(args.missionId)]);
+      main.push(["Mission", await resolveMission(args.missionId)]);
       main.push(["Member", String(args.memberName)]);
       if (args.name) extra.push(["New name", String(args.name)]);
       break;
     case "update_mission_notifications":
-      main.push(["Mission", resolveMission(args.missionId)]);
+      main.push(["Mission", await resolveMission(args.missionId)]);
       main.push(["Action", args.notifications ? "Update rules" : "Clear rules"]);
       break;
     case "delete_tasks":
@@ -2030,8 +2030,8 @@ export function formatToolDetails(
 //  READ IMPLEMENTATIONS
 // ═══════════════════════════════════════════════════════
 
-function execGetStatus(polpo: Orchestrator): string {
-  const state = polpo.getStore().getState();
+async function execGetStatus(polpo: Orchestrator): Promise<string> {
+  const state = await polpo.getStore().getState();
   const tasks = state.tasks;
   const processes = state.processes;
   const agents = polpo.getAgents();
@@ -2061,7 +2061,7 @@ function execGetStatus(polpo: Orchestrator): string {
   lines.push(`Active processes: ${alive.length}`);
   for (const p of alive) lines.push(`  ${p.agentName} → task ${p.taskId}`);
 
-  const missions = polpo.getAllMissions();
+  const missions = await polpo.getAllMissions();
   if (missions.length > 0) {
     lines.push(`Missions: ${missions.length} total`);
     const missionCounts: Record<string, number> = {};
@@ -2069,9 +2069,9 @@ function execGetStatus(polpo: Orchestrator): string {
     for (const [status, count] of Object.entries(missionCounts)) lines.push(`  ${status}: ${count}`);
   }
 
-  if (polpo.hasMemory()) lines.push("Memory: available");
+  if (await polpo.hasMemory()) lines.push("Memory: available");
 
-  const pending = polpo.getPendingApprovals?.();
+  const pending = await polpo.getPendingApprovals?.();
   if (pending?.length) lines.push(`Pending approvals: ${pending.length}`);
 
   const checkpoints = polpo.getActiveCheckpoints?.();
@@ -2080,8 +2080,8 @@ function execGetStatus(polpo: Orchestrator): string {
   return lines.join("\n");
 }
 
-function execListTasks(polpo: Orchestrator, args: Record<string, unknown>): string {
-  const state = polpo.getStore().getState();
+async function execListTasks(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
+  const state = await polpo.getStore().getState();
   let tasks = state.tasks;
   if (args.status) tasks = tasks.filter(t => t.status === args.status);
   if (args.group) tasks = tasks.filter(t => t.group === args.group);
@@ -2093,20 +2093,20 @@ function execListTasks(polpo: Orchestrator, args: Record<string, unknown>): stri
   return `${tasks.length} task(s):\n${lines.join("\n")}`;
 }
 
-function execGetTask(polpo: Orchestrator, args: Record<string, unknown>): string {
+async function execGetTask(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
   const store = polpo.getStore();
   let task;
-  if (args.id) task = store.getTask(args.id as string);
+  if (args.id) task = await store.getTask(args.id as string);
   if (!task && args.title) {
     const needle = (args.title as string).toLowerCase();
-    task = store.getAllTasks().find(t => t.title.toLowerCase().includes(needle));
+    task = (await store.getAllTasks()).find(t => t.title.toLowerCase().includes(needle));
   }
   if (!task) return "Task not found.";
   return JSON.stringify(task, null, 2);
 }
 
-function execListMissions(polpo: Orchestrator, args: Record<string, unknown>): string {
-  let missions = polpo.getAllMissions();
+async function execListMissions(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
+  let missions = await polpo.getAllMissions();
   if (args.status) missions = missions.filter(p => p.status === args.status);
   if (missions.length === 0) return "No missions found.";
   const lines = missions.map(p =>
@@ -2115,14 +2115,14 @@ function execListMissions(polpo: Orchestrator, args: Record<string, unknown>): s
   return `${missions.length} mission(s):\n${lines.join("\n")}`;
 }
 
-function execGetMission(polpo: Orchestrator, args: Record<string, unknown>): string {
+async function execGetMission(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
   let mission;
-  if (args.id) mission = polpo.getMission(args.id as string);
+  if (args.id) mission = await polpo.getMission(args.id as string);
   if (!mission && args.name) {
-    mission = polpo.getMissionByName(args.name as string);
+    mission = await polpo.getMissionByName(args.name as string);
     if (!mission) {
       const needle = (args.name as string).toLowerCase();
-      mission = polpo.getAllMissions().find(p => p.name.toLowerCase().includes(needle));
+      mission = (await polpo.getAllMissions()).find(p => p.name.toLowerCase().includes(needle));
     }
   }
   if (!mission) return "Mission not found.";
@@ -2155,9 +2155,9 @@ function execGetTeams(polpo: Orchestrator, args: Record<string, unknown>): strin
   return JSON.stringify(teams, null, 2);
 }
 
-function execGetMemory(polpo: Orchestrator): string {
-  if (!polpo.hasMemory()) return "No project memory configured.";
-  const content = polpo.getMemory();
+async function execGetMemory(polpo: Orchestrator): Promise<string> {
+  if (!await polpo.hasMemory()) return "No project memory configured.";
+  const content = await polpo.getMemory();
   return content || "(empty)";
 }
 
@@ -2169,12 +2169,12 @@ function execGetConfig(polpo: Orchestrator): string {
   return JSON.stringify(safe, null, 2);
 }
 
-function execListApprovals(polpo: Orchestrator, args: Record<string, unknown>): string {
+async function execListApprovals(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
   const getAllApprovals = polpo.getAllApprovals;
   if (!getAllApprovals) return "Approval system not active.";
   const approvals = args.status
-    ? getAllApprovals.call(polpo, args.status as ApprovalStatus)
-    : getAllApprovals.call(polpo);
+    ? await getAllApprovals.call(polpo, args.status as ApprovalStatus)
+    : await getAllApprovals.call(polpo);
   if (!approvals || approvals.length === 0) return "No approval requests found.";
   const lines = approvals.map((a: { id: string; status: string; gateName: string; taskId?: string }) =>
     `[${a.id}] ${a.status.toUpperCase().padEnd(8)} gate: ${a.gateName}${a.taskId ? ` task: ${a.taskId}` : ""}`
@@ -2202,12 +2202,12 @@ function execListDelays(polpo: Orchestrator): string {
   return `${delays.length} delay(s):\n${lines.join("\n")}`;
 }
 
-function execGetLogs(polpo: Orchestrator, args: Record<string, unknown>): string {
+async function execGetLogs(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
   const logStore = polpo.getLogStore?.();
   if (!logStore) return "Log store not available.";
   if (args.sessionId) {
     try {
-      const entries = logStore.getSessionEntries(args.sessionId as string);
+      const entries = await logStore.getSessionEntries(args.sessionId as string);
       if (!entries || entries.length === 0) return `No log entries for session ${args.sessionId}.`;
       return entries.map((e) => `[${e.ts}] ${e.event}: ${JSON.stringify(e.data)}`).join("\n");
     } catch {
@@ -2215,7 +2215,7 @@ function execGetLogs(polpo: Orchestrator, args: Record<string, unknown>): string
     }
   }
   try {
-    const sessions = logStore.listSessions();
+    const sessions = await logStore.listSessions();
     if (!sessions || sessions.length === 0) return "No log sessions.";
     return sessions.map((s) => `[${s.sessionId}] started: ${s.startedAt} (${s.entries} entries)`).join("\n");
   } catch {
@@ -2227,12 +2227,12 @@ function execGetLogs(polpo: Orchestrator, args: Record<string, unknown>): string
 //  TASK IMPLEMENTATIONS
 // ═══════════════════════════════════════════════════════
 
-function execCreateTask(polpo: Orchestrator, args: Record<string, unknown>): string {
+async function execCreateTask(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
   const agents = polpo.getAgents();
   const resolved = resolveAgentName(agents, args.assignTo as string);
   if ("error" in resolved) return resolved.error;
   const agentName = resolved.name;
-  const task = polpo.addTask({
+  const task = await polpo.addTask({
     title: args.title as string,
     description: args.description as string,
     assignTo: agentName,
@@ -2244,42 +2244,42 @@ function execCreateTask(polpo: Orchestrator, args: Record<string, unknown>): str
   return `Task created: [${task.id}] "${task.title}" → ${task.assignTo}`;
 }
 
-function execUpdateTask(polpo: Orchestrator, args: Record<string, unknown>): string {
+async function execUpdateTask(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
   const taskId = args.taskId as string;
-  const task = polpo.getStore().getTask(taskId);
+  const task = await polpo.getStore().getTask(taskId);
   if (!task) return `Error: Task "${taskId}" not found.`;
 
   const changes: string[] = [];
   if (args.description) {
-    polpo.updateTaskDescription(taskId, args.description as string);
+    await polpo.updateTaskDescription(taskId, args.description as string);
     changes.push("description");
   }
   if (args.assignTo) {
     const agents = polpo.getAgents();
     const resolved = resolveAgentName(agents, args.assignTo as string);
     if ("error" in resolved) return resolved.error;
-    polpo.updateTaskAssignment(taskId, resolved.name);
+    await polpo.updateTaskAssignment(taskId, resolved.name);
     changes.push(`assignment → ${resolved.name}`);
   }
   if (args.expectations) {
-    polpo.updateTaskExpectations(taskId, args.expectations as any[]);
+    await polpo.updateTaskExpectations(taskId, args.expectations as any[]);
     changes.push("expectations");
   }
   if (args.sideEffects !== undefined) {
-    polpo.getStore().updateTask(taskId, { sideEffects: args.sideEffects as boolean });
+    await polpo.getStore().updateTask(taskId, { sideEffects: args.sideEffects as boolean });
     changes.push(`sideEffects → ${args.sideEffects}`);
   }
   if (changes.length === 0) return "No changes specified.";
   return `Task ${taskId} updated: ${changes.join(", ")}`;
 }
 
-function execDeleteTask(polpo: Orchestrator, args: Record<string, unknown>): string {
+async function execDeleteTask(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
   const taskId = args.taskId as string;
-  const deleted = polpo.deleteTask(taskId);
+  const deleted = await polpo.deleteTask(taskId);
   return deleted ? `Task ${taskId} deleted.` : `Error: Task "${taskId}" not found.`;
 }
 
-function execDeleteTasks(polpo: Orchestrator, args: Record<string, unknown>): string {
+async function execDeleteTasks(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
   let filter: (t: { status: string; group?: string }) => boolean;
   if (args.all) {
     filter = () => true;
@@ -2292,27 +2292,27 @@ function execDeleteTasks(polpo: Orchestrator, args: Record<string, unknown>): st
   } else {
     return "Error: Specify at least one filter (status, group) or all=true.";
   }
-  const count = polpo.clearTasks(filter);
+  const count = await polpo.clearTasks(filter);
   return `Deleted ${count} task(s).`;
 }
 
-function execRetryTask(polpo: Orchestrator, args: Record<string, unknown>): string {
-  polpo.retryTask(args.taskId as string);
+async function execRetryTask(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
+  await polpo.retryTask(args.taskId as string);
   return `Task ${args.taskId} retried — reset to pending.`;
 }
 
-function execKillTask(polpo: Orchestrator, args: Record<string, unknown>): string {
-  const killed = polpo.killTask(args.taskId as string);
+async function execKillTask(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
+  const killed = await polpo.killTask(args.taskId as string);
   return killed ? `Task ${args.taskId} killed.` : `Task ${args.taskId} — no running process found.`;
 }
 
-function execReassessTask(polpo: Orchestrator, args: Record<string, unknown>): string {
-  polpo.reassessTask(args.taskId as string);
+async function execReassessTask(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
+  await polpo.reassessTask(args.taskId as string);
   return `Reassessment started for task ${args.taskId}.`;
 }
 
-function execForceFailTask(polpo: Orchestrator, args: Record<string, unknown>): string {
-  polpo.forceFailTask(args.taskId as string);
+async function execForceFailTask(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
+  await polpo.forceFailTask(args.taskId as string);
   return `Task ${args.taskId} force-failed.`;
 }
 
@@ -2320,7 +2320,7 @@ function execForceFailTask(polpo: Orchestrator, args: Record<string, unknown>): 
 //  MISSION IMPLEMENTATIONS
 // ═══════════════════════════════════════════════════════
 
-function execCreateMission(polpo: Orchestrator, args: Record<string, unknown>): string {
+async function execCreateMission(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
   // data arrives as a structured object from the tool call — serialize to JSON for the store
   const dataObj = args.data;
   const dataStr = typeof dataObj === "string" ? dataObj : JSON.stringify(dataObj);
@@ -2333,7 +2333,7 @@ function execCreateMission(polpo: Orchestrator, args: Record<string, unknown>): 
     return `Error: ${e.message}`;
   }
 
-  const mission = polpo.saveMission({
+  const mission = await polpo.saveMission({
     data: dataStr,
     name: args.name as string,
     prompt: args.prompt as string | undefined,
@@ -2342,52 +2342,52 @@ function execCreateMission(polpo: Orchestrator, args: Record<string, unknown>): 
   return `Mission created: [${mission.id}] "${mission.name}" (draft)`;
 }
 
-function execUpdateMission(polpo: Orchestrator, args: Record<string, unknown>): string {
+async function execUpdateMission(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
   const missionId = args.missionId as string;
-  const mission = polpo.getMission(missionId);
+  const mission = await polpo.getMission(missionId);
   if (!mission) return `Error: Mission "${missionId}" not found.`;
   const updates: Record<string, unknown> = {};
   if (args.name) updates.name = args.name;
   if (args.data) updates.data = args.data;
   if (args.status) updates.status = args.status;
-  const updated = polpo.updateMission(missionId, updates as any);
+  const updated = await polpo.updateMission(missionId, updates as any);
   return `Mission "${updated.name}" updated.`;
 }
 
-function execExecuteMission(polpo: Orchestrator, args: Record<string, unknown>): string {
+async function execExecuteMission(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
   const missionId = args.missionId as string;
-  const mission = polpo.getMission(missionId);
+  const mission = await polpo.getMission(missionId);
   if (!mission) return `Error: Mission "${missionId}" not found.`;
-  const result = polpo.executeMission(missionId);
+  const result = await polpo.executeMission(missionId);
   return `Mission "${mission.name}" executed: ${result.tasks.length} tasks created in group "${result.group}".`;
 }
 
-function execResumeMission(polpo: Orchestrator, args: Record<string, unknown>): string {
+async function execResumeMission(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
   const missionId = args.missionId as string;
-  const mission = polpo.getMission(missionId);
+  const mission = await polpo.getMission(missionId);
   if (!mission) return `Error: Mission "${missionId}" not found.`;
-  const result = polpo.resumeMission(missionId, { retryFailed: args.retryFailed as boolean | undefined });
+  const result = await polpo.resumeMission(missionId, { retryFailed: args.retryFailed as boolean | undefined });
   return `Mission "${mission.name}" resumed: ${result.retried} retried, ${result.pending} pending.`;
 }
 
-function execAbortMission(polpo: Orchestrator, args: Record<string, unknown>): string {
+async function execAbortMission(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
   const missionId = args.missionId as string;
-  const mission = polpo.getMission(missionId);
+  const mission = await polpo.getMission(missionId);
   if (!mission) return `Error: Mission "${missionId}" not found.`;
   // abortGroup uses the mission's group name, which is typically the mission ID or name
   // We need to find the group from active tasks
-  const state = polpo.getStore().getState();
-  const missionTasks = state.tasks.filter(t => t.group && polpo.getMission(missionId));
+  const state = await polpo.getStore().getState();
+  const missionTasks = state.tasks.filter(t => t.group && mission);
   // Use the mission name as group identifier
-  const count = polpo.abortGroup(mission.name);
+  const count = await polpo.abortGroup(mission.name);
   return count > 0 ? `Mission "${mission.name}" aborted: ${count} tasks killed/failed.` : `Mission "${mission.name}" — no active tasks to abort.`;
 }
 
-function execDeleteMission(polpo: Orchestrator, args: Record<string, unknown>): string {
+async function execDeleteMission(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
   const missionId = args.missionId as string;
-  const mission = polpo.getMission(missionId);
+  const mission = await polpo.getMission(missionId);
   if (!mission) return `Error: Mission "${missionId}" not found.`;
-  polpo.deleteMission(missionId);
+  await polpo.deleteMission(missionId);
   return `Mission "${mission.name}" deleted.`;
 }
 
@@ -2395,9 +2395,9 @@ function execDeleteMission(polpo: Orchestrator, args: Record<string, unknown>): 
 //  ATOMIC MISSION DATA IMPLEMENTATIONS
 // ═══════════════════════════════════════════════════════
 
-function execAddMissionTask(polpo: Orchestrator, args: Record<string, unknown>): string {
+async function execAddMissionTask(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
   try {
-    const m = polpo.addMissionTask(args.missionId as string, {
+    const m = await polpo.addMissionTask(args.missionId as string, {
       title: args.title as string,
       description: args.description as string,
       assignTo: args.assignTo as string | undefined,
@@ -2411,32 +2411,32 @@ function execAddMissionTask(polpo: Orchestrator, args: Record<string, unknown>):
   } catch (e) { return `Error: ${(e as Error).message}`; }
 }
 
-function execUpdateMissionTask(polpo: Orchestrator, args: Record<string, unknown>): string {
+async function execUpdateMissionTask(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
   try {
     const { missionId, taskTitle, ...updates } = args;
-    const m = polpo.updateMissionTask(missionId as string, taskTitle as string, updates);
+    const m = await polpo.updateMissionTask(missionId as string, taskTitle as string, updates);
     return `Task "${taskTitle}" updated in mission "${m.name}".`;
   } catch (e) { return `Error: ${(e as Error).message}`; }
 }
 
-function execRemoveMissionTask(polpo: Orchestrator, args: Record<string, unknown>): string {
+async function execRemoveMissionTask(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
   try {
-    const m = polpo.removeMissionTask(args.missionId as string, args.taskTitle as string);
+    const m = await polpo.removeMissionTask(args.missionId as string, args.taskTitle as string);
     const parsed = m.data ? JSON.parse(m.data) : {};
     return `Task "${args.taskTitle}" removed from mission "${m.name}" (${parsed.tasks?.length ?? 0} tasks remaining).`;
   } catch (e) { return `Error: ${(e as Error).message}`; }
 }
 
-function execReorderMissionTasks(polpo: Orchestrator, args: Record<string, unknown>): string {
+async function execReorderMissionTasks(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
   try {
-    const m = polpo.reorderMissionTasks(args.missionId as string, args.titles as string[]);
+    const m = await polpo.reorderMissionTasks(args.missionId as string, args.titles as string[]);
     return `Tasks reordered in mission "${m.name}".`;
   } catch (e) { return `Error: ${(e as Error).message}`; }
 }
 
-function execAddMissionCheckpoint(polpo: Orchestrator, args: Record<string, unknown>): string {
+async function execAddMissionCheckpoint(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
   try {
-    const m = polpo.addMissionCheckpoint(args.missionId as string, {
+    const m = await polpo.addMissionCheckpoint(args.missionId as string, {
       name: args.name as string,
       afterTasks: args.afterTasks as string[],
       blocksTasks: args.blocksTasks as string[],
@@ -2446,24 +2446,24 @@ function execAddMissionCheckpoint(polpo: Orchestrator, args: Record<string, unkn
   } catch (e) { return `Error: ${(e as Error).message}`; }
 }
 
-function execUpdateMissionCheckpoint(polpo: Orchestrator, args: Record<string, unknown>): string {
+async function execUpdateMissionCheckpoint(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
   try {
     const { missionId, checkpointName, ...updates } = args;
-    const m = polpo.updateMissionCheckpoint(missionId as string, checkpointName as string, updates as { name?: string; afterTasks?: string[]; blocksTasks?: string[]; message?: string });
+    const m = await polpo.updateMissionCheckpoint(missionId as string, checkpointName as string, updates as { name?: string; afterTasks?: string[]; blocksTasks?: string[]; message?: string });
     return `Checkpoint "${checkpointName}" updated in mission "${m.name}".`;
   } catch (e) { return `Error: ${(e as Error).message}`; }
 }
 
-function execRemoveMissionCheckpoint(polpo: Orchestrator, args: Record<string, unknown>): string {
+async function execRemoveMissionCheckpoint(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
   try {
-    const m = polpo.removeMissionCheckpoint(args.missionId as string, args.checkpointName as string);
+    const m = await polpo.removeMissionCheckpoint(args.missionId as string, args.checkpointName as string);
     return `Checkpoint "${args.checkpointName}" removed from mission "${m.name}".`;
   } catch (e) { return `Error: ${(e as Error).message}`; }
 }
 
-function execAddMissionDelay(polpo: Orchestrator, args: Record<string, unknown>): string {
+async function execAddMissionDelay(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
   try {
-    const m = polpo.addMissionDelay(args.missionId as string, {
+    const m = await polpo.addMissionDelay(args.missionId as string, {
       name: args.name as string,
       afterTasks: args.afterTasks as string[],
       blocksTasks: args.blocksTasks as string[],
@@ -2474,24 +2474,24 @@ function execAddMissionDelay(polpo: Orchestrator, args: Record<string, unknown>)
   } catch (e) { return `Error: ${(e as Error).message}`; }
 }
 
-function execUpdateMissionDelay(polpo: Orchestrator, args: Record<string, unknown>): string {
+async function execUpdateMissionDelay(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
   try {
     const { missionId, delayName, ...updates } = args;
-    const m = polpo.updateMissionDelay(missionId as string, delayName as string, updates as { name?: string; afterTasks?: string[]; blocksTasks?: string[]; duration?: string; message?: string });
+    const m = await polpo.updateMissionDelay(missionId as string, delayName as string, updates as { name?: string; afterTasks?: string[]; blocksTasks?: string[]; duration?: string; message?: string });
     return `Delay "${delayName}" updated in mission "${m.name}".`;
   } catch (e) { return `Error: ${(e as Error).message}`; }
 }
 
-function execRemoveMissionDelay(polpo: Orchestrator, args: Record<string, unknown>): string {
+async function execRemoveMissionDelay(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
   try {
-    const m = polpo.removeMissionDelay(args.missionId as string, args.delayName as string);
+    const m = await polpo.removeMissionDelay(args.missionId as string, args.delayName as string);
     return `Delay "${args.delayName}" removed from mission "${m.name}".`;
   } catch (e) { return `Error: ${(e as Error).message}`; }
 }
 
-function execAddMissionQualityGate(polpo: Orchestrator, args: Record<string, unknown>): string {
+async function execAddMissionQualityGate(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
   try {
-    const m = polpo.addMissionQualityGate(args.missionId as string, {
+    const m = await polpo.addMissionQualityGate(args.missionId as string, {
       name: args.name as string,
       afterTasks: args.afterTasks as string[],
       blocksTasks: args.blocksTasks as string[],
@@ -2502,47 +2502,47 @@ function execAddMissionQualityGate(polpo: Orchestrator, args: Record<string, unk
   } catch (e) { return `Error: ${(e as Error).message}`; }
 }
 
-function execUpdateMissionQualityGate(polpo: Orchestrator, args: Record<string, unknown>): string {
+async function execUpdateMissionQualityGate(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
   try {
     const { missionId, gateName, ...updates } = args;
-    const m = polpo.updateMissionQualityGate(missionId as string, gateName as string, updates as { name?: string; afterTasks?: string[]; blocksTasks?: string[]; minScore?: number; requireAllPassed?: boolean });
+    const m = await polpo.updateMissionQualityGate(missionId as string, gateName as string, updates as { name?: string; afterTasks?: string[]; blocksTasks?: string[]; minScore?: number; requireAllPassed?: boolean });
     return `Quality gate "${gateName}" updated in mission "${m.name}".`;
   } catch (e) { return `Error: ${(e as Error).message}`; }
 }
 
-function execRemoveMissionQualityGate(polpo: Orchestrator, args: Record<string, unknown>): string {
+async function execRemoveMissionQualityGate(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
   try {
-    const m = polpo.removeMissionQualityGate(args.missionId as string, args.gateName as string);
+    const m = await polpo.removeMissionQualityGate(args.missionId as string, args.gateName as string);
     return `Quality gate "${args.gateName}" removed from mission "${m.name}".`;
   } catch (e) { return `Error: ${(e as Error).message}`; }
 }
 
-function execAddMissionTeamMember(polpo: Orchestrator, args: Record<string, unknown>): string {
+async function execAddMissionTeamMember(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
   try {
     const { missionId, ...member } = args;
-    const m = polpo.addMissionTeamMember(missionId as string, member as { name: string; role?: string; model?: string });
+    const m = await polpo.addMissionTeamMember(missionId as string, member as { name: string; role?: string; model?: string });
     return `Team member "${member.name}" added to mission "${m.name}".`;
   } catch (e) { return `Error: ${(e as Error).message}`; }
 }
 
-function execUpdateMissionTeamMember(polpo: Orchestrator, args: Record<string, unknown>): string {
+async function execUpdateMissionTeamMember(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
   try {
     const { missionId, memberName, ...updates } = args;
-    const m = polpo.updateMissionTeamMember(missionId as string, memberName as string, updates as { name?: string; role?: string; model?: string });
+    const m = await polpo.updateMissionTeamMember(missionId as string, memberName as string, updates as { name?: string; role?: string; model?: string });
     return `Team member "${memberName}" updated in mission "${m.name}".`;
   } catch (e) { return `Error: ${(e as Error).message}`; }
 }
 
-function execRemoveMissionTeamMember(polpo: Orchestrator, args: Record<string, unknown>): string {
+async function execRemoveMissionTeamMember(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
   try {
-    const m = polpo.removeMissionTeamMember(args.missionId as string, args.memberName as string);
+    const m = await polpo.removeMissionTeamMember(args.missionId as string, args.memberName as string);
     return `Team member "${args.memberName}" removed from mission "${m.name}".`;
   } catch (e) { return `Error: ${(e as Error).message}`; }
 }
 
-function execUpdateMissionNotifications(polpo: Orchestrator, args: Record<string, unknown>): string {
+async function execUpdateMissionNotifications(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
   try {
-    const m = polpo.updateMissionNotifications(args.missionId as string, args.notifications as import("../core/types.js").ScopedNotificationRules | null);
+    const m = await polpo.updateMissionNotifications(args.missionId as string, args.notifications as import("../core/types.js").ScopedNotificationRules | null);
     return args.notifications ? `Notification rules updated for mission "${m.name}".` : `Notification rules cleared for mission "${m.name}".`;
   } catch (e) { return `Error: ${(e as Error).message}`; }
 }
@@ -2580,11 +2580,11 @@ function execAddAgent(polpo: Orchestrator, args: Record<string, unknown>): strin
   return `Agent "${args.name}" added to ${teamName ? `team "${teamName}"` : "the first team"}.`;
 }
 
-function execRemoveAgent(polpo: Orchestrator, args: Record<string, unknown>): string {
+async function execRemoveAgent(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
   const agents = polpo.getAgents();
   const resolved = resolveAgentName(agents, args.name as string);
   if ("error" in resolved) return resolved.error;
-  const removed = polpo.removeAgent(resolved.name);
+  const removed = await polpo.removeAgent(resolved.name);
   return removed ? `Agent "${resolved.name}" removed.` : `Error: Agent "${resolved.name}" not found.`;
 }
 
@@ -2653,11 +2653,11 @@ function execAddTeam(polpo: Orchestrator, args: Record<string, unknown>): string
   return `Team "${name}" created.`;
 }
 
-function execRemoveTeam(polpo: Orchestrator, args: Record<string, unknown>): string {
+async function execRemoveTeam(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
   const name = args.name as string;
   const teams = polpo.getTeams();
   if (teams.length <= 1) return "Error: Cannot remove the last team.";
-  const removed = polpo.removeTeam(name);
+  const removed = await polpo.removeTeam(name);
   return removed ? `Team "${name}" removed.` : `Error: Team "${name}" not found.`;
 }
 
@@ -2674,8 +2674,8 @@ function execRenameTeam(polpo: Orchestrator, args: Record<string, unknown>): str
 //  APPROVAL & CHECKPOINT IMPLEMENTATIONS
 // ═══════════════════════════════════════════════════════
 
-function execApproveRequest(polpo: Orchestrator, args: Record<string, unknown>): string {
-  const result = polpo.approveRequest(
+async function execApproveRequest(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
+  const result = await polpo.approveRequest(
     args.requestId as string,
     "polpo",
     args.note as string | undefined,
@@ -2683,8 +2683,8 @@ function execApproveRequest(polpo: Orchestrator, args: Record<string, unknown>):
   return result ? `Request ${args.requestId} approved.` : `Error: Request "${args.requestId}" not found or already resolved.`;
 }
 
-function execRejectRequest(polpo: Orchestrator, args: Record<string, unknown>): string {
-  const result = polpo.rejectRequest(
+async function execRejectRequest(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
+  const result = await polpo.rejectRequest(
     args.requestId as string,
     args.feedback as string,
     "polpo",
@@ -2692,8 +2692,8 @@ function execRejectRequest(polpo: Orchestrator, args: Record<string, unknown>): 
   return result ? `Request ${args.requestId} rejected.` : `Error: Request "${args.requestId}" not found or already resolved.`;
 }
 
-function execResumeCheckpoint(polpo: Orchestrator, args: Record<string, unknown>): string {
-  const resumed = polpo.resumeCheckpointByMissionId(
+async function execResumeCheckpoint(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
+  const resumed = await polpo.resumeCheckpointByMissionId(
     args.missionId as string,
     args.checkpointName as string,
   );
@@ -2704,11 +2704,11 @@ function execResumeCheckpoint(polpo: Orchestrator, args: Record<string, unknown>
 //  SCHEDULING IMPLEMENTATIONS
 // ═══════════════════════════════════════════════════════
 
-function execCreateSchedule(polpo: Orchestrator, args: Record<string, unknown>): string {
+async function execCreateSchedule(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
   const scheduler = polpo.getScheduler();
   if (!scheduler) return "Error: Scheduler not available (enableScheduler may be false).";
   const missionId = args.missionId as string;
-  const mission = polpo.getMission(missionId);
+  const mission = await polpo.getMission(missionId);
   if (!mission) return `Error: Mission "${missionId}" not found.`;
 
   const isRecurring = (args.recurring as boolean) ?? false;
@@ -2721,7 +2721,7 @@ function execCreateSchedule(polpo: Orchestrator, args: Record<string, unknown>):
   if (args.endDate !== undefined) {
     missionUpdate.endDate = args.endDate as string;
   }
-  const updatedMission = polpo.updateMission(missionId, missionUpdate as any);
+  const updatedMission = await polpo.updateMission(missionId, missionUpdate as any);
 
   const entry = scheduler.registerMission(updatedMission);
   if (!entry) return `Error: Could not create schedule. Expression may be invalid or timestamp is in the past.`;
@@ -2730,31 +2730,31 @@ function execCreateSchedule(polpo: Orchestrator, args: Record<string, unknown>):
   return result;
 }
 
-function execListSchedules(polpo: Orchestrator, args: Record<string, unknown>): string {
+async function execListSchedules(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
   const scheduler = polpo.getScheduler();
   if (!scheduler) return "Scheduler not available.";
   const all = args.active ? scheduler.getActiveSchedules() : scheduler.getAllSchedules();
   if (all.length === 0) return "No schedules found.";
-  const lines = all.map(s => {
-    const mission = polpo.getMission(s.missionId);
+  const lines = await Promise.all(all.map(async s => {
+    const mission = await polpo.getMission(s.missionId);
     const missionName = mission ? mission.name : s.missionId;
     return `[${s.id}] ${s.enabled ? "ACTIVE" : "DISABLED"} mission: "${missionName}" expr: ${s.expression}${s.recurring ? " (recurring)" : ""} next: ${s.nextRunAt ?? "N/A"}${s.lastRunAt ? ` last: ${s.lastRunAt}` : ""}`;
-  });
+  }));
   return `${all.length} schedule(s):\n${lines.join("\n")}`;
 }
 
-function execDeleteSchedule(polpo: Orchestrator, args: Record<string, unknown>): string {
+async function execDeleteSchedule(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
   const scheduler = polpo.getScheduler();
   if (!scheduler) return "Error: Scheduler not available.";
   const missionId = args.missionId as string;
   const deleted = scheduler.unregisterMission(missionId);
   if (!deleted) return `Error: No schedule found for mission "${missionId}".`;
   // Clear schedule from the mission and reset status to draft
-  polpo.updateMission(missionId, { schedule: undefined, status: "draft" });
+  await polpo.updateMission(missionId, { schedule: undefined, status: "draft" });
   return `Schedule for mission "${missionId}" deleted. Mission status reset to draft.`;
 }
 
-function execUpdateSchedule(polpo: Orchestrator, args: Record<string, unknown>): string {
+async function execUpdateSchedule(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
   const scheduler = polpo.getScheduler();
   if (!scheduler) return "Error: Scheduler not available.";
   const missionId = args.missionId as string;
@@ -2764,12 +2764,12 @@ function execUpdateSchedule(polpo: Orchestrator, args: Record<string, unknown>):
   const changes: string[] = [];
   if (args.expression !== undefined) {
     // Re-register with new expression
-    const mission = polpo.getMission(missionId);
+    const mission = await polpo.getMission(missionId);
     if (!mission) return `Error: Mission "${missionId}" not found.`;
     // Determine new status based on recurring flag
     const isRecurring = (args.recurring as boolean) ?? existing.recurring;
     const newStatus = isRecurring ? "recurring" : "scheduled";
-    const updated = polpo.updateMission(missionId, {
+    const updated = await polpo.updateMission(missionId, {
       schedule: args.expression as string,
       status: newStatus,
     });
@@ -2782,9 +2782,9 @@ function execUpdateSchedule(polpo: Orchestrator, args: Record<string, unknown>):
     const isRecurring = args.recurring as boolean;
     existing.recurring = isRecurring;
     const newStatus = isRecurring ? "recurring" : "scheduled";
-    polpo.updateMission(missionId, { status: newStatus });
+    await polpo.updateMission(missionId, { status: newStatus });
     // Re-register to pick up the new recurring flag
-    const mission = polpo.getMission(missionId);
+    const mission = await polpo.getMission(missionId);
     if (mission) {
       scheduler.unregisterMission(missionId);
       scheduler.registerMission(mission);
@@ -2797,7 +2797,7 @@ function execUpdateSchedule(polpo: Orchestrator, args: Record<string, unknown>):
   }
   if (args.endDate !== undefined) {
     const endDate = (args.endDate as string).trim() || undefined;
-    polpo.updateMission(missionId, { endDate } as any);
+    await polpo.updateMission(missionId, { endDate } as any);
     changes.push(endDate ? `endDate: ${endDate}` : "endDate: removed");
   }
   if (changes.length === 0) return "No changes specified.";
@@ -2887,12 +2887,12 @@ function execSendNotification(polpo: Orchestrator, args: Record<string, unknown>
 //  TASK WATCHER IMPLEMENTATIONS
 // ═══════════════════════════════════════════════════════
 
-function execWatchTask(polpo: Orchestrator, args: Record<string, unknown>): string {
+async function execWatchTask(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
   const watcherMgr = polpo.getWatcherManager();
   if (!watcherMgr) return "Error: Watcher manager not available.";
 
   const taskId = args.taskId as string;
-  const task = polpo.getStore().getTask(taskId);
+  const task = await polpo.getStore().getTask(taskId);
   if (!task) return `Error: Task "${taskId}" not found.`;
 
   const targetStatus = args.targetStatus as string;
@@ -2915,18 +2915,18 @@ function execWatchTask(polpo: Orchestrator, args: Record<string, unknown>): stri
   return `Watcher created: [${watcher.id}] watching task "${task.title}" for status "${targetStatus}" → action: ${action.type}`;
 }
 
-function execListWatchers(polpo: Orchestrator, args: Record<string, unknown>): string {
+async function execListWatchers(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
   const watcherMgr = polpo.getWatcherManager();
   if (!watcherMgr) return "Watcher manager not available.";
   const all = args.active ? watcherMgr.getActive() : watcherMgr.getAll();
   if (all.length === 0) return "No watchers found.";
 
-  const lines = all.map(w => {
-    const task = polpo.getStore().getTask(w.taskId);
+  const lines = await Promise.all(all.map(async w => {
+    const task = await polpo.getStore().getTask(w.taskId);
     const taskName = task ? task.title : w.taskId;
     const status = w.fired ? `FIRED at ${w.firedAt}` : "ACTIVE";
     return `[${w.id}] ${status} task: "${taskName}" target: ${w.targetStatus} → ${w.action.type}`;
-  });
+  }));
   return `${all.length} watcher(s):\n${lines.join("\n")}`;
 }
 
@@ -2946,21 +2946,21 @@ function execReloadConfig(polpo: Orchestrator): string {
   return reloaded ? "Configuration reloaded from polpo.json." : "Error: Failed to reload configuration.";
 }
 
-function execSaveMemory(polpo: Orchestrator, args: Record<string, unknown>): string {
-  polpo.saveMemory(args.content as string);
+async function execSaveMemory(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
+  await polpo.saveMemory(args.content as string);
   return "Project memory updated.";
 }
 
-function execAppendMemory(polpo: Orchestrator, args: Record<string, unknown>): string {
-  polpo.appendMemory(args.content as string);
+async function execAppendMemory(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
+  await polpo.appendMemory(args.content as string);
   return "Appended to project memory.";
 }
 
-function execUpdateMemory(polpo: Orchestrator, args: Record<string, unknown>): string {
+async function execUpdateMemory(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
   const oldString = args.oldString as string;
   const newString = args.newString as string;
   if (!oldString) return "Error: oldString is required.";
-  const result = polpo.updateMemory(oldString, newString);
+  const result = await polpo.updateMemory(oldString, newString);
   if (result === true) {
     return `Memory updated: replaced ${oldString.length} chars with ${newString.length} chars.`;
   }
@@ -2984,7 +2984,7 @@ function execAppendSystemContext(polpo: Orchestrator, args: Record<string, unkno
 //  VAULT IMPLEMENTATIONS
 // ═══════════════════════════════════════════════════════
 
-function execSetVaultEntry(polpo: Orchestrator, args: Record<string, unknown>): string {
+async function execSetVaultEntry(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
   const agents = polpo.getAgents();
   const resolved = resolveAgentName(agents, args.agent as string);
   if ("error" in resolved) return resolved.error;
@@ -3000,12 +3000,12 @@ function execSetVaultEntry(polpo: Orchestrator, args: Record<string, unknown>): 
     credentials: args.credentials as Record<string, string>,
   };
 
-  vaultStore.set(agentName, service, entry);
+  await vaultStore.set(agentName, service, entry);
   const credKeys = Object.keys(entry.credentials).join(", ");
   return `Vault entry "${service}" (${entry.type}) set for agent "${agentName}". Credential fields: ${credKeys}`;
 }
 
-function execUpdateVaultCredentials(polpo: Orchestrator, args: Record<string, unknown>): string {
+async function execUpdateVaultCredentials(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
   const agents = polpo.getAgents();
   const resolved = resolveAgentName(agents, args.agent as string);
   if ("error" in resolved) return resolved.error;
@@ -3015,16 +3015,16 @@ function execUpdateVaultCredentials(polpo: Orchestrator, args: Record<string, un
   if (!vaultStore) return `Error: Vault store not available. Check POLPO_VAULT_KEY or ~/.polpo/vault.key.`;
 
   const service = args.service as string;
-  const existing = vaultStore.get(agentName, service);
+  const existing = await vaultStore.get(agentName, service);
   if (!existing) return `Error: No vault entry "${service}" for agent "${agentName}". Use set_vault_entry to create one.`;
 
   const credentials = args.credentials as Record<string, string>;
-  const mergedKeys = vaultStore.patch(agentName, service, { credentials });
+  const mergedKeys = await vaultStore.patch(agentName, service, { credentials });
   const updatedKeys = Object.keys(credentials).join(", ");
   return `Vault entry "${service}" updated for agent "${agentName}". Updated fields: ${updatedKeys}. All fields: ${mergedKeys.join(", ")}`;
 }
 
-function execRemoveVaultEntry(polpo: Orchestrator, args: Record<string, unknown>): string {
+async function execRemoveVaultEntry(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
   const agents = polpo.getAgents();
   const resolved = resolveAgentName(agents, args.agent as string);
   if ("error" in resolved) return resolved.error;
@@ -3034,13 +3034,13 @@ function execRemoveVaultEntry(polpo: Orchestrator, args: Record<string, unknown>
   if (!vaultStore) return `Error: Vault store not available.`;
 
   const service = args.service as string;
-  const removed = vaultStore.remove(agentName, service);
+  const removed = await vaultStore.remove(agentName, service);
   if (!removed) return `Error: No vault entry "${service}" found for agent "${agentName}".`;
 
   return `Vault entry "${service}" removed from agent "${agentName}".`;
 }
 
-function execListVault(polpo: Orchestrator, args: Record<string, unknown>): string {
+async function execListVault(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
   const agents = polpo.getAgents();
   const resolved = resolveAgentName(agents, args.agent as string);
   if ("error" in resolved) return resolved.error;
@@ -3049,7 +3049,7 @@ function execListVault(polpo: Orchestrator, args: Record<string, unknown>): stri
   const vaultStore = polpo.getVaultStore();
   if (!vaultStore) return `Error: Vault store not available.`;
 
-  const entries = vaultStore.list(agentName);
+  const entries = await vaultStore.list(agentName);
   if (entries.length === 0) return `Agent "${agentName}" has no vault entries.`;
 
   const lines: string[] = [`Vault for "${agentName}" (${entries.length} entries):`];
@@ -4119,7 +4119,7 @@ function execCreateTemplate(polpo: Orchestrator, args: Record<string, unknown>):
   }
 }
 
-function execInstantiateTemplate(polpo: Orchestrator, args: Record<string, unknown>): string {
+async function execInstantiateTemplate(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
   const name = args.name as string;
   const params = (args.params ?? {}) as Record<string, string | number | boolean>;
 
@@ -4141,7 +4141,7 @@ function execInstantiateTemplate(polpo: Orchestrator, args: Record<string, unkno
     const instance = instantiateTemplate(template, validation.resolved);
 
     // Save as draft mission (do NOT execute)
-    const mission = polpo.saveMission({
+    const mission = await polpo.saveMission({
       data: instance.data,
       prompt: instance.prompt,
       name: instance.name,
@@ -4155,7 +4155,7 @@ function execInstantiateTemplate(polpo: Orchestrator, args: Record<string, unkno
   }
 }
 
-function execRunTemplate(polpo: Orchestrator, args: Record<string, unknown>): string {
+async function execRunTemplate(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
   const name = args.name as string;
   const params = (args.params ?? {}) as Record<string, string | number | boolean>;
 
@@ -4176,13 +4176,13 @@ function execRunTemplate(polpo: Orchestrator, args: Record<string, unknown>): st
   try {
     const instance = instantiateTemplate(template, validation.resolved);
 
-    const mission = polpo.saveMission({
+    const mission = await polpo.saveMission({
       data: instance.data,
       prompt: instance.prompt,
       name: instance.name,
     });
 
-    const result = polpo.executeMission(mission.id);
+    const result = await polpo.executeMission(mission.id);
     const warns = validation.warnings.length > 0 ? `\nWarnings:\n  - ${validation.warnings.join("\n  - ")}` : "";
     return `Template "${name}" executed — mission "${mission.name}" (ID: ${mission.id}), ${result.tasks.length} task(s), group: ${result.group}.${warns}`;
   } catch (err: unknown) {

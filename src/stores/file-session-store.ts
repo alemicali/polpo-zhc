@@ -26,7 +26,7 @@ export class FileSessionStore implements SessionStore {
     this.sessionsDir = join(polpoDir, "sessions");
   }
 
-  create(title?: string): string {
+  async create(title?: string): Promise<string> {
     if (!existsSync(this.sessionsDir)) {
       mkdirSync(this.sessionsDir, { recursive: true });
     }
@@ -44,7 +44,7 @@ export class FileSessionStore implements SessionStore {
     return sessionId;
   }
 
-  addMessage(sessionId: string, role: MessageRole, content: string): Message {
+  async addMessage(sessionId: string, role: MessageRole, content: string): Promise<Message> {
     const message: Message = {
       id: nanoid(10),
       role,
@@ -59,7 +59,7 @@ export class FileSessionStore implements SessionStore {
     return message;
   }
 
-  updateMessage(sessionId: string, messageId: string, content: string, toolCalls?: ToolCallInfo[]): boolean {
+  async updateMessage(sessionId: string, messageId: string, content: string, toolCalls?: ToolCallInfo[]): Promise<boolean> {
     const file = this.sessionFile(sessionId);
     if (!existsSync(file)) return false;
     try {
@@ -86,7 +86,7 @@ export class FileSessionStore implements SessionStore {
     }
   }
 
-  getMessages(sessionId: string): Message[] {
+  async getMessages(sessionId: string): Promise<Message[]> {
     const file = this.sessionFile(sessionId);
     if (!existsSync(file)) return [];
     try {
@@ -104,12 +104,12 @@ export class FileSessionStore implements SessionStore {
     }
   }
 
-  getRecentMessages(sessionId: string, limit: number): Message[] {
-    const messages = this.getMessages(sessionId);
+  async getRecentMessages(sessionId: string, limit: number): Promise<Message[]> {
+    const messages = await this.getMessages(sessionId);
     return messages.slice(-limit);
   }
 
-  listSessions(): Session[] {
+  async listSessions(): Promise<Session[]> {
     if (!existsSync(this.sessionsDir)) return [];
     const files = readdirSync(this.sessionsDir)
       .filter(f => f.endsWith(".jsonl"));
@@ -143,7 +143,7 @@ export class FileSessionStore implements SessionStore {
     return sessions;
   }
 
-  getSession(sessionId: string): Session | undefined {
+  async getSession(sessionId: string): Promise<Session | undefined> {
     const file = this.sessionFile(sessionId);
     if (!existsSync(file)) return undefined;
     try {
@@ -164,12 +164,12 @@ export class FileSessionStore implements SessionStore {
     }
   }
 
-  getLatestSession(): Session | undefined {
-    const sessions = this.listSessions();
+  async getLatestSession(): Promise<Session | undefined> {
+    const sessions = await this.listSessions();
     return sessions[0];
   }
 
-  renameSession(sessionId: string, title: string): boolean {
+  async renameSession(sessionId: string, title: string): Promise<boolean> {
     const file = this.sessionFile(sessionId);
     if (!existsSync(file)) return false;
     try {
@@ -187,7 +187,7 @@ export class FileSessionStore implements SessionStore {
     }
   }
 
-  deleteSession(sessionId: string): boolean {
+  async deleteSession(sessionId: string): Promise<boolean> {
     const file = this.sessionFile(sessionId);
     if (!existsSync(file)) return false;
     try {
@@ -198,8 +198,8 @@ export class FileSessionStore implements SessionStore {
     }
   }
 
-  prune(keepSessions: number): number {
-    const sessions = this.listSessions();
+  async prune(keepSessions: number): Promise<number> {
+    const sessions = await this.listSessions();
     if (sessions.length <= keepSessions) return 0;
     const toRemove = sessions.slice(keepSessions);
     let removed = 0;
@@ -212,7 +212,7 @@ export class FileSessionStore implements SessionStore {
     return removed;
   }
 
-  close(): void {
+  async close(): Promise<void> {
     // No resources to release for file-based store
   }
 

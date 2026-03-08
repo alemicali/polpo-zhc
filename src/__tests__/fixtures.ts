@@ -12,13 +12,13 @@ export class InMemoryTaskStore implements TaskStore {
     processes: [],
   };
 
-  getState(): PolpoState { return this.state; }
+  async getState(): Promise<PolpoState> { return this.state; }
 
-  setState(partial: Partial<PolpoState>): void {
+  async setState(partial: Partial<PolpoState>): Promise<void> {
     Object.assign(this.state, partial);
   }
 
-  addTask(task: Omit<Task, "id" | "status" | "retries" | "createdAt" | "updatedAt">): Task {
+  async addTask(task: Omit<Task, "id" | "status" | "retries" | "createdAt" | "updatedAt">): Promise<Task> {
     const now = new Date().toISOString();
     const newTask: Task = {
       ...task,
@@ -32,15 +32,15 @@ export class InMemoryTaskStore implements TaskStore {
     return newTask;
   }
 
-  getTask(taskId: string): Task | undefined {
+  async getTask(taskId: string): Promise<Task | undefined> {
     return this.state.tasks.find(t => t.id === taskId);
   }
 
-  getAllTasks(): Task[] {
+  async getAllTasks(): Promise<Task[]> {
     return this.state.tasks;
   }
 
-  unsafeSetStatus(taskId: string, newStatus: TaskStatus, reason: string): Task {
+  async unsafeSetStatus(taskId: string, newStatus: TaskStatus, reason: string): Promise<Task> {
     const task = this.state.tasks.find(t => t.id === taskId);
     if (!task) throw new Error(`Task not found: ${taskId}`);
     const from = task.status;
@@ -50,27 +50,27 @@ export class InMemoryTaskStore implements TaskStore {
     return task;
   }
 
-  updateTask(taskId: string, updates: Partial<Omit<Task, "id" | "status">>): Task {
+  async updateTask(taskId: string, updates: Partial<Omit<Task, "id" | "status">>): Promise<Task> {
     const task = this.state.tasks.find(t => t.id === taskId);
     if (!task) throw new Error(`Task not found: ${taskId}`);
     Object.assign(task, updates, { updatedAt: new Date().toISOString() });
     return task;
   }
 
-  removeTask(taskId: string): boolean {
+  async removeTask(taskId: string): Promise<boolean> {
     const idx = this.state.tasks.findIndex(t => t.id === taskId);
     if (idx < 0) return false;
     this.state.tasks.splice(idx, 1);
     return true;
   }
 
-  removeTasks(filter: (task: Task) => boolean): number {
+  async removeTasks(filter: (task: Task) => boolean): Promise<number> {
     const before = this.state.tasks.length;
     this.state.tasks = this.state.tasks.filter(t => !filter(t));
     return before - this.state.tasks.length;
   }
 
-  transition(taskId: string, newStatus: TaskStatus): Task {
+  async transition(taskId: string, newStatus: TaskStatus): Promise<Task> {
     const task = this.state.tasks.find(t => t.id === taskId);
     if (!task) throw new Error(`Task not found: ${taskId}`);
     assertValidTransition(task.status, newStatus);
@@ -148,11 +148,11 @@ export function createTestActivity(overrides: Partial<AgentActivity> = {}): Agen
 export class InMemoryRunStore implements RunStore {
   private runs = new Map<string, RunRecord>();
 
-  upsertRun(run: RunRecord): void {
+  async upsertRun(run: RunRecord): Promise<void> {
     this.runs.set(run.id, { ...run });
   }
 
-  updateActivity(runId: string, activity: AgentActivity): void {
+  async updateActivity(runId: string, activity: AgentActivity): Promise<void> {
     const run = this.runs.get(runId);
     if (run) {
       run.activity = activity;
@@ -160,7 +160,7 @@ export class InMemoryRunStore implements RunStore {
     }
   }
 
-  updateOutcomes(runId: string, outcomes: TaskOutcome[]): void {
+  async updateOutcomes(runId: string, outcomes: TaskOutcome[]): Promise<void> {
     const run = this.runs.get(runId);
     if (run) {
       run.outcomes = outcomes;
@@ -168,7 +168,7 @@ export class InMemoryRunStore implements RunStore {
     }
   }
 
-  completeRun(runId: string, status: RunStatus, result: TaskResult): void {
+  async completeRun(runId: string, status: RunStatus, result: TaskResult): Promise<void> {
     const run = this.runs.get(runId);
     if (run) {
       run.status = status;
@@ -177,29 +177,29 @@ export class InMemoryRunStore implements RunStore {
     }
   }
 
-  getRun(runId: string): RunRecord | undefined {
+  async getRun(runId: string): Promise<RunRecord | undefined> {
     const run = this.runs.get(runId);
     return run ? { ...run } : undefined;
   }
 
-  getRunByTaskId(taskId: string): RunRecord | undefined {
+  async getRunByTaskId(taskId: string): Promise<RunRecord | undefined> {
     for (const run of this.runs.values()) {
       if (run.taskId === taskId) return { ...run };
     }
     return undefined;
   }
 
-  getActiveRuns(): RunRecord[] {
+  async getActiveRuns(): Promise<RunRecord[]> {
     return [...this.runs.values()].filter(r => r.status === "running");
   }
 
-  getTerminalRuns(): RunRecord[] {
+  async getTerminalRuns(): Promise<RunRecord[]> {
     return [...this.runs.values()].filter(r =>
       r.status === "completed" || r.status === "failed" || r.status === "killed"
     );
   }
 
-  deleteRun(runId: string): void {
+  async deleteRun(runId: string): Promise<void> {
     this.runs.delete(runId);
   }
 

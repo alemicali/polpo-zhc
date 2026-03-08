@@ -43,19 +43,19 @@ export interface NotificationRecord {
 
 export interface NotificationStore {
   /** Persist a notification record (sent or failed). */
-  append(record: NotificationRecord): void;
+  append(record: NotificationRecord): Promise<void>;
   /** Get all notifications, most recent first. Optional limit (default 100). */
-  list(limit?: number): NotificationRecord[];
+  list(limit?: number): Promise<NotificationRecord[]>;
   /** Get notifications by channel ID. */
-  listByChannel(channelId: string, limit?: number): NotificationRecord[];
+  listByChannel(channelId: string, limit?: number): Promise<NotificationRecord[]>;
   /** Get notifications by rule ID. */
-  listByRule(ruleId: string, limit?: number): NotificationRecord[];
+  listByRule(ruleId: string, limit?: number): Promise<NotificationRecord[]>;
   /** Get notifications by status. */
-  listByStatus(status: NotificationStatus, limit?: number): NotificationRecord[];
+  listByStatus(status: NotificationStatus, limit?: number): Promise<NotificationRecord[]>;
   /** Count notifications by status. */
-  count(status?: NotificationStatus): number;
+  count(status?: NotificationStatus): Promise<number>;
   /** Prune old records, keeping the most recent N. Returns number pruned. */
-  prune(keep: number): number;
+  prune(keep: number): Promise<number>;
   /** Flush/close. */
-  close(): void;
+  close(): Promise<void> | void;
 }

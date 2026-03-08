@@ -13,11 +13,11 @@ export class FileMemoryStore implements MemoryStore {
     this.filePath = join(polpoDir, "memory.md");
   }
 
-  exists(): boolean {
+  async exists(): Promise<boolean> {
     return existsSync(this.filePath);
   }
 
-  get(): string {
+  async get(): Promise<string> {
     if (!this.exists()) return "";
     try {
       return readFileSync(this.filePath, "utf-8");
@@ -26,7 +26,7 @@ export class FileMemoryStore implements MemoryStore {
     }
   }
 
-  save(content: string): void {
+  async save(content: string): Promise<void> {
     const dir = dirname(this.filePath);
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
     const tmpPath = this.filePath + ".tmp";
@@ -34,16 +34,16 @@ export class FileMemoryStore implements MemoryStore {
     renameSync(tmpPath, this.filePath);
   }
 
-  append(line: string): void {
+  async append(line: string): Promise<void> {
     const dir = dirname(this.filePath);
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
     const ts = new Date().toISOString().slice(0, 10);
     appendFileSync(this.filePath, `\n- ${ts}: ${line}\n`, "utf-8");
   }
 
-  update(oldText: string, newText: string): true | string {
+  async update(oldText: string, newText: string): Promise<true | string> {
     if (!this.exists()) return "Memory file does not exist. Use save_memory to create it first.";
-    const content = this.get();
+    const content = await this.get();
     if (!content.includes(oldText)) {
       return "oldString not found in memory. Use get_memory to see the current content.";
     }

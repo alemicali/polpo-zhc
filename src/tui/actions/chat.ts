@@ -58,7 +58,7 @@ export async function startChat(
 ): Promise<void> {
   // Resolve or create session
   const sessionStore = polpo.getSessionStore();
-  const sessionId = resolveSession(sessionStore, store.activeSessionId);
+  const sessionId = await resolveSession(sessionStore, store.activeSessionId);
   if (sessionId && store.activeSessionId !== sessionId) {
     store.setActiveSessionId(sessionId);
   }
@@ -79,7 +79,7 @@ export async function startChat(
     const messages: { role: string; content: string }[] = [];
 
     if (sessionStore && sessionId) {
-      const history = sessionStore.getRecentMessages(sessionId, 20);
+      const history = await sessionStore.getRecentMessages(sessionId, 20);
       // Exclude the current message from history (we'll add it separately)
       const past = history.filter(
         (m) => !(m.role === "user" && m.content === message),
@@ -253,25 +253,25 @@ export async function startChat(
   }
 }
 
-function resolveSession(
+async function resolveSession(
   sessionStore: import("../../core/session-store.js").SessionStore | undefined,
   activeId: string | null,
-): string | null {
+): Promise<string | null> {
   if (!sessionStore) return null;
 
   // Reuse active session
   if (activeId) {
-    const session = sessionStore.getSession(activeId);
+    const session = await sessionStore.getSession(activeId);
     if (session) return activeId;
   }
 
   // Look for recent session (< 30min old)
-  const latest = sessionStore.getLatestSession();
+  const latest = await sessionStore.getLatestSession();
   if (latest) {
     const age = Date.now() - new Date(latest.updatedAt).getTime();
     if (age < SESSION_TIMEOUT_MS) return latest.id;
   }
 
   // Create new
-  return sessionStore.create();
+  return await sessionStore.create();
 }

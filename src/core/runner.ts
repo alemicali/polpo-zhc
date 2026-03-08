@@ -108,7 +108,7 @@ async function main(): Promise<void> {
     activity: { filesCreated: [], filesEdited: [], toolCalls: 0, totalTokens: 0, lastUpdate: now },
     configPath: join(process.argv[process.argv.indexOf("--config") + 1]),
   };
-  runStore.upsertRun(initialRecord);
+  await runStore.upsertRun(initialRecord);
   actLog.logEvent("spawning", { task: config.task.title });
 
   let handle;
@@ -176,18 +176,18 @@ async function main(): Promise<void> {
   } catch (err) {
     const result = errorResult(err);
     actLog.logEvent("error", { message: result.stderr });
-    runStore.completeRun(config.runId, "failed", result);
+    await runStore.completeRun(config.runId, "failed", result);
     if (config.notifySocket) {
       notifyRunComplete(config.notifySocket, config.runId, config.taskId, "failed");
     }
-    runStore.close();
+    await runStore.close();
     process.exit(1);
   }
 
   // Activity polling + persistent logging
-  const poll = setInterval(() => {
+  const poll = setInterval(async () => {
     try {
-      runStore.updateActivity(config.runId, handle.activity);
+      await runStore.updateActivity(config.runId, handle.activity);
       actLog.logActivity({ ...handle.activity });
     } catch { /* DB temporarily locked */
     }
@@ -205,12 +205,12 @@ async function main(): Promise<void> {
     const result = await handle.done;
     clearInterval(poll);
     // Final activity + sessionId flush before marking terminal
-    try { runStore.updateActivity(config.runId, handle.activity); } catch { /* best effort */ }
+    try { await runStore.updateActivity(config.runId, handle.activity); } catch { /* best effort */ }
     actLog.logActivity({ ...handle.activity });
 
     // Store auto-collected outcomes on the run record
     if (handle.outcomes && handle.outcomes.length > 0) {
-      try { runStore.updateOutcomes(config.runId, handle.outcomes); } catch { /* best effort */ }
+      try { await runStore.updateOutcomes(config.runId, handle.outcomes); } catch { /* best effort */ }
       actLog.logEvent("outcomes", { count: handle.outcomes.length, types: handle.outcomes.map((o: any) => o.type) });
     }
 
@@ -222,15 +222,15 @@ async function main(): Promise<void> {
     }
     const status = sigterm ? "killed" : (result.exitCode === 0 ? "completed" : "failed");
     actLog.logEvent("done", { status, exitCode: result.exitCode, duration: result.duration });
-    runStore.completeRun(config.runId, status, result);
+    await runStore.completeRun(config.runId, status, result);
     if (config.notifySocket) {
       notifyRunComplete(config.notifySocket, config.runId, config.taskId, status);
     }
   } catch (err) {
     clearInterval(poll);
-    try { runStore.updateActivity(config.runId, handle.activity); } catch { /* best effort */ }
+    try { await runStore.updateActivity(config.runId, handle.activity); } catch { /* best effort */ }
     actLog.logEvent("error", { message: err instanceof Error ? err.message : String(err) });
-    runStore.completeRun(config.runId, "failed", errorResult(err));
+    await runStore.completeRun(config.runId, "failed", errorResult(err));
     if (config.notifySocket) {
       notifyRunComplete(config.notifySocket, config.runId, config.taskId, "failed");
     }
@@ -239,7 +239,7 @@ async function main(): Promise<void> {
   // Cleanup config file
   try { unlinkSync(join(process.argv[process.argv.indexOf("--config") + 1])); } catch { /* already gone */ }
 
-  runStore.close();
+  await runStore.close();
   process.exit(0);
 }
 

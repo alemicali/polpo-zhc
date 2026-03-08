@@ -17,8 +17,8 @@ export async function generateAnswer(
   question: string,
   model?: string | ModelConfig,
 ): Promise<string> {
-  const memory = orchestrator.getMemory();
-  const state = orchestrator.getStore().getState();
+  const memory = await orchestrator.getMemory();
+  const state = await orchestrator.getStore().getState();
 
   // Sibling tasks in the same plan group for additional context
   const siblings = task.group

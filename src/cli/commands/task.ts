@@ -72,7 +72,7 @@ export function registerTaskCommands(program: Command): void {
     .action(async (opts) => {
       try {
         const orchestrator = await initOrchestrator(opts.dir);
-        let tasks = orchestrator.getStore().getAllTasks();
+        let tasks = await orchestrator.getStore().getAllTasks();
 
         if (opts.status) {
           tasks = tasks.filter(t => t.status === opts.status);
@@ -117,7 +117,7 @@ export function registerTaskCommands(program: Command): void {
     .action(async (taskId: string, opts) => {
       try {
         const orchestrator = await initOrchestrator(opts.dir);
-        const tasks = orchestrator.getStore().getAllTasks();
+        const tasks = await orchestrator.getStore().getAllTasks();
         const t = findTask(tasks, taskId);
 
         if (!t) {
@@ -244,7 +244,7 @@ export function registerTaskCommands(program: Command): void {
         if (opts.prep === false) {
           // --no-prep: create directly
           const title = description.length > 80 ? description.slice(0, 77) + "..." : description;
-          const t = orchestrator.addTask({ title, description, assignTo: agentName });
+          const t = await orchestrator.addTask({ title, description, assignTo: agentName });
           console.log(chalk.green(`  + Task created: ${t.title}`));
           console.log(chalk.dim(`    ID: ${t.id}  Agent: ${agentName}`));
           console.log(chalk.dim(`\n  Run ${chalk.white("polpo run")} to execute.`));
@@ -254,14 +254,14 @@ export function registerTaskCommands(program: Command): void {
             const { buildTaskPrepPrompt } = await import("../../llm/prompts.js");
             const { generateTaskPrep } = await import("../../llm/mission-generator.js");
 
-            const state = (() => {
-              try { return orchestrator.getStore()?.getState() ?? null; }
+            const state = await (async () => {
+              try { return await orchestrator.getStore()?.getState() ?? null; }
               catch { return null; }
             })();
 
             console.log(chalk.dim("  Preparing task with AI..."));
 
-            const systemPrompt = buildTaskPrepPrompt(orchestrator, state, orchestrator.getWorkDir(), description, agentName);
+            const systemPrompt = await buildTaskPrepPrompt(orchestrator, state, orchestrator.getWorkDir(), description, agentName);
             const settings = orchestrator.getConfig()?.settings;
             const model = resolveModelSpec(settings?.orchestratorModel);
             const prepTask = await generateTaskPrep(systemPrompt, description, model, undefined, settings?.reasoning);
@@ -287,7 +287,7 @@ export function registerTaskCommands(program: Command): void {
               }
             }
 
-            const t = orchestrator.addTask({
+            const t = await orchestrator.addTask({
               title: prepTask.title,
               description: prepTask.description || description,
               assignTo: agentName,
@@ -307,7 +307,7 @@ export function registerTaskCommands(program: Command): void {
             console.log(chalk.yellow(`  Task prep failed: ${msg}`));
             console.log(chalk.dim("  Creating task directly..."));
             const title = description.length > 80 ? description.slice(0, 77) + "..." : description;
-            const t = orchestrator.addTask({ title, description, assignTo: agentName });
+            const t = await orchestrator.addTask({ title, description, assignTo: agentName });
             console.log(chalk.green(`  + Task created: ${t.title}`));
             console.log(chalk.dim(`    ID: ${t.id}  Agent: ${agentName}`));
             console.log(chalk.dim(`\n  Run ${chalk.white("polpo run")} to execute.`));
@@ -328,7 +328,7 @@ export function registerTaskCommands(program: Command): void {
     .action(async (taskId: string, opts) => {
       try {
         const orchestrator = await initOrchestrator(opts.dir);
-        const tasks = orchestrator.getStore().getAllTasks();
+        const tasks = await orchestrator.getStore().getAllTasks();
         const t = findTask(tasks, taskId);
 
         if (!t) {
@@ -336,7 +336,7 @@ export function registerTaskCommands(program: Command): void {
           process.exit(1);
         }
 
-        orchestrator.retryTask(t.id);
+        await orchestrator.retryTask(t.id);
         console.log(chalk.green(`  Task "${t.title}" queued for retry.`));
       } catch (err: unknown) {
         console.error(chalk.red(`Error: ${err instanceof Error ? err.message : String(err)}`));
@@ -353,7 +353,7 @@ export function registerTaskCommands(program: Command): void {
     .action(async (taskId: string, opts) => {
       try {
         const orchestrator = await initOrchestrator(opts.dir);
-        const tasks = orchestrator.getStore().getAllTasks();
+        const tasks = await orchestrator.getStore().getAllTasks();
         const t = findTask(tasks, taskId);
 
         if (!t) {
@@ -361,7 +361,7 @@ export function registerTaskCommands(program: Command): void {
           process.exit(1);
         }
 
-        const killed = orchestrator.killTask(t.id);
+        const killed = await orchestrator.killTask(t.id);
         if (killed) {
           console.log(chalk.green(`  Task "${t.title}" killed.`));
         } else {
@@ -382,7 +382,7 @@ export function registerTaskCommands(program: Command): void {
     .action(async (taskId: string, opts) => {
       try {
         const orchestrator = await initOrchestrator(opts.dir);
-        const tasks = orchestrator.getStore().getAllTasks();
+        const tasks = await orchestrator.getStore().getAllTasks();
         const t = findTask(tasks, taskId);
 
         if (!t) {
@@ -408,7 +408,7 @@ export function registerTaskCommands(program: Command): void {
     .action(async (taskId: string, opts) => {
       try {
         const orchestrator = await initOrchestrator(opts.dir);
-        const tasks = orchestrator.getStore().getAllTasks();
+        const tasks = await orchestrator.getStore().getAllTasks();
         const t = findTask(tasks, taskId);
 
         if (!t) {
@@ -416,7 +416,7 @@ export function registerTaskCommands(program: Command): void {
           process.exit(1);
         }
 
-        const removed = orchestrator.deleteTask(t.id);
+        const removed = await orchestrator.deleteTask(t.id);
         if (removed) {
           console.log(chalk.green(`  Task "${t.title}" deleted.`));
         } else {

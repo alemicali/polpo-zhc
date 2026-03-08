@@ -63,35 +63,35 @@ export class SLAMonitor {
     });
   }
 
-  check(): void {
+  async check(): Promise<void> {
     const now = Date.now();
 
     if (now - this.lastCheckMs < this.config.checkIntervalMs) return;
     this.lastCheckMs = now;
 
-    const tasks = this.ctx.registry.getAllTasks();
+    const tasks = await this.ctx.registry.getAllTasks();
     for (const task of tasks) {
       if (!task.deadline) continue;
       if (task.status === "done" || task.status === "failed") continue;
-      this.checkEntity(task.id, "task", task.deadline, task.createdAt, now);
+      await this.checkEntity(task.id, "task", task.deadline, task.createdAt, now);
     }
 
-    const missions = this.ctx.registry.getAllMissions?.() ?? [];
+    const missions = await this.ctx.registry.getAllMissions?.() ?? [];
     for (const mission of missions) {
       if (!mission.deadline) continue;
       if (mission.status === "completed" || mission.status === "failed" || mission.status === "cancelled" ||
           mission.status === "scheduled" || mission.status === "recurring") continue;
-      this.checkEntity(mission.id, "mission", mission.deadline, mission.createdAt, now);
+      await this.checkEntity(mission.id, "mission", mission.deadline, mission.createdAt, now);
     }
   }
 
-  private checkEntity(
+  private async checkEntity(
     entityId: string,
     entityType: "task" | "mission",
     deadlineStr: string,
     createdAtStr: string,
     now: number,
-  ): void {
+  ): Promise<void> {
     const deadline = new Date(deadlineStr).getTime();
     const createdAt = new Date(createdAtStr).getTime();
     const totalBudget = deadline - createdAt;
@@ -114,7 +114,7 @@ export class SLAMonitor {
 
       if (this.config.violationAction === "fail" && entityType === "task") {
         try {
-          this.ctx.registry.unsafeSetStatus(entityId, "failed", "SLA violated — deadline exceeded");
+          await this.ctx.registry.unsafeSetStatus(entityId, "failed", "SLA violated — deadline exceeded");
         } catch { /* task may not exist or be in terminal state */ }
       }
       return;

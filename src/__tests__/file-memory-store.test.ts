@@ -14,76 +14,76 @@ describe("FileMemoryStore", () => {
     if (existsSync(TEST_DIR)) rmSync(TEST_DIR, { recursive: true });
   });
 
-  it("exists() returns false when no memory file", () => {
+  it("exists() returns false when no memory file", async () => {
     const store = new FileMemoryStore(TEST_DIR);
-    expect(store.exists()).toBe(false);
+    expect(await store.exists()).toBe(false);
   });
 
-  it("get() returns empty string when no memory file", () => {
+  it("get() returns empty string when no memory file", async () => {
     const store = new FileMemoryStore(TEST_DIR);
-    expect(store.get()).toBe("");
+    expect(await store.get()).toBe("");
   });
 
-  it("save() creates directory and memory file", () => {
+  it("save() creates directory and memory file", async () => {
     const store = new FileMemoryStore(TEST_DIR);
-    store.save("# Project Memory\n\nSome content.");
+    await store.save("# Project Memory\n\nSome content.");
 
-    expect(store.exists()).toBe(true);
+    expect(await store.exists()).toBe(true);
     const raw = readFileSync(join(TEST_DIR, "memory.md"), "utf-8");
     expect(raw).toBe("# Project Memory\n\nSome content.");
   });
 
-  it("get() returns saved content", () => {
+  it("get() returns saved content", async () => {
     const store = new FileMemoryStore(TEST_DIR);
-    store.save("Hello world");
-    expect(store.get()).toBe("Hello world");
+    await store.save("Hello world");
+    expect(await store.get()).toBe("Hello world");
   });
 
-  it("save() overwrites existing content", () => {
+  it("save() overwrites existing content", async () => {
     const store = new FileMemoryStore(TEST_DIR);
-    store.save("first");
-    store.save("second");
-    expect(store.get()).toBe("second");
+    await store.save("first");
+    await store.save("second");
+    expect(await store.get()).toBe("second");
   });
 
-  it("append() adds timestamped line", () => {
+  it("append() adds timestamped line", async () => {
     const store = new FileMemoryStore(TEST_DIR);
-    store.save("# Memory");
-    store.append("Agent completed auth refactor");
+    await store.save("# Memory");
+    await store.append("Agent completed auth refactor");
 
-    const content = store.get();
+    const content = await store.get();
     expect(content).toContain("# Memory");
     expect(content).toMatch(/\d{4}-\d{2}-\d{2}: Agent completed auth refactor/);
   });
 
-  it("append() creates file if missing", () => {
+  it("append() creates file if missing", async () => {
     const store = new FileMemoryStore(TEST_DIR);
-    expect(store.exists()).toBe(false);
+    expect(await store.exists()).toBe(false);
 
-    store.append("first entry");
-    expect(store.exists()).toBe(true);
-    expect(store.get()).toMatch(/first entry/);
+    await store.append("first entry");
+    expect(await store.exists()).toBe(true);
+    expect(await store.get()).toMatch(/first entry/);
   });
 
-  it("survives separate instances (persistence)", () => {
+  it("survives separate instances (persistence)", async () => {
     const store1 = new FileMemoryStore(TEST_DIR);
-    store1.save("persistent data");
+    await store1.save("persistent data");
 
     const store2 = new FileMemoryStore(TEST_DIR);
-    expect(store2.get()).toBe("persistent data");
+    expect(await store2.get()).toBe("persistent data");
   });
 
-  it("handles empty save gracefully", () => {
+  it("handles empty save gracefully", async () => {
     const store = new FileMemoryStore(TEST_DIR);
-    store.save("");
-    expect(store.exists()).toBe(true);
-    expect(store.get()).toBe("");
+    await store.save("");
+    expect(await store.exists()).toBe(true);
+    expect(await store.get()).toBe("");
   });
 
-  it("handles multiline content", () => {
+  it("handles multiline content", async () => {
     const store = new FileMemoryStore(TEST_DIR);
     const content = "# Memory\n\n## Architecture\n- TypeScript\n- Node.js\n\n## Notes\n- Important thing";
-    store.save(content);
-    expect(store.get()).toBe(content);
+    await store.save(content);
+    expect(await store.get()).toBe(content);
   });
 });

@@ -20,9 +20,9 @@ describe("Mission Persistence (SqliteTaskStore)", () => {
   });
 
   describe("saveMission", () => {
-    it("creates a mission with generated ID and timestamps", () => {
+    it("creates a mission with generated ID and timestamps", async () => {
       const store = makeStore();
-      const mission = store.saveMission({
+      const mission = await store.saveMission({
         name: "mission-1",
         data: JSON.stringify({ tasks: [{ title: "Test" }] }),
         prompt: "Build a test",
@@ -39,9 +39,9 @@ describe("Mission Persistence (SqliteTaskStore)", () => {
       store.close();
     });
 
-    it("saves without prompt", () => {
+    it("saves without prompt", async () => {
       const store = makeStore();
-      const mission = store.saveMission({
+      const mission = await store.saveMission({
         name: "mission-1",
         data: JSON.stringify({ tasks: [{ title: "Test" }] }),
         status: "draft",
@@ -50,57 +50,57 @@ describe("Mission Persistence (SqliteTaskStore)", () => {
       store.close();
     });
 
-    it("enforces unique name", () => {
+    it("enforces unique name", async () => {
       const store = makeStore();
-      store.saveMission({ name: "mission-1", data: "a", status: "draft" });
-      expect(() => store.saveMission({ name: "mission-1", data: "b", status: "draft" }))
-        .toThrow();
+      await store.saveMission({ name: "mission-1", data: "a", status: "draft" });
+      await expect(store.saveMission({ name: "mission-1", data: "b", status: "draft" }))
+        .rejects.toThrow();
       store.close();
     });
   });
 
   describe("getMission", () => {
-    it("returns mission by ID", () => {
+    it("returns mission by ID", async () => {
       const store = makeStore();
-      const created = store.saveMission({ name: "p1", data: "d", status: "draft" });
-      const found = store.getMission(created.id);
+      const created = await store.saveMission({ name: "p1", data: "d", status: "draft" });
+      const found = await store.getMission(created.id);
       expect(found).toBeDefined();
       expect(found!.id).toBe(created.id);
       expect(found!.name).toBe("p1");
       store.close();
     });
 
-    it("returns undefined for missing ID", () => {
+    it("returns undefined for missing ID", async () => {
       const store = makeStore();
-      expect(store.getMission("nonexistent")).toBeUndefined();
+      expect(await store.getMission("nonexistent")).toBeUndefined();
       store.close();
     });
   });
 
   describe("getMissionByName", () => {
-    it("returns mission by name", () => {
+    it("returns mission by name", async () => {
       const store = makeStore();
-      const created = store.saveMission({ name: "my-mission", data: "d", status: "draft" });
-      const found = store.getMissionByName("my-mission");
+      const created = await store.saveMission({ name: "my-mission", data: "d", status: "draft" });
+      const found = await store.getMissionByName("my-mission");
       expect(found).toBeDefined();
       expect(found!.id).toBe(created.id);
       store.close();
     });
 
-    it("returns undefined for missing name", () => {
+    it("returns undefined for missing name", async () => {
       const store = makeStore();
-      expect(store.getMissionByName("nope")).toBeUndefined();
+      expect(await store.getMissionByName("nope")).toBeUndefined();
       store.close();
     });
   });
 
   describe("getAllMissions", () => {
-    it("returns all missions", () => {
+    it("returns all missions", async () => {
       const store = makeStore();
-      store.saveMission({ name: "p1", data: "a", status: "draft" });
-      store.saveMission({ name: "p2", data: "b", status: "active" });
-      store.saveMission({ name: "p3", data: "c", status: "completed" });
-      const missions = store.getAllMissions();
+      await store.saveMission({ name: "p1", data: "a", status: "draft" });
+      await store.saveMission({ name: "p2", data: "b", status: "active" });
+      await store.saveMission({ name: "p3", data: "c", status: "completed" });
+      const missions = await store.getAllMissions();
       expect(missions).toHaveLength(3);
       const names = missions.map(p => p.name).sort();
       expect(names).toEqual(["p1", "p2", "p3"]);
@@ -109,111 +109,111 @@ describe("Mission Persistence (SqliteTaskStore)", () => {
   });
 
   describe("updateMission", () => {
-    it("updates data", () => {
+    it("updates data", async () => {
       const store = makeStore();
-      const mission = store.saveMission({ name: "p1", data: "old", status: "draft" });
-      const updated = store.updateMission(mission.id, { data: "new data" });
+      const mission = await store.saveMission({ name: "p1", data: "old", status: "draft" });
+      const updated = await store.updateMission(mission.id, { data: "new data" });
       expect(updated.data).toBe("new data");
       expect(updated.name).toBe("p1"); // unchanged
       store.close();
     });
 
-    it("updates status", () => {
+    it("updates status", async () => {
       const store = makeStore();
-      const mission = store.saveMission({ name: "p1", data: "d", status: "draft" });
-      const updated = store.updateMission(mission.id, { status: "active" });
+      const mission = await store.saveMission({ name: "p1", data: "d", status: "draft" });
+      const updated = await store.updateMission(mission.id, { status: "active" });
       expect(updated.status).toBe("active");
       store.close();
     });
 
-    it("updates name", () => {
+    it("updates name", async () => {
       const store = makeStore();
-      const mission = store.saveMission({ name: "old-name", data: "d", status: "draft" });
-      const updated = store.updateMission(mission.id, { name: "new-name" });
+      const mission = await store.saveMission({ name: "old-name", data: "d", status: "draft" });
+      const updated = await store.updateMission(mission.id, { name: "new-name" });
       expect(updated.name).toBe("new-name");
       store.close();
     });
 
-    it("throws for missing mission", () => {
+    it("throws for missing mission", async () => {
       const store = makeStore();
-      expect(() => store.updateMission("nope", { data: "x" })).toThrow("Mission not found");
+      await expect(store.updateMission("nope", { data: "x" })).rejects.toThrow("Mission not found");
       store.close();
     });
   });
 
   describe("deleteMission", () => {
-    it("deletes and returns true", () => {
+    it("deletes and returns true", async () => {
       const store = makeStore();
-      const mission = store.saveMission({ name: "p1", data: "d", status: "draft" });
-      expect(store.deleteMission(mission.id)).toBe(true);
-      expect(store.getAllMissions()).toHaveLength(0);
+      const mission = await store.saveMission({ name: "p1", data: "d", status: "draft" });
+      expect(await store.deleteMission(mission.id)).toBe(true);
+      expect(await store.getAllMissions()).toHaveLength(0);
       store.close();
     });
 
-    it("returns false for missing mission", () => {
+    it("returns false for missing mission", async () => {
       const store = makeStore();
-      expect(store.deleteMission("nope")).toBe(false);
+      expect(await store.deleteMission("nope")).toBe(false);
       store.close();
     });
   });
 
   describe("nextMissionName", () => {
-    it("returns mission-1 for empty store", () => {
+    it("returns mission-1 for empty store", async () => {
       const store = makeStore();
-      expect(store.nextMissionName()).toBe("mission-1");
+      expect(await store.nextMissionName()).toBe("mission-1");
       store.close();
     });
 
-    it("increments based on count", () => {
+    it("increments based on count", async () => {
       const store = makeStore();
-      store.saveMission({ name: "mission-1", data: "a", status: "draft" });
-      expect(store.nextMissionName()).toBe("mission-2");
-      store.saveMission({ name: "mission-2", data: "b", status: "active" });
-      expect(store.nextMissionName()).toBe("mission-3");
+      await store.saveMission({ name: "mission-1", data: "a", status: "draft" });
+      expect(await store.nextMissionName()).toBe("mission-2");
+      await store.saveMission({ name: "mission-2", data: "b", status: "active" });
+      expect(await store.nextMissionName()).toBe("mission-3");
       store.close();
     });
   });
 
   describe("mission status lifecycle", () => {
-    it("supports draft → active → completed", () => {
+    it("supports draft → active → completed", async () => {
       const store = makeStore();
-      const mission = store.saveMission({ name: "p1", data: "d", status: "draft" });
+      const mission = await store.saveMission({ name: "p1", data: "d", status: "draft" });
       expect(mission.status).toBe("draft");
 
-      const active = store.updateMission(mission.id, { status: "active" });
+      const active = await store.updateMission(mission.id, { status: "active" });
       expect(active.status).toBe("active");
 
-      const completed = store.updateMission(mission.id, { status: "completed" });
+      const completed = await store.updateMission(mission.id, { status: "completed" });
       expect(completed.status).toBe("completed");
       store.close();
     });
 
-    it("supports draft → active → failed", () => {
+    it("supports draft → active → failed", async () => {
       const store = makeStore();
-      const mission = store.saveMission({ name: "p1", data: "d", status: "draft" });
-      store.updateMission(mission.id, { status: "active" });
-      const failed = store.updateMission(mission.id, { status: "failed" });
+      const mission = await store.saveMission({ name: "p1", data: "d", status: "draft" });
+      await store.updateMission(mission.id, { status: "active" });
+      const failed = await store.updateMission(mission.id, { status: "failed" });
       expect(failed.status).toBe("failed");
       store.close();
     });
 
-    it("supports active → cancelled", () => {
+    it("supports active → cancelled", async () => {
       const store = makeStore();
-      const mission = store.saveMission({ name: "p1", data: "d", status: "active" });
-      const cancelled = store.updateMission(mission.id, { status: "cancelled" });
+      const mission = await store.saveMission({ name: "p1", data: "d", status: "active" });
+      const cancelled = await store.updateMission(mission.id, { status: "cancelled" });
       expect(cancelled.status).toBe("cancelled");
       store.close();
     });
   });
 
   describe("persistence", () => {
-    it("survives close and reopen", () => {
+    it("survives close and reopen", async () => {
       const store1 = makeStore();
-      store1.saveMission({ name: "persistent", data: JSON.stringify({ tasks: [{ title: "hi" }] }), status: "draft", prompt: "test" });
+      await store1.saveMission({ name: "persistent", data: JSON.stringify({ tasks: [{ title: "hi" }] }), status: "draft", prompt: "test" });
       store1.close();
 
       const store2 = makeStore();
-      const missions = store2.getAllMissions();
+      const missions = await store2.getAllMissions();
       expect(missions).toHaveLength(1);
       expect(missions[0].name).toBe("persistent");
       expect(missions[0].prompt).toBe("test");

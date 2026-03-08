@@ -26,7 +26,7 @@ export class FileLogStore implements LogStore {
     this.logsDir = join(polpoDir, "logs");
   }
 
-  startSession(): string {
+  async startSession(): Promise<string> {
     if (!existsSync(this.logsDir)) {
       mkdirSync(this.logsDir, { recursive: true });
     }
@@ -40,11 +40,11 @@ export class FileLogStore implements LogStore {
     return this.sessionId;
   }
 
-  getSessionId(): string | undefined {
+  async getSessionId(): Promise<string | undefined> {
     return this.sessionId;
   }
 
-  append(entry: LogEntry): void {
+  async append(entry: LogEntry): Promise<void> {
     if (!this.sessionId) return;
     try {
       const line = JSON.stringify(entry);
@@ -53,7 +53,7 @@ export class FileLogStore implements LogStore {
     }
   }
 
-  getSessionEntries(sessionId?: string): LogEntry[] {
+  async getSessionEntries(sessionId?: string): Promise<LogEntry[]> {
     const sid = sessionId ?? this.sessionId;
     if (!sid) return [];
     const file = this.sessionFile(sid);
@@ -73,7 +73,7 @@ export class FileLogStore implements LogStore {
     }
   }
 
-  listSessions(): SessionInfo[] {
+  async listSessions(): Promise<SessionInfo[]> {
     if (!existsSync(this.logsDir)) return [];
     const files = readdirSync(this.logsDir)
       .filter(f => f.endsWith(".jsonl"))
@@ -105,8 +105,8 @@ export class FileLogStore implements LogStore {
     return sessions;
   }
 
-  prune(keepSessions: number): number {
-    const sessions = this.listSessions();
+  async prune(keepSessions: number): Promise<number> {
+    const sessions = await this.listSessions();
     if (sessions.length <= keepSessions) return 0;
     const toRemove = sessions.slice(keepSessions);
     let removed = 0;
@@ -121,7 +121,7 @@ export class FileLogStore implements LogStore {
     return removed;
   }
 
-  close(): void {
+  async close(): Promise<void> {
     // No resources to release for file-based store
     this.sessionId = undefined;
   }

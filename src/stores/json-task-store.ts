@@ -38,18 +38,18 @@ export class JsonTaskStore implements TaskStore {
     renameSync(tmp, this.statePath);
   }
 
-  getState(): PolpoState {
+  async getState(): Promise<PolpoState> {
     return this.state;
   }
 
-  setState(partial: Partial<PolpoState>): void {
+  async setState(partial: Partial<PolpoState>): Promise<void> {
     Object.assign(this.state, partial);
     this.persist();
   }
 
-  addTask(
+  async addTask(
     task: Omit<Task, "id" | "status" | "retries" | "createdAt" | "updatedAt"> & { status?: TaskStatus },
-  ): Task {
+  ): Promise<Task> {
     const now = new Date().toISOString();
     const newTask: Task = {
       ...task,
@@ -64,15 +64,15 @@ export class JsonTaskStore implements TaskStore {
     return newTask;
   }
 
-  getTask(taskId: string): Task | undefined {
+  async getTask(taskId: string): Promise<Task | undefined> {
     return this.state.tasks.find((t) => t.id === taskId);
   }
 
-  getAllTasks(): Task[] {
+  async getAllTasks(): Promise<Task[]> {
     return this.state.tasks;
   }
 
-  unsafeSetStatus(taskId: string, newStatus: TaskStatus, reason: string): Task {
+  async unsafeSetStatus(taskId: string, newStatus: TaskStatus, reason: string): Promise<Task> {
     const task = this.state.tasks.find((t) => t.id === taskId);
     if (!task) throw new Error(`Task not found: ${taskId}`);
     const from = task.status;
@@ -83,7 +83,7 @@ export class JsonTaskStore implements TaskStore {
     return task;
   }
 
-  updateTask(taskId: string, updates: Partial<Omit<Task, "id" | "status">>): Task {
+  async updateTask(taskId: string, updates: Partial<Omit<Task, "id" | "status">>): Promise<Task> {
     const task = this.state.tasks.find((t) => t.id === taskId);
     if (!task) {
       throw new Error(`Task not found: ${taskId}`);
@@ -93,7 +93,7 @@ export class JsonTaskStore implements TaskStore {
     return task;
   }
 
-  removeTask(taskId: string): boolean {
+  async removeTask(taskId: string): Promise<boolean> {
     const idx = this.state.tasks.findIndex((t) => t.id === taskId);
     if (idx < 0) return false;
     this.state.tasks.splice(idx, 1);
@@ -101,7 +101,7 @@ export class JsonTaskStore implements TaskStore {
     return true;
   }
 
-  removeTasks(filter: (task: Task) => boolean): number {
+  async removeTasks(filter: (task: Task) => boolean): Promise<number> {
     const before = this.state.tasks.length;
     this.state.tasks = this.state.tasks.filter((t) => !filter(t));
     const removed = before - this.state.tasks.length;
@@ -109,7 +109,7 @@ export class JsonTaskStore implements TaskStore {
     return removed;
   }
 
-  transition(taskId: string, newStatus: TaskStatus): Task {
+  async transition(taskId: string, newStatus: TaskStatus): Promise<Task> {
     const task = this.state.tasks.find((t) => t.id === taskId);
     if (!task) {
       throw new Error(`Task not found: ${taskId}`);

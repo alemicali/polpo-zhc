@@ -115,7 +115,7 @@ export function templateRoutes(): OpenAPIHono<ServerEnv> {
     },
   });
 
-  app.openapi(runTemplateRoute, (c) => {
+  app.openapi(runTemplateRoute, async (c) => {
     const orchestrator = c.get("orchestrator");
     const workDir = orchestrator.getWorkDir();
     const polpoDir = orchestrator.getPolpoDir?.();
@@ -144,13 +144,13 @@ export function templateRoutes(): OpenAPIHono<ServerEnv> {
     const instance = instantiateTemplate(template, validation.resolved);
 
     // Save as mission and execute
-    const mission = orchestrator.saveMission({
+    const mission = await orchestrator.saveMission({
       data: instance.data,
       prompt: instance.prompt,
       name: instance.name,
     });
 
-    const result = orchestrator.executeMission(mission.id);
+    const result = await orchestrator.executeMission(mission.id);
 
     return c.json({
       ok: true,

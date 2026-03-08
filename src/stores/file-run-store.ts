@@ -78,11 +78,11 @@ export class FileRunStore implements RunStore {
     return records;
   }
 
-  upsertRun(run: RunRecord): void {
+  async upsertRun(run: RunRecord): Promise<void> {
     this.writeRun(run);
   }
 
-  updateActivity(runId: string, activity: AgentActivity): void {
+  async updateActivity(runId: string, activity: AgentActivity): Promise<void> {
     const run = this.readRun(runId);
     if (!run) return;
     run.activity = activity;
@@ -91,7 +91,7 @@ export class FileRunStore implements RunStore {
     this.writeRun(run);
   }
 
-  updateOutcomes(runId: string, outcomes: TaskOutcome[]): void {
+  async updateOutcomes(runId: string, outcomes: TaskOutcome[]): Promise<void> {
     const run = this.readRun(runId);
     if (!run) return;
     run.outcomes = outcomes;
@@ -99,7 +99,7 @@ export class FileRunStore implements RunStore {
     this.writeRun(run);
   }
 
-  completeRun(runId: string, status: RunStatus, result: TaskResult): void {
+  async completeRun(runId: string, status: RunStatus, result: TaskResult): Promise<void> {
     const run = this.readRun(runId);
     if (!run) return;
     // Don't let a later write overwrite a run already in terminal state.
@@ -113,11 +113,11 @@ export class FileRunStore implements RunStore {
     this.writeRun(run);
   }
 
-  getRun(runId: string): RunRecord | undefined {
+  async getRun(runId: string): Promise<RunRecord | undefined> {
     return this.readRun(runId);
   }
 
-  getRunByTaskId(taskId: string): RunRecord | undefined {
+  async getRunByTaskId(taskId: string): Promise<RunRecord | undefined> {
     // Scan all runs — small directory, fast enough
     for (const id of this.listRunIds()) {
       const run = this.readRun(id);
@@ -126,17 +126,17 @@ export class FileRunStore implements RunStore {
     return undefined;
   }
 
-  getActiveRuns(): RunRecord[] {
+  async getActiveRuns(): Promise<RunRecord[]> {
     return this.allRuns().filter(r => r.status === "running");
   }
 
-  getTerminalRuns(): RunRecord[] {
+  async getTerminalRuns(): Promise<RunRecord[]> {
     return this.allRuns().filter(
       r => r.status === "completed" || r.status === "failed" || r.status === "killed",
     );
   }
 
-  deleteRun(runId: string): void {
+  async deleteRun(runId: string): Promise<void> {
     const path = this.runPath(runId);
     try {
       unlinkSync(path);
@@ -145,7 +145,7 @@ export class FileRunStore implements RunStore {
     }
   }
 
-  close(): void {
+  async close(): Promise<void> {
     // No-op for filesystem store
   }
 }

@@ -138,7 +138,7 @@ export class SqliteRunStore implements RunStore {
     };
   }
 
-  upsertRun(run: RunRecord): void {
+  async upsertRun(run: RunRecord): Promise<void> {
     this.upsertRunStmt.run({
       id: run.id,
       task_id: run.taskId,
@@ -155,7 +155,7 @@ export class SqliteRunStore implements RunStore {
     });
   }
 
-  updateActivity(runId: string, activity: AgentActivity): void {
+  async updateActivity(runId: string, activity: AgentActivity): Promise<void> {
     this.updateActivityStmt.run({
       id: runId,
       activity: JSON.stringify(activity),
@@ -164,7 +164,7 @@ export class SqliteRunStore implements RunStore {
     });
   }
 
-  updateOutcomes(runId: string, outcomes: TaskOutcome[]): void {
+  async updateOutcomes(runId: string, outcomes: TaskOutcome[]): Promise<void> {
     this.updateOutcomesStmt.run({
       id: runId,
       outcomes: JSON.stringify(outcomes),
@@ -172,9 +172,9 @@ export class SqliteRunStore implements RunStore {
     });
   }
 
-  completeRun(runId: string, status: RunStatus, result: TaskResult): void {
+  async completeRun(runId: string, status: RunStatus, result: TaskResult): Promise<void> {
     // Don't overwrite a run already in terminal state (race condition guard)
-    const existing = this.getRun(runId);
+    const existing = await this.getRun(runId);
     if (existing) {
       const terminal: RunStatus[] = ["completed", "failed", "killed"];
       if (terminal.includes(existing.status)) return;
@@ -187,29 +187,29 @@ export class SqliteRunStore implements RunStore {
     });
   }
 
-  getRun(runId: string): RunRecord | undefined {
+  async getRun(runId: string): Promise<RunRecord | undefined> {
     const row = this.getRunStmt.get(runId) as RunRow | undefined;
     return row ? this.rowToRecord(row) : undefined;
   }
 
-  getRunByTaskId(taskId: string): RunRecord | undefined {
+  async getRunByTaskId(taskId: string): Promise<RunRecord | undefined> {
     const row = this.getRunByTaskIdStmt.get(taskId) as RunRow | undefined;
     return row ? this.rowToRecord(row) : undefined;
   }
 
-  getActiveRuns(): RunRecord[] {
+  async getActiveRuns(): Promise<RunRecord[]> {
     return (this.getActiveRunsStmt.all() as RunRow[]).map(r => this.rowToRecord(r));
   }
 
-  getTerminalRuns(): RunRecord[] {
+  async getTerminalRuns(): Promise<RunRecord[]> {
     return (this.getTerminalRunsStmt.all() as RunRow[]).map(r => this.rowToRecord(r));
   }
 
-  deleteRun(runId: string): void {
+  async deleteRun(runId: string): Promise<void> {
     this.deleteRunStmt.run(runId);
   }
 
-  close(): void {
+  async close(): Promise<void> {
     this.db.close();
   }
 }

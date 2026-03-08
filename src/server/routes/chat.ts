@@ -101,29 +101,29 @@ export function chatRoutes(): OpenAPIHono<ServerEnv> {
   const app = new OpenAPIHono<ServerEnv>();
 
   // GET /chat/sessions — list chat sessions
-  app.openapi(listSessionsRoute, (c) => {
+  app.openapi(listSessionsRoute, async (c) => {
     const orchestrator = c.get("orchestrator");
     const sessionStore = orchestrator.getSessionStore();
     if (!sessionStore) {
       return c.json({ ok: true, data: { sessions: [] } });
     }
-    const sessions = sessionStore.listSessions();
+    const sessions = await sessionStore.listSessions();
     return c.json({ ok: true, data: { sessions } });
   });
 
   // GET /chat/sessions/:id/messages — get messages for a session
-  app.openapi(getSessionMessagesRoute, (c) => {
+  app.openapi(getSessionMessagesRoute, async (c) => {
     const orchestrator = c.get("orchestrator");
     const sessionStore = orchestrator.getSessionStore();
     if (!sessionStore) {
       return c.json({ ok: false, error: "Session store not available", code: "NOT_AVAILABLE" }, 503);
     }
     const { id } = c.req.valid("param");
-    const session = sessionStore.getSession(id);
+    const session = await sessionStore.getSession(id);
     if (!session) {
       return c.json({ ok: false, error: "Session not found", code: "NOT_FOUND" }, 404);
     }
-    const messages = sessionStore.getMessages(id);
+    const messages = await sessionStore.getMessages(id);
     // SECURITY: Redact vault credentials from persisted tool calls before serving to client
     const safeMessages = messages.map(m => {
       if (!m.toolCalls) return m;
@@ -149,7 +149,7 @@ export function chatRoutes(): OpenAPIHono<ServerEnv> {
   });
 
   // PATCH /chat/sessions/:id — rename a session
-  app.openapi(renameSessionRoute, (c) => {
+  app.openapi(renameSessionRoute, async (c) => {
     const orchestrator = c.get("orchestrator");
     const sessionStore = orchestrator.getSessionStore();
     if (!sessionStore) {
@@ -157,7 +157,7 @@ export function chatRoutes(): OpenAPIHono<ServerEnv> {
     }
     const { id } = c.req.valid("param");
     const { title } = c.req.valid("json");
-    const renamed = sessionStore.renameSession(id, title);
+    const renamed = await sessionStore.renameSession(id, title);
     if (!renamed) {
       return c.json({ ok: false, error: "Session not found", code: "NOT_FOUND" }, 404);
     }
@@ -165,14 +165,14 @@ export function chatRoutes(): OpenAPIHono<ServerEnv> {
   });
 
   // DELETE /chat/sessions/:id — delete a session
-  app.openapi(deleteSessionRoute, (c) => {
+  app.openapi(deleteSessionRoute, async (c) => {
     const orchestrator = c.get("orchestrator");
     const sessionStore = orchestrator.getSessionStore();
     if (!sessionStore) {
       return c.json({ ok: false, error: "Session store not available", code: "NOT_AVAILABLE" }, 503);
     }
     const { id } = c.req.valid("param");
-    const deleted = sessionStore.deleteSession(id);
+    const deleted = await sessionStore.deleteSession(id);
     if (!deleted) {
       return c.json({ ok: false, error: "Session not found", code: "NOT_FOUND" }, 404);
     }

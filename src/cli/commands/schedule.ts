@@ -75,7 +75,7 @@ export function registerScheduleCommands(program: Command): void {
           process.exit(1);
         }
 
-        const mission = orchestrator.getMission(missionId);
+        const mission = await orchestrator.getMission(missionId);
         if (!mission) {
           console.error(chalk.red(`Mission "${missionId}" not found.`));
           process.exit(1);
@@ -93,7 +93,7 @@ export function registerScheduleCommands(program: Command): void {
           missionUpdate.endDate = opts.endDate;
         }
 
-        const updated = orchestrator.updateMission(missionId, missionUpdate as any);
+        const updated = await orchestrator.updateMission(missionId, missionUpdate as any);
         const entry = scheduler.registerMission(updated);
 
         if (!entry) {

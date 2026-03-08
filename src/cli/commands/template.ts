@@ -178,13 +178,13 @@ export function registerTemplateCommands(program: Command): void {
         // Init orchestrator, save & execute
         const orchestrator = await initOrchestrator(opts.dir);
 
-        const mission = orchestrator.saveMission({
+        const mission = await orchestrator.saveMission({
           data: instance.data,
           prompt: instance.prompt,
           name: instance.name,
         });
 
-        const result = orchestrator.executeMission(mission.id);
+        const result = await orchestrator.executeMission(mission.id);
         console.log(
           chalk.green(`  Template "${template.name}" executed — ${result.tasks.length} task(s), group: ${result.group}`),
         );

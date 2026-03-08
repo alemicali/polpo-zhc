@@ -126,35 +126,35 @@ export function peerRoutes(): OpenAPIHono<ServerEnv> {
   const app = new OpenAPIHono<ServerEnv>();
 
   // ── List known peers ──
-  app.openapi(listPeersRoute, (c) => {
+  app.openapi(listPeersRoute, async (c) => {
     const orch = c.get("orchestrator");
     const peerStore = orch.getPeerStore();
     if (!peerStore) return c.json({ ok: false, error: "Channel gateway not configured" }, 404);
 
     const channel = c.req.query("channel") as "telegram" | "whatsapp" | "slack" | "discord" | "webchat" | undefined;
-    return c.json({ ok: true, data: peerStore.listPeers(channel) }, 200);
+    return c.json({ ok: true, data: await peerStore.listPeers(channel) }, 200);
   });
 
   // ── Get presence ──
-  app.openapi(getPresenceRoute, (c) => {
+  app.openapi(getPresenceRoute, async (c) => {
     const orch = c.get("orchestrator");
     const peerStore = orch.getPeerStore();
     if (!peerStore) return c.json({ ok: false, error: "Channel gateway not configured" }, 404);
 
-    return c.json({ ok: true, data: peerStore.getPresence() }, 200);
+    return c.json({ ok: true, data: await peerStore.getPresence() }, 200);
   });
 
   // ── Get allowlist ──
-  app.openapi(getAllowlistRoute, (c) => {
+  app.openapi(getAllowlistRoute, async (c) => {
     const orch = c.get("orchestrator");
     const peerStore = orch.getPeerStore();
     if (!peerStore) return c.json({ ok: false, error: "Channel gateway not configured" }, 404);
 
-    return c.json({ ok: true, data: peerStore.getAllowlist() }, 200);
+    return c.json({ ok: true, data: await peerStore.getAllowlist() }, 200);
   });
 
   // ── Add to allowlist ──
-  app.openapi(addToAllowlistRoute, (c) => {
+  app.openapi(addToAllowlistRoute, async (c) => {
     const orch = c.get("orchestrator");
     const peerStore = orch.getPeerStore();
     if (!peerStore) return c.json({ ok: false, error: "Channel gateway not configured" }, 404);
@@ -162,23 +162,23 @@ export function peerRoutes(): OpenAPIHono<ServerEnv> {
     const { peerId } = c.req.valid("json");
     if (!peerId) return c.json({ ok: false, error: "peerId is required" }, 400);
 
-    peerStore.addToAllowlist(peerId);
+    await peerStore.addToAllowlist(peerId);
     return c.json({ ok: true, data: { peerId } }, 200);
   });
 
   // ── Remove from allowlist ──
-  app.openapi(removeFromAllowlistRoute, (c) => {
+  app.openapi(removeFromAllowlistRoute, async (c) => {
     const orch = c.get("orchestrator");
     const peerStore = orch.getPeerStore();
     if (!peerStore) return c.json({ ok: false, error: "Channel gateway not configured" }, 404);
 
     const { peerId } = c.req.valid("param");
-    peerStore.removeFromAllowlist(peerId);
+    await peerStore.removeFromAllowlist(peerId);
     return c.json({ ok: true, data: { peerId } }, 200);
   });
 
   // ── Approve pairing code ──
-  app.openapi(approvePairingRoute, (c) => {
+  app.openapi(approvePairingRoute, async (c) => {
     const orch = c.get("orchestrator");
     const peerStore = orch.getPeerStore();
     if (!peerStore) return c.json({ ok: false, error: "Channel gateway not configured" }, 404);
@@ -186,14 +186,14 @@ export function peerRoutes(): OpenAPIHono<ServerEnv> {
     const { code } = c.req.valid("json");
     if (!code) return c.json({ ok: false, error: "code is required" }, 400);
 
-    const request = peerStore.resolvePairing(code);
+    const request = await peerStore.resolvePairing(code);
     if (!request) return c.json({ ok: false, error: "Invalid or expired pairing code" }, 404);
 
     return c.json({ ok: true, data: request }, 200);
   });
 
   // ── Link peer identities ──
-  app.openapi(linkPeersRoute, (c) => {
+  app.openapi(linkPeersRoute, async (c) => {
     const orch = c.get("orchestrator");
     const peerStore = orch.getPeerStore();
     if (!peerStore) return c.json({ ok: false, error: "Channel gateway not configured" }, 404);
@@ -203,7 +203,7 @@ export function peerRoutes(): OpenAPIHono<ServerEnv> {
       return c.json({ ok: false, error: "peerId and linkedTo are required" }, 400);
     }
 
-    peerStore.linkPeers(peerId, linkedTo);
+    await peerStore.linkPeers(peerId, linkedTo);
     return c.json({ ok: true, data: { peerId, linkedTo } }, 200);
   });
 

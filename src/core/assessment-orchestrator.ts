@@ -24,8 +24,8 @@ export class AssessmentOrchestrator {
    * - JSONL transcript log (execution timeline)
    * - Task outcomes
    */
-  private buildReviewContext(taskId: string, task: Task, result: TaskResult): ReviewContext {
-    const run = this.ctx.runStore.getRunByTaskId(taskId);
+  private async buildReviewContext(taskId: string, task: Task, result: TaskResult): Promise<ReviewContext> {
+    const run = await this.ctx.runStore.getRunByTaskId(taskId);
     const activity = run?.activity;
     const outcomes = run?.outcomes ?? task.outcomes;
 
@@ -81,8 +81,8 @@ export class AssessmentOrchestrator {
       to: "done",
       task: { ...task, status: "done" },
     });
-    this.ctx.registry.transition(taskId, "done");
-    this.ctx.registry.updateTask(taskId, { phase: undefined });
+    await this.ctx.registry.transition(taskId, "done");
+    await this.ctx.registry.updateTask(taskId, { phase: undefined });
 
     // Fire after:task:complete (async, fire-and-forget)
     this.ctx.hooks.runAfter("task:complete", { taskId, task, result }).catch(() => {});
@@ -101,8 +101,8 @@ export class AssessmentOrchestrator {
     return task.expectations.some(e => failedTypes.has(e.type) && this.getConfidence(e) === "estimated");
   }
 
-  handleResult(taskId: string, result: TaskResult): void {
-    const task = this.ctx.registry.getTask(taskId);
+  async handleResult(taskId: string, result: TaskResult): Promise<void> {
+    const task = await this.ctx.registry.getTask(taskId);
     if (!task) return;
 
     // Skip if already terminal
@@ -118,8 +118,8 @@ export class AssessmentOrchestrator {
 
     // Ensure we're in review state
     if (task.status === "in_progress") {
-      this.ctx.registry.transition(taskId, "review");
-      this.ctx.registry.updateTask(taskId, { phase: "review" });
+      await this.ctx.registry.transition(taskId, "review");
+      await this.ctx.registry.updateTask(taskId, { phase: "review" });
     }
 
     // Question detection: intercept before assessment
@@ -127,7 +127,7 @@ export class AssessmentOrchestrator {
     const questionRounds = task.questionRounds ?? 0;
     if (result.exitCode === 0 && questionRounds < maxQRounds) {
       // Get activity from RunStore for richer heuristic
-      const run = this.ctx.runStore.getRunByTaskId(taskId);
+      const run = await this.ctx.runStore.getRunByTaskId(taskId);
       const activity = run?.activity;
       if (looksLikeQuestion(result, activity)) {
         this.handlePossibleQuestion(taskId, task, result);
@@ -160,23 +160,23 @@ export class AssessmentOrchestrator {
   private resolveAndRerun(taskId: string, task: Task, result: TaskResult, question: string): void {
     this.ctx.emitter.emit("task:question", { taskId, question });
 
-    generateAnswer(this.ctx.emitter as unknown as Orchestrator, task, question, this.ctx.config.settings.orchestratorModel).then(answer => {
+    generateAnswer(this.ctx.emitter as unknown as Orchestrator, task, question, this.ctx.config.settings.orchestratorModel).then(async answer => {
       this.ctx.emitter.emit("task:answered", { taskId, question, answer });
 
-      const current = this.ctx.registry.getTask(taskId);
+      const current = await this.ctx.registry.getTask(taskId);
       if (!current) return;
 
       // Save original description before first Q&A
       if (!current.originalDescription) {
-        this.ctx.registry.updateTask(taskId, { originalDescription: current.description });
+        await this.ctx.registry.updateTask(taskId, { originalDescription: current.description });
       }
 
       // Clear old outcomes before re-run — the agent will produce fresh ones.
-      this.ctx.registry.updateTask(taskId, { outcomes: [] });
+      await this.ctx.registry.updateTask(taskId, { outcomes: [] });
       // Append Q&A to description and re-run (no retry burn)
       const qaBlock = `\n\n[Polpo Clarification]\nQ: ${question}\nA: ${answer}`;
-      this.ctx.registry.unsafeSetStatus(taskId, "pending", "Q&A re-run — no retry burn");
-      this.ctx.registry.updateTask(taskId, {
+      await this.ctx.registry.unsafeSetStatus(taskId, "pending", "Q&A re-run — no retry burn");
+      await this.ctx.registry.updateTask(taskId, {
         phase: "execution",
         description: current.description + qaBlock,
         questionRounds: (current.questionRounds ?? 0) + 1,
@@ -224,21 +224,21 @@ export class AssessmentOrchestrator {
   /**
    * Standard assessment flow: run expectations/metrics, then mark done/failed/fix/retry.
    */
-  private proceedToAssessment(taskId: string, task: Task, result: TaskResult): void {
+  private async proceedToAssessment(taskId: string, task: Task, result: TaskResult): Promise<void> {
     if (task.expectations.length > 0 || task.metrics.length > 0) {
       // Run before:assessment:run hook (async — assessment is already async)
-      this.ctx.hooks.runBefore("assessment:run", { taskId, task }).then(hookResult => {
+      this.ctx.hooks.runBefore("assessment:run", { taskId, task }).then(async hookResult => {
         if (hookResult.cancelled) {
           this.ctx.emitter.emit("log", {
             level: "info",
             message: `[${taskId}] Assessment blocked by hook: ${hookResult.cancelReason ?? "no reason"}`,
           });
           // Skip assessment — mark done with result as-is
-          this.ctx.registry.updateTask(taskId, { result });
+          await this.ctx.registry.updateTask(taskId, { result });
           if (result.exitCode === 0) {
             this.transitionToDone(taskId, task, result).catch(() => {});
           } else {
-            this.retryOrFail(taskId, task, result);
+            await this.retryOrFail(taskId, task, result);
           }
           return;
         }
@@ -247,11 +247,11 @@ export class AssessmentOrchestrator {
         this.runAssessmentFlow(taskId, task, result);
       });
     } else {
-      this.ctx.registry.updateTask(taskId, { result });
+      await this.ctx.registry.updateTask(taskId, { result });
       if (result.exitCode === 0) {
         this.transitionToDone(taskId, task, result).catch(() => {});
       } else {
-        this.retryOrFail(taskId, task, result);
+        await this.retryOrFail(taskId, task, result);
       }
     }
   }
@@ -259,7 +259,7 @@ export class AssessmentOrchestrator {
   /**
    * Core assessment flow — extracted to allow hook interception in proceedToAssessment.
    */
-  private runAssessmentFlow(taskId: string, task: Task, result: TaskResult): void {
+  private async runAssessmentFlow(taskId: string, task: Task, result: TaskResult): Promise<void> {
     this.ctx.emitter.emit("assessment:started", { taskId });
       const progressCb = (msg: string) => this.ctx.emitter.emit("assessment:progress", { taskId, message: msg });
       const checkProgressCb = (ev: { index: number; total: number; type: string; label: string; phase: "started" | "complete"; passed?: boolean; message?: string }) => {
@@ -271,11 +271,11 @@ export class AssessmentOrchestrator {
       };
 
       // Build rich review context from RunStore, JSONL transcript, and outcomes
-      const reviewContext = this.buildReviewContext(taskId, task, result);
+      const reviewContext = await this.buildReviewContext(taskId, task, result);
 
-      this.runAssessmentWithRetry(task, this.ctx.agentWorkDir, progressCb, reviewContext, checkProgressCb).then(assessment => {
+      this.runAssessmentWithRetry(task, this.ctx.agentWorkDir, progressCb, reviewContext, checkProgressCb).then(async assessment => {
         setAssessment(result, assessment, "initial");
-        this.ctx.registry.updateTask(taskId, { result });
+        await this.ctx.registry.updateTask(taskId, { result });
 
         if (assessment.passed && result.exitCode === 0) {
           this.ctx.emitter.emit("assessment:complete", {
@@ -297,7 +297,7 @@ export class AssessmentOrchestrator {
             message: exitMsg,
             details: result.stderr || undefined,
           });
-          this.ctx.registry.updateTask(taskId, { result });
+          await this.ctx.registry.updateTask(taskId, { result });
           this.ctx.emitter.emit("assessment:complete", {
             taskId,
             passed: false,
@@ -305,7 +305,7 @@ export class AssessmentOrchestrator {
             globalScore: assessment.globalScore,
             message: exitMsg,
           });
-          this.retryOrFail(taskId, task, result);
+          await this.retryOrFail(taskId, task, result);
         } else {
           const reasons = [
             ...assessment.checks.filter(c => !c.passed).map(c => `${c.type}: ${c.message}`),
@@ -324,25 +324,24 @@ export class AssessmentOrchestrator {
             const hasEstimatedFailures = this.hasEstimatedFailures(task, assessment);
 
             if (autoCorrect && hasEstimatedFailures) {
-              this.tryAutoCorrectExpectations(taskId, task, result, assessment).then(corrected => {
+              this.tryAutoCorrectExpectations(taskId, task, result, assessment).then(async corrected => {
                 if (corrected) return;
-                return this.judgeExpectations(taskId, task, result, assessment).then(judged => {
-                  if (!judged) this.fixOrRetry(taskId, task, result);
-                });
-              }).catch(() => {
-                this.fixOrRetry(taskId, task, result);
+                const judged = await this.judgeExpectations(taskId, task, result, assessment);
+                if (!judged) await this.fixOrRetry(taskId, task, result);
+              }).catch(async () => {
+                await this.fixOrRetry(taskId, task, result);
               });
             } else {
-              this.fixOrRetry(taskId, task, result);
+              await this.fixOrRetry(taskId, task, result);
             }
           } else {
-            this.retryOrFail(taskId, task, result);
+            await this.retryOrFail(taskId, task, result);
           }
         }
-      }).catch(err => {
+      }).catch(async err => {
         this.ctx.emitter.emit("log", { level: "error", message: `[${taskId}] Assessment error: ${err.message}` });
-        this.ctx.registry.updateTask(taskId, { result });
-        this.retryOrFail(taskId, task, result);
+        await this.ctx.registry.updateTask(taskId, { result });
+        await this.retryOrFail(taskId, task, result);
       });
   }
 
@@ -369,7 +368,7 @@ export class AssessmentOrchestrator {
     if (nonCorrectableFailures.length > 0) return false;
 
     // Gather agent's actual file list from activity
-    const run = this.ctx.runStore.getRunByTaskId(taskId);
+    const run = await this.ctx.runStore.getRunByTaskId(taskId);
     const activity = run?.activity;
     const agentFiles = [
       ...(activity?.filesCreated ?? []),
@@ -429,19 +428,19 @@ export class AssessmentOrchestrator {
       newExpectations[idx] = { ...newExpectations[idx], paths };
     }
 
-    this.ctx.registry.updateTask(taskId, { expectations: newExpectations });
+    await this.ctx.registry.updateTask(taskId, { expectations: newExpectations });
     this.ctx.emitter.emit("assessment:corrected", { taskId, corrections: corrections.size });
 
     // Re-assess with corrected expectations
-    const current = this.ctx.registry.getTask(taskId);
+    const current = await this.ctx.registry.getTask(taskId);
     if (!current) return false;
 
     try {
       const progressCb = (msg: string) => this.ctx.emitter.emit("assessment:progress", { taskId, message: msg });
-      const reCtx = this.buildReviewContext(taskId, task, result);
+      const reCtx = await this.buildReviewContext(taskId, task, result);
       const newAssessment = await this.ctx.assessFn(current, this.ctx.agentWorkDir, progressCb, reCtx, this.ctx.config.settings.reasoning);
       setAssessment(result, newAssessment, "auto-correct");
-      this.ctx.registry.updateTask(taskId, { result });
+      await this.ctx.registry.updateTask(taskId, { result });
 
       if (newAssessment.passed) {
         this.ctx.emitter.emit("assessment:complete", {
@@ -500,7 +499,7 @@ export class AssessmentOrchestrator {
     if (assessment.globalScore !== undefined && assessment.globalScore < 2.5) return false;
 
     // Gather context
-    const run = this.ctx.runStore.getRunByTaskId(taskId);
+    const run = await this.ctx.runStore.getRunByTaskId(taskId);
     const activity = run?.activity;
 
     const prompt = buildJudgePrompt(task, result, assessment, failedChecks, activity);
@@ -551,19 +550,19 @@ export class AssessmentOrchestrator {
 
     if (correctionCount === 0) return false;
 
-    this.ctx.registry.updateTask(taskId, { expectations: newExpectations });
+    await this.ctx.registry.updateTask(taskId, { expectations: newExpectations });
     this.ctx.emitter.emit("assessment:corrected", { taskId, corrections: correctionCount });
 
     // Re-assess with corrected expectations
-    const current = this.ctx.registry.getTask(taskId);
+    const current = await this.ctx.registry.getTask(taskId);
     if (!current) return false;
 
     try {
       const progressCb = (msg: string) => this.ctx.emitter.emit("assessment:progress", { taskId, message: msg });
-      const judgeCtx = this.buildReviewContext(taskId, task, result);
+      const judgeCtx = await this.buildReviewContext(taskId, task, result);
       const newAssessment = await this.ctx.assessFn(current, this.ctx.agentWorkDir, progressCb, judgeCtx, this.ctx.config.settings.reasoning);
       setAssessment(result, newAssessment, "judge");
-      this.ctx.registry.updateTask(taskId, { result });
+      await this.ctx.registry.updateTask(taskId, { result });
 
       if (newAssessment.passed) {
         this.ctx.emitter.emit("assessment:complete", {
@@ -603,8 +602,8 @@ export class AssessmentOrchestrator {
    * Fix phase: when execution succeeded but review failed, try a targeted fix
    * without burning a full retry. After maxFixAttempts, fall back to full retry.
    */
-  private fixOrRetry(taskId: string, _task: Task, result: TaskResult): void {
-    const current = this.ctx.registry.getTask(taskId);
+  private async fixOrRetry(taskId: string, _task: Task, result: TaskResult): Promise<void> {
+    const current = await this.ctx.registry.getTask(taskId);
     if (!current) return;
 
     // Side-effects guard: block automatic fix/retry for tasks with irreversible actions.
@@ -616,13 +615,13 @@ export class AssessmentOrchestrator {
       this.ctx.emitter.emit("log", { level: "warn", message: `[${taskId}] ${reason}` });
       // Preserve original description and prepare fix prompt for when approval comes
       if (!current.originalDescription) {
-        this.ctx.registry.updateTask(taskId, { originalDescription: current.description });
+        await this.ctx.registry.updateTask(taskId, { originalDescription: current.description });
       }
-      this.ctx.registry.updateTask(taskId, {
+      await this.ctx.registry.updateTask(taskId, {
         description: buildSideEffectFixPrompt(current, result),
         phase: "fix",
       });
-      this.ctx.registry.transition(taskId, "awaiting_approval");
+      await this.ctx.registry.transition(taskId, "awaiting_approval");
       return;
     }
 
@@ -632,16 +631,16 @@ export class AssessmentOrchestrator {
     if (fixAttempts <= maxFix) {
       // Save original description before first fix/retry
       if (!current.originalDescription) {
-        this.ctx.registry.updateTask(taskId, { originalDescription: current.description });
+        await this.ctx.registry.updateTask(taskId, { originalDescription: current.description });
       }
 
       this.ctx.emitter.emit("task:fix", { taskId, attempt: fixAttempts, maxFix });
 
       // Clear old outcomes — the agent will produce fresh ones on re-execution.
-      this.ctx.registry.updateTask(taskId, { outcomes: [] });
+      await this.ctx.registry.updateTask(taskId, { outcomes: [] });
       // unsafeSetStatus bypasses retry increment (fix attempts are NOT real failures)
-      this.ctx.registry.unsafeSetStatus(taskId, "pending", "fix phase — no retry burn");
-      this.ctx.registry.updateTask(taskId, {
+      await this.ctx.registry.unsafeSetStatus(taskId, "pending", "fix phase — no retry burn");
+      await this.ctx.registry.updateTask(taskId, {
         phase: "fix",
         fixAttempts,
         description: buildFixPrompt(current, result),
@@ -649,17 +648,17 @@ export class AssessmentOrchestrator {
     } else {
       // Fix attempts exhausted → full retry (burns 1 retry)
       this.ctx.emitter.emit("log", { level: "warn", message: `[${taskId}] Fix attempts exhausted (${maxFix}), falling back to full retry` });
-      this.ctx.registry.updateTask(taskId, {
+      await this.ctx.registry.updateTask(taskId, {
         phase: "execution",
         fixAttempts: 0,
       });
-      this.retryOrFail(taskId, _task, result);
+      await this.retryOrFail(taskId, _task, result);
     }
   }
 
   /** @internal — exposed for test access via Orchestrator facade */
-  retryOrFail(taskId: string, _task: Task, result: TaskResult): void {
-    const current = this.ctx.registry.getTask(taskId);
+  async retryOrFail(taskId: string, _task: Task, result: TaskResult): Promise<void> {
+    const current = await this.ctx.registry.getTask(taskId);
     if (!current) return;
 
     // Side-effects guard: block automatic retry for tasks with irreversible actions.
@@ -669,24 +668,24 @@ export class AssessmentOrchestrator {
       this.ctx.emitter.emit("log", { level: "warn", message: `[${taskId}] ${reason}` });
       // Preserve original description and prepare retry prompt for when approval comes
       if (!current.originalDescription) {
-        this.ctx.registry.updateTask(taskId, { originalDescription: current.description });
+        await this.ctx.registry.updateTask(taskId, { originalDescription: current.description });
       }
-      this.ctx.registry.updateTask(taskId, {
+      await this.ctx.registry.updateTask(taskId, {
         description: buildSideEffectRetryPrompt(current, result),
         phase: "execution",
       });
-      this.ctx.registry.transition(taskId, "awaiting_approval");
+      await this.ctx.registry.transition(taskId, "awaiting_approval");
       return;
     }
 
     // Don't retry tasks from cancelled missions — resolve via missionId (direct FK) first
     if (current.group) {
       const mission = current.missionId
-        ? this.ctx.registry.getMission?.(current.missionId)
-        : this.ctx.registry.getMissionByName?.(current.group);
+        ? await this.ctx.registry.getMission?.(current.missionId)
+        : await this.ctx.registry.getMissionByName?.(current.group);
       if (mission && mission.status === "cancelled") {
         this.ctx.emitter.emit("log", { level: "debug", message: `[${taskId}] Skipping retry — mission cancelled` });
-        this.ctx.registry.transition(taskId, "failed");
+        await this.ctx.registry.transition(taskId, "failed");
         return;
       }
     }
@@ -697,7 +696,7 @@ export class AssessmentOrchestrator {
 
       // Save original description before first retry
       if (!current.originalDescription) {
-        this.ctx.registry.updateTask(taskId, { originalDescription: current.description });
+        await this.ctx.registry.updateTask(taskId, { originalDescription: current.description });
       }
 
       // Check if we should escalate to a different agent
@@ -718,10 +717,10 @@ export class AssessmentOrchestrator {
       this.ctx.emitter.emit("task:retry", { taskId, attempt: nextAttempt, maxRetries: current.maxRetries });
       // Clear old outcomes — the agent will produce fresh ones on re-execution.
       // Without this, outcomes accumulate across retries and all get re-sent via notifications.
-      this.ctx.registry.updateTask(taskId, { outcomes: [] });
-      this.ctx.registry.transition(taskId, "failed");
-      this.ctx.registry.transition(taskId, "pending");
-      this.ctx.registry.updateTask(taskId, {
+      await this.ctx.registry.updateTask(taskId, { outcomes: [] });
+      await this.ctx.registry.transition(taskId, "failed");
+      await this.ctx.registry.transition(taskId, "pending");
+      await this.ctx.registry.updateTask(taskId, {
         description: buildRetryPrompt(current, result),
         assignTo,
         phase: "execution",
@@ -736,7 +735,7 @@ export class AssessmentOrchestrator {
         task: current,
         result,
         reason: "maxRetries",
-      }).then(hookResult => {
+      }).then(async hookResult => {
         if (hookResult.cancelled) {
           this.ctx.emitter.emit("log", {
             level: "info",
@@ -744,8 +743,8 @@ export class AssessmentOrchestrator {
           });
           return;  // Escalation manager (or other hook) is handling this
         }
-        this.ctx.registry.transition(taskId, "failed");
-        this.ctx.registry.updateTask(taskId, { phase: undefined });
+        await this.ctx.registry.transition(taskId, "failed");
+        await this.ctx.registry.updateTask(taskId, { phase: undefined });
 
         // Fire after:task:fail
         this.ctx.hooks.runAfter("task:fail", {
@@ -754,10 +753,10 @@ export class AssessmentOrchestrator {
           result,
           reason: "maxRetries",
         }).catch(() => {});
-      }).catch(() => {
+      }).catch(async () => {
         // Hook failed — fail the task normally
-        this.ctx.registry.transition(taskId, "failed");
-        this.ctx.registry.updateTask(taskId, { phase: undefined });
+        await this.ctx.registry.transition(taskId, "failed");
+        await this.ctx.registry.updateTask(taskId, { phase: undefined });
       });
     }
   }

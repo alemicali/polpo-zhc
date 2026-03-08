@@ -125,8 +125,8 @@ export async function resolveDeadlock(
     const settings = orchestrator.getConfig()?.settings;
     const maxAttempts = settings?.maxResolutionAttempts ?? 2;
     const model = settings?.orchestratorModel;
-    const memory = orchestrator.getMemory();
-    const allTasks = orchestrator.getStore().getAllTasks();
+    const memory = await orchestrator.getMemory();
+    const allTasks = await orchestrator.getStore().getAllTasks();
 
     // Deduplicate: if multiple blocked tasks share the same failed dep,
     // process each blocked task independently but track retried deps
@@ -141,7 +141,7 @@ export async function resolveDeadlock(
           taskId: task.id,
           reason: "max resolution attempts reached",
         });
-        forceFailTask(orchestrator, task.id);
+        await forceFailTask(orchestrator, task.id);
         continue;
       }
 
@@ -160,11 +160,11 @@ export async function resolveDeadlock(
           taskId: task.id,
           reason: "LLM analysis failed",
         });
-        forceFailTask(orchestrator, task.id);
+        await forceFailTask(orchestrator, task.id);
         continue;
       }
 
-      applyDecision(decision, task, failedDep, blockage, orchestrator, retriedDeps);
+      await applyDecision(decision, task, failedDep, blockage, orchestrator, retriedDeps);
     }
 
     // Force-fail unresolvable tasks (missing deps)
@@ -173,7 +173,7 @@ export async function resolveDeadlock(
         taskId: blockage.task.id,
         reason: `missing dependencies: ${blockage.missingDeps.join(", ")}`,
       });
-      forceFailTask(orchestrator, blockage.task.id);
+      await forceFailTask(orchestrator, blockage.task.id);
     }
   } finally {
     resolving = false;
@@ -274,21 +274,21 @@ function buildResolutionPrompt(
 
 // ── Apply Decision ────────────────────────────────────
 
-function applyDecision(
+async function applyDecision(
   decision: ResolutionDecision,
   blockedTask: Task,
   failedDep: Task,
   blockage: BlockageInfo,
   orchestrator: Orchestrator,
   retriedDeps: Set<string>,
-): void {
+): Promise<void> {
   const store = orchestrator.getStore();
 
   switch (decision.action) {
     case "absorb": {
       // Save original description before first resolution
       if (!blockedTask.originalDescription) {
-        store.updateTask(blockedTask.id, { originalDescription: blockedTask.description });
+        await store.updateTask(blockedTask.id, { originalDescription: blockedTask.description });
       }
 
       // Build absorbed description
@@ -315,8 +315,8 @@ function applyDecision(
       const allFailedIds = new Set(blockage.failedDeps.map(d => d.id));
       const cleanDeps = newDeps.filter(id => !allFailedIds.has(id));
 
-      store.unsafeSetStatus(blockedTask.id, "pending", "deadlock absorb — failed dep removed");
-      store.updateTask(blockedTask.id, {
+      await store.unsafeSetStatus(blockedTask.id, "pending", "deadlock absorb — failed dep removed");
+      await store.updateTask(blockedTask.id, {
         dependsOn: cleanDeps,
         description: absorbBlock,
         resolutionAttempts: (blockedTask.resolutionAttempts ?? 0) + 1,
@@ -334,10 +334,10 @@ function applyDecision(
     case "retry": {
       // Retry the failed dep (if not already retried in this resolution round)
       if (!retriedDeps.has(failedDep.id)) {
-        const fresh = store.getTask(failedDep.id);
+        const fresh = await store.getTask(failedDep.id);
         if (fresh && fresh.retries < fresh.maxRetries) {
           // Use transition to properly increment retries
-          store.transition(failedDep.id, "pending");
+          await store.transition(failedDep.id, "pending");
           retriedDeps.add(failedDep.id);
 
           orchestrator.emit("deadlock:resolved", {
@@ -352,7 +352,7 @@ function applyDecision(
             taskId: blockedTask.id,
             reason: `dependency "${failedDep.title}" has no retries remaining`,
           });
-          forceFailTask(orchestrator, blockedTask.id);
+          await forceFailTask(orchestrator, blockedTask.id);
         }
       }
       // If already retried: do nothing, next tick will re-evaluate
@@ -365,7 +365,7 @@ function applyDecision(
         taskId: blockedTask.id,
         reason: decision.reason,
       });
-      forceFailTask(orchestrator, blockedTask.id);
+      await forceFailTask(orchestrator, blockedTask.id);
       break;
     }
   }
@@ -373,17 +373,17 @@ function applyDecision(
 
 // ── Helpers ───────────────────────────────────────────
 
-function forceFailTask(orchestrator: Orchestrator, taskId: string): void {
+async function forceFailTask(orchestrator: Orchestrator, taskId: string): Promise<void> {
   const store = orchestrator.getStore();
   try {
-    const task = store.getTask(taskId);
+    const task = await store.getTask(taskId);
     if (!task || task.status === "done" || task.status === "failed") return;
     // Walk through state machine to reach failed
-    if (task.status === "pending") store.transition(taskId, "assigned");
-    const t2 = store.getTask(taskId);
-    if (t2 && t2.status === "assigned") store.transition(taskId, "in_progress");
-    const t3 = store.getTask(taskId);
-    if (t3 && t3.status === "in_progress") store.transition(taskId, "failed");
-    else if (t3 && t3.status === "review") store.transition(taskId, "failed");
+    if (task.status === "pending") await store.transition(taskId, "assigned");
+    const t2 = await store.getTask(taskId);
+    if (t2 && t2.status === "assigned") await store.transition(taskId, "in_progress");
+    const t3 = await store.getTask(taskId);
+    if (t3 && t3.status === "in_progress") await store.transition(taskId, "failed");
+    else if (t3 && t3.status === "review") await store.transition(taskId, "failed");
   } catch { /* already terminal or transition error */ }
 }

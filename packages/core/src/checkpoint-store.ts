@@ -12,7 +12,7 @@ export interface CheckpointState {
 }
 
 export interface CheckpointStore {
-  load(): CheckpointState;
-  save(state: CheckpointState): void;
-  removeGroup(state: CheckpointState, group: string): CheckpointState;
+  load(): Promise<CheckpointState>;
+  save(state: CheckpointState): Promise<void>;
+  removeGroup(state: CheckpointState, group: string): Promise<CheckpointState>;
 }

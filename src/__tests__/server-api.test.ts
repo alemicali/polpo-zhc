@@ -61,7 +61,7 @@ beforeAll(async () => {
 
   // Create Hono app without API key auth
   app = createApp(orchestrator, sseBridge);
-});
+}, 30_000);
 
 afterAll(async () => {
   if (tmpDir) {
@@ -1053,9 +1053,9 @@ describe("Logs API", () => {
   test("GET /logs/:sessionId returns 200 with entries for valid session", async () => {
     // Get the current session ID from the log store
     const logStore = orchestrator.getLogStore()!;
-    const sessions = logStore.listSessions();
+    const sessions = await logStore.listSessions();
     expect(sessions.length).toBeGreaterThanOrEqual(1);
-    const sessionId = sessions[0].id;
+    const sessionId = sessions[0].sessionId;
 
     const res = await app.request(api(`/logs/${sessionId}`));
     expect(res.status).toBe(200);
@@ -1096,9 +1096,9 @@ describe("Chat Sessions API", () => {
   test("session lifecycle: create, list, get messages, delete", async () => {
     // Seed a session via orchestrator (avoids LLM dependency)
     const sessionStore = orchestrator.getSessionStore()!;
-    const sessionId = sessionStore.create("Test session");
-    sessionStore.addMessage(sessionId, "user", "Hello from test");
-    sessionStore.addMessage(sessionId, "assistant", "Hi! How can I help?");
+    const sessionId = await sessionStore.create("Test session");
+    await sessionStore.addMessage(sessionId, "user", "Hello from test");
+    await sessionStore.addMessage(sessionId, "assistant", "Hi! How can I help?");
 
     // List — should include our session
     const listRes = await app.request(api("/chat/sessions"));

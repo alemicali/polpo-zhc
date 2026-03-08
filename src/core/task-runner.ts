@@ -26,20 +26,20 @@ export class TaskRunner {
    * Collect results from terminal runs and pass them to the callback.
    * The callback is typically the assessment pipeline (handleResult).
    */
-  collectResults(onResult: (taskId: string, result: TaskResult) => void): void {
-    const terminalRuns = this.ctx.runStore.getTerminalRuns();
+  async collectResults(onResult: (taskId: string, result: TaskResult) => void): Promise<void> {
+    const terminalRuns = await this.ctx.runStore.getTerminalRuns();
     for (const run of terminalRuns) {
       // Persist sessionId on the task before deleting the run
       const sid = run.sessionId ?? run.activity.sessionId;
       if (sid) {
-        try { this.ctx.registry.updateTask(run.taskId, { sessionId: sid }); } catch { /* task may already be gone */ }
+        try { await this.ctx.registry.updateTask(run.taskId, { sessionId: sid }); } catch { /* task may already be gone */ }
       }
       // Persist auto-collected outcomes on the task.
       // REPLACE (not append) — each execution produces its own definitive outcomes.
       // Appending caused "exponential outcome" accumulation across retries/fix cycles.
       if (run.outcomes && run.outcomes.length > 0) {
         try {
-          this.ctx.registry.updateTask(run.taskId, { outcomes: run.outcomes });
+          await this.ctx.registry.updateTask(run.taskId, { outcomes: run.outcomes });
         } catch { /* task may already be gone */ }
       }
       if (run.result) {
@@ -60,7 +60,7 @@ export class TaskRunner {
         }
         onResult(run.taskId, run.result);
       }
-      this.ctx.runStore.deleteRun(run.id);
+      await this.ctx.runStore.deleteRun(run.id);
       this.staleWarned.delete(run.taskId);
     }
   }
@@ -163,14 +163,14 @@ export class TaskRunner {
    * - Hard kill at maxDuration (or default taskTimeout)
    * - Warn at staleThreshold, kill at 2x staleThreshold
    */
-  enforceHealthChecks(): void {
+  async enforceHealthChecks(): Promise<void> {
     const defaultTimeout = this.ctx.config.settings.taskTimeout ?? 30 * 60 * 1000;
     const staleThreshold = this.ctx.config.settings.staleThreshold ?? 5 * 60 * 1000;
 
-    const activeRuns = this.ctx.runStore.getActiveRuns();
+    const activeRuns = await this.ctx.runStore.getActiveRuns();
     for (const run of activeRuns) {
       // 1. Task timeout (hard kill)
-      const task = this.ctx.registry.getTask(run.taskId);
+      const task = await this.ctx.registry.getTask(run.taskId);
       const timeout = task?.maxDuration ?? defaultTimeout;
       if (timeout > 0) {
         const elapsed = Date.now() - new Date(run.startedAt).getTime();
@@ -181,7 +181,7 @@ export class TaskRunner {
             try { process.kill(run.pid, "SIGTERM"); } catch { /* already dead */ }
           }
           // Mark run as killed so we don't retry every tick
-          this.ctx.runStore.completeRun(run.id, "killed", {
+          await this.ctx.runStore.completeRun(run.id, "killed", {
             exitCode: 1, stdout: "", stderr: `Timed out after ${Math.round(elapsed / 1000)}s`, duration: elapsed,
           });
           this.staleWarned.delete(run.taskId);
@@ -200,7 +200,7 @@ export class TaskRunner {
             try { process.kill(run.pid, "SIGTERM"); } catch { /* already dead */ }
           }
           // Mark run as killed so we don't retry every tick
-          this.ctx.runStore.completeRun(run.id, "killed", {
+          await this.ctx.runStore.completeRun(run.id, "killed", {
             exitCode: 1, stdout: "", stderr: `Agent unresponsive for ${Math.round(idle / 1000)}s`, duration: idle,
           });
           this.staleWarned.delete(run.taskId);
@@ -215,8 +215,8 @@ export class TaskRunner {
 
   /** Sync process list from RunStore into the old processes table for TUI backward compat.
    *  Also emits `agent:activity` SSE events when activity changes (diff-based). */
-  syncProcessesFromRunStore(): void {
-    const active = this.ctx.runStore.getActiveRuns();
+  async syncProcessesFromRunStore(): Promise<void> {
+    const active = await this.ctx.runStore.getActiveRuns();
 
     // Emit agent:activity for each run whose activity snapshot changed
     const seenTaskIds = new Set<string>();
@@ -260,7 +260,7 @@ export class TaskRunner {
       }
     }
 
-    this.ctx.registry.setState({
+    await this.ctx.registry.setState({
       processes: active.map(r => ({
         agentName: r.agentName,
         pid: r.pid,
@@ -276,31 +276,31 @@ export class TaskRunner {
    * Recover tasks left in limbo from a previous crash.
    * Resets orphaned tasks to pending WITHOUT burning retry count.
    */
-  recoverOrphanedTasks(): number {
+  async recoverOrphanedTasks(): Promise<number> {
     // Check RunStore active runs first
-    const activeRuns = this.ctx.runStore.getActiveRuns();
+    const activeRuns = await this.ctx.runStore.getActiveRuns();
     for (const run of activeRuns) {
       if (this.isProcessAlive(run.pid)) {
         // Runner still alive — leave it running, work is NOT lost!
         this.ctx.emitter.emit("log", { level: "info", message: `Runner PID ${run.pid} still alive for task ${run.taskId} — reconnecting` });
       } else {
         // Runner died — clean up the run record
-        this.ctx.runStore.completeRun(run.id, "failed", {
+        await this.ctx.runStore.completeRun(run.id, "failed", {
           exitCode: 1, stdout: "", stderr: "Runner process died", duration: 0,
         });
-        this.ctx.runStore.deleteRun(run.id);
+        await this.ctx.runStore.deleteRun(run.id);
       }
     }
 
     // Backward compat: kill orphan OS processes from old processes table
-    const state = this.ctx.registry.getState();
+    const state = await this.ctx.registry.getState();
     for (const proc of state.processes) {
       if (proc.pid > 0 && proc.alive) {
         this.killOrphanProcess(proc.pid, proc.agentName);
       }
     }
 
-    const tasks = this.ctx.registry.getAllTasks();
+    const tasks = await this.ctx.registry.getAllTasks();
     const orphanStates: Set<string> = new Set(["assigned", "in_progress", "review"]);
     let recovered = 0;
 
@@ -308,7 +308,7 @@ export class TaskRunner {
       if (!orphanStates.has(task.status)) continue;
 
       // Check if there's a live runner for this task
-      const run = this.ctx.runStore.getRunByTaskId(task.id);
+      const run = await this.ctx.runStore.getRunByTaskId(task.id);
       if (run && run.status === "running" && this.isProcessAlive(run.pid)) {
         // Runner still working — skip recovery for this task
         continue;
@@ -318,13 +318,13 @@ export class TaskRunner {
       // Shutdown interrupts are not real failures — unsafeSetStatus bypasses
       // transition(failed → pending) which would burn a retry.
       this.ctx.emitter.emit("task:recovered", { taskId: task.id, title: task.title, previousStatus: task.status });
-      this.ctx.registry.unsafeSetStatus(task.id, "pending", "orphan recovery — shutdown interrupt");
+      await this.ctx.registry.unsafeSetStatus(task.id, "pending", "orphan recovery — shutdown interrupt");
       recovered++;
     }
 
     // Clear stale process list
     if (recovered > 0 || tasks.some(t => orphanStates.has(t.status))) {
-      this.ctx.registry.setState({ processes: [] });
+      await this.ctx.registry.setState({ processes: [] });
     }
 
     return recovered;
@@ -335,13 +335,13 @@ export class TaskRunner {
     try { process.kill(pid, 0); return true; } catch { return false; /* process not found */ }
   }
 
-  spawnForTask(task: Task): void {
+  async spawnForTask(task: Task): Promise<void> {
     const agent = findAgent(this.ctx.config.teams, task.assignTo);
     if (!agent) {
       this.ctx.emitter.emit("log", { level: "error", message: `No agent "${task.assignTo}" for task "${task.title}"` });
-      this.ctx.registry.transition(task.id, "assigned");
-      this.ctx.registry.transition(task.id, "in_progress");
-      this.ctx.registry.transition(task.id, "failed");
+      await this.ctx.registry.transition(task.id, "assigned");
+      await this.ctx.registry.transition(task.id, "in_progress");
+      await this.ctx.registry.transition(task.id, "failed");
       return;
     }
 
@@ -354,9 +354,9 @@ export class TaskRunner {
           level: "error",
           message: `[${task.id}] Missing API key for ${detail} — cannot spawn agent "${agent.name}"`,
         });
-        this.ctx.registry.transition(task.id, "assigned");
-        this.ctx.registry.transition(task.id, "in_progress");
-        this.ctx.registry.transition(task.id, "failed");
+        await this.ctx.registry.transition(task.id, "assigned");
+        await this.ctx.registry.transition(task.id, "in_progress");
+        await this.ctx.registry.transition(task.id, "failed");
         return;
       }
     }
@@ -371,12 +371,12 @@ export class TaskRunner {
       return;  // task stays pending — will be re-evaluated next tick
     }
 
-    this.ctx.registry.transition(task.id, "assigned");
-    this.ctx.registry.transition(task.id, "in_progress");
+    await this.ctx.registry.transition(task.id, "assigned");
+    await this.ctx.registry.transition(task.id, "in_progress");
 
     // Set phase if not already set (new tasks start in execution phase)
     if (!task.phase) {
-      this.ctx.registry.updateTask(task.id, { phase: "execution" });
+      await this.ctx.registry.updateTask(task.id, { phase: "execution" });
     }
 
     const runId = nanoid();
@@ -399,7 +399,7 @@ export class TaskRunner {
     const contextParts: string[] = [];
 
     // 1. Project memory (persistent cross-session knowledge)
-    const memory = this.ctx.memoryStore?.get() ?? "";
+    const memory = (await this.ctx.memoryStore?.get()) ?? "";
     if (memory) {
       contextParts.push(`<project-memory>\n${memory}\n</project-memory>`);
     }
@@ -420,8 +420,8 @@ export class TaskRunner {
       try {
         // Resolve mission via direct ID (preferred) or group name (legacy fallback)
         const mission = task.missionId
-          ? this.ctx.registry.getMission?.(task.missionId)
-          : this.ctx.registry.getMissionByName?.(task.group);
+          ? await this.ctx.registry.getMission?.(task.missionId)
+          : await this.ctx.registry.getMissionByName?.(task.group);
         const missionParts: string[] = [];
 
         // Original user prompt that generated this mission (the "why")
@@ -430,7 +430,7 @@ export class TaskRunner {
         }
 
         // Sibling tasks — just titles and statuses for awareness, not full descriptions
-        const allTasks = this.ctx.registry.getAllTasks();
+        const allTasks = await this.ctx.registry.getAllTasks();
         const siblings = allTasks.filter(t => t.group === task.group && t.id !== task.id);
         if (siblings.length > 0) {
           missionParts.push(`Other tasks in this mission:`);
@@ -525,7 +525,7 @@ export class TaskRunner {
         activity: { filesCreated: [], filesEdited: [], toolCalls: 0, totalTokens: 0, lastUpdate: now },
         configPath,
       };
-      this.ctx.runStore.upsertRun(runRecord);
+      await this.ctx.runStore.upsertRun(runRecord);
 
       this.ctx.emitter.emit("agent:spawned", {
         taskId: task.id,
@@ -535,7 +535,7 @@ export class TaskRunner {
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       this.ctx.emitter.emit("log", { level: "error", message: `[${task.id}] Failed to spawn runner: ${message}` });
-      this.ctx.registry.transition(task.id, "failed");
+      await this.ctx.registry.transition(task.id, "failed");
     }
   }
 

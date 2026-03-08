@@ -91,7 +91,7 @@ export function watcherRoutes(): OpenAPIHono<ServerEnv> {
   });
 
   // POST /watchers — create a watcher
-  app.openapi(createWatcherRoute, (c) => {
+  app.openapi(createWatcherRoute, async (c) => {
     const orchestrator = c.get("orchestrator");
     const watcherMgr = orchestrator.getWatcherManager();
     if (!watcherMgr) {
@@ -99,7 +99,7 @@ export function watcherRoutes(): OpenAPIHono<ServerEnv> {
     }
 
     const body = c.req.valid("json");
-    const task = orchestrator.getStore().getTask(body.taskId);
+    const task = await orchestrator.getStore().getTask(body.taskId);
     if (!task) {
       return c.json({ ok: false, error: `Task "${body.taskId}" not found`, code: "NOT_FOUND" }, 400);
     }

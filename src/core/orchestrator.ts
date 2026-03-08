@@ -194,8 +194,8 @@ export class Orchestrator extends TypedEmitter {
     this.registry = stores.task;
     this.runStore = stores.run;
     this.memoryStore = new FileMemoryStore(this.polpoDir);
-    this.initLogStore();
-    this.initSessionStore();
+    await this.initLogStore();
+    await this.initSessionStore();
     this.initManagers();
     this.initVaultStore();
   }
@@ -310,7 +310,7 @@ export class Orchestrator extends TypedEmitter {
       this.notificationRouter.start();
 
       // Set scope resolver so the router can resolve task/mission-level notification rules
-      this.notificationRouter.setScopeResolver((data: unknown) => {
+      this.notificationRouter.setScopeResolver(async (data: unknown) => {
         if (!data || typeof data !== "object") return undefined;
         const d = data as Record<string, unknown>;
 
@@ -319,22 +319,20 @@ export class Orchestrator extends TypedEmitter {
           ?? ((d.task as Record<string, unknown> | undefined)?.id as string | undefined);
 
         // Extract missionId / group
+        const taskForGroup = taskId ? await this.registry.getTask(taskId) : undefined;
         const group = (d.group as string | undefined)
-          ?? (taskId ? this.registry.getTask(taskId)?.group : undefined);
+          ?? taskForGroup?.group;
 
-        const taskNotifications = taskId
-          ? this.registry.getTask(taskId)?.notifications
-          : undefined;
+        const taskNotifications = taskForGroup?.notifications;
 
         let missionNotifications: import("./types.js").ScopedNotificationRules | undefined;
         // Resolve mission via task.missionId (direct FK) or event.missionId, fallback to group name
-        const taskObj = taskId ? this.registry.getTask(taskId) : undefined;
-        const resolvedMissionId = taskObj?.missionId ?? (d.missionId as string | undefined);
+        const resolvedMissionId = taskForGroup?.missionId ?? (d.missionId as string | undefined);
         if (resolvedMissionId) {
-          const mission = this.registry.getMission?.(resolvedMissionId);
+          const mission = await this.registry.getMission?.(resolvedMissionId);
           missionNotifications = mission?.notifications;
         } else if (group) {
-          const mission = this.registry.getMissionByName?.(group);
+          const mission = await this.registry.getMissionByName?.(group);
           missionNotifications = mission?.notifications;
         }
 
@@ -347,8 +345,8 @@ export class Orchestrator extends TypedEmitter {
       this.approvalMgr.setNotificationRouter(this.notificationRouter);
 
       // Set outcome resolver so approval notifications can include task outcomes
-      this.notificationRouter.setOutcomeResolver((taskId: string) => {
-        const task = this.registry.getTask(taskId);
+      this.notificationRouter.setOutcomeResolver(async (taskId: string) => {
+        const task = await this.registry.getTask(taskId);
         return task?.outcomes;
       });
 
@@ -420,7 +418,7 @@ export class Orchestrator extends TypedEmitter {
     return async (action: NotificationAction): Promise<string> => {
       switch (action.type) {
         case "create_task": {
-          const task = this.addTask({
+          const task = await this.addTask({
             title: action.title,
             description: action.description,
             assignTo: action.assignTo,
@@ -429,9 +427,9 @@ export class Orchestrator extends TypedEmitter {
           return `Task created: [${task.id}] "${task.title}" → ${task.assignTo}`;
         }
         case "execute_mission": {
-          const mission = this.registry.getMission?.(action.missionId);
+          const mission = await this.registry.getMission?.(action.missionId);
           if (!mission) throw new Error(`Mission "${action.missionId}" not found`);
-          const result = this.missionExec.executeMission(action.missionId);
+          const result = await this.missionExec.executeMission(action.missionId);
           return `Mission "${mission.name}" executed: ${result.tasks.length} tasks created`;
         }
         case "run_script": {
@@ -481,8 +479,8 @@ export class Orchestrator extends TypedEmitter {
     this.registry = stores.task;
     this.runStore = stores.run;
     this.memoryStore = new FileMemoryStore(this.polpoDir);
-    this.initLogStore();
-    this.initSessionStore();
+    await this.initLogStore();
+    await this.initSessionStore();
 
     this.config = {
       version: "1",
@@ -504,14 +502,14 @@ export class Orchestrator extends TypedEmitter {
     this.initManagers();
     this.initVaultStore();
     this.interactive = true;
-    this.registry.setState({
+    await this.registry.setState({
       project,
       teams: teamsArray,
       startedAt: new Date().toISOString(),
     });
 
     // Recover any tasks left in limbo from a previous crash
-    const recovered = this.runner.recoverOrphanedTasks();
+    const recovered = await this.runner.recoverOrphanedTasks();
     if (recovered > 0) {
       this.emit("log", { level: "warn", message: `Recovered ${recovered} orphaned task(s) from previous session` });
     }
@@ -547,49 +545,49 @@ export class Orchestrator extends TypedEmitter {
 
   // ── Task Management (delegates to TaskManager) ──
 
-  addTask(opts: {
+  async addTask(opts: {
     title: string; description: string; assignTo: string;
     expectations?: TaskExpectation[]; expectedOutcomes?: ExpectedOutcome[];
     dependsOn?: string[]; group?: string; maxDuration?: number; retryPolicy?: RetryPolicy;
     notifications?: ScopedNotificationRules; sideEffects?: boolean; draft?: boolean;
-  }): Task { return this.taskMgr.addTask(opts); }
-  updateTaskDescription(taskId: string, description: string): void { this.taskMgr.updateTaskDescription(taskId, description); }
-  updateTaskAssignment(taskId: string, agentName: string): void { this.taskMgr.updateTaskAssignment(taskId, agentName); }
-  updateTaskExpectations(taskId: string, expectations: TaskExpectation[]): void { this.taskMgr.updateTaskExpectations(taskId, expectations); }
-  retryTask(taskId: string): void { this.taskMgr.retryTask(taskId); }
+  }): Promise<Task> { return this.taskMgr.addTask(opts); }
+  async updateTaskDescription(taskId: string, description: string): Promise<void> { return this.taskMgr.updateTaskDescription(taskId, description); }
+  async updateTaskAssignment(taskId: string, agentName: string): Promise<void> { return this.taskMgr.updateTaskAssignment(taskId, agentName); }
+  async updateTaskExpectations(taskId: string, expectations: TaskExpectation[]): Promise<void> { return this.taskMgr.updateTaskExpectations(taskId, expectations); }
+  async retryTask(taskId: string): Promise<void> { return this.taskMgr.retryTask(taskId); }
   reassessTask(taskId: string): Promise<void> { return this.taskMgr.reassessTask(taskId); }
-  killTask(taskId: string): boolean { return this.taskMgr.killTask(taskId); }
-  deleteTask(taskId: string): boolean { return this.registry.removeTask(taskId); }
-  abortGroup(group: string): number {
-    const count = this.taskMgr.abortGroup(group);
+  async killTask(taskId: string): Promise<boolean> { return this.taskMgr.killTask(taskId); }
+  async deleteTask(taskId: string): Promise<boolean> { return this.registry.removeTask(taskId); }
+  async abortGroup(group: string): Promise<number> {
+    const count = await this.taskMgr.abortGroup(group);
     // Clean up any schedule tied to this mission group — resolve via task.missionId first
-    const groupTasks = this.registry.getAllTasks().filter(t => t.group === group);
+    const groupTasks = (await this.registry.getAllTasks()).filter(t => t.group === group);
     const mid = groupTasks.find(t => t.missionId)?.missionId;
-    const mission = mid ? this.registry.getMission?.(mid) : this.registry.getMissionByName?.(group);
+    const mission = mid ? await this.registry.getMission?.(mid) : await this.registry.getMissionByName?.(group);
     if (mission) this.scheduler?.unregisterMission(mission.id);
     return count;
   }
-  clearTasks(filter: (task: Task) => boolean): number { return this.taskMgr.clearTasks(filter); }
-  forceFailTask(taskId: string): void { this.taskMgr.forceFailTask(taskId); }
+  async clearTasks(filter: (task: Task) => boolean): Promise<number> { return this.taskMgr.clearTasks(filter); }
+  async forceFailTask(taskId: string): Promise<void> { return this.taskMgr.forceFailTask(taskId); }
 
   // ── Approval Management ──
 
-  approveRequest(requestId: string, resolvedBy?: string, note?: string): ApprovalRequest | null {
-    return this.approvalMgr?.approve(requestId, resolvedBy, note) ?? null;
+  async approveRequest(requestId: string, resolvedBy?: string, note?: string): Promise<ApprovalRequest | null> {
+    return (await this.approvalMgr?.approve(requestId, resolvedBy, note)) ?? null;
   }
-  rejectRequest(requestId: string, feedback: string, resolvedBy?: string): ApprovalRequest | null {
-    return this.approvalMgr?.reject(requestId, feedback, resolvedBy) ?? null;
+  async rejectRequest(requestId: string, feedback: string, resolvedBy?: string): Promise<ApprovalRequest | null> {
+    return (await this.approvalMgr?.reject(requestId, feedback, resolvedBy)) ?? null;
   }
-  canRejectRequest(requestId: string): { allowed: boolean; rejectionCount: number; maxRejections: number } {
-    return this.approvalMgr?.canReject(requestId) ?? { allowed: false, rejectionCount: 0, maxRejections: 0 };
+  async canRejectRequest(requestId: string): Promise<{ allowed: boolean; rejectionCount: number; maxRejections: number }> {
+    return (await this.approvalMgr?.canReject(requestId)) ?? { allowed: false, rejectionCount: 0, maxRejections: 0 };
   }
-  getPendingApprovals(): ApprovalRequest[] {
-    return this.approvalMgr?.getPending() ?? [];
+  async getPendingApprovals(): Promise<ApprovalRequest[]> {
+    return (await this.approvalMgr?.getPending()) ?? [];
   }
-  getAllApprovals(status?: ApprovalStatus): ApprovalRequest[] {
-    return this.approvalMgr?.getAll(status) ?? [];
+  async getAllApprovals(status?: ApprovalStatus): Promise<ApprovalRequest[]> {
+    return (await this.approvalMgr?.getAll(status)) ?? [];
   }
-  getApprovalRequest(id: string): ApprovalRequest | undefined {
+  async getApprovalRequest(id: string): Promise<ApprovalRequest | undefined> {
     return this.approvalMgr?.getRequest(id);
   }
 
@@ -620,107 +618,107 @@ export class Orchestrator extends TypedEmitter {
   getTeams(): Team[] { return this.agentMgr.getTeams(); }
   getTeam(name?: string): Team | undefined { return this.agentMgr.getTeam(name); }
   getConfig(): PolpoConfig | null { return this.config; }
-  addTeam(team: Team): void { this.agentMgr.addTeam(team); }
-  removeTeam(name: string): boolean { return this.agentMgr.removeTeam(name); }
-  renameTeam(oldName: string, newName: string): void { this.agentMgr.renameTeam(oldName, newName); }
-  addAgent(agent: AgentConfig, teamName?: string): void { this.agentMgr.addAgent(agent, teamName); }
-  removeAgent(name: string): boolean { return this.agentMgr.removeAgent(name); }
+  async addTeam(team: Team): Promise<void> { return this.agentMgr.addTeam(team); }
+  async removeTeam(name: string): Promise<boolean> { return this.agentMgr.removeTeam(name); }
+  async renameTeam(oldName: string, newName: string): Promise<void> { return this.agentMgr.renameTeam(oldName, newName); }
+  async addAgent(agent: AgentConfig, teamName?: string): Promise<void> { return this.agentMgr.addAgent(agent, teamName); }
+  async removeAgent(name: string): Promise<boolean> { return this.agentMgr.removeAgent(name); }
   findAgentTeam(name: string): Team | undefined { return this.agentMgr.findAgentTeam(name); }
-  addVolatileAgent(agent: AgentConfig, group: string): void { this.agentMgr.addVolatileAgent(agent, group); }
-  cleanupVolatileAgents(group: string): number { return this.agentMgr.cleanupVolatileAgents(group); }
+  async addVolatileAgent(agent: AgentConfig, group: string): Promise<void> { return this.agentMgr.addVolatileAgent(agent, group); }
+  async cleanupVolatileAgents(group: string): Promise<number> { return this.agentMgr.cleanupVolatileAgents(group); }
 
 
   // ─── Mission Management (delegates to MissionExecutor) ──
 
-  saveMission(opts: { data: string; prompt?: string; name?: string; status?: MissionStatus; notifications?: ScopedNotificationRules }): Mission { return this.missionExec.saveMission(opts); }
-  getMission(missionId: string): Mission | undefined { return this.missionExec.getMission(missionId); }
-  getMissionByName(name: string): Mission | undefined { return this.missionExec.getMissionByName(name); }
-  getAllMissions(): Mission[] { return this.missionExec.getAllMissions(); }
-  updateMission(missionId: string, updates: Partial<Omit<Mission, "id">>): Mission { return this.missionExec.updateMission(missionId, updates); }
-  deleteMission(missionId: string): boolean {
-    const result = this.missionExec.deleteMission(missionId);
+  async saveMission(opts: { data: string; prompt?: string; name?: string; status?: MissionStatus; notifications?: ScopedNotificationRules }): Promise<Mission> { return this.missionExec.saveMission(opts); }
+  async getMission(missionId: string): Promise<Mission | undefined> { return this.missionExec.getMission(missionId); }
+  async getMissionByName(name: string): Promise<Mission | undefined> { return this.missionExec.getMissionByName(name); }
+  async getAllMissions(): Promise<Mission[]> { return this.missionExec.getAllMissions(); }
+  async updateMission(missionId: string, updates: Partial<Omit<Mission, "id">>): Promise<Mission> { return this.missionExec.updateMission(missionId, updates); }
+  async deleteMission(missionId: string): Promise<boolean> {
+    const result = await this.missionExec.deleteMission(missionId);
     if (result) this.scheduler?.unregisterMission(missionId);
     return result;
   }
 
   // ─── Atomic Mission Data Operations (delegates to MissionExecutor) ──
 
-  addMissionTask(missionId: string, task: { title: string; description: string; assignTo?: string; dependsOn?: string[]; expectations?: unknown[]; expectedOutcomes?: unknown[]; maxDuration?: number; retryPolicy?: { escalateAfter?: number; fallbackAgent?: string }; notifications?: unknown }): Mission {
+  async addMissionTask(missionId: string, task: { title: string; description: string; assignTo?: string; dependsOn?: string[]; expectations?: unknown[]; expectedOutcomes?: unknown[]; maxDuration?: number; retryPolicy?: { escalateAfter?: number; fallbackAgent?: string }; notifications?: unknown }): Promise<Mission> {
     return this.missionExec.addMissionTask(missionId, task);
   }
-  updateMissionTask(missionId: string, taskTitle: string, updates: { title?: string; description?: string; assignTo?: string; dependsOn?: string[]; expectations?: unknown[]; expectedOutcomes?: unknown[]; maxDuration?: number; retryPolicy?: { escalateAfter?: number; fallbackAgent?: string }; notifications?: unknown }): Mission {
+  async updateMissionTask(missionId: string, taskTitle: string, updates: { title?: string; description?: string; assignTo?: string; dependsOn?: string[]; expectations?: unknown[]; expectedOutcomes?: unknown[]; maxDuration?: number; retryPolicy?: { escalateAfter?: number; fallbackAgent?: string }; notifications?: unknown }): Promise<Mission> {
     return this.missionExec.updateMissionTask(missionId, taskTitle, updates);
   }
-  removeMissionTask(missionId: string, taskTitle: string): Mission {
+  async removeMissionTask(missionId: string, taskTitle: string): Promise<Mission> {
     return this.missionExec.removeMissionTask(missionId, taskTitle);
   }
-  reorderMissionTasks(missionId: string, titles: string[]): Mission {
+  async reorderMissionTasks(missionId: string, titles: string[]): Promise<Mission> {
     return this.missionExec.reorderMissionTasks(missionId, titles);
   }
-  addMissionCheckpoint(missionId: string, cp: { name: string; afterTasks: string[]; blocksTasks: string[]; notifyChannels?: string[]; message?: string }): Mission {
+  async addMissionCheckpoint(missionId: string, cp: { name: string; afterTasks: string[]; blocksTasks: string[]; notifyChannels?: string[]; message?: string }): Promise<Mission> {
     return this.missionExec.addMissionCheckpoint(missionId, cp);
   }
-  updateMissionCheckpoint(missionId: string, name: string, updates: { name?: string; afterTasks?: string[]; blocksTasks?: string[]; notifyChannels?: string[]; message?: string }): Mission {
+  async updateMissionCheckpoint(missionId: string, name: string, updates: { name?: string; afterTasks?: string[]; blocksTasks?: string[]; notifyChannels?: string[]; message?: string }): Promise<Mission> {
     return this.missionExec.updateMissionCheckpoint(missionId, name, updates);
   }
-  removeMissionCheckpoint(missionId: string, name: string): Mission {
+  async removeMissionCheckpoint(missionId: string, name: string): Promise<Mission> {
     return this.missionExec.removeMissionCheckpoint(missionId, name);
   }
-  addMissionQualityGate(missionId: string, gate: { name: string; afterTasks: string[]; blocksTasks: string[]; minScore?: number; requireAllPassed?: boolean; condition?: string; notifyChannels?: string[] }): Mission {
+  async addMissionQualityGate(missionId: string, gate: { name: string; afterTasks: string[]; blocksTasks: string[]; minScore?: number; requireAllPassed?: boolean; condition?: string; notifyChannels?: string[] }): Promise<Mission> {
     return this.missionExec.addMissionQualityGate(missionId, gate);
   }
-  updateMissionQualityGate(missionId: string, name: string, updates: { name?: string; afterTasks?: string[]; blocksTasks?: string[]; minScore?: number; requireAllPassed?: boolean; condition?: string; notifyChannels?: string[] }): Mission {
+  async updateMissionQualityGate(missionId: string, name: string, updates: { name?: string; afterTasks?: string[]; blocksTasks?: string[]; minScore?: number; requireAllPassed?: boolean; condition?: string; notifyChannels?: string[] }): Promise<Mission> {
     return this.missionExec.updateMissionQualityGate(missionId, name, updates);
   }
-  removeMissionQualityGate(missionId: string, name: string): Mission {
+  async removeMissionQualityGate(missionId: string, name: string): Promise<Mission> {
     return this.missionExec.removeMissionQualityGate(missionId, name);
   }
-  addMissionDelay(missionId: string, delay: { name: string; afterTasks: string[]; blocksTasks: string[]; duration: string; notifyChannels?: string[]; message?: string }): Mission {
+  async addMissionDelay(missionId: string, delay: { name: string; afterTasks: string[]; blocksTasks: string[]; duration: string; notifyChannels?: string[]; message?: string }): Promise<Mission> {
     return this.missionExec.addMissionDelay(missionId, delay);
   }
-  updateMissionDelay(missionId: string, name: string, updates: { name?: string; afterTasks?: string[]; blocksTasks?: string[]; duration?: string; notifyChannels?: string[]; message?: string }): Mission {
+  async updateMissionDelay(missionId: string, name: string, updates: { name?: string; afterTasks?: string[]; blocksTasks?: string[]; duration?: string; notifyChannels?: string[]; message?: string }): Promise<Mission> {
     return this.missionExec.updateMissionDelay(missionId, name, updates);
   }
-  removeMissionDelay(missionId: string, name: string): Mission {
+  async removeMissionDelay(missionId: string, name: string): Promise<Mission> {
     return this.missionExec.removeMissionDelay(missionId, name);
   }
-  addMissionTeamMember(missionId: string, member: { name: string; role?: string; model?: string; [key: string]: unknown }): Mission {
+  async addMissionTeamMember(missionId: string, member: { name: string; role?: string; model?: string; [key: string]: unknown }): Promise<Mission> {
     return this.missionExec.addMissionTeamMember(missionId, member);
   }
-  updateMissionTeamMember(missionId: string, memberName: string, updates: { name?: string; role?: string; model?: string; [key: string]: unknown }): Mission {
+  async updateMissionTeamMember(missionId: string, memberName: string, updates: { name?: string; role?: string; model?: string; [key: string]: unknown }): Promise<Mission> {
     return this.missionExec.updateMissionTeamMember(missionId, memberName, updates);
   }
-  removeMissionTeamMember(missionId: string, memberName: string): Mission {
+  async removeMissionTeamMember(missionId: string, memberName: string): Promise<Mission> {
     return this.missionExec.removeMissionTeamMember(missionId, memberName);
   }
-  updateMissionNotifications(missionId: string, notifications: ScopedNotificationRules | null): Mission {
+  async updateMissionNotifications(missionId: string, notifications: ScopedNotificationRules | null): Promise<Mission> {
     return this.missionExec.updateMissionNotifications(missionId, notifications);
   }
 
   // ─── Project Memory ────────────────────────────────── 
 
   /** Check if project memory exists. */
-  hasMemory(): boolean {
-    return this.memoryStore?.exists() ?? false;
+  async hasMemory(): Promise<boolean> {
+    return (await this.memoryStore?.exists()) ?? false;
   }
 
   /** Get the full project memory content. */
-  getMemory(): string {
-    return this.memoryStore?.get() ?? "";
+  async getMemory(): Promise<string> {
+    return (await this.memoryStore?.get()) ?? "";
   }
 
   /** Overwrite the project memory. */
-  saveMemory(content: string): void {
-    this.memoryStore?.save(content);
+  async saveMemory(content: string): Promise<void> {
+    await this.memoryStore?.save(content);
   }
 
   /** Append a line to the project memory. */
-  appendMemory(line: string): void {
-    this.memoryStore?.append(line);
+  async appendMemory(line: string): Promise<void> {
+    await this.memoryStore?.append(line);
   }
 
   /** Replace a unique substring in the project memory. */
-  updateMemory(oldText: string, newText: string): true | string {
+  async updateMemory(oldText: string, newText: string): Promise<true | string> {
     if (!this.memoryStore) return "No memory store configured.";
     return this.memoryStore.update(oldText, newText);
   }
@@ -731,12 +729,12 @@ export class Orchestrator extends TypedEmitter {
   }
 
   /** Initialize the persistent log store and wire it as event sink. */
-  private initLogStore(): void {
+  private async initLogStore(): Promise<void> {
     this.logStore = new FileLogStore(this.polpoDir);
-    this.logStore.startSession();
+    await this.logStore.startSession();
     this.setLogSink(this.logStore);
     // Auto-prune: keep last 20 sessions
-    try { this.logStore.prune(20); } catch { /* best-effort: non-critical */ }
+    try { await this.logStore.prune(20); } catch { /* best-effort: non-critical */ }
   }
 
   /** Get the chat session store. */
@@ -745,16 +743,16 @@ export class Orchestrator extends TypedEmitter {
   }
 
   /** Initialize the chat session store. */
-  private initSessionStore(): void {
+  private async initSessionStore(): Promise<void> {
     this.sessionStore = new FileSessionStore(this.polpoDir);
-    try { this.sessionStore.prune(20); } catch { /* best-effort: non-critical */ }
+    try { await this.sessionStore.prune(20); } catch { /* best-effort: non-critical */ }
   }
 
   // ─── Mission Resume / Execute (delegates to MissionExecutor) ──
 
-  getResumableMissions(): Mission[] { return this.missionExec.getResumableMissions(); }
-  resumeMission(missionId: string, opts?: { retryFailed?: boolean }): { retried: number; pending: number } { return this.missionExec.resumeMission(missionId, opts); }
-  executeMission(missionId: string): { tasks: Task[]; group: string } { return this.missionExec.executeMission(missionId); }
+  async getResumableMissions(): Promise<Mission[]> { return this.missionExec.getResumableMissions(); }
+  async resumeMission(missionId: string, opts?: { retryFailed?: boolean }): Promise<{ retried: number; pending: number }> { return this.missionExec.resumeMission(missionId, opts); }
+  async executeMission(missionId: string): Promise<{ tasks: Task[]; group: string }> { return this.missionExec.executeMission(missionId); }
 
   // ─── Checkpoints ────────────────────────────────────
 
@@ -762,13 +760,13 @@ export class Orchestrator extends TypedEmitter {
   getActiveCheckpoints() { return this.missionExec.getActiveCheckpoints(); }
 
   /** Resume a checkpoint by mission group name and checkpoint name. Returns true if resumed. */
-  resumeCheckpoint(group: string, checkpointName: string): boolean {
+  async resumeCheckpoint(group: string, checkpointName: string): Promise<boolean> {
     return this.missionExec.resumeCheckpoint(group, checkpointName);
   }
 
   /** Resume a checkpoint by mission ID and checkpoint name. Returns true if resumed. */
-  resumeCheckpointByMissionId(missionId: string, checkpointName: string): boolean {
-    const mission = this.missionExec.getMission(missionId);
+  async resumeCheckpointByMissionId(missionId: string, checkpointName: string): Promise<boolean> {
+    const mission = await this.missionExec.getMission(missionId);
     if (!mission) return false;
     return this.missionExec.resumeCheckpoint(mission.name, checkpointName);
   }
@@ -790,7 +788,7 @@ export class Orchestrator extends TypedEmitter {
   async gracefulStop(timeoutMs = 5000): Promise<void> {
     await this.hookRegistry.runBefore("orchestrator:shutdown", {});
     this.stopped = true;
-    const activeRuns = this.runStore.getActiveRuns();
+    const activeRuns = await this.runStore.getActiveRuns();
 
     if (activeRuns.length > 0) {
       this.emit("log", { level: "warn", message: `Shutting down ${activeRuns.length} running agent(s)...` });
@@ -805,39 +803,39 @@ export class Orchestrator extends TypedEmitter {
       // Wait for runners to write their results
       const deadline = Date.now() + timeoutMs;
       while (Date.now() < deadline) {
-        const stillActive = this.runStore.getActiveRuns();
+        const stillActive = await this.runStore.getActiveRuns();
         if (stillActive.length === 0) break;
         await sleep(200);
       }
 
       // Force-mark any remaining active runs as killed
-      for (const run of this.runStore.getActiveRuns()) {
-        this.runStore.completeRun(run.id, "killed", {
+      for (const run of await this.runStore.getActiveRuns()) {
+        await this.runStore.completeRun(run.id, "killed", {
           exitCode: 1, stdout: "", stderr: "Killed during shutdown", duration: 0,
         });
       }
     }
 
     // Only save completed work — leave killed/failed tasks in current state for recovery
-    for (const run of this.runStore.getTerminalRuns()) {
-      const task = this.registry.getTask(run.taskId);
+    for (const run of await this.runStore.getTerminalRuns()) {
+      const task = await this.registry.getTask(run.taskId);
       if (run.status === "completed" && run.result?.exitCode === 0 && task && task.status !== "done") {
         // Agent finished successfully — save result and mark done (skip async assessment)
         try {
-          this.registry.updateTask(run.taskId, { result: run.result });
-          if (task.status === "pending") this.registry.transition(run.taskId, "assigned");
-          if (task.status === "assigned") this.registry.transition(run.taskId, "in_progress");
-          if (task.status === "in_progress") this.registry.transition(run.taskId, "review");
-          this.registry.transition(run.taskId, "done");
+          await this.registry.updateTask(run.taskId, { result: run.result });
+          if (task.status === "pending") await this.registry.transition(run.taskId, "assigned");
+          if (task.status === "assigned") await this.registry.transition(run.taskId, "in_progress");
+          if (task.status === "in_progress") await this.registry.transition(run.taskId, "review");
+          await this.registry.transition(run.taskId, "done");
         } catch { /* leave for recovery on restart */ }
       }
       // For killed/failed runs: task stays in current state (in_progress, assigned, etc.)
       // recoverOrphanedTasks() on restart will handle retry without burning retry count
-      this.runStore.deleteRun(run.id);
+      await this.runStore.deleteRun(run.id);
     }
 
     // Clear process list in state and close stores
-    this.registry.setState({ processes: [], completedAt: new Date().toISOString() });
+    await this.registry.setState({ processes: [], completedAt: new Date().toISOString() });
     if (this.configReloadTimer) clearTimeout(this.configReloadTimer);
     this.configWatcher?.close();
     this.telegramPoller?.stop();
@@ -851,12 +849,12 @@ export class Orchestrator extends TypedEmitter {
     this.slaMonitor?.dispose();
     this.qualityController?.dispose();
     this.scheduler?.dispose();
-    this.registry.close?.();
-    this.runStore.close();
+    await this.registry.close?.();
+    await this.runStore.close();
     this.emit("orchestrator:shutdown", {});
     await this.hookRegistry.runAfter("orchestrator:shutdown", {});
-    this.logStore?.close();
-    this.sessionStore?.close();
+    await this.logStore?.close();
+    await this.sessionStore?.close();
   }
 
   // ── Config Hot Reload ──
@@ -944,25 +942,23 @@ export class Orchestrator extends TypedEmitter {
       this.notificationRouter.start();
 
       // Restore scope resolver
-      this.notificationRouter.setScopeResolver((data: unknown) => {
+      this.notificationRouter.setScopeResolver(async (data: unknown) => {
         if (!data || typeof data !== "object") return undefined;
         const d = data as Record<string, unknown>;
         const taskId = (d.taskId as string | undefined)
           ?? ((d.task as Record<string, unknown> | undefined)?.id as string | undefined);
+        const taskForGroup = taskId ? await this.registry.getTask(taskId) : undefined;
         const group = (d.group as string | undefined)
-          ?? (taskId ? this.registry.getTask(taskId)?.group : undefined);
-        const taskNotifications = taskId
-          ? this.registry.getTask(taskId)?.notifications
-          : undefined;
+          ?? taskForGroup?.group;
+        const taskNotifications = taskForGroup?.notifications;
         let missionNotifications: ScopedNotificationRules | undefined;
         // Resolve mission via task.missionId (direct FK) or event.missionId, fallback to group name
-        const taskObj = taskId ? this.registry.getTask(taskId) : undefined;
-        const resolvedMissionId = taskObj?.missionId ?? (d.missionId as string | undefined);
+        const resolvedMissionId = taskForGroup?.missionId ?? (d.missionId as string | undefined);
         if (resolvedMissionId) {
-          const mission = this.registry.getMission?.(resolvedMissionId);
+          const mission = await this.registry.getMission?.(resolvedMissionId);
           missionNotifications = mission?.notifications;
         } else if (group) {
-          const mission = this.registry.getMissionByName?.(group);
+          const mission = await this.registry.getMissionByName?.(group);
           missionNotifications = mission?.notifications;
         }
         return { taskNotifications, missionNotifications };
@@ -972,8 +968,8 @@ export class Orchestrator extends TypedEmitter {
     // Wire notification router to approval manager
     if (this.approvalMgr && this.notificationRouter) {
       this.approvalMgr.setNotificationRouter(this.notificationRouter);
-      this.notificationRouter.setOutcomeResolver((taskId: string) => {
-        const task = this.registry.getTask(taskId);
+      this.notificationRouter.setOutcomeResolver(async (taskId: string) => {
+        const task = await this.registry.getTask(taskId);
         return task?.outcomes;
       });
       this.startTelegramApprovalPoller();
@@ -1034,7 +1030,7 @@ export class Orchestrator extends TypedEmitter {
    * Then requeue orphaned tasks to "pending" WITHOUT burning retry count
    * (shutdown interrupts are not real failures).
    */
-  recoverOrphanedTasks(): number { return this.runner.recoverOrphanedTasks(); }
+  async recoverOrphanedTasks(): Promise<number> { return this.runner.recoverOrphanedTasks(); }
 
   /**
    * Start a Telegram callback poller if a telegram channel + approval gates are configured.
@@ -1079,11 +1075,11 @@ export class Orchestrator extends TypedEmitter {
     if (approvalMgr) {
       resolver = {
         approve: async (requestId, resolvedBy) => {
-          const result = approvalMgr.approve(requestId, resolvedBy);
+          const result = await approvalMgr.approve(requestId, resolvedBy);
           return result ? { ok: true } : { ok: false, error: "Not found or already resolved" };
         },
         reject: async (requestId, feedback, resolvedBy) => {
-          const result = approvalMgr.reject(requestId, feedback, resolvedBy);
+          const result = await approvalMgr.reject(requestId, feedback, resolvedBy);
           return result ? { ok: true } : { ok: false, error: "Not found, already resolved, or max rejections reached" };
         },
       };
@@ -1174,11 +1170,11 @@ export class Orchestrator extends TypedEmitter {
     if (approvalMgr) {
       resolver = {
         approve: async (requestId, resolvedBy) => {
-          const result = approvalMgr.approve(requestId, resolvedBy);
+          const result = await approvalMgr.approve(requestId, resolvedBy);
           return result ? { ok: true } : { ok: false, error: "Not found or already resolved" };
         },
         reject: async (requestId, feedback, resolvedBy) => {
-          const result = approvalMgr.reject(requestId, feedback, resolvedBy);
+          const result = await approvalMgr.reject(requestId, feedback, resolvedBy);
           return result ? { ok: true } : { ok: false, error: "Not found, already resolved, or max rejections reached" };
         },
       };
@@ -1231,10 +1227,10 @@ export class Orchestrator extends TypedEmitter {
     this.emit("log", { level: "info", message: "WhatsApp bridge starting..." });
   }
 
-  private seedTasks(): void {
-    this.taskMgr.seedTasks();
+  private async seedTasks(): Promise<void> {
+    await this.taskMgr.seedTasks();
     // Also set initial state for non-interactive mode
-    this.registry.setState({
+    await this.registry.setState({
       project: this.config.project,
       teams: this.config.teams,
       startedAt: new Date().toISOString(),
@@ -1248,7 +1244,7 @@ export class Orchestrator extends TypedEmitter {
   async run(): Promise<void> {
     if (!this.interactive) {
       await this.init();
-      this.seedTasks();
+      await this.seedTasks();
     }
 
     this.emit("orchestrator:started", {
@@ -1268,7 +1264,7 @@ export class Orchestrator extends TypedEmitter {
     // Supervisor loop
     while (!this.stopped) {
       try {
-        const allDone = this.tick();
+        const allDone = await this.tick();
         if (allDone && !this.interactive) break;
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
@@ -1283,13 +1279,13 @@ export class Orchestrator extends TypedEmitter {
   /**
    * Single tick of the supervisor loop. Returns true when all work is done.
    */
-  tick(): boolean {
+  async tick(): Promise<boolean> {
     // Scheduler checks FIRST — must run before early-return guards because
     // scheduled/recurring missions have zero tasks until triggered, and the
     // scheduler is what creates them via executeMission.
     this.scheduler?.check();
 
-    const tasks = this.registry.getAllTasks();
+    const tasks = await this.registry.getAllTasks();
     if (tasks.length === 0) return !this.interactive;
 
     const pending = tasks.filter(t => t.status === "pending");
@@ -1304,31 +1300,33 @@ export class Orchestrator extends TypedEmitter {
     if (activeTasks.length > 0 && terminal.length === activeTasks.length) {
       // Must run cleanup BEFORE returning — assessment transitions happen async
       // between ticks, so this may be the first tick that sees all tasks terminal.
-      this.missionExec.cleanupCompletedGroups(tasks);
-      this.runner.syncProcessesFromRunStore();
+      await this.missionExec.cleanupCompletedGroups(tasks);
+      await this.runner.syncProcessesFromRunStore();
       return true;
     }
 
     // 1. Collect results from finished runners
-    this.runner.collectResults((id, res) => this.assessor.handleResult(id, res));
+    await this.runner.collectResults((id, res) => this.assessor.handleResult(id, res));
 
     // 2. Enforce health checks (timeouts + stale detection)
-    this.runner.enforceHealthChecks();
+    await this.runner.enforceHealthChecks();
 
     // 2b. SLA deadline checks
     this.slaMonitor?.check();
 
     // 3. Spawn agents for ready tasks (skip tasks from cancelled/completed/paused missions)
-    const ready = pending.filter(task => {
+    const readyList: Task[] = [];
+    for (const task of pending) {
+      let isReady = true;
       if (task.group) {
         // Resolve mission via direct ID (preferred) or group name (legacy fallback)
         const mission = task.missionId
-          ? this.registry.getMission?.(task.missionId)
-          : this.registry.getMissionByName?.(task.group);
-        if (mission && (mission.status === "cancelled" || mission.status === "completed" || mission.status === "paused")) return false;
+          ? await this.registry.getMission?.(task.missionId)
+          : await this.registry.getMissionByName?.(task.group);
+        if (mission && (mission.status === "cancelled" || mission.status === "completed" || mission.status === "paused")) { isReady = false; }
 
         // Check quality gates — task may be blocked by a gate even if deps are done
-        if (this.qualityController) {
+        if (isReady && this.qualityController) {
           const gates = this.missionExec.getQualityGates(task.group);
           if (gates.length > 0) {
             const blocking = this.qualityController.getBlockingGate(
@@ -1338,39 +1336,47 @@ export class Orchestrator extends TypedEmitter {
               gates,
               tasks,
             );
-            if (blocking) return false; // Blocked by quality gate
+            if (blocking) isReady = false; // Blocked by quality gate
           }
         }
 
         // Check checkpoints — task may be blocked by a checkpoint awaiting human resume
-        const checkpoints = this.missionExec.getCheckpoints(task.group);
-        if (checkpoints.length > 0) {
-          const blockingCp = this.missionExec.getBlockingCheckpoint(
-            task.group,
-            task.title,
-            task.id,
-            tasks,
-          );
-          if (blockingCp) return false; // Blocked by checkpoint
+        if (isReady) {
+          const checkpoints = this.missionExec.getCheckpoints(task.group);
+          if (checkpoints.length > 0) {
+            const blockingCp = await this.missionExec.getBlockingCheckpoint(
+              task.group,
+              task.title,
+              task.id,
+              tasks,
+            );
+            if (blockingCp) isReady = false; // Blocked by checkpoint
+          }
         }
 
         // Check delays — task may be blocked by a timed delay
-        const delays = this.missionExec.getDelays(task.group);
-        if (delays.length > 0) {
-          const blockingDelay = this.missionExec.getBlockingDelay(
-            task.group,
-            task.title,
-            task.id,
-            tasks,
-          );
-          if (blockingDelay) return false; // Blocked by delay
+        if (isReady) {
+          const delays = this.missionExec.getDelays(task.group);
+          if (delays.length > 0) {
+            const blockingDelay = await this.missionExec.getBlockingDelay(
+              task.group,
+              task.title,
+              task.id,
+              tasks,
+            );
+            if (blockingDelay) isReady = false; // Blocked by delay
+          }
         }
       }
-      return task.dependsOn.every(depId => {
-        const dep = tasks.find(t => t.id === depId);
-        return dep && dep.status === "done";
-      });
-    });
+      if (isReady) {
+        isReady = task.dependsOn.every(depId => {
+          const dep = tasks.find(t => t.id === depId);
+          return dep && dep.status === "done";
+        });
+      }
+      if (isReady) readyList.push(task);
+    }
+    const ready = readyList;
 
     // Check for deadlock: no tasks ready, none running, but some pending
     // Don't consider it a deadlock if tasks are awaiting approval, blocked by checkpoints, or waiting on delays
@@ -1389,9 +1395,9 @@ export class Orchestrator extends TypedEmitter {
         });
 
         // Async LLM resolution (same pattern as question detection)
-        resolveDeadlock(analysis, this).catch(err => {
+        resolveDeadlock(analysis, this).catch(async err => {
           this.emit("log", { level: "error", message: `Deadlock resolution failed: ${err.message}` });
-          for (const t of pending) this.forceFailTask(t.id);
+          for (const t of pending) await this.forceFailTask(t.id);
         });
 
         return false; // Don't terminate loop — resolution pending
@@ -1399,12 +1405,12 @@ export class Orchestrator extends TypedEmitter {
 
       // Only missing deps (unresolvable) → force-fail all
       this.emit("orchestrator:deadlock", { taskIds: pending.map(t => t.id) });
-      for (const t of pending) this.forceFailTask(t.id);
+      for (const t of pending) await this.forceFailTask(t.id);
       return true;
     }
 
     // Concurrency-aware spawn loop
-    const activeRuns = this.runStore.getActiveRuns();
+    const activeRuns = await this.runStore.getActiveRuns();
     const globalMax = this.config.settings.maxConcurrency ?? Infinity;
     let totalActive = activeRuns.length;
 
@@ -1424,7 +1430,7 @@ export class Orchestrator extends TypedEmitter {
       }
 
       // Skip if already running
-      const existingRun = this.runStore.getRunByTaskId(task.id);
+      const existingRun = await this.runStore.getRunByTaskId(task.id);
       if (existingRun && existingRun.status === "running") continue;
 
       // Per-agent concurrency limit
@@ -1437,7 +1443,7 @@ export class Orchestrator extends TypedEmitter {
         }
       }
 
-      this.runner.spawnForTask(task);
+      await this.runner.spawnForTask(task);
       totalActive++;
       agentActiveCounts.set(agentName, (agentActiveCounts.get(agentName) ?? 0) + 1);
     }
@@ -1456,24 +1462,24 @@ export class Orchestrator extends TypedEmitter {
     // Clean up volatile agents for completed mission groups.
     // Re-read tasks fresh — assessment callbacks (async) may have transitioned
     // tasks to done/failed since the snapshot at the top of tick().
-    this.missionExec.cleanupCompletedGroups(this.registry.getAllTasks());
+    await this.missionExec.cleanupCompletedGroups(await this.registry.getAllTasks());
 
     // Sync process list from RunStore for backward compat with TUI
-    this.runner.syncProcessesFromRunStore();
+    await this.runner.syncProcessesFromRunStore();
 
     return false;
   }
 
   // Assessment pipeline delegated to AssessmentOrchestrator
   /** @internal — test access only */
-  private retryOrFail(taskId: string, task: Task, result: TaskResult): void {
-    this.assessor.retryOrFail(taskId, task, result);
+  private async retryOrFail(taskId: string, task: Task, result: TaskResult): Promise<void> {
+    await this.assessor.retryOrFail(taskId, task, result);
   }
 
   async status(): Promise<void> {
     await this.init();
     // Emit log for CLI to consume
-    const tasks = this.registry.getAllTasks();
+    const tasks = await this.registry.getAllTasks();
     const done = tasks.filter(t => t.status === "done");
     const failed = tasks.filter(t => t.status === "failed");
     this.emit("log", { level: "info", message: `Total: ${tasks.length} | Done: ${done.length} | Failed: ${failed.length}` });

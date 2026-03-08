@@ -47,43 +47,43 @@ export class FileNotificationStore implements NotificationStore {
     renameSync(tmp, this.filePath);
   }
 
-  append(record: NotificationRecord): void {
+  async append(record: NotificationRecord): Promise<void> {
     this.records.push(record);
     this.save();
   }
 
-  list(limit = 100): NotificationRecord[] {
+  async list(limit = 100): Promise<NotificationRecord[]> {
     // Most recent first
     return this.records.slice(-limit).reverse();
   }
 
-  listByChannel(channelId: string, limit = 100): NotificationRecord[] {
+  async listByChannel(channelId: string, limit = 100): Promise<NotificationRecord[]> {
     return this.records
       .filter(r => r.channel === channelId)
       .slice(-limit)
       .reverse();
   }
 
-  listByRule(ruleId: string, limit = 100): NotificationRecord[] {
+  async listByRule(ruleId: string, limit = 100): Promise<NotificationRecord[]> {
     return this.records
       .filter(r => r.ruleId === ruleId)
       .slice(-limit)
       .reverse();
   }
 
-  listByStatus(status: NotificationStatus, limit = 100): NotificationRecord[] {
+  async listByStatus(status: NotificationStatus, limit = 100): Promise<NotificationRecord[]> {
     return this.records
       .filter(r => r.status === status)
       .slice(-limit)
       .reverse();
   }
 
-  count(status?: NotificationStatus): number {
+  async count(status?: NotificationStatus): Promise<number> {
     if (!status) return this.records.length;
     return this.records.filter(r => r.status === status).length;
   }
 
-  prune(keep: number): number {
+  async prune(keep: number): Promise<number> {
     if (this.records.length <= keep) return 0;
     const pruned = this.records.length - keep;
     this.records = this.records.slice(-keep);
@@ -91,7 +91,7 @@ export class FileNotificationStore implements NotificationStore {
     return pruned;
   }
 
-  close(): void {
+  async close(): Promise<void> {
     // No-op — writes are synchronous
   }
 }

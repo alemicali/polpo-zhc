@@ -23,12 +23,13 @@ function createMockCtx(store?: InMemoryTaskStore): OrchestratorContext {
     emitter: new TypedEmitter(),
     registry: store ?? new InMemoryTaskStore(),
     runStore: new InMemoryRunStore(),
-    memoryStore: { exists: () => false, get: () => "", save: () => {}, append: () => {} },
-    logStore: { startSession: () => "s", getSessionId: () => "s", append: () => {}, getSessionEntries: () => [], listSessions: () => [], prune: () => 0, close: () => {} },
-    sessionStore: { create: () => "s1", addMessage: () => ({ id: "m1", role: "user" as const, content: "", ts: "" }), getMessages: () => [], getRecentMessages: () => [], listSessions: () => [], getSession: () => undefined, getLatestSession: () => undefined, deleteSession: () => false, prune: () => 0, close: () => {} },
+    memoryStore: { exists: async () => false, get: async () => "", save: async () => {}, append: async () => {}, update: async () => true as true | string },
+    logStore: { startSession: async () => "s", getSessionId: async () => "s", append: async () => {}, getSessionEntries: async () => [], listSessions: async () => [], prune: async () => 0, close: () => {} },
+    sessionStore: { create: async () => "s1", addMessage: async () => ({ id: "m1", role: "user" as const, content: "", ts: "" }), updateMessage: async () => false, getMessages: async () => [], getRecentMessages: async () => [], listSessions: async () => [], getSession: async () => undefined, getLatestSession: async () => undefined, renameSession: async () => false, deleteSession: async () => false, prune: async () => 0, close: () => {} },
     hooks: new HookRegistry(),
     config: createMinimalConfig(),
     workDir: "/tmp/test",
+    agentWorkDir: "/tmp/test",
     polpoDir: "/tmp/test/.polpo",
     assessFn: vi.fn(),
   };
@@ -53,7 +54,7 @@ describe("SLAMonitor", () => {
     monitor.dispose();
   });
 
-  it("emits sla:warning when threshold is reached", () => {
+  it("emits sla:warning when threshold is reached", async () => {
     const emitSpy = vi.spyOn(ctx.emitter, "emit");
 
     // Task created 100 seconds ago, deadline 10 seconds from now
@@ -61,7 +62,7 @@ describe("SLAMonitor", () => {
     const createdAt = new Date(Date.now() - 100_000).toISOString();
     const deadline = new Date(Date.now() + 10_000).toISOString();
 
-    store.addTask({
+    await store.addTask({
       title: "Urgent task",
       description: "Test",
       assignTo: "test-agent",
@@ -72,10 +73,10 @@ describe("SLAMonitor", () => {
       deadline,
     });
     // Override createdAt
-    const task = store.getAllTasks()[0];
+    const task = (await store.getAllTasks())[0];
     (task as any).createdAt = createdAt;
 
-    monitor.check();
+    await monitor.check();
 
     expect(emitSpy).toHaveBeenCalledWith("sla:warning", expect.objectContaining({
       entityType: "task",
@@ -83,13 +84,13 @@ describe("SLAMonitor", () => {
     }));
   });
 
-  it("emits sla:violated when deadline passes", () => {
+  it("emits sla:violated when deadline passes", async () => {
     const emitSpy = vi.spyOn(ctx.emitter, "emit");
 
     const createdAt = new Date(Date.now() - 100_000).toISOString();
     const deadline = new Date(Date.now() - 1_000).toISOString(); // already past
 
-    store.addTask({
+    await store.addTask({
       title: "Overdue task",
       description: "Test",
       assignTo: "test-agent",
@@ -99,10 +100,10 @@ describe("SLAMonitor", () => {
       maxRetries: 2,
       deadline,
     });
-    const task = store.getAllTasks()[0];
+    const task = (await store.getAllTasks())[0];
     (task as any).createdAt = createdAt;
 
-    monitor.check();
+    await monitor.check();
 
     expect(emitSpy).toHaveBeenCalledWith("sla:violated", expect.objectContaining({
       entityType: "task",
@@ -110,11 +111,11 @@ describe("SLAMonitor", () => {
     }));
   });
 
-  it("does not re-emit for the same entity", () => {
+  it("does not re-emit for the same entity", async () => {
     const emitSpy = vi.spyOn(ctx.emitter, "emit");
 
     const deadline = new Date(Date.now() - 1_000).toISOString();
-    store.addTask({
+    await store.addTask({
       title: "Overdue task",
       description: "Test",
       assignTo: "test-agent",
@@ -124,21 +125,21 @@ describe("SLAMonitor", () => {
       maxRetries: 2,
       deadline,
     });
-    const task = store.getAllTasks()[0];
+    const task = (await store.getAllTasks())[0];
     (task as any).createdAt = new Date(Date.now() - 100_000).toISOString();
 
-    monitor.check();
-    monitor.check();
+    await monitor.check();
+    await monitor.check();
 
     const violationCalls = emitSpy.mock.calls.filter(c => c[0] === "sla:violated");
     expect(violationCalls.length).toBe(1);
   });
 
-  it("skips terminal tasks", () => {
+  it("skips terminal tasks", async () => {
     const emitSpy = vi.spyOn(ctx.emitter, "emit");
 
     const deadline = new Date(Date.now() - 1_000).toISOString();
-    store.addTask({
+    await store.addTask({
       title: "Done task",
       description: "Test",
       assignTo: "test-agent",
@@ -148,16 +149,16 @@ describe("SLAMonitor", () => {
       maxRetries: 2,
       deadline,
     });
-    const task = store.getAllTasks()[0];
+    const task = (await store.getAllTasks())[0];
     (task as any).createdAt = new Date(Date.now() - 100_000).toISOString();
 
     // Transition to done
-    store.transition(task.id, "assigned");
-    store.transition(task.id, "in_progress");
-    store.transition(task.id, "review");
-    store.transition(task.id, "done");
+    await store.transition(task.id, "assigned");
+    await store.transition(task.id, "in_progress");
+    await store.transition(task.id, "review");
+    await store.transition(task.id, "done");
 
-    monitor.check();
+    await monitor.check();
 
     const violationCalls = emitSpy.mock.calls.filter(c => c[0] === "sla:violated");
     expect(violationCalls.length).toBe(0);
@@ -181,7 +182,7 @@ describe("SLAMonitor", () => {
     }));
   });
 
-  it("force-fails tasks when violationAction is 'fail'", () => {
+  it("force-fails tasks when violationAction is 'fail'", async () => {
     const failMonitor = new SLAMonitor(ctx, {
       checkIntervalMs: 0,
       violationAction: "fail",
@@ -189,7 +190,7 @@ describe("SLAMonitor", () => {
     failMonitor.init();
 
     const deadline = new Date(Date.now() - 1_000).toISOString();
-    store.addTask({
+    await store.addTask({
       title: "Overdue task",
       description: "Test",
       assignTo: "test-agent",
@@ -199,23 +200,23 @@ describe("SLAMonitor", () => {
       maxRetries: 2,
       deadline,
     });
-    const task = store.getAllTasks()[0];
+    const task = (await store.getAllTasks())[0];
     (task as any).createdAt = new Date(Date.now() - 100_000).toISOString();
     // Move task to in_progress (so unsafeSetStatus to failed works meaningfully)
-    store.transition(task.id, "assigned");
-    store.transition(task.id, "in_progress");
+    await store.transition(task.id, "assigned");
+    await store.transition(task.id, "in_progress");
 
-    failMonitor.check();
+    await failMonitor.check();
 
-    expect(store.getTask(task.id)!.status).toBe("failed");
+    expect((await store.getTask(task.id))!.status).toBe("failed");
     failMonitor.dispose();
   });
 
-  it("clearEntity resets tracking for an entity", () => {
+  it("clearEntity resets tracking for an entity", async () => {
     const emitSpy = vi.spyOn(ctx.emitter, "emit");
 
     const deadline = new Date(Date.now() - 1_000).toISOString();
-    store.addTask({
+    await store.addTask({
       title: "Overdue task",
       description: "Test",
       assignTo: "test-agent",
@@ -225,14 +226,14 @@ describe("SLAMonitor", () => {
       maxRetries: 2,
       deadline,
     });
-    const task = store.getAllTasks()[0];
+    const task = (await store.getAllTasks())[0];
     (task as any).createdAt = new Date(Date.now() - 100_000).toISOString();
 
-    monitor.check();
+    await monitor.check();
     const callsBefore = emitSpy.mock.calls.filter(c => c[0] === "sla:violated").length;
 
     monitor.clearEntity(task.id);
-    monitor.check();
+    await monitor.check();
 
     const callsAfter = emitSpy.mock.calls.filter(c => c[0] === "sla:violated").length;
     expect(callsAfter).toBe(callsBefore + 1);

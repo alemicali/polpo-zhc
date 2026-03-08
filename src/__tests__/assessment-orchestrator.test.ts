@@ -179,8 +179,8 @@ function createHarness(configOverrides: Partial<PolpoConfig["settings"]> = {}): 
 }
 
 /** Add a task to the store and transition it to review (ready for assessment). */
-function addReviewTask(h: TestHarness, taskOverrides: Partial<Task> = {}): Task {
-  const task = h.store.addTask({
+async function addReviewTask(h: TestHarness, taskOverrides: Partial<Task> = {}): Promise<Task> {
+  const task = await h.store.addTask({
     title: "Test task",
     description: "A test task",
     assignTo: "test-agent",
@@ -190,8 +190,8 @@ function addReviewTask(h: TestHarness, taskOverrides: Partial<Task> = {}): Task 
     maxRetries: 2,
     ...taskOverrides,
   });
-  h.store.transition(task.id, "assigned");
-  h.store.transition(task.id, "in_progress");
+  await h.store.transition(task.id, "assigned");
+  await h.store.transition(task.id, "in_progress");
   return task;
 }
 
@@ -214,12 +214,12 @@ describe("AssessmentOrchestrator", () => {
       h.ao.handleResult("nonexistent", createOkResult());
     });
 
-    it("skips already-terminal done tasks", () => {
+    it("skips already-terminal done tasks", async () => {
       const h = createHarness();
-      const task = addReviewTask(h);
+      const task = await addReviewTask(h);
       // Transition through valid path: in_progress -> review -> done
-      h.store.transition(task.id, "review");
-      h.store.transition(task.id, "done");
+      await h.store.transition(task.id, "review");
+      await h.store.transition(task.id, "done");
 
       const events: unknown[] = [];
       h.emitter.on("agent:finished", (e) => events.push(e));
@@ -229,10 +229,10 @@ describe("AssessmentOrchestrator", () => {
       expect(events).toHaveLength(0);
     });
 
-    it("skips already-terminal failed tasks", () => {
+    it("skips already-terminal failed tasks", async () => {
       const h = createHarness();
-      const task = addReviewTask(h);
-      h.store.transition(task.id, "failed");
+      const task = await addReviewTask(h);
+      await h.store.transition(task.id, "failed");
 
       const events: unknown[] = [];
       h.emitter.on("agent:finished", (e) => events.push(e));
@@ -241,32 +241,36 @@ describe("AssessmentOrchestrator", () => {
       expect(events).toHaveLength(0);
     });
 
-    it("emits agent:finished event", () => {
+    it("emits agent:finished event", async () => {
       const h = createHarness();
-      const task = addReviewTask(h);
+      const task = await addReviewTask(h);
 
       const events: any[] = [];
       h.emitter.on("agent:finished", (e) => events.push(e));
 
       h.ao.handleResult(task.id, createOkResult());
 
-      expect(events).toHaveLength(1);
+      await vi.waitFor(() => {
+        expect(events).toHaveLength(1);
+      });
       expect(events[0].taskId).toBe(task.id);
       expect(events[0].exitCode).toBe(0);
     });
 
-    it("transitions in_progress task to review before assessment", () => {
+    it("transitions in_progress task to review before assessment", async () => {
       const h = createHarness();
       h.assessFn.mockResolvedValue(createPassingAssessment());
-      const task = addReviewTask(h);
+      const task = await addReviewTask(h);
 
       h.ao.handleResult(task.id, createOkResult());
 
       // The task should have been moved to review as an intermediate step
       // (then proceedToAssessment runs async)
-      const current = h.store.getTask(task.id)!;
-      // It transitions to review first, so status is at least review or later
-      expect(["review", "done"]).toContain(current.status);
+      await vi.waitFor(async () => {
+        const current = (await h.store.getTask(task.id))!;
+        // It transitions to review first, so status is at least review or later
+        expect(["review", "done"]).toContain(current.status);
+      });
     });
   });
 
@@ -275,15 +279,15 @@ describe("AssessmentOrchestrator", () => {
   describe("proceedToAssessment — no expectations/metrics", () => {
     it("marks task done when exitCode=0 and no expectations", async () => {
       const h = createHarness();
-      const task = addReviewTask(h);
+      const task = await addReviewTask(h);
 
       const transitions: any[] = [];
       h.emitter.on("task:transition", (e) => transitions.push(e));
 
       h.ao.handleResult(task.id, createOkResult());
       // No expectations → synchronous path
-      await vi.waitFor(() => {
-        expect(h.store.getTask(task.id)!.status).toBe("done");
+      await vi.waitFor(async () => {
+        expect((await h.store.getTask(task.id))!.status).toBe("done");
       });
 
       expect(transitions.some(t => t.to === "done")).toBe(true);
@@ -291,16 +295,16 @@ describe("AssessmentOrchestrator", () => {
 
     it("retries when exitCode!=0 and no expectations", async () => {
       const h = createHarness();
-      const task = addReviewTask(h);
+      const task = await addReviewTask(h);
 
       const retryEvents: any[] = [];
       h.emitter.on("task:retry", (e) => retryEvents.push(e));
 
       h.ao.handleResult(task.id, createFailResult());
 
-      await vi.waitFor(() => {
+      await vi.waitFor(async () => {
         // Task should be back to pending (retry) since retries < maxRetries
-        expect(h.store.getTask(task.id)!.status).toBe("pending");
+        expect((await h.store.getTask(task.id))!.status).toBe("pending");
       });
 
       expect(retryEvents).toHaveLength(1);
@@ -309,15 +313,15 @@ describe("AssessmentOrchestrator", () => {
 
     it("fails permanently when exitCode!=0 and retries exhausted", async () => {
       const h = createHarness();
-      const task = addReviewTask(h, { maxRetries: 0 });
+      const task = await addReviewTask(h, { maxRetries: 0 });
 
       const maxRetryEvents: any[] = [];
       h.emitter.on("task:maxRetries", (e) => maxRetryEvents.push(e));
 
       h.ao.handleResult(task.id, createFailResult());
 
-      await vi.waitFor(() => {
-        expect(h.store.getTask(task.id)!.status).toBe("failed");
+      await vi.waitFor(async () => {
+        expect((await h.store.getTask(task.id))!.status).toBe("failed");
       });
 
       expect(maxRetryEvents).toHaveLength(1);
@@ -331,7 +335,7 @@ describe("AssessmentOrchestrator", () => {
       const h = createHarness();
       h.assessFn.mockResolvedValue(createPassingAssessment());
 
-      const task = addReviewTask(h, {
+      const task = await addReviewTask(h, {
         expectations: [{ type: "file_exists", paths: ["src/foo.ts"] }],
       });
 
@@ -340,8 +344,8 @@ describe("AssessmentOrchestrator", () => {
 
       h.ao.handleResult(task.id, createOkResult());
 
-      await vi.waitFor(() => {
-        expect(h.store.getTask(task.id)!.status).toBe("done");
+      await vi.waitFor(async () => {
+        expect((await h.store.getTask(task.id))!.status).toBe("done");
       });
 
       expect(completeEvents).toHaveLength(1);
@@ -353,7 +357,7 @@ describe("AssessmentOrchestrator", () => {
       const h = createHarness();
       h.assessFn.mockResolvedValue(createPassingAssessment());
 
-      const task = addReviewTask(h, {
+      const task = await addReviewTask(h, {
         expectations: [{ type: "test", command: "npm test" }],
       });
 
@@ -380,7 +384,7 @@ describe("AssessmentOrchestrator", () => {
         checks: [{ type: "test", passed: false, message: "Tests failed" }],
       }));
 
-      const task = addReviewTask(h, {
+      const task = await addReviewTask(h, {
         expectations: [{ type: "test", command: "npm test", confidence: "firm" }],
       });
 
@@ -389,11 +393,11 @@ describe("AssessmentOrchestrator", () => {
 
       h.ao.handleResult(task.id, createOkResult());
 
-      await vi.waitFor(() => {
-        expect(h.store.getTask(task.id)!.status).toBe("pending");
+      await vi.waitFor(async () => {
+        expect((await h.store.getTask(task.id))!.status).toBe("pending");
       });
 
-      const updated = h.store.getTask(task.id)!;
+      const updated = (await h.store.getTask(task.id))!;
       expect(updated.phase).toBe("fix");
       expect(updated.fixAttempts).toBe(1);
       expect(fixEvents).toHaveLength(1);
@@ -403,7 +407,7 @@ describe("AssessmentOrchestrator", () => {
       const h = createHarness();
       h.assessFn.mockResolvedValue(createFailingAssessment());
 
-      const task = addReviewTask(h, {
+      const task = await addReviewTask(h, {
         expectations: [{ type: "file_exists", paths: ["src/foo.ts"] }],
       });
 
@@ -412,8 +416,8 @@ describe("AssessmentOrchestrator", () => {
 
       h.ao.handleResult(task.id, createFailResult());
 
-      await vi.waitFor(() => {
-        expect(h.store.getTask(task.id)!.status).toBe("pending");
+      await vi.waitFor(async () => {
+        expect((await h.store.getTask(task.id))!.status).toBe("pending");
       });
 
       expect(retryEvents).toHaveLength(1);
@@ -423,15 +427,15 @@ describe("AssessmentOrchestrator", () => {
       const h = createHarness();
       h.assessFn.mockResolvedValue(createFailingAssessment());
 
-      const task = addReviewTask(h, {
+      const task = await addReviewTask(h, {
         expectations: [{ type: "file_exists", paths: ["src/foo.ts"] }],
         maxRetries: 0,
       });
 
       h.ao.handleResult(task.id, createFailResult());
 
-      await vi.waitFor(() => {
-        expect(h.store.getTask(task.id)!.status).toBe("failed");
+      await vi.waitFor(async () => {
+        expect((await h.store.getTask(task.id))!.status).toBe("failed");
       });
     });
 
@@ -441,7 +445,7 @@ describe("AssessmentOrchestrator", () => {
         checks: [{ type: "test", passed: false, message: "2 tests failed" }],
       }));
 
-      const task = addReviewTask(h, {
+      const task = await addReviewTask(h, {
         expectations: [{ type: "test", command: "npm test", confidence: "firm" }],
       });
 
@@ -466,7 +470,7 @@ describe("AssessmentOrchestrator", () => {
       const h = createHarness();
       h.assessFn.mockRejectedValue(new Error("LLM call failed"));
 
-      const task = addReviewTask(h, {
+      const task = await addReviewTask(h, {
         expectations: [{ type: "test", command: "npm test" }],
       });
 
@@ -475,9 +479,9 @@ describe("AssessmentOrchestrator", () => {
 
       h.ao.handleResult(task.id, createOkResult());
 
-      await vi.waitFor(() => {
+      await vi.waitFor(async () => {
         // Should fall through to retryOrFail
-        expect(h.store.getTask(task.id)!.status).toBe("pending");
+        expect((await h.store.getTask(task.id))!.status).toBe("pending");
       });
 
       expect(logEvents.some(e => e.level === "error" && e.message.includes("Assessment error"))).toBe(true);
@@ -493,14 +497,14 @@ describe("AssessmentOrchestrator", () => {
         checks: [{ type: "script", passed: false, message: "lint failed" }],
       }));
 
-      const task = addReviewTask(h, {
+      const task = await addReviewTask(h, {
         expectations: [{ type: "script", command: "npm run lint", confidence: "firm" }],
       });
 
       h.ao.handleResult(task.id, createOkResult());
 
-      await vi.waitFor(() => {
-        const t = h.store.getTask(task.id)!;
+      await vi.waitFor(async () => {
+        const t = (await h.store.getTask(task.id))!;
         expect(t.fixAttempts).toBe(1);
         expect(t.phase).toBe("fix");
       });
@@ -513,7 +517,7 @@ describe("AssessmentOrchestrator", () => {
       }));
 
       // Task already used 1 fix attempt
-      const task = addReviewTask(h, {
+      const task = await addReviewTask(h, {
         expectations: [{ type: "script", command: "npm run lint", confidence: "firm" }],
         fixAttempts: 1,
       });
@@ -523,9 +527,9 @@ describe("AssessmentOrchestrator", () => {
 
       h.ao.handleResult(task.id, createOkResult());
 
-      await vi.waitFor(() => {
+      await vi.waitFor(async () => {
         // Should have done a full retry (failed -> pending burns a retry)
-        expect(h.store.getTask(task.id)!.phase).toBe("execution");
+        expect((await h.store.getTask(task.id))!.phase).toBe("execution");
       });
 
       expect(retryEvents).toHaveLength(1);
@@ -537,15 +541,15 @@ describe("AssessmentOrchestrator", () => {
         checks: [{ type: "test", passed: false, message: "tests failed" }],
       }));
 
-      const task = addReviewTask(h, {
+      const task = await addReviewTask(h, {
         description: "Original task description",
         expectations: [{ type: "test", command: "npm test", confidence: "firm" }],
       });
 
       h.ao.handleResult(task.id, createOkResult());
 
-      await vi.waitFor(() => {
-        const t = h.store.getTask(task.id)!;
+      await vi.waitFor(async () => {
+        const t = (await h.store.getTask(task.id))!;
         expect(t.originalDescription).toBe("Original task description");
       });
     });
@@ -556,7 +560,7 @@ describe("AssessmentOrchestrator", () => {
   describe("retryOrFail", () => {
     it("retries when retries < maxRetries", async () => {
       const h = createHarness();
-      const task = addReviewTask(h, { maxRetries: 3 });
+      const task = await addReviewTask(h, { maxRetries: 3 });
 
       const retryEvents: any[] = [];
       h.emitter.on("task:retry", (e) => retryEvents.push(e));
@@ -564,27 +568,27 @@ describe("AssessmentOrchestrator", () => {
       // Simulate: task is in_progress, result comes back with exitCode != 0, no expectations
       h.ao.handleResult(task.id, createFailResult());
 
-      await vi.waitFor(() => {
-        expect(h.store.getTask(task.id)!.status).toBe("pending");
+      await vi.waitFor(async () => {
+        expect((await h.store.getTask(task.id))!.status).toBe("pending");
       });
 
       expect(retryEvents).toHaveLength(1);
       expect(retryEvents[0].attempt).toBe(1);
       expect(retryEvents[0].maxRetries).toBe(3);
-      expect(h.store.getTask(task.id)!.retries).toBe(1);
+      expect((await h.store.getTask(task.id))!.retries).toBe(1);
     });
 
     it("emits task:maxRetries and fails when retries exhausted", async () => {
       const h = createHarness();
-      const task = addReviewTask(h, { maxRetries: 0 });
+      const task = await addReviewTask(h, { maxRetries: 0 });
 
       const maxRetryEvents: any[] = [];
       h.emitter.on("task:maxRetries", (e) => maxRetryEvents.push(e));
 
       h.ao.handleResult(task.id, createFailResult());
 
-      await vi.waitFor(() => {
-        expect(h.store.getTask(task.id)!.status).toBe("failed");
+      await vi.waitFor(async () => {
+        expect((await h.store.getTask(task.id))!.status).toBe("failed");
       });
 
       expect(maxRetryEvents).toHaveLength(1);
@@ -593,18 +597,18 @@ describe("AssessmentOrchestrator", () => {
 
     it("preserves originalDescription on first retry", async () => {
       const h = createHarness();
-      const task = addReviewTask(h, {
+      const task = await addReviewTask(h, {
         description: "Do something important",
         maxRetries: 2,
       });
 
       h.ao.handleResult(task.id, createFailResult());
 
-      await vi.waitFor(() => {
-        expect(h.store.getTask(task.id)!.status).toBe("pending");
+      await vi.waitFor(async () => {
+        expect((await h.store.getTask(task.id))!.status).toBe("pending");
       });
 
-      expect(h.store.getTask(task.id)!.originalDescription).toBe("Do something important");
+      expect((await h.store.getTask(task.id))!.originalDescription).toBe("Do something important");
     });
 
     it("escalates to fallback agent after escalateAfter retries", async () => {
@@ -612,24 +616,24 @@ describe("AssessmentOrchestrator", () => {
       h.ctx.config.teams[0].agents.push({ name: "senior-agent" });
 
       // Task already has 1 retry, maxRetries is 3, escalateAfter is 2
-      const task = addReviewTask(h, {
+      const task = await addReviewTask(h, {
         maxRetries: 3,
         retryPolicy: { escalateAfter: 2, fallbackAgent: "senior-agent" },
       });
       // Manually set retries to 1 so next will be attempt 2 which = escalateAfter
-      h.store.updateTask(task.id, { retries: 1 });
+      await h.store.updateTask(task.id, { retries: 1 });
       // Re-transition from failed -> pending doesn't apply here since we manually set;
       // we need the task in review state. Let's just call retryOrFail directly.
       // Actually, let's re-set to review for handleResult
       // The task is currently in_progress from addReviewTask. Let's proceed via handleResult:
       h.ao.handleResult(task.id, createFailResult());
 
-      await vi.waitFor(() => {
-        expect(h.store.getTask(task.id)!.status).toBe("pending");
+      await vi.waitFor(async () => {
+        expect((await h.store.getTask(task.id))!.status).toBe("pending");
       });
 
       // After escalateAfter=2, the fallback agent should be assigned
-      expect(h.store.getTask(task.id)!.assignTo).toBe("senior-agent");
+      expect((await h.store.getTask(task.id))!.assignTo).toBe("senior-agent");
     });
 
     it("skips retry for tasks from cancelled missions", async () => {
@@ -642,15 +646,15 @@ describe("AssessmentOrchestrator", () => {
         return undefined;
       };
 
-      const task = addReviewTask(h, {
+      const task = await addReviewTask(h, {
         group: "cancelled-mission",
         maxRetries: 3,
       });
 
       h.ao.handleResult(task.id, createFailResult());
 
-      await vi.waitFor(() => {
-        expect(h.store.getTask(task.id)!.status).toBe("failed");
+      await vi.waitFor(async () => {
+        expect((await h.store.getTask(task.id))!.status).toBe("failed");
       });
     });
   });
@@ -667,8 +671,8 @@ describe("AssessmentOrchestrator", () => {
       (generateAnswer as Mock).mockResolvedValue("Use PostgreSQL.");
 
       // Need activity with no file changes and few tool calls for heuristic to trigger
-      const task = addReviewTask(h);
-      h.runStore.upsertRun(createTestRunRecord({
+      const task = await addReviewTask(h);
+      await h.runStore.upsertRun(createTestRunRecord({
         taskId: task.id,
         activity: createTestActivity({ toolCalls: 1 }),
       }));
@@ -690,7 +694,7 @@ describe("AssessmentOrchestrator", () => {
       expect(answeredEvents[0].answer).toBe("Use PostgreSQL.");
 
       // Task should be back to pending with Q&A appended
-      const updated = h.store.getTask(task.id)!;
+      const updated = (await h.store.getTask(task.id))!;
       expect(updated.status).toBe("pending");
       expect(updated.description).toContain("[Polpo Clarification]");
       expect(updated.description).toContain("Which database should I use?");
@@ -702,8 +706,8 @@ describe("AssessmentOrchestrator", () => {
       const h = createHarness();
       (classifyAsQuestion as Mock).mockResolvedValue({ isQuestion: false, question: "" });
 
-      const task = addReviewTask(h);
-      h.runStore.upsertRun(createTestRunRecord({
+      const task = await addReviewTask(h);
+      await h.runStore.upsertRun(createTestRunRecord({
         taskId: task.id,
         activity: createTestActivity({ toolCalls: 1 }),
       }));
@@ -711,16 +715,16 @@ describe("AssessmentOrchestrator", () => {
       h.ao.handleResult(task.id, createOkResult({ stdout: "Is this a question?" }));
 
       // No expectations → should proceed to done
-      await vi.waitFor(() => {
-        expect(h.store.getTask(task.id)!.status).toBe("done");
+      await vi.waitFor(async () => {
+        expect((await h.store.getTask(task.id))!.status).toBe("done");
       });
     });
 
     it("respects maxQuestionRounds limit", async () => {
       const h = createHarness({ maxQuestionRounds: 1 });
 
-      const task = addReviewTask(h, { questionRounds: 1 });
-      h.runStore.upsertRun(createTestRunRecord({
+      const task = await addReviewTask(h, { questionRounds: 1 });
+      await h.runStore.upsertRun(createTestRunRecord({
         taskId: task.id,
         activity: createTestActivity({ toolCalls: 0 }),
       }));
@@ -729,8 +733,8 @@ describe("AssessmentOrchestrator", () => {
       h.ao.handleResult(task.id, createOkResult({ stdout: "Should I continue?" }));
 
       // Should skip question detection and proceed directly to assessment (done since no expectations)
-      await vi.waitFor(() => {
-        expect(h.store.getTask(task.id)!.status).toBe("done");
+      await vi.waitFor(async () => {
+        expect((await h.store.getTask(task.id))!.status).toBe("done");
       });
     });
 
@@ -738,8 +742,8 @@ describe("AssessmentOrchestrator", () => {
       const h = createHarness();
       (classifyAsQuestion as Mock).mockRejectedValue(new Error("LLM unavailable"));
 
-      const task = addReviewTask(h);
-      h.runStore.upsertRun(createTestRunRecord({
+      const task = await addReviewTask(h);
+      await h.runStore.upsertRun(createTestRunRecord({
         taskId: task.id,
         activity: createTestActivity({ toolCalls: 0 }),
       }));
@@ -747,8 +751,8 @@ describe("AssessmentOrchestrator", () => {
       h.ao.handleResult(task.id, createOkResult({ stdout: "What should I do?" }));
 
       // Classification error → falls back to proceedToAssessment → done (no expectations)
-      await vi.waitFor(() => {
-        expect(h.store.getTask(task.id)!.status).toBe("done");
+      await vi.waitFor(async () => {
+        expect((await h.store.getTask(task.id))!.status).toBe("done");
       });
     });
 
@@ -760,8 +764,8 @@ describe("AssessmentOrchestrator", () => {
       });
       (generateAnswer as Mock).mockRejectedValue(new Error("LLM down"));
 
-      const task = addReviewTask(h);
-      h.runStore.upsertRun(createTestRunRecord({
+      const task = await addReviewTask(h);
+      await h.runStore.upsertRun(createTestRunRecord({
         taskId: task.id,
         activity: createTestActivity({ toolCalls: 0 }),
       }));
@@ -769,8 +773,8 @@ describe("AssessmentOrchestrator", () => {
       h.ao.handleResult(task.id, createOkResult({ stdout: "Which DB?" }));
 
       // Answer generation failed → falls back to proceedToAssessment → done
-      await vi.waitFor(() => {
-        expect(h.store.getTask(task.id)!.status).toBe("done");
+      await vi.waitFor(async () => {
+        expect((await h.store.getTask(task.id))!.status).toBe("done");
       });
     });
   });
@@ -801,12 +805,12 @@ describe("AssessmentOrchestrator", () => {
         }],
       }), usage: undefined, costUsd: undefined });
 
-      const task = addReviewTask(h, {
+      const task = await addReviewTask(h, {
         expectations: [{ type: "file_exists", paths: ["src/foo.ts"], confidence: "estimated" }],
       });
 
       // Provide a run record so activity is available
-      h.runStore.upsertRun(createTestRunRecord({
+      await h.runStore.upsertRun(createTestRunRecord({
         taskId: task.id,
         activity: createTestActivity({ filesCreated: ["src/bar.ts"], toolCalls: 10 }),
       }));
@@ -816,8 +820,8 @@ describe("AssessmentOrchestrator", () => {
 
       h.ao.handleResult(task.id, createOkResult());
 
-      await vi.waitFor(() => {
-        expect(h.store.getTask(task.id)!.status).toBe("done");
+      await vi.waitFor(async () => {
+        expect((await h.store.getTask(task.id))!.status).toBe("done");
       });
 
       // Should have emitted correction event
@@ -832,7 +836,7 @@ describe("AssessmentOrchestrator", () => {
         checks: [{ type: "test", passed: false, message: "Tests failed" }],
       }));
 
-      const task = addReviewTask(h, {
+      const task = await addReviewTask(h, {
         expectations: [{ type: "test", command: "npm test", confidence: "firm" }],
       });
 
@@ -858,11 +862,11 @@ describe("AssessmentOrchestrator", () => {
         checks: [{ type: "file_exists", passed: false, message: "Missing file" }],
       }));
 
-      const task = addReviewTask(h, {
+      const task = await addReviewTask(h, {
         expectations: [{ type: "file_exists", paths: ["src/foo.ts"], confidence: "estimated" }],
       });
 
-      h.runStore.upsertRun(createTestRunRecord({ taskId: task.id }));
+      await h.runStore.upsertRun(createTestRunRecord({ taskId: task.id }));
 
       const fixEvents: any[] = [];
       h.emitter.on("task:fix", (e) => fixEvents.push(e));
@@ -888,7 +892,7 @@ describe("AssessmentOrchestrator", () => {
         checks: [{ type: "file_exists", passed: false, message: "Missing" }],
       }));
 
-      const task = addReviewTask(h, {
+      const task = await addReviewTask(h, {
         expectations: [{ type: "file_exists", paths: ["src/foo.ts"], confidence: "estimated" }],
       });
 
@@ -916,11 +920,11 @@ describe("AssessmentOrchestrator", () => {
         checks: [{ type: "file_exists", passed: false, message: "Missing" }],
       }));
 
-      const task = addReviewTask(h, {
+      const task = await addReviewTask(h, {
         expectations: [{ type: "file_exists", paths: ["src/foo.ts"] }], // no explicit confidence
       });
 
-      h.runStore.upsertRun(createTestRunRecord({ taskId: task.id }));
+      await h.runStore.upsertRun(createTestRunRecord({ taskId: task.id }));
 
       // The code should attempt auto-correct/judge because file_exists defaults to "estimated"
       // Mock the judge to return work_wrong so it falls through
@@ -951,7 +955,7 @@ describe("AssessmentOrchestrator", () => {
         checks: [{ type: "test", passed: false, message: "Tests failed" }],
       }));
 
-      const task = addReviewTask(h, {
+      const task = await addReviewTask(h, {
         expectations: [{ type: "test", command: "npm test" }], // no explicit confidence
       });
 
@@ -977,17 +981,17 @@ describe("AssessmentOrchestrator", () => {
       const assessment = createPassingAssessment();
       h.assessFn.mockResolvedValue(assessment);
 
-      const task = addReviewTask(h, {
+      const task = await addReviewTask(h, {
         expectations: [{ type: "file_exists", paths: ["src/foo.ts"] }],
       });
 
       h.ao.handleResult(task.id, createOkResult());
 
-      await vi.waitFor(() => {
-        expect(h.store.getTask(task.id)!.status).toBe("done");
+      await vi.waitFor(async () => {
+        expect((await h.store.getTask(task.id))!.status).toBe("done");
       });
 
-      const updated = h.store.getTask(task.id)!;
+      const updated = (await h.store.getTask(task.id))!;
       expect(updated.result).toBeDefined();
       expect(updated.result!.assessment).toBeDefined();
       expect(updated.result!.assessment!.passed).toBe(true);
@@ -995,16 +999,16 @@ describe("AssessmentOrchestrator", () => {
 
     it("stores TaskResult even without expectations", async () => {
       const h = createHarness();
-      const task = addReviewTask(h);
+      const task = await addReviewTask(h);
 
       h.ao.handleResult(task.id, createOkResult());
 
-      await vi.waitFor(() => {
-        expect(h.store.getTask(task.id)!.status).toBe("done");
+      await vi.waitFor(async () => {
+        expect((await h.store.getTask(task.id))!.status).toBe("done");
       });
 
-      expect(h.store.getTask(task.id)!.result).toBeDefined();
-      expect(h.store.getTask(task.id)!.result!.exitCode).toBe(0);
+      expect((await h.store.getTask(task.id))!.result).toBeDefined();
+      expect((await h.store.getTask(task.id))!.result!.exitCode).toBe(0);
     });
   });
 
@@ -1020,7 +1024,7 @@ describe("AssessmentOrchestrator", () => {
         timestamp: new Date().toISOString(),
       } satisfies AssessmentResult);
 
-      const task = addReviewTask(h, {
+      const task = await addReviewTask(h, {
         metrics: [{ name: "coverage", command: "npx coverage", threshold: 80 }],
       });
 

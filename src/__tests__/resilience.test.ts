@@ -57,16 +57,16 @@ describe("Orchestrator Resilience", () => {
   // ─── Task Timeout ────────────────────────────────────────
 
   describe("Task timeout", () => {
-    it("kills agent when task exceeds maxDuration", () => {
-      const task = orchestrator.addTask({
+    it("kills agent when task exceeds maxDuration", async () => {
+      const task = await orchestrator.addTask({
         title: "Slow task",
         description: "Should timeout",
         assignTo: "agent-1",
         maxDuration: 100,
       });
 
-      store.transition(task.id, "assigned");
-      store.transition(task.id, "in_progress");
+      await store.transition(task.id, "assigned");
+      await store.transition(task.id, "in_progress");
 
       const killCalls: Array<{ pid: number; signal: string | number | undefined }> = [];
       vi.spyOn(process, "kill").mockImplementation(((pid: number, signal?: string | number) => {
@@ -75,7 +75,7 @@ describe("Orchestrator Resilience", () => {
       }) as any);
 
       // Add active run in RunStore with old startedAt
-      runStore.upsertRun(createTestRunRecord({
+      await runStore.upsertRun(createTestRunRecord({
         id: "run-timeout",
         taskId: task.id,
         pid: 12345,
@@ -88,7 +88,7 @@ describe("Orchestrator Resilience", () => {
       const events: any[] = [];
       orchestrator.on("task:timeout", (e) => events.push(e));
 
-      orchestrator.tick();
+      await orchestrator.tick();
 
       expect(killCalls.some(c => c.pid === 12345 && c.signal === "SIGTERM")).toBe(true);
       expect(events).toHaveLength(1);
@@ -96,16 +96,16 @@ describe("Orchestrator Resilience", () => {
       expect(events[0].timeout).toBe(100);
     });
 
-    it("does not kill agent before maxDuration", () => {
-      const task = orchestrator.addTask({
+    it("does not kill agent before maxDuration", async () => {
+      const task = await orchestrator.addTask({
         title: "Quick task",
         description: "Not timeout",
         assignTo: "agent-1",
         maxDuration: 60000,
       });
 
-      store.transition(task.id, "assigned");
-      store.transition(task.id, "in_progress");
+      await store.transition(task.id, "assigned");
+      await store.transition(task.id, "in_progress");
 
       const killCalls: number[] = [];
       vi.spyOn(process, "kill").mockImplementation(((pid: number) => {
@@ -113,7 +113,7 @@ describe("Orchestrator Resilience", () => {
         return true;
       }) as any);
 
-      runStore.upsertRun(createTestRunRecord({
+      await runStore.upsertRun(createTestRunRecord({
         id: "run-quick",
         taskId: task.id,
         pid: 11111,
@@ -122,23 +122,23 @@ describe("Orchestrator Resilience", () => {
         activity: createTestActivity(),
       }));
 
-      orchestrator.tick();
+      await orchestrator.tick();
 
       // Should not have killed the runner
       expect(killCalls.filter(p => p === 11111)).toHaveLength(0);
     });
 
-    it("uses default taskTimeout from settings", () => {
+    it("uses default taskTimeout from settings", async () => {
       (orchestrator as any).config.settings.taskTimeout = 50;
 
-      const task = orchestrator.addTask({
+      const task = await orchestrator.addTask({
         title: "Default timeout",
         description: "Uses settings",
         assignTo: "agent-1",
       });
 
-      store.transition(task.id, "assigned");
-      store.transition(task.id, "in_progress");
+      await store.transition(task.id, "assigned");
+      await store.transition(task.id, "in_progress");
 
       const killCalls: Array<{ pid: number; signal: string | number | undefined }> = [];
       vi.spyOn(process, "kill").mockImplementation(((pid: number, signal?: string | number) => {
@@ -146,7 +146,7 @@ describe("Orchestrator Resilience", () => {
         return true;
       }) as any);
 
-      runStore.upsertRun(createTestRunRecord({
+      await runStore.upsertRun(createTestRunRecord({
         id: "run-default",
         taskId: task.id,
         pid: 22222,
@@ -155,13 +155,13 @@ describe("Orchestrator Resilience", () => {
         activity: createTestActivity(),
       }));
 
-      orchestrator.tick();
+      await orchestrator.tick();
 
       expect(killCalls.some(c => c.pid === 22222 && c.signal === "SIGTERM")).toBe(true);
     });
 
-    it("skips timeout when maxDuration is 0", () => {
-      const task = orchestrator.addTask({
+    it("skips timeout when maxDuration is 0", async () => {
+      const task = await orchestrator.addTask({
         title: "No timeout",
         description: "Disabled",
         assignTo: "agent-1",
@@ -171,8 +171,8 @@ describe("Orchestrator Resilience", () => {
       // Also disable stale detection
       (orchestrator as any).config.settings.staleThreshold = 0;
 
-      store.transition(task.id, "assigned");
-      store.transition(task.id, "in_progress");
+      await store.transition(task.id, "assigned");
+      await store.transition(task.id, "in_progress");
 
       const killCalls: number[] = [];
       vi.spyOn(process, "kill").mockImplementation(((pid: number) => {
@@ -180,7 +180,7 @@ describe("Orchestrator Resilience", () => {
         return true;
       }) as any);
 
-      runStore.upsertRun(createTestRunRecord({
+      await runStore.upsertRun(createTestRunRecord({
         id: "run-notimeout",
         taskId: task.id,
         pid: 33333,
@@ -189,7 +189,7 @@ describe("Orchestrator Resilience", () => {
         activity: createTestActivity({ lastUpdate: new Date().toISOString() }),
       }));
 
-      orchestrator.tick();
+      await orchestrator.tick();
 
       expect(killCalls.filter(p => p === 33333)).toHaveLength(0);
     });
@@ -198,23 +198,23 @@ describe("Orchestrator Resilience", () => {
   // ─── Stale Detection ─────────────────────────────────────
 
   describe("Stale detection", () => {
-    it("warns when agent idle exceeds staleThreshold", () => {
+    it("warns when agent idle exceeds staleThreshold", async () => {
       (orchestrator as any).config.settings.staleThreshold = 100;
       (orchestrator as any).config.settings.taskTimeout = 0; // disable timeout
 
-      const task = orchestrator.addTask({
+      const task = await orchestrator.addTask({
         title: "Stale task",
         description: "Agent idle",
         assignTo: "agent-1",
         maxDuration: 0,
       });
 
-      store.transition(task.id, "assigned");
-      store.transition(task.id, "in_progress");
+      await store.transition(task.id, "assigned");
+      await store.transition(task.id, "in_progress");
 
       vi.spyOn(process, "kill").mockImplementation((() => true) as any);
 
-      runStore.upsertRun(createTestRunRecord({
+      await runStore.upsertRun(createTestRunRecord({
         id: "run-stale",
         taskId: task.id,
         pid: 44444,
@@ -229,26 +229,26 @@ describe("Orchestrator Resilience", () => {
       const staleEvents: any[] = [];
       orchestrator.on("agent:stale", (e) => staleEvents.push(e));
 
-      orchestrator.tick();
+      await orchestrator.tick();
 
       expect(staleEvents).toHaveLength(1);
       expect(staleEvents[0].action).toBe("warning");
       expect(staleEvents[0].agentName).toBe("agent-1");
     });
 
-    it("kills agent when idle exceeds 2x staleThreshold", () => {
+    it("kills agent when idle exceeds 2x staleThreshold", async () => {
       (orchestrator as any).config.settings.staleThreshold = 100;
       (orchestrator as any).config.settings.taskTimeout = 0;
 
-      const task = orchestrator.addTask({
+      const task = await orchestrator.addTask({
         title: "Very stale",
         description: "Stuck agent",
         assignTo: "agent-1",
         maxDuration: 0,
       });
 
-      store.transition(task.id, "assigned");
-      store.transition(task.id, "in_progress");
+      await store.transition(task.id, "assigned");
+      await store.transition(task.id, "in_progress");
 
       const killCalls: Array<{ pid: number; signal: string | number | undefined }> = [];
       vi.spyOn(process, "kill").mockImplementation(((pid: number, signal?: string | number) => {
@@ -256,7 +256,7 @@ describe("Orchestrator Resilience", () => {
         return true;
       }) as any);
 
-      runStore.upsertRun(createTestRunRecord({
+      await runStore.upsertRun(createTestRunRecord({
         id: "run-verystale",
         taskId: task.id,
         pid: 55555,
@@ -271,30 +271,30 @@ describe("Orchestrator Resilience", () => {
       const staleEvents: any[] = [];
       orchestrator.on("agent:stale", (e) => staleEvents.push(e));
 
-      orchestrator.tick();
+      await orchestrator.tick();
 
       expect(killCalls.some(c => c.pid === 55555 && c.signal === "SIGTERM")).toBe(true);
       expect(staleEvents).toHaveLength(1);
       expect(staleEvents[0].action).toBe("killed");
     });
 
-    it("warns only once per task", () => {
+    it("warns only once per task", async () => {
       (orchestrator as any).config.settings.staleThreshold = 100;
       (orchestrator as any).config.settings.taskTimeout = 0;
 
-      const task = orchestrator.addTask({
+      const task = await orchestrator.addTask({
         title: "Warn once",
         description: "Only one warning",
         assignTo: "agent-1",
         maxDuration: 0,
       });
 
-      store.transition(task.id, "assigned");
-      store.transition(task.id, "in_progress");
+      await store.transition(task.id, "assigned");
+      await store.transition(task.id, "in_progress");
 
       vi.spyOn(process, "kill").mockImplementation((() => true) as any);
 
-      runStore.upsertRun(createTestRunRecord({
+      await runStore.upsertRun(createTestRunRecord({
         id: "run-warnonce",
         taskId: task.id,
         pid: 66666,
@@ -309,8 +309,8 @@ describe("Orchestrator Resilience", () => {
       const staleEvents: any[] = [];
       orchestrator.on("agent:stale", (e) => staleEvents.push(e));
 
-      orchestrator.tick();
-      orchestrator.tick();
+      await orchestrator.tick();
+      await orchestrator.tick();
 
       expect(staleEvents).toHaveLength(1);
     });
@@ -319,8 +319,8 @@ describe("Orchestrator Resilience", () => {
   // ─── Smart Retry ──────────────────────────────────────────
 
   describe("Smart retry", () => {
-    it("escalates to fallback agent after escalateAfter failures", () => {
-      const task = orchestrator.addTask({
+    it("escalates to fallback agent after escalateAfter failures", async () => {
+      const task = await orchestrator.addTask({
         title: "Escalating",
         description: "Will escalate",
         assignTo: "agent-1",
@@ -330,9 +330,9 @@ describe("Orchestrator Resilience", () => {
         },
       });
 
-      store.transition(task.id, "assigned");
-      store.transition(task.id, "in_progress");
-      store.transition(task.id, "review");
+      await store.transition(task.id, "assigned");
+      await store.transition(task.id, "in_progress");
+      await store.transition(task.id, "review");
 
       const result = {
         exitCode: 1,
@@ -341,15 +341,15 @@ describe("Orchestrator Resilience", () => {
         duration: 100,
       };
 
-      (orchestrator as any).retryOrFail(task.id, task, result);
+      await (orchestrator as any).retryOrFail(task.id, task, result);
 
-      const updated = store.getTask(task.id)!;
+      const updated = (await store.getTask(task.id))!;
       expect(updated.status).toBe("pending");
       expect(updated.assignTo).toBe("agent-senior");
     });
 
-    it("keeps same agent before escalateAfter threshold", () => {
-      const task = orchestrator.addTask({
+    it("keeps same agent before escalateAfter threshold", async () => {
+      const task = await orchestrator.addTask({
         title: "No escalation yet",
         description: "First failure",
         assignTo: "agent-1",
@@ -359,44 +359,44 @@ describe("Orchestrator Resilience", () => {
         },
       });
 
-      store.transition(task.id, "assigned");
-      store.transition(task.id, "in_progress");
-      store.transition(task.id, "review");
+      await store.transition(task.id, "assigned");
+      await store.transition(task.id, "in_progress");
+      await store.transition(task.id, "review");
 
-      (orchestrator as any).retryOrFail(task.id, task, {
+      await (orchestrator as any).retryOrFail(task.id, task, {
         exitCode: 1, stdout: "", stderr: "error", duration: 100,
       });
 
-      const updated = store.getTask(task.id)!;
+      const updated = (await store.getTask(task.id))!;
       expect(updated.status).toBe("pending");
       expect(updated.assignTo).toBe("agent-1");
     });
 
-    it("uses defaultRetryPolicy from settings", () => {
+    it("uses defaultRetryPolicy from settings", async () => {
       (orchestrator as any).config.settings.defaultRetryPolicy = {
         escalateAfter: 1,
         fallbackAgent: "agent-senior",
       };
 
-      const task = orchestrator.addTask({
+      const task = await orchestrator.addTask({
         title: "Default policy",
         description: "Uses settings",
         assignTo: "agent-1",
       });
 
-      store.transition(task.id, "assigned");
-      store.transition(task.id, "in_progress");
-      store.transition(task.id, "review");
+      await store.transition(task.id, "assigned");
+      await store.transition(task.id, "in_progress");
+      await store.transition(task.id, "review");
 
-      (orchestrator as any).retryOrFail(task.id, task, {
+      await (orchestrator as any).retryOrFail(task.id, task, {
         exitCode: 1, stdout: "", stderr: "err", duration: 50,
       });
 
-      expect(store.getTask(task.id)!.assignTo).toBe("agent-senior");
+      expect((await store.getTask(task.id))!.assignTo).toBe("agent-senior");
     });
 
-    it("ignores fallback if agent not in team", () => {
-      const task = orchestrator.addTask({
+    it("ignores fallback if agent not in team", async () => {
+      const task = await orchestrator.addTask({
         title: "Missing fallback",
         description: "Fallback not found",
         assignTo: "agent-1",
@@ -406,49 +406,49 @@ describe("Orchestrator Resilience", () => {
         },
       });
 
-      store.transition(task.id, "assigned");
-      store.transition(task.id, "in_progress");
-      store.transition(task.id, "review");
+      await store.transition(task.id, "assigned");
+      await store.transition(task.id, "in_progress");
+      await store.transition(task.id, "review");
 
-      (orchestrator as any).retryOrFail(task.id, task, {
+      await (orchestrator as any).retryOrFail(task.id, task, {
         exitCode: 1, stdout: "", stderr: "err", duration: 50,
       });
 
       // Should keep original agent since fallback doesn't exist
-      expect(store.getTask(task.id)!.assignTo).toBe("agent-1");
+      expect((await store.getTask(task.id))!.assignTo).toBe("agent-1");
     });
   });
 
   // ─── Orphan Recovery with RunStore ─────────────────────────
 
   describe("Orphan recovery with RunStore", () => {
-    it("cleans up run record when runner PID is dead", () => {
+    it("cleans up run record when runner PID is dead", async () => {
       vi.spyOn(process, "kill").mockImplementation(((pid: number, signal?: string | number) => {
         if (signal === 0) throw new Error("ESRCH");
         return true;
       }) as any);
 
-      runStore.upsertRun(createTestRunRecord({
+      await runStore.upsertRun(createTestRunRecord({
         id: "run-dead",
         taskId: "dead-task",
         pid: 99999,
         status: "running",
       }));
 
-      orchestrator.recoverOrphanedTasks();
+      await orchestrator.recoverOrphanedTasks();
 
       // Dead run gets completed as failed then deleted
-      const run = runStore.getRun("run-dead");
+      const run = await runStore.getRun("run-dead");
       expect(run).toBeUndefined();
     });
 
-    it("keeps run alive when runner PID is still running", () => {
+    it("keeps run alive when runner PID is still running", async () => {
       vi.spyOn(process, "kill").mockImplementation(((pid: number, signal?: string | number) => {
         if (signal === 0) return true; // Process exists
         return true;
       }) as any);
 
-      const task = store.addTask({
+      const task = await store.addTask({
         title: "Still running",
         description: "Runner alive",
         assignTo: "agent-1",
@@ -457,36 +457,36 @@ describe("Orchestrator Resilience", () => {
         metrics: [],
         maxRetries: 2,
       });
-      store.transition(task.id, "assigned");
-      store.transition(task.id, "in_progress");
+      await store.transition(task.id, "assigned");
+      await store.transition(task.id, "in_progress");
 
-      runStore.upsertRun(createTestRunRecord({
+      await runStore.upsertRun(createTestRunRecord({
         id: "run-alive",
         taskId: task.id,
         pid: 88888,
         status: "running",
       }));
 
-      const recovered = orchestrator.recoverOrphanedTasks();
+      const recovered = await orchestrator.recoverOrphanedTasks();
 
       // Task should NOT be recovered — runner is still alive
       expect(recovered).toBe(0);
-      expect(store.getTask(task.id)!.status).toBe("in_progress");
-      expect(runStore.getRun("run-alive")!.status).toBe("running");
+      expect((await store.getTask(task.id))!.status).toBe("in_progress");
+      expect((await runStore.getRun("run-alive"))!.status).toBe("running");
     });
   });
 
   // ─── Backward Compat: Orphan Process Cleanup ──────────────
 
   describe("Orphan process cleanup (backward compat)", () => {
-    it("attempts to kill orphan processes on recovery", () => {
+    it("attempts to kill orphan processes on recovery", async () => {
       const killCalls: Array<{ pid: number; signal: string | number | undefined }> = [];
       vi.spyOn(process, "kill").mockImplementation(((pid: number, signal?: string | number) => {
         killCalls.push({ pid, signal });
         return true;
       }) as any);
 
-      store.setState({
+      await store.setState({
         processes: [
           {
             agentName: "agent-1",
@@ -500,7 +500,7 @@ describe("Orchestrator Resilience", () => {
       });
 
       // Add an orphaned task
-      const task = store.addTask({
+      const task = await store.addTask({
         title: "Orphan",
         description: "Left behind",
         assignTo: "agent-1",
@@ -509,10 +509,10 @@ describe("Orchestrator Resilience", () => {
         metrics: [],
         maxRetries: 2,
       });
-      store.transition(task.id, "assigned");
-      store.transition(task.id, "in_progress");
+      await store.transition(task.id, "assigned");
+      await store.transition(task.id, "in_progress");
 
-      orchestrator.recoverOrphanedTasks();
+      await orchestrator.recoverOrphanedTasks();
 
       // Should have called kill(99999, 0) for existence check
       // then kill(99999, "SIGTERM")
@@ -522,13 +522,13 @@ describe("Orchestrator Resilience", () => {
       expect(pidCalls[1].signal).toBe("SIGTERM");
     });
 
-    it("silently skips dead processes", () => {
+    it("silently skips dead processes", async () => {
       vi.spyOn(process, "kill").mockImplementation(((pid: number, signal?: string | number) => {
         if (signal === 0) throw new Error("ESRCH");
         return true;
       }) as any);
 
-      store.setState({
+      await store.setState({
         processes: [
           {
             agentName: "agent-1",
@@ -541,17 +541,17 @@ describe("Orchestrator Resilience", () => {
         ],
       });
 
-      expect(() => orchestrator.recoverOrphanedTasks()).not.toThrow();
+      await expect(orchestrator.recoverOrphanedTasks()).resolves.not.toThrow();
     });
 
-    it("skips processes with pid 0 (in-process agent)", () => {
+    it("skips processes with pid 0 (in-process agent)", async () => {
       const killCalls: number[] = [];
       vi.spyOn(process, "kill").mockImplementation(((pid: number) => {
         killCalls.push(pid);
         return true;
       }) as any);
 
-      store.setState({
+      await store.setState({
         processes: [
           {
             agentName: "sdk-agent",
@@ -564,20 +564,20 @@ describe("Orchestrator Resilience", () => {
         ],
       });
 
-      orchestrator.recoverOrphanedTasks();
+      await orchestrator.recoverOrphanedTasks();
 
       // pid 0 should be skipped (condition: proc.pid > 0)
       expect(killCalls).toHaveLength(0);
     });
 
-    it("skips processes not marked alive", () => {
+    it("skips processes not marked alive", async () => {
       const killCalls: number[] = [];
       vi.spyOn(process, "kill").mockImplementation(((pid: number) => {
         killCalls.push(pid);
         return true;
       }) as any);
 
-      store.setState({
+      await store.setState({
         processes: [
           {
             agentName: "agent-1",
@@ -590,7 +590,7 @@ describe("Orchestrator Resilience", () => {
         ],
       });
 
-      orchestrator.recoverOrphanedTasks();
+      await orchestrator.recoverOrphanedTasks();
 
       expect(killCalls).toHaveLength(0);
     });

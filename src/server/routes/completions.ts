@@ -305,12 +305,12 @@ export function completionRoutes(orchestrator: Orchestrator, apiKeys?: string[])
     const body = c.req.valid("json");
 
     // ── Build context ──
-    const state = (() => {
-      try { return orchestrator.getStore()?.getState() ?? null; }
+    const state = await (async () => {
+      try { return await orchestrator.getStore()?.getState() ?? null; }
       catch { return null; }
     })();
 
-    const systemPrompt = buildChatSystemPrompt(orchestrator, state);
+    const systemPrompt = await buildChatSystemPrompt(orchestrator, state);
     const { piMessages, extraSystemParts } = convertMessages(body.messages);
     const fullSystemPrompt = extraSystemParts.length > 0
       ? `${systemPrompt}\n\n## Additional context from caller\n\n${extraSystemParts.join("\n\n")}`
@@ -336,23 +336,23 @@ export function completionRoutes(orchestrator: Orchestrator, apiKeys?: string[])
         if (forceNewSession) {
           // Client explicitly requested a new session — skip recency heuristic
           const firstUserMsg = body.messages.find(m => m.role === "user");
-          sessionId = sessionStore.create(firstUserMsg ? extractText(firstUserMsg.content).slice(0, 60) : undefined);
+          sessionId = await sessionStore.create(firstUserMsg ? extractText(firstUserMsg.content).slice(0, 60) : undefined);
         } else {
           // Reuse latest session if recent (< 30 min), otherwise create new
-          const latest = sessionStore.getLatestSession();
+          const latest = await sessionStore.getLatestSession();
           const timeout = 30 * 60 * 1000;
           if (latest && Date.now() - new Date(latest.updatedAt).getTime() < timeout) {
             sessionId = latest.id;
           } else {
             const firstUserMsg = body.messages.find(m => m.role === "user");
-            sessionId = sessionStore.create(firstUserMsg ? extractText(firstUserMsg.content).slice(0, 60) : undefined);
+            sessionId = await sessionStore.create(firstUserMsg ? extractText(firstUserMsg.content).slice(0, 60) : undefined);
           }
         }
       }
       // Persist user message (only the last one — earlier messages are already persisted)
       const lastUserMsg = [...body.messages].reverse().find(m => m.role === "user");
       if (lastUserMsg && sessionId) {
-        sessionStore.addMessage(sessionId, "user", extractText(lastUserMsg.content));
+        await sessionStore.addMessage(sessionId, "user", extractText(lastUserMsg.content));
       }
     }
 
@@ -374,7 +374,7 @@ export function completionRoutes(orchestrator: Orchestrator, apiKeys?: string[])
         // This guarantees the assistant message exists even if the client disconnects.
         let assistantMsgId: string | null = null;
         if (sessionStore && sessionId) {
-          const placeholder = sessionStore.addMessage(sessionId, "assistant", "");
+          const placeholder = await sessionStore.addMessage(sessionId, "assistant", "");
           assistantMsgId = placeholder.id;
         }
 
@@ -579,12 +579,12 @@ export function completionRoutes(orchestrator: Orchestrator, apiKeys?: string[])
           const safeToolCalls = redactVaultToolCalls(toolCallsAccum);
           if (sessionStore && sessionId && assistantMsgId) {
             if (finalText.trim()) {
-              sessionStore.updateMessage(sessionId, assistantMsgId, finalText.trim(), safeToolCalls);
+              await sessionStore.updateMessage(sessionId, assistantMsgId, finalText.trim(), safeToolCalls);
             }
             // If finalText is empty (LLM never responded), remove the empty placeholder
             // by setting content to a marker that indicates an interrupted response
             else {
-              sessionStore.updateMessage(sessionId, assistantMsgId, "[Response interrupted]", safeToolCalls);
+              await sessionStore.updateMessage(sessionId, assistantMsgId, "[Response interrupted]", safeToolCalls);
             }
           }
         }
@@ -594,7 +594,7 @@ export function completionRoutes(orchestrator: Orchestrator, apiKeys?: string[])
       // Reserve placeholder so the message is visible even if the request is interrupted
       let assistantMsgId: string | null = null;
       if (sessionStore && sessionId) {
-        const placeholder = sessionStore.addMessage(sessionId, "assistant", "");
+        const placeholder = await sessionStore.addMessage(sessionId, "assistant", "");
         assistantMsgId = placeholder.id;
       }
 
@@ -795,9 +795,9 @@ export function completionRoutes(orchestrator: Orchestrator, apiKeys?: string[])
         const safeToolCalls = redactVaultToolCalls(toolCallsAccum);
         if (sessionStore && sessionId && assistantMsgId) {
           if (finalText.trim()) {
-            sessionStore.updateMessage(sessionId, assistantMsgId, finalText.trim(), safeToolCalls);
+            await sessionStore.updateMessage(sessionId, assistantMsgId, finalText.trim(), safeToolCalls);
           } else {
-            sessionStore.updateMessage(sessionId, assistantMsgId, "[Response interrupted]", safeToolCalls);
+            await sessionStore.updateMessage(sessionId, assistantMsgId, "[Response interrupted]", safeToolCalls);
           }
         }
       }
