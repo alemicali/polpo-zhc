@@ -1,6 +1,6 @@
 {
   "name": "@polpo-ai/polpo",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Agent-agnostic framework for orchestrating teams of AI coding agents",
   "type": "module",
   "main": "dist/index.js",
