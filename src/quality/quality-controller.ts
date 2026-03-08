@@ -1,1 +1,1 @@
-export { QualityController } from "@polpo/core/quality-controller";
+export { QualityController } from "@polpo-ai/core/quality-controller";

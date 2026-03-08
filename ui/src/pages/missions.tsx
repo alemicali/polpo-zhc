@@ -39,8 +39,8 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { useMissions, useTasks, useAgents } from "@lumea-technologies/polpo-react";
-import type { Mission, MissionStatus } from "@lumea-technologies/polpo-react";
+import { useMissions, useTasks, useAgents } from "@polpo-ai/react";
+import type { Mission, MissionStatus } from "@polpo-ai/react";
 import { useAsyncAction } from "@/hooks/use-polpo";
 import { toast } from "sonner";
 import { formatDistanceToNow } from "date-fns";

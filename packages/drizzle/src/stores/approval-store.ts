@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
-import type { ApprovalStore } from "@polpo/core/approval-store";
-import type { ApprovalRequest, ApprovalStatus } from "@polpo/core/types";
+import type { ApprovalStore } from "@polpo-ai/core/approval-store";
+import type { ApprovalRequest, ApprovalStatus } from "@polpo-ai/core/types";
 import { type Dialect, serializeJson, deserializeJson } from "../utils.js";
 
 type AnyTable = any;

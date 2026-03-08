@@ -1,10 +1,10 @@
 import { eq, desc, asc } from "drizzle-orm";
 import { nanoid } from "nanoid";
-import type { TaskStore } from "@polpo/core/task-store";
+import type { TaskStore } from "@polpo-ai/core/task-store";
 import type {
   Task, TaskStatus, Mission, PolpoState, AgentProcess,
-} from "@polpo/core/types";
-import { assertValidTransition } from "@polpo/core/state-machine";
+} from "@polpo-ai/core/types";
+import { assertValidTransition } from "@polpo-ai/core/state-machine";
 import { type Dialect, serializeJson, deserializeJson } from "../utils.js";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

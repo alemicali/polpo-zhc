@@ -1,5 +1,5 @@
 import { eq } from "drizzle-orm";
-import type { MemoryStore } from "@polpo/core/memory-store";
+import type { MemoryStore } from "@polpo-ai/core/memory-store";
 
 type AnyTable = any;
 

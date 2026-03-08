@@ -1,5 +1,5 @@
 import { eq } from "drizzle-orm";
-import type { CheckpointStore, CheckpointState } from "@polpo/core/checkpoint-store";
+import type { CheckpointStore, CheckpointState } from "@polpo-ai/core/checkpoint-store";
 import { type Dialect, deserializeJson } from "../utils.js";
 
 type AnyTable = any;

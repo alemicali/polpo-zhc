@@ -67,8 +67,8 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { useTask, useTasks, useProcesses, useTaskActivity, useAssessmentProgress, useAgents } from "@lumea-technologies/polpo-react";
-import type { TaskStatus, TaskOutcome, DimensionScore, CheckResult, ReviewerResult, EvalDimension, AssessmentResult, AssessmentTrigger, AgentProcess, RunActivityEntry } from "@lumea-technologies/polpo-react";
+import { useTask, useTasks, useProcesses, useTaskActivity, useAssessmentProgress, useAgents } from "@polpo-ai/react";
+import type { TaskStatus, TaskOutcome, DimensionScore, CheckResult, ReviewerResult, EvalDimension, AssessmentResult, AssessmentTrigger, AgentProcess, RunActivityEntry } from "@polpo-ai/react";
 import { useAsyncAction } from "@/hooks/use-polpo";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { toast } from "sonner";

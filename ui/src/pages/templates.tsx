@@ -38,11 +38,11 @@ import {
   Asterisk,
 
 } from "lucide-react";
-import { useTemplates } from "@lumea-technologies/polpo-react";
+import { useTemplates } from "@polpo-ai/react";
 import type {
   TemplateInfo,
   TemplateParameter,
-} from "@lumea-technologies/polpo-react";
+} from "@polpo-ai/react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 

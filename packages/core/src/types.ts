@@ -671,7 +671,7 @@ export interface PolpoSettings {
    *  Higher levels produce better results but are slower and more expensive. */
   reasoning?: ReasoningLevel;
   /** Storage backend for tasks, missions, and runs. Default: "file" (filesystem JSON).
-   *  "postgres" requires @polpo/drizzle and a databaseUrl. */
+   *  "postgres" requires @polpo-ai/drizzle and a databaseUrl. */
   storage?: "file" | "sqlite" | "postgres";
   /** PostgreSQL connection URL (required when storage is "postgres").
    *  Example: "postgres://user:pass@localhost:5432/polpo" */

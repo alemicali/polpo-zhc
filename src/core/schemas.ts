@@ -1,5 +1,5 @@
 /**
- * Re-export all schemas from @polpo/core.
+ * Re-export all schemas from @polpo-ai/core.
  * Source of truth is packages/core/src/schemas.ts.
  */
-export * from "@polpo/core/schemas";
+export * from "@polpo-ai/core/schemas";

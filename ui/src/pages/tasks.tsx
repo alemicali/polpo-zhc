@@ -60,7 +60,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
-import type { Task, TaskStatus, AgentProcess, AgentConfig } from "@lumea-technologies/polpo-react";
+import type { Task, TaskStatus, AgentProcess, AgentConfig } from "@polpo-ai/react";
 import { formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
 import { MultiSelectFilter } from "@/components/shared/multi-select-filter";

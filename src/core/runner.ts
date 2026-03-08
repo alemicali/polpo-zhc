@@ -84,7 +84,7 @@ class RunActivityLog {
 
 async function createRunStore(config: RunnerConfig): Promise<RunStore> {
   if (config.storage === "postgres" && config.databaseUrl) {
-    const { createPgStores } = await import("@polpo/drizzle");
+    const { createPgStores } = await import("@polpo-ai/drizzle");
     const postgres = (await import("postgres")).default;
     const { drizzle } = await import("drizzle-orm/postgres-js");
     const sql = postgres(config.databaseUrl);
@@ -92,7 +92,7 @@ async function createRunStore(config: RunnerConfig): Promise<RunStore> {
     return createPgStores(db).runStore;
   }
   if (config.storage === "sqlite") {
-    const { createSqliteStores } = await import("@polpo/drizzle");
+    const { createSqliteStores } = await import("@polpo-ai/drizzle");
     const { createRequire } = await import("node:module");
     const req = createRequire(import.meta.url);
     const Database = req("better-sqlite3");

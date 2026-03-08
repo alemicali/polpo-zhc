@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from "react";
 import { usePolpoContext } from "../provider/polpo-context.js";
-import type { PolpoClient } from "@lumea-labs/polpo-client";
-import type { ConnectionStatus } from "@lumea-labs/polpo-client";
+import type { PolpoClient } from "@polpo-ai/client";
+import type { ConnectionStatus } from "@polpo-ai/client";
 
 export interface UsePolpoReturn {
   client: PolpoClient;

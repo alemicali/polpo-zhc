@@ -31,7 +31,7 @@ importers:
       '@mariozechner/pi-ai':
         specifier: ^0.52.12
         version: 0.52.12(@modelcontextprotocol/sdk@1.26.0(zod@4.3.6))(ws@8.19.0)(zod@4.3.6)
-      '@polpo/core':
+      '@polpo-ai/core':
         specifier: workspace:*
         version: link:packages/core
       '@sinclair/typebox':
@@ -132,7 +132,7 @@ importers:
         specifier: ^3.0.4
         version: 3.2.4(@types/debug@4.1.12)(@types/node@22.19.11)(jiti@2.6.1)(lightningcss@1.30.2)(msw@2.12.10(@types/node@22.19.11)(typescript@5.9.3))(terser@5.46.0)(tsx@4.21.0)(yaml@2.8.2)
     optionalDependencies:
-      '@polpo/drizzle':
+      '@polpo-ai/drizzle':
         specifier: workspace:*
         version: link:packages/drizzle
       better-sqlite3:
@@ -169,7 +169,7 @@ importers:
 
   packages/drizzle:
     dependencies:
-      '@polpo/core':
+      '@polpo-ai/core':
         specifier: workspace:*
         version: link:../core
       drizzle-orm:
@@ -197,7 +197,7 @@ importers:
 
   packages/react-sdk:
     dependencies:
-      '@lumea-labs/polpo-client':
+      '@polpo-ai/client':
         specifier: workspace:*
         version: link:../client-sdk
     devDependencies:
@@ -216,7 +216,7 @@ importers:
       '@ai-sdk/react':
         specifier: ^3.0.88
         version: 3.0.88(react@19.2.4)(zod@4.3.6)
-      '@lumea-technologies/polpo-react':
+      '@polpo-ai/react':
         specifier: workspace:*
         version: link:../packages/react-sdk
       '@streamdown/cjk':

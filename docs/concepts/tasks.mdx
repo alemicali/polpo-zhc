@@ -174,5 +174,5 @@ Key events during the task lifecycle:
 | `quality:sla` | SLA warning or violation on a task deadline |
 
 <Note>
-All state transitions are **atomic** — the task registry uses file-based stores (default) with atomic write operations to ensure consistency even if the process crashes mid-transition. SQLite and PostgreSQL are available as alternative stores via `@polpo/drizzle`.
+All state transitions are **atomic** — the task registry uses file-based stores (default) with atomic write operations to ensure consistency even if the process crashes mid-transition. SQLite and PostgreSQL are available as alternative stores via `@polpo-ai/drizzle`.
 </Note>

@@ -156,7 +156,7 @@ export class Orchestrator extends TypedEmitter {
   }
 
   /** Drizzle store bundle — populated when storage is "sqlite" or "postgres". */
-  private drizzleStores?: import("@polpo/drizzle").DrizzleStores;
+  private drizzleStores?: import("@polpo-ai/drizzle").DrizzleStores;
 
   /** Create task + run stores based on the configured storage backend. */
   private async createStores(storage?: "file" | "sqlite" | "postgres"): Promise<{
@@ -164,7 +164,7 @@ export class Orchestrator extends TypedEmitter {
     logStore?: LogStore; sessionStore?: SessionStore; memoryStore?: MemoryStore;
   }> {
     if (storage === "postgres") {
-      const { createPgStores, ensurePgSchema } = await import("@polpo/drizzle");
+      const { createPgStores, ensurePgSchema } = await import("@polpo-ai/drizzle");
       const postgres = (await import("postgres")).default;
       const { drizzle } = await import("drizzle-orm/postgres-js");
       const sql = postgres(this.config.settings.databaseUrl!);
@@ -180,7 +180,7 @@ export class Orchestrator extends TypedEmitter {
       };
     }
     if (storage === "sqlite") {
-      const { createSqliteStores } = await import("@polpo/drizzle");
+      const { createSqliteStores } = await import("@polpo-ai/drizzle");
       const { createRequire } = await import("node:module");
       const req = createRequire(import.meta.url);
       const Database = req("better-sqlite3");
@@ -1156,7 +1156,7 @@ export class Orchestrator extends TypedEmitter {
       // Create ChannelGateway with typing indicator support
       this.channelGateway = new ChannelGateway({
         orchestrator: this,
-        peerStore: this.peerStore,
+        peerStore: this.peerStore!,
         sessionStore: this.sessionStore,
         channelConfig,
         approvalResolver: resolver,
@@ -1253,7 +1253,7 @@ export class Orchestrator extends TypedEmitter {
       if (!this.channelGateway) {
         this.channelGateway = new ChannelGateway({
           orchestrator: this,
-          peerStore: this.peerStore,
+          peerStore: this.peerStore!,
           sessionStore: this.sessionStore,
           channelConfig,
           approvalResolver: resolver,

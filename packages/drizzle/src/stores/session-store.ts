@@ -1,6 +1,6 @@
 import { eq, desc, asc, count as drizzleCount } from "drizzle-orm";
 import { nanoid } from "nanoid";
-import type { SessionStore, Session, Message, MessageRole, ToolCallInfo } from "@polpo/core/session-store";
+import type { SessionStore, Session, Message, MessageRole, ToolCallInfo } from "@polpo-ai/core/session-store";
 import { type Dialect, deserializeJson } from "../utils.js";
 
 type AnyTable = any;

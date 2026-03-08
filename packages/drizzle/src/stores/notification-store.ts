@@ -1,5 +1,5 @@
 import { eq, desc, sql } from "drizzle-orm";
-import type { NotificationStore, NotificationRecord, NotificationStatus } from "@polpo/core/notification-store";
+import type { NotificationStore, NotificationRecord, NotificationStatus } from "@polpo-ai/core/notification-store";
 import { type Dialect, serializeJson, deserializeJson } from "../utils.js";
 
 type AnyTable = any;

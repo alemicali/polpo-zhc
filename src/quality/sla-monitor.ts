@@ -1,1 +1,1 @@
-export { SLAMonitor } from "@polpo/core/sla-monitor";
+export { SLAMonitor } from "@polpo-ai/core/sla-monitor";

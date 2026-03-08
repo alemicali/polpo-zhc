@@ -1,5 +1,5 @@
 /**
- * Re-export SessionStore interface from @polpo/core.
+ * Re-export SessionStore interface from @polpo-ai/core.
  * Source of truth is packages/core/src/session-store.ts.
  */
-export * from "@polpo/core/session-store";
+export * from "@polpo-ai/core/session-store";

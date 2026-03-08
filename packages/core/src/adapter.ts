@@ -3,7 +3,7 @@
  * Pure interfaces — no runtime dependencies.
  *
  * SpawnContext uses generic types for vault/whatsapp to avoid
- * coupling @polpo/core to specific runtime implementations.
+ * coupling @polpo-ai/core to specific runtime implementations.
  */
 
 import type { AgentActivity, TaskResult, TaskOutcome, ReasoningLevel } from "./types.js";

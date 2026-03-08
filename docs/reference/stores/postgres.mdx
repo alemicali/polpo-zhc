@@ -7,7 +7,7 @@ PostgreSQL stores use [Drizzle ORM](https://orm.drizzle.team/) for production-gr
 
 ## What's Included
 
-When `storage: "postgres"` is set, Polpo creates all 11 stores via `@polpo/drizzle` — the same set as [SQLite](/reference/stores/sqlite), backed by PostgreSQL instead.
+When `storage: "postgres"` is set, Polpo creates all 11 stores via `@polpo-ai/drizzle` — the same set as [SQLite](/reference/stores/sqlite), backed by PostgreSQL instead.
 
 ## Pros and Cons
 
@@ -44,5 +44,5 @@ Polpo creates all tables automatically on startup via `ensurePgSchema()`.
 PostgreSQL support requires two additional packages:
 
 ```bash
-npm install @polpo/drizzle postgres
+npm install @polpo-ai/drizzle postgres
 ```

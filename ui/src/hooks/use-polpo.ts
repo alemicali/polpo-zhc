@@ -1,5 +1,5 @@
 /**
- * Custom hooks that complement the @lumea-technologies/polpo-react.
+ * Custom hooks that complement the @polpo-ai/react.
  *
  * The SDK provides: useTasks, useTask, useMissions, useMission, useAgents,
  * useProcesses, useEvents, useStats, useMemory, useLogs, usePolpo,
@@ -11,9 +11,9 @@
  */
 
 import { useState, useCallback, useEffect, useRef } from "react";
-import { usePolpo, useSessions } from "@lumea-technologies/polpo-react";
-import type { ChatMessage, ChatCompletionMessage, PolpoConfig } from "@lumea-technologies/polpo-react";
-import type { ChatCompletionStream } from "@lumea-technologies/polpo-react";
+import { usePolpo, useSessions } from "@polpo-ai/react";
+import type { ChatMessage, ChatCompletionMessage, PolpoConfig } from "@polpo-ai/react";
+import type { ChatCompletionStream } from "@polpo-ai/react";
 
 // Local mirror of SDK ask_user types (avoids build-order issues)
 export interface AskUserOption {

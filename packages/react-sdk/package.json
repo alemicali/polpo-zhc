@@ -1,7 +1,7 @@
 {
-  "name": "@lumea-technologies/polpo-react",
+  "name": "@polpo-ai/react",
   "version": "0.1.0",
-  "description": "React SDK for OpenPolpo — hooks with real-time SSE updates, built on @lumea-labs/polpo-client",
+  "description": "React SDK for OpenPolpo — hooks with real-time SSE updates, built on @polpo-ai/client",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -22,7 +22,7 @@
     "prepublishOnly": "tsc"
   },
   "dependencies": {
-    "@lumea-labs/polpo-client": "workspace:*"
+    "@polpo-ai/client": "workspace:*"
   },
   "peerDependencies": {
     "react": "^18.0.0 || ^19.0.0"

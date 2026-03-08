@@ -36,8 +36,8 @@ import {
   ThumbsUp,
   ThumbsDown,
 } from "lucide-react";
-import { useApprovals } from "@lumea-technologies/polpo-react";
-import type { ApprovalRequest, ApprovalStatus } from "@lumea-technologies/polpo-react";
+import { useApprovals } from "@polpo-ai/react";
+import type { ApprovalRequest, ApprovalStatus } from "@polpo-ai/react";
 import { useAsyncAction } from "@/hooks/use-polpo";
 import { formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";

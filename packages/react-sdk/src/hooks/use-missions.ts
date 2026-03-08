@@ -1,7 +1,7 @@
 import { useSyncExternalStore, useCallback, useEffect, useRef, useState } from "react";
 import { usePolpoContext } from "../provider/polpo-context.js";
-import { selectMissions } from "@lumea-labs/polpo-client";
-import type { Mission, CreateMissionRequest, UpdateMissionRequest, ExecuteMissionResult, ResumeMissionResult } from "@lumea-labs/polpo-client";
+import { selectMissions } from "@polpo-ai/client";
+import type { Mission, CreateMissionRequest, UpdateMissionRequest, ExecuteMissionResult, ResumeMissionResult } from "@polpo-ai/client";
 
 export interface UseMissionsReturn {
   missions: Mission[];

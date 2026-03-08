@@ -1,1 +1,1 @@
-export { TaskManager } from "@polpo/core/task-manager";
+export { TaskManager } from "@polpo-ai/core/task-manager";

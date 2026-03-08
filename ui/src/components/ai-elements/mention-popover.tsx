@@ -18,7 +18,7 @@ import {
 } from "@/components/ui/popover";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import type { AgentConfig, Task, Mission, SkillWithAssignment, TemplateInfo } from "@lumea-technologies/polpo-react";
+import type { AgentConfig, Task, Mission, SkillWithAssignment, TemplateInfo } from "@polpo-ai/react";
 
 // ────────────────────────────────────────────────────────────────────────────
 // Types

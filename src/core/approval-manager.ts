@@ -1,1 +1,1 @@
-export { ApprovalManager } from "@polpo/core/approval-manager";
+export { ApprovalManager } from "@polpo-ai/core/approval-manager";

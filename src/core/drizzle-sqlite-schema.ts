@@ -1,5 +1,5 @@
 /**
- * Create all SQLite tables for @polpo/drizzle stores.
+ * Create all SQLite tables for @polpo-ai/drizzle stores.
  * Equivalent to ensurePgSchema() but for SQLite (uses raw SQL via better-sqlite3).
  */
 export function ensureSqliteSchema(db: { exec(sql: string): void }): void {

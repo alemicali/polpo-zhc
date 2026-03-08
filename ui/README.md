@@ -35,4 +35,4 @@ polpo serve    # Default: http://127.0.0.1:3000
 
 ## Architecture
 
-Uses `@lumea-labs/polpo-react` hooks (`useTasks`, `useAgents`, `usePlans`, etc.) backed by SSE for push-based real-time updates. All data is read-only — the UI reflects the orchestrator's actual state.
+Uses `@polpo-ai/react` hooks (`useTasks`, `useAgents`, `usePlans`, etc.) backed by SSE for push-based real-time updates. All data is read-only — the UI reflects the orchestrator's actual state.

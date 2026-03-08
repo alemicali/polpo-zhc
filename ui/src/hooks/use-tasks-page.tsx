@@ -9,8 +9,8 @@
 
 import { useState, useMemo, useCallback, createContext, use } from "react";
 import { useNavigate } from "react-router-dom";
-import { useTasks, usePolpo, useProcesses, useMissions, useAgents } from "@lumea-technologies/polpo-react";
-import type { Task } from "@lumea-technologies/polpo-react";
+import { useTasks, usePolpo, useProcesses, useMissions, useAgents } from "@polpo-ai/react";
+import type { Task } from "@polpo-ai/react";
 import type { FilterOption } from "@/components/shared/multi-select-filter";
 import { useAsyncAction } from "@/hooks/use-polpo";
 import { toast } from "sonner";
@@ -71,7 +71,7 @@ export interface TimeFilterState {
 
 // ── Sort helpers ──
 
-import type { TaskStatus } from "@lumea-technologies/polpo-react";
+import type { TaskStatus } from "@polpo-ai/react";
 
 const statusOrder: Record<TaskStatus, number> = {
   in_progress: 0,

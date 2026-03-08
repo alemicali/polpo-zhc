@@ -1,15 +1,15 @@
 /**
  * Event system for Polpo.
  *
- * Type definitions (PolpoEventMap, PolpoEvent) come from @polpo/core.
+ * Type definitions (PolpoEventMap, PolpoEvent) come from @polpo-ai/core.
  * TypedEmitter (extends Node.js EventEmitter) lives here in the shell.
  */
 import { EventEmitter } from "node:events";
-export type { PolpoEventMap, PolpoEvent } from "@polpo/core/events";
-export type { EventBus } from "@polpo/core/event-bus";
-import type { PolpoEvent, PolpoEventMap } from "@polpo/core/events";
-import type { EventBus } from "@polpo/core/event-bus";
-import type { LogStore } from "@polpo/core/log-store";
+export type { PolpoEventMap, PolpoEvent } from "@polpo-ai/core/events";
+export type { EventBus } from "@polpo-ai/core/event-bus";
+import type { PolpoEvent, PolpoEventMap } from "@polpo-ai/core/events";
+import type { EventBus } from "@polpo-ai/core/event-bus";
+import type { LogStore } from "@polpo-ai/core/log-store";
 
 /** Events to exclude from persistent logging (too frequent or internal). */
 const LOG_EXCLUDED = new Set<string>(["orchestrator:tick", "newListener", "removeListener"]);

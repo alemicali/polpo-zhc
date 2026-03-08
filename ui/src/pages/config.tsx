@@ -43,8 +43,8 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { useConfig } from "@/hooks/use-polpo";
-import { useAgents, useAuthStatus, useOrchestratorSkills } from "@lumea-technologies/polpo-react";
-import type { CustomModelDef, ProviderConfig, AuthProfileMeta, ProviderAuthInfo, SkillInfo, PolpoSettings, AuthStatusResponse } from "@lumea-technologies/polpo-react";
+import { useAgents, useAuthStatus, useOrchestratorSkills } from "@polpo-ai/react";
+import type { CustomModelDef, ProviderConfig, AuthProfileMeta, ProviderAuthInfo, SkillInfo, PolpoSettings, AuthStatusResponse } from "@polpo-ai/react";
 import { cn } from "@/lib/utils";
 import { JsonBlock } from "@/components/json-block";
 

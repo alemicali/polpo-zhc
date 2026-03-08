@@ -1,5 +1,5 @@
 {
-  "name": "@lumea-technologies/polpo",
+  "name": "polpo-ai",
   "version": "0.1.2",
   "description": "Agent-agnostic framework for orchestrating teams of AI coding agents",
   "type": "module",
@@ -38,8 +38,8 @@
   },
   "scripts": {
     "build": "tsc",
-    "build:all": "./node_modules/.bin/tsc && pnpm --filter @lumea-technologies/polpo-react build && pnpm --filter ui build",
-    "build:sdk": "pnpm --filter @lumea-technologies/polpo-react build",
+    "build:all": "./node_modules/.bin/tsc && pnpm --filter @polpo-ai/react build && pnpm --filter ui build",
+    "build:sdk": "pnpm --filter @polpo-ai/react build",
     "build:ui": "pnpm --filter ui build",
     "dev": "tsc --watch",
     "dev:serve": "tsx --watch src/cli/index.ts serve -p 3890",
@@ -79,7 +79,7 @@
     "node": ">=18.0.0"
   },
   "dependencies": {
-    "@polpo/core": "workspace:*",
+    "@polpo-ai/core": "workspace:*",
     "@hono/node-server": "^1.19.9",
     "@hono/zod-openapi": "^1.2.2",
     "@mariozechner/pi-agent-core": "^0.52.12",
@@ -108,7 +108,7 @@
     "zustand": "^5.0.11"
   },
   "optionalDependencies": {
-    "@polpo/drizzle": "workspace:*",
+    "@polpo-ai/drizzle": "workspace:*",
     "better-sqlite3": "^12.6.2",
     "drizzle-orm": "^0.44.0",
     "playwright-core": "^1.52.0",

@@ -1,7 +1,7 @@
 import { useSyncExternalStore, useCallback, useEffect, useState } from "react";
 import { usePolpoContext } from "../provider/polpo-context.js";
-import { selectTask } from "@lumea-labs/polpo-client";
-import type { Task, UpdateTaskRequest } from "@lumea-labs/polpo-client";
+import { selectTask } from "@polpo-ai/client";
+import type { Task, UpdateTaskRequest } from "@polpo-ai/client";
 
 export interface UseTaskReturn {
   task: Task | undefined;

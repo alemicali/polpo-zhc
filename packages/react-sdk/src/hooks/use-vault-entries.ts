@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { usePolpoContext } from "../provider/polpo-context.js";
-import type { VaultEntryMeta } from "@lumea-labs/polpo-client";
+import type { VaultEntryMeta } from "@polpo-ai/client";
 
 export interface UseVaultEntriesReturn {
   entries: VaultEntryMeta[];

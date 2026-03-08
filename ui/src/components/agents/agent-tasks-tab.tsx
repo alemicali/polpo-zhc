@@ -12,7 +12,7 @@ import { cn } from "@/lib/utils";
 import { formatDistanceToNow } from "date-fns";
 import { useAgentDetail } from "./agent-detail-provider";
 import { taskStatusConfig } from "@/lib/agent-meta";
-import type { Task } from "@lumea-technologies/polpo-react";
+import type { Task } from "@polpo-ai/react";
 
 // ── Task row ──
 

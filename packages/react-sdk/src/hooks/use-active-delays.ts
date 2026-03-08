@@ -1,6 +1,6 @@
 import { useSyncExternalStore, useState, useEffect, useCallback } from "react";
 import { usePolpoContext } from "../provider/polpo-context.js";
-import type { ActiveDelay } from "@lumea-labs/polpo-client";
+import type { ActiveDelay } from "@polpo-ai/client";
 
 export interface UseActiveDelaysReturn {
   /** Active delays from SSE events (live, updated by delay:started/delay:expired). */

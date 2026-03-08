@@ -7,7 +7,7 @@ SQLite stores use an embedded database via [Drizzle ORM](https://orm.drizzle.tea
 
 ## What's Included
 
-When `storage: "sqlite"` is set, Polpo creates all 11 stores via `@polpo/drizzle`:
+When `storage: "sqlite"` is set, Polpo creates all 11 stores via `@polpo-ai/drizzle`:
 
 | Store | Purpose |
 |-------|---------|
@@ -29,7 +29,7 @@ All stored in a single `.polpo/state.db` file.
 
 **Pros:** Safe concurrent access, transactional integrity, better performance at scale, same Drizzle interface as PostgreSQL.
 
-**Cons:** Requires `better-sqlite3` and `@polpo/drizzle` dependencies. Database file is not human-readable.
+**Cons:** Requires `better-sqlite3` and `@polpo-ai/drizzle` dependencies. Database file is not human-readable.
 
 ## When to Use
 

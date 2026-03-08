@@ -100,7 +100,7 @@ Events are consumed by the TUI, HTTP/SSE server, and notifications. See [Events 
 | System Context | File (`.polpo/system-context.md`) | Standing instructions for Polpo (injected into every conversation) |
 | Runner configs | JSON (`.polpo/tmp/`) | Temporary config for detached runners |
 
-File-based stores are the default. SQLite and PostgreSQL are available as alternatives via configuration (powered by [Drizzle ORM](https://orm.drizzle.team/) in `@polpo/drizzle`).
+File-based stores are the default. SQLite and PostgreSQL are available as alternatives via configuration (powered by [Drizzle ORM](https://orm.drizzle.team/) in `@polpo-ai/drizzle`).
 
 <Note>
 File-based stores use atomic write operations to handle concurrent access from Polpo and multiple runner processes.

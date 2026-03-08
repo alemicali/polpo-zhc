@@ -31,8 +31,8 @@ import {
   LayoutGrid,
   Check,
 } from "lucide-react";
-import { useSkills, useAgents } from "@lumea-technologies/polpo-react";
-import type { SkillWithAssignment, Team } from "@lumea-technologies/polpo-react";
+import { useSkills, useAgents } from "@polpo-ai/react";
+import type { SkillWithAssignment, Team } from "@polpo-ai/react";
 import { cn } from "@/lib/utils";
 
 // ── Helpers ──

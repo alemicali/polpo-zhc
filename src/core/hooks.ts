@@ -1,5 +1,5 @@
 /**
- * Re-export hooks from @polpo/core.
+ * Re-export hooks from @polpo-ai/core.
  * Source of truth is packages/core/src/hooks.ts.
  */
-export * from "@polpo/core/hooks";
+export * from "@polpo-ai/core/hooks";

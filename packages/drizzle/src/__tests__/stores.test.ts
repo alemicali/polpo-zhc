@@ -1,5 +1,5 @@
 /**
- * @polpo/drizzle — SQLite in-memory tests for all 11 Drizzle stores.
+ * @polpo-ai/drizzle — SQLite in-memory tests for all 11 Drizzle stores.
  *
  * Uses better-sqlite3 :memory: — no PG required.
  */
@@ -7,7 +7,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { createSqliteStores, type DrizzleStores } from "../index.js";
-import type { ApprovalRequest } from "@polpo/core/types";
+import type { ApprovalRequest } from "@polpo-ai/core/types";
 
 // ── Test helpers ─────────────────────────────────────────────────────
 

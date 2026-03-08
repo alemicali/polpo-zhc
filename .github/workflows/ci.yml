@@ -66,5 +66,5 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm run build
-      - run: pnpm run --filter @lumea-labs/polpo-react build
+      - run: pnpm run --filter @polpo-ai/react build
       - run: pnpm run --filter ui build

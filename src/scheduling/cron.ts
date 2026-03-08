@@ -1,1 +1,1 @@
-export { parseCron, matchesCron, nextCronOccurrence, isCronExpression } from "@polpo/core/cron";
+export { parseCron, matchesCron, nextCronOccurrence, isCronExpression } from "@polpo-ai/core/cron";

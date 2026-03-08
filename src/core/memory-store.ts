@@ -1,5 +1,5 @@
 /**
- * Re-export MemoryStore interface from @polpo/core.
+ * Re-export MemoryStore interface from @polpo-ai/core.
  * Source of truth is packages/core/src/memory-store.ts.
  */
-export * from "@polpo/core/memory-store";
+export * from "@polpo-ai/core/memory-store";

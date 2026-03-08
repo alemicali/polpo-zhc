@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
-import type { DelayStore, DelayState } from "@polpo/core/delay-store";
+import type { DelayStore, DelayState } from "@polpo-ai/core/delay-store";
 
 export type { DelayState };
 

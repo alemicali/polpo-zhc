@@ -1,5 +1,5 @@
 import { eq } from "drizzle-orm";
-import type { DelayStore, DelayState } from "@polpo/core/delay-store";
+import type { DelayStore, DelayState } from "@polpo-ai/core/delay-store";
 import { type Dialect, deserializeJson } from "../utils.js";
 
 type AnyTable = any;

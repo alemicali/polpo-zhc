@@ -64,7 +64,7 @@ jobs:
 
             <div class="platform">
               <h2>npm (manual)</h2>
-              <pre><code>npm install -g @lumea-labs/polpo</code></pre>
+              <pre><code>npm install -g polpo-ai</code></pre>
             </div>
 
             <div class="platform">

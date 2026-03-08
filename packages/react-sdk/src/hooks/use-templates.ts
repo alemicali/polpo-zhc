@@ -4,7 +4,7 @@ import type {
   TemplateInfo,
   TemplateDefinition,
   TemplateRunResult,
-} from "@lumea-labs/polpo-client";
+} from "@polpo-ai/client";
 
 export interface UseTemplatesReturn {
   /** List of discovered templates (lightweight metadata). */

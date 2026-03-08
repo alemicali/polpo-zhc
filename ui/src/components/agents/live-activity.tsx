@@ -15,7 +15,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatDistanceToNow } from "date-fns";
-import type { AgentProcess } from "@lumea-technologies/polpo-react";
+import type { AgentProcess } from "@polpo-ai/react";
 
 export function LiveActivity({ process }: { process: AgentProcess }) {
   const act = process.activity;

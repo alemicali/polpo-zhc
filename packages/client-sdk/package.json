@@ -1,5 +1,5 @@
 {
-  "name": "@lumea-labs/polpo-client",
+  "name": "@polpo-ai/client",
   "version": "0.1.0",
   "description": "TypeScript client for OpenPolpo — typed HTTP client, SSE streaming, and reactive store (framework-agnostic)",
   "type": "module",

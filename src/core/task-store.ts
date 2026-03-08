@@ -1,5 +1,5 @@
 /**
- * Re-export TaskStore interface from @polpo/core.
+ * Re-export TaskStore interface from @polpo-ai/core.
  * Source of truth is packages/core/src/task-store.ts.
  */
-export * from "@polpo/core/task-store";
+export * from "@polpo-ai/core/task-store";

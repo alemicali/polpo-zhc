@@ -22,7 +22,7 @@ polpo/
 │   ├── cli/              # Commander CLI entry point
 │   └── index.ts          # Barrel export (only file in src/ root)
 ├── packages/
-│   └── react-sdk/        # @lumea-labs/polpo-react — React hooks + SSE client
+│   └── react-sdk/        # @polpo-ai/react — React hooks + SSE client
 ├── ui/                   # Vite + React SPA dashboard
 ├── docs/                 # Mintlify documentation site
 └── templates/            # Built-in plan templates (JSON)
@@ -38,7 +38,7 @@ pnpm install
 ./node_modules/.bin/tsc
 
 # Build React SDK
-pnpm --filter @lumea-labs/polpo-react build
+pnpm --filter @polpo-ai/react build
 
 # Build UI
 pnpm --filter ui build
@@ -52,7 +52,7 @@ pnpm test
 ## Naming Conventions
 
 - **User-facing strings**: "Polpo" or "OpenPolpo" (CLI output, docs, prompts)
-- **npm package**: `@lumea-labs/polpo` (root), `@lumea-labs/polpo-react` (SDK)
+- **npm package**: `polpo-ai` (root), `@polpo-ai/react` (SDK)
 - **CLI command**: `polpo`
 - **Config directory**: `.polpo/`
 - **Internal types**: `OrchestraConfig`, `OrchestraState`, `OrchestraEvent` (historical, kept as-is)

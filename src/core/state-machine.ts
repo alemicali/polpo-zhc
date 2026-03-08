@@ -1,5 +1,5 @@
 /**
- * Re-export state machine from @polpo/core.
+ * Re-export state machine from @polpo-ai/core.
  * Source of truth is packages/core/src/state-machine.ts.
  */
-export * from "@polpo/core/state-machine";
+export * from "@polpo-ai/core/state-machine";

@@ -1,6 +1,6 @@
 import { createContext, useContext } from "react";
-import type { PolpoClient } from "@lumea-labs/polpo-client";
-import type { PolpoStore } from "@lumea-labs/polpo-client";
+import type { PolpoClient } from "@polpo-ai/client";
+import type { PolpoStore } from "@polpo-ai/client";
 
 export interface PolpoContextValue {
   client: PolpoClient;

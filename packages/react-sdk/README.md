@@ -1,4 +1,4 @@
-# @lumea-labs/polpo-react
+# @polpo-ai/react
 
 Type-safe React hooks for OpenPolpo with real-time Server-Sent Events (SSE) updates.
 
@@ -15,7 +15,7 @@ Type-safe React hooks for OpenPolpo with real-time Server-Sent Events (SSE) upda
 ## Installation
 
 ```bash
-npm install @lumea-labs/polpo-react
+npm install @polpo-ai/react
 ```
 
 **Peer Dependencies**:
@@ -24,7 +24,7 @@ npm install @lumea-labs/polpo-react
 ## Quick Start
 
 ```tsx
-import { PolpoProvider, useTasks, useAgents, useStats } from '@lumea-labs/polpo-react';
+import { PolpoProvider, useTasks, useAgents, useStats } from '@polpo-ai/react';
 
 function App() {
   return (
@@ -431,7 +431,7 @@ import type {
   UpdateTaskRequest,
   CreateMissionRequest,
   UpdateMissionRequest,
-} from '@lumea-labs/polpo-react';
+} from '@polpo-ai/react';
 ```
 
 ## Examples
@@ -439,7 +439,7 @@ import type {
 ### Task List with Retry
 
 ```tsx
-import { useTasks } from '@lumea-labs/polpo-react';
+import { useTasks } from '@polpo-ai/react';
 
 function TaskList() {
   const { tasks, retryTask } = useTasks();
@@ -464,7 +464,7 @@ function TaskList() {
 ### Live Agent Activity
 
 ```tsx
-import { useProcesses } from '@lumea-labs/polpo-react';
+import { useProcesses } from '@polpo-ai/react';
 
 function AgentActivity() {
   const processes = useProcesses();
@@ -491,7 +491,7 @@ function AgentActivity() {
 ### Mission Progress
 
 ```tsx
-import { useMission, useTasks } from '@lumea-labs/polpo-react';
+import { useMission, useTasks } from '@polpo-ai/react';
 
 function MissionProgress({ missionId }: { missionId: string }) {
   const { mission, report } = useMission(missionId);
@@ -517,7 +517,7 @@ function MissionProgress({ missionId }: { missionId: string }) {
 ### Event Stream
 
 ```tsx
-import { useEvents } from '@lumea-labs/polpo-react';
+import { useEvents } from '@polpo-ai/react';
 
 function EventFeed() {
   const events = useEvents(20);

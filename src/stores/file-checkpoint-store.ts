@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
-import type { CheckpointStore, CheckpointState } from "@polpo/core/checkpoint-store";
+import type { CheckpointStore, CheckpointState } from "@polpo-ai/core/checkpoint-store";
 
 export type { CheckpointState };
 

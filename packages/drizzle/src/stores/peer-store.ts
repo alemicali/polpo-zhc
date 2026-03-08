@@ -1,10 +1,10 @@
 import { eq, and, lt } from "drizzle-orm";
 import { nanoid } from "nanoid";
-import type { PeerStore } from "@polpo/core/peer-store";
+import type { PeerStore } from "@polpo-ai/core/peer-store";
 import type {
   PeerIdentity, PairingRequest, ChannelType,
   ChannelGatewayConfig, PresenceEntry,
-} from "@polpo/core/types";
+} from "@polpo-ai/core/types";
 
 type AnyTable = any;
 

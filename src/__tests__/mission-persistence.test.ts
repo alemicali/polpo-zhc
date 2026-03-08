@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
-import { createSqliteStores } from "@polpo/drizzle";
+import { createSqliteStores } from "@polpo-ai/drizzle";
 import { ensureSqliteSchema } from "../core/drizzle-sqlite-schema.js";
 import type { TaskStore } from "../core/task-store.js";
 

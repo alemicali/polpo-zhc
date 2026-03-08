@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, type ReactNode } from "react";
-import { PolpoClient } from "@lumea-labs/polpo-client";
-import { EventSourceManager } from "@lumea-labs/polpo-client";
-import type { SSEEvent } from "@lumea-labs/polpo-client";
-import { PolpoStore } from "@lumea-labs/polpo-client";
+import { PolpoClient } from "@polpo-ai/client";
+import { EventSourceManager } from "@polpo-ai/client";
+import type { SSEEvent } from "@polpo-ai/client";
+import { PolpoStore } from "@polpo-ai/client";
 import { PolpoContext } from "./polpo-context.js";
 
 export interface PolpoProviderProps {

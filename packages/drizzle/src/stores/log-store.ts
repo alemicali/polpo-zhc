@@ -1,6 +1,6 @@
 import { eq, desc, asc, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
-import type { LogStore, LogEntry, SessionInfo } from "@polpo/core/log-store";
+import type { LogStore, LogEntry, SessionInfo } from "@polpo-ai/core/log-store";
 import { type Dialect, serializeJson, deserializeJson } from "../utils.js";
 
 type AnyTable = any;

@@ -4,16 +4,16 @@ sidebarTitle: "TypeScript Client"
 description: "Framework-agnostic TypeScript client for the Polpo REST API"
 ---
 
-The `@lumea-labs/polpo-client` package provides a typed HTTP client, SSE streaming, and reactive store for interacting with the Polpo API from any TypeScript/JavaScript environment — Node.js, Deno, Bun, browser, or edge runtimes.
+The `@polpo-ai/client` package provides a typed HTTP client, SSE streaming, and reactive store for interacting with the Polpo API from any TypeScript/JavaScript environment — Node.js, Deno, Bun, browser, or edge runtimes.
 
 <Note>
-This is the **framework-agnostic** foundation. For React hooks, see [`@lumea-labs/polpo-react`](/reference/react-sdk) which builds on top of this package.
+This is the **framework-agnostic** foundation. For React hooks, see [`@polpo-ai/react`](/reference/react-sdk) which builds on top of this package.
 </Note>
 
 ## Installation
 
 ```bash
-npm install @lumea-labs/polpo-client
+npm install @polpo-ai/client
 ```
 
 No peer dependencies. Works in Node.js 18+, Deno, Bun, and modern browsers.
@@ -21,7 +21,7 @@ No peer dependencies. Works in Node.js 18+, Deno, Bun, and modern browsers.
 ## Quick Start
 
 ```ts
-import { PolpoClient } from "@lumea-labs/polpo-client";
+import { PolpoClient } from "@polpo-ai/client";
 
 const client = new PolpoClient({
   baseUrl: "http://localhost:3000",
@@ -147,7 +147,7 @@ for await (const chunk of stream) {
 SSE connection manager with auto-reconnect:
 
 ```ts
-import { EventSourceManager } from "@lumea-labs/polpo-client";
+import { EventSourceManager } from "@polpo-ai/client";
 
 const es = new EventSourceManager({
   url: client.getEventsUrl(),
@@ -173,7 +173,7 @@ es.disconnect();
 A framework-agnostic reactive store that consumes SSE events and maintains application state:
 
 ```ts
-import { PolpoClient, PolpoStore, EventSourceManager } from "@lumea-labs/polpo-client";
+import { PolpoClient, PolpoStore, EventSourceManager } from "@polpo-ai/client";
 
 const client = new PolpoClient({ baseUrl: "http://localhost:3000" });
 const store = new PolpoStore();
@@ -221,7 +221,7 @@ es.connect();
 Memoized selector functions for extracting data from the store state:
 
 ```ts
-import { selectTasks, selectMission, selectEvents } from "@lumea-labs/polpo-client";
+import { selectTasks, selectMission, selectEvents } from "@polpo-ai/client";
 
 const state = store.getSnapshot();
 
@@ -239,11 +239,11 @@ const taskEvents = selectEvents(state, ["task:*"]);
 
 ```ts
 // Full import
-import { PolpoClient, PolpoStore } from "@lumea-labs/polpo-client";
+import { PolpoClient, PolpoStore } from "@polpo-ai/client";
 
 // Client-only import
-import { PolpoClient } from "@lumea-labs/polpo-client/client";
+import { PolpoClient } from "@polpo-ai/client/client";
 
 // Store-only import
-import { PolpoStore, reduceEvent } from "@lumea-labs/polpo-client/store";
+import { PolpoStore, reduceEvent } from "@polpo-ai/client/store";
 ```

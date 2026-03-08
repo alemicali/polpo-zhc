@@ -8,8 +8,8 @@
  */
 
 import { createContext, use, useState, useMemo, useCallback } from "react";
-import { useAgents, useProcesses } from "@lumea-technologies/polpo-react";
-import type { AgentConfig, AgentProcess, Team } from "@lumea-technologies/polpo-react";
+import { useAgents, useProcesses } from "@polpo-ai/react";
+import type { AgentConfig, AgentProcess, Team } from "@polpo-ai/react";
 import { useAsyncAction } from "@/hooks/use-polpo";
 
 // ── View types ──

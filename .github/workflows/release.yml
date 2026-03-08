@@ -24,15 +24,15 @@ jobs:
           registry-url: https://registry.npmjs.org
       - run: pnpm install --frozen-lockfile
       - run: pnpm run build
-      - run: pnpm run --filter @lumea-labs/polpo-react build
+      - run: pnpm run --filter @polpo-ai/react build
 
-      - name: Publish @lumea-labs/polpo
+      - name: Publish polpo-ai
         run: pnpm publish --no-git-checks --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-      - name: Publish @lumea-labs/polpo-react
-        run: pnpm publish --no-git-checks --access public --filter @lumea-labs/polpo-react
+      - name: Publish @polpo-ai/react
+        run: pnpm publish --no-git-checks --access public --filter @polpo-ai/react
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 

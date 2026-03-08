@@ -1,10 +1,10 @@
 /**
- * @polpo/drizzle — Drizzle ORM store implementations for Polpo.
+ * @polpo-ai/drizzle — Drizzle ORM store implementations for Polpo.
  *
  * Supports PostgreSQL (via postgres.js) and SQLite (via better-sqlite3).
  *
  * Usage:
- *   import { createPgStores } from "@polpo/drizzle";
+ *   import { createPgStores } from "@polpo-ai/drizzle";
  *   import { drizzle } from "drizzle-orm/postgres-js";
  *   import postgres from "postgres";
  *
@@ -53,17 +53,17 @@ import { DrizzleConfigStore } from "./stores/config-store.js";
 
 // ── Store bundle type ─────────────────────────────────────────────────
 
-import type { TaskStore } from "@polpo/core/task-store";
-import type { RunStore } from "@polpo/core/run-store";
-import type { SessionStore } from "@polpo/core/session-store";
-import type { NotificationStore } from "@polpo/core/notification-store";
-import type { LogStore } from "@polpo/core/log-store";
-import type { ApprovalStore } from "@polpo/core/approval-store";
-import type { MemoryStore } from "@polpo/core/memory-store";
-import type { PeerStore } from "@polpo/core/peer-store";
-import type { CheckpointStore } from "@polpo/core/checkpoint-store";
-import type { DelayStore } from "@polpo/core/delay-store";
-import type { ConfigStore } from "@polpo/core/config-store";
+import type { TaskStore } from "@polpo-ai/core/task-store";
+import type { RunStore } from "@polpo-ai/core/run-store";
+import type { SessionStore } from "@polpo-ai/core/session-store";
+import type { NotificationStore } from "@polpo-ai/core/notification-store";
+import type { LogStore } from "@polpo-ai/core/log-store";
+import type { ApprovalStore } from "@polpo-ai/core/approval-store";
+import type { MemoryStore } from "@polpo-ai/core/memory-store";
+import type { PeerStore } from "@polpo-ai/core/peer-store";
+import type { CheckpointStore } from "@polpo-ai/core/checkpoint-store";
+import type { DelayStore } from "@polpo-ai/core/delay-store";
+import type { ConfigStore } from "@polpo-ai/core/config-store";
 
 export interface DrizzleStores {
   taskStore: TaskStore;

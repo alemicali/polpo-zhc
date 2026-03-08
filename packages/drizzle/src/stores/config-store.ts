@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
-import type { ConfigStore } from "@polpo/core/config-store";
-import type { PolpoConfig } from "@polpo/core/types";
+import type { ConfigStore } from "@polpo-ai/core/config-store";
+import type { PolpoConfig } from "@polpo-ai/core/types";
 import { type Dialect, deserializeJson } from "../utils.js";
 
 type AnyTable = any;

@@ -1,5 +1,5 @@
 /**
- * Re-export ConfigStore interface from @polpo/core.
+ * Re-export ConfigStore interface from @polpo-ai/core.
  * Source of truth is packages/core/src/config-store.ts.
  */
-export * from "@polpo/core/config-store";
+export * from "@polpo-ai/core/config-store";

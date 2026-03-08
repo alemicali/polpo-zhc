@@ -1,8 +1,8 @@
 import { useRef, useSyncExternalStore } from "react";
 import { usePolpoContext } from "../provider/polpo-context.js";
-import { selectEvents } from "@lumea-labs/polpo-client";
+import { selectEvents } from "@polpo-ai/client";
 import { useStableValue } from "./use-stable-value.js";
-import type { SSEEvent } from "@lumea-labs/polpo-client";
+import type { SSEEvent } from "@polpo-ai/client";
 
 export interface UseEventsReturn {
   events: SSEEvent[];

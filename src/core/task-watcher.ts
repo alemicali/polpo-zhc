@@ -1,1 +1,1 @@
-export { TaskWatcherManager } from "@polpo/core/task-watcher";
+export { TaskWatcherManager } from "@polpo-ai/core/task-watcher";

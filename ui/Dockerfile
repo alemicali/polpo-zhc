@@ -19,8 +19,8 @@ COPY packages/react-sdk/ packages/react-sdk/
 COPY ui/ ui/
 
 # Build: client-sdk → react-sdk → ui
-RUN pnpm --filter @lumea-labs/polpo-client build && \
-    pnpm --filter @lumea-technologies/polpo-react build && \
+RUN pnpm --filter @polpo-ai/client build && \
+    pnpm --filter @polpo-ai/react build && \
     VITE_POLPO_API_URL="" pnpm --filter ui build
 
 # ── Stage 2: Serve with nginx ────────────────────────────────────────────────

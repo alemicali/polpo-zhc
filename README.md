@@ -15,7 +15,7 @@
 </p>
 
 <p align="center">
-  <img alt="npm" src="https://img.shields.io/npm/v/@lumea-labs/polpo?style=flat-square&color=blue" />
+  <img alt="npm" src="https://img.shields.io/npm/v/polpo-ai?style=flat-square&color=blue" />
   <img alt="license" src="https://img.shields.io/github/license/lumea-labs/polpo?style=flat-square" />
   <img alt="node" src="https://img.shields.io/badge/node-%3E%3D18-brightgreen?style=flat-square" />
   <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-ESM-blue?style=flat-square" />
@@ -43,12 +43,12 @@ curl -fsSL https://raw.githubusercontent.com/lumea-labs/polpo/main/install/insta
 irm https://raw.githubusercontent.com/lumea-labs/polpo/main/install/install.ps1 | iex
 ```
 
-The installer detects your platform, ensures Node.js >= 18 is available (installing it via your system package manager if needed), and installs `@lumea-labs/polpo` globally.
+The installer detects your platform, ensures Node.js >= 18 is available (installing it via your system package manager if needed), and installs `polpo-ai` globally.
 
 ### Manual install
 
 ```bash
-npm install -g @lumea-labs/polpo    # or: pnpm add -g @lumea-labs/polpo
+npm install -g polpo-ai    # or: pnpm add -g polpo-ai
 ```
 
 ### Docker
@@ -227,10 +227,10 @@ polpo/
 ├── ui/                     # Vite + React monitoring dashboard
 ├── docs/                   # Mintlify documentation site
 ├── packages/
-│   ├── core/               # @polpo/core — pure business logic (zero Node.js deps)
-│   ├── drizzle/            # @polpo/drizzle — Drizzle ORM stores (SQLite + PostgreSQL)
-│   ├── client-sdk/         # @polpo/client-sdk — TypeScript HTTP client + SSE
-│   └── react-sdk/          # @polpo/react-sdk — React hooks + real-time updates
+│   ├── core/               # @polpo-ai/core — pure business logic (zero Node.js deps)
+│   ├── drizzle/            # @polpo-ai/drizzle — Drizzle ORM stores (SQLite + PostgreSQL)
+│   ├── client-sdk/         # @polpo-ai/client — TypeScript HTTP client + SSE
+│   └── react-sdk/          # @polpo-ai/react — React hooks + real-time updates
 └── .polpo/polpo.json       # Your project configuration
 ```
 

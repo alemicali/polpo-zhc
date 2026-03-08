@@ -3,7 +3,7 @@ import { mkdirSync, rmSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
-import { createSqliteStores } from "@polpo/drizzle";
+import { createSqliteStores } from "@polpo-ai/drizzle";
 import { ensureSqliteSchema } from "../core/drizzle-sqlite-schema.js";
 import { Orchestrator } from "../core/orchestrator.js";
 import type { TaskStore } from "../core/task-store.js";

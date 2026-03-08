@@ -12,7 +12,7 @@
   },
   "dependencies": {
     "@ai-sdk/react": "^3.0.88",
-    "@lumea-technologies/polpo-react": "workspace:*",
+    "@polpo-ai/react": "workspace:*",
     "@streamdown/cjk": "^1.0.2",
     "@streamdown/code": "^1.0.2",
     "@streamdown/math": "^1.0.2",

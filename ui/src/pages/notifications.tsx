@@ -48,8 +48,8 @@ import {
   MailX,
   ArrowUpRight,
 } from "lucide-react";
-import { useNotifications } from "@lumea-technologies/polpo-react";
-import type { NotificationRecord, NotificationSeverity } from "@lumea-technologies/polpo-react";
+import { useNotifications } from "@polpo-ai/react";
+import type { NotificationRecord, NotificationSeverity } from "@polpo-ai/react";
 import { formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";

@@ -1,6 +1,6 @@
 import { eq, desc, inArray } from "drizzle-orm";
-import type { RunStore, RunRecord, RunStatus } from "@polpo/core/run-store";
-import type { AgentActivity, TaskResult, TaskOutcome } from "@polpo/core/types";
+import type { RunStore, RunRecord, RunStatus } from "@polpo-ai/core/run-store";
+import type { AgentActivity, TaskResult, TaskOutcome } from "@polpo-ai/core/types";
 import { type Dialect, serializeJson, deserializeJson } from "../utils.js";
 
 type AnyTable = any;

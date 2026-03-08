@@ -1,1 +1,1 @@
-export { EscalationManager } from "@polpo/core/escalation-manager";
+export { EscalationManager } from "@polpo-ai/core/escalation-manager";

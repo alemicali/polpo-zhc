@@ -11,7 +11,7 @@ module.exports = {
   apps: [{
     name: 'polpo',
     script: 'npx',
-    args: '@lumea-labs/polpo serve --dir /path/to/project --port 3000 --api-key YOUR_KEY',
+    args: 'polpo-ai serve --dir /path/to/project --port 3000 --api-key YOUR_KEY',
     cwd: '/path/to/project',
     env: { NODE_ENV: 'production' },
     instances: 'max',
@@ -34,7 +34,7 @@ After=network.target
 Type=simple
 User=polpo
 WorkingDirectory=/path/to/project
-ExecStart=/usr/bin/env npx @lumea-labs/polpo serve --dir /path/to/project --port 3000 --api-key YOUR_KEY
+ExecStart=/usr/bin/env npx polpo-ai serve --dir /path/to/project --port 3000 --api-key YOUR_KEY
 Restart=always
 RestartSec=10
 
@@ -81,7 +81,7 @@ Create `~/Library/LaunchAgents/io.polpo.server.plist`:
 
 1. Download [NSSM](https://nssm.cc/)
 2. `nssm install PolpoServer`
-3. Path: `npx`, Args: `@lumea-labs/polpo serve --dir C:\path\to\project --port 3000`
+3. Path: `npx`, Args: `polpo-ai serve --dir C:\path\to\project --port 3000`
 4. Start: `nssm start PolpoServer`
 
 ## Multi-Arch Notes
@@ -91,7 +91,7 @@ Create `~/Library/LaunchAgents/io.polpo.server.plist`:
 - Use Docker for full portability:
 ```dockerfile
 FROM node:20-alpine
-RUN npm i -g @lumea-labs/polpo
+RUN npm i -g polpo-ai
 WORKDIR /app
 CMD [\"npx\", \"openpolpo\", \"serve\", \"--dir\", \".\", \"--port\", \"3000\"]
 ```

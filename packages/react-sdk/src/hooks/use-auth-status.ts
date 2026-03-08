@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { usePolpoContext } from "../provider/polpo-context.js";
-import type { AuthStatusResponse } from "@lumea-labs/polpo-client";
+import type { AuthStatusResponse } from "@polpo-ai/client";
 
 export interface UseAuthStatusReturn {
   authStatus: AuthStatusResponse | null;

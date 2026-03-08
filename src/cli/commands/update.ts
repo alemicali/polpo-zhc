@@ -7,11 +7,11 @@ import chalk from "chalk";
  */
 function detectPackageManager(): "pnpm" | "npm" {
   try {
-    const out = execSync("pnpm list -g @lumea-labs/polpo --depth=0 2>/dev/null", {
+    const out = execSync("pnpm list -g polpo-ai --depth=0 2>/dev/null", {
       encoding: "utf-8",
       timeout: 10_000,
     });
-    if (out.includes("@lumea-labs/polpo")) return "pnpm";
+    if (out.includes("polpo-ai")) return "pnpm";
   } catch { /* not pnpm */ }
   return "npm";
 }
@@ -20,7 +20,7 @@ function detectPackageManager(): "pnpm" | "npm" {
  * Get the latest version from the npm registry.
  */
 async function getLatestVersion(): Promise<string> {
-  const res = await fetch("https://registry.npmjs.org/@lumea-labs%2fpolpo/latest", {
+  const res = await fetch("https://registry.npmjs.org/polpo-ai/latest", {
     headers: { Accept: "application/json" },
   });
   if (!res.ok) throw new Error(`Registry returned ${res.status}`);
@@ -59,8 +59,8 @@ export function registerUpdateCommand(program: Command): void {
         const pm = detectPackageManager();
         const cmd =
           pm === "pnpm"
-            ? "pnpm add -g @lumea-labs/polpo@latest"
-            : "npm install -g @lumea-labs/polpo@latest";
+            ? "pnpm add -g polpo-ai@latest"
+            : "npm install -g polpo-ai@latest";
 
         console.log(chalk.dim(`\n  Updating via ${pm}...`));
         console.log(chalk.dim(`  $ ${cmd}\n`));
@@ -76,7 +76,7 @@ export function registerUpdateCommand(program: Command): void {
         }
       } catch (err: any) {
         console.error(chalk.red(`\n  Update failed: ${err.message}`));
-        console.log(chalk.dim("  Try manually: npm install -g @lumea-labs/polpo@latest"));
+        console.log(chalk.dim("  Try manually: npm install -g polpo-ai@latest"));
         process.exit(1);
       }
     });

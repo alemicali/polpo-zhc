@@ -1,1 +1,1 @@
-export { AgentManager } from "@polpo/core/agent-manager";
+export { AgentManager } from "@polpo-ai/core/agent-manager";

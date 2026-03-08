@@ -1,11 +1,11 @@
 /**
  * Peer identity store — manages channel peers, allowlists, pairing, and session mapping.
  *
- * Interface re-exported from @polpo/core.
+ * Interface re-exported from @polpo-ai/core.
  * FilePeerStore implementation lives here in the shell layer.
  */
 
-export type { PeerStore } from "@polpo/core/peer-store";
+export type { PeerStore } from "@polpo-ai/core/peer-store";
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -18,7 +18,7 @@ import type {
   PresenceEntry,
   DmPolicy,
 } from "./types.js";
-import type { PeerStore } from "@polpo/core/peer-store";
+import type { PeerStore } from "@polpo-ai/core/peer-store";
 
 // ── File-backed Implementation ──────────────────────────────────────────
 

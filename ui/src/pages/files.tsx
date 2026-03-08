@@ -63,7 +63,7 @@ import {
 import { cn } from "@/lib/utils";
 import { config } from "@/lib/config";
 import { toast } from "sonner";
-import { useEvents } from "@lumea-technologies/polpo-react";
+import { useEvents } from "@polpo-ai/react";
 
 // ── Types ──
 

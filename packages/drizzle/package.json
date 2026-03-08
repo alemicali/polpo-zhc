@@ -1,5 +1,5 @@
 {
-  "name": "@polpo/drizzle",
+  "name": "@polpo-ai/drizzle",
   "version": "0.1.0",
   "description": "Drizzle ORM store implementations for the Polpo AI agent orchestration framework (PostgreSQL + SQLite)",
   "type": "module",
@@ -19,7 +19,7 @@
     "prepublishOnly": "tsc"
   },
   "dependencies": {
-    "@polpo/core": "workspace:*",
+    "@polpo-ai/core": "workspace:*",
     "drizzle-orm": "^0.44.0",
     "nanoid": "^5.1.2"
   },

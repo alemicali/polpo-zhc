@@ -5,8 +5,8 @@ import type { Mission, MissionStatus, MissionReport, Task, TaskExpectation, Expe
 import type { QualityController } from "../quality/quality-controller.js";
 import { sanitizeExpectations, parseMissionDocument, type MissionDocumentParsed } from "./schemas.js";
 import { validateProviderKeys } from "../llm/pi-client.js";
-import type { CheckpointStore, CheckpointState } from "@polpo/core/checkpoint-store";
-import type { DelayStore, DelayState } from "@polpo/core/delay-store";
+import type { CheckpointStore, CheckpointState } from "@polpo-ai/core/checkpoint-store";
+import type { DelayStore, DelayState } from "@polpo-ai/core/delay-store";
 import { FileCheckpointStore } from "../stores/file-checkpoint-store.js";
 import { FileDelayStore } from "../stores/file-delay-store.js";
 
