@@ -25,8 +25,28 @@ import {
   BarChart3,
   MessageSquare,
   Rocket,
+  BookOpen,
+  Star,
+  Scale,
+  AlertTriangle,
+  ShieldCheck,
   type LucideIcon,
 } from "lucide-react";
+
+/* ── GitHub icon (brand — not in Lucide) ──────────────────────────── */
+
+function GitHubIcon({ className = "" }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      className={className}
+      aria-hidden="true"
+    >
+      <path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12" />
+    </svg>
+  );
+}
 
 /* ── Scroll-reveal ─────────────────────────────────────────────────── */
 
@@ -81,15 +101,48 @@ function InstallBar({ className = "" }: { className?: string }) {
   );
 }
 
+/* ── Navbar ─────────────────────────────────────────────────────────── */
+
+function Navbar() {
+  return (
+    <header className="fixed top-0 z-50 w-full border-b border-neutral-100 bg-white/80 backdrop-blur-md">
+      <div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-3">
+        <a href="/" className="flex items-center gap-2">
+          <span className="font-display text-lg font-extrabold tracking-tight text-neutral-950">
+            Polpo
+          </span>
+        </a>
+        <nav className="flex items-center gap-5">
+          <a
+            href="https://docs.polpo.sh"
+            className="flex items-center gap-1.5 text-sm text-neutral-500 transition hover:text-neutral-950"
+          >
+            <BookOpen className="h-3.5 w-3.5" />
+            Docs
+          </a>
+          <a
+            href="https://github.com/lumea-labs/polpo"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-200 px-3 py-1.5 text-sm font-medium text-neutral-700 transition hover:border-neutral-400 hover:text-neutral-950"
+          >
+            <GitHubIcon className="h-4 w-4" />
+            <Star className="h-3 w-3" />
+            Star
+          </a>
+        </nav>
+      </div>
+    </header>
+  );
+}
+
 /* ── Sections ──────────────────────────────────────────────────────── */
 
 function Hero() {
   return (
     <section className="relative overflow-hidden pt-32 pb-24 md:pt-44 md:pb-32">
-      {/* Subtle radial glow */}
-      <div className="pointer-events-none absolute -top-48 left-1/2 -translate-x-1/2 h-[600px] w-[800px] bg-[radial-gradient(ellipse,rgba(0,0,0,0.04)_0%,transparent_70%)]" />
+      {/* Dot grid background */}
+      <div className="dot-grid pointer-events-none absolute inset-0 opacity-60" />
 
-      <div className="mx-auto max-w-3xl px-6 text-center">
+      <div className="relative mx-auto max-w-3xl px-6 text-center">
         <Reveal>
           <p className="mb-6 inline-block rounded-full border border-neutral-200 bg-white px-4 py-1.5 font-mono text-xs tracking-wide text-neutral-500">
             Open source &middot; MIT licensed
@@ -104,9 +157,9 @@ function Hero() {
         </Reveal>
         <Reveal delay={0.16}>
           <p className="mx-auto mt-6 max-w-xl text-lg leading-relaxed text-neutral-500">
-            Assemble AI agent teams that plan, execute, review their own work,
-            and ping you only when it matters. On your laptop, your VPS, your
-            rules.
+            Assemble AI agent teams that plan, execute, and review their own
+            work. Every output scored by LLM judges. Below threshold? The agent
+            fixes it. You're the CEO.
           </p>
         </Reveal>
         <Reveal delay={0.24}>
@@ -126,6 +179,7 @@ function Hero() {
               href="https://github.com/lumea-labs/polpo"
               className="inline-flex items-center gap-2 rounded-lg border border-neutral-200 px-6 py-3 text-sm font-semibold text-neutral-700 transition hover:border-neutral-400 hover:text-neutral-950"
             >
+              <GitHubIcon className="h-4 w-4" />
               GitHub
             </a>
           </div>
@@ -205,6 +259,432 @@ function Comparison() {
   );
 }
 
+/* ── Mock: Agent Team Flow (React-Flow style with SVG edges) ─────── */
+
+function TeamFlow() {
+  /* Layout positions for nodes (relative to SVG viewBox 800x520) */
+  const orchestrator = { x: 320, y: 30, w: 160, h: 64 };
+  const reviewNode = { x: 320, y: 200, w: 160, h: 64 };
+
+  const agents = [
+    { name: "backend-dev", role: "Node.js & APIs", status: "active" as const, x: 40, y: 200 },
+    { name: "frontend-dev", role: "React & UI", status: "active" as const, x: 200, y: 200 },
+    { name: "researcher", role: "Web & docs", status: "idle" as const, x: 520, y: 200 },
+    { name: "reviewer", role: "QA & review", status: "done" as const, x: 680, y: 200 },
+  ];
+
+  const statusColors = {
+    active: { border: "#10b981", bg: "#ecfdf5", dot: "#10b981" },
+    idle: { border: "#d4d4d4", bg: "#ffffff", dot: "#a3a3a3" },
+    done: { border: "#d4d4d4", bg: "#fafafa", dot: "#737373" },
+  };
+
+  return (
+    <section className="relative py-24 md:py-32 overflow-hidden">
+      {/* Subtle cross-hatch background */}
+      <div className="dot-grid pointer-events-none absolute inset-0 opacity-40" />
+
+      <div className="relative mx-auto max-w-5xl px-6">
+        <Reveal>
+          <h2 className="text-center font-display text-3xl font-extrabold tracking-tight text-neutral-950 sm:text-4xl">
+            Your AI team,{" "}
+            <span className="text-neutral-400">orchestrated.</span>
+          </h2>
+          <p className="mx-auto mt-4 max-w-lg text-center text-neutral-500">
+            Polpo acts as the manager. It plans the work, delegates to
+            specialized agents, scores every output with LLM judges, and retries
+            what doesn't meet the bar.
+          </p>
+        </Reveal>
+
+        <Reveal delay={0.12}>
+          <div className="relative mt-14 overflow-hidden rounded-xl border border-neutral-200 bg-white">
+            {/* SVG Flow diagram */}
+            <svg
+              viewBox="0 0 800 340"
+              className="w-full"
+              fill="none"
+              xmlns="http://www.w3.org/2000/svg"
+            >
+              {/* ── Edges from orchestrator to each agent ── */}
+              {agents.map((a, i) => {
+                const startX = orchestrator.x + orchestrator.w / 2;
+                const startY = orchestrator.y + orchestrator.h;
+                const endX = a.x + 70;
+                const endY = a.y;
+                const midY = (startY + endY) / 2;
+                return (
+                  <path
+                    key={i}
+                    d={`M${startX},${startY} C${startX},${midY} ${endX},${midY} ${endX},${endY}`}
+                    stroke="#d4d4d4"
+                    strokeWidth="1.5"
+                    strokeDasharray={a.status === "idle" ? "4 4" : undefined}
+                    className={`flow-line flow-line-delay-${i}`}
+                  />
+                );
+              })}
+
+              {/* ── Edge from review node back to orchestrator ── */}
+              <path
+                d={`M${reviewNode.x + reviewNode.w + 10},${reviewNode.y + reviewNode.h / 2} C${reviewNode.x + reviewNode.w + 50},${reviewNode.y + reviewNode.h / 2} ${orchestrator.x + orchestrator.w + 50},${orchestrator.y + orchestrator.h / 2} ${orchestrator.x + orchestrator.w + 10},${orchestrator.y + orchestrator.h / 2}`}
+                stroke="#d4d4d4"
+                strokeWidth="1.5"
+                strokeDasharray="4 4"
+                className="flow-line flow-line-delay-2"
+                markerEnd="url(#arrowhead)"
+              />
+
+              {/* Arrow marker */}
+              <defs>
+                <marker
+                  id="arrowhead"
+                  markerWidth="8"
+                  markerHeight="6"
+                  refX="8"
+                  refY="3"
+                  orient="auto"
+                >
+                  <polygon points="0 0, 8 3, 0 6" fill="#a3a3a3" />
+                </marker>
+              </defs>
+
+              {/* ── Orchestrator node ── */}
+              <g>
+                <rect
+                  x={orchestrator.x}
+                  y={orchestrator.y}
+                  width={orchestrator.w}
+                  height={orchestrator.h}
+                  rx="10"
+                  fill="#0a0a0a"
+                  stroke="#0a0a0a"
+                  strokeWidth="2"
+                />
+                <text
+                  x={orchestrator.x + orchestrator.w / 2}
+                  y={orchestrator.y + 28}
+                  textAnchor="middle"
+                  fill="white"
+                  fontSize="13"
+                  fontWeight="700"
+                  fontFamily="Bricolage Grotesque, sans-serif"
+                >
+                  Polpo
+                </text>
+                <text
+                  x={orchestrator.x + orchestrator.w / 2}
+                  y={orchestrator.y + 46}
+                  textAnchor="middle"
+                  fill="#a3a3a3"
+                  fontSize="10"
+                  fontFamily="DM Sans, sans-serif"
+                >
+                  Plan · Delegate · Review
+                </text>
+              </g>
+
+              {/* ── Agent nodes ── */}
+              {agents.map((a, i) => {
+                const c = statusColors[a.status];
+                return (
+                  <g key={i}>
+                    <rect
+                      x={a.x}
+                      y={a.y}
+                      width="140"
+                      height="58"
+                      rx="8"
+                      fill={c.bg}
+                      stroke={c.border}
+                      strokeWidth="1.5"
+                    />
+                    {/* Status dot */}
+                    <circle cx={a.x + 16} cy={a.y + 22} r="4" fill={c.dot}>
+                      {a.status === "active" && (
+                        <animate
+                          attributeName="opacity"
+                          values="1;0.4;1"
+                          dur="1.5s"
+                          repeatCount="indefinite"
+                        />
+                      )}
+                    </circle>
+                    <text
+                      x={a.x + 28}
+                      y={a.y + 26}
+                      fill="#171717"
+                      fontSize="12"
+                      fontWeight="700"
+                      fontFamily="DM Mono, monospace"
+                    >
+                      {a.name}
+                    </text>
+                    <text
+                      x={a.x + 16}
+                      y={a.y + 44}
+                      fill="#737373"
+                      fontSize="10"
+                      fontFamily="DM Sans, sans-serif"
+                    >
+                      {a.role}
+                    </text>
+                  </g>
+                );
+              })}
+
+              {/* ── G-Eval review node ── */}
+              <g>
+                <rect
+                  x={reviewNode.x}
+                  y={reviewNode.y}
+                  width={reviewNode.w}
+                  height={reviewNode.h}
+                  rx="10"
+                  fill="#fafafa"
+                  stroke="#e5e5e5"
+                  strokeWidth="1.5"
+                  strokeDasharray="4 2"
+                />
+                <text
+                  x={reviewNode.x + reviewNode.w / 2}
+                  y={reviewNode.y + 26}
+                  textAnchor="middle"
+                  fill="#171717"
+                  fontSize="12"
+                  fontWeight="700"
+                  fontFamily="DM Mono, monospace"
+                >
+                  G-Eval Review
+                </text>
+                <text
+                  x={reviewNode.x + reviewNode.w / 2}
+                  y={reviewNode.y + 44}
+                  textAnchor="middle"
+                  fill="#737373"
+                  fontSize="10"
+                  fontFamily="DM Sans, sans-serif"
+                >
+                  3 judges · median score
+                </text>
+              </g>
+
+              {/* ── Edges from agents to review ── */}
+              {agents.slice(0, 2).map((a, i) => {
+                const startX = a.x + 70;
+                const startY = a.y + 58;
+                const endX = reviewNode.x;
+                const endY = reviewNode.y + reviewNode.h / 2;
+                const midY = startY + 30;
+                return (
+                  <path
+                    key={`rev-${i}`}
+                    d={`M${startX},${startY} C${startX},${midY} ${endX - 20},${endY} ${endX},${endY}`}
+                    stroke="#d4d4d4"
+                    strokeWidth="1"
+                    strokeDasharray="3 3"
+                    opacity="0.5"
+                  />
+                );
+              })}
+
+              {/* ── Legend ── */}
+              <g transform="translate(16, 300)">
+                <circle cx="6" cy="6" r="4" fill="#10b981" />
+                <text x="16" y="10" fill="#737373" fontSize="9" fontFamily="DM Sans, sans-serif">Active</text>
+                <circle cx="66" cy="6" r="4" fill="#a3a3a3" />
+                <text x="76" y="10" fill="#737373" fontSize="9" fontFamily="DM Sans, sans-serif">Idle</text>
+                <circle cx="116" cy="6" r="4" fill="#737373" />
+                <text x="126" y="10" fill="#737373" fontSize="9" fontFamily="DM Sans, sans-serif">Done</text>
+              </g>
+            </svg>
+
+            {/* Mock task feed */}
+            <div className="border-t border-neutral-100 bg-neutral-50 p-5 space-y-2">
+              <p className="font-mono text-xs uppercase tracking-wider text-neutral-400">
+                Live activity
+              </p>
+              {[
+                {
+                  agent: "backend-dev",
+                  task: "Set up Express routes with JWT auth",
+                  status: "in_progress",
+                },
+                {
+                  agent: "frontend-dev",
+                  task: "Create React dashboard components",
+                  status: "in_progress",
+                },
+                {
+                  agent: "reviewer",
+                  task: "Review API schema",
+                  status: "done",
+                  score: "4.2 / 5",
+                },
+                {
+                  agent: "polpo",
+                  task: "Score below 3.0 on auth middleware — retrying",
+                  status: "retry",
+                },
+              ].map((t, i) => (
+                <div
+                  key={i}
+                  className="flex items-center gap-3 rounded-md bg-white px-3 py-2 text-sm"
+                >
+                  {t.status === "in_progress" && (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin text-emerald-500" />
+                  )}
+                  {t.status === "done" && (
+                    <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
+                  )}
+                  {t.status === "retry" && (
+                    <RefreshCw className="h-3.5 w-3.5 text-amber-500" />
+                  )}
+                  <span className="font-mono text-xs font-medium text-neutral-600">
+                    {t.agent}
+                  </span>
+                  <span className="text-neutral-500">{t.task}</span>
+                  {t.score && (
+                    <span className="ml-auto rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700">
+                      {t.score}
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        </Reveal>
+      </div>
+    </section>
+  );
+}
+
+/* ── Quality Assurance — G-Eval deep dive ─────────────────────────── */
+
+function QualitySection() {
+  const dimensions = [
+    { label: "Correctness", weight: "35%", desc: "Logic errors, runtime exceptions, functional accuracy." },
+    { label: "Completeness", weight: "30%", desc: "All requirements met, nothing missing, nothing left half-done." },
+    { label: "Code Quality", weight: "20%", desc: "Clean structure, naming, maintainability." },
+    { label: "Edge Cases", weight: "15%", desc: "Error handling, boundary conditions, resilience." },
+  ];
+
+  return (
+    <section className="relative border-y border-neutral-100 py-24 md:py-32 overflow-hidden">
+      {/* Diagonal lines background */}
+      <div
+        className="pointer-events-none absolute inset-0 opacity-[0.03]"
+        style={{
+          backgroundImage:
+            "repeating-linear-gradient(135deg, #000 0px, #000 1px, transparent 1px, transparent 16px)",
+        }}
+      />
+
+      <div className="relative mx-auto max-w-4xl px-6">
+        <Reveal>
+          <div className="flex items-center justify-center gap-2 mb-4">
+            <Scale className="h-5 w-5 text-neutral-400" />
+            <span className="font-mono text-xs uppercase tracking-wider text-neutral-400">
+              G-Eval Review System
+            </span>
+          </div>
+          <h2 className="text-center font-display text-3xl font-extrabold tracking-tight text-neutral-950 sm:text-4xl">
+            Every task judged.{" "}
+            <span className="text-neutral-400">Nothing ships broken.</span>
+          </h2>
+          <p className="mx-auto mt-4 max-w-2xl text-center text-neutral-500">
+            3 independent LLM judges review every task output in parallel. Scores are
+            aggregated via median with outlier filtering. Below threshold? The
+            agent gets targeted feedback and retries automatically.
+          </p>
+        </Reveal>
+
+        <div className="mt-14 grid grid-cols-1 gap-8 md:grid-cols-2">
+          {/* Left: scoring dimensions */}
+          <Reveal delay={0.08}>
+            <div className="rounded-xl border border-neutral-200 bg-white overflow-hidden">
+              <div className="border-b border-neutral-100 bg-neutral-50 px-5 py-3">
+                <span className="font-mono text-xs uppercase tracking-wider text-neutral-400">
+                  Scoring dimensions
+                </span>
+              </div>
+              <div className="divide-y divide-neutral-100">
+                {dimensions.map((d, i) => (
+                  <div key={i} className="flex items-start gap-4 px-5 py-4">
+                    <span className="shrink-0 rounded-md bg-neutral-100 px-2 py-0.5 font-mono text-xs font-bold text-neutral-600">
+                      {d.weight}
+                    </span>
+                    <div>
+                      <span className="font-display text-sm font-bold text-neutral-900">
+                        {d.label}
+                      </span>
+                      <p className="mt-0.5 text-xs text-neutral-500 leading-relaxed">
+                        {d.desc}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </Reveal>
+
+          {/* Right: how it works */}
+          <Reveal delay={0.16}>
+            <div className="space-y-4">
+              <div className="rounded-xl border border-neutral-200 bg-white p-5">
+                <div className="flex items-center gap-3 mb-3">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-neutral-950">
+                    <Search className="h-4 w-4 text-white" />
+                  </div>
+                  <span className="font-display text-sm font-bold text-neutral-900">
+                    Phase 1 — Exploration
+                  </span>
+                </div>
+                <p className="text-sm text-neutral-500 leading-relaxed">
+                  Each judge explores the codebase with tools — reads files, checks
+                  output, analyzes the execution timeline. No guessing.
+                </p>
+              </div>
+
+              <div className="rounded-xl border border-neutral-200 bg-white p-5">
+                <div className="flex items-center gap-3 mb-3">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-neutral-950">
+                    <BarChart3 className="h-4 w-4 text-white" />
+                  </div>
+                  <span className="font-display text-sm font-bold text-neutral-900">
+                    Phase 2 — Scoring
+                  </span>
+                </div>
+                <p className="text-sm text-neutral-500 leading-relaxed">
+                  Structured scores per dimension with reasoning and
+                  file:line evidence. Median aggregation filters outliers.
+                </p>
+              </div>
+
+              <div className="rounded-xl border border-neutral-200 bg-white p-5">
+                <div className="flex items-center gap-3 mb-3">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-neutral-950">
+                    <AlertTriangle className="h-4 w-4 text-white" />
+                  </div>
+                  <span className="font-display text-sm font-bold text-neutral-900">
+                    Expectation Judge
+                  </span>
+                </div>
+                <p className="text-sm text-neutral-500 leading-relaxed">
+                  A meta-judge evaluates whether the expectations themselves are
+                  wrong — before blaming the agent. Prevents false failures.
+                </p>
+              </div>
+            </div>
+          </Reveal>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/* ── Capabilities ──────────────────────────────────────────────────── */
+
 function Capabilities() {
   const caps = [
     {
@@ -249,7 +729,7 @@ function Capabilities() {
     },
   ];
   return (
-    <section className="border-y border-neutral-100 bg-neutral-50/50 py-24 md:py-32">
+    <section className="bg-neutral-50/50 py-24 md:py-32">
       <div className="mx-auto max-w-4xl px-6">
         <Reveal>
           <h2 className="text-center font-display text-3xl font-extrabold tracking-tight text-neutral-950 sm:text-4xl">
@@ -265,7 +745,10 @@ function Capabilities() {
             const Icon = c.icon;
             return (
               <Reveal key={i} delay={i * 0.04} className="bg-white p-6">
-                <Icon className="mb-3 h-5 w-5 text-neutral-400" strokeWidth={1.5} />
+                <Icon
+                  className="mb-3 h-5 w-5 text-neutral-400"
+                  strokeWidth={1.5}
+                />
                 <h3 className="font-display text-sm font-bold text-neutral-900">
                   {c.title}
                 </h3>
@@ -276,167 +759,6 @@ function Capabilities() {
             );
           })}
         </div>
-      </div>
-    </section>
-  );
-}
-
-/* ── Mock: Agent Team Flow ─────────────────────────────────────────── */
-
-function AgentNode({
-  name,
-  role,
-  status,
-  className = "",
-}: {
-  name: string;
-  role: string;
-  status: "active" | "idle" | "done";
-  className?: string;
-}) {
-  const colors = {
-    active: "border-emerald-300 bg-emerald-50",
-    idle: "border-neutral-200 bg-white",
-    done: "border-neutral-200 bg-neutral-50",
-  };
-  const dots = {
-    active: "bg-emerald-500 animate-pulse",
-    idle: "bg-neutral-300",
-    done: "bg-neutral-400",
-  };
-  return (
-    <div
-      className={`rounded-lg border px-4 py-3 shadow-sm ${colors[status]} ${className}`}
-    >
-      <div className="flex items-center gap-2">
-        <div className={`h-2 w-2 rounded-full ${dots[status]}`} />
-        <span className="font-display text-sm font-bold text-neutral-900">
-          {name}
-        </span>
-      </div>
-      <p className="mt-0.5 text-xs text-neutral-500">{role}</p>
-    </div>
-  );
-}
-
-function TeamFlow() {
-  return (
-    <section className="py-24 md:py-32">
-      <div className="mx-auto max-w-4xl px-6">
-        <Reveal>
-          <h2 className="text-center font-display text-3xl font-extrabold tracking-tight text-neutral-950 sm:text-4xl">
-            Your AI team,{" "}
-            <span className="text-neutral-400">working together.</span>
-          </h2>
-          <p className="mx-auto mt-4 max-w-lg text-center text-neutral-500">
-            Polpo orchestrates multiple agents as a real team. Each agent has a
-            role, skills, and tools. Polpo manages the flow.
-          </p>
-        </Reveal>
-        <Reveal delay={0.12}>
-          <div className="relative mt-14 overflow-hidden rounded-xl border border-neutral-200 bg-white p-8">
-            {/* Polpo at center */}
-            <div className="flex flex-col items-center">
-              <div className="rounded-xl border-2 border-neutral-900 bg-neutral-950 px-6 py-3 text-center shadow-lg">
-                <div className="flex items-center gap-2">
-                  <Target className="h-4 w-4 text-white" />
-                  <span className="font-display text-sm font-bold text-white">
-                    Polpo Orchestrator
-                  </span>
-                </div>
-                <p className="mt-0.5 text-xs text-neutral-400">
-                  Plans &middot; Delegates &middot; Reviews &middot; Reports
-                </p>
-              </div>
-
-              {/* Connectors */}
-              <div className="my-4 flex items-center gap-12">
-                <div className="h-8 w-px bg-neutral-200" />
-                <div className="h-8 w-px bg-neutral-200" />
-                <div className="h-8 w-px bg-neutral-200" />
-                <div className="h-8 w-px bg-neutral-200" />
-              </div>
-
-              {/* Agents row */}
-              <div className="grid w-full max-w-2xl grid-cols-2 gap-3 sm:grid-cols-4">
-                <AgentNode
-                  name="backend-dev"
-                  role="Node.js & APIs"
-                  status="active"
-                />
-                <AgentNode
-                  name="frontend-dev"
-                  role="React & UI"
-                  status="active"
-                />
-                <AgentNode
-                  name="researcher"
-                  role="Web search & docs"
-                  status="idle"
-                />
-                <AgentNode
-                  name="reviewer"
-                  role="Code review & QA"
-                  status="done"
-                />
-              </div>
-            </div>
-
-            {/* Mock task feed */}
-            <div className="mt-8 space-y-2 rounded-lg border border-neutral-100 bg-neutral-50 p-4">
-              <p className="font-mono text-xs uppercase tracking-wider text-neutral-400">
-                Live activity
-              </p>
-              {[
-                {
-                  agent: "backend-dev",
-                  task: "Set up Express routes",
-                  status: "in_progress",
-                },
-                {
-                  agent: "frontend-dev",
-                  task: "Create React dashboard",
-                  status: "in_progress",
-                },
-                {
-                  agent: "reviewer",
-                  task: "Review API schema",
-                  status: "done",
-                  score: "9.2/10",
-                },
-                {
-                  agent: "researcher",
-                  task: "Waiting for dependencies",
-                  status: "pending",
-                },
-              ].map((t, i) => (
-                <div
-                  key={i}
-                  className="flex items-center gap-3 rounded-md bg-white px-3 py-2 text-sm"
-                >
-                  {t.status === "in_progress" && (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin text-emerald-500" />
-                  )}
-                  {t.status === "done" && (
-                    <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
-                  )}
-                  {t.status === "pending" && (
-                    <Clock className="h-3.5 w-3.5 text-neutral-400" />
-                  )}
-                  <span className="font-mono text-xs font-medium text-neutral-600">
-                    {t.agent}
-                  </span>
-                  <span className="text-neutral-500">{t.task}</span>
-                  {t.score && (
-                    <span className="ml-auto rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700">
-                      {t.score}
-                    </span>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-        </Reveal>
       </div>
     </section>
   );
@@ -462,7 +784,7 @@ function FeatureShowcase() {
     {
       icon: BarChart3,
       title: "LLM-as-Judge Review",
-      desc: "Every task scored across multiple dimensions. Below threshold? Automatic retry with targeted fixes.",
+      desc: "3 parallel judges score every task across 4 dimensions. Below threshold? Automatic retry with targeted fixes.",
       link: "https://docs.polpo.sh/features/review",
       linkLabel: "Review pipeline",
     },
@@ -481,7 +803,7 @@ function FeatureShowcase() {
       linkLabel: "Notification channels",
     },
     {
-      icon: Shield,
+      icon: ShieldCheck,
       title: "Approval Gates",
       desc: "Human-in-the-loop checkpoints. Block critical tasks until you review and approve.",
       link: "https://docs.polpo.sh/features/approval-gates",
@@ -680,32 +1002,37 @@ function Differentiators() {
     {
       icon: BotMessageSquare,
       label: "Autonomous",
-      text: "Builds missions, picks agents, works through tasks 24/7. Walk away.",
+      text: "Builds missions, picks agents, works through queued tasks 24/7. Walk away.",
     },
     {
       icon: CheckCircle2,
       label: "Reliable",
-      text: "Every task scored by LLM judges. Below threshold? The agent fixes it.",
+      text: "Every task scored by 3 LLM judges across 4 dimensions. Below threshold? The agent fixes it. You get results, not retries.",
     },
     {
       icon: Zap,
       label: "Crash-proof",
-      text: "Detached processes. Kill, reboot, lose connection — picks up where it left off.",
+      text: "Detached processes. Kill Polpo, reboot, lose connection — picks up where it left off.",
     },
     {
       icon: Bell,
       label: "Proactive",
-      text: "Reaches you on Slack, Telegram, email, webhooks. You decide when.",
+      text: "Reaches you on Slack, Telegram, email, webhooks. You decide when and how.",
     },
     {
       icon: RefreshCw,
       label: "Playbooks",
-      text: "Define a mission once, run it forever. Your AI company gets better over time.",
+      text: "Define a mission once, run it forever. Schedule it on cron, iterate on it. Your AI company gets better over time.",
+    },
+    {
+      icon: ShieldCheck,
+      label: "Side-effect protection",
+      text: "Flags irreversible actions (emails, API calls, deployments) for human approval before re-execution.",
     },
   ];
   return (
-    <section className="border-t border-neutral-100 bg-neutral-50/50 py-24 md:py-32">
-      <div className="mx-auto max-w-2xl px-6">
+    <section className="relative border-t border-neutral-100 bg-neutral-50/50 py-24 md:py-32 overflow-hidden">
+      <div className="relative mx-auto max-w-2xl px-6">
         <Reveal>
           <h2 className="text-center font-display text-3xl font-extrabold tracking-tight text-neutral-950 sm:text-4xl">
             Software that{" "}
@@ -740,38 +1067,13 @@ function Differentiators() {
   );
 }
 
-function Stats() {
-  const stats = [
-    { num: "5,000+", label: "community skills" },
-    { num: "22+", label: "LLM providers" },
-    { num: "70+", label: "built-in tools" },
-  ];
-  return (
-    <section className="py-24 md:py-32">
-      <div className="mx-auto max-w-3xl px-6">
-        <Reveal>
-          <div className="grid grid-cols-3 divide-x divide-neutral-200 rounded-xl border border-neutral-200">
-            {stats.map((s, i) => (
-              <div key={i} className="px-6 py-10 text-center">
-                <span className="font-display text-3xl font-extrabold text-neutral-950 sm:text-4xl">
-                  {s.num}
-                </span>
-                <span className="mt-1 block font-mono text-xs uppercase tracking-wider text-neutral-400">
-                  {s.label}
-                </span>
-              </div>
-            ))}
-          </div>
-        </Reveal>
-      </div>
-    </section>
-  );
-}
-
 function CTA() {
   return (
-    <section className="border-t border-neutral-100 bg-neutral-50/50 py-24 text-center md:py-32">
-      <div className="mx-auto max-w-2xl px-6">
+    <section className="relative py-24 text-center md:py-32 overflow-hidden">
+      {/* Dot grid */}
+      <div className="dot-grid pointer-events-none absolute inset-0 opacity-40" />
+
+      <div className="relative mx-auto max-w-2xl px-6">
         <Reveal>
           <h2 className="font-display text-3xl font-extrabold tracking-tight text-neutral-950 sm:text-4xl">
             Ready to build your AI company?
@@ -794,6 +1096,7 @@ function CTA() {
               href="https://github.com/lumea-labs/polpo"
               className="inline-flex items-center gap-2 rounded-lg border border-neutral-200 px-6 py-3 text-sm font-semibold text-neutral-700 transition hover:border-neutral-400"
             >
+              <GitHubIcon className="h-4 w-4" />
               GitHub
             </a>
           </div>
@@ -805,32 +1108,59 @@ function CTA() {
 
 function Footer() {
   return (
-    <footer className="border-t border-neutral-200 py-8">
-      <div className="mx-auto flex max-w-4xl flex-wrap items-center justify-between gap-4 px-6">
-        <span className="font-display text-sm font-bold text-neutral-900">
-          Polpo
-        </span>
-        <nav className="flex gap-6">
-          {[
-            ["Docs", "https://docs.polpo.sh"],
-            ["GitHub", "https://github.com/lumea-labs/polpo"],
-            ["npm", "https://www.npmjs.com/package/@polpo-ai/polpo"],
-          ].map(([label, href]) => (
-            <a
-              key={label}
-              href={href}
-              className="text-sm text-neutral-500 transition hover:text-neutral-900"
-            >
-              {label}
+    <footer className="border-t border-neutral-200 bg-neutral-50 py-10">
+      <div className="mx-auto max-w-5xl px-6">
+        <div className="flex flex-col gap-8 md:flex-row md:items-start md:justify-between">
+          {/* Brand */}
+          <div>
+            <span className="font-display text-lg font-extrabold text-neutral-900">
+              Polpo
+            </span>
+            <p className="mt-1 text-sm text-neutral-500">
+              Open-source AI agent orchestration.
+            </p>
+          </div>
+
+          {/* Link columns */}
+          <div className="flex gap-16">
+            <div>
+              <p className="font-mono text-xs uppercase tracking-wider text-neutral-400 mb-3">
+                Resources
+              </p>
+              <nav className="flex flex-col gap-2">
+                <a href="https://docs.polpo.sh" className="text-sm text-neutral-600 hover:text-neutral-950 transition">Documentation</a>
+                <a href="https://docs.polpo.sh/install" className="text-sm text-neutral-600 hover:text-neutral-950 transition">Install guide</a>
+                <a href="https://docs.polpo.sh/concepts/missions" className="text-sm text-neutral-600 hover:text-neutral-950 transition">Missions</a>
+                <a href="https://docs.polpo.sh/features/review" className="text-sm text-neutral-600 hover:text-neutral-950 transition">Review pipeline</a>
+              </nav>
+            </div>
+            <div>
+              <p className="font-mono text-xs uppercase tracking-wider text-neutral-400 mb-3">
+                Community
+              </p>
+              <nav className="flex flex-col gap-2">
+                <a href="https://github.com/lumea-labs/polpo" className="text-sm text-neutral-600 hover:text-neutral-950 transition flex items-center gap-1.5">
+                  <GitHubIcon className="h-3.5 w-3.5" /> GitHub
+                </a>
+                <a href="https://www.npmjs.com/package/@polpo-ai/polpo" className="text-sm text-neutral-600 hover:text-neutral-950 transition">npm</a>
+                <a href="https://github.com/lumea-labs/polpo/issues" className="text-sm text-neutral-600 hover:text-neutral-950 transition">Issues</a>
+                <a href="https://github.com/lumea-labs/polpo/blob/main/CONTRIBUTING.md" className="text-sm text-neutral-600 hover:text-neutral-950 transition">Contributing</a>
+              </nav>
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-8 flex items-center justify-between border-t border-neutral-200 pt-6">
+          <span className="text-xs text-neutral-400">
+            MIT License
+          </span>
+          <span className="text-xs text-neutral-400">
+            Built by{" "}
+            <a href="https://lumea-technologies.com" className="underline underline-offset-2 hover:text-neutral-600">
+              Lumea Technologies
             </a>
-          ))}
-        </nav>
-        <span className="text-xs text-neutral-400">
-          Built by{" "}
-          <a href="https://lumea.tech" className="underline underline-offset-2 hover:text-neutral-600">
-            Lumea Labs
-          </a>
-        </span>
+          </span>
+        </div>
       </div>
     </footer>
   );
@@ -842,15 +1172,16 @@ export function App() {
   return (
     <div className="min-h-screen bg-white text-neutral-950">
       <div className="grain" />
+      <Navbar />
       <Hero />
       <Comparison />
       <TeamFlow />
+      <QualitySection />
       <Capabilities />
       <FeatureShowcase />
       <HowItWorks />
       <Differentiators />
       <DeployOptions />
-      <Stats />
       <CTA />
       <Footer />
     </div>

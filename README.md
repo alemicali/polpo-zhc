@@ -115,7 +115,7 @@ docker run -it -v $(pwd):/workspace ghcr.io/lumea-labs/polpo:latest
 
 ## What your agents can do
 
-Code. Browse the web. Send emails. Generate PDFs, Excel, Word docs. Create images, videos, audio. Search the internet. Message on WhatsApp. Talk to your customers. Handle credentials securely. And learn — Polpo creates and installs its own skills over time. Your AI company gets smarter the more you use it.
+Code. Browse the web. Send emails. Generate PDFs, Excel, Word docs. Create images, videos, audio. Search the internet. Talk to your customers. Handle credentials securely. And learn — Polpo creates and installs its own skills over time. Your AI company gets smarter the more you use it.
 
 22+ LLM providers. 70+ tools. 5,000+ community skills. Free default model included.
 
