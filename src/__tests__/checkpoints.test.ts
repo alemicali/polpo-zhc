@@ -96,12 +96,13 @@ describe("Checkpoints", () => {
   let agentMgr: AgentManager;
   let tmpDir: string;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     tmpDir = mkdtempSync(join(tmpdir(), "polpo-test-cp-"));
     ctx = createMockCtx({ polpoDir: tmpDir });
     taskMgr = new TaskManager(ctx);
     agentMgr = new AgentManager(ctx);
     missionExec = new MissionExecutor(ctx, taskMgr, agentMgr);
+    await missionExec.ready;
   });
 
   afterEach(() => {
@@ -498,6 +499,7 @@ describe("Checkpoints", () => {
 
       // Create a new executor (simulates server restart) — reuse same ctx (same polpoDir)
       const missionExec2 = new MissionExecutor(ctx, taskMgr, agentMgr);
+      await missionExec2.ready;
       const checkpoints = missionExec2.getCheckpoints("my-mission");
       expect(checkpoints).toHaveLength(1);
       expect(checkpoints[0].name).toBe("review-a");
@@ -523,6 +525,7 @@ describe("Checkpoints", () => {
 
       // New executor — active checkpoint should still be there
       const missionExec2 = new MissionExecutor(ctx, taskMgr, agentMgr);
+      await missionExec2.ready;
       expect(missionExec2.getActiveCheckpoints()).toHaveLength(1);
       expect(missionExec2.getActiveCheckpoints()[0].checkpointName).toBe("review-a");
 
@@ -550,6 +553,7 @@ describe("Checkpoints", () => {
 
       // New executor — should know checkpoint was resumed (not re-trigger)
       const missionExec2 = new MissionExecutor(ctx, taskMgr, agentMgr);
+      await missionExec2.ready;
       const blocking = await missionExec2.getBlockingCheckpoint("my-mission", "Task B", "id-b", tasks);
       expect(blocking).toBeUndefined();
       expect(missionExec2.getActiveCheckpoints()).toHaveLength(0);
@@ -579,6 +583,7 @@ describe("Checkpoints", () => {
 
       // New executor — should have no checkpoint state for this group
       const missionExec2 = new MissionExecutor(ctx, taskMgr, agentMgr);
+      await missionExec2.ready;
       expect(missionExec2.getCheckpoints("my-mission")).toHaveLength(0);
       expect(missionExec2.getActiveCheckpoints()).toHaveLength(0);
     });

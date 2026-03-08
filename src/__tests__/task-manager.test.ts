@@ -780,11 +780,12 @@ describe("MissionExecutor", () => {
   let agentMgr: AgentManager;
   let missionExec: MissionExecutor;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     ctx = createContext();
     taskMgr = new TaskManager(ctx);
     agentMgr = new AgentManager(ctx);
     missionExec = new MissionExecutor(ctx, taskMgr, agentMgr);
+    await missionExec.ready;
   });
 
   // ── saveMission ──────────────────────────────────────────────────────

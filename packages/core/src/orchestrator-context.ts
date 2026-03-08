@@ -10,6 +10,12 @@ import type { RunStore } from "./run-store.js";
 import type { MemoryStore } from "./memory-store.js";
 import type { LogStore } from "./log-store.js";
 import type { SessionStore } from "./session-store.js";
+import type { ApprovalStore } from "./approval-store.js";
+import type { NotificationStore } from "./notification-store.js";
+import type { CheckpointStore } from "./checkpoint-store.js";
+import type { DelayStore } from "./delay-store.js";
+import type { PeerStore } from "./peer-store.js";
+import type { ConfigStore } from "./config-store.js";
 import type { PolpoConfig, PolpoFileConfig, Task, AssessmentResult, ReviewContext, ReasoningLevel, ModelConfig } from "./types.js";
 import type { HookRegistry } from "./hooks.js";
 
@@ -76,4 +82,19 @@ export interface OrchestratorContext {
 
   /** Validate that provider API keys are configured. */
   readonly validateProviderKeys?: (config: PolpoConfig) => { valid: boolean; missing: string[] };
+
+  // ── Optional store ports (injected by shell for non-file backends) ──
+
+  /** Approval request store (when storage is "postgres", injected by shell). */
+  readonly approvalStore?: ApprovalStore;
+  /** Notification record store (when storage is "postgres", injected by shell). */
+  readonly notificationStore?: NotificationStore;
+  /** Checkpoint persistence store (when storage is "postgres", injected by shell). */
+  readonly checkpointStore?: CheckpointStore;
+  /** Delay persistence store (when storage is "postgres", injected by shell). */
+  readonly delayStore?: DelayStore;
+  /** Peer identity store (when storage is "postgres", injected by shell). */
+  readonly peerStore?: PeerStore;
+  /** Config persistence store (when storage is "postgres", injected by shell). */
+  readonly configStore?: ConfigStore;
 }

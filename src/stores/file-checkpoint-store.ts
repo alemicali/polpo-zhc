@@ -1,27 +1,15 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
-import type { MissionCheckpoint } from "../core/types.js";
+import type { CheckpointStore, CheckpointState } from "@polpo/core/checkpoint-store";
 
-/**
- * Persisted checkpoint state — serialisable shape written to .polpo/checkpoints.json.
- *
- * Three collections survive restarts:
- *  1. `definitions`  — checkpoint definitions keyed by mission group name
- *  2. `active`       — checkpoints that have been reached and await human resume
- *  3. `resumed`      — checkpoints already resumed (prevent re-triggering)
- */
-export interface CheckpointState {
-  definitions: Record<string, MissionCheckpoint[]>;
-  active: Record<string, { checkpoint: MissionCheckpoint; reachedAt: string }>;
-  resumed: string[];
-}
+export type { CheckpointState };
 
 /**
  * Filesystem-based checkpoint store.
  * Persists checkpoint runtime state as JSON in `.polpo/checkpoints.json`
  * so that checkpoint blocking survives server restarts.
  */
-export class FileCheckpointStore {
+export class FileCheckpointStore implements CheckpointStore {
   private filePath: string;
 
   constructor(polpoDir: string) {
@@ -32,7 +20,7 @@ export class FileCheckpointStore {
   }
 
   /** Load persisted state (returns empty collections if file missing/corrupt). */
-  load(): CheckpointState {
+  async load(): Promise<CheckpointState> {
     try {
       if (existsSync(this.filePath)) {
         const raw = readFileSync(this.filePath, "utf-8");
@@ -48,21 +36,21 @@ export class FileCheckpointStore {
   }
 
   /** Persist current state to disk. */
-  save(state: CheckpointState): void {
+  async save(state: CheckpointState): Promise<void> {
     try {
       writeFileSync(this.filePath, JSON.stringify(state, null, 2));
     } catch { /* best-effort */ }
   }
 
   /** Remove all entries for a given group and persist. */
-  removeGroup(state: CheckpointState, group: string): CheckpointState {
+  async removeGroup(state: CheckpointState, group: string): Promise<CheckpointState> {
     delete state.definitions[group];
     const prefix = `${group}:`;
     for (const key of Object.keys(state.active)) {
       if (key.startsWith(prefix)) delete state.active[key];
     }
     state.resumed = state.resumed.filter(k => !k.startsWith(prefix));
-    this.save(state);
+    await this.save(state);
     return state;
   }
 }

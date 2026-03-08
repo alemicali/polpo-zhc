@@ -155,6 +155,9 @@ export class Orchestrator extends TypedEmitter {
     }
   }
 
+  /** Drizzle store bundle — populated when storage is "postgres". */
+  private drizzleStores?: import("@polpo/drizzle").DrizzleStores;
+
   /** Create task + run stores based on the configured storage backend. */
   private async createStores(storage?: "file" | "sqlite" | "postgres"): Promise<{
     task: TaskStore; run: RunStore;
@@ -167,13 +170,13 @@ export class Orchestrator extends TypedEmitter {
       const sql = postgres(this.config.settings.databaseUrl!);
       const db = drizzle(sql);
       await ensurePgSchema(db);
-      const stores = createPgStores(db);
+      this.drizzleStores = createPgStores(db);
       return {
-        task: stores.taskStore,
-        run: stores.runStore,
-        logStore: stores.logStore,
-        sessionStore: stores.sessionStore,
-        memoryStore: stores.memoryStore,
+        task: this.drizzleStores.taskStore,
+        run: this.drizzleStores.runStore,
+        logStore: this.drizzleStores.logStore,
+        sessionStore: this.drizzleStores.sessionStore,
+        memoryStore: this.drizzleStores.memoryStore,
       };
     }
     if (storage === "sqlite") {
@@ -229,7 +232,7 @@ export class Orchestrator extends TypedEmitter {
     this.memoryStore = ("memoryStore" in stores && stores.memoryStore)
       ? stores.memoryStore
       : new FileMemoryStore(this.polpoDir);
-    this.initManagers();
+    await this.initManagers();
     this.initVaultStore();
   }
 
@@ -286,7 +289,7 @@ export class Orchestrator extends TypedEmitter {
   }
 
   /** Create manager instances with shared context. */
-  private initManagers(): void {
+  private async initManagers(): Promise<void> {
     const ctx: OrchestratorContext = {
       emitter: this,
       registry: this.registry,
@@ -311,10 +314,21 @@ export class Orchestrator extends TypedEmitter {
       },
       findLogForTask: (polpoDir, taskId, runId) => findLogForTask(polpoDir, taskId, runId),
       buildExecutionSummary: (logPath) => buildExecutionSummary(logPath),
+
+      // Inject Drizzle stores when storage is "postgres"
+      ...(this.drizzleStores ? {
+        approvalStore: this.drizzleStores.approvalStore,
+        notificationStore: this.drizzleStores.notificationStore,
+        checkpointStore: this.drizzleStores.checkpointStore,
+        delayStore: this.drizzleStores.delayStore,
+        peerStore: this.drizzleStores.peerStore,
+        configStore: this.drizzleStores.configStore,
+      } : {}),
     };
     this.agentMgr = new AgentManager(ctx);
     this.taskMgr = new TaskManager(ctx);
     this.missionExec = new MissionExecutor(ctx, this.taskMgr, this.agentMgr);
+    await this.missionExec.ready;
     this.runner = new TaskRunner(ctx);
     this.assessor = new AssessmentOrchestrator(ctx);
 
@@ -328,7 +342,7 @@ export class Orchestrator extends TypedEmitter {
 
     // Initialize approval gates if configured
     if (this.config.settings.approvalGates && this.config.settings.approvalGates.length > 0) {
-      const approvalStore = new FileApprovalStore(this.polpoDir);
+      const approvalStore = ctx.approvalStore ?? new FileApprovalStore(this.polpoDir);
       this.approvalMgr = new ApprovalManager(ctx, approvalStore);
       this.approvalMgr.init();
     }
@@ -338,7 +352,7 @@ export class Orchestrator extends TypedEmitter {
       this.notificationRouter = new NotificationRouter(this);
       this.notificationRouter.init(this.config.settings.notifications, this.polpoDir);
       // Attach persistent notification store
-      const notifStore = new FileNotificationStore(this.polpoDir);
+      const notifStore = ctx.notificationStore ?? new FileNotificationStore(this.polpoDir);
       this.notificationRouter.setStore(notifStore);
       this.notificationRouter.start();
 
@@ -532,7 +546,7 @@ export class Orchestrator extends TypedEmitter {
       setModelAllowlist(this.config.settings.modelAllowlist);
     }
 
-    this.initManagers();
+    await this.initManagers();
     this.initVaultStore();
     this.interactive = true;
     await this.registry.setState({
@@ -961,7 +975,7 @@ export class Orchestrator extends TypedEmitter {
 
     // Approval gates
     if (this.config.settings.approvalGates && this.config.settings.approvalGates.length > 0) {
-      const approvalStore = new FileApprovalStore(this.polpoDir);
+      const approvalStore = this.drizzleStores?.approvalStore ?? new FileApprovalStore(this.polpoDir);
       this.approvalMgr = new ApprovalManager(ctx, approvalStore);
       this.approvalMgr.init();
     }
@@ -970,7 +984,7 @@ export class Orchestrator extends TypedEmitter {
     if (this.config.settings.notifications) {
       this.notificationRouter = new NotificationRouter(this);
       this.notificationRouter.init(this.config.settings.notifications, this.polpoDir);
-      const notifStore = new FileNotificationStore(this.polpoDir);
+      const notifStore = this.drizzleStores?.notificationStore ?? new FileNotificationStore(this.polpoDir);
       this.notificationRouter.setStore(notifStore);
       this.notificationRouter.start();
 
@@ -1123,7 +1137,7 @@ export class Orchestrator extends TypedEmitter {
     const channelConfig = this.config.settings.notifications?.channels[telegramConfigKey];
     if (channelConfig?.gateway?.enableInbound) {
       // Initialize peer store
-      this.peerStore = new FilePeerStore(this.polpoDir);
+      this.peerStore = this.drizzleStores?.peerStore ?? new FilePeerStore(this.polpoDir);
 
       // Create ChannelGateway with typing indicator support
       this.channelGateway = new ChannelGateway({
@@ -1218,7 +1232,7 @@ export class Orchestrator extends TypedEmitter {
     if (channelConfig?.gateway?.enableInbound) {
       // Initialize peer store (shared with Telegram if already created)
       if (!this.peerStore) {
-        this.peerStore = new FilePeerStore(this.polpoDir);
+        this.peerStore = this.drizzleStores?.peerStore ?? new FilePeerStore(this.polpoDir);
       }
 
       // Create or reuse ChannelGateway

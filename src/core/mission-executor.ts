@@ -5,8 +5,10 @@ import type { Mission, MissionStatus, MissionReport, Task, TaskExpectation, Expe
 import type { QualityController } from "../quality/quality-controller.js";
 import { sanitizeExpectations, parseMissionDocument, type MissionDocumentParsed } from "./schemas.js";
 import { validateProviderKeys } from "../llm/pi-client.js";
-import { FileCheckpointStore, type CheckpointState } from "../stores/file-checkpoint-store.js";
-import { FileDelayStore, type DelayState } from "../stores/file-delay-store.js";
+import type { CheckpointStore, CheckpointState } from "@polpo/core/checkpoint-store";
+import type { DelayStore, DelayState } from "@polpo/core/delay-store";
+import { FileCheckpointStore } from "../stores/file-checkpoint-store.js";
+import { FileDelayStore } from "../stores/file-delay-store.js";
 
 /**
  * Mission CRUD + execution + resume + group lifecycle.
@@ -16,9 +18,9 @@ export class MissionExecutor {
   /** Quality gates parsed from mission documents, keyed by mission group name */
   private gatesByGroup = new Map<string, MissionQualityGate[]>();
   /** Persistent checkpoint store — survives server restarts */
-  private cpStore: FileCheckpointStore;
+  private cpStore: CheckpointStore;
   /** In-memory mirror of persisted checkpoint state (synced on every mutation) */
-  private cpState: CheckpointState;
+  private cpState!: CheckpointState;
   /** Optional quality controller — set by orchestrator after init */
   private qualityCtrl?: QualityController;
   /** Optional notification router — for checkpoint notification rules */
@@ -26,9 +28,9 @@ export class MissionExecutor {
   /** Track which checkpoint notification rules have been registered (by cpKey) */
   private registeredCheckpointRules = new Set<string>();
   /** Persistent delay store — survives server restarts */
-  private delayStore: FileDelayStore;
+  private delayStore: DelayStore;
   /** In-memory mirror of persisted delay state (synced on every mutation) */
-  private delayState: DelayState;
+  private delayState!: DelayState;
   /** Track which delay notification rules have been registered (by delayKey) */
   private registeredDelayRules = new Set<string>();
   /** Track the pre-execution status for scheduled/recurring missions (by group name).
@@ -40,15 +42,23 @@ export class MissionExecutor {
     private taskMgr: TaskManager,
     private agentMgr: AgentManager,
   ) {
-    this.cpStore = new FileCheckpointStore(ctx.polpoDir);
-    this.cpState = this.cpStore.load();
-    this.delayStore = new FileDelayStore(ctx.polpoDir);
-    this.delayState = this.delayStore.load();
+    this.cpStore = ctx.checkpointStore ?? new FileCheckpointStore(ctx.polpoDir);
+    this.delayStore = ctx.delayStore ?? new FileDelayStore(ctx.polpoDir);
 
     // Rebuild cleanedGroups from persisted task state — groups where ALL tasks
     // are already terminal don't need to be re-processed after a server restart.
-    // Constructor cannot be async — kick off async init and let it complete in background.
-    this.rebuildCleanedGroups();
+    // Constructor cannot be async — expose ready promise for callers to await.
+    this.ready = this.initStoresAndRebuild();
+  }
+
+  /** Resolves when async store loading and group rebuild are complete. */
+  readonly ready: Promise<void>;
+
+  /** Async init: load checkpoint/delay state and rebuild cleanedGroups. */
+  private async initStoresAndRebuild(): Promise<void> {
+    this.cpState = await this.cpStore.load();
+    this.delayState = await this.delayStore.load();
+    await this.rebuildCleanedGroups();
   }
 
   /** Async init: rebuild cleanedGroups from persisted task state. */
@@ -126,7 +136,7 @@ export class MissionExecutor {
       if (!this.cpState.active[cpKey]) {
         const reachedAt = new Date().toISOString();
         this.cpState.active[cpKey] = { checkpoint: cp, reachedAt };
-        this.cpStore.save(this.cpState);
+        await this.cpStore.save(this.cpState);
 
         // Pause the mission — use task.missionId when available
         const taskMissionId = tasks.find(t => t.group === group && t.missionId)?.missionId;
@@ -170,7 +180,7 @@ export class MissionExecutor {
 
     this.cpState.resumed.push(cpKey);
     delete this.cpState.active[cpKey];
-    this.cpStore.save(this.cpState);
+    await this.cpStore.save(this.cpState);
 
     // Un-pause the mission (back to active) — resolve via missionId from tasks
     const groupTasks = (await this.ctx.registry.getAllTasks()).filter(t => t.group === group);
@@ -279,7 +289,7 @@ export class MissionExecutor {
         const durationMs = parseISO8601Duration(dl.duration);
         const expiresAt = new Date(Date.now() + durationMs).toISOString();
         this.delayState.active[dlKey] = { delay: dl, startedAt, expiresAt };
-        this.delayStore.save(this.delayState);
+        await this.delayStore.save(this.delayState);
 
         // Register notification rules for this delay's channels
         this.ensureDelayNotificationRules(dlKey, dl);
@@ -305,7 +315,7 @@ export class MissionExecutor {
         // Timer expired — mark as expired and unblock
         this.delayState.expired.push(dlKey);
         delete this.delayState.active[dlKey];
-        this.delayStore.save(this.delayState);
+        await this.delayStore.save(this.delayState);
 
         const mission = await this.resolveMissionForGroupByName(group);
         this.ctx.emitter.emit("delay:expired", {
@@ -425,18 +435,18 @@ export class MissionExecutor {
     }
 
     // 4. Clean up persisted checkpoints
-    this.cpState = this.cpStore.removeGroup(this.cpState, missionGroup);
+    this.cpState = await this.cpStore.removeGroup(this.cpState, missionGroup);
     for (const key of Object.keys(this.cpState.definitions)) {
       if (key.startsWith(missionGroup + " #")) {
-        this.cpState = this.cpStore.removeGroup(this.cpState, key);
+        this.cpState = await this.cpStore.removeGroup(this.cpState, key);
       }
     }
 
     // 4b. Clean up persisted delays
-    this.delayState = this.delayStore.removeGroup(this.delayState, missionGroup);
+    this.delayState = await this.delayStore.removeGroup(this.delayState, missionGroup);
     for (const key of Object.keys(this.delayState.definitions)) {
       if (key.startsWith(missionGroup + " #")) {
-        this.delayState = this.delayStore.removeGroup(this.delayState, key);
+        this.delayState = await this.delayStore.removeGroup(this.delayState, key);
       }
     }
 
@@ -631,11 +641,11 @@ export class MissionExecutor {
     }
     if (doc.checkpoints && doc.checkpoints.length > 0) {
       this.cpState.definitions[group] = doc.checkpoints as MissionCheckpoint[];
-      this.cpStore.save(this.cpState);
+      await this.cpStore.save(this.cpState);
     }
     if (doc.delays && doc.delays.length > 0) {
       this.delayState.definitions[group] = doc.delays as MissionDelay[];
-      this.delayStore.save(this.delayState);
+      await this.delayStore.save(this.delayState);
     }
 
     // Track scheduled origin so we know where to return after completion
@@ -739,9 +749,9 @@ export class MissionExecutor {
         this.gatesByGroup.delete(group);
         this.scheduledOrigin.delete(group);
         // Clean up persisted checkpoint entries for this group
-        this.cpState = this.cpStore.removeGroup(this.cpState, group);
+        this.cpState = await this.cpStore.removeGroup(this.cpState, group);
         // Clean up persisted delay entries for this group
-        this.delayState = this.delayStore.removeGroup(this.delayState, group);
+        this.delayState = await this.delayStore.removeGroup(this.delayState, group);
       }
     }
   }
