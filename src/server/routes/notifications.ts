@@ -134,7 +134,7 @@ export function notificationRoutes(): OpenAPIHono<ServerEnv> {
   const app = new OpenAPIHono<ServerEnv>();
 
   // GET /notifications — list notification history
-  app.openapi(listNotificationsRoute, (c) => {
+  app.openapi(listNotificationsRoute, async (c) => {
     const orchestrator = c.get("orchestrator");
     const router = orchestrator.getNotificationRouter();
     const store = router?.getStore();
@@ -151,20 +151,20 @@ export function notificationRoutes(): OpenAPIHono<ServerEnv> {
 
     let data;
     if (status) {
-      data = store.listByStatus(status, limit);
+      data = await store.listByStatus(status, limit);
     } else if (channel) {
-      data = store.listByChannel(channel, limit);
+      data = await store.listByChannel(channel, limit);
     } else if (rule) {
-      data = store.listByRule(rule, limit);
+      data = await store.listByRule(rule, limit);
     } else {
-      data = store.list(limit);
+      data = await store.list(limit);
     }
 
     return c.json({ ok: true, data });
   });
 
   // GET /notifications/stats — notification summary
-  app.openapi(notificationStatsRoute, (c) => {
+  app.openapi(notificationStatsRoute, async (c) => {
     const orchestrator = c.get("orchestrator");
     const router = orchestrator.getNotificationRouter();
     const store = router?.getStore();
@@ -176,9 +176,9 @@ export function notificationRoutes(): OpenAPIHono<ServerEnv> {
     return c.json({
       ok: true,
       data: {
-        total: store.count(),
-        sent: store.count("sent"),
-        failed: store.count("failed"),
+        total: await store.count(),
+        sent: await store.count("sent"),
+        failed: await store.count("failed"),
       },
     });
   });

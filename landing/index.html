@@ -1,0 +1,1009 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Polpo — Build Your AI Company</title>
+  <meta name="description" content="Open-source AI agent orchestration. Build reliable AI teams that plan, execute, review, and deliver — while you make the decisions." />
+  <meta property="og:title" content="Polpo — Build Your AI Company" />
+  <meta property="og:description" content="Open-source AI agent orchestration. Your AI team handles the grunt work. You make the decisions." />
+  <meta property="og:type" content="website" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐙</text></svg>" />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,300;0,400;0,500;1,400&family=Outfit:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
+
+  <style>
+    /* ── Reset & Base ─────────────────────────────── */
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --ink: #0a0a0b;
+      --paper: #f5f0eb;
+      --coral: #F78B97;
+      --indigo: #3B3E73;
+      --lavender: #8B8FD4;
+      --stone: #78716c;
+      --warm: #faf7f4;
+      --glass: rgba(245, 240, 235, 0.7);
+      --font-display: 'Outfit', sans-serif;
+      --font-mono: 'DM Mono', monospace;
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: var(--font-display);
+      background: var(--paper);
+      color: var(--ink);
+      overflow-x: hidden;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    ::selection {
+      background: var(--coral);
+      color: var(--ink);
+    }
+
+    /* ── Grain overlay ────────────────────────────── */
+    body::after {
+      content: '';
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 9999;
+      opacity: 0.025;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+      background-repeat: repeat;
+      background-size: 200px;
+    }
+
+    a { color: inherit; }
+
+    /* ── Nav ───────────────────────────────────────── */
+    nav {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 100;
+      padding: 1.25rem 2rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      backdrop-filter: blur(16px);
+      background: var(--glass);
+      border-bottom: 1px solid rgba(10, 10, 11, 0.06);
+      transition: all 0.3s;
+    }
+
+    .nav-logo {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-weight: 700;
+      font-size: 1.35rem;
+      text-decoration: none;
+      letter-spacing: -0.02em;
+    }
+
+    .nav-logo span { font-size: 1.5rem; }
+
+    .nav-links {
+      display: flex;
+      align-items: center;
+      gap: 2rem;
+      list-style: none;
+    }
+
+    .nav-links a {
+      text-decoration: none;
+      font-size: 0.9rem;
+      font-weight: 500;
+      color: var(--stone);
+      transition: color 0.2s;
+    }
+
+    .nav-links a:hover { color: var(--ink); }
+
+    .btn-nav {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.6rem 1.3rem;
+      background: var(--ink);
+      color: var(--paper);
+      border-radius: 8px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      text-decoration: none;
+      transition: transform 0.15s, box-shadow 0.15s;
+      font-family: var(--font-display);
+    }
+
+    .btn-nav:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 4px 16px rgba(10, 10, 11, 0.15);
+    }
+
+    /* ── Hero ──────────────────────────────────────── */
+    .hero {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      text-align: center;
+      padding: 8rem 2rem 4rem;
+      position: relative;
+    }
+
+    .hero::before {
+      content: '';
+      position: absolute;
+      top: -200px;
+      right: -200px;
+      width: 700px;
+      height: 700px;
+      border-radius: 50%;
+      background: radial-gradient(circle, var(--coral) 0%, transparent 70%);
+      opacity: 0.12;
+      filter: blur(80px);
+      pointer-events: none;
+    }
+
+    .hero::after {
+      content: '';
+      position: absolute;
+      bottom: -100px;
+      left: -200px;
+      width: 500px;
+      height: 500px;
+      border-radius: 50%;
+      background: radial-gradient(circle, var(--lavender) 0%, transparent 70%);
+      opacity: 0.1;
+      filter: blur(60px);
+      pointer-events: none;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.4rem 1rem;
+      border: 1px solid rgba(59, 62, 115, 0.2);
+      border-radius: 100px;
+      font-size: 0.8rem;
+      font-weight: 500;
+      color: var(--indigo);
+      background: rgba(139, 143, 212, 0.08);
+      margin-bottom: 2rem;
+      letter-spacing: 0.02em;
+      animation: fadeUp 0.8s ease-out both;
+    }
+
+    .badge-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--coral);
+      animation: pulse 2s ease-in-out infinite;
+    }
+
+    h1 {
+      font-size: clamp(3.2rem, 8vw, 6.5rem);
+      font-weight: 800;
+      line-height: 1.02;
+      letter-spacing: -0.04em;
+      max-width: 900px;
+      animation: fadeUp 0.8s ease-out 0.1s both;
+    }
+
+    h1 em {
+      font-style: normal;
+      background: linear-gradient(135deg, var(--indigo), var(--coral));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .hero-sub {
+      font-size: clamp(1.1rem, 2.5vw, 1.35rem);
+      color: var(--stone);
+      max-width: 580px;
+      margin-top: 1.5rem;
+      line-height: 1.6;
+      font-weight: 400;
+      animation: fadeUp 0.8s ease-out 0.2s both;
+    }
+
+    .hero-actions {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      margin-top: 2.5rem;
+      flex-wrap: wrap;
+      justify-content: center;
+      animation: fadeUp 0.8s ease-out 0.3s both;
+    }
+
+    .btn-primary {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.6rem;
+      padding: 0.9rem 2rem;
+      background: var(--ink);
+      color: var(--paper);
+      border-radius: 12px;
+      font-size: 1rem;
+      font-weight: 600;
+      text-decoration: none;
+      transition: transform 0.15s, box-shadow 0.2s;
+      font-family: var(--font-display);
+      border: none;
+      cursor: pointer;
+    }
+
+    .btn-primary:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 30px rgba(10, 10, 11, 0.18);
+    }
+
+    .btn-secondary {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.6rem;
+      padding: 0.9rem 2rem;
+      background: transparent;
+      color: var(--ink);
+      border-radius: 12px;
+      border: 1.5px solid rgba(10, 10, 11, 0.15);
+      font-size: 1rem;
+      font-weight: 600;
+      text-decoration: none;
+      transition: all 0.15s;
+      font-family: var(--font-display);
+      cursor: pointer;
+    }
+
+    .btn-secondary:hover {
+      border-color: var(--ink);
+      background: rgba(10, 10, 11, 0.03);
+    }
+
+    /* ── Install snippet ──────────────────────────── */
+    .install-bar {
+      margin-top: 2rem;
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 0.8rem 1.2rem;
+      background: var(--ink);
+      color: #a8a29e;
+      border-radius: 12px;
+      font-family: var(--font-mono);
+      font-size: 0.85rem;
+      animation: fadeUp 0.8s ease-out 0.4s both;
+      cursor: pointer;
+      transition: box-shadow 0.2s;
+      position: relative;
+    }
+
+    .install-bar:hover {
+      box-shadow: 0 4px 20px rgba(10, 10, 11, 0.15);
+    }
+
+    .install-bar code { color: var(--paper); }
+    .install-bar .prompt { color: var(--coral); user-select: none; }
+
+    .install-bar .copy-hint {
+      font-size: 0.7rem;
+      color: #57534e;
+      transition: color 0.2s;
+    }
+
+    .install-bar:hover .copy-hint { color: #a8a29e; }
+
+    /* ── Terminal mockup ──────────────────────────── */
+    .terminal-section {
+      padding: 0 2rem 8rem;
+      display: flex;
+      justify-content: center;
+      animation: fadeUp 0.8s ease-out 0.5s both;
+    }
+
+    .terminal {
+      width: 100%;
+      max-width: 780px;
+      background: #1a1a1e;
+      border-radius: 16px;
+      overflow: hidden;
+      box-shadow:
+        0 0 0 1px rgba(255,255,255,0.06),
+        0 25px 80px rgba(10, 10, 11, 0.25),
+        0 10px 30px rgba(10, 10, 11, 0.12);
+    }
+
+    .terminal-bar {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      padding: 14px 18px;
+      background: #151518;
+    }
+
+    .terminal-dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+    }
+
+    .terminal-dot.red { background: #ff5f57; }
+    .terminal-dot.yellow { background: #ffbd2e; }
+    .terminal-dot.green { background: #28c840; }
+
+    .terminal-title {
+      flex: 1;
+      text-align: center;
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+      color: #57534e;
+    }
+
+    .terminal-body {
+      padding: 1.5rem 1.8rem 2rem;
+      font-family: var(--font-mono);
+      font-size: 0.82rem;
+      line-height: 1.8;
+      color: #d6d3d1;
+    }
+
+    .t-prompt { color: var(--coral); }
+    .t-cmd { color: #fafaf9; }
+    .t-dim { color: #57534e; }
+    .t-green { color: #4ade80; }
+    .t-blue { color: var(--lavender); }
+    .t-yellow { color: #fbbf24; }
+    .t-coral { color: var(--coral); }
+
+    .terminal-body .line {
+      opacity: 0;
+      animation: termLine 0.3s ease-out forwards;
+    }
+
+    /* ── Section shared ───────────────────────────── */
+    section {
+      padding: 6rem 2rem;
+    }
+
+    .section-inner {
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+
+    .section-label {
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+      font-weight: 500;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--coral);
+      margin-bottom: 0.75rem;
+    }
+
+    h2 {
+      font-size: clamp(2rem, 4.5vw, 3.2rem);
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      line-height: 1.1;
+      max-width: 700px;
+    }
+
+    .section-desc {
+      font-size: 1.1rem;
+      color: var(--stone);
+      max-width: 550px;
+      margin-top: 1rem;
+      line-height: 1.6;
+    }
+
+    /* ── How it works ─────────────────────────────── */
+    .how-section {
+      background: var(--ink);
+      color: var(--paper);
+      padding: 7rem 2rem;
+    }
+
+    .how-section .section-label { color: var(--coral); }
+    .how-section h2 { color: var(--paper); }
+    .how-section .section-desc { color: #a8a29e; }
+
+    .how-grid {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 0;
+      margin-top: 4rem;
+      position: relative;
+    }
+
+    .how-grid::before {
+      content: '';
+      position: absolute;
+      top: 32px;
+      left: 10%;
+      right: 10%;
+      height: 2px;
+      background: linear-gradient(90deg, var(--coral), var(--lavender), var(--coral));
+      opacity: 0.25;
+    }
+
+    .how-step {
+      text-align: center;
+      position: relative;
+      padding: 0 0.5rem;
+    }
+
+    .how-num {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 64px;
+      height: 64px;
+      border-radius: 50%;
+      background: rgba(247, 139, 151, 0.1);
+      border: 2px solid rgba(247, 139, 151, 0.25);
+      font-family: var(--font-mono);
+      font-size: 1.1rem;
+      font-weight: 500;
+      color: var(--coral);
+      margin-bottom: 1.25rem;
+      position: relative;
+      z-index: 1;
+    }
+
+    .how-step h3 {
+      font-size: 1.05rem;
+      font-weight: 700;
+      margin-bottom: 0.5rem;
+      letter-spacing: -0.01em;
+    }
+
+    .how-step p {
+      font-size: 0.85rem;
+      color: #a8a29e;
+      line-height: 1.5;
+    }
+
+    /* ── Features ──────────────────────────────────── */
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1.25rem;
+      margin-top: 3.5rem;
+    }
+
+    .feature-card {
+      padding: 2rem;
+      background: var(--warm);
+      border: 1px solid rgba(10, 10, 11, 0.06);
+      border-radius: 16px;
+      transition: all 0.25s;
+    }
+
+    .feature-card:hover {
+      border-color: rgba(10, 10, 11, 0.12);
+      transform: translateY(-2px);
+      box-shadow: 0 8px 30px rgba(10, 10, 11, 0.06);
+    }
+
+    .feature-icon {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 44px;
+      height: 44px;
+      border-radius: 12px;
+      margin-bottom: 1.25rem;
+      font-size: 1.3rem;
+      background: rgba(59, 62, 115, 0.07);
+    }
+
+    .feature-card h3 {
+      font-size: 1.1rem;
+      font-weight: 700;
+      margin-bottom: 0.5rem;
+      letter-spacing: -0.01em;
+    }
+
+    .feature-card p {
+      font-size: 0.9rem;
+      color: var(--stone);
+      line-height: 1.55;
+    }
+
+    /* ── Providers ticker ─────────────────────────── */
+    .providers-section {
+      padding: 4rem 2rem;
+      border-top: 1px solid rgba(10, 10, 11, 0.06);
+      border-bottom: 1px solid rgba(10, 10, 11, 0.06);
+      text-align: center;
+    }
+
+    .providers-label {
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--stone);
+      margin-bottom: 2rem;
+    }
+
+    .providers-row {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 3rem;
+      flex-wrap: wrap;
+      max-width: 900px;
+      margin: 0 auto;
+    }
+
+    .provider-name {
+      font-size: 1rem;
+      font-weight: 600;
+      color: #a8a29e;
+      transition: color 0.2s;
+      white-space: nowrap;
+    }
+
+    .provider-name:hover { color: var(--ink); }
+
+    /* ── Use cases ─────────────────────────────────── */
+    .use-cases-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 1.25rem;
+      margin-top: 3.5rem;
+    }
+
+    .use-case {
+      padding: 2rem 2.5rem;
+      border-radius: 16px;
+      border: 1px solid rgba(10, 10, 11, 0.06);
+      background: var(--warm);
+      transition: all 0.25s;
+    }
+
+    .use-case:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 30px rgba(10, 10, 11, 0.06);
+    }
+
+    .use-case-emoji {
+      font-size: 1.6rem;
+      margin-bottom: 1rem;
+    }
+
+    .use-case h3 {
+      font-size: 1.15rem;
+      font-weight: 700;
+      margin-bottom: 0.5rem;
+      letter-spacing: -0.01em;
+    }
+
+    .use-case p {
+      font-size: 0.9rem;
+      color: var(--stone);
+      line-height: 1.55;
+    }
+
+    /* ── CTA ───────────────────────────────────────── */
+    .cta-section {
+      padding: 8rem 2rem;
+      text-align: center;
+      position: relative;
+    }
+
+    .cta-section::before {
+      content: '';
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 500px;
+      height: 500px;
+      border-radius: 50%;
+      background: radial-gradient(circle, var(--coral) 0%, transparent 70%);
+      opacity: 0.08;
+      filter: blur(80px);
+      pointer-events: none;
+    }
+
+    .cta-section h2 {
+      margin: 0 auto;
+      text-align: center;
+    }
+
+    .cta-section .section-desc {
+      margin: 1rem auto 0;
+      text-align: center;
+    }
+
+    .cta-actions {
+      display: flex;
+      justify-content: center;
+      gap: 1rem;
+      margin-top: 2.5rem;
+      flex-wrap: wrap;
+    }
+
+    /* ── Footer ────────────────────────────────────── */
+    footer {
+      padding: 3rem 2rem;
+      border-top: 1px solid rgba(10, 10, 11, 0.06);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+
+    .footer-left {
+      font-size: 0.85rem;
+      color: var(--stone);
+    }
+
+    .footer-links {
+      display: flex;
+      gap: 1.5rem;
+      list-style: none;
+    }
+
+    .footer-links a {
+      font-size: 0.85rem;
+      color: var(--stone);
+      text-decoration: none;
+      transition: color 0.2s;
+    }
+
+    .footer-links a:hover { color: var(--ink); }
+
+    /* ── Animations ────────────────────────────────── */
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(20px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+
+    @keyframes termLine {
+      from { opacity: 0; transform: translateX(-8px); }
+      to { opacity: 1; transform: translateX(0); }
+    }
+
+    /* ── Scroll reveal ─────────────────────────────── */
+    .reveal {
+      opacity: 0;
+      transform: translateY(30px);
+      transition: opacity 0.7s ease-out, transform 0.7s ease-out;
+    }
+
+    .reveal.visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    /* ── Responsive ────────────────────────────────── */
+    @media (max-width: 900px) {
+      .how-grid {
+        grid-template-columns: repeat(3, 1fr);
+        row-gap: 2.5rem;
+      }
+
+      .how-grid::before { display: none; }
+
+      .features-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+    }
+
+    @media (max-width: 680px) {
+      nav { padding: 1rem 1.25rem; }
+      .nav-links { display: none; }
+
+      h1 { font-size: 2.8rem; }
+
+      .how-grid {
+        grid-template-columns: 1fr 1fr;
+      }
+
+      .features-grid,
+      .use-cases-grid {
+        grid-template-columns: 1fr;
+      }
+
+      footer {
+        flex-direction: column;
+        gap: 1rem;
+        text-align: center;
+      }
+    }
+  </style>
+</head>
+
+<body>
+
+  <!-- ── Nav ─────────────────────────────── -->
+  <nav>
+    <a href="#" class="nav-logo">
+      <span>🐙</span> Polpo
+    </a>
+    <ul class="nav-links">
+      <li><a href="#features">Features</a></li>
+      <li><a href="#how">How It Works</a></li>
+      <li><a href="#use-cases">Use Cases</a></li>
+      <li><a href="https://openpolpo.dev" target="_blank">Docs</a></li>
+      <li>
+        <a href="https://github.com/lumea-labs/polpo" class="btn-nav" target="_blank">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+          GitHub
+        </a>
+      </li>
+    </ul>
+  </nav>
+
+  <!-- ── Hero ────────────────────────────── -->
+  <section class="hero">
+    <div class="badge">
+      <span class="badge-dot"></span>
+      Open Source &middot; MIT License
+    </div>
+    <h1>Build your <em>AI company</em></h1>
+    <p class="hero-sub">
+      Your AI team handles the grunt work. You make the decisions.<br/>
+      Plan, execute, review, and ship &mdash; with agents you can actually trust.
+    </p>
+    <div class="hero-actions">
+      <a href="https://github.com/lumea-labs/polpo" class="btn-primary" target="_blank">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+        Get Started
+      </a>
+      <a href="https://openpolpo.dev" class="btn-secondary" target="_blank">
+        Read the Docs &rarr;
+      </a>
+    </div>
+    <div class="install-bar" onclick="navigator.clipboard.writeText('npm install -g @lumea-labs/polpo')">
+      <span class="prompt">$</span>
+      <code>npm install -g @lumea-labs/polpo</code>
+      <span class="copy-hint">click to copy</span>
+    </div>
+  </section>
+
+  <!-- ── Terminal ─────────────────────────── -->
+  <div class="terminal-section">
+    <div class="terminal">
+      <div class="terminal-bar">
+        <div class="terminal-dot red"></div>
+        <div class="terminal-dot yellow"></div>
+        <div class="terminal-dot green"></div>
+        <div class="terminal-title">polpo &mdash; my-project</div>
+      </div>
+      <div class="terminal-body">
+        <div class="line" style="animation-delay: 0.6s"><span class="t-prompt">$</span> <span class="t-cmd">polpo init</span></div>
+        <div class="line" style="animation-delay: 0.9s"><span class="t-green">&#10004;</span> Project initialized in ./my-project</div>
+        <div class="line" style="animation-delay: 1.0s"><span class="t-green">&#10004;</span> Team created: <span class="t-blue">default</span> (1 agent)</div>
+        <div class="line" style="animation-delay: 1.1s">&nbsp;</div>
+        <div class="line" style="animation-delay: 1.3s"><span class="t-prompt">$</span> <span class="t-cmd">polpo</span></div>
+        <div class="line" style="animation-delay: 1.6s"><span class="t-dim">🐙 Polpo v0.1.0</span></div>
+        <div class="line" style="animation-delay: 1.8s">&nbsp;</div>
+        <div class="line" style="animation-delay: 2.0s"><span class="t-yellow">you:</span> Build a REST API with auth, SQLite database, and tests</div>
+        <div class="line" style="animation-delay: 2.3s">&nbsp;</div>
+        <div class="line" style="animation-delay: 2.6s"><span class="t-coral">polpo:</span> I'll create a mission with 4 tasks. Let me plan this out.</div>
+        <div class="line" style="animation-delay: 2.9s">&nbsp;</div>
+        <div class="line" style="animation-delay: 3.2s"><span class="t-dim">  [mission]</span> <span class="t-blue">rest-api-auth</span> &mdash; 4 tasks, 1 agent</div>
+        <div class="line" style="animation-delay: 3.5s"><span class="t-dim">  [task-1]</span>  <span class="t-green">&#10004; done</span>  Design database schema <span class="t-dim">(score: 4.2/5)</span></div>
+        <div class="line" style="animation-delay: 3.8s"><span class="t-dim">  [task-2]</span>  <span class="t-green">&#10004; done</span>  Implement API endpoints <span class="t-dim">(score: 4.5/5)</span></div>
+        <div class="line" style="animation-delay: 4.1s"><span class="t-dim">  [task-3]</span>  <span class="t-green">&#10004; done</span>  Add JWT authentication  <span class="t-dim">(score: 3.8/5)</span></div>
+        <div class="line" style="animation-delay: 4.4s"><span class="t-dim">  [task-4]</span>  <span class="t-green">&#10004; done</span>  Write test suite         <span class="t-dim">(score: 4.1/5)</span></div>
+        <div class="line" style="animation-delay: 4.7s">&nbsp;</div>
+        <div class="line" style="animation-delay: 5.0s"><span class="t-green">&#10004;</span> Mission complete. 4/4 tasks passed review. <span class="t-dim">All files committed.</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Providers ────────────────────────── -->
+  <div class="providers-section reveal">
+    <p class="providers-label">Works with 22+ LLM providers</p>
+    <div class="providers-row">
+      <span class="provider-name">Anthropic</span>
+      <span class="provider-name">OpenAI</span>
+      <span class="provider-name">Google</span>
+      <span class="provider-name">Groq</span>
+      <span class="provider-name">Mistral</span>
+      <span class="provider-name">xAI</span>
+      <span class="provider-name">Ollama</span>
+      <span class="provider-name">Bedrock</span>
+      <span class="provider-name">Azure</span>
+      <span class="provider-name">OpenRouter</span>
+      <span class="provider-name">+12 more</span>
+    </div>
+  </div>
+
+  <!-- ── How It Works ─────────────────────── -->
+  <section class="how-section reveal" id="how">
+    <div class="section-inner">
+      <p class="section-label">How It Works</p>
+      <h2>Describe the goal.<br/>Walk away.</h2>
+      <p class="section-desc">
+        Tell Polpo what you need in plain language. It plans the work, assigns agents, checks every result, and only pings you when it matters.
+      </p>
+      <div class="how-grid">
+        <div class="how-step">
+          <div class="how-num">01</div>
+          <h3>You describe</h3>
+          <p>Tell Polpo what you need in natural language, via chat, Telegram, or API.</p>
+        </div>
+        <div class="how-step">
+          <div class="how-num">02</div>
+          <h3>Polpo plans</h3>
+          <p>AI generates a mission with tasks, dependencies, and agent assignments.</p>
+        </div>
+        <div class="how-step">
+          <div class="how-num">03</div>
+          <h3>Agents execute</h3>
+          <p>Crash-proof detached processes run each task with full tool access.</p>
+        </div>
+        <div class="how-step">
+          <div class="how-num">04</div>
+          <h3>LLM judges review</h3>
+          <p>Three independent reviewers score every result. Below threshold? Auto-fix.</p>
+        </div>
+        <div class="how-step">
+          <div class="how-num">05</div>
+          <h3>You get results</h3>
+          <p>Notified on completion. Escalated if it needs you. No babysitting.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Features ─────────────────────────── -->
+  <section id="features" class="reveal">
+    <div class="section-inner">
+      <p class="section-label">Why Polpo</p>
+      <h2>Finally, AI you can trust</h2>
+      <p class="section-desc">
+        Not another chatbot. A reliable system that plans, executes, reviews its own work, and asks before acting.
+      </p>
+
+      <div class="features-grid">
+        <div class="feature-card">
+          <div class="feature-icon">🔄</div>
+          <h3>Self-correcting</h3>
+          <p>LLM judges score every task. Below threshold? The agent gets specific feedback and fixes it &mdash; not a blind retry.</p>
+        </div>
+
+        <div class="feature-card">
+          <div class="feature-icon">🛡️</div>
+          <h3>Crash-proof</h3>
+          <p>Agents run as detached processes. Kill Polpo, reboot the server, lose your connection &mdash; it picks up exactly where it left off.</p>
+        </div>
+
+        <div class="feature-card">
+          <div class="feature-icon">🙋</div>
+          <h3>Human-in-the-loop</h3>
+          <p>Approval gates, checkpoints, and escalation chains. Your AI team handles the grunt work. You make the decisions.</p>
+        </div>
+
+        <div class="feature-card">
+          <div class="feature-icon">📡</div>
+          <h3>Talk from anywhere</h3>
+          <p>Telegram, WhatsApp, Slack, email, or the built-in Web UI. Control your AI team from wherever you are.</p>
+        </div>
+
+        <div class="feature-card">
+          <div class="feature-icon">🔧</div>
+          <h3>30+ built-in tools</h3>
+          <p>File I/O, shell, browser automation, email, image generation, web search, credential vault &mdash; agents have everything they need.</p>
+        </div>
+
+        <div class="feature-card">
+          <div class="feature-icon">🏠</div>
+          <h3>Runs anywhere</h3>
+          <p>Your laptop, a $5 VPS, Docker, or your cloud. Your hardware, your API keys, your rules. Zero vendor lock-in.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Use Cases ─────────────────────────── -->
+  <section id="use-cases" class="reveal">
+    <div class="section-inner">
+      <p class="section-label">Use Cases</p>
+      <h2>What people build with Polpo</h2>
+      <p class="section-desc">
+        Solo founders and small teams use Polpo to do the work of a much larger team.
+      </p>
+
+      <div class="use-cases-grid">
+        <div class="use-case">
+          <div class="use-case-emoji">🚀</div>
+          <h3>Ship features faster</h3>
+          <p>"Build a REST API with auth, database, and tests." Polpo plans the work, writes the code, reviews it, and commits &mdash; while you focus on product.</p>
+        </div>
+
+        <div class="use-case">
+          <div class="use-case-emoji">📧</div>
+          <h3>Automate outreach</h3>
+          <p>Research prospects, draft personalized emails, and send them &mdash; all orchestrated by your AI team with human approval before sending.</p>
+        </div>
+
+        <div class="use-case">
+          <div class="use-case-emoji">🔍</div>
+          <h3>Codebase maintenance</h3>
+          <p>Schedule weekly code reviews, dependency audits, and security checks. Polpo files issues, opens PRs, and escalates critical findings.</p>
+        </div>
+
+        <div class="use-case">
+          <div class="use-case-emoji">🏢</div>
+          <h3>Run your AI company</h3>
+          <p>Define agents with real identities &mdash; names, roles, communication styles. They collaborate on complex projects just like a human team would.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── CTA ──────────────────────────────── -->
+  <section class="cta-section reveal">
+    <p class="section-label">Get Started</p>
+    <h2>Three commands.<br/>Your AI team is live.</h2>
+    <p class="section-desc">
+      Install, init, launch. Free and open source. No account, no credit card, no vendor lock-in.
+    </p>
+    <div class="cta-actions">
+      <a href="https://github.com/lumea-labs/polpo" class="btn-primary" target="_blank">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+        Star on GitHub
+      </a>
+      <a href="https://openpolpo.dev" class="btn-secondary" target="_blank">
+        Documentation &rarr;
+      </a>
+    </div>
+  </section>
+
+  <!-- ── Footer ───────────────────────────── -->
+  <footer>
+    <div class="footer-left">
+      🐙 Polpo &mdash; Built by <a href="https://github.com/lumea-labs" target="_blank" style="text-decoration: underline;">Lumea Labs</a>
+    </div>
+    <ul class="footer-links">
+      <li><a href="https://github.com/lumea-labs/polpo" target="_blank">GitHub</a></li>
+      <li><a href="https://openpolpo.dev" target="_blank">Docs</a></li>
+      <li><a href="https://discord.gg/polpo" target="_blank">Discord</a></li>
+    </ul>
+  </footer>
+
+  <!-- ── Scroll reveal ────────────────────── -->
+  <script>
+    const reveals = document.querySelectorAll('.reveal');
+    const observer = new IntersectionObserver(
+      (entries) => entries.forEach((e) => { if (e.isIntersecting) e.target.classList.add('visible'); }),
+      { threshold: 0.08, rootMargin: '0px 0px -40px 0px' }
+    );
+    reveals.forEach((el) => observer.observe(el));
+    // Fallback: reveal all after 1.5s (for environments where IO doesn't fire)
+    setTimeout(() => reveals.forEach((el) => el.classList.add('visible')), 1500);
+
+    // Copy feedback
+    document.querySelector('.install-bar')?.addEventListener('click', function () {
+      const hint = this.querySelector('.copy-hint');
+      if (hint) { hint.textContent = 'copied!'; setTimeout(() => hint.textContent = 'click to copy', 2000); }
+    });
+  </script>
+
+</body>
+</html>
