@@ -1,24 +1,35 @@
 ---
 title: "SQLite Store"
-description: "SQLite persistence backend — concurrent access, transactional integrity, better performance at scale."
+description: "SQLite persistence backend via Drizzle ORM — concurrent access, transactional integrity, better performance at scale."
 ---
 
-SQLite stores use an embedded database for higher concurrency and better query performance. All SQLite stores share the same database file.
+SQLite stores use an embedded database via [Drizzle ORM](https://orm.drizzle.team/) for higher concurrency and better query performance. All stores share the same database file (`.polpo/state.db`).
 
-## Stores
+## What's Included
 
-| Store | Purpose | Location |
-|-------|---------|----------|
-| `SqliteTaskStore` | Tasks and missions | `.polpo/state.db` |
-| `SqliteRunStore` | Execution run history | `.polpo/state.db` |
-| `SqliteSessionStore` | Chat sessions | `.polpo/state.db` |
-| `SqliteNotificationStore` | Notification records | `.polpo/state.db` |
+When `storage: "sqlite"` is set, Polpo creates all 11 stores via `@polpo/drizzle`:
+
+| Store | Purpose |
+|-------|---------|
+| TaskStore | Tasks and missions |
+| RunStore | Execution run history |
+| SessionStore | Chat sessions and messages |
+| LogStore | Persistent event log |
+| MemoryStore | Project context memory |
+| ApprovalStore | Approval gate requests |
+| NotificationStore | Notification records |
+| PeerStore | Channel gateway peers |
+| CheckpointStore | Mission checkpoints |
+| DelayStore | Mission delays |
+| ConfigStore | Key-value metadata |
+
+All stored in a single `.polpo/state.db` file.
 
 ## Pros and Cons
 
-**Pros:** Safe concurrent access, better performance at scale, transactional integrity.
+**Pros:** Safe concurrent access, transactional integrity, better performance at scale, same Drizzle interface as PostgreSQL.
 
-**Cons:** Requires `better-sqlite3` dependency (in `optionalDependencies`), database file is not human-readable.
+**Cons:** Requires `better-sqlite3` and `@polpo/drizzle` dependencies. Database file is not human-readable.
 
 ## When to Use
 
@@ -27,6 +38,7 @@ SQLite stores use an embedded database for higher concurrency and better query p
 | Multiple concurrent orchestrators | Yes |
 | CI/CD pipelines | Yes |
 | Large task sets (100+ tasks) | Yes |
+| Want to migrate to PostgreSQL later | Yes — same Drizzle interface |
 | Getting started / single user | Optional — [File](/reference/stores/file) is simpler |
 
 ## Configuration
@@ -41,16 +53,4 @@ Set the storage backend in `.polpo/polpo.json`:
 }
 ```
 
-## Programmatic Usage
-
-When using the programmatic API, you can pass stores directly:
-
-```typescript
-import { Orchestrator, SqliteTaskStore, SqliteRunStore } from "openpolpo";
-
-const orchestrator = new Orchestrator({
-  workDir: "./my-project",
-  taskStore: new SqliteTaskStore(".polpo"),
-  runStore: new SqliteRunStore(join(".polpo", "state.db")),
-});
-```
+That's it. Polpo creates the database and all tables automatically on startup.

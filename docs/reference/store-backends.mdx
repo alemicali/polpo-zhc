@@ -62,7 +62,8 @@ The `JsonConfigStore` (aliased as `PolpoConfigStore`) manages the `polpo.json` c
 | Getting started / single user | [File](/reference/stores/file) (default) |
 | Multiple concurrent orchestrators | [SQLite](/reference/stores/sqlite) |
 | CI/CD pipelines | [SQLite](/reference/stores/sqlite) |
-| Large task sets (100+ tasks) | [SQLite](/reference/stores/sqlite) |
+| Large task sets (100+ tasks) | [SQLite](/reference/stores/sqlite) or [PostgreSQL](/reference/stores/postgres) |
+| Production / multi-server | [PostgreSQL](/reference/stores/postgres) |
 | Debugging / inspecting state | [File](/reference/stores/file) |
 
 Set the storage backend in `.polpo/polpo.json`:
@@ -75,7 +76,9 @@ Set the storage backend in `.polpo/polpo.json`:
 }
 ```
 
-Supported values: `"file"` (default) and `"sqlite"`.
+Supported values: `"file"` (default), `"sqlite"`, and `"postgres"`.
+
+SQLite and PostgreSQL both use [Drizzle ORM](https://orm.drizzle.team/) via the `@polpo/drizzle` package, sharing the same store interface. Switching between them is a one-line config change.
 
 <Note>
 All stores share the same `.polpo/` directory by convention. The directory is created automatically by `polpo init`.

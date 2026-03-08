@@ -256,7 +256,8 @@
             "pages": [
               "reference/store-backends",
               "reference/stores/file",
-              "reference/stores/sqlite"
+              "reference/stores/sqlite",
+              "reference/stores/postgres"
             ]
           },
           {

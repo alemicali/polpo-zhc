@@ -193,7 +193,7 @@ Tasks are created inside missions (via CLI, TUI, or API). Each task has these fi
 | `logLevel` | string | `"normal"` | `"quiet"`, `"normal"`, or `"verbose"` |
 | `taskTimeout` | number | `1800000` | Default task timeout (ms) |
 | `staleThreshold` | number | `300000` | Idle time before stale warning (ms) |
-| `storage` | string | `"file"` | Storage backend: `"file"` (filesystem JSON) or `"sqlite"` |
+| `storage` | string | `"file"` | Storage backend: `"file"` (filesystem JSON), `"sqlite"`, or `"postgres"` |
 | `maxConcurrency` | number | unlimited | Max concurrent agent processes globally |
 | `maxAssessmentRetries` | number | `1` | Max assessment retries when all reviewers fail before falling back to fix/retry |
 | `autoCorrectExpectations` | boolean | `true` | Auto-correct correctable expectations (e.g. file_exists paths) on assessment failure |

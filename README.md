@@ -157,7 +157,7 @@ polpo serve        # HTTP API + Web UI at http://localhost:3000
 
 ### Developer Experience
 
-- **Multiple store backends** — File (default), JSON, and SQLite for tasks, runs, sessions, and logs
+- **Multiple store backends** — File (default), SQLite, and PostgreSQL for tasks, runs, sessions, and logs
 - **MCP support** — connect external tool servers to any agent with automatic tool bridging
 - **Filesystem sandbox** — restrict agent file access via `allowedPaths`
 - **Skills system** — reusable agent instructions in `.polpo/skills/`, auto-injected into system prompts
@@ -218,7 +218,7 @@ polpo/
 │   ├── notifications/      # Notification router + channels (Slack, Telegram, Email, Webhook)
 │   ├── tools/              # 7 coding tools, path sandbox, safeEnv
 │   ├── mcp/                # MCP client manager and tool bridging
-│   ├── stores/             # File, JSON, SQLite stores (tasks, runs, sessions, logs, config)
+│   ├── stores/             # File stores (tasks, runs, sessions, logs, config)
 │   ├── llm/                # LLM queries, prompts, plan generation, skills
 │   ├── tui/                # Terminal UI (Ink) + TUI commands
 │   ├── server/             # Hono HTTP API, SSE bridge, routes
@@ -227,7 +227,10 @@ polpo/
 ├── ui/                     # Vite + React monitoring dashboard
 ├── docs/                   # Mintlify documentation site
 ├── packages/
-│   └── react-sdk/          # React hooks + SSE client (@lumea-labs/polpo-react)
+│   ├── core/               # @polpo/core — pure business logic (zero Node.js deps)
+│   ├── drizzle/            # @polpo/drizzle — Drizzle ORM stores (SQLite + PostgreSQL)
+│   ├── client-sdk/         # @polpo/client-sdk — TypeScript HTTP client + SSE
+│   └── react-sdk/          # @polpo/react-sdk — React hooks + real-time updates
 └── .polpo/polpo.json       # Your project configuration
 ```
 
