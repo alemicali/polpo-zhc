@@ -71,6 +71,34 @@ export type { PlaybookParameter, PlaybookDefinition, PlaybookInfo, ValidationRes
 export { discoverTemplates, loadTemplate, instantiateTemplate, validateTemplateDefinition, saveTemplate, deleteTemplate } from "./core/playbook.js";
 export type { TemplateParameter, TemplateDefinition, TemplateInfo } from "./core/playbook.js";
 
+// Ink Registry
+export {
+  parseInkSource,
+  hashContent,
+  discoverInkPackages,
+  validateInkPlaybook,
+  validateInkAgent,
+  validateInkCompany,
+  readInkLock,
+  writeInkLock,
+  upsertInkLockEntry,
+  removeInkLockEntry,
+  isInkSourceInstalled,
+  getInkLockEntry,
+} from "./core/ink.js";
+export type {
+  InkPackageType,
+  InkSource,
+  InkPackage,
+  InkPackageMetadata,
+  InkVerdictLevel,
+  InkVerdict,
+  InkLockEntry,
+  InkLockPackage,
+  InkLockFile,
+  InkValidationResult,
+} from "./core/ink.js";
+
 // Quality Layer
 export { SLAMonitor } from "./quality/sla-monitor.js";
 export { QualityController } from "./quality/quality-controller.js";

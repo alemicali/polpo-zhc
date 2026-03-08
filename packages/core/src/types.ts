@@ -288,6 +288,15 @@ export interface AgentConfig {
    *  When set, emails can only be sent to addresses in these domains.
    *  When omitted, all domains are allowed (backwards compatible). */
   emailAllowedDomains?: string[];
+
+  // ── Ink registry metadata (optional) ──
+
+  /** Semantic version (e.g. "1.0.0"). Used by Ink registry for package identification. */
+  version?: string;
+  /** Author name or "Name <email>" string. */
+  author?: string;
+  /** Searchable tags for registry discovery (e.g. ["frontend", "react", "testing"]). */
+  tags?: string[];
 }
 
 export interface AgentActivity {
@@ -563,6 +572,15 @@ export interface PolpoFileConfig {
   teams: Team[];
   settings: PolpoSettings;
   providers?: Record<string, ProviderConfig>;
+
+  // ── Ink registry metadata (optional) ──
+
+  /** Semantic version (e.g. "1.0.0"). Used by Ink registry for company package identification. */
+  version?: string;
+  /** Author name or "Name <email>" string. */
+  author?: string;
+  /** Searchable tags for registry discovery (e.g. ["saas", "startup", "fullstack"]). */
+  tags?: string[];
 }
 
 /** Shape that parseConfig() accepts from disk — supports both old `team` and new `teams`. */

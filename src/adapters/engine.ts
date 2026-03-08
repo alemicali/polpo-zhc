@@ -25,6 +25,7 @@ import type { AgentEvent } from "@mariozechner/pi-agent-core";
 import { join, sep } from "node:path";
 import { resolveModel, resolveApiKeyAsync, enforceModelAllowlist } from "../llm/pi-client.js";
 import { createCodingTools, createAllTools } from "../tools/coding-tools.js";
+import { createInkTools as createInkToolsFn } from "../tools/ink-tools.js";
 import { loadAgentSkills, buildSkillPrompt } from "../llm/skills.js";
 import { nanoid } from "nanoid";
 
@@ -442,6 +443,11 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
   // Vault is passed here so vault_get/vault_list are available from the start
   const codingTools = createCodingTools(cwd, agentConfig.allowedTools, effectiveAllowedPaths, outputDir, vault);
 
+  // Ink tools (always available — search, browse, install from Ink Hub)
+  if (ctx?.polpoDir) {
+    codingTools.push(...createInkToolsFn(ctx.polpoDir, agentConfig.allowedTools));
+  }
+
 
   // Resolve reasoning level: agent config > global settings (via SpawnContext) > "off"
   const thinkingLevel = agentConfig.reasoning ?? ctx?.reasoning ?? "off";
@@ -576,6 +582,7 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
           outputDir,
           whatsappStore: ctx?.whatsappStore,
           whatsappSendMessage: ctx?.whatsappSendMessage,
+          polpoDir: ctx?.polpoDir,
         });
         agent.setTools(allTools);
       }

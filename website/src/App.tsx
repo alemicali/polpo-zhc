@@ -1,4 +1,5 @@
 import { useRef, useState, type ReactNode } from "react";
+import { Link } from "react-router-dom";
 import { motion, useInView, AnimatePresence } from "motion/react";
 import {
   Code2,
@@ -31,6 +32,7 @@ import {
   Server,
   Container,
   Smartphone,
+  Package,
   type LucideIcon,
 } from "lucide-react";
 
@@ -140,10 +142,18 @@ function Navbar() {
   return (
     <header className="fixed top-0 z-50 w-full border-b border-neutral-100 bg-white/80 backdrop-blur-md">
       <div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-3">
-        <a href="/" className="flex items-center">
+        <Link to="/" className="flex items-center">
           <img src="/logo-text.svg" alt="Polpo" className="h-6" />
-        </a>
+        </Link>
         <nav className="flex items-center gap-5">
+          <Link
+            to="/ink"
+            className="inline-flex items-center gap-2 rounded-full border border-indigo-200 bg-indigo-50 px-3.5 py-1.5 text-sm font-medium text-indigo-700 transition hover:border-indigo-300 hover:bg-indigo-100"
+          >
+            <Package className="h-3.5 w-3.5" />
+            Ink Hub
+            <span className="rounded-full bg-indigo-600 px-1.5 py-0.5 text-[10px] font-bold text-white leading-none">NEW</span>
+          </Link>
           <ExtLink
             href="https://docs.polpo.sh"
             className="flex items-center gap-1.5 text-sm text-neutral-500 transition hover:text-neutral-950"
@@ -257,26 +267,32 @@ function Hero() {
 function VideoSection() {
   return (
     <section className="pb-24 md:pb-32">
-      <div className="mx-auto max-w-4xl px-6">
+      <div className="mx-auto max-w-5xl px-6">
         <Reveal>
           <p className="mx-auto mb-8 max-w-2xl text-center text-neutral-500">
-            4 monitors, 12 terminals, zero confidence anything actually works.
+            4 monitors, 12 terminals, zero confidence anything actually works.<br />
             Stop babysitting AI agents — let Polpo manage them for you.
           </p>
         </Reveal>
         <Reveal delay={0.08}>
-          <div className="relative overflow-hidden rounded-xl border border-neutral-200 bg-neutral-950 aspect-video flex items-center justify-center group cursor-pointer">
-            {/* Placeholder — replace src with actual video */}
-            <div className="text-center">
-              <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-white/10 transition group-hover:bg-white/20">
-                <Play className="h-7 w-7 text-white ml-1" />
-              </div>
-              <p className="text-sm text-neutral-400">
-                See Polpo in action
-              </p>
-            </div>
-            {/* When ready, replace this div with:
-            <iframe src="..." className="absolute inset-0 w-full h-full" allow="autoplay" /> */}
+          <div className="relative overflow-hidden rounded-xl border border-neutral-200 bg-neutral-950 aspect-video shadow-2xl shadow-neutral-950/10">
+            <video
+              className="absolute inset-0 w-full h-full object-contain cursor-pointer"
+              src="https://pub-3ebcd654a5c74a0ab00c87cbb7507f97.r2.dev/polpo-intro.mp4"
+              autoPlay
+              muted
+              loop
+              playsInline
+              onClick={(e) => {
+                const v = e.currentTarget;
+                if (document.fullscreenElement) {
+                  document.exitFullscreen();
+                } else {
+                  v.requestFullscreen();
+                }
+              }}
+              title="Click for fullscreen"
+            />
           </div>
         </Reveal>
       </div>

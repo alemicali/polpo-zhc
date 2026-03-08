@@ -1,0 +1,16 @@
+name = "polpo-website"
+main = "src/worker.ts"
+compatibility_date = "2024-12-01"
+
+# Static assets — Vite build output
+[assets]
+directory = "./dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+
+# D1 database for Ink registry
+[[d1_databases]]
+binding = "INK_DB"
+database_name = "ink-registry"
+database_id = "90f2c367-dd57-4ccb-9fb4-3aa7135155cb"
+migrations_dir = "migrations"

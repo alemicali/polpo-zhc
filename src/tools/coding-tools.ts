@@ -18,6 +18,7 @@ import { createHttpTools as createHttpToolsCore, ALL_HTTP_TOOL_NAMES as CORE_HTT
 import { createVaultToolsCore } from "./vault-tools.js";
 import type { ResolvedVault } from "../vault/index.js";
 import type { WhatsAppStore } from "../stores/whatsapp-store.js";
+import { createInkTools, ALL_INK_TOOL_NAMES } from "./ink-tools.js";
 
 const MAX_READ_LINES = 500;
 const MAX_OUTPUT_BYTES = 30_000;
@@ -424,6 +425,7 @@ export type { PdfToolName } from "./pdf-tools.js";
 export type { DocxToolName } from "./docx-tools.js";
 export type { SearchToolName } from "./search-tools.js";
 export type { WhatsAppToolName } from "./whatsapp-tools.js";
+export type { InkToolName } from "./ink-tools.js";
 
 /** All known tool names across all categories */
 export type ExtendedToolName = CodingToolName
@@ -438,7 +440,8 @@ export type ExtendedToolName = CodingToolName
   | import("./pdf-tools.js").PdfToolName
   | import("./docx-tools.js").DocxToolName
   | import("./search-tools.js").SearchToolName
-  | import("./whatsapp-tools.js").WhatsAppToolName;
+  | import("./whatsapp-tools.js").WhatsAppToolName
+  | import("./ink-tools.js").InkToolName;
 
 /** All available tool names for documentation/config validation */
 export const ALL_EXTENDED_TOOL_NAMES: string[] = [
@@ -455,6 +458,7 @@ export const ALL_EXTENDED_TOOL_NAMES: string[] = [
   ...ALL_DOCX_TOOL_NAMES,
   ...ALL_SEARCH_TOOL_NAMES,
   ...ALL_WHATSAPP_TOOL_NAMES,
+  ...ALL_INK_TOOL_NAMES,
 ];
 
 export interface CreateAllToolsOptions {
@@ -481,6 +485,8 @@ export interface CreateAllToolsOptions {
   whatsappStore?: WhatsAppStore;
   /** WhatsApp send function (for whatsapp_send tool). */
   whatsappSendMessage?: (jid: string, text: string) => Promise<string | undefined>;
+  /** Polpo directory (.polpo/) for Ink tools. */
+  polpoDir?: string;
 }
 
 /**
@@ -511,6 +517,11 @@ export async function createAllTools(options: CreateAllToolsOptions): Promise<Ag
 
   // Core coding tools (always included unless filtered out) — includes vault_get/vault_list
   tools.push(...createCodingTools(cwd, allowedTools, allowedPaths, options.outputDir, options.vault));
+
+  // Ink tools (always included when polpoDir is available)
+  if (options.polpoDir) {
+    tools.push(...createInkTools(options.polpoDir, allowedTools));
+  }
 
   // Browser tools — activated when any browser_* tool is in allowedTools
   if (categoryRequested(ALL_BROWSER_TOOL_NAMES)) {

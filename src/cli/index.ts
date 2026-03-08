@@ -55,6 +55,7 @@ import { registerScheduleCommands } from "./commands/schedule.js";
 import { registerAgentOnboardCommands } from "./commands/agent-onboard.js";
 import { registerUpdateCommand } from "./commands/update.js";
 import { registerWhatsAppCommands } from "./commands/whatsapp.js";
+import { registerInkCommands } from "./commands/ink.js";
 import { ensureSetup } from "./ensure-setup.js";
 import { startUpdateCheck } from "./update-check.js";
 
@@ -555,6 +556,7 @@ registerScheduleCommands(program);
 registerAgentOnboardCommands(program);
 registerUpdateCommand(program);
 registerWhatsAppCommands(program);
+registerInkCommands(program);
 
 // Non-blocking update check — prints notice at exit if a new version exists
 const printUpdateNotice = startUpdateCheck(PKG_VERSION);

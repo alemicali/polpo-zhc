@@ -50,6 +50,15 @@ export interface PlaybookDefinition {
   mission: Record<string, unknown>;
   /** Declared parameters. */
   parameters?: PlaybookParameter[];
+
+  // ── Ink registry metadata (optional) ──
+
+  /** Semantic version (e.g. "1.0.0"). Used by Ink registry for package identification. */
+  version?: string;
+  /** Author name or "Name <email>" string. */
+  author?: string;
+  /** Searchable tags for registry discovery (e.g. ["code-review", "testing"]). */
+  tags?: string[];
 }
 
 /** Lightweight metadata returned by discovery (no mission body). */

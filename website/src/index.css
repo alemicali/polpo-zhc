@@ -35,12 +35,23 @@ body {
   background-size: 24px 24px;
 }
 
-/* ── Hero trama — fine cross-stitch ────────────────────────────────── */
+/* ── Hero trama — premium diagonal weave ───────────────────────────── */
 .hero-mesh {
   background-image:
-    linear-gradient(0deg, rgba(232, 104, 138, 0.025) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(59, 62, 115, 0.025) 1px, transparent 1px);
-  background-size: 40px 40px;
+    repeating-linear-gradient(
+      135deg,
+      transparent 0px,
+      transparent 28px,
+      rgba(59, 62, 115, 0.025) 28px,
+      rgba(59, 62, 115, 0.025) 29px
+    ),
+    repeating-linear-gradient(
+      45deg,
+      transparent 0px,
+      transparent 28px,
+      rgba(232, 104, 138, 0.018) 28px,
+      rgba(232, 104, 138, 0.018) 29px
+    );
 }
 
 /* ── Flow connector line animation ─────────────────────────────────── */

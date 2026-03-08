@@ -58,3 +58,31 @@ export type { PlaybookParameter, PlaybookDefinition, PlaybookInfo, ValidationRes
 // Backward-compat aliases (deprecated)
 export { discoverTemplates, loadTemplate, instantiateTemplate, validateTemplateDefinition, saveTemplate, deleteTemplate } from "./playbook.js";
 export type { TemplateParameter, TemplateDefinition, TemplateInfo } from "./playbook.js";
+
+// Ink Registry
+export {
+  parseInkSource,
+  hashContent,
+  discoverInkPackages,
+  validateInkPlaybook,
+  validateInkAgent,
+  validateInkCompany,
+  readInkLock,
+  writeInkLock,
+  upsertInkLockEntry,
+  removeInkLockEntry,
+  isInkSourceInstalled,
+  getInkLockEntry,
+} from "./ink.js";
+export type {
+  InkPackageType,
+  InkSource,
+  InkPackage,
+  InkPackageMetadata,
+  InkVerdictLevel,
+  InkVerdict,
+  InkLockEntry,
+  InkLockPackage,
+  InkLockFile,
+  InkValidationResult,
+} from "./ink.js";
