@@ -898,7 +898,7 @@ function Footer() {
         <div className="flex flex-col gap-8 md:flex-row md:items-start md:justify-between">
           <div>
             <img src="/logo-text.svg" alt="Polpo" className="h-5" />
-            <p className="mt-1 text-sm text-neutral-500">Orchestration, mission control, and reliability scoring for AI agent teams.</p>
+            <p className="mt-1 text-sm text-neutral-500">Open-source orchestration and mission control for AI agent teams.</p>
           </div>
 
           <div className="flex gap-16">
