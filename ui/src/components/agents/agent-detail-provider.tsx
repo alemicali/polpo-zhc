@@ -16,14 +16,14 @@ import {
   useSkills,
   useTasks,
   useVaultEntries,
-} from "@lumea-labs/polpo-react";
+} from "@lumea-technologies/polpo-react";
 import type {
   AgentConfig,
   AgentProcess,
   SkillInfo,
   Task,
   VaultEntryMeta,
-} from "@lumea-labs/polpo-react";
+} from "@lumea-technologies/polpo-react";
 import { taskStatusOrder } from "@/lib/agent-meta";
 import { toolCategories } from "@/lib/agent-meta";
 

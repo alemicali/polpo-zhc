@@ -45,8 +45,8 @@ import {
   Archive,
   Bell,
 } from "lucide-react";
-import { useEvents, usePolpo, useLogs } from "@lumea-labs/polpo-react";
-import type { LogEntry } from "@lumea-labs/polpo-react";
+import { useEvents, usePolpo, useLogs } from "@lumea-technologies/polpo-react";
+import type { LogEntry } from "@lumea-technologies/polpo-react";
 import { formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
 import { JsonBlock } from "@/components/json-block";

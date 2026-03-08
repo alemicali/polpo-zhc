@@ -22,8 +22,8 @@ import {
   Copy,
   Check,
 } from "lucide-react";
-import { useSkills, useAgents, usePolpo } from "@lumea-labs/polpo-react";
-import type { SkillWithAssignment, Team, LoadedSkill } from "@lumea-labs/polpo-react";
+import { useSkills, useAgents, usePolpo } from "@lumea-technologies/polpo-react";
+import type { SkillWithAssignment, Team, LoadedSkill } from "@lumea-technologies/polpo-react";
 import { MessageResponse } from "@/components/ai-elements/message";
 import { cn } from "@/lib/utils";
 

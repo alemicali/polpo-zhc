@@ -37,8 +37,8 @@ import {
   HelpCircle,
   FileEdit,
 } from "lucide-react";
-import { useTasks, useMissions, useProcesses, useAgents, useStats } from "@lumea-labs/polpo-react";
-import type { Task, AgentProcess, PolpoStats } from "@lumea-labs/polpo-react";
+import { useTasks, useMissions, useProcesses, useAgents, useStats } from "@lumea-technologies/polpo-react";
+import type { Task, AgentProcess, PolpoStats } from "@lumea-technologies/polpo-react";
 import { cn } from "@/lib/utils";
 
 // ── Phase icon helper ──

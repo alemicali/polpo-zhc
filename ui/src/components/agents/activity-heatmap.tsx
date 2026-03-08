@@ -6,7 +6,7 @@
 import { useMemo } from "react";
 import { Zap } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { Task } from "@lumea-labs/polpo-react";
+import type { Task } from "@lumea-technologies/polpo-react";
 
 const HEATMAP_WEEKS = 20;
 const DAY_NAMES = ["", "Mon", "", "Wed", "", "Fri", ""];

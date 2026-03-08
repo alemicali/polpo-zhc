@@ -16,8 +16,8 @@ import {
   Power,
   PowerOff,
 } from "lucide-react";
-import { useSchedules, useMissions } from "@lumea-labs/polpo-react";
-import type { ScheduleEntry, Mission } from "@lumea-labs/polpo-react";
+import { useSchedules, useMissions } from "@lumea-technologies/polpo-react";
+import type { ScheduleEntry, Mission } from "@lumea-technologies/polpo-react";
 import { useAsyncAction } from "@/hooks/use-polpo";
 import { formatDistanceToNow, format } from "date-fns";
 import { cn } from "@/lib/utils";

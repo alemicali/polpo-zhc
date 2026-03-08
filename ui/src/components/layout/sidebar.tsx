@@ -15,7 +15,7 @@ import {
   Settings2,
   FolderOpen,
 } from "lucide-react";
-import { usePolpo } from "@lumea-labs/polpo-react";
+import { usePolpo } from "@lumea-technologies/polpo-react";
 import { useProjectInfo } from "@/hooks/use-polpo";
 import { cn } from "@/lib/utils";
 import {

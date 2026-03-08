@@ -40,7 +40,7 @@ import {
   Upload,
   type LucideIcon,
 } from "lucide-react";
-import type { TaskStatus } from "@lumea-labs/polpo-react";
+import type { TaskStatus } from "@lumea-technologies/polpo-react";
 
 // ── Tool icon & color mapping ──
 

@@ -17,11 +17,11 @@ import {
 } from "lucide-react";
 import { ReactFlowProvider } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { useTemplates } from "@lumea-labs/polpo-react";
+import { useTemplates } from "@lumea-technologies/polpo-react";
 import type {
   TemplateDefinition,
   TemplateParameter,
-} from "@lumea-labs/polpo-react";
+} from "@lumea-technologies/polpo-react";
 import { toast } from "sonner";
 import { JsonBlock } from "@/components/json-block";
 import {

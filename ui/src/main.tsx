@@ -1,7 +1,7 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
-import { PolpoProvider } from "@lumea-labs/polpo-react";
+import { PolpoProvider } from "@lumea-technologies/polpo-react";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "@/components/ui/sonner";
 import { ChatProvider } from "@/hooks/chat-context";

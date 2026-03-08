@@ -31,6 +31,9 @@ importers:
       '@mariozechner/pi-ai':
         specifier: ^0.52.12
         version: 0.52.12(@modelcontextprotocol/sdk@1.26.0(zod@4.3.6))(ws@8.19.0)(zod@4.3.6)
+      '@polpo/core':
+        specifier: workspace:*
+        version: link:packages/core
       '@sinclair/typebox':
         specifier: ^0.34.48
         version: 0.34.48
@@ -142,6 +145,16 @@ importers:
         specifier: ^5.7.0
         version: 5.9.3
 
+  packages/core:
+    dependencies:
+      zod:
+        specifier: ^4.3.6
+        version: 4.3.6
+    devDependencies:
+      typescript:
+        specifier: ^5.7.3
+        version: 5.9.3
+
   packages/react-sdk:
     dependencies:
       '@lumea-labs/polpo-client':
@@ -163,7 +176,7 @@ importers:
       '@ai-sdk/react':
         specifier: ^3.0.88
         version: 3.0.88(react@19.2.4)(zod@4.3.6)
-      '@lumea-labs/polpo-react':
+      '@lumea-technologies/polpo-react':
         specifier: workspace:*
         version: link:../packages/react-sdk
       '@streamdown/cjk':
@@ -12686,7 +12699,7 @@ snapshots:
     dependencies:
       foreground-child: 3.3.1
       jackspeak: 4.2.3
-      minimatch: 10.2.0
+      minimatch: 10.2.4
       minipass: 7.1.2
       package-json-from-dist: 1.0.1
       path-scurry: 2.0.2

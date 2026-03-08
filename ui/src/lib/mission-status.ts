@@ -1,4 +1,4 @@
-import type { MissionStatus } from "@lumea-labs/polpo-react";
+import type { MissionStatus } from "@lumea-technologies/polpo-react";
 import {
   Clock,
   Calendar,

@@ -23,7 +23,7 @@ import {
   Check,
   X,
 } from "lucide-react";
-import type { AgentConfig, AgentProcess } from "@lumea-labs/polpo-react";
+import type { AgentConfig, AgentProcess } from "@lumea-technologies/polpo-react";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { useAsyncAction } from "@/hooks/use-polpo";
 import { RemoveAgentDialog } from "./agents-dialogs";

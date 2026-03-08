@@ -56,8 +56,8 @@ import {
   type NodeProps,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { useMission, useTasks, useSchedules, useActiveDelays } from "@lumea-labs/polpo-react";
-import type { MissionReport, TaskStatus, Task, ActiveDelay } from "@lumea-labs/polpo-react";
+import { useMission, useTasks, useSchedules, useActiveDelays } from "@lumea-technologies/polpo-react";
+import type { MissionReport, TaskStatus, Task, ActiveDelay } from "@lumea-technologies/polpo-react";
 import { toast } from "sonner";
 import { formatDistanceToNow, format } from "date-fns";
 import { cn } from "@/lib/utils";

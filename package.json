@@ -79,6 +79,7 @@
     "node": ">=18.0.0"
   },
   "dependencies": {
+    "@polpo/core": "workspace:*",
     "@hono/node-server": "^1.19.9",
     "@hono/zod-openapi": "^1.2.2",
     "@mariozechner/pi-agent-core": "^0.52.12",

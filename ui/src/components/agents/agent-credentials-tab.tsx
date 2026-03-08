@@ -19,7 +19,7 @@ import {
 import { cn } from "@/lib/utils";
 import { SectionHeader } from "@/components/shared/section-header";
 import { useAgentDetail } from "./agent-detail-provider";
-import type { VaultEntryMeta } from "@lumea-labs/polpo-react";
+import type { VaultEntryMeta } from "@lumea-technologies/polpo-react";
 
 // ── Type metadata ──
 

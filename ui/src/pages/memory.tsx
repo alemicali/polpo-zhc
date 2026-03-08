@@ -18,7 +18,7 @@ import {
   Pencil,
 } from "lucide-react";
 import { MessageResponse } from "@/components/ai-elements/message";
-import { useMemory } from "@lumea-labs/polpo-react";
+import { useMemory } from "@lumea-technologies/polpo-react";
 import { toast } from "sonner";
 import { ScrollArea } from "@/components/ui/scroll-area";
 

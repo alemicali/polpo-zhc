@@ -14,7 +14,7 @@ import {
   MoreHorizontal,
 
 } from "lucide-react";
-import { usePolpo } from "@lumea-labs/polpo-react";
+import { usePolpo } from "@lumea-technologies/polpo-react";
 import { cn } from "@/lib/utils";
 import {
   Sheet,

@@ -1,0 +1,111 @@
+{
+  "name": "@polpo/core",
+  "version": "0.1.0",
+  "description": "Pure business logic, types, schemas, and store interfaces for the Polpo AI agent orchestration framework",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./types": {
+      "types": "./dist/types.d.ts",
+      "import": "./dist/types.js"
+    },
+    "./schemas": {
+      "types": "./dist/schemas.d.ts",
+      "import": "./dist/schemas.js"
+    },
+    "./events": {
+      "types": "./dist/events.d.ts",
+      "import": "./dist/events.js"
+    },
+    "./state-machine": {
+      "types": "./dist/state-machine.d.ts",
+      "import": "./dist/state-machine.js"
+    },
+    "./hooks": {
+      "types": "./dist/hooks.d.ts",
+      "import": "./dist/hooks.js"
+    },
+    "./task-store": {
+      "types": "./dist/task-store.d.ts",
+      "import": "./dist/task-store.js"
+    },
+    "./run-store": {
+      "types": "./dist/run-store.d.ts",
+      "import": "./dist/run-store.js"
+    },
+    "./memory-store": {
+      "types": "./dist/memory-store.d.ts",
+      "import": "./dist/memory-store.js"
+    },
+    "./approval-store": {
+      "types": "./dist/approval-store.d.ts",
+      "import": "./dist/approval-store.js"
+    },
+    "./log-store": {
+      "types": "./dist/log-store.d.ts",
+      "import": "./dist/log-store.js"
+    },
+    "./session-store": {
+      "types": "./dist/session-store.d.ts",
+      "import": "./dist/session-store.js"
+    },
+    "./notification-store": {
+      "types": "./dist/notification-store.d.ts",
+      "import": "./dist/notification-store.js"
+    },
+    "./config-store": {
+      "types": "./dist/config-store.d.ts",
+      "import": "./dist/config-store.js"
+    },
+    "./peer-store": {
+      "types": "./dist/peer-store.d.ts",
+      "import": "./dist/peer-store.js"
+    },
+    "./adapter": {
+      "types": "./dist/adapter.d.ts",
+      "import": "./dist/adapter.js"
+    }
+  },
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "prepublishOnly": "tsc"
+  },
+  "dependencies": {
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.3"
+  },
+  "files": ["dist", "README.md"],
+  "license": "MIT",
+  "keywords": [
+    "polpo",
+    "ai-agents",
+    "orchestration",
+    "types",
+    "core"
+  ],
+  "author": "OpenPolpo Contributors",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/lumea-labs/polpo.git",
+    "directory": "packages/core"
+  },
+  "homepage": "https://github.com/lumea-labs/polpo/tree/main/packages/core",
+  "bugs": {
+    "url": "https://github.com/lumea-labs/polpo/issues"
+  }
+}

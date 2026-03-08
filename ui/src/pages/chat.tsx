@@ -72,7 +72,7 @@ import type { AskUserQuestion, AskUserAnswer, MessageSegment, ToolCallInfo, Miss
 import { FilePreviewDialog, useFilePreview, mimeFromPath } from "@/components/shared/file-preview";
 import { ToolCallList, ToolInvocation, ToolCallGroup } from "@/components/ai-elements/tool";
 import { MentionPopover, MentionText, type MentionPopoverHandle, type MentionFile } from "@/components/ai-elements/mention-popover";
-import { useAgents, useTasks, useMissions, useSkills, useTemplates } from "@lumea-labs/polpo-react";
+import { useAgents, useTasks, useMissions, useSkills, useTemplates } from "@lumea-technologies/polpo-react";
 import { cn } from "@/lib/utils";
 import { config } from "@/lib/config";
 import { toast } from "sonner";
