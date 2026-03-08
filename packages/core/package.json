@@ -69,6 +69,62 @@
     "./adapter": {
       "types": "./dist/adapter.d.ts",
       "import": "./dist/adapter.js"
+    },
+    "./event-bus": {
+      "types": "./dist/event-bus.d.ts",
+      "import": "./dist/event-bus.js"
+    },
+    "./checkpoint-store": {
+      "types": "./dist/checkpoint-store.d.ts",
+      "import": "./dist/checkpoint-store.js"
+    },
+    "./delay-store": {
+      "types": "./dist/delay-store.d.ts",
+      "import": "./dist/delay-store.js"
+    },
+    "./notification-router-port": {
+      "types": "./dist/notification-router-port.d.ts",
+      "import": "./dist/notification-router-port.js"
+    },
+    "./cron": {
+      "types": "./dist/cron.d.ts",
+      "import": "./dist/cron.js"
+    },
+    "./orchestrator-context": {
+      "types": "./dist/orchestrator-context.d.ts",
+      "import": "./dist/orchestrator-context.js"
+    },
+    "./task-manager": {
+      "types": "./dist/task-manager.d.ts",
+      "import": "./dist/task-manager.js"
+    },
+    "./agent-manager": {
+      "types": "./dist/agent-manager.d.ts",
+      "import": "./dist/agent-manager.js"
+    },
+    "./approval-manager": {
+      "types": "./dist/approval-manager.d.ts",
+      "import": "./dist/approval-manager.js"
+    },
+    "./escalation-manager": {
+      "types": "./dist/escalation-manager.d.ts",
+      "import": "./dist/escalation-manager.js"
+    },
+    "./task-watcher": {
+      "types": "./dist/task-watcher.d.ts",
+      "import": "./dist/task-watcher.js"
+    },
+    "./quality-controller": {
+      "types": "./dist/quality-controller.d.ts",
+      "import": "./dist/quality-controller.js"
+    },
+    "./sla-monitor": {
+      "types": "./dist/sla-monitor.d.ts",
+      "import": "./dist/sla-monitor.js"
+    },
+    "./scheduler": {
+      "types": "./dist/scheduler.d.ts",
+      "import": "./dist/scheduler.js"
     }
   },
   "sideEffects": false,
@@ -78,6 +134,7 @@
     "prepublishOnly": "tsc"
   },
   "dependencies": {
+    "nanoid": "^5.1.2",
     "zod": "^4.3.6"
   },
   "devDependencies": {

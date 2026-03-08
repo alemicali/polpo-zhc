@@ -33,5 +33,29 @@ export type { ApprovalStore } from "./approval-store.js";
 export type { NotificationStore, NotificationRecord, NotificationStatus } from "./notification-store.js";
 export type { PeerStore } from "./peer-store.js";
 
+// ── EventBus Interface ──────────────────────────────────────────────────
+export type { EventBus } from "./event-bus.js";
+
+// ── Additional Store Interfaces ─────────────────────────────────────────
+export type { CheckpointStore, CheckpointState } from "./checkpoint-store.js";
+export type { DelayStore, DelayState } from "./delay-store.js";
+export type { NotificationRouterPort } from "./notification-router-port.js";
+
+// ── OrchestratorContext ─────────────────────────────────────────────────
+export type { OrchestratorContext, AssessFn, CheckProgressEvent } from "./orchestrator-context.js";
+
+// ── Cron (pure) ─────────────────────────────────────────────────────────
+export { parseCron, matchesCron, nextCronOccurrence, isCronExpression } from "./cron.js";
+
+// ── Core Managers ───────────────────────────────────────────────────────
+export { TaskManager } from "./task-manager.js";
+export { AgentManager } from "./agent-manager.js";
+export { ApprovalManager } from "./approval-manager.js";
+export { EscalationManager } from "./escalation-manager.js";
+export { TaskWatcherManager } from "./task-watcher.js";
+export { QualityController } from "./quality-controller.js";
+export { SLAMonitor } from "./sla-monitor.js";
+export { Scheduler } from "./scheduler.js";
+
 // ── Adapter Types ────────────────────────────────────────────────────────
 export type { AgentHandle, SpawnContext } from "./adapter.js";

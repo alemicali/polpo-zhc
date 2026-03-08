@@ -6,13 +6,15 @@
  */
 import { EventEmitter } from "node:events";
 export type { PolpoEventMap, PolpoEvent } from "@polpo/core/events";
+export type { EventBus } from "@polpo/core/event-bus";
 import type { PolpoEvent, PolpoEventMap } from "@polpo/core/events";
+import type { EventBus } from "@polpo/core/event-bus";
 import type { LogStore } from "@polpo/core/log-store";
 
 /** Events to exclude from persistent logging (too frequent or internal). */
 const LOG_EXCLUDED = new Set<string>(["orchestrator:tick", "newListener", "removeListener"]);
 
-export class TypedEmitter extends EventEmitter {
+export class TypedEmitter extends EventEmitter implements EventBus {
   private logSink?: LogStore;
 
   /** Attach a persistent log store. All emitted events will be written to it. */
