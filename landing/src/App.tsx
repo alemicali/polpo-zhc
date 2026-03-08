@@ -32,6 +32,7 @@ import {
   Laptop,
   Server,
   Container,
+  Smartphone,
   type LucideIcon,
 } from "lucide-react";
 
@@ -708,18 +709,19 @@ function FeatureShowcase() {
 function DeployOptions() {
   const options: { icon: LucideIcon; title: string; desc: string; link: string }[] = [
     { icon: Laptop, title: "Your laptop", desc: "npm install and go. Zero config.", link: "https://docs.polpo.sh/install" },
-    { icon: Server, title: "Any VPS / Cloud", desc: "Hetzner, DigitalOcean, AWS, Railway, Fly.", link: "https://docs.polpo.sh/install/hetzner" },
+    { icon: Server, title: "Any VPS", desc: "Hetzner, AWS, Railway, Fly.", link: "https://docs.polpo.sh/install/hetzner" },
     { icon: Container, title: "Docker", desc: "One-line container, ready to serve.", link: "https://docs.polpo.sh/install#docker" },
+    { icon: Smartphone, title: "Mobile PWA", desc: "Install the web UI on your phone. Monitor from anywhere.", link: "https://docs.polpo.sh/install" },
   ];
   return (
     <section className="py-24 md:py-32">
-      <div className="mx-auto max-w-3xl px-6">
+      <div className="mx-auto max-w-4xl px-6">
         <Reveal>
           <h2 className="text-center font-display text-3xl font-extrabold tracking-tight text-neutral-950 sm:text-4xl">
             Deploy <span className="text-neutral-400">anywhere.</span>
           </h2>
         </Reveal>
-        <div className="mt-12 grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <div className="mt-12 grid grid-cols-2 gap-3 sm:grid-cols-4">
           {options.map((o, i) => {
             const Icon = o.icon;
             return (
