@@ -93,11 +93,10 @@ The setup wizard detects your API keys, picks a model, and creates your first ag
 
 ```bash
 polpo init                          # Set up project, agents, and roles
-polpo plan create "Build a REST API with auth and tests"
-polpo run                           # Agents execute tasks in parallel
+polpo mission create "Build a REST API with auth and tests"
 ```
 
-Polpo generates a plan with tasks, dependencies, and agent assignments. Agents execute, LLM judges score every result, and failures retry automatically.
+Polpo generates a mission with tasks, dependencies, and agent assignments. Agents execute, LLM judges score every result, and failures retry automatically.
 
 **Monitor** (optional):
 

@@ -157,8 +157,7 @@ function Navbar() {
             className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-200 px-3 py-1.5 text-sm font-medium text-neutral-700 transition hover:border-neutral-400 hover:text-neutral-950"
           >
             <GitHubIcon className="h-4 w-4" />
-            <Star className="h-3 w-3" />
-            Star
+            lumea-labs/polpo
           </ExtLink>
         </nav>
       </div>
@@ -761,15 +760,14 @@ function DeployOptions() {
 function HowItWorks() {
   const steps = [
     { cmd: "polpo init", note: "Initialize your project" },
-    { cmd: 'polpo plan create "Build a REST API with auth"', note: "Describe what you need" },
-    { cmd: "polpo run", note: "Walk away" },
+    { cmd: 'polpo mission create "Build a REST API with auth"', note: "Describe what you need" },
   ];
   return (
     <section className="py-24 md:py-32">
       <div className="mx-auto max-w-4xl px-6">
         <Reveal>
           <h2 className="text-center font-display text-3xl font-extrabold tracking-tight text-neutral-950 sm:text-4xl">
-            Three commands.{" "}
+            Two commands.{" "}
             <span className="text-neutral-400">That's it.</span>
           </h2>
         </Reveal>
