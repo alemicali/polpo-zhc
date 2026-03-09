@@ -539,8 +539,9 @@ export function registerInkCommands(program: Command): void {
     .description("Install packages from a registry (owner/repo, GitHub URL, or local path)")
     .option("-d, --dir <path>", "Working directory", ".")
     .option("-y, --yes", "Skip confirmation prompts", false)
+    .option("-n, --name <name>", "Install a specific package by name")
     .option("--list", "List available packages without installing", false)
-    .action(async (source: string, opts: { dir: string; yes: boolean; list: boolean }) => {
+    .action(async (source: string, opts: { dir: string; yes: boolean; list: boolean; name?: string }) => {
       const polpoDir = getPolpoDir(opts.dir);
       const cacheDir = getCacheDir(polpoDir);
 
@@ -579,7 +580,7 @@ export function registerInkCommands(program: Command): void {
       }
 
       // Discover packages
-      const { packages, errors } = discoverInkPackages(registryDir);
+      let { packages, errors } = discoverInkPackages(registryDir);
 
       if (errors.length > 0) {
         console.log(chalk.yellow(`\n  Validation errors:`));
@@ -591,6 +592,17 @@ export function registerInkCommands(program: Command): void {
       if (packages.length === 0) {
         console.log(chalk.yellow(`\n  No packages found in ${sourceLabel}\n`));
         return;
+      }
+
+      // Filter by --name if provided
+      if (opts.name) {
+        const match = packages.filter(p => p.name === opts.name);
+        if (match.length === 0) {
+          console.log(chalk.yellow(`\n  Package "${opts.name}" not found in ${sourceLabel}.`));
+          console.log(chalk.dim(`  Available: ${packages.map(p => p.name).join(", ")}\n`));
+          return;
+        }
+        packages = match;
       }
 
       // Display discovered packages

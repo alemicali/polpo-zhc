@@ -534,7 +534,7 @@ export function InkDetailPage() {
 
   const config = TYPE_CONFIG[pkg.type];
   const Icon = config.icon;
-  const installCmd = `polpo ink add ${pkg.source}`;
+  const installCmd = `polpo ink add ${pkg.source} --name ${pkg.name}`;
   const ghUrl = `https://github.com/${pkg.source}`;
 
   return (

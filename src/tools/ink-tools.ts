@@ -185,6 +185,7 @@ function createInkBrowseTool(polpoDir: string): AgentTool<typeof InkBrowseSchema
 
 const InkAddSchema = Type.Object({
   source: Type.String({ description: "Package source — GitHub owner/repo (e.g. 'lumea-labs/ink-registry') or a full GitHub URL" }),
+  name: Type.Optional(Type.String({ description: "Install a specific package by name (e.g. 'devops-engineer'). If omitted, all packages from the source are installed." })),
 });
 
 function createInkAddTool(polpoDir: string): AgentTool<typeof InkAddSchema> {
@@ -215,7 +216,7 @@ function createInkAddTool(polpoDir: string): AgentTool<typeof InkAddSchema> {
         const commitHash = execSync("git rev-parse HEAD", { cwd: repoDir, encoding: "utf-8" }).trim();
 
         // Discover packages
-        const { packages, errors } = discoverInkPackages(repoDir);
+        let { packages, errors } = discoverInkPackages(repoDir);
 
         if (errors.length > 0) {
           return err(`Validation errors:\n${errors.join("\n")}`);
@@ -223,6 +224,15 @@ function createInkAddTool(polpoDir: string): AgentTool<typeof InkAddSchema> {
 
         if (packages.length === 0) {
           return ok(`No packages found in "${sourceLabel}". The repo should contain playbooks/<name>/playbook.json, agents/<name>.json, or companies/<name>/polpo.json.`);
+        }
+
+        // Filter by name if provided
+        if (params.name) {
+          const match = packages.filter(p => p.name === params.name);
+          if (match.length === 0) {
+            return ok(`Package "${params.name}" not found in "${sourceLabel}". Available: ${packages.map(p => p.name).join(", ")}`);
+          }
+          packages = match;
         }
 
         // Install: merge packages into existing config
