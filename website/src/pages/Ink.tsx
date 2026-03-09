@@ -7,14 +7,12 @@ import {
   Users,
   Search,
   ArrowRight,
-  ArrowUpDown,
   Copy,
   Check,
   GitBranch,
   ChevronRight,
   Download,
   TrendingUp,
-  Clock,
   X,
   type LucideIcon,
 } from "lucide-react";
@@ -62,12 +60,11 @@ const FILTER_TABS: { key: PackageType | "all"; label: string; count: (pkgs: InkP
 
 /* ── Sort options ─────────────────────────────────────────────────── */
 
-type SortKey = "installs" | "trending" | "recent";
+type SortKey = "installs" | "trending";
 
 const SORT_OPTIONS: { key: SortKey; label: string; icon: LucideIcon }[] = [
   { key: "installs", label: "Most Installed", icon: Download },
   { key: "trending", label: "Trending (24h)", icon: TrendingUp },
-  { key: "recent", label: "Recent", icon: Clock },
 ];
 
 function sortPackages(packages: InkPackage[], sortKey: SortKey): InkPackage[] {
@@ -77,8 +74,6 @@ function sortPackages(packages: InkPackage[], sortKey: SortKey): InkPackage[] {
       return sorted.sort((a, b) => b.installs - a.installs);
     case "trending":
       return sorted.sort((a, b) => b.installs24h - a.installs24h);
-    case "recent":
-      return sorted.sort((a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime());
   }
 }
 
@@ -119,8 +114,6 @@ function PackageRow({ pkg, index, sortKey }: { pkg: InkPackage; index: number; s
 
   const statValue = sortKey === "trending"
     ? `+${formatInstalls(pkg.installs24h)}`
-    : sortKey === "recent"
-    ? pkg.publishedAt
     : formatInstalls(pkg.installs);
 
   return (
@@ -171,13 +164,15 @@ function PackageRow({ pkg, index, sortKey }: { pkg: InkPackage; index: number; s
           </span>
         </div>
 
-        {/* Install command (desktop) */}
-        <div className="hidden shrink-0 items-center gap-2 md:flex">
-          <code className="rounded-md border border-neutral-200 bg-neutral-50 px-3 py-1.5 font-mono text-xs text-neutral-600 opacity-0 transition group-hover:opacity-100">
-            {installCmd}
-          </code>
-          <div className="opacity-0 transition group-hover:opacity-100">
+        {/* Copy button (desktop) — tooltip with install command */}
+        <div className="relative hidden shrink-0 items-center md:flex opacity-0 transition group-hover:opacity-100">
+          <div className="group/copy relative">
             <CopyButton text={installCmd} />
+            <div className="pointer-events-none absolute bottom-full right-0 mb-2 hidden group-hover/copy:block z-10">
+              <div className="whitespace-nowrap rounded-lg border border-neutral-200 bg-neutral-900 px-3 py-1.5 font-mono text-[11px] text-neutral-200 shadow-lg">
+                <span className="text-emerald-400 select-none mr-1">$</span>{installCmd}
+              </div>
+            </div>
           </div>
         </div>
 
@@ -300,7 +295,7 @@ export function InkPage() {
             </h1>
             <p className="mt-2 text-sm font-mono text-neutral-400 tracking-wide">The Polpo Package Registry</p>
             <p className="mt-3 text-lg text-neutral-500">
-              Discover, share, and install playbooks, agents, and complete company configs — directly from any GitHub repo. No publish step. No central authority.
+              Discover, share, and install playbooks, agents, and complete company configs — directly into your Polpo instance from any GitHub repo. One command, no publish step required.
             </p>
           </Reveal>
 
@@ -429,9 +424,9 @@ export function InkPage() {
               <span className="ml-4 w-8 shrink-0" />
               <span className="ml-4 flex-1 font-mono text-[10px] uppercase tracking-wider text-neutral-400">Package</span>
               <span className="w-16 text-right font-mono text-[10px] uppercase tracking-wider text-neutral-400">
-                {sortKey === "installs" ? "Installs" : sortKey === "trending" ? "24h" : "Published"}
+                {sortKey === "installs" ? "Installs" : "24h"}
               </span>
-              <span className="w-48" /> {/* install cmd space */}
+              <span className="w-8" /> {/* copy btn space */}
               <span className="w-4" /> {/* arrow */}
             </div>
 

@@ -15,6 +15,11 @@ import {
   User,
   FileCode,
   ExternalLink,
+  Cpu,
+  MessageSquare,
+  ListChecks,
+  Briefcase,
+  Wrench,
   type LucideIcon,
 } from "lucide-react";
 import { type InkPackage, type PackageType } from "../data/ink-packages";
@@ -70,11 +75,11 @@ function CopyButton({ text, label }: { text: string; label?: string }) {
       <AnimatePresence mode="wait">
         {copied ? (
           <motion.span key="check" initial={{ scale: 0 }} animate={{ scale: 1 }} exit={{ scale: 0 }}>
-            <Check className="h-3.5 w-3.5 text-emerald-500" />
+            <Check className="ml-1 h-3.5 w-3.5 text-emerald-500" />
           </motion.span>
         ) : (
           <motion.span key="copy" initial={{ scale: 0 }} animate={{ scale: 1 }} exit={{ scale: 0 }}>
-            <Copy className="h-3.5 w-3.5 text-neutral-400 group-hover:text-neutral-700" />
+            <Copy className="ml-1 h-3.5 w-3.5 text-neutral-400 opacity-0 transition group-hover:opacity-100 group-hover:text-neutral-700" />
           </motion.span>
         )}
       </AnimatePresence>
@@ -138,6 +143,295 @@ function RelatedRow({ pkg }: { pkg: InkPackage }) {
       </div>
       <ChevronRight className="h-4 w-4 text-neutral-300" />
     </Link>
+  );
+}
+
+/* ── Human-readable content renderers ─────────────────────────────── */
+
+/** Build the raw GitHub URL for a package's JSON file. */
+function getPackageRawUrl(source: string, name: string, type: PackageType): string {
+  const base = `https://raw.githubusercontent.com/${source}/main`;
+  switch (type) {
+    case "agent": return `${base}/agents/${name}.json`;
+    case "playbook": return `${base}/playbooks/${name}/playbook.json`;
+    case "company": return `${base}/companies/${name}/polpo.json`;
+  }
+}
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
+
+function SectionHeading({ children }: { children: ReactNode }) {
+  return <h3 className="font-display text-base font-bold text-neutral-900 mb-3">{children}</h3>;
+}
+
+function InfoRow({ icon: Icon, label, value }: { icon: LucideIcon; label: string; value: string }) {
+  return (
+    <div className="flex items-start gap-3 py-2">
+      <Icon className="h-4 w-4 mt-0.5 shrink-0 text-neutral-400" />
+      <div className="min-w-0">
+        <span className="text-xs font-medium uppercase tracking-wider text-neutral-400">{label}</span>
+        <p className="text-sm text-neutral-700 mt-0.5">{value}</p>
+      </div>
+    </div>
+  );
+}
+
+function ResponsibilityCard({ resp }: { resp: any }) {
+  if (typeof resp === "string") {
+    return (
+      <div className="flex items-start gap-2 py-1.5">
+        <Check className="h-3.5 w-3.5 mt-0.5 shrink-0 text-emerald-500" />
+        <span className="text-sm text-neutral-700">{resp}</span>
+      </div>
+    );
+  }
+  return (
+    <div className="rounded-lg border border-neutral-200 bg-white p-3">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-sm font-semibold text-neutral-900">{resp.area || resp.name}</span>
+        {resp.priority && (
+          <span className={`rounded-full px-2 py-0.5 font-mono text-[10px] font-medium ${
+            resp.priority === "high" ? "bg-red-50 text-red-600 border border-red-200" :
+            resp.priority === "medium" ? "bg-amber-50 text-amber-600 border border-amber-200" :
+            "bg-neutral-50 text-neutral-500 border border-neutral-200"
+          }`}>
+            {resp.priority}
+          </span>
+        )}
+      </div>
+      {resp.description && (
+        <p className="mt-1 text-xs text-neutral-500 leading-relaxed">{resp.description}</p>
+      )}
+    </div>
+  );
+}
+
+function AgentContent({ data }: { data: any }) {
+  const identity = data.identity;
+  return (
+    <div className="space-y-6">
+      {/* Identity */}
+      {identity && (
+        <div>
+          <SectionHeading>Identity</SectionHeading>
+          <div className="rounded-xl border border-neutral-200 bg-neutral-50 p-4 space-y-1">
+            {identity.title && <InfoRow icon={Briefcase} label="Title" value={identity.title} />}
+            {identity.bio && <InfoRow icon={User} label="Bio" value={identity.bio} />}
+            {identity.tone && <InfoRow icon={MessageSquare} label="Tone" value={identity.tone} />}
+            {identity.personality && <InfoRow icon={User} label="Personality" value={identity.personality} />}
+          </div>
+        </div>
+      )}
+
+      {/* Responsibilities */}
+      {identity?.responsibilities && identity.responsibilities.length > 0 && (
+        <div>
+          <SectionHeading>Responsibilities</SectionHeading>
+          <div className="space-y-2">
+            {identity.responsibilities.map((r: any, i: number) => (
+              <ResponsibilityCard key={i} resp={r} />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Allowed tools */}
+      {data.allowedTools && data.allowedTools.length > 0 && (
+        <div>
+          <SectionHeading>Allowed Tools</SectionHeading>
+          <div className="flex flex-wrap gap-1.5">
+            {data.allowedTools.map((tool: string) => (
+              <span key={tool} className="inline-flex items-center gap-1 rounded-md border border-neutral-200 bg-white px-2.5 py-1 font-mono text-xs text-neutral-700">
+                <Wrench className="h-3 w-3 text-neutral-400" />
+                {tool}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* System prompt */}
+      {data.systemPrompt && (
+        <div>
+          <SectionHeading>System Prompt</SectionHeading>
+          <div className="rounded-xl border border-neutral-200 bg-neutral-50 p-4">
+            <p className="text-sm text-neutral-600 leading-relaxed whitespace-pre-wrap">{data.systemPrompt}</p>
+          </div>
+        </div>
+      )}
+
+      {/* Model */}
+      {data.model && (
+        <div>
+          <SectionHeading>Model</SectionHeading>
+          <div className="inline-flex items-center gap-2 rounded-lg border border-neutral-200 bg-white px-3 py-2">
+            <Cpu className="h-4 w-4 text-neutral-400" />
+            <code className="font-mono text-sm text-neutral-700">{data.model}</code>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PlaybookContent({ data }: { data: any }) {
+  const tasks = data.mission?.tasks ?? [];
+  const params = data.parameters ?? [];
+  return (
+    <div className="space-y-6">
+      {/* Parameters */}
+      {params.length > 0 && (
+        <div>
+          <SectionHeading>Parameters</SectionHeading>
+          <div className="rounded-xl border border-neutral-200 bg-neutral-50 overflow-hidden">
+            {params.map((p: any, i: number) => (
+              <div key={i} className="flex items-start gap-3 border-b border-neutral-100 last:border-0 px-4 py-3">
+                <code className="shrink-0 rounded-md bg-white border border-neutral-200 px-2 py-0.5 font-mono text-xs text-violet-600 mt-0.5">
+                  {"{{"}{ p.name }{"}}"}
+                </code>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm text-neutral-700">{p.description}</p>
+                  <div className="mt-1 flex flex-wrap gap-2 text-[10px] font-mono">
+                    {p.required && <span className="text-red-500">required</span>}
+                    {p.type && <span className="text-neutral-400">type: {p.type}</span>}
+                    {p.default !== undefined && <span className="text-neutral-400">default: {String(p.default)}</span>}
+                    {p.enum && <span className="text-neutral-400">options: {p.enum.join(", ")}</span>}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Tasks */}
+      {tasks.length > 0 && (
+        <div>
+          <SectionHeading>Mission Tasks ({tasks.length})</SectionHeading>
+          <div className="space-y-3">
+            {tasks.map((task: any, i: number) => (
+              <div key={i} className="rounded-xl border border-neutral-200 bg-white p-4">
+                <div className="flex items-start gap-3">
+                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-neutral-900 font-mono text-[10px] font-bold text-white">
+                    {i + 1}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <h4 className="text-sm font-semibold text-neutral-900">{task.title}</h4>
+                    <p className="mt-1 text-xs text-neutral-500 leading-relaxed">{task.description}</p>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {task.assignTo && (
+                        <span className="inline-flex items-center gap-1 rounded-md bg-violet-50 border border-violet-200 px-2 py-0.5 font-mono text-[10px] text-violet-600">
+                          <User className="h-2.5 w-2.5" />
+                          {task.assignTo}
+                        </span>
+                      )}
+                      {task.dependsOn?.map((dep: string) => (
+                        <span key={dep} className="inline-flex items-center gap-1 rounded-md bg-neutral-50 border border-neutral-200 px-2 py-0.5 font-mono text-[10px] text-neutral-500">
+                          depends on: {dep}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CompanyContent({ data }: { data: any }) {
+  const teams = data.teams ?? [];
+  return (
+    <div className="space-y-6">
+      {/* Settings */}
+      {data.settings && (
+        <div>
+          <SectionHeading>Settings</SectionHeading>
+          <div className="flex flex-wrap gap-2">
+            {Object.entries(data.settings).map(([key, val]) => (
+              <span key={key} className="inline-flex items-center gap-1.5 rounded-md border border-neutral-200 bg-white px-2.5 py-1 font-mono text-xs text-neutral-700">
+                <span className="text-neutral-400">{key}:</span> {String(val)}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Teams and agents */}
+      {teams.map((team: any, ti: number) => (
+        <div key={ti}>
+          <SectionHeading>
+            Team: {team.name}
+            {team.description && <span className="ml-2 text-sm font-normal text-neutral-400">— {team.description}</span>}
+          </SectionHeading>
+          <div className="space-y-3">
+            {(team.agents ?? []).map((agent: any, ai: number) => (
+              <div key={ai} className="rounded-xl border border-neutral-200 bg-white p-4">
+                <div className="flex items-center gap-3 mb-2">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-violet-200 bg-violet-50">
+                    <Users className="h-4 w-4 text-violet-600" strokeWidth={1.5} />
+                  </div>
+                  <div>
+                    <span className="text-sm font-semibold text-neutral-900">{agent.name}</span>
+                    {agent.role && <span className="ml-2 text-xs text-neutral-400">{agent.role}</span>}
+                  </div>
+                  {agent.model && (
+                    <code className="ml-auto rounded-md bg-neutral-50 border border-neutral-200 px-2 py-0.5 font-mono text-[10px] text-neutral-500">
+                      {agent.model}
+                    </code>
+                  )}
+                </div>
+                {agent.identity?.bio && (
+                  <p className="text-xs text-neutral-500 leading-relaxed mb-2">{agent.identity.bio}</p>
+                )}
+                {agent.identity?.responsibilities && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {agent.identity.responsibilities.map((r: any, ri: number) => (
+                      <span key={ri} className="rounded-md bg-neutral-50 border border-neutral-100 px-2 py-0.5 text-[10px] text-neutral-600">
+                        {typeof r === "string" ? r : r.area || r.description}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function PackageContent({ source, name, type }: { source: string; name: string; type: PackageType }) {
+  const [data, setData] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const url = getPackageRawUrl(source, name, type);
+    fetch(url, { signal: AbortSignal.timeout(8000) })
+      .then((r) => r.ok ? r.json() : null)
+      .then((d) => setData(d))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [source, name, type]);
+
+  if (loading) {
+    return <p className="text-sm text-neutral-400 py-4">Loading package content...</p>;
+  }
+  if (!data) return null;
+
+  return (
+    <Reveal delay={0.14}>
+      <div className="space-y-2">
+        <h2 className="font-display text-lg font-bold text-neutral-900">Package Content</h2>
+        {type === "agent" && <AgentContent data={data} />}
+        {type === "playbook" && <PlaybookContent data={data} />}
+        {type === "company" && <CompanyContent data={data} />}
+      </div>
+    </Reveal>
   );
 }
 
@@ -316,32 +610,8 @@ export function InkDetailPage() {
           <div className="mt-10 grid grid-cols-1 gap-8 md:grid-cols-[1fr_280px]">
             {/* Main content */}
             <div>
-              {/* Description */}
-              {pkg.details && (
-                <Reveal delay={0.14}>
-                  <div>
-                    <h2 className="font-display text-lg font-bold text-neutral-900 mb-3">About</h2>
-                    <p className="text-sm leading-relaxed text-neutral-600">{pkg.details}</p>
-                  </div>
-                </Reveal>
-              )}
-
-              {/* What's included */}
-              {pkg.includes && pkg.includes.length > 0 && (
-                <Reveal delay={0.18}>
-                  <div className="mt-8">
-                    <h2 className="font-display text-lg font-bold text-neutral-900 mb-3">What's included</h2>
-                    <div className="rounded-xl border border-neutral-200 bg-neutral-50 overflow-hidden">
-                      {pkg.includes.map((item, i) => (
-                        <div key={i} className="flex items-center gap-3 border-b border-neutral-100 last:border-0 px-4 py-2.5">
-                          <Check className="h-3.5 w-3.5 shrink-0 text-emerald-500" />
-                          <span className="text-sm text-neutral-700">{item}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </Reveal>
-              )}
+              {/* Dynamic package content — fetched from GitHub */}
+              <PackageContent source={pkg.source} name={pkg.name} type={pkg.type} />
 
               {/* Install instructions */}
               <Reveal delay={0.22}>
