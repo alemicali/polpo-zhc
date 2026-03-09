@@ -1,5 +1,10 @@
+import { existsSync } from "node:fs";
+import { resolve, dirname } from "node:path";
+import { readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 import { OpenAPIHono } from "@hono/zod-openapi";
 import { cors } from "hono/cors";
+import { serveStatic } from "@hono/node-server/serve-static";
 import type { Orchestrator } from "../core/orchestrator.js";
 import type { SSEBridge } from "./sse-bridge.js";
 import { authMiddleware } from "./middleware/auth.js";
@@ -124,6 +129,38 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     scheme: "bearer",
     description: "API key passed as a Bearer token. Configure via the apiKeys field in polpo.json or the POLPO_API_KEY environment variable.",
   });
+
+  // ── Embedded Dashboard UI ────────────────────────────────────────────
+  // Serve the pre-built React SPA from ui/dist/ if it exists.
+  // This lets `polpo serve` provide the full dashboard experience
+  // without requiring a separate nginx/Vite process.
+
+  const __dirname = dirname(fileURLToPath(import.meta.url));
+  // From dist/server/app.js → ../../ui/dist (both dev and npm install)
+  const uiDistDir = resolve(__dirname, "..", "..", "ui", "dist");
+
+  if (existsSync(uiDistDir)) {
+    // Static assets — Hono handles MIME types, streaming, range requests
+    app.use("*", serveStatic({
+      root: uiDistDir,
+      onFound: (_path, c) => {
+        // Hashed assets get immutable cache
+        if (/\.[a-f0-9]{8,}\.\w+$/.test(_path)) {
+          c.header("Cache-Control", "public, max-age=31536000, immutable");
+        }
+      },
+    }));
+
+    // SPA fallback — serve index.html for client-side routes
+    app.get("*", async (c) => {
+      try {
+        const html = await readFile(resolve(uiDistDir, "index.html"), "utf-8");
+        return c.html(html);
+      } catch {
+        return c.text("Dashboard not available", 404);
+      }
+    });
+  }
 
   return app;
 }

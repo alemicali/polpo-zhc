@@ -14,6 +14,9 @@ import {
   Workflow,
   Settings2,
   FolderOpen,
+  BookOpen,
+  Package,
+  Github,
 } from "lucide-react";
 import { usePolpo } from "@polpo-ai/react";
 import { useProjectInfo } from "@/hooks/use-polpo";
@@ -282,6 +285,61 @@ export function Sidebar() {
           </div>
         ))}
       </nav>
+
+      {/* External links */}
+      <div
+        className={cn(
+          "border-t border-border/40",
+          collapsed ? "py-2 flex flex-col items-center gap-1" : "px-4 py-2 flex items-center gap-1"
+        )}
+      >
+        {collapsed ? (
+          <>
+            {[
+              { href: "https://docs.polpo.sh", icon: BookOpen, label: "Docs" },
+              { href: "https://polpo.sh/ink", icon: Package, label: "Ink Hub" },
+              { href: "https://github.com/lumea-labs/polpo", icon: Github, label: "GitHub" },
+            ].map(({ href, icon: Icon, label }) => (
+              <Tooltip key={href} delayDuration={0}>
+                <TooltipTrigger asChild>
+                  <a
+                    href={href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground/50 hover:text-foreground hover:bg-accent/40 transition-all"
+                  >
+                    <Icon className="h-3.5 w-3.5" />
+                  </a>
+                </TooltipTrigger>
+                <TooltipContent side="right" className="text-xs">{label}</TooltipContent>
+              </Tooltip>
+            ))}
+          </>
+        ) : (
+          <>
+            {[
+              { href: "https://docs.polpo.sh", icon: BookOpen, label: "Docs" },
+              { href: "https://polpo.sh/ink", icon: Package, label: "Ink Hub" },
+              { href: "https://github.com/lumea-labs/polpo", icon: Github, label: "GitHub" },
+            ].map(({ href, icon: Icon, label }) => (
+              <Tooltip key={href} delayDuration={0}>
+                <TooltipTrigger asChild>
+                  <a
+                    href={href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex h-7 items-center gap-2 rounded-lg px-2 text-xs text-muted-foreground/50 hover:text-foreground hover:bg-accent/40 transition-all"
+                  >
+                    <Icon className="h-3.5 w-3.5" />
+                    <span>{label}</span>
+                  </a>
+                </TooltipTrigger>
+                <TooltipContent side="top" className="text-xs">{label}</TooltipContent>
+              </Tooltip>
+            ))}
+          </>
+        )}
+      </div>
 
       {/* Footer — connection + project */}
       <div

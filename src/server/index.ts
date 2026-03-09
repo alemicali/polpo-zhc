@@ -1,6 +1,10 @@
-import { resolve, basename } from "node:path";
+import { existsSync } from "node:fs";
+import { resolve, basename, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { serve } from "@hono/node-server";
 import { createApp } from "./app.js";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 import { Orchestrator } from "../core/orchestrator.js";
 import { SSEBridge } from "./sse-bridge.js";
 import type { Team } from "../core/types.js";
@@ -63,9 +67,18 @@ export class PolpoServer {
       hostname: this.config.host,
     });
 
-    console.log(`\n  Listening  http://${this.config.host}:${this.config.port}`);
+    const base = `http://${this.config.host}:${this.config.port}`;
+    const uiAvailable = existsSync(resolve(__dirname, "..", "..", "ui", "dist", "index.html"));
+
+    console.log(`\n  Listening  ${base}`);
     console.log(`  WorkDir    ${workDir}`);
-    console.log(`  API        http://${this.config.host}:${this.config.port}/api/v1/health\n`);
+    console.log(`  API        ${base}/api/v1/health`);
+    if (uiAvailable) {
+      console.log(`  Dashboard  ${base}`);
+    } else {
+      console.log(`  Dashboard  not found (run 'pnpm build:ui' to enable)`);
+    }
+    console.log();
 
     // Signal handlers for graceful shutdown
     const onSignal = () => { this.stop(); };
