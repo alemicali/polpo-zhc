@@ -193,7 +193,7 @@ describe("generatePolpoConfigDefault", () => {
     expect(config.org).toBe("my-project");
     expect(config.teams[0].name).toBe("default");
     expect(config.teams[0].agents).toHaveLength(1);
-    expect(config.teams[0].agents[0].name).toBe("dev-1");
+    expect(config.teams[0].agents[0].name).toBe("agent-1");
     expect(config.settings.maxRetries).toBe(3);
     expect(config.settings.logLevel).toBe("normal");
   });

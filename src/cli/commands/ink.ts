@@ -10,8 +10,9 @@
 import { Command } from "commander";
 import chalk from "chalk";
 import { resolve, join } from "node:path";
-import { existsSync, mkdirSync, rmSync, cpSync, readdirSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, cpSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { execSync } from "node:child_process";
+import { createInterface } from "node:readline";
 
 import {
   parseInkSource,
@@ -24,6 +25,8 @@ import {
   getInkLockEntry,
 } from "../../core/ink.js";
 import type { InkPackage, InkLockEntry, InkLockPackage } from "../../core/ink.js";
+import { loadPolpoConfig, savePolpoConfig } from "../../core/config.js";
+import type { PolpoFileConfig, AgentConfig, Team } from "../../core/types.js";
 
 // ── Helpers ────────────────────────────────────────────────────────────
 
@@ -66,44 +69,375 @@ function getCommitHash(repoDir: string): string {
   }
 }
 
-/** Install a discovered package into the project's .polpo directory. */
-function installPackage(pkg: InkPackage, polpoDir: string): void {
-  switch (pkg.type) {
-    case "playbook": {
-      // Copy to .polpo/playbooks/<name>/
-      const destDir = join(polpoDir, "playbooks", pkg.name);
-      mkdirSync(destDir, { recursive: true });
-      // Copy the entire playbook directory (may contain supporting files)
-      const srcDir = resolve(pkg.path, "..");
-      const entries = readdirSync(srcDir);
-      for (const entry of entries) {
-        cpSync(join(srcDir, entry), join(destDir, entry), { recursive: true });
+// ── Interactive prompt helper ──────────────────────────────────────────
+
+async function askUser(question: string): Promise<string> {
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  return new Promise((resolve) => {
+    rl.question(question, (answer) => {
+      rl.close();
+      resolve(answer.trim().toLowerCase());
+    });
+  });
+}
+
+/**
+ * Conflict resolution for a named item (agent, team, skill, playbook).
+ * Returns: "merge" | "skip" | "overwrite"
+ */
+async function resolveConflict(
+  type: string,
+  name: string,
+  interactive: boolean,
+): Promise<"merge" | "skip" | "overwrite"> {
+  if (!interactive) return "merge"; // non-interactive: default to merge
+  const answer = await askUser(
+    chalk.yellow(`  ${type} "${name}" already exists. [m]erge / [o]verwrite / [s]kip? `),
+  );
+  if (answer.startsWith("o")) return "overwrite";
+  if (answer.startsWith("s")) return "skip";
+  return "merge";
+}
+
+// ── Install logic ─────────────────────────────────────────────────────
+
+export interface InstallResult {
+  installed: string[];
+  skipped: string[];
+  merged: string[];
+}
+
+/**
+ * Install discovered packages into the project by merging into the existing config.
+ *
+ * - Playbooks: copied to .polpo/playbooks/<name>/ (prompt on conflict)
+ * - Agents: merged into polpo.json teams (prompt on name collision)
+ * - Companies: full merge — teams/agents into polpo.json, memory appended,
+ *   skills copied, system-context appended
+ */
+async function installPackages(
+  packages: InkPackage[],
+  polpoDir: string,
+  interactive: boolean,
+): Promise<InstallResult> {
+  const result: InstallResult = { installed: [], skipped: [], merged: [] };
+
+  // Load existing config (or create a minimal one)
+  let config: PolpoFileConfig = loadPolpoConfig(polpoDir) ?? {
+    org: "",
+    teams: [{ name: "default", agents: [] }],
+    settings: { maxRetries: 3, workDir: ".", logLevel: "normal" },
+  } as any;
+  let configChanged = false;
+
+  for (const pkg of packages) {
+    switch (pkg.type) {
+      case "playbook": {
+        const destDir = join(polpoDir, "playbooks", pkg.name);
+
+        if (existsSync(destDir)) {
+          const action = await resolveConflict("Playbook", pkg.name, interactive);
+          if (action === "skip") {
+            result.skipped.push(`playbook: ${pkg.name}`);
+            break;
+          }
+          if (action === "overwrite") {
+            rmSync(destDir, { recursive: true, force: true });
+          }
+          // merge for playbook = overwrite (it's a single unit)
+        }
+
+        mkdirSync(destDir, { recursive: true });
+        const srcDir = resolve(pkg.path, "..");
+        const entries = readdirSync(srcDir);
+        for (const entry of entries) {
+          cpSync(join(srcDir, entry), join(destDir, entry), { recursive: true });
+        }
+        result.installed.push(`playbook: ${pkg.name}`);
+        break;
       }
-      break;
-    }
-    case "agent": {
-      // Copy to .polpo/ink-agents/<name>.json
-      const destDir = join(polpoDir, "ink-agents");
-      mkdirSync(destDir, { recursive: true });
-      cpSync(pkg.path, join(destDir, `${pkg.name}.json`));
-      break;
-    }
-    case "company": {
-      // Copy to .polpo/ink-companies/<name>/
-      const destDir = join(polpoDir, "ink-companies", pkg.name);
-      mkdirSync(destDir, { recursive: true });
-      const srcDir = resolve(pkg.path, "..");
-      const entries = readdirSync(srcDir);
-      for (const entry of entries) {
-        cpSync(join(srcDir, entry), join(destDir, entry), { recursive: true });
+
+      case "agent": {
+        const agentContent = pkg.content as AgentConfig;
+        const mergeResult = await mergeAgent(agentContent, config, interactive);
+        if (mergeResult === "skip") {
+          result.skipped.push(`agent: ${pkg.name}`);
+        } else {
+          configChanged = true;
+          if (mergeResult === "merged") {
+            result.merged.push(`agent: ${pkg.name}`);
+          } else {
+            result.installed.push(`agent: ${pkg.name}`);
+          }
+        }
+        break;
       }
-      break;
+
+      case "company": {
+        const companyContent = pkg.content as PolpoFileConfig;
+        const srcDir = resolve(pkg.path, "..");
+
+        // 1. Merge teams + agents into config
+        const teamMergeResult = await mergeCompanyTeams(companyContent, config, interactive);
+        if (teamMergeResult.changed) configChanged = true;
+        result.installed.push(...teamMergeResult.installed);
+        result.merged.push(...teamMergeResult.merged);
+        result.skipped.push(...teamMergeResult.skipped);
+
+        // 2. Merge settings (only fill in missing settings, never overwrite)
+        if (companyContent.settings) {
+          mergeSettings(config, companyContent.settings);
+          configChanged = true;
+        }
+
+        // 3. Merge providers (only add missing providers)
+        if (companyContent.providers) {
+          if (!config.providers) config.providers = {};
+          for (const [name, providerConfig] of Object.entries(companyContent.providers)) {
+            if (!config.providers[name]) {
+              config.providers[name] = providerConfig;
+              result.installed.push(`provider: ${name}`);
+            }
+          }
+          configChanged = true;
+        }
+
+        // 4. Append memory.md if present in package
+        const srcMemory = join(srcDir, "memory.md");
+        if (existsSync(srcMemory)) {
+          appendFileContent(
+            join(polpoDir, "memory.md"),
+            readFileSync(srcMemory, "utf-8"),
+            `\n\n<!-- Imported from ink package: ${pkg.name} -->\n`,
+          );
+          result.installed.push(`memory: ${pkg.name}`);
+        }
+
+        // 5. Append system-context.md if present in package
+        const srcContext = join(srcDir, "system-context.md");
+        if (existsSync(srcContext)) {
+          appendFileContent(
+            join(polpoDir, "system-context.md"),
+            readFileSync(srcContext, "utf-8"),
+            `\n\n<!-- Imported from ink package: ${pkg.name} -->\n`,
+          );
+          result.installed.push(`system-context: ${pkg.name}`);
+        }
+
+        // 6. Copy skills if present
+        const srcSkills = join(srcDir, "skills");
+        if (existsSync(srcSkills)) {
+          const skillsDestDir = join(polpoDir, "skills");
+          mkdirSync(skillsDestDir, { recursive: true });
+          const skillEntries = readdirSync(srcSkills, { withFileTypes: true });
+          for (const entry of skillEntries) {
+            if (!entry.isDirectory()) continue;
+            const skillDest = join(skillsDestDir, entry.name);
+            if (existsSync(skillDest)) {
+              const action = await resolveConflict("Skill", entry.name, interactive);
+              if (action === "skip") {
+                result.skipped.push(`skill: ${entry.name}`);
+                continue;
+              }
+              if (action === "overwrite") {
+                rmSync(skillDest, { recursive: true, force: true });
+              }
+            }
+            cpSync(join(srcSkills, entry.name), skillDest, { recursive: true });
+            result.installed.push(`skill: ${entry.name}`);
+          }
+        }
+
+        break;
+      }
+    }
+  }
+
+  // Save config if changed
+  if (configChanged) {
+    savePolpoConfig(polpoDir, config);
+  }
+
+  return result;
+}
+
+// ── Merge helpers ─────────────────────────────────────────────────────
+
+/**
+ * Merge a single agent into the config.
+ * Adds to the first team (or "default" team). On name collision, asks user.
+ */
+async function mergeAgent(
+  agent: AgentConfig,
+  config: PolpoFileConfig,
+  interactive: boolean,
+): Promise<"added" | "merged" | "skip"> {
+  // Find existing agent across all teams
+  for (const team of config.teams) {
+    const existing = team.agents.find((a) => a.name === agent.name);
+    if (existing) {
+      const action = await resolveConflict("Agent", agent.name, interactive);
+      if (action === "skip") return "skip";
+      if (action === "overwrite") {
+        // Replace the agent in the team
+        team.agents = team.agents.map((a) => (a.name === agent.name ? stripInkMetadata(agent) : a));
+        return "merged";
+      }
+      // merge: combine fields — incoming fills in missing fields, doesn't overwrite
+      mergeAgentFields(existing, agent);
+      return "merged";
+    }
+  }
+
+  // No collision — add to first team
+  const targetTeam = config.teams[0] ?? { name: "default", agents: [] };
+  if (!config.teams.includes(targetTeam)) config.teams.push(targetTeam);
+  targetTeam.agents.push(stripInkMetadata(agent));
+  return "added";
+}
+
+/**
+ * Merge company teams/agents into existing config.
+ * For each team in the company:
+ *   - If a team with the same name exists, merge agents into it
+ *   - Otherwise, add the team
+ */
+async function mergeCompanyTeams(
+  company: PolpoFileConfig,
+  config: PolpoFileConfig,
+  interactive: boolean,
+): Promise<{ changed: boolean; installed: string[]; merged: string[]; skipped: string[] }> {
+  const installed: string[] = [];
+  const merged: string[] = [];
+  const skipped: string[] = [];
+  let changed = false;
+
+  const companyTeams: Team[] = Array.isArray(company.teams)
+    ? company.teams
+    : (company as any).team
+      ? [(company as any).team]
+      : [];
+
+  for (const incomingTeam of companyTeams) {
+    const existingTeam = config.teams.find((t) => t.name === incomingTeam.name);
+
+    if (existingTeam) {
+      // Merge agents into existing team
+      for (const agent of incomingTeam.agents) {
+        const existingAgent = existingTeam.agents.find((a) => a.name === agent.name);
+        if (existingAgent) {
+          const action = await resolveConflict("Agent", agent.name, interactive);
+          if (action === "skip") {
+            skipped.push(`agent: ${agent.name} (team: ${incomingTeam.name})`);
+            continue;
+          }
+          if (action === "overwrite") {
+            existingTeam.agents = existingTeam.agents.map((a) =>
+              a.name === agent.name ? stripInkMetadata(agent) : a,
+            );
+          } else {
+            mergeAgentFields(existingAgent, agent);
+          }
+          merged.push(`agent: ${agent.name} (team: ${incomingTeam.name})`);
+        } else {
+          existingTeam.agents.push(stripInkMetadata(agent));
+          installed.push(`agent: ${agent.name} (team: ${incomingTeam.name})`);
+        }
+        changed = true;
+      }
+
+      // Merge team description if missing
+      if (!existingTeam.description && incomingTeam.description) {
+        existingTeam.description = incomingTeam.description;
+        changed = true;
+      }
+    } else {
+      // Add entire team (strip ink metadata from all agents)
+      const cleanTeam: Team = {
+        name: incomingTeam.name,
+        description: incomingTeam.description,
+        agents: incomingTeam.agents.map(stripInkMetadata),
+      };
+      config.teams.push(cleanTeam);
+      installed.push(`team: ${incomingTeam.name} (${incomingTeam.agents.length} agents)`);
+      changed = true;
+    }
+  }
+
+  return { changed, installed, merged, skipped };
+}
+
+/**
+ * Merge agent fields from incoming into existing.
+ * Only fills in fields that are missing in the existing agent.
+ * Never overwrites existing values.
+ */
+function mergeAgentFields(existing: AgentConfig, incoming: AgentConfig): void {
+  if (!existing.role && incoming.role) existing.role = incoming.role;
+  if (!existing.model && incoming.model) existing.model = incoming.model;
+  if (!existing.systemPrompt && incoming.systemPrompt) existing.systemPrompt = incoming.systemPrompt;
+  if (!existing.identity && incoming.identity) existing.identity = incoming.identity;
+  if (!existing.allowedTools && incoming.allowedTools) existing.allowedTools = incoming.allowedTools;
+  if (!existing.skills?.length && incoming.skills?.length) existing.skills = incoming.skills;
+  if (!existing.reportsTo && incoming.reportsTo) existing.reportsTo = incoming.reportsTo;
+  if (existing.maxTurns == null && incoming.maxTurns != null) existing.maxTurns = incoming.maxTurns;
+  if (existing.maxConcurrency == null && incoming.maxConcurrency != null) existing.maxConcurrency = incoming.maxConcurrency;
+  if (existing.reasoning == null && incoming.reasoning != null) existing.reasoning = incoming.reasoning;
+}
+
+/**
+ * Strip ink-specific metadata fields (version, author, tags) from an agent config
+ * so they don't end up in polpo.json.
+ */
+function stripInkMetadata(agent: AgentConfig): AgentConfig {
+  const clean = { ...agent };
+  delete (clean as any).version;
+  delete (clean as any).author;
+  delete (clean as any).tags;
+  return clean;
+}
+
+/**
+ * Merge settings from incoming company — only fill in missing values.
+ */
+function mergeSettings(config: PolpoFileConfig, incoming: any): void {
+  if (!config.settings) {
+    config.settings = incoming;
+    return;
+  }
+  const settings = config.settings as unknown as Record<string, unknown>;
+  const inc = incoming as unknown as Record<string, unknown>;
+  for (const [key, value] of Object.entries(inc)) {
+    if (settings[key] == null && value != null) {
+      settings[key] = value;
     }
   }
 }
 
-/** Remove installed packages for a registry source. */
+/**
+ * Append content to a file. Creates the file if it doesn't exist.
+ */
+function appendFileContent(destPath: string, content: string, separator: string): void {
+  if (existsSync(destPath)) {
+    const existing = readFileSync(destPath, "utf-8");
+    writeFileSync(destPath, existing + separator + content, "utf-8");
+  } else {
+    mkdirSync(resolve(destPath, ".."), { recursive: true });
+    writeFileSync(destPath, content, "utf-8");
+  }
+}
+
+/**
+ * Remove installed packages for a registry source.
+ *
+ * - Playbooks: remove from .polpo/playbooks/
+ * - Agents: remove from polpo.json teams
+ * - Companies: remove agents/teams that were added, but leave memory/skills
+ *   (those are merged and can't be cleanly un-merged)
+ */
 function uninstallPackages(entry: InkLockEntry, polpoDir: string): void {
+  const config = loadPolpoConfig(polpoDir);
+
   for (const pkg of entry.packages) {
     switch (pkg.type) {
       case "playbook": {
@@ -112,16 +446,30 @@ function uninstallPackages(entry: InkLockEntry, polpoDir: string): void {
         break;
       }
       case "agent": {
-        const file = join(polpoDir, "ink-agents", `${pkg.name}.json`);
-        if (existsSync(file)) rmSync(file, { force: true });
+        // Remove agent from polpo.json
+        if (config) {
+          for (const team of config.teams) {
+            team.agents = team.agents.filter((a) => a.name !== pkg.name);
+          }
+        }
+        // Also clean up legacy ink-agents path
+        const legacyFile = join(polpoDir, "ink-agents", `${pkg.name}.json`);
+        if (existsSync(legacyFile)) rmSync(legacyFile, { force: true });
         break;
       }
       case "company": {
-        const dir = join(polpoDir, "ink-companies", pkg.name);
-        if (existsSync(dir)) rmSync(dir, { recursive: true, force: true });
+        // For companies, we can't cleanly reverse a merge of teams/agents.
+        // Remove legacy ink-companies path if present.
+        const legacyDir = join(polpoDir, "ink-companies", pkg.name);
+        if (existsSync(legacyDir)) rmSync(legacyDir, { recursive: true, force: true });
         break;
       }
     }
+  }
+
+  // Save config if we removed agents
+  if (config) {
+    savePolpoConfig(polpoDir, config);
   }
 }
 
@@ -284,12 +632,19 @@ export function registerInkCommands(program: Command): void {
         return;
       }
 
-      // Install packages
+      // Install packages with merge
       console.log(chalk.bold(`  Installing...\n`));
 
-      for (const pkg of packages) {
-        installPackage(pkg, polpoDir);
-        console.log(`  ${chalk.green("+")} ${formatType(pkg.type)} ${chalk.white(pkg.name)}`);
+      const installResult = await installPackages(packages, polpoDir, !opts.yes);
+
+      for (const item of installResult.installed) {
+        console.log(`  ${chalk.green("+")} ${item}`);
+      }
+      for (const item of installResult.merged) {
+        console.log(`  ${chalk.yellow("~")} merged ${item}`);
+      }
+      for (const item of installResult.skipped) {
+        console.log(`  ${chalk.dim("-")} skipped ${item}`);
       }
 
       // Update lock file
@@ -494,9 +849,7 @@ export function registerInkCommands(program: Command): void {
 
         // Uninstall old packages, install new ones
         uninstallPackages(reg, polpoDir);
-        for (const pkg of packages) {
-          installPackage(pkg, polpoDir);
-        }
+        await installPackages(packages, polpoDir, !opts.yes);
 
         // Update lock
         const lockPackages: InkLockPackage[] = packages.map(p => ({

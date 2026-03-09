@@ -14,6 +14,10 @@ import { Type } from "@sinclair/typebox";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 import { execSync } from "node:child_process";
 import {
+  existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, rmSync, cpSync,
+} from "node:fs";
+import { join, resolve } from "node:path";
+import {
   parseInkSource,
   discoverInkPackages,
   readInkLock,
@@ -23,6 +27,8 @@ import {
   type InkPackage,
   type InkLockEntry,
 } from "../core/ink.js";
+import { loadPolpoConfig, savePolpoConfig } from "../core/config.js";
+import type { PolpoFileConfig, AgentConfig, Team } from "../core/types.js";
 
 const INK_API_URL = "https://polpo.sh/api";
 
@@ -198,11 +204,11 @@ function createInkAddTool(polpoDir: string): AgentTool<typeof InkAddSchema> {
           return ok(`Source "${sourceLabel}" is already installed. Use polpo ink update to refresh it.`);
         }
 
-        // Clone to temp dir
-        const cacheDir = `${polpoDir}/.ink-cache`;
-        execSync(`mkdir -p "${cacheDir}"`);
-        const repoDir = `${cacheDir}/${sourceLabel.replace("/", "__")}`;
-        execSync(`rm -rf "${repoDir}"`);
+        // Clone to temp dir (use same cache dir as CLI)
+        const cacheDir = join(polpoDir, "ink-cache");
+        mkdirSync(cacheDir, { recursive: true });
+        const repoDir = join(cacheDir, sourceLabel.replace(/\//g, "--"));
+        if (existsSync(repoDir)) rmSync(repoDir, { recursive: true, force: true });
         execSync(`git clone --depth 1 "${parsed.url}" "${repoDir}"`, { stdio: "pipe", timeout: 30000 });
 
         // Get commit hash
@@ -219,38 +225,134 @@ function createInkAddTool(polpoDir: string): AgentTool<typeof InkAddSchema> {
           return ok(`No packages found in "${sourceLabel}". The repo should contain playbooks/<name>/playbook.json, agents/<name>.json, or companies/<name>/polpo.json.`);
         }
 
-        // Install: copy files to appropriate locations
+        // Install: merge packages into existing config
         const installed: string[] = [];
 
-        for (const pkg of packages) {
-          const { readFileSync, writeFileSync, mkdirSync } = await import("node:fs");
-          const { join, basename } = await import("node:path");
-          const content = readFileSync(pkg.path, "utf-8");
+        // Load existing config (or create minimal one)
+        let config: PolpoFileConfig = loadPolpoConfig(polpoDir) ?? {
+          org: "",
+          teams: [{ name: "default", agents: [] }],
+          settings: { maxRetries: 3, workDir: ".", logLevel: "normal" },
+        } as any;
+        let configChanged = false;
 
-          let destPath: string;
+        for (const pkg of packages) {
           switch (pkg.type) {
             case "playbook": {
-              const dir = join(polpoDir, "playbooks", pkg.name);
-              mkdirSync(dir, { recursive: true });
-              destPath = join(dir, "playbook.json");
+              // Copy playbook directory
+              const destDir = join(polpoDir, "playbooks", pkg.name);
+              mkdirSync(destDir, { recursive: true });
+              const srcDir = resolve(pkg.path, "..");
+              const entries = readdirSync(srcDir);
+              for (const entry of entries) {
+                cpSync(join(srcDir, entry), join(destDir, entry), { recursive: true });
+              }
+              installed.push(`playbook: ${pkg.name}`);
               break;
             }
             case "agent": {
-              const dir = join(polpoDir, "agents");
-              mkdirSync(dir, { recursive: true });
-              destPath = join(dir, `${pkg.name}.json`);
+              // Merge agent into polpo.json (first team, no collision prompt — agents auto-merge)
+              const agentContent = pkg.content as AgentConfig;
+              const cleanAgent = { ...agentContent };
+              delete (cleanAgent as any).version;
+              delete (cleanAgent as any).author;
+              delete (cleanAgent as any).tags;
+
+              const targetTeam = config.teams[0] ?? { name: "default", agents: [] };
+              if (!config.teams.includes(targetTeam)) config.teams.push(targetTeam);
+
+              const existingIdx = targetTeam.agents.findIndex((a) => a.name === cleanAgent.name);
+              if (existingIdx >= 0) {
+                // Merge: fill in missing fields
+                const existing = targetTeam.agents[existingIdx];
+                if (!existing.role && cleanAgent.role) existing.role = cleanAgent.role;
+                if (!existing.model && cleanAgent.model) existing.model = cleanAgent.model;
+                if (!existing.identity && cleanAgent.identity) existing.identity = cleanAgent.identity;
+                if (!existing.allowedTools && cleanAgent.allowedTools) existing.allowedTools = cleanAgent.allowedTools;
+                if (!existing.systemPrompt && cleanAgent.systemPrompt) existing.systemPrompt = cleanAgent.systemPrompt;
+                installed.push(`agent: ${pkg.name} (merged)`);
+              } else {
+                targetTeam.agents.push(cleanAgent);
+                installed.push(`agent: ${pkg.name}`);
+              }
+              configChanged = true;
               break;
             }
             case "company": {
-              const dir = join(polpoDir, "companies", pkg.name);
-              mkdirSync(dir, { recursive: true });
-              destPath = join(dir, "polpo.json");
+              // Merge company teams/agents into config
+              const companyContent = pkg.content as PolpoFileConfig;
+              const srcDir = resolve(pkg.path, "..");
+
+              const companyTeams: Team[] = Array.isArray(companyContent.teams)
+                ? companyContent.teams
+                : (companyContent as any).team
+                  ? [(companyContent as any).team]
+                  : [];
+
+              for (const incomingTeam of companyTeams) {
+                const existingTeam = config.teams.find((t) => t.name === incomingTeam.name);
+                if (existingTeam) {
+                  for (const agent of incomingTeam.agents) {
+                    const cleanAgent = { ...agent };
+                    delete (cleanAgent as any).version;
+                    delete (cleanAgent as any).author;
+                    delete (cleanAgent as any).tags;
+                    if (!existingTeam.agents.find((a) => a.name === agent.name)) {
+                      existingTeam.agents.push(cleanAgent);
+                    }
+                  }
+                } else {
+                  config.teams.push(incomingTeam);
+                }
+              }
+
+              // Merge settings (fill missing only)
+              if (companyContent.settings && config.settings) {
+                const settings = config.settings as unknown as Record<string, unknown>;
+                const inc = companyContent.settings as unknown as Record<string, unknown>;
+                for (const [key, value] of Object.entries(inc)) {
+                  if (settings[key] == null && value != null) settings[key] = value;
+                }
+              }
+
+              // Append memory.md if present
+              const srcMemory = join(srcDir, "memory.md");
+              if (existsSync(srcMemory)) {
+                const destMemory = join(polpoDir, "memory.md");
+                const memContent = readFileSync(srcMemory, "utf-8");
+                if (existsSync(destMemory)) {
+                  const existing = readFileSync(destMemory, "utf-8");
+                  writeFileSync(destMemory, existing + `\n\n<!-- Imported from ink: ${pkg.name} -->\n` + memContent, "utf-8");
+                } else {
+                  writeFileSync(destMemory, memContent, "utf-8");
+                }
+              }
+
+              // Copy skills if present
+              const srcSkills = join(srcDir, "skills");
+              if (existsSync(srcSkills)) {
+                const skillsDest = join(polpoDir, "skills");
+                mkdirSync(skillsDest, { recursive: true });
+                const skillEntries = readdirSync(srcSkills, { withFileTypes: true });
+                for (const entry of skillEntries) {
+                  if (!entry.isDirectory()) continue;
+                  const dest = join(skillsDest, entry.name);
+                  if (!existsSync(dest)) {
+                    cpSync(join(srcSkills, entry.name), dest, { recursive: true });
+                  }
+                }
+              }
+
+              configChanged = true;
+              installed.push(`company: ${pkg.name}`);
               break;
             }
           }
+        }
 
-          writeFileSync(destPath, content);
-          installed.push(`${pkg.type}: ${pkg.name}`);
+        // Save config if changed
+        if (configChanged) {
+          savePolpoConfig(polpoDir, config);
         }
 
         // Update lock file

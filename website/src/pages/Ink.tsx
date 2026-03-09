@@ -51,11 +51,11 @@ const TYPE_CONFIG: Record<PackageType, { icon: LucideIcon; label: string; color:
   company: { icon: Package, label: "company", color: "text-rose-600", bg: "bg-rose-50 border-rose-200" },
 };
 
-const FILTER_TABS: { key: PackageType | "all"; label: string; count: (pkgs: InkPackage[]) => number }[] = [
-  { key: "all", label: "All", count: (p) => p.length },
+const FILTER_TABS: { key: PackageType | "all"; label: string; count: (pkgs: InkPackage[]) => number; comingSoon?: boolean }[] = [
+  { key: "all", label: "All", count: (p) => p.filter((x) => x.type !== "company").length },
   { key: "playbook", label: "Playbooks", count: (p) => p.filter((x) => x.type === "playbook").length },
   { key: "agent", label: "Agents", count: (p) => p.filter((x) => x.type === "agent").length },
-  { key: "company", label: "Companies", count: (p) => p.filter((x) => x.type === "company").length },
+  { key: "company", label: "Companies", count: () => 0, comingSoon: true },
 ];
 
 /* ── Sort options ─────────────────────────────────────────────────── */
@@ -229,7 +229,7 @@ export function InkPage() {
   const [sortKey, setSortKey] = useState<SortKey>("installs");
   const [activeTags, setActiveTags] = useState<Set<string>>(new Set());
 
-  const allTags = useMemo(() => getAllTags(packages), [packages]);
+  const allTags = useMemo(() => getAllTags(packages.filter((p) => p.type !== "company")), [packages]);
 
   const toggleTag = (tag: string) => {
     setActiveTags((prev) => {
@@ -243,10 +243,11 @@ export function InkPage() {
   const clearTags = () => setActiveTags(new Set());
 
   const filtered = useMemo(() => {
-    let result = packages;
+    // Always exclude companies (coming soon)
+    let result = packages.filter((p) => p.type !== "company");
 
     // Type filter
-    if (activeFilter !== "all") {
+    if (activeFilter !== "all" && activeFilter !== "company") {
       result = result.filter((p) => p.type === activeFilter);
     }
 
@@ -276,7 +277,8 @@ export function InkPage() {
     return sortPackages(result, sortKey);
   }, [packages, search, activeFilter, sortKey, activeTags]);
 
-  const totalInstalls = useMemo(() => packages.reduce((sum, p) => sum + p.installs, 0), [packages]);
+  const visiblePackages = useMemo(() => packages.filter((p) => p.type !== "company"), [packages]);
+  const totalInstalls = useMemo(() => visiblePackages.reduce((sum, p) => sum + p.installs, 0), [visiblePackages]);
 
   return (
     <div className="min-h-screen bg-white text-neutral-950">
@@ -315,7 +317,7 @@ export function InkPage() {
                 <span className="text-red-400">Failed to load packages</span>
               ) : (
                 <>
-                  <span>{packages.length} packages</span>
+                  <span>{visiblePackages.length} packages</span>
                   <span>{formatInstalls(totalInstalls)} installs</span>
                 </>
               )}
@@ -350,15 +352,22 @@ export function InkPage() {
                 {FILTER_TABS.map((tab) => (
                   <button
                     key={tab.key}
-                    onClick={() => setActiveFilter(tab.key)}
+                    onClick={() => !tab.comingSoon && setActiveFilter(tab.key)}
+                    disabled={tab.comingSoon}
                     className={`rounded-lg px-3 py-1.5 font-mono text-xs transition ${
-                      activeFilter === tab.key
-                        ? "bg-neutral-900 text-white"
-                        : "text-neutral-500 hover:bg-neutral-100 hover:text-neutral-700"
+                      tab.comingSoon
+                        ? "text-neutral-300 cursor-default"
+                        : activeFilter === tab.key
+                          ? "bg-neutral-900 text-white"
+                          : "text-neutral-500 hover:bg-neutral-100 hover:text-neutral-700"
                     }`}
                   >
                     {tab.label}
-                    <span className="ml-1.5 opacity-60">{tab.count(packages)}</span>
+                    {tab.comingSoon ? (
+                      <span className="ml-1.5 text-[9px] italic opacity-60">soon</span>
+                    ) : (
+                      <span className="ml-1.5 opacity-60">{tab.count(packages)}</span>
+                    )}
                   </button>
                 ))}
               </div>
