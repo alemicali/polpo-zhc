@@ -16,7 +16,7 @@ import type { PolpoConfig, Task, Mission, MissionCheckpoint } from "../core/type
 function createMinimalConfig(): PolpoConfig {
   return {
     version: "1",
-    project: "test",
+    org: "test",
     teams: [{ name: "test-team", agents: [{ name: "test-agent" }] }],
     tasks: [],
     settings: { maxRetries: 2, workDir: "/tmp/test", logLevel: "quiet" },

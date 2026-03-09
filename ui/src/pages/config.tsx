@@ -732,13 +732,13 @@ export function ConfigPage() {
         {/* ═══ GENERAL (merged with Settings) ═══ */}
         {activeSection === "general" && (
           <div className="space-y-6">
-            {/* ── Project ── */}
+            {/* ── Org ── */}
             <section>
               <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5 flex items-center gap-1.5">
-                <Hash className="h-3.5 w-3.5" /> Project
+                <Hash className="h-3.5 w-3.5" /> Org
               </h3>
               <div className="max-w-md">
-                <Row label="Name" value={config.project} mono />
+                <Row label="Name" value={config.org} mono />
               </div>
             </section>
 

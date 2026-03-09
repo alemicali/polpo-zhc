@@ -148,7 +148,7 @@ export class DrizzleTaskStore implements TaskStore {
     const procRows: any[] = await this.db.select().from(processes);
 
     return {
-      project: meta.project ?? "",
+      org: meta.org ?? meta.project ?? "",
       teams,
       tasks: taskRows.map((r) => this.rowToTask(r)),
       processes: procRows.map((r) => this.rowToProcess(r)),
@@ -167,8 +167,8 @@ export class DrizzleTaskStore implements TaskStore {
         .onConflictDoUpdate({ target: metadata.key, set: { value } });
 
     const exec = async (db: any) => {
-      if (partial.project !== undefined) {
-        await upsertMeta(db, "project", partial.project);
+      if (partial.org !== undefined) {
+        await upsertMeta(db, "org", partial.org);
       }
       if (partial.teams !== undefined) {
         const val = JSON.stringify(partial.teams);

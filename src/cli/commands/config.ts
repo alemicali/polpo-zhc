@@ -30,7 +30,7 @@ export function registerConfigCommands(program: Command): void {
           return;
         }
 
-        console.log(chalk.bold("\n  Project: ") + config.project);
+        console.log(chalk.bold("\n  Org:     ") + config.org);
         console.log(chalk.bold("  Version: ") + config.version);
         for (const t of config.teams) {
           console.log(
@@ -104,7 +104,7 @@ export function registerConfigCommands(program: Command): void {
       try {
         const config = await parseConfig(workDir);
         console.log(chalk.green("\n  \u2713 Configuration valid"));
-        console.log(chalk.dim(`    Project: ${config.project}`));
+        console.log(chalk.dim(`    Org: ${config.org}`));
         console.log(chalk.dim(`    Agents:  ${config.teams.flatMap((t) => t.agents).length}`));
         console.log();
         process.exit(0);

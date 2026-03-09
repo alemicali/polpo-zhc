@@ -29,7 +29,7 @@ export interface PolpoEventMap {
   "assessment:corrected": { taskId: string; corrections: number };
 
   // Orchestrator lifecycle
-  "orchestrator:started": { project: string; agents: string[] };
+  "orchestrator:started": { org: string; agents: string[] };
   "orchestrator:tick": { pending: number; running: number; done: number; failed: number; queued: number };
   "orchestrator:deadlock": { taskIds: string[] };
   "orchestrator:shutdown": Record<string, never>;

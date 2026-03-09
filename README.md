@@ -4,7 +4,7 @@
 
 <p align="center">
   <strong>Build your AI company.</strong><br/>
-  <sub>Assemble AI agent teams that plan, execute, review their own work, and ping you only when it matters.</sub>
+  <sub>Spin up AI agent teams that plan, execute, review their own work, and ping you only when it matters.</sub>
 </p>
 
 <p align="center">
@@ -93,7 +93,7 @@ The setup wizard detects your API keys, picks a model, and creates your first ag
 
 ```bash
 polpo init                          # Set up project, agents, and roles
-polpo mission create "Build a REST API with auth and tests"
+polpo mission create "Close $1M in revenue this month"
 ```
 
 Polpo generates a mission with tasks, dependencies, and agent assignments. Agents execute, LLM judges score every result, and failures retry automatically.

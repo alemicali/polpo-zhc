@@ -327,7 +327,7 @@ describe("CLI: config operations", () => {
   test("config show — returns parsed config", () => {
     const config = o.getConfig();
     expect(config).toBeDefined();
-    expect(config!.project).toBe("test-cli");
+    expect(config!.org).toBe("test-cli");
     expect(config!.teams[0].name).toBe("test-team");
     expect(config!.teams[0].agents.length).toBeGreaterThanOrEqual(1);
   });
@@ -335,13 +335,13 @@ describe("CLI: config operations", () => {
   test("config validate — valid config succeeds", async () => {
     // parseConfig reads from .polpo/polpo.json — write it first
     savePolpoConfig(join(tempDir, ".polpo"), {
-      project: "test-cli",
+      org: "test-cli",
       teams: [VALID_TEAM],
       settings: { maxRetries: 2, workDir: ".", logLevel: "normal" },
     });
     const config = await parseConfig(tempDir);
     expect(config.version).toBe("1");
-    expect(config.project).toBe("test-cli");
+    expect(config.org).toBe("test-cli");
     expect(config.teams[0].name).toBe("test-team");
   });
 

@@ -1,45 +1,11 @@
-import { resolve, basename } from "node:path";
+import { resolve, basename, join } from "node:path";
+import { writeFileSync, readFileSync, existsSync, mkdirSync, chmodSync } from "node:fs";
 import readline from "node:readline";
 import chalk from "chalk";
 import type { Command } from "commander";
 import { loadPolpoConfig, savePolpoConfig, generatePolpoConfigDefault } from "../../core/config.js";
-import { PROVIDER_ENV_MAP } from "../../llm/pi-client.js";
-
-// ── Recommended models per provider (shown in picker) ──
-
-const RECOMMENDED_MODELS: Record<string, { spec: string; label: string }[]> = {
-  anthropic: [
-    { spec: "anthropic:claude-sonnet-4-5", label: "Claude Sonnet 4.5 (latest, balanced)" },
-    { spec: "anthropic:claude-sonnet-4-5-20250929", label: "Claude Sonnet 4.5 (balanced)" },
-    { spec: "anthropic:claude-haiku-4-5-20251001", label: "Claude Haiku 4.5 (fast)" },
-  ],
-  openai: [
-    { spec: "openai:gpt-4o", label: "GPT-4o (balanced)" },
-    { spec: "openai:o4-mini", label: "o4-mini (reasoning, fast)" },
-    { spec: "openai:gpt-4o-mini", label: "GPT-4o Mini (fast)" },
-  ],
-  google: [
-    { spec: "google:gemini-2.5-flash", label: "Gemini 2.5 Flash (fast)" },
-    { spec: "google:gemini-2.5-pro", label: "Gemini 2.5 Pro (balanced)" },
-  ],
-  groq: [
-    { spec: "groq:llama-3.3-70b-versatile", label: "Llama 3.3 70B (free tier)" },
-  ],
-  mistral: [
-    { spec: "mistral:codestral-latest", label: "Codestral (coding)" },
-    { spec: "mistral:mistral-large-latest", label: "Mistral Large (flagship)" },
-  ],
-  xai: [
-    { spec: "xai:grok-3", label: "Grok 3 (flagship)" },
-    { spec: "xai:grok-3-mini", label: "Grok 3 Mini (fast)" },
-  ],
-  openrouter: [
-    { spec: "openrouter:deepseek-chat", label: "DeepSeek Chat" },
-  ],
-  opencode: [
-    { spec: "opencode:big-pickle", label: "Big Pickle (free)" },
-  ],
-};
+import { PROVIDER_ENV_MAP, listModels } from "../../llm/pi-client.js";
+import type { ModelInfo } from "../../llm/pi-client.js";
 
 // ── Readline helpers ────────────────────────────────
 
@@ -83,14 +49,12 @@ interface DetectedProvider {
 function detectProviders(): DetectedProvider[] {
   const detected: DetectedProvider[] = [];
 
-  // Check env vars
   for (const [provider, envVar] of Object.entries(PROVIDER_ENV_MAP)) {
     if (process.env[envVar]) {
       detected.push({ name: provider, source: "env", envVar });
     }
   }
 
-  // Check OAuth profiles (sync — just check file existence)
   try {
     const { hasOAuthProfiles } = require("../../llm/pi-client.js");
     if (typeof hasOAuthProfiles === "function") {
@@ -101,17 +65,173 @@ function detectProviders(): DetectedProvider[] {
       }
     }
   } catch {
-    // OAuth check unavailable — skip
+    // OAuth check unavailable
   }
 
   return detected;
+}
+
+// ── Model helpers ───────────────────────────────────
+
+function fmtCost(cost: number): string {
+  if (cost === 0) return "free";
+  if (cost < 1) return `$${cost.toFixed(2)}/M`;
+  return `$${cost.toFixed(0)}/M`;
+}
+
+function modelLabel(m: ModelInfo): string {
+  const tags: string[] = [];
+  if (m.reasoning) tags.push("reasoning");
+  if (m.cost.input === 0 && m.cost.output === 0) tags.push("free");
+  const costStr = m.cost.input > 0 ? `in:${fmtCost(m.cost.input)} out:${fmtCost(m.cost.output)}` : "";
+  const tagStr = tags.length > 0 ? ` (${tags.join(", ")})` : "";
+  return `${m.name}${tagStr}${costStr ? ` ${chalk.dim(costStr)}` : ""}`;
+}
+
+function getProviderModels(provider: string): ModelInfo[] {
+  return listModels(provider).sort((a, b) => a.cost.input - b.cost.input);
+}
+
+// ── .env persistence ────────────────────────────────
+
+function persistToEnvFile(polpoDir: string, envVar: string, value: string): void {
+  const envPath = join(polpoDir, ".env");
+  if (!existsSync(polpoDir)) mkdirSync(polpoDir, { recursive: true });
+
+  let content = "";
+  if (existsSync(envPath)) {
+    content = readFileSync(envPath, "utf-8");
+    const regex = new RegExp(`^${envVar}=.*$`, "m");
+    if (regex.test(content)) {
+      content = content.replace(regex, `${envVar}=${value}`);
+      writeFileSync(envPath, content, "utf-8");
+      try { chmodSync(envPath, 0o600); } catch { /* best-effort */ }
+      return;
+    }
+  }
+
+  const line = `${envVar}=${value}\n`;
+  writeFileSync(envPath, content ? `${content.trimEnd()}\n${line}` : line, "utf-8");
+  try { chmodSync(envPath, 0o600); } catch { /* best-effort */ }
+}
+
+// ── OAuth login (inline) ────────────────────────────
+
+async function runOAuthLogin(provider: string): Promise<boolean> {
+  try {
+    const { oauthLogin, OAUTH_PROVIDERS } = await import("../../auth/index.js");
+    type OAuthProviderName = (typeof OAUTH_PROVIDERS)[number]["id"];
+
+    const match = OAUTH_PROVIDERS.find((p: { id: string }) => p.id === provider);
+    if (!match) return false;
+
+    console.log();
+    console.log(chalk.bold(`  Logging in to ${match.name}...`));
+    console.log();
+
+    const profileId = await oauthLogin(provider as OAuthProviderName, {
+      onAuthUrl: (url: string, instructions?: string) => {
+        if (instructions) console.log(chalk.yellow(`  ${instructions}`));
+        console.log(`  ${chalk.bold("Open this URL in your browser:")}`);
+        console.log(`  ${chalk.cyan(url)}`);
+        console.log();
+      },
+      onPrompt: async (message: string, placeholder?: string) => {
+        return promptUser(`  ${message}${placeholder ? chalk.dim(` (${placeholder})`) : ""}: `);
+      },
+      onProgress: (message: string) => {
+        console.log(chalk.dim(`  ${message}`));
+      },
+    });
+
+    console.log(`  ${chalk.green("Login successful!")} Profile: ${chalk.bold(profileId)}`);
+    return true;
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : "Unknown error";
+    console.log(`  ${chalk.red(`Login failed: ${msg}`)}`);
+    return false;
+  }
+}
+
+// ── Auth options ────────────────────────────────────
+
+interface AuthOption {
+  id: string;
+  label: string;
+  description: string;
+  type: "oauth" | "api_key";
+  oauthId?: string;
+}
+
+function getAuthOptions(): AuthOption[] {
+  return [
+    // Free OAuth
+    { id: "google-antigravity", label: "Google Antigravity", description: "Free — Gemini 3, Claude, GPT-OSS via Google account", type: "oauth", oauthId: "google-antigravity" },
+    { id: "google-gemini-cli", label: "Google Gemini CLI", description: "Free — Gemini models via Google account", type: "oauth", oauthId: "google-gemini-cli" },
+    // Paid OAuth
+    { id: "anthropic", label: "Anthropic (Claude Pro/Max)", description: "Requires Claude Pro or Max subscription", type: "oauth", oauthId: "anthropic" },
+    { id: "openai-codex", label: "OpenAI Codex (ChatGPT Plus/Pro)", description: "Requires ChatGPT Plus or Pro subscription", type: "oauth", oauthId: "openai-codex" },
+    { id: "github-copilot", label: "GitHub Copilot", description: "Requires Copilot subscription — multi-model access", type: "oauth", oauthId: "github-copilot" },
+    // Manual
+    { id: "api-key", label: "Enter an API key manually", description: "For any provider (OpenAI, Anthropic, Groq, etc.)", type: "api_key" },
+  ];
+}
+
+// ── Auth step ───────────────────────────────────────
+
+async function runAuthStep(providers: DetectedProvider[], polpoDir: string): Promise<void> {
+  const authOptions = getAuthOptions();
+  const labels = [
+    ...authOptions.map((a) => {
+      const tag = a.type === "oauth"
+        ? (a.description.startsWith("Free") ? chalk.green("FREE") : chalk.yellow("PAID"))
+        : chalk.dim("MANUAL");
+      return `${tag} ${chalk.bold(a.label)} ${chalk.dim(`— ${a.description}`)}`;
+    }),
+    chalk.dim("Skip"),
+  ];
+
+  const authIdx = await pickFromList(labels, `Select (1-${labels.length})`);
+  if (authIdx < 0 || authIdx >= authOptions.length) return;
+
+  const selected = authOptions[authIdx];
+
+  if (selected.type === "oauth" && selected.oauthId) {
+    const success = await runOAuthLogin(selected.oauthId);
+    if (success) {
+      // Re-detect after successful login
+      for (const p of detectProviders()) {
+        if (!providers.find((e) => e.name === p.name)) providers.push(p);
+      }
+    }
+  } else if (selected.type === "api_key") {
+    console.log();
+    console.log(chalk.bold("  Select a provider:"));
+    console.log();
+    const allProviders = Object.entries(PROVIDER_ENV_MAP)
+      .filter(([, envVar], idx, arr) => arr.findIndex(([, ev]) => ev === envVar) === idx);
+    const pIdx = await pickFromList(
+      allProviders.map(([p, ev]) => `${chalk.bold(p)} ${chalk.dim(`(${ev})`)}`),
+      `Select (1-${allProviders.length})`,
+    );
+
+    if (pIdx >= 0) {
+      const [provider, envVar] = allProviders[pIdx];
+      const key = await promptUser(`  ${envVar}: `);
+      if (key) {
+        process.env[envVar] = key;
+        persistToEnvFile(polpoDir, envVar, key);
+        console.log(chalk.green(`  ✓ ${envVar} saved to .polpo/.env`));
+        providers.push({ name: provider, source: "env", envVar });
+      }
+    }
+  }
 }
 
 // ── Setup wizard ────────────────────────────────────
 
 export interface SetupOptions {
   polpoDir?: string;
-  /** Explicit project root directory. Falls back to process.cwd() when omitted. */
   workDir?: string;
   nonInteractive?: boolean;
 }
@@ -120,144 +240,103 @@ export async function runSetupWizard(options?: SetupOptions): Promise<void> {
   const workDir = options?.workDir ?? process.cwd();
   const polpoDir = options?.polpoDir ?? resolve(workDir, ".polpo");
   const isInteractive = !options?.nonInteractive && process.stdin.isTTY;
-
-  // Load existing config for defaults
   const existing = loadPolpoConfig(polpoDir);
+  const orgName = existing?.org ?? basename(workDir);
 
   console.log();
   console.log(chalk.bold("  Polpo Setup"));
   console.log();
 
+  // ── Non-interactive fallback ──
   if (!isInteractive) {
-    // Non-interactive: use env or defaults, skip prompts
     const model = process.env.POLPO_MODEL;
-    const projectName = existing?.project ?? basename(workDir);
-    const config = generatePolpoConfigDefault(projectName, { model: model ?? undefined });
+    const config = generatePolpoConfigDefault(orgName, { model: model ?? undefined });
     savePolpoConfig(polpoDir, config);
     if (!model) {
-      console.log(chalk.yellow("  No model configured. Set POLPO_MODEL env var or run 'polpo setup' interactively."));
+      console.log(chalk.yellow("  No model configured. Set POLPO_MODEL or run 'polpo setup' interactively."));
     } else {
       console.log(chalk.green(`  Config saved with model: ${model}`));
     }
     return;
   }
 
-  // ── Step 1: Project name ──
-  const defaultProject = existing?.project ?? basename(workDir);
-  const projectName = await promptWithDefault("Project name", defaultProject);
-
-  // ── Step 2: Detect providers ──
-  console.log();
-  console.log(chalk.dim("  Detecting providers..."));
+  // ── Step 1: Auth ──────────────────────────────────
   const providers = detectProviders();
 
   if (providers.length > 0) {
-    console.log();
+    console.log(chalk.dim("  Detected providers:"));
     for (const p of providers) {
       const source = p.source === "env" ? `env: ${p.envVar}` : "OAuth profile";
       console.log(`  ${chalk.green("✓")} ${chalk.bold(p.name)} ${chalk.dim(`(${source})`)}`);
     }
     console.log();
   } else {
-    console.log(chalk.yellow("  No providers detected."));
+    console.log(chalk.bold("  Step 1 — Auth with a provider"));
+    console.log();
+    await runAuthStep(providers, polpoDir);
     console.log();
   }
 
-  // ── Step 3: Model selection ──
+  // If still no providers after auth step, bail early with guidance
+  if (providers.length === 0) {
+    console.log(chalk.yellow("  No provider configured."));
+    console.log(chalk.dim("  Run 'polpo setup' again or 'polpo auth login' to add one."));
+    console.log();
+    // Still save a config so the directory is initialized
+    savePolpoConfig(polpoDir, generatePolpoConfigDefault(orgName));
+    return;
+  }
+
+  // ── Step 2: Orchestrator model ────────────────────
+  console.log(chalk.bold("  Step 2 — Select the orchestrator model"));
+  console.log();
+
   let selectedModel: string | undefined;
-
-  if (providers.length > 0) {
-    // Build model picker from detected providers
-    const modelOptions: { spec: string; label: string }[] = [];
-    for (const p of providers) {
-      const recommended = RECOMMENDED_MODELS[p.name];
-      if (recommended) {
-        modelOptions.push(...recommended);
-      } else {
-        modelOptions.push({ spec: `${p.name}:`, label: `${p.name} (enter model ID)` });
-      }
+  const allModels: { spec: string; label: string }[] = [];
+  for (const p of providers) {
+    for (const m of getProviderModels(p.name)) {
+      allModels.push({ spec: `${p.name}:${m.id}`, label: modelLabel(m) });
     }
+  }
 
-    // Cap at 8 models + custom option
-    const capped = modelOptions.slice(0, 8);
+  if (allModels.length > 0) {
+    const capped = allModels.slice(0, 15);
     const labels = [
       ...capped.map((m) => `${chalk.bold(m.spec)} ${chalk.dim(`— ${m.label}`)}`),
       chalk.dim("Enter custom model"),
     ];
 
-    console.log(chalk.bold("  Select a model for your agents:"));
-    console.log();
-    const idx = await pickFromList(labels, "Select (1-" + labels.length + ")");
-
+    const idx = await pickFromList(labels, `Select (1-${labels.length})`);
     if (idx >= 0 && idx < capped.length) {
       selectedModel = capped[idx].spec;
     } else {
-      // Custom model or invalid selection
       const custom = await promptUser("  Model spec (provider:model): ");
       if (custom) selectedModel = custom;
     }
   } else {
-    // No providers — offer options
-    console.log(chalk.bold("  How would you like to configure a model?"));
-    console.log();
-    const idx = await pickFromList(
-      [
-        "Enter an API key now",
-        "Skip for now (configure later)",
-      ],
-      "Select (1-2)"
-    );
-
-    if (idx === 0) {
-      // Enter API key
-      const topProviders = ["anthropic", "openai", "google", "groq", "openrouter"];
-      console.log();
-      console.log(chalk.bold("  Select a provider:"));
-      console.log();
-      const pIdx = await pickFromList(
-        topProviders.map((p) => `${chalk.bold(p)} ${chalk.dim(`(${PROVIDER_ENV_MAP[p]})`)}`),
-        "Select (1-" + topProviders.length + ")"
-      );
-
-      if (pIdx >= 0) {
-        const provider = topProviders[pIdx];
-        const envVar = PROVIDER_ENV_MAP[provider];
-        const key = await promptUser(`  ${envVar}: `);
-        if (key) {
-          process.env[envVar] = key;
-          console.log(chalk.green(`  ✓ ${envVar} set for this session.`));
-          console.log(chalk.dim(`    Add to your shell profile to persist: export ${envVar}=${key.slice(0, 8)}...`));
-          console.log();
-
-          // Pick a model from this provider
-          const recommended = RECOMMENDED_MODELS[provider];
-          if (recommended && recommended.length > 0) {
-            selectedModel = recommended[0].spec;
-            console.log(`  Using ${chalk.bold(selectedModel)}`);
-          } else {
-            const custom = await promptUser(`  Model spec (${provider}:model-id): `);
-            if (custom) selectedModel = custom;
-          }
-        }
-      }
-    }
-    // idx === 1 or invalid → skip, selectedModel stays undefined
+    const custom = await promptUser("  Model spec (provider:model): ");
+    if (custom) selectedModel = custom;
   }
 
-  // ── Step 4: Team configuration ──
-  console.log();
-  const defaultTeamName = existing?.teams?.[0]?.name ?? "default";
-  const defaultAgentName = existing?.teams?.[0]?.agents?.[0]?.name ?? "dev-1";
-  const defaultAgentRole = existing?.teams?.[0]?.agents?.[0]?.role ?? "developer";
+  if (!selectedModel) {
+    console.log(chalk.yellow("  No model selected. You can set it later in .polpo/polpo.json"));
+    console.log();
+  }
 
-  const teamName = await promptWithDefault("Team name", defaultTeamName);
+  // ── Step 3: First agent ───────────────────────────
+  console.log();
+  console.log(chalk.bold("  Step 3 — First agent"));
+  console.log();
+
+  const defaultAgentName = existing?.teams?.[0]?.agents?.[0]?.name ?? "agent-1";
+  const defaultAgentRole = existing?.teams?.[0]?.agents?.[0]?.role ?? "founder";
+
   const agentName = await promptWithDefault("Agent name", defaultAgentName);
   const agentRole = await promptWithDefault("Agent role", defaultAgentRole);
 
-  // ── Step 5: Write config ──
-  const config = generatePolpoConfigDefault(projectName, {
+  // ── Write config ──────────────────────────────────
+  const config = generatePolpoConfigDefault(orgName, {
     model: selectedModel,
-    teamName,
     agentName,
     agentRole,
   });
@@ -265,14 +344,14 @@ export async function runSetupWizard(options?: SetupOptions): Promise<void> {
 
   // ── Summary ──
   console.log();
-  console.log(chalk.green("  Setup complete!"));
+  console.log(chalk.green("  Ready!"));
   console.log();
-  console.log(`  ${chalk.dim("Project:")} ${projectName}`);
-  console.log(`  ${chalk.dim("Model:")}   ${selectedModel ?? chalk.yellow("not set — configure before running agents")}`);
-  console.log(`  ${chalk.dim("Team:")}    ${teamName}`);
-  console.log(`  ${chalk.dim("Agent:")}   ${agentName} (${agentRole})`);
+  console.log(`  ${chalk.dim("Org:")}    ${orgName}`);
+  console.log(`  ${chalk.dim("Model:")}  ${selectedModel ?? chalk.yellow("not set")}`);
+  console.log(`  ${chalk.dim("Agent:")}  ${agentName} (${agentRole})`);
   console.log();
   console.log(chalk.dim("  Config saved to .polpo/polpo.json"));
+  console.log(chalk.dim("  Run: polpo tui"));
   console.log();
 }
 
@@ -281,7 +360,7 @@ export async function runSetupWizard(options?: SetupOptions): Promise<void> {
 export function registerSetupCommand(parent: Command): void {
   parent
     .command("setup")
-    .description("Interactive setup wizard — configure model, team, and providers")
+    .description("Interactive setup wizard — auth, model, and first agent")
     .option("-d, --dir <path>", "Working directory", ".")
     .action(async (opts) => {
       const workDir = resolve(opts.dir);

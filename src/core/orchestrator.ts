@@ -524,7 +524,7 @@ export class Orchestrator extends TypedEmitter {
    * Initialize for interactive/TUI mode.
    * Creates .polpo dir and a minimal config from provided team info.
    */
-  async initInteractive(project: string, teams: Team | Team[]): Promise<void> {
+  async initInteractive(org: string, teams: Team | Team[]): Promise<void> {
     const teamsArray = Array.isArray(teams) ? teams : [teams];
     if (!existsSync(this.polpoDir)) {
       mkdirSync(this.polpoDir, { recursive: true });
@@ -545,7 +545,7 @@ export class Orchestrator extends TypedEmitter {
 
     this.config = {
       version: "1",
-      project: polpoConfig?.project ?? project,
+      org: polpoConfig?.org ?? org,
       teams: polpoConfig?.teams ?? teamsArray,
       tasks: [],
       settings,
@@ -564,7 +564,7 @@ export class Orchestrator extends TypedEmitter {
     this.initVaultStore();
     this.interactive = true;
     await this.registry.setState({
-      project,
+      org,
       teams: teamsArray,
       startedAt: new Date().toISOString(),
     });
@@ -1292,7 +1292,7 @@ export class Orchestrator extends TypedEmitter {
     await this.taskMgr.seedTasks();
     // Also set initial state for non-interactive mode
     await this.registry.setState({
-      project: this.config.project,
+      org: this.config.org,
       teams: this.config.teams,
       startedAt: new Date().toISOString(),
     });
@@ -1309,7 +1309,7 @@ export class Orchestrator extends TypedEmitter {
     }
 
     this.emit("orchestrator:started", {
-      project: this.config.project,
+      org: this.config.org,
       agents: this.agentMgr.getAgents().map((a: AgentConfig) => a.name),
     });
 

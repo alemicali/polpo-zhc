@@ -63,7 +63,7 @@ import {
 // ── Test Setup ──────────────────────────────────────────
 
 const POLPO_CONFIG = JSON.stringify({
-  project: "test-completions",
+  org: "test-completions",
   team: {
     name: "test-team",
     agents: [

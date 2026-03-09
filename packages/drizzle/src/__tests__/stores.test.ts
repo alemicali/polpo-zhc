@@ -360,13 +360,13 @@ describe("DrizzleTaskStore", () => {
 
   it("setState + getState round-trip", async () => {
     await stores.taskStore.setState({
-      project: "test-project",
+      org: "test-project",
       teams: [{ name: "alpha", agents: [{ name: "claude" }] }],
       startedAt: "2025-01-01T00:00:00Z",
     });
 
     const state = await stores.taskStore.getState();
-    expect(state.project).toBe("test-project");
+    expect(state.org).toBe("test-project");
     expect(state.teams).toHaveLength(1);
     expect(state.teams[0].name).toBe("alpha");
     expect(state.startedAt).toBe("2025-01-01T00:00:00Z");
@@ -374,7 +374,7 @@ describe("DrizzleTaskStore", () => {
 
   it("setState with processes", async () => {
     await stores.taskStore.setState({
-      project: "p",
+      org: "p",
       processes: [{
         agentName: "claude",
         pid: 1234,

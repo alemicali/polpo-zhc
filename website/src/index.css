@@ -35,23 +35,24 @@ body {
   background-size: 24px 24px;
 }
 
-/* ── Hero trama — premium diagonal weave ───────────────────────────── */
+/* ── Hero grid — terminal dot matrix ──────────────────────────────── */
 .hero-mesh {
   background-image:
-    repeating-linear-gradient(
-      135deg,
-      transparent 0px,
-      transparent 28px,
-      rgba(59, 62, 115, 0.025) 28px,
-      rgba(59, 62, 115, 0.025) 29px
+    radial-gradient(
+      circle,
+      rgba(59, 62, 115, 0.06) 1px,
+      transparent 1px
     ),
-    repeating-linear-gradient(
-      45deg,
-      transparent 0px,
-      transparent 28px,
-      rgba(232, 104, 138, 0.018) 28px,
-      rgba(232, 104, 138, 0.018) 29px
+    linear-gradient(
+      rgba(59, 62, 115, 0.015) 1px,
+      transparent 1px
+    ),
+    linear-gradient(
+      90deg,
+      rgba(59, 62, 115, 0.015) 1px,
+      transparent 1px
     );
+  background-size: 20px 20px;
 }
 
 /* ── Flow connector line animation ─────────────────────────────────── */

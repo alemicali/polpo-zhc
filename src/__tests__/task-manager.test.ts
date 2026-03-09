@@ -103,7 +103,7 @@ function createNoopSessionStore() {
 function createDefaultConfig(overrides?: Partial<PolpoConfig>): PolpoConfig {
   return {
     version: "1",
-    project: "test-project",
+    org: "test-project",
     teams: [{
       name: "test-team",
       agents: [createTestAgent({ name: "dev" })],

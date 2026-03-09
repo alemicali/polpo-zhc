@@ -1150,7 +1150,7 @@ export async function buildChatSystemPrompt(
     ``,
     `## Current state`,
     ``,
-    `Project: ${state?.project || config?.project || "polpo-interactive"}`,
+    `Org: ${state?.org || config?.org || "polpo-interactive"}`,
     `Teams: ${teams.length}`,
   );
 

@@ -8,19 +8,19 @@ const DEFAULT_SETTINGS: PolpoSettings = {
   logLevel: "normal",
 };
 
-// --- .polpo/polpo.json (persistent project config) ---
+// --- .polpo/polpo.json (persistent org config) ---
 
 export function loadPolpoConfig(polpoDir: string): PolpoFileConfig | undefined {
   const filePath = join(polpoDir, "polpo.json");
   if (!existsSync(filePath)) return undefined;
   try {
     const raw = JSON.parse(readFileSync(filePath, "utf-8")) as PolpoFileConfigRaw;
-    return migrateToMultiTeam(raw);
+    return migrateConfig(raw);
   } catch { return undefined; }
 }
 
-/** Migrate old singular `team` config to new `teams` array. */
-function migrateToMultiTeam(raw: PolpoFileConfigRaw): PolpoFileConfig {
+/** Migrate old singular `team` config to new `teams` array, and `project` → `org`. */
+function migrateConfig(raw: PolpoFileConfigRaw): PolpoFileConfig {
   let teams: Team[];
   if (raw.teams && raw.teams.length > 0) {
     teams = raw.teams;
@@ -31,8 +31,11 @@ function migrateToMultiTeam(raw: PolpoFileConfigRaw): PolpoFileConfig {
     teams = [{ name: "default", agents: [] }];
   }
 
+  // Backward compat: accept legacy `project` field, prefer `org`
+  const org = raw.org ?? raw.project ?? "";
+
   return {
-    project: raw.project,
+    org,
     teams,
     settings: raw.settings as PolpoSettings ?? { maxRetries: 3, workDir: ".", logLevel: "normal" },
     providers: raw.providers,
@@ -238,7 +241,7 @@ export async function parseConfig(workDir: string): Promise<PolpoConfig> {
 
   return {
     version: "1",
-    project: polpoConfig.project,
+    org: polpoConfig.org,
     teams: polpoConfig.teams,
     tasks: [],
     settings,
@@ -249,12 +252,12 @@ export async function parseConfig(workDir: string): Promise<PolpoConfig> {
 // --- Default config generator ---
 
 export function generatePolpoConfigDefault(
-  projectName: string,
+  orgName: string,
   options?: { model?: string; teamName?: string; agentName?: string; agentRole?: string },
 ): PolpoFileConfig {
   const agent: Record<string, unknown> = {
-    name: options?.agentName ?? "dev-1",
-    role: options?.agentRole ?? "developer",
+    name: options?.agentName ?? "agent-1",
+    role: options?.agentRole ?? "founder",
   };
   if (options?.model) {
     agent.model = options.model;
@@ -264,7 +267,7 @@ export function generatePolpoConfigDefault(
     settings.orchestratorModel = options.model;
   }
   return {
-    project: projectName,
+    org: orgName,
     teams: [{
       name: options?.teamName ?? "default",
       description: `${options?.teamName ?? "Default"} Polpo team`,

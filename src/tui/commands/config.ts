@@ -31,7 +31,7 @@ function configView(
 
   const s = config.settings;
   const lines: [string, string][] = [
-    ["Project", config.project],
+    ["Org", config.org],
     ["Version", config.version],
     ["Team", `${config.teams[0]?.name ?? "default"} (${config.teams[0]?.agents.length ?? 0} agents)`],
     ["Max retries", `${s.maxRetries}`],
@@ -101,7 +101,7 @@ function configEdit(
             const polpoDir = polpo.getPolpoDir();
             if (polpoDir) {
               savePolpoConfig(polpoDir, {
-                project: config.project,
+                org: config.org,
                 teams: config.teams,
                 settings: config.settings,
                 providers: config.providers,

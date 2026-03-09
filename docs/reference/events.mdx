@@ -78,7 +78,7 @@ Events for the orchestrator's own lifecycle.
 
 | Event | Description | Key Payload Fields |
 |-------|-------------|-------------------|
-| `orchestrator:started` | Orchestrator started | `project`, `agents: string[]` |
+| `orchestrator:started` | Orchestrator started | `org`, `agents: string[]` |
 | `orchestrator:tick` | Periodic aggregate counts (**Not persisted**) | `pending`, `running`, `done`, `failed`, `queued` |
 | `orchestrator:deadlock` | Unresolvable deadlocks found | `taskIds: string[]` |
 | `orchestrator:shutdown` | Graceful shutdown initiated | _(empty)_ |

@@ -27,7 +27,7 @@ describe("JsonConfigStore", () => {
 
   it("save() creates directory and config file", () => {
     const store = new JsonConfigStore(TEST_DIR);
-    const config: ProjectConfig = { project: "test", judge: "claude-sdk", agent: "generic", model: "haiku" };
+    const config: ProjectConfig = { org: "test", judge: "claude-sdk", agent: "generic", model: "haiku" };
     store.save(config);
 
     expect(store.exists()).toBe(true);
@@ -40,7 +40,7 @@ describe("JsonConfigStore", () => {
 
   it("get() returns saved config", () => {
     const store = new JsonConfigStore(TEST_DIR);
-    const config: ProjectConfig = { project: "test", judge: "claude-sdk", agent: "claude-sdk", model: "sonnet" };
+    const config: ProjectConfig = { org: "test", judge: "claude-sdk", agent: "claude-sdk", model: "sonnet" };
     store.save(config);
 
     const loaded = store.get();
@@ -49,8 +49,8 @@ describe("JsonConfigStore", () => {
 
   it("save() overwrites existing config", () => {
     const store = new JsonConfigStore(TEST_DIR);
-    store.save({ project: "p", judge: "a", agent: "b", model: "c" });
-    store.save({ project: "p", judge: "x", agent: "y", model: "z" });
+    store.save({ org: "p", judge: "a", agent: "b", model: "c" });
+    store.save({ org: "p", judge: "x", agent: "y", model: "z" });
 
     const loaded = store.get();
     expect(loaded?.judge).toBe("x");
@@ -80,7 +80,7 @@ describe("JsonConfigStore", () => {
 
   it("survives separate instances (persistence)", () => {
     const store1 = new JsonConfigStore(TEST_DIR);
-    store1.save({ project: "test", judge: "claude-sdk", agent: "generic", model: "opus" });
+    store1.save({ org: "test", judge: "claude-sdk", agent: "generic", model: "opus" });
 
     const store2 = new JsonConfigStore(TEST_DIR);
     const loaded = store2.get();

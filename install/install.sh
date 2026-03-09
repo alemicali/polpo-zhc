@@ -195,9 +195,16 @@ install_node() {
 # ── Install Polpo ──────────────────────────────────────────────────
 install_polpo() {
   local pkg_manager="npm"
+  local force_flag=""
 
   if check_pnpm; then
     pkg_manager="pnpm"
+  fi
+
+  # If polpo is already installed, force overwrite to allow upgrades
+  if command -v polpo &>/dev/null; then
+    info "Existing polpo installation detected — upgrading..."
+    force_flag="--force"
   fi
 
   info "Installing @polpo-ai/polpo globally via ${BOLD}${pkg_manager}${RESET}..."
@@ -207,7 +214,7 @@ install_polpo() {
       pnpm add -g @polpo-ai/polpo
       ;;
     npm)
-      npm install -g @polpo-ai/polpo
+      npm install -g @polpo-ai/polpo $force_flag
       ;;
   esac
 

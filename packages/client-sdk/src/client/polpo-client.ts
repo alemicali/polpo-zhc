@@ -557,7 +557,7 @@ export class PolpoClient {
     return this.get<AgentProcess[]>("/agents/processes");
   }
 
-  // ── Project ──────────────────────────────────────────────
+  // ── State ────────────────────────────────────────────────
 
   getState(): Promise<PolpoState> {
     return this.get<PolpoState>("/state");

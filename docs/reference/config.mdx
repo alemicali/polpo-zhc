@@ -7,7 +7,7 @@ description: "Complete field-by-field reference for .polpo/polpo.json"
 
 ```json
 {
-  "project": "my-project",
+  "org": "my-project",
   "team": {
     "name": "My Team",
     "agents": []
@@ -218,7 +218,7 @@ Stored in `.polpo/config.json` — separate from `polpo.json`, this stores proje
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `project` | string | Project name |
+| `org` | string | Org name |
 | `judge` | string | Model for assessment LLM |
 | `model` | string | Default model |
 
@@ -291,7 +291,7 @@ See [Providers & Models](/models/overview) for supported providers and model res
 
 ```json
 {
-  "project": "my-project",
+  "org": "my-project",
   "team": {
     "name": "my-team",
     "agents": [

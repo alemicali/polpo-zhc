@@ -51,7 +51,13 @@ export class JsonConfigStore {
     if (!existsSync(this.filePath)) return undefined;
     try {
       const parsed = JSON.parse(readFileSync(this.filePath, "utf-8"));
-      if (!parsed || typeof parsed !== "object" || typeof parsed.project !== "string") return undefined;
+      // Backward compat: accept legacy `project` field
+      if (!parsed || typeof parsed !== "object") return undefined;
+      if (typeof parsed.org !== "string" && typeof parsed.project !== "string") return undefined;
+      // Migrate project → org on read
+      if (typeof parsed.org !== "string" && typeof parsed.project === "string") {
+        parsed.org = parsed.project;
+      }
       return parsed as ProjectConfig;
     } catch { return undefined; }
   }

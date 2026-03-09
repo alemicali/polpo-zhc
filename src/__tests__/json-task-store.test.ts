@@ -160,8 +160,8 @@ describe("JsonTaskStore", () => {
   describe("setState / getState", () => {
     it("merges partial state", async () => {
       const store = makeStore();
-      await store.setState({ project: "test-project" });
-      expect((await store.getState()).project).toBe("test-project");
+      await store.setState({ org: "test-project" });
+      expect((await store.getState()).org).toBe("test-project");
     });
   });
 

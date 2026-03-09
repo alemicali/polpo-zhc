@@ -20,7 +20,7 @@ function detectPackageManager(): "pnpm" | "npm" {
  * Get the latest version from the npm registry.
  */
 async function getLatestVersion(): Promise<string> {
-  const res = await fetch("https://registry.npmjs.org/polpo-ai/latest", {
+  const res = await fetch("https://registry.npmjs.org/@polpo-ai%2fpolpo/latest", {
     headers: { Accept: "application/json" },
   });
   if (!res.ok) throw new Error(`Registry returned ${res.status}`);
@@ -59,8 +59,8 @@ export function registerUpdateCommand(program: Command): void {
         const pm = detectPackageManager();
         const cmd =
           pm === "pnpm"
-            ? "pnpm add -g polpo-ai@latest"
-            : "npm install -g polpo-ai@latest";
+            ? "pnpm add -g @polpo-ai/polpo@latest"
+            : "npm install -g @polpo-ai/polpo@latest --force";
 
         console.log(chalk.dim(`\n  Updating via ${pm}...`));
         console.log(chalk.dim(`  $ ${cmd}\n`));

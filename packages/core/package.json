@@ -1,6 +1,6 @@
 {
   "name": "@polpo-ai/core",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "description": "Pure business logic, types, schemas, and store interfaces for the Polpo AI agent orchestration framework",
   "type": "module",
   "main": "dist/index.js",

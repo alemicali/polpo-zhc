@@ -63,7 +63,7 @@ export function Header() {
         <h2 className="text-lg font-bold tracking-tight">{title}</h2>
         <div className="h-4 w-px bg-border/60" />
         <span className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground/60">
-          {info?.project ?? "Polpo"}
+          {info?.org ?? "Polpo"}
         </span>
       </div>
 

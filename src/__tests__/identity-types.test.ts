@@ -14,7 +14,7 @@ function writeConfig(config: object): string {
 
 function baseConfig(agentOverrides: object = {}) {
   return {
-    project: "identity-test",
+    org: "identity-test",
     teams: [{
       name: "test-team",
       agents: [{ name: "agent-1", ...agentOverrides }],
@@ -131,7 +131,7 @@ describe("Config parsing — identity, responsibilities, vault", () => {
 
   it("parses reportsTo", async () => {
     const workDir = writeConfig({
-      project: "identity-test",
+      org: "identity-test",
       teams: [{
         name: "test-team",
         agents: [

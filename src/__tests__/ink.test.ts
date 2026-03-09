@@ -220,14 +220,14 @@ describe("validateInkAgent", () => {
 describe("validateInkCompany", () => {
   it("validates a correct company config", () => {
     const result = validateInkCompany({
-      project: "my-saas",
+      org: "my-saas",
       teams: [{ name: "dev", agents: [] }],
       settings: {},
     });
     expect(result.valid).toBe(true);
   });
 
-  it("rejects missing project", () => {
+  it("rejects missing org", () => {
     const result = validateInkCompany({
       teams: [],
     });
@@ -236,7 +236,7 @@ describe("validateInkCompany", () => {
 
   it("accepts legacy team field", () => {
     const result = validateInkCompany({
-      project: "my-saas",
+      org: "my-saas",
       team: { name: "dev", agents: [] },
     });
     expect(result.valid).toBe(true);
@@ -244,7 +244,7 @@ describe("validateInkCompany", () => {
 
   it("warns on agents with systemPrompt", () => {
     const result = validateInkCompany({
-      project: "my-saas",
+      org: "my-saas",
       teams: [{
         name: "dev",
         agents: [{
@@ -326,7 +326,7 @@ describe("discoverInkPackages", () => {
     writeFileSync(
       join(companyDir, "polpo.json"),
       JSON.stringify({
-        project: "saas-startup",
+        org: "saas-startup",
         teams: [{
           name: "engineering",
           agents: [
@@ -376,7 +376,7 @@ describe("discoverInkPackages", () => {
     writeFileSync(
       join(companyDir, "polpo.json"),
       JSON.stringify({
-        project: "my-startup",
+        org: "my-startup",
         teams: [{ name: "team", agents: [] }],
         settings: {},
       }),

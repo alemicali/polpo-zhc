@@ -1084,7 +1084,7 @@ export function useAsyncAction<T extends unknown[]>(
 
 export function useProjectInfo() {
   const { client } = usePolpo();
-  const [info, setInfo] = useState<{ project: string; version?: string } | null>(null);
+  const [info, setInfo] = useState<{ org: string; version?: string } | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -1095,9 +1095,9 @@ export function useProjectInfo() {
       client.getHealth().catch(() => null),
     ]).then(([state, health]) => {
       if (cancelled) return;
-      const project = state?.project;
-      if (project) {
-        setInfo({ project, version: health?.version });
+      const org = state?.org;
+      if (org) {
+        setInfo({ org, version: health?.version });
       }
     }).finally(() => {
       if (!cancelled) setLoading(false);

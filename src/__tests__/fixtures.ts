@@ -6,7 +6,7 @@ import { assertValidTransition } from "../core/state-machine.js";
 
 export class InMemoryTaskStore implements TaskStore {
   private state: PolpoState = {
-    project: "",
+    org: "",
     teams: [{ name: "", agents: [] }],
     tasks: [],
     processes: [],
