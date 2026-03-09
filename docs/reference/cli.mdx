@@ -500,6 +500,58 @@ polpo skills orchestrator remove <name> [-d <path>]
 
 ---
 
+## polpo ink
+
+Manage the [Ink Hub](/features/ink) — install, list, update, and remove packages from git-native registries.
+
+### ink add
+
+Install packages from a registry source.
+
+```bash
+polpo ink add <source> [-d <path>] [-y] [--list]
+```
+
+`<source>` can be an `owner/repo` shorthand, a full GitHub URL, or a local path.
+
+| Flag | Description |
+|------|-------------|
+| `-y, --yes` | Skip confirmation prompts |
+| `--list` | List available packages without installing |
+
+### ink list
+
+List installed packages from `ink.lock`.
+
+```bash
+polpo ink list [-d <path>]
+polpo ink ls          # alias
+```
+
+### ink remove
+
+Remove an installed registry and all its packages.
+
+```bash
+polpo ink remove <source> [-d <path>]
+polpo ink rm <source> # alias
+```
+
+### ink update
+
+Update installed registries to latest (pulls, re-discovers, shows diff).
+
+```bash
+polpo ink update [source] [-d <path>] [-y]
+```
+
+| Flag | Description |
+|------|-------------|
+| `[source]` | Update a specific registry (default: all) |
+| `-y, --yes` | Skip confirmation prompts |
+
+---
+
 ## polpo auth
 
 Manage OAuth authentication for LLM providers.

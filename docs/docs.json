@@ -112,6 +112,12 @@
             ]
           },
           {
+            "group": "Sharing & Registry",
+            "pages": [
+              "features/ink"
+            ]
+          },
+          {
             "group": "Mission Execution",
             "pages": [
               "features/playbooks",
