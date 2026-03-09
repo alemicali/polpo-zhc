@@ -297,7 +297,7 @@ export function InkPage() {
             </h1>
             <p className="mt-2 text-sm font-mono text-neutral-400 tracking-wide">The Polpo Package Registry</p>
             <p className="mt-3 text-lg text-neutral-500">
-              Discover, share, and install playbooks, agents, and complete company configs — directly into your Polpo instance from any GitHub repo. One command, no publish step required.
+              Discover, share, and install playbooks, agents, and complete company configs — directly into your Polpo instance from any GitHub repo.
             </p>
           </Reveal>
 
