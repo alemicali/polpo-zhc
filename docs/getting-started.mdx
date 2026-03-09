@@ -3,7 +3,7 @@ title: "Quickstart"
 description: "From zero to running agents in under 2 minutes."
 ---
 
-Three commands: install, init, launch. You'll have an AI agent running in your project in under 2 minutes.
+One command. You'll have an AI agent running in your project in under 2 minutes.
 
 {/* TODO: replace with actual screenshot/gif of the TUI in action */}
 <Frame>
@@ -12,17 +12,26 @@ Three commands: install, init, launch. You'll have an AI agent running in your p
 
 <Steps>
 
-1. **Install**
+1. **Run Polpo**
 
    <Tabs>
+     <Tab title="npx (recommended)">
+       ```bash
+       npx polpo-ai
+       ```
+
+       No install needed. This launches the setup wizard and dashboard on `http://localhost:3000`.
+     </Tab>
      <Tab title="npm">
        ```bash
        npm install -g @polpo-ai/polpo
+       polpo
        ```
      </Tab>
      <Tab title="pnpm">
        ```bash
        pnpm add -g @polpo-ai/polpo
+       polpo
        ```
      </Tab>
      <Tab title="Docker">
@@ -33,31 +42,22 @@ Three commands: install, init, launch. You'll have an AI agent running in your p
      </Tab>
    </Tabs>
 
-2. **Init a project**
+2. **Setup wizard**
 
-   ```bash
-   mkdir my-project && cd my-project
-   polpo init
-   ```
-
-   The [setup wizard](/guides/setup) walks you through 4 steps:
+   If no config exists, Polpo opens the setup wizard automatically. It walks you through:
    - **Detect providers** — scans your env for API keys and OAuth profiles
    - **Pick a model** — shows recommended models from your detected providers
    - **Name your team** — creates your first agent with a role
 
    You need at least one API key (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, etc.) or an OAuth login (`polpo auth login`). See [Providers & Models](/models/overview) for 22+ supported providers.
 
-3. **Launch**
+3. **Start working**
 
-   ```bash
-   polpo
-   ```
-
-   You're in the interactive TUI. Type what you need — "create a REST API", "fix the bug in auth.ts", "write tests for the user module" — hit Enter, and the agent does it.
+   You're in the dashboard. Type what you need — "create a REST API", "fix the bug in auth.ts", "write tests for the user module" — hit Enter, and the agent does it.
 
 </Steps>
 
-That's it. One agent, one command, you're live.
+That's it. One command, you're live.
 
 ## Scale up
 

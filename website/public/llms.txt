@@ -6,7 +6,7 @@ Polpo is an autonomous multi-agent orchestrator. It acts as a project manager fo
 
 Key capabilities: code generation, web browsing, email, document generation (PDF, Excel, Word), image/video/audio creation, web search, encrypted credential vault, reusable skills system, cron scheduling, approval gates, and crash-proof detached processes.
 
-Install: `npm install -g @polpo-ai/polpo`
+Install: `npx polpo-ai` (zero-install) or `npm install -g @polpo-ai/polpo` (global)
 
 ## Docs
 

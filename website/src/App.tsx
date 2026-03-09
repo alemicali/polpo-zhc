@@ -115,7 +115,7 @@ function Reveal({
 function InstallBar({ className = "" }: { className?: string }) {
   const [copied, setCopied] = useState(false);
   const copy = () => {
-    navigator.clipboard.writeText("npm install -g @polpo-ai/polpo");
+    navigator.clipboard.writeText("npx polpo-ai");
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -125,7 +125,7 @@ function InstallBar({ className = "" }: { className?: string }) {
       className={`group inline-flex items-center gap-3 rounded-lg border border-neutral-200 bg-neutral-50 px-5 py-3.5 font-mono text-sm transition hover:border-neutral-400 ${className}`}
     >
       <span className="text-neutral-400 select-none">$</span>
-      <code className="text-neutral-900">npm install -g @polpo-ai/polpo</code>
+      <code className="text-neutral-900">npx polpo-ai</code>
       <AnimatePresence mode="wait">
         {copied ? (
           <motion.span
@@ -739,7 +739,7 @@ function FeatureShowcase() {
 
 function DeployOptions() {
   const options: { icon: LucideIcon; title: string; desc: string; link: string }[] = [
-    { icon: Laptop, title: "Laptop", desc: "npm install, done.", link: "https://docs.polpo.sh/install" },
+    { icon: Laptop, title: "Laptop", desc: "npx polpo-ai, done.", link: "https://docs.polpo.sh/install" },
     { icon: Server, title: "VPS / Cloud", desc: "Hetzner, AWS, Railway.", link: "https://docs.polpo.sh/install/hetzner" },
     { icon: Container, title: "Docker", desc: "One-line container.", link: "https://docs.polpo.sh/install#docker" },
     { icon: Smartphone, title: "Mobile", desc: "PWA, monitor anywhere.", link: "https://docs.polpo.sh/install" },
@@ -778,7 +778,7 @@ function DeployOptions() {
 
 function HowItWorks() {
   const steps = [
-    { cmd: "polpo init", note: "Initialize your project" },
+    { cmd: "npx polpo-ai", note: "Setup wizard + dashboard" },
     { cmd: 'polpo mission create "Close $1M in revenue this month"', note: "Describe what you need" },
   ];
   return (
@@ -786,8 +786,8 @@ function HowItWorks() {
       <div className="mx-auto max-w-4xl px-6">
         <Reveal>
           <h2 className="text-center font-display text-3xl font-extrabold tracking-tight text-neutral-950 sm:text-4xl">
-            Two commands.{" "}
-            <span className="text-neutral-400">That's it.</span>
+            One command to start.{" "}
+            <span className="text-neutral-400">Then scale.</span>
           </h2>
         </Reveal>
         <Reveal delay={0.12}>

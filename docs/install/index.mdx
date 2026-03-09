@@ -10,10 +10,17 @@ description: "Install Polpo via npm, Docker, or from source."
 - macOS, Linux, or Windows (WSL2 recommended)
 
 <Note>
-  Run `polpo setup` during init to configure your model and API keys.
+  Run `npx polpo-ai` to start — the setup wizard configures your model and API keys automatically.
 </Note>
 
 <Tabs>
+  <Tab title="npx (recommended)">
+    ```bash
+    npx polpo-ai
+    ```
+
+    No install needed. Polpo starts the server and dashboard on `http://localhost:3000`. If no config exists, it opens the setup wizard automatically.
+  </Tab>
   <Tab title="npm / pnpm">
     ```bash
     npm install -g @polpo-ai/polpo
@@ -28,11 +35,10 @@ description: "Install Polpo via npm, Docker, or from source."
     Then:
 
     ```bash
-    polpo init
     polpo
     ```
 
-    `polpo init` creates the `.polpo/` directory with a default config and team. `polpo` launches the TUI where you can start chatting with Polpo.
+    `polpo` launches the TUI where you can start chatting with Polpo. Use `polpo serve` for the web dashboard.
   </Tab>
   <Tab title="Docker">
     ```bash

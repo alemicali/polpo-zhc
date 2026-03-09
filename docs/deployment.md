@@ -34,7 +34,7 @@ After=network.target
 Type=simple
 User=polpo
 WorkingDirectory=/path/to/project
-ExecStart=/usr/bin/env npx @polpo-ai/polpo serve --dir /path/to/project --port 3000 --api-key YOUR_KEY
+ExecStart=/usr/bin/env npx polpo-ai serve --dir /path/to/project --port 3000 --api-key YOUR_KEY
 Restart=always
 RestartSec=10
 
@@ -91,7 +91,7 @@ Create `~/Library/LaunchAgents/io.polpo.server.plist`:
 - Use Docker for full portability:
 ```dockerfile
 FROM node:20-alpine
-RUN npm i -g @polpo-ai/polpo
+RUN npm i -g polpo-ai
 WORKDIR /app
 CMD [\"npx\", \"polpo-ai\", \"serve\", \"--dir\", \".\", \"--port\", \"3000\"]
 ```

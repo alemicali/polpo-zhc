@@ -31,7 +31,7 @@ AI agents are great at execution — terrible at finishing real work autonomousl
 
 **Polpo gives you an AI company.** Describe what you need and walk away. Polpo assembles the right agents, plans the work, checks every result, retries what's broken, and escalates what it can't fix. It reaches you on Telegram, Slack, or email — only when it matters.
 
-One `npm install`, no hosted platform, no vendor lock-in. Your laptop, your API keys, your rules.
+One `npx` command, no hosted platform, no vendor lock-in. Your laptop, your API keys, your rules.
 
 ## How Polpo is different
 
@@ -51,26 +51,24 @@ One `npm install`, no hosted platform, no vendor lock-in. Your laptop, your API 
 
 ## Installation
 
-### One-line install (recommended)
-
-**macOS / Linux / WSL:**
+### Zero-install (recommended)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/lumea-labs/polpo/main/install/install.sh | bash
+npx polpo-ai
 ```
 
-**Windows (PowerShell):**
+That's it. No global install needed. The setup wizard walks you through API keys, model selection, and team creation — then launches the dashboard.
 
-```powershell
-irm https://raw.githubusercontent.com/lumea-labs/polpo/main/install/install.ps1 | iex
-```
-
-The installer detects your platform, ensures Node.js >= 18 is available, and installs Polpo globally.
-
-### Manual install
+### Global install
 
 ```bash
 npm install -g @polpo-ai/polpo    # or: pnpm add -g @polpo-ai/polpo
+```
+
+### One-line installer (macOS / Linux / WSL)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/lumea-labs/polpo/main/install/install.sh | bash
 ```
 
 ### Docker
@@ -81,18 +79,15 @@ docker run -it -p 3000:3000 -v $(pwd):/workspace lumea-labs/polpo
 
 ## Quick Start
 
-### Chat with an agent
-
 ```bash
-polpo init && polpo
+npx polpo-ai
 ```
 
-The setup wizard detects your API keys, picks a model, and creates your first agent. Then you're in the interactive TUI — type what you need, hit Enter, and the agent does it.
+The setup wizard detects your API keys, picks a model, and creates your first agent. Then you're in the dashboard — type what you need, hit Enter, and the agent does it.
 
 ### Orchestrate a team
 
 ```bash
-polpo init                          # Set up project, agents, and roles
 polpo mission create "Close $1M in revenue this month"
 ```
 
