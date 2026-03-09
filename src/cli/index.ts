@@ -188,12 +188,75 @@ const LOGO_CENTER = () => _buildLogo(true);
 
 const LOGO_MINI = `  ${chalk.bold.white("🐙 P O L P O")}  `;
 
+// ── Default action: start server + dashboard ────────────────────────
+const serveAction = async (opts: any) => {
+    console.log(LOGO);
+    const { PolpoServer } = await import("../server/index.js");
+
+    const workDir = resolve(opts.dir);
+    const port = parseInt(opts.port, 10);
+
+    const apiKeys = opts.apiKey ? [opts.apiKey] : [];
+
+    const corsRaw = opts.corsOrigins ?? process.env.POLPO_CORS_ORIGINS;
+    const corsOrigins = corsRaw
+      ? corsRaw.split(",").map((o: string) => o.trim()).filter(Boolean)
+      : undefined;
+
+    // Check if setup is needed
+    const configPath = resolve(workDir, ".polpo", "polpo.json");
+    const needsSetup = opts.setup || !existsSync(configPath);
+
+    if (needsSetup && !opts.setup) {
+      console.log(
+        chalk.yellow.bold("  No configuration found.\n") +
+        chalk.dim("  The dashboard will open in setup mode.\n") +
+        chalk.dim("  You can also run: polpo-ai --setup\n"),
+      );
+    }
+
+    // Security warning: no authentication configured
+    if (!needsSetup && apiKeys.length === 0) {
+      const isExposed = opts.host === "0.0.0.0" || opts.host === "::";
+      console.log(
+        chalk.yellow.bold("\n  WARNING: No API key configured — server has no authentication.\n") +
+        (isExposed
+          ? chalk.yellow(`  The server is binding to ${opts.host} (all interfaces) and is accessible\n`) +
+            chalk.yellow("  from the network. Anyone on your network can control your agents.\n\n") +
+            chalk.yellow("  To secure it, use: ") + chalk.white("polpo-ai --api-key <secret>\n")
+          : chalk.dim("  Server is localhost-only. Use --api-key <secret> for network access.\n")),
+      );
+    }
+
+    const server = new PolpoServer({
+      port,
+      host: opts.host,
+      workDir,
+      apiKeys,
+      corsOrigins,
+      autoStart: !needsSetup,
+      setupMode: needsSetup,
+    });
+
+    await server.start();
+};
+
 const program = new Command();
 
 program
-  .name("polpo")
+  .name("polpo-ai")
   .description("Agent-agnostic framework for orchestrating teams of AI coding agents")
-  .version(PKG_VERSION);
+  .version(PKG_VERSION)
+  .enablePositionalOptions()
+  .passThroughOptions()
+  // Default action: start server + dashboard when no subcommand is given
+  .option("-p, --port <port>", "Port to listen on", String(DEFAULT_SERVER_PORT))
+  .option("-H, --host <host>", "Host to bind to", DEFAULT_SERVER_HOST)
+  .option("-d, --dir <path>", "Working directory", ".")
+  .option("--setup", "Launch the setup wizard in the dashboard")
+  .option("--api-key <key>", "API key for authentication (optional)")
+  .option("--cors-origins <origins>", "Comma-separated allowed CORS origins (env: POLPO_CORS_ORIGINS)")
+  .action(serveAction);
 
 // polpo init
 program
@@ -479,57 +542,22 @@ program
     }
   });
 
-// polpo serve — HTTP API server
+// polpo serve — alias for the default action
 program
   .command("serve")
-  .description("Start the Polpo HTTP API server")
+  .description("Start the Polpo HTTP API server + dashboard")
   .option("-p, --port <port>", "Port to listen on", String(DEFAULT_SERVER_PORT))
   .option("-H, --host <host>", "Host to bind to", DEFAULT_SERVER_HOST)
   .option("-d, --dir <path>", "Working directory", ".")
+  .option("--setup", "Launch the setup wizard in the dashboard")
   .option("--api-key <key>", "API key for authentication (optional)")
   .option("--cors-origins <origins>", "Comma-separated allowed CORS origins (env: POLPO_CORS_ORIGINS)")
-  .action(async (opts) => {
-    console.log(LOGO);
-    const { PolpoServer } = await import("../server/index.js");
+  .action(serveAction);
 
-    const workDir = resolve(opts.dir);
-    const port = parseInt(opts.port, 10);
-
-    const apiKeys = opts.apiKey ? [opts.apiKey] : [];
-
-    const corsRaw = opts.corsOrigins ?? process.env.POLPO_CORS_ORIGINS;
-    const corsOrigins = corsRaw
-      ? corsRaw.split(",").map((o: string) => o.trim()).filter(Boolean)
-      : undefined;
-
-    // Security warning: no authentication configured
-    if (apiKeys.length === 0) {
-      const isExposed = opts.host === "0.0.0.0" || opts.host === "::";
-      console.log(
-        chalk.yellow.bold("\n  WARNING: No API key configured — server has no authentication.\n") +
-        (isExposed
-          ? chalk.yellow(`  The server is binding to ${opts.host} (all interfaces) and is accessible\n`) +
-            chalk.yellow("  from the network. Anyone on your network can control your agents.\n\n") +
-            chalk.yellow("  To secure it, use: ") + chalk.white("polpo serve --api-key <secret>\n")
-          : chalk.dim("  Server is localhost-only. Use --api-key <secret> for network access.\n")),
-      );
-    }
-
-    const server = new PolpoServer({
-      port,
-      host: opts.host,
-      workDir,
-      apiKeys,
-      corsOrigins,
-    });
-
-    await server.start();
-  });
-
-// polpo tui (interactive mode — also the default)
+// polpo tui (interactive terminal mode)
 program
-  .command("tui", { isDefault: true })
-  .description("Launch the interactive TUI (default)")
+  .command("tui")
+  .description("Launch the interactive TUI")
   .option("-d, --dir <path>", "Working directory", ".")
   .action(async (opts) => {
     const dir = resolve(opts.dir);

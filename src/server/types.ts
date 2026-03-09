@@ -104,4 +104,6 @@ export interface ServerConfig {
   corsOrigins?: string[];
   /** Start the supervisor loop on server start. Default: true. */
   autoStart?: boolean;
+  /** Start in setup mode (no config required, serves setup wizard). Default: false. */
+  setupMode?: boolean;
 }

@@ -1,6 +1,6 @@
 {
   "name": "@polpo-ai/polpo",
-  "version": "0.1.10",
+  "version": "0.1.14",
   "description": "The open-source platform for zero-human companies",
   "type": "module",
   "main": "dist/index.js",
@@ -24,6 +24,7 @@
     }
   },
   "bin": {
+    "polpo-ai": "dist/cli/index.js",
     "polpo": "dist/cli/index.js"
   },
   "files": [

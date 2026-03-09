@@ -14,9 +14,8 @@ import {
   Workflow,
   Settings2,
   FolderOpen,
-  BookOpen,
-  Package,
-  Github,
+  Store,
+  ExternalLink,
 } from "lucide-react";
 import { usePolpo } from "@polpo-ai/react";
 import { useProjectInfo } from "@/hooks/use-polpo";
@@ -27,7 +26,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 
-type NavItem = { to: string; icon: typeof LayoutDashboard; label: string };
+type NavItem = { to: string; icon: typeof LayoutDashboard; label: string; external?: boolean };
 type NavSection = { section: string; items: NavItem[] };
 
 const nav: NavSection[] = [
@@ -53,6 +52,7 @@ const nav: NavSection[] = [
       { to: "/skills", icon: Sparkles, label: "Skills" },
       { to: "/memory", icon: Brain, label: "Memory" },
       { to: "/playbooks", icon: Workflow, label: "Playbooks" },
+      { to: "https://polpo.sh/ink", icon: Store, label: "Polpo Ink Hub", external: true },
     ],
   },
   {
@@ -132,7 +132,29 @@ const PendingBadge = memo(function PendingBadge({ collapsed }: { collapsed: bool
 
 // ── Nav item variants ──
 
-function NavItemCollapsed({ to, icon: Icon, label }: NavItem) {
+function NavItemCollapsed({ to, icon: Icon, label, external }: NavItem) {
+  if (external) {
+    return (
+      <Tooltip delayDuration={0}>
+        <TooltipTrigger asChild>
+          <div>
+            <a
+              href={to}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center justify-center h-10 w-10 rounded-lg transition-all duration-200 text-muted-foreground hover:bg-accent/40 hover:text-foreground"
+            >
+              <Icon className="h-[18px] w-[18px]" />
+            </a>
+          </div>
+        </TooltipTrigger>
+        <TooltipContent side="right" className="text-xs font-medium">
+          {label}
+        </TooltipContent>
+      </Tooltip>
+    );
+  }
+
   const linkClasses = ({ isActive }: { isActive: boolean }) =>
     cn(
       "flex items-center rounded-lg transition-all duration-200 group/link relative",
@@ -166,7 +188,22 @@ function NavItemCollapsed({ to, icon: Icon, label }: NavItem) {
   );
 }
 
-function NavItemExpanded({ to, icon: Icon, label }: NavItem) {
+function NavItemExpanded({ to, icon: Icon, label, external }: NavItem) {
+  if (external) {
+    return (
+      <a
+        href={to}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="flex items-center rounded-lg transition-all duration-200 relative gap-3 px-3 py-2.5 text-[13px] font-medium text-muted-foreground hover:bg-accent/40 hover:text-foreground"
+      >
+        <Icon className="h-[18px] w-[18px] shrink-0" />
+        <span className="truncate">{label}</span>
+        <ExternalLink className="h-3 w-3 ml-auto shrink-0 text-muted-foreground/40" />
+      </a>
+    );
+  }
+
   const linkClasses = ({ isActive }: { isActive: boolean }) =>
     cn(
       "flex items-center rounded-lg transition-all duration-200 group/link relative",
@@ -285,61 +322,6 @@ export function Sidebar() {
           </div>
         ))}
       </nav>
-
-      {/* External links */}
-      <div
-        className={cn(
-          "border-t border-border/40",
-          collapsed ? "py-2 flex flex-col items-center gap-1" : "px-4 py-2 flex items-center gap-1"
-        )}
-      >
-        {collapsed ? (
-          <>
-            {[
-              { href: "https://docs.polpo.sh", icon: BookOpen, label: "Docs" },
-              { href: "https://polpo.sh/ink", icon: Package, label: "Ink Hub" },
-              { href: "https://github.com/lumea-labs/polpo", icon: Github, label: "GitHub" },
-            ].map(({ href, icon: Icon, label }) => (
-              <Tooltip key={href} delayDuration={0}>
-                <TooltipTrigger asChild>
-                  <a
-                    href={href}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground/50 hover:text-foreground hover:bg-accent/40 transition-all"
-                  >
-                    <Icon className="h-3.5 w-3.5" />
-                  </a>
-                </TooltipTrigger>
-                <TooltipContent side="right" className="text-xs">{label}</TooltipContent>
-              </Tooltip>
-            ))}
-          </>
-        ) : (
-          <>
-            {[
-              { href: "https://docs.polpo.sh", icon: BookOpen, label: "Docs" },
-              { href: "https://polpo.sh/ink", icon: Package, label: "Ink Hub" },
-              { href: "https://github.com/lumea-labs/polpo", icon: Github, label: "GitHub" },
-            ].map(({ href, icon: Icon, label }) => (
-              <Tooltip key={href} delayDuration={0}>
-                <TooltipTrigger asChild>
-                  <a
-                    href={href}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex h-7 items-center gap-2 rounded-lg px-2 text-xs text-muted-foreground/50 hover:text-foreground hover:bg-accent/40 transition-all"
-                  >
-                    <Icon className="h-3.5 w-3.5" />
-                    <span>{label}</span>
-                  </a>
-                </TooltipTrigger>
-                <TooltipContent side="top" className="text-xs">{label}</TooltipContent>
-              </Tooltip>
-            ))}
-          </>
-        )}
-      </div>
 
       {/* Footer — connection + project */}
       <div

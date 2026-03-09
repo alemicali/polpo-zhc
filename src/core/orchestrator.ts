@@ -138,6 +138,13 @@ export class Orchestrator extends TypedEmitter {
   getWhatsAppStore(): WhatsAppStore | undefined { return this.whatsappStore; }
   getWhatsAppBridge(): WhatsAppBridge | undefined { return this.whatsappBridge; }
 
+  /** Re-point the orchestrator at a different project directory (before init). */
+  resetWorkDir(newWorkDir: string): void {
+    this.workDir = resolve(newWorkDir);
+    this.polpoDir = resolve(this.workDir, ".polpo");
+    this.cachedAgentWorkDir = null;
+  }
+
   constructor(workDirOrOptions?: string | OrchestratorOptions) {
     super();
     if (typeof workDirOrOptions === "string" || workDirOrOptions === undefined) {

@@ -1,5 +1,5 @@
 import { useLocation } from "react-router-dom";
-import { Sun, Moon, Monitor, MessageCircle } from "lucide-react";
+import { Sun, Moon, Monitor, MessageCircle, Github, BookOpen } from "lucide-react";
 import { useProjectInfo } from "@/hooks/use-polpo";
 import { useSidebarOpen, sidebarActions } from "@/hooks/chat-context";
 import { Button } from "@/components/ui/button";
@@ -69,6 +69,36 @@ export function Header() {
 
       {/* Actions */}
       <div className="flex items-center gap-2">
+        {/* Documentation */}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <a
+              href="https://docs.polpo.sh"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-all"
+            >
+              <BookOpen className="h-4 w-4" />
+              <span className="sr-only">Documentation</span>
+            </a>
+          </TooltipTrigger>
+          <TooltipContent side="bottom" className="text-xs">Documentation</TooltipContent>
+        </Tooltip>
+        {/* GitHub */}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <a
+              href="https://github.com/lumea-labs/polpo"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-all"
+            >
+              <Github className="h-4 w-4" />
+              <span className="sr-only">GitHub</span>
+            </a>
+          </TooltipTrigger>
+          <TooltipContent side="bottom" className="text-xs">GitHub</TooltipContent>
+        </Tooltip>
         {/* Theme toggle */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>

@@ -11,6 +11,7 @@ import { authMiddleware } from "./middleware/auth.js";
 import { errorMiddleware } from "./middleware/error.js";
 import { rateLimitMiddleware } from "./middleware/rate-limit.js";
 import { healthRoutes } from "./routes/health.js";
+import { setupRoutes } from "./routes/setup.js";
 import { taskRoutes } from "./routes/tasks.js";
 import { missionRoutes } from "./routes/missions.js";
 import { agentRoutes } from "./routes/agents.js";
@@ -36,9 +37,18 @@ export type ServerEnv = {
   };
 };
 
+/** Shared mutable state between app and server — allows setup→ready transition */
+export interface ServerState {
+  setupMode: boolean;
+}
+
 export interface AppOptions {
   apiKeys?: string[];
   corsOrigins?: string[];
+  setupMode?: boolean;
+  workDir?: string;
+  serverState?: ServerState;
+  onSetupComplete?: (workDir: string) => Promise<void>;
 }
 
 /**
@@ -50,7 +60,9 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
 
   // Global middleware
   app.use("*", errorMiddleware());
-  app.use("*", rateLimitMiddleware());
+  // Rate limit API routes only (not static assets)
+  app.use("/api/*", rateLimitMiddleware());
+  app.use("/v1/*", rateLimitMiddleware());
 
   const corsExposeHeaders = ["x-session-id"];
   if (opts?.corsOrigins && opts.corsOrigins.length > 0) {
@@ -71,6 +83,18 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
   // Health (no auth)
   app.route("/api/v1/health", healthRoutes());
 
+  // Shared state for setup→ready transition
+  const serverState = opts?.serverState ?? { setupMode: !!opts?.setupMode };
+
+  // Setup mode indicator — the UI checks this to redirect to /setup
+  // Must read serverState dynamically so it reflects completeSetup() flipping it to false
+  app.get("/api/v1/setup-mode", (c) => c.json({ ok: true, data: { setupMode: serverState.setupMode } }));
+
+  // Setup routes (no auth — used by setup wizard)
+  if (opts?.workDir) {
+    app.route("/api/v1/setup", setupRoutes(opts.workDir, opts.onSetupComplete));
+  }
+
   // OpenAI-compatible chat completions
   app.route("/v1/chat/completions", completionRoutes(orchestrator, opts?.apiKeys));
 
@@ -80,13 +104,16 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     authed.use("*", authMiddleware(opts.apiKeys));
   }
 
-  // Inject single orchestrator into all routes
+  // Gate: if still in setup mode, return 503 for orchestrator routes
   authed.use("*", async (c, next) => {
+    if (serverState.setupMode) {
+      return c.json({ ok: false, error: "Server is in setup mode. Complete setup first." }, 503);
+    }
     c.set("orchestrator", orchestrator);
     return next();
   });
 
-  // Mount all routes directly (no project prefix)
+  // Mount all routes (always — gated by middleware above)
   authed.route("/tasks", taskRoutes());
   authed.route("/missions", missionRoutes());
   authed.route("/agents", agentRoutes());
