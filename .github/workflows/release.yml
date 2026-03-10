@@ -100,10 +100,12 @@ jobs:
 
       # 1. Build the TypeScript source (needed for sidecar compilation)
       - name: Build workspace dependencies
-        run: pnpm --filter @polpo-ai/core build && pnpm --filter @polpo-ai/drizzle build
-
-      - name: Build TypeScript
-        run: ./node_modules/.bin/tsc
+        run: |
+          pnpm --filter @polpo-ai/core build
+          pnpm --filter @polpo-ai/drizzle build
+          ./node_modules/.bin/tsc
+          pnpm --filter @polpo-ai/client build
+          pnpm --filter @polpo-ai/react build
         shell: bash
 
       # 2. Build the sidecar server binary with Bun
