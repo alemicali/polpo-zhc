@@ -1,12 +1,8 @@
 import { existsSync } from "node:fs";
-import { exec } from "node:child_process";
-import { resolve, basename, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
-import { platform } from "node:os";
+import { resolve, basename } from "node:path";
 import { serve } from "@hono/node-server";
 import { createApp } from "./app.js";
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
 import { Orchestrator } from "../core/orchestrator.js";
 import { SSEBridge } from "./sse-bridge.js";
 import type { Team } from "../core/types.js";
@@ -93,26 +89,11 @@ export class PolpoServer {
     });
 
     const base = `http://${this.config.host}:${this.config.port}`;
-    const uiAvailable = existsSync(resolve(__dirname, "..", "..", "ui", "dist", "index.html"));
 
     console.log(`\n  Listening  ${base}`);
     console.log(`  WorkDir    ${workDir}`);
     console.log(`  API        ${base}/api/v1/health`);
-    if (uiAvailable) {
-      console.log(`  Dashboard  ${base}`);
-      if (!hasConfig) {
-        console.log(`  Setup      ${base}/setup`);
-      }
-    } else {
-      console.log(`  Dashboard  not found (run 'pnpm build:ui' to enable)`);
-    }
     console.log();
-
-    // Auto-open browser
-    if (uiAvailable) {
-      const openCmd = platform() === "darwin" ? "open" : platform() === "win32" ? "start" : "xdg-open";
-      exec(`${openCmd} ${base}`, () => { /* ignore errors — best effort */ });
-    }
 
     // Signal handlers for graceful shutdown
     const onSignal = () => { this.stop(); };
