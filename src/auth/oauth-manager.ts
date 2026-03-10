@@ -23,8 +23,8 @@ import {
   refreshGoogleCloudToken,
   refreshAntigravityToken,
   getOAuthProvider,
-  type OAuthCredentials,
-} from "@mariozechner/pi-ai";
+} from "@mariozechner/pi-ai/oauth";
+import type { OAuthCredentials } from "@mariozechner/pi-ai";
 import type { OAuthProviderName, OAuthProfile } from "./types.js";
 import {
   profileId,

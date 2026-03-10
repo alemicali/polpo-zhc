@@ -1119,18 +1119,30 @@ export function useConfig() {
   const [config, setConfig] = useState<PolpoConfig | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const initialLoadDone = useRef(false);
 
-  const fetch = useCallback(() => {
-    setIsLoading(true);
+  const refetch = useCallback(async () => {
+    // Only show full loading spinner on initial load, not on refetch
+    if (!initialLoadDone.current) setIsLoading(true);
     setError(null);
-    client
-      .getConfig()
-      .then((cfg) => setConfig(cfg))
-      .catch((e) => setError((e as Error).message))
-      .finally(() => setIsLoading(false));
+    try {
+      const cfg = await client.getConfig();
+      setConfig(cfg);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setIsLoading(false);
+      initialLoadDone.current = true;
+    }
   }, [client]);
 
-  useEffect(() => { fetch(); }, [fetch]);
+  /** Optimistically set config without fetching (avoids extra network round-trip). */
+  const setOptimistic = useCallback((cfg: PolpoConfig) => {
+    setConfig(cfg);
+    setError(null);
+  }, []);
 
-  return { config, isLoading, error, refetch: fetch };
+  useEffect(() => { refetch(); }, [refetch]);
+
+  return { config, isLoading, error, refetch, setOptimistic };
 }

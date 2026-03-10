@@ -2,10 +2,12 @@
  * Polpo LLM abstraction — multi-provider model resolution, streaming, cost tracking,
  * and provider-level failover built on top of pi-ai.
  *
- * Supports all 22 pi-ai providers out-of-the-box plus custom OpenAI/Anthropic-compatible
+ * Supports all 23 pi-ai providers out-of-the-box plus custom OpenAI/Anthropic-compatible
  * endpoints via ProviderConfig.
  */
 
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   getModel,
   getModels,
@@ -26,7 +28,7 @@ import type { ProviderConfig, ModelConfig, ModelAllowlistEntry, ReasoningLevel }
 /**
  * Prefix-based inference map for bare model IDs (without provider prefix).
  * Used ONLY when the user writes "claude-opus-4-6" instead of "anthropic:claude-opus-4-6".
- * All 22 pi-ai providers are supported — this map covers the most common prefixes.
+ * All 23 pi-ai providers are supported — this map covers the most common prefixes.
  */
 const PREFIX_MAP: [string, KnownProvider][] = [
   // Anthropic
@@ -87,6 +89,7 @@ export const PROVIDER_ENV_MAP: Record<string, string> = {
   "minimax-cn": "MINIMAX_CN_API_KEY",
   "huggingface": "HF_TOKEN",
   "opencode": "OPENCODE_API_KEY",
+  "opencode-go": "OPENCODE_API_KEY",
   "kimi-coding": "KIMI_API_KEY",
   "azure-openai-responses": "AZURE_OPENAI_API_KEY",
   "github-copilot": "COPILOT_GITHUB_TOKEN",
@@ -452,12 +455,18 @@ export function validateProviderKeys(
  * Used by the sync validation path so OAuth-based providers (openai-codex,
  * github-copilot, anthropic, etc.) aren't rejected before spawn.
  *
- * Reads the auth-profiles.json file directly to avoid async module imports.
+ * Reads auth-profiles.json directly to stay synchronous in ESM context.
  */
 function hasOAuthProfiles(provider: string): boolean {
   try {
-    const { hasOAuthProfilesForProvider } = require("../setup/providers.js");
-    return hasOAuthProfilesForProvider(provider);
+    const home = process.env.HOME || process.env.USERPROFILE || "";
+    const profilePath = join(home, ".polpo", "auth-profiles.json");
+    if (!existsSync(profilePath)) return false;
+    const data = JSON.parse(readFileSync(profilePath, "utf-8"));
+    if (!data?.profiles) return false;
+    return Object.values(data.profiles).some(
+      (p: any) => p.provider === provider,
+    );
   } catch {
     return false;
   }

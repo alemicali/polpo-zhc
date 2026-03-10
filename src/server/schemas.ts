@@ -206,6 +206,19 @@ export const UpdateMissionNotificationsSchema = z.object({
   notifications: ScopedNotificationRulesSchema.nullable(),
 });
 
+// ── Settings schema ───────────────────────────────────────────────────
+
+const ModelConfigSchema = z.object({
+  primary: z.string().optional(),
+  fallbacks: z.array(z.string()).optional(),
+});
+
+export const UpdateSettingsSchema = z.object({
+  orchestratorModel: z.union([z.string(), ModelConfigSchema]).optional(),
+  imageModel: z.string().nullable().optional(),
+  reasoning: z.enum(["off", "minimal", "low", "medium", "high", "xhigh"]).optional(),
+});
+
 // ── Agent schemas ─────────────────────────────────────────────────────
 
 const AgentResponsibilitySchema = z.object({
@@ -268,6 +281,39 @@ export const RenameTeamSchema = z.object({
 export const AddTeamSchema = z.object({
   name: z.string().min(1),
   description: z.string().optional(),
+});
+
+// ── Notification channel config schema ─────────────────────────────────
+
+const ChannelGatewaySchema = z.object({
+  dmPolicy: z.enum(["pairing", "allowlist", "open", "disabled"]).optional(),
+  allowFrom: z.array(z.string()).optional(),
+  enableInbound: z.boolean().optional(),
+  sessionIdleMinutes: z.number().int().min(1).optional(),
+}).strict();
+
+export const NotificationChannelConfigSchema = z.object({
+  type: z.enum(["slack", "email", "telegram", "whatsapp", "webhook"]),
+  // Slack
+  webhookUrl: z.string().url().optional(),
+  // Email
+  to: z.array(z.string().email()).optional(),
+  provider: z.string().optional(),
+  from: z.string().optional(),
+  host: z.string().optional(),
+  port: z.number().int().min(1).max(65535).optional(),
+  // Shared
+  apiKey: z.string().optional(),
+  // Telegram
+  botToken: z.string().optional(),
+  chatId: z.string().optional(),
+  // WhatsApp
+  profileDir: z.string().optional(),
+  // Webhook
+  url: z.string().url().optional(),
+  headers: z.record(z.string(), z.string()).optional(),
+  // Gateway
+  gateway: ChannelGatewaySchema.optional(),
 });
 
 // ── Direct notification schema ─────────────────────────────────────────

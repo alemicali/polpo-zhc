@@ -25,7 +25,7 @@ const listProvidersRoute = createRoute({
             ok: z.boolean(),
             data: z.array(z.object({
               name: z.string(),
-              envVar: z.string(),
+              envVar: z.string().optional(),
               hasKey: z.boolean(),
               source: z.enum(["env", "oauth", "none"]),
             })),
@@ -281,6 +281,42 @@ const deleteApiKeyRoute = createRoute({
   },
 });
 
+const disconnectRoute = createRoute({
+  method: "delete",
+  path: "/{name}/disconnect",
+  tags: ["Providers"],
+  summary: "Disconnect a provider — removes API key and OAuth profiles",
+  request: {
+    params: z.object({ name: z.string() }),
+    body: {
+      content: {
+        "application/json": {
+          schema: z.object({ workDir: z.string().optional() }).optional(),
+        },
+      },
+      required: false,
+    },
+  },
+  responses: {
+    200: {
+      content: {
+        "application/json": {
+          schema: z.object({ ok: z.boolean(), data: z.object({ message: z.string() }) }),
+        },
+      },
+      description: "Provider disconnected",
+    },
+    400: {
+      content: {
+        "application/json": {
+          schema: z.object({ ok: z.boolean(), error: z.string() }),
+        },
+      },
+      description: "Unknown provider",
+    },
+  },
+});
+
 // ── OAuth flow state ────────────────────────────────────────────────
 
 interface OAuthFlowState {
@@ -452,6 +488,39 @@ export function providerRoutes(polpoDir: string): OpenAPIHono {
     removeFromEnvFile(targetDir, envVar);
 
     return c.json({ ok: true, data: { message: `${envVar} removed` } });
+  });
+
+  // DELETE /providers/:name/disconnect — remove env key + OAuth profiles
+  app.openapi(disconnectRoute, async (c: any) => {
+    const { name } = c.req.valid("param");
+    let bodyWorkDir: string | undefined;
+    try {
+      const body = c.req.valid("json");
+      bodyWorkDir = body?.workDir;
+    } catch { /* no body is fine for DELETE */ }
+
+    const actions: string[] = [];
+
+    // Remove env var from process + .env file
+    const envVar = PROVIDER_ENV_MAP[name];
+    if (envVar && process.env[envVar]) {
+      delete process.env[envVar];
+      const targetDir = bodyWorkDir ? resolve(bodyWorkDir, ".polpo") : polpoDir;
+      removeFromEnvFile(targetDir, envVar);
+      actions.push("API key removed");
+    }
+
+    // Remove OAuth profiles for this provider (exact name match — no mapping needed)
+    try {
+      const { deleteProviderProfiles } = await import("../../auth/store.js");
+      const removed = deleteProviderProfiles(name);
+      if (removed > 0) actions.push(`${removed} OAuth profile(s) removed`);
+    } catch { /* auth module not available */ }
+
+    return c.json({
+      ok: true,
+      data: { message: actions.length > 0 ? actions.join(", ") : "No credentials found" },
+    });
   });
 
   return app;

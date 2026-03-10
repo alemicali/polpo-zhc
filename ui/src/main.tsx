@@ -1,6 +1,6 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { BrowserRouter } from "react-router-dom";
+import { BrowserRouter, HashRouter } from "react-router-dom";
 import { PolpoProvider } from "@polpo-ai/react";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "@/components/ui/sonner";
@@ -9,9 +9,13 @@ import { App } from "./app";
 import { config } from "./lib/config";
 import "./index.css";
 
+// Use HashRouter for Electron (file:// protocol), BrowserRouter for web
+const isFileProtocol = window.location.protocol === "file:";
+const Router = isFileProtocol ? HashRouter : BrowserRouter;
+
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <BrowserRouter>
+    <Router>
       <PolpoProvider
         baseUrl={config.baseUrl}
         apiKey={config.apiKey}
@@ -23,6 +27,6 @@ createRoot(document.getElementById("root")!).render(
           </TooltipProvider>
         </ChatProvider>
       </PolpoProvider>
-    </BrowserRouter>
+    </Router>
   </StrictMode>
 );

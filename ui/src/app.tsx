@@ -39,21 +39,23 @@ function SetupModeRedirect({ children }: { children: React.ReactNode }) {
       setState("ready");
       return;
     }
+    setState("loading");
     fetch(`${config.baseUrl}/api/v1/config/status`)
       .then((r) => r.json())
       .then((r) => {
         if (r.ok && !r.data.initialized) {
-          setState("setup");
           navigate("/setup", { replace: true });
+          // Don't set ready — wait for location to change to /setup,
+          // which re-triggers this effect and hits the early return above.
         } else {
           setState("ready");
         }
       })
       .catch(() => { setState("ready"); });
-  }, []);
+  }, [location.pathname]);
 
-  // Block all rendering until we know the mode — prevents dashboard API calls
-  if (state === "loading" || state === "setup") {
+  // Block rendering until we know the mode — prevents dashboard API calls
+  if (state === "loading") {
     return (
       <div className="flex items-center justify-center min-h-screen">
         <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />

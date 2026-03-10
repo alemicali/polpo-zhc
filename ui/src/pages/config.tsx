@@ -1,7 +1,21 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
 import {
   Tooltip,
   TooltipContent,
@@ -40,13 +54,41 @@ import {
   Users,
   Clock,
   AlertTriangle,
+  LogIn,
+  Keyboard,
+   Pencil,
+  X,
   type LucideIcon,
 } from "lucide-react";
 import { useConfig } from "@/hooks/use-polpo";
 import { useAgents, useAuthStatus, useOrchestratorSkills } from "@polpo-ai/react";
-import type { CustomModelDef, ProviderConfig, AuthProfileMeta, ProviderAuthInfo, SkillInfo, PolpoSettings, AuthStatusResponse } from "@polpo-ai/react";
+import type { CustomModelDef, ProviderConfig, AuthProfileMeta, ProviderAuthInfo, SkillInfo, PolpoSettings, AuthStatusResponse, ReasoningLevel, NotificationChannelType, NotificationChannelConfig } from "@polpo-ai/react";
 import { cn } from "@/lib/utils";
+import { Input } from "@/components/ui/input";
 import { JsonBlock } from "@/components/json-block";
+import { config as appConfig } from "@/lib/config";
+import { AuthStep, OAuthFlow, ApiKeyStep } from "@/components/shared/provider-auth";
+import type { Provider as AuthProvider, OAuthProvider } from "@/components/shared/provider-auth";
+import { ConfirmDialog } from "@/components/shared/confirm-dialog";
+import { ModelPicker } from "@/components/shared/model-picker";
+
+// ── API helper (same pattern as setup.tsx) ──
+
+const api = async (path: string, init?: RequestInit) => {
+  try {
+    const headers: Record<string, string> = { ...init?.headers as Record<string, string> };
+    // Only set Content-Type for requests with a body
+    if (init?.body) headers["Content-Type"] = "application/json";
+    const res = await fetch(`${appConfig.baseUrl}/api/v1${path}`, {
+      ...init,
+      headers,
+    });
+    const data = await res.json();
+    return data;
+  } catch {
+    return { ok: false, error: "Could not connect to server" };
+  }
+};
 
 // ── Helpers ──
 
@@ -163,11 +205,14 @@ function StatusDot({ ok, label }: { ok: boolean; label: string }) {
 }
 
 /** Provider card for the unified Models & Providers section */
-function ProviderCard({ name, prov, agentModels, authInfo }: {
+function ProviderCard({ name, prov, agentModels, authInfo, onConnect, onDisconnect, disconnecting }: {
   name: string;
   prov: ProviderConfig;
   agentModels: string[];
   authInfo?: ProviderAuthInfo;
+  onConnect?: (name: string) => void;
+  onDisconnect?: (name: string) => void;
+  disconnecting?: boolean;
 }) {
   const hasEnvKey = authInfo?.hasEnvKey ?? false;
   const hasOAuth = (authInfo?.profiles.length ?? 0) > 0;
@@ -217,6 +262,29 @@ function ProviderCard({ name, prov, agentModels, authInfo }: {
             )}
           </div>
         </div>
+        {/* Inline action button */}
+        {isAuthenticated ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => onDisconnect?.(name)}
+            disabled={disconnecting}
+            className="text-[11px] text-muted-foreground hover:text-destructive hover:bg-destructive/10 h-7 px-2 shrink-0"
+          >
+            {disconnecting ? <Loader2 className="h-3 w-3 animate-spin" /> : "Disconnect"}
+          </Button>
+        ) : (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => onConnect?.(name)}
+            className="text-[11px] h-7 px-2.5 shrink-0"
+          >
+            Connect
+          </Button>
+        )}
       </div>
 
       {/* OAuth profiles */}
@@ -307,217 +375,703 @@ function ProviderCard({ name, prov, agentModels, authInfo }: {
   );
 }
 
-// ── Channel detail components ──
+// ── Channel helpers ──
 
-function ChannelCard({ name, ch }: {
-  name: string;
-  ch: Record<string, unknown>;
+const CHANNEL_META: Record<string, { label: string; icon: LucideIcon; color: string; description: string }> = {
+  telegram: { label: "Telegram", icon: Send, color: "border-l-sky-500", description: "Send notifications to a Telegram chat via bot" },
+  slack:    { label: "Slack", icon: MessageSquare, color: "border-l-green-500", description: "Post to a Slack channel via webhook" },
+  email:    { label: "Email", icon: Mail, color: "border-l-amber-500", description: "Send email via Resend, SendGrid, or SMTP" },
+  webhook:  { label: "Webhook", icon: Link2, color: "border-l-violet-500", description: "POST JSON to any HTTP endpoint" },
+};
+
+const ALL_CHANNEL_TYPES: NotificationChannelType[] = ["telegram", "slack", "email", "webhook"];
+
+/** Default empty config per channel type */
+function defaultChannelConfig(type: NotificationChannelType): NotificationChannelConfig {
+  switch (type) {
+    case "telegram": return { type, botToken: "", chatId: "" };
+    case "slack":    return { type, webhookUrl: "" };
+    case "email":    return { type, provider: "resend", apiKey: "", from: "", to: [] };
+    case "webhook":  return { type, url: "" };
+    default:         return { type };
+  }
+}
+
+/** Form field — label + input */
+function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
+  return (
+    <div className="space-y-1">
+      <label className="text-xs font-medium text-foreground">{label}</label>
+      {children}
+      {hint && <p className="text-[10px] text-muted-foreground leading-tight">{hint}</p>}
+    </div>
+  );
+}
+
+/** Channel config form — renders type-specific fields */
+function ChannelForm({ config, onChange }: {
+  config: NotificationChannelConfig;
+  onChange: (config: NotificationChannelConfig) => void;
 }) {
-  const type = (ch.type as string) ?? "unknown";
-  const gateway = ch.gateway as Record<string, unknown> | undefined;
-
-  const typeColor: Record<string, string> = {
-    telegram: "border-l-sky-500",
-    email: "border-l-amber-500",
-    slack: "border-l-green-500",
-    webhook: "border-l-violet-500",
-  };
-
-  const TypeIcon: Record<string, LucideIcon> = {
-    telegram: Send,
-    email: Mail,
-    slack: MessageSquare,
-    webhook: Link2,
-  };
-
-  const Ic = TypeIcon[type] ?? Bell;
-  const color = typeColor[type] ?? "border-l-zinc-500";
+  const set = (patch: Partial<NotificationChannelConfig>) => onChange({ ...config, ...patch });
 
   return (
-    <Card className={cn("bg-card/80 border-border/40 border-l-2 py-0 gap-0", color)}>
+    <div className="space-y-3">
+      {config.type === "telegram" && (
+        <>
+          <Field label="Bot Token" hint="From @BotFather on Telegram">
+            <Input className="h-8 text-xs font-mono" placeholder="123456:ABC-DEF..." value={config.botToken ?? ""} onChange={(e) => set({ botToken: e.target.value })} />
+          </Field>
+          <Field label="Chat ID" hint="Numeric chat or group ID">
+            <Input className="h-8 text-xs font-mono" placeholder="-1001234567890" value={config.chatId ?? ""} onChange={(e) => set({ chatId: e.target.value })} />
+          </Field>
+        </>
+      )}
+
+      {config.type === "slack" && (
+        <>
+          <Field label="Webhook URL" hint="Slack Incoming Webhook URL">
+            <Input className="h-8 text-xs font-mono" placeholder="https://hooks.slack.com/services/..." value={config.webhookUrl ?? ""} onChange={(e) => set({ webhookUrl: e.target.value })} />
+          </Field>
+          <Field label="API Key" hint="Optional — enables file uploads">
+            <Input className="h-8 text-xs font-mono" placeholder="xoxb-..." value={config.apiKey ?? ""} onChange={(e) => set({ apiKey: e.target.value || undefined })} />
+          </Field>
+        </>
+      )}
+
+      {config.type === "email" && (
+        <>
+          <Field label="Provider">
+            <Select value={config.provider ?? "resend"} onValueChange={(v) => set({ provider: v })}>
+              <SelectTrigger className="h-8 text-xs w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="resend" className="text-xs">Resend</SelectItem>
+                <SelectItem value="sendgrid" className="text-xs">SendGrid</SelectItem>
+                <SelectItem value="smtp" className="text-xs">SMTP</SelectItem>
+              </SelectContent>
+            </Select>
+          </Field>
+          {config.provider !== "smtp" && (
+            <Field label="API Key">
+              <Input className="h-8 text-xs font-mono" placeholder="re_..." value={config.apiKey ?? ""} onChange={(e) => set({ apiKey: e.target.value })} />
+            </Field>
+          )}
+          {config.provider === "smtp" && (
+            <>
+              <Field label="SMTP Host">
+                <Input className="h-8 text-xs font-mono" placeholder="smtp.example.com" value={config.host ?? ""} onChange={(e) => set({ host: e.target.value })} />
+              </Field>
+              <Field label="SMTP Port">
+                <Input className="h-8 text-xs font-mono" type="number" placeholder="587" value={config.port ?? ""} onChange={(e) => set({ port: e.target.value ? Number(e.target.value) : undefined })} />
+              </Field>
+            </>
+          )}
+          <Field label="From Address">
+            <Input className="h-8 text-xs font-mono" placeholder="noreply@example.com" value={config.from ?? ""} onChange={(e) => set({ from: e.target.value })} />
+          </Field>
+          <Field label="Recipients" hint="Comma-separated email addresses">
+            <Input className="h-8 text-xs font-mono" placeholder="alice@example.com, bob@example.com"
+              value={(config.to ?? []).join(", ")}
+              onChange={(e) => set({ to: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) })}
+            />
+          </Field>
+        </>
+      )}
+
+      {config.type === "webhook" && (
+        <>
+          <Field label="URL" hint="JSON POST endpoint">
+            <Input className="h-8 text-xs font-mono" placeholder="https://example.com/webhook" value={config.url ?? ""} onChange={(e) => set({ url: e.target.value })} />
+          </Field>
+          <Field label="Headers" hint="key:value pairs, one per line">
+            <textarea
+              className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-xs font-mono min-h-[56px] resize-y focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              placeholder={"Authorization: Bearer xxx\nX-Custom: value"}
+              value={Object.entries(config.headers ?? {}).map(([k, v]) => `${k}: ${v}`).join("\n")}
+              onChange={(e) => {
+                const headers: Record<string, string> = {};
+                for (const line of e.target.value.split("\n")) {
+                  const idx = line.indexOf(":");
+                  if (idx > 0) headers[line.slice(0, idx).trim()] = line.slice(idx + 1).trim();
+                }
+                set({ headers: Object.keys(headers).length > 0 ? headers : undefined });
+              }}
+            />
+          </Field>
+        </>
+      )}
+    </div>
+  );
+}
+
+/** Interactive channel card with edit / delete / test */
+function ChannelCard({ name, ch, onEdit, onDelete, onTest, deleting, testing, testResult }: {
+  name: string;
+  ch: NotificationChannelConfig;
+  onEdit: () => void;
+  onDelete: () => void;
+  onTest: () => void;
+  deleting?: boolean;
+  testing?: boolean;
+  testResult?: boolean | null;
+}) {
+  const meta = CHANNEL_META[ch.type] ?? { label: ch.type, icon: Bell, color: "border-l-zinc-500" };
+  const Ic = meta.icon;
+  const gateway = ch.gateway;
+
+  return (
+    <Card className={cn("bg-card/80 border-border/40 border-l-2 py-0 gap-0", meta.color)}>
       <CardContent className="pt-3 pb-3 space-y-2.5">
         {/* Header */}
         <div className="flex items-center gap-2">
           <Ic className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
           <span className="text-sm font-semibold flex-1 truncate">{name}</span>
-          <Badge variant="outline" className="text-[10px] shrink-0">{type}</Badge>
-          {Boolean(gateway?.enableInbound) && (
+          <Badge variant="outline" className="text-[10px] shrink-0">{meta.label}</Badge>
+          {gateway?.enableInbound && (
             <Badge variant="secondary" className="text-[10px] shrink-0">
               <Zap className="h-2.5 w-2.5 mr-0.5" /> Inbound
             </Badge>
           )}
         </div>
 
-        {/* Type-specific details */}
-        {type === "telegram" && (
+        {/* Type-specific summary */}
+        {ch.type === "telegram" && (
           <div className="space-y-0.5">
-            <Row label="Bot Token" value={ch.botToken ? "***" : "not set"} mono />
-            <Row label="Chat ID" value={(ch.chatId as string) ?? "not set"} mono />
+            <Row label="Bot Token" value={ch.botToken ? "*** configured" : "not set"} mono />
+            <Row label="Chat ID" value={ch.chatId || "not set"} mono />
           </div>
         )}
-
-        {type === "slack" && (
+        {ch.type === "slack" && (
           <div className="space-y-0.5">
-            <Row label="Webhook URL" value={ch.webhookUrl ? "*** configured" : "not set"} mono />
-            {Boolean(ch.apiKey) && <Row label="Bot Token" value="***" mono />}
-            <StatusDot ok={!!ch.apiKey} label={ch.apiKey ? "File uploads enabled" : "No bot token (text only)"} />
+            <Row label="Webhook" value={ch.webhookUrl ? "*** configured" : "not set"} mono />
+            {ch.apiKey && <StatusDot ok label="File uploads enabled" />}
           </div>
         )}
-
-        {type === "email" && (
+        {ch.type === "email" && (
           <div className="space-y-0.5">
-            <Row label="Provider" value={
-              <Badge variant="secondary" className="text-[10px]">
-                {(ch.provider as string) ?? "resend"}
-              </Badge>
-            } />
-            {Boolean(ch.from) && <Row label="From" value={String(ch.from)} mono />}
-            {(ch.to as string[])?.length > 0 && (
-              <div>
-                <span className="text-[10px] text-muted-foreground">Recipients:</span>
-                <div className="flex flex-wrap gap-1 mt-1">
-                  {(ch.to as string[]).map((email: string) => (
-                    <Badge key={email} variant="outline" className="text-[10px] font-mono">{email}</Badge>
-                  ))}
-                </div>
-              </div>
+            <Row label="Provider" value={<Badge variant="secondary" className="text-[10px]">{ch.provider ?? "resend"}</Badge>} />
+            {ch.from && <Row label="From" value={ch.from} mono />}
+            {(ch.to?.length ?? 0) > 0 && (
+              <Row label="To" value={`${ch.to!.length} recipient${ch.to!.length > 1 ? "s" : ""}`} />
             )}
-            {(ch.provider === "smtp" || Boolean(ch.host)) && (
-              <>
-                {Boolean(ch.host) && <Row label="SMTP Host" value={String(ch.host)} mono />}
-                {Boolean(ch.port) && <Row label="SMTP Port" value={String(ch.port)} mono />}
-              </>
-            )}
-            <StatusDot ok={!!ch.apiKey || !!ch.host} label={ch.apiKey ? "API key configured" : ch.host ? "SMTP configured" : "No credentials"} />
+            <StatusDot ok={!!ch.apiKey || !!ch.host} label={ch.apiKey ? "API key set" : ch.host ? "SMTP configured" : "No credentials"} />
           </div>
         )}
-
-        {type === "webhook" && (
+        {ch.type === "webhook" && (
           <div className="space-y-0.5">
-            {Boolean(ch.url) && <Row label="URL" value={String(ch.url)} mono />}
-            {Boolean(ch.headers) && Object.keys(ch.headers as object).length > 0 && (
-              <div>
-                <span className="text-[10px] text-muted-foreground">Headers:</span>
-                <div className="flex flex-wrap gap-1 mt-1">
-                  {Object.keys(ch.headers as object).map((h: string) => (
-                    <Badge key={h} variant="outline" className="text-[10px] font-mono">{h}</Badge>
-                  ))}
-                </div>
-              </div>
+            <Row label="URL" value={ch.url || "not set"} mono />
+            {ch.headers && Object.keys(ch.headers).length > 0 && (
+              <Row label="Headers" value={`${Object.keys(ch.headers).length} custom`} />
             )}
           </div>
         )}
 
-        {/* Gateway config */}
+        {/* Gateway */}
         {gateway && (
           <div className="pt-2 border-t border-border/20 space-y-0.5">
             <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Gateway</span>
-            <Row label="DM Policy" value={(gateway.dmPolicy as string) ?? "default"} mono />
-            {(gateway.allowFrom as string[])?.length > 0 && (
-              <Row label="Allow From" value={`${(gateway.allowFrom as string[]).length} ID${(gateway.allowFrom as string[]).length > 1 ? "s" : ""}`} />
-            )}
-            {Number(gateway.sessionIdleMinutes) > 0 && (
-              <Row label="Session Idle" value={`${String(gateway.sessionIdleMinutes)}min`} />
-            )}
+            <Row label="DM Policy" value={gateway.dmPolicy ?? "allowlist"} mono />
           </div>
         )}
+
+        {/* Actions */}
+        <div className="flex items-center gap-2 pt-1.5 border-t border-border/20">
+          <Button variant="ghost" size="sm" className="h-7 text-[11px] gap-1 px-2" onClick={onEdit}>
+            <Pencil className="h-3 w-3" /> Edit
+          </Button>
+          <Button variant="ghost" size="sm" className="h-7 text-[11px] gap-1 px-2" onClick={onTest} disabled={testing}>
+            {testing ? <Loader2 className="h-3 w-3 animate-spin" /> : <Activity className="h-3 w-3" />}
+            Test
+            {testResult === true && <span className="text-emerald-500 text-[10px]">OK</span>}
+            {testResult === false && <span className="text-red-500 text-[10px]">Fail</span>}
+          </Button>
+          <div className="flex-1" />
+          <Button variant="ghost" size="sm" className="h-7 text-[11px] px-2 text-muted-foreground hover:text-destructive" onClick={onDelete} disabled={deleting}>
+            {deleting ? <Loader2 className="h-3 w-3 animate-spin" /> : <X className="h-3 w-3" />}
+          </Button>
+        </div>
       </CardContent>
     </Card>
   );
 }
 
-// ── Available notification channel types (all supported) ──
-const ALL_CHANNEL_TYPES: Array<{ type: string; label: string; icon: LucideIcon }> = [
-  { type: "telegram", label: "Telegram", icon: Send },
-  { type: "slack", label: "Slack", icon: MessageSquare },
-  { type: "email", label: "Email", icon: Mail },
-  { type: "webhook", label: "Webhook", icon: Link2 },
+// ── Channels Tab ──
+
+interface ChannelApiAction {
+  path: string;
+  method: string;
+  body?: unknown;
+}
+
+function ChannelsTab({ settings, onUpdateConfig }: {
+  settings: PolpoSettings;
+  onUpdateConfig: (action: ChannelApiAction) => Promise<void>;
+}) {
+  const channels = (settings.notifications?.channels ?? {}) as Record<string, NotificationChannelConfig>;
+
+  // Dialog state
+  const [editOpen, setEditOpen] = useState(false);
+  const [editName, setEditName] = useState("");
+  const [editConfig, setEditConfig] = useState<NotificationChannelConfig>(defaultChannelConfig("telegram"));
+  const [isNew, setIsNew] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  // Delete
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<string | null>(null);
+
+  // Test
+  const [testing, setTesting] = useState<string | null>(null);
+  const [testResults, setTestResults] = useState<Record<string, boolean | null>>({});
+
+  // Add new channel — choose type first
+  const [typePickerOpen, setTypePickerOpen] = useState(false);
+
+  const openEdit = (name: string, config: NotificationChannelConfig) => {
+    setEditName(name);
+    setEditConfig({ ...config });
+    setIsNew(false);
+    setSaveError(null);
+    setEditOpen(true);
+  };
+
+  const openAdd = (type: NotificationChannelType) => {
+    setTypePickerOpen(false);
+    setEditName("");
+    setEditConfig(defaultChannelConfig(type));
+    setIsNew(true);
+    setSaveError(null);
+    setEditOpen(true);
+  };
+
+  const handleSave = async () => {
+    const name = editName.trim();
+    if (!name) { setSaveError("Channel name is required"); return; }
+    if (!/^[a-zA-Z0-9_-]+$/.test(name)) { setSaveError("Name: only letters, numbers, dashes, underscores"); return; }
+    setSaving(true);
+    setSaveError(null);
+    try {
+      await onUpdateConfig({ path: `/${encodeURIComponent(name)}`, method: "PUT", body: editConfig });
+      setEditOpen(false);
+    } catch (e) {
+      setSaveError((e as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!deleteTarget) return;
+    const name = deleteTarget;
+    setDeleteTarget(null);
+    setDeleting(name);
+    try {
+      await onUpdateConfig({ path: `/${encodeURIComponent(name)}`, method: "DELETE" });
+    } finally {
+      setDeleting(null);
+    }
+  };
+
+  const handleTest = async (name: string) => {
+    setTesting(name);
+    setTestResults((prev) => ({ ...prev, [name]: null }));
+    try {
+      const res = await fetch(`${appConfig.baseUrl}/api/v1/config/channels/${encodeURIComponent(name)}/test`, { method: "POST" });
+      const data = await res.json();
+      setTestResults((prev) => ({ ...prev, [name]: data.ok ? data.data.success : false }));
+    } catch {
+      setTestResults((prev) => ({ ...prev, [name]: false }));
+    } finally {
+      setTesting(null);
+    }
+  };
+
+  const configuredTypes = new Set(Object.values(channels).map((c) => c.type));
+  const unconfiguredTypes = ALL_CHANNEL_TYPES.filter((t) => !configuredTypes.has(t));
+
+  return (
+    <div className="space-y-6">
+      {/* Configured channels */}
+      <section>
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+            <Bell className="h-3.5 w-3.5" /> Channels
+          </h3>
+          <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={() => setTypePickerOpen(true)}>
+            <Zap className="h-3 w-3" /> Add channel
+          </Button>
+        </div>
+
+        {Object.keys(channels).length > 0 ? (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+            {Object.entries(channels).map(([name, ch]) => (
+              <ChannelCard
+                key={name}
+                name={name}
+                ch={ch}
+                onEdit={() => openEdit(name, ch)}
+                onDelete={() => setDeleteTarget(name)}
+                onTest={() => handleTest(name)}
+                deleting={deleting === name}
+                testing={testing === name}
+                testResult={testResults[name]}
+              />
+            ))}
+          </div>
+        ) : (
+          <Empty text="No notification channels configured" />
+        )}
+      </section>
+
+      {/* Unconfigured types — quick add */}
+      {unconfiguredTypes.length > 0 && (
+        <section>
+          <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-2 flex items-center gap-1.5">
+            <Zap className="h-3.5 w-3.5" /> Quick Add
+          </h3>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            {unconfiguredTypes.map((type) => {
+              const meta = CHANNEL_META[type];
+              if (!meta) return null;
+              const Icon = meta.icon;
+              return (
+                <button
+                  key={type}
+                  onClick={() => openAdd(type)}
+                  className="flex items-center gap-2.5 rounded-lg border border-dashed border-border/40 bg-muted/10 px-3 py-2.5 hover:border-primary/30 hover:bg-accent/30 transition-colors text-left cursor-pointer"
+                >
+                  <Icon className="h-3.5 w-3.5 text-muted-foreground/50" />
+                  <div>
+                    <span className="text-xs text-muted-foreground/70">{meta.label}</span>
+                    <p className="text-[10px] text-muted-foreground/40">Click to add</p>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
+      {/* ── Type Picker Dialog ── */}
+      <Dialog open={typePickerOpen} onOpenChange={setTypePickerOpen}>
+        <DialogContent className="sm:max-w-md p-0 gap-0 overflow-hidden">
+          <DialogHeader className="px-6 pt-6 pb-0">
+            <DialogTitle className="text-base">Add Notification Channel</DialogTitle>
+            <DialogDescription className="text-xs">Choose a channel type to configure.</DialogDescription>
+          </DialogHeader>
+          <div className="px-6 py-5 space-y-2">
+            {ALL_CHANNEL_TYPES.map((type) => {
+              const meta = CHANNEL_META[type];
+              if (!meta) return null;
+              const Icon = meta.icon;
+              return (
+                <button
+                  key={type}
+                  onClick={() => openAdd(type)}
+                  className="w-full flex items-center gap-4 p-3 rounded-lg border border-border hover:border-primary/30 hover:bg-accent/50 text-left transition-all cursor-pointer"
+                >
+                  <div className={cn("h-10 w-10 rounded-lg flex items-center justify-center shrink-0", meta.color.replace("border-l-", "bg-").replace("500", "500/10"))}>
+                    <Icon className="h-5 w-5 text-muted-foreground" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium">{meta.label}</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">{meta.description}</p>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Edit/Add Channel Dialog ── */}
+      <Dialog open={editOpen} onOpenChange={setEditOpen}>
+        <DialogContent className="sm:max-w-md p-0 gap-0 overflow-hidden">
+          <DialogHeader className="px-6 pt-6 pb-0">
+            <DialogTitle className="text-base">{isNew ? "Add" : "Edit"} {CHANNEL_META[editConfig.type]?.label ?? editConfig.type} Channel</DialogTitle>
+            <DialogDescription className="text-xs">
+              {isNew ? "Configure the channel and give it a unique name." : `Editing channel "${editName}".`}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="px-6 py-5 space-y-4 max-h-[60vh] overflow-y-auto">
+            {isNew && (
+              <Field label="Channel Name" hint="Unique identifier (e.g. slack-team, ops-email)">
+                <Input
+                  className="h-8 text-xs font-mono"
+                  placeholder="my-channel"
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  autoFocus
+                />
+              </Field>
+            )}
+            <ChannelForm config={editConfig} onChange={setEditConfig} />
+            {saveError && (
+              <p className="text-xs text-destructive">{saveError}</p>
+            )}
+          </div>
+          <div className="flex justify-end gap-2 px-6 pb-5">
+            <Button variant="outline" size="sm" onClick={() => setEditOpen(false)} className="text-xs">Cancel</Button>
+            <Button size="sm" onClick={handleSave} disabled={saving} className="text-xs gap-1.5">
+              {saving && <Loader2 className="h-3 w-3 animate-spin" />}
+              {isNew ? "Add Channel" : "Save Changes"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Delete Confirmation ── */}
+      <ConfirmDialog
+        open={!!deleteTarget}
+        onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}
+        title={`Delete "${deleteTarget}"?`}
+        description="This will remove the channel and any rules referencing it may stop working."
+        confirmLabel="Delete"
+        destructive
+        onConfirm={handleDelete}
+      />
+    </div>
+  );
+}
+
+// ── Reasoning level options ──
+const REASONING_LEVELS: { value: ReasoningLevel; label: string; description: string }[] = [
+  { value: "off", label: "Off", description: "Standard mode — no extended thinking" },
+  { value: "minimal", label: "Minimal", description: "Light reasoning pass" },
+  { value: "low", label: "Low", description: "Basic extended thinking" },
+  { value: "medium", label: "Medium", description: "Balanced reasoning depth" },
+  { value: "high", label: "High", description: "Deep analysis — slower, better results" },
+  { value: "xhigh", label: "Extra High", description: "Maximum reasoning — slowest, highest quality" },
 ];
 
 // ── Agent Tab ──
 
-function AgentTab({ settings, primaryModel, fallbackModels }: {
+/** Clickable setting row — label left, current value right, entire row is the click target */
+function SettingRow({ icon: Icon, label, description, value, placeholder, onClick, onClear, saving, disabled }: {
+  icon: LucideIcon;
+  label: string;
+  description?: string;
+  value?: React.ReactNode;
+  placeholder?: string;
+  onClick?: () => void;
+  onClear?: () => void;
+  saving?: boolean;
+  disabled?: boolean;
+}) {
+  return (
+    <div className="group rounded-lg border border-border/40 bg-card/60 hover:border-border/60 transition-colors">
+      <button
+        type="button"
+        onClick={onClick}
+        disabled={disabled || saving}
+        className="w-full flex items-center gap-3 px-4 py-3 text-left cursor-pointer disabled:cursor-default disabled:opacity-60"
+      >
+        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-muted/40 shrink-0">
+          {saving
+            ? <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+            : <Icon className="h-4 w-4 text-muted-foreground" />}
+        </div>
+        <div className="flex-1 min-w-0">
+          <span className="text-xs font-medium text-foreground">{label}</span>
+          {description && (
+            <p className="text-[10px] text-muted-foreground mt-0.5 leading-tight">{description}</p>
+          )}
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          {value ? (
+            <span className="text-xs font-mono text-foreground">{value}</span>
+          ) : (
+            <span className="text-xs text-muted-foreground/50 italic">{placeholder ?? "Not set"}</span>
+          )}
+          <Pencil className="h-3 w-3 text-muted-foreground/40 group-hover:text-muted-foreground transition-colors" />
+        </div>
+      </button>
+      {onClear && value && (
+        <div className="flex justify-end px-4 pb-2 -mt-1">
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); onClear(); }}
+            disabled={saving}
+            className="flex items-center gap-1 text-[10px] text-muted-foreground/60 hover:text-destructive transition-colors cursor-pointer"
+          >
+            <X className="h-2.5 w-2.5" /> Clear
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AgentTab({ settings, primaryModel, fallbackModels, authStatus, onUpdateSettings }: {
   settings: PolpoSettings;
   primaryModel: string | undefined;
   fallbackModels: string[];
+  authStatus: AuthStatusResponse | null | undefined;
+  onUpdateSettings: (patch: { orchestratorModel?: string; imageModel?: string | null; reasoning?: ReasoningLevel }) => Promise<void>;
 }) {
   const { skills, isLoading: skillsLoading } = useOrchestratorSkills();
+  const [reasoningSaving, setReasoningSaving] = useState(false);
+
+  // Model picker dialogs
+  const [orchestratorPickerOpen, setOrchestratorPickerOpen] = useState(false);
+  const [imagePickerOpen, setImagePickerOpen] = useState(false);
+  const [modelSaving, setModelSaving] = useState<"orchestrator" | "image" | null>(null);
+
+  // Active providers (have credentials) — derived from auth status
+  const configuredProviders = authStatus
+    ? Object.entries(authStatus.providers)
+        .filter(([, info]) => info.hasEnvKey || info.profiles.some((p) => p.status === "active"))
+        .map(([name]) => name)
+    : [];
+  const providerSources = authStatus
+    ? Object.fromEntries(
+        Object.entries(authStatus.providers)
+          .filter(([, info]) => info.hasEnvKey || info.profiles.some((p) => p.status === "active"))
+          .map(([name, info]) => [name, info.hasEnvKey ? "env" : "oauth"]),
+      )
+    : {};
+
+  const handleReasoningChange = async (value: string) => {
+    setReasoningSaving(true);
+    try {
+      await onUpdateSettings({ reasoning: value as ReasoningLevel });
+    } finally {
+      setReasoningSaving(false);
+    }
+  };
+
+  const handleOrchestratorModelSelect = async (spec: string) => {
+    setModelSaving("orchestrator");
+    try {
+      await onUpdateSettings({ orchestratorModel: spec });
+      setOrchestratorPickerOpen(false);
+    } finally {
+      setModelSaving(null);
+    }
+  };
+
+  const handleImageModelSelect = async (spec: string) => {
+    setModelSaving("image");
+    try {
+      await onUpdateSettings({ imageModel: spec });
+      setImagePickerOpen(false);
+    } finally {
+      setModelSaving(null);
+    }
+  };
+
+  const handleImageModelClear = async () => {
+    setModelSaving("image");
+    try {
+      await onUpdateSettings({ imageModel: null });
+    } finally {
+      setModelSaving(null);
+    }
+  };
+
+  // Format model display value
+  const orchestratorDisplay = primaryModel ? (
+    <span className="flex items-center gap-1.5">
+      <span>{parseModelSpec(primaryModel).model}</span>
+      <Badge variant="outline" className="text-[9px] h-4 font-normal">{providerLabel(parseModelSpec(primaryModel).provider)}</Badge>
+    </span>
+  ) : undefined;
+
+  const imageDisplay = settings.imageModel ? (
+    <span className="flex items-center gap-1.5">
+      <span>{parseModelSpec(settings.imageModel).model}</span>
+      <Badge variant="outline" className="text-[9px] h-4 font-normal">{providerLabel(parseModelSpec(settings.imageModel).provider)}</Badge>
+    </span>
+  ) : undefined;
 
   return (
     <div className="space-y-6">
-      {/* ── Orchestrator Model ── */}
+      {/* ── Models & Reasoning ── */}
       <section>
-        <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5 flex items-center gap-1.5">
-          <Brain className="h-3.5 w-3.5" /> Orchestrator Model
+        <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-3 flex items-center gap-1.5">
+          <Settings2 className="h-3.5 w-3.5" /> Orchestrator Settings
         </h3>
-        <div className="max-w-md">
-          {primaryModel ? (
-            <>
-              <Row label="Model" value={parseModelSpec(primaryModel).model} mono />
-              <Row label="Provider" value={providerLabel(parseModelSpec(primaryModel).provider)} mono />
-              {fallbackModels.length > 0 && (
-                <div className="pt-2 mt-1">
-                  <span className="text-[10px] text-muted-foreground">Fallbacks</span>
-                  <div className="flex flex-wrap gap-1 mt-1">
-                    {fallbackModels.map((fb) => (
-                      <Badge key={fb} variant="outline" className="text-[10px] font-mono">{fb}</Badge>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </>
-          ) : (
-            <p className="text-xs text-muted-foreground italic py-1">Not set — auto-detect</p>
-          )}
-        </div>
-      </section>
-
-      {/* ── Image Model ── */}
-      <section>
-        <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5 flex items-center gap-1.5">
-          <Monitor className="h-3.5 w-3.5" /> Image Model
-        </h3>
-        <div className="max-w-md">
-          {settings.imageModel ? (
-            <>
-              <Row label="Model" value={parseModelSpec(settings.imageModel).model} mono />
-              <Row label="Provider" value={providerLabel(parseModelSpec(settings.imageModel).provider)} mono />
-            </>
-          ) : (
-            <p className="text-xs text-muted-foreground italic py-1">Not set</p>
-          )}
-        </div>
-      </section>
-
-      {/* ── Reasoning ── */}
-      <section>
-        <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5 flex items-center gap-1.5">
-          <Sparkles className="h-3.5 w-3.5" /> Reasoning
-        </h3>
-        <div className="max-w-md">
-          <Row
-            label="Level"
-            value={
-              <span className={cn(
-                "text-xs font-medium",
-                settings.reasoning && settings.reasoning !== "off" ? "text-emerald-500" : "text-muted-foreground",
-              )}>
-                {settings.reasoning ?? "off"}
-              </span>
-            }
+        <div className="space-y-2 max-w-xl">
+          {/* Orchestrator Model */}
+          <SettingRow
+            icon={Brain}
+            label="Orchestrator Model"
+            description="Planning, assessment, and agent coordination"
+            value={orchestratorDisplay}
+            placeholder="Auto-detect"
+            onClick={() => setOrchestratorPickerOpen(true)}
+            saving={modelSaving === "orchestrator"}
           />
-          <p className="text-[10px] text-muted-foreground mt-1">
-            {!settings.reasoning || settings.reasoning === "off"
-              ? "Standard mode — no extended thinking"
-              : "Extended thinking enabled for deeper analysis"}
-          </p>
+
+          {/* Fallbacks */}
+          {fallbackModels.length > 0 && (
+            <div className="ml-11 flex flex-wrap gap-1 py-1">
+              <span className="text-[10px] text-muted-foreground mr-1">Fallbacks:</span>
+              {fallbackModels.map((fb) => (
+                <Badge key={fb} variant="outline" className="text-[10px] font-mono">{fb}</Badge>
+              ))}
+            </div>
+          )}
+
+          {/* Image Model */}
+          <SettingRow
+            icon={Monitor}
+            label="Image Model"
+            description="Vision tasks — falls back to orchestrator model"
+            value={imageDisplay}
+            placeholder="Not set"
+            onClick={() => setImagePickerOpen(true)}
+            onClear={settings.imageModel ? handleImageModelClear : undefined}
+            saving={modelSaving === "image"}
+          />
+
+          {/* Reasoning */}
+          <div className="rounded-lg border border-border/40 bg-card/60 px-4 py-3">
+            <div className="flex items-center gap-3">
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-muted/40 shrink-0">
+                {reasoningSaving
+                  ? <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                  : <Sparkles className="h-4 w-4 text-muted-foreground" />}
+              </div>
+              <div className="flex-1 min-w-0">
+                <span className="text-xs font-medium text-foreground">Reasoning Level</span>
+                <p className="text-[10px] text-muted-foreground mt-0.5 leading-tight">
+                  {REASONING_LEVELS.find((l) => l.value === (settings.reasoning ?? "off"))?.description}
+                </p>
+              </div>
+              <Select
+                value={settings.reasoning ?? "off"}
+                onValueChange={handleReasoningChange}
+                disabled={reasoningSaving}
+              >
+                <SelectTrigger className="h-8 text-xs w-36 shrink-0">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {REASONING_LEVELS.map((level) => (
+                    <SelectItem key={level.value} value={level.value} className="text-xs">
+                      <span className={cn(
+                        "font-medium",
+                        level.value !== "off" ? "text-emerald-500" : "text-muted-foreground",
+                      )}>
+                        {level.label}
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
         </div>
       </section>
 
       {/* ── Orchestrator Skills ── */}
       <section>
-        <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5 flex items-center gap-1.5">
-          <Bookmark className="h-3.5 w-3.5" /> Orchestrator Skills
+        <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-3 flex items-center gap-1.5">
+          <Bookmark className="h-3.5 w-3.5" /> Skills
         </h3>
         {skillsLoading ? (
           <div className="flex items-center gap-2 py-3">
@@ -525,24 +1079,26 @@ function AgentTab({ settings, primaryModel, fallbackModels }: {
             <span className="text-xs text-muted-foreground">Loading skills...</span>
           </div>
         ) : skills.length > 0 ? (
-          <div className="space-y-2 max-w-lg">
+          <div className="space-y-2 max-w-xl">
             {skills.map((skill: SkillInfo) => (
-              <div key={skill.name} className="flex items-start gap-3 rounded-md bg-muted/15 border border-border/20 px-3 py-2.5">
-                <Bookmark className="h-3.5 w-3.5 text-muted-foreground shrink-0 mt-0.5" />
+              <div key={skill.name} className="flex items-start gap-3 rounded-lg border border-border/40 bg-card/60 px-4 py-3">
+                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-muted/40 shrink-0">
+                  <Bookmark className="h-4 w-4 text-muted-foreground" />
+                </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
-                    <span className="text-xs font-semibold truncate">{skill.name}</span>
-                    <Badge variant="outline" className="text-[9px] shrink-0">{skill.source}</Badge>
+                    <span className="text-xs font-medium">{skill.name}</span>
+                    <Badge variant="outline" className="text-[9px] h-4">{skill.source}</Badge>
                   </div>
                   {skill.description && (
-                    <p className="text-[11px] text-muted-foreground mt-0.5 line-clamp-2">{skill.description}</p>
+                    <p className="text-[10px] text-muted-foreground mt-0.5 line-clamp-2 leading-tight">{skill.description}</p>
                   )}
                 </div>
               </div>
             ))}
             {settings.orchestratorSkills && settings.orchestratorSkills.length > 0 && (
-              <p className="text-[10px] text-muted-foreground mt-2">
-                Filter active: only <code className="font-mono text-primary">{settings.orchestratorSkills.join(", ")}</code>
+              <p className="text-[10px] text-muted-foreground mt-1 ml-11">
+                Filter: <code className="font-mono text-primary">{settings.orchestratorSkills.join(", ")}</code>
               </p>
             )}
           </div>
@@ -553,26 +1109,198 @@ function AgentTab({ settings, primaryModel, fallbackModels }: {
           Skill pool: <code className="font-mono text-primary">.polpo/.agent/skills/</code>
         </p>
       </section>
+
+      {/* ── Orchestrator Model Picker Dialog ── */}
+      <Dialog open={orchestratorPickerOpen} onOpenChange={setOrchestratorPickerOpen}>
+        <DialogContent className="sm:max-w-lg p-0 gap-0 overflow-hidden">
+          <DialogHeader className="px-6 pt-6 pb-0">
+            <DialogTitle className="text-base">Orchestrator Model</DialogTitle>
+            <DialogDescription className="text-xs">
+              Choose the model that powers planning, assessment, and agent coordination.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="px-6 py-5">
+            <ModelPicker
+              configuredProviders={configuredProviders}
+              providerSources={providerSources}
+              value={primaryModel ?? null}
+              onSelect={handleOrchestratorModelSelect}
+              apiFetch={api}
+              heading={null}
+              maxHeight="320px"
+            />
+            {modelSaving === "orchestrator" && (
+              <div className="flex items-center gap-2 mt-3 text-xs text-muted-foreground">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" /> Saving...
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Image Model Picker Dialog ── */}
+      <Dialog open={imagePickerOpen} onOpenChange={setImagePickerOpen}>
+        <DialogContent className="sm:max-w-lg p-0 gap-0 overflow-hidden">
+          <DialogHeader className="px-6 pt-6 pb-0">
+            <DialogTitle className="text-base">Image Model</DialogTitle>
+            <DialogDescription className="text-xs">
+              Choose the model for vision tasks. Falls back to the orchestrator model if not set.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="px-6 py-5">
+            <ModelPicker
+              configuredProviders={configuredProviders}
+              providerSources={providerSources}
+              value={settings.imageModel ?? null}
+              onSelect={handleImageModelSelect}
+              apiFetch={api}
+              heading={null}
+              maxHeight="320px"
+            />
+            {modelSaving === "image" && (
+              <div className="flex items-center gap-2 mt-3 text-xs text-muted-foreground">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" /> Saving...
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
 
 // ── Providers Tab ──
 
-function ProvidersTab({ settings, providers, allProviderNames, providerAgentUsage, authStatus }: {
+function ProvidersTab({ settings, providers, allProviderNames, providerAgentUsage, authStatus, onRefresh }: {
   settings: PolpoSettings;
   providers: Record<string, ProviderConfig> | undefined;
   allProviderNames: Set<string>;
   providerAgentUsage: Map<string, string[]>;
   authStatus: AuthStatusResponse | null | undefined;
+  onRefresh: () => Promise<void>;
 }) {
+  // ── "Add provider" dialog (full AuthStep — lists all providers) ──
+  const [addDialogOpen, setAddDialogOpen] = useState(false);
+  const [authProviders, setAuthProviders] = useState<AuthProvider[]>([]);
+  const [authProvidersLoaded, setAuthProvidersLoaded] = useState(false);
+
+  // ── "Connect specific provider" dialog (direct flow) ──
+  const [connectTarget, setConnectTarget] = useState<string | null>(null);
+  const [connectMode, setConnectMode] = useState<"choose" | "oauth" | "apikey">("choose");
+  const [oauthProviders, setOauthProviders] = useState<OAuthProvider[]>([]);
+
+  // ── Disconnect ──
+  const [disconnectTarget, setDisconnectTarget] = useState<string | null>(null);
+  const [disconnecting, setDisconnecting] = useState<string | null>(null);
+
+  // Load full provider list for AuthStep (add dialog)
+  const ensureAuthProviders = useCallback(async () => {
+    if (authProvidersLoaded) return;
+    const r = await api("/providers");
+    if (r.ok) {
+      setAuthProviders(r.data);
+      setAuthProvidersLoaded(true);
+    }
+  }, [authProvidersLoaded]);
+
+  const refreshProviderList = useCallback(async () => {
+    await onRefresh();
+    const r = await api("/providers");
+    if (r.ok) {
+      setAuthProviders(r.data);
+      setAuthProvidersLoaded(true);
+    }
+  }, [onRefresh]);
+
+  // ── Connect: card button → open direct dialog for that provider ──
+  const handleConnect = useCallback(async (name: string) => {
+    const info = authStatus?.providers[name];
+    setConnectTarget(name);
+
+    if (info?.oauthAvailable) {
+      // Load OAuth providers list if needed, then show choice
+      const r = await api("/providers/oauth");
+      if (r.ok) setOauthProviders(r.data);
+      setConnectMode("choose");
+    } else {
+      // No OAuth → go direct to API key
+      // Ensure provider list loaded for ApiKeyStep
+      await ensureAuthProviders();
+      setConnectMode("apikey");
+    }
+  }, [authStatus, ensureAuthProviders]);
+
+  // Close the connect dialog and reset state
+  const closeConnectDialog = useCallback(() => {
+    setConnectTarget(null);
+    setConnectMode("choose");
+  }, []);
+
+  // ── Disconnect: card button → confirm dialog ──
+  const handleDisconnectRequest = useCallback((name: string) => {
+    setDisconnectTarget(name);
+  }, []);
+
+  const handleDisconnectConfirm = useCallback(async () => {
+    if (!disconnectTarget) return;
+    const name = disconnectTarget;
+    setDisconnecting(name);
+    setDisconnectTarget(null);
+    try {
+      await api(`/providers/${name}/disconnect`, { method: "DELETE" });
+      await refreshProviderList();
+    } finally {
+      setDisconnecting(null);
+    }
+  }, [disconnectTarget, refreshProviderList]);
+
+  // ── Shared handlers for auth flows ──
+  const handleSaveKey = useCallback(async (provider: string, key: string): Promise<boolean> => {
+    const result = await api(`/providers/${provider}/api-key`, {
+      method: "POST",
+      body: JSON.stringify({ apiKey: key }),
+    });
+    if (result.ok) {
+      await refreshProviderList();
+      return true;
+    }
+    return false;
+  }, [refreshProviderList]);
+
+  const handleOAuthComplete = useCallback(async (_provider: string) => {
+    await refreshProviderList();
+    closeConnectDialog();
+  }, [refreshProviderList, closeConnectDialog]);
+
+  // Disconnect from inside the AuthStep (add dialog) — AuthStep has its own ConfirmDialog
+  const handleAuthDisconnect = useCallback(async (provider: string) => {
+    setDisconnecting(provider);
+    try {
+      await api(`/providers/${provider}/disconnect`, { method: "DELETE" });
+      await refreshProviderList();
+    } finally {
+      setDisconnecting(null);
+    }
+  }, [refreshProviderList]);
+
   return (
     <div className="space-y-6">
       {/* ── Provider Cards ── */}
       <section>
-        <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-2 flex items-center gap-1.5">
-          <Key className="h-3.5 w-3.5" /> Providers
-        </h3>
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+            <Key className="h-3.5 w-3.5" /> Providers
+          </h3>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 text-xs gap-1"
+            onClick={async () => { await ensureAuthProviders(); setAddDialogOpen(true); }}
+          >
+            <Key className="h-3 w-3" />
+            Add provider
+          </Button>
+        </div>
         {allProviderNames.size > 0 ? (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
             {[...allProviderNames].sort().map((name) => {
@@ -580,7 +1308,16 @@ function ProvidersTab({ settings, providers, allProviderNames, providerAgentUsag
               const agentUsage = providerAgentUsage.get(name) ?? [];
               const authInfo = authStatus?.providers[name];
               return (
-                <ProviderCard key={name} name={name} prov={prov} agentModels={agentUsage} authInfo={authInfo} />
+                <ProviderCard
+                  key={name}
+                  name={name}
+                  prov={prov}
+                  agentModels={agentUsage}
+                  authInfo={authInfo}
+                  onConnect={handleConnect}
+                  onDisconnect={handleDisconnectRequest}
+                  disconnecting={disconnecting === name}
+                />
               );
             })}
           </div>
@@ -608,6 +1345,127 @@ function ProvidersTab({ settings, providers, allProviderNames, providerAgentUsag
           </div>
         </section>
       )}
+
+      {/* ── Connect Specific Provider Dialog ── */}
+      <Dialog open={!!connectTarget} onOpenChange={(open) => { if (!open) closeConnectDialog(); }}>
+        <DialogContent className="sm:max-w-lg p-0 gap-0 overflow-hidden">
+          <DialogHeader className="px-6 pt-6 pb-0">
+            <DialogTitle className="text-base">Connect {connectTarget}</DialogTitle>
+            <DialogDescription className="text-xs">
+              {connectMode === "choose"
+                ? "Choose how to authenticate with this provider."
+                : connectMode === "oauth"
+                  ? "Complete the login flow in your browser."
+                  : "Enter your API key to connect."}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="px-6 py-5">
+            {/* Choose: OAuth or API key */}
+            {connectMode === "choose" && (
+              <div className="space-y-3">
+                <button
+                  onClick={() => setConnectMode("oauth")}
+                  className="w-full flex items-start gap-4 p-4 rounded-lg border border-border hover:border-primary/30 hover:bg-accent/50 text-left transition-all"
+                >
+                  <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center shrink-0 mt-0.5">
+                    <LogIn className="h-5 w-5 text-primary" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="font-medium text-sm">Login with subscription</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Use your existing account — no API key needed.
+                    </p>
+                  </div>
+                </button>
+                <button
+                  onClick={async () => {
+                    await ensureAuthProviders();
+                    setConnectMode("apikey");
+                  }}
+                  className="w-full flex items-start gap-4 p-4 rounded-lg border border-border hover:border-primary/30 hover:bg-accent/50 text-left transition-all"
+                >
+                  <div className="h-10 w-10 rounded-lg bg-muted flex items-center justify-center shrink-0 mt-0.5">
+                    <Keyboard className="h-5 w-5 text-muted-foreground" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="font-medium text-sm">Enter an API key</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Paste an API key for this provider.
+                    </p>
+                  </div>
+                </button>
+              </div>
+            )}
+
+            {/* OAuth flow — starts immediately for the target provider */}
+            {connectMode === "oauth" && connectTarget && (
+              <OAuthFlow
+                oauthProviders={oauthProviders}
+                initialProvider={connectTarget}
+                onBack={() => setConnectMode("choose")}
+                onComplete={handleOAuthComplete}
+                apiFetch={api}
+              />
+            )}
+
+            {/* API key — pre-selected provider */}
+            {connectMode === "apikey" && connectTarget && (
+              <ApiKeyStep
+                providers={authProviders}
+                initialProvider={connectTarget}
+                onSave={async (provider, key) => {
+                  const ok = await handleSaveKey(provider, key);
+                  if (ok) closeConnectDialog();
+                  return ok;
+                }}
+                onBack={() => {
+                  const info = authStatus?.providers[connectTarget];
+                  if (info?.oauthAvailable) setConnectMode("choose");
+                  else closeConnectDialog();
+                }}
+              />
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Add Provider Dialog (full AuthStep) ── */}
+      <Dialog open={addDialogOpen} onOpenChange={setAddDialogOpen}>
+        <DialogContent className="sm:max-w-lg p-0 gap-0 overflow-hidden">
+          <DialogHeader className="px-6 pt-6 pb-0">
+            <DialogTitle className="text-base">Manage providers</DialogTitle>
+            <DialogDescription className="text-xs">
+              Connect or disconnect LLM providers via OAuth subscription or API key.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="px-6 py-5">
+            {authProviders.length > 0 ? (
+              <AuthStep
+                providers={authProviders}
+                onKeySave={handleSaveKey}
+                onOAuthComplete={async () => { await refreshProviderList(); }}
+                onDisconnect={handleAuthDisconnect}
+                apiFetch={api}
+              />
+            ) : (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Disconnect Confirmation ── */}
+      <ConfirmDialog
+        open={!!disconnectTarget}
+        onOpenChange={(open) => { if (!open) setDisconnectTarget(null); }}
+        title={`Disconnect ${disconnectTarget ?? ""}?`}
+        description="This will remove the API key and any OAuth sessions for this provider."
+        confirmLabel="Disconnect"
+        destructive
+        onConfirm={handleDisconnectConfirm}
+      />
     </div>
   );
 }
@@ -615,9 +1473,9 @@ function ProvidersTab({ settings, providers, allProviderNames, providerAgentUsag
 // ── Main ──
 
 export function ConfigPage() {
-  const { config, isLoading, error, refetch } = useConfig();
+  const { config, isLoading, error, refetch, setOptimistic } = useConfig();
   const { agents } = useAgents();
-  const { authStatus } = useAuthStatus();
+  const { authStatus, refetch: refetchAuth } = useAuthStatus();
   const [activeSection, setActiveSection] = useState<SectionId>("general");
 
   if (isLoading) {
@@ -642,7 +1500,6 @@ export function ConfigPage() {
 
   const { settings, providers } = config;
   const notifications = settings.notifications as Record<string, unknown> | undefined;
-  const channels = (notifications?.channels ?? {}) as Record<string, Record<string, unknown>>;
   const rules = (notifications?.rules ?? []) as Array<{
     id: string; name: string; events: string[]; channels: string[];
     severity?: string; template?: string; condition?: Record<string, unknown>;
@@ -858,6 +1715,22 @@ export function ConfigPage() {
             settings={settings}
             primaryModel={primaryModel}
             fallbackModels={fallbackModels}
+            authStatus={authStatus}
+            onUpdateSettings={async (patch) => {
+              const result = await api("/config/settings", {
+                method: "PATCH",
+                body: JSON.stringify(patch),
+              });
+              if (!result.ok) {
+                throw new Error(result.error ?? "Failed to update settings");
+              }
+              // Use the updated config returned by the server directly (avoids extra fetch + loading flash)
+              if (result.data) {
+                setOptimistic(result.data);
+              } else {
+                await refetch();
+              }
+            }}
           />
         )}
 
@@ -869,51 +1742,22 @@ export function ConfigPage() {
             allProviderNames={allProviderNames}
             providerAgentUsage={providerAgentUsage}
             authStatus={authStatus}
+            onRefresh={async () => { await refetchAuth(); await refetch(); }}
           />
         )}
 
         {/* ═══ CHANNELS ═══ */}
-        {activeSection === "channels" && (() => {
-          const configuredTypes = new Set(
-            Object.values(channels).map(ch => (ch.type as string) ?? "unknown"),
-          );
-          const inactiveTypes = ALL_CHANNEL_TYPES.filter(ct => !configuredTypes.has(ct.type));
-
-          return (
-            <div className="space-y-6">
-              {/* Configured channels */}
-              {Object.keys(channels).length > 0 ? (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {Object.entries(channels).map(([name, ch]) => (
-                    <ChannelCard key={name} name={name} ch={ch} />
-                  ))}
-                </div>
-              ) : (
-                <Empty text="No notification channels configured" />
-              )}
-
-              {/* Available / inactive channel types */}
-              {inactiveTypes.length > 0 && (
-                <section>
-                  <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-2 flex items-center gap-1.5">
-                    <Zap className="h-3.5 w-3.5" /> Available Channel Types
-                  </h3>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                    {inactiveTypes.map(({ type, label, icon: Icon }) => (
-                      <div key={type} className="flex items-center gap-2.5 rounded-lg border border-dashed border-border/40 bg-muted/10 px-3 py-2.5">
-                        <Icon className="h-3.5 w-3.5 text-muted-foreground/50" />
-                        <div>
-                          <span className="text-xs text-muted-foreground/70">{label}</span>
-                          <p className="text-[10px] text-muted-foreground/40">Not configured</p>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </section>
-              )}
-            </div>
-          );
-        })()}
+        {activeSection === "channels" && (
+          <ChannelsTab settings={settings} onUpdateConfig={async (updater) => {
+            const result = await api("/config/channels" + (updater.path ?? ""), {
+              method: updater.method,
+              body: updater.body ? JSON.stringify(updater.body) : undefined,
+            });
+            if (!result.ok) throw new Error(result.error ?? "Failed");
+            if (result.data) setOptimistic(result.data);
+            else await refetch();
+          }} />
+        )}
 
         {/* ═══ RULES ═══ */}
         {activeSection === "rules" && (

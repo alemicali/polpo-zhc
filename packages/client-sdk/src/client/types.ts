@@ -451,6 +451,32 @@ export type NotificationSeverity = "info" | "warning" | "critical";
 export type NotificationChannelType = "slack" | "email" | "telegram" | "whatsapp" | "webhook";
 export type NotificationStatus = "sent" | "failed";
 
+export type DmPolicy = "pairing" | "allowlist" | "open" | "disabled";
+
+export interface ChannelGatewayConfig {
+  dmPolicy?: DmPolicy;
+  allowFrom?: string[];
+  enableInbound?: boolean;
+  sessionIdleMinutes?: number;
+}
+
+export interface NotificationChannelConfig {
+  type: NotificationChannelType;
+  webhookUrl?: string;
+  to?: string[];
+  provider?: string;
+  apiKey?: string;
+  botToken?: string;
+  chatId?: string;
+  profileDir?: string;
+  url?: string;
+  headers?: Record<string, string>;
+  host?: string;
+  port?: number;
+  from?: string;
+  gateway?: ChannelGatewayConfig;
+}
+
 export interface NotificationRule {
   id: string;
   name: string;
@@ -905,6 +931,30 @@ export interface AddAgentRequest {
   /** Allowed email recipient domains (overrides global setting). */
   emailAllowedDomains?: string[];
   // Tool categories activated via allowedTools (e.g. ["browser_*", "email_*", "image_*", "video_*", "audio_*", "excel_*", "pdf_*", "docx_*", "search_*"])
+}
+
+export interface UpdateAgentRequest {
+  role?: string;
+  model?: string;
+  allowedTools?: string[];
+  allowedPaths?: string[];
+  systemPrompt?: string;
+  skills?: string[];
+  maxTurns?: number;
+  maxConcurrency?: number;
+  identity?: AgentIdentity;
+  reportsTo?: string;
+  reasoning?: string;
+  browserProfile?: string;
+  emailAllowedDomains?: string[];
+  /** Move agent to a different team. */
+  team?: string;
+}
+
+export interface UpdateSettingsRequest {
+  orchestratorModel?: string | ModelConfig;
+  imageModel?: string | null;
+  reasoning?: ReasoningLevel;
 }
 
 // === SSE ===

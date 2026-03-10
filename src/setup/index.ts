@@ -1,8 +1,6 @@
 export {
   detectProviders,
   hasOAuthProfilesForProvider,
-  OAUTH_TO_CANONICAL,
-  CANONICAL_TO_OAUTH,
   type DetectedProvider,
 } from "./providers.js";
 

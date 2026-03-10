@@ -7,7 +7,10 @@ import { fileURLToPath } from "url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+const isElectron = !!process.env.VITE_POLPO_API_URL;
+
 export default defineConfig({
+  base: isElectron ? "./" : "/",
   plugins: [
     react(),
     tailwindcss(),

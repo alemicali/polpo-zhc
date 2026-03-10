@@ -76,40 +76,7 @@ describe("env-persistence", () => {
   });
 });
 
-// ── providers (OAUTH_TO_CANONICAL / CANONICAL_TO_OAUTH) ────────────
-
-describe("provider name mappings", () => {
-  it("OAUTH_TO_CANONICAL maps all OAuth provider names", async () => {
-    const { OAUTH_TO_CANONICAL } = await import("../setup/providers.js");
-
-    expect(OAUTH_TO_CANONICAL["openai-codex"]).toContain("openai");
-    expect(OAUTH_TO_CANONICAL["openai-codex"]).toContain("openai-codex");
-    expect(OAUTH_TO_CANONICAL["google-gemini-cli"]).toContain("google");
-    expect(OAUTH_TO_CANONICAL["google-antigravity"]).toContain("google");
-    expect(OAUTH_TO_CANONICAL["anthropic"]).toContain("anthropic");
-    expect(OAUTH_TO_CANONICAL["github-copilot"]).toContain("github-copilot");
-  });
-
-  it("CANONICAL_TO_OAUTH is the reverse mapping", async () => {
-    const { CANONICAL_TO_OAUTH } = await import("../setup/providers.js");
-
-    expect(CANONICAL_TO_OAUTH["openai"]).toContain("openai-codex");
-    expect(CANONICAL_TO_OAUTH["google"]).toContain("google-gemini-cli");
-    expect(CANONICAL_TO_OAUTH["google"]).toContain("google-antigravity");
-    expect(CANONICAL_TO_OAUTH["anthropic"]).toContain("anthropic");
-    expect(CANONICAL_TO_OAUTH["github-copilot"]).toContain("github-copilot");
-  });
-
-  it("every OAuth provider in OAUTH_TO_CANONICAL maps to at least one canonical name", async () => {
-    const { OAUTH_TO_CANONICAL } = await import("../setup/providers.js");
-
-    for (const [oauthName, canonicals] of Object.entries(OAUTH_TO_CANONICAL)) {
-      expect(canonicals.length).toBeGreaterThan(0);
-      // Every mapping should include either the name itself or a canonical base
-      expect(typeof oauthName).toBe("string");
-    }
-  });
-});
+// ── providers ──────────────────────────────────────────────────────
 
 // ── detectProviders ────────────────────────────────────────────────
 
@@ -151,41 +118,32 @@ describe("detectProviders", () => {
     expect(cerebras!.source).toBe("none");
   });
 
-  it("deduplicates providers sharing the same env var", async () => {
+  it("returns all catalog providers without deduplication", async () => {
     const { detectProviders } = await import("../setup/providers.js");
 
     const providers = detectProviders();
-    // openai and openai-codex share OPENAI_API_KEY — only one should appear
-    const openaiEntries = providers.filter((p) => p.envVar === "OPENAI_API_KEY");
-    expect(openaiEntries.length).toBe(1);
-
-    // google, google-gemini-cli, google-antigravity share GEMINI_API_KEY
-    const geminiEntries = providers.filter((p) => p.envVar === "GEMINI_API_KEY");
-    expect(geminiEntries.length).toBe(1);
-  });
-
-  it("returns all known providers", async () => {
-    const { detectProviders } = await import("../setup/providers.js");
-
-    const providers = detectProviders();
-    // Should include the main providers (deduplicated by env var)
     const names = providers.map((p) => p.name);
+
+    // Both openai and openai-codex should appear (no deduplication)
     expect(names).toContain("openai");
-    expect(names).toContain("anthropic");
+    expect(names).toContain("openai-codex");
+
+    // All google variants should appear
     expect(names).toContain("google");
+    expect(names).toContain("google-gemini-cli");
+    expect(names).toContain("google-antigravity");
+
+    // Standard providers
+    expect(names).toContain("anthropic");
     expect(names).toContain("groq");
     expect(names).toContain("mistral");
   });
 });
 
-// ── hasOAuthProfilesForProvider (name mismatch bug fix) ────────────
+// ── hasOAuthProfilesForProvider (exact match) ─────────────────────
 
 describe("hasOAuthProfilesForProvider", () => {
-  it("checks canonical name through reverse mapping", async () => {
-    const { hasOAuthProfilesForProvider, CANONICAL_TO_OAUTH } = await import("../setup/providers.js");
-    const { getAllProfiles } = await import("../auth/store.js");
-
-    // Mock getAllProfiles to return a fake openai-codex profile
+  it("matches profiles by exact provider name", async () => {
     vi.spyOn(await import("../auth/store.js"), "getAllProfiles").mockReturnValue([
       {
         id: "openai-codex:test-123",
@@ -201,36 +159,12 @@ describe("hasOAuthProfilesForProvider", () => {
       },
     ]);
 
-    // The key bug fix: "openai" should find profiles stored under "openai-codex"
-    expect(hasOAuthProfilesForProvider("openai")).toBe(true);
-    // Direct name should also work
-    expect(hasOAuthProfilesForProvider("openai-codex")).toBe(true);
-    // Unrelated provider should not match
-    expect(hasOAuthProfilesForProvider("anthropic")).toBe(false);
-
-    vi.restoreAllMocks();
-  });
-
-  it("finds google profiles through google-gemini-cli", async () => {
-    vi.spyOn(await import("../auth/store.js"), "getAllProfiles").mockReturnValue([
-      {
-        id: "google-gemini-cli:test-456",
-        profile: {
-          provider: "google-gemini-cli",
-          type: "oauth",
-          access: "fake-token",
-          refresh: "fake-refresh",
-          expires: Date.now() + 86400000,
-          createdAt: new Date().toISOString(),
-          lastUsed: new Date().toISOString(),
-        } as any,
-      },
-    ]);
-
     const { hasOAuthProfilesForProvider } = await import("../setup/providers.js");
-    expect(hasOAuthProfilesForProvider("google")).toBe(true);
-    expect(hasOAuthProfilesForProvider("google-gemini-cli")).toBe(true);
+    // Exact match works
+    expect(hasOAuthProfilesForProvider("openai-codex")).toBe(true);
+    // Different provider name does NOT match (no cross-mapping)
     expect(hasOAuthProfilesForProvider("openai")).toBe(false);
+    expect(hasOAuthProfilesForProvider("anthropic")).toBe(false);
 
     vi.restoreAllMocks();
   });
@@ -239,7 +173,7 @@ describe("hasOAuthProfilesForProvider", () => {
     vi.spyOn(await import("../auth/store.js"), "getAllProfiles").mockReturnValue([]);
 
     const { hasOAuthProfilesForProvider } = await import("../setup/providers.js");
-    expect(hasOAuthProfilesForProvider("openai")).toBe(false);
+    expect(hasOAuthProfilesForProvider("openai-codex")).toBe(false);
     expect(hasOAuthProfilesForProvider("anthropic")).toBe(false);
 
     vi.restoreAllMocks();
@@ -261,8 +195,7 @@ describe("detectProviders with OAuth", () => {
     vi.restoreAllMocks();
   });
 
-  it("detects openai via openai-codex OAuth profile (the name mismatch bug)", async () => {
-    // This is the critical bug that was broken before the fix
+  it("detects openai-codex directly from OAuth profile", async () => {
     delete process.env.OPENAI_API_KEY;
 
     vi.spyOn(await import("../auth/store.js"), "getAllProfiles").mockReturnValue([
@@ -282,14 +215,20 @@ describe("detectProviders with OAuth", () => {
 
     const { detectProviders } = await import("../setup/providers.js");
     const providers = detectProviders();
-    const openai = providers.find((p) => p.name === "openai");
 
+    // openai-codex detected directly via its own OAuth profile
+    const codex = providers.find((p) => p.name === "openai-codex");
+    expect(codex).toBeDefined();
+    expect(codex!.hasKey).toBe(true);
+    expect(codex!.source).toBe("oauth");
+
+    // openai (different provider) should NOT have credentials from openai-codex profile
+    const openai = providers.find((p) => p.name === "openai");
     expect(openai).toBeDefined();
-    expect(openai!.hasKey).toBe(true);
-    expect(openai!.source).toBe("oauth");
+    expect(openai!.hasKey).toBe(false);
   });
 
-  it("detects google via google-gemini-cli OAuth profile", async () => {
+  it("detects google-gemini-cli directly from OAuth profile", async () => {
     delete process.env.GEMINI_API_KEY;
 
     vi.spyOn(await import("../auth/store.js"), "getAllProfiles").mockReturnValue([
@@ -310,11 +249,17 @@ describe("detectProviders with OAuth", () => {
 
     const { detectProviders } = await import("../setup/providers.js");
     const providers = detectProviders();
-    const google = providers.find((p) => p.name === "google");
 
+    // google-gemini-cli detected directly
+    const geminiCli = providers.find((p) => p.name === "google-gemini-cli");
+    expect(geminiCli).toBeDefined();
+    expect(geminiCli!.hasKey).toBe(true);
+    expect(geminiCli!.source).toBe("oauth");
+
+    // google (different provider) should NOT have credentials from google-gemini-cli profile
+    const google = providers.find((p) => p.name === "google");
     expect(google).toBeDefined();
-    expect(google!.hasKey).toBe(true);
-    expect(google!.source).toBe("oauth");
+    expect(google!.hasKey).toBe(false);
   });
 
   it("env source takes priority over oauth", async () => {
@@ -516,8 +461,6 @@ describe("integration: shared module consistency", () => {
     // Providers
     expect(typeof setup.detectProviders).toBe("function");
     expect(typeof setup.hasOAuthProfilesForProvider).toBe("function");
-    expect(setup.OAUTH_TO_CANONICAL).toBeDefined();
-    expect(setup.CANONICAL_TO_OAUTH).toBeDefined();
 
     // Env persistence
     expect(typeof setup.persistToEnvFile).toBe("function");
@@ -545,7 +488,7 @@ describe("integration: shared module consistency", () => {
     for (const p of providers) {
       // Every provider must have all required fields
       expect(typeof p.name).toBe("string");
-      expect(typeof p.envVar).toBe("string");
+      expect(p.envVar === undefined || typeof p.envVar === "string").toBe(true);
       expect(typeof p.hasKey).toBe("boolean");
       expect(["env", "oauth", "none"]).toContain(p.source);
     }

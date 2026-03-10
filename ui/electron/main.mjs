@@ -2,15 +2,70 @@ import { app, BrowserWindow, dialog } from "electron";
 import { spawn } from "node:child_process";
 import { resolve, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { homedir } from "node:os";
 import http from "node:http";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SERVER_PORT = 3890;
 const HEALTH_URL = `http://localhost:${SERVER_PORT}/api/v1/health`;
+const CONFIG_DIR = join(homedir(), ".polpo-desktop");
+const CONFIG_FILE = join(CONFIG_DIR, "config.json");
 
 let serverProcess = null;
 let mainWindow = null;
+
+// ── Config persistence ───────────────────────────────────────────────────
+
+function loadConfig() {
+  try {
+    if (existsSync(CONFIG_FILE)) {
+      return JSON.parse(readFileSync(CONFIG_FILE, "utf-8"));
+    }
+  } catch {}
+  return {};
+}
+
+function saveConfig(config) {
+  mkdirSync(CONFIG_DIR, { recursive: true });
+  writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2));
+}
+
+// ── Work directory resolution ────────────────────────────────────────────
+
+async function resolveWorkDir() {
+  // 1. CLI argument: ./Polpo.AppImage /path/to/project
+  const cliArg = process.argv.find((a) => !a.startsWith("-") && a !== process.argv[0] && a !== process.argv[1]);
+  if (cliArg) {
+    const dir = resolve(cliArg);
+    if (existsSync(dir)) {
+      saveConfig({ workDir: dir });
+      return dir;
+    }
+  }
+
+  // 2. Saved from previous session
+  const config = loadConfig();
+  if (config.workDir && existsSync(config.workDir)) {
+    return config.workDir;
+  }
+
+  // 3. First launch — ask the user
+  const result = await dialog.showOpenDialog({
+    title: "Select your project directory",
+    message: "Choose the directory where Polpo should work",
+    properties: ["openDirectory", "createDirectory"],
+    defaultPath: homedir(),
+  });
+
+  if (result.canceled || result.filePaths.length === 0) {
+    return null;
+  }
+
+  const dir = result.filePaths[0];
+  saveConfig({ workDir: dir });
+  return dir;
+}
 
 // ── Health check ─────────────────────────────────────────────────────────
 
@@ -52,7 +107,7 @@ function findServerBinary() {
 
 // ── Server lifecycle ─────────────────────────────────────────────────────
 
-async function ensureServer() {
+async function ensureServer(workDir) {
   // 1. Check if server is already running (user started it separately)
   if (await checkServerHealth()) {
     console.log("[Polpo] Server already running on port", SERVER_PORT);
@@ -71,7 +126,8 @@ async function ensureServer() {
   }
 
   console.log("[Polpo] Starting server:", binary);
-  serverProcess = spawn(binary, ["serve", "-p", String(SERVER_PORT)], {
+  console.log("[Polpo] Working directory:", workDir);
+  serverProcess = spawn(binary, ["serve", "-p", String(SERVER_PORT), "-d", workDir], {
     stdio: ["ignore", "pipe", "pipe"],
     env: { ...process.env },
   });
@@ -127,9 +183,12 @@ function createWindow() {
     minWidth: 900,
     minHeight: 600,
     title: "Polpo",
+    icon: join(__dirname, "..", "dist", "icons", "icon-512.png"),
+    autoHideMenuBar: true,
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
+      webSecurity: false, // Allow file:// to call localhost API
     },
   });
 
@@ -145,7 +204,13 @@ function createWindow() {
 // ── App lifecycle ────────────────────────────────────────────────────────
 
 app.whenReady().then(async () => {
-  const serverOk = await ensureServer();
+  const workDir = await resolveWorkDir();
+  if (!workDir) {
+    app.quit();
+    return;
+  }
+
+  const serverOk = await ensureServer(workDir);
   if (!serverOk) {
     app.quit();
     return;

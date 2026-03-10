@@ -1,6 +1,6 @@
 import { useSyncExternalStore, useCallback, useEffect, useState } from "react";
 import { usePolpoContext } from "../provider/polpo-context.js";
-import type { AgentConfig, Team, AddAgentRequest, AddTeamRequest } from "@polpo-ai/client";
+import type { AgentConfig, Team, AddAgentRequest, UpdateAgentRequest, AddTeamRequest } from "@polpo-ai/client";
 
 export interface UseAgentsReturn {
   agents: AgentConfig[];
@@ -8,6 +8,7 @@ export interface UseAgentsReturn {
   isLoading: boolean;
   error: Error | null;
   addAgent: (req: AddAgentRequest, teamName?: string) => Promise<void>;
+  updateAgent: (name: string, req: UpdateAgentRequest) => Promise<AgentConfig>;
   removeAgent: (name: string) => Promise<void>;
   addTeam: (req: AddTeamRequest) => Promise<void>;
   removeTeam: (name: string) => Promise<void>;
@@ -48,6 +49,12 @@ export function useAgents(): UseAgentsReturn {
     await fetchAll();
   }, [client, fetchAll]);
 
+  const updateAgent = useCallback(async (name: string, req: UpdateAgentRequest) => {
+    const updated = await client.updateAgent(name, req);
+    await fetchAll();
+    return updated;
+  }, [client, fetchAll]);
+
   const removeAgent = useCallback(async (name: string) => {
     await client.removeAgent(name);
     await fetchAll();
@@ -69,5 +76,5 @@ export function useAgents(): UseAgentsReturn {
     return t;
   }, [client, fetchAll]);
 
-  return { agents, teams, isLoading, error, addAgent, removeAgent, addTeam, removeTeam, renameTeam, refetch: fetchAll };
+  return { agents, teams, isLoading, error, addAgent, updateAgent, removeAgent, addTeam, removeTeam, renameTeam, refetch: fetchAll };
 }

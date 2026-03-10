@@ -29,6 +29,8 @@ import type {
   UpdateMissionTeamMemberRequest,
   UpdateMissionNotificationsRequest,
   AddAgentRequest,
+  UpdateAgentRequest,
+  UpdateSettingsRequest,
   AddTeamRequest,
   ExecuteMissionResult,
   ResumeMissionResult,
@@ -52,6 +54,7 @@ import type {
   SkillWithAssignment,
   SkillIndexEntry,
   SkillIndex,
+  NotificationChannelConfig,
   NotificationRecord,
   NotificationStats,
   SendNotificationRequest,
@@ -532,6 +535,10 @@ export class PolpoClient {
     return this.del<{ removed: boolean }>(`/agents/${encodeURIComponent(name)}`);
   }
 
+  updateAgent(name: string, req: UpdateAgentRequest): Promise<AgentConfig> {
+    return this.patch<AgentConfig>(`/agents/${encodeURIComponent(name)}`, req);
+  }
+
   getTeams(): Promise<Team[]> {
     return this.get<Team[]>("/agents/teams");
   }
@@ -565,6 +572,28 @@ export class PolpoClient {
 
   getConfig(): Promise<PolpoConfig> {
     return this.get<PolpoConfig>("/orchestrator-config");
+  }
+
+  updateSettings(req: UpdateSettingsRequest): Promise<PolpoConfig> {
+    return this.patch<PolpoConfig>("/config/settings", req);
+  }
+
+  // ── Notification Channels ────────────────────────────────
+
+  listChannels(): Promise<Record<string, NotificationChannelConfig>> {
+    return this.get<Record<string, NotificationChannelConfig>>("/config/channels");
+  }
+
+  upsertChannel(name: string, config: NotificationChannelConfig): Promise<PolpoConfig> {
+    return this.request<PolpoConfig>("PUT", this.apiUrl(`/config/channels/${encodeURIComponent(name)}`), config);
+  }
+
+  deleteChannel(name: string): Promise<PolpoConfig> {
+    return this.del<PolpoConfig>(`/config/channels/${encodeURIComponent(name)}`);
+  }
+
+  testChannel(name: string): Promise<{ success: boolean }> {
+    return this.post<{ success: boolean }>(`/config/channels/${encodeURIComponent(name)}/test`);
   }
 
   getMemory(): Promise<{ exists: boolean; content: string }> {

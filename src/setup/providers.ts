@@ -1,37 +1,11 @@
-import { PROVIDER_ENV_MAP } from "../llm/pi-client.js";
+import { PROVIDER_ENV_MAP, listProviders } from "../llm/pi-client.js";
 import { getAllProfiles } from "../auth/store.js";
 
-/**
- * Maps OAuth profile provider names → canonical PROVIDER_ENV_MAP names they satisfy.
- * E.g. a profile with provider "openai-codex" satisfies both "openai" and "openai-codex".
- */
-export const OAUTH_TO_CANONICAL: Record<string, string[]> = {
-  "anthropic":          ["anthropic"],
-  "openai-codex":       ["openai", "openai-codex"],
-  "github-copilot":     ["github-copilot"],
-  "google-gemini-cli":  ["google", "google-gemini-cli"],
-  "google-antigravity": ["google", "google-antigravity"],
-};
-
-/**
- * Reverse map: canonical PROVIDER_ENV_MAP name → OAuth profile names that satisfy it.
- * E.g. "openai" → ["openai-codex"], "google" → ["google-gemini-cli", "google-antigravity"]
- */
-export const CANONICAL_TO_OAUTH: Record<string, string[]> = (() => {
-  const map: Record<string, string[]> = {};
-  for (const [oauthName, canonicals] of Object.entries(OAUTH_TO_CANONICAL)) {
-    for (const canonical of canonicals) {
-      (map[canonical] ??= []).push(oauthName);
-    }
-  }
-  return map;
-})();
-
 export interface DetectedProvider {
-  /** Canonical provider name from PROVIDER_ENV_MAP (e.g. "openai", "google") */
+  /** Provider name exactly as it appears in the pi-ai catalog (e.g. "openai", "openai-codex", "google") */
   name: string;
-  /** Environment variable for API key */
-  envVar: string;
+  /** Environment variable for API key (if any) */
+  envVar: string | undefined;
   /** Whether a usable credential exists (env key or OAuth profile) */
   hasKey: boolean;
   /** Source of credentials */
@@ -39,64 +13,51 @@ export interface DetectedProvider {
 }
 
 /**
- * Get the set of canonical provider names that have OAuth profiles.
- * Reads auth-profiles.json and maps profile provider names through OAUTH_TO_CANONICAL.
+ * Detect all providers from the pi-ai catalog with their credential status.
+ *
+ * This is a 1:1 pass-through of the catalog — every provider that pi-ai knows about
+ * is returned. No deduplication, no name mapping. The UI is a mere wrapper on this.
+ *
+ * Credential detection:
+ * - env: the provider has a known env var (PROVIDER_ENV_MAP) and it's set
+ * - oauth: there's an OAuth profile stored with exactly this provider name
+ * - none: no credentials found
  */
-function getOAuthProviderSet(): Set<string> {
-  const result = new Set<string>();
+export function detectProviders(): DetectedProvider[] {
+  // All providers from the pi-ai catalog — this is the single source of truth
+  const catalogProviders = listProviders();
+
+  // Build set of provider names that have OAuth profiles (exact match, no mapping)
+  const oauthProviders = new Set<string>();
   try {
-    const profiles = getAllProfiles();
-    for (const { profile } of profiles) {
-      const canonicals = OAUTH_TO_CANONICAL[profile.provider];
-      if (canonicals) {
-        for (const c of canonicals) result.add(c);
-      } else {
-        // Direct match (provider name is already canonical)
-        result.add(profile.provider);
-      }
+    for (const { profile } of getAllProfiles()) {
+      oauthProviders.add(profile.provider);
     }
   } catch {
     // No profiles file — that's fine
   }
-  return result;
+
+  return catalogProviders.map((name) => {
+    const envVar = PROVIDER_ENV_MAP[name];
+    const hasEnvKey = envVar ? !!process.env[envVar] : false;
+    const hasOAuth = oauthProviders.has(name);
+
+    return {
+      name,
+      envVar,
+      hasKey: hasEnvKey || hasOAuth,
+      source: hasEnvKey ? "env" as const : hasOAuth ? "oauth" as const : "none" as const,
+    };
+  });
 }
 
 /**
- * Detect all providers with their credential status.
- * Single source of truth — used by both CLI and server.
- */
-export function detectProviders(): DetectedProvider[] {
-  const oauthSet = getOAuthProviderSet();
-  const seen = new Set<string>();
-
-  return Object.entries(PROVIDER_ENV_MAP)
-    // Deduplicate by env var (e.g. openai and openai-codex share OPENAI_API_KEY)
-    .filter(([, envVar]) => {
-      if (seen.has(envVar)) return false;
-      seen.add(envVar);
-      return true;
-    })
-    .map(([name, envVar]) => {
-      const hasEnvKey = !!process.env[envVar];
-      const hasOAuth = oauthSet.has(name);
-      return {
-        name,
-        envVar,
-        hasKey: hasEnvKey || hasOAuth,
-        source: hasEnvKey ? "env" as const : hasOAuth ? "oauth" as const : "none" as const,
-      };
-    });
-}
-
-/**
- * Check if a canonical provider name has any OAuth profiles available.
- * Handles the name mismatch: "openai" checks for "openai-codex" profiles, etc.
+ * Check if a provider has any OAuth profiles available (exact name match).
  */
 export function hasOAuthProfilesForProvider(provider: string): boolean {
-  const oauthNames = CANONICAL_TO_OAUTH[provider] ?? [provider];
   try {
     const profiles = getAllProfiles();
-    return profiles.some(({ profile }) => oauthNames.includes(profile.provider));
+    return profiles.some(({ profile }) => profile.provider === provider);
   } catch {
     return false;
   }
