@@ -39,10 +39,10 @@ function SetupModeRedirect({ children }: { children: React.ReactNode }) {
       setState("ready");
       return;
     }
-    fetch(`${config.baseUrl}/api/v1/setup-mode`)
+    fetch(`${config.baseUrl}/api/v1/config/status`)
       .then((r) => r.json())
       .then((r) => {
-        if (r.ok && r.data.setupMode) {
+        if (r.ok && !r.data.initialized) {
           setState("setup");
           navigate("/setup", { replace: true });
         } else {

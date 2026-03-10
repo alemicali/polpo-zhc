@@ -9721,9 +9721,6 @@
                           "additionalProperties": {
                             "type": "object",
                             "properties": {
-                              "hasConfigKey": {
-                                "type": "boolean"
-                              },
                               "hasEnvKey": {
                                 "type": "boolean"
                               },
@@ -9809,7 +9806,6 @@
                               }
                             },
                             "required": [
-                              "hasConfigKey",
                               "hasEnvKey",
                               "profiles",
                               "oauthAvailable"

@@ -1,5 +1,6 @@
 import { useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
+import { Navbar, ExtLink, GitHubIcon, DiscordIcon } from "./components/Navbar";
 import { motion, useInView, AnimatePresence } from "motion/react";
 import {
   Code2,
@@ -36,53 +37,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
-/* ── Discord icon (brand — not in Lucide) ─────────────────────────── */
-
-function DiscordIcon({ className = "" }: { className?: string }) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="currentColor"
-      className={className}
-      aria-hidden="true"
-    >
-      <path d="M20.317 4.37a19.791 19.791 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028c.462-.63.874-1.295 1.226-1.994a.076.076 0 0 0-.041-.106 13.107 13.107 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10.2 10.2 0 0 0 .372-.292.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127 12.299 12.299 0 0 1-1.873.892.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.839 19.839 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.03zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.095 2.157 2.42 0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.095 2.157 2.42 0 1.333-.947 2.418-2.157 2.418z" />
-    </svg>
-  );
-}
-
-/* ── GitHub icon (brand — not in Lucide) ──────────────────────────── */
-
-function GitHubIcon({ className = "" }: { className?: string }) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="currentColor"
-      className={className}
-      aria-hidden="true"
-    >
-      <path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12" />
-    </svg>
-  );
-}
-
-/* ── External link helper ──────────────────────────────────────────── */
-
-function ExtLink({
-  href,
-  className = "",
-  children,
-}: {
-  href: string;
-  className?: string;
-  children: ReactNode;
-}) {
-  return (
-    <a href={href} target="_blank" rel="noopener noreferrer" className={className}>
-      {children}
-    </a>
-  );
-}
+/* ── Icons & helpers imported from ./components/Navbar ─────────────── */
 
 /* ── Scroll-reveal ─────────────────────────────────────────────────── */
 
@@ -151,50 +106,7 @@ function InstallBar({ className = "" }: { className?: string }) {
   );
 }
 
-/* ── Navbar ─────────────────────────────────────────────────────────── */
-
-function Navbar() {
-  return (
-    <header className="fixed top-0 z-50 w-full border-b border-neutral-100 bg-white/80 backdrop-blur-md">
-      <div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-3">
-        <Link to="/" className="flex items-center">
-          <img src="/logo-text.svg" alt="Polpo" className="h-6" />
-        </Link>
-        <nav className="flex items-center gap-5">
-          <Link
-            to="/ink"
-            className="inline-flex items-center gap-2 rounded-full border border-indigo-200 bg-indigo-50 px-3.5 py-1.5 text-sm font-medium text-indigo-700 transition hover:border-indigo-300 hover:bg-indigo-100"
-          >
-            <Package className="h-3.5 w-3.5" />
-            Ink Hub
-            <span className="rounded-full bg-indigo-600 px-1.5 py-0.5 text-[10px] font-bold text-white leading-none">NEW</span>
-          </Link>
-          <ExtLink
-            href="https://docs.polpo.sh"
-            className="flex items-center gap-1.5 text-sm text-neutral-500 transition hover:text-neutral-950"
-          >
-            <BookOpen className="h-3.5 w-3.5" />
-            Docs
-          </ExtLink>
-          <ExtLink
-            href="https://discord.gg/xha8trjq"
-            className="flex items-center gap-1.5 text-sm text-neutral-500 transition hover:text-neutral-950"
-          >
-            <DiscordIcon className="h-3.5 w-3.5" />
-            Discord
-          </ExtLink>
-          <ExtLink
-            href="https://github.com/lumea-labs/polpo"
-            className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-200 px-3 py-1.5 text-sm font-medium text-neutral-700 transition hover:border-neutral-400 hover:text-neutral-950"
-          >
-            <GitHubIcon className="h-4 w-4" />
-            lumea-labs/polpo
-          </ExtLink>
-        </nav>
-      </div>
-    </header>
-  );
-}
+/* ── Navbar imported from ./components/Navbar ──────────────────────── */
 
 /* ── Hero ───────────────────────────────────────────────────────────── */
 
@@ -208,35 +120,23 @@ function Hero() {
 
       <div className="relative mx-auto max-w-3xl px-6 text-center">
         <Reveal>
-          <ExtLink
-            href="https://github.com/lumea-labs/polpo"
-            className="mb-6 inline-flex items-center gap-2 rounded-full border border-neutral-200 bg-white px-4 py-1.5 font-mono text-xs tracking-wide text-neutral-500 transition hover:border-neutral-400 hover:text-neutral-900"
-          >
-            <motion.span
-              animate={{ scale: [1, 1.2, 1] }}
-              transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
-            >
-              <Star className="h-3.5 w-3.5 text-amber-400 fill-amber-400" />
-            </motion.span>
-            Star us on GitHub
-          </ExtLink>
+          <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-neutral-200 bg-white px-4 py-1.5 font-mono text-xs tracking-wide text-neutral-500">
+            <ShieldCheck className="h-3.5 w-3.5 text-emerald-500" />
+            Make your AI agents reliable
+          </div>
         </Reveal>
 
         <Reveal delay={0.06}>
-          <p className="mb-6 font-mono text-xs uppercase tracking-[0.25em] text-neutral-400">Built for human freedom</p>
-        </Reveal>
-
-        <Reveal delay={0.12}>
           <h1 className="font-display text-5xl font-extrabold tracking-tight text-neutral-950 sm:text-6xl lg:text-7xl">
-            Build your
+            The open-source platform
             <br />
             <motion.span
-              className="inline-block"
+              className="inline-block text-neutral-400"
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.6, delay: 0.4, ease: [0.22, 1, 0.36, 1] }}
             >
-              AI company.
+              for AI agent teams.
             </motion.span>
           </h1>
         </Reveal>
@@ -318,71 +218,93 @@ function VideoSection() {
 /* ── Comparison ────────────────────────────────────────────────────── */
 
 function Comparison() {
-  const rows = [
+  const cards: { icon: LucideIcon; title: string; badge: string; badgeClass: string; items: { label: string; ok: boolean }[]; desc: string; highlight?: boolean }[] = [
     {
-      tool: "Claude Code / Cursor",
-      get: "A developer",
-      how: "One agent, one chat, one task. You drive.",
+      icon: BotMessageSquare,
+      title: "Single agent",
+      badge: "Limited",
+      badgeClass: "bg-neutral-100 text-neutral-500",
+      desc: "One agent, one task. You babysit the chat and hope it finishes.",
+      items: [
+        { label: "Execution", ok: true },
+        { label: "Coordination", ok: false },
+        { label: "Quality review", ok: false },
+        { label: "Auto-retry", ok: false },
+      ],
     },
     {
-      tool: "OpenClaw",
-      get: "An assistant",
-      how: "Multiple agents, no quality checks. You hope it works.",
+      icon: Users,
+      title: "Multi-agent",
+      badge: "Partial",
+      badgeClass: "bg-amber-50 text-amber-600",
+      desc: "Multiple agents run in parallel — but nobody checks their work.",
+      items: [
+        { label: "Execution", ok: true },
+        { label: "Coordination", ok: true },
+        { label: "Quality review", ok: false },
+        { label: "Auto-retry", ok: false },
+      ],
     },
     {
-      tool: "Polpo",
-      get: "A company",
-      how: "A team with a manager that plans, delegates, reviews, retries, and reports back. You're the CEO.",
+      icon: Target,
+      title: "Polpo",
+      badge: "Full cycle",
+      badgeClass: "bg-emerald-50 text-emerald-700",
+      desc: "Orchestration, LLM-as-judge evaluation, automatic retry. Work is done when it passes review.",
       highlight: true,
+      items: [
+        { label: "Execution", ok: true },
+        { label: "Coordination", ok: true },
+        { label: "Quality review", ok: true },
+        { label: "Auto-retry", ok: true },
+      ],
     },
   ];
   return (
     <section className="py-24 md:py-32">
-      <div className="mx-auto max-w-3xl px-6">
+      <div className="mx-auto max-w-4xl px-6">
         <Reveal>
           <h2 className="text-center font-display text-3xl font-extrabold tracking-tight text-neutral-950 sm:text-4xl">
-            You don't need another coding assistant.
+            Orchestration alone isn't enough.
             <br />
             <span className="text-neutral-400">
-              You need a team that runs without you.
+              You need agents that deliver verified work.
             </span>
           </h2>
         </Reveal>
-        <Reveal delay={0.12}>
-          <div className="mt-12 overflow-hidden rounded-xl border border-neutral-200">
-            <div className="grid grid-cols-[180px_140px_1fr] gap-4 border-b border-neutral-100 bg-neutral-50 px-6 py-3 font-mono text-xs uppercase tracking-wider text-neutral-400 max-md:hidden">
-              <span />
-              <span>What you get</span>
-              <span>How it works</span>
-            </div>
-            {rows.map((r, i) => (
-              <div
-                key={i}
-                className={`grid grid-cols-1 gap-1 border-b border-neutral-100 px-6 py-4 last:border-0 md:grid-cols-[180px_140px_1fr] md:gap-4 md:items-center ${
-                  r.highlight
-                    ? "bg-gradient-to-r from-rose-50 to-violet-50 border-l-2 border-l-rose-400"
-                    : ""
-                }`}
-              >
-                <span
-                  className={`font-display text-sm font-bold ${r.highlight ? "text-neutral-950" : "text-neutral-900"}`}
-                >
-                  {r.tool}
-                </span>
-                <span
-                  className={`text-sm font-semibold ${r.highlight ? "text-rose-600" : "text-neutral-600"}`}
-                >
-                  {r.get}
-                </span>
-                <span
-                  className={`text-sm ${r.highlight ? "text-neutral-600" : "text-neutral-500"}`}
-                >
-                  {r.how}
-                </span>
-              </div>
-            ))}
-          </div>
-        </Reveal>
+        <div className="mt-14 grid grid-cols-1 gap-5 sm:grid-cols-3">
+          {cards.map((c, i) => {
+            const Icon = c.icon;
+            return (
+              <Reveal key={i} delay={i * 0.08}>
+                <div className={`relative flex h-full flex-col rounded-xl border p-6 transition ${
+                  c.highlight
+                    ? "border-emerald-200 bg-gradient-to-b from-emerald-50/60 to-white shadow-sm"
+                    : "border-neutral-200 bg-white"
+                }`}>
+                  <div className="flex items-center justify-between mb-4">
+                    <Icon className={`h-5 w-5 ${c.highlight ? "text-emerald-500" : "text-neutral-400"}`} strokeWidth={1.5} />
+                    <span className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${c.badgeClass}`}>{c.badge}</span>
+                  </div>
+                  <h3 className="font-display text-lg font-bold text-neutral-950">{c.title}</h3>
+                  <p className="mt-2 text-sm leading-relaxed text-neutral-500 flex-1">{c.desc}</p>
+                  <div className="mt-5 space-y-2 border-t border-neutral-100 pt-4">
+                    {c.items.map((item, j) => (
+                      <div key={j} className="flex items-center gap-2.5">
+                        {item.ok ? (
+                          <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+                        ) : (
+                          <div className="h-3.5 w-3.5 rounded-full border-2 border-neutral-200 shrink-0" />
+                        )}
+                        <span className={`text-sm ${item.ok ? "text-neutral-700" : "text-neutral-400"}`}>{item.label}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </Reveal>
+            );
+          })}
+        </div>
       </div>
     </section>
   );
@@ -735,6 +657,65 @@ function FeatureShowcase() {
   );
 }
 
+/* ── Ink Hub ──────────────────────────────────────────────────────── */
+
+function InkHubSection() {
+  const packageTypes: { icon: LucideIcon; title: string; desc: string; example: string }[] = [
+    { icon: Play, title: "Playbooks", desc: "Reusable mission templates with parameters. Scaffold a REST API, run a content pipeline, or automate deploys.", example: "polpo ink add lumea-labs/ink-registry" },
+    { icon: BotMessageSquare, title: "Agents", desc: "Pre-configured agent definitions with roles, tools, identity, and system prompts. Drop them into any team.", example: "backend-dev, researcher, writer..." },
+    { icon: Users, title: "Companies", desc: "Complete Polpo setups — multiple teams, agents, settings, and memory. Clone an entire working configuration.", example: "SaaS startup, content agency..." },
+  ];
+
+  return (
+    <section className="py-24 md:py-32">
+      <div className="mx-auto max-w-4xl px-6">
+        <Reveal>
+          <div className="flex items-center justify-center gap-2 mb-4">
+            <Package className="h-5 w-5 text-neutral-400" />
+            <span className="font-mono text-xs uppercase tracking-wider text-neutral-400">Polpo Ink Hub</span>
+          </div>
+          <h2 className="text-center font-display text-3xl font-extrabold tracking-tight text-neutral-950 sm:text-4xl">
+            A package registry{" "}
+            <span className="text-neutral-400">for agent teams.</span>
+          </h2>
+          <p className="mx-auto mt-4 max-w-2xl text-center text-neutral-500">
+            Browse, install, and share reusable agent configurations. Any GitHub
+            repo that follows the convention becomes a registry. Install with one
+            command, track with a lock file.
+          </p>
+        </Reveal>
+
+        <div className="mt-14 grid grid-cols-1 gap-5 sm:grid-cols-3">
+          {packageTypes.map((p, i) => {
+            const Icon = p.icon;
+            return (
+              <Reveal key={i} delay={i * 0.08}>
+                <div className="flex h-full flex-col rounded-xl border border-neutral-200 bg-white p-6 transition hover:border-neutral-300 hover:shadow-sm">
+                  <Icon className="mb-3 h-5 w-5 text-neutral-400" strokeWidth={1.5} />
+                  <h3 className="font-display text-sm font-bold text-neutral-900">{p.title}</h3>
+                  <p className="mt-2 flex-1 text-sm leading-relaxed text-neutral-500">{p.desc}</p>
+                  <p className="mt-3 font-mono text-xs text-neutral-400">{p.example}</p>
+                </div>
+              </Reveal>
+            );
+          })}
+        </div>
+
+        <Reveal delay={0.3}>
+          <div className="mt-10 text-center">
+            <Link
+              to="/ink"
+              className="inline-flex items-center gap-2 rounded-lg bg-neutral-950 px-6 py-3 text-sm font-semibold text-white transition hover:bg-neutral-800"
+            >
+              Browse Polpo Ink Hub <ArrowRight className="h-4 w-4" />
+            </Link>
+          </div>
+        </Reveal>
+      </div>
+    </section>
+  );
+}
+
 /* ── Deploy options ───────────────────────────────────────────────── */
 
 function DeployOptions() {
@@ -831,7 +812,7 @@ function Differentiators() {
     { icon: CheckCircle2, label: "Reliable", text: "Every task scored by 3 LLM judges across 4 dimensions. Below threshold? The agent fixes it. You get results, not retries." },
     { icon: Zap, label: "Crash-proof", text: "Detached processes. Kill Polpo, reboot, lose connection — picks up where it left off." },
     { icon: Bell, label: "Proactive", text: "Reaches you on Slack, Telegram, email, webhooks. You decide when and how." },
-    { icon: RefreshCw, label: "Playbooks", text: "Define a mission once, run it forever. Schedule it on cron, iterate on it. Your AI company gets better over time." },
+    { icon: RefreshCw, label: "Playbooks", text: "Define a mission once, run it forever. Schedule it on cron, iterate on it. Your agent teams get better over time." },
     { icon: ShieldCheck, label: "Side-effect protection", text: "Flags irreversible actions (emails, API calls, deployments) for human approval before re-execution." },
   ];
   return (
@@ -843,7 +824,7 @@ function Differentiators() {
           </h2>
           <p className="mx-auto mt-4 max-w-lg text-center text-neutral-500">
             Polpo gets smarter over time. Skills, playbooks, and agent memory
-            compound — your AI company improves with every run.
+            compound — your agent teams improve with every run.
           </p>
         </Reveal>
         <div className="mt-12 space-y-1">
@@ -876,7 +857,7 @@ function CTA() {
       <div className="relative mx-auto max-w-2xl px-6">
         <Reveal>
           <h2 className="font-display text-3xl font-extrabold tracking-tight text-neutral-950 sm:text-4xl">
-            Ready to build your AI company?
+            Ready to orchestrate your AI team?
           </h2>
         </Reveal>
         <Reveal delay={0.08}>
@@ -915,7 +896,7 @@ function Footer() {
         <div className="flex flex-col gap-8 md:flex-row md:items-start md:justify-between">
           <div>
             <img src="/logo-text.svg" alt="Polpo" className="h-5" />
-            <p className="mt-1 text-sm text-neutral-500">Open-source orchestration and mission control for AI agent teams.</p>
+            <p className="mt-1 text-sm text-neutral-500">The open-source framework for AI agent teams.</p>
           </div>
 
           <div className="flex gap-16">
@@ -968,6 +949,7 @@ export function App() {
       <QualitySection />
       <Capabilities />
       <FeatureShowcase />
+      <InkHubSection />
       <HowItWorks />
       <Differentiators />
       <DeployOptions />

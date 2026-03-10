@@ -2,7 +2,7 @@ import { resolve } from "node:path";
 import { mkdirSync, existsSync, watch, type FSWatcher } from "node:fs";
 import { join } from "node:path";
 import type { Server } from "node:net";
-import { parseConfig, loadPolpoConfig, savePolpoConfig } from "./config.js";
+import { parseConfig, loadPolpoConfig, savePolpoConfig, loadEnvFile } from "./config.js";
 import { findLogForTask, buildExecutionSummary } from "../assessment/transcript-parser.js";
 import { FileTaskStore } from "../stores/file-task-store.js";
 import { FileRunStore } from "../stores/file-run-store.js";
@@ -295,7 +295,7 @@ export class Orchestrator extends TypedEmitter {
         .join("\n");
       this.emit("log", {
         level: "warn",
-        message: `Missing API keys for providers:\n${details}\nSet the corresponding env vars or add them to .polpo/polpo.json providers section`,
+        message: `Missing API keys for providers:\n${details}\nSet the corresponding environment variables or run 'polpo setup'`,
       });
     }
   }
@@ -537,6 +537,9 @@ export class Orchestrator extends TypedEmitter {
       mkdirSync(this.polpoDir, { recursive: true });
     }
 
+    // Load .polpo/.env so ${VAR} references resolve correctly
+    loadEnvFile(this.polpoDir);
+
     // Load persistent config if available
     const polpoConfig = loadPolpoConfig(this.polpoDir);
     const settings = polpoConfig?.settings ?? { maxRetries: 2, workDir: ".", logLevel: "normal" as const };
@@ -686,6 +689,7 @@ export class Orchestrator extends TypedEmitter {
   getTeams(): Team[] { return this.agentMgr.getTeams(); }
   getTeam(name?: string): Team | undefined { return this.agentMgr.getTeam(name); }
   getConfig(): PolpoConfig | null { return this.config; }
+  get isInitialized(): boolean { return this.interactive; }
   async addTeam(team: Team): Promise<void> { return this.agentMgr.addTeam(team); }
   async removeTeam(name: string): Promise<boolean> { return this.agentMgr.removeTeam(name); }
   async renameTeam(oldName: string, newName: string): Promise<void> { return this.agentMgr.renameTeam(oldName, newName); }

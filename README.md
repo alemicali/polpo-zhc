@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <strong>Build your AI company.</strong><br/>
+  <strong>The open-source framework for AI agent teams.</strong><br/>
   <sub>Spin up AI agent teams that plan, execute, review their own work, and ping you only when it matters.</sub>
 </p>
 
@@ -25,21 +25,21 @@
 
 ## Why Polpo?
 
-You don't need another AI coding assistant. You need a team that runs without you.
+Orchestration alone isn't enough. You need agents that deliver verified work.
 
 AI agents are great at execution — terrible at finishing real work autonomously. Without oversight they drift, conflict, and stall. You end up babysitting the machines that were supposed to save you time: 4 monitors, 12 terminals, zero confidence anything actually works.
 
-**Polpo gives you an AI company.** Describe what you need and walk away. Polpo assembles the right agents, plans the work, checks every result, retries what's broken, and escalates what it can't fix. It reaches you on Telegram, Slack, or email — only when it matters.
+**Polpo closes the loop.** Describe what you need and walk away. Polpo assembles the right agents, plans the work, evaluates every result with LLM judges, retries what's broken, and escalates what it can't fix. It reaches you on Telegram, Slack, or email — only when it matters.
 
 One `npx` command, no hosted platform, no vendor lock-in. Your laptop, your API keys, your rules.
 
 ## How Polpo is different
 
-| | What you get | How it works |
+| Approach | Coverage | What happens |
 |---|---|---|
-| **Claude Code / Cursor** | A developer | One agent, one chat, one task at a time. You drive. |
-| **OpenClaw** | A personal assistant | Multiple agents, no quality checks. You hope it works. |
-| **Polpo** | **A company** | Multiple agents working as a team — with a manager (Polpo) that plans, delegates, reviews, retries, and reports back. You're the CEO. |
+| **Single agent** | No coordination | One agent, one task. You babysit the chat and hope it finishes. |
+| **Multi-agent (no review)** | No quality checks | Multiple agents run in parallel — but nobody checks their work. |
+| **Polpo** | **Full cycle** | Orchestration, LLM-as-judge evaluation, automatic retry, and notifications. Work is done when it passes review. |
 
 | | | |
 |:---:|---|---|
@@ -47,7 +47,7 @@ One `npx` command, no hosted platform, no vendor lock-in. Your laptop, your API 
 | :white_check_mark: | **Reliable** | Every task scored by LLM judges. Below threshold? The agent fixes it. You get results, not retries. |
 | :shield: | **Crash-proof** | Detached processes. Kill Polpo, reboot, lose connection — picks up where it left off. |
 | :bell: | **Proactive** | Reaches you on Slack, Telegram, email, or webhooks. You decide when and how. |
-| :repeat: | **Playbooks** | Define a mission once, run it forever. Schedule it, tweak it, improve it. Your AI company gets better over time. |
+| :repeat: | **Playbooks** | Define a mission once, run it forever. Schedule it, tweak it, improve it. Your agent teams get better over time. |
 
 ## Installation
 
@@ -109,7 +109,7 @@ docker run -it -v $(pwd):/workspace ghcr.io/lumea-labs/polpo:latest
 
 ## What your agents can do
 
-Code. Browse the web. Send emails. Generate PDFs, Excel, Word docs. Create images, videos, audio. Search the internet. Talk to your customers. Handle credentials securely. And learn — Polpo creates and installs its own skills over time. Your AI company gets smarter the more you use it.
+Code. Browse the web. Send emails. Generate PDFs, Excel, Word docs. Create images, videos, audio. Search the internet. Talk to your customers. Handle credentials securely. And learn — Polpo creates and installs its own skills over time. Your agent teams get smarter the more you use it.
 
 22+ LLM providers. 70+ tools. 5,000+ community skills. Free default model included.
 

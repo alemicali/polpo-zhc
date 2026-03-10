@@ -78,7 +78,7 @@ describe("redactPolpoState", () => {
 // ── redactPolpoConfig ──
 
 describe("redactPolpoConfig", () => {
-  it("redacts providers.apiKey values", () => {
+  it("returns config as-is — providers no longer contain secrets", () => {
     const config = {
       version: "1",
       org: "test",
@@ -89,20 +89,17 @@ describe("redactPolpoConfig", () => {
       tasks: [],
       settings: { maxRetries: 3, workDir: ".", logLevel: "normal" as const },
       providers: {
-        anthropic: { apiKey: "sk-ant-12345" },
-        openai: { apiKey: "sk-openai-abc", baseUrl: "https://api.openai.com" },
         ollama: { baseUrl: "http://localhost:11434" },
+        custom: { baseUrl: "https://my-vllm.example.com/v1", api: "openai-completions" as const },
       },
     } as PolpoConfig;
 
     const result = redactPolpoConfig(config);
 
-    // Provider keys redacted
-    expect(result.providers!.anthropic.apiKey).toBe("***");
-    expect(result.providers!.openai.apiKey).toBe("***");
-    expect(result.providers!.openai.baseUrl).toBe("https://api.openai.com");
-    // No apiKey → undefined preserved
-    expect(result.providers!.ollama.apiKey).toBeUndefined();
+    // Same reference — pass-through
+    expect(result).toBe(config);
+    expect(result.providers!.ollama.baseUrl).toBe("http://localhost:11434");
+    expect(result.providers!.custom.baseUrl).toBe("https://my-vllm.example.com/v1");
   });
 
   it("handles config without providers", () => {
@@ -115,6 +112,7 @@ describe("redactPolpoConfig", () => {
     } as PolpoConfig;
 
     const result = redactPolpoConfig(config);
+    expect(result).toBe(config);
     expect(result.providers).toBeUndefined();
   });
 });

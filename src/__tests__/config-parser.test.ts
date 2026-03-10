@@ -135,19 +135,40 @@ describe("parseConfig (.polpo/polpo.json)", () => {
       expect(config.settings.logLevel).toBe("verbose");
     });
 
-    it("parses provider overrides", async () => {
+    it("parses provider overrides (baseUrl/api/models only)", async () => {
       const cfg = {
         ...minimalConfig(),
         providers: {
-          anthropic: { apiKey: "sk-test" },
-          openai: "sk-openai-test",
+          ollama: { baseUrl: "http://localhost:11434/v1", api: "openai-completions" },
+          custom: { baseUrl: "https://my-vllm.example.com/v1" },
         },
       };
       const workDir = writeConfig(cfg);
       const config = await parseConfig(workDir);
       expect(config.providers).toBeDefined();
-      expect(config.providers!.anthropic.apiKey).toBe("sk-test");
-      expect(config.providers!.openai.apiKey).toBe("sk-openai-test");
+      expect(config.providers!.ollama.baseUrl).toBe("http://localhost:11434/v1");
+      expect(config.providers!.ollama.api).toBe("openai-completions");
+      expect(config.providers!.custom.baseUrl).toBe("https://my-vllm.example.com/v1");
+    });
+
+    it("ignores provider entries that only have apiKey (no custom config)", async () => {
+      const cfg = {
+        ...minimalConfig(),
+        providers: {
+          anthropic: { apiKey: "sk-test" },
+          openai: "sk-openai-test",
+          ollama: { baseUrl: "http://localhost:11434/v1" },
+        },
+      };
+      const workDir = writeConfig(cfg);
+      const config = await parseConfig(workDir);
+      expect(config.providers).toBeDefined();
+      // Only ollama should remain — it has baseUrl
+      expect(config.providers!.ollama).toBeDefined();
+      expect(config.providers!.ollama.baseUrl).toBe("http://localhost:11434/v1");
+      // anthropic had only apiKey, openai was a string — both skipped
+      expect(config.providers!.anthropic).toBeUndefined();
+      expect(config.providers!.openai).toBeUndefined();
     });
   });
 

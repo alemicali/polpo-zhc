@@ -11,7 +11,9 @@ import { authMiddleware } from "./middleware/auth.js";
 import { errorMiddleware } from "./middleware/error.js";
 import { rateLimitMiddleware } from "./middleware/rate-limit.js";
 import { healthRoutes } from "./routes/health.js";
-import { setupRoutes } from "./routes/setup.js";
+import { publicConfigRoutes, configRoutes } from "./routes/config.js";
+import { filesystemRoutes } from "./routes/filesystem.js";
+import { providerRoutes } from "./routes/providers.js";
 import { taskRoutes } from "./routes/tasks.js";
 import { missionRoutes } from "./routes/missions.js";
 import { agentRoutes } from "./routes/agents.js";
@@ -21,7 +23,6 @@ import { skillRoutes } from "./routes/skills.js";
 import { notificationRoutes } from "./routes/notifications.js";
 import { approvalRoutes } from "./routes/approvals.js";
 import { playbookRoutes } from "./routes/playbooks.js";
-import { configRoutes } from "./routes/config.js";
 import { stateRoutes } from "./routes/state.js";
 import { completionRoutes } from "./routes/completions.js";
 import { peerRoutes } from "./routes/peers.js";
@@ -37,18 +38,11 @@ export type ServerEnv = {
   };
 };
 
-/** Shared mutable state between app and server — allows setup→ready transition */
-export interface ServerState {
-  setupMode: boolean;
-}
-
 export interface AppOptions {
   apiKeys?: string[];
   corsOrigins?: string[];
-  setupMode?: boolean;
   workDir?: string;
-  serverState?: ServerState;
-  onSetupComplete?: (workDir: string) => Promise<void>;
+  onInitialize?: (workDir: string) => Promise<void>;
 }
 
 /**
@@ -72,48 +66,54 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     app.use("*", cors({
       origin: [
         "http://localhost:3000", "http://localhost:3001",
-        "http://localhost:5173", "http://localhost:5174", "http://localhost:5175",
+        "http://localhost:3890", "http://localhost:3891",
+        "http://localhost:5173", "http://localhost:5174", "http://localhost:5175", "http://localhost:5176",
         "http://127.0.0.1:3000", "http://127.0.0.1:3001",
-        "http://127.0.0.1:5173", "http://127.0.0.1:5174", "http://127.0.0.1:5175",
+        "http://127.0.0.1:3890", "http://127.0.0.1:3891",
+        "http://127.0.0.1:5173", "http://127.0.0.1:5174", "http://127.0.0.1:5175", "http://127.0.0.1:5176",
       ],
       exposeHeaders: corsExposeHeaders,
     }));
   }
 
-  // Health (no auth)
+  // ── Public routes (no auth) ───────────────────────────────────────────
+
   app.route("/api/v1/health", healthRoutes());
 
-  // Shared state for setup→ready transition
-  const serverState = opts?.serverState ?? { setupMode: !!opts?.setupMode };
-
-  // Setup mode indicator — the UI checks this to redirect to /setup
-  // Must read serverState dynamically so it reflects completeSetup() flipping it to false
-  app.get("/api/v1/setup-mode", (c) => c.json({ ok: true, data: { setupMode: serverState.setupMode } }));
-
-  // Setup routes (no auth — used by setup wizard)
+  // Config status + initialize — always available so setup wizard works
   if (opts?.workDir) {
-    app.route("/api/v1/setup", setupRoutes(opts.workDir, opts.onSetupComplete));
+    app.route("/api/v1/config", publicConfigRoutes(orchestrator, opts.workDir, opts.onInitialize));
+  }
+
+  // Filesystem browsing — always available (used by setup wizard path picker)
+  app.route("/api/v1/filesystem", filesystemRoutes());
+
+  // Provider management — always available (API key CRUD, OAuth flows, model listing)
+  if (opts?.workDir) {
+    const polpoDir = resolve(opts.workDir, ".polpo");
+    app.route("/api/v1/providers", providerRoutes(polpoDir));
   }
 
   // OpenAI-compatible chat completions
   app.route("/v1/chat/completions", completionRoutes(orchestrator, opts?.apiKeys));
 
-  // Authenticated routes
+  // ── Authenticated routes (require initialized orchestrator) ───────────
+
   const authed = new OpenAPIHono<ServerEnv>();
   if (opts?.apiKeys && opts.apiKeys.length > 0) {
     authed.use("*", authMiddleware(opts.apiKeys));
   }
 
-  // Gate: if still in setup mode, return 503 for orchestrator routes
+  // Gate: orchestrator must be initialized for these routes
   authed.use("*", async (c, next) => {
-    if (serverState.setupMode) {
-      return c.json({ ok: false, error: "Server is in setup mode. Complete setup first." }, 503);
+    if (!orchestrator.isInitialized) {
+      return c.json({ ok: false, error: "Polpo is not initialized. Complete setup first." }, 503);
     }
     c.set("orchestrator", orchestrator);
     return next();
   });
 
-  // Mount all routes (always — gated by middleware above)
+  // Mount all routes (gated by middleware above)
   authed.route("/tasks", taskRoutes());
   authed.route("/missions", missionRoutes());
   authed.route("/agents", agentRoutes());
@@ -178,8 +178,12 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
       },
     }));
 
-    // SPA fallback — serve index.html for client-side routes
+    // SPA fallback — serve index.html for client-side routes (skip API paths)
     app.get("*", async (c) => {
+      const path = c.req.path;
+      if (path.startsWith("/api/") || path.startsWith("/v1/")) {
+        return c.json({ ok: false, error: "Not found" }, 404);
+      }
       try {
         const html = await readFile(resolve(uiDistDir, "index.html"), "utf-8");
         return c.html(html);

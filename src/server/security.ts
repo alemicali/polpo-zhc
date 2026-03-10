@@ -18,8 +18,6 @@ import type { AgentConfig, Team, PolpoState, PolpoConfig, PolpoFileConfig } from
 /** Regex matching parameter names that likely contain secrets. */
 export const SENSITIVE_PARAM_RE = /pass|secret|token|key|auth|password|credential/i;
 
-const REDACTED = "***";
-
 // ── Agent Config Redaction ──
 
 /**
@@ -46,23 +44,9 @@ export function redactPolpoState(state: PolpoState): PolpoState {
 
 // ── Config Redaction ──
 
-/** Redact provider API keys in a PolpoConfig or PolpoFileConfig. */
+/** Return config as-is — providers no longer contain secrets (API keys resolved via env/OAuth only). */
 export function redactPolpoConfig<T extends PolpoConfig | PolpoFileConfig>(config: T): T {
-  const result: any = { ...config };
-
-  // Redact provider API keys
-  if (result.providers) {
-    const redactedProviders: Record<string, any> = {};
-    for (const [name, provider] of Object.entries(result.providers as Record<string, any>)) {
-      redactedProviders[name] = {
-        ...provider,
-        apiKey: provider.apiKey ? REDACTED : undefined,
-      };
-    }
-    result.providers = redactedProviders;
-  }
-
-  return result;
+  return config;
 }
 
 // ── Transcript Sanitization ──

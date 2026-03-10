@@ -599,8 +599,6 @@ export interface PolpoFileConfigRaw {
 // === Provider Config ===
 
 export interface ProviderConfig {
-  /** API key (direct value or "${ENV_VAR}" reference). */
-  apiKey?: string;
   /** Override base URL for the provider (e.g. custom proxy, Ollama, vLLM). */
   baseUrl?: string;
   /** API compatibility mode for custom endpoints. */

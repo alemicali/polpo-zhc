@@ -1,7 +1,7 @@
 {
   "name": "@polpo-ai/polpo",
-  "version": "0.1.16",
-  "description": "The open-source platform for zero-human companies",
+  "version": "0.1.17",
+  "description": "The open-source platform for AI agent teams",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

@@ -686,7 +686,6 @@ export interface PolpoSettings {
 }
 
 export interface ProviderConfig {
-  apiKey?: string;
   baseUrl?: string;
   /** API compatibility mode for custom endpoints. */
   api?: "openai-completions" | "openai-responses" | "anthropic-messages";
@@ -1254,7 +1253,6 @@ export interface AuthProfileMeta {
 
 /** Per-provider auth health info. */
 export interface ProviderAuthInfo {
-  hasConfigKey: boolean;
   hasEnvKey: boolean;
   envVar?: string;
   profiles: AuthProfileMeta[];

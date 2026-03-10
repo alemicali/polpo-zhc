@@ -203,11 +203,10 @@ const serveAction = async (opts: any) => {
       ? corsRaw.split(",").map((o: string) => o.trim()).filter(Boolean)
       : undefined;
 
-    // Check if setup is needed
     const configPath = resolve(workDir, ".polpo", "polpo.json");
-    const needsSetup = opts.setup || !existsSync(configPath);
+    const hasConfig = existsSync(configPath);
 
-    if (needsSetup && !opts.setup) {
+    if (!hasConfig) {
       console.log(
         chalk.yellow.bold("  No configuration found.\n") +
         chalk.dim("  The dashboard will open in setup mode.\n") +
@@ -216,7 +215,7 @@ const serveAction = async (opts: any) => {
     }
 
     // Security warning: no authentication configured
-    if (!needsSetup && apiKeys.length === 0) {
+    if (hasConfig && apiKeys.length === 0) {
       const isExposed = opts.host === "0.0.0.0" || opts.host === "::";
       console.log(
         chalk.yellow.bold("\n  WARNING: No API key configured — server has no authentication.\n") +
@@ -234,8 +233,7 @@ const serveAction = async (opts: any) => {
       workDir,
       apiKeys,
       corsOrigins,
-      autoStart: !needsSetup,
-      setupMode: needsSetup,
+      autoStart: hasConfig,
     });
 
     await server.start();
@@ -245,7 +243,7 @@ const program = new Command();
 
 program
   .name("polpo-ai")
-  .description("Agent-agnostic framework for orchestrating teams of AI coding agents")
+  .description("The open-source platform for AI agent teams")
   .version(PKG_VERSION)
   .enablePositionalOptions()
   .passThroughOptions()

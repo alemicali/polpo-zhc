@@ -169,16 +169,14 @@ function ProviderCard({ name, prov, agentModels, authInfo }: {
   agentModels: string[];
   authInfo?: ProviderAuthInfo;
 }) {
-  const hasKey = !!prov.apiKey;
   const hasEnvKey = authInfo?.hasEnvKey ?? false;
   const hasOAuth = (authInfo?.profiles.length ?? 0) > 0;
   const activeOAuth = authInfo?.profiles.filter((p: AuthProfileMeta) => p.status === "active").length ?? 0;
   const isLocal = !!prov.baseUrl && (prov.baseUrl.includes("localhost") || prov.baseUrl.includes("127.0.0.1"));
-  const isAuthenticated = hasKey || hasEnvKey || hasOAuth || isLocal;
+  const isAuthenticated = hasEnvKey || hasOAuth || isLocal;
 
   // Build status label
   const statusLabel = isLocal ? "Local"
-    : hasKey ? "API key (config)"
     : hasEnvKey ? `Env var (${authInfo?.envVar ?? ""})`
     : hasOAuth ? `OAuth (${activeOAuth} active)`
     : "Not configured";

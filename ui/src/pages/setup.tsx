@@ -3,15 +3,28 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
 import { config } from "@/lib/config";
 import {
   KeyRound,
   Sparkles,
   Cpu,
   FolderOpen,
+  Folder,
+  FolderPlus,
+  Home,
   CheckCircle2,
   ChevronRight,
   ChevronLeft,
+  Check,
+  X,
   Eye,
   EyeOff,
   Loader2,
@@ -20,6 +33,7 @@ import {
   ExternalLink,
   LogIn,
   Keyboard,
+  Pencil,
   Search,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -30,6 +44,7 @@ interface Provider {
   name: string;
   envVar: string;
   hasKey: boolean;
+  source?: string; // "env" | "oauth" | "none"
 }
 
 interface OAuthProvider {
@@ -48,7 +63,7 @@ interface Model {
 }
 
 interface SetupStatus {
-  needsSetup: boolean;
+  initialized: boolean;
   hasConfig: boolean;
   hasProviders: boolean;
   detectedProviders: Provider[];
@@ -83,6 +98,294 @@ function StepIndicator({ current, total }: { current: number; total: number }) {
 }
 
 // Step 0: Project directory + org name
+
+interface DirEntry {
+  name: string;
+  path: string;
+  hasPolpoConfig: boolean;
+}
+
+interface BrowseResult {
+  current: string;
+  parent: string | null;
+  dirs: DirEntry[];
+}
+
+function DirectoryPickerDialog({
+  open,
+  onOpenChange,
+  initialPath,
+  onSelect,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  initialPath: string;
+  onSelect: (path: string) => void;
+}) {
+  const [data, setData] = useState<BrowseResult | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [search, setSearch] = useState("");
+  const [creatingFolder, setCreatingFolder] = useState(false);
+  const [newFolderName, setNewFolderName] = useState("New Folder");
+  const [renamingDir, setRenamingDir] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const newFolderRef = useRef<HTMLInputElement>(null);
+  const renameRef = useRef<HTMLInputElement>(null);
+
+  const browse = useCallback(async (path: string) => {
+    setLoading(true);
+    setSearch("");
+    setCreatingFolder(false);
+    setRenamingDir(null);
+    try {
+      const r = await api(`/filesystem/browse?path=${encodeURIComponent(path)}`);
+      if (r.ok) {
+        setData(r.data);
+        if (scrollRef.current) scrollRef.current.scrollTop = 0;
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (open) browse(initialPath || "");
+  }, [open]);
+
+  useEffect(() => {
+    if (creatingFolder) setTimeout(() => newFolderRef.current?.select(), 50);
+  }, [creatingFolder]);
+
+  useEffect(() => {
+    if (renamingDir) setTimeout(() => renameRef.current?.select(), 50);
+  }, [renamingDir]);
+
+  const segments = (data?.current || "").split("/").filter(Boolean);
+
+  const handleBreadcrumbNav = (index: number) => {
+    if (index === -1) browse("/");
+    else browse("/" + segments.slice(0, index + 1).join("/"));
+  };
+
+  const handleConfirm = () => {
+    if (data?.current) {
+      onSelect(data.current);
+      onOpenChange(false);
+    }
+  };
+
+  const handleCreateFolder = async () => {
+    if (!data?.current || !newFolderName.trim()) return;
+    const fullPath = data.current + "/" + newFolderName.trim();
+    const r = await api("/filesystem/mkdir", {
+      method: "POST",
+      body: JSON.stringify({ path: fullPath }),
+    });
+    if (r.ok) {
+      setCreatingFolder(false);
+      browse(data.current);
+    }
+  };
+
+  const handleRename = async (dir: DirEntry) => {
+    if (!renameValue.trim() || renameValue === dir.name) {
+      setRenamingDir(null);
+      return;
+    }
+    const r = await api("/filesystem/rename", {
+      method: "POST",
+      body: JSON.stringify({ path: dir.path, newName: renameValue.trim() }),
+    });
+    if (r.ok) {
+      setRenamingDir(null);
+      browse(data!.current);
+    }
+  };
+
+  const q = search.toLowerCase().trim();
+  const filteredDirs = data?.dirs.filter((d) => !q || d.name.toLowerCase().includes(q)) ?? [];
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-2xl p-0 gap-0 overflow-hidden">
+        <DialogHeader className="px-5 pt-5 pb-0">
+          <DialogTitle className="text-base">Select a folder</DialogTitle>
+          <DialogDescription className="text-xs">
+            Navigate to your project directory
+          </DialogDescription>
+        </DialogHeader>
+
+        {/* Toolbar: breadcrumb + actions */}
+        <div className="flex items-center gap-2 px-5 py-2.5 border-b">
+          {/* Breadcrumb */}
+          <div className="flex items-center gap-0.5 text-sm overflow-x-auto flex-1 min-w-0">
+            <button
+              type="button"
+              onClick={() => handleBreadcrumbNav(-1)}
+              className="shrink-0 p-1 rounded hover:bg-accent/40 transition-colors text-muted-foreground hover:text-foreground"
+            >
+              <Home className="h-3.5 w-3.5" />
+            </button>
+            {segments.map((seg, i) => (
+              <div key={i} className="flex items-center gap-0.5 min-w-0">
+                <ChevronRight className="h-3 w-3 text-muted-foreground/40 shrink-0" />
+                {i === segments.length - 1 ? (
+                  <span className="font-medium text-foreground truncate text-sm">{seg}</span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => handleBreadcrumbNav(i)}
+                    className="truncate px-1 py-0.5 rounded hover:bg-accent/40 transition-colors text-muted-foreground hover:text-foreground text-sm"
+                  >
+                    {seg}
+                  </button>
+                )}
+              </div>
+            ))}
+            {loading && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground ml-1 shrink-0" />}
+          </div>
+
+          {/* Actions */}
+          <div className="flex items-center gap-1 shrink-0">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7"
+              onClick={() => { setCreatingFolder(true); setNewFolderName("New Folder"); }}
+              title="New folder"
+            >
+              <FolderPlus className="h-3.5 w-3.5" />
+            </Button>
+            <div className="relative">
+              <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
+              <Input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Filter..."
+                className="h-7 w-36 pl-7 text-xs"
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Directory listing */}
+        <div ref={scrollRef} className="h-96 overflow-y-auto">
+          {/* Parent directory */}
+          {data?.parent && (
+            <button
+              type="button"
+              onClick={() => browse(data.parent!)}
+              className="w-full flex items-center gap-3 px-5 py-2.5 text-left hover:bg-accent/40 transition-colors"
+            >
+              <Folder className="h-4 w-4 text-muted-foreground shrink-0" />
+              <span className="text-sm text-muted-foreground">..</span>
+            </button>
+          )}
+
+          {/* New folder inline */}
+          {creatingFolder && (
+            <div className="flex items-center gap-3 px-5 py-2">
+              <FolderPlus className="h-4 w-4 text-primary shrink-0" />
+              <Input
+                ref={newFolderRef}
+                value={newFolderName}
+                onChange={(e) => setNewFolderName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") handleCreateFolder();
+                  if (e.key === "Escape") setCreatingFolder(false);
+                }}
+                className="h-7 text-sm flex-1"
+                autoFocus
+              />
+              <Button type="button" variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={handleCreateFolder}>
+                <Check className="h-3.5 w-3.5 text-emerald-500" />
+              </Button>
+              <Button type="button" variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={() => setCreatingFolder(false)}>
+                <X className="h-3.5 w-3.5 text-muted-foreground" />
+              </Button>
+            </div>
+          )}
+
+          {filteredDirs.map((dir) => (
+            <div key={dir.path} className="group flex items-center gap-3 px-5 py-2.5 hover:bg-accent/40 transition-colors">
+              {renamingDir === dir.path ? (
+                <>
+                  <Folder className="h-4 w-4 text-sky-400 shrink-0" />
+                  <Input
+                    ref={renameRef}
+                    value={renameValue}
+                    onChange={(e) => setRenameValue(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") handleRename(dir);
+                      if (e.key === "Escape") setRenamingDir(null);
+                    }}
+                    className="h-7 text-sm flex-1"
+                    autoFocus
+                  />
+                  <Button type="button" variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={() => handleRename(dir)}>
+                    <Check className="h-3.5 w-3.5 text-emerald-500" />
+                  </Button>
+                  <Button type="button" variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={() => setRenamingDir(null)}>
+                    <X className="h-3.5 w-3.5 text-muted-foreground" />
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => browse(dir.path)}
+                    className="flex items-center gap-3 flex-1 min-w-0 text-left"
+                  >
+                    <Folder className="h-4 w-4 text-sky-400 shrink-0" />
+                    <span className="text-sm truncate">{dir.name}</span>
+                    {dir.hasPolpoConfig && (
+                      <Badge variant="secondary" className="text-[10px] px-1.5 py-0 shrink-0">
+                        polpo
+                      </Badge>
+                    )}
+                  </button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                    onClick={() => { setRenamingDir(dir.path); setRenameValue(dir.name); }}
+                    title="Rename"
+                  >
+                    <Pencil className="h-3 w-3 text-muted-foreground" />
+                  </Button>
+                </>
+              )}
+            </div>
+          ))}
+
+          {data && filteredDirs.length === 0 && (
+            <div className="flex items-center justify-center h-32">
+              <p className="text-sm text-muted-foreground">
+                {q ? `No folders matching "${search}"` : "Empty folder"}
+              </p>
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <DialogFooter className="px-5 py-3 border-t bg-muted/30">
+          <div className="flex items-center gap-3 w-full">
+            <code className="text-xs text-muted-foreground font-mono truncate flex-1">
+              {data?.current || initialPath}
+            </code>
+            <Button type="button" size="sm" onClick={handleConfirm}>
+              Select folder
+            </Button>
+          </div>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function ProjectStep({
   workDir,
   orgName,
@@ -94,6 +397,8 @@ function ProjectStep({
   onChangeDir: (v: string) => void;
   onChangeOrg: (v: string) => void;
 }) {
+  const [pickerOpen, setPickerOpen] = useState(false);
+
   return (
     <div className="space-y-6">
       <div>
@@ -108,15 +413,33 @@ function ProjectStep({
           <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
             Working directory
           </label>
-          <Input
-            value={workDir}
-            onChange={(e) => onChangeDir(e.target.value)}
-            placeholder="/path/to/your/project"
-            className="font-mono text-sm"
-          />
+          <div className="flex gap-2">
+            <Input
+              value={workDir}
+              onChange={(e) => onChangeDir(e.target.value)}
+              placeholder="/path/to/your/project"
+              className="font-mono text-sm flex-1"
+            />
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              onClick={() => setPickerOpen(true)}
+              className="shrink-0"
+            >
+              <FolderOpen className="h-4 w-4" />
+            </Button>
+          </div>
           <p className="text-xs text-muted-foreground">
             Config will be saved to <code className="bg-muted px-1 py-0.5 rounded">{workDir}/.polpo/polpo.json</code>
           </p>
+
+          <DirectoryPickerDialog
+            open={pickerOpen}
+            onOpenChange={setPickerOpen}
+            initialPath={workDir}
+            onSelect={onChangeDir}
+          />
         </div>
         <div className="space-y-2">
           <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
@@ -142,44 +465,173 @@ function AuthStep({
   onKeySave,
   onOAuthComplete,
   onOAuthActiveChange,
+  onDisconnect,
 }: {
   providers: Provider[];
   onKeySave: (provider: string, key: string) => Promise<void>;
   onOAuthComplete: () => void;
   onOAuthActiveChange?: (active: boolean) => void;
+  onDisconnect?: (provider: string) => Promise<void>;
 }) {
-  type AuthMode = "choose" | "oauth" | "apikey";
+  type AuthMode = "choose" | "add" | "oauth" | "apikey";
   const [mode, setMode] = useState<AuthMode>("choose");
   const [oauthProviders, setOauthProviders] = useState<OAuthProvider[]>([]);
   const [connectedProviders, setConnectedProviders] = useState<string[]>(
     providers.filter((p) => p.hasKey).map((p) => p.name),
   );
+  const [disconnecting, setDisconnecting] = useState<string | null>(null);
 
   useEffect(() => {
-    api("/setup/oauth/providers").then((r) => {
+    api("/providers/oauth").then((r) => {
       if (r.ok) setOauthProviders(r.data);
     });
   }, []);
 
+  const connected = providers.filter((p) => connectedProviders.includes(p.name) && p.hasKey);
+
+  const handleDisconnect = async (provider: Provider) => {
+    setDisconnecting(provider.name);
+    try {
+      await onDisconnect?.(provider.name);
+      setConnectedProviders((prev) => prev.filter((n) => n !== provider.name));
+    } finally {
+      setDisconnecting(null);
+    }
+  };
+
   if (mode === "choose") {
+    // No providers connected — force user to add one
+    if (connected.length === 0) {
+      return (
+        <div className="space-y-6">
+          <div>
+            <h2 className="text-xl font-semibold tracking-tight">Connect a provider</h2>
+            <p className="text-sm text-muted-foreground mt-1">
+              You need at least one LLM provider to continue. Choose how to connect.
+            </p>
+          </div>
+
+          <div className="space-y-3">
+            {/* OAuth — subscriptions & free */}
+            <button
+              onClick={() => setMode("oauth")}
+              className="w-full flex items-start gap-4 p-4 rounded-lg border border-border hover:border-primary/30 hover:bg-accent/50 text-left transition-all"
+            >
+              <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center shrink-0 mt-0.5">
+                <LogIn className="h-5 w-5 text-primary" />
+              </div>
+              <div className="min-w-0">
+                <p className="font-medium text-sm">Login with subscription</p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Use your existing Claude, ChatGPT, Copilot, or Google account.
+                  Includes free options.
+                </p>
+                <div className="flex flex-wrap gap-1.5 mt-2">
+                  {oauthProviders.slice(0, 3).map((p) => (
+                    <Badge key={p.id} variant="secondary" className="text-[10px]">
+                      {p.free && <span className="text-emerald-600 mr-0.5">FREE</span>}
+                      {p.name.split("(")[0].trim()}
+                    </Badge>
+                  ))}
+                  {oauthProviders.length > 3 && (
+                    <Badge variant="secondary" className="text-[10px]">
+                      +{oauthProviders.length - 3} more
+                    </Badge>
+                  )}
+                </div>
+              </div>
+            </button>
+
+            {/* API Key */}
+            <button
+              onClick={() => setMode("apikey")}
+              className="w-full flex items-start gap-4 p-4 rounded-lg border border-border hover:border-primary/30 hover:bg-accent/50 text-left transition-all"
+            >
+              <div className="h-10 w-10 rounded-lg bg-muted flex items-center justify-center shrink-0 mt-0.5">
+                <Keyboard className="h-5 w-5 text-muted-foreground" />
+              </div>
+              <div className="min-w-0">
+                <p className="font-medium text-sm">Enter an API key</p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Paste an API key for any provider — OpenAI, Anthropic, Groq, and more.
+                </p>
+              </div>
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    // Has providers — show list + "Add provider" button
     return (
       <div className="space-y-6">
         <div>
-          <h2 className="text-xl font-semibold tracking-tight">Connect a provider</h2>
+          <h2 className="text-xl font-semibold tracking-tight">Your providers</h2>
           <p className="text-sm text-muted-foreground mt-1">
-            Choose how to authenticate with an LLM provider.
+            {connected.length} provider{connected.length > 1 ? "s" : ""} connected. You can add more or continue to the next step.
           </p>
         </div>
 
-        {connectedProviders.length > 0 && (
-          <p className="text-sm text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5">
-            <CheckCircle2 className="h-4 w-4" />
-            {connectedProviders.length} provider{connectedProviders.length > 1 ? "s" : ""} connected
-          </p>
-        )}
+        <div className="space-y-1.5">
+          {connected.map((p) => (
+            <div
+              key={p.name}
+              className="flex items-center justify-between px-3 py-2.5 rounded-lg border border-emerald-500/20 bg-emerald-500/5"
+            >
+              <div className="flex items-center gap-2 min-w-0">
+                <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" />
+                <span className="text-sm font-medium capitalize">{p.name}</span>
+                <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+                  {p.source === "oauth" ? "subscription" : "API key"}
+                </Badge>
+              </div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => handleDisconnect(p)}
+                disabled={disconnecting === p.name}
+                className="text-xs text-muted-foreground hover:text-destructive hover:bg-destructive/10 h-7 px-2"
+              >
+                {disconnecting === p.name ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  "Disconnect"
+                )}
+              </Button>
+            </div>
+          ))}
+        </div>
+
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => setMode("add")}
+          className="w-full gap-1.5"
+        >
+          <KeyRound className="h-3.5 w-3.5" />
+          Add another provider
+        </Button>
+      </div>
+    );
+  }
+
+  if (mode === "add") {
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center gap-2">
+          <button onClick={() => setMode("choose")} className="text-muted-foreground hover:text-foreground">
+            <ChevronLeft className="h-4 w-4" />
+          </button>
+          <div>
+            <h2 className="text-xl font-semibold tracking-tight">Add a provider</h2>
+            <p className="text-sm text-muted-foreground mt-0.5">
+              Choose how to connect another LLM provider.
+            </p>
+          </div>
+        </div>
 
         <div className="space-y-3">
-          {/* OAuth — subscriptions & free */}
           <button
             onClick={() => setMode("oauth")}
             className="w-full flex items-start gap-4 p-4 rounded-lg border border-border hover:border-primary/30 hover:bg-accent/50 text-left transition-all"
@@ -190,26 +642,11 @@ function AuthStep({
             <div className="min-w-0">
               <p className="font-medium text-sm">Login with subscription</p>
               <p className="text-xs text-muted-foreground mt-0.5">
-                Use your existing Claude, ChatGPT, Copilot, or Google account.
-                Includes free options.
+                Claude, ChatGPT, Copilot, or Google. Includes free options.
               </p>
-              <div className="flex flex-wrap gap-1.5 mt-2">
-                {oauthProviders.slice(0, 3).map((p) => (
-                  <Badge key={p.id} variant="secondary" className="text-[10px]">
-                    {p.free && <span className="text-emerald-600 mr-0.5">FREE</span>}
-                    {p.name.split("(")[0].trim()}
-                  </Badge>
-                ))}
-                {oauthProviders.length > 3 && (
-                  <Badge variant="secondary" className="text-[10px]">
-                    +{oauthProviders.length - 3} more
-                  </Badge>
-                )}
-              </div>
             </div>
           </button>
 
-          {/* API Key */}
           <button
             onClick={() => setMode("apikey")}
             className="w-full flex items-start gap-4 p-4 rounded-lg border border-border hover:border-primary/30 hover:bg-accent/50 text-left transition-all"
@@ -220,7 +657,7 @@ function AuthStep({
             <div className="min-w-0">
               <p className="font-medium text-sm">Enter an API key</p>
               <p className="text-xs text-muted-foreground mt-0.5">
-                Paste an API key for any provider — OpenAI, Anthropic, Groq, and more.
+                OpenAI, Anthropic, Groq, and more.
               </p>
             </div>
           </button>
@@ -300,7 +737,7 @@ function OAuthFlow({
     openedUrlRef.current = null;
     onActiveChange?.(true);
 
-    const res = await api("/setup/oauth/start", {
+    const res = await api("/providers/oauth/start", {
       method: "POST",
       body: JSON.stringify({ provider }),
     });
@@ -316,7 +753,7 @@ function OAuthFlow({
 
     // Start polling
     pollRef.current = setInterval(async () => {
-      const r = await api(`/setup/oauth/status/${id}`);
+      const r = await api(`/providers/oauth/status/${id}`);
       if (!r.ok) return;
       const d = r.data;
 
@@ -353,7 +790,7 @@ function OAuthFlow({
 
   const sendInput = async () => {
     if (!flowId || !inputValue) return;
-    await api(`/setup/oauth/input/${flowId}`, {
+    await api(`/providers/oauth/input/${flowId}`, {
       method: "POST",
       body: JSON.stringify({ value: inputValue }),
     });
@@ -652,21 +1089,23 @@ function ApiKeyStep({
 function ModelStep({
   onSelect,
   configuredProviders,
+  providerSources,
 }: {
   onSelect: (model: string) => void;
   configuredProviders: string[];
+  providerSources: Record<string, string>; // provider name → "env" | "oauth"
 }) {
   const [models, setModels] = useState<Model[]>([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const [providerFilter, setProviderFilter] = useState<string>("all");
 
   useEffect(() => {
-    api("/setup/models")
+    api("/providers/models")
       .then((r) => {
         if (r.ok) {
           const all = r.data as Model[];
-          // Filter to configured providers only, deduplicate by id
           const seen = new Set<string>();
           const filtered = all
             .filter((m) => configuredProviders.includes(m.provider))
@@ -684,15 +1123,15 @@ function ModelStep({
 
   const fmtCost = (n: number) => (n === 0 ? "free" : n < 1 ? `$${n.toFixed(2)}/M` : `$${n.toFixed(0)}/M`);
 
+  // Unique providers that have models
+  const availableProviders = [...new Set(models.map((m) => m.provider))].sort();
+
   const q = search.toLowerCase().trim();
-  const filtered = q
-    ? models.filter(
-        (m) =>
-          m.name.toLowerCase().includes(q) ||
-          m.id.toLowerCase().includes(q) ||
-          m.provider.toLowerCase().includes(q),
-      )
-    : models;
+  const filtered = models.filter((m) => {
+    if (providerFilter !== "all" && m.provider !== providerFilter) return false;
+    if (q && !m.name.toLowerCase().includes(q) && !m.id.toLowerCase().includes(q) && !m.provider.toLowerCase().includes(q)) return false;
+    return true;
+  });
 
   return (
     <div className="space-y-6">
@@ -713,6 +1152,53 @@ function ModelStep({
         </p>
       ) : (
         <>
+        {/* Provider filter pills */}
+        <div className="flex flex-wrap gap-1.5">
+          <button
+            type="button"
+            onClick={() => setProviderFilter("all")}
+            className={cn(
+              "px-2.5 py-1 rounded-full text-xs font-medium transition-all",
+              providerFilter === "all"
+                ? "bg-primary text-primary-foreground"
+                : "bg-muted text-muted-foreground hover:bg-accent",
+            )}
+          >
+            All ({models.length})
+          </button>
+          {availableProviders.map((prov) => {
+            const count = models.filter((m) => m.provider === prov).length;
+            const source = providerSources[prov];
+            return (
+              <button
+                key={prov}
+                type="button"
+                onClick={() => setProviderFilter(prov === providerFilter ? "all" : prov)}
+                className={cn(
+                  "px-2.5 py-1 rounded-full text-xs font-medium transition-all flex items-center gap-1",
+                  providerFilter === prov
+                    ? "bg-primary text-primary-foreground"
+                    : "bg-muted text-muted-foreground hover:bg-accent",
+                )}
+              >
+                <span className="capitalize">{prov}</span>
+                <span className="opacity-60">({count})</span>
+                {source && (
+                  <Badge
+                    variant="secondary"
+                    className={cn(
+                      "text-[9px] px-1 py-0 ml-0.5",
+                      providerFilter === prov ? "bg-primary-foreground/20 text-primary-foreground" : "",
+                    )}
+                  >
+                    {source === "oauth" ? "sub" : "key"}
+                  </Badge>
+                )}
+              </button>
+            );
+          })}
+        </div>
+
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
@@ -722,10 +1208,10 @@ function ModelStep({
             className="pl-9 text-sm"
           />
         </div>
-        <div className="space-y-1.5 max-h-[280px] overflow-y-auto pr-1">
+        <div className="space-y-1.5 max-h-[240px] overflow-y-auto pr-1">
           {filtered.length === 0 ? (
             <p className="text-sm text-muted-foreground py-6 text-center">
-              No models match "{search}"
+              No models match "{search || providerFilter}"
             </p>
           ) : filtered.map((m) => (
             <button
@@ -839,7 +1325,7 @@ export function SetupPage() {
 
   // Load status on mount
   useEffect(() => {
-    api("/setup/status")
+    api("/config/status")
       .then((r) => {
         if (r.ok) {
           const status = r.data as SetupStatus;
@@ -852,22 +1338,30 @@ export function SetupPage() {
   }, []);
 
   const refreshProviders = useCallback(async () => {
-    const r = await api("/setup/providers");
+    const r = await api("/providers");
     if (r.ok) setProviders(r.data);
   }, []);
 
   const handleSaveKey = useCallback(async (provider: string, key: string) => {
-    const result = await api("/setup/api-key", {
+    const result = await api(`/providers/${provider}/api-key`, {
       method: "POST",
-      body: JSON.stringify({ provider, apiKey: key }),
+      body: JSON.stringify({ apiKey: key, workDir }),
     });
     if (result.ok) await refreshProviders();
-  }, [refreshProviders]);
+  }, [refreshProviders, workDir]);
+
+  const handleDisconnect = useCallback(async (provider: string) => {
+    await api(`/providers/${provider}/api-key`, {
+      method: "DELETE",
+      body: JSON.stringify({ workDir }),
+    });
+    await refreshProviders();
+  }, [refreshProviders, workDir]);
 
   const handleComplete = async () => {
     setCompleting(true);
     try {
-      await api("/setup/complete", {
+      await api("/config/initialize", {
         method: "POST",
         body: JSON.stringify({
           orgName: orgName || undefined,
@@ -941,12 +1435,16 @@ export function SetupPage() {
                     onKeySave={handleSaveKey}
                     onOAuthComplete={refreshProviders}
                     onOAuthActiveChange={setOauthActive}
+                    onDisconnect={handleDisconnect}
                   />
                 )}
                 {step === 2 && (
                   <ModelStep
                     onSelect={setSelectedModel}
                     configuredProviders={providers.filter((p) => p.hasKey).map((p) => p.name)}
+                    providerSources={Object.fromEntries(
+                      providers.filter((p) => p.hasKey).map((p) => [p.name, p.source || "env"]),
+                    )}
                   />
                 )}
                 {step === 3 && (
@@ -962,15 +1460,18 @@ export function SetupPage() {
               {/* Navigation — hidden during active OAuth flow */}
               {!oauthActive && (
               <div className="flex items-center justify-between pt-6 mt-6 border-t border-border/40">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setStep(Math.max(0, step - 1))}
-                  disabled={step === 0}
-                  className="gap-1"
-                >
-                  <ChevronLeft className="h-4 w-4" /> Back
-                </Button>
+                {step > 0 ? (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setStep(step - 1)}
+                    className="gap-1"
+                  >
+                    <ChevronLeft className="h-4 w-4" /> Back
+                  </Button>
+                ) : (
+                  <div />
+                )}
 
                 {step < STEPS.length - 1 ? (
                   <Button

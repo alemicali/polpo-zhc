@@ -1,11 +1,19 @@
-import { resolve, basename, join } from "node:path";
-import { writeFileSync, readFileSync, existsSync, mkdirSync, chmodSync } from "node:fs";
+import { resolve, basename } from "node:path";
 import readline from "node:readline";
 import chalk from "chalk";
 import type { Command } from "commander";
 import { loadPolpoConfig, savePolpoConfig, generatePolpoConfigDefault } from "../../core/config.js";
-import { PROVIDER_ENV_MAP, listModels } from "../../llm/pi-client.js";
-import type { ModelInfo } from "../../llm/pi-client.js";
+import { PROVIDER_ENV_MAP } from "../../llm/pi-client.js";
+import {
+  detectProviders,
+  persistToEnvFile,
+  getAuthOptions,
+  startOAuthLogin,
+  getProviderModels,
+  modelLabel as rawModelLabel,
+  type DetectedProvider,
+  type ModelInfo,
+} from "../../setup/index.js";
 
 // ── Readline helpers ────────────────────────────────
 
@@ -38,98 +46,23 @@ async function pickFromList(items: string[], prompt: string): Promise<number> {
   return idx;
 }
 
-// ── Provider detection ──────────────────────────────
-
-interface DetectedProvider {
-  name: string;
-  source: "env" | "oauth";
-  envVar?: string;
-}
-
-function detectProviders(): DetectedProvider[] {
-  const detected: DetectedProvider[] = [];
-
-  for (const [provider, envVar] of Object.entries(PROVIDER_ENV_MAP)) {
-    if (process.env[envVar]) {
-      detected.push({ name: provider, source: "env", envVar });
-    }
-  }
-
-  try {
-    const { hasOAuthProfiles } = require("../../llm/pi-client.js");
-    if (typeof hasOAuthProfiles === "function") {
-      for (const provider of Object.keys(PROVIDER_ENV_MAP)) {
-        if (!detected.find((d) => d.name === provider) && hasOAuthProfiles(provider)) {
-          detected.push({ name: provider, source: "oauth" });
-        }
-      }
-    }
-  } catch {
-    // OAuth check unavailable
-  }
-
-  return detected;
-}
-
-// ── Model helpers ───────────────────────────────────
-
-function fmtCost(cost: number): string {
-  if (cost === 0) return "free";
-  if (cost < 1) return `$${cost.toFixed(2)}/M`;
-  return `$${cost.toFixed(0)}/M`;
-}
+// ── Chalk model label ──────────────────────────────
 
 function modelLabel(m: ModelInfo): string {
-  const tags: string[] = [];
-  if (m.reasoning) tags.push("reasoning");
-  if (m.cost.input === 0 && m.cost.output === 0) tags.push("free");
-  const costStr = m.cost.input > 0 ? `in:${fmtCost(m.cost.input)} out:${fmtCost(m.cost.output)}` : "";
+  const { name, tags, costStr } = rawModelLabel(m);
   const tagStr = tags.length > 0 ? ` (${tags.join(", ")})` : "";
-  return `${m.name}${tagStr}${costStr ? ` ${chalk.dim(costStr)}` : ""}`;
+  return `${name}${tagStr}${costStr ? ` ${chalk.dim(costStr)}` : ""}`;
 }
 
-function getProviderModels(provider: string): ModelInfo[] {
-  return listModels(provider).sort((a, b) => a.cost.input - b.cost.input);
-}
-
-// ── .env persistence ────────────────────────────────
-
-function persistToEnvFile(polpoDir: string, envVar: string, value: string): void {
-  const envPath = join(polpoDir, ".env");
-  if (!existsSync(polpoDir)) mkdirSync(polpoDir, { recursive: true });
-
-  let content = "";
-  if (existsSync(envPath)) {
-    content = readFileSync(envPath, "utf-8");
-    const regex = new RegExp(`^${envVar}=.*$`, "m");
-    if (regex.test(content)) {
-      content = content.replace(regex, `${envVar}=${value}`);
-      writeFileSync(envPath, content, "utf-8");
-      try { chmodSync(envPath, 0o600); } catch { /* best-effort */ }
-      return;
-    }
-  }
-
-  const line = `${envVar}=${value}\n`;
-  writeFileSync(envPath, content ? `${content.trimEnd()}\n${line}` : line, "utf-8");
-  try { chmodSync(envPath, 0o600); } catch { /* best-effort */ }
-}
-
-// ── OAuth login (inline) ────────────────────────────
+// ── OAuth login (CLI adapter) ──────────────────────
 
 async function runOAuthLogin(provider: string): Promise<boolean> {
   try {
-    const { oauthLogin, OAUTH_PROVIDERS } = await import("../../auth/index.js");
-    type OAuthProviderName = (typeof OAUTH_PROVIDERS)[number]["id"];
-
-    const match = OAUTH_PROVIDERS.find((p: { id: string }) => p.id === provider);
-    if (!match) return false;
-
     console.log();
-    console.log(chalk.bold(`  Logging in to ${match.name}...`));
+    console.log(chalk.bold(`  Logging in...`));
     console.log();
 
-    const profileId = await oauthLogin(provider as OAuthProviderName, {
+    await startOAuthLogin(provider, {
       onAuthUrl: (url: string, instructions?: string) => {
         if (instructions) console.log(chalk.yellow(`  ${instructions}`));
         console.log(`  ${chalk.bold("Open this URL in your browser:")}`);
@@ -144,37 +77,13 @@ async function runOAuthLogin(provider: string): Promise<boolean> {
       },
     });
 
-    console.log(`  ${chalk.green("Login successful!")} Profile: ${chalk.bold(profileId)}`);
+    console.log(`  ${chalk.green("Login successful!")}`);
     return true;
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : "Unknown error";
     console.log(`  ${chalk.red(`Login failed: ${msg}`)}`);
     return false;
   }
-}
-
-// ── Auth options ────────────────────────────────────
-
-interface AuthOption {
-  id: string;
-  label: string;
-  description: string;
-  type: "oauth" | "api_key";
-  oauthId?: string;
-}
-
-function getAuthOptions(): AuthOption[] {
-  return [
-    // Free OAuth
-    { id: "google-antigravity", label: "Google Antigravity", description: "Free — Gemini 3, Claude, GPT-OSS via Google account", type: "oauth", oauthId: "google-antigravity" },
-    { id: "google-gemini-cli", label: "Google Gemini CLI", description: "Free — Gemini models via Google account", type: "oauth", oauthId: "google-gemini-cli" },
-    // Paid OAuth
-    { id: "anthropic", label: "Anthropic (Claude Pro/Max)", description: "Requires Claude Pro or Max subscription", type: "oauth", oauthId: "anthropic" },
-    { id: "openai-codex", label: "OpenAI Codex (ChatGPT Plus/Pro)", description: "Requires ChatGPT Plus or Pro subscription", type: "oauth", oauthId: "openai-codex" },
-    { id: "github-copilot", label: "GitHub Copilot", description: "Requires Copilot subscription — multi-model access", type: "oauth", oauthId: "github-copilot" },
-    // Manual
-    { id: "api-key", label: "Enter an API key manually", description: "For any provider (OpenAI, Anthropic, Groq, etc.)", type: "api_key" },
-  ];
 }
 
 // ── Auth step ───────────────────────────────────────
@@ -184,7 +93,7 @@ async function runAuthStep(providers: DetectedProvider[], polpoDir: string): Pro
   const labels = [
     ...authOptions.map((a) => {
       const tag = a.type === "oauth"
-        ? (a.description.startsWith("Free") ? chalk.green("FREE") : chalk.yellow("PAID"))
+        ? (a.free ? chalk.green("FREE") : chalk.yellow("PAID"))
         : chalk.dim("MANUAL");
       return `${tag} ${chalk.bold(a.label)} ${chalk.dim(`— ${a.description}`)}`;
     }),
@@ -222,7 +131,7 @@ async function runAuthStep(providers: DetectedProvider[], polpoDir: string): Pro
         process.env[envVar] = key;
         persistToEnvFile(polpoDir, envVar, key);
         console.log(chalk.green(`  ✓ ${envVar} saved to .polpo/.env`));
-        providers.push({ name: provider, source: "env", envVar });
+        providers.push({ name: provider, source: "env", envVar, hasKey: true });
       }
     }
   }
@@ -250,7 +159,9 @@ export async function runSetupWizard(options?: SetupOptions): Promise<void> {
   // ── Non-interactive fallback ──
   if (!isInteractive) {
     const model = process.env.POLPO_MODEL;
-    const config = generatePolpoConfigDefault(orgName, { model: model ?? undefined });
+    const config = generatePolpoConfigDefault(orgName, {
+      model: model ?? undefined,
+    });
     savePolpoConfig(polpoDir, config);
     if (!model) {
       console.log(chalk.yellow("  No model configured. Set POLPO_MODEL or run 'polpo setup' interactively."));
@@ -261,7 +172,7 @@ export async function runSetupWizard(options?: SetupOptions): Promise<void> {
   }
 
   // ── Step 1: Auth ──────────────────────────────────
-  const providers = detectProviders();
+  const providers = detectProviders().filter((p) => p.hasKey);
 
   if (providers.length > 0) {
     console.log(chalk.dim("  Detected providers:"));
@@ -282,7 +193,6 @@ export async function runSetupWizard(options?: SetupOptions): Promise<void> {
     console.log(chalk.yellow("  No provider configured."));
     console.log(chalk.dim("  Run 'polpo setup' again or 'polpo auth login' to add one."));
     console.log();
-    // Still save a config so the directory is initialized
     savePolpoConfig(polpoDir, generatePolpoConfigDefault(orgName));
     return;
   }

@@ -32,7 +32,6 @@ export function authRoutes(): OpenAPIHono<ServerEnv> {
                 providers: z.record(
                   z.string(),
                   z.object({
-                    hasConfigKey: z.boolean(),
                     hasEnvKey: z.boolean(),
                     envVar: z.string().optional(),
                     profiles: z.array(
@@ -126,7 +125,6 @@ export function authRoutes(): OpenAPIHono<ServerEnv> {
     }
 
     interface ProviderAuthInfo {
-      hasConfigKey: boolean;
       hasEnvKey: boolean;
       envVar?: string;
       profiles: ProfileMeta[];
@@ -139,9 +137,7 @@ export function authRoutes(): OpenAPIHono<ServerEnv> {
     const providers: Record<string, ProviderAuthInfo> = {};
 
     for (const name of allProviderNames) {
-      const configProv = configProviders[name];
       const envVar = PROVIDER_ENV_MAP[name];
-      const hasConfigKey = !!configProv?.apiKey;
       const hasEnvKey = envVar ? !!process.env[envVar] : false;
       const providerProfiles = profilesByProvider.get(name) ?? [];
       const oauthInfo = OAUTH_PROVIDERS.find((p) => p.id === name);
@@ -176,10 +172,9 @@ export function authRoutes(): OpenAPIHono<ServerEnv> {
         };
       });
 
-      // Only include providers that have at least one of: config key, env key, profiles, or oauth support
-      if (hasConfigKey || hasEnvKey || profiles.length > 0 || oauthInfo) {
+      // Only include providers that have at least one of: env key, profiles, or oauth support
+      if (hasEnvKey || profiles.length > 0 || oauthInfo) {
         providers[name] = {
-          hasConfigKey,
           hasEnvKey,
           envVar,
           profiles,

@@ -111,26 +111,19 @@ export function validateAgents(agents: any[]): void {
   }
 }
 
-function parseProviders(raw: Record<string, unknown>): Record<string, ProviderConfig> {
+export function parseProviders(raw: Record<string, unknown>): Record<string, ProviderConfig> {
   const providers: Record<string, ProviderConfig> = {};
   for (const [name, cfg] of Object.entries(raw)) {
+    if (!cfg || typeof cfg !== "object") continue;
+    const c = cfg as Record<string, unknown>;
     const pc: ProviderConfig = {};
-    if (typeof cfg === "string") {
-      pc.apiKey = cfg;
-    } else if (cfg && typeof cfg === "object") {
-      const c = cfg as Record<string, unknown>;
-      if (typeof c.apiKey === "string") pc.apiKey = c.apiKey;
-      if (typeof c.baseUrl === "string") pc.baseUrl = c.baseUrl;
-      if (typeof c.api === "string") pc.api = c.api as ProviderConfig["api"];
-      if (Array.isArray(c.models)) pc.models = c.models;
+    if (typeof c.baseUrl === "string") pc.baseUrl = c.baseUrl;
+    if (typeof c.api === "string") pc.api = c.api as ProviderConfig["api"];
+    if (Array.isArray(c.models)) pc.models = c.models;
+    // Only include if there's actual custom config (not just an empty object)
+    if (pc.baseUrl || pc.api || pc.models) {
+      providers[name] = pc;
     }
-    if (pc.apiKey) {
-      const envMatch = pc.apiKey.match(/^\$\{(\w+)\}$/);
-      if (envMatch) {
-        pc.apiKey = process.env[envMatch[1]] ?? "";
-      }
-    }
-    providers[name] = pc;
   }
   return providers;
 }
@@ -202,6 +195,23 @@ function parseSettings(raw: any): PolpoSettings {
   return settings;
 }
 
+/** Load .polpo/.env into process.env (does NOT overwrite existing vars). */
+export function loadEnvFile(polpoDir: string): void {
+  const envPath = join(polpoDir, ".env");
+  if (!existsSync(envPath)) return;
+  try {
+    for (const line of readFileSync(envPath, "utf-8").split("\n")) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) continue;
+      const eq = trimmed.indexOf("=");
+      if (eq === -1) continue;
+      const key = trimmed.slice(0, eq).trim();
+      const val = trimmed.slice(eq + 1).trim().replace(/^["']|["']$/g, "");
+      if (!process.env[key]) process.env[key] = val;
+    }
+  } catch { /* ignore */ }
+}
+
 // --- parseConfig: .polpo/polpo.json only ---
 
 /**
@@ -210,6 +220,12 @@ function parseSettings(raw: any): PolpoSettings {
  */
 export async function parseConfig(workDir: string): Promise<PolpoConfig> {
   const polpoDir = resolve(workDir, ".polpo");
+
+  // Load .polpo/.env relative to workDir (handles --dir correctly).
+  // The CLI top-level only loads from cwd; this ensures the right .env is used
+  // when workDir differs from cwd.
+  loadEnvFile(polpoDir);
+
   const polpoConfig = loadPolpoConfig(polpoDir);
 
   if (!polpoConfig) {
@@ -253,7 +269,7 @@ export async function parseConfig(workDir: string): Promise<PolpoConfig> {
 
 export function generatePolpoConfigDefault(
   orgName: string,
-  options?: { model?: string; teamName?: string; agentName?: string; agentRole?: string },
+  options?: { model?: string; teamName?: string; agentName?: string; agentRole?: string; providers?: Record<string, ProviderConfig> },
 ): PolpoFileConfig {
   const agent: Record<string, unknown> = {
     name: options?.agentName ?? "agent-1",
@@ -266,7 +282,7 @@ export function generatePolpoConfigDefault(
   if (options?.model) {
     settings.orchestratorModel = options.model;
   }
-  return {
+  const config: PolpoFileConfig = {
     org: orgName,
     teams: [{
       name: options?.teamName ?? "default",
@@ -275,4 +291,8 @@ export function generatePolpoConfigDefault(
     }],
     settings: settings as any,
   };
+  if (options?.providers && Object.keys(options.providers).length > 0) {
+    config.providers = options.providers;
+  }
+  return config;
 }

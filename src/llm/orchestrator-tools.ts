@@ -2164,9 +2164,7 @@ async function execGetMemory(polpo: Orchestrator): Promise<string> {
 function execGetConfig(polpo: Orchestrator): string {
   const config = polpo.getConfig();
   if (!config) return "No configuration loaded.";
-  // Redact API keys
-  const safe = { ...config, providers: undefined };
-  return JSON.stringify(safe, null, 2);
+  return JSON.stringify(config, null, 2);
 }
 
 async function execListApprovals(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {

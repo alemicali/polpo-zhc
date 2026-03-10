@@ -19,9 +19,6 @@ import {
   type KnownProvider,
   type Usage,
 } from "@mariozechner/pi-ai";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
-import { homedir } from "node:os";
 import type { ProviderConfig, ModelConfig, ModelAllowlistEntry, ReasoningLevel } from "../core/types.js";
 
 // ─── Constants ──────────────────────────────────────
@@ -96,6 +93,8 @@ export const PROVIDER_ENV_MAP: Record<string, string> = {
   "amazon-bedrock": "AWS_ACCESS_KEY_ID",
   "google-vertex": "GOOGLE_CLOUD_PROJECT",
   "openai-codex": "OPENAI_API_KEY",
+  "google-gemini-cli": "GEMINI_API_KEY",
+  "google-antigravity": "GEMINI_API_KEY",
 };
 
 // ─── Provider override management ───────────────────
@@ -152,14 +151,12 @@ export function enforceModelAllowlist(spec: string): void {
 
 /**
  * Resolve API key for a provider (synchronous).
- * Priority: 1) polpo.json overrides, 2) pi-ai env var lookup.
+ * Uses pi-ai env var lookup (reads from process.env / .polpo/.env).
  *
  * Does NOT check OAuth profiles (that requires async). Use resolveApiKeyAsync
  * for the full resolution chain including OAuth.
  */
 export function resolveApiKey(provider: string): string | undefined {
-  const override = providerOverrides[provider];
-  if (override?.apiKey) return override.apiKey;
   return getEnvApiKey(provider as KnownProvider);
 }
 
@@ -459,13 +456,8 @@ export function validateProviderKeys(
  */
 function hasOAuthProfiles(provider: string): boolean {
   try {
-    const dir = process.env.POLPO_STATE_DIR || join(homedir(), ".polpo");
-    const raw = readFileSync(join(dir, "auth-profiles.json"), "utf-8");
-    const data = JSON.parse(raw);
-    if (!data?.profiles || typeof data.profiles !== "object") return false;
-    return Object.values(data.profiles).some(
-      (p: any) => p?.provider === provider,
-    );
+    const { hasOAuthProfilesForProvider } = require("../setup/providers.js");
+    return hasOAuthProfilesForProvider(provider);
   } catch {
     return false;
   }

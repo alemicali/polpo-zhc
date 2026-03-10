@@ -4,7 +4,7 @@ import { resolve, basename, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { platform } from "node:os";
 import { serve } from "@hono/node-server";
-import { createApp, type ServerState } from "./app.js";
+import { createApp } from "./app.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 import { Orchestrator } from "../core/orchestrator.js";
@@ -31,7 +31,6 @@ export class PolpoServer {
   private sseBridge!: SSEBridge;
   private server: ReturnType<typeof serve> | null = null;
   private shutdownHandlers: (() => void)[] = [];
-  private serverState: ServerState = { setupMode: false };
 
   constructor(private config: ServerConfig) {}
 
@@ -50,25 +49,24 @@ export class PolpoServer {
     this.sseBridge = new SSEBridge(this.orchestrator);
     this.sseBridge.start();
 
-    // Flip shared state — routes will start serving
-    this.serverState.setupMode = false;
     console.log("\n  Orchestrator initialized — dashboard is ready.\n");
   }
 
-  /** Called by the setup complete endpoint to transition from setup → ready. */
+  /** Called by the initialize endpoint to transition from uninitialized → ready. */
   async completeSetup(workDir: string): Promise<void> {
-    // Re-point the existing orchestrator at the user's chosen project directory
     this.orchestrator.resetWorkDir(workDir);
     await this.initOrchestrator(workDir);
   }
 
-  /** Start the server: init orchestrator, bind HTTP. */
+  /** Start the server: init orchestrator if config exists, bind HTTP. */
   async start(): Promise<void> {
     const workDir = resolve(this.config.workDir);
     this.orchestrator = new Orchestrator(workDir);
-    this.serverState = { setupMode: !!this.config.setupMode };
 
-    if (!this.config.setupMode) {
+    const configPath = resolve(workDir, ".polpo", "polpo.json");
+    const hasConfig = existsSync(configPath);
+
+    if (hasConfig) {
       await this.initOrchestrator();
 
       if (this.config.autoStart !== false) {
@@ -77,17 +75,15 @@ export class PolpoServer {
         });
       }
     } else {
-      // Setup mode — no orchestrator init yet, just a placeholder SSE bridge
+      // No config yet — placeholder SSE bridge, orchestrator will be initialized after setup
       this.sseBridge = new SSEBridge(this.orchestrator);
     }
 
     const app = createApp(this.orchestrator, this.sseBridge, {
       apiKeys: this.config.apiKeys,
       corsOrigins: this.config.corsOrigins,
-      setupMode: this.config.setupMode,
       workDir,
-      serverState: this.serverState,
-      onSetupComplete: (workDir: string) => this.completeSetup(workDir),
+      onInitialize: (workDir: string) => this.completeSetup(workDir),
     });
 
     this.server = serve({
@@ -102,14 +98,10 @@ export class PolpoServer {
     console.log(`\n  Listening  ${base}`);
     console.log(`  WorkDir    ${workDir}`);
     console.log(`  API        ${base}/api/v1/health`);
-    let dashboardUrl: string | undefined;
     if (uiAvailable) {
-      if (this.config.setupMode) {
-        dashboardUrl = `${base}/setup`;
-        console.log(`  Setup      ${dashboardUrl}`);
-      } else {
-        dashboardUrl = base;
-        console.log(`  Dashboard  ${dashboardUrl}`);
+      console.log(`  Dashboard  ${base}`);
+      if (!hasConfig) {
+        console.log(`  Setup      ${base}/setup`);
       }
     } else {
       console.log(`  Dashboard  not found (run 'pnpm build:ui' to enable)`);
@@ -117,9 +109,9 @@ export class PolpoServer {
     console.log();
 
     // Auto-open browser
-    if (dashboardUrl) {
+    if (uiAvailable) {
       const openCmd = platform() === "darwin" ? "open" : platform() === "win32" ? "start" : "xdg-open";
-      exec(`${openCmd} ${dashboardUrl}`, () => { /* ignore errors — best effort */ });
+      exec(`${openCmd} ${base}`, () => { /* ignore errors — best effort */ });
     }
 
     // Signal handlers for graceful shutdown
@@ -136,8 +128,8 @@ export class PolpoServer {
   async stop(): Promise<void> {
     console.log("\nShutting down Polpo Server...");
     this.sseBridge?.dispose();
-    if (!this.config.setupMode) {
-      await this.orchestrator?.gracefulStop();
+    if (this.orchestrator?.isInitialized) {
+      await this.orchestrator.gracefulStop();
     }
     this.server?.close();
     for (const fn of this.shutdownHandlers) fn();
