@@ -114,6 +114,10 @@ jobs:
           retention-days: 1
           path: |
             dist/
+            packages/core/dist/
+            packages/drizzle/dist/
+            packages/client-sdk/dist/
+            packages/react-sdk/dist/
             ui/dist/
             ui/electron/
             ui/package.json
