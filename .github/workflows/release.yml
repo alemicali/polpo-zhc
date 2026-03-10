@@ -7,13 +7,12 @@ on:
 
 permissions:
   contents: write
-  id-token: write
   packages: write
 
 jobs:
-  # ── Build + Publish npm (runs once, produces artifacts for desktop) ──
+  # ── Build (runs once, produces artifacts for desktop) ──
   build:
-    name: Build & Publish npm
+    name: Build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -22,7 +21,6 @@ jobs:
         with:
           node-version: 20
           cache: pnpm
-          registry-url: https://registry.npmjs.org
       - run: pnpm install --frozen-lockfile
 
       # Build full workspace chain (once)
@@ -33,17 +31,6 @@ jobs:
           pnpm --filter @polpo-ai/client build
           ./node_modules/.bin/tsc
           pnpm --filter @polpo-ai/react build
-
-      # Publish to npm
-      - name: Publish polpo-ai
-        run: pnpm publish --no-git-checks
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-
-      - name: Publish @polpo-ai/react
-        run: pnpm publish --no-git-checks --access public --filter @polpo-ai/react
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       # Sync version + build Vite UI for desktop
       - name: Sync version
