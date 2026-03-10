@@ -11,8 +11,9 @@ permissions:
   packages: write
 
 jobs:
-  npm:
-    name: Publish to npm
+  # ── Build + Publish npm (runs once, produces artifacts for desktop) ──
+  build:
+    name: Build & Publish npm
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -23,9 +24,17 @@ jobs:
           cache: pnpm
           registry-url: https://registry.npmjs.org
       - run: pnpm install --frozen-lockfile
-      - run: pnpm run build
-      - run: pnpm run --filter @polpo-ai/react build
 
+      # Build full workspace chain (once)
+      - name: Build all packages
+        run: |
+          pnpm --filter @polpo-ai/core build
+          pnpm --filter @polpo-ai/drizzle build
+          pnpm --filter @polpo-ai/client build
+          ./node_modules/.bin/tsc
+          pnpm --filter @polpo-ai/react build
+
+      # Publish to npm
       - name: Publish @polpo-ai/polpo
         run: pnpm publish --no-git-checks --access public
         env:
@@ -36,78 +45,18 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-  docker:
-    name: Publish Docker image
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Extract version from tag
-        id: version
-        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
-
-      - name: Login to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build and push
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          push: true
-          platforms: linux/amd64,linux/arm64
-          tags: |
-            ghcr.io/${{ github.repository }}:latest
-            ghcr.io/${{ github.repository }}:${{ steps.version.outputs.VERSION }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-  # ── Desktop: common build (runs once on Ubuntu) ────────────────────
-  desktop-build:
-    name: Desktop Build (common)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-
-      # Build full workspace chain
-      - name: Build workspace packages
-        run: |
-          pnpm --filter @polpo-ai/core build
-          pnpm --filter @polpo-ai/drizzle build
-          pnpm --filter @polpo-ai/client build
-
-      - name: Build TypeScript
-        run: ./node_modules/.bin/tsc
-
-      - name: Build React SDK
-        run: pnpm --filter @polpo-ai/react build
-
-      # Sync version from tag
+      # Sync version + build Vite UI for desktop
       - name: Sync version
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          cd ui
-          node -e "const p=require('./package.json'); p.version='$VERSION'; require('fs').writeFileSync('./package.json', JSON.stringify(p, null, 2)+'\n')"
+          node -e "const p=require('./ui/package.json'); p.version='$VERSION'; require('fs').writeFileSync('./ui/package.json', JSON.stringify(p, null, 2)+'\n')"
 
-      # Build Vite UI (same output for all platforms)
       - name: Build Vite UI
         run: VITE_POLPO_API_URL=http://localhost:3890 pnpm exec vite build
         working-directory: ui
 
-      # Upload compiled artifacts for platform-specific jobs
-      - name: Upload dist
+      # Upload for desktop jobs
+      - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
           name: desktop-build
@@ -122,10 +71,39 @@ jobs:
             ui/electron/
             ui/package.json
 
-  # ── Desktop: platform-specific packaging (parallel) ────────────────
-  desktop-package:
+  # ── Docker (independent, runs in parallel with build) ──────────────
+  docker:
+    name: Docker
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Extract version
+        id: version
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: |
+            ghcr.io/${{ github.repository }}:latest
+            ghcr.io/${{ github.repository }}:${{ steps.version.outputs.VERSION }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ── Desktop packaging (3 OS in parallel, depends on build) ─────────
+  desktop:
     name: Desktop (${{ matrix.platform }})
-    needs: desktop-build
+    needs: build
     strategy:
       fail-fast: false
       matrix:
@@ -144,39 +122,31 @@ jobs:
         with:
           node-version: 20
           cache: pnpm
-
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
-
       - run: pnpm install --frozen-lockfile
 
-      # Download pre-built artifacts
       - name: Download build artifacts
         uses: actions/download-artifact@v4
         with:
           name: desktop-build
 
-      # Build OS-specific sidecar binary
-      - name: Build sidecar (Linux/macOS)
+      # OS-specific sidecar
+      - name: Build sidecar (Unix)
         if: matrix.platform != 'win'
         run: bash ui/binaries/build-sidecar.sh
 
       - name: Build sidecar (Windows)
         if: matrix.platform == 'win'
-        run: |
-          cd $env:GITHUB_WORKSPACE
-          bun build dist/cli/index.js --compile --outfile ui/binaries/polpo-server.exe
+        run: bun build dist/cli/index.js --compile --outfile ui/binaries/polpo-server.exe
         shell: pwsh
 
-      # Package with electron-builder (uses pre-built ui/dist/)
+      # Package
       - name: Package Electron app
-        run: electron-builder
+        run: pnpm exec electron-builder --publish never
         working-directory: ui
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # Upload to GitHub Release
       - name: Upload to Release
         uses: softprops/action-gh-release@v2
         with:
@@ -190,14 +160,13 @@ jobs:
             ui/release/latest-mac.yml
             ui/release/latest.yml
 
-  # ── GitHub Release (created after all jobs) ────────────────────────
+  # ── Finalize release notes ─────────────────────────────────────────
   release:
-    name: GitHub Release
-    needs: [npm, docker, desktop-package]
+    name: Release Notes
+    needs: [build, docker, desktop]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
