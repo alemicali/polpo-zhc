@@ -11,8 +11,8 @@
 import { Type } from "@sinclair/typebox";
 import type { Tool } from "@mariozechner/pi-ai";
 import type { Orchestrator } from "../core/orchestrator.js";
-import type { ApprovalStatus, VaultEntry, AgentIdentity, AgentResponsibility, AgentConfig } from "../core/types.js";
-import { existsSync, readFileSync, appendFileSync, writeFileSync, readdirSync, statSync, mkdirSync } from "fs";
+import type { ApprovalStatus, VaultEntry, AgentIdentity, AgentResponsibility, AgentConfig, PolpoFileConfig, Team } from "../core/types.js";
+import { existsSync, readFileSync, appendFileSync, writeFileSync, readdirSync, statSync, mkdirSync, rmSync, cpSync } from "fs";
 import { join, resolve, relative, isAbsolute, dirname } from "path";
 import { execSync } from "child_process";
 import { assertUrlAllowed } from "../tools/ssrf-guard.js";
@@ -28,6 +28,15 @@ import {
   savePlaybook, deletePlaybook, validatePlaybookDefinition,
 } from "../core/playbook.js";
 import type { PlaybookDefinition, PlaybookParameter } from "../core/playbook.js";
+import {
+  parseInkSource, discoverInkPackages, readInkLock, writeInkLock,
+  upsertInkLockEntry, removeInkLockEntry, getInkLockEntry,
+  isInkSourceInstalled, uninstallInkPackages,
+} from "../core/ink.js";
+import type { InkPackage, InkLockEntry } from "../core/ink.js";
+import { loadPolpoConfig, savePolpoConfig } from "../core/config.js";
+
+
 
 // ═══════════════════════════════════════════════════════
 //  READ TOOLS (12)
@@ -1253,6 +1262,52 @@ const whatsappReadTool: Tool = {
 };
 
 // ═══════════════════════════════════════════════════════
+//  INK HUB TOOLS (5) — package registry
+// ═══════════════════════════════════════════════════════
+
+const inkSearchTool: Tool = {
+  name: "ink_search",
+  description: "Search the Ink Hub registry for available packages (playbooks, agents, companies). Queries the live API at polpo.sh. Use this when the user asks to find, search, or discover packages, templates, or reusable configs.",
+  parameters: Type.Object({
+    query: Type.Optional(Type.String({ description: "Search query to filter packages by name, description, or tags" })),
+    type: Type.Optional(Type.String({ description: "Filter by package type: playbook, agent, or company" })),
+  }),
+};
+
+const inkBrowseTool: Tool = {
+  name: "ink_browse",
+  description: "List packages currently installed in this project from the Ink registry. Shows source, type, name, and content hash for each installed package.",
+  parameters: Type.Object({
+    type: Type.Optional(Type.String({ description: "Filter by package type: playbook, agent, or company" })),
+  }),
+};
+
+const inkAddTool: Tool = {
+  name: "ink_add",
+  description: "Install packages from an Ink registry source (GitHub repo). Clones the repo, discovers packages by convention (playbooks, agents, companies), validates them, and installs into the project config. The official registry is 'lumea-labs/ink-registry'.",
+  parameters: Type.Object({
+    source: Type.String({ description: "Package source — GitHub owner/repo (e.g. 'lumea-labs/ink-registry') or a full GitHub URL" }),
+    name: Type.Optional(Type.String({ description: "Install a specific package by name (e.g. 'devops-engineer'). If omitted, all packages from the source are installed." })),
+  }),
+};
+
+const inkRemoveTool: Tool = {
+  name: "ink_remove",
+  description: "Remove an installed Ink registry source and its packages from the project. Playbooks are deleted, agents are removed from polpo.json. Use ink_browse to see what's installed.",
+  parameters: Type.Object({
+    source: Type.String({ description: "Package source to remove — GitHub owner/repo (e.g. 'lumea-labs/ink-registry')" }),
+  }),
+};
+
+const inkUpdateTool: Tool = {
+  name: "ink_update",
+  description: "Update installed Ink packages by pulling the latest from their git repos. Re-discovers and re-installs packages, updating the lock file with new commit hashes. If no source is specified, all installed sources are updated.",
+  parameters: Type.Object({
+    source: Type.Optional(Type.String({ description: "Specific source to update (e.g. 'lumea-labs/ink-registry'). If omitted, all installed sources are updated." })),
+  }),
+};
+
+// ═══════════════════════════════════════════════════════
 //  CLIENT-SIDE TOOLS (executed on the user's browser, not the server)
 // ═══════════════════════════════════════════════════════
 
@@ -1403,6 +1458,8 @@ export const WRITE_TOOLS = new Set([
   "http_download",
   // WhatsApp (write — sends messages)
   "whatsapp_send",
+  // Ink Hub (write — modifies project config)
+  "ink_add", "ink_remove", "ink_update",
 ]);
 
 /** Tools that pause the conversation to collect user input / show a preview. */
@@ -1462,6 +1519,8 @@ export const ALL_ORCHESTRATOR_TOOLS: Tool[] = [
   httpFetchTool, httpDownloadTool,
   // Search (1)
   searchWebTool,
+  // Ink Hub (5)
+  inkSearchTool, inkBrowseTool, inkAddTool, inkRemoveTool, inkUpdateTool,
   // WhatsApp (2)
   whatsappSendTool, whatsappReadTool,
   // Interactive (1)
@@ -1555,6 +1614,12 @@ const TOOL_LABELS: Record<string, string> = {
   whatsapp_read: "WhatsApp Read",
   // Client-side
   open_tab: "Open Tab",
+  // Ink Hub
+  ink_search: "Search Ink Hub",
+  ink_browse: "Browse Installed Packages",
+  ink_add: "Install Ink Package",
+  ink_remove: "Remove Ink Package",
+  ink_update: "Update Ink Packages",
 };
 
 // ═══════════════════════════════════════════════════════
@@ -1751,6 +1816,13 @@ export async function executeOrchestratorTool(
 
       // ── Search ──
       case "search_web":       return await execSearchWeb(polpo, args);
+
+      // ── Ink Hub ──
+      case "ink_search":       return await execInkSearch(args);
+      case "ink_browse":       return execInkBrowse(polpo, args);
+      case "ink_add":          return execInkAdd(polpo, args);
+      case "ink_remove":       return execInkRemove(polpo, args);
+      case "ink_update":       return execInkUpdate(polpo, args);
 
       // ── WhatsApp ──
       case "whatsapp_send":    return await execWhatsAppSend(polpo, args);
@@ -4060,6 +4132,437 @@ function execWhatsAppRead(polpo: Orchestrator, args: Record<string, unknown>): s
     default:
       return `Error: Unknown action "${action}". Use: list_chats, read_chat, search, contacts.`;
   }
+}
+
+// ═══════════════════════════════════════════════════════
+//  INK HUB EXECUTORS
+// ═══════════════════════════════════════════════════════
+
+const INK_API_URL = "https://polpo.sh/api";
+
+async function execInkSearch(args: Record<string, unknown>): Promise<string> {
+  try {
+    const res = await fetch(`${INK_API_URL}/packages`, { signal: AbortSignal.timeout(10000) });
+    if (!res.ok) return `Error: Ink Hub API returned HTTP ${res.status}`;
+
+    const data = await res.json() as { packages: Array<{
+      source: string; name: string; type: string; description: string;
+      tags: string[]; version: string; author: string; installs: number;
+      installs24h: number;
+    }> };
+
+    let packages = data.packages;
+
+    if (args.type) {
+      packages = packages.filter((p) => p.type === args.type);
+    }
+
+    if (args.query) {
+      const q = (args.query as string).toLowerCase();
+      packages = packages.filter((p) =>
+        p.name.toLowerCase().includes(q) ||
+        p.description.toLowerCase().includes(q) ||
+        p.tags.some((t) => t.toLowerCase().includes(q)),
+      );
+    }
+
+    if (packages.length === 0) return "No packages found matching your search.";
+
+    const lines = packages.map((p) =>
+      `- **${p.name}** (${p.type}) — ${p.description}\n  Source: ${p.source} | Installs: ${p.installs} | Tags: ${p.tags.join(", ") || "none"}`,
+    );
+
+    return `Found ${packages.length} package(s) on Ink Hub:\n\n${lines.join("\n\n")}`;
+  } catch (e: any) {
+    return `Error searching Ink Hub: ${e.message}`;
+  }
+}
+
+function execInkBrowse(polpo: Orchestrator, args: Record<string, unknown>): string {
+  const polpoDir = polpo.getPolpoDir();
+  const lock = readInkLock(polpoDir);
+
+  if (lock.registries.length === 0) {
+    return "No Ink packages installed in this project. Use ink_search to find packages and ink_add to install them.";
+  }
+
+  const lines: string[] = [];
+  let total = 0;
+
+  for (const entry of lock.registries) {
+    let pkgs = entry.packages;
+    if (args.type) {
+      pkgs = pkgs.filter((p) => p.type === args.type);
+    }
+    if (pkgs.length === 0) continue;
+
+    lines.push(`**${entry.source}** (installed ${entry.installedAt.slice(0, 10)}):`);
+    for (const p of pkgs) {
+      lines.push(`  - ${p.name} (${p.type})`);
+      total++;
+    }
+  }
+
+  if (total === 0) return `No ${args.type ?? ""} packages found in installed sources.`;
+  return `${total} installed package(s):\n\n${lines.join("\n")}`;
+}
+
+function execInkAdd(polpo: Orchestrator, args: Record<string, unknown>): string {
+  const source = args.source as string;
+  if (!source) return "Error: 'source' is required (e.g. 'lumea-labs/ink-registry').";
+
+  const polpoDir = polpo.getPolpoDir();
+  const parsed = parseInkSource(source);
+  const sourceLabel = parsed.ownerRepo ?? source;
+
+  // Check if already installed
+  const lock = readInkLock(polpoDir);
+  if (isInkSourceInstalled(lock, sourceLabel)) {
+    return `Source "${sourceLabel}" is already installed. Use ink_update to refresh it.`;
+  }
+
+  // Clone to temp dir
+  const cacheDir = join(polpoDir, "ink-cache");
+  mkdirSync(cacheDir, { recursive: true });
+  const repoDir = join(cacheDir, sourceLabel.replace(/\//g, "--"));
+  if (existsSync(repoDir)) rmSync(repoDir, { recursive: true, force: true });
+
+  try {
+    execSync(`git clone --depth 1 "${parsed.url}" "${repoDir}"`, { stdio: "pipe", timeout: 30000 });
+  } catch (e: any) {
+    return `Error cloning "${parsed.url}": ${e.message}`;
+  }
+
+  const commitHash = execSync("git rev-parse HEAD", { cwd: repoDir, encoding: "utf-8" }).trim();
+
+  // Discover packages
+  let { packages, errors } = discoverInkPackages(repoDir);
+  if (errors.length > 0) return `Validation errors:\n${errors.join("\n")}`;
+  if (packages.length === 0) return `No packages found in "${sourceLabel}".`;
+
+  // Filter by name if provided
+  if (args.name) {
+    const match = packages.filter(p => p.name === args.name);
+    if (match.length === 0) {
+      return `Package "${args.name}" not found in "${sourceLabel}". Available: ${packages.map(p => p.name).join(", ")}`;
+    }
+    packages = match;
+  }
+
+  // Install packages into config
+  let config: PolpoFileConfig = loadPolpoConfig(polpoDir) ?? {
+    org: "",
+    teams: [{ name: "default", agents: [] }],
+    settings: { maxRetries: 3, workDir: ".", logLevel: "normal" },
+  } as any;
+  let configChanged = false;
+  const installed: string[] = [];
+
+  for (const pkg of packages) {
+    switch (pkg.type) {
+      case "playbook": {
+        const destDir = join(polpoDir, "playbooks", pkg.name);
+        mkdirSync(destDir, { recursive: true });
+        const srcDir = resolve(pkg.path, "..");
+        for (const entry of readdirSync(srcDir)) {
+          cpSync(join(srcDir, entry), join(destDir, entry), { recursive: true });
+        }
+        installed.push(`playbook: ${pkg.name}`);
+        break;
+      }
+      case "agent": {
+        const agentContent = pkg.content as AgentConfig;
+        const cleanAgent = { ...agentContent };
+        delete (cleanAgent as any).version;
+        delete (cleanAgent as any).author;
+        delete (cleanAgent as any).tags;
+
+        const targetTeam = config.teams[0] ?? { name: "default", agents: [] };
+        if (!config.teams.includes(targetTeam)) config.teams.push(targetTeam);
+
+        const existingIdx = targetTeam.agents.findIndex((a) => a.name === cleanAgent.name);
+        if (existingIdx >= 0) {
+          const existing = targetTeam.agents[existingIdx];
+          if (!existing.role && cleanAgent.role) existing.role = cleanAgent.role;
+          if (!existing.model && cleanAgent.model) existing.model = cleanAgent.model;
+          if (!existing.identity && cleanAgent.identity) existing.identity = cleanAgent.identity;
+          if (!existing.allowedTools && cleanAgent.allowedTools) existing.allowedTools = cleanAgent.allowedTools;
+          if (!existing.systemPrompt && cleanAgent.systemPrompt) existing.systemPrompt = cleanAgent.systemPrompt;
+          installed.push(`agent: ${pkg.name} (merged)`);
+        } else {
+          targetTeam.agents.push(cleanAgent);
+          installed.push(`agent: ${pkg.name}`);
+        }
+        configChanged = true;
+        break;
+      }
+      case "company": {
+        const companyContent = pkg.content as PolpoFileConfig;
+        const srcDir = resolve(pkg.path, "..");
+        const companyTeams: Team[] = Array.isArray(companyContent.teams)
+          ? companyContent.teams
+          : (companyContent as any).team ? [(companyContent as any).team] : [];
+
+        for (const incomingTeam of companyTeams) {
+          const existingTeam = config.teams.find((t) => t.name === incomingTeam.name);
+          if (existingTeam) {
+            for (const agent of incomingTeam.agents) {
+              const cleanAgent = { ...agent };
+              delete (cleanAgent as any).version;
+              delete (cleanAgent as any).author;
+              delete (cleanAgent as any).tags;
+              if (!existingTeam.agents.find((a) => a.name === agent.name)) {
+                existingTeam.agents.push(cleanAgent);
+              }
+            }
+          } else {
+            config.teams.push(incomingTeam);
+          }
+        }
+
+        // Append memory.md if present
+        const srcMemory = join(srcDir, "memory.md");
+        if (existsSync(srcMemory)) {
+          const destMemory = join(polpoDir, "memory.md");
+          const memContent = readFileSync(srcMemory, "utf-8");
+          if (existsSync(destMemory)) {
+            const existing = readFileSync(destMemory, "utf-8");
+            writeFileSync(destMemory, existing + `\n\n<!-- Imported from ink: ${pkg.name} -->\n` + memContent, "utf-8");
+          } else {
+            writeFileSync(destMemory, memContent, "utf-8");
+          }
+        }
+
+        // Copy skills if present
+        const srcSkills = join(srcDir, "skills");
+        if (existsSync(srcSkills)) {
+          const skillsDest = join(polpoDir, "skills");
+          mkdirSync(skillsDest, { recursive: true });
+          for (const entry of readdirSync(srcSkills, { withFileTypes: true })) {
+            if (!entry.isDirectory()) continue;
+            const dest = join(skillsDest, entry.name);
+            if (!existsSync(dest)) {
+              cpSync(join(srcSkills, entry.name), dest, { recursive: true });
+            }
+          }
+        }
+
+        configChanged = true;
+        installed.push(`company: ${pkg.name}`);
+        break;
+      }
+    }
+  }
+
+  if (configChanged) savePolpoConfig(polpoDir, config);
+
+  // Update lock file
+  const lockEntry: InkLockEntry = {
+    source: sourceLabel,
+    commitHash,
+    installedAt: new Date().toISOString(),
+    packages: packages.map((p) => ({ type: p.type, name: p.name, contentHash: p.contentHash })),
+  };
+  writeInkLock(polpoDir, upsertInkLockEntry(lock, lockEntry));
+
+  // Fire telemetry (fire-and-forget)
+  try {
+    fetch(`${INK_API_URL}/installs`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        source: sourceLabel,
+        packages: packages.map((p) => ({
+          name: p.name, type: p.type,
+          description: p.metadata?.description, tags: p.metadata?.tags, version: p.metadata?.version,
+        })),
+        timestamp: new Date().toISOString(),
+      }),
+      signal: AbortSignal.timeout(5000),
+    }).catch(() => {});
+  } catch { /* silent */ }
+
+  // Clean up
+  try { rmSync(repoDir, { recursive: true, force: true }); } catch { /* ignore */ }
+
+  // Reload config so the orchestrator picks up new agents/teams immediately
+  try { polpo.reloadConfig(); } catch { /* ignore */ }
+
+  return `Installed ${packages.length} package(s) from "${sourceLabel}":\n\n${installed.map((i) => `  - ${i}`).join("\n")}\n\nLock file updated. Config reloaded.`;
+}
+
+function execInkRemove(polpo: Orchestrator, args: Record<string, unknown>): string {
+  const source = args.source as string;
+  if (!source) return "Error: 'source' is required.";
+
+  const polpoDir = polpo.getPolpoDir();
+  const lock = readInkLock(polpoDir);
+  const entry = getInkLockEntry(lock, source);
+  if (!entry) return `Source "${source}" is not installed. Use ink_browse to see installed packages.`;
+
+  const removed = uninstallInkPackages(
+    entry, polpoDir,
+    () => loadPolpoConfig(polpoDir),
+    (config) => savePolpoConfig(polpoDir, config),
+  );
+
+  writeInkLock(polpoDir, removeInkLockEntry(lock, source));
+
+  // Clean cache
+  const cacheDir = join(polpoDir, "ink-cache", source.replace(/\//g, "--"));
+  if (existsSync(cacheDir)) {
+    try { rmSync(cacheDir, { recursive: true, force: true }); } catch { /* ignore */ }
+  }
+
+  // Reload config
+  try { polpo.reloadConfig(); } catch { /* ignore */ }
+
+  return `Removed "${source}" (${entry.packages.length} package(s)):\n\n${removed.map(r => `  - ${r}`).join("\n")}\n\nLock file updated. Config reloaded.`;
+}
+
+function execInkUpdate(polpo: Orchestrator, args: Record<string, unknown>): string {
+  const polpoDir = polpo.getPolpoDir();
+  const lock = readInkLock(polpoDir);
+
+  if (lock.registries.length === 0) {
+    return "No Ink packages installed. Use ink_search to find packages and ink_add to install them.";
+  }
+
+  let entries = lock.registries;
+  if (args.source) {
+    const entry = getInkLockEntry(lock, args.source as string);
+    if (!entry) return `Source "${args.source}" is not installed. Use ink_browse to see installed packages.`;
+    entries = [entry];
+  }
+
+  const results: string[] = [];
+  let updatedLock = { ...lock, registries: [...lock.registries] };
+
+  for (const entry of entries) {
+    const parsed = parseInkSource(entry.source);
+    const cacheDir = join(polpoDir, "ink-cache");
+    mkdirSync(cacheDir, { recursive: true });
+    const repoDir = join(cacheDir, entry.source.replace(/\//g, "--"));
+
+    // Clone or pull
+    try {
+      if (existsSync(repoDir)) {
+        try {
+          execSync("git pull --ff-only", { cwd: repoDir, stdio: "pipe", timeout: 30000 });
+        } catch {
+          rmSync(repoDir, { recursive: true, force: true });
+          execSync(`git clone --depth 1 "${parsed.url}" "${repoDir}"`, { stdio: "pipe", timeout: 30000 });
+        }
+      } else {
+        execSync(`git clone --depth 1 "${parsed.url}" "${repoDir}"`, { stdio: "pipe", timeout: 30000 });
+      }
+    } catch (e: any) {
+      results.push(`${entry.source}: git error — ${e.message}`);
+      continue;
+    }
+
+    const newHash = execSync("git rev-parse HEAD", { cwd: repoDir, encoding: "utf-8" }).trim();
+
+    if (newHash === entry.commitHash) {
+      results.push(`${entry.source}: already up to date (${newHash.slice(0, 7)})`);
+      continue;
+    }
+
+    const { packages, errors } = discoverInkPackages(repoDir);
+    if (errors.length > 0 || packages.length === 0) {
+      results.push(`${entry.source}: ${errors.length > 0 ? `errors: ${errors.join("; ")}` : "no packages found"}`);
+      continue;
+    }
+
+    // Uninstall old, install new
+    uninstallInkPackages(entry, polpoDir, () => loadPolpoConfig(polpoDir), (config) => savePolpoConfig(polpoDir, config));
+
+    let config: PolpoFileConfig = loadPolpoConfig(polpoDir) ?? {
+      org: "", teams: [{ name: "default", agents: [] }],
+      settings: { maxRetries: 3, workDir: ".", logLevel: "normal" },
+    } as any;
+    let configChanged = false;
+    const installed: string[] = [];
+
+    for (const pkg of packages) {
+      switch (pkg.type) {
+        case "playbook": {
+          const destDir = join(polpoDir, "playbooks", pkg.name);
+          mkdirSync(destDir, { recursive: true });
+          const srcDir = resolve(pkg.path, "..");
+          for (const e of readdirSync(srcDir)) {
+            cpSync(join(srcDir, e), join(destDir, e), { recursive: true });
+          }
+          installed.push(`playbook: ${pkg.name}`);
+          break;
+        }
+        case "agent": {
+          const agentContent = pkg.content as AgentConfig;
+          const cleanAgent = { ...agentContent };
+          delete (cleanAgent as any).version;
+          delete (cleanAgent as any).author;
+          delete (cleanAgent as any).tags;
+          const targetTeam = config.teams[0] ?? { name: "default", agents: [] };
+          if (!config.teams.includes(targetTeam)) config.teams.push(targetTeam);
+          const idx = targetTeam.agents.findIndex((a) => a.name === cleanAgent.name);
+          if (idx >= 0) {
+            targetTeam.agents[idx] = cleanAgent;
+            installed.push(`agent: ${pkg.name} (updated)`);
+          } else {
+            targetTeam.agents.push(cleanAgent);
+            installed.push(`agent: ${pkg.name}`);
+          }
+          configChanged = true;
+          break;
+        }
+        case "company": {
+          const companyContent = pkg.content as PolpoFileConfig;
+          const companyTeams: Team[] = Array.isArray(companyContent.teams)
+            ? companyContent.teams
+            : (companyContent as any).team ? [(companyContent as any).team] : [];
+          for (const incomingTeam of companyTeams) {
+            const existingTeam = config.teams.find((t) => t.name === incomingTeam.name);
+            if (existingTeam) {
+              for (const agent of incomingTeam.agents) {
+                const cleanAgent = { ...agent };
+                delete (cleanAgent as any).version;
+                delete (cleanAgent as any).author;
+                delete (cleanAgent as any).tags;
+                const idx = existingTeam.agents.findIndex((a) => a.name === agent.name);
+                if (idx >= 0) existingTeam.agents[idx] = cleanAgent;
+                else existingTeam.agents.push(cleanAgent);
+              }
+            } else {
+              config.teams.push(incomingTeam);
+            }
+          }
+          configChanged = true;
+          installed.push(`company: ${pkg.name}`);
+          break;
+        }
+      }
+    }
+
+    if (configChanged) savePolpoConfig(polpoDir, config);
+
+    const newEntry: InkLockEntry = {
+      source: entry.source,
+      commitHash: newHash,
+      installedAt: new Date().toISOString(),
+      packages: packages.map((p) => ({ type: p.type, name: p.name, contentHash: p.contentHash })),
+    };
+    updatedLock = upsertInkLockEntry(updatedLock, newEntry);
+    results.push(`${entry.source}: updated ${entry.commitHash.slice(0, 7)} → ${newHash.slice(0, 7)} (${installed.length} packages)`);
+
+    try { rmSync(repoDir, { recursive: true, force: true }); } catch { /* ignore */ }
+  }
+
+  writeInkLock(polpoDir, updatedLock);
+
+  // Reload config
+  try { polpo.reloadConfig(); } catch { /* ignore */ }
+
+  return `Update complete:\n\n${results.map(r => `  - ${r}`).join("\n")}`;
 }
 
 // ═══════════════════════════════════════════════════════
