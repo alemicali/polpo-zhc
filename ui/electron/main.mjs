@@ -1,6 +1,5 @@
 import { app, BrowserWindow, dialog } from "electron";
-import pkg from "electron-updater";
-const { autoUpdater } = pkg;
+
 import { spawn } from "node:child_process";
 import { resolve, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -228,7 +227,16 @@ function createWindow() {
 
 // ── Auto-updater ────────────────────────────────────────────────────────
 
-function setupAutoUpdater() {
+async function setupAutoUpdater() {
+  let autoUpdater;
+  try {
+    const mod = await import("electron-updater");
+    autoUpdater = mod.default?.autoUpdater ?? mod.autoUpdater;
+  } catch {
+    console.log("[Polpo] electron-updater not available, skipping auto-update");
+    return;
+  }
+
   autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = true;
 
@@ -250,7 +258,6 @@ function setupAutoUpdater() {
 
   autoUpdater.on("update-downloaded", (info) => {
     console.log("[Polpo] Update downloaded:", info.version);
-    // Notify the user — install on next restart
     if (mainWindow) {
       dialog.showMessageBox(mainWindow, {
         type: "info",
@@ -271,10 +278,7 @@ function setupAutoUpdater() {
     console.log("[Polpo] Auto-update error:", err.message);
   });
 
-  // Check for updates (non-blocking, silent on first launch)
-  autoUpdater.checkForUpdates().catch(() => {
-    // Ignore errors — offline, no releases yet, etc.
-  });
+  autoUpdater.checkForUpdates().catch(() => {});
 }
 
 // ── App lifecycle ────────────────────────────────────────────────────────

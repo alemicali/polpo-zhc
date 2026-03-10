@@ -76,10 +76,7 @@
     "directories": {
       "output": "release"
     },
-    "files": [
-      "dist/**/*",
-      "electron/**/*"
-    ],
+
     "extraResources": [
       {
         "from": "binaries/",
