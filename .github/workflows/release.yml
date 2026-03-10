@@ -68,9 +68,60 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  # ── Desktop app builds (Electron) ──────────────────────────────────
-  desktop:
-    name: Desktop (${{ matrix.os }})
+  # ── Desktop: common build (runs once on Ubuntu) ────────────────────
+  desktop-build:
+    name: Desktop Build (common)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      # Build full workspace chain
+      - name: Build workspace packages
+        run: |
+          pnpm --filter @polpo-ai/core build
+          pnpm --filter @polpo-ai/drizzle build
+          pnpm --filter @polpo-ai/client build
+
+      - name: Build TypeScript
+        run: ./node_modules/.bin/tsc
+
+      - name: Build React SDK
+        run: pnpm --filter @polpo-ai/react build
+
+      # Sync version from tag
+      - name: Sync version
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          cd ui
+          node -e "const p=require('./package.json'); p.version='$VERSION'; require('fs').writeFileSync('./package.json', JSON.stringify(p, null, 2)+'\n')"
+
+      # Build Vite UI (same output for all platforms)
+      - name: Build Vite UI
+        run: VITE_POLPO_API_URL=http://localhost:3890 vite build
+        working-directory: ui
+
+      # Upload compiled artifacts for platform-specific jobs
+      - name: Upload dist
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-build
+          retention-days: 1
+          path: |
+            dist/
+            ui/dist/
+            ui/electron/
+            ui/package.json
+
+  # ── Desktop: platform-specific packaging (parallel) ────────────────
+  desktop-package:
+    name: Desktop (${{ matrix.platform }})
+    needs: desktop-build
     strategy:
       fail-fast: false
       matrix:
@@ -84,9 +135,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-
       - uses: pnpm/action-setup@v4
-
       - uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -98,22 +147,13 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      # 1. Build the TypeScript source (needed for sidecar compilation)
-      - name: Build workspace packages
-        run: |
-          pnpm --filter @polpo-ai/core build
-          pnpm --filter @polpo-ai/drizzle build
-          pnpm --filter @polpo-ai/client build
-        shell: bash
+      # Download pre-built artifacts
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: desktop-build
 
-      - name: Build TypeScript
-        run: ./node_modules/.bin/tsc
-        shell: bash
-
-      - name: Build React SDK
-        run: pnpm --filter @polpo-ai/react build
-
-      # 2. Build the sidecar server binary with Bun
+      # Build OS-specific sidecar binary
       - name: Build sidecar (Linux/macOS)
         if: matrix.platform != 'win'
         run: bash ui/binaries/build-sidecar.sh
@@ -125,22 +165,14 @@ jobs:
           bun build dist/cli/index.js --compile --outfile ui/binaries/polpo-server.exe
         shell: pwsh
 
-      # 3. Sync version from git tag into ui/package.json
-      - name: Sync version
-        run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          cd ui
-          node -e "const p=require('./package.json'); p.version='$VERSION'; require('fs').writeFileSync('./package.json', JSON.stringify(p, null, 2)+'\n')"
-        shell: bash
-
-      # 4. Build Vite UI + Electron package
-      - name: Build Electron app
-        run: pnpm run electron:build
+      # Package with electron-builder (uses pre-built ui/dist/)
+      - name: Package Electron app
+        run: electron-builder
         working-directory: ui
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # 5. Upload artifacts to the GitHub Release
+      # Upload to GitHub Release
       - name: Upload to Release
         uses: softprops/action-gh-release@v2
         with:
@@ -157,7 +189,7 @@ jobs:
   # ── GitHub Release (created after all jobs) ────────────────────────
   release:
     name: GitHub Release
-    needs: [npm, docker, desktop]
+    needs: [npm, docker, desktop-package]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
