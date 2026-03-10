@@ -17,7 +17,7 @@
  *   - Interactive review with warnings for dangerous patterns
  */
 
-import { readdirSync, readFileSync, existsSync, writeFileSync, mkdirSync, statSync } from "node:fs";
+import { readdirSync, readFileSync, existsSync, writeFileSync, mkdirSync, statSync, rmSync } from "node:fs";
 import { join, basename, resolve } from "node:path";
 import { createHash } from "node:crypto";
 
@@ -522,4 +522,69 @@ export function isInkSourceInstalled(lock: InkLockFile, source: string): boolean
 /** Get the installed entry for a source, or undefined. */
 export function getInkLockEntry(lock: InkLockFile, source: string): InkLockEntry | undefined {
   return lock.registries.find(r => r.source === source);
+}
+
+// ── Uninstall ──────────────────────────────────────────────────────────
+
+/**
+ * Uninstall packages recorded in a lock entry.
+ *
+ * - Playbooks: removes `.polpo/playbooks/<name>/` directory
+ * - Agents: removes from polpo.json teams
+ * - Companies: removes legacy paths (merged config cannot be cleanly reversed)
+ *
+ * @param entry - The lock entry whose packages should be removed
+ * @param polpoDir - Path to the .polpo directory
+ * @param loadConfig - Function to load polpo.json (injected to avoid circular dep)
+ * @param saveConfig - Function to save polpo.json
+ */
+export function uninstallInkPackages(
+  entry: InkLockEntry,
+  polpoDir: string,
+  loadConfig: () => PolpoFileConfig | null | undefined,
+  saveConfig: (config: PolpoFileConfig) => void,
+): string[] {
+  const removed: string[] = [];
+  const config = loadConfig();
+
+  for (const pkg of entry.packages) {
+    switch (pkg.type) {
+      case "playbook": {
+        const dir = join(polpoDir, "playbooks", pkg.name);
+        if (existsSync(dir)) {
+          rmSync(dir, { recursive: true, force: true });
+          removed.push(`playbook: ${pkg.name}`);
+        }
+        break;
+      }
+      case "agent": {
+        if (config) {
+          for (const team of config.teams) {
+            const before = team.agents.length;
+            team.agents = team.agents.filter((a) => a.name !== pkg.name);
+            if (team.agents.length < before) {
+              removed.push(`agent: ${pkg.name}`);
+            }
+          }
+        }
+        break;
+      }
+      case "company": {
+        // Companies merge teams/agents — can't cleanly reverse.
+        // Remove legacy paths if present.
+        const legacyDir = join(polpoDir, "ink-companies", pkg.name);
+        if (existsSync(legacyDir)) {
+          rmSync(legacyDir, { recursive: true, force: true });
+        }
+        removed.push(`company: ${pkg.name} (merged config preserved)`);
+        break;
+      }
+    }
+  }
+
+  if (config) {
+    saveConfig(config);
+  }
+
+  return removed;
 }

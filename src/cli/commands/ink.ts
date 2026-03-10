@@ -23,6 +23,7 @@ import {
   removeInkLockEntry,
   isInkSourceInstalled,
   getInkLockEntry,
+  uninstallInkPackages,
 } from "../../core/ink.js";
 import type { InkPackage, InkLockEntry, InkLockPackage } from "../../core/ink.js";
 import { loadPolpoConfig, savePolpoConfig } from "../../core/config.js";
@@ -429,48 +430,15 @@ function appendFileContent(destPath: string, content: string, separator: string)
 
 /**
  * Remove installed packages for a registry source.
- *
- * - Playbooks: remove from .polpo/playbooks/
- * - Agents: remove from polpo.json teams
- * - Companies: remove agents/teams that were added, but leave memory/skills
- *   (those are merged and can't be cleanly un-merged)
+ * Delegates to the shared `uninstallInkPackages()` from core/ink.ts.
  */
 function uninstallPackages(entry: InkLockEntry, polpoDir: string): void {
-  const config = loadPolpoConfig(polpoDir);
-
-  for (const pkg of entry.packages) {
-    switch (pkg.type) {
-      case "playbook": {
-        const dir = join(polpoDir, "playbooks", pkg.name);
-        if (existsSync(dir)) rmSync(dir, { recursive: true, force: true });
-        break;
-      }
-      case "agent": {
-        // Remove agent from polpo.json
-        if (config) {
-          for (const team of config.teams) {
-            team.agents = team.agents.filter((a) => a.name !== pkg.name);
-          }
-        }
-        // Also clean up legacy ink-agents path
-        const legacyFile = join(polpoDir, "ink-agents", `${pkg.name}.json`);
-        if (existsSync(legacyFile)) rmSync(legacyFile, { force: true });
-        break;
-      }
-      case "company": {
-        // For companies, we can't cleanly reverse a merge of teams/agents.
-        // Remove legacy ink-companies path if present.
-        const legacyDir = join(polpoDir, "ink-companies", pkg.name);
-        if (existsSync(legacyDir)) rmSync(legacyDir, { recursive: true, force: true });
-        break;
-      }
-    }
-  }
-
-  // Save config if we removed agents
-  if (config) {
-    savePolpoConfig(polpoDir, config);
-  }
+  uninstallInkPackages(
+    entry,
+    polpoDir,
+    () => loadPolpoConfig(polpoDir),
+    (config) => savePolpoConfig(polpoDir, config),
+  );
 }
 
 /** Format a package type with color. */
