@@ -99,8 +99,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       # 1. Build the TypeScript source (needed for sidecar compilation)
-      - name: Build core package
-        run: pnpm --filter @polpo-ai/core build
+      - name: Build workspace dependencies
+        run: pnpm --filter @polpo-ai/core build && pnpm --filter @polpo-ai/drizzle build
 
       - name: Build TypeScript
         run: ./node_modules/.bin/tsc

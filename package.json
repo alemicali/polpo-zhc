@@ -38,7 +38,7 @@
     "access": "public"
   },
   "scripts": {
-    "build": "pnpm --filter @polpo-ai/core build && tsc",
+    "build": "pnpm --filter @polpo-ai/core build && pnpm --filter @polpo-ai/drizzle build && tsc",
     "build:all": "./node_modules/.bin/tsc && pnpm --filter @polpo-ai/react build && pnpm --filter ui build",
     "build:sdk": "pnpm --filter @polpo-ai/react build",
     "build:ui": "pnpm --filter ui build",
@@ -52,7 +52,7 @@
     "start:all": "pnpm build:all && node dist/cli/index.js serve -p 3890",
     "test": "vitest",
     "test:coverage": "vitest run --coverage",
-    "typecheck": "pnpm --filter @polpo-ai/core build && ./node_modules/.bin/tsc --noEmit",
+    "typecheck": "pnpm --filter @polpo-ai/core build && pnpm --filter @polpo-ai/drizzle build && ./node_modules/.bin/tsc --noEmit",
     "lint": "pnpm --filter ui lint",
     "clean": "rm -rf dist packages/react-sdk/dist ui/dist",
     "prepublishOnly": "./node_modules/.bin/tsc && pnpm build:sdk",
