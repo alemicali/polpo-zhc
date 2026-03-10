@@ -1,5 +1,5 @@
 {
-  "name": "@polpo-ai/polpo",
+  "name": "polpo-ai",
   "version": "0.1.18",
   "description": "The open-source platform for AI agent teams",
   "type": "module",
@@ -34,9 +34,6 @@
     "README.md",
     "LICENSE"
   ],
-  "publishConfig": {
-    "access": "public"
-  },
   "scripts": {
     "build": "pnpm --filter @polpo-ai/core build && pnpm --filter @polpo-ai/drizzle build && tsc",
     "build:all": "./node_modules/.bin/tsc && pnpm --filter @polpo-ai/react build && pnpm --filter ui build",

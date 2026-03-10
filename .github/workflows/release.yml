@@ -35,8 +35,8 @@ jobs:
           pnpm --filter @polpo-ai/react build
 
       # Publish to npm
-      - name: Publish @polpo-ai/polpo
-        run: pnpm publish --no-git-checks --access public
+      - name: Publish polpo-ai
+        run: pnpm publish --no-git-checks
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
