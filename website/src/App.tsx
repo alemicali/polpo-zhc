@@ -1,7 +1,8 @@
-import { useRef, useState, type ReactNode } from "react";
+import { useRef, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { Navbar, ExtLink, GitHubIcon, DiscordIcon } from "./components/Navbar";
-import { motion, useInView, AnimatePresence } from "motion/react";
+import { DownloadButton } from "./components/DownloadButton";
+import { motion, useInView } from "motion/react";
 import {
   Code2,
   Globe,
@@ -17,8 +18,6 @@ import {
   CheckCircle2,
   Sparkles,
   ArrowRight,
-  Copy,
-  Check,
   Target,
   Loader2,
   Users,
@@ -62,47 +61,6 @@ function Reveal({
     >
       {children}
     </motion.div>
-  );
-}
-
-/* ── Install bar ───────────────────────────────────────────────────── */
-
-function InstallBar({ className = "" }: { className?: string }) {
-  const [copied, setCopied] = useState(false);
-  const copy = () => {
-    navigator.clipboard.writeText("npx polpo-ai");
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-  return (
-    <button
-      onClick={copy}
-      className={`group inline-flex items-center gap-3 rounded-lg border border-neutral-200 bg-neutral-50 px-5 py-3.5 font-mono text-sm transition hover:border-neutral-400 ${className}`}
-    >
-      <span className="text-neutral-400 select-none">$</span>
-      <code className="text-neutral-900">npx polpo-ai</code>
-      <AnimatePresence mode="wait">
-        {copied ? (
-          <motion.span
-            key="check"
-            initial={{ scale: 0 }}
-            animate={{ scale: 1 }}
-            exit={{ scale: 0 }}
-          >
-            <Check className="ml-2 h-4 w-4 text-emerald-500" />
-          </motion.span>
-        ) : (
-          <motion.span
-            key="copy"
-            initial={{ scale: 0 }}
-            animate={{ scale: 1 }}
-            exit={{ scale: 0 }}
-          >
-            <Copy className="ml-2 h-4 w-4 text-neutral-400 transition group-hover:text-neutral-700" />
-          </motion.span>
-        )}
-      </AnimatePresence>
-    </button>
   );
 }
 
@@ -151,25 +109,7 @@ function Hero() {
 
         <Reveal delay={0.28}>
           <div className="mt-8">
-            <InstallBar />
-          </div>
-        </Reveal>
-
-        <Reveal delay={0.36}>
-          <div className="mt-6 flex flex-wrap justify-center gap-3">
-            <ExtLink
-              href="https://docs.polpo.sh"
-              className="inline-flex items-center gap-2 rounded-lg bg-neutral-950 px-6 py-3 text-sm font-semibold text-white transition hover:bg-neutral-800"
-            >
-              Get started <ArrowRight className="h-4 w-4" />
-            </ExtLink>
-            <ExtLink
-              href="https://github.com/lumea-labs/polpo"
-              className="inline-flex items-center gap-2 rounded-lg border border-neutral-200 px-6 py-3 text-sm font-semibold text-neutral-700 transition hover:border-neutral-400 hover:text-neutral-950"
-            >
-              <GitHubIcon className="h-4 w-4" />
-              GitHub
-            </ExtLink>
+            <DownloadButton />
           </div>
         </Reveal>
       </div>
@@ -720,7 +660,7 @@ function InkHubSection() {
 
 function DeployOptions() {
   const options: { icon: LucideIcon; title: string; desc: string; link: string }[] = [
-    { icon: Laptop, title: "Laptop", desc: "npx polpo-ai, done.", link: "https://docs.polpo.sh/install" },
+    { icon: Laptop, title: "Desktop App", desc: "One-click install. Auto-updates.", link: "https://github.com/lumea-labs/polpo/releases/latest" },
     { icon: Server, title: "VPS / Cloud", desc: "Hetzner, AWS, Railway.", link: "https://docs.polpo.sh/install/hetzner" },
     { icon: Container, title: "Docker", desc: "One-line container.", link: "https://docs.polpo.sh/install#docker" },
     { icon: Smartphone, title: "Mobile", desc: "PWA, monitor anywhere.", link: "https://docs.polpo.sh/install" },
@@ -862,24 +802,7 @@ function CTA() {
         </Reveal>
         <Reveal delay={0.08}>
           <div className="mt-8">
-            <InstallBar />
-          </div>
-        </Reveal>
-        <Reveal delay={0.16}>
-          <div className="mt-6 flex flex-wrap justify-center gap-3">
-            <ExtLink
-              href="https://docs.polpo.sh"
-              className="inline-flex items-center gap-2 rounded-lg bg-neutral-950 px-6 py-3 text-sm font-semibold text-white transition hover:bg-neutral-800"
-            >
-              Get started <ArrowRight className="h-4 w-4" />
-            </ExtLink>
-            <ExtLink
-              href="https://github.com/lumea-labs/polpo"
-              className="inline-flex items-center gap-2 rounded-lg border border-neutral-200 px-6 py-3 text-sm font-semibold text-neutral-700 transition hover:border-neutral-400"
-            >
-              <GitHubIcon className="h-4 w-4" />
-              GitHub
-            </ExtLink>
+            <DownloadButton />
           </div>
         </Reveal>
       </div>

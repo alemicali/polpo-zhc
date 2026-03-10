@@ -604,7 +604,8 @@ export function SetupPage() {
         }),
       });
       if (result.ok) {
-        window.location.href = "/";
+        // Full reload to re-check setup status — works for both file:// (HashRouter) and http (BrowserRouter)
+        window.location.href = window.location.pathname + window.location.search + "#/";
       } else {
         setSetupError(result.error || "Setup failed. Check server logs.");
         setCompleting(false);
@@ -644,7 +645,7 @@ export function SetupPage() {
             <p className="text-sm text-muted-foreground">
               Polpo is already set up and running. To change providers, models, or other settings, use the configuration page.
             </p>
-            <Button onClick={() => window.location.href = "/config"} className="gap-1.5">
+            <Button onClick={() => { window.location.href = window.location.pathname + window.location.search + "#/config"; }} className="gap-1.5">
               Go to Configuration <ArrowRight className="h-4 w-4" />
             </Button>
           </CardContent>

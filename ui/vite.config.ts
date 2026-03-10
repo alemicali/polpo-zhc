@@ -9,63 +9,66 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const isElectron = !!process.env.VITE_POLPO_API_URL;
 
+const pwaPlugin = VitePWA({
+  registerType: "autoUpdate",
+  includeAssets: ["favicon.svg", "icons/*.png"],
+  manifest: {
+    name: "Polpo — AI Agent Wrangler",
+    short_name: "Polpo",
+    description:
+      "Monitor and orchestrate your AI coding agent team",
+    theme_color: "#0a0e1a",
+    background_color: "#0a0e1a",
+    display: "standalone",
+    orientation: "portrait-primary",
+    scope: "/",
+    start_url: "/",
+    icons: [
+      {
+        src: "/icons/icon-192.png",
+        sizes: "192x192",
+        type: "image/png",
+      },
+      {
+        src: "/icons/icon-512.png",
+        sizes: "512x512",
+        type: "image/png",
+      },
+      {
+        src: "/icons/icon-192-maskable.png",
+        sizes: "192x192",
+        type: "image/png",
+        purpose: "maskable",
+      },
+    ],
+  },
+  workbox: {
+    navigateFallback: "/index.html",
+    globPatterns: ["**/*.{js,css,html,svg,woff2}"],
+    navigateFallbackDenylist: [/^\/api\//, /^\/v1\//],
+    runtimeCaching: [
+      {
+        urlPattern: /\.(png|jpg|svg|woff2)$/,
+        handler: "CacheFirst",
+        options: {
+          cacheName: "assets",
+          expiration: { maxAgeSeconds: 60 * 60 * 24 * 30 },
+        },
+      },
+    ],
+  },
+  devOptions: {
+    enabled: true,
+  },
+});
+
 export default defineConfig({
   base: isElectron ? "./" : "/",
   plugins: [
     react(),
     tailwindcss(),
-    VitePWA({
-      registerType: "autoUpdate",
-      includeAssets: ["favicon.svg", "icons/*.png"],
-      manifest: {
-        name: "Polpo — AI Agent Wrangler",
-        short_name: "Polpo",
-        description:
-          "Monitor and orchestrate your AI coding agent team",
-        theme_color: "#0a0e1a",
-        background_color: "#0a0e1a",
-        display: "standalone",
-        orientation: "portrait-primary",
-        scope: "/",
-        start_url: "/",
-        icons: [
-          {
-            src: "/icons/icon-192.png",
-            sizes: "192x192",
-            type: "image/png",
-          },
-          {
-            src: "/icons/icon-512.png",
-            sizes: "512x512",
-            type: "image/png",
-          },
-          {
-            src: "/icons/icon-192-maskable.png",
-            sizes: "192x192",
-            type: "image/png",
-            purpose: "maskable",
-          },
-        ],
-      },
-      workbox: {
-        navigateFallback: "/index.html",
-        globPatterns: ["**/*.{js,css,html,svg,woff2}"],
-        navigateFallbackDenylist: [/^\/api\//, /^\/v1\//],
-        runtimeCaching: [
-          {
-            urlPattern: /\.(png|jpg|svg|woff2)$/,
-            handler: "CacheFirst",
-            options: {
-              cacheName: "assets",
-              expiration: { maxAgeSeconds: 60 * 60 * 24 * 30 },
-            },
-          },
-        ],
-      },
-      devOptions: {
-        enabled: true,
-      },
-    }),
+    // Disable PWA in Electron builds — service workers break file:// protocol
+    ...(isElectron ? [] : [pwaPlugin]),
   ],
   resolve: {
     alias: {

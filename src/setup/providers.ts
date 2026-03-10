@@ -37,10 +37,26 @@ export function detectProviders(): DetectedProvider[] {
     // No profiles file — that's fine
   }
 
+  // Build a set of env vars that are "owned" by an OAuth provider.
+  // If the user logged in via OAuth to openai-codex, the shared OPENAI_API_KEY
+  // should NOT make the plain "openai" provider show up as authenticated.
+  const oauthOwnedEnvVars = new Set<string>();
+  for (const oauthProv of oauthProviders) {
+    const ev = PROVIDER_ENV_MAP[oauthProv];
+    if (ev) oauthOwnedEnvVars.add(ev);
+  }
+
   return catalogProviders.map((name) => {
     const envVar = PROVIDER_ENV_MAP[name];
-    const hasEnvKey = envVar ? !!process.env[envVar] : false;
     const hasOAuth = oauthProviders.has(name);
+
+    // An env key counts only if:
+    // - The env var is set, AND
+    // - Either this provider itself has OAuth (so the key is genuinely for it),
+    //   or the env var is NOT claimed by another OAuth provider
+    const envVarSet = envVar ? !!process.env[envVar] : false;
+    const envClaimedByOtherOAuth = envVar && oauthOwnedEnvVars.has(envVar) && !hasOAuth;
+    const hasEnvKey = envVarSet && !envClaimedByOtherOAuth;
 
     return {
       name,

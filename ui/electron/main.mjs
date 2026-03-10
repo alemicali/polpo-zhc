@@ -1,4 +1,5 @@
 import { app, BrowserWindow, dialog } from "electron";
+import { autoUpdater } from "electron-updater";
 import { spawn } from "node:child_process";
 import { resolve, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -35,13 +36,28 @@ function saveConfig(config) {
 
 async function resolveWorkDir() {
   // 1. CLI argument: ./Polpo.AppImage /path/to/project
-  const cliArg = process.argv.find((a) => !a.startsWith("-") && a !== process.argv[0] && a !== process.argv[1]);
+  //    argv[0] is always the executable (electron binary or AppImage mount).
+  //    Everything after that is user args + flags.
+  //    We skip argv[0], the APPIMAGE env path, and any --flags.
+  const skip = new Set([process.argv[0]]);
+  if (process.env.APPIMAGE) skip.add(process.env.APPIMAGE);
+
+  console.log("[Polpo] process.argv:", process.argv);
+  console.log("[Polpo] APPIMAGE env:", process.env.APPIMAGE);
+
+  const cliArg = process.argv.slice(1).find((a) => {
+    if (skip.has(a)) return false;
+    if (a.startsWith("--")) return false;
+    return true;
+  });
+
+  console.log("[Polpo] Detected CLI arg:", cliArg);
+
   if (cliArg) {
     const dir = resolve(cliArg);
-    if (existsSync(dir)) {
-      saveConfig({ workDir: dir });
-      return dir;
-    }
+    mkdirSync(dir, { recursive: true });
+    saveConfig({ workDir: dir });
+    return dir;
   }
 
   // 2. Saved from previous session
@@ -194,10 +210,69 @@ function createWindow() {
 
   // Load the built React app from dist/
   const indexPath = join(__dirname, "..", "dist", "index.html");
+  console.log("[Polpo] __dirname:", __dirname);
+  console.log("[Polpo] indexPath:", indexPath);
+  console.log("[Polpo] indexPath exists:", existsSync(indexPath));
   mainWindow.loadFile(indexPath);
+
+  // Open DevTools in development / debug
+  if (process.argv.includes("--devtools") || process.env.POLPO_DEVTOOLS) {
+    mainWindow.webContents.openDevTools();
+  }
 
   mainWindow.on("closed", () => {
     mainWindow = null;
+  });
+}
+
+// ── Auto-updater ────────────────────────────────────────────────────────
+
+function setupAutoUpdater() {
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+
+  autoUpdater.on("checking-for-update", () => {
+    console.log("[Polpo] Checking for updates...");
+  });
+
+  autoUpdater.on("update-available", (info) => {
+    console.log("[Polpo] Update available:", info.version);
+  });
+
+  autoUpdater.on("update-not-available", () => {
+    console.log("[Polpo] App is up to date");
+  });
+
+  autoUpdater.on("download-progress", (progress) => {
+    console.log(`[Polpo] Download: ${Math.round(progress.percent)}%`);
+  });
+
+  autoUpdater.on("update-downloaded", (info) => {
+    console.log("[Polpo] Update downloaded:", info.version);
+    // Notify the user — install on next restart
+    if (mainWindow) {
+      dialog.showMessageBox(mainWindow, {
+        type: "info",
+        title: "Update Ready",
+        message: `Polpo ${info.version} has been downloaded.`,
+        detail: "The update will be installed when you restart the app.",
+        buttons: ["Restart Now", "Later"],
+        defaultId: 0,
+      }).then(({ response }) => {
+        if (response === 0) {
+          autoUpdater.quitAndInstall(false, true);
+        }
+      });
+    }
+  });
+
+  autoUpdater.on("error", (err) => {
+    console.log("[Polpo] Auto-update error:", err.message);
+  });
+
+  // Check for updates (non-blocking, silent on first launch)
+  autoUpdater.checkForUpdates().catch(() => {
+    // Ignore errors — offline, no releases yet, etc.
   });
 }
 
@@ -217,6 +292,9 @@ app.whenReady().then(async () => {
   }
 
   createWindow();
+
+  // Check for updates after window is up (non-blocking)
+  setupAutoUpdater();
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
