@@ -103,7 +103,7 @@ jobs:
 
       # Build Vite UI (same output for all platforms)
       - name: Build Vite UI
-        run: VITE_POLPO_API_URL=http://localhost:3890 vite build
+        run: VITE_POLPO_API_URL=http://localhost:3890 pnpm exec vite build
         working-directory: ui
 
       # Upload compiled artifacts for platform-specific jobs
