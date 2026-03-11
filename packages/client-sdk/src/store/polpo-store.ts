@@ -23,6 +23,7 @@ function createInitialState(): StoreState {
     recentEvents: [],
     missionsStale: false,
     memory: null,
+    agentMemory: new Map(),
     assessmentProgress: new Map(),
     assessmentChecks: new Map(),
     activeDelays: new Map(),
@@ -126,6 +127,13 @@ export class PolpoStore {
 
   setMemory(memory: { exists: boolean; content: string } | null): void {
     this.state = { ...this.state, memory };
+    this.notify();
+  }
+
+  setAgentMemory(agentName: string, memory: { exists: boolean; content: string }): void {
+    const agentMemory = new Map(this.state.agentMemory);
+    agentMemory.set(agentName, memory);
+    this.state = { ...this.state, agentMemory };
     this.notify();
   }
 

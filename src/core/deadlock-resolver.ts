@@ -254,7 +254,7 @@ function buildResolutionPrompt(
   }
 
   if (memory) {
-    parts.push(``, `## Project Memory`, memory.slice(0, 1000));
+    parts.push(``, `## Shared Memory`, memory.slice(0, 1000));
   }
 
   parts.push(

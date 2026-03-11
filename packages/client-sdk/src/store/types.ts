@@ -45,6 +45,8 @@ export interface StoreState {
   recentEvents: SSEEvent[];
   missionsStale: boolean;
   memory: { exists: boolean; content: string } | null;
+  /** Agent-specific memory keyed by agent name. */
+  agentMemory: Map<string, { exists: boolean; content: string }>;
   /** Live assessment progress messages keyed by taskId. Cleared on assessment:complete. */
   assessmentProgress: Map<string, AssessmentProgressEntry[]>;
   /** Per-check status keyed by taskId. Tracks which expectations are running/done. Cleared on assessment:complete. */

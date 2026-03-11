@@ -96,8 +96,10 @@ When `--api-key` is set, all requests must include the key:
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/memory` | Get project memory |
-| `PUT` | `/memory` | Update project memory |
+| `GET` | `/memory` | Get shared memory |
+| `PUT` | `/memory` | Update shared memory |
+| `GET` | `/memory/agent/:agentName` | Get agent-specific memory |
+| `PUT` | `/memory/agent/:agentName` | Update agent-specific memory |
 
 ### Files
 

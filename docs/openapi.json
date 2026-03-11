@@ -10128,10 +10128,10 @@
         "tags": [
           "Memory"
         ],
-        "summary": "Get memory",
+        "summary": "Get shared memory",
         "responses": {
           "200": {
-            "description": "Memory content",
+            "description": "Shared memory content",
             "content": {
               "application/json": {
                 "schema": {
@@ -10169,7 +10169,7 @@
         "tags": [
           "Memory"
         ],
-        "summary": "Update memory",
+        "summary": "Update shared memory",
         "requestBody": {
           "content": {
             "application/json": {
@@ -10207,6 +10207,132 @@
                       },
                       "required": [
                         "saved"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/memory/agent/{agentName}": {
+      "get": {
+        "tags": [
+          "Memory"
+        ],
+        "summary": "Get agent-specific memory",
+        "parameters": [
+          {
+            "name": "agentName",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Agent memory content",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "exists": {
+                          "type": "boolean"
+                        },
+                        "content": {
+                          "nullable": true
+                        },
+                        "agent": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "exists",
+                        "agent"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Memory"
+        ],
+        "summary": "Update agent-specific memory",
+        "parameters": [
+          {
+            "name": "agentName",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "content": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "content"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Agent memory updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "saved": {
+                          "type": "boolean"
+                        },
+                        "agent": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "saved",
+                        "agent"
                       ]
                     }
                   },

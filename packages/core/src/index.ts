@@ -27,6 +27,7 @@ export type { TaskStore } from "./task-store.js";
 export type { RunStore, RunRecord, RunStatus } from "./run-store.js";
 export type { ConfigStore } from "./config-store.js";
 export type { MemoryStore } from "./memory-store.js";
+export { agentMemoryScope } from "./memory-store.js";
 export type { LogStore, LogEntry, SessionInfo } from "./log-store.js";
 export type { SessionStore, Session, Message, MessageRole, ToolCallInfo, ToolCallState } from "./session-store.js";
 export type { ApprovalStore } from "./approval-store.js";

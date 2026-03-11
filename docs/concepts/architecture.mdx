@@ -10,7 +10,7 @@ Polpo follows a **supervisor architecture**: it manages agent lifecycles, task a
 Under the hood, Polpo is composed of four layers:
 
 1. **Interface layer** — CLI, TUI, Web UI, OpenAI-compatible chat endpoint (`/v1/chat/completions`), and REST API provide different ways to talk to Polpo
-2. **Core** — the supervisor loop, task registry, mission executor, system context (`.polpo/system-context.md`), project memory, and all the managers (assessment, approvals, escalation, scheduling, etc.)
+2. **Core** — the supervisor loop, task registry, mission executor, system context (`.polpo/system-context.md`), memory (shared + per-agent), and all the managers (assessment, approvals, escalation, scheduling, etc.)
 3. **Runner layer** — detached subprocesses that host individual agents, communicating with Polpo via the file-based RunStore
 4. **Agent layer** — the actual AI agents (Claude, GPT, Gemini, etc.) running on the built-in engine
 

@@ -11,6 +11,7 @@ import { FileLogStore } from "../stores/file-log-store.js";
 import { FileSessionStore } from "../stores/file-session-store.js";
 import type { SessionStore } from "./session-store.js";
 import type { MemoryStore } from "./memory-store.js";
+import { agentMemoryScope } from "./memory-store.js";
 import type { LogStore } from "./log-store.js";
 import { assessTask } from "../assessment/assessor.js";
 import { analyzeBlockedTasks, resolveDeadlock, isResolving } from "./deadlock-resolver.js";
@@ -767,32 +768,60 @@ export class Orchestrator extends TypedEmitter {
     return this.missionExec.updateMissionNotifications(missionId, notifications);
   }
 
-  // ─── Project Memory ────────────────────────────────── 
+  // ─── Shared Memory ─────────────────────────────────── 
 
-  /** Check if project memory exists. */
+  /** Check if shared memory exists. */
   async hasMemory(): Promise<boolean> {
     return (await this.memoryStore?.exists()) ?? false;
   }
 
-  /** Get the full project memory content. */
+  /** Get the full shared memory content. */
   async getMemory(): Promise<string> {
     return (await this.memoryStore?.get()) ?? "";
   }
 
-  /** Overwrite the project memory. */
+  /** Overwrite the shared memory. */
   async saveMemory(content: string): Promise<void> {
     await this.memoryStore?.save(content);
   }
 
-  /** Append a line to the project memory. */
+  /** Append a line to the shared memory. */
   async appendMemory(line: string): Promise<void> {
     await this.memoryStore?.append(line);
   }
 
-  /** Replace a unique substring in the project memory. */
+  /** Replace a unique substring in the shared memory. */
   async updateMemory(oldText: string, newText: string): Promise<true | string> {
     if (!this.memoryStore) return "No memory store configured.";
     return this.memoryStore.update(oldText, newText);
+  }
+
+  // ─── Agent Memory ────────────────────────────────────
+
+  /** Check if memory exists for a specific agent. */
+  async hasAgentMemory(agentName: string): Promise<boolean> {
+    return (await this.memoryStore?.exists(agentMemoryScope(agentName))) ?? false;
+  }
+
+  /** Get the memory content for a specific agent. */
+  async getAgentMemory(agentName: string): Promise<string> {
+    return (await this.memoryStore?.get(agentMemoryScope(agentName))) ?? "";
+  }
+
+  /** Overwrite the memory for a specific agent. */
+  async saveAgentMemory(agentName: string, content: string): Promise<void> {
+    await this.memoryStore?.save(content, agentMemoryScope(agentName));
+  }
+
+  /** Append a line to a specific agent's memory. */
+  async appendAgentMemory(agentName: string, line: string): Promise<void> {
+    await this.memoryStore?.append(line, agentMemoryScope(agentName));
+  }
+
+  /** Replace a unique substring in a specific agent's memory. */
+  async updateAgentMemory(agentName: string, oldText: string, newText: string): Promise<true | string> {
+    if (!this.memoryStore) return "No memory store configured.";
+    return this.memoryStore.update(oldText, newText, agentMemoryScope(agentName));
   }
 
   /** Get the persistent log store. */

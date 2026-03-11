@@ -375,7 +375,7 @@ describe("Orchestrator", () => {
     });
   });
 
-  describe("project memory", () => {
+  describe("shared memory", () => {
     it("hasMemory returns false when no memory saved", async () => {
       expect(await orchestrator.hasMemory()).toBe(false);
     });
@@ -396,6 +396,44 @@ describe("Orchestrator", () => {
       const content = await orchestrator.getMemory();
       expect(content).toContain("# Memory");
       expect(content).toContain("New insight");
+    });
+  });
+
+  describe("agent memory", () => {
+    it("hasAgentMemory returns false for unknown agent", async () => {
+      expect(await orchestrator.hasAgentMemory("alice")).toBe(false);
+    });
+
+    it("getAgentMemory returns empty string for unknown agent", async () => {
+      expect(await orchestrator.getAgentMemory("alice")).toBe("");
+    });
+
+    it("saveAgentMemory + getAgentMemory round-trips", async () => {
+      await orchestrator.saveAgentMemory("alice", "Alice prefers functional style");
+      expect(await orchestrator.hasAgentMemory("alice")).toBe(true);
+      expect(await orchestrator.getAgentMemory("alice")).toBe("Alice prefers functional style");
+    });
+
+    it("agent memory is isolated from shared memory", async () => {
+      await orchestrator.saveMemory("shared context");
+      await orchestrator.saveAgentMemory("alice", "agent context");
+      expect(await orchestrator.getMemory()).toBe("shared context");
+      expect(await orchestrator.getAgentMemory("alice")).toBe("agent context");
+    });
+
+    it("different agents have separate memories", async () => {
+      await orchestrator.saveAgentMemory("alice", "alice notes");
+      await orchestrator.saveAgentMemory("bob", "bob notes");
+      expect(await orchestrator.getAgentMemory("alice")).toBe("alice notes");
+      expect(await orchestrator.getAgentMemory("bob")).toBe("bob notes");
+    });
+
+    it("appendAgentMemory appends to agent memory", async () => {
+      await orchestrator.saveAgentMemory("alice", "# Notes");
+      await orchestrator.appendAgentMemory("alice", "learned React patterns");
+      const content = await orchestrator.getAgentMemory("alice");
+      expect(content).toContain("# Notes");
+      expect(content).toContain("learned React patterns");
     });
   });
 });

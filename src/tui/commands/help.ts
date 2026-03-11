@@ -9,7 +9,7 @@ export const COMMANDS: [string, string][] = [
   ["/team [add|rm|edit]", "Manage team agents"],
   ["/config", "Configure settings"],
   ["/sessions", "View chat sessions"],
-  ["/memory [edit]", "View/edit project memory"],
+  ["/memory [edit] [agent:<name>]", "View/edit shared or agent memory"],
   ["/clear", "Clear the stream"],
   ["/quit", "Exit Polpo"],
 ];

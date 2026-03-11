@@ -604,6 +604,14 @@ export class PolpoClient {
     return this.request<{ saved: boolean }>("PUT", this.apiUrl("/memory"), { content });
   }
 
+  getAgentMemory(agentName: string): Promise<{ exists: boolean; content: string; agent: string }> {
+    return this.get<{ exists: boolean; content: string; agent: string }>(`/memory/agent/${encodeURIComponent(agentName)}`);
+  }
+
+  saveAgentMemory(agentName: string, content: string): Promise<{ saved: boolean; agent: string }> {
+    return this.request<{ saved: boolean; agent: string }>("PUT", this.apiUrl(`/memory/agent/${encodeURIComponent(agentName)}`), { content });
+  }
+
   getLogs(): Promise<LogSession[]> {
     return this.get<LogSession[]>("/logs");
   }

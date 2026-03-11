@@ -344,14 +344,14 @@ describe("CLI layer: memory commands", () => {
 
   test("memory show — empty initially", async () => {
     const { stdout } = await runCLI(registerMemoryCommands, ["memory", "show", "-d", dir]);
-    expect(stdout).toContain("No project memory");
+    expect(stdout).toContain("No shared memory");
   });
 
   test("memory set — saves memory content", async () => {
     const { stdout } = await runCLI(registerMemoryCommands, [
       "memory", "set", "-d", dir, "Architecture", "decisions", "go", "here",
     ]);
-    expect(stdout).toContain("Memory saved");
+    expect(stdout).toContain("Shared memory saved");
   });
 
   test("memory show — displays saved memory", async () => {
@@ -363,7 +363,7 @@ describe("CLI layer: memory commands", () => {
     const { stdout } = await runCLI(registerMemoryCommands, [
       "memory", "append", "-d", dir, "New insight about performance",
     ]);
-    expect(stdout).toContain("Memory updated");
+    expect(stdout).toContain("Shared memory updated");
   });
 
   test("memory show — shows both original and appended content", async () => {

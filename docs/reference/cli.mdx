@@ -307,36 +307,38 @@ polpo browser clear <agent> [-d <path>] [-f]
 
 ## polpo memory
 
-View and manage project memory.
+View and manage shared and agent-specific memory.
+
+All subcommands accept `--agent <name>` (or `-a <name>`) to operate on a specific agent's private memory instead of shared memory.
 
 ### memory show
 
 ```bash
-polpo memory show [-d <path>]
+polpo memory show [-d <path>] [--agent <name>]
 ```
 
 ### memory set
 
-Replace the entire project memory.
+Replace memory content (shared by default, or agent-specific with `--agent`).
 
 ```bash
-polpo memory set <content...> [-d <path>]
+polpo memory set <content...> [-d <path>] [--agent <name>]
 ```
 
 ### memory append
 
-Append a line to the project memory.
+Append a line to memory (shared by default, or agent-specific with `--agent`).
 
 ```bash
-polpo memory append <line...> [-d <path>]
+polpo memory append <line...> [-d <path>] [--agent <name>]
 ```
 
 ### memory edit
 
-Open project memory in `$EDITOR` (defaults to `vi`).
+Open memory in `$EDITOR` (defaults to `vi`). Use `--agent` to edit a specific agent's memory.
 
 ```bash
-polpo memory edit [-d <path>]
+polpo memory edit [-d <path>] [--agent <name>]
 ```
 
 ---

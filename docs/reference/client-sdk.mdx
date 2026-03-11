@@ -122,8 +122,10 @@ const client = new PolpoClient({
 | `approve(id, opts?)` | `void` | Approve a request |
 | `reject(id, feedback)` | `void` | Reject a request |
 | `getNotifications(opts?)` | `NotificationRecord[]` | List notifications |
-| `getMemory()` | `{ exists, content }` | Get project memory |
-| `updateMemory(content)` | `void` | Update project memory |
+| `getMemory()` | `{ exists, content }` | Get shared memory |
+| `saveMemory(content)` | `{ saved }` | Update shared memory |
+| `getAgentMemory(agentName)` | `{ exists, content, agent }` | Get agent-specific memory |
+| `saveAgentMemory(agentName, content)` | `{ saved, agent }` | Update agent-specific memory |
 | `getAuthStatus()` | `AuthStatusResponse` | Per-provider auth health |
 
 ## ChatCompletionStream

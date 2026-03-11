@@ -13,7 +13,7 @@ describe("buildSystemPrompt — base", () => {
     const prompt = buildSystemPrompt(agent, CWD);
     expect(prompt).toContain("Polpo");
     expect(prompt).toContain("coding agent");
-    expect(prompt).toContain("<project-memory>");
+    expect(prompt).toContain("<shared-memory>");
   });
 
   it("includes agent role when set", () => {

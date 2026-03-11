@@ -100,8 +100,10 @@ const getTeamsTool: Tool = {
 
 const getMemoryTool: Tool = {
   name: "get_memory",
-  description: "Read the project memory content (.polpo/memory.md).",
-  parameters: Type.Object({}),
+  description: "Read memory content. By default reads shared memory (.polpo/memory.md). Pass `agent` to read a specific agent's private memory.",
+  parameters: Type.Object({
+    agent: Type.Optional(Type.String({ description: "Agent name to read agent-specific memory. Omit for shared memory." })),
+  }),
 };
 
 const getConfigTool: Tool = {
@@ -914,26 +916,29 @@ const reloadConfigTool: Tool = {
 
 const saveMemoryTool: Tool = {
   name: "save_memory",
-  description: "Overwrite the project memory (.polpo/memory.md) with new content.",
+  description: "Overwrite memory with new content. By default writes shared memory (.polpo/memory.md). Pass `agent` to write a specific agent's private memory.",
   parameters: Type.Object({
     content: Type.String({ description: "New memory content (replaces everything)" }),
+    agent: Type.Optional(Type.String({ description: "Agent name to write agent-specific memory. Omit for shared memory." })),
   }),
 };
 
 const appendMemoryTool: Tool = {
   name: "append_memory",
-  description: "Append a line to the project memory without overwriting existing content.",
+  description: "Append a line to memory without overwriting existing content. Pass `agent` to append to a specific agent's private memory.",
   parameters: Type.Object({
     content: Type.String({ description: "Content to append" }),
+    agent: Type.Optional(Type.String({ description: "Agent name to append to agent-specific memory. Omit for shared memory." })),
   }),
 };
 
 const updateMemoryTool: Tool = {
   name: "update_memory",
-  description: "Replace a specific section of the project memory (.polpo/memory.md). Works like edit_file: find an exact substring and replace it. The oldString must appear exactly once.",
+  description: "Replace a specific section of memory. Works like edit_file: find an exact substring and replace it. The oldString must appear exactly once. Pass `agent` to update a specific agent's private memory.",
   parameters: Type.Object({
     oldString: Type.String({ description: "The exact text to find in memory (must be unique)" }),
     newString: Type.String({ description: "The replacement text" }),
+    agent: Type.Optional(Type.String({ description: "Agent name to update agent-specific memory. Omit for shared memory." })),
   }),
 };
 
@@ -1770,7 +1775,7 @@ export async function executeOrchestratorTool(
       case "get_mission":      return execGetMission(polpo, args);
       case "list_agents":      return execListAgents(polpo);
       case "get_teams":        return execGetTeams(polpo, args);
-      case "get_memory":       return execGetMemory(polpo);
+      case "get_memory":       return execGetMemory(polpo, args);
       case "get_config":       return execGetConfig(polpo);
       case "list_approvals":   return execListApprovals(polpo, args);
       case "list_checkpoints": return execListCheckpoints(polpo);
@@ -2139,11 +2144,16 @@ export async function formatToolDetails(
       break;
     case "save_memory":
     case "append_memory":
+      if (args.agent) main.push(["Agent", String(args.agent)]);
+      main.push(["Content length", `${String(args.content ?? "").length} chars`]);
+      extra.push(["Content", trunc(args.content, 300)]);
+      break;
     case "append_system_context":
       main.push(["Content length", `${String(args.content ?? "").length} chars`]);
       extra.push(["Content", trunc(args.content, 300)]);
       break;
     case "update_memory":
+      if (args.agent) main.push(["Agent", String(args.agent)]);
       main.push(["Old", trunc(args.oldString, 80)]);
       main.push(["New", trunc(args.newString, 80)]);
       break;
@@ -2318,8 +2328,14 @@ function execGetTeams(polpo: Orchestrator, args: Record<string, unknown>): strin
   return JSON.stringify(teams, null, 2);
 }
 
-async function execGetMemory(polpo: Orchestrator): Promise<string> {
-  if (!await polpo.hasMemory()) return "No project memory configured.";
+async function execGetMemory(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
+  const agent = args.agent as string | undefined;
+  if (agent) {
+    if (!await polpo.hasAgentMemory(agent)) return `No memory found for agent "${agent}".`;
+    const content = await polpo.getAgentMemory(agent);
+    return content || "(empty)";
+  }
+  if (!await polpo.hasMemory()) return "No shared memory configured.";
   const content = await polpo.getMemory();
   return content || "(empty)";
 }
@@ -3108,22 +3124,36 @@ function execReloadConfig(polpo: Orchestrator): string {
 }
 
 async function execSaveMemory(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
+  const agent = args.agent as string | undefined;
+  if (agent) {
+    await polpo.saveAgentMemory(agent, args.content as string);
+    return `Memory for agent "${agent}" updated.`;
+  }
   await polpo.saveMemory(args.content as string);
-  return "Project memory updated.";
+  return "Shared memory updated.";
 }
 
 async function execAppendMemory(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
+  const agent = args.agent as string | undefined;
+  if (agent) {
+    await polpo.appendAgentMemory(agent, args.content as string);
+    return `Appended to agent "${agent}" memory.`;
+  }
   await polpo.appendMemory(args.content as string);
-  return "Appended to project memory.";
+  return "Appended to shared memory.";
 }
 
 async function execUpdateMemory(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
   const oldString = args.oldString as string;
   const newString = args.newString as string;
+  const agent = args.agent as string | undefined;
   if (!oldString) return "Error: oldString is required.";
-  const result = await polpo.updateMemory(oldString, newString);
+  const result = agent
+    ? await polpo.updateAgentMemory(agent, oldString, newString)
+    : await polpo.updateMemory(oldString, newString);
   if (result === true) {
-    return `Memory updated: replaced ${oldString.length} chars with ${newString.length} chars.`;
+    const target = agent ? `agent "${agent}" memory` : "shared memory";
+    return `${target} updated: replaced ${oldString.length} chars with ${newString.length} chars.`;
   }
   return `Error: ${result}`;
 }

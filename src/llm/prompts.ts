@@ -188,7 +188,7 @@ export async function buildChatSystemPrompt(
     `  already exists, missing fields are filled in from the incoming agent (existing values are never overwritten).`,
     `- **Companies**: full merge into the project:`,
     `  - Teams and agents are merged into \`polpo.json\` (new teams added, existing teams get new agents)`,
-    `  - \`memory.md\` is appended (not replaced) — preserves existing project memory`,
+    `  - \`memory.md\` is appended (not replaced) — preserves existing shared memory`,
     `  - \`system-context.md\` is appended (not replaced)`,
     `  - Skills are copied to the skill pool (existing skills with the same name are kept)`,
     `  - Settings are merged conservatively (only missing settings are filled in)`,
@@ -315,7 +315,7 @@ export async function buildChatSystemPrompt(
     `401 with { error: 'Unauthorized' }. On expired token, return 401 with { error: 'Token expired' }."`,
     ``,
     `The description determines the quality of the output. Invest time here.`,
-    `Project memory (from .polpo/memory.md) is automatically injected into every task description`,
+    `Shared memory (from .polpo/memory.md) is automatically injected into every task description`,
     `before the agent sees it — so shared context like "we use TypeScript, Vitest for testing,`,
     `the API runs on port 3890" doesn't need to be repeated in every task.`,
     ``,
@@ -1117,7 +1117,8 @@ export async function buildChatSystemPrompt(
     ``,
     `Every Polpo project has a \`.polpo/\` directory:`,
     `- \`.polpo/polpo.json\` — Main configuration (team, agents, settings, notifications, providers)`,
-    `- \`.polpo/memory.md\` — Project memory (facts shared with agents)`,
+    `- \`.polpo/memory.md\` — Shared memory (facts visible to all agents)`,
+    `- \`.polpo/memory/<agent>.md\` — Per-agent private memory`,
     `- \`.polpo/system-context.md\` — Standing instructions for you (Polpo)`,
     `- \`.polpo/tasks/\` — Persisted task state`,
     `- \`.polpo/missions/\` — Persisted missions`,
@@ -1231,11 +1232,11 @@ export async function buildChatSystemPrompt(
     );
   }
 
-  // ── Project memory ──
+  // ── Shared memory ──
   if (memory) {
     parts.push(
       ``,
-      `## Project memory`,
+      `## Shared memory`,
       ``,
       memory,
     );
@@ -1566,7 +1567,7 @@ export async function buildTaskPrepPrompt(
   const memory = await orchestrator.getMemory();
 
   const memorySection = memory
-    ? [`## Project Memory`, ``, memory, ``]
+    ? [`## Shared Memory`, ``, memory, ``]
     : [];
 
   return [
@@ -1579,14 +1580,14 @@ export async function buildTaskPrepPrompt(
     `The user wants to create a single task. Your job is to:`,
     `1. Understand the user's intent in context (project state, recent tasks, memory)`,
     `2. Call the submit_task tool with a well-structured task including title, description, and expectations`,
-    `3. Resolve ambiguity using recent activity and project memory`,
+    `3. Resolve ambiguity using recent activity and shared memory`,
     ``,
     ...memorySection,
     `## Context Awareness`,
     ``,
     `When the user says something ambiguous, resolve it using:`,
     `- Recent tasks: what was just built, modified, or failed`,
-    `- Project memory: tech stack, conventions, architecture decisions`,
+    `- Shared memory: tech stack, conventions, architecture decisions`,
     `- Common patterns: "open the browser" → "start dev server and open localhost"`,
     ``,
     `## Expectation Selection Guide`,

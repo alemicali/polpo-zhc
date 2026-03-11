@@ -35,11 +35,11 @@ const getMemoryRoute = createRoute({
   method: "get",
   path: "/memory",
   tags: ["Memory"],
-  summary: "Get memory",
+  summary: "Get shared memory",
   responses: {
     200: {
       content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.object({ exists: z.boolean(), content: z.any() }) }) } },
-      description: "Memory content",
+      description: "Shared memory content",
     },
   },
 });
@@ -48,7 +48,7 @@ const updateMemoryRoute = createRoute({
   method: "put",
   path: "/memory",
   tags: ["Memory"],
-  summary: "Update memory",
+  summary: "Update shared memory",
   request: {
     body: { content: { "application/json": { schema: UpdateMemorySchema } } },
   },
@@ -56,6 +56,39 @@ const updateMemoryRoute = createRoute({
     200: {
       content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.object({ saved: z.boolean() }) }) } },
       description: "Memory updated",
+    },
+  },
+});
+
+const getAgentMemoryRoute = createRoute({
+  method: "get",
+  path: "/memory/agent/{agentName}",
+  tags: ["Memory"],
+  summary: "Get agent-specific memory",
+  request: {
+    params: z.object({ agentName: z.string() }),
+  },
+  responses: {
+    200: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.object({ exists: z.boolean(), content: z.any(), agent: z.string() }) }) } },
+      description: "Agent memory content",
+    },
+  },
+});
+
+const updateAgentMemoryRoute = createRoute({
+  method: "put",
+  path: "/memory/agent/{agentName}",
+  tags: ["Memory"],
+  summary: "Update agent-specific memory",
+  request: {
+    params: z.object({ agentName: z.string() }),
+    body: { content: { "application/json": { schema: UpdateMemorySchema } } },
+  },
+  responses: {
+    200: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.object({ saved: z.boolean(), agent: z.string() }) }) } },
+      description: "Agent memory updated",
     },
   },
 });
@@ -114,7 +147,7 @@ export function stateRoutes(): OpenAPIHono<ServerEnv> {
     return c.json({ ok: true, data: config ? redactPolpoConfig(config) : config });
   });
 
-  // GET /memory — memory
+  // GET /memory — shared memory
   app.openapi(getMemoryRoute, async (c) => {
     const orchestrator = c.get("orchestrator");
     return c.json({
@@ -126,12 +159,35 @@ export function stateRoutes(): OpenAPIHono<ServerEnv> {
     });
   });
 
-  // PUT /memory — update memory
+  // PUT /memory — update shared memory
   app.openapi(updateMemoryRoute, async (c) => {
     const orchestrator = c.get("orchestrator");
     const body = c.req.valid("json");
     await orchestrator.saveMemory(body.content);
     return c.json({ ok: true, data: { saved: true } });
+  });
+
+  // GET /memory/agent/:agentName — agent-specific memory
+  app.openapi(getAgentMemoryRoute, async (c) => {
+    const orchestrator = c.get("orchestrator");
+    const { agentName } = c.req.valid("param");
+    return c.json({
+      ok: true,
+      data: {
+        exists: await orchestrator.hasAgentMemory(agentName),
+        content: await orchestrator.getAgentMemory(agentName),
+        agent: agentName,
+      },
+    });
+  });
+
+  // PUT /memory/agent/:agentName — update agent-specific memory
+  app.openapi(updateAgentMemoryRoute, async (c) => {
+    const orchestrator = c.get("orchestrator");
+    const { agentName } = c.req.valid("param");
+    const body = c.req.valid("json");
+    await orchestrator.saveAgentMemory(agentName, body.content);
+    return c.json({ ok: true, data: { saved: true, agent: agentName } });
   });
 
   // GET /logs — list log sessions

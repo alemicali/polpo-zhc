@@ -1,5 +1,5 @@
 /**
- * Answer generator: produces answers to agent questions using project context.
+ * Answer generator: produces answers to agent questions using shared memory and context.
  * Used by the orchestrator to auto-resolve clarification requests.
  */
 
@@ -8,7 +8,7 @@ import type { Orchestrator } from "../core/orchestrator.js";
 import type { Task, ModelConfig } from "../core/types.js";
 
 /**
- * Generate an answer to an agent's question using project memory,
+ * Generate an answer to an agent's question using shared memory,
  * sibling task results, and task context.
  */
 export async function generateAnswer(
@@ -45,7 +45,7 @@ function buildAnswerPrompt(
   ];
 
   if (memory) {
-    parts.push(``, `## Project Memory`, memory);
+    parts.push(``, `## Shared Memory`, memory);
   }
 
   if (siblings.length > 0) {

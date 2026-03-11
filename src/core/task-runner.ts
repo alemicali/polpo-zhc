@@ -6,6 +6,7 @@ import { nanoid } from "nanoid";
 import type { OrchestratorContext } from "./orchestrator-context.js";
 import type { Task, TaskResult, RunnerConfig } from "./types.js";
 import { findAgent } from "./types.js";
+import { agentMemoryScope } from "./memory-store.js";
 import type { RunRecord } from "./run-store.js";
 import { getSocketPath } from "./notification.js";
 import { validateProviderKeys } from "../llm/pi-client.js";
@@ -398,10 +399,18 @@ export class TaskRunner {
     const taskWithContext = { ...task };
     const contextParts: string[] = [];
 
-    // 1. Project memory (persistent cross-session knowledge)
-    const memory = (await this.ctx.memoryStore?.get()) ?? "";
-    if (memory) {
-      contextParts.push(`<project-memory>\n${memory}\n</project-memory>`);
+    // 1. Shared memory (persistent cross-session knowledge, visible to all agents)
+    const sharedMemory = (await this.ctx.memoryStore?.get()) ?? "";
+    if (sharedMemory) {
+      contextParts.push(`<shared-memory>\n${sharedMemory}\n</shared-memory>`);
+    }
+
+    // 1b. Agent-specific memory (private knowledge for the assigned agent)
+    if (task.assignTo) {
+      const agentMem = (await this.ctx.memoryStore?.get(agentMemoryScope(task.assignTo))) ?? "";
+      if (agentMem) {
+        contextParts.push(`<agent-memory agent="${task.assignTo}">\n${agentMem}\n</agent-memory>`);
+      }
     }
 
     // 2. System context (standing instructions from .polpo/system-context.md)
