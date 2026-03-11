@@ -177,6 +177,19 @@ function describeToolsForAgent(agent: AgentConfig): string {
     );
   }
 
+  if (hasPattern("phone_")) {
+    extended.push(
+      "",
+      "**Phone Calls (VAPI):**",
+      "- `phone_call` — make an outbound AI phone call with natural language instructions (WARNING: irreversible)",
+      "- `phone_get_call` — get call details (transcript, summary, recording URL)",
+      "- `phone_list_calls` — list recent phone calls",
+      "- `phone_hangup` — terminate an active call",
+      "Use phone tools for scheduling calls, follow-ups, surveys, or any phone conversation.",
+      "ALWAYS use these tools for phone operations. Never try to make calls via bash or other means.",
+    );
+  }
+
   if (extended.length > 0) {
     lines.push(...extended);
   }
@@ -416,7 +429,7 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
     return lc.startsWith("browser_") || lc.startsWith("email_")
       || lc.startsWith("image_") || lc.startsWith("video_") || lc.startsWith("audio_")
       || lc.startsWith("excel_") || lc.startsWith("pdf_") || lc.startsWith("docx_")
-      || lc.startsWith("search_") || lc.startsWith("whatsapp_");
+      || lc.startsWith("search_") || lc.startsWith("whatsapp_") || lc.startsWith("phone_");
   }) ?? false;
 
   // Derive output directory from context (per-task output dir for deliverables)

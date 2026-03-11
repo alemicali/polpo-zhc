@@ -1308,6 +1308,50 @@ const inkUpdateTool: Tool = {
 };
 
 // ═══════════════════════════════════════════════════════
+//  PHONE TOOLS (4) — VAPI-powered phone calls
+// ═══════════════════════════════════════════════════════
+
+const phoneCallTool: Tool = {
+  name: "phone_call",
+  description: "Make an outbound AI phone call. The AI assistant calls the number, follows your instructions, and returns a transcript and summary. Use for scheduling, follow-ups, surveys, notifications. WARNING: irreversible — it will actually call the phone number. Requires VAPI_API_KEY and VAPI_PHONE_NUMBER_ID in vault or environment.",
+  parameters: Type.Object({
+    number: Type.String({ description: "Phone number to call (E.164 format, e.g. '+14155551234' or '+393381234567')" }),
+    instructions: Type.String({ description: "Natural language instructions for the AI assistant — what to say, what to ask, what to collect" }),
+    firstMessage: Type.Optional(Type.String({ description: "First message the assistant says when call connects" })),
+    customerName: Type.Optional(Type.String({ description: "Name of the person being called" })),
+    maxDuration: Type.Optional(Type.Number({ description: "Maximum call duration in seconds (default: 600, max: 1800)" })),
+    voice: Type.Optional(Type.String({ description: "Voice ID (e.g. '11labs:sarah')" })),
+    record: Type.Optional(Type.Boolean({ description: "Record the call (default: true)" })),
+    wait: Type.Optional(Type.Boolean({ description: "Wait for call to finish and return transcript (default: true)" })),
+  }),
+};
+
+const phoneGetCallTool: Tool = {
+  name: "phone_get_call",
+  description: "Get details of a phone call including transcript, summary, recording URL, duration, and cost. Use to check the result of a call initiated with phone_call.",
+  parameters: Type.Object({
+    callId: Type.String({ description: "VAPI call ID" }),
+  }),
+};
+
+const phoneListCallsTool: Tool = {
+  name: "phone_list_calls",
+  description: "List recent phone calls with status, duration, and summary.",
+  parameters: Type.Object({
+    limit: Type.Optional(Type.Number({ description: "Maximum number of calls (default: 10, max: 100)" })),
+    status: Type.Optional(Type.String({ description: "Filter by status: queued, ringing, in-progress, ended" })),
+  }),
+};
+
+const phoneHangupTool: Tool = {
+  name: "phone_hangup",
+  description: "Terminate an active phone call immediately. WARNING: irreversible.",
+  parameters: Type.Object({
+    callId: Type.String({ description: "VAPI call ID to terminate" }),
+  }),
+};
+
+// ═══════════════════════════════════════════════════════
 //  CLIENT-SIDE TOOLS (executed on the user's browser, not the server)
 // ═══════════════════════════════════════════════════════
 
@@ -1460,6 +1504,8 @@ export const WRITE_TOOLS = new Set([
   "whatsapp_send",
   // Ink Hub (write — modifies project config)
   "ink_add", "ink_remove", "ink_update",
+  // Phone (write — makes/terminates calls)
+  "phone_call", "phone_hangup",
 ]);
 
 /** Tools that pause the conversation to collect user input / show a preview. */
@@ -1521,6 +1567,8 @@ export const ALL_ORCHESTRATOR_TOOLS: Tool[] = [
   searchWebTool,
   // Ink Hub (5)
   inkSearchTool, inkBrowseTool, inkAddTool, inkRemoveTool, inkUpdateTool,
+  // Phone (4)
+  phoneCallTool, phoneGetCallTool, phoneListCallsTool, phoneHangupTool,
   // WhatsApp (2)
   whatsappSendTool, whatsappReadTool,
   // Interactive (1)
@@ -1620,6 +1668,11 @@ const TOOL_LABELS: Record<string, string> = {
   ink_add: "Install Ink Package",
   ink_remove: "Remove Ink Package",
   ink_update: "Update Ink Packages",
+  // Phone
+  phone_call: "Phone Call",
+  phone_get_call: "Get Call Details",
+  phone_list_calls: "List Calls",
+  phone_hangup: "Hang Up Call",
 };
 
 // ═══════════════════════════════════════════════════════
@@ -1823,6 +1876,12 @@ export async function executeOrchestratorTool(
       case "ink_add":          return execInkAdd(polpo, args);
       case "ink_remove":       return execInkRemove(polpo, args);
       case "ink_update":       return execInkUpdate(polpo, args);
+
+      // ── Phone ──
+      case "phone_call":        return await execPhoneCall(polpo, args);
+      case "phone_get_call":    return await execPhoneGetCall(polpo, args);
+      case "phone_list_calls":  return await execPhoneListCalls(polpo, args);
+      case "phone_hangup":      return await execPhoneHangup(polpo, args);
 
       // ── WhatsApp ──
       case "whatsapp_send":    return await execWhatsAppSend(polpo, args);
@@ -4132,6 +4191,216 @@ function execWhatsAppRead(polpo: Orchestrator, args: Record<string, unknown>): s
     default:
       return `Error: Unknown action "${action}". Use: list_chats, read_chat, search, contacts.`;
   }
+}
+
+// ═══════════════════════════════════════════════════════
+//  PHONE EXECUTORS
+// ═══════════════════════════════════════════════════════
+
+const VAPI_BASE = "https://api.vapi.ai";
+const PHONE_POLL_INTERVAL = 5000;
+const PHONE_MAX_POLL_TIME = 15 * 60 * 1000;
+
+function getVapiApiKey(polpo: Orchestrator): string | undefined {
+  let key = process.env.VAPI_API_KEY;
+  if (!key) {
+    const vaultStore = polpo.getVaultStore();
+    if (vaultStore) {
+      for (const agent of polpo.getAgents()) {
+        const entry = vaultStore.get(agent.name, "vapi");
+        if (entry?.credentials?.api_key) { key = entry.credentials.api_key; break; }
+      }
+    }
+  }
+  return key;
+}
+
+function getVapiPhoneNumberId(polpo: Orchestrator): string | undefined {
+  let id = process.env.VAPI_PHONE_NUMBER_ID;
+  if (!id) {
+    const vaultStore = polpo.getVaultStore();
+    if (vaultStore) {
+      for (const agent of polpo.getAgents()) {
+        const entry = vaultStore.get(agent.name, "vapi");
+        if (entry?.credentials?.phone_number_id) { id = entry.credentials.phone_number_id; break; }
+      }
+    }
+  }
+  return id;
+}
+
+async function vapiRequest(
+  method: string, path: string, apiKey: string, body?: unknown,
+): Promise<{ ok: boolean; status: number; data: any }> {
+  const res = await fetch(`${VAPI_BASE}${path}`, {
+    method,
+    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+    body: body ? JSON.stringify(body) : undefined,
+    signal: AbortSignal.timeout(30000),
+  });
+  const data = await res.json().catch(() => ({}));
+  return { ok: res.ok, status: res.status, data };
+}
+
+function phoneSleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+function phoneDuration(startedAt?: string, endedAt?: string): string {
+  if (!startedAt || !endedAt) return "unknown";
+  const secs = Math.round((new Date(endedAt).getTime() - new Date(startedAt).getTime()) / 1000);
+  return secs < 60 ? `${secs}s` : `${Math.floor(secs / 60)}m ${secs % 60}s`;
+}
+
+function phoneEndReason(reason?: string): string {
+  if (!reason) return "unknown";
+  const map: Record<string, string> = {
+    "customer-ended-call": "Customer hung up",
+    "assistant-ended-call": "Assistant ended the call",
+    "customer-did-not-answer": "No answer",
+    "customer-busy": "Line busy",
+    "exceeded-max-duration": "Max duration exceeded",
+    "silence-timed-out": "Silence timeout",
+    "voicemail": "Went to voicemail",
+    "manually-canceled": "Manually canceled",
+  };
+  return map[reason] ?? reason;
+}
+
+function formatPhoneCallResult(call: any): string {
+  const parts: string[] = [];
+  parts.push(`**Call ID:** ${call.id}`);
+  parts.push(`**Status:** ${call.status}`);
+  if (call.customer?.number) parts.push(`**Number:** ${call.customer.number}${call.customer.name ? ` (${call.customer.name})` : ""}`);
+  if (call.endedReason) parts.push(`**Ended:** ${phoneEndReason(call.endedReason)}`);
+  parts.push(`**Duration:** ${phoneDuration(call.startedAt, call.endedAt)}`);
+  if (call.cost !== undefined) parts.push(`**Cost:** $${call.cost.toFixed(4)}`);
+  if (call.analysis?.summary) parts.push(`\n**Summary:**\n${call.analysis.summary}`);
+  if (call.artifact?.transcript) {
+    const t = call.artifact.transcript.length > 3000 ? call.artifact.transcript.slice(0, 3000) + "\n... (truncated)" : call.artifact.transcript;
+    parts.push(`\n**Transcript:**\n${t}`);
+  }
+  if (call.artifact?.recordingUrl) parts.push(`\n**Recording:** ${call.artifact.recordingUrl}`);
+  if (call.analysis?.successEvaluation) parts.push(`**Success:** ${call.analysis.successEvaluation}`);
+  return parts.join("\n");
+}
+
+async function execPhoneCall(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
+  const number = args.number as string;
+  const instructions = args.instructions as string;
+  if (!number) return "Error: 'number' is required.";
+  if (!instructions) return "Error: 'instructions' is required.";
+
+  const apiKey = getVapiApiKey(polpo);
+  if (!apiKey) return "Error: VAPI_API_KEY not found. Set it in vault (service: vapi, credentials: {api_key: ...}) or as environment variable.";
+
+  const phoneNumberId = getVapiPhoneNumberId(polpo);
+  if (!phoneNumberId) return "Error: VAPI_PHONE_NUMBER_ID not found. Set it in vault (service: vapi, credentials: {phone_number_id: ...}) or as environment variable. Buy a number at dashboard.vapi.ai.";
+
+  const maxDuration = Math.min((args.maxDuration as number) ?? 600, 1800);
+  const shouldWait = args.wait !== false;
+  const shouldRecord = args.record !== false;
+
+  let voiceConfig: Record<string, unknown> | undefined;
+  if (args.voice) {
+    const v = args.voice as string;
+    const [provider, voiceId] = v.includes(":") ? v.split(":", 2) : ["vapi", v];
+    voiceConfig = { provider, voiceId };
+  }
+
+  const callBody: Record<string, unknown> = {
+    phoneNumberId,
+    customer: { number, ...(args.customerName ? { name: args.customerName } : {}) },
+    assistant: {
+      model: {
+        provider: "openai",
+        model: "gpt-4o",
+        messages: [{ role: "system", content: instructions }],
+      },
+      ...(args.firstMessage ? { firstMessage: args.firstMessage } : {}),
+      ...(voiceConfig ? { voice: voiceConfig } : {}),
+      maxDurationSeconds: maxDuration,
+      backgroundSound: "office",
+      voicemailDetection: { provider: "google", type: "audio", beepMaxAwaitSeconds: 20 },
+      analysisPlan: { summaryPlan: { enabled: true }, successEvaluationPlan: { enabled: true } },
+      artifactPlan: { recordingEnabled: shouldRecord },
+    },
+  };
+
+  const { ok: isOk, status, data } = await vapiRequest("POST", "/call", apiKey, callBody);
+  if (!isOk) return `Error: VAPI returned ${status}: ${JSON.stringify(data)}`;
+
+  const callId = data.id as string;
+
+  if (!shouldWait) {
+    return `Call initiated to ${number} (ID: ${callId}). Use phone_get_call to check status and get transcript.`;
+  }
+
+  // Poll
+  const pollStart = Date.now();
+  let lastStatus = data.status as string;
+
+  while (Date.now() - pollStart < PHONE_MAX_POLL_TIME) {
+    await phoneSleep(PHONE_POLL_INTERVAL);
+    const poll = await vapiRequest("GET", `/call/${callId}`, apiKey);
+    if (!poll.ok) continue;
+    lastStatus = poll.data.status;
+    if (poll.data.status === "ended") {
+      return formatPhoneCallResult(poll.data);
+    }
+  }
+
+  return `Call ${callId} is still active after ${PHONE_MAX_POLL_TIME / 60000} minutes. Last status: ${lastStatus}. Use phone_get_call to check later.`;
+}
+
+async function execPhoneGetCall(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
+  const callId = args.callId as string;
+  if (!callId) return "Error: 'callId' is required.";
+
+  const apiKey = getVapiApiKey(polpo);
+  if (!apiKey) return "Error: VAPI_API_KEY not found.";
+
+  const { ok: isOk, status, data } = await vapiRequest("GET", `/call/${callId}`, apiKey);
+  if (!isOk) return `Error: VAPI returned ${status}: ${JSON.stringify(data)}`;
+
+  return formatPhoneCallResult(data);
+}
+
+async function execPhoneListCalls(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
+  const apiKey = getVapiApiKey(polpo);
+  if (!apiKey) return "Error: VAPI_API_KEY not found.";
+
+  const limit = Math.min((args.limit as number) ?? 10, 100);
+  const { ok: isOk, status, data } = await vapiRequest("GET", `/call?limit=${limit}`, apiKey);
+  if (!isOk) return `Error: VAPI returned ${status}: ${JSON.stringify(data)}`;
+
+  let calls = (Array.isArray(data) ? data : data.calls ?? []) as any[];
+  if (args.status) calls = calls.filter((c: any) => c.status === args.status);
+
+  if (calls.length === 0) return "No phone calls found.";
+
+  const lines = calls.map((c: any) => {
+    const number = c.customer?.number ?? "unknown";
+    const duration = phoneDuration(c.startedAt, c.endedAt);
+    const reason = c.endedReason ? ` — ${phoneEndReason(c.endedReason)}` : "";
+    const summary = c.analysis?.summary ? `\n    Summary: ${c.analysis.summary.slice(0, 150)}` : "";
+    return `- **${c.id}** | ${c.status} | ${number} | ${duration}${reason}${summary}`;
+  });
+
+  return `${calls.length} call(s):\n\n${lines.join("\n\n")}`;
+}
+
+async function execPhoneHangup(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
+  const callId = args.callId as string;
+  if (!callId) return "Error: 'callId' is required.";
+
+  const apiKey = getVapiApiKey(polpo);
+  if (!apiKey) return "Error: VAPI_API_KEY not found.";
+
+  const { ok: isOk, status, data } = await vapiRequest("DELETE", `/call/${callId}`, apiKey);
+  if (!isOk) return `Error: VAPI returned ${status}: ${JSON.stringify(data)}`;
+
+  return `Call ${callId} terminated.`;
 }
 
 // ═══════════════════════════════════════════════════════
