@@ -4,11 +4,15 @@
  * POST /v1/chat/completions
  *
  * This is Polpo's primary conversational interface. It accepts OpenAI-format
- * messages, runs the full agentic tool loop internally (38 tools), and returns
+ * messages, runs the full agentic tool loop internally, and returns
  * responses in OpenAI-compatible format — both streaming (SSE) and non-streaming.
  *
- * The caller talks to Polpo. Polpo decides when and how to use its tools.
- * Tools are NOT exposed to the caller.
+ * Supports two modes:
+ * - **Orchestrator mode** (default): The caller talks to Polpo. Polpo has 100+
+ *   orchestration tools (tasks, missions, agents, vault, etc.).
+ * - **Agent-direct mode** (`agent` field): The caller talks directly to a
+ *   specific agent. The agent uses its own model, system prompt, and coding
+ *   tools — bypassing the orchestrator entirely.
  */
 
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
@@ -17,15 +21,20 @@ import { nanoid } from "nanoid";
 import type { Orchestrator } from "../../core/orchestrator.js";
 import { buildChatSystemPrompt } from "../../llm/prompts.js";
 import { resolveModel, resolveApiKeyAsync, resolveModelSpec, buildStreamOpts } from "../../llm/pi-client.js";
-import { streamSimple, type Message } from "@mariozechner/pi-ai";
+import { streamSimple, type Message, type Tool } from "@mariozechner/pi-ai";
 import {
   ALL_ORCHESTRATOR_TOOLS,
   executeOrchestratorTool,
   isInteractive,
 } from "../../llm/orchestrator-tools.js";
+import type { AgentTool } from "@mariozechner/pi-agent-core";
 import type { AskUserQuestion } from "../../core/types.js";
 import type { ToolCallInfo } from "../../core/session-store.js";
 import { dirname } from "node:path";
+import { buildSystemPrompt } from "../../adapters/engine.js";
+import { createCodingTools, createAllTools } from "../../tools/coding-tools.js";
+import { createInkTools } from "../../tools/ink-tools.js";
+import { resolveAgentVault } from "../../vault/index.js";
 
 const MAX_TURNS = 20;
 
@@ -101,13 +110,16 @@ const completionRequestSchema = z.object({
     description: "If true, returns an SSE stream of OpenAI-format chunks. If false, returns a complete response.",
   }),
   model: z.string().optional().openapi({
-    description: "Ignored. Polpo uses its configured orchestrator model.",
+    description: "Ignored. Polpo uses its configured orchestrator model (or the agent's model in agent-direct mode).",
   }),
   temperature: z.number().optional().openapi({
     description: "Ignored. Reserved for future use.",
   }),
   max_tokens: z.number().int().optional().openapi({
     description: "Ignored. Reserved for future use.",
+  }),
+  agent: z.string().optional().openapi({
+    description: "Target a specific agent by name for direct conversation. Uses the agent's own model, system prompt, and coding tools instead of the orchestrator. Omit to talk to the orchestrator (default).",
   }),
   project: z.string().optional().openapi({
     description: "Deprecated. Ignored.",
@@ -303,26 +315,121 @@ export function completionRoutes(orchestrator: Orchestrator, apiKeys?: string[])
 
     // ── Parse body ──
     const body = c.req.valid("json");
+    const agentMode = !!body.agent;
 
-    // ── Build context ──
-    const state = await (async () => {
-      try { return await orchestrator.getStore()?.getState() ?? null; }
-      catch { return null; }
-    })();
+    // ── Resolve effective context (orchestrator vs agent-direct) ──
+    let fullSystemPrompt: string;
+    let m: ReturnType<typeof resolveModel>;
+    let streamOpts: ReturnType<typeof buildStreamOpts>;
+    let effectiveTools: Tool[];
+    let effectiveToolExecutor: (name: string, args: Record<string, unknown>) => Promise<string>;
 
-    const systemPrompt = await buildChatSystemPrompt(orchestrator, state);
+    // Agent-scoped tool instances (kept alive for the request lifetime)
+    let agentToolInstances: AgentTool<any>[] | null = null;
+
     const { piMessages, extraSystemParts } = convertMessages(body.messages);
-    const fullSystemPrompt = extraSystemParts.length > 0
-      ? `${systemPrompt}\n\n## Additional context from caller\n\n${extraSystemParts.join("\n\n")}`
-      : systemPrompt;
 
-    // ── Resolve model ──
-    const settings = orchestrator.getConfig()?.settings;
-    const modelSpec = resolveModelSpec(settings?.orchestratorModel);
-    const m = resolveModel(modelSpec);
-    const apiKey = await resolveApiKeyAsync(m.provider as string);
-    const reasoning = settings?.reasoning;
-    const streamOpts = buildStreamOpts(apiKey, reasoning, m.maxTokens);
+    if (agentMode) {
+      // ── Agent-direct mode ──
+      const agents = orchestrator.getAgents();
+      const agentConfig = agents.find(a => a.name === body.agent);
+      if (!agentConfig) {
+        return c.json({ error: { message: `Agent "${body.agent}" not found`, type: "invalid_request_error", code: "agent_not_found" } }, 404);
+      }
+
+      const cwd = orchestrator.getAgentWorkDir();
+      const polpoDir = orchestrator.getPolpoDir();
+
+      // Build agent system prompt (reuses the same builder as task execution)
+      const agentSystemPrompt = buildSystemPrompt(agentConfig, cwd, polpoDir);
+
+      // Adapt system prompt for conversational mode (agents normally run autonomously)
+      const conversationalPreamble = [
+        "You are now in interactive conversation mode with the user.",
+        "Unlike task execution, you should engage in dialogue: ask clarifying questions,",
+        "explain your reasoning, and wait for user input when needed.",
+        "You still have access to all your coding tools to help the user.",
+      ].join("\n");
+
+      const basePrompt = `${conversationalPreamble}\n\n${agentSystemPrompt}`;
+      fullSystemPrompt = extraSystemParts.length > 0
+        ? `${basePrompt}\n\n## Additional context from caller\n\n${extraSystemParts.join("\n\n")}`
+        : basePrompt;
+
+      // Resolve agent model
+      m = resolveModel(agentConfig.model);
+      const apiKey = await resolveApiKeyAsync(m.provider as string);
+      const reasoning = agentConfig.reasoning ?? orchestrator.getConfig()?.settings?.reasoning;
+      streamOpts = buildStreamOpts(apiKey, reasoning, m.maxTokens);
+
+      // Build agent tools (core coding tools + ink tools)
+      const vaultEntries = orchestrator.getVaultStore()?.getAllForAgent(agentConfig.name);
+      const vault = resolveAgentVault(vaultEntries);
+      agentToolInstances = createCodingTools(cwd, agentConfig.allowedTools, undefined, undefined, vault);
+      agentToolInstances.push(...createInkTools(polpoDir, agentConfig.allowedTools));
+
+      // Load extended tools if configured (browser, email, image, etc.)
+      const hasExtendedTools = agentConfig.allowedTools?.some(t => {
+        const lc = t.toLowerCase();
+        return lc.startsWith("browser_") || lc.startsWith("email_")
+          || lc.startsWith("image_") || lc.startsWith("video_") || lc.startsWith("audio_")
+          || lc.startsWith("excel_") || lc.startsWith("pdf_") || lc.startsWith("docx_")
+          || lc.startsWith("search_") || lc.startsWith("whatsapp_") || lc.startsWith("phone_");
+      }) ?? false;
+
+      if (hasExtendedTools) {
+        const { join } = await import("node:path");
+        const browserProfileDir = join(polpoDir, "browser-profiles", agentConfig.browserProfile || agentConfig.name);
+        agentToolInstances = await createAllTools({
+          cwd,
+          allowedTools: agentConfig.allowedTools,
+          allowedPaths: agentConfig.allowedPaths,
+          browserSession: agentConfig.name,
+          browserProfileDir,
+          vault,
+          emailAllowedDomains: agentConfig.emailAllowedDomains,
+          outputDir: undefined,
+          polpoDir,
+        });
+      }
+
+      effectiveTools = agentToolInstances as Tool[];
+
+      // Tool executor: call AgentTool.execute() directly, return text content
+      const toolMap = new Map(agentToolInstances.map(t => [t.name, t]));
+      effectiveToolExecutor = async (name: string, args: Record<string, unknown>): Promise<string> => {
+        const tool = toolMap.get(name);
+        if (!tool) return `Error: Unknown tool "${name}"`;
+        try {
+          const result = await tool.execute(nanoid(), args as any);
+          return result.content.map((c: any) => c.text ?? "").join("");
+        } catch (err) {
+          return `Error: ${err instanceof Error ? err.message : String(err)}`;
+        }
+      };
+    } else {
+      // ── Orchestrator mode (default, unchanged) ──
+      const state = await (async () => {
+        try { return await orchestrator.getStore()?.getState() ?? null; }
+        catch { return null; }
+      })();
+
+      const systemPrompt = await buildChatSystemPrompt(orchestrator, state);
+      fullSystemPrompt = extraSystemParts.length > 0
+        ? `${systemPrompt}\n\n## Additional context from caller\n\n${extraSystemParts.join("\n\n")}`
+        : systemPrompt;
+
+      const settings = orchestrator.getConfig()?.settings;
+      const modelSpec = resolveModelSpec(settings?.orchestratorModel);
+      m = resolveModel(modelSpec);
+      const apiKey = await resolveApiKeyAsync(m.provider as string);
+      const reasoning = settings?.reasoning;
+      streamOpts = buildStreamOpts(apiKey, reasoning, m.maxTokens);
+
+      effectiveTools = ALL_ORCHESTRATOR_TOOLS;
+      effectiveToolExecutor = (name: string, args: Record<string, unknown>) =>
+        executeOrchestratorTool(name, args, orchestrator);
+    }
 
     const completionId = `chatcmpl-${nanoid(24)}`;
 
@@ -333,10 +440,16 @@ export function completionRoutes(orchestrator: Orchestrator, apiKeys?: string[])
     let sessionId: string | null = forceNewSession ? null : rawSessionHeader;
     if (sessionStore) {
       if (!sessionId) {
+        // Build session title with agent namespace prefix for agent-direct sessions
+        const firstUserMsg = body.messages.find(m => m.role === "user");
+        const baseTitle = firstUserMsg ? extractText(firstUserMsg.content).slice(0, 60) : undefined;
+        const sessionTitle = agentMode
+          ? `[agent:${body.agent}] ${baseTitle ?? "chat"}`
+          : baseTitle;
+
         if (forceNewSession) {
           // Client explicitly requested a new session — skip recency heuristic
-          const firstUserMsg = body.messages.find(m => m.role === "user");
-          sessionId = await sessionStore.create(firstUserMsg ? extractText(firstUserMsg.content).slice(0, 60) : undefined);
+          sessionId = await sessionStore.create(sessionTitle);
         } else {
           // Reuse latest session if recent (< 30 min), otherwise create new
           const latest = await sessionStore.getLatestSession();
@@ -344,8 +457,7 @@ export function completionRoutes(orchestrator: Orchestrator, apiKeys?: string[])
           if (latest && Date.now() - new Date(latest.updatedAt).getTime() < timeout) {
             sessionId = latest.id;
           } else {
-            const firstUserMsg = body.messages.find(m => m.role === "user");
-            sessionId = await sessionStore.create(firstUserMsg ? extractText(firstUserMsg.content).slice(0, 60) : undefined);
+            sessionId = await sessionStore.create(sessionTitle);
           }
         }
       }
@@ -390,7 +502,7 @@ export function completionRoutes(orchestrator: Orchestrator, apiKeys?: string[])
             const piStream = streamSimple(m, {
               systemPrompt: fullSystemPrompt,
               messages,
-              tools: ALL_ORCHESTRATOR_TOOLS,
+              tools: effectiveTools,
             }, { ...streamOpts, signal: abortController.signal });
 
             let turnText = "";
@@ -441,8 +553,8 @@ export function completionRoutes(orchestrator: Orchestrator, apiKeys?: string[])
 
             if (toolCalls.length === 0) break;
 
-            // Check for interactive tools — intercept and pause the stream
-            const interactiveCall = toolCalls.find(tc => isInteractive(tc.name));
+            // Check for interactive tools — only in orchestrator mode (agents don't have interactive tools)
+            const interactiveCall = agentMode ? undefined : toolCalls.find(tc => isInteractive(tc.name));
             if (interactiveCall) {
               // Persist the interactive tool call so it survives session reload
               toolCallsAccum.push({
@@ -531,7 +643,7 @@ export function completionRoutes(orchestrator: Orchestrator, apiKeys?: string[])
                 }),
               });
 
-              const result = await executeOrchestratorTool(call.name, call.arguments, orchestrator);
+              const result = await effectiveToolExecutor(call.name, call.arguments);
               const isError = result.startsWith("Error:");
               emitFileChanged(call.name, call.arguments, result, orchestrator);
 
@@ -607,7 +719,7 @@ export function completionRoutes(orchestrator: Orchestrator, apiKeys?: string[])
           const piStream = streamSimple(m, {
             systemPrompt: fullSystemPrompt,
             messages,
-            tools: ALL_ORCHESTRATOR_TOOLS,
+            tools: effectiveTools,
           }, streamOpts);
 
           let turnText = "";
@@ -635,8 +747,8 @@ export function completionRoutes(orchestrator: Orchestrator, apiKeys?: string[])
 
           if (toolCalls.length === 0) break;
 
-          // Check for interactive tools — return control to client
-          const interactiveCall = toolCalls.find(tc => isInteractive(tc.name));
+          // Check for interactive tools — only in orchestrator mode (agents don't have interactive tools)
+          const interactiveCall = agentMode ? undefined : toolCalls.find(tc => isInteractive(tc.name));
           if (interactiveCall) {
             // Persist the interactive tool call so it survives session reload
             toolCallsAccum.push({
@@ -762,7 +874,7 @@ export function completionRoutes(orchestrator: Orchestrator, apiKeys?: string[])
           }
 
           for (const call of toolCalls) {
-            const result = await executeOrchestratorTool(call.name, call.arguments, orchestrator);
+            const result = await effectiveToolExecutor(call.name, call.arguments);
             const isError = result.startsWith("Error:");
             emitFileChanged(call.name, call.arguments, result, orchestrator);
 
