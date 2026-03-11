@@ -185,6 +185,9 @@ function describeToolsForAgent(agent: AgentConfig): string {
       "- `phone_get_call` — get call details (transcript, summary, recording URL)",
       "- `phone_list_calls` — list recent phone calls",
       "- `phone_hangup` — terminate an active call",
+      "- `phone_setup_inbound` — configure AI assistant for incoming calls",
+      "- `phone_get_inbound_config` — view current inbound call configuration",
+      "- `phone_disable_inbound` — disable AI for incoming calls",
       "Use phone tools for scheduling calls, follow-ups, surveys, or any phone conversation.",
       "ALWAYS use these tools for phone operations. Never try to make calls via bash or other means.",
     );

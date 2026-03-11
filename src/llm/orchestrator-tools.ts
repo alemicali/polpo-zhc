@@ -1351,6 +1351,31 @@ const phoneHangupTool: Tool = {
   }),
 };
 
+const phoneSetupInboundTool: Tool = {
+  name: "phone_setup_inbound",
+  description: "Configure the AI assistant that answers incoming phone calls. Creates a persistent assistant and assigns it to your VAPI phone number. After setup, any call to your number is answered by AI. Call again to update the instructions.",
+  parameters: Type.Object({
+    instructions: Type.String({ description: "System prompt for the inbound assistant — how to greet callers, what to ask, how to handle scenarios" }),
+    firstMessage: Type.Optional(Type.String({ description: "First message when answering (e.g. 'Hello, thank you for calling.')" })),
+    voice: Type.Optional(Type.String({ description: "Voice ID (e.g. '11labs:sarah')" })),
+    maxDuration: Type.Optional(Type.Number({ description: "Max call duration in seconds (default: 600)" })),
+    record: Type.Optional(Type.Boolean({ description: "Record inbound calls (default: true)" })),
+    name: Type.Optional(Type.String({ description: "Name for the assistant (default: 'Polpo Inbound Assistant')" })),
+  }),
+};
+
+const phoneGetInboundConfigTool: Tool = {
+  name: "phone_get_inbound_config",
+  description: "Get the current inbound call configuration — shows the assigned assistant, voice, instructions, and settings.",
+  parameters: Type.Object({}),
+};
+
+const phoneDisableInboundTool: Tool = {
+  name: "phone_disable_inbound",
+  description: "Disable the AI assistant for incoming calls. Calls will no longer be answered. The assistant is deleted. WARNING: irreversible.",
+  parameters: Type.Object({}),
+};
+
 // ═══════════════════════════════════════════════════════
 //  CLIENT-SIDE TOOLS (executed on the user's browser, not the server)
 // ═══════════════════════════════════════════════════════
@@ -1504,8 +1529,8 @@ export const WRITE_TOOLS = new Set([
   "whatsapp_send",
   // Ink Hub (write — modifies project config)
   "ink_add", "ink_remove", "ink_update",
-  // Phone (write — makes/terminates calls)
-  "phone_call", "phone_hangup",
+  // Phone (write — makes/terminates calls, configures inbound)
+  "phone_call", "phone_hangup", "phone_setup_inbound", "phone_disable_inbound",
 ]);
 
 /** Tools that pause the conversation to collect user input / show a preview. */
@@ -1567,8 +1592,9 @@ export const ALL_ORCHESTRATOR_TOOLS: Tool[] = [
   searchWebTool,
   // Ink Hub (5)
   inkSearchTool, inkBrowseTool, inkAddTool, inkRemoveTool, inkUpdateTool,
-  // Phone (4)
+  // Phone (7)
   phoneCallTool, phoneGetCallTool, phoneListCallsTool, phoneHangupTool,
+  phoneSetupInboundTool, phoneGetInboundConfigTool, phoneDisableInboundTool,
   // WhatsApp (2)
   whatsappSendTool, whatsappReadTool,
   // Interactive (1)
@@ -1673,6 +1699,9 @@ const TOOL_LABELS: Record<string, string> = {
   phone_get_call: "Get Call Details",
   phone_list_calls: "List Calls",
   phone_hangup: "Hang Up Call",
+  phone_setup_inbound: "Setup Inbound Calls",
+  phone_get_inbound_config: "Get Inbound Config",
+  phone_disable_inbound: "Disable Inbound Calls",
 };
 
 // ═══════════════════════════════════════════════════════
@@ -1878,10 +1907,13 @@ export async function executeOrchestratorTool(
       case "ink_update":       return execInkUpdate(polpo, args);
 
       // ── Phone ──
-      case "phone_call":        return await execPhoneCall(polpo, args);
-      case "phone_get_call":    return await execPhoneGetCall(polpo, args);
-      case "phone_list_calls":  return await execPhoneListCalls(polpo, args);
-      case "phone_hangup":      return await execPhoneHangup(polpo, args);
+      case "phone_call":              return await execPhoneCall(polpo, args);
+      case "phone_get_call":          return await execPhoneGetCall(polpo, args);
+      case "phone_list_calls":        return await execPhoneListCalls(polpo, args);
+      case "phone_hangup":            return await execPhoneHangup(polpo, args);
+      case "phone_setup_inbound":     return await execPhoneSetupInbound(polpo, args);
+      case "phone_get_inbound_config": return await execPhoneGetInboundConfig(polpo);
+      case "phone_disable_inbound":   return await execPhoneDisableInbound(polpo);
 
       // ── WhatsApp ──
       case "whatsapp_send":    return await execWhatsAppSend(polpo, args);
@@ -4401,6 +4433,135 @@ async function execPhoneHangup(polpo: Orchestrator, args: Record<string, unknown
   if (!isOk) return `Error: VAPI returned ${status}: ${JSON.stringify(data)}`;
 
   return `Call ${callId} terminated.`;
+}
+
+async function execPhoneSetupInbound(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
+  const instructions = args.instructions as string;
+  if (!instructions) return "Error: 'instructions' is required.";
+
+  const apiKey = getVapiApiKey(polpo);
+  if (!apiKey) return "Error: VAPI_API_KEY not found.";
+
+  const phoneNumberId = getVapiPhoneNumberId(polpo);
+  if (!phoneNumberId) return "Error: VAPI_PHONE_NUMBER_ID not found.";
+
+  const maxDuration = Math.min((args.maxDuration as number) ?? 600, 1800);
+  const shouldRecord = args.record !== false;
+  const assistantName = (args.name as string) ?? "Polpo Inbound Assistant";
+
+  let voiceConfig: Record<string, unknown> | undefined;
+  if (args.voice) {
+    const v = args.voice as string;
+    const [provider, voiceId] = v.includes(":") ? v.split(":", 2) : ["vapi", v];
+    voiceConfig = { provider, voiceId };
+  }
+
+  // Get current phone number
+  const phoneRes = await vapiRequest("GET", `/phone-number/${phoneNumberId}`, apiKey);
+  if (!phoneRes.ok) return `Error fetching phone number: VAPI returned ${phoneRes.status}`;
+
+  const existingAssistantId = phoneRes.data.assistantId as string | undefined;
+
+  const assistantBody: Record<string, unknown> = {
+    name: assistantName,
+    model: {
+      provider: "openai", model: "gpt-4o",
+      messages: [{ role: "system", content: instructions }],
+    },
+    ...(args.firstMessage ? { firstMessage: args.firstMessage } : { firstMessage: "Hello, how can I help you?" }),
+    ...(voiceConfig ? { voice: voiceConfig } : {}),
+    firstMessageMode: "assistant-speaks-first",
+    maxDurationSeconds: maxDuration,
+    backgroundSound: "office",
+    voicemailDetection: "off",
+    analysisPlan: { summaryPlan: { enabled: true }, successEvaluationPlan: { enabled: true } },
+    artifactPlan: { recordingEnabled: shouldRecord },
+  };
+
+  let assistantId: string;
+
+  if (existingAssistantId) {
+    const updateRes = await vapiRequest("PATCH", `/assistant/${existingAssistantId}`, apiKey, assistantBody);
+    if (!updateRes.ok) return `Error updating assistant: VAPI returned ${updateRes.status}: ${JSON.stringify(updateRes.data)}`;
+    assistantId = existingAssistantId;
+  } else {
+    const createRes = await vapiRequest("POST", "/assistant", apiKey, assistantBody);
+    if (!createRes.ok) return `Error creating assistant: VAPI returned ${createRes.status}: ${JSON.stringify(createRes.data)}`;
+    assistantId = createRes.data.id as string;
+
+    const provider = phoneRes.data.provider as string ?? "twilio";
+    const patchRes = await vapiRequest("PATCH", `/phone-number/${phoneNumberId}`, apiKey, { provider, assistantId });
+    if (!patchRes.ok) return `Error assigning assistant: VAPI returned ${patchRes.status}: ${JSON.stringify(patchRes.data)}`;
+  }
+
+  const number = phoneRes.data.number ?? phoneRes.data.sipUri ?? phoneNumberId;
+  return `Inbound assistant configured on ${number}:\n- Assistant ID: ${assistantId}\n- Name: ${assistantName}\n- Max duration: ${maxDuration}s\n- Recording: ${shouldRecord ? "enabled" : "disabled"}\n\nIncoming calls will now be answered by AI.`;
+}
+
+async function execPhoneGetInboundConfig(polpo: Orchestrator): Promise<string> {
+  const apiKey = getVapiApiKey(polpo);
+  if (!apiKey) return "Error: VAPI_API_KEY not found.";
+
+  const phoneNumberId = getVapiPhoneNumberId(polpo);
+  if (!phoneNumberId) return "Error: VAPI_PHONE_NUMBER_ID not found.";
+
+  const phoneRes = await vapiRequest("GET", `/phone-number/${phoneNumberId}`, apiKey);
+  if (!phoneRes.ok) return `Error: VAPI returned ${phoneRes.status}`;
+
+  const phone = phoneRes.data;
+  const number = phone.number ?? phone.sipUri ?? phoneNumberId;
+  const parts: string[] = [];
+
+  parts.push(`**Phone Number:** ${number}`);
+  parts.push(`**Status:** ${phone.status ?? "unknown"}`);
+  parts.push(`**Provider:** ${phone.provider ?? "unknown"}`);
+
+  if (!phone.assistantId) {
+    parts.push(`\n**Inbound:** Not configured — calls will not be answered by AI.`);
+    parts.push(`Use phone_setup_inbound to configure an AI assistant.`);
+    return parts.join("\n");
+  }
+
+  parts.push(`**Assistant ID:** ${phone.assistantId}`);
+
+  const assistantRes = await vapiRequest("GET", `/assistant/${phone.assistantId}`, apiKey);
+  if (assistantRes.ok) {
+    const asst = assistantRes.data;
+    parts.push(`**Assistant Name:** ${asst.name ?? "unnamed"}`);
+    if (asst.model?.messages?.[0]?.content) {
+      const instructions = asst.model.messages[0].content as string;
+      parts.push(`**Instructions:** ${instructions.length > 500 ? instructions.slice(0, 500) + "..." : instructions}`);
+    }
+    if (asst.firstMessage) parts.push(`**First Message:** ${asst.firstMessage}`);
+    if (asst.voice) parts.push(`**Voice:** ${asst.voice.provider ?? "default"}:${asst.voice.voiceId ?? "default"}`);
+    parts.push(`**Max Duration:** ${asst.maxDurationSeconds ?? 600}s`);
+    parts.push(`**Recording:** ${asst.artifactPlan?.recordingEnabled !== false ? "enabled" : "disabled"}`);
+  }
+
+  return parts.join("\n");
+}
+
+async function execPhoneDisableInbound(polpo: Orchestrator): Promise<string> {
+  const apiKey = getVapiApiKey(polpo);
+  if (!apiKey) return "Error: VAPI_API_KEY not found.";
+
+  const phoneNumberId = getVapiPhoneNumberId(polpo);
+  if (!phoneNumberId) return "Error: VAPI_PHONE_NUMBER_ID not found.";
+
+  const phoneRes = await vapiRequest("GET", `/phone-number/${phoneNumberId}`, apiKey);
+  if (!phoneRes.ok) return `Error: VAPI returned ${phoneRes.status}`;
+
+  const assistantId = phoneRes.data.assistantId as string | undefined;
+  if (!assistantId) return "Inbound is already disabled — no assistant assigned.";
+
+  const provider = phoneRes.data.provider as string ?? "twilio";
+  const patchRes = await vapiRequest("PATCH", `/phone-number/${phoneNumberId}`, apiKey, { provider, assistantId: null });
+  if (!patchRes.ok) return `Error removing assistant: VAPI returned ${patchRes.status}`;
+
+  await vapiRequest("DELETE", `/assistant/${assistantId}`, apiKey);
+
+  const number = phoneRes.data.number ?? phoneRes.data.sipUri ?? phoneNumberId;
+  return `Inbound disabled on ${number}. Assistant ${assistantId} removed and deleted.`;
 }
 
 // ═══════════════════════════════════════════════════════
