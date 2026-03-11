@@ -1094,6 +1094,8 @@ export interface ChatSession {
   createdAt: string;
   updatedAt: string;
   messageCount: number;
+  /** Agent name when this session targets a specific agent (agent-direct mode). Absent for orchestrator sessions. */
+  agent?: string;
 }
 
 export interface ChatMessage {
@@ -1139,6 +1141,8 @@ export interface ChatCompletionRequest {
   model?: string;
   /** Session ID for conversation persistence. If omitted, server auto-selects or creates one. */
   sessionId?: string;
+  /** Target a specific agent by name for direct conversation. Uses the agent's own model, system prompt, and coding tools. Omit to talk to the orchestrator (default). */
+  agent?: string;
 }
 
 export interface ChatCompletionChoice {

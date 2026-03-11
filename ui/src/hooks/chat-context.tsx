@@ -81,7 +81,7 @@ export interface ChatStateValue {
   isLoading: boolean;
   messagesLoading: boolean;
   sessionId: string | null;
-  sessions: { id: string; title?: string; createdAt: string; updatedAt: string; messageCount: number }[];
+  sessions: { id: string; title?: string; createdAt: string; updatedAt: string; messageCount: number; agent?: string }[];
   sessionsLoading: boolean;
   pendingQuestions: AskUserQuestion[] | null;
   pendingMission: MissionPreviewData | null;
@@ -89,6 +89,8 @@ export interface ChatStateValue {
   pendingOpenFile: OpenFileData | null;
   pendingNavigateTo: NavigateToData | null;
   pendingOpenTab: OpenTabData | null;
+  /** Currently selected agent for agent-direct chat. null = orchestrator. */
+  selectedAgent: string | null;
 }
 
 /** Stable action callbacks — never change identity (wrapped in useCallback upstream) */
@@ -105,6 +107,7 @@ export interface ChatActionsValue {
   loadSession: (id: string) => Promise<void>;
   newSession: () => void;
   deleteSession: (id: string) => Promise<void>;
+  setSelectedAgent: (agent: string | null) => void;
 }
 
 const ChatStateContext = createContext<ChatStateValue | null>(null);
@@ -127,12 +130,13 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     pendingOpenFile: chat.pendingOpenFile,
     pendingNavigateTo: chat.pendingNavigateTo,
     pendingOpenTab: chat.pendingOpenTab,
+    selectedAgent: chat.selectedAgent,
   }), [
     chat.messages, chat.isLoading, chat.messagesLoading,
     chat.sessionId, chat.sessions, chat.sessionsLoading,
     chat.pendingQuestions, chat.pendingMission, chat.pendingVault,
     chat.pendingOpenFile, chat.pendingNavigateTo,
-    chat.pendingOpenTab,
+    chat.pendingOpenTab, chat.selectedAgent,
   ]);
 
   const actions: ChatActionsValue = useMemo(() => ({
@@ -148,12 +152,14 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     loadSession: chat.loadSession,
     newSession: chat.newSession,
     deleteSession: chat.deleteSession,
+    setSelectedAgent: chat.setSelectedAgent,
   }), [
     chat.send, chat.stop, chat.answerQuestions,
     chat.respondToMission, chat.respondToVault,
     chat.consumeOpenFile, chat.consumeNavigateTo,
     chat.consumeOpenTab,
     chat.clear, chat.loadSession, chat.newSession, chat.deleteSession,
+    chat.setSelectedAgent,
   ]);
 
   return (

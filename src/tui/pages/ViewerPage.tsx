@@ -48,6 +48,8 @@ export function ViewerPage() {
   const actionCount = hasActions ? actions!.length : 0;
   const bottomHeight = actionCount + 3; // spacer + actions + hint + scroll indicator
   const termRows = stdout?.rows ?? 40;
+  const termCols = stdout?.columns ?? 80;
+  const usableWidth = Math.max(1, termCols - 2); // minus paddingX={1} (1 each side)
   const maxVisible = Math.max(5, termRows - 4 - bottomHeight); // 4 = title + sep + top/bottom padding
 
   const maxScroll = Math.max(0, richLines.length - maxVisible);
@@ -111,10 +113,10 @@ export function ViewerPage() {
   const scrollPct = maxScroll > 0 ? Math.round((scrollOffset / maxScroll) * 100) : 100;
 
   return (
-    <Box flexDirection="column" height={termRows} paddingX={2}>
+    <Box flexDirection="column" height={termRows} paddingX={1}>
       {/* Header */}
       <Text bold color="cyan">{title}</Text>
-      <Text color="gray">{"─".repeat(Math.min(60, title.length + 4))}</Text>
+      <Text color="gray">{"─".repeat(usableWidth)}</Text>
 
       {/* Content area — fills available space */}
       <Box flexDirection="column" flexGrow={1}>

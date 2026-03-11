@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import {
   Copy,
   Check,
@@ -7,8 +7,9 @@ import {
   ListChecks,
   Target,
   MessageSquare,
+  MessageCircle,
   Plus,
-  History,
+
   ChevronsLeft,
   Send,
   MessageCircleQuestion,
@@ -51,6 +52,13 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 import {
   Message,
@@ -72,6 +80,7 @@ import type { AskUserQuestion, AskUserAnswer, MessageSegment, ToolCallInfo, Miss
 import { FilePreviewDialog, useFilePreview, mimeFromPath } from "@/components/shared/file-preview";
 import { ToolCallList, ToolInvocation, ToolCallGroup } from "@/components/ai-elements/tool";
 import { MentionPopover, MentionText, type MentionPopoverHandle, type MentionFile } from "@/components/ai-elements/mention-popover";
+import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { useAgents, useTasks, useMissions, useSkills, usePlaybooks } from "@polpo-ai/react";
 import { cn } from "@/lib/utils";
 import { config } from "@/lib/config";
@@ -1514,7 +1523,12 @@ function SessionIdCopy({ sessionId }: { sessionId: string }) {
   );
 }
 
-// ── Session sidebar ──
+// ── Session sidebar (two-level: agent groups → session list) ──
+
+/** Key used for orchestrator (non-agent) sessions in the group map */
+const ORCHESTRATOR_KEY = "__orchestrator__";
+
+type SessionItem = { id: string; title?: string; createdAt: string; updatedAt: string; messageCount: number; agent?: string };
 
 function SessionSidebar({
   sessions,
@@ -1522,75 +1536,249 @@ function SessionSidebar({
   onSelect,
   onNew,
   onDelete,
+  onBack,
+  fullWidth,
 }: {
-  sessions: { id: string; title?: string; createdAt: string; updatedAt: string; messageCount: number }[];
+  sessions: SessionItem[];
   activeSessionId: string | null;
   onSelect: (id: string) => void;
-  onNew: () => void;
+  onNew: (agent?: string) => void;
   onDelete: (id: string) => void;
+  /** Callback to close the sidebar (used in compact/overlay mode) */
+  onBack?: () => void;
+  /** When true, sidebar takes full width instead of fixed w-72 */
+  fullWidth?: boolean;
 }) {
-  return (
-    <div className="w-56 border-r border-border/30 flex flex-col bg-card/40 h-full">
-      <div className="px-3 py-2 border-b border-border/40 flex items-center justify-between shrink-0">
-        <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+  const { agents } = useAgents();
+  const agentMap = agents ? Object.fromEntries(agents.map((a) => [a.name, a])) : {};
+
+  // Which group is drilled into. null = show groups overview.
+  const [activeGroup, setActiveGroup] = useState<string | null>(null);
+
+  // Auto-drill into the group that contains the active session
+  useEffect(() => {
+    if (!activeSessionId) return;
+    const session = sessions.find((s) => s.id === activeSessionId);
+    if (session) {
+      setActiveGroup(session.agent ?? ORCHESTRATOR_KEY);
+    }
+  }, [activeSessionId, sessions]);
+
+  // ── Build groups: key → sessions[], sorted by most-recent-first ──
+  const groups = useMemo((): [string, SessionItem[]][] => {
+    const map = new Map<string, SessionItem[]>();
+    for (const s of sessions) {
+      const key = s.agent ?? ORCHESTRATOR_KEY;
+      const arr = map.get(key) ?? [];
+      arr.push(s);
+      map.set(key, arr);
+    }
+    // Sort sessions within each group by updatedAt desc
+    for (const arr of map.values()) {
+      arr.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+    }
+    // Sort groups by the most recent session in each
+    return [...map.entries()].sort((a, b) => {
+      const aLatest = new Date(a[1][0].updatedAt).getTime();
+      const bLatest = new Date(b[1][0].updatedAt).getTime();
+      return bLatest - aLatest;
+    });
+  }, [sessions]);
+
+  // ── Header ──
+  const headerContent = activeGroup ? (
+    <div className="px-3 py-2.5 border-b border-border/40 flex items-center gap-2 shrink-0">
+      <Button
+        variant="ghost"
+        size="icon"
+        className="h-7 w-7 shrink-0"
+        onClick={() => setActiveGroup(null)}
+      >
+        <ChevronLeft className="h-4 w-4" />
+      </Button>
+      {(() => {
+        const agent = activeGroup !== ORCHESTRATOR_KEY ? agentMap[activeGroup] : undefined;
+        const name = agent ? (agent.identity?.displayName ?? agent.name) : "Polpo";
+        return (
+          <div className="flex items-center gap-2 flex-1 min-w-0">
+            {agent ? (
+              <AgentAvatar avatar={agent.identity?.avatar} name={name} size="sm" />
+            ) : (
+              <span className="text-sm leading-none">🐙</span>
+            )}
+            <span className="text-sm font-medium truncate">{name}</span>
+          </div>
+        );
+      })()}
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={() => onNew(activeGroup !== ORCHESTRATOR_KEY ? activeGroup! : undefined)}>
+            <Plus className="h-3.5 w-3.5" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent side="bottom" className="text-xs">New session</TooltipContent>
+      </Tooltip>
+    </div>
+  ) : (
+    <div className="px-3 py-2.5 border-b border-border/40 flex items-center gap-2 shrink-0">
+      {onBack && (
+        <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={onBack}>
+          <ChevronLeft className="h-4 w-4" />
+        </Button>
+      )}
+      <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider flex-1">
+        Agent Chats
+      </span>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => onNew()}>
+            <Plus className="h-3.5 w-3.5" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent side="bottom" className="text-xs">New session</TooltipContent>
+      </Tooltip>
+    </div>
+  );
+
+  // ── Level 2: session list for a single group ──
+  const renderSessionList = (groupSessions: SessionItem[]) => (
+    <div className="p-1.5 space-y-0.5">
+      <div className="px-3 pt-1.5 pb-1">
+        <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
           Sessions
         </span>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onNew}>
-              <Plus className="h-3.5 w-3.5" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom" className="text-xs">
-            New session
-          </TooltipContent>
-        </Tooltip>
       </div>
-      <div className="flex-1 overflow-y-auto min-h-0">
-        <div className="p-1.5 space-y-0.5">
-          {sessions.length === 0 ? (
-            <div className="flex flex-col items-center text-center py-8 px-3 text-muted-foreground">
-              <p className="text-xs font-medium">No sessions yet</p>
-              <p className="text-[10px] mt-1">
-                Start a new session or use the TUI — sessions are shared
-                between both interfaces.
-              </p>
-            </div>
-          ) : (
-            sessions.map((s) => (
-              <div
-                key={s.id}
-                className={cn(
-                  "group flex items-start gap-2 rounded-md px-2.5 py-2 cursor-pointer transition-colors",
-                  activeSessionId === s.id
-                    ? "bg-accent/80 text-accent-foreground"
-                    : "hover:bg-accent/30 text-muted-foreground"
-                )}
-                onClick={() => onSelect(s.id)}
-              >
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs font-medium truncate leading-snug">
-                    {s.title || "Untitled"}
-                  </p>
-                  <span className="text-[10px] opacity-50">
-                    {formatDistanceToNow(new Date(s.updatedAt), { addSuffix: true })}
-                  </span>
-                </div>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-5 w-5 opacity-0 group-hover:opacity-100 shrink-0 text-muted-foreground hover:text-destructive"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onDelete(s.id);
-                  }}
-                >
-                  <Trash2 className="h-3 w-3" />
-                </Button>
-              </div>
-            ))
+      {groupSessions.map((s) => (
+        <div
+          key={s.id}
+          className={cn(
+            "group flex items-center gap-3 rounded-lg px-3 py-2.5 cursor-pointer transition-colors",
+            activeSessionId === s.id
+              ? "bg-accent/80 text-accent-foreground"
+              : "hover:bg-accent/30 text-muted-foreground"
           )}
+          onClick={() => onSelect(s.id)}
+        >
+          <div className="flex-1 min-w-0">
+            <div className="flex items-baseline justify-between gap-2">
+              <p className={cn(
+                "text-[13px] font-medium truncate",
+                activeSessionId === s.id ? "text-accent-foreground" : "text-foreground"
+              )}>
+                {s.title || "Untitled"}
+              </p>
+              <span className="text-[10px] text-muted-foreground shrink-0">
+                {formatDistanceToNow(new Date(s.updatedAt), { addSuffix: false })}
+              </span>
+            </div>
+            <p className="text-[10px] opacity-50 mt-0.5">
+              {s.messageCount} message{s.messageCount !== 1 ? "s" : ""}
+            </p>
+          </div>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-5 w-5 opacity-0 group-hover:opacity-100 shrink-0 text-muted-foreground hover:text-destructive -mr-1"
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete(s.id);
+            }}
+          >
+            <Trash2 className="h-3 w-3" />
+          </Button>
         </div>
+      ))}
+    </div>
+  );
+
+  // ── Level 1: grouped overview ──
+  const renderGroups = () => (
+    <div className="p-1.5 space-y-0.5">
+      {groups.map(([key, groupSessions]: [string, SessionItem[]]) => {
+        const agent = key !== ORCHESTRATOR_KEY ? agentMap[key] : undefined;
+        const displayName = agent ? (agent.identity?.displayName ?? agent.name) : "Polpo";
+        const latestSession = groupSessions[0];
+        const count = groupSessions.length;
+        // Check if any session in this group is the active one
+        const hasActive = groupSessions.some((s: SessionItem) => s.id === activeSessionId);
+
+        return (
+          <div
+            key={key}
+            className={cn(
+              "group flex items-center gap-3 rounded-lg px-3 py-3 cursor-pointer transition-colors",
+              hasActive
+                ? "bg-accent/60 text-accent-foreground"
+                : "hover:bg-accent/30 text-muted-foreground"
+            )}
+            onClick={() => setActiveGroup(key)}
+          >
+            {/* Avatar */}
+            <div className="shrink-0">
+              {agent ? (
+                <AgentAvatar
+                  avatar={agent.identity?.avatar}
+                  name={displayName}
+                  size="md"
+                />
+              ) : (
+                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-base">
+                  🐙
+                </div>
+              )}
+            </div>
+            {/* Info */}
+            <div className="flex-1 min-w-0">
+              <div className="flex items-baseline justify-between gap-2">
+                <p className={cn(
+                  "text-[13px] font-semibold truncate",
+                  hasActive ? "text-accent-foreground" : "text-foreground"
+                )}>
+                  {displayName}
+                </p>
+                <span className="text-[10px] text-muted-foreground shrink-0">
+                  {formatDistanceToNow(new Date(latestSession.updatedAt), { addSuffix: false })}
+                </span>
+              </div>
+              <div className="flex items-center gap-1.5 mt-0.5">
+                <span className="text-[11px] opacity-60">
+                  {count} chat{count !== 1 ? "s" : ""}
+                </span>
+              </div>
+            </div>
+            {/* Chevron */}
+            <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/50 shrink-0" />
+          </div>
+        );
+      })}
+    </div>
+  );
+
+  // ── Find sessions for the active group ──
+  const activeGroupSessions = activeGroup
+    ? (groups.find(([k]: [string, SessionItem[]]) => k === activeGroup)?.[1] ?? [])
+    : [];
+
+  return (
+    <div className={cn(
+      "border-r border-border/30 flex flex-col bg-card/40 h-full",
+      fullWidth ? "w-full" : "w-72"
+    )}>
+      {headerContent}
+      <div className="flex-1 overflow-y-auto min-h-0">
+        {sessions.length === 0 ? (
+          <div className="flex flex-col items-center text-center py-8 px-3 text-muted-foreground">
+            <p className="text-xs font-medium">No sessions yet</p>
+            <p className="text-[10px] mt-1">
+              Start a new session or use the TUI — sessions are shared
+              between both interfaces.
+            </p>
+          </div>
+        ) : activeGroup ? (
+          renderSessionList(activeGroupSessions)
+        ) : (
+          renderGroups()
+        )}
       </div>
     </div>
   );
@@ -1643,28 +1831,30 @@ function ChatToolbar({
   onToggleSidebar: () => void;
   compact?: boolean;
 }) {
-  const { messages, isLoading, sessionId, sessions } = useChatState();
+  const { messages, isLoading, sessionId, sessions, selectedAgent } = useChatState();
   const { newSession, clear } = useChatActions();
+  const { agents } = useAgents();
+  // Resolve agent for the current session
+  const sessionAgent = selectedAgent ?? sessions.find((s: { id: string; agent?: string }) => s.id === sessionId)?.agent ?? null;
+  const agentConfig = sessionAgent && agents ? agents.find((a) => a.name === sessionAgent) : undefined;
 
   return (
     <div className="flex items-center gap-2 px-4 py-2 border-b border-border/40 bg-background/80 backdrop-blur-md shrink-0">
-      {!compact && (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7"
-              onClick={onToggleSidebar}
-            >
-              {sidebarOpen ? <ChevronsLeft className="h-4 w-4" /> : <History className="h-4 w-4" />}
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom" className="text-xs">
-            {sidebarOpen ? "Hide history" : "Session history"}
-          </TooltipContent>
-        </Tooltip>
-      )}
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7"
+            onClick={onToggleSidebar}
+          >
+            {sidebarOpen ? <ChevronsLeft className="h-4 w-4" /> : <MessageCircle className="h-4 w-4" />}
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent side="bottom" className="text-xs">
+          {sidebarOpen ? "Hide threads" : "Threads"}
+        </TooltipContent>
+      </Tooltip>
       {/* New session — only when sidebar is closed (or in compact mode) */}
       {(!sidebarOpen || compact) && (
         <Tooltip>
@@ -1683,15 +1873,35 @@ function ChatToolbar({
           </TooltipContent>
         </Tooltip>
       )}
-      <div className="flex-1 min-w-0 truncate">
+      {/* Left: agent avatar + name */}
+      {agentConfig ? (
+        <div className="flex items-center gap-1.5 shrink-0">
+          <AgentAvatar
+            avatar={agentConfig.identity?.avatar}
+            name={agentConfig.identity?.displayName ?? agentConfig.name}
+            size="xs"
+          />
+          <span className="text-sm font-medium text-foreground">
+            {agentConfig.identity?.displayName ?? agentConfig.name}
+          </span>
+        </div>
+      ) : (
+        <div className="flex items-center gap-1.5 shrink-0">
+          <span className="text-sm leading-none">🐙</span>
+          <span className="text-sm font-medium text-foreground">Polpo</span>
+        </div>
+      )}
+      {/* Session title — flex-1 pushes right-side actions to the edge */}
+      <div className="flex-1 min-w-0">
         {sessionId ? (
-          <span className="text-sm font-medium">
+          <span className="text-xs text-muted-foreground truncate block">
             {sessions.find((s: { id: string; title?: string }) => s.id === sessionId)?.title || "Session"}
           </span>
         ) : (
-          <span className="text-sm text-muted-foreground">New session</span>
+          <span className="text-xs text-muted-foreground">New session</span>
         )}
       </div>
+      {/* Right: message count + actions */}
       {messages.length > 0 && (
         <>
           <Badge variant="secondary" className="text-[10px]">
@@ -1723,17 +1933,69 @@ function ChatToolbar({
 // ── ChatEmptyState — shown when no messages ──
 
 function ChatEmptyState() {
-  const { send } = useChatActions();
+  const { send, setSelectedAgent } = useChatActions();
+  const { selectedAgent } = useChatState();
+  const { agents } = useAgents();
+  const agentConfig = selectedAgent && agents ? agents.find((a) => a.name === selectedAgent) : undefined;
+  const name = agentConfig?.identity?.displayName ?? agentConfig?.name ?? "Polpo";
 
   return (
-    <div className="flex flex-col items-center justify-center h-full pt-24">
+    <div className="flex flex-col items-center justify-center h-full">
+      {/* Agent selector — text-only dropdown above the avatar */}
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            className="inline-flex items-center gap-1 text-sm transition-colors mb-3 focus-visible:outline-none"
+          >
+            <span className="font-semibold text-foreground">{name}</span>
+            <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="center" className="w-52">
+          <DropdownMenuItem
+            onClick={() => setSelectedAgent(null)}
+            className="gap-2"
+          >
+            <span className="text-xs leading-none">🐙</span>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium">Polpo</p>
+              <p className="text-[11px] text-muted-foreground">Orchestrator</p>
+            </div>
+            {!selectedAgent && <Check className="h-3.5 w-3.5 text-primary shrink-0" />}
+          </DropdownMenuItem>
+          {agents && agents.length > 0 && <DropdownMenuSeparator />}
+          {agents?.map((a) => (
+            <DropdownMenuItem
+              key={a.name}
+              onClick={() => setSelectedAgent(a.name)}
+              className="gap-2"
+            >
+              <AgentAvatar
+                avatar={a.identity?.avatar}
+                name={a.identity?.displayName ?? a.name}
+                size="xs"
+              />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium truncate">{a.identity?.displayName ?? a.name}</p>
+                {a.role && <p className="text-[11px] text-muted-foreground truncate">{a.role}</p>}
+              </div>
+              {selectedAgent === a.name && <Check className="h-3.5 w-3.5 text-primary shrink-0" />}
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
+      {/* Avatar */}
       <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10 mb-4 text-3xl">
-        🐙
+        {agentConfig ? (
+          <AgentAvatar avatar={agentConfig.identity?.avatar} name={name} size="xl" />
+        ) : (
+          <>🐙</>
+        )}
       </div>
-      <h2 className="text-2xl font-semibold mb-2">How can I help you?</h2>
+      <h2 className="text-2xl font-semibold mb-2">Chat with {name}</h2>
       <p className="text-sm text-muted-foreground mb-8 max-w-md text-center">
-        I can manage your tasks, create execution plans, monitor agents,
-        and help you orchestrate your AI coding team.
+        {agentConfig?.role ?? "Orchestrator"}
       </p>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-xl w-full px-4">
         {suggestions.map((s) => (
@@ -1759,8 +2021,17 @@ function ChatEmptyState() {
 // ── ChatMessages — Virtuoso message list, empty state, scroll-to-bottom ──
 
 function ChatMessages() {
-  const { messages, isLoading, messagesLoading, pendingQuestions, pendingMission, pendingVault } = useChatState();
+  const { messages, isLoading, messagesLoading, pendingQuestions, pendingMission, pendingVault, selectedAgent, sessions, sessionId } = useChatState();
   const { answerQuestions, respondToMission, respondToVault } = useChatActions();
+
+  // Resolve agent config for agent-direct sessions
+  const { agents } = useAgents();
+  const agentMap = agents ? Object.fromEntries(agents.map((a) => [a.name, a])) : {};
+  // Derive current agent: from selectedAgent (for new sessions) or from the active session's agent field
+  const currentAgentName = selectedAgent ?? sessions.find((s) => s.id === sessionId)?.agent ?? null;
+  const currentAgent = currentAgentName ? agentMap[currentAgentName] : undefined;
+  const assistantName = currentAgent?.identity?.displayName ?? currentAgent?.name ?? "Polpo";
+  const assistantAvatar = currentAgent?.identity?.avatar;
 
   const [atBottom, setAtBottom] = useState(true);
   const virtuosoRef = useRef<VirtuosoHandle>(null);
@@ -1820,11 +2091,17 @@ function ChatMessages() {
                   <Message from="assistant">
                     <div className="flex gap-3">
                       <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/10 mt-0.5 text-sm">
-                        🐙
+                        {assistantAvatar ? (
+                          <AgentAvatar avatar={assistantAvatar} name={assistantName} size="sm" />
+                        ) : currentAgent ? (
+                          <AgentAvatar name={assistantName} size="sm" />
+                        ) : (
+                          <>🐙</>
+                        )}
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 mb-1">
-                          <p className="text-xs font-semibold">Polpo</p>
+                          <p className="text-xs font-semibold">{assistantName}</p>
                           {msg.ts && (
                             <span className="text-[10px] text-muted-foreground">
                               {chatTimeAgo(new Date(msg.ts))}
@@ -1926,7 +2203,7 @@ function ChatMessages() {
                       <span className="h-1.5 w-1.5 rounded-full bg-primary/60 animate-bounce [animation-delay:300ms]" />
                     </div>
                     <span className="text-[11px] text-muted-foreground animate-pulse">
-                      Polpo is thinking...
+                      {assistantName} is thinking...
                     </span>
                   </div>
                 </div>
@@ -1957,7 +2234,7 @@ function ChatMessages() {
 // ── ChatInput — prompt input area with mentions, attachments, mic ──
 
 function ChatInput() {
-  const { isLoading, pendingQuestions, pendingMission, pendingVault, sessionId } = useChatState();
+  const { isLoading, pendingQuestions, pendingMission, pendingVault, sessionId, selectedAgent } = useChatState();
   const { send, stop } = useChatActions();
   const inputDisabled = useChatInputDisabled();
 
@@ -2004,6 +2281,10 @@ function ChatInput() {
     textarea.dispatchEvent(new Event("input", { bubbles: true }));
   }, []);
 
+  // Resolve selected agent config for display
+  const selectedAgentConfig = selectedAgent && agents ? agents.find((a) => a.name === selectedAgent) : undefined;
+  const recipientName = selectedAgentConfig?.identity?.displayName ?? selectedAgentConfig?.name ?? "Polpo";
+
   return (
     <div className="bg-background/80 backdrop-blur-md px-4 pt-2 pb-1.5 shrink-0" ref={inputWrapperRef}>
       <div className="mx-auto max-w-3xl">
@@ -2020,7 +2301,7 @@ function ChatInput() {
           >
             <AttachmentPreview />
             <PromptInputTextarea
-              placeholder={isLoading ? "Polpo is working..." : pendingQuestions ? "Answer the questions above first..." : pendingMission ? "Review the mission preview above..." : pendingVault ? "Review the vault entry above..." : "Message Polpo..."}
+              placeholder={isLoading ? `${recipientName} is working...` : pendingQuestions ? "Answer the questions above first..." : pendingMission ? "Review the mission preview above..." : pendingVault ? "Review the vault entry above..." : `Message ${recipientName}...`}
               disabled={inputDisabled}
               onKeyDown={(e) => mentionRef.current?.handleTextareaKeyDown(e)}
               onInput={(e) => {
@@ -2105,7 +2386,7 @@ function ChatLoadingSkeleton({ compact }: { compact?: boolean }) {
 
 export function ChatPage({ compact }: { compact?: boolean } = {}) {
   const { sessions, sessionsLoading, sessionId } = useChatState();
-  const { loadSession, newSession, deleteSession } = useChatActions();
+  const { loadSession, newSession, deleteSession, setSelectedAgent } = useChatActions();
 
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
@@ -2118,34 +2399,60 @@ export function ChatPage({ compact }: { compact?: boolean } = {}) {
     return <ChatLoadingSkeleton compact={compact} />;
   }
 
+  const handleSelectSession = useCallback((id: string) => {
+    loadSession(id);
+    if (compact) setSidebarOpen(false);
+  }, [loadSession, compact]);
+
+  const handleNewSession = useCallback((agent?: string) => {
+    newSession();
+    setSelectedAgent(agent ?? null);
+    if (compact) setSidebarOpen(false);
+  }, [newSession, setSelectedAgent, compact]);
+
   return (
     <div className={cn(
       "flex flex-1 min-h-0",
       !compact && "-mx-4 -mt-4 -mb-2 lg:-mx-6 lg:-mt-6 lg:-mb-3",
     )}>
-      {/* Session sidebar — only in full-page mode, hidden on mobile */}
-      {!compact && sidebarOpen && (
-        <div className="hidden lg:flex">
-          <SessionSidebar
-            sessions={visibleSessions}
-            activeSessionId={sessionId}
-            onSelect={loadSession}
-            onNew={newSession}
-            onDelete={deleteSession}
-          />
-        </div>
-      )}
-
-      {/* Main chat area */}
-      <div className="flex-1 flex flex-col min-w-0 h-full">
-        <ChatToolbar
-          sidebarOpen={sidebarOpen}
-          onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
-          compact={compact}
+      {/* Compact mode: sidebar replaces the entire chat area */}
+      {compact && sidebarOpen ? (
+        <SessionSidebar
+          sessions={visibleSessions}
+          activeSessionId={sessionId}
+          onSelect={handleSelectSession}
+          onNew={handleNewSession}
+          onDelete={deleteSession}
+          onBack={() => setSidebarOpen(false)}
+          fullWidth
         />
-        <ChatMessages />
-        <ChatInput />
-      </div>
+      ) : (
+        <>
+          {/* Full-page mode: sidebar as side panel */}
+          {!compact && sidebarOpen && (
+            <div className="hidden lg:flex">
+              <SessionSidebar
+                sessions={visibleSessions}
+                activeSessionId={sessionId}
+                onSelect={handleSelectSession}
+                onNew={handleNewSession}
+                onDelete={deleteSession}
+              />
+            </div>
+          )}
+
+          {/* Main chat area */}
+          <div className="flex-1 flex flex-col min-w-0 h-full">
+            <ChatToolbar
+              sidebarOpen={sidebarOpen}
+              onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
+              compact={compact}
+            />
+            <ChatMessages />
+            <ChatInput />
+          </div>
+        </>
+      )}
     </div>
   );
 }

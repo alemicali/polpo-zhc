@@ -123,6 +123,8 @@ export function useChat() {
   const [isLoading, setIsLoading] = useState(false);
   /** True while loading messages for an existing session (distinguishes from empty "new chat" state) */
   const [messagesLoading, setMessagesLoading] = useState(false);
+  /** Selected agent for agent-direct chat mode. null = orchestrator (default). */
+  const [selectedAgent, setSelectedAgent] = useState<string | null>(null);
   /** Questions waiting for user response (null = no pending questions) */
   const [pendingQuestions, setPendingQuestions] = useState<AskUserQuestion[] | null>(null);
   /** Mission preview waiting for user action (null = no pending preview) */
@@ -235,6 +237,9 @@ export function useChat() {
       setPendingQuestions(null);
       setPendingMission(null);
       setPendingVault(null);
+      // Restore agent scope from the loaded session
+      const session = sessions.find((s) => s.id === id);
+      setSelectedAgent(session?.agent ?? null);
       try {
         const raw = await getMessages(id);
         // Filter out empty placeholder messages (server saves them before streaming starts)
@@ -264,7 +269,7 @@ export function useChat() {
         setMessagesLoading(false);
       }
     },
-    [setSessionId, getMessages]
+    [setSessionId, getMessages, sessions]
   );
 
   // Auto-select most recent non-empty session on first load
@@ -321,6 +326,7 @@ export function useChat() {
     setPendingQuestions(null);
     setPendingMission(null);
     setPendingVault(null);
+    setSelectedAgent(null);
     conversationRef.current = [];
     wantsNewSessionRef.current = true;
   }, [setSessionId]);
@@ -335,6 +341,7 @@ export function useChat() {
       const stream = client.chatCompletionsStream({
         messages: conversationRef.current,
         sessionId: effectiveSessionId,
+        ...(selectedAgent ? { agent: selectedAgent } : {}),
       });
       streamRef.current = stream;
 
@@ -525,7 +532,7 @@ export function useChat() {
       refetchSessions();
       return fullContent;
     },
-    [client, sessionId, setSessionId, refetchSessions]
+    [client, sessionId, selectedAgent, setSessionId, refetchSessions]
   );
 
   // Send a message (streaming). Optionally attach images (data URLs).
@@ -1053,6 +1060,8 @@ export function useChat() {
     loadSession,
     newSession,
     deleteSession,
+    selectedAgent,
+    setSelectedAgent,
   };
 }
 
