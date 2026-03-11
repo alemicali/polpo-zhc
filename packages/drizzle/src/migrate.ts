@@ -99,6 +99,7 @@ export async function ensurePgSchema(db: any): Promise<void> {
     CREATE TABLE IF NOT EXISTS sessions (
       id         TEXT PRIMARY KEY,
       title      TEXT,
+      agent      TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );

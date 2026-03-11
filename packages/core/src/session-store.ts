@@ -35,10 +35,12 @@ export interface Session {
   createdAt: string;       // ISO timestamp
   updatedAt: string;       // ISO timestamp
   messageCount: number;
+  /** Agent name when this session targets a specific agent (agent-direct mode). Null/undefined for orchestrator sessions. */
+  agent?: string;
 }
 
 export interface SessionStore {
-  create(title?: string): Promise<string>;
+  create(title?: string, agent?: string): Promise<string>;
   addMessage(sessionId: string, role: MessageRole, content: string): Promise<Message>;
   /** Update the content of an existing message (e.g. finalize a streaming response). */
   updateMessage(sessionId: string, messageId: string, content: string, toolCalls?: ToolCallInfo[]): Promise<boolean>;
@@ -46,7 +48,8 @@ export interface SessionStore {
   getRecentMessages(sessionId: string, limit: number): Promise<Message[]>;
   listSessions(): Promise<Session[]>;
   getSession(sessionId: string): Promise<Session | undefined>;
-  getLatestSession(): Promise<Session | undefined>;
+  /** Get the most recent session, optionally filtered by agent name. Pass `null` to match only orchestrator sessions. */
+  getLatestSession(agent?: string | null): Promise<Session | undefined>;
   /** Rename (update the title of) an existing session. */
   renameSession(sessionId: string, title: string): Promise<boolean>;
   deleteSession(sessionId: string): Promise<boolean>;

@@ -440,24 +440,22 @@ export function completionRoutes(orchestrator: Orchestrator, apiKeys?: string[])
     let sessionId: string | null = forceNewSession ? null : rawSessionHeader;
     if (sessionStore) {
       if (!sessionId) {
-        // Build session title with agent namespace prefix for agent-direct sessions
         const firstUserMsg = body.messages.find(m => m.role === "user");
-        const baseTitle = firstUserMsg ? extractText(firstUserMsg.content).slice(0, 60) : undefined;
-        const sessionTitle = agentMode
-          ? `[agent:${body.agent}] ${baseTitle ?? "chat"}`
-          : baseTitle;
+        const sessionTitle = firstUserMsg ? extractText(firstUserMsg.content).slice(0, 60) : undefined;
+        // Agent scope: orchestrator sessions use null, agent sessions use the agent name
+        const agentScope = agentMode ? body.agent! : null;
 
         if (forceNewSession) {
           // Client explicitly requested a new session — skip recency heuristic
-          sessionId = await sessionStore.create(sessionTitle);
+          sessionId = await sessionStore.create(sessionTitle, agentScope ?? undefined);
         } else {
-          // Reuse latest session if recent (< 30 min), otherwise create new
-          const latest = await sessionStore.getLatestSession();
+          // Reuse latest session if recent (< 30 min), scoped by agent
+          const latest = await sessionStore.getLatestSession(agentScope);
           const timeout = 30 * 60 * 1000;
           if (latest && Date.now() - new Date(latest.updatedAt).getTime() < timeout) {
             sessionId = latest.id;
           } else {
-            sessionId = await sessionStore.create(sessionTitle);
+            sessionId = await sessionStore.create(sessionTitle, agentScope ?? undefined);
           }
         }
       }

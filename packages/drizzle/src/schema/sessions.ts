@@ -6,6 +6,7 @@ import { pgTable, text as pgText, index as pgIndex } from "drizzle-orm/pg-core";
 export const sessionsSqlite = sqliteTable("sessions", {
   id: text("id").primaryKey(),
   title: text("title"),
+  agent: text("agent"),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
 });
@@ -26,6 +27,7 @@ export const messagesSqlite = sqliteTable("messages", {
 export const sessionsPg = pgTable("sessions", {
   id: pgText("id").primaryKey(),
   title: pgText("title"),
+  agent: pgText("agent"),
   createdAt: pgText("created_at").notNull(),
   updatedAt: pgText("updated_at").notNull(),
 });

@@ -26,19 +26,20 @@ export class FileSessionStore implements SessionStore {
     this.sessionsDir = join(polpoDir, "sessions");
   }
 
-  async create(title?: string): Promise<string> {
+  async create(title?: string, agent?: string): Promise<string> {
     if (!existsSync(this.sessionsDir)) {
       mkdirSync(this.sessionsDir, { recursive: true });
     }
     const sessionId = nanoid(10);
-    const header = JSON.stringify({
+    const header: Record<string, unknown> = {
       _session: true,
       id: sessionId,
       title,
       createdAt: new Date().toISOString(),
-    });
+    };
+    if (agent) header.agent = agent;
     try {
-      appendFileSync(this.sessionFile(sessionId), header + "\n", "utf-8");
+      appendFileSync(this.sessionFile(sessionId), JSON.stringify(header) + "\n", "utf-8");
     } catch { /* best-effort: non-critical */
     }
     return sessionId;
@@ -136,6 +137,7 @@ export class FileSessionStore implements SessionStore {
           createdAt: header.createdAt ?? updatedAt,
           updatedAt,
           messageCount,
+          ...(header.agent ? { agent: header.agent } : {}),
         });
       } catch { /* skip corrupt file */
       }
@@ -158,15 +160,25 @@ export class FileSessionStore implements SessionStore {
         createdAt: header.createdAt ?? updatedAt,
         updatedAt,
         messageCount,
+        ...(header.agent ? { agent: header.agent } : {}),
       };
     } catch { /* unreadable session file */
       return undefined;
     }
   }
 
-  async getLatestSession(): Promise<Session | undefined> {
+  async getLatestSession(agent?: string | null): Promise<Session | undefined> {
     const sessions = await this.listSessions();
-    return sessions[0];
+    if (agent === undefined) {
+      // No filter — return the most recent session regardless of agent
+      return sessions[0];
+    }
+    if (agent === null) {
+      // Orchestrator sessions only (no agent)
+      return sessions.find(s => !s.agent);
+    }
+    // Agent-specific sessions
+    return sessions.find(s => s.agent === agent);
   }
 
   async renameSession(sessionId: string, title: string): Promise<boolean> {

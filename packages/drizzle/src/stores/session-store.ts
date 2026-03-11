@@ -1,4 +1,4 @@
-import { eq, desc, asc, count as drizzleCount } from "drizzle-orm";
+import { eq, desc, asc, count as drizzleCount, isNull, and } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import type { SessionStore, Session, Message, MessageRole, ToolCallInfo } from "@polpo-ai/core/session-store";
 import { type Dialect, deserializeJson } from "../utils.js";
@@ -20,6 +20,7 @@ export class DrizzleSessionStore implements SessionStore {
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
       messageCount,
+      ...(row.agent ? { agent: row.agent } : {}),
     };
   }
 
@@ -33,12 +34,13 @@ export class DrizzleSessionStore implements SessionStore {
     };
   }
 
-  async create(title?: string): Promise<string> {
+  async create(title?: string, agent?: string): Promise<string> {
     const id = nanoid(10);
     const now = new Date().toISOString();
     await this.db.insert(this.sessions).values({
       id,
       title: title ?? null,
+      agent: agent ?? null,
       createdAt: now,
       updatedAt: now,
     });
@@ -102,6 +104,7 @@ export class DrizzleSessionStore implements SessionStore {
       .select({
         id: this.sessions.id,
         title: this.sessions.title,
+        agent: this.sessions.agent,
         createdAt: this.sessions.createdAt,
         updatedAt: this.sessions.updatedAt,
         messageCount: drizzleCount(this.messages.id),
@@ -119,6 +122,7 @@ export class DrizzleSessionStore implements SessionStore {
       .select({
         id: this.sessions.id,
         title: this.sessions.title,
+        agent: this.sessions.agent,
         createdAt: this.sessions.createdAt,
         updatedAt: this.sessions.updatedAt,
         messageCount: drizzleCount(this.messages.id),
@@ -131,17 +135,30 @@ export class DrizzleSessionStore implements SessionStore {
     return rows.length > 0 ? this.rowToSession(rows[0], Number(rows[0].messageCount)) : undefined;
   }
 
-  async getLatestSession(): Promise<Session | undefined> {
-    const rows: any[] = await this.db
+  async getLatestSession(agent?: string | null): Promise<Session | undefined> {
+    let query = this.db
       .select({
         id: this.sessions.id,
         title: this.sessions.title,
+        agent: this.sessions.agent,
         createdAt: this.sessions.createdAt,
         updatedAt: this.sessions.updatedAt,
         messageCount: drizzleCount(this.messages.id),
       })
       .from(this.sessions)
-      .leftJoin(this.messages, eq(this.sessions.id, this.messages.sessionId))
+      .leftJoin(this.messages, eq(this.sessions.id, this.messages.sessionId));
+
+    // Filter by agent scope
+    if (agent === null) {
+      // Orchestrator sessions only (no agent)
+      query = query.where(isNull(this.sessions.agent));
+    } else if (agent !== undefined) {
+      // Agent-specific sessions
+      query = query.where(eq(this.sessions.agent, agent));
+    }
+    // agent === undefined → no filter, return most recent regardless
+
+    const rows: any[] = await query
       .groupBy(this.sessions.id)
       .orderBy(desc(this.sessions.updatedAt))
       .limit(1);
