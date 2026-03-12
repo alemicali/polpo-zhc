@@ -24,8 +24,8 @@ import {
 } from "./skills.js";
 import { parseMissionDocument } from "../core/schemas.js";
 import {
-  discoverPlaybooks, loadPlaybook, validateParams, instantiatePlaybook,
-  savePlaybook, deletePlaybook, validatePlaybookDefinition,
+  validateParams, instantiatePlaybook,
+  validatePlaybookDefinition,
 } from "../core/playbook.js";
 import type { PlaybookDefinition, PlaybookParameter } from "../core/playbook.js";
 import {
@@ -3237,7 +3237,7 @@ async function execListVault(polpo: Orchestrator, args: Record<string, unknown>)
 
   const lines: string[] = [`Vault for "${agentName}" (${entries.length} entries):`];
   for (const e of entries) {
-    const maskedCreds = e.keys.map(k => `${k}: ***`).join(", ");
+    const maskedCreds = e.keys.map((k: string) => `${k}: ***`).join(", ");
     let line = `  - ${e.service} [${e.type}]`;
     if (e.label) line += ` — ${e.label}`;
     line += `: { ${maskedCreds} }`;
@@ -4047,7 +4047,7 @@ async function execSearchWeb(polpo: Orchestrator, args: Record<string, unknown>)
     const vaultStore = polpo.getVaultStore();
     if (vaultStore) {
       for (const agent of await polpo.getAgents()) {
-        const entry = vaultStore.get(agent.name, "exa");
+        const entry = await vaultStore.get(agent.name, "exa");
         if (entry?.credentials?.key) { apiKey = entry.credentials.key; break; }
       }
     }
@@ -4256,7 +4256,7 @@ async function getVapiApiKey(polpo: Orchestrator): Promise<string | undefined> {
     const vaultStore = polpo.getVaultStore();
     if (vaultStore) {
       for (const agent of await polpo.getAgents()) {
-        const entry = vaultStore.get(agent.name, "vapi");
+        const entry = await vaultStore.get(agent.name, "vapi");
         if (entry?.credentials?.api_key) { key = entry.credentials.api_key; break; }
       }
     }
@@ -4270,7 +4270,7 @@ async function getVapiPhoneNumberId(polpo: Orchestrator): Promise<string | undef
     const vaultStore = polpo.getVaultStore();
     if (vaultStore) {
       for (const agent of await polpo.getAgents()) {
-        const entry = vaultStore.get(agent.name, "vapi");
+        const entry = await vaultStore.get(agent.name, "vapi");
         if (entry?.credentials?.phone_number_id) { id = entry.credentials.phone_number_id; break; }
       }
     }
@@ -4853,7 +4853,8 @@ async function execInkRemove(polpo: Orchestrator, args: Record<string, unknown>)
   if (!entry) return `Source "${source}" is not installed. Use ink_browse to see installed packages.`;
 
   const removeAgentStore = new FileAgentStore(polpoDir);
-  const removed = await uninstallInkPackages(entry, polpoDir, removeAgentStore);
+  const removePlaybookStore = polpo.getPlaybookStore();
+  const removed = await uninstallInkPackages(entry, polpoDir, removeAgentStore, removePlaybookStore);
 
   writeInkLock(polpoDir, removeInkLockEntry(lock, source));
 
@@ -4933,19 +4934,15 @@ async function execInkUpdate(polpo: Orchestrator, args: Record<string, unknown>)
     }
 
     // Uninstall old, install new via stores
-    await uninstallInkPackages(entry, polpoDir, updAgentStore);
+    const updPlaybookStore = polpo.getPlaybookStore();
+    await uninstallInkPackages(entry, polpoDir, updAgentStore, updPlaybookStore);
 
     const installed: string[] = [];
 
     for (const pkg of packages) {
       switch (pkg.type) {
         case "playbook": {
-          const destDir = join(polpoDir, "playbooks", pkg.name);
-          mkdirSync(destDir, { recursive: true });
-          const srcDir = resolve(pkg.path, "..");
-          for (const e of readdirSync(srcDir)) {
-            cpSync(join(srcDir, e), join(destDir, e), { recursive: true });
-          }
+          await updPlaybookStore.save(pkg.content as PlaybookDefinition);
           installed.push(`playbook: ${pkg.name}`);
           break;
         }
@@ -5029,10 +5026,9 @@ async function execInkUpdate(polpo: Orchestrator, args: Record<string, unknown>)
 //  PLAYBOOK EXECUTORS
 // ═══════════════════════════════════════════════════════
 
-function execListPlaybooks(polpo: Orchestrator): string {
-  const cwd = polpo.getWorkDir();
-  const polpoDir = polpo.getPolpoDir();
-  const playbooks = discoverPlaybooks(cwd, polpoDir);
+async function execListPlaybooks(polpo: Orchestrator): Promise<string> {
+  const playbookStore = polpo.getPlaybookStore();
+  const playbooks = await playbookStore.list();
   if (playbooks.length === 0) return "No playbooks found. Playbooks are discovered from .polpo/playbooks/ and ~/.polpo/playbooks/.";
   const lines = playbooks.map((pb: { name: string; description: string; parameters: Array<{ name: string; required?: boolean; default?: unknown }> }) => {
     const params = pb.parameters;
@@ -5044,21 +5040,20 @@ function execListPlaybooks(polpo: Orchestrator): string {
   return `${playbooks.length} playbook(s):\n${lines.join("\n")}`;
 }
 
-function execGetPlaybook(polpo: Orchestrator, args: Record<string, unknown>): string {
+async function execGetPlaybook(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
   const name = args.name as string;
   if (!name) return "Error: 'name' is required.";
-  const cwd = polpo.getWorkDir();
-  const polpoDir = polpo.getPolpoDir();
-  const playbook = loadPlaybook(cwd, polpoDir, name);
+  const playbookStore = polpo.getPlaybookStore();
+  const playbook = await playbookStore.get(name);
   if (!playbook) {
-    const available = discoverPlaybooks(cwd, polpoDir);
+    const available = await playbookStore.list();
     const names = available.map((p: { name: string }) => p.name).join(", ");
     return `Error: Playbook "${name}" not found.${names ? ` Available: ${names}` : ""}`;
   }
   return JSON.stringify(playbook, null, 2);
 }
 
-function execCreatePlaybook(polpo: Orchestrator, args: Record<string, unknown>): string {
+async function execCreatePlaybook(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
   const name = args.name as string;
   const description = args.description as string;
   const mission = args.mission as Record<string, unknown>;
@@ -5071,7 +5066,7 @@ function execCreatePlaybook(polpo: Orchestrator, args: Record<string, unknown>):
   const definition: PlaybookDefinition = { name, description, mission, parameters };
 
   try {
-    const dir = savePlaybook(polpo.getPolpoDir(), definition);
+    const dir = await polpo.getPlaybookStore().save(definition);
     const paramCount = parameters?.length ?? 0;
     return `Playbook "${name}" saved to ${dir} (${paramCount} parameter${paramCount !== 1 ? "s" : ""}).`;
   } catch (err: unknown) {
@@ -5086,9 +5081,7 @@ async function execInstantiatePlaybook(polpo: Orchestrator, args: Record<string,
 
   if (!name) return "Error: 'name' is required.";
 
-  const cwd = polpo.getWorkDir();
-  const polpoDir = polpo.getPolpoDir();
-  const playbook = loadPlaybook(cwd, polpoDir, name);
+  const playbook = await polpo.getPlaybookStore().get(name);
   if (!playbook) return `Error: Playbook "${name}" not found.`;
 
   // Validate parameters
@@ -5122,9 +5115,7 @@ async function execRunPlaybook(polpo: Orchestrator, args: Record<string, unknown
 
   if (!name) return "Error: 'name' is required.";
 
-  const cwd = polpo.getWorkDir();
-  const polpoDir = polpo.getPolpoDir();
-  const playbook = loadPlaybook(cwd, polpoDir, name);
+  const playbook = await polpo.getPlaybookStore().get(name);
   if (!playbook) return `Error: Playbook "${name}" not found.`;
 
   // Validate parameters
@@ -5152,13 +5143,11 @@ async function execRunPlaybook(polpo: Orchestrator, args: Record<string, unknown
   }
 }
 
-function execDeletePlaybook(polpo: Orchestrator, args: Record<string, unknown>): string {
+async function execDeletePlaybook(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
   const name = args.name as string;
   if (!name) return "Error: 'name' is required.";
 
-  const cwd = polpo.getWorkDir();
-  const polpoDir = polpo.getPolpoDir();
-  const deleted = deletePlaybook(cwd, polpoDir, name);
+  const deleted = await polpo.getPlaybookStore().delete(name);
   if (!deleted) return `Error: Playbook "${name}" not found.`;
   return `Playbook "${name}" deleted.`;
 }

@@ -1,5 +1,5 @@
 import type { AgentConfig, AgentActivity, Task, TaskResult, TaskOutcome, ReasoningLevel } from "./types.js";
-import type { EncryptedVaultStore } from "../vault/encrypted-store.js";
+import type { VaultStore } from "./vault-store.js";
 import type { WhatsAppStore } from "../stores/whatsapp-store.js";
 
 /**
@@ -48,8 +48,8 @@ export interface SpawnContext {
   emailAllowedDomains?: string[];
   /** Global reasoning level from settings — used as fallback when agent doesn't specify one. */
   reasoning?: ReasoningLevel;
-  /** Encrypted vault store — for resolving agent credentials at runtime. */
-  vaultStore?: EncryptedVaultStore;
+  /** Vault store — for resolving agent credentials at runtime. */
+  vaultStore?: VaultStore;
   /** WhatsApp message store — for whatsapp_* agent tools. */
   whatsappStore?: WhatsAppStore;
   /** WhatsApp send function — for whatsapp_send agent tool. */

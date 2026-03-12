@@ -365,7 +365,7 @@ export function completionRoutes(orchestrator: Orchestrator, apiKeys?: string[])
       streamOpts = buildStreamOpts(apiKey, reasoning, m.maxTokens);
 
       // Build agent tools (core coding tools + ink tools)
-      const vaultEntries = orchestrator.getVaultStore()?.getAllForAgent(agentConfig.name);
+      const vaultEntries = await orchestrator.getVaultStore()?.getAllForAgent(agentConfig.name);
       const vault = resolveAgentVault(vaultEntries);
       agentToolInstances = createCodingTools(cwd, agentConfig.allowedTools, undefined, undefined, vault);
       agentToolInstances.push(...createInkTools(polpoDir, agentConfig.allowedTools));

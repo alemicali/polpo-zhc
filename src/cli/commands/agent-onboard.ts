@@ -152,7 +152,7 @@ export function registerAgentOnboardCommands(program: Command): void {
       const hasEmailTools = agentCfg.allowedTools?.some(t => t.toLowerCase().startsWith("email_")) ?? false;
       const enableEmail = await askYesNo("Configure email tools?", hasEmailTools);
       const vaultStore = new EncryptedVaultStore(polpoDir);
-      const existingVault = vaultStore.getAllForAgent(name);
+      const existingVault = await vaultStore.getAllForAgent(name);
       const vaultEntries: Record<string, VaultEntry> = {};
 
       if (enableEmail) {
@@ -244,7 +244,7 @@ export function registerAgentOnboardCommands(program: Command): void {
 
       // Save vault entries to encrypted store
       for (const [svc, entry] of Object.entries(vaultEntries)) {
-        vaultStore.set(name, svc, entry);
+        await vaultStore.set(name, svc, entry);
       }
       const vaultCount = Object.keys(vaultEntries).length;
 
@@ -284,11 +284,20 @@ export function registerAgentOnboardCommands(program: Command): void {
       let listVaultStore: EncryptedVaultStore | undefined;
       try { listVaultStore = new EncryptedVaultStore(polpoDir); } catch { /* vault unavailable */ }
 
+      // Pre-load vault counts for all agents (async)
+      const vaultCounts = new Map<string, number>();
+      if (listVaultStore) {
+        for (const a of agents) {
+          const entries = await listVaultStore.list(a.name);
+          vaultCounts.set(a.name, entries.length);
+        }
+      }
+
       const printAgent = (a: AgentConfig, prefix: string, isLast: boolean) => {
         const connector = isLast ? "\u2514\u2500\u2500 " : "\u251C\u2500\u2500 ";
         const display = a.identity?.displayName ? `${a.name} (${a.identity.displayName})` : a.name;
         const titleStr = a.identity?.title ?? a.role ?? "";
-        const vaultCount = listVaultStore?.list(a.name).length ?? 0;
+        const vaultCount = vaultCounts.get(a.name) ?? 0;
         const flags: string[] = [];
         const aTools = a.allowedTools ?? [];
         if (aTools.some(t => t.toLowerCase().startsWith("email_"))) flags.push("email");
@@ -366,7 +375,7 @@ export function registerAgentOnboardCommands(program: Command): void {
       // Show vault entries from encrypted store
       let showVaultStore: EncryptedVaultStore | undefined;
       try { showVaultStore = new EncryptedVaultStore(polpoDir); } catch { /* vault unavailable */ }
-      const vaultList = showVaultStore?.list(name) ?? [];
+      const vaultList = showVaultStore ? await showVaultStore.list(name) : [];
       if (vaultList.length > 0) {
         console.log(chalk.cyan("\n  Vault (encrypted):"));
         for (const entry of vaultList) {

@@ -36,6 +36,7 @@ import { loadPolpoConfig, savePolpoConfig } from "../core/config.js";
 import type { PolpoFileConfig, AgentConfig, Team } from "../core/types.js";
 import { FileTeamStore } from "../stores/file-team-store.js";
 import { FileAgentStore } from "../stores/file-agent-store.js";
+import { FilePlaybookStore } from "../stores/file-playbook-store.js";
 import { FileMemoryStore } from "../stores/file-memory-store.js";
 
 const INK_API_URL = "https://polpo.sh/api";
@@ -247,6 +248,7 @@ function createInkAddTool(polpoDir: string): AgentTool<typeof InkAddSchema> {
         const installed: string[] = [];
         const teamStore = new FileTeamStore(polpoDir);
         const agentStore = new FileAgentStore(polpoDir);
+        const playbookStore = new FilePlaybookStore(resolve(polpoDir, ".."), polpoDir);
 
         // Ensure default team exists
         const existingTeams = await teamStore.getTeams();
@@ -266,13 +268,7 @@ function createInkAddTool(polpoDir: string): AgentTool<typeof InkAddSchema> {
         for (const pkg of packages) {
           switch (pkg.type) {
             case "playbook": {
-              const destDir = join(polpoDir, "playbooks", pkg.name);
-              mkdirSync(destDir, { recursive: true });
-              const srcDir = resolve(pkg.path, "..");
-              const entries = readdirSync(srcDir);
-              for (const entry of entries) {
-                cpSync(join(srcDir, entry), join(destDir, entry), { recursive: true });
-              }
+              await playbookStore.save(pkg.content as import("../core/playbook.js").PlaybookDefinition);
               installed.push(`playbook: ${pkg.name}`);
               break;
             }
@@ -435,9 +431,10 @@ function createInkRemoveTool(polpoDir: string): AgentTool<typeof InkRemoveSchema
           return ok(`Source "${params.source}" is not installed. Use ink_browse to see installed packages.`);
         }
 
-        // Uninstall packages via AgentStore
+        // Uninstall packages via stores
         const removeAgentStore = new FileAgentStore(polpoDir);
-        const removed = await uninstallInkPackages(entry, polpoDir, removeAgentStore);
+        const removePlaybookStore = new FilePlaybookStore(resolve(polpoDir, ".."), polpoDir);
+        const removed = await uninstallInkPackages(entry, polpoDir, removeAgentStore, removePlaybookStore);
 
         // Remove from lock file
         writeInkLock(polpoDir, removeInkLockEntry(lock, params.source));
@@ -525,10 +522,11 @@ function createInkUpdateTool(polpoDir: string): AgentTool<typeof InkUpdateSchema
             continue;
           }
 
-          // Uninstall old packages via AgentStore
+          // Uninstall old packages via stores
           const updateAgentStore = new FileAgentStore(polpoDir);
           const updateTeamStore = new FileTeamStore(polpoDir);
-          await uninstallInkPackages(entry, polpoDir, updateAgentStore);
+          const updatePlaybookStore = new FilePlaybookStore(resolve(polpoDir, ".."), polpoDir);
+          await uninstallInkPackages(entry, polpoDir, updateAgentStore, updatePlaybookStore);
 
           // Ensure default team exists
           const updateTeams = await updateTeamStore.getTeams();
@@ -542,13 +540,7 @@ function createInkUpdateTool(polpoDir: string): AgentTool<typeof InkUpdateSchema
           for (const pkg of packages) {
             switch (pkg.type) {
               case "playbook": {
-                const destDir = join(polpoDir, "playbooks", pkg.name);
-                mkdirSync(destDir, { recursive: true });
-                const srcDir = resolve(pkg.path, "..");
-                const srcEntries = readdirSync(srcDir);
-                for (const e of srcEntries) {
-                  cpSync(join(srcDir, e), join(destDir, e), { recursive: true });
-                }
+                await updatePlaybookStore.save(pkg.content as import("../core/playbook.js").PlaybookDefinition);
                 installed.push(`playbook: ${pkg.name}`);
                 break;
               }

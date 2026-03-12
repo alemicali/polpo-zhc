@@ -70,6 +70,9 @@ import { Scheduler } from "../scheduling/scheduler.js";
 import { TaskWatcherManager } from "./task-watcher.js";
 import type { ApprovalRequest, ApprovalStatus, NotificationAction } from "./types.js";
 import { EncryptedVaultStore } from "../vault/encrypted-store.js";
+import type { VaultStore } from "./vault-store.js";
+import type { PlaybookStore } from "./playbook-store.js";
+import { FilePlaybookStore } from "../stores/file-playbook-store.js";
 
 // Re-export for backward compatibility (consumed by core/index.ts and external modules)
 export { buildFixPrompt, buildRetryPrompt };
@@ -118,7 +121,8 @@ export class Orchestrator extends TypedEmitter {
   private channelGateway?: ChannelGateway;
   private configWatcher?: FSWatcher;
   private configReloadTimer?: ReturnType<typeof setTimeout>;
-  private vaultStore?: EncryptedVaultStore;
+  private vaultStore?: VaultStore;
+  private playbookStore!: PlaybookStore;
 
   // Managers
   private agentMgr!: AgentManager;
@@ -267,6 +271,7 @@ export class Orchestrator extends TypedEmitter {
 
     await this.initManagers();
     this.initVaultStore();
+    this.playbookStore = new FilePlaybookStore(this.workDir, this.polpoDir);
   }
 
   /**
@@ -627,6 +632,7 @@ export class Orchestrator extends TypedEmitter {
 
     await this.initManagers();
     this.initVaultStore();
+    this.playbookStore = new FilePlaybookStore(this.workDir, this.polpoDir);
     this.interactive = true;
     await this.registry.setState({
       org,
@@ -723,7 +729,8 @@ export class Orchestrator extends TypedEmitter {
   getRunStore(): RunStore { return this.runStore; }
   getPolpoDir(): string { return this.polpoDir; }
   getMemoryStore(): MemoryStore { return this.memoryStore; }
-  getVaultStore(): EncryptedVaultStore | undefined { return this.vaultStore; }
+  getVaultStore(): VaultStore | undefined { return this.vaultStore; }
+  getPlaybookStore(): PlaybookStore { return this.playbookStore; }
   getTeamStore(): TeamStore { return this.teamStore; }
   getAgentStore(): AgentStore { return this.agentStore; }
 

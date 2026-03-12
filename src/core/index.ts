@@ -54,6 +54,7 @@ export { TaskWatcherManager } from "./task-watcher.js";
 // Playbooks
 export { discoverPlaybooks, loadPlaybook, validateParams, instantiatePlaybook, validatePlaybookDefinition, savePlaybook, deletePlaybook } from "./playbook.js";
 export type { PlaybookParameter, PlaybookDefinition, PlaybookInfo, ValidationResult } from "./playbook.js";
+export type { PlaybookStore } from "./playbook-store.js";
 
 // Backward-compat aliases (deprecated)
 export { discoverTemplates, loadTemplate, instantiateTemplate, validateTemplateDefinition, saveTemplate, deleteTemplate } from "./playbook.js";

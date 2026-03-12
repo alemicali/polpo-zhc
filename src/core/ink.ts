@@ -24,6 +24,7 @@ import { createHash } from "node:crypto";
 import type { AgentConfig, PolpoFileConfig } from "./types.js";
 import type { PlaybookDefinition } from "./playbook.js";
 import type { AgentStore } from "./agent-store.js";
+import type { PlaybookStore } from "./playbook-store.js";
 
 // ── Package Types ──────────────────────────────────────────────────────
 
@@ -530,28 +531,36 @@ export function getInkLockEntry(lock: InkLockFile, source: string): InkLockEntry
 /**
  * Uninstall packages recorded in a lock entry.
  *
- * - Playbooks: removes `.polpo/playbooks/<name>/` directory
+ * - Playbooks: removes via PlaybookStore
  * - Agents: removes from AgentStore
  * - Companies: removes legacy paths (merged config cannot be cleanly reversed)
  *
  * @param entry - The lock entry whose packages should be removed
  * @param polpoDir - Path to the .polpo directory
  * @param agentStore - AgentStore to remove agents from
+ * @param playbookStore - PlaybookStore to remove playbooks from
  */
 export async function uninstallInkPackages(
   entry: InkLockEntry,
   polpoDir: string,
   agentStore: AgentStore,
+  playbookStore?: PlaybookStore,
 ): Promise<string[]> {
   const removed: string[] = [];
 
   for (const pkg of entry.packages) {
     switch (pkg.type) {
       case "playbook": {
-        const dir = join(polpoDir, "playbooks", pkg.name);
-        if (existsSync(dir)) {
-          rmSync(dir, { recursive: true, force: true });
-          removed.push(`playbook: ${pkg.name}`);
+        if (playbookStore) {
+          const deleted = await playbookStore.delete(pkg.name);
+          if (deleted) removed.push(`playbook: ${pkg.name}`);
+        } else {
+          // Fallback: direct filesystem removal (when store not available)
+          const dir = join(polpoDir, "playbooks", pkg.name);
+          if (existsSync(dir)) {
+            rmSync(dir, { recursive: true, force: true });
+            removed.push(`playbook: ${pkg.name}`);
+          }
         }
         break;
       }

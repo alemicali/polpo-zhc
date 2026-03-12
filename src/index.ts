@@ -66,6 +66,7 @@ export { createImageTools, ALL_IMAGE_TOOL_NAMES } from "./tools/image-tools.js";
 // Playbooks
 export { discoverPlaybooks, loadPlaybook, validateParams, instantiatePlaybook, validatePlaybookDefinition, savePlaybook, deletePlaybook } from "./core/playbook.js";
 export type { PlaybookParameter, PlaybookDefinition, PlaybookInfo, ValidationResult } from "./core/playbook.js";
+export type { PlaybookStore } from "./core/playbook-store.js";
 
 // Backward-compat aliases (deprecated)
 export { discoverTemplates, loadTemplate, instantiateTemplate, validateTemplateDefinition, saveTemplate, deleteTemplate } from "./core/playbook.js";

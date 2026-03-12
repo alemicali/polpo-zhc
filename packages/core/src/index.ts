@@ -35,6 +35,8 @@ export type { NotificationStore, NotificationRecord, NotificationStatus } from "
 export type { PeerStore } from "./peer-store.js";
 export type { TeamStore } from "./team-store.js";
 export type { AgentStore } from "./agent-store.js";
+export type { VaultStore } from "./vault-store.js";
+export type { PlaybookStore } from "./playbook-store.js";
 
 // ── EventBus Interface ──────────────────────────────────────────────────
 export type { EventBus } from "./event-bus.js";
