@@ -20,6 +20,7 @@
   },
   "dependencies": {
     "@polpo-ai/core": "workspace:*",
+    "@polpo-ai/vault-crypto": "workspace:*",
     "drizzle-orm": "^0.44.0",
     "nanoid": "^5.1.2"
   },

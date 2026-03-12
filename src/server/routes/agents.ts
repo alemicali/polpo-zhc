@@ -25,9 +25,10 @@ export function agentRoutes(): OpenAPIHono<ServerEnv> {
     },
   });
 
-  app.openapi(listAgentsRoute, (c) => {
+  app.openapi(listAgentsRoute, async (c) => {
     const orchestrator = c.get("orchestrator");
-    return c.json({ ok: true, data: orchestrator.getAgents().map(redactAgentConfig) });
+    const agents = await orchestrator.getAgents();
+    return c.json({ ok: true, data: agents.map(redactAgentConfig) });
   });
 
   // POST /agents — add agent
@@ -113,9 +114,9 @@ export function agentRoutes(): OpenAPIHono<ServerEnv> {
     },
   });
 
-  app.openapi(getTeamsRoute, (c) => {
+  app.openapi(getTeamsRoute, async (c) => {
     const orchestrator = c.get("orchestrator");
-    const teams = orchestrator.getTeams();
+    const teams = await orchestrator.getTeams();
     return c.json({ ok: true, data: teams.map(redactTeam) });
   });
 
@@ -133,10 +134,10 @@ export function agentRoutes(): OpenAPIHono<ServerEnv> {
     },
   });
 
-  app.openapi(getTeamRoute, (c) => {
+  app.openapi(getTeamRoute, async (c) => {
     const orchestrator = c.get("orchestrator");
     const name = c.req.query("name");
-    const team = orchestrator.getTeam(name);
+    const team = await orchestrator.getTeam(name);
     return c.json({ ok: true, data: team ? redactTeam(team) : null });
   });
 
@@ -216,7 +217,7 @@ export function agentRoutes(): OpenAPIHono<ServerEnv> {
     const orchestrator = c.get("orchestrator");
     const body = c.req.valid("json");
     await orchestrator.renameTeam(body.oldName, body.name);
-    const updatedTeam = orchestrator.getTeam(body.name);
+    const updatedTeam = await orchestrator.getTeam(body.name);
     return c.json({ ok: true, data: updatedTeam ? redactTeam(updatedTeam) : null });
   });
 
@@ -332,45 +333,40 @@ export function agentRoutes(): OpenAPIHono<ServerEnv> {
   app.openapi(updateAgentRoute, async (c) => {
     const orchestrator = c.get("orchestrator");
     const { name } = c.req.valid("param");
-    const existing = orchestrator.getAgents().find(a => a.name === name);
+    const existing = (await orchestrator.getAgents()).find(a => a.name === name);
     if (!existing) {
       return c.json({ ok: false, error: "Agent not found", code: "NOT_FOUND" }, 404);
     }
 
     const body = c.req.valid("json");
-    const currentTeam = orchestrator.findAgentTeam(name);
-    const originalTeamName = currentTeam?.name;
-
-    await orchestrator.removeAgent(name);
 
     // Handle reportsTo: empty string clears it
-    let reportsTo = existing.reportsTo;
+    let reportsTo: string | undefined = undefined;
     if (typeof body.reportsTo === "string") {
       reportsTo = body.reportsTo.trim() || undefined;
     }
 
-    const merged = {
-      ...existing,
-      role: body.role ?? existing.role,
-      model: body.model ?? existing.model,
-      systemPrompt: body.systemPrompt ?? existing.systemPrompt,
-      skills: body.skills ?? existing.skills,
-      allowedPaths: body.allowedPaths ?? existing.allowedPaths,
-      allowedTools: body.allowedTools ?? existing.allowedTools,
-      reportsTo,
-      reasoning: body.reasoning ?? (existing as any).reasoning,
-      maxTurns: body.maxTurns ?? existing.maxTurns,
-      maxConcurrency: body.maxConcurrency ?? (existing as any).maxConcurrency,
-      browserProfile: body.browserProfile ?? existing.browserProfile,
-      emailAllowedDomains: body.emailAllowedDomains ?? (existing as any).emailAllowedDomains,
-      identity: body.identity ? { ...(existing.identity ?? {}), ...body.identity } : existing.identity,
+    const updates: Record<string, unknown> = {
+      ...(body.role !== undefined && { role: body.role }),
+      ...(body.model !== undefined && { model: body.model }),
+      ...(body.systemPrompt !== undefined && { systemPrompt: body.systemPrompt }),
+      ...(body.skills !== undefined && { skills: body.skills }),
+      ...(body.allowedPaths !== undefined && { allowedPaths: body.allowedPaths }),
+      ...(body.allowedTools !== undefined && { allowedTools: body.allowedTools }),
+      ...(typeof body.reportsTo === "string" && { reportsTo }),
+      ...(body.reasoning !== undefined && { reasoning: body.reasoning }),
+      ...(body.maxTurns !== undefined && { maxTurns: body.maxTurns }),
+      ...(body.maxConcurrency !== undefined && { maxConcurrency: body.maxConcurrency }),
+      ...(body.browserProfile !== undefined && { browserProfile: body.browserProfile }),
+      ...(body.emailAllowedDomains !== undefined && { emailAllowedDomains: body.emailAllowedDomains }),
+      ...(body.identity && { identity: { ...(existing.identity ?? {}), ...body.identity } }),
+      ...(body.team !== undefined && { team: body.team }),
     };
 
-    const targetTeam = body.team ?? originalTeamName;
-    await orchestrator.addAgent(merged as any, targetTeam);
+    await orchestrator.updateAgent(name, updates);
 
-    const updated = orchestrator.getAgents().find(a => a.name === name);
-    return c.json({ ok: true, data: updated ? redactAgentConfig(updated) : merged }, 200);
+    const updated = (await orchestrator.getAgents()).find(a => a.name === name);
+    return c.json({ ok: true, data: updated ? redactAgentConfig(updated) : null }, 200);
   });
 
   // GET /agents/:name — single agent detail (registered after static routes to avoid conflicts)
@@ -394,10 +390,10 @@ export function agentRoutes(): OpenAPIHono<ServerEnv> {
     },
   });
 
-  app.openapi(getAgentRoute, (c) => {
+  app.openapi(getAgentRoute, async (c) => {
     const orchestrator = c.get("orchestrator");
     const { name } = c.req.valid("param");
-    const agent = orchestrator.getAgents().find(a => a.name === name);
+    const agent = (await orchestrator.getAgents()).find(a => a.name === name);
     if (!agent) {
       return c.json({ ok: false, error: "Agent not found", code: "NOT_FOUND" }, 404);
     }
@@ -408,7 +404,7 @@ export function agentRoutes(): OpenAPIHono<ServerEnv> {
   app.post("/:name/avatar", async (c) => {
     const orchestrator = c.get("orchestrator");
     const name = c.req.param("name");
-    const agent = orchestrator.getAgents().find(a => a.name === name);
+    const agent = (await orchestrator.getAgents()).find(a => a.name === name);
     if (!agent) return c.json({ ok: false, error: "Agent not found" }, 404);
 
     const body = await c.req.parseBody();
@@ -436,11 +432,9 @@ export function agentRoutes(): OpenAPIHono<ServerEnv> {
     const buffer = Buffer.from(await file.arrayBuffer());
     writeFileSync(avatarPath, buffer);
 
-    // Update agent identity with avatar path — preserve original team
+    // Update agent identity with avatar path
     const identity = { ...(agent.identity ?? {}), avatar: relativePath };
-    const originalTeam = orchestrator.findAgentTeam(name)?.name;
-    await orchestrator.removeAgent(name);
-    await orchestrator.addAgent({ ...agent, identity }, originalTeam);
+    await orchestrator.updateAgent(name, { identity });
 
     return c.json({ ok: true, data: { avatar: relativePath } }, 200);
   });
@@ -449,14 +443,12 @@ export function agentRoutes(): OpenAPIHono<ServerEnv> {
   app.delete("/:name/avatar", async (c) => {
     const orchestrator = c.get("orchestrator");
     const name = c.req.param("name");
-    const agent = orchestrator.getAgents().find(a => a.name === name);
+    const agent = (await orchestrator.getAgents()).find(a => a.name === name);
     if (!agent) return c.json({ ok: false, error: "Agent not found" }, 404);
 
     if (agent.identity?.avatar) {
       const identity = { ...agent.identity, avatar: undefined };
-      const originalTeam = orchestrator.findAgentTeam(name)?.name;
-      await orchestrator.removeAgent(name);
-      await orchestrator.addAgent({ ...agent, identity }, originalTeam);
+      await orchestrator.updateAgent(name, { identity });
     }
 
     return c.json({ ok: true }, 200);

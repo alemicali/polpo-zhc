@@ -1632,7 +1632,7 @@ describe("Vault API", () => {
 
     // Verify via the store directly that values were merged correctly
     const vaultStore = orchestrator.getVaultStore()!;
-    const entry = vaultStore.get("agent-1", "smtp-patch")!;
+    const entry = (await vaultStore.get("agent-1", "smtp-patch"))!;
     expect(entry.credentials.host).toBe("smtp.example.com"); // preserved
     expect(entry.credentials.port).toBe("587");               // preserved
     expect(entry.credentials.user).toBe("new-user");           // updated
@@ -1665,7 +1665,7 @@ describe("Vault API", () => {
     expect(body.data.type).toBe("api_key");
 
     // Verify label and type via store
-    const entry = orchestrator.getVaultStore()!.get("agent-1", "patch-meta")!;
+    const entry = (await orchestrator.getVaultStore()!.get("agent-1", "patch-meta"))!;
     expect(entry.type).toBe("api_key");
     expect(entry.label).toBe("New label");
     expect(entry.credentials.key).toBe("val"); // credentials unchanged
@@ -1703,7 +1703,7 @@ describe("Vault API", () => {
     expect(body.data.removed).toBe(true);
 
     // Verify gone
-    const entry = orchestrator.getVaultStore()!.get("agent-1", "delete-me");
+    const entry = await orchestrator.getVaultStore()!.get("agent-1", "delete-me");
     expect(entry).toBeUndefined();
   });
 
@@ -1754,7 +1754,7 @@ describe("Vault API", () => {
 
     // 4. Verify merged state
     const store = orchestrator.getVaultStore()!;
-    const entry = store.get(ag, svc)!;
+    const entry = (await store.get(ag, svc))!;
     expect(entry.credentials.host).toBe("mail.example.com");
     expect(entry.credentials.port).toBe("465");
     expect(entry.credentials.user).toBe("new-admin");
@@ -1767,7 +1767,7 @@ describe("Vault API", () => {
     expect((await delRes.json()).data.removed).toBe(true);
 
     // 6. Verify deleted
-    expect(store.get(ag, svc)).toBeUndefined();
+    expect(await store.get(ag, svc)).toBeUndefined();
   });
 });
 

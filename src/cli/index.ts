@@ -283,7 +283,7 @@ program
     }
 
     console.log(chalk.green("\n  Polpo initialized!"));
-    console.log(chalk.dim("  Run: polpo tui\n"));
+    console.log(chalk.dim("  Run: polpo serve\n"));
   });
 
 // polpo run
@@ -310,24 +310,28 @@ program
   .option("-d, --dir <path>", "Working directory", ".")
   .option("-w, --watch", "Watch mode: auto-refresh", false)
   .action(async (opts) => {
-    const statePath = resolve(opts.dir, ".polpo", "state.json");
+    const polpoDir = resolve(opts.dir, ".polpo");
     let frame = 0;
     const startTime = Date.now();
     let lastState: PolpoState | null = null;
+    let orchestrator: Orchestrator | null = null;
 
     const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
     const PULSE  = ["●", "◉", "○", "◉"];
 
     const printStatus = async () => {
-      if (!existsSync(statePath)) {
-        console.log(chalk.red("  No .polpo/state.json found. Run 'polpo init' first."));
+      if (!existsSync(resolve(polpoDir, "polpo.json"))) {
+        console.log(chalk.red("  No .polpo/polpo.json found. Run 'polpo init' first."));
         return;
       }
 
       try {
-        const raw = await readFile(statePath, "utf-8");
-        lastState = JSON.parse(raw);
-      } catch { /* file being written — use last state */
+        if (!orchestrator) {
+          orchestrator = new Orchestrator(resolve(opts.dir));
+          await orchestrator.init();
+        }
+        lastState = await orchestrator.getStore().getState();
+      } catch { /* store error — use last state */
       }
 
       const state = lastState;
@@ -438,9 +442,19 @@ program
       // Elapsed since watch started
       const totalElapsed = formatTime(Date.now() - (state.startedAt ? new Date(state.startedAt).getTime() : startTime));
 
-      // Header
+      // Header — read teams/agents from stores for accurate display
+      let teamsLabel = "-";
+      let agentsLabel = "-";
+      if (orchestrator) {
+        try {
+          const teams = await orchestrator.getTeamStore().getTeams();
+          const agents = await orchestrator.getAgentStore().getAgents();
+          teamsLabel = teams.map(t => t.name).join(", ") || "-";
+          agentsLabel = agents.map(a => a.name).join(", ") || "-";
+        } catch { /* fallback to state */ }
+      }
       console.log(`\n  ${headerIcon} ${LOGO_MINI} ${headerIcon}`);
-      console.log(chalk.dim(`    ${state.org || "org"} | Teams: ${state.teams.map(t => t.name).join(", ") || "-"} | Agents: ${state.teams.flatMap(t => t.agents).map(a => a.name).join(", ") || "-"}`));
+      console.log(chalk.dim(`    ${state.org || "org"} | Teams: ${teamsLabel} | Agents: ${agentsLabel}`));
       console.log(chalk.dim(`    Elapsed: ${totalElapsed}`));
 
       // Progress bar
@@ -551,18 +565,6 @@ program
   .option("--api-key <key>", "API key for authentication (optional)")
   .option("--cors-origins <origins>", "Comma-separated allowed CORS origins (env: POLPO_CORS_ORIGINS)")
   .action(serveAction);
-
-// polpo tui (interactive terminal mode)
-program
-  .command("tui")
-  .description("Launch the interactive TUI")
-  .option("-d, --dir <path>", "Working directory", ".")
-  .action(async (opts) => {
-    const dir = resolve(opts.dir);
-    await ensureSetup(dir);
-    const { startInkTUI } = await import("../tui/app.js");
-    await startInkTUI(dir);
-  });
 
 // Register subcommand groups
 registerTaskCommands(program);

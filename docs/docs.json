@@ -70,7 +70,6 @@
             "group": "Usage",
             "pages": [
               "usage/cli",
-              "usage/tui",
               "usage/server",
               "usage/web-ui",
               "usage/telegram"

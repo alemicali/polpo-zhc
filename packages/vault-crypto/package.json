@@ -1,0 +1,37 @@
+{
+  "name": "@polpo-ai/vault-crypto",
+  "version": "0.1.0",
+  "description": "AES-256-GCM encryption helpers for Polpo vault stores",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "prepublishOnly": "tsc"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.3"
+  },
+  "files": ["dist", "README.md"],
+  "license": "MIT",
+  "author": "OpenPolpo Contributors",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/lumea-labs/polpo.git",
+    "directory": "packages/vault-crypto"
+  }
+}

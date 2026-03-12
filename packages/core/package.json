@@ -66,6 +66,22 @@
       "types": "./dist/peer-store.d.ts",
       "import": "./dist/peer-store.js"
     },
+    "./team-store": {
+      "types": "./dist/team-store.d.ts",
+      "import": "./dist/team-store.js"
+    },
+    "./agent-store": {
+      "types": "./dist/agent-store.d.ts",
+      "import": "./dist/agent-store.js"
+    },
+    "./vault-store": {
+      "types": "./dist/vault-store.d.ts",
+      "import": "./dist/vault-store.js"
+    },
+    "./playbook-store": {
+      "types": "./dist/playbook-store.d.ts",
+      "import": "./dist/playbook-store.js"
+    },
     "./adapter": {
       "types": "./dist/adapter.d.ts",
       "import": "./dist/adapter.js"

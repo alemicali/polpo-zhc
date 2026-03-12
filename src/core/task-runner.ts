@@ -5,7 +5,6 @@ import { fileURLToPath } from "node:url";
 import { nanoid } from "nanoid";
 import type { OrchestratorContext } from "./orchestrator-context.js";
 import type { Task, TaskResult, RunnerConfig } from "./types.js";
-import { findAgent } from "./types.js";
 import { agentMemoryScope } from "./memory-store.js";
 import type { RunRecord } from "./run-store.js";
 import { getSocketPath } from "./notification.js";
@@ -337,7 +336,7 @@ export class TaskRunner {
   }
 
   async spawnForTask(task: Task): Promise<void> {
-    const agent = findAgent(this.ctx.config.teams, task.assignTo);
+    const agent = await this.ctx.agentStore.getAgent(task.assignTo);
     if (!agent) {
       this.ctx.emitter.emit("log", { level: "error", message: `No agent "${task.assignTo}" for task "${task.title}"` });
       await this.ctx.registry.transition(task.id, "assigned");
@@ -413,18 +412,7 @@ export class TaskRunner {
       }
     }
 
-    // 2. System context (standing instructions from .polpo/system-context.md)
-    try {
-      const systemContextPath = join(this.ctx.polpoDir, "system-context.md");
-      if (existsSync(systemContextPath)) {
-        const systemContext = readFileSync(systemContextPath, "utf-8").trim();
-        if (systemContext) {
-          contextParts.push(`<system-context>\n${systemContext}\n</system-context>`);
-        }
-      }
-    } catch { /* best effort */ }
-
-    // 3. Mission context — if this task belongs to a mission, include the mission goal and sibling tasks
+    // 2. Mission context — if this task belongs to a mission, include the mission goal and sibling tasks
     if (task.group) {
       try {
         // Resolve mission via direct ID (preferred) or group name (legacy fallback)

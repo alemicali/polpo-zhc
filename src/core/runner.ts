@@ -21,6 +21,7 @@ import type { RunnerConfig, TaskResult } from "./types.js";
 import { notifyRunComplete } from "./notification.js";
 import { sanitizeTranscriptEntry } from "../server/security.js";
 import { EncryptedVaultStore } from "../vault/encrypted-store.js";
+import type { VaultStore } from "./vault-store.js";
 import type { WhatsAppStore } from "../stores/whatsapp-store.js";
 
 const ACTIVITY_POLL_MS = 1500;
@@ -132,7 +133,7 @@ async function main(): Promise<void> {
 
   let handle;
   try {
-    let vaultStore: EncryptedVaultStore | undefined;
+    let vaultStore: VaultStore | undefined;
     try { vaultStore = new EncryptedVaultStore(config.polpoDir); } catch { /* vault unavailable */ }
 
     // WhatsApp store + send function (if configured)

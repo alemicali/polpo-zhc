@@ -41,13 +41,13 @@ export function skillRoutes(): OpenAPIHono<ServerEnv> {
     },
   });
 
-  app.openapi(listSkillsRoute, (c) => {
+  app.openapi(listSkillsRoute, async (c) => {
     const orchestrator = c.get("orchestrator");
     const workDir = orchestrator.getWorkDir();
     const polpoDir = orchestrator.getPolpoDir();
 
     // Get agent names from config (authoritative source) + filesystem fallback
-    const configAgents = orchestrator.getAgents();
+    const configAgents = await orchestrator.getAgents();
     const configAgentNames = configAgents.map(a => a.name);
     const fsAgentNames = getAgentNames(polpoDir);
     // Merge: config agents are authoritative, fs agents catch orphaned symlink dirs

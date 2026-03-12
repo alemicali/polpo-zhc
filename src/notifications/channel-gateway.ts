@@ -261,7 +261,7 @@ export class ChannelGateway {
     const running = tasks.filter(t => t.status === "in_progress").length;
     const done = tasks.filter(t => t.status === "done").length;
     const failed = tasks.filter(t => t.status === "failed").length;
-    const agents = this.orchestrator.getAgents();
+    const agents = await this.orchestrator.getAgents();
     const state = await this.orchestrator.getStore().getState();
     const processes = state?.processes ?? [];
 
@@ -307,7 +307,7 @@ export class ChannelGateway {
   }
 
   private async cmdAgents(): Promise<CommandResult> {
-    const agents = this.orchestrator.getAgents();
+    const agents = await this.orchestrator.getAgents();
     const state = await this.orchestrator.getStore().getState();
     const processes = state?.processes ?? [];
 

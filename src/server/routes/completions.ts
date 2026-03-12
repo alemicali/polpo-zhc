@@ -333,7 +333,7 @@ export function completionRoutes(orchestrator: Orchestrator, apiKeys?: string[])
 
     if (agentMode) {
       // ── Agent-direct mode ──
-      const agents = orchestrator.getAgents();
+      const agents = await orchestrator.getAgents();
       const agentConfig = agents.find(a => a.name === body.agent);
       if (!agentConfig) {
         return c.json({ error: { message: `Agent "${body.agent}" not found`, type: "invalid_request_error", code: "agent_not_found" } }, 404);
@@ -365,7 +365,7 @@ export function completionRoutes(orchestrator: Orchestrator, apiKeys?: string[])
       streamOpts = buildStreamOpts(apiKey, reasoning, m.maxTokens);
 
       // Build agent tools (core coding tools + ink tools)
-      const vaultEntries = orchestrator.getVaultStore()?.getAllForAgent(agentConfig.name);
+      const vaultEntries = await orchestrator.getVaultStore()?.getAllForAgent(agentConfig.name);
       const vault = resolveAgentVault(vaultEntries);
       agentToolInstances = createCodingTools(cwd, agentConfig.allowedTools, undefined, undefined, vault);
       agentToolInstances.push(...createInkTools(polpoDir, agentConfig.allowedTools));

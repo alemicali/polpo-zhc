@@ -59,6 +59,10 @@ import { WhatsAppGatewayAdapter } from "../notifications/whatsapp-gateway-adapte
 import { WhatsAppStore } from "../stores/whatsapp-store.js";
 import { FilePeerStore } from "./peer-store.js";
 import type { PeerStore } from "./peer-store.js";
+import { FileTeamStore } from "../stores/file-team-store.js";
+import { FileAgentStore } from "../stores/file-agent-store.js";
+import type { TeamStore } from "./team-store.js";
+import type { AgentStore } from "./agent-store.js";
 import { EscalationManager } from "./escalation-manager.js";
 import { SLAMonitor } from "../quality/sla-monitor.js";
 import { QualityController } from "../quality/quality-controller.js";
@@ -66,6 +70,9 @@ import { Scheduler } from "../scheduling/scheduler.js";
 import { TaskWatcherManager } from "./task-watcher.js";
 import type { ApprovalRequest, ApprovalStatus, NotificationAction } from "./types.js";
 import { EncryptedVaultStore } from "../vault/encrypted-store.js";
+import type { VaultStore } from "./vault-store.js";
+import type { PlaybookStore } from "./playbook-store.js";
+import { FilePlaybookStore } from "../stores/file-playbook-store.js";
 
 // Re-export for backward compatibility (consumed by core/index.ts and external modules)
 export { buildFixPrompt, buildRetryPrompt };
@@ -109,10 +116,13 @@ export class Orchestrator extends TypedEmitter {
   private whatsappBridge?: WhatsAppBridge;
   private whatsappStore?: WhatsAppStore;
   private peerStore?: PeerStore;
+  private teamStore!: TeamStore;
+  private agentStore!: AgentStore;
   private channelGateway?: ChannelGateway;
   private configWatcher?: FSWatcher;
   private configReloadTimer?: ReturnType<typeof setTimeout>;
-  private vaultStore?: EncryptedVaultStore;
+  private vaultStore?: VaultStore;
+  private playbookStore!: PlaybookStore;
 
   // Managers
   private agentMgr!: AgentManager;
@@ -229,9 +239,6 @@ export class Orchestrator extends TypedEmitter {
       setModelAllowlist(this.config.settings.modelAllowlist);
     }
 
-    // Validate API keys for all configured models
-    this.validateProviders();
-
     const stores = this.injectedStore
       ? { task: this.injectedStore, run: this.injectedRunStore! }
       : await this.createStores(this.config.settings.storage);
@@ -254,11 +261,40 @@ export class Orchestrator extends TypedEmitter {
     this.memoryStore = ("memoryStore" in stores && stores.memoryStore)
       ? stores.memoryStore
       : new FileMemoryStore(this.polpoDir);
+
+    // Team & Agent stores — Drizzle when available, otherwise file-based
+    this.teamStore = this.drizzleStores?.teamStore ?? new FileTeamStore(this.polpoDir);
+    this.agentStore = this.drizzleStores?.agentStore ?? new FileAgentStore(this.polpoDir);
+
+    // Validate API keys (after stores are available so we can read per-agent models)
+    await this.validateProviders();
+
     await this.initManagers();
     this.initVaultStore();
+    this.playbookStore = this.drizzleStores?.playbookStore ?? new FilePlaybookStore(this.workDir, this.polpoDir);
   }
 
-  private validateProviders(): void {
+  /**
+   * Populate stores from the teams array passed to initInteractive().
+   * Idempotent — skips teams/agents that already exist in the store.
+   */
+  private async populateStores(teams: Team[]): Promise<void> {
+    if (!teams || teams.length === 0) return;
+
+    await this.teamStore.seed(teams);
+
+    const agentsToSeed: Array<AgentConfig & { teamName: string }> = [];
+    for (const team of teams) {
+      for (const agent of team.agents) {
+        agentsToSeed.push({ ...agent, teamName: team.name });
+      }
+    }
+    if (agentsToSeed.length > 0) {
+      await this.agentStore.seed(agentsToSeed);
+    }
+  }
+
+  private async validateProviders(): Promise<void> {
     const modelSpecs: string[] = [];
     // Default model
     if (process.env.POLPO_MODEL) modelSpecs.push(process.env.POLPO_MODEL);
@@ -274,11 +310,10 @@ export class Orchestrator extends TypedEmitter {
     }
     // Judge model
     if (process.env.POLPO_JUDGE_MODEL) modelSpecs.push(process.env.POLPO_JUDGE_MODEL);
-    // Per-agent models
-    for (const team of this.config.teams) {
-      for (const agent of team.agents) {
-        if (agent.model) modelSpecs.push(agent.model);
-      }
+    // Per-agent models (from AgentStore, not config)
+    const agents = await this.agentStore.getAgents();
+    for (const agent of agents) {
+      if (agent.model) modelSpecs.push(agent.model);
     }
 
     if (modelSpecs.length === 0) {
@@ -319,6 +354,8 @@ export class Orchestrator extends TypedEmitter {
       memoryStore: this.memoryStore,
       logStore: this.logStore,
       sessionStore: this.sessionStore,
+      teamStore: this.teamStore,
+      agentStore: this.agentStore,
       hooks: this.hookRegistry,
       config: this.config,
       workDir: this.workDir,
@@ -550,9 +587,31 @@ export class Orchestrator extends TypedEmitter {
       : await this.createStores(settings.storage);
     this.registry = stores.task;
     this.runStore = stores.run;
-    this.memoryStore = new FileMemoryStore(this.polpoDir);
-    await this.initLogStore();
-    await this.initSessionStore();
+
+    // Use Drizzle-provided stores when available, otherwise fall back to file-based
+    if ("logStore" in stores && stores.logStore) {
+      this.logStore = stores.logStore;
+      await this.logStore.startSession();
+      this.setLogSink(this.logStore);
+    } else {
+      await this.initLogStore();
+    }
+    if ("sessionStore" in stores && stores.sessionStore) {
+      this.sessionStore = stores.sessionStore;
+    } else {
+      await this.initSessionStore();
+    }
+    this.memoryStore = ("memoryStore" in stores && stores.memoryStore)
+      ? stores.memoryStore
+      : new FileMemoryStore(this.polpoDir);
+
+    // Team & Agent stores — Drizzle when available, otherwise file-based
+    this.teamStore = this.drizzleStores?.teamStore ?? new FileTeamStore(this.polpoDir);
+    this.agentStore = this.drizzleStores?.agentStore ?? new FileAgentStore(this.polpoDir);
+
+    // Populate stores with the teams passed to initInteractive
+    // (this is project creation, not migration — teams come from the caller)
+    await this.populateStores(teamsArray);
 
     this.config = {
       version: "1",
@@ -573,6 +632,7 @@ export class Orchestrator extends TypedEmitter {
 
     await this.initManagers();
     this.initVaultStore();
+    this.playbookStore = this.drizzleStores?.playbookStore ?? new FilePlaybookStore(this.workDir, this.polpoDir);
     this.interactive = true;
     await this.registry.setState({
       org,
@@ -604,7 +664,7 @@ export class Orchestrator extends TypedEmitter {
         if (this.configReloadTimer) clearTimeout(this.configReloadTimer);
         this.configReloadTimer = setTimeout(() => {
           this.emit("log", { level: "info", message: "[watch] polpo.json changed on disk — auto-reloading config" });
-          this.reloadConfig();
+          this.reloadConfig().catch(() => {});
         }, 500);
       });
 
@@ -669,16 +729,20 @@ export class Orchestrator extends TypedEmitter {
   getRunStore(): RunStore { return this.runStore; }
   getPolpoDir(): string { return this.polpoDir; }
   getMemoryStore(): MemoryStore { return this.memoryStore; }
-  getVaultStore(): EncryptedVaultStore | undefined { return this.vaultStore; }
+  getVaultStore(): VaultStore | undefined { return this.vaultStore; }
+  getPlaybookStore(): PlaybookStore { return this.playbookStore; }
+  getTeamStore(): TeamStore { return this.teamStore; }
+  getAgentStore(): AgentStore { return this.agentStore; }
 
   /**
-   * Initialize the encrypted vault store.
-   * Credentials are stored in .polpo/vault.enc (AES-256-GCM encrypted).
+   * Initialize the vault store.
+   * When storage is "sqlite" or "postgres", uses DrizzleVaultStore (AES-256-GCM encrypted in DB).
+   * Otherwise falls back to EncryptedVaultStore (file-based, .polpo/vault.enc).
    * Key: POLPO_VAULT_KEY env var or auto-generated ~/.polpo/vault.key.
    */
   private initVaultStore(): void {
     try {
-      this.vaultStore = new EncryptedVaultStore(this.polpoDir);
+      this.vaultStore = this.drizzleStores?.vaultStore ?? new EncryptedVaultStore(this.polpoDir);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       this.emit("log", { level: "warn", message: `Vault store init failed: ${msg}. Vault features disabled.` });
@@ -687,9 +751,9 @@ export class Orchestrator extends TypedEmitter {
 
   // ── Agent Management (delegates to AgentManager) ──
 
-  getAgents(): AgentConfig[] { return this.agentMgr.getAgents(); }
-  getTeams(): Team[] { return this.agentMgr.getTeams(); }
-  getTeam(name?: string): Team | undefined { return this.agentMgr.getTeam(name); }
+  async getAgents(): Promise<AgentConfig[]> { return this.agentMgr.getAgents(); }
+  async getTeams(): Promise<Team[]> { return this.agentMgr.getTeams(); }
+  async getTeam(name?: string): Promise<Team | undefined> { return this.agentMgr.getTeam(name); }
   getConfig(): PolpoConfig | null { return this.config; }
   get isInitialized(): boolean { return this.interactive; }
   async addTeam(team: Team): Promise<void> { return this.agentMgr.addTeam(team); }
@@ -697,7 +761,8 @@ export class Orchestrator extends TypedEmitter {
   async renameTeam(oldName: string, newName: string): Promise<void> { return this.agentMgr.renameTeam(oldName, newName); }
   async addAgent(agent: AgentConfig, teamName?: string): Promise<void> { return this.agentMgr.addAgent(agent, teamName); }
   async removeAgent(name: string): Promise<boolean> { return this.agentMgr.removeAgent(name); }
-  findAgentTeam(name: string): Team | undefined { return this.agentMgr.findAgentTeam(name); }
+  async updateAgent(name: string, updates: Partial<Omit<AgentConfig, "name">>): Promise<AgentConfig> { return this.agentMgr.updateAgent(name, updates); }
+  async findAgentTeam(name: string): Promise<Team | undefined> { return this.agentMgr.findAgentTeam(name); }
   async addVolatileAgent(agent: AgentConfig, group: string): Promise<void> { return this.agentMgr.addVolatileAgent(agent, group); }
   async cleanupVolatileAgents(group: string): Promise<number> { return this.agentMgr.cleanupVolatileAgents(group); }
 
@@ -970,7 +1035,7 @@ export class Orchestrator extends TypedEmitter {
    *
    * Returns `true` if the config was successfully reloaded.
    */
-  reloadConfig(): boolean {
+  async reloadConfig(): Promise<boolean> {
     const polpoConfig = loadPolpoConfig(this.polpoDir);
     if (!polpoConfig) {
       this.emit("log", { level: "warn", message: "[reload] polpo.json not found or unparseable — skipping reload" });
@@ -998,9 +1063,9 @@ export class Orchestrator extends TypedEmitter {
     this.approvalMgr = undefined;
 
     // 2. Update config in-place (preserves the shared reference in OrchestratorContext)
+    //    Settings and providers come from polpo.json; teams come from stores.
     const newSettings = polpoConfig.settings ?? this.config.settings;
     this.config.settings = newSettings;
-    if (polpoConfig.teams) this.config.teams = polpoConfig.teams;
     if (polpoConfig.providers) {
       this.config.providers = polpoConfig.providers;
       setProviderOverrides(polpoConfig.providers);
@@ -1008,6 +1073,9 @@ export class Orchestrator extends TypedEmitter {
     if (newSettings.modelAllowlist) {
       setModelAllowlist(newSettings.modelAllowlist);
     }
+
+    // Re-sync config.teams from TeamStore/AgentStore (authoritative source)
+    await this.agentMgr.syncConfigCache();
 
     // 3. Invalidate cached agent work dir and rebuild OrchestratorContext
     this.cachedAgentWorkDir = null;
@@ -1018,12 +1086,35 @@ export class Orchestrator extends TypedEmitter {
       memoryStore: this.memoryStore,
       logStore: this.logStore,
       sessionStore: this.sessionStore,
+      teamStore: this.teamStore,
+      agentStore: this.agentStore,
       hooks: this.hookRegistry,
       config: this.config,
       workDir: this.workDir,
       agentWorkDir: this.getAgentWorkDir(),
       polpoDir: this.polpoDir,
       assessFn: this.assessFn,
+
+      // Shell-specific ports (must match initManagers)
+      killProcess: (pid, signal) => { try { process.kill(pid, (signal ?? "SIGTERM") as NodeJS.Signals); } catch { /* already dead */ } },
+      loadConfig: () => loadPolpoConfig(this.polpoDir),
+      saveConfig: (config) => savePolpoConfig(this.polpoDir, config),
+      queryLLM: async (prompt, model) => {
+        const { queryOrchestratorText } = await import("../llm/query.js");
+        return queryOrchestratorText(prompt, model);
+      },
+      findLogForTask: (polpoDir, taskId, runId) => findLogForTask(polpoDir, taskId, runId),
+      buildExecutionSummary: (logPath) => buildExecutionSummary(logPath),
+
+      // Inject Drizzle stores when storage is "sqlite" or "postgres"
+      ...(this.drizzleStores ? {
+        approvalStore: this.drizzleStores.approvalStore,
+        notificationStore: this.drizzleStores.notificationStore,
+        checkpointStore: this.drizzleStores.checkpointStore,
+        delayStore: this.drizzleStores.delayStore,
+        peerStore: this.drizzleStores.peerStore,
+        configStore: this.drizzleStores.configStore,
+      } : {}),
     };
 
     // 4. Re-initialize optional subsystems from new config
@@ -1331,6 +1422,8 @@ export class Orchestrator extends TypedEmitter {
 
   private async seedTasks(): Promise<void> {
     await this.taskMgr.seedTasks();
+    // Sync config cache from stores so state reflects authoritative data
+    await this.agentMgr.syncConfigCache();
     // Also set initial state for non-interactive mode
     await this.registry.setState({
       org: this.config.org,
@@ -1351,7 +1444,7 @@ export class Orchestrator extends TypedEmitter {
 
     this.emit("orchestrator:started", {
       org: this.config.org,
-      agents: this.agentMgr.getAgents().map((a: AgentConfig) => a.name),
+      agents: (await this.agentMgr.getAgents()).map((a: AgentConfig) => a.name),
     });
 
     this.stopped = false;
@@ -1537,7 +1630,7 @@ export class Orchestrator extends TypedEmitter {
 
       // Per-agent concurrency limit
       const agentName = task.assignTo;
-      const agentConfig = this.agentMgr.findAgent(agentName);
+      const agentConfig = await this.agentMgr.findAgent(agentName);
       if (agentConfig?.maxConcurrency) {
         if ((agentActiveCounts.get(agentName) ?? 0) >= agentConfig.maxConcurrency) {
           queued++;

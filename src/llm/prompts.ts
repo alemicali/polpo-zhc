@@ -45,7 +45,7 @@ export async function buildChatSystemPrompt(
   state: PolpoState | null,
   _workDir?: string,
 ): Promise<string> {
-  const teams = orchestrator.getTeams();
+  const teams = await orchestrator.getTeams();
   const config = orchestrator.getConfig();
   const memory = await orchestrator.getMemory();
   const polpoDir = orchestrator.getPolpoDir();
@@ -1462,7 +1462,7 @@ export async function buildMissionSystemPrompt(
   workDir: string,
 ): Promise<string> {
   const orchestraKnowledge = await buildChatSystemPrompt(orchestrator, state, workDir);
-  const teams = orchestrator.getTeams();
+  const teams = await orchestrator.getTeams();
   const allAgents = teams.flatMap(t => t.agents);
   const availableSkills = discoverSkills(workDir, orchestrator.getPolpoDir());
 
@@ -1679,12 +1679,12 @@ export async function buildTaskPrepPrompt(
 }
 
 /** Build the system prompt for AI team generation */
-export function buildTeamGenPrompt(
+export async function buildTeamGenPrompt(
   orchestrator: Orchestrator,
   workDir: string,
   description: string,
-): string {
-  const currentTeams = orchestrator.getTeams();
+): Promise<string> {
+  const currentTeams = await orchestrator.getTeams();
   const alreadyInstalled = discoverSkills(workDir, orchestrator.getPolpoDir());
   const installedSection = alreadyInstalled.length > 0
     ? `Already installed skills: ${alreadyInstalled.map(s => s.name).join(", ")}`

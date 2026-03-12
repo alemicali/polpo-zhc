@@ -24,8 +24,8 @@ import {
   updateSkillIndex,
   loadSkillIndex,
 } from "../../llm/skills.js";
-import { loadPolpoConfig } from "../../core/config.js";
 import type { AgentConfig } from "../../core/types.js";
+import { FileAgentStore } from "../../stores/file-agent-store.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -113,23 +113,23 @@ export function registerSkillsCommands(program: Command): void {
     .alias("ls")
     .description("List skills in the pool with agent assignments")
     .option("-d, --dir <path>", "Working directory", ".")
-    .action((opts) => {
+    .action(async (opts) => {
       try {
         const cwd = resolve(opts.dir);
         const polpoDir = getPolpoDir(opts.dir);
 
-        // Merge agent names from filesystem AND config
+        // Merge agent names from filesystem AND AgentStore
         const fsAgentNames = getAgentNames(polpoDir);
-        const config = loadPolpoConfig(polpoDir);
-        const configAgents = (config?.teams?.[0]?.agents ?? []) as AgentConfig[];
-        const configAgentNames = configAgents.map(a => a.name);
+        const agentStore = new FileAgentStore(polpoDir);
+        const storeAgents = await agentStore.getAgents();
+        const storeAgentNames = storeAgents.map(a => a.name);
 
         // Deduplicated agent names
-        const agentNames = [...new Set([...fsAgentNames, ...configAgentNames])];
+        const agentNames = [...new Set([...fsAgentNames, ...storeAgentNames])];
 
-        // Build agentConfigSkills map from config
+        // Build agentConfigSkills map from store agents
         const agentConfigSkills = new Map<string, string[]>();
-        for (const agent of configAgents) {
+        for (const agent of storeAgents) {
           if (agent.skills?.length) {
             agentConfigSkills.set(agent.name, agent.skills);
           }

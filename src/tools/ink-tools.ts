@@ -16,7 +16,7 @@ import { Type } from "@sinclair/typebox";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 import { execSync } from "node:child_process";
 import {
-  existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, rmSync, cpSync,
+  existsSync, mkdirSync, readFileSync, readdirSync, rmSync, cpSync,
 } from "node:fs";
 import { join, resolve } from "node:path";
 import {
@@ -34,6 +34,10 @@ import {
 } from "../core/ink.js";
 import { loadPolpoConfig, savePolpoConfig } from "../core/config.js";
 import type { PolpoFileConfig, AgentConfig, Team } from "../core/types.js";
+import { FileTeamStore } from "../stores/file-team-store.js";
+import { FileAgentStore } from "../stores/file-agent-store.js";
+import { FilePlaybookStore } from "../stores/file-playbook-store.js";
+import { FileMemoryStore } from "../stores/file-memory-store.js";
 
 const INK_API_URL = "https://polpo.sh/api";
 
@@ -240,10 +244,20 @@ function createInkAddTool(polpoDir: string): AgentTool<typeof InkAddSchema> {
           packages = match;
         }
 
-        // Install: merge packages into existing config
+        // Install: merge packages via stores
         const installed: string[] = [];
+        const teamStore = new FileTeamStore(polpoDir);
+        const agentStore = new FileAgentStore(polpoDir);
+        const playbookStore = new FilePlaybookStore(resolve(polpoDir, ".."), polpoDir);
 
-        // Load existing config (or create minimal one)
+        // Ensure default team exists
+        const existingTeams = await teamStore.getTeams();
+        if (existingTeams.length === 0) {
+          await teamStore.createTeam({ name: "default", agents: [] });
+        }
+        const defaultTeamName = (await teamStore.getTeams())[0].name;
+
+        // Load config for settings merging only
         let config: PolpoFileConfig = loadPolpoConfig(polpoDir) ?? {
           org: "",
           teams: [{ name: "default", agents: [] }],
@@ -254,47 +268,37 @@ function createInkAddTool(polpoDir: string): AgentTool<typeof InkAddSchema> {
         for (const pkg of packages) {
           switch (pkg.type) {
             case "playbook": {
-              // Copy playbook directory
-              const destDir = join(polpoDir, "playbooks", pkg.name);
-              mkdirSync(destDir, { recursive: true });
-              const srcDir = resolve(pkg.path, "..");
-              const entries = readdirSync(srcDir);
-              for (const entry of entries) {
-                cpSync(join(srcDir, entry), join(destDir, entry), { recursive: true });
-              }
+              await playbookStore.save(pkg.content as import("../core/playbook.js").PlaybookDefinition);
               installed.push(`playbook: ${pkg.name}`);
               break;
             }
             case "agent": {
-              // Merge agent into polpo.json (first team, no collision prompt — agents auto-merge)
               const agentContent = pkg.content as AgentConfig;
               const cleanAgent = { ...agentContent };
               delete (cleanAgent as any).version;
               delete (cleanAgent as any).author;
               delete (cleanAgent as any).tags;
 
-              const targetTeam = config.teams[0] ?? { name: "default", agents: [] };
-              if (!config.teams.includes(targetTeam)) config.teams.push(targetTeam);
-
-              const existingIdx = targetTeam.agents.findIndex((a) => a.name === cleanAgent.name);
-              if (existingIdx >= 0) {
+              const existingAgent = await agentStore.getAgent(cleanAgent.name);
+              if (existingAgent) {
                 // Merge: fill in missing fields
-                const existing = targetTeam.agents[existingIdx];
-                if (!existing.role && cleanAgent.role) existing.role = cleanAgent.role;
-                if (!existing.model && cleanAgent.model) existing.model = cleanAgent.model;
-                if (!existing.identity && cleanAgent.identity) existing.identity = cleanAgent.identity;
-                if (!existing.allowedTools && cleanAgent.allowedTools) existing.allowedTools = cleanAgent.allowedTools;
-                if (!existing.systemPrompt && cleanAgent.systemPrompt) existing.systemPrompt = cleanAgent.systemPrompt;
+                const updates: Partial<AgentConfig> = {};
+                if (!existingAgent.role && cleanAgent.role) updates.role = cleanAgent.role;
+                if (!existingAgent.model && cleanAgent.model) updates.model = cleanAgent.model;
+                if (!existingAgent.identity && cleanAgent.identity) updates.identity = cleanAgent.identity;
+                if (!existingAgent.allowedTools && cleanAgent.allowedTools) updates.allowedTools = cleanAgent.allowedTools;
+                if (!existingAgent.systemPrompt && cleanAgent.systemPrompt) updates.systemPrompt = cleanAgent.systemPrompt;
+                if (Object.keys(updates).length > 0) {
+                  await agentStore.updateAgent(cleanAgent.name, updates);
+                }
                 installed.push(`agent: ${pkg.name} (merged)`);
               } else {
-                targetTeam.agents.push(cleanAgent);
+                await agentStore.createAgent(cleanAgent, defaultTeamName);
                 installed.push(`agent: ${pkg.name}`);
               }
-              configChanged = true;
               break;
             }
             case "company": {
-              // Merge company teams/agents into config
               const companyContent = pkg.content as PolpoFileConfig;
               const srcDir = resolve(pkg.path, "..");
 
@@ -305,19 +309,27 @@ function createInkAddTool(polpoDir: string): AgentTool<typeof InkAddSchema> {
                   : [];
 
               for (const incomingTeam of companyTeams) {
-                const existingTeam = config.teams.find((t) => t.name === incomingTeam.name);
+                const existingTeam = await teamStore.getTeam(incomingTeam.name);
                 if (existingTeam) {
                   for (const agent of incomingTeam.agents) {
                     const cleanAgent = { ...agent };
                     delete (cleanAgent as any).version;
                     delete (cleanAgent as any).author;
                     delete (cleanAgent as any).tags;
-                    if (!existingTeam.agents.find((a) => a.name === agent.name)) {
-                      existingTeam.agents.push(cleanAgent);
+                    const existing = await agentStore.getAgent(agent.name);
+                    if (!existing) {
+                      await agentStore.createAgent(cleanAgent, incomingTeam.name);
                     }
                   }
                 } else {
-                  config.teams.push(incomingTeam);
+                  await teamStore.createTeam({ name: incomingTeam.name, description: incomingTeam.description, agents: [] });
+                  for (const agent of incomingTeam.agents) {
+                    const cleanAgent = { ...agent };
+                    delete (cleanAgent as any).version;
+                    delete (cleanAgent as any).author;
+                    delete (cleanAgent as any).tags;
+                    await agentStore.createAgent(cleanAgent, incomingTeam.name);
+                  }
                 }
               }
 
@@ -328,19 +340,17 @@ function createInkAddTool(polpoDir: string): AgentTool<typeof InkAddSchema> {
                 for (const [key, value] of Object.entries(inc)) {
                   if (settings[key] == null && value != null) settings[key] = value;
                 }
+                configChanged = true;
               }
 
-              // Append memory.md if present
+              // Append memory.md if present (via MemoryStore)
               const srcMemory = join(srcDir, "memory.md");
               if (existsSync(srcMemory)) {
-                const destMemory = join(polpoDir, "memory.md");
+                const memStore = new FileMemoryStore(polpoDir);
+                const existingMem = await memStore.get();
                 const memContent = readFileSync(srcMemory, "utf-8");
-                if (existsSync(destMemory)) {
-                  const existing = readFileSync(destMemory, "utf-8");
-                  writeFileSync(destMemory, existing + `\n\n<!-- Imported from ink: ${pkg.name} -->\n` + memContent, "utf-8");
-                } else {
-                  writeFileSync(destMemory, memContent, "utf-8");
-                }
+                const separator = `\n\n<!-- Imported from ink: ${pkg.name} -->\n`;
+                await memStore.save(existingMem ? existingMem + separator + memContent : memContent);
               }
 
               // Copy skills if present
@@ -358,16 +368,16 @@ function createInkAddTool(polpoDir: string): AgentTool<typeof InkAddSchema> {
                 }
               }
 
-              configChanged = true;
               installed.push(`company: ${pkg.name}`);
               break;
             }
           }
         }
 
-        // Save config if changed
+        // Save config if non-team data changed (strip teams — they live in stores now)
         if (configChanged) {
-          savePolpoConfig(polpoDir, config);
+          const { teams: _t, ...configWithoutTeams } = config;
+          savePolpoConfig(polpoDir, { ...configWithoutTeams, teams: [] } as PolpoFileConfig);
         }
 
         // Update lock file
@@ -421,13 +431,10 @@ function createInkRemoveTool(polpoDir: string): AgentTool<typeof InkRemoveSchema
           return ok(`Source "${params.source}" is not installed. Use ink_browse to see installed packages.`);
         }
 
-        // Uninstall packages
-        const removed = uninstallInkPackages(
-          entry,
-          polpoDir,
-          () => loadPolpoConfig(polpoDir),
-          (config) => savePolpoConfig(polpoDir, config),
-        );
+        // Uninstall packages via stores
+        const removeAgentStore = new FileAgentStore(polpoDir);
+        const removePlaybookStore = new FilePlaybookStore(resolve(polpoDir, ".."), polpoDir);
+        const removed = await uninstallInkPackages(entry, polpoDir, removeAgentStore, removePlaybookStore);
 
         // Remove from lock file
         writeInkLock(polpoDir, removeInkLockEntry(lock, params.source));
@@ -439,7 +446,7 @@ function createInkRemoveTool(polpoDir: string): AgentTool<typeof InkRemoveSchema
         }
 
         return ok(
-          `Removed "${params.source}" (${entry.packages.length} package(s)):\n\n${removed.map(r => `  - ${r}`).join("\n")}\n\nLock file updated.`,
+          `Removed "${params.source}" (${entry.packages.length} package(s)):\n\n${removed.map((r: string) => `  - ${r}`).join("\n")}\n\nLock file updated.`,
           { source: params.source, removed },
         );
       } catch (e: any) {
@@ -515,33 +522,25 @@ function createInkUpdateTool(polpoDir: string): AgentTool<typeof InkUpdateSchema
             continue;
           }
 
-          // Uninstall old packages
-          uninstallInkPackages(
-            entry,
-            polpoDir,
-            () => loadPolpoConfig(polpoDir),
-            (config) => savePolpoConfig(polpoDir, config),
-          );
+          // Uninstall old packages via stores
+          const updateAgentStore = new FileAgentStore(polpoDir);
+          const updateTeamStore = new FileTeamStore(polpoDir);
+          const updatePlaybookStore = new FilePlaybookStore(resolve(polpoDir, ".."), polpoDir);
+          await uninstallInkPackages(entry, polpoDir, updateAgentStore, updatePlaybookStore);
 
-          // Re-install new packages (same logic as ink_add)
-          let config: PolpoFileConfig = loadPolpoConfig(polpoDir) ?? {
-            org: "",
-            teams: [{ name: "default", agents: [] }],
-            settings: { maxRetries: 3, workDir: ".", logLevel: "normal" },
-          } as any;
-          let configChanged = false;
+          // Ensure default team exists
+          const updateTeams = await updateTeamStore.getTeams();
+          if (updateTeams.length === 0) {
+            await updateTeamStore.createTeam({ name: "default", agents: [] });
+          }
+          const updateDefaultTeam = (await updateTeamStore.getTeams())[0].name;
+
           const installed: string[] = [];
 
           for (const pkg of packages) {
             switch (pkg.type) {
               case "playbook": {
-                const destDir = join(polpoDir, "playbooks", pkg.name);
-                mkdirSync(destDir, { recursive: true });
-                const srcDir = resolve(pkg.path, "..");
-                const srcEntries = readdirSync(srcDir);
-                for (const e of srcEntries) {
-                  cpSync(join(srcDir, e), join(destDir, e), { recursive: true });
-                }
+                await updatePlaybookStore.save(pkg.content as import("../core/playbook.js").PlaybookDefinition);
                 installed.push(`playbook: ${pkg.name}`);
                 break;
               }
@@ -552,55 +551,54 @@ function createInkUpdateTool(polpoDir: string): AgentTool<typeof InkUpdateSchema
                 delete (cleanAgent as any).author;
                 delete (cleanAgent as any).tags;
 
-                const targetTeam = config.teams[0] ?? { name: "default", agents: [] };
-                if (!config.teams.includes(targetTeam)) config.teams.push(targetTeam);
-
-                const existingIdx = targetTeam.agents.findIndex((a) => a.name === cleanAgent.name);
-                if (existingIdx >= 0) {
-                  targetTeam.agents[existingIdx] = cleanAgent;
+                const existingAgent = await updateAgentStore.getAgent(cleanAgent.name);
+                if (existingAgent) {
+                  const { name: _, ...updates } = cleanAgent;
+                  await updateAgentStore.updateAgent(cleanAgent.name, updates);
                   installed.push(`agent: ${pkg.name} (updated)`);
                 } else {
-                  targetTeam.agents.push(cleanAgent);
+                  await updateAgentStore.createAgent(cleanAgent, updateDefaultTeam);
                   installed.push(`agent: ${pkg.name}`);
                 }
-                configChanged = true;
                 break;
               }
               case "company": {
-                // Re-install company (same as ink_add company logic)
                 const companyContent = pkg.content as PolpoFileConfig;
                 const companyTeams: Team[] = Array.isArray(companyContent.teams)
                   ? companyContent.teams
                   : (companyContent as any).team ? [(companyContent as any).team] : [];
 
                 for (const incomingTeam of companyTeams) {
-                  const existingTeam = config.teams.find((t) => t.name === incomingTeam.name);
+                  const existingTeam = await updateTeamStore.getTeam(incomingTeam.name);
                   if (existingTeam) {
                     for (const agent of incomingTeam.agents) {
                       const cleanAgent = { ...agent };
                       delete (cleanAgent as any).version;
                       delete (cleanAgent as any).author;
                       delete (cleanAgent as any).tags;
-                      const idx = existingTeam.agents.findIndex((a) => a.name === agent.name);
-                      if (idx >= 0) {
-                        existingTeam.agents[idx] = cleanAgent;
+                      const existing = await updateAgentStore.getAgent(agent.name);
+                      if (existing) {
+                        const { name: _, ...updates } = cleanAgent;
+                        await updateAgentStore.updateAgent(agent.name, updates);
                       } else {
-                        existingTeam.agents.push(cleanAgent);
+                        await updateAgentStore.createAgent(cleanAgent, incomingTeam.name);
                       }
                     }
                   } else {
-                    config.teams.push(incomingTeam);
+                    await updateTeamStore.createTeam({ name: incomingTeam.name, description: incomingTeam.description, agents: [] });
+                    for (const agent of incomingTeam.agents) {
+                      const cleanAgent = { ...agent };
+                      delete (cleanAgent as any).version;
+                      delete (cleanAgent as any).author;
+                      delete (cleanAgent as any).tags;
+                      await updateAgentStore.createAgent(cleanAgent, incomingTeam.name);
+                    }
                   }
                 }
-                configChanged = true;
                 installed.push(`company: ${pkg.name}`);
                 break;
               }
             }
-          }
-
-          if (configChanged) {
-            savePolpoConfig(polpoDir, config);
           }
 
           // Update lock entry

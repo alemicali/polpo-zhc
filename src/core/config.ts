@@ -232,21 +232,24 @@ export async function parseConfig(workDir: string): Promise<PolpoConfig> {
     throw new Error(`No configuration found: missing .polpo/polpo.json in ${workDir}. Run 'polpo init' first.`);
   }
 
-  // Validate all agents across all teams
-  for (const team of polpoConfig.teams) {
-    if (team.agents?.length) {
+  // Validate agents embedded in polpo.json (if any).
+  // After migration to TeamStore/AgentStore, teams in polpo.json may be empty —
+  // that's fine, agents are validated at the store level.
+  const teamsWithAgents = (polpoConfig.teams ?? []).filter(t => t.agents?.length);
+  if (teamsWithAgents.length > 0) {
+    for (const team of teamsWithAgents) {
       validateAgents(team.agents);
     }
-  }
 
-  // Check for duplicate agent names across teams
-  const allNames = new Set<string>();
-  for (const team of polpoConfig.teams) {
-    for (const agent of team.agents) {
-      if (allNames.has(agent.name)) {
-        throw new Error(`Duplicate agent name "${agent.name}" across teams. Agent names must be globally unique.`);
+    // Check for duplicate agent names across teams
+    const allNames = new Set<string>();
+    for (const team of teamsWithAgents) {
+      for (const agent of team.agents) {
+        if (allNames.has(agent.name)) {
+          throw new Error(`Duplicate agent name "${agent.name}" across teams. Agent names must be globally unique.`);
+        }
+        allNames.add(agent.name);
       }
-      allNames.add(agent.name);
     }
   }
 

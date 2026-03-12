@@ -61,7 +61,7 @@ export function vaultRoutes(): OpenAPIHono<ServerEnv> {
     },
   });
 
-  app.openapi(saveEntryRoute, (c) => {
+  app.openapi(saveEntryRoute, async (c) => {
     const orchestrator = c.get("orchestrator");
     const vaultStore = orchestrator.getVaultStore();
     if (!vaultStore) {
@@ -75,7 +75,7 @@ export function vaultRoutes(): OpenAPIHono<ServerEnv> {
       credentials: body.credentials,
     };
 
-    vaultStore.set(body.agent, body.service, entry);
+    await vaultStore.set(body.agent, body.service, entry);
 
     // Return only metadata — NEVER return credential values
     return c.json({
@@ -125,7 +125,7 @@ export function vaultRoutes(): OpenAPIHono<ServerEnv> {
     },
   });
 
-  app.openapi(listEntriesRoute, (c) => {
+  app.openapi(listEntriesRoute, async (c) => {
     const orchestrator = c.get("orchestrator");
     const vaultStore = orchestrator.getVaultStore();
     if (!vaultStore) {
@@ -133,7 +133,7 @@ export function vaultRoutes(): OpenAPIHono<ServerEnv> {
     }
 
     const { agent } = c.req.valid("param");
-    const entries = vaultStore.list(agent);
+    const entries = await vaultStore.list(agent);
     return c.json({ ok: true, data: entries }, 200);
   });
 
@@ -189,7 +189,7 @@ export function vaultRoutes(): OpenAPIHono<ServerEnv> {
     },
   });
 
-  app.openapi(patchEntryRoute, (c) => {
+  app.openapi(patchEntryRoute, async (c) => {
     const orchestrator = c.get("orchestrator");
     const vaultStore = orchestrator.getVaultStore();
     if (!vaultStore) {
@@ -197,19 +197,19 @@ export function vaultRoutes(): OpenAPIHono<ServerEnv> {
     }
 
     const { agent, service } = c.req.valid("param");
-    const existing = vaultStore.get(agent, service);
+    const existing = await vaultStore.get(agent, service);
     if (!existing) {
       return c.json({ ok: false, error: `No vault entry "${service}" for agent "${agent}".` }, 404);
     }
 
     const body = c.req.valid("json");
-    const mergedKeys = vaultStore.patch(agent, service, {
+    const mergedKeys = await vaultStore.patch(agent, service, {
       type: body.type,
       label: body.label,
       credentials: body.credentials,
     });
 
-    const updated = vaultStore.get(agent, service)!;
+    const updated = (await vaultStore.get(agent, service))!;
     return c.json({
       ok: true,
       data: {
@@ -245,7 +245,7 @@ export function vaultRoutes(): OpenAPIHono<ServerEnv> {
     },
   });
 
-  app.openapi(deleteEntryRoute, (c) => {
+  app.openapi(deleteEntryRoute, async (c) => {
     const orchestrator = c.get("orchestrator");
     const vaultStore = orchestrator.getVaultStore();
     if (!vaultStore) {
@@ -253,7 +253,7 @@ export function vaultRoutes(): OpenAPIHono<ServerEnv> {
     }
 
     const { agent, service } = c.req.valid("param");
-    const removed = vaultStore.remove(agent, service);
+    const removed = await vaultStore.remove(agent, service);
     return c.json({ ok: true, data: { removed } }, 200);
   });
 

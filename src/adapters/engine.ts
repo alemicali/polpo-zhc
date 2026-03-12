@@ -464,13 +464,9 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
     effectiveAllowedPaths = undefined;
   }
 
-  // Resolve agent vault credentials upfront — vault tools are core (always available)
-  const vaultEntries = ctx?.vaultStore?.getAllForAgent(agentConfig.name);
-  const vault = resolveAgentVault(vaultEntries);
-
-  // Start with core coding tools (sync); extended tools loaded async in the run phase
-  // Vault is passed here so vault_get/vault_list are available from the start
-  const codingTools = createCodingTools(cwd, agentConfig.allowedTools, effectiveAllowedPaths, outputDir, vault);
+  // Vault resolution is async — will be resolved in handle.done before tools are used.
+  // Start with core coding tools WITHOUT vault; vault tools are added in the async phase.
+  const codingTools = createCodingTools(cwd, agentConfig.allowedTools, effectiveAllowedPaths, outputDir, undefined);
 
   // Ink tools (always available — search, browse, install from Ink Hub)
   if (ctx?.polpoDir) {
@@ -596,9 +592,16 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
   // Run the agent and capture result
   handle.done = (async (): Promise<TaskResult> => {
     try {
-      // Resolve all tools (browser/email auto-detected from allowedTools) before prompting
-      // Note: vault is already resolved above and included in codingTools as core tools
-      let allTools = codingTools;
+      // Resolve vault credentials (async) — then rebuild tools with vault included
+      const vaultEntries = await ctx?.vaultStore?.getAllForAgent(agentConfig.name);
+      const vault = resolveAgentVault(vaultEntries);
+
+      // Rebuild tools with vault resolved
+      let allTools = createCodingTools(cwd, agentConfig.allowedTools, effectiveAllowedPaths, outputDir, vault);
+      if (ctx?.polpoDir) {
+        allTools.push(...createInkToolsFn(ctx.polpoDir, agentConfig.allowedTools));
+      }
+
       if (hasExtendedTools) {
         allTools = await createAllTools({
           cwd,
@@ -613,8 +616,8 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
           whatsappSendMessage: ctx?.whatsappSendMessage,
           polpoDir: ctx?.polpoDir,
         });
-        agent.setTools(allTools);
       }
+      agent.setTools(allTools);
 
 
       const prompt = buildPrompt(task);

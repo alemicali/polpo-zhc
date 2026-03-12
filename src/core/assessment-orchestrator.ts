@@ -2,7 +2,7 @@ import { join, basename } from "node:path";
 import { existsSync, readdirSync } from "node:fs";
 import type { OrchestratorContext } from "./orchestrator-context.js";
 import type { Task, TaskResult, AssessmentResult, TaskExpectation, ReviewContext } from "./types.js";
-import { setAssessment, findAgent } from "./types.js";
+import { setAssessment } from "./types.js";
 import { buildFixPrompt, buildRetryPrompt, buildSideEffectFixPrompt, buildSideEffectRetryPrompt, buildJudgePrompt, type JudgeVerdict, type JudgeCorrection } from "./assessment-prompts.js";
 import { looksLikeQuestion, classifyAsQuestion } from "./question-detector.js";
 import { generateAnswer } from "../llm/answer-generator.js";
@@ -702,11 +702,11 @@ export class AssessmentOrchestrator {
       // Check if we should escalate to a different agent
       // fallbackAgent resolution: explicit policy > agent.reportsTo (org chart)
       let assignTo = current.assignTo;
-      const currentAgent = findAgent(this.ctx.config.teams, current.assignTo);
+      const currentAgent = await this.ctx.agentStore.getAgent(current.assignTo);
       const effectiveFallback = policy?.fallbackAgent ?? currentAgent?.reportsTo;
       if (policy?.escalateAfter !== undefined && nextAttempt >= policy.escalateAfter) {
         if (effectiveFallback) {
-          const fallback = findAgent(this.ctx.config.teams, effectiveFallback);
+          const fallback = await this.ctx.agentStore.getAgent(effectiveFallback);
           if (fallback) {
             assignTo = effectiveFallback;
             this.ctx.emitter.emit("log", { level: "info", message: `[${taskId}] Escalating to ${assignTo} (attempt ${nextAttempt})` });
