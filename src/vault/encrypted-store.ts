@@ -11,95 +11,20 @@
  * Plaintext is JSON: Record<agentName, Record<serviceName, VaultEntry>>
  */
 
-import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync, mkdirSync, chmodSync } from "node:fs";
 import { join } from "node:path";
-import { homedir } from "node:os";
 import type { VaultEntry } from "../core/types.js";
 import type { VaultStore } from "../core/vault-store.js";
+import { resolveKey, encrypt, decrypt } from "@polpo-ai/vault-crypto";
 
 // ── Constants ──
 
-const ALGORITHM = "aes-256-gcm";
-const IV_LENGTH = 12;
-const AUTH_TAG_LENGTH = 16;
-const KEY_LENGTH = 32; // 256 bits
 const VAULT_FILENAME = "vault.enc";
-const GLOBAL_KEY_DIR = join(homedir(), ".polpo");
-const GLOBAL_KEY_FILE = join(GLOBAL_KEY_DIR, "vault.key");
 
 // ── Internal types ──
 
 /** Full vault data structure: agent → service → entry */
 type VaultData = Record<string, Record<string, VaultEntry>>;
-
-// ── Key Management ──
-
-/**
- * Resolve the encryption key from env var or key file.
- * Auto-generates key file on first use.
- */
-function resolveKey(): Buffer {
-  // 1. Check env var first (CI/Docker override)
-  const envKey = process.env.POLPO_VAULT_KEY;
-  if (envKey) {
-    const buf = Buffer.from(envKey, "hex");
-    if (buf.length !== KEY_LENGTH) {
-      throw new Error(
-        `POLPO_VAULT_KEY must be ${KEY_LENGTH * 2} hex characters (${KEY_LENGTH} bytes). Got ${envKey.length} characters.`,
-      );
-    }
-    return buf;
-  }
-
-  // 2. Read or generate key file
-  if (existsSync(GLOBAL_KEY_FILE)) {
-    const raw = readFileSync(GLOBAL_KEY_FILE);
-    // Key file can be raw bytes or hex-encoded
-    if (raw.length === KEY_LENGTH) return raw;
-    const hex = raw.toString("utf-8").trim();
-    const buf = Buffer.from(hex, "hex");
-    if (buf.length === KEY_LENGTH) return buf;
-    throw new Error(`Invalid vault key file: ${GLOBAL_KEY_FILE}. Expected ${KEY_LENGTH} bytes.`);
-  }
-
-  // Auto-generate
-  if (!existsSync(GLOBAL_KEY_DIR)) {
-    mkdirSync(GLOBAL_KEY_DIR, { recursive: true });
-  }
-  const key = randomBytes(KEY_LENGTH);
-  writeFileSync(GLOBAL_KEY_FILE, key);
-  // Set restrictive permissions (owner-only)
-  try {
-    chmodSync(GLOBAL_KEY_FILE, 0o600);
-  } catch {
-    // chmod may fail on Windows — non-fatal
-  }
-  return key;
-}
-
-// ── Encryption / Decryption ──
-
-function encrypt(data: Buffer, key: Buffer): Buffer {
-  const iv = randomBytes(IV_LENGTH);
-  const cipher = createCipheriv(ALGORITHM, key, iv, { authTagLength: AUTH_TAG_LENGTH });
-  const encrypted = Buffer.concat([cipher.update(data), cipher.final()]);
-  const authTag = cipher.getAuthTag();
-  // Format: IV | auth tag | ciphertext
-  return Buffer.concat([iv, authTag, encrypted]);
-}
-
-function decrypt(blob: Buffer, key: Buffer): Buffer {
-  if (blob.length < IV_LENGTH + AUTH_TAG_LENGTH) {
-    throw new Error("Vault file is corrupted (too short).");
-  }
-  const iv = blob.subarray(0, IV_LENGTH);
-  const authTag = blob.subarray(IV_LENGTH, IV_LENGTH + AUTH_TAG_LENGTH);
-  const ciphertext = blob.subarray(IV_LENGTH + AUTH_TAG_LENGTH);
-  const decipher = createDecipheriv(ALGORITHM, key, iv, { authTagLength: AUTH_TAG_LENGTH });
-  decipher.setAuthTag(authTag);
-  return Buffer.concat([decipher.update(ciphertext), decipher.final()]);
-}
 
 // ── EncryptedVaultStore ──
 

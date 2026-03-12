@@ -197,5 +197,43 @@ export function ensureSqliteSchema(db: { exec(sql: string): void }): void {
       peer_id TEXT PRIMARY KEY,
       session_id TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS teams (
+      name TEXT PRIMARY KEY,
+      description TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS agents (
+      name TEXT PRIMARY KEY,
+      team_name TEXT NOT NULL,
+      config TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS vault (
+      agent TEXT NOT NULL,
+      service TEXT NOT NULL,
+      type TEXT NOT NULL,
+      label TEXT,
+      credentials TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (agent, service)
+    );
+
+    CREATE TABLE IF NOT EXISTS playbooks (
+      name TEXT PRIMARY KEY,
+      description TEXT NOT NULL,
+      mission TEXT NOT NULL,
+      parameters TEXT,
+      version TEXT,
+      author TEXT,
+      tags TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
   `);
 }

@@ -271,7 +271,7 @@ export class Orchestrator extends TypedEmitter {
 
     await this.initManagers();
     this.initVaultStore();
-    this.playbookStore = new FilePlaybookStore(this.workDir, this.polpoDir);
+    this.playbookStore = this.drizzleStores?.playbookStore ?? new FilePlaybookStore(this.workDir, this.polpoDir);
   }
 
   /**
@@ -632,7 +632,7 @@ export class Orchestrator extends TypedEmitter {
 
     await this.initManagers();
     this.initVaultStore();
-    this.playbookStore = new FilePlaybookStore(this.workDir, this.polpoDir);
+    this.playbookStore = this.drizzleStores?.playbookStore ?? new FilePlaybookStore(this.workDir, this.polpoDir);
     this.interactive = true;
     await this.registry.setState({
       org,
@@ -735,13 +735,14 @@ export class Orchestrator extends TypedEmitter {
   getAgentStore(): AgentStore { return this.agentStore; }
 
   /**
-   * Initialize the encrypted vault store.
-   * Credentials are stored in .polpo/vault.enc (AES-256-GCM encrypted).
+   * Initialize the vault store.
+   * When storage is "sqlite" or "postgres", uses DrizzleVaultStore (AES-256-GCM encrypted in DB).
+   * Otherwise falls back to EncryptedVaultStore (file-based, .polpo/vault.enc).
    * Key: POLPO_VAULT_KEY env var or auto-generated ~/.polpo/vault.key.
    */
   private initVaultStore(): void {
     try {
-      this.vaultStore = new EncryptedVaultStore(this.polpoDir);
+      this.vaultStore = this.drizzleStores?.vaultStore ?? new EncryptedVaultStore(this.polpoDir);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       this.emit("log", { level: "warn", message: `Vault store init failed: ${msg}. Vault features disabled.` });

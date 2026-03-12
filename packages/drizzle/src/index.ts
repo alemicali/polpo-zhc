@@ -40,6 +40,8 @@ import {
   teamsPg, agentsPg,
   teamsSqlite, agentsSqlite,
 } from "./schema/teams.js";
+import { vaultPg, vaultSqlite } from "./schema/vault.js";
+import { playbooksPg, playbooksSqlite } from "./schema/playbooks.js";
 
 // ── Store classes ─────────────────────────────────────────────────────
 
@@ -56,6 +58,8 @@ import { DrizzleDelayStore } from "./stores/delay-store.js";
 import { DrizzleConfigStore } from "./stores/config-store.js";
 import { DrizzleTeamStore } from "./stores/team-store.js";
 import { DrizzleAgentStore } from "./stores/agent-store.js";
+import { DrizzleVaultStore } from "./stores/vault-store.js";
+import { DrizzlePlaybookStore } from "./stores/playbook-store.js";
 
 // ── Store bundle type ─────────────────────────────────────────────────
 
@@ -72,6 +76,8 @@ import type { DelayStore } from "@polpo-ai/core/delay-store";
 import type { ConfigStore } from "@polpo-ai/core/config-store";
 import type { TeamStore } from "@polpo-ai/core/team-store";
 import type { AgentStore } from "@polpo-ai/core/agent-store";
+import type { VaultStore } from "@polpo-ai/core/vault-store";
+import type { PlaybookStore } from "@polpo-ai/core/playbook-store";
 
 export interface DrizzleStores {
   taskStore: TaskStore;
@@ -87,6 +93,8 @@ export interface DrizzleStores {
   configStore: ConfigStore;
   teamStore: TeamStore;
   agentStore: AgentStore;
+  vaultStore: VaultStore;
+  playbookStore: PlaybookStore;
 }
 
 // ── PostgreSQL factory ────────────────────────────────────────────────
@@ -116,6 +124,8 @@ export function createPgStores(db: any): DrizzleStores {
     configStore: new DrizzleConfigStore(db, metadataPg, "pg"),
     teamStore: new DrizzleTeamStore(db, teamsPg, agentsPg, "pg"),
     agentStore: new DrizzleAgentStore(db, agentsPg, "pg"),
+    vaultStore: new DrizzleVaultStore(db, vaultPg),
+    playbookStore: new DrizzlePlaybookStore(db, playbooksPg, "pg"),
   };
 }
 
@@ -146,6 +156,8 @@ export function createSqliteStores(db: any): DrizzleStores {
     configStore: new DrizzleConfigStore(db, metadataSqlite, "sqlite"),
     teamStore: new DrizzleTeamStore(db, teamsSqlite, agentsSqlite, "sqlite"),
     agentStore: new DrizzleAgentStore(db, agentsSqlite, "sqlite"),
+    vaultStore: new DrizzleVaultStore(db, vaultSqlite),
+    playbookStore: new DrizzlePlaybookStore(db, playbooksSqlite, "sqlite"),
   };
 }
 
@@ -170,6 +182,8 @@ export const pgSchema = {
   peerSessions: peerSessionsPg,
   teams: teamsPg,
   agents: agentsPg,
+  vault: vaultPg,
+  playbooks: playbooksPg,
 };
 
 export const sqliteSchema = {
@@ -191,4 +205,6 @@ export const sqliteSchema = {
   peerSessions: peerSessionsSqlite,
   teams: teamsSqlite,
   agents: agentsSqlite,
+  vault: vaultSqlite,
+  playbooks: playbooksSqlite,
 };

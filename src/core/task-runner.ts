@@ -412,18 +412,7 @@ export class TaskRunner {
       }
     }
 
-    // 2. System context (standing instructions from .polpo/system-context.md)
-    try {
-      const systemContextPath = join(this.ctx.polpoDir, "system-context.md");
-      if (existsSync(systemContextPath)) {
-        const systemContext = readFileSync(systemContextPath, "utf-8").trim();
-        if (systemContext) {
-          contextParts.push(`<system-context>\n${systemContext}\n</system-context>`);
-        }
-      }
-    } catch { /* best effort */ }
-
-    // 3. Mission context — if this task belongs to a mission, include the mission goal and sibling tasks
+    // 2. Mission context — if this task belongs to a mission, include the mission goal and sibling tasks
     if (task.group) {
       try {
         // Resolve mission via direct ID (preferred) or group name (legacy fallback)

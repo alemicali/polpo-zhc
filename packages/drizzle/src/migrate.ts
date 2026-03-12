@@ -226,5 +226,28 @@ export async function ensurePgSchema(db: any): Promise<void> {
       created_at  TEXT NOT NULL,
       updated_at  TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS vault (
+      agent       TEXT NOT NULL,
+      service     TEXT NOT NULL,
+      type        TEXT NOT NULL,
+      label       TEXT,
+      credentials TEXT NOT NULL,
+      created_at  TEXT NOT NULL,
+      updated_at  TEXT NOT NULL,
+      PRIMARY KEY (agent, service)
+    );
+
+    CREATE TABLE IF NOT EXISTS playbooks (
+      name        TEXT PRIMARY KEY,
+      description TEXT NOT NULL,
+      mission     JSONB NOT NULL,
+      parameters  JSONB,
+      version     TEXT,
+      author      TEXT,
+      tags        JSONB,
+      created_at  TEXT NOT NULL,
+      updated_at  TEXT NOT NULL
+    );
   `);
 }

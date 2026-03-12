@@ -31,6 +31,9 @@ importers:
       '@polpo-ai/core':
         specifier: workspace:*
         version: link:packages/core
+      '@polpo-ai/vault-crypto':
+        specifier: workspace:*
+        version: link:packages/vault-crypto
       '@sinclair/typebox':
         specifier: ^0.34.48
         version: 0.34.48
@@ -145,6 +148,9 @@ importers:
       '@polpo-ai/core':
         specifier: workspace:*
         version: link:../core
+      '@polpo-ai/vault-crypto':
+        specifier: workspace:*
+        version: link:../vault-crypto
       drizzle-orm:
         specifier: ^0.44.0
         version: 0.44.7(@cloudflare/workers-types@4.20260307.1)(@opentelemetry/api@1.9.0)(@types/better-sqlite3@7.6.13)(better-sqlite3@11.10.0)(postgres@3.4.8)
@@ -182,6 +188,12 @@ importers:
         version: 19.2.4
       typescript:
         specifier: ^5.7.0
+        version: 5.9.3
+
+  packages/vault-crypto:
+    devDependencies:
+      typescript:
+        specifier: ^5.7.3
         version: 5.9.3
 
   ui:
