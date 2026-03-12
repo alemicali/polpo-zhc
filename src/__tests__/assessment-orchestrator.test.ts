@@ -4,7 +4,7 @@ import type { OrchestratorContext, AssessFn } from "../core/orchestrator-context
 import { HookRegistry } from "../core/hooks.js";
 import type { Task, TaskResult, AssessmentResult, PolpoConfig } from "../core/types.js";
 import { TypedEmitter } from "../core/events.js";
-import { InMemoryTaskStore, InMemoryRunStore, createTestActivity } from "./fixtures.js";
+import { InMemoryTaskStore, InMemoryRunStore, createTestActivity, createMockStores } from "./fixtures.js";
 import type { RunRecord } from "../core/run-store.js";
 
 // Mock external LLM modules — these must be mocked before importing the class
@@ -158,6 +158,7 @@ function createHarness(configOverrides: Partial<PolpoConfig["settings"]> = {}): 
 
   const config = createMinimalConfig();
   Object.assign(config.settings, configOverrides);
+  const { teamStore, agentStore } = createMockStores(config.teams);
 
   const ctx: OrchestratorContext = {
     emitter,
@@ -168,6 +169,8 @@ function createHarness(configOverrides: Partial<PolpoConfig["settings"]> = {}): 
     sessionStore: createSessionStore(),
     hooks: new HookRegistry(),
     config,
+    teamStore,
+    agentStore,
     workDir: "/tmp/test",
     agentWorkDir: "/tmp/test",
     polpoDir: "/tmp/test/.polpo",
@@ -614,6 +617,7 @@ describe("AssessmentOrchestrator", () => {
     it("escalates to fallback agent after escalateAfter retries", async () => {
       const h = createHarness();
       h.ctx.config.teams[0].agents.push({ name: "senior-agent" });
+      await h.ctx.agentStore.createAgent({ name: "senior-agent" }, h.ctx.config.teams[0].name);
 
       // Task already has 1 retry, maxRetries is 3, escalateAfter is 2
       const task = await addReviewTask(h, {

@@ -4,7 +4,7 @@ import { TaskManager } from "../core/task-manager.js";
 import { MissionExecutor } from "../core/mission-executor.js";
 import { AgentManager } from "../core/agent-manager.js";
 import { TypedEmitter } from "../core/events.js";
-import { InMemoryTaskStore, InMemoryRunStore, createTestAgent } from "./fixtures.js";
+import { InMemoryTaskStore, InMemoryRunStore, createTestAgent, createMockStores } from "./fixtures.js";
 import type { OrchestratorContext } from "../core/orchestrator-context.js";
 import { HookRegistry } from "../core/hooks.js";
 import type { PolpoConfig, Mission } from "../core/types.js";
@@ -123,6 +123,7 @@ function createContext(overrides?: {
   registry?: TaskStore;
 }): OrchestratorContext {
   const config = overrides?.config ?? createDefaultConfig();
+  const { teamStore, agentStore } = createMockStores(config.teams);
   return {
     emitter: new TypedEmitter(),
     registry: overrides?.registry ?? new InMemoryTaskStoreWithMissions(),
@@ -132,6 +133,8 @@ function createContext(overrides?: {
     sessionStore: createNoopSessionStore(),
     hooks: new HookRegistry(),
     config,
+    teamStore,
+    agentStore,
     workDir: "/tmp/test",
     agentWorkDir: "/tmp/test",
     polpoDir: "/tmp/test/.polpo",

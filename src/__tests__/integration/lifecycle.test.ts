@@ -18,7 +18,11 @@ vi.mock("node:fs", async (importOriginal) => {
   const original = await importOriginal<typeof import("node:fs")>();
   return {
     ...original,
-    writeFileSync: (_path: string, _data: string) => {},
+    // Only suppress runner config writes — let store writes through
+    writeFileSync: (path: string, data: string, ...rest: any[]) => {
+      if (typeof path === "string" && path.endsWith("run.json")) return;
+      return original.writeFileSync(path, data, ...rest);
+    },
   };
 });
 

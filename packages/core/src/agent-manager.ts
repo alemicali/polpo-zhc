@@ -15,7 +15,7 @@ export class AgentManager {
   // ── Internal: sync in-memory cache ────────────────────────────────
 
   /** Refresh the in-memory `config.teams` from the stores. */
-  private async syncConfigCache(): Promise<void> {
+  async syncConfigCache(): Promise<void> {
     const teams = await this.ctx.teamStore.getTeams();
     // Each team from TeamStore already contains its agents via the store's join.
     // But for file-based stores, TeamStore stores teams without agents —
@@ -36,18 +36,30 @@ export class AgentManager {
     }));
   }
 
+  // ── Internal: hydrate teams with agents ────────────────────────────
+
+  /** Build a full Team with its agents array populated from AgentStore. */
+  private async hydrateTeam(team: Team): Promise<Team> {
+    const agents = await this.ctx.agentStore.getAgents(team.name);
+    return { ...team, agents };
+  }
+
   // ── Team-level operations ──────────────────────────────────────────
 
   async getTeams(): Promise<Team[]> {
-    return this.ctx.teamStore.getTeams();
+    const teams = await this.ctx.teamStore.getTeams();
+    return Promise.all(teams.map(t => this.hydrateTeam(t)));
   }
 
   async getTeam(name?: string): Promise<Team | undefined> {
+    let team: Team | undefined;
     if (!name) {
       const teams = await this.ctx.teamStore.getTeams();
-      return teams[0];
+      team = teams[0];
+    } else {
+      team = await this.ctx.teamStore.getTeam(name);
     }
-    return this.ctx.teamStore.getTeam(name);
+    return team ? this.hydrateTeam(team) : undefined;
   }
 
   /** Get the default (first) team, creating one if none exist. */
@@ -56,7 +68,7 @@ export class AgentManager {
     if (teams.length === 0) {
       return this.ctx.teamStore.createTeam({ name: "default", agents: [] });
     }
-    return teams[0];
+    return teams[0]; // No need to hydrate — used for team identity only
   }
 
   async addTeam(team: Team): Promise<void> {
@@ -88,6 +100,13 @@ export class AgentManager {
 
   async renameTeam(oldName: string, newName: string): Promise<void> {
     await this.ctx.teamStore.renameTeam(oldName, newName);
+
+    // Move all agents from the old team to the new team name
+    const agents = await this.ctx.agentStore.getAgents(oldName);
+    for (const agent of agents) {
+      await this.ctx.agentStore.moveAgent(agent.name, newName);
+    }
+
     await this.syncConfigCache();
     this.ctx.emitter.emit("log", { level: "info", message: `Team renamed: "${oldName}" → "${newName}"` });
   }

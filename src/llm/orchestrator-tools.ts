@@ -3110,8 +3110,8 @@ function execRemoveWatcher(polpo: Orchestrator, args: Record<string, unknown>): 
 //  CONFIG & SELF-MODIFICATION IMPLEMENTATIONS
 // ═══════════════════════════════════════════════════════
 
-function execReloadConfig(polpo: Orchestrator): string {
-  const reloaded = polpo.reloadConfig();
+async function execReloadConfig(polpo: Orchestrator): Promise<string> {
+  const reloaded = await polpo.reloadConfig();
   return reloaded ? "Configuration reloaded from polpo.json." : "Error: Failed to reload configuration.";
 }
 
@@ -4838,7 +4838,7 @@ async function execInkAdd(polpo: Orchestrator, args: Record<string, unknown>): P
   try { rmSync(repoDir, { recursive: true, force: true }); } catch { /* ignore */ }
 
   // Reload config so the orchestrator picks up new agents/teams immediately
-  try { polpo.reloadConfig(); } catch { /* ignore */ }
+  try { await polpo.reloadConfig(); } catch { /* ignore */ }
 
   return `Installed ${packages.length} package(s) from "${sourceLabel}":\n\n${installed.map((i) => `  - ${i}`).join("\n")}\n\nLock file updated. Config reloaded.`;
 }
@@ -4864,7 +4864,7 @@ async function execInkRemove(polpo: Orchestrator, args: Record<string, unknown>)
   }
 
   // Reload config
-  try { polpo.reloadConfig(); } catch { /* ignore */ }
+  try { await polpo.reloadConfig(); } catch { /* ignore */ }
 
   return `Removed "${source}" (${entry.packages.length} package(s)):\n\n${removed.map((r: string) => `  - ${r}`).join("\n")}\n\nLock file updated. Config reloaded.`;
 }
@@ -5020,7 +5020,7 @@ async function execInkUpdate(polpo: Orchestrator, args: Record<string, unknown>)
   writeInkLock(polpoDir, updatedLock);
 
   // Reload config
-  try { polpo.reloadConfig(); } catch { /* ignore */ }
+  try { await polpo.reloadConfig(); } catch { /* ignore */ }
 
   return `Update complete:\n\n${results.map((r: string) => `  - ${r}`).join("\n")}`;
 }

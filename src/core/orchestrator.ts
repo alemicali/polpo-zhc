@@ -662,7 +662,7 @@ export class Orchestrator extends TypedEmitter {
         if (this.configReloadTimer) clearTimeout(this.configReloadTimer);
         this.configReloadTimer = setTimeout(() => {
           this.emit("log", { level: "info", message: "[watch] polpo.json changed on disk — auto-reloading config" });
-          this.reloadConfig();
+          this.reloadConfig().catch(() => {});
         }, 500);
       });
 
@@ -728,6 +728,8 @@ export class Orchestrator extends TypedEmitter {
   getPolpoDir(): string { return this.polpoDir; }
   getMemoryStore(): MemoryStore { return this.memoryStore; }
   getVaultStore(): EncryptedVaultStore | undefined { return this.vaultStore; }
+  getTeamStore(): TeamStore { return this.teamStore; }
+  getAgentStore(): AgentStore { return this.agentStore; }
 
   /**
    * Initialize the encrypted vault store.
@@ -1029,7 +1031,7 @@ export class Orchestrator extends TypedEmitter {
    *
    * Returns `true` if the config was successfully reloaded.
    */
-  reloadConfig(): boolean {
+  async reloadConfig(): Promise<boolean> {
     const polpoConfig = loadPolpoConfig(this.polpoDir);
     if (!polpoConfig) {
       this.emit("log", { level: "warn", message: "[reload] polpo.json not found or unparseable — skipping reload" });
@@ -1057,9 +1059,9 @@ export class Orchestrator extends TypedEmitter {
     this.approvalMgr = undefined;
 
     // 2. Update config in-place (preserves the shared reference in OrchestratorContext)
+    //    Settings and providers come from polpo.json; teams come from stores.
     const newSettings = polpoConfig.settings ?? this.config.settings;
     this.config.settings = newSettings;
-    if (polpoConfig.teams) this.config.teams = polpoConfig.teams;
     if (polpoConfig.providers) {
       this.config.providers = polpoConfig.providers;
       setProviderOverrides(polpoConfig.providers);
@@ -1067,6 +1069,9 @@ export class Orchestrator extends TypedEmitter {
     if (newSettings.modelAllowlist) {
       setModelAllowlist(newSettings.modelAllowlist);
     }
+
+    // Re-sync config.teams from TeamStore/AgentStore (authoritative source)
+    await this.agentMgr.syncConfigCache();
 
     // 3. Invalidate cached agent work dir and rebuild OrchestratorContext
     this.cachedAgentWorkDir = null;

@@ -32,11 +32,17 @@ export function registerConfigCommands(program: Command): void {
 
         console.log(chalk.bold("\n  Org:     ") + config.org);
         console.log(chalk.bold("  Version: ") + config.version);
-        for (const t of config.teams) {
+
+        // Read teams and agents from stores
+        const teamStore = orchestrator.getTeamStore();
+        const agentStore = orchestrator.getAgentStore();
+        const teams = await teamStore.getTeams();
+        for (const t of teams) {
+          const teamAgents = await agentStore.getAgents(t.name);
           console.log(
             chalk.bold("  Team:    ") +
               t.name +
-              chalk.dim(` (${t.agents.length} agents)`)
+              chalk.dim(` (${teamAgents.length} agents)`)
           );
         }
 
@@ -62,10 +68,10 @@ export function registerConfigCommands(program: Command): void {
           `  orchestratorModel       ${typeof s.orchestratorModel === "string" ? s.orchestratorModel : s.orchestratorModel?.primary ?? chalk.dim("default")}`
         );
 
-        // Agents table
+        // Agents table (from store)
         console.log(chalk.bold("\n  Agents"));
         console.log(chalk.dim("  ────────────────────────────────────"));
-        const allAgents = config.teams.flatMap((t) => t.agents);
+        const allAgents = await agentStore.getAgents();
         const nameWidth = Math.max(
           6,
           ...allAgents.map((a) => a.name.length)

@@ -1,5 +1,7 @@
 import { nanoid } from "nanoid";
-import type { Task, TaskStatus, TaskOutcome, PolpoState, AgentConfig, AgentActivity, TaskResult, AgentHandle, TaskStore, RunStore, RunRecord, RunStatus } from "../core/index.js";
+import type { Task, TaskStatus, TaskOutcome, PolpoState, AgentConfig, AgentActivity, TaskResult, AgentHandle, TaskStore, RunStore, RunRecord, RunStatus, Team } from "../core/index.js";
+import type { TeamStore } from "../core/team-store.js";
+import type { AgentStore } from "../core/agent-store.js";
 import { assertValidTransition } from "../core/state-machine.js";
 
 // === InMemoryTaskStore ===
@@ -206,4 +208,96 @@ export class InMemoryRunStore implements RunStore {
   close(): void {
     this.runs.clear();
   }
+}
+
+// === In-memory TeamStore / AgentStore for tests ===
+
+/**
+ * Build mock TeamStore + AgentStore backed by the teams array from a PolpoConfig.
+ * Agents are extracted from `config.teams[*].agents` and flattened into a simple list.
+ */
+export function createMockStores(teams: Team[]): { teamStore: TeamStore; agentStore: AgentStore } {
+  // Deep-copy so mutations don't leak across tests
+  const _teams: Team[] = JSON.parse(JSON.stringify(teams));
+  const _agents: Array<{ agent: AgentConfig; teamName: string }> = [];
+  for (const t of _teams) {
+    for (const a of t.agents) {
+      _agents.push({ agent: { ...a }, teamName: t.name });
+    }
+  }
+
+  const teamStore: TeamStore = {
+    getTeams: async () => _teams,
+    getTeam: async (name) => _teams.find(t => t.name === name),
+    createTeam: async (t) => { _teams.push(t); return t; },
+    updateTeam: async (name, u) => {
+      const t = _teams.find(x => x.name === name);
+      if (!t) throw new Error(`Team "${name}" not found`);
+      Object.assign(t, u);
+      return t;
+    },
+    renameTeam: async (old, newN) => {
+      const t = _teams.find(x => x.name === old);
+      if (!t) throw new Error(`Team "${old}" not found`);
+      t.name = newN;
+      // Update teamName references in agents
+      for (const a of _agents) {
+        if (a.teamName === old) a.teamName = newN;
+      }
+      return t;
+    },
+    deleteTeam: async (name) => {
+      const idx = _teams.findIndex(x => x.name === name);
+      if (idx < 0) return false;
+      _teams.splice(idx, 1);
+      return true;
+    },
+    seed: async () => {},
+  };
+
+  const agentStore: AgentStore = {
+    getAgents: async (teamName?) => {
+      const filtered = teamName ? _agents.filter(e => e.teamName === teamName) : _agents;
+      return filtered.map(e => e.agent);
+    },
+    getAgent: async (name) => _agents.find(e => e.agent.name === name)?.agent,
+    getAgentTeam: async (name) => _agents.find(e => e.agent.name === name)?.teamName,
+    createAgent: async (agent, teamName) => {
+      if (_agents.some(e => e.agent.name === agent.name)) {
+        throw new Error(`Agent "${agent.name}" already exists`);
+      }
+      _agents.push({ agent: { ...agent }, teamName });
+      return agent;
+    },
+    updateAgent: async (name, u) => {
+      const entry = _agents.find(e => e.agent.name === name);
+      if (!entry) throw new Error(`Agent "${name}" not found`);
+      Object.assign(entry.agent, u);
+      return entry.agent;
+    },
+    moveAgent: async (name, newTeam) => {
+      const entry = _agents.find(e => e.agent.name === name);
+      if (!entry) throw new Error(`Agent "${name}" not found`);
+      entry.teamName = newTeam;
+      return entry.agent;
+    },
+    deleteAgent: async (name) => {
+      const idx = _agents.findIndex(e => e.agent.name === name);
+      if (idx < 0) return false;
+      _agents.splice(idx, 1);
+      return true;
+    },
+    cleanupVolatileAgents: async (group) => {
+      const before = _agents.length;
+      const toRemove = _agents.filter(e => e.agent.volatile && e.agent.missionGroup === group);
+      for (const r of toRemove) {
+        const idx = _agents.indexOf(r);
+        if (idx >= 0) _agents.splice(idx, 1);
+      }
+      return before - _agents.length;
+    },
+    seed: async () => {},
+  };
+
+  return { teamStore, agentStore };
 }

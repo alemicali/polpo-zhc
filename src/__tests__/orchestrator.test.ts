@@ -220,7 +220,7 @@ describe("Orchestrator", () => {
   describe("agent management", () => {
     it("addAgent adds to team", async () => {
       await orchestrator.addAgent(createTestAgent({ name: "new-agent" }));
-      expect(orchestrator.getAgents().find(a => a.name === "new-agent")).toBeDefined();
+      expect((await orchestrator.getAgents()).find(a => a.name === "new-agent")).toBeDefined();
     });
 
     it("addAgent throws for duplicate", async () => {
@@ -231,7 +231,7 @@ describe("Orchestrator", () => {
     it("removeAgent removes from team", async () => {
       await orchestrator.addAgent(createTestAgent({ name: "to-remove" }));
       expect(await orchestrator.removeAgent("to-remove")).toBe(true);
-      expect(orchestrator.getAgents().find(a => a.name === "to-remove")).toBeUndefined();
+      expect((await orchestrator.getAgents()).find(a => a.name === "to-remove")).toBeUndefined();
     });
 
     it("removeAgent returns false for nonexistent", async () => {
@@ -242,7 +242,7 @@ describe("Orchestrator", () => {
   describe("volatile agents", () => {
     it("addVolatileAgent marks agent as volatile", async () => {
       await orchestrator.addVolatileAgent(createTestAgent({ name: "vol-1" }), "mission-1");
-      const agent = orchestrator.getAgents().find(a => a.name === "vol-1");
+      const agent = (await orchestrator.getAgents()).find(a => a.name === "vol-1");
       expect(agent?.volatile).toBe(true);
       expect(agent?.missionGroup).toBe("mission-1");
     });
@@ -252,7 +252,7 @@ describe("Orchestrator", () => {
       await orchestrator.addVolatileAgent(createTestAgent({ name: "vol-2" }), "mission-1");
       const removed = await orchestrator.cleanupVolatileAgents("mission-1");
       expect(removed).toBe(2);
-      expect(orchestrator.getAgents().find(a => a.name === "vol-1")).toBeUndefined();
+      expect((await orchestrator.getAgents()).find(a => a.name === "vol-1")).toBeUndefined();
     });
   });
 

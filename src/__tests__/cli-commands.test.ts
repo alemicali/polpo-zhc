@@ -226,8 +226,8 @@ describe("CLI: team operations", () => {
     await rm(tempDir, { recursive: true, force: true });
   });
 
-  test("team list — shows agents from config", () => {
-    const agents = o.getAgents();
+  test("team list — shows agents from config", async () => {
+    const agents = await o.getAgents();
     expect(agents.length).toBeGreaterThanOrEqual(1);
     expect(agents.find((a) => a.name === "agent-1")).toBeDefined();
   });
@@ -237,7 +237,7 @@ describe("CLI: team operations", () => {
       name: "agent-2",
       role: "Helper",
     });
-    const agents = o.getAgents();
+    const agents = await o.getAgents();
     expect(agents.find((a) => a.name === "agent-2")).toBeDefined();
   });
 
@@ -247,17 +247,17 @@ describe("CLI: team operations", () => {
     });
     const result = await o.removeAgent("agent-temp");
     expect(result).toBe(true);
-    expect(o.getAgents().find((a) => a.name === "agent-temp")).toBeUndefined();
+    expect((await o.getAgents()).find((a) => a.name === "agent-temp")).toBeUndefined();
   });
 
   test("team rename — changes team name", async () => {
     await o.renameTeam("test-team", "new-team-name");
-    const team = o.getTeam()!;
+    const team = (await o.getTeam())!;
     expect(team.name).toBe("new-team-name");
   });
 
-  test("team getTeam — returns team info", () => {
-    const team = o.getTeam()!;
+  test("team getTeam — returns team info", async () => {
+    const team = (await o.getTeam())!;
     expect(team).toBeDefined();
     expect(team.name).toBe("new-team-name"); // renamed in previous test
     expect(Array.isArray(team.agents)).toBe(true);
