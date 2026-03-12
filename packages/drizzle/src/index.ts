@@ -36,6 +36,10 @@ import {
   peersPg, peerAllowlistPg, pairingRequestsPg, peerSessionsPg,
   peersSqlite, peerAllowlistSqlite, pairingRequestsSqlite, peerSessionsSqlite,
 } from "./schema/peers.js";
+import {
+  teamsPg, agentsPg,
+  teamsSqlite, agentsSqlite,
+} from "./schema/teams.js";
 
 // ── Store classes ─────────────────────────────────────────────────────
 
@@ -50,6 +54,8 @@ import { DrizzlePeerStore } from "./stores/peer-store.js";
 import { DrizzleCheckpointStore } from "./stores/checkpoint-store.js";
 import { DrizzleDelayStore } from "./stores/delay-store.js";
 import { DrizzleConfigStore } from "./stores/config-store.js";
+import { DrizzleTeamStore } from "./stores/team-store.js";
+import { DrizzleAgentStore } from "./stores/agent-store.js";
 
 // ── Store bundle type ─────────────────────────────────────────────────
 
@@ -64,6 +70,8 @@ import type { PeerStore } from "@polpo-ai/core/peer-store";
 import type { CheckpointStore } from "@polpo-ai/core/checkpoint-store";
 import type { DelayStore } from "@polpo-ai/core/delay-store";
 import type { ConfigStore } from "@polpo-ai/core/config-store";
+import type { TeamStore } from "@polpo-ai/core/team-store";
+import type { AgentStore } from "@polpo-ai/core/agent-store";
 
 export interface DrizzleStores {
   taskStore: TaskStore;
@@ -77,6 +85,8 @@ export interface DrizzleStores {
   checkpointStore: CheckpointStore;
   delayStore: DelayStore;
   configStore: ConfigStore;
+  teamStore: TeamStore;
+  agentStore: AgentStore;
 }
 
 // ── PostgreSQL factory ────────────────────────────────────────────────
@@ -104,6 +114,8 @@ export function createPgStores(db: any): DrizzleStores {
     checkpointStore: new DrizzleCheckpointStore(db, metadataPg, "pg"),
     delayStore: new DrizzleDelayStore(db, metadataPg, "pg"),
     configStore: new DrizzleConfigStore(db, metadataPg, "pg"),
+    teamStore: new DrizzleTeamStore(db, teamsPg, agentsPg, "pg"),
+    agentStore: new DrizzleAgentStore(db, agentsPg, "pg"),
   };
 }
 
@@ -132,6 +144,8 @@ export function createSqliteStores(db: any): DrizzleStores {
     checkpointStore: new DrizzleCheckpointStore(db, metadataSqlite, "sqlite"),
     delayStore: new DrizzleDelayStore(db, metadataSqlite, "sqlite"),
     configStore: new DrizzleConfigStore(db, metadataSqlite, "sqlite"),
+    teamStore: new DrizzleTeamStore(db, teamsSqlite, agentsSqlite, "sqlite"),
+    agentStore: new DrizzleAgentStore(db, agentsSqlite, "sqlite"),
   };
 }
 
@@ -154,6 +168,8 @@ export const pgSchema = {
   peerAllowlist: peerAllowlistPg,
   pairingRequests: pairingRequestsPg,
   peerSessions: peerSessionsPg,
+  teams: teamsPg,
+  agents: agentsPg,
 };
 
 export const sqliteSchema = {
@@ -173,4 +189,6 @@ export const sqliteSchema = {
   peerAllowlist: peerAllowlistSqlite,
   pairingRequests: pairingRequestsSqlite,
   peerSessions: peerSessionsSqlite,
+  teams: teamsSqlite,
+  agents: agentsSqlite,
 };

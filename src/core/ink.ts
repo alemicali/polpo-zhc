@@ -23,6 +23,7 @@ import { createHash } from "node:crypto";
 
 import type { AgentConfig, PolpoFileConfig } from "./types.js";
 import type { PlaybookDefinition } from "./playbook.js";
+import type { AgentStore } from "./agent-store.js";
 
 // ── Package Types ──────────────────────────────────────────────────────
 
@@ -530,22 +531,19 @@ export function getInkLockEntry(lock: InkLockFile, source: string): InkLockEntry
  * Uninstall packages recorded in a lock entry.
  *
  * - Playbooks: removes `.polpo/playbooks/<name>/` directory
- * - Agents: removes from polpo.json teams
+ * - Agents: removes from AgentStore
  * - Companies: removes legacy paths (merged config cannot be cleanly reversed)
  *
  * @param entry - The lock entry whose packages should be removed
  * @param polpoDir - Path to the .polpo directory
- * @param loadConfig - Function to load polpo.json (injected to avoid circular dep)
- * @param saveConfig - Function to save polpo.json
+ * @param agentStore - AgentStore to remove agents from
  */
-export function uninstallInkPackages(
+export async function uninstallInkPackages(
   entry: InkLockEntry,
   polpoDir: string,
-  loadConfig: () => PolpoFileConfig | null | undefined,
-  saveConfig: (config: PolpoFileConfig) => void,
-): string[] {
+  agentStore: AgentStore,
+): Promise<string[]> {
   const removed: string[] = [];
-  const config = loadConfig();
 
   for (const pkg of entry.packages) {
     switch (pkg.type) {
@@ -558,14 +556,9 @@ export function uninstallInkPackages(
         break;
       }
       case "agent": {
-        if (config) {
-          for (const team of config.teams) {
-            const before = team.agents.length;
-            team.agents = team.agents.filter((a) => a.name !== pkg.name);
-            if (team.agents.length < before) {
-              removed.push(`agent: ${pkg.name}`);
-            }
-          }
+        const deleted = await agentStore.deleteAgent(pkg.name);
+        if (deleted) {
+          removed.push(`agent: ${pkg.name}`);
         }
         break;
       }
@@ -580,10 +573,6 @@ export function uninstallInkPackages(
         break;
       }
     }
-  }
-
-  if (config) {
-    saveConfig(config);
   }
 
   return removed;

@@ -62,7 +62,6 @@ polpo/
 │   ├── mcp/                # MCP client manager
 │   ├── stores/             # File, JSON, SQLite persistence
 │   ├── llm/                # LLM queries and prompts
-│   ├── tui/                # Terminal UI (Ink)
 │   ├── server/             # HTTP API (Hono), SSE, WebSocket
 │   └── cli/                # CLI entry point
 ├── ui/                     # Web monitoring dashboard (Vite + React)

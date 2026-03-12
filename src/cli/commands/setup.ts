@@ -261,7 +261,7 @@ export async function runSetupWizard(options?: SetupOptions): Promise<void> {
   console.log(`  ${chalk.dim("Agent:")}  ${agentName} (${agentRole})`);
   console.log();
   console.log(chalk.dim("  Config saved to .polpo/polpo.json"));
-  console.log(chalk.dim("  Run: polpo tui"));
+  console.log(chalk.dim("  Run: polpo serve"));
   console.log();
 }
 

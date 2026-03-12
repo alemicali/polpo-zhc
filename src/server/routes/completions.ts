@@ -333,7 +333,7 @@ export function completionRoutes(orchestrator: Orchestrator, apiKeys?: string[])
 
     if (agentMode) {
       // ── Agent-direct mode ──
-      const agents = orchestrator.getAgents();
+      const agents = await orchestrator.getAgents();
       const agentConfig = agents.find(a => a.name === body.agent);
       if (!agentConfig) {
         return c.json({ error: { message: `Agent "${body.agent}" not found`, type: "invalid_request_error", code: "agent_not_found" } }, 404);

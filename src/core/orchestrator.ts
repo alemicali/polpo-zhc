@@ -59,6 +59,10 @@ import { WhatsAppGatewayAdapter } from "../notifications/whatsapp-gateway-adapte
 import { WhatsAppStore } from "../stores/whatsapp-store.js";
 import { FilePeerStore } from "./peer-store.js";
 import type { PeerStore } from "./peer-store.js";
+import { FileTeamStore } from "../stores/file-team-store.js";
+import { FileAgentStore } from "../stores/file-agent-store.js";
+import type { TeamStore } from "./team-store.js";
+import type { AgentStore } from "./agent-store.js";
 import { EscalationManager } from "./escalation-manager.js";
 import { SLAMonitor } from "../quality/sla-monitor.js";
 import { QualityController } from "../quality/quality-controller.js";
@@ -109,6 +113,8 @@ export class Orchestrator extends TypedEmitter {
   private whatsappBridge?: WhatsAppBridge;
   private whatsappStore?: WhatsAppStore;
   private peerStore?: PeerStore;
+  private teamStore!: TeamStore;
+  private agentStore!: AgentStore;
   private channelGateway?: ChannelGateway;
   private configWatcher?: FSWatcher;
   private configReloadTimer?: ReturnType<typeof setTimeout>;
@@ -254,8 +260,37 @@ export class Orchestrator extends TypedEmitter {
     this.memoryStore = ("memoryStore" in stores && stores.memoryStore)
       ? stores.memoryStore
       : new FileMemoryStore(this.polpoDir);
+
+    // Team & Agent stores — Drizzle when available, otherwise file-based
+    this.teamStore = this.drizzleStores?.teamStore ?? new FileTeamStore(this.polpoDir);
+    this.agentStore = this.drizzleStores?.agentStore ?? new FileAgentStore(this.polpoDir);
+
+    // Seed teams/agents from polpo.json into the stores (migration path)
+    await this.seedTeamsAndAgents();
+
     await this.initManagers();
     this.initVaultStore();
+  }
+
+  /**
+   * Seed teams and agents from polpo.json config into TeamStore/AgentStore.
+   * This supports migration from the old embedded model. If the stores
+   * already have data, existing entries are not overwritten.
+   */
+  private async seedTeamsAndAgents(): Promise<void> {
+    if (!this.config.teams || this.config.teams.length === 0) return;
+
+    await this.teamStore.seed(this.config.teams);
+
+    const agentsToSeed: Array<AgentConfig & { teamName: string }> = [];
+    for (const team of this.config.teams) {
+      for (const agent of team.agents) {
+        agentsToSeed.push({ ...agent, teamName: team.name });
+      }
+    }
+    if (agentsToSeed.length > 0) {
+      await this.agentStore.seed(agentsToSeed);
+    }
   }
 
   private validateProviders(): void {
@@ -319,6 +354,8 @@ export class Orchestrator extends TypedEmitter {
       memoryStore: this.memoryStore,
       logStore: this.logStore,
       sessionStore: this.sessionStore,
+      teamStore: this.teamStore,
+      agentStore: this.agentStore,
       hooks: this.hookRegistry,
       config: this.config,
       workDir: this.workDir,
@@ -550,9 +587,27 @@ export class Orchestrator extends TypedEmitter {
       : await this.createStores(settings.storage);
     this.registry = stores.task;
     this.runStore = stores.run;
-    this.memoryStore = new FileMemoryStore(this.polpoDir);
-    await this.initLogStore();
-    await this.initSessionStore();
+
+    // Use Drizzle-provided stores when available, otherwise fall back to file-based
+    if ("logStore" in stores && stores.logStore) {
+      this.logStore = stores.logStore;
+      await this.logStore.startSession();
+      this.setLogSink(this.logStore);
+    } else {
+      await this.initLogStore();
+    }
+    if ("sessionStore" in stores && stores.sessionStore) {
+      this.sessionStore = stores.sessionStore;
+    } else {
+      await this.initSessionStore();
+    }
+    this.memoryStore = ("memoryStore" in stores && stores.memoryStore)
+      ? stores.memoryStore
+      : new FileMemoryStore(this.polpoDir);
+
+    // Team & Agent stores — Drizzle when available, otherwise file-based
+    this.teamStore = this.drizzleStores?.teamStore ?? new FileTeamStore(this.polpoDir);
+    this.agentStore = this.drizzleStores?.agentStore ?? new FileAgentStore(this.polpoDir);
 
     this.config = {
       version: "1",
@@ -570,6 +625,9 @@ export class Orchestrator extends TypedEmitter {
     if (this.config.settings.modelAllowlist) {
       setModelAllowlist(this.config.settings.modelAllowlist);
     }
+
+    // Seed teams/agents from polpo.json into the stores (migration path)
+    await this.seedTeamsAndAgents();
 
     await this.initManagers();
     this.initVaultStore();
@@ -687,9 +745,9 @@ export class Orchestrator extends TypedEmitter {
 
   // ── Agent Management (delegates to AgentManager) ──
 
-  getAgents(): AgentConfig[] { return this.agentMgr.getAgents(); }
-  getTeams(): Team[] { return this.agentMgr.getTeams(); }
-  getTeam(name?: string): Team | undefined { return this.agentMgr.getTeam(name); }
+  async getAgents(): Promise<AgentConfig[]> { return this.agentMgr.getAgents(); }
+  async getTeams(): Promise<Team[]> { return this.agentMgr.getTeams(); }
+  async getTeam(name?: string): Promise<Team | undefined> { return this.agentMgr.getTeam(name); }
   getConfig(): PolpoConfig | null { return this.config; }
   get isInitialized(): boolean { return this.interactive; }
   async addTeam(team: Team): Promise<void> { return this.agentMgr.addTeam(team); }
@@ -697,7 +755,8 @@ export class Orchestrator extends TypedEmitter {
   async renameTeam(oldName: string, newName: string): Promise<void> { return this.agentMgr.renameTeam(oldName, newName); }
   async addAgent(agent: AgentConfig, teamName?: string): Promise<void> { return this.agentMgr.addAgent(agent, teamName); }
   async removeAgent(name: string): Promise<boolean> { return this.agentMgr.removeAgent(name); }
-  findAgentTeam(name: string): Team | undefined { return this.agentMgr.findAgentTeam(name); }
+  async updateAgent(name: string, updates: Partial<Omit<AgentConfig, "name">>): Promise<AgentConfig> { return this.agentMgr.updateAgent(name, updates); }
+  async findAgentTeam(name: string): Promise<Team | undefined> { return this.agentMgr.findAgentTeam(name); }
   async addVolatileAgent(agent: AgentConfig, group: string): Promise<void> { return this.agentMgr.addVolatileAgent(agent, group); }
   async cleanupVolatileAgents(group: string): Promise<number> { return this.agentMgr.cleanupVolatileAgents(group); }
 
@@ -1018,12 +1077,35 @@ export class Orchestrator extends TypedEmitter {
       memoryStore: this.memoryStore,
       logStore: this.logStore,
       sessionStore: this.sessionStore,
+      teamStore: this.teamStore,
+      agentStore: this.agentStore,
       hooks: this.hookRegistry,
       config: this.config,
       workDir: this.workDir,
       agentWorkDir: this.getAgentWorkDir(),
       polpoDir: this.polpoDir,
       assessFn: this.assessFn,
+
+      // Shell-specific ports (must match initManagers)
+      killProcess: (pid, signal) => { try { process.kill(pid, (signal ?? "SIGTERM") as NodeJS.Signals); } catch { /* already dead */ } },
+      loadConfig: () => loadPolpoConfig(this.polpoDir),
+      saveConfig: (config) => savePolpoConfig(this.polpoDir, config),
+      queryLLM: async (prompt, model) => {
+        const { queryOrchestratorText } = await import("../llm/query.js");
+        return queryOrchestratorText(prompt, model);
+      },
+      findLogForTask: (polpoDir, taskId, runId) => findLogForTask(polpoDir, taskId, runId),
+      buildExecutionSummary: (logPath) => buildExecutionSummary(logPath),
+
+      // Inject Drizzle stores when storage is "sqlite" or "postgres"
+      ...(this.drizzleStores ? {
+        approvalStore: this.drizzleStores.approvalStore,
+        notificationStore: this.drizzleStores.notificationStore,
+        checkpointStore: this.drizzleStores.checkpointStore,
+        delayStore: this.drizzleStores.delayStore,
+        peerStore: this.drizzleStores.peerStore,
+        configStore: this.drizzleStores.configStore,
+      } : {}),
     };
 
     // 4. Re-initialize optional subsystems from new config
@@ -1351,7 +1433,7 @@ export class Orchestrator extends TypedEmitter {
 
     this.emit("orchestrator:started", {
       org: this.config.org,
-      agents: this.agentMgr.getAgents().map((a: AgentConfig) => a.name),
+      agents: (await this.agentMgr.getAgents()).map((a: AgentConfig) => a.name),
     });
 
     this.stopped = false;
@@ -1537,7 +1619,7 @@ export class Orchestrator extends TypedEmitter {
 
       // Per-agent concurrency limit
       const agentName = task.assignTo;
-      const agentConfig = this.agentMgr.findAgent(agentName);
+      const agentConfig = await this.agentMgr.findAgent(agentName);
       if (agentConfig?.maxConcurrency) {
         if ((agentActiveCounts.get(agentName) ?? 0) >= agentConfig.maxConcurrency) {
           queued++;

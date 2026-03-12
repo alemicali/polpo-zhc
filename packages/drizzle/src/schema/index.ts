@@ -11,6 +11,7 @@ export { memorySqlite } from "./memory.js";
 export {
   peersSqlite, peerAllowlistSqlite, pairingRequestsSqlite, peerSessionsSqlite,
 } from "./peers.js";
+export { teamsSqlite, agentsSqlite } from "./teams.js";
 
 // PostgreSQL schemas
 export {
@@ -25,3 +26,4 @@ export { memoryPg } from "./memory.js";
 export {
   peersPg, peerAllowlistPg, pairingRequestsPg, peerSessionsPg,
 } from "./peers.js";
+export { teamsPg, agentsPg } from "./teams.js";

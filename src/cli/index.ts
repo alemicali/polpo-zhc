@@ -283,7 +283,7 @@ program
     }
 
     console.log(chalk.green("\n  Polpo initialized!"));
-    console.log(chalk.dim("  Run: polpo tui\n"));
+    console.log(chalk.dim("  Run: polpo serve\n"));
   });
 
 // polpo run
@@ -551,18 +551,6 @@ program
   .option("--api-key <key>", "API key for authentication (optional)")
   .option("--cors-origins <origins>", "Comma-separated allowed CORS origins (env: POLPO_CORS_ORIGINS)")
   .action(serveAction);
-
-// polpo tui (interactive terminal mode)
-program
-  .command("tui")
-  .description("Launch the interactive TUI")
-  .option("-d, --dir <path>", "Working directory", ".")
-  .action(async (opts) => {
-    const dir = resolve(opts.dir);
-    await ensureSetup(dir);
-    const { startInkTUI } = await import("../tui/app.js");
-    await startInkTUI(dir);
-  });
 
 // Register subcommand groups
 registerTaskCommands(program);

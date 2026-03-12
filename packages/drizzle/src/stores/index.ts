@@ -10,3 +10,5 @@ export { DrizzlePeerStore } from "./peer-store.js";
 export { DrizzleCheckpointStore } from "./checkpoint-store.js";
 export { DrizzleDelayStore } from "./delay-store.js";
 export { DrizzleConfigStore } from "./config-store.js";
+export { DrizzleTeamStore } from "./team-store.js";
+export { DrizzleAgentStore } from "./agent-store.js";

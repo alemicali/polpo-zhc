@@ -16,6 +16,8 @@ import type { CheckpointStore } from "./checkpoint-store.js";
 import type { DelayStore } from "./delay-store.js";
 import type { PeerStore } from "./peer-store.js";
 import type { ConfigStore } from "./config-store.js";
+import type { TeamStore } from "./team-store.js";
+import type { AgentStore } from "./agent-store.js";
 import type { PolpoConfig, PolpoFileConfig, Task, AssessmentResult, ReviewContext, ReasoningLevel, ModelConfig } from "./types.js";
 import type { HookRegistry } from "./hooks.js";
 
@@ -52,6 +54,8 @@ export interface OrchestratorContext {
   readonly memoryStore: MemoryStore;
   readonly logStore: LogStore;
   readonly sessionStore: SessionStore;
+  readonly teamStore: TeamStore;
+  readonly agentStore: AgentStore;
   readonly hooks: HookRegistry;
   config: PolpoConfig;
   readonly workDir: string;

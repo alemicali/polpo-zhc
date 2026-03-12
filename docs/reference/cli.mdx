@@ -3,7 +3,7 @@ title: "CLI"
 description: "Complete reference for every polpo command, flag, and subcommand"
 ---
 
-Running `polpo` with no arguments launches the [TUI](/usage/tui). All commands that interact with a project accept `-d, --dir <path>` to set the working directory (defaults to `.`).
+All commands that interact with a project accept `-d, --dir <path>` to set the working directory (defaults to `.`).
 
 ## polpo init
 
@@ -47,15 +47,6 @@ polpo serve [-p <port>] [-H <host>] [-d <path>] [--api-key <key>] [--project-id 
 | `-H, --host` | `127.0.0.1` | Host to bind to |
 | `--api-key` | — | API key for authentication |
 | `--project-id` | dir name | Project ID |
-
-## polpo tui
-
-Launch the interactive TUI. This is the default command.
-
-```bash
-polpo tui [-d <path>]
-polpo          # same thing
-```
 
 ## polpo chat
 
