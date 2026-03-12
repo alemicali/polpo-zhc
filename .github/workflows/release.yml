@@ -126,7 +126,7 @@ jobs:
 
       - name: Build sidecar (Windows)
         if: matrix.platform == 'win'
-        run: bun build dist/cli/index.js --compile --outfile ui/binaries/polpo-server.exe
+        run: bun build dist/cli/index.js --compile --external chromium-bidi --external playwright-core --external playwright --outfile ui/binaries/polpo-server.exe
         shell: pwsh
 
       # Package
