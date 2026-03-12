@@ -235,9 +235,6 @@ export class Orchestrator extends TypedEmitter {
       setModelAllowlist(this.config.settings.modelAllowlist);
     }
 
-    // Validate API keys for all configured models
-    this.validateProviders();
-
     const stores = this.injectedStore
       ? { task: this.injectedStore, run: this.injectedRunStore! }
       : await this.createStores(this.config.settings.storage);
@@ -265,6 +262,9 @@ export class Orchestrator extends TypedEmitter {
     this.teamStore = this.drizzleStores?.teamStore ?? new FileTeamStore(this.polpoDir);
     this.agentStore = this.drizzleStores?.agentStore ?? new FileAgentStore(this.polpoDir);
 
+    // Validate API keys (after stores are available so we can read per-agent models)
+    await this.validateProviders();
+
     await this.initManagers();
     this.initVaultStore();
   }
@@ -289,7 +289,7 @@ export class Orchestrator extends TypedEmitter {
     }
   }
 
-  private validateProviders(): void {
+  private async validateProviders(): Promise<void> {
     const modelSpecs: string[] = [];
     // Default model
     if (process.env.POLPO_MODEL) modelSpecs.push(process.env.POLPO_MODEL);
@@ -305,11 +305,10 @@ export class Orchestrator extends TypedEmitter {
     }
     // Judge model
     if (process.env.POLPO_JUDGE_MODEL) modelSpecs.push(process.env.POLPO_JUDGE_MODEL);
-    // Per-agent models
-    for (const team of this.config.teams) {
-      for (const agent of team.agents) {
-        if (agent.model) modelSpecs.push(agent.model);
-      }
+    // Per-agent models (from AgentStore, not config)
+    const agents = await this.agentStore.getAgents();
+    for (const agent of agents) {
+      if (agent.model) modelSpecs.push(agent.model);
     }
 
     if (modelSpecs.length === 0) {
@@ -1415,6 +1414,8 @@ export class Orchestrator extends TypedEmitter {
 
   private async seedTasks(): Promise<void> {
     await this.taskMgr.seedTasks();
+    // Sync config cache from stores so state reflects authoritative data
+    await this.agentMgr.syncConfigCache();
     // Also set initial state for non-interactive mode
     await this.registry.setState({
       org: this.config.org,
