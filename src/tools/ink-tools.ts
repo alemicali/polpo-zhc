@@ -378,9 +378,10 @@ function createInkAddTool(polpoDir: string): AgentTool<typeof InkAddSchema> {
           }
         }
 
-        // Save config if non-team data changed
+        // Save config if non-team data changed (strip teams — they live in stores now)
         if (configChanged) {
-          savePolpoConfig(polpoDir, config);
+          const { teams: _t, ...configWithoutTeams } = config;
+          savePolpoConfig(polpoDir, { ...configWithoutTeams, teams: [] } as PolpoFileConfig);
         }
 
         // Update lock file

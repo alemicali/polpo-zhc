@@ -3,6 +3,7 @@ import chalk from "chalk";
 import { resolve } from "node:path";
 import { Orchestrator } from "../../core/orchestrator.js";
 import { parseConfig } from "../../core/config.js";
+import { FileAgentStore } from "../../stores/file-agent-store.js";
 
 async function initOrchestrator(workDir: string): Promise<Orchestrator> {
   const o = new Orchestrator(resolve(workDir));
@@ -109,9 +110,12 @@ export function registerConfigCommands(program: Command): void {
       const workDir = resolve(opts.dir);
       try {
         const config = await parseConfig(workDir);
+        const polpoDir = resolve(workDir, ".polpo");
+        const agentStore = new FileAgentStore(polpoDir);
+        const allAgents = await agentStore.getAgents();
         console.log(chalk.green("\n  \u2713 Configuration valid"));
         console.log(chalk.dim(`    Org: ${config.org}`));
-        console.log(chalk.dim(`    Agents:  ${config.teams.flatMap((t) => t.agents).length}`));
+        console.log(chalk.dim(`    Agents:  ${allAgents.length}`));
         console.log();
         process.exit(0);
       } catch (err: any) {

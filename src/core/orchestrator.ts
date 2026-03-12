@@ -265,25 +265,21 @@ export class Orchestrator extends TypedEmitter {
     this.teamStore = this.drizzleStores?.teamStore ?? new FileTeamStore(this.polpoDir);
     this.agentStore = this.drizzleStores?.agentStore ?? new FileAgentStore(this.polpoDir);
 
-    // Seed teams/agents from polpo.json into the stores (migration path)
-    await this.seedTeamsAndAgents();
-
     await this.initManagers();
     this.initVaultStore();
   }
 
   /**
-   * Seed teams and agents from polpo.json config into TeamStore/AgentStore.
-   * This supports migration from the old embedded model. If the stores
-   * already have data, existing entries are not overwritten.
+   * Populate stores from the teams array passed to initInteractive().
+   * Idempotent — skips teams/agents that already exist in the store.
    */
-  private async seedTeamsAndAgents(): Promise<void> {
-    if (!this.config.teams || this.config.teams.length === 0) return;
+  private async populateStores(teams: Team[]): Promise<void> {
+    if (!teams || teams.length === 0) return;
 
-    await this.teamStore.seed(this.config.teams);
+    await this.teamStore.seed(teams);
 
     const agentsToSeed: Array<AgentConfig & { teamName: string }> = [];
-    for (const team of this.config.teams) {
+    for (const team of teams) {
       for (const agent of team.agents) {
         agentsToSeed.push({ ...agent, teamName: team.name });
       }
@@ -609,6 +605,10 @@ export class Orchestrator extends TypedEmitter {
     this.teamStore = this.drizzleStores?.teamStore ?? new FileTeamStore(this.polpoDir);
     this.agentStore = this.drizzleStores?.agentStore ?? new FileAgentStore(this.polpoDir);
 
+    // Populate stores with the teams passed to initInteractive
+    // (this is project creation, not migration — teams come from the caller)
+    await this.populateStores(teamsArray);
+
     this.config = {
       version: "1",
       org: polpoConfig?.org ?? org,
@@ -625,9 +625,6 @@ export class Orchestrator extends TypedEmitter {
     if (this.config.settings.modelAllowlist) {
       setModelAllowlist(this.config.settings.modelAllowlist);
     }
-
-    // Seed teams/agents from polpo.json into the stores (migration path)
-    await this.seedTeamsAndAgents();
 
     await this.initManagers();
     this.initVaultStore();

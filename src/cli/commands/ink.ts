@@ -261,9 +261,11 @@ async function installPackages(
     }
   }
 
-  // Save config if non-team data changed (settings, providers)
+  // Save config if non-team data changed (settings, providers).
+  // Strip teams — they live in TeamStore/AgentStore now.
   if (configChanged) {
-    savePolpoConfig(polpoDir, config);
+    const { teams: _t, ...configWithoutTeams } = config;
+    savePolpoConfig(polpoDir, { ...configWithoutTeams, teams: [] } as PolpoFileConfig);
   }
 
   return result;
