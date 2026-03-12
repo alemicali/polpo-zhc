@@ -34,6 +34,8 @@ import { dirname } from "node:path";
 import { buildSystemPrompt } from "../../adapters/engine.js";
 import { createCodingTools, createAllTools } from "../../tools/coding-tools.js";
 import { createInkTools } from "../../tools/ink-tools.js";
+import { createMemoryTools } from "../../tools/memory-tools.js";
+import { agentMemoryScope } from "@polpo-ai/core";
 import { resolveAgentVault } from "../../vault/index.js";
 
 const MAX_TURNS = 20;
@@ -391,6 +393,18 @@ export function completionRoutes(orchestrator: Orchestrator, apiKeys?: string[])
           outputDir: undefined,
           polpoDir,
         });
+      }
+
+      // Memory tools — scoped to this agent only
+      const memoryStore = orchestrator.getMemoryStore();
+      if (memoryStore) {
+        agentToolInstances.push(...createMemoryTools(memoryStore, agentConfig.name));
+      }
+
+      // Inject existing agent memory into the system prompt
+      const agentMemory = await memoryStore?.get(agentMemoryScope(agentConfig.name));
+      if (agentMemory) {
+        fullSystemPrompt += `\n\n## Your persistent memory\n\n${agentMemory}`;
       }
 
       effectiveTools = agentToolInstances as Tool[];

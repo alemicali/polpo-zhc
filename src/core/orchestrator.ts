@@ -668,6 +668,7 @@ export class Orchestrator extends TypedEmitter {
   getStore(): TaskStore { return this.registry; }
   getRunStore(): RunStore { return this.runStore; }
   getPolpoDir(): string { return this.polpoDir; }
+  getMemoryStore(): MemoryStore { return this.memoryStore; }
   getVaultStore(): EncryptedVaultStore | undefined { return this.vaultStore; }
 
   /**

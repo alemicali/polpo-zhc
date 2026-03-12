@@ -2321,7 +2321,7 @@ function ChatInput() {
                 <MicButton onTranscript={setTextareaValue} disabled={inputDisabled} />
                 <PromptInputSubmit
                   status={isLoading ? "streaming" : undefined}
-                  disabled={inputDisabled}
+                  disabled={isLoading ? false : inputDisabled}
                   onStop={stop}
                 />
               </div>

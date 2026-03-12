@@ -69,8 +69,8 @@ const PLATFORMS: Record<Platform, PlatformInfo> = {
     label: "macOS",
     icon: Apple,
     assets: [
-      { label: "DMG", filename: "Polpo-{version}.dmg" },
-      { label: "ZIP", filename: "Polpo-{version}-mac.zip" },
+      { label: "DMG", filename: "Polpo-{version}-arm64.dmg" },
+      { label: "ZIP", filename: "Polpo-{version}-arm64-mac.zip" },
     ],
   },
   windows: {
@@ -78,7 +78,7 @@ const PLATFORMS: Record<Platform, PlatformInfo> = {
     label: "Windows",
     icon: Monitor, // placeholder, we use WindowsIcon
     assets: [
-      { label: "Installer", filename: "Polpo-Setup-{version}.exe" },
+      { label: "Installer", filename: "Polpo.Setup.{version}.exe" },
     ],
   },
   unknown: {
