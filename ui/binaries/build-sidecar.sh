@@ -13,7 +13,11 @@ fi
 echo "Building polpo-server sidecar..."
 
 cd "$REPO_ROOT"
-bun build dist/cli/index.js --compile --outfile "$SCRIPT_DIR/polpo-server${EXT}"
+bun build dist/cli/index.js --compile \
+  --external chromium-bidi \
+  --external playwright-core \
+  --external playwright \
+  --outfile "$SCRIPT_DIR/polpo-server${EXT}"
 
 echo "Sidecar built: $SCRIPT_DIR/polpo-server${EXT}"
 ls -lh "$SCRIPT_DIR/polpo-server${EXT}"
