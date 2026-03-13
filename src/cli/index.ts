@@ -5,7 +5,7 @@ import { mkdir, access, readFile } from "node:fs/promises";
 import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { Command } from "commander";
-import { DEFAULT_SERVER_PORT, DEFAULT_SERVER_HOST } from "../core/constants.js";
+import { DEFAULT_SERVER_PORT, DEFAULT_SERVER_HOST, getPolpoDir } from "../core/constants.js";
 
 // Read version from package.json at build time fallback
 const __dirname_cli = dirname(fileURLToPath(import.meta.url));
@@ -203,7 +203,7 @@ const serveAction = async (opts: any) => {
       ? corsRaw.split(",").map((o: string) => o.trim()).filter(Boolean)
       : undefined;
 
-    const configPath = resolve(workDir, ".polpo", "polpo.json");
+    const configPath = resolve(getPolpoDir(workDir), "polpo.json");
     const hasConfig = existsSync(configPath);
 
     if (!hasConfig) {
@@ -265,7 +265,7 @@ program
     console.log(LOGO_CENTER());
 
     const workDir = resolve(opts.dir);
-    const polpoDir = resolve(workDir, ".polpo");
+    const polpoDir = getPolpoDir(workDir);
 
     await mkdir(polpoDir, { recursive: true });
     await mkdir(resolve(polpoDir, "logs"), { recursive: true });
@@ -310,7 +310,7 @@ program
   .option("-d, --dir <path>", "Working directory", ".")
   .option("-w, --watch", "Watch mode: auto-refresh", false)
   .action(async (opts) => {
-    const polpoDir = resolve(opts.dir, ".polpo");
+    const polpoDir = getPolpoDir(resolve(opts.dir));
     let frame = 0;
     const startTime = Date.now();
     let lastState: PolpoState | null = null;

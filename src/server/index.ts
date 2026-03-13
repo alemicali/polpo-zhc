@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
-import { resolve, basename } from "node:path";
+import { resolve, basename, join } from "node:path";
+import { getPolpoDir } from "../core/constants.js";
 import { serve } from "@hono/node-server";
 import { createApp } from "./app.js";
 
@@ -59,7 +60,7 @@ export class PolpoServer {
     const workDir = resolve(this.config.workDir);
     this.orchestrator = new Orchestrator(workDir);
 
-    const configPath = resolve(workDir, ".polpo", "polpo.json");
+    const configPath = join(getPolpoDir(workDir), "polpo.json");
     const hasConfig = existsSync(configPath);
 
     if (hasConfig) {

@@ -11,7 +11,7 @@
 import { Command } from "commander";
 import chalk from "chalk";
 import { resolve } from "node:path";
-import { existsSync, readdirSync } from "node:fs";
+import { getPolpoDir } from "../../core/constants.js";
 import {
   discoverSkills,
   installSkills,
@@ -25,25 +25,7 @@ import {
   loadSkillIndex,
 } from "../../llm/skills.js";
 import type { AgentConfig } from "../../core/types.js";
-import { FileAgentStore } from "../../stores/file-agent-store.js";
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function getPolpoDir(dir: string): string {
-  return resolve(dir, ".polpo");
-}
-
-function getAgentNames(polpoDir: string): string[] {
-  const agentsDir = resolve(polpoDir, "agents");
-  if (!existsSync(agentsDir)) return [];
-  try {
-    return readdirSync(agentsDir, { withFileTypes: true })
-      .filter(e => e.isDirectory())
-      .map(e => e.name);
-  } catch { return []; }
-}
+import { createCliAgentStore } from "../stores.js";
 
 // ---------------------------------------------------------------------------
 // Registration
@@ -118,14 +100,10 @@ export function registerSkillsCommands(program: Command): void {
         const cwd = resolve(opts.dir);
         const polpoDir = getPolpoDir(opts.dir);
 
-        // Merge agent names from filesystem AND AgentStore
-        const fsAgentNames = getAgentNames(polpoDir);
-        const agentStore = new FileAgentStore(polpoDir);
+        // Get agent names from the configured store backend
+        const agentStore = await createCliAgentStore(polpoDir);
         const storeAgents = await agentStore.getAgents();
-        const storeAgentNames = storeAgents.map(a => a.name);
-
-        // Deduplicated agent names
-        const agentNames = [...new Set([...fsAgentNames, ...storeAgentNames])];
+        const agentNames = storeAgents.map((a: AgentConfig) => a.name);
 
         // Build agentConfigSkills map from store agents
         const agentConfigSkills = new Map<string, string[]>();

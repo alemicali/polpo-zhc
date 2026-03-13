@@ -1055,7 +1055,7 @@ function ListView({
                 </p>
                 {tab === "all" && (
                   <p className="text-xs mt-1 text-center max-w-xs">
-                    Tasks are created when a mission is executed. Use the TUI or Chat to create and run a mission.
+                    Tasks are created when a mission is executed. Use the CLI or Chat to create and run a mission.
                   </p>
                 )}
               </CardContent>
@@ -1393,7 +1393,7 @@ export function TasksPage() {
               <ListChecks className="h-12 w-12 mb-4 opacity-40" />
               <p className="text-sm font-medium">No tasks yet</p>
               <p className="text-xs mt-1 text-center max-w-xs">
-                Tasks are created when a mission is executed. Use the TUI or Chat to create and run a mission.
+                Tasks are created when a mission is executed. Use the CLI or Chat to create and run a mission.
               </p>
               <kbd className="mt-3 rounded border border-border bg-muted px-2 py-1 font-mono text-[10px]">
                 polpo mission &lt;prompt&gt;

@@ -213,7 +213,7 @@ export class TaskRunner {
     }
   }
 
-  /** Sync process list from RunStore into the old processes table for TUI backward compat.
+  /** Sync process list from RunStore into the old processes table for backward compat.
    *  Also emits `agent:activity` SSE events when activity changes (diff-based). */
   async syncProcessesFromRunStore(): Promise<void> {
     const active = await this.ctx.runStore.getActiveRuns();

@@ -1,6 +1,6 @@
-import { resolve } from "node:path";
+import { resolve, join } from "node:path";
 import { mkdirSync, existsSync, watch, type FSWatcher } from "node:fs";
-import { join } from "node:path";
+import { getPolpoDir } from "./constants.js";
 import type { Server } from "node:net";
 import { parseConfig, loadPolpoConfig, savePolpoConfig, loadEnvFile } from "./config.js";
 import { findLogForTask, buildExecutionSummary } from "../assessment/transcript-parser.js";
@@ -152,7 +152,7 @@ export class Orchestrator extends TypedEmitter {
   /** Re-point the orchestrator at a different project directory (before init). */
   resetWorkDir(newWorkDir: string): void {
     this.workDir = resolve(newWorkDir);
-    this.polpoDir = resolve(this.workDir, ".polpo");
+    this.polpoDir = getPolpoDir(this.workDir);
     this.cachedAgentWorkDir = null;
   }
 
@@ -161,12 +161,12 @@ export class Orchestrator extends TypedEmitter {
     if (typeof workDirOrOptions === "string" || workDirOrOptions === undefined) {
       const workDir = workDirOrOptions ?? ".";
       this.workDir = resolve(workDir);
-      this.polpoDir = resolve(workDir, ".polpo");
+      this.polpoDir = getPolpoDir(this.workDir);
       this.assessFn = assessTask;
     } else {
       const opts = workDirOrOptions;
       this.workDir = resolve(opts.workDir ?? ".");
-      this.polpoDir = resolve(this.workDir, ".polpo");
+      this.polpoDir = getPolpoDir(this.workDir);
       this.assessFn = opts.assessFn ?? assessTask;
       this.injectedStore = opts.store;
       this.injectedRunStore = opts.runStore;
@@ -177,15 +177,17 @@ export class Orchestrator extends TypedEmitter {
   private drizzleStores?: import("@polpo-ai/drizzle").DrizzleStores;
 
   /** Create task + run stores based on the configured storage backend. */
-  private async createStores(storage?: "file" | "sqlite" | "postgres"): Promise<{
+  private async createStores(storage?: "file" | "sqlite" | "postgres", databaseUrl?: string): Promise<{
     task: TaskStore; run: RunStore;
     logStore?: LogStore; sessionStore?: SessionStore; memoryStore?: MemoryStore;
   }> {
     if (storage === "postgres") {
+      const dbUrl = databaseUrl ?? this.config?.settings?.databaseUrl;
+      if (!dbUrl) throw new Error('storage: "postgres" requires a databaseUrl');
       const { createPgStores, ensurePgSchema } = await import("@polpo-ai/drizzle");
       const postgres = (await import("postgres")).default;
       const { drizzle } = await import("drizzle-orm/postgres-js");
-      const sql = postgres(this.config.settings.databaseUrl!);
+      const sql = postgres(dbUrl);
       const db = drizzle(sql);
       await ensurePgSchema(db);
       this.drizzleStores = createPgStores(db);
@@ -241,7 +243,7 @@ export class Orchestrator extends TypedEmitter {
 
     const stores = this.injectedStore
       ? { task: this.injectedStore, run: this.injectedRunStore! }
-      : await this.createStores(this.config.settings.storage);
+      : await this.createStores(this.config.settings.storage, this.config.settings.databaseUrl);
     this.registry = stores.task;
     this.runStore = stores.run;
 
@@ -345,9 +347,9 @@ export class Orchestrator extends TypedEmitter {
     return resolved;
   }
 
-  /** Create manager instances with shared context. */
-  private async initManagers(): Promise<void> {
-    const ctx: OrchestratorContext = {
+  /** Build the shared OrchestratorContext used by all managers. */
+  private buildContext(): OrchestratorContext {
+    return {
       emitter: this,
       registry: this.registry,
       runStore: this.runStore,
@@ -359,7 +361,7 @@ export class Orchestrator extends TypedEmitter {
       hooks: this.hookRegistry,
       config: this.config,
       workDir: this.workDir,
-      agentWorkDir: this.resolveAgentWorkDir(),
+      agentWorkDir: this.getAgentWorkDir(),
       polpoDir: this.polpoDir,
       assessFn: this.assessFn,
 
@@ -374,7 +376,7 @@ export class Orchestrator extends TypedEmitter {
       findLogForTask: (polpoDir, taskId, runId) => findLogForTask(polpoDir, taskId, runId),
       buildExecutionSummary: (logPath) => buildExecutionSummary(logPath),
 
-      // Inject Drizzle stores when storage is "postgres"
+      // Inject Drizzle stores when storage is "sqlite" or "postgres"
       ...(this.drizzleStores ? {
         approvalStore: this.drizzleStores.approvalStore,
         notificationStore: this.drizzleStores.notificationStore,
@@ -384,6 +386,11 @@ export class Orchestrator extends TypedEmitter {
         configStore: this.drizzleStores.configStore,
       } : {}),
     };
+  }
+
+  /** Create manager instances with shared context. */
+  private async initManagers(): Promise<void> {
+    const ctx = this.buildContext();
     this.agentMgr = new AgentManager(ctx);
     this.taskMgr = new TaskManager(ctx);
     this.missionExec = new MissionExecutor(ctx, this.taskMgr, this.agentMgr);
@@ -566,7 +573,7 @@ export class Orchestrator extends TypedEmitter {
   }
 
   /**
-   * Initialize for interactive/TUI mode.
+   * Initialize for interactive mode.
    * Creates .polpo dir and a minimal config from provided team info.
    */
   async initInteractive(org: string, teams: Team | Team[]): Promise<void> {
@@ -582,9 +589,11 @@ export class Orchestrator extends TypedEmitter {
     const polpoConfig = loadPolpoConfig(this.polpoDir);
     const settings = polpoConfig?.settings ?? { maxRetries: 2, workDir: ".", logLevel: "normal" as const };
 
+    const storageBackend = settings.storage as "file" | "sqlite" | "postgres" | undefined;
+    const dbUrl = (settings as any).databaseUrl ?? process.env.DATABASE_URL;
     const stores = this.injectedStore
       ? { task: this.injectedStore, run: this.injectedRunStore! }
-      : await this.createStores(settings.storage);
+      : await this.createStores(storageBackend, dbUrl);
     this.registry = stores.task;
     this.runStore = stores.run;
 
@@ -1079,43 +1088,7 @@ export class Orchestrator extends TypedEmitter {
 
     // 3. Invalidate cached agent work dir and rebuild OrchestratorContext
     this.cachedAgentWorkDir = null;
-    const ctx: OrchestratorContext = {
-      emitter: this,
-      registry: this.registry,
-      runStore: this.runStore,
-      memoryStore: this.memoryStore,
-      logStore: this.logStore,
-      sessionStore: this.sessionStore,
-      teamStore: this.teamStore,
-      agentStore: this.agentStore,
-      hooks: this.hookRegistry,
-      config: this.config,
-      workDir: this.workDir,
-      agentWorkDir: this.getAgentWorkDir(),
-      polpoDir: this.polpoDir,
-      assessFn: this.assessFn,
-
-      // Shell-specific ports (must match initManagers)
-      killProcess: (pid, signal) => { try { process.kill(pid, (signal ?? "SIGTERM") as NodeJS.Signals); } catch { /* already dead */ } },
-      loadConfig: () => loadPolpoConfig(this.polpoDir),
-      saveConfig: (config) => savePolpoConfig(this.polpoDir, config),
-      queryLLM: async (prompt, model) => {
-        const { queryOrchestratorText } = await import("../llm/query.js");
-        return queryOrchestratorText(prompt, model);
-      },
-      findLogForTask: (polpoDir, taskId, runId) => findLogForTask(polpoDir, taskId, runId),
-      buildExecutionSummary: (logPath) => buildExecutionSummary(logPath),
-
-      // Inject Drizzle stores when storage is "sqlite" or "postgres"
-      ...(this.drizzleStores ? {
-        approvalStore: this.drizzleStores.approvalStore,
-        notificationStore: this.drizzleStores.notificationStore,
-        checkpointStore: this.drizzleStores.checkpointStore,
-        delayStore: this.drizzleStores.delayStore,
-        peerStore: this.drizzleStores.peerStore,
-        configStore: this.drizzleStores.configStore,
-      } : {}),
-    };
+    const ctx = this.buildContext();
 
     // 4. Re-initialize optional subsystems from new config
 
@@ -1659,7 +1632,7 @@ export class Orchestrator extends TypedEmitter {
     // tasks to done/failed since the snapshot at the top of tick().
     await this.missionExec.cleanupCompletedGroups(await this.registry.getAllTasks());
 
-    // Sync process list from RunStore for backward compat with TUI
+    // Sync process list from RunStore for backward compat
     await this.runner.syncProcessesFromRunStore();
 
     return false;

@@ -665,7 +665,7 @@ export function useChat() {
   );
 
   // Respond to a mission preview.
-  // Execute/Draft call the REST API directly (same pattern as TUI).
+  // Execute/Draft call the REST API directly.
   // Refine sends feedback back to the LLM for re-planning.
   // Cancel just clears the state.
   const respondToMission = useCallback(

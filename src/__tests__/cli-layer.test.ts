@@ -406,15 +406,14 @@ describe("CLI layer: logs commands", () => {
 
   test("logs list — shows sessions", async () => {
     const { stdout } = await runCLI(registerLogsCommands, ["logs", "list", "-d", dir]);
-    // Should show at least one session from init, or "No sessions"
-    // Either way, we exercised the command path
-    expect(stdout.length + 1).toBeGreaterThan(0);
+    // Should print something — either session rows or a "No sessions" message
+    expect(stdout.length).toBeGreaterThan(0);
   });
 
   test("logs show — displays log entries or shows active session", async () => {
     const { stdout, stderr } = await runCLI(registerLogsCommands, ["logs", "show", "-d", dir]);
-    // Might show entries or "No entries" — either exercises the code path
-    expect(stdout.length + stderr.length).toBeGreaterThanOrEqual(0);
+    // Should produce output on stdout or stderr (e.g. "No entries" or entries table)
+    expect(stdout.length + stderr.length).toBeGreaterThan(0);
   });
 });
 

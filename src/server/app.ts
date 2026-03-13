@@ -1,4 +1,4 @@
-import { resolve } from "node:path";
+import { getPolpoDir } from "../core/constants.js";
 import { OpenAPIHono } from "@hono/zod-openapi";
 import { cors } from "hono/cors";
 import type { Orchestrator } from "../core/orchestrator.js";
@@ -86,7 +86,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
 
   // Provider management — always available (API key CRUD, OAuth flows, model listing)
   if (opts?.workDir) {
-    const polpoDir = resolve(opts.workDir, ".polpo");
+    const polpoDir = getPolpoDir(opts.workDir);
     app.route("/api/v1/providers", providerRoutes(polpoDir));
   }
 

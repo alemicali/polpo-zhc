@@ -23,6 +23,7 @@ import {
 } from "node:fs";
 import { join, resolve, isAbsolute } from "node:path";
 import { homedir } from "node:os";
+import { getGlobalPolpoDir } from "../core/constants.js";
 import { randomBytes } from "node:crypto";
 import type { AuthProfilesFile, OAuthProfile, ProfileUsageStats } from "./types.js";
 
@@ -60,7 +61,7 @@ const FORBIDDEN_KEYS = new Set([
 function resolveStateDir(): string {
   const envDir = process.env.POLPO_STATE_DIR;
   if (!envDir) {
-    return join(homedir(), ".polpo");
+    return getGlobalPolpoDir();
   }
 
   // Must be absolute
@@ -68,7 +69,7 @@ function resolveStateDir(): string {
     emitSecurityWarning(
       `POLPO_STATE_DIR is not absolute ("${envDir}") — ignoring, using default ~/.polpo`,
     );
-    return join(homedir(), ".polpo");
+    return getGlobalPolpoDir();
   }
 
   // Resolve must equal the input (no ".." trickery)
@@ -86,7 +87,7 @@ function resolveStateDir(): string {
       emitSecurityWarning(
         `POLPO_STATE_DIR points to sensitive location ("${resolved}") — ignoring, using default ~/.polpo`,
       );
-      return join(homedir(), ".polpo");
+      return getGlobalPolpoDir();
     }
   }
 

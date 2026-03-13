@@ -18,7 +18,7 @@ import {
   loadSkillIndex,
 } from "../../llm/skills.js";
 import { resolve } from "node:path";
-import { existsSync, readdirSync } from "node:fs";
+
 
 /**
  * Skill routes — discover, install, remove, and assign skills.
@@ -46,12 +46,9 @@ export function skillRoutes(): OpenAPIHono<ServerEnv> {
     const workDir = orchestrator.getWorkDir();
     const polpoDir = orchestrator.getPolpoDir();
 
-    // Get agent names from config (authoritative source) + filesystem fallback
+    // Get agent names from the configured store (authoritative source)
     const configAgents = await orchestrator.getAgents();
-    const configAgentNames = configAgents.map(a => a.name);
-    const fsAgentNames = getAgentNames(polpoDir);
-    // Merge: config agents are authoritative, fs agents catch orphaned symlink dirs
-    const allAgentNames = [...new Set([...configAgentNames, ...fsAgentNames])];
+    const allAgentNames = configAgents.map(a => a.name);
 
     // Build map of agentName → configured skill names for config-based assignment detection
     const agentConfigSkills = new Map<string, string[]>();
@@ -619,12 +616,4 @@ export function skillRoutes(): OpenAPIHono<ServerEnv> {
   return app;
 }
 
-function getAgentNames(polpoDir: string): string[] {
-  const agentsDir = resolve(polpoDir, "agents");
-  if (!existsSync(agentsDir)) return [];
-  try {
-    return readdirSync(agentsDir, { withFileTypes: true })
-      .filter(e => e.isDirectory())
-      .map(e => e.name);
-  } catch { return []; }
-}
+

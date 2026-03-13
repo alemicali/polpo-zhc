@@ -4,7 +4,7 @@
  * Read tools execute immediately. Write tools may require user approval
  * depending on the current approval mode (approval vs accept-all).
  *
- * These tools are used by both the TUI chat and the OpenAI-compatible
+ * These tools are used by the chat interface and the OpenAI-compatible
  * /v1/chat/completions endpoint.
  */
 
@@ -32,6 +32,7 @@ import {
   parseInkSource, discoverInkPackages, readInkLock, writeInkLock,
   upsertInkLockEntry, removeInkLockEntry, getInkLockEntry,
   isInkSourceInstalled, uninstallInkPackages,
+  stripInkMetadata,
 } from "../core/ink.js";
 import type { InkPackage, InkLockEntry } from "../core/ink.js";
 import { FileTeamStore } from "../stores/file-team-store.js";
@@ -4722,11 +4723,7 @@ async function execInkAdd(polpo: Orchestrator, args: Record<string, unknown>): P
         break;
       }
       case "agent": {
-        const agentContent = pkg.content as AgentConfig;
-        const cleanAgent = { ...agentContent };
-        delete (cleanAgent as any).version;
-        delete (cleanAgent as any).author;
-        delete (cleanAgent as any).tags;
+        const cleanAgent = stripInkMetadata(pkg.content as AgentConfig);
 
         const existingAgent = await inkAgentStore.getAgent(cleanAgent.name);
         if (existingAgent) {
@@ -4757,10 +4754,7 @@ async function execInkAdd(polpo: Orchestrator, args: Record<string, unknown>): P
           const existingTeam = await inkTeamStore.getTeam(incomingTeam.name);
           if (existingTeam) {
             for (const agent of incomingTeam.agents) {
-              const cleanAgent = { ...agent };
-              delete (cleanAgent as any).version;
-              delete (cleanAgent as any).author;
-              delete (cleanAgent as any).tags;
+              const cleanAgent = stripInkMetadata(agent);
               const existing = await inkAgentStore.getAgent(agent.name);
               if (!existing) {
                 await inkAgentStore.createAgent(cleanAgent, incomingTeam.name);
@@ -4769,10 +4763,7 @@ async function execInkAdd(polpo: Orchestrator, args: Record<string, unknown>): P
           } else {
             await inkTeamStore.createTeam({ name: incomingTeam.name, description: incomingTeam.description, agents: [] });
             for (const agent of incomingTeam.agents) {
-              const cleanAgent = { ...agent };
-              delete (cleanAgent as any).version;
-              delete (cleanAgent as any).author;
-              delete (cleanAgent as any).tags;
+              const cleanAgent = stripInkMetadata(agent);
               await inkAgentStore.createAgent(cleanAgent, incomingTeam.name);
             }
           }
@@ -4947,11 +4938,7 @@ async function execInkUpdate(polpo: Orchestrator, args: Record<string, unknown>)
           break;
         }
         case "agent": {
-          const agentContent = pkg.content as AgentConfig;
-          const cleanAgent = { ...agentContent };
-          delete (cleanAgent as any).version;
-          delete (cleanAgent as any).author;
-          delete (cleanAgent as any).tags;
+          const cleanAgent = stripInkMetadata(pkg.content as AgentConfig);
 
           const existingAgent = await updAgentStore.getAgent(cleanAgent.name);
           if (existingAgent) {
@@ -4973,10 +4960,7 @@ async function execInkUpdate(polpo: Orchestrator, args: Record<string, unknown>)
             const existingTeam = await updTeamStore.getTeam(incomingTeam.name);
             if (existingTeam) {
               for (const agent of incomingTeam.agents) {
-                const cleanAgent = { ...agent };
-                delete (cleanAgent as any).version;
-                delete (cleanAgent as any).author;
-                delete (cleanAgent as any).tags;
+                const cleanAgent = stripInkMetadata(agent);
                 const existing = await updAgentStore.getAgent(agent.name);
                 if (existing) {
                   const { name: _, ...updates } = cleanAgent;
@@ -4988,10 +4972,7 @@ async function execInkUpdate(polpo: Orchestrator, args: Record<string, unknown>)
             } else {
               await updTeamStore.createTeam({ name: incomingTeam.name, description: incomingTeam.description, agents: [] });
               for (const agent of incomingTeam.agents) {
-                const cleanAgent = { ...agent };
-                delete (cleanAgent as any).version;
-                delete (cleanAgent as any).author;
-                delete (cleanAgent as any).tags;
+                const cleanAgent = stripInkMetadata(agent);
                 await updAgentStore.createAgent(cleanAgent, incomingTeam.name);
               }
             }

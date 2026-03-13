@@ -26,6 +26,20 @@ import type { PlaybookDefinition } from "./playbook.js";
 import type { AgentStore } from "./agent-store.js";
 import type { PlaybookStore } from "./playbook-store.js";
 
+// ── Helpers ────────────────────────────────────────────────────────────
+
+/**
+ * Strip ink-specific metadata fields (version, author, tags) from an agent
+ * config so they don't end up persisted in polpo.json or agent stores.
+ */
+export function stripInkMetadata(agent: AgentConfig): AgentConfig {
+  const clean = { ...agent };
+  delete (clean as any).version;
+  delete (clean as any).author;
+  delete (clean as any).tags;
+  return clean;
+}
+
 // ── Package Types ──────────────────────────────────────────────────────
 
 /** The three package types distributable via Ink. */

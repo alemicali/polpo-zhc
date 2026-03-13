@@ -659,7 +659,7 @@ export function MissionsPage() {
             <Target className="h-12 w-12 mb-4 text-primary/30" />
             <p className="text-sm font-medium">No missions yet</p>
             <p className="text-xs mt-1 text-center max-w-xs">
-              Missions are created when you give the orchestrator a prompt via the TUI or Chat.
+              Missions are created when you give the orchestrator a prompt via the CLI or Chat.
             </p>
             <kbd className="mt-3 rounded border border-border bg-muted px-2 py-1 font-mono text-[10px]">
               polpo mission &lt;prompt&gt;

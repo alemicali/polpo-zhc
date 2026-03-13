@@ -1,9 +1,10 @@
 import { Command } from "commander";
 import chalk from "chalk";
 import { resolve } from "node:path";
+import { getPolpoDir } from "../../core/constants.js";
 import { Orchestrator } from "../../core/orchestrator.js";
 import { parseConfig } from "../../core/config.js";
-import { FileAgentStore } from "../../stores/file-agent-store.js";
+import { createCliTeamAndAgentStores } from "../stores.js";
 
 async function initOrchestrator(workDir: string): Promise<Orchestrator> {
   const o = new Orchestrator(resolve(workDir));
@@ -110,8 +111,8 @@ export function registerConfigCommands(program: Command): void {
       const workDir = resolve(opts.dir);
       try {
         const config = await parseConfig(workDir);
-        const polpoDir = resolve(workDir, ".polpo");
-        const agentStore = new FileAgentStore(polpoDir);
+        const polpoDir = getPolpoDir(workDir);
+        const { agentStore } = await createCliTeamAndAgentStores(polpoDir);
         const allAgents = await agentStore.getAgents();
         console.log(chalk.green("\n  \u2713 Configuration valid"));
         console.log(chalk.dim(`    Org: ${config.org}`));

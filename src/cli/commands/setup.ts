@@ -1,9 +1,10 @@
 import { resolve, basename } from "node:path";
+import { getPolpoDir } from "../../core/constants.js";
 import readline from "node:readline";
 import chalk from "chalk";
 import type { Command } from "commander";
 import { loadPolpoConfig, savePolpoConfig, generatePolpoConfigDefault } from "../../core/config.js";
-import { FileAgentStore } from "../../stores/file-agent-store.js";
+import { createCliAgentStore } from "../stores.js";
 import { PROVIDER_ENV_MAP } from "../../llm/pi-client.js";
 import {
   detectProviders,
@@ -148,7 +149,7 @@ export interface SetupOptions {
 
 export async function runSetupWizard(options?: SetupOptions): Promise<void> {
   const workDir = options?.workDir ?? process.cwd();
-  const polpoDir = options?.polpoDir ?? resolve(workDir, ".polpo");
+  const polpoDir = options?.polpoDir ?? getPolpoDir(workDir);
   const isInteractive = !options?.nonInteractive && process.stdin.isTTY;
   const existing = loadPolpoConfig(polpoDir);
   const orgName = existing?.org ?? basename(workDir);
@@ -240,7 +241,7 @@ export async function runSetupWizard(options?: SetupOptions): Promise<void> {
   console.log();
 
   // Read agent defaults from AgentStore (preferred) with polpo.json fallback
-  const agentStore = new FileAgentStore(polpoDir);
+  const agentStore = await createCliAgentStore(polpoDir);
   const existingAgents = await agentStore.getAgents();
   const defaultAgentName = existingAgents[0]?.name ?? existing?.teams?.[0]?.agents?.[0]?.name ?? "agent-1";
   const defaultAgentRole = existingAgents[0]?.role ?? existing?.teams?.[0]?.agents?.[0]?.role ?? "founder";

@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import { resolve, basename, join } from "node:path";
+import { getPolpoDir } from "../../core/constants.js";
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import type { ServerEnv } from "../app.js";
 import { redactPolpoConfig } from "../security.js";
@@ -397,7 +398,7 @@ export function publicConfigRoutes(
   onInitialize?: (workDir: string) => Promise<void>,
 ): OpenAPIHono {
   const app = new OpenAPIHono();
-  const polpoDir = resolve(workDir, ".polpo");
+  const polpoDir = getPolpoDir(workDir);
 
   // GET /config/status
   app.openapi(configStatusRoute, (c) => {
@@ -434,7 +435,7 @@ export function publicConfigRoutes(
     try {
       const body = c.req.valid("json");
       const targetDir = body.workDir ? resolve(body.workDir) : workDir;
-      const targetPolpoDir = resolve(targetDir, ".polpo");
+      const targetPolpoDir = getPolpoDir(targetDir);
       const org = body.orgName || basename(targetDir);
 
       const config = generatePolpoConfigDefault(org, {

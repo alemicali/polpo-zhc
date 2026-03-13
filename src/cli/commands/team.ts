@@ -1,9 +1,9 @@
 import { Command } from "commander";
 import chalk from "chalk";
 import { resolve } from "node:path";
+import { getPolpoDir } from "../../core/constants.js";
 import type { AgentConfig } from "../../core/types.js";
-import { FileTeamStore } from "../../stores/file-team-store.js";
-import { FileAgentStore } from "../../stores/file-agent-store.js";
+import { createCliTeamAndAgentStores } from "../stores.js";
 
 export function registerTeamCommands(program: Command): void {
   const team = program
@@ -17,9 +17,8 @@ export function registerTeamCommands(program: Command): void {
     .option("-d, --dir <path>", "Working directory", ".")
     .action(async (opts) => {
       try {
-        const polpoDir = resolve(opts.dir, ".polpo");
-        const teamStore = new FileTeamStore(polpoDir);
-        const agentStore = new FileAgentStore(polpoDir);
+        const polpoDir = getPolpoDir(resolve(opts.dir));
+        const { teamStore, agentStore } = await createCliTeamAndAgentStores(polpoDir);
 
         const teams = await teamStore.getTeams();
         const teamName = teams[0]?.name ?? "default";
@@ -57,9 +56,8 @@ export function registerTeamCommands(program: Command): void {
     .option("--reports-to <agent>", "Agent this one reports to (org chart hierarchy)")
     .action(async (name: string, opts) => {
       try {
-        const polpoDir = resolve(opts.dir, ".polpo");
-        const teamStore = new FileTeamStore(polpoDir);
-        const agentStore = new FileAgentStore(polpoDir);
+        const polpoDir = getPolpoDir(resolve(opts.dir));
+        const { teamStore, agentStore } = await createCliTeamAndAgentStores(polpoDir);
 
         // Ensure default team exists
         const teams = await teamStore.getTeams();
@@ -93,8 +91,8 @@ export function registerTeamCommands(program: Command): void {
     .option("-d, --dir <path>", "Working directory", ".")
     .action(async (name: string, opts) => {
       try {
-        const polpoDir = resolve(opts.dir, ".polpo");
-        const agentStore = new FileAgentStore(polpoDir);
+        const polpoDir = getPolpoDir(resolve(opts.dir));
+        const { agentStore } = await createCliTeamAndAgentStores(polpoDir);
 
         const deleted = await agentStore.deleteAgent(name);
         if (!deleted) throw new Error(`Agent "${name}" not found`);
@@ -114,8 +112,8 @@ export function registerTeamCommands(program: Command): void {
     .option("-d, --dir <path>", "Working directory", ".")
     .action(async (newName: string, opts) => {
       try {
-        const polpoDir = resolve(opts.dir, ".polpo");
-        const teamStore = new FileTeamStore(polpoDir);
+        const polpoDir = getPolpoDir(resolve(opts.dir));
+        const { teamStore } = await createCliTeamAndAgentStores(polpoDir);
 
         const teams = await teamStore.getTeams();
         if (teams.length === 0) {

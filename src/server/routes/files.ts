@@ -1,6 +1,7 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import type { ServerEnv } from "../app.js";
 import { resolve, relative, extname, basename, dirname } from "node:path";
+import { POLPO_DIR_NAME } from "../../core/constants.js";
 import { existsSync, statSync, readdirSync, createReadStream, mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import { Readable } from "node:stream";
@@ -222,8 +223,8 @@ export function fileRoutes(): OpenAPIHono<ServerEnv> {
     const polpoStats = dirStats(polpoDir);
     roots.push({
       id: "polpo",
-      name: ".polpo",
-      path: ".polpo",
+      name: POLPO_DIR_NAME,
+      path: POLPO_DIR_NAME,
       absolutePath: polpoDir,
       description: "Polpo configuration & data",
       icon: "folder-cog",
@@ -509,7 +510,7 @@ export function fileRoutes(): OpenAPIHono<ServerEnv> {
     const resolved = resolveSandboxed(root, roots);
     if (!resolved) return c.json({ ok: false, error: "Invalid or disallowed path" }, 400);
 
-    const SKIP = new Set(["node_modules", ".git", ".next", "dist", "__pycache__", ".cache", ".polpo"]);
+    const SKIP = new Set(["node_modules", ".git", ".next", "dist", "__pycache__", ".cache", POLPO_DIR_NAME]);
     const results: { name: string; path: string }[] = [];
 
     function walk(dir: string, depth: number) {

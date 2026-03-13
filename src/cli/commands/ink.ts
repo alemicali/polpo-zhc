@@ -10,6 +10,7 @@
 import { Command } from "commander";
 import chalk from "chalk";
 import { resolve, join } from "node:path";
+import { getPolpoDir } from "../../core/constants.js";
 import { existsSync, mkdirSync, rmSync, cpSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { execSync } from "node:child_process";
 import { createInterface } from "node:readline";
@@ -24,19 +25,15 @@ import {
   isInkSourceInstalled,
   getInkLockEntry,
   uninstallInkPackages,
+  stripInkMetadata,
 } from "../../core/ink.js";
 import type { InkPackage, InkLockEntry, InkLockPackage } from "../../core/ink.js";
 import { loadPolpoConfig, savePolpoConfig } from "../../core/config.js";
 import type { PolpoFileConfig, AgentConfig, Team } from "../../core/types.js";
-import { FileTeamStore } from "../../stores/file-team-store.js";
-import { FileAgentStore } from "../../stores/file-agent-store.js";
 import { FileMemoryStore } from "../../stores/file-memory-store.js";
+import { createCliStores, createCliAgentStore } from "../stores.js";
 
 // ── Helpers ────────────────────────────────────────────────────────────
-
-function getPolpoDir(dir: string): string {
-  return resolve(dir, ".polpo");
-}
 
 /** Directory where registry repos are cached. */
 function getCacheDir(polpoDir: string): string {
@@ -126,8 +123,7 @@ async function installPackages(
 ): Promise<InstallResult> {
   const result: InstallResult = { installed: [], skipped: [], merged: [] };
 
-  const teamStore = new FileTeamStore(polpoDir);
-  const agentStore = new FileAgentStore(polpoDir);
+  const { teamStore, agentStore } = await createCliStores(polpoDir);
 
   // Ensure default team exists
   const teams = await teamStore.getTeams();
@@ -279,8 +275,8 @@ async function installPackages(
  */
 async function mergeAgentViaStore(
   agent: AgentConfig,
-  teamStore: InstanceType<typeof FileTeamStore>,
-  agentStore: InstanceType<typeof FileAgentStore>,
+  teamStore: import("@polpo-ai/core/team-store").TeamStore,
+  agentStore: import("@polpo-ai/core/agent-store").AgentStore,
   interactive: boolean,
 ): Promise<"added" | "merged" | "skip"> {
   const clean = stripInkMetadata(agent);
@@ -327,8 +323,8 @@ async function mergeAgentViaStore(
  */
 async function mergeCompanyTeamsViaStore(
   company: PolpoFileConfig,
-  teamStore: InstanceType<typeof FileTeamStore>,
-  agentStore: InstanceType<typeof FileAgentStore>,
+  teamStore: import("@polpo-ai/core/team-store").TeamStore,
+  agentStore: import("@polpo-ai/core/agent-store").AgentStore,
   interactive: boolean,
 ): Promise<{ installed: string[]; merged: string[]; skipped: string[] }> {
   const installed: string[] = [];
@@ -400,18 +396,6 @@ async function mergeCompanyTeamsViaStore(
 }
 
 /**
- * Strip ink-specific metadata fields (version, author, tags) from an agent config
- * so they don't end up in polpo.json.
- */
-function stripInkMetadata(agent: AgentConfig): AgentConfig {
-  const clean = { ...agent };
-  delete (clean as any).version;
-  delete (clean as any).author;
-  delete (clean as any).tags;
-  return clean;
-}
-
-/**
  * Merge settings from incoming company — only fill in missing values.
  */
 function mergeSettings(config: PolpoFileConfig, incoming: any): void {
@@ -446,7 +430,7 @@ function appendFileContent(destPath: string, content: string, separator: string)
  * Delegates to the shared `uninstallInkPackages()` from core/ink.ts.
  */
 async function uninstallPackages(entry: InkLockEntry, polpoDir: string): Promise<void> {
-  const agentStore = new FileAgentStore(polpoDir);
+  const agentStore = await createCliAgentStore(polpoDir);
   await uninstallInkPackages(entry, polpoDir, agentStore);
 }
 

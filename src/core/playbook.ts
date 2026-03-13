@@ -23,6 +23,7 @@
 import { readdirSync, readFileSync, existsSync, realpathSync, statSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { homedir } from "node:os";
+import { getPolpoDir, getGlobalPolpoDir } from "./constants.js";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -157,15 +158,16 @@ export function discoverPlaybooks(cwd: string, polpoDir?: string): PlaybookInfo[
   }
 
   // 2. Fallback if polpoDir is not the default .polpo
-  const defaultPolpoDir = join(cwd, ".polpo");
+  const defaultPolpoDir = getPolpoDir(cwd);
   if (!polpoDir || resolve(polpoDir) !== resolve(defaultPolpoDir)) {
     dirs.push(join(defaultPolpoDir, "playbooks"));
     dirs.push(join(defaultPolpoDir, "templates"));
   }
 
   // 3. User-level: ~/.polpo/playbooks/ (+ legacy templates/)
-  dirs.push(join(homedir(), ".polpo", "playbooks"));
-  dirs.push(join(homedir(), ".polpo", "templates"));
+  const globalDir = getGlobalPolpoDir();
+  dirs.push(join(globalDir, "playbooks"));
+  dirs.push(join(globalDir, "templates"));
 
   for (const dir of dirs) {
     for (const pb of scanPlaybookDir(dir)) {

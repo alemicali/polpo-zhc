@@ -74,6 +74,7 @@ export {
   removeInkLockEntry,
   isInkSourceInstalled,
   getInkLockEntry,
+  stripInkMetadata,
 } from "./ink.js";
 export type {
   InkPackageType,

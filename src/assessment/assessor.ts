@@ -2,6 +2,7 @@ import { exec } from "node:child_process";
 import { access } from "node:fs/promises";
 import { mkdir, writeFile, unlink } from "node:fs/promises";
 import { join, resolve } from "node:path";
+import { getPolpoDir } from "../core/constants.js";
 import { promisify } from "node:util";
 import { nanoid } from "nanoid";
 import type {
@@ -99,7 +100,7 @@ export async function runCheck(
       }
 
       // Multi-line: write to temp file, execute with bash, cleanup
-      const tmpDir = join(cwd, ".polpo", "tmp");
+      const tmpDir = join(getPolpoDir(cwd), "tmp");
       const scriptFile = join(tmpDir, `check-${nanoid(8)}.sh`);
       try {
         await mkdir(tmpDir, { recursive: true });

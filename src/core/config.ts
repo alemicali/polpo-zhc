@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { resolve, join } from "node:path";
 import type { PolpoFileConfig, PolpoFileConfigRaw, PolpoSettings, PolpoConfig, ProviderConfig, ModelConfig, Team } from "./types.js";
+import { getPolpoDir } from "./constants.js";
 
 const DEFAULT_SETTINGS: PolpoSettings = {
   maxRetries: 3,
@@ -219,7 +220,7 @@ export function loadEnvFile(polpoDir: string): void {
  * Tasks are managed via plans and the task store — not in the config file.
  */
 export async function parseConfig(workDir: string): Promise<PolpoConfig> {
-  const polpoDir = resolve(workDir, ".polpo");
+  const polpoDir = getPolpoDir(workDir);
 
   // Load .polpo/.env relative to workDir (handles --dir correctly).
   // The CLI top-level only loads from cwd; this ensures the right .env is used
