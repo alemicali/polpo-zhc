@@ -1,4 +1,4 @@
-import type { AgentActivity, TaskResult, TaskOutcome } from "./types.js";
+import type { AgentActivity, TaskResult, TaskOutcome, RunnerConfig } from "./types.js";
 
 export type RunStatus = "running" | "completed" | "failed" | "killed";
 
@@ -15,6 +15,8 @@ export interface RunRecord {
   result?: TaskResult;
   /** Outcomes auto-collected during execution (files, media, text artifacts). */
   outcomes?: TaskOutcome[];
+  /** Full runner configuration (used by cloud runners that read config from DB instead of file). */
+  config?: RunnerConfig;
   configPath: string;
 }
 

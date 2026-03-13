@@ -26,10 +26,10 @@ import type { WhatsAppStore } from "../stores/whatsapp-store.js";
 
 const ACTIVITY_POLL_MS = 1500;
 
-function readConfig(): RunnerConfig {
+function readConfigFromFile(): RunnerConfig {
   const idx = process.argv.indexOf("--config");
   if (idx < 0 || !process.argv[idx + 1]) {
-    console.error("Usage: runner --config <path>");
+    console.error("Usage: runner --config <path> | --run-id <id> --db <url>");
     process.exit(1);
   }
   const configPath = process.argv[idx + 1];
@@ -40,6 +40,38 @@ function readConfig(): RunnerConfig {
     console.error(`Failed to parse runner config at ${configPath}:`, err instanceof Error ? err.message : err);
     process.exit(1);
   }
+}
+
+/**
+ * Cloud mode: read RunnerConfig from Neon DB via RunStore.
+ * Usage: runner --run-id <id> --db <postgres-url>
+ */
+async function readConfigFromDb(): Promise<RunnerConfig> {
+  const runIdIdx = process.argv.indexOf("--run-id");
+  const dbIdx = process.argv.indexOf("--db");
+  if (runIdIdx < 0 || dbIdx < 0 || !process.argv[runIdIdx + 1] || !process.argv[dbIdx + 1]) {
+    console.error("Usage: runner --run-id <id> --db <postgres-url>");
+    process.exit(1);
+  }
+  const runId = process.argv[runIdIdx + 1];
+  const dbUrl = process.argv[dbIdx + 1];
+
+  const { createPgStores } = await import("@polpo-ai/drizzle");
+  const postgres = (await import("postgres")).default;
+  const { drizzle } = await import("drizzle-orm/postgres-js");
+  const sql = postgres(dbUrl);
+  const db = drizzle(sql);
+  const store = createPgStores(db).runStore;
+
+  const run = await store.getRun(runId);
+  if (!run?.config) {
+    console.error(`Run ${runId} not found or has no config in DB`);
+    await sql.end();
+    process.exit(1);
+  }
+
+  await sql.end();
+  return run.config;
 }
 
 function errorResult(err: unknown): TaskResult {
@@ -112,7 +144,8 @@ async function createRunStore(config: RunnerConfig): Promise<RunStore> {
 }
 
 async function main(): Promise<void> {
-  const config = readConfig();
+  const isDbMode = process.argv.includes("--run-id");
+  const config = isDbMode ? await readConfigFromDb() : readConfigFromFile();
   const runStore = await createRunStore(config);
   const actLog = new RunActivityLog(config.polpoDir, config.runId, config.taskId, config.agent.name);
 
@@ -126,8 +159,9 @@ async function main(): Promise<void> {
     startedAt: now,
     updatedAt: now,
     activity: { filesCreated: [], filesEdited: [], toolCalls: 0, totalTokens: 0, lastUpdate: now },
-    configPath: join(process.argv[process.argv.indexOf("--config") + 1]),
+    configPath: isDbMode ? `db://${config.runId}` : join(process.argv[process.argv.indexOf("--config") + 1]),
   };
+  // In DB mode, run record already exists (created by cloud spawner) — update it with PID
   await runStore.upsertRun(initialRecord);
   actLog.logEvent("spawning", { task: config.task.title });
 
@@ -256,8 +290,10 @@ async function main(): Promise<void> {
     }
   }
 
-  // Cleanup config file
-  try { unlinkSync(join(process.argv[process.argv.indexOf("--config") + 1])); } catch { /* already gone */ }
+  // Cleanup config file (only in file mode, not DB mode)
+  if (!isDbMode) {
+    try { unlinkSync(join(process.argv[process.argv.indexOf("--config") + 1])); } catch { /* already gone */ }
+  }
 
   await runStore.close();
   process.exit(0);

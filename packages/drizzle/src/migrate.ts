@@ -90,6 +90,7 @@ export async function ensurePgSchema(db: any): Promise<void> {
       activity     JSONB NOT NULL DEFAULT '{}',
       result       JSONB,
       outcomes     JSONB,
+      config       JSONB,
       config_path  TEXT NOT NULL
     );
 

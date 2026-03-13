@@ -93,6 +93,7 @@ function createTables(raw: InstanceType<typeof Database>) {
       activity TEXT NOT NULL DEFAULT '{}',
       result TEXT,
       outcomes TEXT,
+      config TEXT,
       config_path TEXT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS sessions (

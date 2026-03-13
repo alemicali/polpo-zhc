@@ -84,6 +84,7 @@ export function ensureSqliteSchema(db: { exec(sql: string): void }): void {
       activity TEXT NOT NULL DEFAULT '{}',
       result TEXT,
       outcomes TEXT,
+      config TEXT,
       config_path TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_runs_status ON runs(status);
