@@ -16,6 +16,7 @@ export type { ValidatedReviewPayload, ExecutionSummaryResult } from "./assessmen
 
 // Server
 export { PolpoServer, createApp, SSEBridge } from "./server/index.js";
+export type { AppOptions } from "./server/index.js";
 export type {
   ServerConfig,
   ApiResponse,
@@ -26,6 +27,30 @@ export type {
   CreateMissionRequest,
   UpdateMissionRequest,
   AddAgentRequest,
+} from "./server/index.js";
+
+// Route factories (for cloud data-plane wiring)
+export {
+  taskRoutes,
+  missionRoutes,
+  agentRoutes,
+  eventRoutes,
+  chatRoutes,
+  skillRoutes,
+  notificationRoutes,
+  approvalRoutes,
+  playbookRoutes,
+  stateRoutes,
+  completionRoutes,
+  peerRoutes,
+  scheduleRoutes,
+  watcherRoutes,
+  vaultRoutes,
+  authRoutes,
+  fileRoutes,
+  configRoutes,
+  publicConfigRoutes,
+  healthRoutes,
 } from "./server/index.js";
 
 // Notifications (channels are not in core/index)
