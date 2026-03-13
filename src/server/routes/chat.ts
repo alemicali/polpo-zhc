@@ -1,5 +1,4 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
-import type { ServerEnv } from "../app.js";
 
 /* ── Route definitions ─────────────────────────────────────────────── */
 
@@ -97,13 +96,12 @@ const deleteSessionRoute = createRoute({
  * Chat session management routes.
  * Conversational AI is handled by /v1/chat/completions (see completions.ts).
  */
-export function chatRoutes(): OpenAPIHono<ServerEnv> {
-  const app = new OpenAPIHono<ServerEnv>();
+export function chatRoutes(getDeps: () => { sessionStore?: any }): OpenAPIHono {
+  const app = new OpenAPIHono();
 
   // GET /chat/sessions — list chat sessions
   app.openapi(listSessionsRoute, async (c) => {
-    const orchestrator = c.get("orchestrator");
-    const sessionStore = orchestrator.getSessionStore();
+    const { sessionStore } = getDeps();
     if (!sessionStore) {
       return c.json({ ok: true, data: { sessions: [] } });
     }
@@ -113,8 +111,7 @@ export function chatRoutes(): OpenAPIHono<ServerEnv> {
 
   // GET /chat/sessions/:id/messages — get messages for a session
   app.openapi(getSessionMessagesRoute, async (c) => {
-    const orchestrator = c.get("orchestrator");
-    const sessionStore = orchestrator.getSessionStore();
+    const { sessionStore } = getDeps();
     if (!sessionStore) {
       return c.json({ ok: false, error: "Session store not available", code: "NOT_AVAILABLE" }, 503);
     }
@@ -125,13 +122,13 @@ export function chatRoutes(): OpenAPIHono<ServerEnv> {
     }
     const messages = await sessionStore.getMessages(id);
     // SECURITY: Redact vault credentials from persisted tool calls before serving to client
-    const safeMessages = messages.map(m => {
+    const safeMessages = messages.map((m: any) => {
       if (!m.toolCalls) return m;
-      const hasVault = m.toolCalls.some(tc => tc.name === "set_vault_entry" || tc.name === "update_vault_credentials");
+      const hasVault = m.toolCalls.some((tc: any) => tc.name === "set_vault_entry" || tc.name === "update_vault_credentials");
       if (!hasVault) return m;
       return {
         ...m,
-        toolCalls: m.toolCalls.map(tc => {
+        toolCalls: m.toolCalls.map((tc: any) => {
           if ((tc.name !== "set_vault_entry" && tc.name !== "update_vault_credentials") || !tc.arguments) return tc;
           const args = { ...tc.arguments };
           if (args.credentials && typeof args.credentials === "object") {
@@ -150,8 +147,7 @@ export function chatRoutes(): OpenAPIHono<ServerEnv> {
 
   // PATCH /chat/sessions/:id — rename a session
   app.openapi(renameSessionRoute, async (c) => {
-    const orchestrator = c.get("orchestrator");
-    const sessionStore = orchestrator.getSessionStore();
+    const { sessionStore } = getDeps();
     if (!sessionStore) {
       return c.json({ ok: false, error: "Session store not available", code: "NOT_AVAILABLE" }, 503);
     }
@@ -166,8 +162,7 @@ export function chatRoutes(): OpenAPIHono<ServerEnv> {
 
   // DELETE /chat/sessions/:id — delete a session
   app.openapi(deleteSessionRoute, async (c) => {
-    const orchestrator = c.get("orchestrator");
-    const sessionStore = orchestrator.getSessionStore();
+    const { sessionStore } = getDeps();
     if (!sessionStore) {
       return c.json({ ok: false, error: "Session store not available", code: "NOT_AVAILABLE" }, 503);
     }

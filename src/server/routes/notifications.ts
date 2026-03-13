@@ -1,5 +1,4 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
-import type { ServerEnv } from "../app.js";
 import { SendNotificationSchema } from "../schemas.js";
 
 /* ── Route definitions ─────────────────────────────────────────────── */
@@ -130,13 +129,15 @@ const deleteRuleRoute = createRoute({
 /**
  * Notification history, rules, and direct send routes.
  */
-export function notificationRoutes(): OpenAPIHono<ServerEnv> {
-  const app = new OpenAPIHono<ServerEnv>();
+export function notificationRoutes(getDeps: () => {
+  getNotificationRouter: () => any;
+}): OpenAPIHono {
+  const app = new OpenAPIHono();
 
   // GET /notifications — list notification history
   app.openapi(listNotificationsRoute, async (c) => {
-    const orchestrator = c.get("orchestrator");
-    const router = orchestrator.getNotificationRouter();
+    const deps = getDeps();
+    const router = deps.getNotificationRouter();
     const store = router?.getStore();
 
     if (!store) {
@@ -165,8 +166,8 @@ export function notificationRoutes(): OpenAPIHono<ServerEnv> {
 
   // GET /notifications/stats — notification summary
   app.openapi(notificationStatsRoute, async (c) => {
-    const orchestrator = c.get("orchestrator");
-    const router = orchestrator.getNotificationRouter();
+    const deps = getDeps();
+    const router = deps.getNotificationRouter();
     const store = router?.getStore();
 
     if (!store) {
@@ -185,8 +186,8 @@ export function notificationRoutes(): OpenAPIHono<ServerEnv> {
 
   // POST /notifications/send — send a notification directly (with optional delay)
   app.openapi(sendNotificationRoute, async (c) => {
-    const orchestrator = c.get("orchestrator");
-    const router = orchestrator.getNotificationRouter();
+    const deps = getDeps();
+    const router = deps.getNotificationRouter();
 
     if (!router) {
       return c.json(
@@ -218,8 +219,8 @@ export function notificationRoutes(): OpenAPIHono<ServerEnv> {
 
   // GET /notifications/rules — list notification rules
   app.openapi(listRulesRoute, (c) => {
-    const orchestrator = c.get("orchestrator");
-    const router = orchestrator.getNotificationRouter();
+    const deps = getDeps();
+    const router = deps.getNotificationRouter();
     if (!router) {
       return c.json({ ok: true, data: [] });
     }
@@ -228,8 +229,8 @@ export function notificationRoutes(): OpenAPIHono<ServerEnv> {
 
   // POST /notifications/rules — create a notification rule
   app.openapi(createRuleRoute, (c) => {
-    const orchestrator = c.get("orchestrator");
-    const router = orchestrator.getNotificationRouter();
+    const deps = getDeps();
+    const router = deps.getNotificationRouter();
     if (!router) {
       return c.json({ ok: false, error: "Notification system not configured", code: "NOT_CONFIGURED" }, 400);
     }
@@ -253,8 +254,8 @@ export function notificationRoutes(): OpenAPIHono<ServerEnv> {
 
   // DELETE /notifications/rules/:ruleId — delete a notification rule
   app.openapi(deleteRuleRoute, (c) => {
-    const orchestrator = c.get("orchestrator");
-    const router = orchestrator.getNotificationRouter();
+    const deps = getDeps();
+    const router = deps.getNotificationRouter();
     if (!router) {
       return c.json({ ok: false, error: "Notification system not configured", code: "NOT_FOUND" }, 404);
     }

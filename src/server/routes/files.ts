@@ -1,5 +1,4 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
-import type { ServerEnv } from "../app.js";
 import { resolve, relative, extname, basename, dirname } from "node:path";
 import { POLPO_DIR_NAME } from "../../core/constants.js";
 import { existsSync, statSync, readdirSync, createReadStream, mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
@@ -154,24 +153,28 @@ const previewFileRoute = createRoute({
 
 // ── Route factory ────────────────────────────────────────────────────────────
 
-export function fileRoutes(): OpenAPIHono<ServerEnv> {
-  const app = new OpenAPIHono<ServerEnv>();
+export function fileRoutes(getDeps: () => {
+  polpoDir: string;
+  workDir: string;
+  agentWorkDir: string;
+  emit: (event: string, data: any) => void;
+}): OpenAPIHono {
+  const app = new OpenAPIHono();
 
-  function getAllowedRoots(c: { get: (key: "orchestrator") => { getPolpoDir(): string; getWorkDir(): string; getAgentWorkDir(): string } }): string[] {
-    const orchestrator = c.get("orchestrator");
+  function getAllowedRoots(): string[] {
+    const deps = getDeps();
     // workDir must come before polpoDir so that "." resolves to the project root, not .polpo
-    const roots = [orchestrator.getWorkDir(), orchestrator.getPolpoDir()];
-    const agentDir = orchestrator.getAgentWorkDir();
-    if (!roots.includes(agentDir)) roots.push(agentDir);
+    const roots = [deps.workDir, deps.polpoDir];
+    if (!roots.includes(deps.agentWorkDir)) roots.push(deps.agentWorkDir);
     return roots;
   }
 
   // ── GET /roots — available root directories ──
   app.openapi(listRootsRoute, ((c: any) => {
-    const orchestrator = c.get("orchestrator");
-    const workDir = orchestrator.getWorkDir();
-    const polpoDir = orchestrator.getPolpoDir();
-    const agentWorkDir = orchestrator.getAgentWorkDir();
+    const deps = getDeps();
+    const workDir = deps.workDir;
+    const polpoDir = deps.polpoDir;
+    const agentWorkDir = deps.agentWorkDir;
 
     // Recursively compute total files and total size for a directory.
     // Skips node_modules, .git, and similar heavy dirs to stay fast.
@@ -238,7 +241,7 @@ export function fileRoutes(): OpenAPIHono<ServerEnv> {
   // ── GET /list — directory listing (OpenAPI) ──
   app.openapi(listFilesRoute, ((c: any) => {
     const { path: reqPath = "." } = c.req.valid("query");
-    const roots = getAllowedRoots(c);
+    const roots = getAllowedRoots();
 
     const resolved = resolveSandboxed(reqPath, roots);
     if (!resolved) {
@@ -287,7 +290,7 @@ export function fileRoutes(): OpenAPIHono<ServerEnv> {
     const download = c.req.query("download");
     if (!reqPath) return c.json({ ok: false, error: "Missing path parameter" }, 400);
 
-    const roots = getAllowedRoots(c);
+    const roots = getAllowedRoots();
     const resolved = resolveSandboxed(reqPath, roots);
     if (!resolved) return c.json({ ok: false, error: "Invalid or disallowed path" }, 400);
 
@@ -322,7 +325,7 @@ export function fileRoutes(): OpenAPIHono<ServerEnv> {
     const { path: reqPath, maxLines: maxLinesStr } = c.req.valid("query");
     if (!reqPath) return c.json({ ok: false, error: "Missing path parameter" }, 400);
 
-    const roots = getAllowedRoots(c);
+    const roots = getAllowedRoots();
     const maxLines = maxLinesStr ? parseInt(maxLinesStr, 10) : 500;
 
     const resolved = resolveSandboxed(reqPath, roots);
@@ -392,7 +395,7 @@ export function fileRoutes(): OpenAPIHono<ServerEnv> {
   app.post("/upload", async (c) => {
     const body = await c.req.parseBody({ all: true });
     const destPath = (body.path as string | undefined) ?? ".";
-    const roots = getAllowedRoots(c);
+    const roots = getAllowedRoots();
     const resolvedDir = resolveSandboxed(destPath, roots);
     if (!resolvedDir) return c.json({ ok: false, error: "Invalid or disallowed path" }, 400);
     if (!existsSync(resolvedDir) || !statSync(resolvedDir).isDirectory()) {
@@ -421,9 +424,9 @@ export function fileRoutes(): OpenAPIHono<ServerEnv> {
     }
 
     // Emit file:changed for each uploaded file
-    const orchestrator = c.get("orchestrator");
+    const uploadDeps = getDeps();
     for (const u of uploaded) {
-      orchestrator.emit("file:changed", { path: resolve(resolvedDir, u.name), dir: resolvedDir, action: "created", source: "server" });
+      uploadDeps.emit("file:changed", { path: resolve(resolvedDir, u.name), dir: resolvedDir, action: "created", source: "server" });
     }
 
     return c.json({ ok: true, data: { uploaded, count: uploaded.length } }, 200);
@@ -434,7 +437,7 @@ export function fileRoutes(): OpenAPIHono<ServerEnv> {
     const body = await c.req.json<{ path: string }>().catch(() => null);
     if (!body?.path) return c.json({ ok: false, error: "Missing path" }, 400);
 
-    const roots = getAllowedRoots(c);
+    const roots = getAllowedRoots();
     const parent = dirname(body.path);
     const resolvedParent = resolveSandboxed(parent === "." ? "." : parent, roots);
     if (!resolvedParent) return c.json({ ok: false, error: "Invalid or disallowed path" }, 400);
@@ -443,7 +446,7 @@ export function fileRoutes(): OpenAPIHono<ServerEnv> {
     if (existsSync(newDir)) return c.json({ ok: false, error: "Directory already exists" }, 400);
 
     mkdirSync(newDir, { recursive: true });
-    c.get("orchestrator").emit("file:changed", { path: newDir, dir: resolvedParent, action: "created", source: "server" });
+    getDeps().emit("file:changed", { path: newDir, dir: resolvedParent, action: "created", source: "server" });
     return c.json({ ok: true, data: { path: body.path } }, 200);
   });
 
@@ -455,7 +458,7 @@ export function fileRoutes(): OpenAPIHono<ServerEnv> {
       return c.json({ ok: false, error: "Invalid new name" }, 400);
     }
 
-    const roots = getAllowedRoots(c);
+    const roots = getAllowedRoots();
     const resolved = resolveSandboxed(body.path, roots);
     if (!resolved) return c.json({ ok: false, error: "Invalid or disallowed path" }, 400);
     if (!existsSync(resolved)) return c.json({ ok: false, error: "Path not found" }, 404);
@@ -464,7 +467,7 @@ export function fileRoutes(): OpenAPIHono<ServerEnv> {
     if (existsSync(newPath)) return c.json({ ok: false, error: "A file with that name already exists" }, 400);
 
     renameSync(resolved, newPath);
-    c.get("orchestrator").emit("file:changed", { path: resolved, dir: dirname(resolved), action: "renamed", source: "server" });
+    getDeps().emit("file:changed", { path: resolved, dir: dirname(resolved), action: "renamed", source: "server" });
     return c.json({ ok: true, data: { oldPath: body.path, newName: body.newName } }, 200);
   });
 
@@ -473,7 +476,7 @@ export function fileRoutes(): OpenAPIHono<ServerEnv> {
     const body = await c.req.json<{ path: string }>().catch(() => null);
     if (!body?.path) return c.json({ ok: false, error: "Missing path" }, 400);
 
-    const roots = getAllowedRoots(c);
+    const roots = getAllowedRoots();
     const resolved = resolveSandboxed(body.path, roots);
     if (!resolved) return c.json({ ok: false, error: "Invalid or disallowed path" }, 400);
     if (!existsSync(resolved)) return c.json({ ok: false, error: "Path not found" }, 404);
@@ -490,23 +493,23 @@ export function fileRoutes(): OpenAPIHono<ServerEnv> {
     }
 
     rmSync(resolved, { force: true });
-    c.get("orchestrator").emit("file:changed", { path: resolved, dir: dirname(resolved), action: "deleted", source: "server" });
+    getDeps().emit("file:changed", { path: resolved, dir: dirname(resolved), action: "deleted", source: "server" });
     return c.json({ ok: true, data: { path: body.path } }, 200);
   });
 
   // ── GET /search — recursive flat file listing for mention autocomplete ──
   app.get("/search", (c) => {
     const query = (c.req.query("q") ?? "").toLowerCase();
-    const orchestrator = c.get("orchestrator");
+    const searchDeps = getDeps();
     // Default to agent workspace (workDir setting), not project root
-    const agentDir = orchestrator.getAgentWorkDir();
-    const workDir = orchestrator.getWorkDir();
+    const agentDir = searchDeps.agentWorkDir;
+    const workDir = searchDeps.workDir;
     const defaultRoot = agentDir !== workDir ? relative(workDir, agentDir) : ".";
     const root = c.req.query("root") ?? defaultRoot;
     const limitParam = c.req.query("limit");
     const limit = limitParam ? Math.min(Number(limitParam), 500) : 200;
 
-    const roots = getAllowedRoots(c);
+    const roots = getAllowedRoots();
     const resolved = resolveSandboxed(root, roots);
     if (!resolved) return c.json({ ok: false, error: "Invalid or disallowed path" }, 400);
 

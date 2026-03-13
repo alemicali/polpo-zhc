@@ -9,11 +9,10 @@
  */
 
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
-import type { ServerEnv } from "../app.js";
 import type { VaultEntry } from "../../core/types.js";
 
-export function vaultRoutes(): OpenAPIHono<ServerEnv> {
-  const app = new OpenAPIHono<ServerEnv>();
+export function vaultRoutes(getDeps: () => { vaultStore?: any }): OpenAPIHono {
+  const app = new OpenAPIHono();
 
   // POST /vault/entries — save a vault entry
   const saveEntryRoute = createRoute({
@@ -62,8 +61,7 @@ export function vaultRoutes(): OpenAPIHono<ServerEnv> {
   });
 
   app.openapi(saveEntryRoute, async (c) => {
-    const orchestrator = c.get("orchestrator");
-    const vaultStore = orchestrator.getVaultStore();
+    const { vaultStore } = getDeps();
     if (!vaultStore) {
       return c.json({ ok: false, error: "Vault store not available. Check POLPO_VAULT_KEY or ~/.polpo/vault.key." }, 503);
     }
@@ -126,8 +124,7 @@ export function vaultRoutes(): OpenAPIHono<ServerEnv> {
   });
 
   app.openapi(listEntriesRoute, async (c) => {
-    const orchestrator = c.get("orchestrator");
-    const vaultStore = orchestrator.getVaultStore();
+    const { vaultStore } = getDeps();
     if (!vaultStore) {
       return c.json({ ok: false, error: "Vault store not available. Check POLPO_VAULT_KEY or ~/.polpo/vault.key." }, 503);
     }
@@ -190,8 +187,7 @@ export function vaultRoutes(): OpenAPIHono<ServerEnv> {
   });
 
   app.openapi(patchEntryRoute, async (c) => {
-    const orchestrator = c.get("orchestrator");
-    const vaultStore = orchestrator.getVaultStore();
+    const { vaultStore } = getDeps();
     if (!vaultStore) {
       return c.json({ ok: false, error: "Vault store not available. Check POLPO_VAULT_KEY or ~/.polpo/vault.key." }, 503);
     }
@@ -246,8 +242,7 @@ export function vaultRoutes(): OpenAPIHono<ServerEnv> {
   });
 
   app.openapi(deleteEntryRoute, async (c) => {
-    const orchestrator = c.get("orchestrator");
-    const vaultStore = orchestrator.getVaultStore();
+    const { vaultStore } = getDeps();
     if (!vaultStore) {
       return c.json({ ok: false, error: "Vault store not available." }, 503);
     }

@@ -126,6 +126,7 @@ export class PolpoServer {
 
 // Re-exports
 export { createApp } from "./app.js";
+export type { AppOptions } from "./app.js";
 export { SSEBridge } from "./sse-bridge.js";
 export type {
   ServerConfig,
@@ -138,3 +139,24 @@ export type {
   UpdateMissionRequest,
   AddAgentRequest,
 } from "./types.js";
+
+// Route factories — importable individually for cloud data-plane wiring
+export { taskRoutes } from "./routes/tasks.js";
+export { missionRoutes } from "./routes/missions.js";
+export { agentRoutes } from "./routes/agents.js";
+export { eventRoutes } from "./routes/events.js";
+export { chatRoutes } from "./routes/chat.js";
+export { skillRoutes } from "./routes/skills.js";
+export { notificationRoutes } from "./routes/notifications.js";
+export { approvalRoutes } from "./routes/approvals.js";
+export { playbookRoutes } from "./routes/playbooks.js";
+export { stateRoutes } from "./routes/state.js";
+export { completionRoutes } from "./routes/completions.js";
+export { peerRoutes } from "./routes/peers.js";
+export { scheduleRoutes } from "./routes/schedules.js";
+export { watcherRoutes } from "./routes/watchers.js";
+export { vaultRoutes } from "./routes/vault.js";
+export { authRoutes } from "./routes/auth.js";
+export { fileRoutes } from "./routes/files.js";
+export { configRoutes, publicConfigRoutes } from "./routes/config.js";
+export { healthRoutes } from "./routes/health.js";

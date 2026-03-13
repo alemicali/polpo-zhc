@@ -1,5 +1,4 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
-import type { ServerEnv } from "../app.js";
 import { UpdateMemorySchema } from "../schemas.js";
 import { redactPolpoState, redactPolpoConfig, sanitizeTranscriptEntry } from "../security.js";
 
@@ -131,51 +130,61 @@ const getLogSessionRoute = createRoute({
 /**
  * State, config, memory, and logs routes.
  */
-export function stateRoutes(): OpenAPIHono<ServerEnv> {
-  const app = new OpenAPIHono<ServerEnv>();
+export function stateRoutes(getDeps: () => {
+  taskStore: any;
+  getConfig: () => any;
+  hasMemory: () => Promise<boolean>;
+  getMemory: () => Promise<string>;
+  saveMemory: (content: string) => Promise<void>;
+  hasAgentMemory: (name: string) => Promise<boolean>;
+  getAgentMemory: (name: string) => Promise<string>;
+  saveAgentMemory: (name: string, content: string) => Promise<void>;
+  getLogStore: () => any;
+}): OpenAPIHono {
+  const app = new OpenAPIHono();
 
   // GET /state — full state snapshot
   app.openapi(getStateRoute, async (c) => {
-    const orchestrator = c.get("orchestrator");
-    return c.json({ ok: true, data: redactPolpoState(await orchestrator.getStore().getState()) });
+    const deps = getDeps();
+    return c.json({ ok: true, data: redactPolpoState(await deps.taskStore.getState()) });
   });
 
   // GET /orchestrator-config — orchestrator config
   app.openapi(getConfigRoute, (c) => {
-    const orchestrator = c.get("orchestrator");
-    const config = orchestrator.getConfig();
+    const deps = getDeps();
+    const config = deps.getConfig();
     return c.json({ ok: true, data: config ? redactPolpoConfig(config) : config });
   });
 
   // GET /memory — shared memory
   app.openapi(getMemoryRoute, async (c) => {
-    const orchestrator = c.get("orchestrator");
+    const deps = getDeps();
     return c.json({
       ok: true,
       data: {
-        exists: await orchestrator.hasMemory(),
-        content: await orchestrator.getMemory(),
+        exists: await deps.hasMemory(),
+        content: await deps.getMemory(),
       },
     });
   });
 
   // PUT /memory — update shared memory
   app.openapi(updateMemoryRoute, async (c) => {
-    const orchestrator = c.get("orchestrator");
+    const deps = getDeps();
     const body = c.req.valid("json");
-    await orchestrator.saveMemory(body.content);
+    await deps.saveMemory(body.content);
     return c.json({ ok: true, data: { saved: true } });
   });
 
   // GET /memory/agent/:agentName — agent-specific memory
   app.openapi(getAgentMemoryRoute, async (c) => {
-    const orchestrator = c.get("orchestrator");
+    const deps = getDeps();
     const { agentName } = c.req.valid("param");
     return c.json({
       ok: true,
       data: {
-        exists: await orchestrator.hasAgentMemory(agentName),
-        content: await orchestrator.getAgentMemory(agentName),
+        exists: await deps.hasAgentMemory(agentName),
+        content: await deps.getAgentMemory(agentName),
         agent: agentName,
       },
     });
@@ -183,17 +192,17 @@ export function stateRoutes(): OpenAPIHono<ServerEnv> {
 
   // PUT /memory/agent/:agentName — update agent-specific memory
   app.openapi(updateAgentMemoryRoute, async (c) => {
-    const orchestrator = c.get("orchestrator");
+    const deps = getDeps();
     const { agentName } = c.req.valid("param");
     const body = c.req.valid("json");
-    await orchestrator.saveAgentMemory(agentName, body.content);
+    await deps.saveAgentMemory(agentName, body.content);
     return c.json({ ok: true, data: { saved: true, agent: agentName } });
   });
 
   // GET /logs — list log sessions
   app.openapi(listLogsRoute, async (c) => {
-    const orchestrator = c.get("orchestrator");
-    const logStore = orchestrator.getLogStore();
+    const deps = getDeps();
+    const logStore = deps.getLogStore();
     if (!logStore) {
       return c.json({ ok: true, data: [] });
     }
@@ -202,13 +211,13 @@ export function stateRoutes(): OpenAPIHono<ServerEnv> {
 
   // GET /logs/:sessionId — get log entries for a session
   app.openapi(getLogSessionRoute, async (c) => {
-    const orchestrator = c.get("orchestrator");
-    const logStore = orchestrator.getLogStore();
+    const deps = getDeps();
+    const logStore = deps.getLogStore();
     if (!logStore) {
       return c.json({ ok: false, error: "Log store not available", code: "NOT_FOUND" }, 404);
     }
     const { sessionId } = c.req.valid("param");
-    const entries = (await logStore.getSessionEntries(sessionId)).map(e => sanitizeTranscriptEntry(e as unknown as Record<string, unknown>));
+    const entries = (await logStore.getSessionEntries(sessionId)).map((e: any) => sanitizeTranscriptEntry(e as unknown as Record<string, unknown>));
     return c.json({ ok: true, data: entries }, 200);
   });
 

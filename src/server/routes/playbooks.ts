@@ -1,5 +1,4 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
-import type { ServerEnv } from "../app.js";
 import {
   validateParams,
   instantiatePlaybook,
@@ -9,10 +8,14 @@ import type { PlaybookParameter, PlaybookDefinition } from "../../core/playbook.
 /**
  * Playbook routes — discover, inspect, and execute reusable mission playbooks.
  *
- * All persistence goes through PlaybookStore (from orchestrator.getPlaybookStore()).
+ * All persistence goes through PlaybookStore (injected via getDeps()).
  */
-export function playbookRoutes(): OpenAPIHono<ServerEnv> {
-  const app = new OpenAPIHono<ServerEnv>();
+export function playbookRoutes(getDeps: () => {
+  playbookStore: any;
+  saveMission: (opts: any) => Promise<any>;
+  executeMission: (id: string) => Promise<any>;
+}): OpenAPIHono {
+  const app = new OpenAPIHono();
 
   // GET /playbooks — list available playbooks
   const listPlaybooksRoute = createRoute({
@@ -29,9 +32,8 @@ export function playbookRoutes(): OpenAPIHono<ServerEnv> {
   });
 
   app.openapi(listPlaybooksRoute, async (c) => {
-    const orchestrator = c.get("orchestrator");
-    const playbookStore = orchestrator.getPlaybookStore();
-    const playbooks = await playbookStore.list();
+    const deps = getDeps();
+    const playbooks = await deps.playbookStore.list();
     return c.json({ ok: true, data: playbooks });
   });
 
@@ -57,10 +59,9 @@ export function playbookRoutes(): OpenAPIHono<ServerEnv> {
   });
 
   app.openapi(getPlaybookRoute, async (c) => {
-    const orchestrator = c.get("orchestrator");
-    const playbookStore = orchestrator.getPlaybookStore();
+    const deps = getDeps();
     const { name } = c.req.valid("param");
-    const playbook = await playbookStore.get(name);
+    const playbook = await deps.playbookStore.get(name);
 
     if (!playbook) {
       return c.json({ ok: false, error: "Playbook not found", code: "NOT_FOUND" }, 404);
@@ -112,11 +113,10 @@ export function playbookRoutes(): OpenAPIHono<ServerEnv> {
   });
 
   app.openapi(runPlaybookRoute, async (c) => {
-    const orchestrator = c.get("orchestrator");
-    const playbookStore = orchestrator.getPlaybookStore();
+    const deps = getDeps();
     const { name } = c.req.valid("param");
 
-    const playbook = await playbookStore.get(name);
+    const playbook = await deps.playbookStore.get(name);
     if (!playbook) {
       return c.json({ ok: false, error: "Playbook not found", code: "NOT_FOUND" }, 404);
     }
@@ -139,13 +139,13 @@ export function playbookRoutes(): OpenAPIHono<ServerEnv> {
     const instance = instantiatePlaybook(playbook, validation.resolved);
 
     // Save as mission and execute
-    const mission = await orchestrator.saveMission({
+    const mission = await deps.saveMission({
       data: instance.data,
       prompt: instance.prompt,
       name: instance.name,
     });
 
-    const result = await orchestrator.executeMission(mission.id);
+    const result = await deps.executeMission(mission.id);
 
     return c.json({
       ok: true,
@@ -198,8 +198,7 @@ export function playbookRoutes(): OpenAPIHono<ServerEnv> {
   });
 
   app.openapi(createPlaybookRoute, async (c) => {
-    const orchestrator = c.get("orchestrator");
-    const playbookStore = orchestrator.getPlaybookStore();
+    const deps = getDeps();
 
     const body = c.req.valid("json");
     const definition: PlaybookDefinition = {
@@ -210,7 +209,7 @@ export function playbookRoutes(): OpenAPIHono<ServerEnv> {
     };
 
     try {
-      const dir = await playbookStore.save(definition);
+      const dir = await deps.playbookStore.save(definition);
       return c.json({ ok: true, data: { name: definition.name, path: dir } }, 201);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -240,11 +239,10 @@ export function playbookRoutes(): OpenAPIHono<ServerEnv> {
   });
 
   app.openapi(deletePlaybookRoute, async (c) => {
-    const orchestrator = c.get("orchestrator");
-    const playbookStore = orchestrator.getPlaybookStore();
+    const deps = getDeps();
     const { name } = c.req.valid("param");
 
-    const deleted = await playbookStore.delete(name);
+    const deleted = await deps.playbookStore.delete(name);
     if (!deleted) {
       return c.json({ ok: false, error: "Playbook not found", code: "NOT_FOUND" }, 404);
     }

@@ -1,5 +1,4 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
-import type { ServerEnv } from "../app.js";
 
 // ── Schemas ───────────────────────────────────────────────────────────
 
@@ -99,26 +98,30 @@ const deleteScheduleRoute = createRoute({
 
 // ── Route handlers ────────────────────────────────────────────────────
 
-export function scheduleRoutes(): OpenAPIHono<ServerEnv> {
-  const app = new OpenAPIHono<ServerEnv>();
+export function scheduleRoutes(getDeps: () => {
+  getScheduler: () => any;
+  getMission: (id: string) => Promise<any>;
+  updateMission: (id: string, updates: any) => Promise<any>;
+}): OpenAPIHono {
+  const app = new OpenAPIHono();
 
   // GET /schedules — list all schedule entries
   app.openapi(listSchedulesRoute, (c) => {
-    const orchestrator = c.get("orchestrator");
-    const schedules = orchestrator.getScheduler()?.getAllSchedules() ?? [];
+    const deps = getDeps();
+    const schedules = deps.getScheduler()?.getAllSchedules() ?? [];
     return c.json({ ok: true, data: schedules });
   });
 
   // POST /schedules — create a schedule for a mission
   app.openapi(createScheduleRoute, async (c) => {
-    const orchestrator = c.get("orchestrator");
-    const scheduler = orchestrator.getScheduler();
+    const deps = getDeps();
+    const scheduler = deps.getScheduler();
     if (!scheduler) {
       return c.json({ ok: false, error: "Scheduler not available", code: "SCHEDULER_UNAVAILABLE" }, 400);
     }
 
     const body = c.req.valid("json");
-    const mission = await orchestrator.getMission(body.missionId);
+    const mission = await deps.getMission(body.missionId);
     if (!mission) {
       return c.json({ ok: false, error: `Mission "${body.missionId}" not found`, code: "NOT_FOUND" }, 404);
     }
@@ -132,7 +135,7 @@ export function scheduleRoutes(): OpenAPIHono<ServerEnv> {
     if (body.endDate !== undefined) {
       missionUpdate.endDate = body.endDate;
     }
-    const updatedMission = await orchestrator.updateMission(body.missionId, missionUpdate as any);
+    const updatedMission = await deps.updateMission(body.missionId, missionUpdate as any);
 
     const entry = scheduler.registerMission(updatedMission);
     if (!entry) {
@@ -144,8 +147,8 @@ export function scheduleRoutes(): OpenAPIHono<ServerEnv> {
 
   // PATCH /schedules/:missionId — update a schedule
   app.openapi(updateScheduleRoute, async (c) => {
-    const orchestrator = c.get("orchestrator");
-    const scheduler = orchestrator.getScheduler();
+    const deps = getDeps();
+    const scheduler = deps.getScheduler();
     if (!scheduler) {
       return c.json({ ok: false, error: "Scheduler not available", code: "SCHEDULER_UNAVAILABLE" }, 404);
     }
@@ -159,13 +162,13 @@ export function scheduleRoutes(): OpenAPIHono<ServerEnv> {
     const body = c.req.valid("json");
 
     if (body.expression !== undefined) {
-      const mission = await orchestrator.getMission(missionId);
+      const mission = await deps.getMission(missionId);
       if (!mission) {
         return c.json({ ok: false, error: `Mission "${missionId}" not found`, code: "NOT_FOUND" }, 404);
       }
       const isRecurring = body.recurring ?? existing.recurring;
       const newStatus = isRecurring ? "recurring" : "scheduled";
-      const updated = await orchestrator.updateMission(missionId, {
+      const updated = await deps.updateMission(missionId, {
         schedule: body.expression,
         status: newStatus,
       });
@@ -177,8 +180,8 @@ export function scheduleRoutes(): OpenAPIHono<ServerEnv> {
       const isRecurring = body.recurring;
       existing.recurring = isRecurring;
       const newStatus = isRecurring ? "recurring" : "scheduled";
-      await orchestrator.updateMission(missionId, { status: newStatus });
-      const mission = await orchestrator.getMission(missionId);
+      await deps.updateMission(missionId, { status: newStatus });
+      const mission = await deps.getMission(missionId);
       if (mission) {
         scheduler.unregisterMission(missionId);
         scheduler.registerMission(mission);
@@ -191,7 +194,7 @@ export function scheduleRoutes(): OpenAPIHono<ServerEnv> {
 
     if (body.endDate !== undefined) {
       const endDate = body.endDate ?? undefined;
-      await orchestrator.updateMission(missionId, { endDate } as any);
+      await deps.updateMission(missionId, { endDate } as any);
     }
 
     const updated = scheduler.getScheduleByMissionId(missionId);
@@ -200,8 +203,8 @@ export function scheduleRoutes(): OpenAPIHono<ServerEnv> {
 
   // DELETE /schedules/:missionId — delete a schedule
   app.openapi(deleteScheduleRoute, async (c) => {
-    const orchestrator = c.get("orchestrator");
-    const scheduler = orchestrator.getScheduler();
+    const deps = getDeps();
+    const scheduler = deps.getScheduler();
     if (!scheduler) {
       return c.json({ ok: false, error: "Scheduler not available", code: "SCHEDULER_UNAVAILABLE" }, 404);
     }
@@ -213,7 +216,7 @@ export function scheduleRoutes(): OpenAPIHono<ServerEnv> {
     }
 
     // Clear schedule from mission and reset status to draft
-    await orchestrator.updateMission(missionId, { schedule: undefined, status: "draft" });
+    await deps.updateMission(missionId, { schedule: undefined, status: "draft" });
     return c.json({ ok: true, data: { deleted: true } }, 200);
   });
 

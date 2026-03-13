@@ -1,7 +1,6 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { streamSSE } from "hono/streaming";
 import { nanoid } from "nanoid";
-import type { ServerEnv } from "../app.js";
 import type { SSEBridge, SSEClient } from "../sse-bridge.js";
 
 // ── Route definitions ─────────────────────────────────────────────────
@@ -30,8 +29,8 @@ const _sseEventStreamRoute = createRoute({
 /**
  * SSE streaming event routes.
  */
-export function eventRoutes(sseBridge: SSEBridge): OpenAPIHono<ServerEnv> {
-  const app = new OpenAPIHono<ServerEnv>();
+export function eventRoutes(sseBridge: SSEBridge): OpenAPIHono {
+  const app = new OpenAPIHono();
 
   // GET /events — SSE event stream
   // NOTE: SSE streaming cannot use app.openapi() because it returns a streaming response, not JSON.

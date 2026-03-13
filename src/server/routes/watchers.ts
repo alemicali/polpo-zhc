@@ -1,5 +1,4 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
-import type { ServerEnv } from "../app.js";
 
 // ── Route definitions ─────────────────────────────────────────────────
 
@@ -75,13 +74,16 @@ const deleteWatcherRoute = createRoute({
 
 // ── Route handlers ────────────────────────────────────────────────────
 
-export function watcherRoutes(): OpenAPIHono<ServerEnv> {
-  const app = new OpenAPIHono<ServerEnv>();
+export function watcherRoutes(getDeps: () => {
+  getWatcherManager: () => any;
+  taskStore: any;
+}): OpenAPIHono {
+  const app = new OpenAPIHono();
 
   // GET /watchers — list watchers
   app.openapi(listWatchersRoute, (c) => {
-    const orchestrator = c.get("orchestrator");
-    const watcherMgr = orchestrator.getWatcherManager();
+    const deps = getDeps();
+    const watcherMgr = deps.getWatcherManager();
     if (!watcherMgr) {
       return c.json({ ok: true, data: [] });
     }
@@ -92,14 +94,14 @@ export function watcherRoutes(): OpenAPIHono<ServerEnv> {
 
   // POST /watchers — create a watcher
   app.openapi(createWatcherRoute, async (c) => {
-    const orchestrator = c.get("orchestrator");
-    const watcherMgr = orchestrator.getWatcherManager();
+    const deps = getDeps();
+    const watcherMgr = deps.getWatcherManager();
     if (!watcherMgr) {
       return c.json({ ok: false, error: "Watcher manager not available", code: "NOT_AVAILABLE" }, 400);
     }
 
     const body = c.req.valid("json");
-    const task = await orchestrator.getStore().getTask(body.taskId);
+    const task = await deps.taskStore.getTask(body.taskId);
     if (!task) {
       return c.json({ ok: false, error: `Task "${body.taskId}" not found`, code: "NOT_FOUND" }, 400);
     }
@@ -115,8 +117,8 @@ export function watcherRoutes(): OpenAPIHono<ServerEnv> {
 
   // DELETE /watchers/:watcherId — delete a watcher
   app.openapi(deleteWatcherRoute, (c) => {
-    const orchestrator = c.get("orchestrator");
-    const watcherMgr = orchestrator.getWatcherManager();
+    const deps = getDeps();
+    const watcherMgr = deps.getWatcherManager();
     if (!watcherMgr) {
       return c.json({ ok: false, error: "Watcher manager not available", code: "NOT_FOUND" }, 404);
     }
