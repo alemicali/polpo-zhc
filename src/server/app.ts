@@ -89,7 +89,18 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
   }
 
   // OpenAI-compatible chat completions
-  app.route("/v1/chat/completions", completionRoutes(orchestrator, opts?.apiKeys));
+  app.route("/v1/chat/completions", completionRoutes(() => ({
+    getAgents: () => o.getAgents(),
+    getAgentWorkDir: () => o.getAgentWorkDir(),
+    getPolpoDir: () => o.getPolpoDir(),
+    getConfig: () => o.getConfig(),
+    getVaultStore: () => o.getVaultStore(),
+    getMemoryStore: () => o.getMemoryStore(),
+    getSessionStore: () => o.getSessionStore(),
+    getStore: () => o.getStore(),
+    emit: (event: string, data: any) => o.emit(event as any, data),
+    orchestrator: o,
+  }), opts?.apiKeys));
 
   // ── Authenticated routes (require initialized orchestrator) ───────────
 

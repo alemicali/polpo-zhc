@@ -51,13 +51,13 @@ function emitFileChanged(
   toolName: string,
   args: Record<string, unknown>,
   result: string,
-  orchestrator: Orchestrator,
+  emit: (event: string, data: any) => void,
 ): void {
   const action = FILE_WRITE_TOOLS[toolName];
   if (!action || result.startsWith("Error:")) return;
   const path = args.path as string | undefined;
   if (!path) return;
-  orchestrator.emit("file:changed", { path, dir: dirname(path), action, source: "chat" });
+  emit("file:changed", { path, dir: dirname(path), action, source: "chat" });
 }
 
 /**
@@ -302,10 +302,24 @@ function completionResponse(id: string, content: string, promptTokens: number, c
 
 // ── Route factory ──────────────────────────────────────────────────────
 
-export function completionRoutes(orchestrator: Orchestrator, apiKeys?: string[]): OpenAPIHono {
+export function completionRoutes(getDeps: () => {
+  getAgents: () => Promise<any[]>;
+  getAgentWorkDir: () => string;
+  getPolpoDir: () => string;
+  getConfig: () => any;
+  getVaultStore: () => any;
+  getMemoryStore: () => any;
+  getSessionStore: () => any;
+  getStore: () => any;
+  emit: (event: string, data: any) => void;
+  /** Full orchestrator — required for orchestrator chat mode, optional for agent-direct. */
+  orchestrator?: Orchestrator;
+}, apiKeys?: string[]): OpenAPIHono {
   const app = new OpenAPIHono();
 
   app.openapi(chatCompletionsRoute, async (c) => {
+    const deps = getDeps();
+
     // ── Auth ──
     if (apiKeys && apiKeys.length > 0) {
       const auth = c.req.header("Authorization");
@@ -333,14 +347,14 @@ export function completionRoutes(orchestrator: Orchestrator, apiKeys?: string[])
 
     if (agentMode) {
       // ── Agent-direct mode ──
-      const agents = await orchestrator.getAgents();
-      const agentConfig = agents.find(a => a.name === body.agent);
+      const agents = await deps.getAgents();
+      const agentConfig = agents.find((a: any) => a.name === body.agent);
       if (!agentConfig) {
         return c.json({ error: { message: `Agent "${body.agent}" not found`, type: "invalid_request_error", code: "agent_not_found" } }, 404);
       }
 
-      const cwd = orchestrator.getAgentWorkDir();
-      const polpoDir = orchestrator.getPolpoDir();
+      const cwd = deps.getAgentWorkDir();
+      const polpoDir = deps.getPolpoDir();
 
       // Build agent system prompt (reuses the same builder as task execution)
       const agentSystemPrompt = buildSystemPrompt(agentConfig, cwd, polpoDir);
@@ -361,17 +375,17 @@ export function completionRoutes(orchestrator: Orchestrator, apiKeys?: string[])
       // Resolve agent model
       m = resolveModel(agentConfig.model);
       const apiKey = await resolveApiKeyAsync(m.provider as string);
-      const reasoning = agentConfig.reasoning ?? orchestrator.getConfig()?.settings?.reasoning;
+      const reasoning = agentConfig.reasoning ?? deps.getConfig()?.settings?.reasoning;
       streamOpts = buildStreamOpts(apiKey, reasoning, m.maxTokens);
 
       // Build agent tools (core coding tools + ink tools)
-      const vaultEntries = await orchestrator.getVaultStore()?.getAllForAgent(agentConfig.name);
+      const vaultEntries = await deps.getVaultStore()?.getAllForAgent(agentConfig.name);
       const vault = resolveAgentVault(vaultEntries);
       agentToolInstances = createCodingTools(cwd, agentConfig.allowedTools, undefined, undefined, vault);
       agentToolInstances.push(...createInkTools(polpoDir, agentConfig.allowedTools));
 
       // Load extended tools if configured (browser, email, image, etc.)
-      const hasExtendedTools = agentConfig.allowedTools?.some(t => {
+      const hasExtendedTools = agentConfig.allowedTools?.some((t: string) => {
         const lc = t.toLowerCase();
         return lc.startsWith("browser_") || lc.startsWith("email_")
           || lc.startsWith("image_") || lc.startsWith("video_") || lc.startsWith("audio_")
@@ -396,7 +410,7 @@ export function completionRoutes(orchestrator: Orchestrator, apiKeys?: string[])
       }
 
       // Memory tools — scoped to this agent only
-      const memoryStore = orchestrator.getMemoryStore();
+      const memoryStore = deps.getMemoryStore();
       if (memoryStore) {
         agentToolInstances.push(...createMemoryTools(memoryStore, agentConfig.name));
       }
@@ -422,18 +436,25 @@ export function completionRoutes(orchestrator: Orchestrator, apiKeys?: string[])
         }
       };
     } else {
-      // ── Orchestrator mode (default, unchanged) ──
+      // ── Orchestrator mode (default) — requires full orchestrator ──
+      if (!deps.orchestrator) {
+        return c.json({
+          error: { message: "Orchestrator mode is not available. Use agent-direct mode by specifying the 'agent' field.", type: "invalid_request_error", code: "orchestrator_unavailable" },
+        }, 501 as any);
+      }
+      const orch = deps.orchestrator;
+
       const state = await (async () => {
-        try { return await orchestrator.getStore()?.getState() ?? null; }
+        try { return await deps.getStore()?.getState() ?? null; }
         catch { return null; }
       })();
 
-      const systemPrompt = await buildChatSystemPrompt(orchestrator, state);
+      const systemPrompt = await buildChatSystemPrompt(orch, state);
       fullSystemPrompt = extraSystemParts.length > 0
         ? `${systemPrompt}\n\n## Additional context from caller\n\n${extraSystemParts.join("\n\n")}`
         : systemPrompt;
 
-      const settings = orchestrator.getConfig()?.settings;
+      const settings = deps.getConfig()?.settings;
       const modelSpec = resolveModelSpec(settings?.orchestratorModel);
       m = resolveModel(modelSpec);
       const apiKey = await resolveApiKeyAsync(m.provider as string);
@@ -442,13 +463,13 @@ export function completionRoutes(orchestrator: Orchestrator, apiKeys?: string[])
 
       effectiveTools = ALL_ORCHESTRATOR_TOOLS;
       effectiveToolExecutor = (name: string, args: Record<string, unknown>) =>
-        executeOrchestratorTool(name, args, orchestrator);
+        executeOrchestratorTool(name, args, orch);
     }
 
     const completionId = `chatcmpl-${nanoid(24)}`;
 
     // ── Session persistence ──
-    const sessionStore = orchestrator.getSessionStore();
+    const sessionStore = deps.getSessionStore();
     const rawSessionHeader = c.req.header("x-session-id") ?? null;
     const forceNewSession = rawSessionHeader === "new";
     let sessionId: string | null = forceNewSession ? null : rawSessionHeader;
@@ -657,7 +678,7 @@ export function completionRoutes(orchestrator: Orchestrator, apiKeys?: string[])
 
               const result = await effectiveToolExecutor(call.name, call.arguments);
               const isError = result.startsWith("Error:");
-              emitFileChanged(call.name, call.arguments, result, orchestrator);
+              emitFileChanged(call.name, call.arguments, result, deps.emit);
 
               // Accumulate for persistence
               toolCallsAccum.push({
@@ -888,7 +909,7 @@ export function completionRoutes(orchestrator: Orchestrator, apiKeys?: string[])
           for (const call of toolCalls) {
             const result = await effectiveToolExecutor(call.name, call.arguments);
             const isError = result.startsWith("Error:");
-            emitFileChanged(call.name, call.arguments, result, orchestrator);
+            emitFileChanged(call.name, call.arguments, result, deps.emit);
 
             // Accumulate for persistence
             toolCallsAccum.push({
