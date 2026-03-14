@@ -7,7 +7,7 @@ import { TaskManager } from "../core/task-manager.js";
 import { AgentManager } from "../core/agent-manager.js";
 import { HookRegistry } from "../core/hooks.js";
 import { TypedEmitter } from "../core/events.js";
-import { InMemoryTaskStore, InMemoryRunStore, createTestTask } from "./fixtures.js";
+import { InMemoryTaskStore, InMemoryRunStore, createTestTask, createMockStores } from "./fixtures.js";
 import type { OrchestratorContext } from "../core/orchestrator-context.js";
 import type { PolpoConfig, Task, Mission, MissionCheckpoint } from "../core/types.js";
 
@@ -57,6 +57,9 @@ function createMockCtx(overrides: Partial<OrchestratorContext> = {}): Orchestrat
     nextMissionName: async () => `mission-${missionCounter + 1}`,
   });
 
+  const config = createMinimalConfig();
+  const { teamStore, agentStore } = createMockStores(config.teams);
+
   return {
     emitter: new TypedEmitter(),
     registry,
@@ -65,7 +68,9 @@ function createMockCtx(overrides: Partial<OrchestratorContext> = {}): Orchestrat
     logStore: { startSession: async () => "s", getSessionId: async () => "s", append: async () => {}, getSessionEntries: async () => [], listSessions: async () => [], prune: async () => 0, close: () => {} },
     sessionStore: { create: async () => "s1", addMessage: async () => ({ id: "m1", role: "user" as const, content: "", ts: "" }), updateMessage: async () => false, getMessages: async () => [], getRecentMessages: async () => [], listSessions: async () => [], getSession: async () => undefined, getLatestSession: async () => undefined, renameSession: async () => false, deleteSession: async () => false, prune: async () => 0, close: () => {} },
     hooks: new HookRegistry(),
-    config: createMinimalConfig(),
+    config,
+    teamStore,
+    agentStore,
     workDir: "/tmp/test",
     agentWorkDir: "/tmp/test",
     polpoDir: "/tmp/test/.polpo",

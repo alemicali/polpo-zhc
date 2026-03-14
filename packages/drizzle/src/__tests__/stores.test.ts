@@ -1,13 +1,17 @@
 /**
- * @polpo-ai/drizzle — SQLite in-memory tests for all 11 Drizzle stores.
+ * @polpo-ai/drizzle — SQLite in-memory tests for all 15 Drizzle stores.
  *
  * Uses better-sqlite3 :memory: — no PG required.
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { randomBytes } from "node:crypto";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { createSqliteStores, type DrizzleStores } from "../index.js";
 import type { ApprovalRequest } from "@polpo-ai/core/types";
+
+// Provide a deterministic vault key for tests (32 bytes hex-encoded)
+process.env.POLPO_VAULT_KEY = randomBytes(32).toString("hex");
 
 // ── Test helpers ─────────────────────────────────────────────────────
 
@@ -89,11 +93,13 @@ function createTables(raw: InstanceType<typeof Database>) {
       activity TEXT NOT NULL DEFAULT '{}',
       result TEXT,
       outcomes TEXT,
+      config TEXT,
       config_path TEXT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS sessions (
       id TEXT PRIMARY KEY,
       title TEXT,
+      agent TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
@@ -175,6 +181,40 @@ function createTables(raw: InstanceType<typeof Database>) {
     CREATE TABLE IF NOT EXISTS peer_sessions (
       peer_id TEXT PRIMARY KEY,
       session_id TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS teams (
+      name TEXT PRIMARY KEY,
+      description TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS agents (
+      name TEXT PRIMARY KEY,
+      team_name TEXT NOT NULL,
+      config TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS vault (
+      agent TEXT NOT NULL,
+      service TEXT NOT NULL,
+      type TEXT NOT NULL,
+      label TEXT,
+      credentials TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (agent, service)
+    );
+    CREATE TABLE IF NOT EXISTS playbooks (
+      name TEXT PRIMARY KEY,
+      description TEXT NOT NULL,
+      mission TEXT NOT NULL,
+      parameters TEXT,
+      version TEXT,
+      author TEXT,
+      tags TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
     );
     PRAGMA foreign_keys = ON;
   `);
@@ -514,14 +554,15 @@ describe("DrizzleSessionStore", () => {
   it("getRecentMessages returns last N", async () => {
     const sid = await stores.sessionStore.create();
     await stores.sessionStore.addMessage(sid, "user", "1");
+    await new Promise((r) => setTimeout(r, 5));
     await stores.sessionStore.addMessage(sid, "assistant", "2");
+    await new Promise((r) => setTimeout(r, 5));
     await stores.sessionStore.addMessage(sid, "user", "3");
 
     const recent = await stores.sessionStore.getRecentMessages(sid, 2);
     expect(recent).toHaveLength(2);
-    // Should contain the 2 most recent messages (exact order depends on timestamp granularity)
-    const contents = recent.map((m) => m.content).sort();
-    expect(contents).toEqual(["2", "3"]);
+    expect(recent[0].content).toBe("2");
+    expect(recent[1].content).toBe("3");
   });
 
   it("listSessions includes messageCount", async () => {
@@ -1076,11 +1117,334 @@ describe("DrizzlePeerStore", () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════
+// TeamStore
+// ═══════════════════════════════════════════════════════════════════════
+
+describe("DrizzleTeamStore", () => {
+  it("createTeam + getTeam round-trip", async () => {
+    const team = await stores.teamStore.createTeam({ name: "alpha", agents: [] });
+    expect(team.name).toBe("alpha");
+    expect(team.agents).toEqual([]);
+
+    const fetched = await stores.teamStore.getTeam("alpha");
+    expect(fetched).toBeDefined();
+    expect(fetched!.name).toBe("alpha");
+  });
+
+  it("getTeams returns all teams", async () => {
+    await stores.teamStore.createTeam({ name: "alpha", agents: [] });
+    await stores.teamStore.createTeam({ name: "beta", agents: [] });
+
+    const teams = await stores.teamStore.getTeams();
+    expect(teams).toHaveLength(2);
+    const names = teams.map(t => t.name).sort();
+    expect(names).toEqual(["alpha", "beta"]);
+  });
+
+  it("createTeam rejects duplicates", async () => {
+    await stores.teamStore.createTeam({ name: "alpha", agents: [] });
+    await expect(stores.teamStore.createTeam({ name: "alpha", agents: [] })).rejects.toThrow(/already exists/);
+  });
+
+  it("updateTeam merges description", async () => {
+    await stores.teamStore.createTeam({ name: "alpha", agents: [], description: "old" });
+    const updated = await stores.teamStore.updateTeam("alpha", { description: "new" });
+    expect(updated.description).toBe("new");
+  });
+
+  it("renameTeam updates team and agent foreign keys", async () => {
+    await stores.teamStore.createTeam({ name: "old-name", agents: [] });
+    await stores.agentStore.createAgent({ name: "claude" } as any, "old-name");
+
+    const renamed = await stores.teamStore.renameTeam("old-name", "new-name");
+    expect(renamed.name).toBe("new-name");
+
+    // Old name should not exist
+    expect(await stores.teamStore.getTeam("old-name")).toBeUndefined();
+
+    // Agent should be under the new team
+    const agentTeam = await stores.agentStore.getAgentTeam("claude");
+    expect(agentTeam).toBe("new-name");
+  });
+
+  it("deleteTeam cascade-deletes agents", async () => {
+    await stores.teamStore.createTeam({ name: "alpha", agents: [] });
+    await stores.agentStore.createAgent({ name: "claude" } as any, "alpha");
+
+    const ok = await stores.teamStore.deleteTeam("alpha");
+    expect(ok).toBe(true);
+
+    expect(await stores.teamStore.getTeam("alpha")).toBeUndefined();
+    expect(await stores.agentStore.getAgent("claude")).toBeUndefined();
+  });
+
+  it("deleteTeam returns false for non-existent", async () => {
+    expect(await stores.teamStore.deleteTeam("ghost")).toBe(false);
+  });
+
+  it("seed skips existing teams", async () => {
+    await stores.teamStore.createTeam({ name: "alpha", description: "original", agents: [] });
+    await stores.teamStore.seed([
+      { name: "alpha", description: "overwrite?", agents: [] },
+      { name: "beta", agents: [] },
+    ]);
+
+    const alpha = await stores.teamStore.getTeam("alpha");
+    expect(alpha!.description).toBe("original"); // not overwritten
+
+    const beta = await stores.teamStore.getTeam("beta");
+    expect(beta).toBeDefined();
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+// AgentStore
+// ═══════════════════════════════════════════════════════════════════════
+
+describe("DrizzleAgentStore", () => {
+  beforeEach(async () => {
+    // Need a team to attach agents to
+    await stores.teamStore.createTeam({ name: "alpha", agents: [] });
+  });
+
+  it("createAgent + getAgent round-trip", async () => {
+    const agent = await stores.agentStore.createAgent({ name: "claude", role: "coder" } as any, "alpha");
+    expect(agent.name).toBe("claude");
+    expect(agent.role).toBe("coder");
+
+    const fetched = await stores.agentStore.getAgent("claude");
+    expect(fetched).toBeDefined();
+    expect(fetched!.role).toBe("coder");
+  });
+
+  it("getAgents with and without team filter", async () => {
+    await stores.teamStore.createTeam({ name: "beta", agents: [] });
+    await stores.agentStore.createAgent({ name: "claude" } as any, "alpha");
+    await stores.agentStore.createAgent({ name: "gpt" } as any, "beta");
+
+    const all = await stores.agentStore.getAgents();
+    expect(all).toHaveLength(2);
+
+    const alphaOnly = await stores.agentStore.getAgents("alpha");
+    expect(alphaOnly).toHaveLength(1);
+    expect(alphaOnly[0].name).toBe("claude");
+  });
+
+  it("getAgentTeam returns team name", async () => {
+    await stores.agentStore.createAgent({ name: "claude" } as any, "alpha");
+    expect(await stores.agentStore.getAgentTeam("claude")).toBe("alpha");
+    expect(await stores.agentStore.getAgentTeam("ghost")).toBeUndefined();
+  });
+
+  it("createAgent rejects duplicates", async () => {
+    await stores.agentStore.createAgent({ name: "claude" } as any, "alpha");
+    await expect(stores.agentStore.createAgent({ name: "claude" } as any, "alpha")).rejects.toThrow(/already exists/);
+  });
+
+  it("updateAgent merges fields", async () => {
+    await stores.agentStore.createAgent({ name: "claude", role: "coder" } as any, "alpha");
+    const updated = await stores.agentStore.updateAgent("claude", { role: "reviewer" });
+    expect(updated.role).toBe("reviewer");
+    expect(updated.name).toBe("claude");
+  });
+
+  it("moveAgent changes team", async () => {
+    await stores.teamStore.createTeam({ name: "beta", agents: [] });
+    await stores.agentStore.createAgent({ name: "claude" } as any, "alpha");
+
+    await stores.agentStore.moveAgent("claude", "beta");
+    expect(await stores.agentStore.getAgentTeam("claude")).toBe("beta");
+  });
+
+  it("deleteAgent removes the agent", async () => {
+    await stores.agentStore.createAgent({ name: "claude" } as any, "alpha");
+    expect(await stores.agentStore.deleteAgent("claude")).toBe(true);
+    expect(await stores.agentStore.getAgent("claude")).toBeUndefined();
+    expect(await stores.agentStore.deleteAgent("ghost")).toBe(false);
+  });
+
+  it("seed skips existing agents", async () => {
+    await stores.agentStore.createAgent({ name: "claude", role: "coder" } as any, "alpha");
+    await stores.agentStore.seed([
+      { name: "claude", role: "overwrite?", teamName: "alpha" } as any,
+      { name: "gpt", role: "planner", teamName: "alpha" } as any,
+    ]);
+
+    const claude = await stores.agentStore.getAgent("claude");
+    expect(claude!.role).toBe("coder"); // not overwritten
+
+    const gpt = await stores.agentStore.getAgent("gpt");
+    expect(gpt).toBeDefined();
+    expect(gpt!.role).toBe("planner");
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+// VaultStore
+// ═══════════════════════════════════════════════════════════════════════
+
+describe("DrizzleVaultStore", () => {
+  it("set + get round-trip with encryption", async () => {
+    const entry = { type: "api_key" as const, credentials: { key: "sk-secret-123" } };
+    await stores.vaultStore.set("claude", "openai", entry);
+
+    const fetched = await stores.vaultStore.get("claude", "openai");
+    expect(fetched).toBeDefined();
+    expect(fetched!.type).toBe("api_key");
+    expect(fetched!.credentials.key).toBe("sk-secret-123");
+  });
+
+  it("getAllForAgent returns map by service", async () => {
+    await stores.vaultStore.set("claude", "openai", { type: "api_key" as const, credentials: { key: "k1" } });
+    await stores.vaultStore.set("claude", "smtp", { type: "smtp" as const, credentials: { host: "mail.test" } });
+
+    const all = await stores.vaultStore.getAllForAgent("claude");
+    expect(Object.keys(all).sort()).toEqual(["openai", "smtp"]);
+    expect(all.openai.credentials.key).toBe("k1");
+  });
+
+  it("set upserts on conflict", async () => {
+    await stores.vaultStore.set("claude", "openai", { type: "api_key" as const, credentials: { key: "old" } });
+    await stores.vaultStore.set("claude", "openai", { type: "api_key" as const, credentials: { key: "new" } });
+
+    const fetched = await stores.vaultStore.get("claude", "openai");
+    expect(fetched!.credentials.key).toBe("new");
+  });
+
+  it("patch merges credentials", async () => {
+    await stores.vaultStore.set("claude", "smtp", { type: "smtp" as const, credentials: { host: "mail.test", port: "587" } });
+    const keys = await stores.vaultStore.patch("claude", "smtp", { credentials: { user: "alice" } });
+    expect(keys.sort()).toEqual(["host", "port", "user"]);
+
+    const fetched = await stores.vaultStore.get("claude", "smtp");
+    expect(fetched!.credentials.user).toBe("alice");
+    expect(fetched!.credentials.host).toBe("mail.test"); // preserved
+  });
+
+  it("remove deletes entry", async () => {
+    await stores.vaultStore.set("claude", "openai", { type: "api_key" as const, credentials: { key: "k" } });
+    const ok = await stores.vaultStore.remove("claude", "openai");
+    expect(ok).toBe(true);
+    expect(await stores.vaultStore.get("claude", "openai")).toBeUndefined();
+  });
+
+  it("list returns metadata without full credentials", async () => {
+    await stores.vaultStore.set("claude", "openai", { type: "api_key" as const, label: "Main", credentials: { key: "sk", org: "o" } });
+    const list = await stores.vaultStore.list("claude");
+    expect(list).toHaveLength(1);
+    expect(list[0].service).toBe("openai");
+    expect(list[0].type).toBe("api_key");
+    expect(list[0].label).toBe("Main");
+    expect(list[0].keys.sort()).toEqual(["key", "org"]);
+  });
+
+  it("hasEntries returns correct boolean", async () => {
+    expect(await stores.vaultStore.hasEntries("claude")).toBe(false);
+    await stores.vaultStore.set("claude", "openai", { type: "api_key" as const, credentials: { key: "k" } });
+    expect(await stores.vaultStore.hasEntries("claude")).toBe(true);
+  });
+
+  it("renameAgent moves entries to new name", async () => {
+    await stores.vaultStore.set("old-agent", "openai", { type: "api_key" as const, credentials: { key: "k" } });
+    await stores.vaultStore.renameAgent("old-agent", "new-agent");
+
+    expect(await stores.vaultStore.get("old-agent", "openai")).toBeUndefined();
+    const fetched = await stores.vaultStore.get("new-agent", "openai");
+    expect(fetched).toBeDefined();
+    expect(fetched!.credentials.key).toBe("k");
+  });
+
+  it("removeAgent deletes all entries for agent", async () => {
+    await stores.vaultStore.set("claude", "openai", { type: "api_key" as const, credentials: { key: "k1" } });
+    await stores.vaultStore.set("claude", "smtp", { type: "smtp" as const, credentials: { host: "h" } });
+    await stores.vaultStore.removeAgent("claude");
+
+    expect(await stores.vaultStore.hasEntries("claude")).toBe(false);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+// PlaybookStore
+// ═══════════════════════════════════════════════════════════════════════
+
+describe("DrizzlePlaybookStore", () => {
+  const makePlaybook = (name: string, overrides: Partial<any> = {}) => ({
+    name,
+    description: `Playbook ${name}`,
+    mission: { prompt: "Do the thing", tasks: [] },
+    ...overrides,
+  });
+
+  it("save + get round-trip", async () => {
+    const path = await stores.playbookStore.save(makePlaybook("deploy-v1"));
+    expect(path).toContain("deploy-v1");
+
+    const fetched = await stores.playbookStore.get("deploy-v1");
+    expect(fetched).not.toBeNull();
+    expect(fetched!.name).toBe("deploy-v1");
+    expect(fetched!.description).toBe("Playbook deploy-v1");
+    expect(fetched!.mission).toEqual({ prompt: "Do the thing", tasks: [] });
+  });
+
+  it("save upserts on conflict", async () => {
+    await stores.playbookStore.save(makePlaybook("pb", { description: "old" }));
+    await stores.playbookStore.save(makePlaybook("pb", { description: "new" }));
+
+    const fetched = await stores.playbookStore.get("pb");
+    expect(fetched!.description).toBe("new");
+  });
+
+  it("list returns metadata for all playbooks", async () => {
+    await stores.playbookStore.save(makePlaybook("alpha", {
+      parameters: [{ name: "env", description: "Target environment", required: true }],
+    }));
+    await stores.playbookStore.save(makePlaybook("beta"));
+
+    const list = await stores.playbookStore.list();
+    expect(list).toHaveLength(2);
+
+    const alpha = list.find(p => p.name === "alpha");
+    expect(alpha).toBeDefined();
+    expect(alpha!.parameters).toHaveLength(1);
+    expect(alpha!.parameters[0].name).toBe("env");
+    expect(alpha!.path).toContain("alpha");
+  });
+
+  it("get returns null for non-existent", async () => {
+    expect(await stores.playbookStore.get("ghost")).toBeNull();
+  });
+
+  it("delete removes playbook", async () => {
+    await stores.playbookStore.save(makePlaybook("del-me"));
+    const ok = await stores.playbookStore.delete("del-me");
+    expect(ok).toBe(true);
+    expect(await stores.playbookStore.get("del-me")).toBeNull();
+  });
+
+  it("delete returns false for non-existent", async () => {
+    expect(await stores.playbookStore.delete("ghost")).toBe(false);
+  });
+
+  it("preserves optional fields: version, author, tags", async () => {
+    await stores.playbookStore.save(makePlaybook("rich", {
+      version: "1.2.0",
+      author: "alice",
+      tags: ["infra", "deploy"],
+    }));
+
+    const fetched = await stores.playbookStore.get("rich");
+    expect(fetched!.version).toBe("1.2.0");
+    expect(fetched!.author).toBe("alice");
+    expect(fetched!.tags).toEqual(["infra", "deploy"]);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════
 // Factory function
 // ═══════════════════════════════════════════════════════════════════════
 
 describe("createSqliteStores", () => {
-  it("returns all 11 stores", () => {
+  it("returns all 15 stores", () => {
     expect(stores.taskStore).toBeDefined();
     expect(stores.runStore).toBeDefined();
     expect(stores.sessionStore).toBeDefined();
@@ -1092,5 +1456,9 @@ describe("createSqliteStores", () => {
     expect(stores.checkpointStore).toBeDefined();
     expect(stores.delayStore).toBeDefined();
     expect(stores.configStore).toBeDefined();
+    expect(stores.teamStore).toBeDefined();
+    expect(stores.agentStore).toBeDefined();
+    expect(stores.vaultStore).toBeDefined();
+    expect(stores.playbookStore).toBeDefined();
   });
 });

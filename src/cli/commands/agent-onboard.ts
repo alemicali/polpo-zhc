@@ -7,12 +7,12 @@
  */
 
 import { resolve } from "node:path";
+import { getPolpoDir } from "../../core/constants.js";
 import readline from "node:readline";
 import type { Command } from "commander";
 import chalk from "chalk";
-import { loadPolpoConfig, savePolpoConfig } from "../../core/config.js";
 import type { AgentConfig, AgentIdentity, AgentResponsibility, VaultEntry } from "../../core/types.js";
-import { EncryptedVaultStore } from "../../vault/encrypted-store.js";
+import { createCliStores } from "../stores.js";
 
 // ── Readline helpers ──
 
@@ -57,25 +57,16 @@ export function registerAgentOnboardCommands(program: Command): void {
     .description("Interactive wizard to set up an agent's identity, vault, and hierarchy")
     .option("-d, --dir <path>", "Working directory", ".")
     .action(async (name: string, opts: { dir: string }) => {
-      const polpoDir = resolve(opts.dir, ".polpo");
-      const config = loadPolpoConfig(polpoDir);
-      if (!config) {
-        console.log(chalk.red("No polpo.json found. Run 'polpo init' first."));
+      const polpoDir = getPolpoDir(resolve(opts.dir));
+      const { agentStore, vaultStore } = await createCliStores(polpoDir);
+
+      const agentCfg = await agentStore.getAgent(name);
+      if (!agentCfg) {
+        const allAgents = await agentStore.getAgents();
+        console.log(chalk.red(`Agent "${name}" not found. Available: ${allAgents.map(a => a.name).join(", ") || "(none)"}`));
         process.exit(1);
       }
 
-      const defaultTeam = config.teams?.[0];
-      if (!defaultTeam) {
-        console.log(chalk.red("No team configured. Run 'polpo init' first."));
-        process.exit(1);
-      }
-      const agentIdx = defaultTeam.agents.findIndex(a => a.name === name);
-      if (agentIdx < 0) {
-        console.log(chalk.red(`Agent "${name}" not found. Available: ${defaultTeam.agents.map(a => a.name).join(", ")}`));
-        process.exit(1);
-      }
-
-      const agentCfg = defaultTeam.agents[agentIdx] as AgentConfig;
       console.log(chalk.bold(`\n  Onboarding agent: ${name}\n`));
 
       // ── 1. Identity ──
@@ -143,7 +134,8 @@ export function registerAgentOnboardCommands(program: Command): void {
 
       // ── 3. Hierarchy ──
       console.log(chalk.cyan("\n  Step 3: Hierarchy\n"));
-      const otherAgents = defaultTeam.agents.filter(a => a.name !== name).map(a => a.name);
+      const allAgents = await agentStore.getAgents();
+      const otherAgents = allAgents.filter(a => a.name !== name).map(a => a.name);
       let reportsTo: string | undefined = agentCfg.reportsTo;
 
       if (otherAgents.length > 0) {
@@ -158,8 +150,7 @@ export function registerAgentOnboardCommands(program: Command): void {
       console.log(chalk.cyan("\n  Step 4: Email\n"));
       const hasEmailTools = agentCfg.allowedTools?.some(t => t.toLowerCase().startsWith("email_")) ?? false;
       const enableEmail = await askYesNo("Configure email tools?", hasEmailTools);
-      const vaultStore = new EncryptedVaultStore(polpoDir);
-      const existingVault = vaultStore.getAllForAgent(name);
+      const existingVault = await vaultStore.getAllForAgent(name);
       const vaultEntries: Record<string, VaultEntry> = {};
 
       if (enableEmail) {
@@ -216,7 +207,7 @@ export function registerAgentOnboardCommands(program: Command): void {
         }
       }
 
-      // ── Build & Save ──
+      // ── Build & Save via AgentStore ──
       const identity: AgentIdentity = {};
       if (displayName) identity.displayName = displayName;
       if (title) identity.title = title;
@@ -238,29 +229,25 @@ export function registerAgentOnboardCommands(program: Command): void {
         if (Object.keys(socials).length > 0) identity.socials = socials;
       }
 
-      const updated: Record<string, unknown> = { ...agentCfg };
-      if (Object.keys(identity).length > 0) updated.identity = identity;
-      if (reportsTo) updated.reportsTo = reportsTo;
-      else delete updated.reportsTo;
+      const updates: Partial<Omit<AgentConfig, "name">> = {};
+      if (Object.keys(identity).length > 0) updates.identity = identity;
+      if (reportsTo) updates.reportsTo = reportsTo;
       // If email was enabled, ensure email_* is in allowedTools
       if (enableEmail && !hasEmailTools) {
-        const tools = (updated.allowedTools as string[] | undefined) ?? [];
-        tools.push("email_*");
-        updated.allowedTools = tools;
+        const tools = [...(agentCfg.allowedTools ?? []), "email_*"];
+        updates.allowedTools = tools;
       }
-      // Vault tools are core — always available, no need to add to allowedTools
 
-      defaultTeam.agents[agentIdx] = updated as any;
-      savePolpoConfig(polpoDir, config);
+      await agentStore.updateAgent(name, updates);
 
       // Save vault entries to encrypted store
       for (const [svc, entry] of Object.entries(vaultEntries)) {
-        vaultStore.set(name, svc, entry);
+        await vaultStore.set(name, svc, entry);
       }
       const vaultCount = Object.keys(vaultEntries).length;
 
       console.log(chalk.green(`\n  Agent "${name}" onboarded successfully!`));
-      console.log(chalk.dim("  Config saved to .polpo/polpo.json"));
+      console.log(chalk.dim("  Config saved to .polpo/agents.json"));
       if (vaultCount > 0) {
         console.log(chalk.dim(`  ${vaultCount} credential(s) saved to .polpo/vault.enc (encrypted)`));
       }
@@ -274,33 +261,37 @@ export function registerAgentOnboardCommands(program: Command): void {
     .description("Show agents with org chart hierarchy")
     .option("-d, --dir <path>", "Working directory", ".")
     .action(async (opts: { dir: string }) => {
-      const polpoDir = resolve(opts.dir, ".polpo");
-      const config = loadPolpoConfig(polpoDir);
-      if (!config) {
-        console.log(chalk.red("No polpo.json found. Run 'polpo init' first."));
-        process.exit(1);
-      }
+      const polpoDir = getPolpoDir(resolve(opts.dir));
+      const { teamStore, agentStore, vaultStore: listVaultStore } = await createCliStores(polpoDir);
 
-      const defaultTeam = config.teams?.[0];
-      const agents = (defaultTeam?.agents ?? []) as AgentConfig[];
+      const teams = await teamStore.getTeams();
+      const teamName = teams[0]?.name ?? "default";
+      const agents = await agentStore.getAgents();
+
       if (agents.length === 0) {
         console.log(chalk.dim("  No agents configured."));
         return;
       }
 
-      console.log(chalk.bold(`\n  Team: ${defaultTeam?.name ?? "default"}\n`));
+      console.log(chalk.bold(`\n  Team: ${teamName}\n`));
 
       const roots = agents.filter(a => !a.reportsTo);
-      const childrenOf = (name: string) => agents.filter(a => a.reportsTo === name);
+      const childrenOf = (agentName: string) => agents.filter(a => a.reportsTo === agentName);
 
-      let listVaultStore: EncryptedVaultStore | undefined;
-      try { listVaultStore = new EncryptedVaultStore(polpoDir); } catch { /* vault unavailable */ }
+      // Pre-load vault counts for all agents (async)
+      const vaultCounts = new Map<string, number>();
+      for (const a of agents) {
+        try {
+          const entries = await listVaultStore.list(a.name);
+          vaultCounts.set(a.name, entries.length);
+        } catch { /* vault unavailable */ }
+      }
 
       const printAgent = (a: AgentConfig, prefix: string, isLast: boolean) => {
-        const connector = isLast ? "└── " : "├── ";
+        const connector = isLast ? "\u2514\u2500\u2500 " : "\u251C\u2500\u2500 ";
         const display = a.identity?.displayName ? `${a.name} (${a.identity.displayName})` : a.name;
         const titleStr = a.identity?.title ?? a.role ?? "";
-        const vaultCount = listVaultStore?.list(a.name).length ?? 0;
+        const vaultCount = vaultCounts.get(a.name) ?? 0;
         const flags: string[] = [];
         const aTools = a.allowedTools ?? [];
         if (aTools.some(t => t.toLowerCase().startsWith("email_"))) flags.push("email");
@@ -314,10 +305,10 @@ export function registerAgentOnboardCommands(program: Command): void {
         if (aTools.some(t => t.toLowerCase().startsWith("search_"))) flags.push("search");
         if (vaultCount > 0) flags.push(`vault:${vaultCount}`);
 
-        console.log(`${prefix}${connector}${chalk.bold(display)}${titleStr ? chalk.dim(` — ${titleStr}`) : ""}${flags.length ? chalk.cyan(` [${flags.join(", ")}]`) : ""}`);
+        console.log(`${prefix}${connector}${chalk.bold(display)}${titleStr ? chalk.dim(` \u2014 ${titleStr}`) : ""}${flags.length ? chalk.cyan(` [${flags.join(", ")}]`) : ""}`);
 
         const children = childrenOf(a.name);
-        const childPrefix = prefix + (isLast ? "    " : "│   ");
+        const childPrefix = prefix + (isLast ? "    " : "\u2502   ");
         children.forEach((child, i) => printAgent(child, childPrefix, i === children.length - 1));
       };
 
@@ -332,17 +323,13 @@ export function registerAgentOnboardCommands(program: Command): void {
     .description("Show detailed agent info (identity + vault with masked credentials)")
     .option("-d, --dir <path>", "Working directory", ".")
     .action(async (name: string, opts: { dir: string }) => {
-      const polpoDir = resolve(opts.dir, ".polpo");
-      const config = loadPolpoConfig(polpoDir);
-      if (!config) {
-        console.log(chalk.red("No polpo.json found. Run 'polpo init' first."));
-        process.exit(1);
-      }
+      const polpoDir = getPolpoDir(resolve(opts.dir));
+      const { agentStore, vaultStore: showVaultStore } = await createCliStores(polpoDir);
 
-      const defaultTeam = config.teams?.[0];
-      const agentCfg = defaultTeam?.agents?.find(a => a.name === name) as AgentConfig | undefined;
+      const agentCfg = await agentStore.getAgent(name);
       if (!agentCfg) {
-        console.log(chalk.red(`Agent "${name}" not found. Available: ${(defaultTeam?.agents ?? []).map(a => a.name).join(", ")}`));
+        const allAgents = await agentStore.getAgents();
+        console.log(chalk.red(`Agent "${name}" not found. Available: ${allAgents.map((a: AgentConfig) => a.name).join(", ") || "(none)"}`));
         process.exit(1);
       }
 
@@ -379,14 +366,13 @@ export function registerAgentOnboardCommands(program: Command): void {
         }
       }
 
-      // Show vault entries from encrypted store
-      let showVaultStore: EncryptedVaultStore | undefined;
-      try { showVaultStore = new EncryptedVaultStore(polpoDir); } catch { /* vault unavailable */ }
-      const vaultList = showVaultStore?.list(name) ?? [];
+      // Show vault entries
+      let vaultList: Array<{ service: string; type: string; label?: string; keys: string[] }> = [];
+      try { vaultList = await showVaultStore.list(name); } catch { /* vault unavailable */ }
       if (vaultList.length > 0) {
         console.log(chalk.cyan("\n  Vault (encrypted):"));
         for (const entry of vaultList) {
-          console.log(`    ${chalk.bold(entry.service)} (${entry.type})${entry.label ? ` — ${entry.label}` : ""}`);
+          console.log(`    ${chalk.bold(entry.service)} (${entry.type})${entry.label ? ` \u2014 ${entry.label}` : ""}`);
           for (const key of entry.keys) {
             console.log(chalk.dim(`      ${key}: ***`));
           }
@@ -395,23 +381,18 @@ export function registerAgentOnboardCommands(program: Command): void {
 
       const showTools = agentCfg.allowedTools ?? [];
       const showFlags: string[] = [];
-      if (showTools.some(t => t.toLowerCase().startsWith("browser_"))) showFlags.push("browser");
-      if (showTools.some(t => t.toLowerCase().startsWith("email_"))) showFlags.push("email");
-      if (showTools.some(t => t.toLowerCase().startsWith("image_"))) showFlags.push("image");
-      if (showTools.some(t => t.toLowerCase().startsWith("video_"))) showFlags.push("video");
-      if (showTools.some(t => t.toLowerCase().startsWith("audio_"))) showFlags.push("audio");
-      if (showTools.some(t => t.toLowerCase().startsWith("excel_"))) showFlags.push("excel");
-      if (showTools.some(t => t.toLowerCase().startsWith("pdf_"))) showFlags.push("pdf");
-      if (showTools.some(t => t.toLowerCase().startsWith("docx_"))) showFlags.push("docx");
-      if (showTools.some(t => t.toLowerCase().startsWith("search_"))) showFlags.push("search");
+      if (showTools.some((t: string) => t.toLowerCase().startsWith("browser_"))) showFlags.push("browser");
+      if (showTools.some((t: string) => t.toLowerCase().startsWith("email_"))) showFlags.push("email");
+      if (showTools.some((t: string) => t.toLowerCase().startsWith("image_"))) showFlags.push("image");
+      if (showTools.some((t: string) => t.toLowerCase().startsWith("video_"))) showFlags.push("video");
+      if (showTools.some((t: string) => t.toLowerCase().startsWith("audio_"))) showFlags.push("audio");
+      if (showTools.some((t: string) => t.toLowerCase().startsWith("excel_"))) showFlags.push("excel");
+      if (showTools.some((t: string) => t.toLowerCase().startsWith("pdf_"))) showFlags.push("pdf");
+      if (showTools.some((t: string) => t.toLowerCase().startsWith("docx_"))) showFlags.push("docx");
+      if (showTools.some((t: string) => t.toLowerCase().startsWith("search_"))) showFlags.push("search");
       if (showFlags.length > 0) {
         console.log(chalk.cyan(`\n  Tool categories: `) + showFlags.join(", "));
       }
       console.log();
     });
-}
-
-function maskValue(value: string): string {
-  if (value.length <= 4) return "****";
-  return value[0] + "*".repeat(Math.min(value.length - 2, 10)) + value[value.length - 1];
 }

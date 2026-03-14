@@ -8,3 +8,4 @@ export {
 } from "./resolver.js";
 
 export { EncryptedVaultStore } from "./encrypted-store.js";
+export type { VaultStore } from "../core/vault-store.js";

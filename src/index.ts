@@ -1,9 +1,6 @@
-// Core abstractions
+// Core abstractions (includes orchestrator, config, session-reader, state-machine,
+// types, events, hooks, playbooks, templates, ink, quality, scheduling, etc.)
 export * from "./core/index.js";
-
-// Orchestrator
-export { Orchestrator, buildRetryPrompt } from "./core/orchestrator.js";
-export type { OrchestratorOptions, AssessFn } from "./core/orchestrator.js";
 
 // Stores
 export { FileTaskStore, FileRunStore, JsonTaskStore } from "./stores/index.js";
@@ -17,14 +14,9 @@ export { runLLMReview, computeWeightedScore, buildRubricSection, DEFAULT_DIMENSI
 export type { LLMQueryFn } from "./assessment/llm-review.js";
 export type { ValidatedReviewPayload, ExecutionSummaryResult } from "./assessment/index.js";
 
-// Config
-export { parseConfig, loadPolpoConfig, savePolpoConfig, generatePolpoConfigDefault, validateAgents } from "./core/config.js";
-
-// Session reader
-export { readSessionSummary, readSessionSummaryFromPath, getRecentMessages, findTranscriptPath } from "./core/session-reader.js";
-
 // Server
 export { PolpoServer, createApp, SSEBridge } from "./server/index.js";
+export type { AppOptions } from "./server/index.js";
 export type {
   ServerConfig,
   ApiResponse,
@@ -37,10 +29,33 @@ export type {
   AddAgentRequest,
 } from "./server/index.js";
 
-// Notifications
+// Route factories (for cloud data-plane wiring)
+export {
+  taskRoutes,
+  missionRoutes,
+  agentRoutes,
+  eventRoutes,
+  chatRoutes,
+  skillRoutes,
+  notificationRoutes,
+  approvalRoutes,
+  playbookRoutes,
+  stateRoutes,
+  completionRoutes,
+  peerRoutes,
+  scheduleRoutes,
+  watcherRoutes,
+  vaultRoutes,
+  authRoutes,
+  fileRoutes,
+  configRoutes,
+  publicConfigRoutes,
+  healthRoutes,
+} from "./server/index.js";
+
+// Notifications (channels are not in core/index)
 export { NotificationRouter } from "./notifications/index.js";
 export type { NotificationChannel, Notification, OutcomeAttachment } from "./notifications/types.js";
-export type { NotificationStore, NotificationRecord, NotificationStatus } from "./core/notification-store.js";
 export { FileNotificationStore } from "./stores/file-notification-store.js";
 export { SlackChannel } from "./notifications/channels/slack.js";
 export { TelegramChannel } from "./notifications/channels/telegram.js";
@@ -62,47 +77,3 @@ export { createEmailTools, ALL_EMAIL_TOOL_NAMES } from "./tools/email-tools.js";
 export { createVaultTools, ALL_VAULT_TOOL_NAMES } from "./tools/vault-tools.js";
 export { createAudioTools, ALL_AUDIO_TOOL_NAMES } from "./tools/audio-tools.js";
 export { createImageTools, ALL_IMAGE_TOOL_NAMES } from "./tools/image-tools.js";
-
-// Playbooks
-export { discoverPlaybooks, loadPlaybook, validateParams, instantiatePlaybook, validatePlaybookDefinition, savePlaybook, deletePlaybook } from "./core/playbook.js";
-export type { PlaybookParameter, PlaybookDefinition, PlaybookInfo, ValidationResult } from "./core/playbook.js";
-
-// Backward-compat aliases (deprecated)
-export { discoverTemplates, loadTemplate, instantiateTemplate, validateTemplateDefinition, saveTemplate, deleteTemplate } from "./core/playbook.js";
-export type { TemplateParameter, TemplateDefinition, TemplateInfo } from "./core/playbook.js";
-
-// Ink Registry
-export {
-  parseInkSource,
-  hashContent,
-  discoverInkPackages,
-  validateInkPlaybook,
-  validateInkAgent,
-  validateInkCompany,
-  readInkLock,
-  writeInkLock,
-  upsertInkLockEntry,
-  removeInkLockEntry,
-  isInkSourceInstalled,
-  getInkLockEntry,
-} from "./core/ink.js";
-export type {
-  InkPackageType,
-  InkSource,
-  InkPackage,
-  InkPackageMetadata,
-  InkVerdictLevel,
-  InkVerdict,
-  InkLockEntry,
-  InkLockPackage,
-  InkLockFile,
-  InkValidationResult,
-} from "./core/ink.js";
-
-// Quality Layer
-export { SLAMonitor } from "./quality/sla-monitor.js";
-export { QualityController } from "./quality/quality-controller.js";
-
-// Scheduling
-export { Scheduler } from "./scheduling/scheduler.js";
-export { parseCron, matchesCron, nextCronOccurrence, isCronExpression } from "./scheduling/cron.js";

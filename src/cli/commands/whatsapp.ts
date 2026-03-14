@@ -10,6 +10,7 @@
  */
 
 import { resolve, join } from "node:path";
+import { getPolpoDir } from "../../core/constants.js";
 import { existsSync, rmSync, readdirSync } from "node:fs";
 import { mkdirSync } from "node:fs";
 import type { Command } from "commander";
@@ -27,7 +28,7 @@ export function registerWhatsAppCommands(parent: Command): void {
     .description("Link WhatsApp by scanning a QR code")
     .option("-d, --dir <path>", "Working directory", ".")
     .action(async (profile: string | undefined, opts: { dir: string }) => {
-      const polpoDir = resolve(opts.dir, ".polpo");
+      const polpoDir = getPolpoDir(resolve(opts.dir));
       const profileName = profile ?? "default";
       const profilePath = join(polpoDir, "whatsapp-profiles", profileName);
       mkdirSync(profilePath, { recursive: true });
@@ -119,7 +120,7 @@ export function registerWhatsAppCommands(parent: Command): void {
     .description("Check WhatsApp profiles")
     .option("-d, --dir <path>", "Working directory", ".")
     .action((_opts: { dir: string }) => {
-      const polpoDir = resolve(_opts.dir, ".polpo");
+      const polpoDir = getPolpoDir(resolve(_opts.dir));
       const profilesDir = join(polpoDir, "whatsapp-profiles");
 
       if (!existsSync(profilesDir)) {
@@ -157,7 +158,7 @@ export function registerWhatsAppCommands(parent: Command): void {
     .description("Remove WhatsApp credentials")
     .option("-d, --dir <path>", "Working directory", ".")
     .action((profile: string | undefined, opts: { dir: string }) => {
-      const polpoDir = resolve(opts.dir, ".polpo");
+      const polpoDir = getPolpoDir(resolve(opts.dir));
       const profileName = profile ?? "default";
       const profilePath = join(polpoDir, "whatsapp-profiles", profileName);
 

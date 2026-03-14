@@ -1,6 +1,7 @@
 import { existsSync, readdirSync, renameSync, mkdirSync } from "node:fs";
 import { resolve, join, dirname } from "node:path";
 import { homedir } from "node:os";
+import { POLPO_DIR_NAME, getPolpoDir } from "../../core/constants.js";
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 
 // ── Route definitions ─────────────────────────────────────────────────
@@ -102,12 +103,12 @@ export function filesystemRoutes(): OpenAPIHono {
       const dirs = entries
         .filter((e) => {
           if (!e.isDirectory()) return false;
-          if (e.name.startsWith(".") && e.name !== ".polpo") return false;
+          if (e.name.startsWith(".") && e.name !== POLPO_DIR_NAME) return false;
           return true;
         })
         .map((e) => {
           const fullPath = join(target, e.name);
-          const hasPolpoConfig = existsSync(join(fullPath, ".polpo", "polpo.json"));
+          const hasPolpoConfig = existsSync(join(getPolpoDir(fullPath), "polpo.json"));
           return { name: e.name, path: fullPath, hasPolpoConfig };
         })
         .sort((a, b) => a.name.localeCompare(b.name));

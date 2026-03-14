@@ -572,7 +572,7 @@ export class MissionExecutor {
     }
 
     // Validate API keys for all agents referenced in the mission
-    const allAgents = this.agentMgr.getAgents();
+    const allAgents = await this.agentMgr.getAgents();
     const referencedModels: string[] = [];
     for (const t of doc.tasks) {
       const agentName = t.assignTo || allAgents[0]?.name;
@@ -620,7 +620,7 @@ export class MissionExecutor {
       const task = await this.taskMgr.addTask({
         title: t.title,
         description: t.description || t.title,
-        assignTo: t.assignTo || this.agentMgr.getAgents()[0]?.name || "default",
+        assignTo: t.assignTo || (await this.agentMgr.getAgents())[0]?.name || "default",
         dependsOn: deps,
         expectations,
         expectedOutcomes: t.expectedOutcomes,

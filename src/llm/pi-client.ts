@@ -8,6 +8,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { getGlobalPolpoDir } from "../core/constants.js";
 import {
   getModel,
   getModels,
@@ -460,7 +461,7 @@ export function validateProviderKeys(
 function hasOAuthProfiles(provider: string): boolean {
   try {
     const home = process.env.HOME || process.env.USERPROFILE || "";
-    const profilePath = join(home, ".polpo", "auth-profiles.json");
+    const profilePath = join(getGlobalPolpoDir(), "auth-profiles.json");
     if (!existsSync(profilePath)) return false;
     const data = JSON.parse(readFileSync(profilePath, "utf-8"));
     if (!data?.profiles) return false;

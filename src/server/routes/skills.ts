@@ -1,5 +1,4 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
-import type { ServerEnv } from "../app.js";
 import {
   discoverSkills,
   installSkills,
@@ -18,14 +17,18 @@ import {
   loadSkillIndex,
 } from "../../llm/skills.js";
 import { resolve } from "node:path";
-import { existsSync, readdirSync } from "node:fs";
+
 
 /**
  * Skill routes — discover, install, remove, and assign skills.
  * Pool lives in .polpo/skills/ (project) and ~/.polpo/skills/ (global).
  */
-export function skillRoutes(): OpenAPIHono<ServerEnv> {
-  const app = new OpenAPIHono<ServerEnv>();
+export function skillRoutes(getDeps: () => {
+  polpoDir: string;
+  workDir: string;
+  getAgents: () => Promise<any[]>;
+}): OpenAPIHono {
+  const app = new OpenAPIHono();
 
   // GET /skills — list skills with agent assignments
   const listSkillsRoute = createRoute({
@@ -41,17 +44,14 @@ export function skillRoutes(): OpenAPIHono<ServerEnv> {
     },
   });
 
-  app.openapi(listSkillsRoute, (c) => {
-    const orchestrator = c.get("orchestrator");
-    const workDir = orchestrator.getWorkDir();
-    const polpoDir = orchestrator.getPolpoDir();
+  app.openapi(listSkillsRoute, async (c) => {
+    const deps = getDeps();
+    const workDir = deps.workDir;
+    const polpoDir = deps.polpoDir;
 
-    // Get agent names from config (authoritative source) + filesystem fallback
-    const configAgents = orchestrator.getAgents();
-    const configAgentNames = configAgents.map(a => a.name);
-    const fsAgentNames = getAgentNames(polpoDir);
-    // Merge: config agents are authoritative, fs agents catch orphaned symlink dirs
-    const allAgentNames = [...new Set([...configAgentNames, ...fsAgentNames])];
+    // Get agent names from the configured store (authoritative source)
+    const configAgents = await deps.getAgents();
+    const allAgentNames = configAgents.map(a => a.name);
 
     // Build map of agentName → configured skill names for config-based assignment detection
     const agentConfigSkills = new Map<string, string[]>();
@@ -98,8 +98,8 @@ export function skillRoutes(): OpenAPIHono<ServerEnv> {
   });
 
   app.openapi(addSkillRoute, (c) => {
-    const orchestrator = c.get("orchestrator");
-    const polpoDir = orchestrator.getPolpoDir();
+    const deps = getDeps();
+    const polpoDir = deps.polpoDir;
 
     const body = c.req.valid("json");
 
@@ -150,9 +150,9 @@ export function skillRoutes(): OpenAPIHono<ServerEnv> {
   });
 
   app.openapi(createSkillRoute, (c) => {
-    const orchestrator = c.get("orchestrator");
-    const polpoDir = orchestrator.getPolpoDir();
-    const workDir = orchestrator.getWorkDir();
+    const deps = getDeps();
+    const polpoDir = deps.polpoDir;
+    const workDir = deps.workDir;
     const body = c.req.valid("json");
 
     const existing = discoverSkills(workDir, polpoDir);
@@ -190,8 +190,8 @@ export function skillRoutes(): OpenAPIHono<ServerEnv> {
   });
 
   app.openapi(deleteSkillRoute, (c) => {
-    const orchestrator = c.get("orchestrator");
-    const polpoDir = orchestrator.getPolpoDir();
+    const deps = getDeps();
+    const polpoDir = deps.polpoDir;
     const { name } = c.req.valid("param");
     const { global: globalParam } = c.req.valid("query");
     const global = globalParam === "true";
@@ -233,9 +233,9 @@ export function skillRoutes(): OpenAPIHono<ServerEnv> {
   });
 
   app.openapi(assignSkillRoute, (c) => {
-    const orchestrator = c.get("orchestrator");
-    const workDir = orchestrator.getWorkDir();
-    const polpoDir = orchestrator.getPolpoDir();
+    const deps = getDeps();
+    const workDir = deps.workDir;
+    const polpoDir = deps.polpoDir;
     const { name: skillName } = c.req.valid("param");
     const { agent } = c.req.valid("json");
 
@@ -279,8 +279,8 @@ export function skillRoutes(): OpenAPIHono<ServerEnv> {
   });
 
   app.openapi(unassignSkillRoute, (c) => {
-    const orchestrator = c.get("orchestrator");
-    const polpoDir = orchestrator.getPolpoDir();
+    const deps = getDeps();
+    const polpoDir = deps.polpoDir;
     const { name: skillName } = c.req.valid("param");
     const { agent } = c.req.valid("json");
 
@@ -313,9 +313,9 @@ export function skillRoutes(): OpenAPIHono<ServerEnv> {
   });
 
   app.openapi(getSkillContentRoute, (c) => {
-    const orchestrator = c.get("orchestrator");
-    const polpoDir = orchestrator.getPolpoDir();
-    const workDir = orchestrator.getWorkDir();
+    const deps = getDeps();
+    const polpoDir = deps.polpoDir;
+    const workDir = deps.workDir;
     const { name } = c.req.valid("param");
 
     const skill = getSkillByName(workDir, polpoDir, name, "agent");
@@ -344,8 +344,8 @@ export function skillRoutes(): OpenAPIHono<ServerEnv> {
   });
 
   app.openapi(listOrchSkillsRoute, (c) => {
-    const orchestrator = c.get("orchestrator");
-    const skills = discoverOrchestratorSkills(orchestrator.getPolpoDir());
+    const deps = getDeps();
+    const skills = discoverOrchestratorSkills(deps.polpoDir);
     return c.json({ ok: true, data: skills });
   });
 
@@ -382,8 +382,8 @@ export function skillRoutes(): OpenAPIHono<ServerEnv> {
   });
 
   app.openapi(createOrchSkillRoute, (c) => {
-    const orchestrator = c.get("orchestrator");
-    const polpoDir = orchestrator.getPolpoDir();
+    const deps = getDeps();
+    const polpoDir = deps.polpoDir;
     const body = c.req.valid("json");
 
     const existing = discoverOrchestratorSkills(polpoDir);
@@ -430,8 +430,8 @@ export function skillRoutes(): OpenAPIHono<ServerEnv> {
   });
 
   app.openapi(updateOrchSkillRoute, (c) => {
-    const orchestrator = c.get("orchestrator");
-    const polpoDir = orchestrator.getPolpoDir();
+    const deps = getDeps();
+    const polpoDir = deps.polpoDir;
     const { name } = c.req.valid("param");
     const body = c.req.valid("json");
 
@@ -464,8 +464,8 @@ export function skillRoutes(): OpenAPIHono<ServerEnv> {
   });
 
   app.openapi(deleteOrchSkillRoute, (c) => {
-    const orchestrator = c.get("orchestrator");
-    const polpoDir = orchestrator.getPolpoDir();
+    const deps = getDeps();
+    const polpoDir = deps.polpoDir;
     const { name } = c.req.valid("param");
 
     const removed = removeOrchestratorSkill(polpoDir, name);
@@ -497,9 +497,9 @@ export function skillRoutes(): OpenAPIHono<ServerEnv> {
   });
 
   app.openapi(getOrchSkillContentRoute, (c) => {
-    const orchestrator = c.get("orchestrator");
-    const polpoDir = orchestrator.getPolpoDir();
-    const workDir = orchestrator.getWorkDir();
+    const deps = getDeps();
+    const polpoDir = deps.polpoDir;
+    const workDir = deps.workDir;
     const { name } = c.req.valid("param");
 
     const skill = getSkillByName(workDir, polpoDir, name, "orchestrator");
@@ -541,8 +541,8 @@ export function skillRoutes(): OpenAPIHono<ServerEnv> {
   });
 
   app.openapi(addOrchSkillRoute, (c) => {
-    const orchestrator = c.get("orchestrator");
-    const polpoDir = orchestrator.getPolpoDir();
+    const deps = getDeps();
+    const polpoDir = deps.polpoDir;
     const body = c.req.valid("json");
 
     const result = installOrchestratorSkills(body.source, polpoDir, {
@@ -573,8 +573,8 @@ export function skillRoutes(): OpenAPIHono<ServerEnv> {
   });
 
   app.openapi(getSkillIndexRoute, (c) => {
-    const orchestrator = c.get("orchestrator");
-    const polpoDir = orchestrator.getPolpoDir();
+    const deps = getDeps();
+    const polpoDir = deps.polpoDir;
     const index = loadSkillIndex(polpoDir) ?? {};
     return c.json({ ok: true, data: index });
   });
@@ -607,8 +607,8 @@ export function skillRoutes(): OpenAPIHono<ServerEnv> {
   });
 
   app.openapi(updateSkillIndexRoute, (c) => {
-    const orchestrator = c.get("orchestrator");
-    const polpoDir = orchestrator.getPolpoDir();
+    const deps = getDeps();
+    const polpoDir = deps.polpoDir;
     const { name } = c.req.valid("param");
     const body = c.req.valid("json");
 
@@ -619,12 +619,4 @@ export function skillRoutes(): OpenAPIHono<ServerEnv> {
   return app;
 }
 
-function getAgentNames(polpoDir: string): string[] {
-  const agentsDir = resolve(polpoDir, "agents");
-  if (!existsSync(agentsDir)) return [];
-  try {
-    return readdirSync(agentsDir, { withFileTypes: true })
-      .filter(e => e.isDirectory())
-      .map(e => e.name);
-  } catch { return []; }
-}
+

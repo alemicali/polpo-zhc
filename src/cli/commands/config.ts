@@ -1,8 +1,10 @@
 import { Command } from "commander";
 import chalk from "chalk";
 import { resolve } from "node:path";
+import { getPolpoDir } from "../../core/constants.js";
 import { Orchestrator } from "../../core/orchestrator.js";
 import { parseConfig } from "../../core/config.js";
+import { createCliTeamAndAgentStores } from "../stores.js";
 
 async function initOrchestrator(workDir: string): Promise<Orchestrator> {
   const o = new Orchestrator(resolve(workDir));
@@ -32,11 +34,17 @@ export function registerConfigCommands(program: Command): void {
 
         console.log(chalk.bold("\n  Org:     ") + config.org);
         console.log(chalk.bold("  Version: ") + config.version);
-        for (const t of config.teams) {
+
+        // Read teams and agents from stores
+        const teamStore = orchestrator.getTeamStore();
+        const agentStore = orchestrator.getAgentStore();
+        const teams = await teamStore.getTeams();
+        for (const t of teams) {
+          const teamAgents = await agentStore.getAgents(t.name);
           console.log(
             chalk.bold("  Team:    ") +
               t.name +
-              chalk.dim(` (${t.agents.length} agents)`)
+              chalk.dim(` (${teamAgents.length} agents)`)
           );
         }
 
@@ -62,10 +70,10 @@ export function registerConfigCommands(program: Command): void {
           `  orchestratorModel       ${typeof s.orchestratorModel === "string" ? s.orchestratorModel : s.orchestratorModel?.primary ?? chalk.dim("default")}`
         );
 
-        // Agents table
+        // Agents table (from store)
         console.log(chalk.bold("\n  Agents"));
         console.log(chalk.dim("  ────────────────────────────────────"));
-        const allAgents = config.teams.flatMap((t) => t.agents);
+        const allAgents = await agentStore.getAgents();
         const nameWidth = Math.max(
           6,
           ...allAgents.map((a) => a.name.length)
@@ -103,9 +111,12 @@ export function registerConfigCommands(program: Command): void {
       const workDir = resolve(opts.dir);
       try {
         const config = await parseConfig(workDir);
+        const polpoDir = getPolpoDir(workDir);
+        const { agentStore } = await createCliTeamAndAgentStores(polpoDir);
+        const allAgents = await agentStore.getAgents();
         console.log(chalk.green("\n  \u2713 Configuration valid"));
         console.log(chalk.dim(`    Org: ${config.org}`));
-        console.log(chalk.dim(`    Agents:  ${config.teams.flatMap((t) => t.agents).length}`));
+        console.log(chalk.dim(`    Agents:  ${allAgents.length}`));
         console.log();
         process.exit(0);
       } catch (err: any) {

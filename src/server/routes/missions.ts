@@ -1,5 +1,4 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
-import type { ServerEnv } from "../app.js";
 import {
   CreateMissionSchema, UpdateMissionSchema,
   AddMissionTaskSchema, UpdateMissionTaskSchema, ReorderMissionTasksSchema,
@@ -353,26 +352,56 @@ const updateMissionNotificationsRoute = createRoute({
 /**
  * Mission CRUD + execute/resume/abort routes.
  */
-export function missionRoutes(): OpenAPIHono<ServerEnv> {
-  const app = new OpenAPIHono<ServerEnv>();
+export function missionRoutes(getDeps: () => {
+  getAllMissions: () => Promise<any[]>;
+  getResumableMissions: () => Promise<any[]>;
+  getMission: (id: string) => Promise<any>;
+  saveMission: (opts: any) => Promise<any>;
+  updateMission: (id: string, updates: any) => Promise<any>;
+  deleteMission: (id: string) => Promise<boolean>;
+  executeMission: (id: string) => Promise<any>;
+  resumeMission: (id: string, opts?: any) => Promise<any>;
+  abortGroup: (group: string) => Promise<number>;
+  getActiveCheckpoints: () => any;
+  resumeCheckpointByMissionId: (missionId: string, checkpointName: string) => Promise<boolean>;
+  getActiveDelays: () => any;
+  addMissionTask: (missionId: string, body: any) => Promise<any>;
+  updateMissionTask: (missionId: string, taskTitle: string, body: any) => Promise<any>;
+  removeMissionTask: (missionId: string, taskTitle: string) => Promise<any>;
+  reorderMissionTasks: (missionId: string, titles: string[]) => Promise<any>;
+  addMissionCheckpoint: (missionId: string, body: any) => Promise<any>;
+  updateMissionCheckpoint: (missionId: string, name: string, body: any) => Promise<any>;
+  removeMissionCheckpoint: (missionId: string, name: string) => Promise<any>;
+  addMissionDelay: (missionId: string, body: any) => Promise<any>;
+  updateMissionDelay: (missionId: string, name: string, body: any) => Promise<any>;
+  removeMissionDelay: (missionId: string, name: string) => Promise<any>;
+  addMissionQualityGate: (missionId: string, body: any) => Promise<any>;
+  updateMissionQualityGate: (missionId: string, name: string, body: any) => Promise<any>;
+  removeMissionQualityGate: (missionId: string, name: string) => Promise<any>;
+  addMissionTeamMember: (missionId: string, body: any) => Promise<any>;
+  updateMissionTeamMember: (missionId: string, name: string, body: any) => Promise<any>;
+  removeMissionTeamMember: (missionId: string, name: string) => Promise<any>;
+  updateMissionNotifications: (missionId: string, notifications: any) => Promise<any>;
+}): OpenAPIHono {
+  const app = new OpenAPIHono();
 
   // GET /missions — list all missions
   app.openapi(listMissionsRoute, async (c) => {
-    const orchestrator = c.get("orchestrator");
-    return c.json({ ok: true, data: await orchestrator.getAllMissions() });
+    const deps = getDeps();
+    return c.json({ ok: true, data: await deps.getAllMissions() });
   });
 
   // GET /missions/resumable — list resumable missions
   app.openapi(listResumableMissionsRoute, async (c) => {
-    const orchestrator = c.get("orchestrator");
-    return c.json({ ok: true, data: await orchestrator.getResumableMissions() });
+    const deps = getDeps();
+    return c.json({ ok: true, data: await deps.getResumableMissions() });
   });
 
   // GET /missions/:missionId — get mission by ID
   app.openapi(getMissionRoute, async (c) => {
-    const orchestrator = c.get("orchestrator");
+    const deps = getDeps();
     const { missionId } = c.req.valid("param");
-    const mission = await orchestrator.getMission(missionId);
+    const mission = await deps.getMission(missionId);
     if (!mission) {
       return c.json({ ok: false, error: "Mission not found", code: "NOT_FOUND" }, 404);
     }
@@ -381,10 +410,10 @@ export function missionRoutes(): OpenAPIHono<ServerEnv> {
 
   // POST /missions — save mission
   app.openapi(createMissionRoute, async (c) => {
-    const orchestrator = c.get("orchestrator");
+    const deps = getDeps();
     const body = c.req.valid("json");
 
-    const mission = await orchestrator.saveMission({
+    const mission = await deps.saveMission({
       data: body.data,
       prompt: body.prompt,
       name: body.name,
@@ -397,7 +426,7 @@ export function missionRoutes(): OpenAPIHono<ServerEnv> {
 
   // PATCH /missions/:missionId — update mission
   app.openapi(updateMissionRoute, async (c) => {
-    const orchestrator = c.get("orchestrator");
+    const deps = getDeps();
     const { missionId } = c.req.valid("param");
     const { endDate, ...rest } = c.req.valid("json");
     // Convert null endDate (clear) to undefined for the Mission interface
@@ -405,15 +434,15 @@ export function missionRoutes(): OpenAPIHono<ServerEnv> {
       ...rest,
       ...(endDate !== undefined ? { endDate: endDate ?? undefined } : {}),
     };
-    const mission = await orchestrator.updateMission(missionId, updates);
+    const mission = await deps.updateMission(missionId, updates);
     return c.json({ ok: true, data: mission });
   });
 
   // DELETE /missions/:missionId — delete mission
   app.openapi(deleteMissionRoute, async (c) => {
-    const orchestrator = c.get("orchestrator");
+    const deps = getDeps();
     const { missionId } = c.req.valid("param");
-    const deleted = await orchestrator.deleteMission(missionId);
+    const deleted = await deps.deleteMission(missionId);
     if (!deleted) {
       return c.json({ ok: false, error: "Mission not found", code: "NOT_FOUND" }, 404);
     }
@@ -422,32 +451,32 @@ export function missionRoutes(): OpenAPIHono<ServerEnv> {
 
   // POST /missions/:missionId/execute — execute mission
   app.openapi(executeMissionRoute, async (c) => {
-    const orchestrator = c.get("orchestrator");
+    const deps = getDeps();
     const { missionId } = c.req.valid("param");
-    const result = await orchestrator.executeMission(missionId);
+    const result = await deps.executeMission(missionId);
     return c.json({ ok: true, data: result });
   });
 
   // POST /missions/:missionId/resume — resume mission
   app.openapi(resumeMissionRoute, async (c) => {
-    const orchestrator = c.get("orchestrator");
+    const deps = getDeps();
     const { missionId } = c.req.valid("param");
     const body = c.req.valid("json");
-    const result = await orchestrator.resumeMission(missionId, body);
+    const result = await deps.resumeMission(missionId, body);
     return c.json({ ok: true, data: result });
   });
 
   // GET /missions/checkpoints — list all active checkpoints
   app.openapi(listCheckpointsRoute, (c) => {
-    const orchestrator = c.get("orchestrator");
-    return c.json({ ok: true, data: orchestrator.getActiveCheckpoints() });
+    const deps = getDeps();
+    return c.json({ ok: true, data: deps.getActiveCheckpoints() });
   });
 
   // POST /missions/:missionId/checkpoints/:checkpointName/resume — resume a checkpoint
   app.openapi(resumeCheckpointRoute, async (c) => {
-    const orchestrator = c.get("orchestrator");
+    const deps = getDeps();
     const { missionId, checkpointName } = c.req.valid("param");
-    const resumed = await orchestrator.resumeCheckpointByMissionId(missionId, checkpointName);
+    const resumed = await deps.resumeCheckpointByMissionId(missionId, checkpointName);
     if (!resumed) {
       return c.json({ ok: false, error: "Checkpoint not found or not active", code: "NOT_FOUND" }, 404);
     }
@@ -456,13 +485,13 @@ export function missionRoutes(): OpenAPIHono<ServerEnv> {
 
   // POST /missions/:missionId/abort — abort mission group
   app.openapi(abortMissionRoute, async (c) => {
-    const orchestrator = c.get("orchestrator");
+    const deps = getDeps();
     const { missionId } = c.req.valid("param");
-    const mission = await orchestrator.getMission(missionId);
+    const mission = await deps.getMission(missionId);
     if (!mission) {
       return c.json({ ok: false, error: "Mission not found", code: "NOT_FOUND" }, 404);
     }
-    const count = await orchestrator.abortGroup(mission.name);
+    const count = await deps.abortGroup(mission.name);
     return c.json({ ok: true, data: { aborted: count } }, 200);
   });
 
@@ -470,11 +499,11 @@ export function missionRoutes(): OpenAPIHono<ServerEnv> {
 
   // POST /missions/:missionId/tasks — add task
   app.openapi(addMissionTaskRoute, async (c) => {
-    const orchestrator = c.get("orchestrator");
+    const deps = getDeps();
     const { missionId } = c.req.valid("param");
     const body = c.req.valid("json");
     try {
-      const mission = await orchestrator.addMissionTask(missionId, body);
+      const mission = await deps.addMissionTask(missionId, body);
       return c.json({ ok: true, data: mission }, 201);
     } catch (e: any) {
       return c.json({ ok: false, error: e.message, code: "BAD_REQUEST" }, 404);
@@ -483,11 +512,11 @@ export function missionRoutes(): OpenAPIHono<ServerEnv> {
 
   // PATCH /missions/:missionId/tasks/:taskTitle — update task
   app.openapi(updateMissionTaskRoute, async (c) => {
-    const orchestrator = c.get("orchestrator");
+    const deps = getDeps();
     const { missionId, taskTitle } = c.req.valid("param");
     const body = c.req.valid("json");
     try {
-      const mission = await orchestrator.updateMissionTask(missionId, decodeURIComponent(taskTitle), body);
+      const mission = await deps.updateMissionTask(missionId, decodeURIComponent(taskTitle), body);
       return c.json({ ok: true, data: mission }, 200);
     } catch (e: any) {
       return c.json({ ok: false, error: e.message, code: "NOT_FOUND" }, 404);
@@ -496,10 +525,10 @@ export function missionRoutes(): OpenAPIHono<ServerEnv> {
 
   // DELETE /missions/:missionId/tasks/:taskTitle — remove task
   app.openapi(removeMissionTaskRoute, async (c) => {
-    const orchestrator = c.get("orchestrator");
+    const deps = getDeps();
     const { missionId, taskTitle } = c.req.valid("param");
     try {
-      const mission = await orchestrator.removeMissionTask(missionId, decodeURIComponent(taskTitle));
+      const mission = await deps.removeMissionTask(missionId, decodeURIComponent(taskTitle));
       return c.json({ ok: true, data: mission }, 200);
     } catch (e: any) {
       return c.json({ ok: false, error: e.message, code: "NOT_FOUND" }, 404);
@@ -508,11 +537,11 @@ export function missionRoutes(): OpenAPIHono<ServerEnv> {
 
   // PUT /missions/:missionId/tasks/reorder — reorder tasks
   app.openapi(reorderMissionTasksRoute, async (c) => {
-    const orchestrator = c.get("orchestrator");
+    const deps = getDeps();
     const { missionId } = c.req.valid("param");
     const { titles } = c.req.valid("json");
     try {
-      const mission = await orchestrator.reorderMissionTasks(missionId, titles);
+      const mission = await deps.reorderMissionTasks(missionId, titles);
       return c.json({ ok: true, data: mission }, 200);
     } catch (e: any) {
       return c.json({ ok: false, error: e.message, code: "BAD_REQUEST" }, 404);
@@ -521,11 +550,11 @@ export function missionRoutes(): OpenAPIHono<ServerEnv> {
 
   // POST /missions/:missionId/checkpoints — add checkpoint (data-level)
   app.openapi(addMissionCheckpointRoute, async (c) => {
-    const orchestrator = c.get("orchestrator");
+    const deps = getDeps();
     const { missionId } = c.req.valid("param");
     const body = c.req.valid("json");
     try {
-      const mission = await orchestrator.addMissionCheckpoint(missionId, body);
+      const mission = await deps.addMissionCheckpoint(missionId, body);
       return c.json({ ok: true, data: mission }, 201);
     } catch (e: any) {
       return c.json({ ok: false, error: e.message, code: "BAD_REQUEST" }, 404);
@@ -534,11 +563,11 @@ export function missionRoutes(): OpenAPIHono<ServerEnv> {
 
   // PATCH /missions/:missionId/checkpoints/:checkpointName — update checkpoint (data-level)
   app.openapi(updateMissionCheckpointRoute, async (c) => {
-    const orchestrator = c.get("orchestrator");
+    const deps = getDeps();
     const { missionId, checkpointName } = c.req.valid("param");
     const body = c.req.valid("json");
     try {
-      const mission = await orchestrator.updateMissionCheckpoint(missionId, decodeURIComponent(checkpointName), body);
+      const mission = await deps.updateMissionCheckpoint(missionId, decodeURIComponent(checkpointName), body);
       return c.json({ ok: true, data: mission }, 200);
     } catch (e: any) {
       return c.json({ ok: false, error: e.message, code: "NOT_FOUND" }, 404);
@@ -547,10 +576,10 @@ export function missionRoutes(): OpenAPIHono<ServerEnv> {
 
   // DELETE /missions/:missionId/checkpoints/:checkpointName — remove checkpoint (data-level)
   app.openapi(removeMissionCheckpointRoute2, async (c) => {
-    const orchestrator = c.get("orchestrator");
+    const deps = getDeps();
     const { missionId, checkpointName } = c.req.valid("param");
     try {
-      const mission = await orchestrator.removeMissionCheckpoint(missionId, decodeURIComponent(checkpointName));
+      const mission = await deps.removeMissionCheckpoint(missionId, decodeURIComponent(checkpointName));
       return c.json({ ok: true, data: mission }, 200);
     } catch (e: any) {
       return c.json({ ok: false, error: e.message, code: "NOT_FOUND" }, 404);
@@ -559,17 +588,17 @@ export function missionRoutes(): OpenAPIHono<ServerEnv> {
 
   // GET /missions/delays — list active delays
   app.openapi(listDelaysRoute, (c) => {
-    const orchestrator = c.get("orchestrator");
-    return c.json({ ok: true, data: orchestrator.getActiveDelays() });
+    const deps = getDeps();
+    return c.json({ ok: true, data: deps.getActiveDelays() });
   });
 
   // POST /missions/:missionId/delays — add delay (data-level)
   app.openapi(addMissionDelayRoute, async (c) => {
-    const orchestrator = c.get("orchestrator");
+    const deps = getDeps();
     const { missionId } = c.req.valid("param");
     const body = c.req.valid("json");
     try {
-      const mission = await orchestrator.addMissionDelay(missionId, body);
+      const mission = await deps.addMissionDelay(missionId, body);
       return c.json({ ok: true, data: mission }, 201);
     } catch (e: any) {
       return c.json({ ok: false, error: e.message, code: "BAD_REQUEST" }, 404);
@@ -578,11 +607,11 @@ export function missionRoutes(): OpenAPIHono<ServerEnv> {
 
   // PATCH /missions/:missionId/delays/:delayName — update delay (data-level)
   app.openapi(updateMissionDelayRoute, async (c) => {
-    const orchestrator = c.get("orchestrator");
+    const deps = getDeps();
     const { missionId, delayName } = c.req.valid("param");
     const body = c.req.valid("json");
     try {
-      const mission = await orchestrator.updateMissionDelay(missionId, decodeURIComponent(delayName), body);
+      const mission = await deps.updateMissionDelay(missionId, decodeURIComponent(delayName), body);
       return c.json({ ok: true, data: mission }, 200);
     } catch (e: any) {
       return c.json({ ok: false, error: e.message, code: "NOT_FOUND" }, 404);
@@ -591,10 +620,10 @@ export function missionRoutes(): OpenAPIHono<ServerEnv> {
 
   // DELETE /missions/:missionId/delays/:delayName — remove delay (data-level)
   app.openapi(removeMissionDelayRoute, async (c) => {
-    const orchestrator = c.get("orchestrator");
+    const deps = getDeps();
     const { missionId, delayName } = c.req.valid("param");
     try {
-      const mission = await orchestrator.removeMissionDelay(missionId, decodeURIComponent(delayName));
+      const mission = await deps.removeMissionDelay(missionId, decodeURIComponent(delayName));
       return c.json({ ok: true, data: mission }, 200);
     } catch (e: any) {
       return c.json({ ok: false, error: e.message, code: "NOT_FOUND" }, 404);
@@ -603,11 +632,11 @@ export function missionRoutes(): OpenAPIHono<ServerEnv> {
 
   // POST /missions/:missionId/quality-gates — add quality gate
   app.openapi(addMissionQualityGateRoute, async (c) => {
-    const orchestrator = c.get("orchestrator");
+    const deps = getDeps();
     const { missionId } = c.req.valid("param");
     const body = c.req.valid("json");
     try {
-      const mission = await orchestrator.addMissionQualityGate(missionId, body);
+      const mission = await deps.addMissionQualityGate(missionId, body);
       return c.json({ ok: true, data: mission }, 201);
     } catch (e: any) {
       return c.json({ ok: false, error: e.message, code: "BAD_REQUEST" }, 404);
@@ -616,11 +645,11 @@ export function missionRoutes(): OpenAPIHono<ServerEnv> {
 
   // PATCH /missions/:missionId/quality-gates/:gateName — update quality gate
   app.openapi(updateMissionQualityGateRoute, async (c) => {
-    const orchestrator = c.get("orchestrator");
+    const deps = getDeps();
     const { missionId, gateName } = c.req.valid("param");
     const body = c.req.valid("json");
     try {
-      const mission = await orchestrator.updateMissionQualityGate(missionId, decodeURIComponent(gateName), body);
+      const mission = await deps.updateMissionQualityGate(missionId, decodeURIComponent(gateName), body);
       return c.json({ ok: true, data: mission }, 200);
     } catch (e: any) {
       return c.json({ ok: false, error: e.message, code: "NOT_FOUND" }, 404);
@@ -629,10 +658,10 @@ export function missionRoutes(): OpenAPIHono<ServerEnv> {
 
   // DELETE /missions/:missionId/quality-gates/:gateName — remove quality gate
   app.openapi(removeMissionQualityGateRoute, async (c) => {
-    const orchestrator = c.get("orchestrator");
+    const deps = getDeps();
     const { missionId, gateName } = c.req.valid("param");
     try {
-      const mission = await orchestrator.removeMissionQualityGate(missionId, decodeURIComponent(gateName));
+      const mission = await deps.removeMissionQualityGate(missionId, decodeURIComponent(gateName));
       return c.json({ ok: true, data: mission }, 200);
     } catch (e: any) {
       return c.json({ ok: false, error: e.message, code: "NOT_FOUND" }, 404);
@@ -641,11 +670,11 @@ export function missionRoutes(): OpenAPIHono<ServerEnv> {
 
   // POST /missions/:missionId/team — add team member
   app.openapi(addMissionTeamMemberRoute, async (c) => {
-    const orchestrator = c.get("orchestrator");
+    const deps = getDeps();
     const { missionId } = c.req.valid("param");
     const body = c.req.valid("json");
     try {
-      const mission = await orchestrator.addMissionTeamMember(missionId, body);
+      const mission = await deps.addMissionTeamMember(missionId, body);
       return c.json({ ok: true, data: mission }, 201);
     } catch (e: any) {
       return c.json({ ok: false, error: e.message, code: "BAD_REQUEST" }, 404);
@@ -654,11 +683,11 @@ export function missionRoutes(): OpenAPIHono<ServerEnv> {
 
   // PATCH /missions/:missionId/team/:memberName — update team member
   app.openapi(updateMissionTeamMemberRoute, async (c) => {
-    const orchestrator = c.get("orchestrator");
+    const deps = getDeps();
     const { missionId, memberName } = c.req.valid("param");
     const body = c.req.valid("json");
     try {
-      const mission = await orchestrator.updateMissionTeamMember(missionId, decodeURIComponent(memberName), body);
+      const mission = await deps.updateMissionTeamMember(missionId, decodeURIComponent(memberName), body);
       return c.json({ ok: true, data: mission }, 200);
     } catch (e: any) {
       return c.json({ ok: false, error: e.message, code: "NOT_FOUND" }, 404);
@@ -667,10 +696,10 @@ export function missionRoutes(): OpenAPIHono<ServerEnv> {
 
   // DELETE /missions/:missionId/team/:memberName — remove team member
   app.openapi(removeMissionTeamMemberRoute, async (c) => {
-    const orchestrator = c.get("orchestrator");
+    const deps = getDeps();
     const { missionId, memberName } = c.req.valid("param");
     try {
-      const mission = await orchestrator.removeMissionTeamMember(missionId, decodeURIComponent(memberName));
+      const mission = await deps.removeMissionTeamMember(missionId, decodeURIComponent(memberName));
       return c.json({ ok: true, data: mission }, 200);
     } catch (e: any) {
       return c.json({ ok: false, error: e.message, code: "NOT_FOUND" }, 404);
@@ -679,11 +708,11 @@ export function missionRoutes(): OpenAPIHono<ServerEnv> {
 
   // PUT /missions/:missionId/notifications — update notifications
   app.openapi(updateMissionNotificationsRoute, async (c) => {
-    const orchestrator = c.get("orchestrator");
+    const deps = getDeps();
     const { missionId } = c.req.valid("param");
     const { notifications } = c.req.valid("json");
     try {
-      const mission = await orchestrator.updateMissionNotifications(missionId, notifications);
+      const mission = await deps.updateMissionNotifications(missionId, notifications);
       return c.json({ ok: true, data: mission }, 200);
     } catch (e: any) {
       return c.json({ ok: false, error: e.message, code: "NOT_FOUND" }, 404);

@@ -1770,7 +1770,7 @@ function SessionSidebar({
           <div className="flex flex-col items-center text-center py-8 px-3 text-muted-foreground">
             <p className="text-xs font-medium">No sessions yet</p>
             <p className="text-[10px] mt-1">
-              Start a new session or use the TUI — sessions are shared
+              Start a new session or use the CLI — sessions are shared
               between both interfaces.
             </p>
           </div>

@@ -90,6 +90,7 @@ export async function ensurePgSchema(db: any): Promise<void> {
       activity     JSONB NOT NULL DEFAULT '{}',
       result       JSONB,
       outcomes     JSONB,
+      config       JSONB,
       config_path  TEXT NOT NULL
     );
 
@@ -210,6 +211,44 @@ export async function ensurePgSchema(db: any): Promise<void> {
     CREATE TABLE IF NOT EXISTS peer_sessions (
       peer_id    TEXT PRIMARY KEY,
       session_id TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS teams (
+      name        TEXT PRIMARY KEY,
+      description TEXT,
+      created_at  TEXT NOT NULL,
+      updated_at  TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS agents (
+      name        TEXT PRIMARY KEY,
+      team_name   TEXT NOT NULL,
+      config      JSONB NOT NULL,
+      created_at  TEXT NOT NULL,
+      updated_at  TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS vault (
+      agent       TEXT NOT NULL,
+      service     TEXT NOT NULL,
+      type        TEXT NOT NULL,
+      label       TEXT,
+      credentials TEXT NOT NULL,
+      created_at  TEXT NOT NULL,
+      updated_at  TEXT NOT NULL,
+      PRIMARY KEY (agent, service)
+    );
+
+    CREATE TABLE IF NOT EXISTS playbooks (
+      name        TEXT PRIMARY KEY,
+      description TEXT NOT NULL,
+      mission     JSONB NOT NULL,
+      parameters  JSONB,
+      version     TEXT,
+      author      TEXT,
+      tags        JSONB,
+      created_at  TEXT NOT NULL,
+      updated_at  TEXT NOT NULL
     );
   `);
 }

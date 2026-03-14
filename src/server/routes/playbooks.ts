@@ -1,20 +1,21 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
-import type { ServerEnv } from "../app.js";
 import {
-  discoverPlaybooks,
-  loadPlaybook,
   validateParams,
   instantiatePlaybook,
-  savePlaybook,
-  deletePlaybook,
 } from "../../core/playbook.js";
-import type { PlaybookParameter } from "../../core/playbook.js";
+import type { PlaybookParameter, PlaybookDefinition } from "../../core/playbook.js";
 
 /**
  * Playbook routes — discover, inspect, and execute reusable mission playbooks.
+ *
+ * All persistence goes through PlaybookStore (injected via getDeps()).
  */
-export function playbookRoutes(): OpenAPIHono<ServerEnv> {
-  const app = new OpenAPIHono<ServerEnv>();
+export function playbookRoutes(getDeps: () => {
+  playbookStore: any;
+  saveMission: (opts: any) => Promise<any>;
+  executeMission: (id: string) => Promise<any>;
+}): OpenAPIHono {
+  const app = new OpenAPIHono();
 
   // GET /playbooks — list available playbooks
   const listPlaybooksRoute = createRoute({
@@ -30,11 +31,9 @@ export function playbookRoutes(): OpenAPIHono<ServerEnv> {
     },
   });
 
-  app.openapi(listPlaybooksRoute, (c) => {
-    const orchestrator = c.get("orchestrator");
-    const workDir = orchestrator.getWorkDir();
-    const polpoDir = orchestrator.getPolpoDir?.();
-    const playbooks = discoverPlaybooks(workDir, polpoDir);
+  app.openapi(listPlaybooksRoute, async (c) => {
+    const deps = getDeps();
+    const playbooks = await deps.playbookStore.list();
     return c.json({ ok: true, data: playbooks });
   });
 
@@ -59,12 +58,10 @@ export function playbookRoutes(): OpenAPIHono<ServerEnv> {
     },
   });
 
-  app.openapi(getPlaybookRoute, (c) => {
-    const orchestrator = c.get("orchestrator");
-    const workDir = orchestrator.getWorkDir();
-    const polpoDir = orchestrator.getPolpoDir?.();
+  app.openapi(getPlaybookRoute, async (c) => {
+    const deps = getDeps();
     const { name } = c.req.valid("param");
-    const playbook = loadPlaybook(workDir, polpoDir, name);
+    const playbook = await deps.playbookStore.get(name);
 
     if (!playbook) {
       return c.json({ ok: false, error: "Playbook not found", code: "NOT_FOUND" }, 404);
@@ -116,12 +113,10 @@ export function playbookRoutes(): OpenAPIHono<ServerEnv> {
   });
 
   app.openapi(runPlaybookRoute, async (c) => {
-    const orchestrator = c.get("orchestrator");
-    const workDir = orchestrator.getWorkDir();
-    const polpoDir = orchestrator.getPolpoDir?.();
+    const deps = getDeps();
     const { name } = c.req.valid("param");
 
-    const playbook = loadPlaybook(workDir, polpoDir, name);
+    const playbook = await deps.playbookStore.get(name);
     if (!playbook) {
       return c.json({ ok: false, error: "Playbook not found", code: "NOT_FOUND" }, 404);
     }
@@ -144,13 +139,13 @@ export function playbookRoutes(): OpenAPIHono<ServerEnv> {
     const instance = instantiatePlaybook(playbook, validation.resolved);
 
     // Save as mission and execute
-    const mission = await orchestrator.saveMission({
+    const mission = await deps.saveMission({
       data: instance.data,
       prompt: instance.prompt,
       name: instance.name,
     });
 
-    const result = await orchestrator.executeMission(mission.id);
+    const result = await deps.executeMission(mission.id);
 
     return c.json({
       ok: true,
@@ -202,15 +197,11 @@ export function playbookRoutes(): OpenAPIHono<ServerEnv> {
     },
   });
 
-  app.openapi(createPlaybookRoute, (c) => {
-    const orchestrator = c.get("orchestrator");
-    const polpoDir = orchestrator.getPolpoDir?.();
-    if (!polpoDir) {
-      return c.json({ ok: false, error: "Polpo directory not available", code: "NO_POLPO_DIR" }, 400);
-    }
+  app.openapi(createPlaybookRoute, async (c) => {
+    const deps = getDeps();
 
     const body = c.req.valid("json");
-    const definition = {
+    const definition: PlaybookDefinition = {
       name: body.name,
       description: body.description,
       mission: body.mission,
@@ -218,7 +209,7 @@ export function playbookRoutes(): OpenAPIHono<ServerEnv> {
     };
 
     try {
-      const dir = savePlaybook(polpoDir, definition);
+      const dir = await deps.playbookStore.save(definition);
       return c.json({ ok: true, data: { name: definition.name, path: dir } }, 201);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -247,13 +238,11 @@ export function playbookRoutes(): OpenAPIHono<ServerEnv> {
     },
   });
 
-  app.openapi(deletePlaybookRoute, (c) => {
-    const orchestrator = c.get("orchestrator");
-    const workDir = orchestrator.getWorkDir();
-    const polpoDir = orchestrator.getPolpoDir?.();
+  app.openapi(deletePlaybookRoute, async (c) => {
+    const deps = getDeps();
     const { name } = c.req.valid("param");
 
-    const deleted = deletePlaybook(workDir, polpoDir, name);
+    const deleted = await deps.playbookStore.delete(name);
     if (!deleted) {
       return c.json({ ok: false, error: "Playbook not found", code: "NOT_FOUND" }, 404);
     }

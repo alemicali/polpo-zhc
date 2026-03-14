@@ -17,7 +17,6 @@ polpo/
 │   ├── assessment/       # G-Eval LLM-as-judge assessor
 │   ├── stores/           # SQLite + file persistence backends
 │   ├── llm/              # LLM query layer (multi-provider via pi-ai)
-│   ├── tui/              # Terminal UI (Ink 5 + React 18)
 │   ├── server/           # Hono HTTP API + SSE/WebSocket
 │   ├── cli/              # Commander CLI entry point
 │   └── index.ts          # Barrel export (only file in src/ root)
@@ -90,5 +89,4 @@ pnpm test -- --run     # Single run (no watch)
 - Store implementations: `src/stores/*.ts`
 - Core interfaces: `src/core/types.ts`, `src/core/adapter.ts`
 - CLI commands: `src/cli/index.ts`
-- TUI components: `src/tui/components/`
 - React SDK hooks: `packages/react-sdk/src/hooks/`

@@ -1,4 +1,4 @@
-import { resolve } from "node:path";
+import { getPolpoDir } from "../core/constants.js";
 import { OpenAPIHono } from "@hono/zod-openapi";
 import { cors } from "hono/cors";
 import type { Orchestrator } from "../core/orchestrator.js";
@@ -28,12 +28,6 @@ import { vaultRoutes } from "./routes/vault.js";
 import { authRoutes } from "./routes/auth.js";
 import { fileRoutes } from "./routes/files.js";
 
-export type ServerEnv = {
-  Variables: {
-    orchestrator: Orchestrator;
-  };
-};
-
 export interface AppOptions {
   apiKeys?: string[];
   corsOrigins?: string[];
@@ -44,6 +38,10 @@ export interface AppOptions {
 /**
  * Create the Hono app with all routes and middleware.
  * Single-orchestrator architecture — no project concept.
+ *
+ * Route factories receive explicit dependency thunks instead of pulling
+ * from Hono context.  This lets the cloud data-plane wire stores directly
+ * without needing the full Orchestrator class.
  */
 export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts?: AppOptions): OpenAPIHono {
   const app = new OpenAPIHono();
@@ -86,16 +84,27 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
 
   // Provider management — always available (API key CRUD, OAuth flows, model listing)
   if (opts?.workDir) {
-    const polpoDir = resolve(opts.workDir, ".polpo");
+    const polpoDir = getPolpoDir(opts.workDir);
     app.route("/api/v1/providers", providerRoutes(polpoDir));
   }
 
   // OpenAI-compatible chat completions
-  app.route("/v1/chat/completions", completionRoutes(orchestrator, opts?.apiKeys));
+  app.route("/v1/chat/completions", completionRoutes(() => ({
+    getAgents: () => o.getAgents(),
+    getAgentWorkDir: () => o.getAgentWorkDir(),
+    getPolpoDir: () => o.getPolpoDir(),
+    getConfig: () => o.getConfig(),
+    getVaultStore: () => o.getVaultStore(),
+    getMemoryStore: () => o.getMemoryStore(),
+    getSessionStore: () => o.getSessionStore(),
+    getStore: () => o.getStore(),
+    emit: (event: string, data: any) => o.emit(event as any, data),
+    orchestrator: o,
+  }), opts?.apiKeys));
 
   // ── Authenticated routes (require initialized orchestrator) ───────────
 
-  const authed = new OpenAPIHono<ServerEnv>();
+  const authed = new OpenAPIHono();
   if (opts?.apiKeys && opts.apiKeys.length > 0) {
     authed.use("*", authMiddleware(opts.apiKeys));
   }
@@ -105,30 +114,162 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     if (!orchestrator.isInitialized) {
       return c.json({ ok: false, error: "Polpo is not initialized. Complete setup first." }, 503);
     }
-    c.set("orchestrator", orchestrator);
     return next();
   });
 
-  // Mount all routes (gated by middleware above)
-  authed.route("/tasks", taskRoutes());
-  authed.route("/missions", missionRoutes());
-  authed.route("/agents", agentRoutes());
+  // ── Dependency thunks ─────────────────────────────────────────────────
+  //
+  // Each route factory receives a thunk that returns its deps at request
+  // time.  In the self-hosted case every thunk delegates to the same
+  // Orchestrator instance.  Cloud can supply different thunks that read
+  // from Neon stores directly.
+
+  const o = orchestrator; // short alias
+
+  authed.route("/tasks", taskRoutes(() => ({
+    taskStore: o.getStore(),
+    addTask: (opts: any) => o.addTask(opts),
+    deleteTask: (id: string) => o.deleteTask(id),
+    retryTask: (id: string) => o.retryTask(id),
+    killTask: (id: string) => o.killTask(id),
+    reassessTask: (id: string) => o.reassessTask(id),
+    forceFailTask: (id: string) => o.forceFailTask(id),
+    updateTaskDescription: (id: string, desc: string) => o.updateTaskDescription(id, desc),
+    updateTaskAssignment: (id: string, agent: string) => o.updateTaskAssignment(id, agent),
+    updateTaskExpectations: (id: string, exp: any) => o.updateTaskExpectations(id, exp),
+  })));
+
+  authed.route("/missions", missionRoutes(() => ({
+    getAllMissions: () => o.getAllMissions(),
+    getResumableMissions: () => o.getResumableMissions(),
+    getMission: (id: string) => o.getMission(id),
+    saveMission: (opts: any) => o.saveMission(opts),
+    updateMission: (id: string, updates: any) => o.updateMission(id, updates),
+    deleteMission: (id: string) => o.deleteMission(id),
+    executeMission: (id: string) => o.executeMission(id),
+    resumeMission: (id: string, opts?: any) => o.resumeMission(id, opts),
+    abortGroup: (group: string) => o.abortGroup(group),
+    getActiveCheckpoints: () => o.getActiveCheckpoints(),
+    resumeCheckpointByMissionId: (mid: string, cp: string) => o.resumeCheckpointByMissionId(mid, cp),
+    getActiveDelays: () => o.getActiveDelays(),
+    addMissionTask: (mid: string, task: any) => o.addMissionTask(mid, task),
+    updateMissionTask: (mid: string, title: string, u: any) => o.updateMissionTask(mid, title, u),
+    removeMissionTask: (mid: string, title: string) => o.removeMissionTask(mid, title),
+    reorderMissionTasks: (mid: string, titles: string[]) => o.reorderMissionTasks(mid, titles),
+    addMissionCheckpoint: (mid: string, cp: any) => o.addMissionCheckpoint(mid, cp),
+    updateMissionCheckpoint: (mid: string, name: string, u: any) => o.updateMissionCheckpoint(mid, name, u),
+    removeMissionCheckpoint: (mid: string, name: string) => o.removeMissionCheckpoint(mid, name),
+    addMissionDelay: (mid: string, d: any) => o.addMissionDelay(mid, d),
+    updateMissionDelay: (mid: string, name: string, u: any) => o.updateMissionDelay(mid, name, u),
+    removeMissionDelay: (mid: string, name: string) => o.removeMissionDelay(mid, name),
+    addMissionQualityGate: (mid: string, g: any) => o.addMissionQualityGate(mid, g),
+    updateMissionQualityGate: (mid: string, name: string, u: any) => o.updateMissionQualityGate(mid, name, u),
+    removeMissionQualityGate: (mid: string, name: string) => o.removeMissionQualityGate(mid, name),
+    addMissionTeamMember: (mid: string, m: any) => o.addMissionTeamMember(mid, m),
+    updateMissionTeamMember: (mid: string, name: string, u: any) => o.updateMissionTeamMember(mid, name, u),
+    removeMissionTeamMember: (mid: string, name: string) => o.removeMissionTeamMember(mid, name),
+    updateMissionNotifications: (mid: string, n: any) => o.updateMissionNotifications(mid, n),
+  })));
+
+  authed.route("/agents", agentRoutes(() => ({
+    getAgents: () => o.getAgents(),
+    addAgent: (agent: any, teamName?: string) => o.addAgent(agent, teamName),
+    removeAgent: (name: string) => o.removeAgent(name),
+    updateAgent: (name: string, updates: any) => o.updateAgent(name, updates),
+    getTeams: () => o.getTeams(),
+    getTeam: (name?: string) => o.getTeam(name),
+    addTeam: (team: any) => o.addTeam(team),
+    removeTeam: (name: string) => o.removeTeam(name),
+    renameTeam: (oldName: string, newName: string) => o.renameTeam(oldName, newName),
+    taskStore: o.getStore(),
+    runStore: o.getRunStore(),
+    polpoDir: o.getPolpoDir(),
+  })));
+
   authed.route("/events", eventRoutes(sseBridge));
-  authed.route("/chat", chatRoutes());
-  authed.route("/skills", skillRoutes());
-  authed.route("/notifications", notificationRoutes());
-  authed.route("/approvals", approvalRoutes());
-  authed.route("/playbooks", playbookRoutes());
+
+  authed.route("/chat", chatRoutes(() => ({
+    sessionStore: o.getSessionStore(),
+  })));
+
+  authed.route("/skills", skillRoutes(() => ({
+    polpoDir: o.getPolpoDir(),
+    workDir: o.getWorkDir(),
+    getAgents: () => o.getAgents(),
+  })));
+
+  authed.route("/notifications", notificationRoutes(() => ({
+    getNotificationRouter: () => o.getNotificationRouter(),
+  })));
+
+  authed.route("/approvals", approvalRoutes(() => ({
+    getAllApprovals: (status?: string) => o.getAllApprovals(status as any),
+    getApprovalRequest: (id: string) => o.getApprovalRequest(id),
+    approveRequest: (id: string, resolvedBy?: string, note?: string) => o.approveRequest(id, resolvedBy, note),
+    rejectRequest: (id: string, feedback: string, resolvedBy?: string) => o.rejectRequest(id, feedback, resolvedBy),
+    canRejectRequest: (id: string) => o.canRejectRequest(id),
+  })));
+
+  authed.route("/playbooks", playbookRoutes(() => ({
+    playbookStore: o.getPlaybookStore(),
+    saveMission: (opts: any) => o.saveMission(opts),
+    executeMission: (id: string) => o.executeMission(id),
+  })));
   // Backward-compat: keep /templates as alias
-  authed.route("/templates", playbookRoutes());
-  authed.route("/config", configRoutes());
-  authed.route("/peers", peerRoutes());
-  authed.route("/schedules", scheduleRoutes());
-  authed.route("/watchers", watcherRoutes());
-  authed.route("/vault", vaultRoutes());
-  authed.route("/auth", authRoutes());
-  authed.route("/files", fileRoutes());
-  authed.route("/", stateRoutes());
+  authed.route("/templates", playbookRoutes(() => ({
+    playbookStore: o.getPlaybookStore(),
+    saveMission: (opts: any) => o.saveMission(opts),
+    executeMission: (id: string) => o.executeMission(id),
+  })));
+
+  authed.route("/config", configRoutes(() => ({
+    getConfig: () => o.getConfig(),
+    reloadConfig: () => o.reloadConfig(),
+    getPolpoDir: () => o.getPolpoDir(),
+    getNotificationRouter: () => o.getNotificationRouter(),
+  })));
+
+  authed.route("/peers", peerRoutes(() => ({
+    peerStore: o.getPeerStore(),
+  })));
+
+  authed.route("/schedules", scheduleRoutes(() => ({
+    getScheduler: () => o.getScheduler(),
+    getMission: (id: string) => o.getMission(id),
+    updateMission: (id: string, updates: any) => o.updateMission(id, updates),
+  })));
+
+  authed.route("/watchers", watcherRoutes(() => ({
+    getWatcherManager: () => o.getWatcherManager(),
+    taskStore: o.getStore(),
+  })));
+
+  authed.route("/vault", vaultRoutes(() => ({
+    vaultStore: o.getVaultStore(),
+  })));
+
+  authed.route("/auth", authRoutes(() => ({
+    getConfig: () => o.getConfig(),
+  })));
+
+  authed.route("/files", fileRoutes(() => ({
+    polpoDir: o.getPolpoDir(),
+    workDir: o.getWorkDir(),
+    agentWorkDir: o.getAgentWorkDir(),
+    emit: (event: string, data: any) => o.emit(event as any, data),
+  })));
+
+  authed.route("/", stateRoutes(() => ({
+    taskStore: o.getStore(),
+    getConfig: () => o.getConfig(),
+    hasMemory: () => o.hasMemory(),
+    getMemory: () => o.getMemory(),
+    saveMemory: (content: string) => o.saveMemory(content),
+    hasAgentMemory: (name: string) => o.hasAgentMemory(name),
+    getAgentMemory: (name: string) => o.getAgentMemory(name),
+    saveAgentMemory: (name: string, content: string) => o.saveAgentMemory(name, content),
+    getLogStore: () => o.getLogStore(),
+  })));
 
   app.route("/api/v1", authed);
 

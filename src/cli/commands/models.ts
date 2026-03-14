@@ -91,11 +91,12 @@ export function registerModelsCommands(parent: Command): void {
     .option("--plain", "Print only the resolved primary model")
     .action(async (opts: { dir: string; json?: boolean; check?: boolean; plain?: boolean }) => {
       const { resolve } = await import("node:path");
+      const { getPolpoDir: getPolpoDirFn } = await import("../../core/constants.js");
       const { loadPolpoConfig } = await import("../../core/config.js");
       const { resolveModel, resolveModelSpec, resolveApiKey, resolveApiKeyAsync, parseModelSpec, setProviderOverrides, getProviderCooldowns } = await import("../../llm/pi-client.js");
       const { getAllProfiles, isProfileAvailable, getUsageStats } = await import("../../auth/index.js");
 
-      const polpoDir = resolve(opts.dir, ".polpo");
+      const polpoDir = getPolpoDirFn(resolve(opts.dir));
       let config;
       try {
         config = loadPolpoConfig(polpoDir);

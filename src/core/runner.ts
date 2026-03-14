@@ -17,18 +17,20 @@ import { join } from "node:path";
 import { FileRunStore } from "../stores/file-run-store.js";
 import { spawnEngine } from "../adapters/engine.js";
 import type { RunStore, RunRecord } from "./run-store.js";
+import type { LogStore } from "./log-store.js";
 import type { RunnerConfig, TaskResult } from "./types.js";
 import { notifyRunComplete } from "./notification.js";
 import { sanitizeTranscriptEntry } from "../server/security.js";
 import { EncryptedVaultStore } from "../vault/encrypted-store.js";
+import type { VaultStore } from "./vault-store.js";
 import type { WhatsAppStore } from "../stores/whatsapp-store.js";
 
 const ACTIVITY_POLL_MS = 1500;
 
-function readConfig(): RunnerConfig {
+function readConfigFromFile(): RunnerConfig {
   const idx = process.argv.indexOf("--config");
   if (idx < 0 || !process.argv[idx + 1]) {
-    console.error("Usage: runner --config <path>");
+    console.error("Usage: runner --config <path> | --run-id <id> --db <url>");
     process.exit(1);
   }
   const configPath = process.argv[idx + 1];
@@ -39,6 +41,38 @@ function readConfig(): RunnerConfig {
     console.error(`Failed to parse runner config at ${configPath}:`, err instanceof Error ? err.message : err);
     process.exit(1);
   }
+}
+
+/**
+ * Cloud mode: read RunnerConfig from Neon DB via RunStore.
+ * Usage: runner --run-id <id> --db <postgres-url>
+ */
+async function readConfigFromDb(): Promise<RunnerConfig> {
+  const runIdIdx = process.argv.indexOf("--run-id");
+  const dbIdx = process.argv.indexOf("--db");
+  if (runIdIdx < 0 || dbIdx < 0 || !process.argv[runIdIdx + 1] || !process.argv[dbIdx + 1]) {
+    console.error("Usage: runner --run-id <id> --db <postgres-url>");
+    process.exit(1);
+  }
+  const runId = process.argv[runIdIdx + 1];
+  const dbUrl = process.argv[dbIdx + 1];
+
+  const { createPgStores } = await import("@polpo-ai/drizzle");
+  const postgres = (await import("postgres")).default;
+  const { drizzle } = await import("drizzle-orm/postgres-js");
+  const sql = postgres(dbUrl);
+  const db = drizzle(sql);
+  const store = createPgStores(db).runStore;
+
+  const run = await store.getRun(runId);
+  if (!run?.config) {
+    console.error(`Run ${runId} not found or has no config in DB`);
+    await sql.end();
+    process.exit(1);
+  }
+
+  await sql.end();
+  return run.config;
 }
 
 function errorResult(err: unknown): TaskResult {
@@ -82,14 +116,20 @@ class RunActivityLog {
   }
 }
 
-async function createRunStore(config: RunnerConfig): Promise<RunStore> {
+interface RunnerStores {
+  runStore: RunStore;
+  logStore?: LogStore;
+}
+
+async function createStores(config: RunnerConfig): Promise<RunnerStores> {
   if (config.storage === "postgres" && config.databaseUrl) {
     const { createPgStores } = await import("@polpo-ai/drizzle");
     const postgres = (await import("postgres")).default;
     const { drizzle } = await import("drizzle-orm/postgres-js");
     const sql = postgres(config.databaseUrl);
     const db = drizzle(sql);
-    return createPgStores(db).runStore;
+    const stores = createPgStores(db);
+    return { runStore: stores.runStore, logStore: stores.logStore };
   }
   if (config.storage === "sqlite") {
     const { createSqliteStores } = await import("@polpo-ai/drizzle");
@@ -105,15 +145,24 @@ async function createRunStore(config: RunnerConfig): Promise<RunStore> {
     ensureSqliteSchema(sqlite);
     const { drizzle } = await import("drizzle-orm/better-sqlite3");
     const db = drizzle(sqlite);
-    return createSqliteStores(db).runStore;
+    const stores = createSqliteStores(db);
+    return { runStore: stores.runStore, logStore: stores.logStore };
   }
-  return new FileRunStore(config.polpoDir);
+  return { runStore: new FileRunStore(config.polpoDir) };
 }
 
 async function main(): Promise<void> {
-  const config = readConfig();
-  const runStore = await createRunStore(config);
+  const isDbMode = process.argv.includes("--run-id");
+  const config = isDbMode ? await readConfigFromDb() : readConfigFromFile();
+  const { runStore, logStore } = await createStores(config);
   const actLog = new RunActivityLog(config.polpoDir, config.runId, config.taskId, config.agent.name);
+
+  // When LogStore is available (postgres/sqlite), persist transcript to DB.
+  // This ensures transcript survives sandbox destruction in cloud mode.
+  let logSessionId: string | undefined;
+  if (logStore) {
+    logSessionId = await logStore.startSession();
+  }
 
   const now = new Date().toISOString();
   const initialRecord: RunRecord = {
@@ -125,14 +174,15 @@ async function main(): Promise<void> {
     startedAt: now,
     updatedAt: now,
     activity: { filesCreated: [], filesEdited: [], toolCalls: 0, totalTokens: 0, lastUpdate: now },
-    configPath: join(process.argv[process.argv.indexOf("--config") + 1]),
+    configPath: isDbMode ? `db://${config.runId}` : join(process.argv[process.argv.indexOf("--config") + 1]),
   };
+  // In DB mode, run record already exists (created by cloud spawner) — update it with PID
   await runStore.upsertRun(initialRecord);
   actLog.logEvent("spawning", { task: config.task.title });
 
   let handle;
   try {
-    let vaultStore: EncryptedVaultStore | undefined;
+    let vaultStore: VaultStore | undefined;
     try { vaultStore = new EncryptedVaultStore(config.polpoDir); } catch { /* vault unavailable */ }
 
     // WhatsApp store + send function (if configured)
@@ -190,7 +240,18 @@ async function main(): Promise<void> {
     };
     handle = spawnEngine(config.agent, config.task, config.cwd, spawnCtx);
     // Wire transcript persistence — every agent message gets written to the run log
-    handle.onTranscript = (entry) => actLog.logTranscript(entry);
+    handle.onTranscript = (entry) => {
+      actLog.logTranscript(entry);
+      // Persist transcript to DB when LogStore is available (cloud mode)
+      if (logStore && logSessionId) {
+        const event = entry.role === "assistant" ? "transcript:assistant"
+          : entry.role === "tool_result" ? "transcript:tool_result"
+          : entry.role === "tool_use" ? "transcript:tool_use"
+          : `transcript:${entry.role ?? "unknown"}`;
+        logStore.append({ ts: new Date().toISOString(), event, data: sanitizeTranscriptEntry(entry) })
+          .catch(() => {}); // best-effort, don't block engine
+      }
+    };
     actLog.logEvent("spawned");
   } catch (err) {
     const result = errorResult(err);
@@ -255,8 +316,10 @@ async function main(): Promise<void> {
     }
   }
 
-  // Cleanup config file
-  try { unlinkSync(join(process.argv[process.argv.indexOf("--config") + 1])); } catch { /* already gone */ }
+  // Cleanup config file (only in file mode, not DB mode)
+  if (!isDbMode) {
+    try { unlinkSync(join(process.argv[process.argv.indexOf("--config") + 1])); } catch { /* already gone */ }
+  }
 
   await runStore.close();
   process.exit(0);

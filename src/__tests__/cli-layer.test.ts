@@ -36,12 +36,26 @@ const BASE_CONFIG: PolpoFileConfig = {
   settings: { maxRetries: 2, workDir: ".", logLevel: "normal" },
 };
 
-/** Create a temp dir with a valid .polpo/polpo.json ready for CLI commands. */
+/** Create a temp dir with a valid .polpo/polpo.json + teams.json/agents.json ready for CLI commands. */
 async function makeTempProject(config = BASE_CONFIG): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), "polpo-cli-layer-"));
   const polpoDir = join(dir, ".polpo");
   await mkdir(polpoDir, { recursive: true });
   savePolpoConfig(polpoDir, config);
+
+  // Seed teams.json and agents.json (team commands now use FileTeamStore/FileAgentStore)
+  const teams = config.teams ?? [];
+  const teamsJson = teams.map(t => ({ name: t.name, agents: [] }));
+  await writeFile(join(polpoDir, "teams.json"), JSON.stringify(teamsJson, null, 2));
+
+  const agentsJson: Array<{ agent: any; teamName: string }> = [];
+  for (const t of teams) {
+    for (const a of t.agents) {
+      agentsJson.push({ agent: a, teamName: t.name });
+    }
+  }
+  await writeFile(join(polpoDir, "agents.json"), JSON.stringify(agentsJson, null, 2));
+
   return dir;
 }
 
@@ -197,14 +211,14 @@ describe("CLI layer: team commands", () => {
     ]);
     expect(stdout).toContain('Added agent "agent-2"');
 
-    // Verify it persisted
-    const config = JSON.parse(
-      await readFile(join(dir, ".polpo", "polpo.json"), "utf-8"),
+    // Verify it persisted in agents.json (team commands now use FileAgentStore)
+    const agents = JSON.parse(
+      await readFile(join(dir, ".polpo", "agents.json"), "utf-8"),
     );
-    const agent = config.teams[0].agents.find((a: any) => a.name === "agent-2");
-    expect(agent).toBeDefined();
-    expect(agent.role).toBe("Backend developer");
-    expect(agent.model).toBe("anthropic:claude-sonnet-4-6");
+    const entry = agents.find((e: any) => e.agent.name === "agent-2");
+    expect(entry).toBeDefined();
+    expect(entry.agent.role).toBe("Backend developer");
+    expect(entry.agent.model).toBe("anthropic:claude-sonnet-4-6");
   });
 
   test("team add — duplicate agent errors", async () => {
@@ -220,12 +234,12 @@ describe("CLI layer: team commands", () => {
     ]);
     expect(stdout).toContain('Removed agent "agent-2"');
 
-    // Verify it persisted
-    const config = JSON.parse(
-      await readFile(join(dir, ".polpo", "polpo.json"), "utf-8"),
+    // Verify it persisted in agents.json
+    const agents = JSON.parse(
+      await readFile(join(dir, ".polpo", "agents.json"), "utf-8"),
     );
-    const agent = config.teams[0].agents.find((a: any) => a.name === "agent-2");
-    expect(agent).toBeUndefined();
+    const entry = agents.find((e: any) => e.agent.name === "agent-2");
+    expect(entry).toBeUndefined();
   });
 
   test("team remove — unknown agent errors", async () => {
@@ -241,19 +255,21 @@ describe("CLI layer: team commands", () => {
     ]);
     expect(stdout).toContain('Team renamed to "alpha-team"');
 
-    const config = JSON.parse(
-      await readFile(join(dir, ".polpo", "polpo.json"), "utf-8"),
+    // Verify it persisted in teams.json
+    const teams = JSON.parse(
+      await readFile(join(dir, ".polpo", "teams.json"), "utf-8"),
     );
-    expect(config.teams[0].name).toBe("alpha-team");
+    expect(teams[0].name).toBe("alpha-team");
   });
 
-  test("team list — error on missing config", async () => {
+  test("team list — empty dir shows no agents", async () => {
     const emptyDir = await mkdtemp(join(tmpdir(), "polpo-no-config-"));
     try {
-      const { stderr } = await runCLI(registerTeamCommands, [
+      const { stdout } = await runCLI(registerTeamCommands, [
         "team", "list", "-d", emptyDir,
       ]);
-      expect(stderr).toContain("polpo.json not found");
+      // FileTeamStore returns empty when no teams.json exists
+      expect(stdout).toContain("No agents");
     } finally {
       await rm(emptyDir, { recursive: true, force: true });
     }
@@ -390,15 +406,14 @@ describe("CLI layer: logs commands", () => {
 
   test("logs list — shows sessions", async () => {
     const { stdout } = await runCLI(registerLogsCommands, ["logs", "list", "-d", dir]);
-    // Should show at least one session from init, or "No sessions"
-    // Either way, we exercised the command path
-    expect(stdout.length + 1).toBeGreaterThan(0);
+    // Should print something — either session rows or a "No sessions" message
+    expect(stdout.length).toBeGreaterThan(0);
   });
 
   test("logs show — displays log entries or shows active session", async () => {
     const { stdout, stderr } = await runCLI(registerLogsCommands, ["logs", "show", "-d", dir]);
-    // Might show entries or "No entries" — either exercises the code path
-    expect(stdout.length + stderr.length).toBeGreaterThanOrEqual(0);
+    // Should produce output on stdout or stderr (e.g. "No entries" or entries table)
+    expect(stdout.length + stderr.length).toBeGreaterThan(0);
   });
 });
 

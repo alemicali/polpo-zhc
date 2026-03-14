@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { resolve, basename, join } from "node:path";
+import { getPolpoDir } from "../../core/constants.js";
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
-import type { ServerEnv } from "../app.js";
 import { redactPolpoConfig } from "../security.js";
 import { UpdateSettingsSchema, NotificationChannelConfigSchema } from "../schemas.js";
 import { loadPolpoConfig, savePolpoConfig, generatePolpoConfigDefault } from "../../core/config.js";
@@ -242,11 +242,11 @@ const listChannelsRoute = createRoute({
 // ── Authed route handlers ─────────────────────────────────────────────
 
 /** Shared helper: read config from disk, apply a mutation, persist, reload, return updated config. */
-function mutateConfig(
-  orchestrator: Orchestrator,
+async function mutateConfig(
+  deps: { getPolpoDir: () => string; reloadConfig: () => Promise<boolean>; getConfig: () => any },
   mutate: (fileConfig: ReturnType<typeof loadPolpoConfig> & {}) => void,
-): { ok: true; config: NonNullable<ReturnType<Orchestrator["getConfig"]>> } | { ok: false; error: string; status: 404 | 500 } {
-  const polpoDir = orchestrator.getPolpoDir();
+): Promise<{ ok: true; config: any } | { ok: false; error: string; status: 404 | 500 }> {
+  const polpoDir = deps.getPolpoDir();
   const fileConfig = loadPolpoConfig(polpoDir);
   if (!fileConfig) return { ok: false, error: "No configuration found on disk", status: 404 };
 
@@ -259,8 +259,8 @@ function mutateConfig(
     return { ok: false, error: `Failed to save config: ${msg}`, status: 500 };
   }
 
-  orchestrator.reloadConfig();
-  return { ok: true, config: orchestrator.getConfig()! };
+  await deps.reloadConfig();
+  return { ok: true, config: deps.getConfig()! };
 }
 
 /**
@@ -273,12 +273,17 @@ function mutateConfig(
  * DELETE /config/channels/:n  — delete a channel
  * POST   /config/channels/:n/test — test a channel
  */
-export function configRoutes(): OpenAPIHono<ServerEnv> {
-  const app = new OpenAPIHono<ServerEnv>();
+export function configRoutes(getDeps: () => {
+  getConfig: () => any;
+  reloadConfig: () => Promise<boolean>;
+  getPolpoDir: () => string;
+  getNotificationRouter: () => any;
+}): OpenAPIHono {
+  const app = new OpenAPIHono();
 
-  app.openapi(reloadConfigRoute, (c) => {
-    const orchestrator = c.get("orchestrator");
-    const success = orchestrator.reloadConfig();
+  app.openapi(reloadConfigRoute, async (c) => {
+    const deps = getDeps();
+    const success = await deps.reloadConfig();
     if (success) {
       return c.json({ ok: true, data: { message: "Configuration reloaded successfully" } }, 200);
     }
@@ -286,19 +291,19 @@ export function configRoutes(): OpenAPIHono<ServerEnv> {
   });
 
   app.openapi(getConfigRoute, (c) => {
-    const orchestrator = c.get("orchestrator");
-    const config = orchestrator.getConfig();
+    const deps = getDeps();
+    const config = deps.getConfig();
     if (!config) {
       return c.json({ ok: false, error: "No configuration loaded" }, 404);
     }
     return c.json({ ok: true, data: redactPolpoConfig(config) }, 200);
   });
 
-  app.openapi(updateSettingsRoute, (c) => {
-    const orchestrator = c.get("orchestrator");
+  app.openapi(updateSettingsRoute, async (c) => {
+    const deps = getDeps();
     const body = c.req.valid("json");
 
-    const result = mutateConfig(orchestrator, (fileConfig) => {
+    const result = await mutateConfig(deps, (fileConfig) => {
       const settings = fileConfig.settings ?? {} as any;
       if (body.orchestratorModel !== undefined) settings.orchestratorModel = body.orchestratorModel;
       if (body.imageModel !== undefined) settings.imageModel = body.imageModel === null ? undefined : body.imageModel;
@@ -313,18 +318,18 @@ export function configRoutes(): OpenAPIHono<ServerEnv> {
   // ── Channel CRUD ──
 
   app.openapi(listChannelsRoute, (c) => {
-    const orchestrator = c.get("orchestrator");
-    const config = orchestrator.getConfig();
+    const deps = getDeps();
+    const config = deps.getConfig();
     const channels = config?.settings?.notifications?.channels ?? {};
     return c.json({ ok: true, data: channels }, 200);
   });
 
-  app.openapi(upsertChannelRoute, (c) => {
-    const orchestrator = c.get("orchestrator");
+  app.openapi(upsertChannelRoute, async (c) => {
+    const deps = getDeps();
     const { name } = c.req.valid("param");
     const channelConfig = c.req.valid("json");
 
-    const result = mutateConfig(orchestrator, (fileConfig) => {
+    const result = await mutateConfig(deps, (fileConfig) => {
       const settings = fileConfig.settings ?? {} as any;
       if (!settings.notifications) settings.notifications = { channels: {}, rules: [] };
       if (!settings.notifications.channels) settings.notifications.channels = {};
@@ -336,18 +341,18 @@ export function configRoutes(): OpenAPIHono<ServerEnv> {
     return c.json({ ok: true, data: redactPolpoConfig(result.config) }, 200);
   });
 
-  app.openapi(deleteChannelRoute, (c) => {
-    const orchestrator = c.get("orchestrator");
+  app.openapi(deleteChannelRoute, async (c) => {
+    const deps = getDeps();
     const { name } = c.req.valid("param");
 
     // Check the channel exists before deleting
-    const currentConfig = orchestrator.getConfig();
+    const currentConfig = deps.getConfig();
     const channels = currentConfig?.settings?.notifications?.channels;
     if (!channels || !(name in channels)) {
       return c.json({ ok: false, error: `Channel "${name}" not found` }, 404);
     }
 
-    const result = mutateConfig(orchestrator, (fileConfig) => {
+    const result = await mutateConfig(deps, (fileConfig) => {
       const settings = fileConfig.settings ?? {} as any;
       if (settings.notifications?.channels) {
         delete settings.notifications.channels[name];
@@ -360,10 +365,10 @@ export function configRoutes(): OpenAPIHono<ServerEnv> {
   });
 
   app.openapi(testChannelRoute, async (c) => {
-    const orchestrator = c.get("orchestrator");
+    const deps = getDeps();
     const { name } = c.req.valid("param");
 
-    const notificationRouter = orchestrator.getNotificationRouter();
+    const notificationRouter = deps.getNotificationRouter();
     if (!notificationRouter) {
       return c.json({ ok: false, error: "Notification system not initialized" }, 404);
     }
@@ -397,7 +402,7 @@ export function publicConfigRoutes(
   onInitialize?: (workDir: string) => Promise<void>,
 ): OpenAPIHono {
   const app = new OpenAPIHono();
-  const polpoDir = resolve(workDir, ".polpo");
+  const polpoDir = getPolpoDir(workDir);
 
   // GET /config/status
   app.openapi(configStatusRoute, (c) => {
@@ -434,7 +439,7 @@ export function publicConfigRoutes(
     try {
       const body = c.req.valid("json");
       const targetDir = body.workDir ? resolve(body.workDir) : workDir;
-      const targetPolpoDir = resolve(targetDir, ".polpo");
+      const targetPolpoDir = getPolpoDir(targetDir);
       const org = body.orgName || basename(targetDir);
 
       const config = generatePolpoConfigDefault(org, {

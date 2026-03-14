@@ -1,6 +1,6 @@
 {
   "name": "@polpo-ai/drizzle",
-  "version": "0.1.2",
+  "version": "0.2.1",
   "description": "Drizzle ORM store implementations for the Polpo AI agent orchestration platform (PostgreSQL + SQLite)",
   "type": "module",
   "main": "dist/index.js",
@@ -20,6 +20,7 @@
   },
   "dependencies": {
     "@polpo-ai/core": "workspace:*",
+    "@polpo-ai/vault-crypto": "workspace:*",
     "drizzle-orm": "^0.44.0",
     "nanoid": "^5.1.2"
   },

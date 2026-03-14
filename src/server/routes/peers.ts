@@ -11,7 +11,6 @@
  */
 
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
-import type { ServerEnv } from "../app.js";
 
 /* ── Shared error schema ───────────────────────────────────────────── */
 const ErrorResponse = z.object({ ok: z.boolean(), error: z.string() });
@@ -122,13 +121,12 @@ const linkPeersRoute = createRoute({
 
 /* ── Route handlers ────────────────────────────────────────────────── */
 
-export function peerRoutes(): OpenAPIHono<ServerEnv> {
-  const app = new OpenAPIHono<ServerEnv>();
+export function peerRoutes(getDeps: () => { peerStore?: any }): OpenAPIHono {
+  const app = new OpenAPIHono();
 
   // ── List known peers ──
   app.openapi(listPeersRoute, async (c) => {
-    const orch = c.get("orchestrator");
-    const peerStore = orch.getPeerStore();
+    const { peerStore } = getDeps();
     if (!peerStore) return c.json({ ok: false, error: "Channel gateway not configured" }, 404);
 
     const channel = c.req.query("channel") as "telegram" | "whatsapp" | "slack" | "discord" | "webchat" | undefined;
@@ -137,8 +135,7 @@ export function peerRoutes(): OpenAPIHono<ServerEnv> {
 
   // ── Get presence ──
   app.openapi(getPresenceRoute, async (c) => {
-    const orch = c.get("orchestrator");
-    const peerStore = orch.getPeerStore();
+    const { peerStore } = getDeps();
     if (!peerStore) return c.json({ ok: false, error: "Channel gateway not configured" }, 404);
 
     return c.json({ ok: true, data: await peerStore.getPresence() }, 200);
@@ -146,8 +143,7 @@ export function peerRoutes(): OpenAPIHono<ServerEnv> {
 
   // ── Get allowlist ──
   app.openapi(getAllowlistRoute, async (c) => {
-    const orch = c.get("orchestrator");
-    const peerStore = orch.getPeerStore();
+    const { peerStore } = getDeps();
     if (!peerStore) return c.json({ ok: false, error: "Channel gateway not configured" }, 404);
 
     return c.json({ ok: true, data: await peerStore.getAllowlist() }, 200);
@@ -155,8 +151,7 @@ export function peerRoutes(): OpenAPIHono<ServerEnv> {
 
   // ── Add to allowlist ──
   app.openapi(addToAllowlistRoute, async (c) => {
-    const orch = c.get("orchestrator");
-    const peerStore = orch.getPeerStore();
+    const { peerStore } = getDeps();
     if (!peerStore) return c.json({ ok: false, error: "Channel gateway not configured" }, 404);
 
     const { peerId } = c.req.valid("json");
@@ -168,8 +163,7 @@ export function peerRoutes(): OpenAPIHono<ServerEnv> {
 
   // ── Remove from allowlist ──
   app.openapi(removeFromAllowlistRoute, async (c) => {
-    const orch = c.get("orchestrator");
-    const peerStore = orch.getPeerStore();
+    const { peerStore } = getDeps();
     if (!peerStore) return c.json({ ok: false, error: "Channel gateway not configured" }, 404);
 
     const { peerId } = c.req.valid("param");
@@ -179,8 +173,7 @@ export function peerRoutes(): OpenAPIHono<ServerEnv> {
 
   // ── Approve pairing code ──
   app.openapi(approvePairingRoute, async (c) => {
-    const orch = c.get("orchestrator");
-    const peerStore = orch.getPeerStore();
+    const { peerStore } = getDeps();
     if (!peerStore) return c.json({ ok: false, error: "Channel gateway not configured" }, 404);
 
     const { code } = c.req.valid("json");
@@ -194,8 +187,7 @@ export function peerRoutes(): OpenAPIHono<ServerEnv> {
 
   // ── Link peer identities ──
   app.openapi(linkPeersRoute, async (c) => {
-    const orch = c.get("orchestrator");
-    const peerStore = orch.getPeerStore();
+    const { peerStore } = getDeps();
     if (!peerStore) return c.json({ ok: false, error: "Channel gateway not configured" }, 404);
 
     const { peerId, linkedTo } = c.req.valid("json");

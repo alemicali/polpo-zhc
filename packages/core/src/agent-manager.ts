@@ -1,176 +1,184 @@
 import type { OrchestratorContext } from "./orchestrator-context.js";
 import type { AgentConfig, Team } from "./types.js";
-import { getAllAgents, findAgent, findAgentTeam } from "./types.js";
 
 /**
  * Manages multi-team agent topology: CRUD operations on teams and agents,
- * volatile (mission-tied) agents, and config persistence.
+ * volatile (mission-tied) agents.
+ *
+ * All persistence goes through TeamStore / AgentStore — no more dual-write
+ * to config + TaskStore.  The in-memory `config.teams` cache is kept in sync
+ * so existing callers that read `config.teams` still work during migration.
  */
 export class AgentManager {
   constructor(private ctx: OrchestratorContext) {}
 
-  /**
-   * Persist the current teams to polpo.json, excluding volatile agents.
-   * Merges into the existing file config to preserve providers/settings
-   * that may have been edited outside the runtime.
-   */
-  private async persistConfig(): Promise<void> {
-    if (!this.ctx.loadConfig || !this.ctx.saveConfig) return;
-    const existing = this.ctx.loadConfig();
-    if (!existing) return; // no polpo.json to update (e.g. headless / test mode)
+  // ── Internal: sync in-memory cache ────────────────────────────────
 
-    // Strip volatile agents from each team; drop empty teams that only had volatile agents
-    existing.teams = this.ctx.config.teams.map(t => ({
+  /** Refresh the in-memory `config.teams` from the stores. */
+  async syncConfigCache(): Promise<void> {
+    const teams = await this.ctx.teamStore.getTeams();
+    // Each team from TeamStore already contains its agents via the store's join.
+    // But for file-based stores, TeamStore stores teams without agents —
+    // agents come from AgentStore. Rebuild the full Team[] shape.
+    const allAgents = await this.ctx.agentStore.getAgents();
+    const agentsByTeam = new Map<string, AgentConfig[]>();
+    for (const agent of allAgents) {
+      const teamName = await this.ctx.agentStore.getAgentTeam(agent.name);
+      if (teamName) {
+        const list = agentsByTeam.get(teamName) ?? [];
+        list.push(agent);
+        agentsByTeam.set(teamName, list);
+      }
+    }
+    this.ctx.config.teams = teams.map(t => ({
       ...t,
-      agents: t.agents.filter(a => !a.volatile),
-    })).filter(t => t.agents.length > 0 || !this.isVolatileOnlyTeam(t.name));
-
-    this.ctx.saveConfig(existing);
+      agents: agentsByTeam.get(t.name) ?? [],
+    }));
   }
 
-  /** Returns true if a team had ONLY volatile agents (should not be persisted). */
-  private isVolatileOnlyTeam(teamName: string): boolean {
-    const team = this.ctx.config.teams.find(t => t.name === teamName);
-    if (!team) return false;
-    return team.agents.length > 0 && team.agents.every(a => a.volatile);
+  // ── Internal: hydrate teams with agents ────────────────────────────
+
+  /** Build a full Team with its agents array populated from AgentStore. */
+  private async hydrateTeam(team: Team): Promise<Team> {
+    const agents = await this.ctx.agentStore.getAgents(team.name);
+    return { ...team, agents };
   }
 
-  // ── Team-level operations ──
+  // ── Team-level operations ──────────────────────────────────────────
 
-  getTeams(): Team[] {
-    return this.ctx.config?.teams ?? [];
+  async getTeams(): Promise<Team[]> {
+    const teams = await this.ctx.teamStore.getTeams();
+    return Promise.all(teams.map(t => this.hydrateTeam(t)));
   }
 
-  getTeam(name?: string): Team | undefined {
-    if (!this.ctx.config) return undefined;
-    if (!name) return this.ctx.config.teams[0];
-    return this.ctx.config.teams.find(t => t.name === name);
+  async getTeam(name?: string): Promise<Team | undefined> {
+    let team: Team | undefined;
+    if (!name) {
+      const teams = await this.ctx.teamStore.getTeams();
+      team = teams[0];
+    } else {
+      team = await this.ctx.teamStore.getTeam(name);
+    }
+    return team ? this.hydrateTeam(team) : undefined;
   }
 
   /** Get the default (first) team, creating one if none exist. */
-  getDefaultTeam(): Team {
-    if (!this.ctx.config) return { name: "default", agents: [] };
-    if (this.ctx.config.teams.length === 0) {
-      const team: Team = { name: "default", agents: [] };
-      this.ctx.config.teams.push(team);
+  async getDefaultTeam(): Promise<Team> {
+    const teams = await this.ctx.teamStore.getTeams();
+    if (teams.length === 0) {
+      return this.ctx.teamStore.createTeam({ name: "default", agents: [] });
     }
-    return this.ctx.config.teams[0];
+    return teams[0]; // No need to hydrate — used for team identity only
   }
 
   async addTeam(team: Team): Promise<void> {
-    if (!this.ctx.config) throw new Error("Orchestrator not initialized");
-    const existing = this.ctx.config.teams.find(t => t.name === team.name);
-    if (existing) throw new Error(`Team "${team.name}" already exists`);
-    this.ctx.config.teams.push(team);
-    await this.ctx.registry.setState({ teams: this.ctx.config.teams });
-    await this.persistConfig();
+    // Extract agents from the team — they go to AgentStore separately
+    const { agents, ...teamData } = team;
+    await this.ctx.teamStore.createTeam({ ...teamData, agents: [] });
+
+    // Add any agents that came with the team definition
+    for (const agent of agents ?? []) {
+      await this.ctx.agentStore.createAgent(agent, team.name);
+    }
+
+    await this.syncConfigCache();
     this.ctx.emitter.emit("log", { level: "info", message: `Team added: ${team.name}` });
   }
 
   async removeTeam(name: string): Promise<boolean> {
-    if (!this.ctx.config) throw new Error("Orchestrator not initialized");
-    const idx = this.ctx.config.teams.findIndex(t => t.name === name);
-    if (idx < 0) return false;
-    if (this.ctx.config.teams.length === 1) {
+    const teams = await this.ctx.teamStore.getTeams();
+    if (teams.length <= 1 && teams[0]?.name === name) {
       throw new Error("Cannot remove the last team");
     }
-    this.ctx.config.teams.splice(idx, 1);
-    await this.ctx.registry.setState({ teams: this.ctx.config.teams });
-    await this.persistConfig();
-    this.ctx.emitter.emit("log", { level: "info", message: `Team removed: ${name}` });
-    return true;
+    const deleted = await this.ctx.teamStore.deleteTeam(name);
+    if (deleted) {
+      await this.syncConfigCache();
+      this.ctx.emitter.emit("log", { level: "info", message: `Team removed: ${name}` });
+    }
+    return deleted;
   }
 
   async renameTeam(oldName: string, newName: string): Promise<void> {
-    if (!this.ctx.config) throw new Error("Orchestrator not initialized");
-    const team = this.ctx.config.teams.find(t => t.name === oldName);
-    if (!team) throw new Error(`Team "${oldName}" not found`);
-    if (this.ctx.config.teams.some(t => t.name === newName)) {
-      throw new Error(`Team "${newName}" already exists`);
+    await this.ctx.teamStore.renameTeam(oldName, newName);
+
+    // Move all agents from the old team to the new team name
+    const agents = await this.ctx.agentStore.getAgents(oldName);
+    for (const agent of agents) {
+      await this.ctx.agentStore.moveAgent(agent.name, newName);
     }
-    team.name = newName;
-    await this.ctx.registry.setState({ teams: this.ctx.config.teams });
-    await this.persistConfig();
+
+    await this.syncConfigCache();
     this.ctx.emitter.emit("log", { level: "info", message: `Team renamed: "${oldName}" → "${newName}"` });
   }
 
-  // ── Agent-level operations ──
+  // ── Agent-level operations ─────────────────────────────────────────
 
   /** Get ALL agents across all teams (flattened). */
-  getAgents(): AgentConfig[] {
-    return getAllAgents(this.ctx.config?.teams ?? []);
+  async getAgents(): Promise<AgentConfig[]> {
+    return this.ctx.agentStore.getAgents();
   }
 
   /** Find an agent by name across all teams. */
-  findAgent(name: string): AgentConfig | undefined {
-    return findAgent(this.ctx.config?.teams ?? [], name);
+  async findAgent(name: string): Promise<AgentConfig | undefined> {
+    return this.ctx.agentStore.getAgent(name);
   }
 
   /** Find which team an agent belongs to. */
-  findAgentTeam(name: string): Team | undefined {
-    return findAgentTeam(this.ctx.config?.teams ?? [], name);
+  async findAgentTeam(name: string): Promise<Team | undefined> {
+    const teamName = await this.ctx.agentStore.getAgentTeam(name);
+    if (!teamName) return undefined;
+    return this.ctx.teamStore.getTeam(teamName);
   }
 
   async addAgent(agent: AgentConfig, teamName?: string): Promise<void> {
-    if (!this.ctx.config) throw new Error("Orchestrator not initialized");
-
-    // Globally unique names across all teams
-    const existing = this.findAgent(agent.name);
-    if (existing) throw new Error(`Agent "${agent.name}" already exists`);
-
     const team = teamName
-      ? this.ctx.config.teams.find(t => t.name === teamName)
-      : this.getDefaultTeam();
+      ? await this.ctx.teamStore.getTeam(teamName)
+      : await this.getDefaultTeam();
     if (!team) throw new Error(`Team "${teamName}" not found`);
 
-    if (!agent.createdAt) agent.createdAt = new Date().toISOString();
-    team.agents.push(agent);
-    await this.ctx.registry.setState({ teams: this.ctx.config.teams });
-    if (!agent.volatile) await this.persistConfig();
+    await this.ctx.agentStore.createAgent(agent, team.name);
+    await this.syncConfigCache();
     this.ctx.emitter.emit("log", { level: "info", message: `Agent added: ${agent.name} (team: ${team.name})` });
   }
 
-  async removeAgent(name: string): Promise<boolean> {
-    if (!this.ctx.config) throw new Error("Orchestrator not initialized");
+  /** Atomic update of an agent's fields. No more remove+add. */
+  async updateAgent(name: string, updates: Partial<Omit<AgentConfig, "name">>): Promise<AgentConfig> {
+    const updated = await this.ctx.agentStore.updateAgent(name, updates);
+    await this.syncConfigCache();
+    this.ctx.emitter.emit("log", { level: "info", message: `Agent updated: ${name}` });
+    return updated;
+  }
 
-    for (const team of this.ctx.config.teams) {
-      const idx = team.agents.findIndex(a => a.name === name);
-      if (idx >= 0) {
-        const wasVolatile = team.agents[idx].volatile;
-        team.agents.splice(idx, 1);
-        await this.ctx.registry.setState({ teams: this.ctx.config.teams });
-        if (!wasVolatile) await this.persistConfig();
-        this.ctx.emitter.emit("log", { level: "info", message: `Agent removed: ${name} (team: ${team.name})` });
-        return true;
-      }
+  async removeAgent(name: string): Promise<boolean> {
+    const teamName = await this.ctx.agentStore.getAgentTeam(name);
+    const deleted = await this.ctx.agentStore.deleteAgent(name);
+    if (deleted) {
+      await this.syncConfigCache();
+      this.ctx.emitter.emit("log", { level: "info", message: `Agent removed: ${name}${teamName ? ` (team: ${teamName})` : ""}` });
     }
-    return false;
+    return deleted;
   }
 
   async addVolatileAgent(agent: AgentConfig, group: string): Promise<void> {
-    if (!this.ctx.config) throw new Error("Orchestrator not initialized");
-
-    const existing = this.findAgent(agent.name);
+    const existing = await this.ctx.agentStore.getAgent(agent.name);
     if (existing) return;
 
-    // Volatile agents go to the default (first) team
-    const team = this.getDefaultTeam();
-    const volatileAgent: AgentConfig = { ...agent, volatile: true, missionGroup: group, createdAt: agent.createdAt ?? new Date().toISOString() };
-    team.agents.push(volatileAgent);
-    await this.ctx.registry.setState({ teams: this.ctx.config.teams });
+    const team = await this.getDefaultTeam();
+    const volatileAgent: AgentConfig = {
+      ...agent,
+      volatile: true,
+      missionGroup: group,
+      createdAt: agent.createdAt ?? new Date().toISOString(),
+    };
+    await this.ctx.agentStore.createAgent(volatileAgent, team.name);
+    await this.syncConfigCache();
     this.ctx.emitter.emit("log", { level: "info", message: `Volatile agent added: ${agent.name} for ${group}` });
   }
 
   async cleanupVolatileAgents(group: string): Promise<number> {
-    if (!this.ctx.config) return 0;
-    let removed = 0;
-    for (const team of this.ctx.config.teams) {
-      const before = team.agents.length;
-      team.agents = team.agents.filter(a => !(a.volatile && a.missionGroup === group));
-      removed += before - team.agents.length;
-    }
+    const removed = await this.ctx.agentStore.cleanupVolatileAgents(group);
     if (removed > 0) {
-      await this.ctx.registry.setState({ teams: this.ctx.config.teams });
+      await this.syncConfigCache();
       this.ctx.emitter.emit("log", { level: "debug", message: `Cleaned up ${removed} volatile agent(s) from ${group}` });
     }
     return removed;

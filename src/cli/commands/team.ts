@@ -1,30 +1,9 @@
 import { Command } from "commander";
 import chalk from "chalk";
-import { resolve, join } from "node:path";
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
-import type { AgentConfig, PolpoConfig } from "../../core/types.js";
-
-/** Resolve .polpo/polpo.json path from a working directory. */
-function resolvePolpoJson(workDir: string): string {
-  return join(resolve(workDir), ".polpo", "polpo.json");
-}
-
-/** Read .polpo/polpo.json. */
-function readPolpoConfig(workDir: string): PolpoConfig {
-  const filePath = resolvePolpoJson(workDir);
-  if (!existsSync(filePath)) {
-    throw new Error(`.polpo/polpo.json not found. Run 'polpo init' first.`);
-  }
-  return JSON.parse(readFileSync(filePath, "utf-8")) as PolpoConfig;
-}
-
-/** Write .polpo/polpo.json. */
-function writePolpoConfig(workDir: string, config: PolpoConfig): void {
-  const filePath = resolvePolpoJson(workDir);
-  const dir = resolve(workDir, ".polpo");
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-  writeFileSync(filePath, JSON.stringify(config, null, 2), "utf-8");
-}
+import { resolve } from "node:path";
+import { getPolpoDir } from "../../core/constants.js";
+import type { AgentConfig } from "../../core/types.js";
+import { createCliTeamAndAgentStores } from "../stores.js";
 
 export function registerTeamCommands(program: Command): void {
   const team = program
@@ -38,9 +17,12 @@ export function registerTeamCommands(program: Command): void {
     .option("-d, --dir <path>", "Working directory", ".")
     .action(async (opts) => {
       try {
-        const config = readPolpoConfig(opts.dir);
-        const teamName = config.teams?.[0]?.name ?? "default";
-        const agents = config.teams?.[0]?.agents ?? [];
+        const polpoDir = getPolpoDir(resolve(opts.dir));
+        const { teamStore, agentStore } = await createCliTeamAndAgentStores(polpoDir);
+
+        const teams = await teamStore.getTeams();
+        const teamName = teams[0]?.name ?? "default";
+        const agents = await agentStore.getAgents(teamName);
 
         console.log(chalk.bold(`Team: ${teamName}`) + chalk.dim(` (${agents.length} agent${agents.length !== 1 ? "s" : ""})`));
         console.log();
@@ -74,24 +56,26 @@ export function registerTeamCommands(program: Command): void {
     .option("--reports-to <agent>", "Agent this one reports to (org chart hierarchy)")
     .action(async (name: string, opts) => {
       try {
-        const agent: AgentConfig = {
-          name,
-        };
+        const polpoDir = getPolpoDir(resolve(opts.dir));
+        const { teamStore, agentStore } = await createCliTeamAndAgentStores(polpoDir);
+
+        // Ensure default team exists
+        const teams = await teamStore.getTeams();
+        let teamName: string;
+        if (teams.length === 0) {
+          await teamStore.createTeam({ name: "default", agents: [] });
+          teamName = "default";
+        } else {
+          teamName = teams[0].name;
+        }
+
+        const agent: AgentConfig = { name };
         if (opts.model) agent.model = opts.model;
         if (opts.role) agent.role = opts.role;
         if (opts.reportsTo) agent.reportsTo = opts.reportsTo;
         agent.createdAt = new Date().toISOString();
 
-        const config = readPolpoConfig(opts.dir);
-        if (!config.teams || config.teams.length === 0) {
-          config.teams = [{ name: "default", agents: [] }];
-        }
-        if (config.teams[0].agents.find(a => a.name === name)) {
-          throw new Error(`Agent "${name}" already exists`);
-        }
-        config.teams[0].agents.push(agent);
-        writePolpoConfig(opts.dir, config);
-
+        await agentStore.createAgent(agent, teamName);
         console.log(chalk.green(`Added agent "${name}"`));
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
@@ -107,12 +91,11 @@ export function registerTeamCommands(program: Command): void {
     .option("-d, --dir <path>", "Working directory", ".")
     .action(async (name: string, opts) => {
       try {
-        const config = readPolpoConfig(opts.dir);
-        if (!config.teams?.[0]?.agents) throw new Error("No team in config");
-        const idx = config.teams[0].agents.findIndex(a => a.name === name);
-        if (idx === -1) throw new Error(`Agent "${name}" not found`);
-        config.teams[0].agents.splice(idx, 1);
-        writePolpoConfig(opts.dir, config);
+        const polpoDir = getPolpoDir(resolve(opts.dir));
+        const { agentStore } = await createCliTeamAndAgentStores(polpoDir);
+
+        const deleted = await agentStore.deleteAgent(name);
+        if (!deleted) throw new Error(`Agent "${name}" not found`);
 
         console.log(chalk.green(`Removed agent "${name}"`));
       } catch (err: unknown) {
@@ -129,13 +112,15 @@ export function registerTeamCommands(program: Command): void {
     .option("-d, --dir <path>", "Working directory", ".")
     .action(async (newName: string, opts) => {
       try {
-        const config = readPolpoConfig(opts.dir);
-        if (!config.teams || config.teams.length === 0) {
-          config.teams = [{ name: newName, agents: [] }];
+        const polpoDir = getPolpoDir(resolve(opts.dir));
+        const { teamStore } = await createCliTeamAndAgentStores(polpoDir);
+
+        const teams = await teamStore.getTeams();
+        if (teams.length === 0) {
+          await teamStore.createTeam({ name: newName, agents: [] });
         } else {
-          config.teams[0].name = newName;
+          await teamStore.renameTeam(teams[0].name, newName);
         }
-        writePolpoConfig(opts.dir, config);
 
         console.log(chalk.green(`Team renamed to "${newName}"`));
       } catch (err: unknown) {

@@ -1,6 +1,6 @@
 import type { OrchestratorContext } from "./orchestrator-context.js";
 import type { Task, EscalationPolicy, EscalationLevel } from "./types.js";
-import { findAgent } from "./types.js";
+
 import type { ApprovalManager } from "./approval-manager.js";
 
 /**
@@ -110,7 +110,7 @@ export class EscalationManager {
       return;
     }
 
-    const agent = findAgent(this.ctx.config.teams, targetAgent);
+    const agent = await this.ctx.agentStore.getAgent(targetAgent);
     if (!agent) {
       this.ctx.emitter.emit("log", {
         level: "warn",

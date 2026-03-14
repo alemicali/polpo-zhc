@@ -1,5 +1,5 @@
-export { querySDK, querySDKText, querySDKTextDetailed, querySDKStream, querySDKStreamDetailed, querySDKWithFallback, queryOrchestratorText } from "./query.js";
-export type { OnProgress, QueryResult } from "./query.js";
+export { queryOrchestratorText } from "./query.js";
+export type { QueryResult } from "./query.js";
 export { withRetry, isTransientError } from "./retry.js";
 export type { RetryOptions } from "./retry.js";
 export { buildChatSystemPrompt, buildMissionSystemPrompt, buildTaskPrepPrompt, buildTeamGenPrompt } from "./prompts.js";

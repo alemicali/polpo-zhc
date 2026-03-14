@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { resolve, join } from "node:path";
 import type { PolpoFileConfig, PolpoFileConfigRaw, PolpoSettings, PolpoConfig, ProviderConfig, ModelConfig, Team } from "./types.js";
+import { getPolpoDir } from "./constants.js";
 
 const DEFAULT_SETTINGS: PolpoSettings = {
   maxRetries: 3,
@@ -219,7 +220,7 @@ export function loadEnvFile(polpoDir: string): void {
  * Tasks are managed via plans and the task store — not in the config file.
  */
 export async function parseConfig(workDir: string): Promise<PolpoConfig> {
-  const polpoDir = resolve(workDir, ".polpo");
+  const polpoDir = getPolpoDir(workDir);
 
   // Load .polpo/.env relative to workDir (handles --dir correctly).
   // The CLI top-level only loads from cwd; this ensures the right .env is used
@@ -232,21 +233,24 @@ export async function parseConfig(workDir: string): Promise<PolpoConfig> {
     throw new Error(`No configuration found: missing .polpo/polpo.json in ${workDir}. Run 'polpo init' first.`);
   }
 
-  // Validate all agents across all teams
-  for (const team of polpoConfig.teams) {
-    if (team.agents?.length) {
+  // Validate agents embedded in polpo.json (if any).
+  // After migration to TeamStore/AgentStore, teams in polpo.json may be empty —
+  // that's fine, agents are validated at the store level.
+  const teamsWithAgents = (polpoConfig.teams ?? []).filter(t => t.agents?.length);
+  if (teamsWithAgents.length > 0) {
+    for (const team of teamsWithAgents) {
       validateAgents(team.agents);
     }
-  }
 
-  // Check for duplicate agent names across teams
-  const allNames = new Set<string>();
-  for (const team of polpoConfig.teams) {
-    for (const agent of team.agents) {
-      if (allNames.has(agent.name)) {
-        throw new Error(`Duplicate agent name "${agent.name}" across teams. Agent names must be globally unique.`);
+    // Check for duplicate agent names across teams
+    const allNames = new Set<string>();
+    for (const team of teamsWithAgents) {
+      for (const agent of team.agents) {
+        if (allNames.has(agent.name)) {
+          throw new Error(`Duplicate agent name "${agent.name}" across teams. Agent names must be globally unique.`);
+        }
+        allNames.add(agent.name);
       }
-      allNames.add(agent.name);
     }
   }
 

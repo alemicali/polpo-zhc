@@ -8,11 +8,12 @@
  */
 
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
-import type { ServerEnv } from "../app.js";
 import { PROVIDER_ENV_MAP } from "../../llm/pi-client.js";
 
-export function authRoutes(): OpenAPIHono<ServerEnv> {
-  const app = new OpenAPIHono<ServerEnv>();
+export function authRoutes(getDeps: () => {
+  getConfig: () => any;
+}): OpenAPIHono {
+  const app = new OpenAPIHono();
 
   // GET /auth/status — full auth status per provider
   const statusRoute = createRoute({
@@ -67,8 +68,8 @@ export function authRoutes(): OpenAPIHono<ServerEnv> {
   });
 
   app.openapi(statusRoute, async (c) => {
-    const orchestrator = c.get("orchestrator");
-    const config = orchestrator.getConfig();
+    const deps = getDeps();
+    const config = deps.getConfig();
     const configProviders = config?.providers ?? {};
 
     // Dynamic import auth store (auth is optional — may not be installed in all envs)

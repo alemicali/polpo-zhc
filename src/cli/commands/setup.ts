@@ -1,8 +1,10 @@
 import { resolve, basename } from "node:path";
+import { getPolpoDir } from "../../core/constants.js";
 import readline from "node:readline";
 import chalk from "chalk";
 import type { Command } from "commander";
 import { loadPolpoConfig, savePolpoConfig, generatePolpoConfigDefault } from "../../core/config.js";
+import { createCliAgentStore } from "../stores.js";
 import { PROVIDER_ENV_MAP } from "../../llm/pi-client.js";
 import {
   detectProviders,
@@ -147,7 +149,7 @@ export interface SetupOptions {
 
 export async function runSetupWizard(options?: SetupOptions): Promise<void> {
   const workDir = options?.workDir ?? process.cwd();
-  const polpoDir = options?.polpoDir ?? resolve(workDir, ".polpo");
+  const polpoDir = options?.polpoDir ?? getPolpoDir(workDir);
   const isInteractive = !options?.nonInteractive && process.stdin.isTTY;
   const existing = loadPolpoConfig(polpoDir);
   const orgName = existing?.org ?? basename(workDir);
@@ -238,8 +240,11 @@ export async function runSetupWizard(options?: SetupOptions): Promise<void> {
   console.log(chalk.bold("  Step 3 — First agent"));
   console.log();
 
-  const defaultAgentName = existing?.teams?.[0]?.agents?.[0]?.name ?? "agent-1";
-  const defaultAgentRole = existing?.teams?.[0]?.agents?.[0]?.role ?? "founder";
+  // Read agent defaults from AgentStore (preferred) with polpo.json fallback
+  const agentStore = await createCliAgentStore(polpoDir);
+  const existingAgents = await agentStore.getAgents();
+  const defaultAgentName = existingAgents[0]?.name ?? existing?.teams?.[0]?.agents?.[0]?.name ?? "agent-1";
+  const defaultAgentRole = existingAgents[0]?.role ?? existing?.teams?.[0]?.agents?.[0]?.role ?? "founder";
 
   const agentName = await promptWithDefault("Agent name", defaultAgentName);
   const agentRole = await promptWithDefault("Agent role", defaultAgentRole);
@@ -261,7 +266,7 @@ export async function runSetupWizard(options?: SetupOptions): Promise<void> {
   console.log(`  ${chalk.dim("Agent:")}  ${agentName} (${agentRole})`);
   console.log();
   console.log(chalk.dim("  Config saved to .polpo/polpo.json"));
-  console.log(chalk.dim("  Run: polpo tui"));
+  console.log(chalk.dim("  Run: polpo serve"));
   console.log();
 }
 

@@ -1,5 +1,4 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
-import type { ServerEnv } from "../app.js";
 import { ApproveRequestSchema, RejectRequestSchema } from "../schemas.js";
 
 /* ── Route definitions ─────────────────────────────────────────────── */
@@ -110,12 +109,18 @@ const rejectRoute = createRoute({
  * POST /approvals/:id/approve — approve a pending request
  * POST /approvals/:id/reject  — reject with feedback (task retries with notes)
  */
-export function approvalRoutes(): OpenAPIHono<ServerEnv> {
-  const app = new OpenAPIHono<ServerEnv>();
+export function approvalRoutes(getDeps: () => {
+  getAllApprovals: (status?: string) => Promise<any[]>;
+  getApprovalRequest: (id: string) => Promise<any>;
+  approveRequest: (id: string, resolvedBy?: string, note?: string) => Promise<any>;
+  rejectRequest: (id: string, feedback: string, resolvedBy?: string) => Promise<any>;
+  canRejectRequest: (id: string) => Promise<any>;
+}): OpenAPIHono {
+  const app = new OpenAPIHono();
 
   // GET /approvals — list all approval requests
   app.openapi(listApprovalsRoute, async (c) => {
-    const orchestrator = c.get("orchestrator");
+    const deps = getDeps();
     const query = c.req.valid("query");
     const status = query.status as "pending" | "approved" | "rejected" | "timeout" | undefined;
     const taskId = query.taskId;
@@ -124,10 +129,10 @@ export function approvalRoutes(): OpenAPIHono<ServerEnv> {
     if (taskId) {
       // Filter by task — getAllApprovals doesn't support taskId filter,
       // so we get all and filter manually
-      const all = await orchestrator.getAllApprovals(status);
+      const all = await deps.getAllApprovals(status);
       data = all.filter(r => r.taskId === taskId);
     } else {
-      data = await orchestrator.getAllApprovals(status);
+      data = await deps.getAllApprovals(status);
     }
 
     return c.json({ ok: true, data });
@@ -135,9 +140,9 @@ export function approvalRoutes(): OpenAPIHono<ServerEnv> {
 
   // GET /approvals/:id — get single approval request
   app.openapi(getApprovalRoute, async (c) => {
-    const orchestrator = c.get("orchestrator");
+    const deps = getDeps();
     const { id } = c.req.valid("param");
-    const request = await orchestrator.getApprovalRequest(id);
+    const request = await deps.getApprovalRequest(id);
     if (!request) {
       return c.json({ ok: false, error: "Approval request not found", code: "NOT_FOUND" }, 404);
     }
@@ -146,7 +151,7 @@ export function approvalRoutes(): OpenAPIHono<ServerEnv> {
 
   // POST /approvals/:id/approve — approve a pending request
   app.openapi(approveRoute, async (c) => {
-    const orchestrator = c.get("orchestrator");
+    const deps = getDeps();
     const { id } = c.req.valid("param");
 
     // Body is optional — approve can work with no payload
@@ -160,10 +165,10 @@ export function approvalRoutes(): OpenAPIHono<ServerEnv> {
       // Empty body or parse error — that's fine, use defaults
     }
 
-    const result = await orchestrator.approveRequest(id, resolvedBy, note);
+    const result = await deps.approveRequest(id, resolvedBy, note);
     if (!result) {
       // Could be not found or already resolved
-      const existing = await orchestrator.getApprovalRequest(id);
+      const existing = await deps.getApprovalRequest(id);
       if (!existing) {
         return c.json({ ok: false, error: "Approval request not found", code: "NOT_FOUND" }, 404);
       }
@@ -179,7 +184,7 @@ export function approvalRoutes(): OpenAPIHono<ServerEnv> {
 
   // POST /approvals/:id/reject — reject with feedback, task retries with notes
   app.openapi(rejectRoute, async (c) => {
-    const orchestrator = c.get("orchestrator");
+    const deps = getDeps();
     const { id } = c.req.valid("param");
 
     const body = c.req.valid("json");
@@ -188,9 +193,9 @@ export function approvalRoutes(): OpenAPIHono<ServerEnv> {
     }
 
     // Check if rejection is allowed (max rejections)
-    const check = await orchestrator.canRejectRequest(id);
+    const check = await deps.canRejectRequest(id);
     if (!check.allowed) {
-      const existing = await orchestrator.getApprovalRequest(id);
+      const existing = await deps.getApprovalRequest(id);
       if (!existing) {
         return c.json({ ok: false, error: "Approval request not found", code: "NOT_FOUND" }, 404);
       }
@@ -208,7 +213,7 @@ export function approvalRoutes(): OpenAPIHono<ServerEnv> {
       }, 409);
     }
 
-    const result = await orchestrator.rejectRequest(id, body.feedback, body.resolvedBy);
+    const result = await deps.rejectRequest(id, body.feedback, body.resolvedBy);
     if (!result) {
       return c.json({ ok: false, error: "Failed to reject request", code: "CONFLICT" }, 409);
     }

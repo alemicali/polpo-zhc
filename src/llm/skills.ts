@@ -39,6 +39,7 @@ import {
 import { homedir, tmpdir } from "node:os";
 import { execSync } from "node:child_process";
 import { parse as parseYaml } from "yaml";
+import { getPolpoDir, getGlobalPolpoDir, POLPO_DIR_NAME } from "../core/constants.js";
 
 // ── Types ──
 
@@ -160,13 +161,13 @@ function scanSkillsDir(dir: string, source: SkillInfo["source"]): SkillInfo[] {
  *   2. ~/.polpo/skills/     — user-level global pool (shared across projects)
  */
 export function discoverSkills(cwd: string, polpoDir?: string): SkillInfo[] {
-  const effectivePolpoDir = polpoDir ?? resolve(cwd, ".polpo");
+  const effectivePolpoDir = polpoDir ?? getPolpoDir(cwd);
   const seen = new Set<string>();
   const all: SkillInfo[] = [];
 
   const dirs: Array<{ dir: string; source: SkillInfo["source"] }> = [
     { dir: resolve(effectivePolpoDir, "skills"), source: "project" },
-    { dir: resolve(homedir(), ".polpo", "skills"), source: "global" },
+    { dir: resolve(getGlobalPolpoDir(), "skills"), source: "global" },
   ];
 
   for (const { dir, source } of dirs) {
@@ -477,7 +478,7 @@ function deepScan(dir: string, depth: number, maxDepth: number, results: string[
   if (depth > maxDepth) return;
   try {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
-      if (entry.name.startsWith(".") && entry.name !== ".polpo" && entry.name !== ".agents") continue;
+      if (entry.name.startsWith(".") && entry.name !== POLPO_DIR_NAME && entry.name !== ".agents") continue;
       if (entry.name === "node_modules" || entry.name === ".git") continue;
       if (!entry.isDirectory()) continue;
       const entryPath = resolve(dir, entry.name);
@@ -602,7 +603,7 @@ export function installSkills(
 
     // Target directory
     const targetBase = options.global
-      ? join(homedir(), ".polpo", "skills")
+      ? join(getGlobalPolpoDir(), "skills")
       : join(polpoDir, "skills");
     mkdirSync(targetBase, { recursive: true });
 
@@ -644,7 +645,7 @@ export function installSkills(
  */
 export function removeSkill(polpoDir: string, name: string, global = false): boolean {
   const targetBase = global
-    ? join(homedir(), ".polpo", "skills")
+    ? join(getGlobalPolpoDir(), "skills")
     : join(polpoDir, "skills");
   const targetDir = join(targetBase, name);
 
@@ -666,7 +667,7 @@ export function createAgentSkill(
   options?: { allowedTools?: string[]; global?: boolean },
 ): string {
   const targetBase = options?.global
-    ? join(homedir(), ".polpo", "skills")
+    ? join(getGlobalPolpoDir(), "skills")
     : join(polpoDir, "skills");
   const targetDir = join(targetBase, name);
   mkdirSync(targetDir, { recursive: true });
@@ -758,7 +759,7 @@ export function discoverOrchestratorSkills(polpoDir: string): SkillInfo[] {
 
   const dirs: Array<{ dir: string; source: SkillInfo["source"] }> = [
     { dir: resolve(polpoDir, ORCHESTRATOR_AGENT_DIR, "skills"), source: "project" },
-    { dir: resolve(homedir(), ".polpo", ORCHESTRATOR_AGENT_DIR, "skills"), source: "global" },
+    { dir: resolve(getGlobalPolpoDir(), ORCHESTRATOR_AGENT_DIR, "skills"), source: "global" },
   ];
 
   for (const { dir, source } of dirs) {
@@ -862,7 +863,7 @@ export function installOrchestratorSkills(
     }
 
     const targetBase = options.global
-      ? join(homedir(), ".polpo", ORCHESTRATOR_AGENT_DIR, "skills")
+      ? join(getGlobalPolpoDir(), ORCHESTRATOR_AGENT_DIR, "skills")
       : join(polpoDir, ORCHESTRATOR_AGENT_DIR, "skills");
     mkdirSync(targetBase, { recursive: true });
 
@@ -900,7 +901,7 @@ export function installOrchestratorSkills(
  */
 export function removeOrchestratorSkill(polpoDir: string, name: string, global = false): boolean {
   const targetBase = global
-    ? join(homedir(), ".polpo", ORCHESTRATOR_AGENT_DIR, "skills")
+    ? join(getGlobalPolpoDir(), ORCHESTRATOR_AGENT_DIR, "skills")
     : join(polpoDir, ORCHESTRATOR_AGENT_DIR, "skills");
   const targetDir = join(targetBase, name);
 
@@ -921,7 +922,7 @@ export function createOrchestratorSkill(
   options?: { allowedTools?: string[]; global?: boolean },
 ): string {
   const targetBase = options?.global
-    ? join(homedir(), ".polpo", ORCHESTRATOR_AGENT_DIR, "skills")
+    ? join(getGlobalPolpoDir(), ORCHESTRATOR_AGENT_DIR, "skills")
     : join(polpoDir, ORCHESTRATOR_AGENT_DIR, "skills");
   const targetDir = join(targetBase, name);
   mkdirSync(targetDir, { recursive: true });
@@ -949,7 +950,7 @@ export function updateOrchestratorSkill(
   global = false,
 ): boolean {
   const targetBase = global
-    ? join(homedir(), ".polpo", ORCHESTRATOR_AGENT_DIR, "skills")
+    ? join(getGlobalPolpoDir(), ORCHESTRATOR_AGENT_DIR, "skills")
     : join(polpoDir, ORCHESTRATOR_AGENT_DIR, "skills");
   const skillFile = join(targetBase, name, "SKILL.md");
 

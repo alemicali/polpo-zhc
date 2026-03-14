@@ -423,7 +423,7 @@ export class NotificationRouter {
   }
 
   /**
-   * Get currently configured rules (for API/TUI display).
+   * Get currently configured rules (for API display).
    */
   getRules(): NotificationRule[] {
     return [...this.rules];

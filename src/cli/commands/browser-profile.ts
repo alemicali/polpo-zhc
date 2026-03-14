@@ -7,12 +7,13 @@
  */
 
 import { resolve, join } from "node:path";
+import { getPolpoDir } from "../../core/constants.js";
 import { existsSync, readdirSync, rmSync, statSync } from "node:fs";
 import { mkdirSync } from "node:fs";
 import type { Command } from "commander";
 import chalk from "chalk";
-import { loadPolpoConfig } from "../../core/config.js";
 import type { AgentConfig } from "../../core/types.js";
+import { createCliAgentStore } from "../stores.js";
 
 /** Resolve the browser profile directory for a given agent. */
 function profileDir(polpoDir: string, agentName: string, agent?: AgentConfig): string {
@@ -20,13 +21,11 @@ function profileDir(polpoDir: string, agentName: string, agent?: AgentConfig): s
   return join(polpoDir, "browser-profiles", profileName);
 }
 
-/** Find an agent in the config by name. */
-function findAgent(polpoDir: string, name: string): AgentConfig | undefined {
+/** Find an agent via the AgentStore (respects configured storage backend). */
+async function findAgentByName(polpoDir: string, name: string): Promise<AgentConfig | undefined> {
   try {
-    const config = loadPolpoConfig(polpoDir);
-    return config?.teams?.[0]?.agents?.find(
-      (a: AgentConfig) => a.name.toLowerCase() === name.toLowerCase(),
-    );
+    const agentStore = await createCliAgentStore(polpoDir);
+    return await agentStore.getAgent(name) ?? undefined;
   } catch {
     return undefined;
   }
@@ -45,8 +44,8 @@ export function registerBrowserCommands(parent: Command): void {
     .option("-d, --dir <path>", "Working directory", ".")
     .option("--headless", "Run headless (for testing)", false)
     .action(async (agentName: string, url: string | undefined, opts: { dir: string; headless: boolean }) => {
-      const polpoDir = resolve(opts.dir, ".polpo");
-      const agent = findAgent(polpoDir, agentName);
+      const polpoDir = getPolpoDir(resolve(opts.dir));
+      const agent = await findAgentByName(polpoDir, agentName);
 
       // Determine profile directory
       const profDir = profileDir(polpoDir, agentName, agent);
@@ -136,7 +135,7 @@ export function registerBrowserCommands(parent: Command): void {
     .description("List agents with browser profiles")
     .option("-d, --dir <path>", "Working directory", ".")
     .action((opts: { dir: string }) => {
-      const profilesDir = resolve(opts.dir, ".polpo", "browser-profiles");
+      const profilesDir = join(getPolpoDir(resolve(opts.dir)), "browser-profiles");
 
       if (!existsSync(profilesDir)) {
         console.log(chalk.dim("\n  No browser profiles found.\n"));
@@ -182,8 +181,8 @@ export function registerBrowserCommands(parent: Command): void {
     .option("-d, --dir <path>", "Working directory", ".")
     .option("-f, --force", "Skip confirmation", false)
     .action(async (agentName: string, opts: { dir: string; force: boolean }) => {
-      const polpoDir = resolve(opts.dir, ".polpo");
-      const agent = findAgent(polpoDir, agentName);
+      const polpoDir = getPolpoDir(resolve(opts.dir));
+      const agent = await findAgentByName(polpoDir, agentName);
       const profDir = profileDir(polpoDir, agentName, agent);
 
       if (!existsSync(profDir)) {

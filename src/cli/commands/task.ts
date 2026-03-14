@@ -215,7 +215,7 @@ export function registerTaskCommands(program: Command): void {
       try {
         const description = descParts.join(" ");
         const orchestrator = await initOrchestrator(opts.dir);
-        const agents = orchestrator.getAgents();
+        const agents = await orchestrator.getAgents();
 
         if (agents.length === 0) {
           console.error(chalk.red("No agents configured. Edit .polpo/polpo.json to add agents."));

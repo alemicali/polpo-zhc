@@ -16,6 +16,7 @@ export const runsSqlite = sqliteTable("runs", {
   activity: text("activity").notNull().default("{}"),
   result: text("result"),
   outcomes: text("outcomes"),
+  config: text("config"),
   configPath: text("config_path").notNull(),
 }, (table) => [
   index("idx_runs_status").on(table.status),
@@ -37,6 +38,7 @@ export const runsPg = pgTable("runs", {
   activity: jsonb("activity").notNull().default({}),
   result: jsonb("result"),
   outcomes: jsonb("outcomes"),
+  config: jsonb("config"),
   configPath: pgText("config_path").notNull(),
 }, (table) => [
   pgIndex("idx_pg_runs_status").on(table.status),

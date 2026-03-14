@@ -1,6 +1,6 @@
 {
   "name": "polpo-ai",
-  "version": "0.1.23",
+  "version": "0.2.1",
   "description": "The open-source platform for AI agent teams",
   "type": "module",
   "main": "dist/index.js",
@@ -35,7 +35,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "pnpm --filter @polpo-ai/core build && pnpm --filter @polpo-ai/drizzle build && tsc",
+    "build": "pnpm --filter @polpo-ai/core build && pnpm --filter @polpo-ai/vault-crypto build && pnpm --filter @polpo-ai/drizzle build && tsc",
     "build:all": "./node_modules/.bin/tsc && pnpm --filter @polpo-ai/react build && pnpm --filter ui build",
     "build:sdk": "pnpm --filter @polpo-ai/react build",
     "build:ui": "pnpm --filter ui build",
@@ -82,28 +82,22 @@
     "@mariozechner/pi-agent-core": "^0.57.1",
     "@mariozechner/pi-ai": "^0.57.1",
     "@polpo-ai/core": "workspace:*",
+    "@polpo-ai/vault-crypto": "workspace:*",
     "@sinclair/typebox": "^0.34.48",
     "@whiskeysockets/baileys": "7.0.0-rc.9",
     "chalk": "^5.4.1",
     "commander": "^13.1.0",
     "docx": "^9.5.3",
     "exceljs": "^4.4.0",
-    "fullscreen-ink": "^0.1.0",
     "hono": "^4.11.9",
     "imapflow": "^1.2.10",
-    "ink": "^5.2.1",
-    "ink-select-input": "^6.2.0",
-    "ink-spinner": "^5.0.0",
-    "ink-text-input": "^6.0.0",
     "mammoth": "^1.11.0",
     "nanoid": "^5.1.2",
     "nodemailer": "^8.0.1",
     "pdf-lib": "^1.17.1",
     "qrcode": "^1.5.4",
-    "react": "^18.3.1",
     "yaml": "^2.7.0",
-    "zod": "^4.3.6",
-    "zustand": "^5.0.11"
+    "zod": "^4.3.6"
   },
   "optionalDependencies": {
     "@polpo-ai/drizzle": "workspace:*",
@@ -117,18 +111,13 @@
     "@types/node": "^22.12.0",
     "@types/nodemailer": "^7.0.10",
     "@types/qrcode": "^1.5.6",
-    "@types/react": "^19.2.14",
     "@vitest/coverage-v8": "^3.2.4",
     "concurrently": "^9.2.1",
-    "react-devtools-core": "^7.0.1",
     "tsx": "^4.21.0",
     "typescript": "^5.7.3",
     "vitest": "^3.0.4"
   },
   "pnpm": {
-    "overrides": {
-      "react-reconciler": "0.29.2"
-    },
     "onlyBuiltDependencies": [
       "@swc/core",
       "better-sqlite3",

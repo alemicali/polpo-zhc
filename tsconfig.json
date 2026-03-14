@@ -12,9 +12,7 @@
     "sourceMap": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
-    "resolveJsonModule": true,
-    "jsx": "react-jsx",
-    "jsxImportSource": "react"
+    "resolveJsonModule": true
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist", "tests", "src/**/*.test.ts", "src/__tests__"]

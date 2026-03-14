@@ -1,5 +1,4 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
-import type { ServerEnv } from "../app.js";
 import { CreateTaskSchema, UpdateTaskSchema } from "../schemas.js";
 
 // ── Route definitions ─────────────────────────────────────────────────
@@ -226,29 +225,40 @@ const bulkDeleteTasksRoute = createRoute({
 /**
  * Task CRUD + action routes.
  */
-export function taskRoutes(): OpenAPIHono<ServerEnv> {
-  const app = new OpenAPIHono<ServerEnv>();
+export function taskRoutes(getDeps: () => {
+  taskStore: any;
+  addTask: (opts: any) => Promise<any>;
+  deleteTask: (taskId: string) => Promise<any>;
+  retryTask: (taskId: string) => Promise<any>;
+  killTask: (taskId: string) => Promise<any>;
+  reassessTask: (taskId: string) => Promise<any>;
+  forceFailTask: (taskId: string) => Promise<any>;
+  updateTaskDescription: (taskId: string, desc: string) => Promise<any>;
+  updateTaskAssignment: (taskId: string, agent: string) => Promise<any>;
+  updateTaskExpectations: (taskId: string, exp: any) => Promise<any>;
+}): OpenAPIHono {
+  const app = new OpenAPIHono();
 
   // GET /tasks — list all tasks, optional filters
   app.openapi(listTasksRoute, async (c) => {
-    const orchestrator = c.get("orchestrator");
-    let tasks = await orchestrator.getStore().getAllTasks();
+    const deps = getDeps();
+    let tasks = await deps.taskStore.getAllTasks();
 
     // Optional filters
     const { status, group, assignTo } = c.req.valid("query");
 
-    if (status) tasks = tasks.filter(t => t.status === status);
-    if (group) tasks = tasks.filter(t => t.group === group);
-    if (assignTo) tasks = tasks.filter(t => t.assignTo === assignTo);
+    if (status) tasks = tasks.filter((t: any) => t.status === status);
+    if (group) tasks = tasks.filter((t: any) => t.group === group);
+    if (assignTo) tasks = tasks.filter((t: any) => t.assignTo === assignTo);
 
     return c.json({ ok: true, data: tasks });
   });
 
   // GET /tasks/:taskId — get single task
   app.openapi(getTaskRoute, async (c) => {
-    const orchestrator = c.get("orchestrator");
+    const deps = getDeps();
     const { taskId } = c.req.valid("param");
-    const task = await orchestrator.getStore().getTask(taskId);
+    const task = await deps.taskStore.getTask(taskId);
     if (!task) {
       return c.json({ ok: false, error: "Task not found", code: "NOT_FOUND" }, 404);
     }
@@ -257,10 +267,10 @@ export function taskRoutes(): OpenAPIHono<ServerEnv> {
 
   // POST /tasks — create task
   app.openapi(createTaskRoute, async (c) => {
-    const orchestrator = c.get("orchestrator");
+    const deps = getDeps();
     const body = c.req.valid("json");
 
-    const task = await orchestrator.addTask({
+    const task = await deps.addTask({
       title: body.title,
       description: body.description,
       assignTo: body.assignTo,
@@ -280,46 +290,46 @@ export function taskRoutes(): OpenAPIHono<ServerEnv> {
 
   // PATCH /tasks/:taskId — update task description and/or assignment
   app.openapi(updateTaskRoute, async (c) => {
-    const orchestrator = c.get("orchestrator");
+    const deps = getDeps();
     const { taskId } = c.req.valid("param");
     const body = c.req.valid("json");
 
-    const task = await orchestrator.getStore().getTask(taskId);
+    const task = await deps.taskStore.getTask(taskId);
     if (!task) {
       return c.json({ ok: false, error: "Task not found", code: "NOT_FOUND" }, 404);
     }
 
     if (body.status !== undefined) {
-      await orchestrator.getStore().unsafeSetStatus(taskId, body.status as any, "manual status update via API");
+      await deps.taskStore.unsafeSetStatus(taskId, body.status as any, "manual status update via API");
     }
     if (body.description !== undefined) {
-      await orchestrator.updateTaskDescription(taskId, body.description);
+      await deps.updateTaskDescription(taskId, body.description);
     }
     if (body.assignTo !== undefined) {
-      await orchestrator.updateTaskAssignment(taskId, body.assignTo);
+      await deps.updateTaskAssignment(taskId, body.assignTo);
     }
     if (body.expectations !== undefined) {
-      await orchestrator.updateTaskExpectations(taskId, body.expectations);
+      await deps.updateTaskExpectations(taskId, body.expectations);
     }
     if (body.retries !== undefined || body.maxRetries !== undefined) {
       const patch: Record<string, number> = {};
       if (body.retries !== undefined) patch.retries = body.retries;
       if (body.maxRetries !== undefined) patch.maxRetries = body.maxRetries;
-      await orchestrator.getStore().updateTask(taskId, patch);
+      await deps.taskStore.updateTask(taskId, patch);
     }
     if (body.sideEffects !== undefined) {
-      await orchestrator.getStore().updateTask(taskId, { sideEffects: body.sideEffects });
+      await deps.taskStore.updateTask(taskId, { sideEffects: body.sideEffects });
     }
 
-    const updated = await orchestrator.getStore().getTask(taskId);
+    const updated = await deps.taskStore.getTask(taskId);
     return c.json({ ok: true, data: updated }, 200);
   });
 
   // DELETE /tasks/:taskId — remove task
   app.openapi(deleteTaskRoute, async (c) => {
-    const orchestrator = c.get("orchestrator");
+    const deps = getDeps();
     const { taskId } = c.req.valid("param");
-    const removed = await orchestrator.deleteTask(taskId);
+    const removed = await deps.deleteTask(taskId);
     if (!removed) {
       return c.json({ ok: false, error: "Task not found", code: "NOT_FOUND" }, 404);
     }
@@ -328,17 +338,17 @@ export function taskRoutes(): OpenAPIHono<ServerEnv> {
 
   // POST /tasks/:taskId/retry — retry failed task
   app.openapi(retryTaskRoute, async (c) => {
-    const orchestrator = c.get("orchestrator");
+    const deps = getDeps();
     const { taskId } = c.req.valid("param");
-    await orchestrator.retryTask(taskId);
+    await deps.retryTask(taskId);
     return c.json({ ok: true, data: { retried: true } });
   });
 
   // POST /tasks/:taskId/kill — kill running task
   app.openapi(killTaskRoute, async (c) => {
-    const orchestrator = c.get("orchestrator");
+    const deps = getDeps();
     const { taskId } = c.req.valid("param");
-    const killed = await orchestrator.killTask(taskId);
+    const killed = await deps.killTask(taskId);
     if (!killed) {
       return c.json({ ok: false, error: "Task not found", code: "NOT_FOUND" }, 404);
     }
@@ -347,42 +357,42 @@ export function taskRoutes(): OpenAPIHono<ServerEnv> {
 
   // POST /tasks/:taskId/reassess — re-run assessment
   app.openapi(reassessTaskRoute, async (c) => {
-    const orchestrator = c.get("orchestrator");
+    const deps = getDeps();
     const { taskId } = c.req.valid("param");
-    await orchestrator.reassessTask(taskId);
+    await deps.reassessTask(taskId);
     return c.json({ ok: true, data: { reassessed: true } });
   });
 
   // POST /tasks/:taskId/queue — transition draft → pending
   app.openapi(queueTaskRoute, async (c) => {
-    const orchestrator = c.get("orchestrator");
+    const deps = getDeps();
     const { taskId } = c.req.valid("param");
-    const task = await orchestrator.getStore().getTask(taskId);
+    const task = await deps.taskStore.getTask(taskId);
     if (!task) {
       return c.json({ ok: false, error: "Task not found", code: "NOT_FOUND" }, 404);
     }
     if (task.status !== "draft") {
       return c.json({ ok: false, error: `Task is not in draft state (current: ${task.status})`, code: "INVALID_STATE" }, 404);
     }
-    await orchestrator.getStore().transition(taskId, "pending");
+    await deps.taskStore.transition(taskId, "pending");
     return c.json({ ok: true, data: { queued: true } }, 200);
   });
 
   // POST /tasks/:taskId/force-fail — force a task to failed state
   app.openapi(forceFailTaskRoute, async (c) => {
-    const orchestrator = c.get("orchestrator");
+    const deps = getDeps();
     const { taskId } = c.req.valid("param");
-    const task = await orchestrator.getStore().getTask(taskId);
+    const task = await deps.taskStore.getTask(taskId);
     if (!task) {
       return c.json({ ok: false, error: "Task not found", code: "NOT_FOUND" }, 404);
     }
-    await orchestrator.forceFailTask(taskId);
+    await deps.forceFailTask(taskId);
     return c.json({ ok: true, data: { failed: true } }, 200);
   });
 
   // DELETE /tasks — bulk delete tasks by filter
   app.openapi(bulkDeleteTasksRoute, async (c) => {
-    const orchestrator = c.get("orchestrator");
+    const deps = getDeps();
     const query = c.req.valid("query");
 
     if (!query.status && !query.group && query.all !== "true") {
@@ -400,7 +410,7 @@ export function taskRoutes(): OpenAPIHono<ServerEnv> {
       filter = (t: any) => t.group === query.group;
     }
 
-    const deleted = await orchestrator.getStore().removeTasks(filter);
+    const deleted = await deps.taskStore.removeTasks(filter);
     return c.json({ ok: true, data: { deleted } }, 200);
   });
 

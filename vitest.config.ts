@@ -26,7 +26,6 @@ export default defineConfig({
         "src/**/*.test.ts",
         "src/__tests__/**",
         "src/**/index.ts",
-        "src/tui/**",
       ],
       thresholds: {
         statements: 45,

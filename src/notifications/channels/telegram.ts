@@ -1,9 +1,7 @@
 import type { NotificationChannel, Notification, OutcomeAttachment } from "../types.js";
 import type { NotificationChannelConfig } from "../../core/types.js";
-import { basename, join } from "node:path";
-import { mkdirSync, writeFileSync, unlinkSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { randomBytes } from "node:crypto";
+import { basename } from "node:path";
+import { mkdirSync, writeFileSync } from "node:fs";
 
 /**
  * Telegram notification channel — sends messages via Bot API.
@@ -328,8 +326,6 @@ export class TelegramCallbackPoller {
           const msg = update.message;
           const msgKeys = Object.keys(msg).filter(k => !["message_id", "chat", "from", "date"].includes(k));
           console.error(`[polpo/telegram] update ${update.update_id}: keys=[${msgKeys.join(",")}]` +
-            (msg.voice ? ` voice=${msg.voice.mime_type}` : "") +
-            (msg.audio ? ` audio=${msg.audio.mime_type}` : "") +
             (msg.document ? ` document=${msg.document.mime_type} file_name=${(msg.document as any).file_name}` : "") +
             (msg.text ? ` text="${msg.text.slice(0, 40)}"` : ""));
           await this.handleMessage(update.message);
@@ -384,29 +380,7 @@ export class TelegramCallbackPoller {
     const senderId = String(message.from?.id ?? message.chat.id);
     const senderName = message.from?.first_name;
 
-    // ── Extract text from voice/audio messages via transcription ──
-    let text = message.text ?? message.caption;
-
-    // Documents with audio mime types (e.g. WhatsApp voice forwarded to Telegram)
-    const audioDocument = message.document?.mime_type?.startsWith("audio/") ? message.document : undefined;
-    const voiceFile = message.voice ?? message.audio ?? message.video_note ?? audioDocument;
-
-    if (!text && voiceFile) {
-      try {
-        await this.sendChatAction(chatId, "typing");
-        const transcribed = await this.transcribeVoice(voiceFile.file_id, voiceFile.mime_type);
-        if (!transcribed?.trim()) {
-          await this.sendReply(chatId, `<i>Non sono riuscito a capire il vocale (trascrizione vuota).</i>`);
-          return;
-        }
-        text = `[The user sent a voice message. It has already been transcribed for you — the following is the exact transcription. Respond to its content directly, do NOT say you cannot hear or transcribe audio.]\n${transcribed}`;
-      } catch (err) {
-        const errMsg = err instanceof Error ? err.message : String(err);
-        await this.sendReply(chatId,
-          `<i>Non sono riuscito a trascrivere il vocale: ${escapeHtml(errMsg)}</i>`);
-        return;
-      }
-    }
+    const text = message.text ?? message.caption;
 
     if (!text) return; // No usable content
 
@@ -442,79 +416,6 @@ export class TelegramCallbackPoller {
       ? `❌ Rejected — task will retry with your feedback:\n<i>${escapeHtml(text)}</i>`
       : `❌ Error: ${result.error}`;
     await this.sendReply(chatId, msg);
-  }
-
-  /**
-   * Download a file from Telegram and transcribe it using OpenAI STT.
-   *
-   * Telegram voice messages are OGG Opus (.oga) which is NOT in OpenAI's
-   * supported formats (mp3, mp4, mpeg, mpga, m4a, wav, webm).
-   * We convert to mp3 via ffmpeg before sending to the API.
-   */
-  private async transcribeVoice(fileId: string, mimeType?: string): Promise<string> {
-    // 1. Get file path from Telegram
-    const fileInfoUrl = `https://api.telegram.org/bot${this.botToken}/getFile`;
-    const fileInfoRes = await fetch(fileInfoUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ file_id: fileId }),
-    });
-    if (!fileInfoRes.ok) throw new Error(`Telegram getFile failed: ${fileInfoRes.status}`);
-    const fileInfo = await fileInfoRes.json() as { ok: boolean; result?: { file_path?: string } };
-    if (!fileInfo.ok || !fileInfo.result?.file_path) throw new Error("Could not get file path from Telegram");
-
-    // 2. Download the file
-    const downloadUrl = `https://api.telegram.org/file/bot${this.botToken}/${fileInfo.result.file_path}`;
-    const downloadRes = await fetch(downloadUrl);
-    if (!downloadRes.ok) throw new Error(`Download failed: ${downloadRes.status}`);
-    const buffer = Buffer.from(await downloadRes.arrayBuffer());
-
-    if (buffer.length < 100) throw new Error("Audio too short");
-
-    // 3. Save the original file
-    const tmpId = randomBytes(6).toString("hex");
-    const MIME_EXT: Record<string, string> = {
-      "audio/mpeg": ".mp3", "audio/mp3": ".mp3",
-      "audio/mp4": ".m4a", "audio/m4a": ".m4a", "audio/x-m4a": ".m4a", "audio/aac": ".m4a",
-      "audio/wav": ".wav", "audio/x-wav": ".wav", "audio/wave": ".wav",
-      "audio/webm": ".webm",
-      "audio/ogg": ".oga", "audio/x-opus+ogg": ".oga",
-      "audio/flac": ".flac", "audio/x-flac": ".flac",
-    };
-    const origExt = (mimeType && MIME_EXT[mimeType]) ?? ".oga";
-    const origPath = join(tmpdir(), `polpo-voice-${tmpId}${origExt}`);
-    writeFileSync(origPath, buffer);
-
-    // 4. Convert to mp3 if not already a supported format
-    //    OpenAI supports: mp3, mp4, mpeg, mpga, m4a, wav, webm
-    const SUPPORTED = new Set([".mp3", ".mp4", ".m4a", ".wav", ".webm", ".mpeg", ".mpga"]);
-    let transcribePath = origPath;
-
-    if (!SUPPORTED.has(origExt)) {
-      const mp3Path = join(tmpdir(), `polpo-voice-${tmpId}.mp3`);
-      const { execSync } = await import("node:child_process");
-      try {
-        execSync(`ffmpeg -i "${origPath}" -y -ar 16000 -ac 1 -b:a 64k "${mp3Path}"`, {
-          stdio: "ignore",
-          timeout: 15_000,
-        });
-        transcribePath = mp3Path;
-      } catch (err) {
-        // ffmpeg failed — try sending original anyway
-      }
-    }
-
-    try {
-      // 5. Transcribe using the shared transcribe function
-      const { transcribe } = await import("../../tui/voice.js");
-      const text = await transcribe(transcribePath);
-      return text;
-    } finally {
-      try { unlinkSync(origPath); } catch { /* cleanup */ }
-      if (transcribePath !== origPath) {
-        try { unlinkSync(transcribePath); } catch { /* cleanup */ }
-      }
-    }
   }
 
   private async answerCallback(callbackQueryId: string): Promise<void> {
@@ -653,13 +554,7 @@ interface TelegramMessage {
   chat: { id: number };
   from?: TelegramUser;
   text?: string;
-  /** Voice message (.ogg opus) */
-  voice?: TelegramFile;
-  /** Audio file (music, etc.) */
-  audio?: TelegramFile & { title?: string; performer?: string };
-  /** Round video note */
-  video_note?: TelegramFile;
-  /** File attachment (document). Audio files forwarded from WhatsApp arrive as documents. */
+  /** File attachment (document). */
   document?: TelegramFile & { file_name?: string };
   /** Caption text (on media messages) */
   caption?: string;

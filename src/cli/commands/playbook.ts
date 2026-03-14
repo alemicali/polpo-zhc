@@ -5,8 +5,10 @@
 import { Command } from "commander";
 import chalk from "chalk";
 import { resolve } from "node:path";
+import { getPolpoDir } from "../../core/constants.js";
 import { Orchestrator } from "../../core/orchestrator.js";
-import { discoverPlaybooks, loadPlaybook, validateParams, instantiatePlaybook, validatePlaybookDefinition } from "../../core/playbook.js";
+import { validateParams, instantiatePlaybook, validatePlaybookDefinition } from "../../core/playbook.js";
+import { FilePlaybookStore } from "../../stores/file-playbook-store.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -16,10 +18,6 @@ async function initOrchestrator(configPath: string): Promise<Orchestrator> {
   const o = new Orchestrator(resolve(configPath));
   await o.init();
   return o;
-}
-
-function getPolpoDir(dir: string): string {
-  return resolve(dir, ".polpo");
 }
 
 /**
@@ -60,10 +58,11 @@ export function registerPlaybookCommands(program: Command): void {
       .command("list")
       .description("List available playbooks")
       .option("-d, --dir <path>", "Working directory", ".")
-      .action((opts) => {
+      .action(async (opts) => {
         try {
           const cwd = resolve(opts.dir);
-          const playbooks = discoverPlaybooks(cwd, getPolpoDir(opts.dir));
+          const store = new FilePlaybookStore(cwd, getPolpoDir(opts.dir));
+          const playbooks = await store.list();
 
           if (playbooks.length === 0) {
             console.log(chalk.dim("  No playbooks found."));
@@ -94,10 +93,11 @@ export function registerPlaybookCommands(program: Command): void {
       .command("show <name>")
       .description("Show playbook details and parameters")
       .option("-d, --dir <path>", "Working directory", ".")
-      .action((name: string, opts) => {
+      .action(async (name: string, opts) => {
         try {
           const cwd = resolve(opts.dir);
-          const playbook = loadPlaybook(cwd, getPolpoDir(opts.dir), name);
+          const store = new FilePlaybookStore(cwd, getPolpoDir(opts.dir));
+          const playbook = await store.get(name);
 
           if (!playbook) {
             console.error(chalk.red(`Playbook not found: ${name}`));
@@ -142,11 +142,12 @@ export function registerPlaybookCommands(program: Command): void {
         try {
           const cwd = resolve(opts.dir);
           const polpoDir = getPolpoDir(opts.dir);
-          const playbook = loadPlaybook(cwd, polpoDir, name);
+          const store = new FilePlaybookStore(cwd, polpoDir);
+          const playbook = await store.get(name);
 
           if (!playbook) {
             console.error(chalk.red(`Playbook not found: ${name}`));
-            const available = discoverPlaybooks(cwd, polpoDir);
+            const available = await store.list();
             if (available.length > 0) {
               console.log(chalk.dim(`\n  Available playbooks: ${available.map(p => p.name).join(", ")}`));
             }
@@ -206,10 +207,11 @@ export function registerPlaybookCommands(program: Command): void {
       .command("validate <name>")
       .description("Validate a playbook definition")
       .option("-d, --dir <path>", "Working directory", ".")
-      .action((name: string, opts) => {
+      .action(async (name: string, opts) => {
         try {
           const cwd = resolve(opts.dir);
-          const playbook = loadPlaybook(cwd, getPolpoDir(opts.dir), name);
+          const store = new FilePlaybookStore(cwd, getPolpoDir(opts.dir));
+          const playbook = await store.get(name);
 
           if (!playbook) {
             console.error(chalk.red(`Playbook not found: ${name}`));

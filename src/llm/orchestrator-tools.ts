@@ -4,7 +4,7 @@
  * Read tools execute immediately. Write tools may require user approval
  * depending on the current approval mode (approval vs accept-all).
  *
- * These tools are used by both the TUI chat and the OpenAI-compatible
+ * These tools are used by the chat interface and the OpenAI-compatible
  * /v1/chat/completions endpoint.
  */
 
@@ -24,17 +24,20 @@ import {
 } from "./skills.js";
 import { parseMissionDocument } from "../core/schemas.js";
 import {
-  discoverPlaybooks, loadPlaybook, validateParams, instantiatePlaybook,
-  savePlaybook, deletePlaybook, validatePlaybookDefinition,
+  validateParams, instantiatePlaybook,
+  validatePlaybookDefinition,
 } from "../core/playbook.js";
 import type { PlaybookDefinition, PlaybookParameter } from "../core/playbook.js";
 import {
   parseInkSource, discoverInkPackages, readInkLock, writeInkLock,
   upsertInkLockEntry, removeInkLockEntry, getInkLockEntry,
   isInkSourceInstalled, uninstallInkPackages,
+  stripInkMetadata,
 } from "../core/ink.js";
 import type { InkPackage, InkLockEntry } from "../core/ink.js";
-import { loadPolpoConfig, savePolpoConfig } from "../core/config.js";
+import { FileTeamStore } from "../stores/file-team-store.js";
+import { FileAgentStore } from "../stores/file-agent-store.js";
+import { FileMemoryStore } from "../stores/file-memory-store.js";
 
 
 
@@ -1907,9 +1910,9 @@ export async function executeOrchestratorTool(
       // ── Ink Hub ──
       case "ink_search":       return await execInkSearch(args);
       case "ink_browse":       return execInkBrowse(polpo, args);
-      case "ink_add":          return execInkAdd(polpo, args);
-      case "ink_remove":       return execInkRemove(polpo, args);
-      case "ink_update":       return execInkUpdate(polpo, args);
+      case "ink_add":          return await execInkAdd(polpo, args);
+      case "ink_remove":       return await execInkRemove(polpo, args);
+      case "ink_update":       return await execInkUpdate(polpo, args);
 
       // ── Phone ──
       case "phone_call":              return await execPhoneCall(polpo, args);
@@ -2207,8 +2210,8 @@ async function execGetStatus(polpo: Orchestrator): Promise<string> {
   const state = await polpo.getStore().getState();
   const tasks = state.tasks;
   const processes = state.processes;
-  const agents = polpo.getAgents();
-  const teams = polpo.getTeams();
+  const agents = await polpo.getAgents();
+  const teams = await polpo.getTeams();
 
   const counts: Record<string, number> = {};
   for (const t of tasks) counts[t.status] = (counts[t.status] || 0) + 1;
@@ -2302,8 +2305,8 @@ async function execGetMission(polpo: Orchestrator, args: Record<string, unknown>
   return JSON.stringify(mission, null, 2);
 }
 
-function execListAgents(polpo: Orchestrator): string {
-  const agents = polpo.getAgents();
+async function execListAgents(polpo: Orchestrator): Promise<string> {
+  const agents = await polpo.getAgents();
   if (agents.length === 0) return "No agents configured.";
   const lines = agents.map(a => {
     const dn = a.identity?.displayName;
@@ -2318,13 +2321,13 @@ function execListAgents(polpo: Orchestrator): string {
   return `${agents.length} agent(s):\n${lines.join("\n")}`;
 }
 
-function execGetTeams(polpo: Orchestrator, args: Record<string, unknown>): string {
+async function execGetTeams(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
   if (args.name) {
-    const team = polpo.getTeam(args.name as string);
+    const team = await polpo.getTeam(args.name as string);
     if (!team) return `Error: Team "${args.name}" not found.`;
     return JSON.stringify(team, null, 2);
   }
-  const teams = polpo.getTeams();
+  const teams = await polpo.getTeams();
   return JSON.stringify(teams, null, 2);
 }
 
@@ -2405,7 +2408,7 @@ async function execGetLogs(polpo: Orchestrator, args: Record<string, unknown>): 
 // ═══════════════════════════════════════════════════════
 
 async function execCreateTask(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
-  const agents = polpo.getAgents();
+  const agents = await polpo.getAgents();
   const resolved = resolveAgentName(agents, args.assignTo as string);
   if ("error" in resolved) return resolved.error;
   const agentName = resolved.name;
@@ -2432,7 +2435,7 @@ async function execUpdateTask(polpo: Orchestrator, args: Record<string, unknown>
     changes.push("description");
   }
   if (args.assignTo) {
-    const agents = polpo.getAgents();
+    const agents = await polpo.getAgents();
     const resolved = resolveAgentName(agents, args.assignTo as string);
     if ("error" in resolved) return resolved.error;
     await polpo.updateTaskAssignment(taskId, resolved.name);
@@ -2728,8 +2731,8 @@ async function execUpdateMissionNotifications(polpo: Orchestrator, args: Record<
 //  TEAM IMPLEMENTATIONS
 // ═══════════════════════════════════════════════════════
 
-function execAddAgent(polpo: Orchestrator, args: Record<string, unknown>): string {
-  const existing = polpo.getAgents();
+async function execAddAgent(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
+  const existing = await polpo.getAgents();
   // For add_agent, check if agent already exists (by name or displayName)
   const dup = resolveAgent(existing, args.name as string);
   if (dup) {
@@ -2758,15 +2761,15 @@ function execAddAgent(polpo: Orchestrator, args: Record<string, unknown>): strin
 }
 
 async function execRemoveAgent(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
-  const agents = polpo.getAgents();
+  const agents = await polpo.getAgents();
   const resolved = resolveAgentName(agents, args.name as string);
   if ("error" in resolved) return resolved.error;
   const removed = await polpo.removeAgent(resolved.name);
   return removed ? `Agent "${resolved.name}" removed.` : `Error: Agent "${resolved.name}" not found.`;
 }
 
-function execUpdateAgent(polpo: Orchestrator, args: Record<string, unknown>): string {
-  const agents = polpo.getAgents();
+async function execUpdateAgent(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
+  const agents = await polpo.getAgents();
   const existing = resolveAgent(agents, args.name as string);
   if (!existing) {
     const resolved = resolveAgentName(agents, args.name as string);
@@ -2774,53 +2777,43 @@ function execUpdateAgent(polpo: Orchestrator, args: Record<string, unknown>): st
   }
   const name = existing.name; // canonical name
 
-  // Remember which team the agent is currently in BEFORE removing
-  const currentTeam = polpo.findAgentTeam(name);
-  const originalTeamName = currentTeam?.name;
-
-  // Remove and re-add with updated fields
-  polpo.removeAgent(name);
-
   // Handle reportsTo: empty string clears it, undefined keeps existing
   let reportsTo = existing.reportsTo;
   if (typeof args.reportsTo === "string") {
     reportsTo = args.reportsTo.trim() || undefined;
   }
 
-  // Merge: explicit args override existing, undefined keeps current
-  const merged: Record<string, unknown> = {
-    ...existing,
-    role: (args.role as string | undefined) ?? existing.role,
-    model: (args.model as string | undefined) ?? existing.model,
-    systemPrompt: (args.systemPrompt as string | undefined) ?? existing.systemPrompt,
-    skills: (args.skills as string[] | undefined) ?? existing.skills,
-    allowedPaths: (args.allowedPaths as string[] | undefined) ?? existing.allowedPaths,
-    allowedTools: (args.allowedTools as string[] | undefined) ?? existing.allowedTools,
-    reportsTo,
-    reasoning: (args.reasoning as string | undefined) ?? existing.reasoning,
-    maxTurns: (args.maxTurns as number | undefined) ?? existing.maxTurns,
-    maxConcurrency: (args.maxConcurrency as number | undefined) ?? existing.maxConcurrency,
-    browserProfile: (args.browserProfile as string | undefined) ?? existing.browserProfile,
-    emailAllowedDomains: (args.emailAllowedDomains as string[] | undefined) ?? existing.emailAllowedDomains,
-  };
+  // Build updates from explicit args, only including fields that were provided
+  const updates: Record<string, unknown> = {};
+  if (args.role !== undefined) updates.role = args.role as string;
+  if (args.model !== undefined) updates.model = args.model as string;
+  if (args.systemPrompt !== undefined) updates.systemPrompt = args.systemPrompt as string;
+  if (args.skills !== undefined) updates.skills = args.skills as string[];
+  if (args.allowedPaths !== undefined) updates.allowedPaths = args.allowedPaths as string[];
+  if (args.allowedTools !== undefined) updates.allowedTools = args.allowedTools as string[];
+  if (args.reportsTo !== undefined) updates.reportsTo = reportsTo;
+  if (args.reasoning !== undefined) updates.reasoning = args.reasoning as string;
+  if (args.maxTurns !== undefined) updates.maxTurns = args.maxTurns as number;
+  if (args.maxConcurrency !== undefined) updates.maxConcurrency = args.maxConcurrency as number;
+  if (args.browserProfile !== undefined) updates.browserProfile = args.browserProfile as string;
+  if (args.emailAllowedDomains !== undefined) updates.emailAllowedDomains = args.emailAllowedDomains as string[];
+  if (args.team !== undefined) updates.team = args.team as string;
 
-  // Use explicit team from args, otherwise preserve the original team
-  const targetTeam = (args.team as string | undefined) ?? originalTeamName;
-  polpo.addAgent(merged as any, targetTeam);
+  await polpo.updateAgent(name, updates as any);
   const changes = Object.keys(args).filter(k => k !== "name").join(", ");
   return `Agent "${name}" updated: ${changes}`;
 }
 
-function execListTeams(polpo: Orchestrator): string {
-  const teams = polpo.getTeams();
+async function execListTeams(polpo: Orchestrator): Promise<string> {
+  const teams = await polpo.getTeams();
   if (teams.length === 0) return "No teams configured.";
   const lines = teams.map(t => `- ${t.name}: ${t.agents.length} agent(s)${t.description ? ` — ${t.description}` : ""}`);
   return `${teams.length} team(s):\n${lines.join("\n")}`;
 }
 
-function execAddTeam(polpo: Orchestrator, args: Record<string, unknown>): string {
+async function execAddTeam(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
   const name = args.name as string;
-  const existing = polpo.getTeam(name);
+  const existing = await polpo.getTeam(name);
   if (existing) return `Error: Team "${name}" already exists.`;
   polpo.addTeam({
     name,
@@ -2832,16 +2825,16 @@ function execAddTeam(polpo: Orchestrator, args: Record<string, unknown>): string
 
 async function execRemoveTeam(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
   const name = args.name as string;
-  const teams = polpo.getTeams();
+  const teams = await polpo.getTeams();
   if (teams.length <= 1) return "Error: Cannot remove the last team.";
   const removed = await polpo.removeTeam(name);
   return removed ? `Team "${name}" removed.` : `Error: Team "${name}" not found.`;
 }
 
-function execRenameTeam(polpo: Orchestrator, args: Record<string, unknown>): string {
+async function execRenameTeam(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
   const oldName = args.oldName as string;
   const newName = args.name as string;
-  const team = polpo.getTeam(oldName);
+  const team = await polpo.getTeam(oldName);
   if (!team) return `Error: Team "${oldName}" not found.`;
   polpo.renameTeam(oldName, newName);
   return `Team "${oldName}" renamed to "${newName}".`;
@@ -3118,8 +3111,8 @@ function execRemoveWatcher(polpo: Orchestrator, args: Record<string, unknown>): 
 //  CONFIG & SELF-MODIFICATION IMPLEMENTATIONS
 // ═══════════════════════════════════════════════════════
 
-function execReloadConfig(polpo: Orchestrator): string {
-  const reloaded = polpo.reloadConfig();
+async function execReloadConfig(polpo: Orchestrator): Promise<string> {
+  const reloaded = await polpo.reloadConfig();
   return reloaded ? "Configuration reloaded from polpo.json." : "Error: Failed to reload configuration.";
 }
 
@@ -3176,7 +3169,7 @@ function execAppendSystemContext(polpo: Orchestrator, args: Record<string, unkno
 // ═══════════════════════════════════════════════════════
 
 async function execSetVaultEntry(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
-  const agents = polpo.getAgents();
+  const agents = await polpo.getAgents();
   const resolved = resolveAgentName(agents, args.agent as string);
   if ("error" in resolved) return resolved.error;
   const agentName = resolved.name;
@@ -3197,7 +3190,7 @@ async function execSetVaultEntry(polpo: Orchestrator, args: Record<string, unkno
 }
 
 async function execUpdateVaultCredentials(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
-  const agents = polpo.getAgents();
+  const agents = await polpo.getAgents();
   const resolved = resolveAgentName(agents, args.agent as string);
   if ("error" in resolved) return resolved.error;
   const agentName = resolved.name;
@@ -3216,7 +3209,7 @@ async function execUpdateVaultCredentials(polpo: Orchestrator, args: Record<stri
 }
 
 async function execRemoveVaultEntry(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
-  const agents = polpo.getAgents();
+  const agents = await polpo.getAgents();
   const resolved = resolveAgentName(agents, args.agent as string);
   if ("error" in resolved) return resolved.error;
   const agentName = resolved.name;
@@ -3232,7 +3225,7 @@ async function execRemoveVaultEntry(polpo: Orchestrator, args: Record<string, un
 }
 
 async function execListVault(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
-  const agents = polpo.getAgents();
+  const agents = await polpo.getAgents();
   const resolved = resolveAgentName(agents, args.agent as string);
   if ("error" in resolved) return resolved.error;
   const agentName = resolved.name;
@@ -3245,7 +3238,7 @@ async function execListVault(polpo: Orchestrator, args: Record<string, unknown>)
 
   const lines: string[] = [`Vault for "${agentName}" (${entries.length} entries):`];
   for (const e of entries) {
-    const maskedCreds = e.keys.map(k => `${k}: ***`).join(", ");
+    const maskedCreds = e.keys.map((k: string) => `${k}: ***`).join(", ");
     let line = `  - ${e.service} [${e.type}]`;
     if (e.label) line += ` — ${e.label}`;
     line += `: { ${maskedCreds} }`;
@@ -3258,18 +3251,14 @@ async function execListVault(polpo: Orchestrator, args: Record<string, unknown>)
 //  IDENTITY IMPLEMENTATIONS
 // ═══════════════════════════════════════════════════════
 
-function execSetIdentity(polpo: Orchestrator, args: Record<string, unknown>): string {
-  const agents = polpo.getAgents();
+async function execSetIdentity(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
+  const agents = await polpo.getAgents();
   const existing = resolveAgent(agents, args.agent as string);
   if (!existing) {
     const resolved = resolveAgentName(agents, args.agent as string);
     return "error" in resolved ? resolved.error : `Error: Agent "${args.agent}" not found.`;
   }
   const agentName = existing.name;
-
-  // Remember which team the agent is currently in BEFORE removing
-  const currentTeam = polpo.findAgentTeam(agentName);
-  const originalTeamName = currentTeam?.name;
 
   const currentIdentity = existing.identity ?? {};
 
@@ -3289,15 +3278,14 @@ function execSetIdentity(polpo: Orchestrator, args: Record<string, unknown>): st
     updated.responsibilities = (args.responsibilities as (string | AgentResponsibility)[]);
   }
 
-  polpo.removeAgent(agentName);
-  polpo.addAgent({ ...existing, identity: updated }, originalTeamName);
+  await polpo.updateAgent(agentName, { identity: updated } as any);
 
   const updatedFields = Object.keys(args).filter(k => k !== "agent");
   return `Identity updated for agent "${agentName}": ${updatedFields.join(", ")}`;
 }
 
-function execGetIdentity(polpo: Orchestrator, args: Record<string, unknown>): string {
-  const agents = polpo.getAgents();
+async function execGetIdentity(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
+  const agents = await polpo.getAgents();
   const existing = resolveAgent(agents, args.agent as string);
   if (!existing) {
     const resolved = resolveAgentName(agents, args.agent as string);
@@ -4059,8 +4047,8 @@ async function execSearchWeb(polpo: Orchestrator, args: Record<string, unknown>)
   if (!apiKey) {
     const vaultStore = polpo.getVaultStore();
     if (vaultStore) {
-      for (const agent of polpo.getAgents()) {
-        const entry = vaultStore.get(agent.name, "exa");
+      for (const agent of await polpo.getAgents()) {
+        const entry = await vaultStore.get(agent.name, "exa");
         if (entry?.credentials?.key) { apiKey = entry.credentials.key; break; }
       }
     }
@@ -4263,13 +4251,13 @@ const VAPI_BASE = "https://api.vapi.ai";
 const PHONE_POLL_INTERVAL = 5000;
 const PHONE_MAX_POLL_TIME = 15 * 60 * 1000;
 
-function getVapiApiKey(polpo: Orchestrator): string | undefined {
+async function getVapiApiKey(polpo: Orchestrator): Promise<string | undefined> {
   let key = process.env.VAPI_API_KEY;
   if (!key) {
     const vaultStore = polpo.getVaultStore();
     if (vaultStore) {
-      for (const agent of polpo.getAgents()) {
-        const entry = vaultStore.get(agent.name, "vapi");
+      for (const agent of await polpo.getAgents()) {
+        const entry = await vaultStore.get(agent.name, "vapi");
         if (entry?.credentials?.api_key) { key = entry.credentials.api_key; break; }
       }
     }
@@ -4277,13 +4265,13 @@ function getVapiApiKey(polpo: Orchestrator): string | undefined {
   return key;
 }
 
-function getVapiPhoneNumberId(polpo: Orchestrator): string | undefined {
+async function getVapiPhoneNumberId(polpo: Orchestrator): Promise<string | undefined> {
   let id = process.env.VAPI_PHONE_NUMBER_ID;
   if (!id) {
     const vaultStore = polpo.getVaultStore();
     if (vaultStore) {
-      for (const agent of polpo.getAgents()) {
-        const entry = vaultStore.get(agent.name, "vapi");
+      for (const agent of await polpo.getAgents()) {
+        const entry = await vaultStore.get(agent.name, "vapi");
         if (entry?.credentials?.phone_number_id) { id = entry.credentials.phone_number_id; break; }
       }
     }
@@ -4353,10 +4341,10 @@ async function execPhoneCall(polpo: Orchestrator, args: Record<string, unknown>)
   if (!number) return "Error: 'number' is required.";
   if (!instructions) return "Error: 'instructions' is required.";
 
-  const apiKey = getVapiApiKey(polpo);
+  const apiKey = await getVapiApiKey(polpo);
   if (!apiKey) return "Error: VAPI_API_KEY not found. Set it in vault (service: vapi, credentials: {api_key: ...}) or as environment variable.";
 
-  const phoneNumberId = getVapiPhoneNumberId(polpo);
+  const phoneNumberId = await getVapiPhoneNumberId(polpo);
   if (!phoneNumberId) return "Error: VAPI_PHONE_NUMBER_ID not found. Set it in vault (service: vapi, credentials: {phone_number_id: ...}) or as environment variable. Buy a number at dashboard.vapi.ai.";
 
   const maxDuration = Math.min((args.maxDuration as number) ?? 600, 1800);
@@ -4419,7 +4407,7 @@ async function execPhoneGetCall(polpo: Orchestrator, args: Record<string, unknow
   const callId = args.callId as string;
   if (!callId) return "Error: 'callId' is required.";
 
-  const apiKey = getVapiApiKey(polpo);
+  const apiKey = await getVapiApiKey(polpo);
   if (!apiKey) return "Error: VAPI_API_KEY not found.";
 
   const { ok: isOk, status, data } = await vapiRequest("GET", `/call/${callId}`, apiKey);
@@ -4429,7 +4417,7 @@ async function execPhoneGetCall(polpo: Orchestrator, args: Record<string, unknow
 }
 
 async function execPhoneListCalls(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
-  const apiKey = getVapiApiKey(polpo);
+  const apiKey = await getVapiApiKey(polpo);
   if (!apiKey) return "Error: VAPI_API_KEY not found.";
 
   const limit = Math.min((args.limit as number) ?? 10, 100);
@@ -4456,7 +4444,7 @@ async function execPhoneHangup(polpo: Orchestrator, args: Record<string, unknown
   const callId = args.callId as string;
   if (!callId) return "Error: 'callId' is required.";
 
-  const apiKey = getVapiApiKey(polpo);
+  const apiKey = await getVapiApiKey(polpo);
   if (!apiKey) return "Error: VAPI_API_KEY not found.";
 
   const { ok: isOk, status, data } = await vapiRequest("DELETE", `/call/${callId}`, apiKey);
@@ -4469,10 +4457,10 @@ async function execPhoneSetupInbound(polpo: Orchestrator, args: Record<string, u
   const instructions = args.instructions as string;
   if (!instructions) return "Error: 'instructions' is required.";
 
-  const apiKey = getVapiApiKey(polpo);
+  const apiKey = await getVapiApiKey(polpo);
   if (!apiKey) return "Error: VAPI_API_KEY not found.";
 
-  const phoneNumberId = getVapiPhoneNumberId(polpo);
+  const phoneNumberId = await getVapiPhoneNumberId(polpo);
   if (!phoneNumberId) return "Error: VAPI_PHONE_NUMBER_ID not found.";
 
   const maxDuration = Math.min((args.maxDuration as number) ?? 600, 1800);
@@ -4529,10 +4517,10 @@ async function execPhoneSetupInbound(polpo: Orchestrator, args: Record<string, u
 }
 
 async function execPhoneGetInboundConfig(polpo: Orchestrator): Promise<string> {
-  const apiKey = getVapiApiKey(polpo);
+  const apiKey = await getVapiApiKey(polpo);
   if (!apiKey) return "Error: VAPI_API_KEY not found.";
 
-  const phoneNumberId = getVapiPhoneNumberId(polpo);
+  const phoneNumberId = await getVapiPhoneNumberId(polpo);
   if (!phoneNumberId) return "Error: VAPI_PHONE_NUMBER_ID not found.";
 
   const phoneRes = await vapiRequest("GET", `/phone-number/${phoneNumberId}`, apiKey);
@@ -4572,10 +4560,10 @@ async function execPhoneGetInboundConfig(polpo: Orchestrator): Promise<string> {
 }
 
 async function execPhoneDisableInbound(polpo: Orchestrator): Promise<string> {
-  const apiKey = getVapiApiKey(polpo);
+  const apiKey = await getVapiApiKey(polpo);
   if (!apiKey) return "Error: VAPI_API_KEY not found.";
 
-  const phoneNumberId = getVapiPhoneNumberId(polpo);
+  const phoneNumberId = await getVapiPhoneNumberId(polpo);
   if (!phoneNumberId) return "Error: VAPI_PHONE_NUMBER_ID not found.";
 
   const phoneRes = await vapiRequest("GET", `/phone-number/${phoneNumberId}`, apiKey);
@@ -4667,7 +4655,7 @@ function execInkBrowse(polpo: Orchestrator, args: Record<string, unknown>): stri
   return `${total} installed package(s):\n\n${lines.join("\n")}`;
 }
 
-function execInkAdd(polpo: Orchestrator, args: Record<string, unknown>): string {
+async function execInkAdd(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
   const source = args.source as string;
   if (!source) return "Error: 'source' is required (e.g. 'lumea-labs/ink-registry').";
 
@@ -4709,13 +4697,17 @@ function execInkAdd(polpo: Orchestrator, args: Record<string, unknown>): string 
     packages = match;
   }
 
-  // Install packages into config
-  let config: PolpoFileConfig = loadPolpoConfig(polpoDir) ?? {
-    org: "",
-    teams: [{ name: "default", agents: [] }],
-    settings: { maxRetries: 3, workDir: ".", logLevel: "normal" },
-  } as any;
-  let configChanged = false;
+  // Install packages via stores
+  const inkTeamStore = new FileTeamStore(polpoDir);
+  const inkAgentStore = new FileAgentStore(polpoDir);
+
+  // Ensure default team exists
+  const inkTeams = await inkTeamStore.getTeams();
+  if (inkTeams.length === 0) {
+    await inkTeamStore.createTeam({ name: "default", agents: [] });
+  }
+  const inkDefaultTeam = (await inkTeamStore.getTeams())[0].name;
+
   const installed: string[] = [];
 
   for (const pkg of packages) {
@@ -4731,29 +4723,24 @@ function execInkAdd(polpo: Orchestrator, args: Record<string, unknown>): string 
         break;
       }
       case "agent": {
-        const agentContent = pkg.content as AgentConfig;
-        const cleanAgent = { ...agentContent };
-        delete (cleanAgent as any).version;
-        delete (cleanAgent as any).author;
-        delete (cleanAgent as any).tags;
+        const cleanAgent = stripInkMetadata(pkg.content as AgentConfig);
 
-        const targetTeam = config.teams[0] ?? { name: "default", agents: [] };
-        if (!config.teams.includes(targetTeam)) config.teams.push(targetTeam);
-
-        const existingIdx = targetTeam.agents.findIndex((a) => a.name === cleanAgent.name);
-        if (existingIdx >= 0) {
-          const existing = targetTeam.agents[existingIdx];
-          if (!existing.role && cleanAgent.role) existing.role = cleanAgent.role;
-          if (!existing.model && cleanAgent.model) existing.model = cleanAgent.model;
-          if (!existing.identity && cleanAgent.identity) existing.identity = cleanAgent.identity;
-          if (!existing.allowedTools && cleanAgent.allowedTools) existing.allowedTools = cleanAgent.allowedTools;
-          if (!existing.systemPrompt && cleanAgent.systemPrompt) existing.systemPrompt = cleanAgent.systemPrompt;
+        const existingAgent = await inkAgentStore.getAgent(cleanAgent.name);
+        if (existingAgent) {
+          const updates: Partial<AgentConfig> = {};
+          if (!existingAgent.role && cleanAgent.role) updates.role = cleanAgent.role;
+          if (!existingAgent.model && cleanAgent.model) updates.model = cleanAgent.model;
+          if (!existingAgent.identity && cleanAgent.identity) updates.identity = cleanAgent.identity;
+          if (!existingAgent.allowedTools && cleanAgent.allowedTools) updates.allowedTools = cleanAgent.allowedTools;
+          if (!existingAgent.systemPrompt && cleanAgent.systemPrompt) updates.systemPrompt = cleanAgent.systemPrompt;
+          if (Object.keys(updates).length > 0) {
+            await inkAgentStore.updateAgent(cleanAgent.name, updates);
+          }
           installed.push(`agent: ${pkg.name} (merged)`);
         } else {
-          targetTeam.agents.push(cleanAgent);
+          await inkAgentStore.createAgent(cleanAgent, inkDefaultTeam);
           installed.push(`agent: ${pkg.name}`);
         }
-        configChanged = true;
         break;
       }
       case "company": {
@@ -4764,33 +4751,32 @@ function execInkAdd(polpo: Orchestrator, args: Record<string, unknown>): string 
           : (companyContent as any).team ? [(companyContent as any).team] : [];
 
         for (const incomingTeam of companyTeams) {
-          const existingTeam = config.teams.find((t) => t.name === incomingTeam.name);
+          const existingTeam = await inkTeamStore.getTeam(incomingTeam.name);
           if (existingTeam) {
             for (const agent of incomingTeam.agents) {
-              const cleanAgent = { ...agent };
-              delete (cleanAgent as any).version;
-              delete (cleanAgent as any).author;
-              delete (cleanAgent as any).tags;
-              if (!existingTeam.agents.find((a) => a.name === agent.name)) {
-                existingTeam.agents.push(cleanAgent);
+              const cleanAgent = stripInkMetadata(agent);
+              const existing = await inkAgentStore.getAgent(agent.name);
+              if (!existing) {
+                await inkAgentStore.createAgent(cleanAgent, incomingTeam.name);
               }
             }
           } else {
-            config.teams.push(incomingTeam);
+            await inkTeamStore.createTeam({ name: incomingTeam.name, description: incomingTeam.description, agents: [] });
+            for (const agent of incomingTeam.agents) {
+              const cleanAgent = stripInkMetadata(agent);
+              await inkAgentStore.createAgent(cleanAgent, incomingTeam.name);
+            }
           }
         }
 
-        // Append memory.md if present
+        // Append memory.md if present (via MemoryStore)
         const srcMemory = join(srcDir, "memory.md");
         if (existsSync(srcMemory)) {
-          const destMemory = join(polpoDir, "memory.md");
+          const memStore = new FileMemoryStore(polpoDir);
+          const existingMem = await memStore.get();
           const memContent = readFileSync(srcMemory, "utf-8");
-          if (existsSync(destMemory)) {
-            const existing = readFileSync(destMemory, "utf-8");
-            writeFileSync(destMemory, existing + `\n\n<!-- Imported from ink: ${pkg.name} -->\n` + memContent, "utf-8");
-          } else {
-            writeFileSync(destMemory, memContent, "utf-8");
-          }
+          const separator = `\n\n<!-- Imported from ink: ${pkg.name} -->\n`;
+          await memStore.save(existingMem ? existingMem + separator + memContent : memContent);
         }
 
         // Copy skills if present
@@ -4807,14 +4793,11 @@ function execInkAdd(polpo: Orchestrator, args: Record<string, unknown>): string 
           }
         }
 
-        configChanged = true;
         installed.push(`company: ${pkg.name}`);
         break;
       }
     }
   }
-
-  if (configChanged) savePolpoConfig(polpoDir, config);
 
   // Update lock file
   const lockEntry: InkLockEntry = {
@@ -4846,12 +4829,12 @@ function execInkAdd(polpo: Orchestrator, args: Record<string, unknown>): string 
   try { rmSync(repoDir, { recursive: true, force: true }); } catch { /* ignore */ }
 
   // Reload config so the orchestrator picks up new agents/teams immediately
-  try { polpo.reloadConfig(); } catch { /* ignore */ }
+  try { await polpo.reloadConfig(); } catch { /* ignore */ }
 
   return `Installed ${packages.length} package(s) from "${sourceLabel}":\n\n${installed.map((i) => `  - ${i}`).join("\n")}\n\nLock file updated. Config reloaded.`;
 }
 
-function execInkRemove(polpo: Orchestrator, args: Record<string, unknown>): string {
+async function execInkRemove(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
   const source = args.source as string;
   if (!source) return "Error: 'source' is required.";
 
@@ -4860,11 +4843,9 @@ function execInkRemove(polpo: Orchestrator, args: Record<string, unknown>): stri
   const entry = getInkLockEntry(lock, source);
   if (!entry) return `Source "${source}" is not installed. Use ink_browse to see installed packages.`;
 
-  const removed = uninstallInkPackages(
-    entry, polpoDir,
-    () => loadPolpoConfig(polpoDir),
-    (config) => savePolpoConfig(polpoDir, config),
-  );
+  const removeAgentStore = new FileAgentStore(polpoDir);
+  const removePlaybookStore = polpo.getPlaybookStore();
+  const removed = await uninstallInkPackages(entry, polpoDir, removeAgentStore, removePlaybookStore);
 
   writeInkLock(polpoDir, removeInkLockEntry(lock, source));
 
@@ -4875,12 +4856,12 @@ function execInkRemove(polpo: Orchestrator, args: Record<string, unknown>): stri
   }
 
   // Reload config
-  try { polpo.reloadConfig(); } catch { /* ignore */ }
+  try { await polpo.reloadConfig(); } catch { /* ignore */ }
 
-  return `Removed "${source}" (${entry.packages.length} package(s)):\n\n${removed.map(r => `  - ${r}`).join("\n")}\n\nLock file updated. Config reloaded.`;
+  return `Removed "${source}" (${entry.packages.length} package(s)):\n\n${removed.map((r: string) => `  - ${r}`).join("\n")}\n\nLock file updated. Config reloaded.`;
 }
 
-function execInkUpdate(polpo: Orchestrator, args: Record<string, unknown>): string {
+async function execInkUpdate(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
   const polpoDir = polpo.getPolpoDir();
   const lock = readInkLock(polpoDir);
 
@@ -4895,6 +4876,16 @@ function execInkUpdate(polpo: Orchestrator, args: Record<string, unknown>): stri
     entries = [entry];
   }
 
+  const updTeamStore = new FileTeamStore(polpoDir);
+  const updAgentStore = new FileAgentStore(polpoDir);
+
+  // Ensure default team exists
+  const updTeams = await updTeamStore.getTeams();
+  if (updTeams.length === 0) {
+    await updTeamStore.createTeam({ name: "default", agents: [] });
+  }
+  const updDefaultTeam = (await updTeamStore.getTeams())[0].name;
+
   const results: string[] = [];
   let updatedLock = { ...lock, registries: [...lock.registries] };
 
@@ -4904,7 +4895,6 @@ function execInkUpdate(polpo: Orchestrator, args: Record<string, unknown>): stri
     mkdirSync(cacheDir, { recursive: true });
     const repoDir = join(cacheDir, entry.source.replace(/\//g, "--"));
 
-    // Clone or pull
     try {
       if (existsSync(repoDir)) {
         try {
@@ -4934,45 +4924,31 @@ function execInkUpdate(polpo: Orchestrator, args: Record<string, unknown>): stri
       continue;
     }
 
-    // Uninstall old, install new
-    uninstallInkPackages(entry, polpoDir, () => loadPolpoConfig(polpoDir), (config) => savePolpoConfig(polpoDir, config));
+    // Uninstall old, install new via stores
+    const updPlaybookStore = polpo.getPlaybookStore();
+    await uninstallInkPackages(entry, polpoDir, updAgentStore, updPlaybookStore);
 
-    let config: PolpoFileConfig = loadPolpoConfig(polpoDir) ?? {
-      org: "", teams: [{ name: "default", agents: [] }],
-      settings: { maxRetries: 3, workDir: ".", logLevel: "normal" },
-    } as any;
-    let configChanged = false;
     const installed: string[] = [];
 
     for (const pkg of packages) {
       switch (pkg.type) {
         case "playbook": {
-          const destDir = join(polpoDir, "playbooks", pkg.name);
-          mkdirSync(destDir, { recursive: true });
-          const srcDir = resolve(pkg.path, "..");
-          for (const e of readdirSync(srcDir)) {
-            cpSync(join(srcDir, e), join(destDir, e), { recursive: true });
-          }
+          await updPlaybookStore.save(pkg.content as PlaybookDefinition);
           installed.push(`playbook: ${pkg.name}`);
           break;
         }
         case "agent": {
-          const agentContent = pkg.content as AgentConfig;
-          const cleanAgent = { ...agentContent };
-          delete (cleanAgent as any).version;
-          delete (cleanAgent as any).author;
-          delete (cleanAgent as any).tags;
-          const targetTeam = config.teams[0] ?? { name: "default", agents: [] };
-          if (!config.teams.includes(targetTeam)) config.teams.push(targetTeam);
-          const idx = targetTeam.agents.findIndex((a) => a.name === cleanAgent.name);
-          if (idx >= 0) {
-            targetTeam.agents[idx] = cleanAgent;
+          const cleanAgent = stripInkMetadata(pkg.content as AgentConfig);
+
+          const existingAgent = await updAgentStore.getAgent(cleanAgent.name);
+          if (existingAgent) {
+            const { name: _, ...updates } = cleanAgent;
+            await updAgentStore.updateAgent(cleanAgent.name, updates);
             installed.push(`agent: ${pkg.name} (updated)`);
           } else {
-            targetTeam.agents.push(cleanAgent);
+            await updAgentStore.createAgent(cleanAgent, updDefaultTeam);
             installed.push(`agent: ${pkg.name}`);
           }
-          configChanged = true;
           break;
         }
         case "company": {
@@ -4981,29 +4957,31 @@ function execInkUpdate(polpo: Orchestrator, args: Record<string, unknown>): stri
             ? companyContent.teams
             : (companyContent as any).team ? [(companyContent as any).team] : [];
           for (const incomingTeam of companyTeams) {
-            const existingTeam = config.teams.find((t) => t.name === incomingTeam.name);
+            const existingTeam = await updTeamStore.getTeam(incomingTeam.name);
             if (existingTeam) {
               for (const agent of incomingTeam.agents) {
-                const cleanAgent = { ...agent };
-                delete (cleanAgent as any).version;
-                delete (cleanAgent as any).author;
-                delete (cleanAgent as any).tags;
-                const idx = existingTeam.agents.findIndex((a) => a.name === agent.name);
-                if (idx >= 0) existingTeam.agents[idx] = cleanAgent;
-                else existingTeam.agents.push(cleanAgent);
+                const cleanAgent = stripInkMetadata(agent);
+                const existing = await updAgentStore.getAgent(agent.name);
+                if (existing) {
+                  const { name: _, ...updates } = cleanAgent;
+                  await updAgentStore.updateAgent(agent.name, updates);
+                } else {
+                  await updAgentStore.createAgent(cleanAgent, incomingTeam.name);
+                }
               }
             } else {
-              config.teams.push(incomingTeam);
+              await updTeamStore.createTeam({ name: incomingTeam.name, description: incomingTeam.description, agents: [] });
+              for (const agent of incomingTeam.agents) {
+                const cleanAgent = stripInkMetadata(agent);
+                await updAgentStore.createAgent(cleanAgent, incomingTeam.name);
+              }
             }
           }
-          configChanged = true;
           installed.push(`company: ${pkg.name}`);
           break;
         }
       }
     }
-
-    if (configChanged) savePolpoConfig(polpoDir, config);
 
     const newEntry: InkLockEntry = {
       source: entry.source,
@@ -5020,19 +4998,18 @@ function execInkUpdate(polpo: Orchestrator, args: Record<string, unknown>): stri
   writeInkLock(polpoDir, updatedLock);
 
   // Reload config
-  try { polpo.reloadConfig(); } catch { /* ignore */ }
+  try { await polpo.reloadConfig(); } catch { /* ignore */ }
 
-  return `Update complete:\n\n${results.map(r => `  - ${r}`).join("\n")}`;
+  return `Update complete:\n\n${results.map((r: string) => `  - ${r}`).join("\n")}`;
 }
 
 // ═══════════════════════════════════════════════════════
 //  PLAYBOOK EXECUTORS
 // ═══════════════════════════════════════════════════════
 
-function execListPlaybooks(polpo: Orchestrator): string {
-  const cwd = polpo.getWorkDir();
-  const polpoDir = polpo.getPolpoDir();
-  const playbooks = discoverPlaybooks(cwd, polpoDir);
+async function execListPlaybooks(polpo: Orchestrator): Promise<string> {
+  const playbookStore = polpo.getPlaybookStore();
+  const playbooks = await playbookStore.list();
   if (playbooks.length === 0) return "No playbooks found. Playbooks are discovered from .polpo/playbooks/ and ~/.polpo/playbooks/.";
   const lines = playbooks.map((pb: { name: string; description: string; parameters: Array<{ name: string; required?: boolean; default?: unknown }> }) => {
     const params = pb.parameters;
@@ -5044,21 +5021,20 @@ function execListPlaybooks(polpo: Orchestrator): string {
   return `${playbooks.length} playbook(s):\n${lines.join("\n")}`;
 }
 
-function execGetPlaybook(polpo: Orchestrator, args: Record<string, unknown>): string {
+async function execGetPlaybook(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
   const name = args.name as string;
   if (!name) return "Error: 'name' is required.";
-  const cwd = polpo.getWorkDir();
-  const polpoDir = polpo.getPolpoDir();
-  const playbook = loadPlaybook(cwd, polpoDir, name);
+  const playbookStore = polpo.getPlaybookStore();
+  const playbook = await playbookStore.get(name);
   if (!playbook) {
-    const available = discoverPlaybooks(cwd, polpoDir);
+    const available = await playbookStore.list();
     const names = available.map((p: { name: string }) => p.name).join(", ");
     return `Error: Playbook "${name}" not found.${names ? ` Available: ${names}` : ""}`;
   }
   return JSON.stringify(playbook, null, 2);
 }
 
-function execCreatePlaybook(polpo: Orchestrator, args: Record<string, unknown>): string {
+async function execCreatePlaybook(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
   const name = args.name as string;
   const description = args.description as string;
   const mission = args.mission as Record<string, unknown>;
@@ -5071,7 +5047,7 @@ function execCreatePlaybook(polpo: Orchestrator, args: Record<string, unknown>):
   const definition: PlaybookDefinition = { name, description, mission, parameters };
 
   try {
-    const dir = savePlaybook(polpo.getPolpoDir(), definition);
+    const dir = await polpo.getPlaybookStore().save(definition);
     const paramCount = parameters?.length ?? 0;
     return `Playbook "${name}" saved to ${dir} (${paramCount} parameter${paramCount !== 1 ? "s" : ""}).`;
   } catch (err: unknown) {
@@ -5086,9 +5062,7 @@ async function execInstantiatePlaybook(polpo: Orchestrator, args: Record<string,
 
   if (!name) return "Error: 'name' is required.";
 
-  const cwd = polpo.getWorkDir();
-  const polpoDir = polpo.getPolpoDir();
-  const playbook = loadPlaybook(cwd, polpoDir, name);
+  const playbook = await polpo.getPlaybookStore().get(name);
   if (!playbook) return `Error: Playbook "${name}" not found.`;
 
   // Validate parameters
@@ -5122,9 +5096,7 @@ async function execRunPlaybook(polpo: Orchestrator, args: Record<string, unknown
 
   if (!name) return "Error: 'name' is required.";
 
-  const cwd = polpo.getWorkDir();
-  const polpoDir = polpo.getPolpoDir();
-  const playbook = loadPlaybook(cwd, polpoDir, name);
+  const playbook = await polpo.getPlaybookStore().get(name);
   if (!playbook) return `Error: Playbook "${name}" not found.`;
 
   // Validate parameters
@@ -5152,13 +5124,11 @@ async function execRunPlaybook(polpo: Orchestrator, args: Record<string, unknown
   }
 }
 
-function execDeletePlaybook(polpo: Orchestrator, args: Record<string, unknown>): string {
+async function execDeletePlaybook(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
   const name = args.name as string;
   if (!name) return "Error: 'name' is required.";
 
-  const cwd = polpo.getWorkDir();
-  const polpoDir = polpo.getPolpoDir();
-  const deleted = deletePlaybook(cwd, polpoDir, name);
+  const deleted = await polpo.getPlaybookStore().delete(name);
   if (!deleted) return `Error: Playbook "${name}" not found.`;
   return `Playbook "${name}" deleted.`;
 }

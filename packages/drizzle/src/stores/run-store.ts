@@ -1,6 +1,6 @@
 import { eq, desc, inArray } from "drizzle-orm";
 import type { RunStore, RunRecord, RunStatus } from "@polpo-ai/core/run-store";
-import type { AgentActivity, TaskResult, TaskOutcome } from "@polpo-ai/core/types";
+import type { AgentActivity, TaskResult, TaskOutcome, RunnerConfig } from "@polpo-ai/core/types";
 import { type Dialect, serializeJson, deserializeJson } from "../utils.js";
 
 type AnyTable = any;
@@ -32,6 +32,7 @@ export class DrizzleRunStore implements RunStore {
       activity,
       result: deserializeJson<TaskResult | undefined>(row.result, undefined, d),
       outcomes: deserializeJson<TaskOutcome[] | undefined>(row.outcomes, undefined, d),
+      config: deserializeJson<RunnerConfig | undefined>(row.config, undefined, d),
       configPath: row.configPath,
     };
   }
@@ -51,6 +52,7 @@ export class DrizzleRunStore implements RunStore {
       activity: serializeJson(run.activity, d),
       result: serializeJson(run.result, d),
       outcomes: serializeJson(run.outcomes, d),
+      config: serializeJson(run.config, d),
       configPath: run.configPath,
     };
     await this.db.insert(this.runs).values(values)
@@ -64,6 +66,7 @@ export class DrizzleRunStore implements RunStore {
           activity: values.activity,
           result: values.result,
           outcomes: values.outcomes,
+          config: values.config,
         },
       });
   }

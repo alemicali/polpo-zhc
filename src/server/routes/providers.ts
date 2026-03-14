@@ -1,4 +1,5 @@
 import { resolve } from "node:path";
+import { getPolpoDir } from "../../core/constants.js";
 import { randomUUID } from "node:crypto";
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { PROVIDER_ENV_MAP, listModels } from "../../llm/pi-client.js";
@@ -465,7 +466,7 @@ export function providerRoutes(polpoDir: string): OpenAPIHono {
     if (!envVar) return c.json({ ok: false, error: `Unknown provider: ${name}` }, 400);
 
     process.env[envVar] = apiKey;
-    const targetDir = bodyWorkDir ? resolve(bodyWorkDir, ".polpo") : polpoDir;
+    const targetDir = bodyWorkDir ? getPolpoDir(resolve(bodyWorkDir)) : polpoDir;
     persistToEnvFile(targetDir, envVar, apiKey);
 
     return c.json({ ok: true, data: { message: `${envVar} saved to .polpo/.env` } });
@@ -484,7 +485,7 @@ export function providerRoutes(polpoDir: string): OpenAPIHono {
     if (!envVar) return c.json({ ok: false, error: `Unknown provider: ${name}` }, 400);
 
     delete process.env[envVar];
-    const targetDir = bodyWorkDir ? resolve(bodyWorkDir, ".polpo") : polpoDir;
+    const targetDir = bodyWorkDir ? getPolpoDir(resolve(bodyWorkDir)) : polpoDir;
     removeFromEnvFile(targetDir, envVar);
 
     return c.json({ ok: true, data: { message: `${envVar} removed` } });
@@ -505,7 +506,7 @@ export function providerRoutes(polpoDir: string): OpenAPIHono {
     const envVar = PROVIDER_ENV_MAP[name];
     if (envVar && process.env[envVar]) {
       delete process.env[envVar];
-      const targetDir = bodyWorkDir ? resolve(bodyWorkDir, ".polpo") : polpoDir;
+      const targetDir = bodyWorkDir ? getPolpoDir(resolve(bodyWorkDir)) : polpoDir;
       removeFromEnvFile(targetDir, envVar);
       actions.push("API key removed");
     }
