@@ -1,6 +1,6 @@
 {
   "name": "polpo-ai",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "description": "The open-source platform for AI agent teams",
   "type": "module",
   "main": "dist/index.js",
@@ -81,8 +81,8 @@
     "@hono/zod-openapi": "^1.2.2",
     "@mariozechner/pi-agent-core": "^0.57.1",
     "@mariozechner/pi-ai": "^0.57.1",
-    "@polpo-ai/core": "workspace:*",
-    "@polpo-ai/vault-crypto": "workspace:*",
+    "@polpo-ai/core": "^0.2.4",
+    "@polpo-ai/vault-crypto": "^0.2.4",
     "@sinclair/typebox": "^0.34.48",
     "@whiskeysockets/baileys": "7.0.0-rc.9",
     "chalk": "^5.4.1",
@@ -101,7 +101,7 @@
     "zod": "^4.3.6"
   },
   "optionalDependencies": {
-    "@polpo-ai/drizzle": "workspace:*",
+    "@polpo-ai/drizzle": "^0.2.4",
     "better-sqlite3": "^12.6.2",
     "drizzle-orm": "^0.44.0",
     "playwright-core": "^1.52.0",
