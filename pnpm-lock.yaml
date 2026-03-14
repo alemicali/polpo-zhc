@@ -29,11 +29,14 @@ importers:
         specifier: ^0.57.1
         version: 0.57.1(@modelcontextprotocol/sdk@1.26.0(zod@4.3.6))(ws@8.19.0)(zod@4.3.6)
       '@polpo-ai/core':
-        specifier: workspace:*
-        version: link:packages/core
+        specifier: ^0.2.4
+        version: 0.2.5
+      '@polpo-ai/server':
+        specifier: ^0.2.4
+        version: 0.2.4(zod@4.3.6)
       '@polpo-ai/vault-crypto':
-        specifier: workspace:*
-        version: link:packages/vault-crypto
+        specifier: ^0.2.4
+        version: 0.2.4
       '@sinclair/typebox':
         specifier: ^0.34.48
         version: 0.34.48
@@ -112,8 +115,8 @@ importers:
         version: 3.2.4(@types/debug@4.1.12)(@types/node@22.19.11)(jiti@2.6.1)(lightningcss@1.30.2)(msw@2.12.10(@types/node@22.19.11)(typescript@5.9.3))(terser@5.46.0)(tsx@4.21.0)(yaml@2.8.2)
     optionalDependencies:
       '@polpo-ai/drizzle':
-        specifier: workspace:*
-        version: link:packages/drizzle
+        specifier: ^0.2.4
+        version: 0.2.4(@cloudflare/workers-types@4.20260307.1)(@opentelemetry/api@1.9.0)(@types/better-sqlite3@7.6.13)(better-sqlite3@12.6.2)(postgres@3.4.8)
       better-sqlite3:
         specifier: ^12.6.2
         version: 12.6.2
@@ -210,6 +213,49 @@ importers:
       zod:
         specifier: '>=3.0.0 || >=4.0.0'
         version: 4.3.6
+
+  packages/tools:
+    dependencies:
+      '@mariozechner/pi-agent-core':
+        specifier: ^0.57.1
+        version: 0.57.1(@modelcontextprotocol/sdk@1.26.0(zod@4.3.6))(ws@8.19.0)(zod@4.3.6)
+      '@polpo-ai/core':
+        specifier: ^0.2.4
+        version: 0.2.5
+      '@sinclair/typebox':
+        specifier: ^0.34.0
+        version: 0.34.48
+      execa:
+        specifier: ^9.0.0
+        version: 9.6.1
+      nanoid:
+        specifier: ^5.0.0
+        version: 5.1.6
+      zod:
+        specifier: '>=3.0.0 || >=4.0.0'
+        version: 4.3.6
+    optionalDependencies:
+      docx:
+        specifier: ^9.5.0
+        version: 9.5.3
+      exceljs:
+        specifier: ^4.4.0
+        version: 4.4.0
+      imapflow:
+        specifier: ^1.2.0
+        version: 1.2.10
+      mammoth:
+        specifier: ^1.11.0
+        version: 1.11.0
+      nodemailer:
+        specifier: ^8.0.0
+        version: 8.0.1
+      pdf-lib:
+        specifier: ^1.17.0
+        version: 1.17.1
+      playwright-core:
+        specifier: ^1.52.0
+        version: 1.58.2
 
   packages/vault-crypto:
     devDependencies:
@@ -2177,6 +2223,31 @@ packages:
 
   '@polpo-ai/core@0.2.3':
     resolution: {integrity: sha512-Pbe3+cgKDQXP2mpKkIgmwF1Sif8FalGwdP78GwOPftPFGiD3hhNfmsJ7/ed/aCBnQnC1DQ99HDYnHBP3NWUmpQ==}
+    engines: {node: '>=18.0.0'}
+
+  '@polpo-ai/core@0.2.5':
+    resolution: {integrity: sha512-3KN3BTXM3qHxjt5D5g1CEsoLicGBiTVrQUHdK6TxnEDccx13zX4V7mzpLVKj/0d4PbuhICyx9EZLa0KZNDMa7A==}
+    engines: {node: '>=18.0.0'}
+
+  '@polpo-ai/drizzle@0.2.4':
+    resolution: {integrity: sha512-0ggGczgy9syQHGVaAdKdtolfTvQsRyUH3GowLqvb5oultU452gthh9f234vwcgIdmk3EFcalH3lrDcEtYmXqBw==}
+    engines: {node: '>=18.0.0'}
+    peerDependencies:
+      better-sqlite3: ^11.0.0
+      postgres: ^3.4.0
+    peerDependenciesMeta:
+      better-sqlite3:
+        optional: true
+      postgres:
+        optional: true
+
+  '@polpo-ai/server@0.2.4':
+    resolution: {integrity: sha512-T5o/XtnP+Z8Ku/9vP42EAcJTbQ/I/py4SSV67kNCcRUpxRxB7xKuOpFEhQmPJC7nW+u5ebf5kL4biaoE/xrhrw==}
+    peerDependencies:
+      zod: '>=3.0.0 || >=4.0.0'
+
+  '@polpo-ai/vault-crypto@0.2.4':
+    resolution: {integrity: sha512-IsU/zdb9P3O2/If773LNpQ7H5toeTNqaHS3WDFQpr2aQpYywZg0xsRuPensTdrg5Eai9SyZMmDsxizNW8IFnlQ==}
     engines: {node: '>=18.0.0'}
 
   '@poppinss/colors@4.1.6':
@@ -10920,6 +10991,60 @@ snapshots:
     dependencies:
       nanoid: 5.1.6
       zod: 4.3.6
+
+  '@polpo-ai/core@0.2.5':
+    dependencies:
+      nanoid: 5.1.6
+      zod: 4.3.6
+
+  '@polpo-ai/drizzle@0.2.4(@cloudflare/workers-types@4.20260307.1)(@opentelemetry/api@1.9.0)(@types/better-sqlite3@7.6.13)(better-sqlite3@12.6.2)(postgres@3.4.8)':
+    dependencies:
+      '@polpo-ai/core': link:packages/core
+      '@polpo-ai/vault-crypto': link:packages/vault-crypto
+      drizzle-orm: 0.44.7(@cloudflare/workers-types@4.20260307.1)(@opentelemetry/api@1.9.0)(@types/better-sqlite3@7.6.13)(better-sqlite3@12.6.2)(postgres@3.4.8)
+      nanoid: 5.1.6
+    optionalDependencies:
+      better-sqlite3: 12.6.2
+      postgres: 3.4.8
+    transitivePeerDependencies:
+      - '@aws-sdk/client-rds-data'
+      - '@cloudflare/workers-types'
+      - '@electric-sql/pglite'
+      - '@libsql/client'
+      - '@libsql/client-wasm'
+      - '@neondatabase/serverless'
+      - '@op-engineering/op-sqlite'
+      - '@opentelemetry/api'
+      - '@planetscale/database'
+      - '@prisma/client'
+      - '@tidbcloud/serverless'
+      - '@types/better-sqlite3'
+      - '@types/pg'
+      - '@types/sql.js'
+      - '@upstash/redis'
+      - '@vercel/postgres'
+      - '@xata.io/client'
+      - bun-types
+      - expo-sqlite
+      - gel
+      - knex
+      - kysely
+      - mysql2
+      - pg
+      - prisma
+      - sql.js
+      - sqlite3
+    optional: true
+
+  '@polpo-ai/server@0.2.4(zod@4.3.6)':
+    dependencies:
+      '@hono/zod-openapi': 1.2.2(hono@4.11.9)(zod@4.3.6)
+      '@polpo-ai/core': 0.2.5
+      hono: 4.11.9
+      nanoid: 5.1.6
+      zod: 4.3.6
+
+  '@polpo-ai/vault-crypto@0.2.4': {}
 
   '@poppinss/colors@4.1.6':
     dependencies:

@@ -1,30 +1,36 @@
 import { getPolpoDir } from "../core/constants.js";
 import { OpenAPIHono } from "@hono/zod-openapi";
 import { cors } from "hono/cors";
+import { streamSimple } from "@mariozechner/pi-ai";
+import { buildSystemPrompt } from "../adapters/engine.js";
 import type { Orchestrator } from "../core/orchestrator.js";
 import type { SSEBridge } from "./sse-bridge.js";
 import { authMiddleware } from "./middleware/auth.js";
 import { errorMiddleware } from "./middleware/error.js";
 import { rateLimitMiddleware } from "./middleware/rate-limit.js";
-import { healthRoutes } from "./routes/health.js";
+// Shared routes from @polpo-ai/server (edge-compatible, single source of truth)
+import {
+  healthRoutes,
+  taskRoutes,
+  missionRoutes,
+  chatRoutes,
+  notificationRoutes,
+  approvalRoutes,
+  playbookRoutes,
+  stateRoutes,
+  completionRoutes,
+  peerRoutes,
+  scheduleRoutes,
+  watcherRoutes,
+  vaultRoutes,
+} from "@polpo-ai/server";
+// Node.js-only routes (stay in src/server/routes/)
 import { publicConfigRoutes, configRoutes } from "./routes/config.js";
 import { filesystemRoutes } from "./routes/filesystem.js";
 import { providerRoutes } from "./routes/providers.js";
-import { taskRoutes } from "./routes/tasks.js";
-import { missionRoutes } from "./routes/missions.js";
 import { agentRoutes } from "./routes/agents.js";
 import { eventRoutes } from "./routes/events.js";
-import { chatRoutes } from "./routes/chat.js";
 import { skillRoutes } from "./routes/skills.js";
-import { notificationRoutes } from "./routes/notifications.js";
-import { approvalRoutes } from "./routes/approvals.js";
-import { playbookRoutes } from "./routes/playbooks.js";
-import { stateRoutes } from "./routes/state.js";
-import { completionRoutes } from "./routes/completions.js";
-import { peerRoutes } from "./routes/peers.js";
-import { scheduleRoutes } from "./routes/schedules.js";
-import { watcherRoutes } from "./routes/watchers.js";
-import { vaultRoutes } from "./routes/vault.js";
 import { authRoutes } from "./routes/auth.js";
 import { fileRoutes } from "./routes/files.js";
 
@@ -91,15 +97,64 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
   // OpenAI-compatible chat completions
   app.route("/v1/chat/completions", completionRoutes(() => ({
     getAgents: () => o.getAgents(),
-    getAgentWorkDir: () => o.getAgentWorkDir(),
-    getPolpoDir: () => o.getPolpoDir(),
     getConfig: () => o.getConfig(),
-    getVaultStore: () => o.getVaultStore(),
     getMemoryStore: () => o.getMemoryStore(),
     getSessionStore: () => o.getSessionStore(),
     getStore: () => o.getStore(),
     emit: (event: string, data: any) => o.emit(event as any, data),
-    orchestrator: o,
+    resolveAgentModel: async (agentConfig: any, reasoning?: string) => {
+      const { resolveModel, resolveApiKeyAsync, buildStreamOpts } = await import("../llm/pi-client.js");
+      const m = resolveModel(agentConfig.model);
+      const apiKey = await resolveApiKeyAsync(m.provider as string);
+      const r = agentConfig.reasoning ?? reasoning;
+      return { model: m, streamOpts: buildStreamOpts(apiKey, r, m.maxTokens) };
+    },
+    buildAgentPrompt: (agentConfig: any) => {
+      return buildSystemPrompt(agentConfig, o.getAgentWorkDir(), o.getPolpoDir());
+    },
+    resolveAgentTools: async (agentConfig: any) => {
+      const { createSystemTools } = await import("../tools/system-tools.js");
+      const { createMemoryTools } = await import("../tools/memory-tools.js");
+      const { resolveAgentVault } = await import("../vault/index.js");
+      const { nanoid } = await import("nanoid");
+      const vaultEntries = await o.getVaultStore()?.getAllForAgent(agentConfig.name);
+      const vault = resolveAgentVault(vaultEntries);
+      const tools: any[] = createSystemTools(o.getAgentWorkDir(), agentConfig.allowedTools, undefined, undefined, vault);
+      const memoryStore = o.getMemoryStore();
+      if (memoryStore) tools.push(...createMemoryTools(memoryStore, agentConfig.name));
+      const toolMap = new Map(tools.map((t: any) => [t.name, t]));
+      const executor = async (name: string, args: Record<string, unknown>): Promise<string> => {
+        const tool = toolMap.get(name);
+        if (!tool) return `Error: Unknown tool "${name}"`;
+        try {
+          const result = await tool.execute(nanoid(), args as any);
+          return result.content.map((c: any) => c.text ?? "").join("");
+        } catch (err: any) {
+          return `Error: ${err.message}`;
+        }
+      };
+      return { tools, executor };
+    },
+    streamLLM: streamSimple as any,
+    resolveOrchestratorContext: async () => {
+      const { buildChatSystemPrompt } = await import("../llm/prompts.js");
+      const { resolveModel, resolveApiKeyAsync, resolveModelSpec, buildStreamOpts } = await import("../llm/pi-client.js");
+      const { ALL_ORCHESTRATOR_TOOLS, executeOrchestratorTool, isInteractive } = await import("../llm/orchestrator-tools.js");
+      const state = await (async () => { try { return await o.getStore()?.getState() ?? null; } catch { return null; } })();
+      const systemPrompt = await buildChatSystemPrompt(o, state);
+      const settings = o.getConfig()?.settings;
+      const modelSpec = resolveModelSpec(settings?.orchestratorModel);
+      const m = resolveModel(modelSpec);
+      const apiKey = await resolveApiKeyAsync(m.provider as string);
+      return {
+        systemPrompt,
+        model: m,
+        streamOpts: buildStreamOpts(apiKey, settings?.reasoning, m.maxTokens),
+        tools: ALL_ORCHESTRATOR_TOOLS,
+        executor: (name: string, args: Record<string, unknown>) => executeOrchestratorTool(name, args, o),
+        isInteractive,
+      };
+    },
   }), opts?.apiKeys));
 
   // ── Authenticated routes (require initialized orchestrator) ───────────
