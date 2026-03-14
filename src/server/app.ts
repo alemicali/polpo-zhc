@@ -26,9 +26,10 @@ import {
   vaultRoutes,
   agentRoutes,
   eventRoutes,
+  configRoutes,
 } from "@polpo-ai/server";
 // Node.js-only routes (stay in src/server/routes/)
-import { publicConfigRoutes, configRoutes } from "./routes/config.js";
+import { publicConfigRoutes } from "./routes/config.js";
 import { filesystemRoutes } from "./routes/filesystem.js";
 import { providerRoutes } from "./routes/providers.js";
 import { skillRoutes } from "./routes/skills.js";
@@ -282,7 +283,10 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
   authed.route("/config", configRoutes(() => ({
     getConfig: () => o.getConfig(),
     reloadConfig: () => o.reloadConfig(),
-    getPolpoDir: () => o.getPolpoDir(),
+    saveConfig: async (config: any) => {
+      const { savePolpoConfig } = await import("../core/config.js");
+      savePolpoConfig(o.getPolpoDir(), config);
+    },
     getNotificationRouter: () => o.getNotificationRouter(),
   })));
 

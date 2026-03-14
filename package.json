@@ -82,7 +82,7 @@
     "@mariozechner/pi-agent-core": "^0.57.1",
     "@mariozechner/pi-ai": "^0.57.1",
     "@polpo-ai/core": "^0.2.4",
-    "@polpo-ai/server": "^0.2.6",
+    "@polpo-ai/server": "^0.2.7",
     "@polpo-ai/vault-crypto": "^0.2.4",
     "@sinclair/typebox": "^0.34.48",
     "@whiskeysockets/baileys": "7.0.0-rc.9",

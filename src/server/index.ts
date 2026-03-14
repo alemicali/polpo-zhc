@@ -144,10 +144,11 @@ export type {
 export {
   taskRoutes, missionRoutes, chatRoutes, notificationRoutes, approvalRoutes,
   playbookRoutes, stateRoutes, completionRoutes, peerRoutes, scheduleRoutes,
-  watcherRoutes, vaultRoutes, healthRoutes, agentRoutes, eventRoutes,
+  watcherRoutes, vaultRoutes, healthRoutes, agentRoutes, eventRoutes, configRoutes,
 } from "@polpo-ai/server";
 // eventRoutes now in @polpo-ai/server (decoupled with EventBridge interface)
 export { skillRoutes } from "./routes/skills.js";
 export { authRoutes } from "./routes/auth.js";
 export { fileRoutes } from "./routes/files.js";
-export { configRoutes, publicConfigRoutes } from "./routes/config.js";
+// configRoutes now in @polpo-ai/server (decoupled with saveConfig dep)
+export { publicConfigRoutes } from "./routes/config.js";
