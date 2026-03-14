@@ -6,13 +6,14 @@
  */
 import { exec } from "node:child_process";
 import type { Shell, ShellOptions, ShellResult } from "@polpo-ai/core/shell";
+import { bashSafeEnv } from "../tools/safe-env.js";
 
 export class NodeShell implements Shell {
   async execute(command: string, options?: ShellOptions): Promise<ShellResult> {
     return new Promise((resolve) => {
       exec(command, {
         cwd: options?.cwd,
-        env: options?.env ? { ...process.env, ...options.env } : undefined,
+        env: { ...bashSafeEnv(), ...options?.env },
         timeout: options?.timeout,
         maxBuffer: 10 * 1024 * 1024, // 10MB
       }, (error, stdout, stderr) => {
