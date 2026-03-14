@@ -17,6 +17,7 @@ import { join } from "node:path";
 import { FileRunStore } from "../stores/file-run-store.js";
 import { spawnEngine } from "../adapters/engine.js";
 import type { RunStore, RunRecord } from "./run-store.js";
+import type { LogStore } from "./log-store.js";
 import type { RunnerConfig, TaskResult } from "./types.js";
 import { notifyRunComplete } from "./notification.js";
 import { sanitizeTranscriptEntry } from "../server/security.js";
@@ -115,14 +116,20 @@ class RunActivityLog {
   }
 }
 
-async function createRunStore(config: RunnerConfig): Promise<RunStore> {
+interface RunnerStores {
+  runStore: RunStore;
+  logStore?: LogStore;
+}
+
+async function createStores(config: RunnerConfig): Promise<RunnerStores> {
   if (config.storage === "postgres" && config.databaseUrl) {
     const { createPgStores } = await import("@polpo-ai/drizzle");
     const postgres = (await import("postgres")).default;
     const { drizzle } = await import("drizzle-orm/postgres-js");
     const sql = postgres(config.databaseUrl);
     const db = drizzle(sql);
-    return createPgStores(db).runStore;
+    const stores = createPgStores(db);
+    return { runStore: stores.runStore, logStore: stores.logStore };
   }
   if (config.storage === "sqlite") {
     const { createSqliteStores } = await import("@polpo-ai/drizzle");
@@ -138,16 +145,24 @@ async function createRunStore(config: RunnerConfig): Promise<RunStore> {
     ensureSqliteSchema(sqlite);
     const { drizzle } = await import("drizzle-orm/better-sqlite3");
     const db = drizzle(sqlite);
-    return createSqliteStores(db).runStore;
+    const stores = createSqliteStores(db);
+    return { runStore: stores.runStore, logStore: stores.logStore };
   }
-  return new FileRunStore(config.polpoDir);
+  return { runStore: new FileRunStore(config.polpoDir) };
 }
 
 async function main(): Promise<void> {
   const isDbMode = process.argv.includes("--run-id");
   const config = isDbMode ? await readConfigFromDb() : readConfigFromFile();
-  const runStore = await createRunStore(config);
+  const { runStore, logStore } = await createStores(config);
   const actLog = new RunActivityLog(config.polpoDir, config.runId, config.taskId, config.agent.name);
+
+  // When LogStore is available (postgres/sqlite), persist transcript to DB.
+  // This ensures transcript survives sandbox destruction in cloud mode.
+  let logSessionId: string | undefined;
+  if (logStore) {
+    logSessionId = await logStore.startSession();
+  }
 
   const now = new Date().toISOString();
   const initialRecord: RunRecord = {
@@ -225,7 +240,18 @@ async function main(): Promise<void> {
     };
     handle = spawnEngine(config.agent, config.task, config.cwd, spawnCtx);
     // Wire transcript persistence — every agent message gets written to the run log
-    handle.onTranscript = (entry) => actLog.logTranscript(entry);
+    handle.onTranscript = (entry) => {
+      actLog.logTranscript(entry);
+      // Persist transcript to DB when LogStore is available (cloud mode)
+      if (logStore && logSessionId) {
+        const event = entry.role === "assistant" ? "transcript:assistant"
+          : entry.role === "tool_result" ? "transcript:tool_result"
+          : entry.role === "tool_use" ? "transcript:tool_use"
+          : `transcript:${entry.role ?? "unknown"}`;
+        logStore.append({ ts: new Date().toISOString(), event, data: sanitizeTranscriptEntry(entry) })
+          .catch(() => {}); // best-effort, don't block engine
+      }
+    };
     actLog.logEvent("spawned");
   } catch (err) {
     const result = errorResult(err);
