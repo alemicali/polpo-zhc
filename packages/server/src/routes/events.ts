@@ -1,11 +1,22 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { streamSSE } from "hono/streaming";
 import { nanoid } from "nanoid";
-import type { SSEBridge, SSEClient } from "../sse-bridge.js";
+
+/** SSE client interface — implemented by the consumer's bridge. */
+export interface EventClient {
+  id: string;
+  send(event: string, data: unknown, eventId: string): void;
+  close(): void;
+}
+
+/** Event bridge interface — the consumer provides the event source. */
+export interface EventBridge {
+  addClient(client: EventClient, lastEventId?: string): void;
+  removeClient(id: string): void;
+}
 
 // ── Route definitions ─────────────────────────────────────────────────
 
-// Document the SSE endpoint for OpenAPI (actual handler uses regular app.get)
 const _sseEventStreamRoute = createRoute({
   method: "get",
   path: "/",
@@ -28,12 +39,11 @@ const _sseEventStreamRoute = createRoute({
 
 /**
  * SSE streaming event routes.
+ * Accepts any EventBridge implementation (self-hosted SSEBridge, cloud EventEmitter adapter, etc.)
  */
-export function eventRoutes(sseBridge: SSEBridge): OpenAPIHono {
+export function eventRoutes(bridge: EventBridge): OpenAPIHono {
   const app = new OpenAPIHono();
 
-  // GET /events — SSE event stream
-  // NOTE: SSE streaming cannot use app.openapi() because it returns a streaming response, not JSON.
   app.get("/", (c) => {
     const lastEventId = c.req.header("last-event-id");
     const filterParam = c.req.query("filter");
@@ -42,10 +52,9 @@ export function eventRoutes(sseBridge: SSEBridge): OpenAPIHono {
     return streamSSE(c, async (stream) => {
       const clientId = nanoid();
 
-      const client: SSEClient = {
+      const client: EventClient = {
         id: clientId,
         send(event: string, data: unknown, eventId: string) {
-          // Apply event filter if specified
           if (filters && !matchesFilter(event, filters)) return;
           stream.writeSSE({
             event,
@@ -58,25 +67,22 @@ export function eventRoutes(sseBridge: SSEBridge): OpenAPIHono {
         },
       };
 
-      sseBridge.addClient(client, lastEventId ?? undefined);
+      bridge.addClient(client, lastEventId ?? undefined);
 
-      // Keep connection alive with periodic comments
       const heartbeat = setInterval(() => {
         try {
           stream.writeSSE({ event: "heartbeat", data: "" });
-        } catch { /* client disconnected */
+        } catch {
           clearInterval(heartbeat);
-          sseBridge.removeClient(clientId);
+          bridge.removeClient(clientId);
         }
       }, 30_000);
 
-      // Clean up when stream closes
       stream.onAbort(() => {
         clearInterval(heartbeat);
-        sseBridge.removeClient(clientId);
+        bridge.removeClient(clientId);
       });
 
-      // Block to keep stream open
       await new Promise<void>((resolve) => {
         stream.onAbort(() => resolve());
       });
@@ -91,7 +97,7 @@ function matchesFilter(event: string, filters: string[]): boolean {
   for (const filter of filters) {
     if (filter === event) return true;
     if (filter.endsWith(":*")) {
-      const prefix = filter.slice(0, -1); // "task:"
+      const prefix = filter.slice(0, -1);
       if (event.startsWith(prefix)) return true;
     }
     if (filter === "*") return true;

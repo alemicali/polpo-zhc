@@ -32,8 +32,8 @@ importers:
         specifier: ^0.2.4
         version: 0.2.5
       '@polpo-ai/server':
-        specifier: ^0.2.5
-        version: 0.2.5(zod@4.3.6)
+        specifier: ^0.2.6
+        version: 0.2.6(zod@4.3.6)
       '@polpo-ai/vault-crypto':
         specifier: ^0.2.4
         version: 0.2.4
@@ -2237,8 +2237,8 @@ packages:
       postgres:
         optional: true
 
-  '@polpo-ai/server@0.2.5':
-    resolution: {integrity: sha512-mdYk/7m87MkRpm8N5zL9IbyrwgXW7Y+/K62MBF5SBo92u/vc+OqlRu1aKTauqUoI6Zu6UvHgaSlXkOBSDWwrXg==}
+  '@polpo-ai/server@0.2.6':
+    resolution: {integrity: sha512-jcQupyWIhufme9RRhgDylmY0zaISpx+nIyE9HQeINtvBUBrFSZN2MwUjR6j90dPd/PpqBFiD+VRO9QV2Xl54Zg==}
     peerDependencies:
       zod: '>=3.0.0 || >=4.0.0'
 
@@ -11027,7 +11027,7 @@ snapshots:
       - sqlite3
     optional: true
 
-  '@polpo-ai/server@0.2.5(zod@4.3.6)':
+  '@polpo-ai/server@0.2.6(zod@4.3.6)':
     dependencies:
       '@hono/zod-openapi': 1.2.2(hono@4.11.9)(zod@4.3.6)
       '@polpo-ai/core': 0.2.5

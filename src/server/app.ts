@@ -25,12 +25,12 @@ import {
   watcherRoutes,
   vaultRoutes,
   agentRoutes,
+  eventRoutes,
 } from "@polpo-ai/server";
 // Node.js-only routes (stay in src/server/routes/)
 import { publicConfigRoutes, configRoutes } from "./routes/config.js";
 import { filesystemRoutes } from "./routes/filesystem.js";
 import { providerRoutes } from "./routes/providers.js";
-import { eventRoutes } from "./routes/events.js";
 import { skillRoutes } from "./routes/skills.js";
 import { authRoutes } from "./routes/auth.js";
 import { fileRoutes } from "./routes/files.js";

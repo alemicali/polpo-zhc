@@ -23,6 +23,7 @@ export { stateRoutes } from "./routes/state.js";
 export { healthRoutes } from "./routes/health.js";
 export { completionRoutes, type CompletionRouteDeps } from "./routes/completions.js";
 export { agentRoutes } from "./routes/agents.js";
+export { eventRoutes, type EventBridge, type EventClient } from "./routes/events.js";
 
 // Dependency types
 export type {
