@@ -38,6 +38,10 @@ export type { AgentStore } from "./agent-store.js";
 export type { VaultStore } from "./vault-store.js";
 export type { PlaybookStore } from "./playbook-store.js";
 
+// ── FileSystem & Shell Abstractions ──────────────────────────────────────
+export type { FileSystem, FileStat } from "./filesystem.js";
+export type { Shell, ShellOptions, ShellResult } from "./shell.js";
+
 // ── EventBus Interface ──────────────────────────────────────────────────
 export type { EventBus } from "./event-bus.js";
 

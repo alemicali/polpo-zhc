@@ -106,6 +106,14 @@
       "types": "./dist/cron.d.ts",
       "import": "./dist/cron.js"
     },
+    "./filesystem": {
+      "types": "./dist/filesystem.d.ts",
+      "import": "./dist/filesystem.js"
+    },
+    "./shell": {
+      "types": "./dist/shell.d.ts",
+      "import": "./dist/shell.js"
+    },
     "./orchestrator-context": {
       "types": "./dist/orchestrator-context.d.ts",
       "import": "./dist/orchestrator-context.js"
