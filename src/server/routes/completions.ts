@@ -32,7 +32,7 @@ import type { AskUserQuestion } from "../../core/types.js";
 import type { ToolCallInfo } from "../../core/session-store.js";
 import { dirname } from "node:path";
 import { buildSystemPrompt } from "../../adapters/engine.js";
-import { createCodingTools, createAllTools } from "../../tools/coding-tools.js";
+import { createSystemTools, createAllTools } from "../../tools/system-tools.js";
 import { createInkTools } from "../../tools/ink-tools.js";
 import { createMemoryTools } from "../../tools/memory-tools.js";
 import { agentMemoryScope } from "@polpo-ai/core";
@@ -381,7 +381,7 @@ export function completionRoutes(getDeps: () => {
       // Build agent tools (core coding tools + ink tools)
       const vaultEntries = await deps.getVaultStore()?.getAllForAgent(agentConfig.name);
       const vault = resolveAgentVault(vaultEntries);
-      agentToolInstances = createCodingTools(cwd, agentConfig.allowedTools, undefined, undefined, vault);
+      agentToolInstances = createSystemTools(cwd, agentConfig.allowedTools, undefined, undefined, vault);
       agentToolInstances.push(...createInkTools(polpoDir, agentConfig.allowedTools));
 
       // Load extended tools if configured (browser, email, image, etc.)

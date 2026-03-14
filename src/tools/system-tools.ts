@@ -321,9 +321,9 @@ export function expandToolWildcards(allowedTools: string[], allNames: readonly s
 // === Factory ===
 
 /** Tool name to filter by in allowedTools config */
-type CodingToolName = "read" | "write" | "edit" | "bash" | "glob" | "grep" | "ls";
+type SystemToolName = "read" | "write" | "edit" | "bash" | "glob" | "grep" | "ls";
 
-const ALL_TOOL_NAMES: CodingToolName[] = ["read", "write", "edit", "bash", "glob", "grep", "ls"];
+const ALL_TOOL_NAMES: SystemToolName[] = ["read", "write", "edit", "bash", "glob", "grep", "ls"];
 
 /**
  * Create the standard set of coding tools scoped to a working directory.
@@ -336,12 +336,12 @@ const ALL_TOOL_NAMES: CodingToolName[] = ["read", "write", "edit", "bash", "glob
  * - http_fetch, http_download
  * - vault_get, vault_list (when vault is provided)
  */
-export function createCodingTools(cwd: string, allowedTools?: string[], allowedPaths?: string[], outputDir?: string, vault?: ResolvedVault, fs?: FileSystem, shell?: Shell): AgentTool<any>[] {
+export function createSystemTools(cwd: string, allowedTools?: string[], allowedPaths?: string[], outputDir?: string, vault?: ResolvedVault, fs?: FileSystem, shell?: Shell): AgentTool<any>[] {
   const _fs = fs ?? new NodeFileSystem();
   const _shell = shell ?? new NodeShell();
   const sandbox = resolveAllowedPaths(cwd, allowedPaths);
 
-  const factories: Record<CodingToolName, () => AgentTool<any>> = {
+  const factories: Record<SystemToolName, () => AgentTool<any>> = {
     read: () => createReadTool(cwd, sandbox, _fs),
     write: () => createWriteTool(cwd, sandbox, _fs),
     edit: () => createEditTool(cwd, sandbox, _fs),
@@ -403,7 +403,7 @@ export type { PhoneToolName } from "./phone-tools.js";
 export type { InkToolName } from "./ink-tools.js";
 
 /** All known tool names across all categories */
-export type ExtendedToolName = CodingToolName
+export type ExtendedToolName = SystemToolName
   | import("./browser-tools.js").BrowserToolName
   | import("./http-tools.js").HttpToolName
   | import("./email-tools.js").EmailToolName
@@ -497,7 +497,7 @@ export async function createAllTools(options: CreateAllToolsOptions): Promise<Ag
     allowedTools?.some(a => names.some(n => n === a.toLowerCase()));
 
   // Core coding tools (always included unless filtered out) — includes vault_get/vault_list
-  tools.push(...createCodingTools(cwd, allowedTools, allowedPaths, options.outputDir, options.vault, options.fs, options.shell));
+  tools.push(...createSystemTools(cwd, allowedTools, allowedPaths, options.outputDir, options.vault, options.fs, options.shell));
 
   // Ink tools (always included when polpoDir is available)
   if (options.polpoDir) {
@@ -557,7 +557,7 @@ export async function createAllTools(options: CreateAllToolsOptions): Promise<Ag
     tools.push(...createPhoneTools(options.vault, allowedTools));
   }
 
-  // HTTP, register_outcome, and vault are already included via createCodingTools() above — no need to add again
+  // HTTP, register_outcome, and vault are already included via createSystemTools() above — no need to add again
 
   return tools;
 }

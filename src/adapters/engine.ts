@@ -24,7 +24,7 @@ import { Agent } from "@mariozechner/pi-agent-core";
 import type { AgentEvent } from "@mariozechner/pi-agent-core";
 import { join, sep } from "node:path";
 import { resolveModel, resolveApiKeyAsync, enforceModelAllowlist } from "../llm/pi-client.js";
-import { createCodingTools, createAllTools } from "../tools/coding-tools.js";
+import { createSystemTools, createAllTools } from "../tools/system-tools.js";
 import { createInkTools as createInkToolsFn } from "../tools/ink-tools.js";
 import { loadAgentSkills, buildSkillPrompt } from "../llm/skills.js";
 import { nanoid } from "nanoid";
@@ -466,7 +466,7 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
 
   // Vault resolution is async — will be resolved in handle.done before tools are used.
   // Start with core coding tools WITHOUT vault; vault tools are added in the async phase.
-  const codingTools = createCodingTools(cwd, agentConfig.allowedTools, effectiveAllowedPaths, outputDir, undefined);
+  const codingTools = createSystemTools(cwd, agentConfig.allowedTools, effectiveAllowedPaths, outputDir, undefined);
 
   // Ink tools (always available — search, browse, install from Ink Hub)
   if (ctx?.polpoDir) {
@@ -597,7 +597,7 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
       const vault = resolveAgentVault(vaultEntries);
 
       // Rebuild tools with vault resolved
-      let allTools = createCodingTools(cwd, agentConfig.allowedTools, effectiveAllowedPaths, outputDir, vault);
+      let allTools = createSystemTools(cwd, agentConfig.allowedTools, effectiveAllowedPaths, outputDir, vault);
       if (ctx?.polpoDir) {
         allTools.push(...createInkToolsFn(ctx.polpoDir, agentConfig.allowedTools));
       }

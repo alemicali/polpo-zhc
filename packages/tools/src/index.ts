@@ -12,7 +12,7 @@
  */
 
 // Core tool factory
-export { createCodingTools, createAllTools, matchToolPattern, expandToolWildcards } from "./coding-tools.js";
+export { createSystemTools, createSystemTools as createCodingTools, createAllTools, matchToolPattern, expandToolWildcards } from "./system-tools.js";
 
 // Individual tool factories (for custom composition)
 export { createOutcomeTools } from "./outcome-tools.js";

@@ -66,8 +66,8 @@ export { WebhookChannel } from "./notifications/channels/webhook.js";
 export { safeEnv, bashSafeEnv } from "./tools/safe-env.js";
 
 // Extended Tools
-export { createCodingTools, createAllTools, ALL_EXTENDED_TOOL_NAMES } from "./tools/coding-tools.js";
-export type { ExtendedToolName, CreateAllToolsOptions } from "./tools/coding-tools.js";
+export { createSystemTools, createSystemTools as createCodingTools, createAllTools, ALL_EXTENDED_TOOL_NAMES } from "./tools/system-tools.js";
+export type { ExtendedToolName, CreateAllToolsOptions } from "./tools/system-tools.js";
 export { createBrowserTools, ALL_BROWSER_TOOL_NAMES } from "./tools/browser-tools.js";
 export { createHttpTools, ALL_HTTP_TOOL_NAMES } from "./tools/http-tools.js";
 export { createExcelTools, ALL_EXCEL_TOOL_NAMES } from "./tools/excel-tools.js";
