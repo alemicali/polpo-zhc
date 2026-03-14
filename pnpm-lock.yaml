@@ -52,6 +52,9 @@ importers:
       exceljs:
         specifier: ^4.4.0
         version: 4.4.0
+      execa:
+        specifier: ^9.6.1
+        version: 9.6.1
       hono:
         specifier: ^4.11.9
         version: 4.11.9
@@ -189,6 +192,24 @@ importers:
       typescript:
         specifier: ^5.7.0
         version: 5.9.3
+
+  packages/server:
+    dependencies:
+      '@hono/zod-openapi':
+        specifier: '>=1.0.0'
+        version: 1.2.2(hono@4.11.9)(zod@4.3.6)
+      '@polpo-ai/core':
+        specifier: '>=0.2.0'
+        version: 0.2.3
+      hono:
+        specifier: '>=4.0.0'
+        version: 4.11.9
+      nanoid:
+        specifier: '>=5.0.0'
+        version: 5.1.6
+      zod:
+        specifier: '>=3.0.0 || >=4.0.0'
+        version: 4.3.6
 
   packages/vault-crypto:
     devDependencies:
@@ -2153,6 +2174,10 @@ packages:
   '@pkgjs/parseargs@0.11.0':
     resolution: {integrity: sha512-+1VkjdD0QBLPodGrJUeqarH8VAIvQODIbwh9XpP5Syisf7YoQgsJKPNFoqqLQlu+VQ/tVSshMR6loPMn8U+dPg==}
     engines: {node: '>=14'}
+
+  '@polpo-ai/core@0.2.3':
+    resolution: {integrity: sha512-Pbe3+cgKDQXP2mpKkIgmwF1Sif8FalGwdP78GwOPftPFGiD3hhNfmsJ7/ed/aCBnQnC1DQ99HDYnHBP3NWUmpQ==}
+    engines: {node: '>=18.0.0'}
 
   '@poppinss/colors@4.1.6':
     resolution: {integrity: sha512-H9xkIdFswbS8n1d6vmRd8+c10t2Qe+rZITbbDHHkQixH5+2x1FDGmi/0K+WgWiqQFKPSlIYB7jlH6Kpfn6Fleg==}
@@ -10890,6 +10915,11 @@ snapshots:
 
   '@pkgjs/parseargs@0.11.0':
     optional: true
+
+  '@polpo-ai/core@0.2.3':
+    dependencies:
+      nanoid: 5.1.6
+      zod: 4.3.6
 
   '@poppinss/colors@4.1.6':
     dependencies:
