@@ -32,8 +32,8 @@ importers:
         specifier: ^0.2.4
         version: 0.2.5
       '@polpo-ai/server':
-        specifier: ^0.2.4
-        version: 0.2.4(zod@4.3.6)
+        specifier: ^0.2.5
+        version: 0.2.5(zod@4.3.6)
       '@polpo-ai/vault-crypto':
         specifier: ^0.2.4
         version: 0.2.4
@@ -202,8 +202,8 @@ importers:
         specifier: '>=1.0.0'
         version: 1.2.2(hono@4.11.9)(zod@4.3.6)
       '@polpo-ai/core':
-        specifier: '>=0.2.0'
-        version: 0.2.3
+        specifier: ^0.2.5
+        version: 0.2.5
       hono:
         specifier: '>=4.0.0'
         version: 4.11.9
@@ -2221,10 +2221,6 @@ packages:
     resolution: {integrity: sha512-+1VkjdD0QBLPodGrJUeqarH8VAIvQODIbwh9XpP5Syisf7YoQgsJKPNFoqqLQlu+VQ/tVSshMR6loPMn8U+dPg==}
     engines: {node: '>=14'}
 
-  '@polpo-ai/core@0.2.3':
-    resolution: {integrity: sha512-Pbe3+cgKDQXP2mpKkIgmwF1Sif8FalGwdP78GwOPftPFGiD3hhNfmsJ7/ed/aCBnQnC1DQ99HDYnHBP3NWUmpQ==}
-    engines: {node: '>=18.0.0'}
-
   '@polpo-ai/core@0.2.5':
     resolution: {integrity: sha512-3KN3BTXM3qHxjt5D5g1CEsoLicGBiTVrQUHdK6TxnEDccx13zX4V7mzpLVKj/0d4PbuhICyx9EZLa0KZNDMa7A==}
     engines: {node: '>=18.0.0'}
@@ -2241,8 +2237,8 @@ packages:
       postgres:
         optional: true
 
-  '@polpo-ai/server@0.2.4':
-    resolution: {integrity: sha512-T5o/XtnP+Z8Ku/9vP42EAcJTbQ/I/py4SSV67kNCcRUpxRxB7xKuOpFEhQmPJC7nW+u5ebf5kL4biaoE/xrhrw==}
+  '@polpo-ai/server@0.2.5':
+    resolution: {integrity: sha512-mdYk/7m87MkRpm8N5zL9IbyrwgXW7Y+/K62MBF5SBo92u/vc+OqlRu1aKTauqUoI6Zu6UvHgaSlXkOBSDWwrXg==}
     peerDependencies:
       zod: '>=3.0.0 || >=4.0.0'
 
@@ -10987,11 +10983,6 @@ snapshots:
   '@pkgjs/parseargs@0.11.0':
     optional: true
 
-  '@polpo-ai/core@0.2.3':
-    dependencies:
-      nanoid: 5.1.6
-      zod: 4.3.6
-
   '@polpo-ai/core@0.2.5':
     dependencies:
       nanoid: 5.1.6
@@ -11036,7 +11027,7 @@ snapshots:
       - sqlite3
     optional: true
 
-  '@polpo-ai/server@0.2.4(zod@4.3.6)':
+  '@polpo-ai/server@0.2.5(zod@4.3.6)':
     dependencies:
       '@hono/zod-openapi': 1.2.2(hono@4.11.9)(zod@4.3.6)
       '@polpo-ai/core': 0.2.5

@@ -144,10 +144,8 @@ export type {
 export {
   taskRoutes, missionRoutes, chatRoutes, notificationRoutes, approvalRoutes,
   playbookRoutes, stateRoutes, completionRoutes, peerRoutes, scheduleRoutes,
-  watcherRoutes, vaultRoutes, healthRoutes,
+  watcherRoutes, vaultRoutes, healthRoutes, agentRoutes,
 } from "@polpo-ai/server";
-// Node.js-only route factories
-export { agentRoutes } from "./routes/agents.js";
 export { eventRoutes } from "./routes/events.js";
 export { skillRoutes } from "./routes/skills.js";
 export { authRoutes } from "./routes/auth.js";

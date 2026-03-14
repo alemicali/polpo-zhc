@@ -3,6 +3,7 @@ import { OpenAPIHono } from "@hono/zod-openapi";
 import { cors } from "hono/cors";
 import { streamSimple } from "@mariozechner/pi-ai";
 import { buildSystemPrompt } from "../adapters/engine.js";
+import { NodeFileSystem } from "../adapters/node-filesystem.js";
 import type { Orchestrator } from "../core/orchestrator.js";
 import type { SSEBridge } from "./sse-bridge.js";
 import { authMiddleware } from "./middleware/auth.js";
@@ -23,12 +24,12 @@ import {
   scheduleRoutes,
   watcherRoutes,
   vaultRoutes,
+  agentRoutes,
 } from "@polpo-ai/server";
 // Node.js-only routes (stay in src/server/routes/)
 import { publicConfigRoutes, configRoutes } from "./routes/config.js";
 import { filesystemRoutes } from "./routes/filesystem.js";
 import { providerRoutes } from "./routes/providers.js";
-import { agentRoutes } from "./routes/agents.js";
 import { eventRoutes } from "./routes/events.js";
 import { skillRoutes } from "./routes/skills.js";
 import { authRoutes } from "./routes/auth.js";
@@ -239,6 +240,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     taskStore: o.getStore(),
     runStore: o.getRunStore(),
     polpoDir: o.getPolpoDir(),
+    fs: new NodeFileSystem(),
   })));
 
   authed.route("/events", eventRoutes(sseBridge));

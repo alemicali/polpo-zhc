@@ -1,6 +1,6 @@
 {
   "name": "@polpo-ai/server",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "description": "Polpo API route factories — edge-compatible Hono routes for tasks, agents, missions, vault, and more",
   "type": "module",
   "main": "dist/index.js",
@@ -21,7 +21,7 @@
   ],
   "dependencies": {
     "@hono/zod-openapi": ">=1.0.0",
-    "@polpo-ai/core": ">=0.2.0",
+    "@polpo-ai/core": "^0.2.5",
     "hono": ">=4.0.0",
     "nanoid": ">=5.0.0"
   },
