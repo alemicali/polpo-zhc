@@ -86,8 +86,8 @@ export interface OrchestratorContext {
   /** Build execution summary from JSONL log. */
   readonly buildExecutionSummary?: (logPath: string) => { summary: string; toolsSummary?: string };
 
-  /** Validate that provider API keys are configured. */
-  readonly validateProviderKeys?: (config: PolpoConfig) => { valid: boolean; missing: string[] };
+  /** Validate that provider API keys are configured for the given model specs. */
+  readonly validateProviderKeys?: (modelSpecs: string[]) => { provider: string; modelSpec: string }[];
 
   // ── Optional store ports (injected by shell for non-file backends) ──
 

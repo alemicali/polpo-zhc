@@ -153,6 +153,10 @@
     "./scheduler": {
       "types": "./dist/scheduler.d.ts",
       "import": "./dist/scheduler.js"
+    },
+    "./mission-executor": {
+      "types": "./dist/mission-executor.d.ts",
+      "import": "./dist/mission-executor.js"
     }
   },
   "sideEffects": false,

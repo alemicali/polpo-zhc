@@ -384,6 +384,7 @@ export class Orchestrator extends TypedEmitter {
       },
       findLogForTask: (polpoDir, taskId, runId) => findLogForTask(polpoDir, taskId, runId),
       buildExecutionSummary: (logPath) => buildExecutionSummary(logPath),
+      validateProviderKeys: (modelSpecs) => validateProviderKeys(modelSpecs),
 
       // Inject Drizzle stores when storage is "sqlite" or "postgres"
       ...(this.drizzleStores ? {

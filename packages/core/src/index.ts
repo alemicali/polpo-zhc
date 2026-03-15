@@ -69,6 +69,9 @@ export { QualityController } from "./quality-controller.js";
 export { SLAMonitor } from "./sla-monitor.js";
 export { Scheduler } from "./scheduler.js";
 
+// ── MissionExecutor ─────────────────────────────────────────────────────
+export { MissionExecutor } from "./mission-executor.js";
+
 // ── OrchestratorEngine ──────────────────────────────────────────────────
 export { OrchestratorEngine } from "./orchestrator-engine.js";
 export type {
