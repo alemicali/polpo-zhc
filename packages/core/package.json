@@ -1,6 +1,6 @@
 {
   "name": "@polpo-ai/core",
-  "version": "0.2.5",
+  "version": "0.3.0",
   "description": "Pure business logic, types, schemas, and store interfaces for the Polpo AI agent orchestration platform",
   "type": "module",
   "main": "dist/index.js",
@@ -173,6 +173,22 @@
     "./question-detector": {
       "types": "./dist/question-detector.d.ts",
       "import": "./dist/question-detector.js"
+    },
+    "./assessor": {
+      "types": "./dist/assessor.d.ts",
+      "import": "./dist/assessor.js"
+    },
+    "./assessment-scoring": {
+      "types": "./dist/assessment-scoring.d.ts",
+      "import": "./dist/assessment-scoring.js"
+    },
+    "./assessment-schemas": {
+      "types": "./dist/assessment-schemas.d.ts",
+      "import": "./dist/assessment-schemas.js"
+    },
+    "./retry": {
+      "types": "./dist/retry.d.ts",
+      "import": "./dist/retry.js"
     }
   },
   "sideEffects": false,

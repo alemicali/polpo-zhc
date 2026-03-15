@@ -94,3 +94,9 @@ export { looksLikeQuestion, classifyAsQuestion } from "./question-detector.js";
 
 // ── Adapter Types ────────────────────────────────────────────────────────
 export type { AgentHandle, SpawnContext } from "./adapter.js";
+
+// ── Assessment (pure — no Node.js deps) ─────────────────────────────────
+export { assessTask, runCheck, runMetric, type AssessmentDeps, type CheckProgressEvent as AssessorCheckProgressEvent } from "./assessor.js";
+export { DEFAULT_DIMENSIONS, buildRubricSection, computeWeightedScore, computeMedianScores } from "./assessment-scoring.js";
+export { validateReviewPayload, ReviewPayloadSchema, ReviewScoreSchema, REVIEW_JSON_SCHEMA, type ValidatedReviewPayload } from "./assessment-schemas.js";
+export { withRetry, isTransientError, type RetryOptions } from "./retry.js";
