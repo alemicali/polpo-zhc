@@ -9,8 +9,8 @@
 import { join, dirname, resolve, relative } from "node:path";
 import type { FileSystem } from "@polpo-ai/core/filesystem";
 import type { Shell } from "@polpo-ai/core/shell";
-import { NodeFileSystem } from "./adapters/node-filesystem.js";
-import { NodeShell } from "./adapters/node-shell.js";
+// NodeFileSystem and NodeShell are loaded lazily to avoid pulling in
+// node:fs and execa when the consumer provides their own implementations.
 import { Type } from "@sinclair/typebox";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 import { resolveAllowedPaths, assertPathAllowed } from "./path-sandbox.js";
@@ -339,8 +339,18 @@ const ALL_TOOL_NAMES: SystemToolName[] = ["read", "write", "edit", "bash", "glob
  * - vault_get, vault_list (when vault is provided)
  */
 export function createSystemTools(cwd: string, allowedTools?: string[], allowedPaths?: string[], outputDir?: string, vault?: ResolvedVault, fs?: FileSystem, shell?: Shell): AgentTool<any>[] {
-  const _fs = fs ?? new NodeFileSystem();
-  const _shell = shell ?? new NodeShell();
+  // Lazy-load defaults only when no implementation is provided
+  // This avoids importing node:fs/execa when the consumer provides SandboxProxyFS/Shell
+  if (!fs) {
+    const { NodeFileSystem } = require("./adapters/node-filesystem.js");
+    fs = new NodeFileSystem();
+  }
+  if (!shell) {
+    const { NodeShell } = require("./adapters/node-shell.js");
+    shell = new NodeShell();
+  }
+  const _fs = fs!;
+  const _shell = shell!;
   const sandbox = resolveAllowedPaths(cwd, allowedPaths);
 
   const factories: Record<SystemToolName, () => AgentTool<any>> = {
