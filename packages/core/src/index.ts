@@ -42,6 +42,9 @@ export type { PlaybookStore } from "./playbook-store.js";
 export type { FileSystem, FileStat } from "./filesystem.js";
 export type { Shell, ShellOptions, ShellResult } from "./shell.js";
 
+// ── Spawner Abstraction ─────────────────────────────────────────────────
+export type { Spawner, SpawnResult } from "./spawner.js";
+
 // ── EventBus Interface ──────────────────────────────────────────────────
 export type { EventBus } from "./event-bus.js";
 
@@ -65,6 +68,18 @@ export { TaskWatcherManager } from "./task-watcher.js";
 export { QualityController } from "./quality-controller.js";
 export { SLAMonitor } from "./sla-monitor.js";
 export { Scheduler } from "./scheduler.js";
+
+// ── OrchestratorEngine ──────────────────────────────────────────────────
+export { OrchestratorEngine } from "./orchestrator-engine.js";
+export type {
+  OrchestratorEngineDeps,
+  TaskRunnerPort,
+  AssessmentOrchestratorPort,
+  MissionExecutorPort,
+  DeadlockResolverPort,
+  DeadlockFacade,
+  TaskWatcherManagerPort,
+} from "./orchestrator-engine.js";
 
 // ── Adapter Types ────────────────────────────────────────────────────────
 export type { AgentHandle, SpawnContext } from "./adapter.js";

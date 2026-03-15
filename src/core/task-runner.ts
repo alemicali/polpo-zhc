@@ -1,7 +1,5 @@
 import { join, dirname } from "node:path";
-import { mkdirSync, existsSync, writeFileSync, readFileSync } from "node:fs";
-import { spawn as cpSpawn } from "node:child_process";
-import { fileURLToPath } from "node:url";
+import { existsSync, readFileSync } from "node:fs";
 import { nanoid } from "nanoid";
 import type { OrchestratorContext } from "./orchestrator-context.js";
 import type { Task, TaskResult, RunnerConfig } from "./types.js";
@@ -178,7 +176,7 @@ export class TaskRunner {
           this.ctx.emitter.emit("log", { level: "warn", message: `[${run.taskId}] Timed out (${Math.round(elapsed / 1000)}s)` });
           this.ctx.emitter.emit("task:timeout", { taskId: run.taskId, elapsed, timeout });
           if (run.pid > 0) {
-            try { process.kill(run.pid, "SIGTERM"); } catch { /* already dead */ }
+            try { this.ctx.spawner.kill(run.pid); } catch { /* already dead */ }
           }
           // Mark run as killed so we don't retry every tick
           await this.ctx.runStore.completeRun(run.id, "killed", {
@@ -197,7 +195,7 @@ export class TaskRunner {
           this.ctx.emitter.emit("log", { level: "error", message: `[${run.taskId}] Agent unresponsive for ${Math.round(idle / 1000)}s — killing` });
           this.ctx.emitter.emit("agent:stale", { taskId: run.taskId, agentName: run.agentName, idleMs: idle, action: "killed" });
           if (run.pid > 0) {
-            try { process.kill(run.pid, "SIGTERM"); } catch { /* already dead */ }
+            try { this.ctx.spawner.kill(run.pid); } catch { /* already dead */ }
           }
           // Mark run as killed so we don't retry every tick
           await this.ctx.runStore.completeRun(run.id, "killed", {
@@ -331,8 +329,7 @@ export class TaskRunner {
   }
 
   isProcessAlive(pid: number): boolean {
-    if (pid <= 0) return false;
-    try { process.kill(pid, 0); return true; } catch { return false; /* process not found */ }
+    return this.ctx.spawner.isAlive(pid);
   }
 
   async spawnForTask(task: Task): Promise<void> {
@@ -383,15 +380,6 @@ export class TaskRunner {
 
     // Create per-task output directory for deliverables
     const outputDir = join(this.ctx.polpoDir, "output", task.id);
-    if (!existsSync(outputDir)) {
-      mkdirSync(outputDir, { recursive: true });
-    }
-
-    const tmpDir = join(this.ctx.polpoDir, "tmp");
-    if (!existsSync(tmpDir)) {
-      mkdirSync(tmpDir, { recursive: true });
-    }
-    const configPath = join(tmpDir, `run-${runId}.json`);
 
     // Inject context into task description for agent awareness.
     // Context is prepended using XML-like tags that the agent prompt can reference.
@@ -484,44 +472,19 @@ export class TaskRunner {
     };
 
     try {
-      writeFileSync(configPath, JSON.stringify(runnerConfig, null, 2), { mode: 0o600 });
-
-      // Resolve runner path: prefer compiled .js, fall back to .ts via tsx (dev mode)
-      const baseDir = dirname(fileURLToPath(import.meta.url));
-      const runnerJs = join(baseDir, "runner.js");
-      const runnerTs = join(baseDir, "runner.ts");
-      const useTs = !existsSync(runnerJs) && existsSync(runnerTs);
-      const runnerPath = useTs ? runnerTs : runnerJs;
-
-      let spawnArgs: string[];
-      if (useTs) {
-        // Dev mode: use tsx to run TypeScript directly.
-        // Resolve tsx the same way npx does — find the CLI entry point.
-        const tsxCli = join(baseDir, "../../node_modules/tsx/dist/cli.mjs");
-        spawnArgs = existsSync(tsxCli)
-          ? [process.execPath, tsxCli, runnerPath, "--config", configPath]
-          : [process.execPath, runnerPath, "--config", configPath]; // fallback
-      } else {
-        spawnArgs = [process.execPath, runnerPath, "--config", configPath];
-      }
-      const child = cpSpawn(spawnArgs[0], spawnArgs.slice(1), {
-        detached: true,
-        stdio: "ignore",
-        cwd: this.ctx.agentWorkDir,
-      });
-      child.unref();
+      const spawnResult = await this.ctx.spawner.spawn(runnerConfig);
 
       const now = new Date().toISOString();
       const runRecord: RunRecord = {
         id: runId,
         taskId: task.id,
-        pid: child.pid ?? 0,
+        pid: spawnResult.pid,
         agentName: agent.name,
-      status: "running",
+        status: "running",
         startedAt: now,
         updatedAt: now,
         activity: { filesCreated: [], filesEdited: [], toolCalls: 0, totalTokens: 0, lastUpdate: now },
-        configPath,
+        configPath: spawnResult.configPath,
       };
       await this.ctx.runStore.upsertRun(runRecord);
 
@@ -538,14 +501,8 @@ export class TaskRunner {
   }
 
   private killOrphanProcess(pid: number, agentName: string): void {
-    try {
-      process.kill(pid, 0); // existence check (signal 0)
-      this.ctx.emitter.emit("log", { level: "warn", message: `Killing orphan process PID ${pid} (${agentName})` });
-      process.kill(pid, "SIGTERM");
-      setTimeout(() => {
-        try { process.kill(pid, "SIGKILL"); } catch { /* already dead */ }
-      }, 3000);
-    } catch { /* process already dead */
-    }
+    if (!this.ctx.spawner.isAlive(pid)) return;
+    this.ctx.emitter.emit("log", { level: "warn", message: `Killing orphan process PID ${pid} (${agentName})` });
+    this.ctx.spawner.kill(pid);
   }
 }

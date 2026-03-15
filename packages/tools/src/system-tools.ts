@@ -339,18 +339,11 @@ const ALL_TOOL_NAMES: SystemToolName[] = ["read", "write", "edit", "bash", "glob
  * - vault_get, vault_list (when vault is provided)
  */
 export function createSystemTools(cwd: string, allowedTools?: string[], allowedPaths?: string[], outputDir?: string, vault?: ResolvedVault, fs?: FileSystem, shell?: Shell): AgentTool<any>[] {
-  // Lazy-load defaults only when no implementation is provided
-  // This avoids importing node:fs/execa when the consumer provides SandboxProxyFS/Shell
-  if (!fs) {
-    const { NodeFileSystem } = require("./adapters/node-filesystem.js");
-    fs = new NodeFileSystem();
+  if (!fs || !shell) {
+    throw new Error("createSystemTools requires fs and shell arguments. Use NodeFileSystem/NodeShell for Node.js or SandboxProxyFS/SandboxProxyShell for cloud.");
   }
-  if (!shell) {
-    const { NodeShell } = require("./adapters/node-shell.js");
-    shell = new NodeShell();
-  }
-  const _fs = fs!;
-  const _shell = shell!;
+  const _fs = fs;
+  const _shell = shell;
   const sandbox = resolveAllowedPaths(cwd, allowedPaths);
 
   const factories: Record<SystemToolName, () => AgentTool<any>> = {

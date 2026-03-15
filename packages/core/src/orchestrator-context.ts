@@ -20,6 +20,7 @@ import type { TeamStore } from "./team-store.js";
 import type { AgentStore } from "./agent-store.js";
 import type { PolpoConfig, PolpoFileConfig, Task, AssessmentResult, ReviewContext, ReasoningLevel, ModelConfig } from "./types.js";
 import type { HookRegistry } from "./hooks.js";
+import type { Spawner } from "./spawner.js";
 
 /** Progress event for individual assessment checks. */
 export interface CheckProgressEvent {
@@ -63,6 +64,7 @@ export interface OrchestratorContext {
   readonly agentWorkDir: string;
   readonly polpoDir: string;
   readonly assessFn: AssessFn;
+  readonly spawner: Spawner;
 
   // ── Optional ports (injected by shell) ──────────────────────────
 

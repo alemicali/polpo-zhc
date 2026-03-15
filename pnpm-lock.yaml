@@ -29,8 +29,8 @@ importers:
         specifier: ^0.57.1
         version: 0.57.1(@modelcontextprotocol/sdk@1.26.0(zod@4.3.6))(ws@8.19.0)(zod@4.3.6)
       '@polpo-ai/core':
-        specifier: ^0.2.4
-        version: 0.2.5
+        specifier: workspace:*
+        version: link:packages/core
       '@polpo-ai/server':
         specifier: ^0.2.7
         version: 0.2.7(zod@4.3.6)
@@ -225,9 +225,6 @@ importers:
       '@sinclair/typebox':
         specifier: ^0.34.0
         version: 0.34.48
-      execa:
-        specifier: ^9.0.0
-        version: 9.6.1
       nanoid:
         specifier: ^5.0.0
         version: 5.1.6
@@ -241,6 +238,9 @@ importers:
       exceljs:
         specifier: ^4.4.0
         version: 4.4.0
+      execa:
+        specifier: ^9.0.0
+        version: 9.6.1
       imapflow:
         specifier: ^1.2.0
         version: 1.2.10

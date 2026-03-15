@@ -114,6 +114,10 @@
       "types": "./dist/shell.d.ts",
       "import": "./dist/shell.js"
     },
+    "./spawner": {
+      "types": "./dist/spawner.d.ts",
+      "import": "./dist/spawner.js"
+    },
     "./orchestrator-context": {
       "types": "./dist/orchestrator-context.d.ts",
       "import": "./dist/orchestrator-context.js"
