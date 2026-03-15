@@ -72,6 +72,9 @@ export { Scheduler } from "./scheduler.js";
 // ── MissionExecutor ─────────────────────────────────────────────────────
 export { MissionExecutor } from "./mission-executor.js";
 
+// ── TaskRunner ──────────────────────────────────────────────────────────
+export { TaskRunner } from "./task-runner.js";
+
 // ── OrchestratorEngine ──────────────────────────────────────────────────
 export { OrchestratorEngine } from "./orchestrator-engine.js";
 export type {
@@ -83,6 +86,11 @@ export type {
   DeadlockFacade,
   TaskWatcherManagerPort,
 } from "./orchestrator-engine.js";
+
+// ── Assessment Pipeline ──────────────────────────────────────────────────
+export { AssessmentOrchestrator, type AssessmentPorts } from "./assessment-orchestrator.js";
+export { buildFixPrompt, buildRetryPrompt, buildSideEffectFixPrompt, buildSideEffectRetryPrompt, buildJudgePrompt, sleep, type JudgeCorrectionFix, type JudgeCorrection, type JudgeVerdict } from "./assessment-prompts.js";
+export { looksLikeQuestion, classifyAsQuestion } from "./question-detector.js";
 
 // ── Adapter Types ────────────────────────────────────────────────────────
 export type { AgentHandle, SpawnContext } from "./adapter.js";

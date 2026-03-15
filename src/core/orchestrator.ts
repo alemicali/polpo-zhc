@@ -1,5 +1,5 @@
 import { resolve, join } from "node:path";
-import { mkdirSync, existsSync, watch, type FSWatcher } from "node:fs";
+import { mkdirSync, existsSync, readFileSync, watch, type FSWatcher } from "node:fs";
 import { getPolpoDir } from "./constants.js";
 import type { Server } from "node:net";
 import { parseConfig, loadPolpoConfig, savePolpoConfig, loadEnvFile } from "./config.js";
@@ -45,7 +45,7 @@ import {
 } from "./assessment-prompts.js";
 import type { AssessFn } from "./orchestrator-context.js";
 import { setProviderOverrides, validateProviderKeys, setModelAllowlist } from "../llm/pi-client.js";
-import { startNotificationServer } from "./notification.js";
+import { startNotificationServer, getSocketPath } from "./notification.js";
 import { HookRegistry } from "./hooks.js";
 import { ApprovalManager } from "./approval-manager.js";
 import { FileApprovalStore } from "../stores/file-approval-store.js";
@@ -385,6 +385,12 @@ export class Orchestrator extends TypedEmitter {
       findLogForTask: (polpoDir, taskId, runId) => findLogForTask(polpoDir, taskId, runId),
       buildExecutionSummary: (logPath) => buildExecutionSummary(logPath),
       validateProviderKeys: (modelSpecs) => validateProviderKeys(modelSpecs),
+      readRunLog: (runId) => {
+        const logPath = join(this.polpoDir, "logs", `run-${runId}.jsonl`);
+        if (!existsSync(logPath)) return null;
+        return readFileSync(logPath, "utf-8");
+      },
+      notifySocketPath: getSocketPath(this.polpoDir),
 
       // Inject Drizzle stores when storage is "sqlite" or "postgres"
       ...(this.drizzleStores ? {

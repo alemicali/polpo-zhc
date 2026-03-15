@@ -1,0 +1,885 @@
+/**
+ * AssessmentOrchestrator — handles the full assessment pipeline:
+ * result collection → question detection → assessment → auto-correction → judge → fix/retry/fail.
+ *
+ * Pure core version — ZERO Node.js imports.
+ * All runtime-specific behavior is injected via OrchestratorContext ports
+ * and the optional AssessmentPorts interface.
+ */
+
+import type { OrchestratorContext } from "./orchestrator-context.js";
+import type { Task, TaskResult, AssessmentResult, TaskExpectation, ReviewContext, ModelConfig } from "./types.js";
+import { setAssessment } from "./types.js";
+import { buildFixPrompt, buildRetryPrompt, buildSideEffectFixPrompt, buildSideEffectRetryPrompt, buildJudgePrompt, type JudgeVerdict, type JudgeCorrection } from "./assessment-prompts.js";
+import { looksLikeQuestion, classifyAsQuestion } from "./question-detector.js";
+
+// ── File System Ports ────────────────────────────────────────────────────
+// These optional ports allow the shell to inject Node.js file system operations
+// needed by the auto-correct expectations feature. When not provided, auto-correct
+// falls back gracefully (no file search, no path correction).
+
+/**
+ * Optional ports for runtime-specific operations that cannot go through
+ * OrchestratorContext (to avoid modifying the shared interface).
+ *
+ * Shell layer creates these from Node.js APIs (node:fs, node:path);
+ * cloud/test environments can provide stubs or omit them.
+ */
+export interface AssessmentPorts {
+  /** Check if a file path exists (sync). Maps to node:fs existsSync. */
+  fileExists?: (path: string) => boolean;
+  /** Read directory entries with type info (sync). Maps to node:fs readdirSync. */
+  readDir?: (dir: string) => Array<{ name: string; isFile: boolean; isDirectory: boolean }>;
+  /** Join path segments. Maps to node:path join. */
+  joinPath?: (...parts: string[]) => string;
+  /** Extract file name from path. Maps to node:path basename. */
+  baseName?: (path: string) => string;
+  /**
+   * Generate an answer to an agent's question.
+   * Shell layer implements this using shared memory + sibling tasks + LLM.
+   * When not provided, question auto-answering is skipped (falls through to assessment).
+   */
+  generateAnswer?: (task: Task, question: string, model?: string | ModelConfig) => Promise<string>;
+  /** LLM-based question classifier. Overrides core classifyAsQuestion when provided. */
+  classifyAsQuestion?: (stdout: string, model?: string | ModelConfig) => Promise<{ isQuestion: boolean; question: string }>;
+}
+
+/**
+ * Handles the full assessment pipeline: result collection → question detection →
+ * assessment → auto-correction → judge → fix/retry/fail.
+ */
+export class AssessmentOrchestrator {
+  private ports: AssessmentPorts;
+
+  constructor(private ctx: OrchestratorContext, ports?: AssessmentPorts) {
+    this.ports = ports ?? {};
+  }
+
+  /**
+   * Build a rich ReviewContext from all available data sources:
+   * - RunStore activity (files, tool counts)
+   * - TaskResult (stdout, stderr, exit code, duration)
+   * - JSONL transcript log (execution timeline)
+   * - Task outcomes
+   */
+  private async buildReviewContext(taskId: string, task: Task, result: TaskResult): Promise<ReviewContext> {
+    const run = await this.ctx.runStore.getRunByTaskId(taskId);
+    const activity = run?.activity;
+    const outcomes = run?.outcomes ?? task.outcomes;
+
+    // Build execution summary from JSONL transcript log (via ctx ports)
+    let executionSummary: string | undefined;
+    let toolsSummary: string | undefined;
+    try {
+      if (this.ctx.findLogForTask && this.ctx.buildExecutionSummary) {
+        const logPath = this.ctx.findLogForTask(this.ctx.polpoDir, taskId, run?.id);
+        if (logPath) {
+          const summaryResult = this.ctx.buildExecutionSummary(logPath);
+          executionSummary = summaryResult.summary;
+          toolsSummary = summaryResult.toolsSummary;
+        }
+      }
+    } catch { /* best effort — don't fail assessment if log parsing fails */ }
+
+    return {
+      taskTitle: task.title,
+      taskDescription: task.originalDescription ?? task.description,
+      agentOutput: result.stdout || undefined,
+      agentStderr: result.stderr || undefined,
+      exitCode: result.exitCode,
+      duration: result.duration,
+      filesCreated: activity?.filesCreated,
+      filesEdited: activity?.filesEdited,
+      toolCalls: activity?.toolCalls,
+      toolsSummary: toolsSummary || undefined,
+      executionSummary,
+      outcomes: outcomes?.length ? outcomes : undefined,
+    };
+  }
+
+  /**
+   * Attempt to transition a task to "done", but first run the before:task:complete
+   * hook so approval gates (and any other hooks) can block it.
+   * Returns true if the task transitioned to done, false if a hook blocked it.
+   */
+  private async transitionToDone(
+    taskId: string, task: Task, result: TaskResult,
+  ): Promise<boolean> {
+    const hookResult = await this.ctx.hooks.runBefore("task:complete", {
+      taskId, task, result,
+    });
+    if (hookResult.cancelled) {
+      this.ctx.emitter.emit("log", {
+        level: "info",
+        message: `[${taskId}] Completion blocked by hook: ${hookResult.cancelReason ?? "no reason"}`,
+      });
+      return false;
+    }
+    this.ctx.emitter.emit("task:transition", {
+      taskId,
+      from: task.status,
+      to: "done",
+      task: { ...task, status: "done" },
+    });
+    await this.ctx.registry.transition(taskId, "done");
+    await this.ctx.registry.updateTask(taskId, { phase: undefined });
+
+    // Fire after:task:complete (async, fire-and-forget)
+    this.ctx.hooks.runAfter("task:complete", { taskId, task, result }).catch(() => {});
+    return true;
+  }
+
+  /** Resolve effective confidence: explicit field, or default by type. */
+  private getConfidence(exp: TaskExpectation): "firm" | "estimated" {
+    if (exp.confidence) return exp.confidence;
+    return exp.type === "file_exists" ? "estimated" : "firm";
+  }
+
+  /** Check if any failed checks correspond to estimated expectations. */
+  private hasEstimatedFailures(task: Task, assessment: AssessmentResult): boolean {
+    const failedTypes = new Set(assessment.checks.filter(c => !c.passed).map(c => c.type));
+    return task.expectations.some(e => failedTypes.has(e.type) && this.getConfidence(e) === "estimated");
+  }
+
+  async handleResult(taskId: string, result: TaskResult): Promise<void> {
+    const task = await this.ctx.registry.getTask(taskId);
+    if (!task) return;
+
+    // Skip if already terminal
+    if (task.status === "done" || task.status === "failed") return;
+
+    this.ctx.emitter.emit("agent:finished", {
+      taskId,
+      agentName: task.assignTo,
+      exitCode: result.exitCode,
+      duration: result.duration,
+      sessionId: task.sessionId,
+    });
+
+    // Ensure we're in review state
+    if (task.status === "in_progress") {
+      await this.ctx.registry.transition(taskId, "review");
+      await this.ctx.registry.updateTask(taskId, { phase: "review" });
+    }
+
+    // Question detection: intercept before assessment
+    const maxQRounds = this.ctx.config.settings.maxQuestionRounds ?? 2;
+    const questionRounds = task.questionRounds ?? 0;
+    if (result.exitCode === 0 && questionRounds < maxQRounds) {
+      // Get activity from RunStore for richer heuristic
+      const run = await this.ctx.runStore.getRunByTaskId(taskId);
+      const activity = run?.activity;
+      if (looksLikeQuestion(result, activity)) {
+        this.handlePossibleQuestion(taskId, task, result);
+        return;
+      }
+    }
+
+    this.proceedToAssessment(taskId, task, result);
+  }
+
+  /**
+   * LLM-classify a potential question, then either resolve+rerun or proceed to assessment.
+   */
+  private handlePossibleQuestion(taskId: string, task: Task, result: TaskResult): void {
+    if (!this.ctx.queryLLM) {
+      // No LLM available — skip classification, proceed to assessment
+      this.proceedToAssessment(taskId, task, result);
+      return;
+    }
+
+    const queryLLM = this.ctx.queryLLM;
+    const classify = this.ports.classifyAsQuestion
+      ? (stdout: string, model?: string | ModelConfig) => this.ports.classifyAsQuestion!(stdout, model)
+      : (stdout: string, model?: string | ModelConfig) => classifyAsQuestion(stdout, queryLLM, model);
+    classify(result.stdout, this.ctx.config.settings.orchestratorModel).then(classification => {
+      if (classification.isQuestion) {
+        this.resolveAndRerun(taskId, task, result, classification.question);
+      } else {
+        this.proceedToAssessment(taskId, task, result);
+      }
+    }).catch(() => {
+      // Classification failed → proceed normally
+      this.proceedToAssessment(taskId, task, result);
+    });
+  }
+
+  /**
+   * Auto-answer an agent's question and re-run the task (no retry burn).
+   */
+  private resolveAndRerun(taskId: string, task: Task, result: TaskResult, question: string): void {
+    this.ctx.emitter.emit("task:question", { taskId, question });
+
+    // Use the generateAnswer port if provided, otherwise build the answer inline via queryLLM
+    const answerPromise = this.ports.generateAnswer
+      ? this.ports.generateAnswer(task, question, this.ctx.config.settings.orchestratorModel)
+      : this.generateAnswerInline(task, question);
+
+    answerPromise.then(async answer => {
+      this.ctx.emitter.emit("task:answered", { taskId, question, answer });
+
+      const current = await this.ctx.registry.getTask(taskId);
+      if (!current) return;
+
+      // Save original description before first Q&A
+      if (!current.originalDescription) {
+        await this.ctx.registry.updateTask(taskId, { originalDescription: current.description });
+      }
+
+      // Clear old outcomes before re-run — the agent will produce fresh ones.
+      await this.ctx.registry.updateTask(taskId, { outcomes: [] });
+      // Append Q&A to description and re-run (no retry burn)
+      const qaBlock = `\n\n[Polpo Clarification]\nQ: ${question}\nA: ${answer}`;
+      await this.ctx.registry.unsafeSetStatus(taskId, "pending", "Q&A re-run — no retry burn");
+      await this.ctx.registry.updateTask(taskId, {
+        phase: "execution",
+        description: current.description + qaBlock,
+        questionRounds: (current.questionRounds ?? 0) + 1,
+      });
+    }).catch(() => {
+      // Answer generation failed → proceed to assessment normally
+      this.proceedToAssessment(taskId, task, result);
+    });
+  }
+
+  /**
+   * Inline answer generation using ctx.memoryStore + ctx.registry + ctx.queryLLM.
+   * Equivalent to the shell's generateAnswer() but without Node.js dependencies.
+   */
+  private async generateAnswerInline(task: Task, question: string): Promise<string> {
+    if (!this.ctx.queryLLM) {
+      throw new Error("queryLLM port not available");
+    }
+
+    const memory = (await this.ctx.memoryStore?.get()) ?? "";
+    const state = await this.ctx.registry.getState();
+
+    // Sibling tasks in the same plan group for additional context
+    const siblings = task.group
+      ? state.tasks.filter(t => t.group === task.group && t.id !== task.id)
+      : [];
+
+    const parts = [
+      `You are Polpo, an AI agent orchestration framework. An agent working on a task has asked a question instead of completing the work.`,
+      `Your job is to answer the question concisely so the agent can proceed autonomously.`,
+      ``,
+      `## Task`,
+      `Title: ${task.title}`,
+      `Description: ${task.originalDescription || task.description}`,
+    ];
+
+    if (memory) {
+      parts.push(``, `## Shared Memory`, memory);
+    }
+
+    if (siblings.length > 0) {
+      parts.push(``, `## Related tasks in the same plan`);
+      for (const s of siblings) {
+        parts.push(`- [${s.status}] ${s.title}`);
+        if (s.result?.stdout && s.status === "done") {
+          parts.push(`  Result: ${s.result.stdout.slice(0, 200)}`);
+        }
+      }
+    }
+
+    parts.push(
+      ``,
+      `## Agent's Question`,
+      question,
+      ``,
+      `Answer the question directly and concisely. Provide specific, actionable information.`,
+      `If you're unsure, give your best guidance based on available context.`,
+      `Do NOT ask follow-up questions. Just answer.`,
+    );
+
+    const prompt = parts.join("\n");
+    return (await this.ctx.queryLLM(prompt, this.ctx.config.settings.orchestratorModel)).text;
+  }
+
+  /**
+   * Run assessment with retry when all LLM reviewers fail.
+   * Retries up to maxAssessmentRetries times before returning the failed result.
+   */
+  private async runAssessmentWithRetry(
+    task: Task, cwd: string, progressCb: (msg: string) => void,
+    context?: ReviewContext,
+    checkProgressCb?: (ev: { index: number; total: number; type: string; label: string; phase: "started" | "complete"; passed?: boolean; message?: string }) => void,
+  ): Promise<AssessmentResult> {
+    const maxRetries = this.ctx.config.settings.maxAssessmentRetries ?? 1;
+
+    const reasoning = this.ctx.config.settings.reasoning;
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      const assessment = await this.ctx.assessFn(task, cwd, progressCb, context, reasoning, checkProgressCb);
+
+      // Check if failure is due to all evaluators failing (not low scores)
+      const allEvalsFailed = !assessment.passed && assessment.checks.some(
+        c => c.type === "llm_review" && !c.passed && c.message.includes("all evaluators failed"),
+      );
+
+      if (!allEvalsFailed || attempt === maxRetries) {
+        return assessment;
+      }
+
+      this.ctx.emitter.emit("log", {
+        level: "warn",
+        message: `[${task.id}] All reviewers failed, retrying assessment (${attempt + 1}/${maxRetries})`,
+      });
+    }
+
+    // Unreachable — satisfies TypeScript
+    return this.ctx.assessFn(task, cwd, progressCb, context, reasoning, checkProgressCb);
+  }
+
+  /**
+   * Standard assessment flow: run expectations/metrics, then mark done/failed/fix/retry.
+   */
+  private async proceedToAssessment(taskId: string, task: Task, result: TaskResult): Promise<void> {
+    if (task.expectations.length > 0 || task.metrics.length > 0) {
+      // Run before:assessment:run hook (async — assessment is already async)
+      this.ctx.hooks.runBefore("assessment:run", { taskId, task }).then(async hookResult => {
+        if (hookResult.cancelled) {
+          this.ctx.emitter.emit("log", {
+            level: "info",
+            message: `[${taskId}] Assessment blocked by hook: ${hookResult.cancelReason ?? "no reason"}`,
+          });
+          // Skip assessment — mark done with result as-is
+          await this.ctx.registry.updateTask(taskId, { result });
+          if (result.exitCode === 0) {
+            this.transitionToDone(taskId, task, result).catch(() => {});
+          } else {
+            await this.retryOrFail(taskId, task, result);
+          }
+          return;
+        }
+        this.runAssessmentFlow(taskId, task, result);
+      }).catch(() => {
+        this.runAssessmentFlow(taskId, task, result);
+      });
+    } else {
+      await this.ctx.registry.updateTask(taskId, { result });
+      if (result.exitCode === 0) {
+        this.transitionToDone(taskId, task, result).catch(() => {});
+      } else {
+        await this.retryOrFail(taskId, task, result);
+      }
+    }
+  }
+
+  /**
+   * Core assessment flow — extracted to allow hook interception in proceedToAssessment.
+   */
+  private async runAssessmentFlow(taskId: string, task: Task, result: TaskResult): Promise<void> {
+    this.ctx.emitter.emit("assessment:started", { taskId });
+      const progressCb = (msg: string) => this.ctx.emitter.emit("assessment:progress", { taskId, message: msg });
+      const checkProgressCb = (ev: { index: number; total: number; type: string; label: string; phase: "started" | "complete"; passed?: boolean; message?: string }) => {
+        if (ev.phase === "started") {
+          this.ctx.emitter.emit("assessment:check:started", { taskId, index: ev.index, total: ev.total, type: ev.type, label: ev.label });
+        } else {
+          this.ctx.emitter.emit("assessment:check:complete", { taskId, index: ev.index, total: ev.total, type: ev.type, label: ev.label, passed: ev.passed ?? false, message: ev.message });
+        }
+      };
+
+      // Build rich review context from RunStore, JSONL transcript, and outcomes
+      const reviewContext = await this.buildReviewContext(taskId, task, result);
+
+      this.runAssessmentWithRetry(task, this.ctx.agentWorkDir, progressCb, reviewContext, checkProgressCb).then(async assessment => {
+        setAssessment(result, assessment, "initial");
+        await this.ctx.registry.updateTask(taskId, { result });
+
+        if (assessment.passed && result.exitCode === 0) {
+          this.ctx.emitter.emit("assessment:complete", {
+            taskId,
+            passed: true,
+            scores: assessment.scores,
+            globalScore: assessment.globalScore,
+            message: task.title,
+          });
+          this.transitionToDone(taskId, task, result).catch(() => {});
+        } else if (assessment.passed && result.exitCode !== 0) {
+          // Checks passed but agent failed (killed, crashed, non-zero exit).
+          // Override assessment to failed — the agent didn't complete successfully.
+          assessment.passed = false;
+          const exitMsg = `Agent exited with code ${result.exitCode}`;
+          assessment.checks.push({
+            type: "test",
+            passed: false,
+            message: exitMsg,
+            details: result.stderr || undefined,
+          });
+          await this.ctx.registry.updateTask(taskId, { result });
+          this.ctx.emitter.emit("assessment:complete", {
+            taskId,
+            passed: false,
+            scores: assessment.scores,
+            globalScore: assessment.globalScore,
+            message: exitMsg,
+          });
+          await this.retryOrFail(taskId, task, result);
+        } else {
+          const reasons = [
+            ...assessment.checks.filter(c => !c.passed).map(c => `${c.type}: ${c.message}`),
+            ...assessment.metrics.filter(m => !m.passed).map(m => `${m.name}: ${m.value} < ${m.threshold}`),
+          ];
+          this.ctx.emitter.emit("assessment:complete", {
+            taskId,
+            passed: false,
+            scores: assessment.scores,
+            globalScore: assessment.globalScore,
+            message: reasons.join(", "),
+          });
+          // Execution OK but review failed → check if estimated expectations can be corrected
+          if (result.exitCode === 0) {
+            const autoCorrect = this.ctx.config.settings.autoCorrectExpectations !== false;
+            const hasEstimatedFailures = this.hasEstimatedFailures(task, assessment);
+
+            if (autoCorrect && hasEstimatedFailures) {
+              this.tryAutoCorrectExpectations(taskId, task, result, assessment).then(async corrected => {
+                if (corrected) return;
+                const judged = await this.judgeExpectations(taskId, task, result, assessment);
+                if (!judged) await this.fixOrRetry(taskId, task, result);
+              }).catch(async () => {
+                await this.fixOrRetry(taskId, task, result);
+              });
+            } else {
+              await this.fixOrRetry(taskId, task, result);
+            }
+          } else {
+            await this.retryOrFail(taskId, task, result);
+          }
+        }
+      }).catch(async err => {
+        this.ctx.emitter.emit("log", { level: "error", message: `[${taskId}] Assessment error: ${err.message}` });
+        await this.ctx.registry.updateTask(taskId, { result });
+        await this.retryOrFail(taskId, task, result);
+      });
+  }
+
+  /**
+   * Auto-correct expectations when assessment fails due to wrong paths.
+   * If the only failures are file_exists checks with incorrect paths, search
+   * for the actual files using agent activity + filesystem, update expectations,
+   * and re-assess. Returns true if auto-correction succeeded (task is done).
+   */
+  private async tryAutoCorrectExpectations(
+    taskId: string, task: Task, result: TaskResult, assessment: AssessmentResult,
+  ): Promise<boolean> {
+    const failedChecks = assessment.checks.filter(c => !c.passed);
+    const failedMetrics = assessment.metrics.filter(m => !m.passed);
+    if (failedMetrics.length > 0) return false;
+    if (failedChecks.length === 0) return false;
+
+    // Only correct estimated file_exists expectations; firm ones are never touched
+    const nonCorrectableFailures = failedChecks.filter(c => {
+      if (c.type !== "file_exists") return true;
+      const exp = task.expectations.find(e => e.type === c.type);
+      return exp ? this.getConfidence(exp) === "firm" : true;
+    });
+    if (nonCorrectableFailures.length > 0) return false;
+
+    // File system ports required for auto-correction
+    const { fileExists, baseName, joinPath } = this.ports;
+    if (!fileExists || !baseName) return false;
+
+    // Gather agent's actual file list from activity
+    const run = await this.ctx.runStore.getRunByTaskId(taskId);
+    const activity = run?.activity;
+    const agentFiles = [
+      ...(activity?.filesCreated ?? []),
+      ...(activity?.filesEdited ?? []),
+    ];
+
+    // For each file_exists expectation that failed, try to find the actual path
+    const corrections = new Map<number, string[]>(); // expectation index → corrected paths
+    let allCorrected = true;
+
+    for (let i = 0; i < task.expectations.length; i++) {
+      const exp = task.expectations[i];
+      if (exp.type !== "file_exists" || !exp.paths) continue;
+
+      // Check if this expectation's check failed
+      const check = assessment.checks.find(c => c.type === "file_exists" && !c.passed);
+      if (!check) continue;
+
+      const correctedPaths: string[] = [];
+      for (const expectedPath of exp.paths) {
+        if (fileExists(expectedPath)) {
+          correctedPaths.push(expectedPath);
+          continue;
+        }
+
+        // Try to find by basename in agent's created/edited files
+        const name = baseName(expectedPath);
+        const match = agentFiles.find(f => baseName(f) === name);
+        if (match && fileExists(match)) {
+          correctedPaths.push(match);
+          continue;
+        }
+
+        // Try to find by basename in workDir (shallow search in common locations)
+        const found = this.findFileByName(name);
+        if (found) {
+          correctedPaths.push(found);
+          continue;
+        }
+
+        // Can't find this file — can't auto-correct
+        allCorrected = false;
+        break;
+      }
+
+      if (!allCorrected) break;
+      if (correctedPaths.length > 0) {
+        corrections.set(i, correctedPaths);
+      }
+    }
+
+    if (!allCorrected || corrections.size === 0) return false;
+
+    // Apply corrections
+    const newExpectations = [...task.expectations];
+    for (const [idx, paths] of corrections) {
+      newExpectations[idx] = { ...newExpectations[idx], paths };
+    }
+
+    await this.ctx.registry.updateTask(taskId, { expectations: newExpectations });
+    this.ctx.emitter.emit("assessment:corrected", { taskId, corrections: corrections.size });
+
+    // Re-assess with corrected expectations
+    const current = await this.ctx.registry.getTask(taskId);
+    if (!current) return false;
+
+    try {
+      const progressCb = (msg: string) => this.ctx.emitter.emit("assessment:progress", { taskId, message: msg });
+      const reCtx = await this.buildReviewContext(taskId, task, result);
+      const newAssessment = await this.ctx.assessFn(current, this.ctx.agentWorkDir, progressCb, reCtx, this.ctx.config.settings.reasoning);
+      setAssessment(result, newAssessment, "auto-correct");
+      await this.ctx.registry.updateTask(taskId, { result });
+
+      if (newAssessment.passed) {
+        this.ctx.emitter.emit("assessment:complete", {
+          taskId,
+          passed: true,
+          scores: newAssessment.scores,
+          globalScore: newAssessment.globalScore,
+          message: `${task.title} (paths auto-corrected)`,
+        });
+        return this.transitionToDone(taskId, task, result);
+      }
+    } catch { /* re-assessment failed */
+    }
+
+    return false;
+  }
+
+  /** Search for a file by name in common project locations.
+   *  Searches agentWorkDir first (where the agent actually created files),
+   *  then falls back to workDir (the project root) when they differ. */
+  private findFileByName(name: string): string | null {
+    const { joinPath } = this.ports;
+    if (!joinPath) return null;
+
+    const searchDirs = [
+      this.ctx.agentWorkDir,
+      joinPath(this.ctx.agentWorkDir, "src"),
+    ];
+    // When agentWorkDir differs from workDir (settings.workDir is set),
+    // also search the project root as a fallback.
+    if (this.ctx.agentWorkDir !== this.ctx.workDir) {
+      searchDirs.push(this.ctx.workDir, joinPath(this.ctx.workDir, "src"));
+    }
+    for (const dir of searchDirs) {
+      const found = this.searchDir(dir, name, 4);
+      if (found) return found;
+    }
+    return null;
+  }
+
+  /**
+   * LLM judge: analyze failed estimated expectations vs agent output and decide
+   * whether they are wrong (correct them) or the agent's work is wrong (fix phase).
+   * Only operates on estimated expectations — firm ones are never touched.
+   * Returns true if expectations were corrected and re-assessment passed.
+   */
+  private async judgeExpectations(
+    taskId: string, task: Task, result: TaskResult, assessment: AssessmentResult,
+  ): Promise<boolean> {
+    // Only judge estimated expectations
+    const failedChecks = assessment.checks.filter(c => {
+      if (c.passed) return false;
+      const exp = task.expectations.find(e => e.type === c.type);
+      return exp ? this.getConfidence(exp) === "estimated" : false;
+    });
+    if (failedChecks.length === 0) return false;
+
+    // Don't judge if score is very low — that's clearly bad work
+    if (assessment.globalScore !== undefined && assessment.globalScore < 2.5) return false;
+
+    // queryLLM port required for judge
+    if (!this.ctx.queryLLM) return false;
+
+    // Gather context
+    const run = await this.ctx.runStore.getRunByTaskId(taskId);
+    const activity = run?.activity;
+
+    const prompt = buildJudgePrompt(task, result, assessment, failedChecks, activity);
+
+    let response: string;
+    try {
+      response = (await this.ctx.queryLLM(prompt, this.ctx.config.settings.orchestratorModel)).text;
+    } catch { /* LLM query failed */
+      return false;
+    }
+
+    // Parse LLM verdict
+    let verdict: JudgeVerdict;
+    try {
+      const cleaned = response.replace(/```json?\n?/g, "").replace(/```/g, "").trim();
+      verdict = JSON.parse(cleaned);
+      if (!verdict.corrections || !Array.isArray(verdict.corrections)) return false;
+    } catch { /* malformed JSON response */
+      return false;
+    }
+
+    // Apply corrections only if LLM found at least one fixable expectation
+    const fixable = verdict.corrections.filter((c: JudgeCorrection) => c.verdict === "expectation_wrong" && c.fix);
+    if (fixable.length === 0) return false;
+
+    const newExpectations = [...task.expectations];
+    let correctionCount = 0;
+
+    for (const fix of fixable) {
+      const idx = task.expectations.findIndex(e => e.type === fix.type);
+      if (idx < 0 || !fix.fix) continue;
+
+      // Double-check: never correct firm expectations even if LLM suggests it
+      const exp = newExpectations[idx];
+      if (this.getConfidence(exp) === "firm") continue;
+      const f = fix.fix;
+      if (fix.type === "file_exists" && f.paths) {
+        newExpectations[idx] = { ...exp, paths: f.paths };
+        correctionCount++;
+      } else if ((fix.type === "test" || fix.type === "script") && f.command) {
+        newExpectations[idx] = { ...exp, command: f.command };
+        correctionCount++;
+      } else if (fix.type === "llm_review" && f.threshold !== undefined) {
+        newExpectations[idx] = { ...exp, threshold: f.threshold };
+        correctionCount++;
+      }
+    }
+
+    if (correctionCount === 0) return false;
+
+    await this.ctx.registry.updateTask(taskId, { expectations: newExpectations });
+    this.ctx.emitter.emit("assessment:corrected", { taskId, corrections: correctionCount });
+
+    // Re-assess with corrected expectations
+    const current = await this.ctx.registry.getTask(taskId);
+    if (!current) return false;
+
+    try {
+      const progressCb = (msg: string) => this.ctx.emitter.emit("assessment:progress", { taskId, message: msg });
+      const judgeCtx = await this.buildReviewContext(taskId, task, result);
+      const newAssessment = await this.ctx.assessFn(current, this.ctx.agentWorkDir, progressCb, judgeCtx, this.ctx.config.settings.reasoning);
+      setAssessment(result, newAssessment, "judge");
+      await this.ctx.registry.updateTask(taskId, { result });
+
+      if (newAssessment.passed) {
+        this.ctx.emitter.emit("assessment:complete", {
+          taskId,
+          passed: true,
+          scores: newAssessment.scores,
+          globalScore: newAssessment.globalScore,
+          message: `${task.title} (expectations corrected)`,
+        });
+        return this.transitionToDone(taskId, task, result);
+      }
+    } catch { /* re-assessment failed */
+    }
+
+    return false;
+  }
+
+  /** Recursive directory search (bounded depth). Uses injected file system ports. */
+  private searchDir(dir: string, name: string, maxDepth: number): string | null {
+    if (maxDepth <= 0) return null;
+    const { readDir, joinPath } = this.ports;
+    if (!readDir || !joinPath) return null;
+
+    try {
+      const entries = readDir(dir);
+      for (const entry of entries) {
+        if (entry.name === "node_modules" || entry.name === ".git") continue;
+        const fullPath = joinPath(dir, entry.name);
+        if (entry.isFile && entry.name === name) return fullPath;
+        if (entry.isDirectory) {
+          const found = this.searchDir(fullPath, name, maxDepth - 1);
+          if (found) return found;
+        }
+      }
+    } catch { /* permission error or missing dir */ }
+    return null;
+  }
+
+  /**
+   * Fix phase: when execution succeeded but review failed, try a targeted fix
+   * without burning a full retry. After maxFixAttempts, fall back to full retry.
+   */
+  private async fixOrRetry(taskId: string, _task: Task, result: TaskResult): Promise<void> {
+    const current = await this.ctx.registry.getTask(taskId);
+    if (!current) return;
+
+    // Side-effects guard: block automatic fix/retry for tasks with irreversible actions.
+    // The task transitions to awaiting_approval so a human can decide whether to re-execute.
+    // We still save the fix prompt so the agent gets feedback if the human approves.
+    if (current.sideEffects) {
+      const reason = "Task has sideEffects — automatic fix/retry blocked. Awaiting human approval.";
+      this.ctx.emitter.emit("task:retry:blocked", { taskId, reason });
+      this.ctx.emitter.emit("log", { level: "warn", message: `[${taskId}] ${reason}` });
+      // Preserve original description and prepare fix prompt for when approval comes
+      if (!current.originalDescription) {
+        await this.ctx.registry.updateTask(taskId, { originalDescription: current.description });
+      }
+      await this.ctx.registry.updateTask(taskId, {
+        description: buildSideEffectFixPrompt(current, result),
+        phase: "fix",
+      });
+      await this.ctx.registry.transition(taskId, "awaiting_approval");
+      return;
+    }
+
+    const maxFix = this.ctx.config.settings.maxFixAttempts ?? 2;
+    const fixAttempts = (current.fixAttempts ?? 0) + 1;
+
+    if (fixAttempts <= maxFix) {
+      // Save original description before first fix/retry
+      if (!current.originalDescription) {
+        await this.ctx.registry.updateTask(taskId, { originalDescription: current.description });
+      }
+
+      this.ctx.emitter.emit("task:fix", { taskId, attempt: fixAttempts, maxFix });
+
+      // Clear old outcomes — the agent will produce fresh ones on re-execution.
+      await this.ctx.registry.updateTask(taskId, { outcomes: [] });
+      // unsafeSetStatus bypasses retry increment (fix attempts are NOT real failures)
+      await this.ctx.registry.unsafeSetStatus(taskId, "pending", "fix phase — no retry burn");
+      await this.ctx.registry.updateTask(taskId, {
+        phase: "fix",
+        fixAttempts,
+        description: buildFixPrompt(current, result),
+      });
+    } else {
+      // Fix attempts exhausted → full retry (burns 1 retry)
+      this.ctx.emitter.emit("log", { level: "warn", message: `[${taskId}] Fix attempts exhausted (${maxFix}), falling back to full retry` });
+      await this.ctx.registry.updateTask(taskId, {
+        phase: "execution",
+        fixAttempts: 0,
+      });
+      await this.retryOrFail(taskId, _task, result);
+    }
+  }
+
+  /** @internal — exposed for test access via Orchestrator facade */
+  async retryOrFail(taskId: string, _task: Task, result: TaskResult): Promise<void> {
+    const current = await this.ctx.registry.getTask(taskId);
+    if (!current) return;
+
+    // Side-effects guard: block automatic retry for tasks with irreversible actions.
+    if (current.sideEffects) {
+      const reason = "Task has sideEffects — automatic retry blocked. Awaiting human approval.";
+      this.ctx.emitter.emit("task:retry:blocked", { taskId, reason });
+      this.ctx.emitter.emit("log", { level: "warn", message: `[${taskId}] ${reason}` });
+      // Preserve original description and prepare retry prompt for when approval comes
+      if (!current.originalDescription) {
+        await this.ctx.registry.updateTask(taskId, { originalDescription: current.description });
+      }
+      await this.ctx.registry.updateTask(taskId, {
+        description: buildSideEffectRetryPrompt(current, result),
+        phase: "execution",
+      });
+      await this.ctx.registry.transition(taskId, "awaiting_approval");
+      return;
+    }
+
+    // Don't retry tasks from cancelled missions — resolve via missionId (direct FK) first
+    if (current.group) {
+      const mission = current.missionId
+        ? await this.ctx.registry.getMission?.(current.missionId)
+        : await this.ctx.registry.getMissionByName?.(current.group);
+      if (mission && mission.status === "cancelled") {
+        this.ctx.emitter.emit("log", { level: "debug", message: `[${taskId}] Skipping retry — mission cancelled` });
+        await this.ctx.registry.transition(taskId, "failed");
+        return;
+      }
+    }
+
+    if (current.retries < current.maxRetries) {
+      const policy = current.retryPolicy ?? this.ctx.config.settings.defaultRetryPolicy;
+      const nextAttempt = current.retries + 1;
+
+      // Save original description before first retry
+      if (!current.originalDescription) {
+        await this.ctx.registry.updateTask(taskId, { originalDescription: current.description });
+      }
+
+      // Check if we should escalate to a different agent
+      // fallbackAgent resolution: explicit policy > agent.reportsTo (org chart)
+      let assignTo = current.assignTo;
+      const currentAgent = await this.ctx.agentStore.getAgent(current.assignTo);
+      const effectiveFallback = policy?.fallbackAgent ?? currentAgent?.reportsTo;
+      if (policy?.escalateAfter !== undefined && nextAttempt >= policy.escalateAfter) {
+        if (effectiveFallback) {
+          const fallback = await this.ctx.agentStore.getAgent(effectiveFallback);
+          if (fallback) {
+            assignTo = effectiveFallback;
+            this.ctx.emitter.emit("log", { level: "info", message: `[${taskId}] Escalating to ${assignTo} (attempt ${nextAttempt})` });
+          }
+        }
+      }
+
+      this.ctx.emitter.emit("task:retry", { taskId, attempt: nextAttempt, maxRetries: current.maxRetries });
+      // Clear old outcomes — the agent will produce fresh ones on re-execution.
+      // Without this, outcomes accumulate across retries and all get re-sent via notifications.
+      await this.ctx.registry.updateTask(taskId, { outcomes: [] });
+      await this.ctx.registry.transition(taskId, "failed");
+      await this.ctx.registry.transition(taskId, "pending");
+      await this.ctx.registry.updateTask(taskId, {
+        description: buildRetryPrompt(current, result),
+        assignTo,
+        phase: "execution",
+        fixAttempts: 0,
+      });
+    } else {
+      this.ctx.emitter.emit("task:maxRetries", { taskId });
+
+      // Run before:task:fail hook — escalation manager can intercept here
+      this.ctx.hooks.runBefore("task:fail", {
+        taskId,
+        task: current,
+        result,
+        reason: "maxRetries",
+      }).then(async hookResult => {
+        if (hookResult.cancelled) {
+          this.ctx.emitter.emit("log", {
+            level: "info",
+            message: `[${taskId}] Final failure intercepted by hook: ${hookResult.cancelReason ?? "escalation"}`,
+          });
+          return;  // Escalation manager (or other hook) is handling this
+        }
+        await this.ctx.registry.transition(taskId, "failed");
+        await this.ctx.registry.updateTask(taskId, { phase: undefined });
+
+        // Fire after:task:fail
+        this.ctx.hooks.runAfter("task:fail", {
+          taskId,
+          task: current,
+          result,
+          reason: "maxRetries",
+        }).catch(() => {});
+      }).catch(async () => {
+        // Hook failed — fail the task normally
+        await this.ctx.registry.transition(taskId, "failed");
+        await this.ctx.registry.updateTask(taskId, { phase: undefined });
+      });
+    }
+  }
+}

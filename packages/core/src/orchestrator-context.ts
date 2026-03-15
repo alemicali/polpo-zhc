@@ -89,6 +89,12 @@ export interface OrchestratorContext {
   /** Validate that provider API keys are configured for the given model specs. */
   readonly validateProviderKeys?: (modelSpecs: string[]) => { provider: string; modelSpec: string }[];
 
+  /** Read raw JSONL content for a run log (used by TaskRunner timeout diagnosis). */
+  readonly readRunLog?: (runId: string) => string | null;
+
+  /** UDS path for push-notifying the orchestrator on runner completion. */
+  readonly notifySocketPath?: string;
+
   // ── Optional store ports (injected by shell for non-file backends) ──
 
   /** Approval request store (when storage is "postgres", injected by shell). */

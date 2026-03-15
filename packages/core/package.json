@@ -157,6 +157,22 @@
     "./mission-executor": {
       "types": "./dist/mission-executor.d.ts",
       "import": "./dist/mission-executor.js"
+    },
+    "./task-runner": {
+      "types": "./dist/task-runner.d.ts",
+      "import": "./dist/task-runner.js"
+    },
+    "./assessment-orchestrator": {
+      "types": "./dist/assessment-orchestrator.d.ts",
+      "import": "./dist/assessment-orchestrator.js"
+    },
+    "./assessment-prompts": {
+      "types": "./dist/assessment-prompts.d.ts",
+      "import": "./dist/assessment-prompts.js"
+    },
+    "./question-detector": {
+      "types": "./dist/question-detector.d.ts",
+      "import": "./dist/question-detector.js"
     }
   },
   "sideEffects": false,
