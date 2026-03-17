@@ -11,8 +11,20 @@ import { sql } from "drizzle-orm";
 export async function ensurePgSchema(db: any): Promise<void> {
   await db.execute(sql`CREATE TABLE IF NOT EXISTS metadata (
     key   TEXT PRIMARY KEY,
-    value TEXT NOT NULL
+    value JSONB NOT NULL DEFAULT '{}'
   )`);
+
+  // Migrate existing TEXT → JSONB (safe no-op if already JSONB)
+  await db.execute(sql`
+    DO $$ BEGIN
+      IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'metadata' AND column_name = 'value' AND data_type = 'text'
+      ) THEN
+        ALTER TABLE metadata ALTER COLUMN value TYPE JSONB USING value::jsonb;
+      END IF;
+    END $$
+  `);
 
   await db.execute(sql`CREATE TABLE IF NOT EXISTS tasks (
     id                    TEXT PRIMARY KEY,

@@ -2218,7 +2218,7 @@ async function execGetStatus(polpo: Orchestrator): Promise<string> {
 
   const teamSummary = teams.map(t => `${t.name} (${t.agents.length})`).join(", ");
   const lines: string[] = [
-    `Org: ${state.org}`,
+    `Project: ${state.project}`,
     `Teams: ${teams.length} — ${teamSummary}`,
     `Agents: ${agents.length} total`,
     `Tasks: ${tasks.length} total`,

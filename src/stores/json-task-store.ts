@@ -20,7 +20,7 @@ export class JsonTaskStore implements TaskStore {
       return JSON.parse(raw) as PolpoState;
     }
     return {
-      org: "",
+      project: "",
       teams: [{ name: "", agents: [] }],
       tasks: [],
       processes: [],

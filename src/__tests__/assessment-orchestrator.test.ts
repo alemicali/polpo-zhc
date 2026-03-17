@@ -128,7 +128,7 @@ function createSessionStore() {
 function createMinimalConfig(): PolpoConfig {
   return {
     version: "1",
-    org: "test",
+    project: "test",
     teams: [{ name: "test-team", agents: [{ name: "test-agent" }] }],
     tasks: [],
     settings: {

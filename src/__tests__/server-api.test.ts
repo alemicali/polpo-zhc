@@ -7,7 +7,7 @@ import type { Orchestrator } from "../core/orchestrator.js";
 // ── Test Setup ───────────────────────────────────────────────────────
 
 const POLPO_CONFIG = JSON.stringify({
-  org: "test-api",
+  project: "test-api",
   team: {
     name: "api-team",
     agents: [
@@ -618,9 +618,9 @@ describe("State routes", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.ok).toBe(true);
-    expect(body.data).toHaveProperty("org");
+    expect(body.data).toHaveProperty("project");
     expect(body.data).toHaveProperty("teams");
-    expect(typeof body.data.org).toBe("string");
+    expect(typeof body.data.project).toBe("string");
   });
 
   test("GET /orchestrator-config returns orchestrator config", async () => {
@@ -629,7 +629,7 @@ describe("State routes", () => {
     const body = await res.json();
     expect(body.ok).toBe(true);
     expect(body.data).toHaveProperty("version");
-    expect(body.data).toHaveProperty("org");
+    expect(body.data).toHaveProperty("project");
     expect(body.data).toHaveProperty("teams");
     expect(body.data).toHaveProperty("settings");
   });

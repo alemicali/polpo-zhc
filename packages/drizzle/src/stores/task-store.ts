@@ -148,7 +148,7 @@ export class DrizzleTaskStore implements TaskStore {
     const procRows: any[] = await this.db.select().from(processes);
 
     return {
-      org: meta.org ?? meta.project ?? "",
+      project: meta.project ?? "",
       teams,
       tasks: taskRows.map((r) => this.rowToTask(r)),
       processes: procRows.map((r) => this.rowToProcess(r)),
@@ -167,8 +167,8 @@ export class DrizzleTaskStore implements TaskStore {
         .onConflictDoUpdate({ target: metadata.key, set: { value } });
 
     const exec = async (db: any) => {
-      if (partial.org !== undefined) {
-        await upsertMeta(db, "org", partial.org);
+      if (partial.project !== undefined) {
+        await upsertMeta(db, "project", partial.project);
       }
       if (partial.teams !== undefined) {
         const val = JSON.stringify(partial.teams);
@@ -201,13 +201,11 @@ export class DrizzleTaskStore implements TaskStore {
       }
     };
 
-    if (this.dialect === "pg") {
-      await this.db.transaction(async (tx: any) => exec(tx));
-    } else {
-      // SQLite: better-sqlite3 transactions don't support async callbacks.
-      // Individual upserts are idempotent — no transaction needed for correctness.
-      await exec(this.db);
-    }
+    // Execute directly without transaction.
+    // Neon HTTP driver doesn't support transactions, and
+    // SQLite better-sqlite3 transactions don't support async callbacks.
+    // Individual upserts are idempotent — no transaction needed for correctness.
+    await exec(this.db);
   }
 
   // ── Task CRUD ────────────────────────────────────────────────────────

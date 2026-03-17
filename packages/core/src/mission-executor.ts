@@ -129,7 +129,7 @@ export class MissionExecutor {
 
   /** Get checkpoints for a mission group. Returns empty array if none defined. */
   getCheckpoints(group: string): MissionCheckpoint[] {
-    return this.cpState.definitions[group] ?? [];
+    return this.cpState?.definitions?.[group] ?? [];
   }
 
   /**
@@ -142,7 +142,7 @@ export class MissionExecutor {
     taskId: string,
     tasks: Task[],
   ): Promise<{ checkpoint: MissionCheckpoint; reachedAt: string } | undefined> {
-    const checkpoints = this.cpState.definitions[group];
+    const checkpoints = this.cpState?.definitions?.[group];
     if (!checkpoints) return undefined;
 
     for (const cp of checkpoints) {
@@ -278,7 +278,7 @@ export class MissionExecutor {
 
   /** Get delays for a mission group. Returns empty array if none defined. */
   getDelays(group: string): MissionDelay[] {
-    return this.delayState.definitions[group] ?? [];
+    return this.delayState?.definitions?.[group] ?? [];
   }
 
   /**
@@ -293,7 +293,7 @@ export class MissionExecutor {
     taskId: string,
     tasks: Task[],
   ): Promise<{ delay: MissionDelay; startedAt: string; expiresAt: string } | undefined> {
-    const delays = this.delayState.definitions[group];
+    const delays = this.delayState?.definitions?.[group];
     if (!delays) return undefined;
 
     for (const dl of delays) {

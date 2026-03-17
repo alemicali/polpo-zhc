@@ -1,6 +1,6 @@
 {
   "name": "polpo-ai",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "The open-source platform for AI agent teams",
   "type": "module",
   "main": "dist/index.js",

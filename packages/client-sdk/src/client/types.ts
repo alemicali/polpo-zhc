@@ -721,7 +721,7 @@ export interface ProviderConfig {
 
 export interface PolpoConfig {
   version: string;
-  org: string;
+  project: string;
   teams: Team[];
   tasks: Omit<Task, "status" | "retries" | "result" | "createdAt" | "updatedAt">[];
   settings: PolpoSettings;
@@ -729,7 +729,7 @@ export interface PolpoConfig {
 }
 
 export interface PolpoState {
-  org: string;
+  project: string;
   teams: Team[];
   tasks: Task[];
   processes: AgentProcess[];

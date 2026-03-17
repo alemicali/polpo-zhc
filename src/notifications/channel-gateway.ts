@@ -269,7 +269,7 @@ export class ChannelGateway {
 
     return {
       text: [
-        `Org: ${this.orchestrator.getConfig()?.org ?? "unknown"}`,
+        `Project: ${this.orchestrator.getConfig()?.project ?? "unknown"}`,
         "",
         `Tasks: ${pending} pending, ${running} running, ${done} done, ${failed} failed`,
         `Agents: ${agents.length} configured, ${processes.filter((p: { alive: boolean }) => p.alive).length} active`,

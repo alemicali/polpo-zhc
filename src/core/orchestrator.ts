@@ -616,7 +616,7 @@ export class Orchestrator extends TypedEmitter {
    * Initialize for interactive mode.
    * Creates .polpo dir and a minimal config from provided team info.
    */
-  async initInteractive(org: string, teams: Team | Team[]): Promise<void> {
+  async initInteractive(project: string, teams: Team | Team[]): Promise<void> {
     const teamsArray = Array.isArray(teams) ? teams : [teams];
     if (!existsSync(this.polpoDir)) {
       mkdirSync(this.polpoDir, { recursive: true });
@@ -664,7 +664,7 @@ export class Orchestrator extends TypedEmitter {
 
     this.config = {
       version: "1",
-      org: polpoConfig?.org ?? org,
+      project: polpoConfig?.project ?? project,
       teams: polpoConfig?.teams ?? teamsArray,
       tasks: [],
       settings,
@@ -684,7 +684,7 @@ export class Orchestrator extends TypedEmitter {
     this.playbookStore = this.drizzleStores?.playbookStore ?? new FilePlaybookStore(this.workDir, this.polpoDir);
     this.interactive = true;
     await this.registry.setState({
-      org,
+      project,
       teams: teamsArray,
       startedAt: new Date().toISOString(),
     });
@@ -1411,7 +1411,7 @@ export class Orchestrator extends TypedEmitter {
     await this.agentMgr.syncConfigCache();
     // Also set initial state for non-interactive mode
     await this.registry.setState({
-      org: this.config.org,
+      project: this.config.project,
       teams: this.config.teams,
       startedAt: new Date().toISOString(),
     });

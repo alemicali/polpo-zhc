@@ -248,10 +248,10 @@ async function main(): Promise<void> {
       actLog.logTranscript(entry);
       // Persist transcript to DB when LogStore is available (cloud mode)
       if (logStore && logSessionId) {
-        const event = entry.role === "assistant" ? "transcript:assistant"
-          : entry.role === "tool_result" ? "transcript:tool_result"
-          : entry.role === "tool_use" ? "transcript:tool_use"
-          : `transcript:${entry.role ?? "unknown"}`;
+        const event = entry.type === "assistant" ? "transcript:assistant"
+          : entry.type === "tool_result" ? "transcript:tool_result"
+          : entry.type === "tool_use" ? "transcript:tool_use"
+          : `transcript:${entry.type ?? "unknown"}`;
         logStore.append({ ts: new Date().toISOString(), event, data: sanitizeTranscriptEntry(entry) })
           .catch(() => {}); // best-effort, don't block engine
       }

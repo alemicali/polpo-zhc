@@ -152,7 +152,7 @@ export async function runSetupWizard(options?: SetupOptions): Promise<void> {
   const polpoDir = options?.polpoDir ?? getPolpoDir(workDir);
   const isInteractive = !options?.nonInteractive && process.stdin.isTTY;
   const existing = loadPolpoConfig(polpoDir);
-  const orgName = existing?.org ?? basename(workDir);
+  const projectName = existing?.project ?? basename(workDir);
 
   console.log();
   console.log(chalk.bold("  Polpo Setup"));
@@ -161,7 +161,7 @@ export async function runSetupWizard(options?: SetupOptions): Promise<void> {
   // ── Non-interactive fallback ──
   if (!isInteractive) {
     const model = process.env.POLPO_MODEL;
-    const config = generatePolpoConfigDefault(orgName, {
+    const config = generatePolpoConfigDefault(projectName, {
       model: model ?? undefined,
     });
     savePolpoConfig(polpoDir, config);
@@ -195,7 +195,7 @@ export async function runSetupWizard(options?: SetupOptions): Promise<void> {
     console.log(chalk.yellow("  No provider configured."));
     console.log(chalk.dim("  Run 'polpo setup' again or 'polpo auth login' to add one."));
     console.log();
-    savePolpoConfig(polpoDir, generatePolpoConfigDefault(orgName));
+    savePolpoConfig(polpoDir, generatePolpoConfigDefault(projectName));
     return;
   }
 
@@ -250,7 +250,7 @@ export async function runSetupWizard(options?: SetupOptions): Promise<void> {
   const agentRole = await promptWithDefault("Agent role", defaultAgentRole);
 
   // ── Write config ──────────────────────────────────
-  const config = generatePolpoConfigDefault(orgName, {
+  const config = generatePolpoConfigDefault(projectName, {
     model: selectedModel,
     agentName,
     agentRole,
@@ -261,7 +261,7 @@ export async function runSetupWizard(options?: SetupOptions): Promise<void> {
   console.log();
   console.log(chalk.green("  Ready!"));
   console.log();
-  console.log(`  ${chalk.dim("Org:")}    ${orgName}`);
+  console.log(`  ${chalk.dim("Project:")} ${projectName}`);
   console.log(`  ${chalk.dim("Model:")}  ${selectedModel ?? chalk.yellow("not set")}`);
   console.log(`  ${chalk.dim("Agent:")}  ${agentName} (${agentRole})`);
   console.log();

@@ -9,7 +9,7 @@ const DEFAULT_SETTINGS: PolpoSettings = {
   logLevel: "normal",
 };
 
-// --- .polpo/polpo.json (persistent org config) ---
+// --- .polpo/polpo.json (persistent project config) ---
 
 export function loadPolpoConfig(polpoDir: string): PolpoFileConfig | undefined {
   const filePath = join(polpoDir, "polpo.json");
@@ -20,7 +20,7 @@ export function loadPolpoConfig(polpoDir: string): PolpoFileConfig | undefined {
   } catch { return undefined; }
 }
 
-/** Migrate old singular `team` config to new `teams` array, and `project` → `org`. */
+/** Migrate old singular `team` config to new `teams` array. */
 function migrateConfig(raw: PolpoFileConfigRaw): PolpoFileConfig {
   let teams: Team[];
   if (raw.teams && raw.teams.length > 0) {
@@ -32,11 +32,8 @@ function migrateConfig(raw: PolpoFileConfigRaw): PolpoFileConfig {
     teams = [{ name: "default", agents: [] }];
   }
 
-  // Backward compat: accept legacy `project` field, prefer `org`
-  const org = raw.org ?? raw.project ?? "";
-
   return {
-    org,
+    project: raw.project ?? "",
     teams,
     settings: raw.settings as PolpoSettings ?? { maxRetries: 3, workDir: ".", logLevel: "normal" },
     providers: raw.providers,
@@ -261,7 +258,7 @@ export async function parseConfig(workDir: string): Promise<PolpoConfig> {
 
   return {
     version: "1",
-    org: polpoConfig.org,
+    project: polpoConfig.project,
     teams: polpoConfig.teams,
     tasks: [],
     settings,
@@ -272,7 +269,7 @@ export async function parseConfig(workDir: string): Promise<PolpoConfig> {
 // --- Default config generator ---
 
 export function generatePolpoConfigDefault(
-  orgName: string,
+  projectName: string,
   options?: { model?: string; teamName?: string; agentName?: string; agentRole?: string; providers?: Record<string, ProviderConfig> },
 ): PolpoFileConfig {
   const agent: Record<string, unknown> = {
@@ -287,7 +284,7 @@ export function generatePolpoConfigDefault(
     settings.orchestratorModel = options.model;
   }
   const config: PolpoFileConfig = {
-    org: orgName,
+    project: projectName,
     teams: [{
       name: options?.teamName ?? "default",
       description: `${options?.teamName ?? "Default"} Polpo team`,

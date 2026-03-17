@@ -236,7 +236,7 @@ export class OrchestratorEngine {
    */
   async run(interactive: boolean, onBeforeLoop?: () => void, onAfterLoop?: () => void): Promise<void> {
     this.ctx.emitter.emit("orchestrator:started", {
-      org: this.ctx.config.org,
+      project: this.ctx.config.project,
       agents: (await this.agentMgr.getAgents()).map((a: AgentConfig) => a.name),
     });
 
