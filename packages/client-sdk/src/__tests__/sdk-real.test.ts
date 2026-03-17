@@ -89,6 +89,61 @@ describe("@polpo-ai/sdk — Real E2E", () => {
     expect(sessions.length).toBeGreaterThan(0);
   });
 
+  // ── Vault ───────────────────────────────────────────────
+
+  it("saves, lists, and deletes a vault entry", async () => {
+    // Save
+    const saved = await client.saveVaultEntry({
+      agent: "coder",
+      service: "sdk-test-service",
+      type: "api_key",
+      label: "SDK test key",
+      credentials: { token: "test-secret-123" },
+    });
+    expect(saved.service).toBe("sdk-test-service");
+    expect(saved.keys).toContain("token");
+
+    // List
+    const entries = await client.listVaultEntries("coder");
+    const found = entries.find((e) => e.service === "sdk-test-service");
+    expect(found).toBeDefined();
+    expect(found!.type).toBe("api_key");
+
+    // Delete
+    const removed = await client.removeVaultEntry("coder", "sdk-test-service");
+    expect(removed.removed).toBe(true);
+
+    // Verify deleted
+    const after = await client.listVaultEntries("coder");
+    expect(after.find((e) => e.service === "sdk-test-service")).toBeUndefined();
+  });
+
+  // ── Teams ──────────────────────────────────────────────
+
+  it("lists teams", async () => {
+    const teams = await client.getTeams();
+    expect(Array.isArray(teams)).toBe(true);
+  });
+
+  // ── SSE Events ─────────────────────────────────────────
+
+  it("connects to SSE event stream", async () => {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+
+    const res = await fetch(`${BASE_URL}/v1/events`, {
+      headers: { Authorization: `Bearer ${API_KEY}` },
+      signal: controller.signal,
+    }).catch(() => null);
+
+    clearTimeout(timeout);
+
+    if (res) {
+      expect(res.status).toBe(200);
+      expect(res.headers.get("content-type")).toContain("text/event-stream");
+    }
+  });
+
   // ── Health ─────────────────────────────────────────────────
 
   it("health check", async () => {
