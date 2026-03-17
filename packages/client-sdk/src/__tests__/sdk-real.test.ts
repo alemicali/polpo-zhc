@@ -144,6 +144,57 @@ describe("@polpo-ai/sdk — Real E2E", () => {
     }
   });
 
+  // ── Tasks ───────────────────────────────────────────────
+
+  it("creates, lists, and deletes a task", async () => {
+    // Create as draft (so the orchestrator tick doesn't pick it up)
+    const task = await client.createTask({
+      title: "SDK test task",
+      description: "Created by SDK E2E test",
+      assignTo: "coder",
+      draft: true,
+    });
+    expect(task.id).toBeDefined();
+    expect(task.title).toBe("SDK test task");
+    expect(task.status).toBe("draft");
+
+    // List
+    const tasks = await client.getTasks();
+    expect(tasks.find((t) => t.id === task.id)).toBeDefined();
+
+    // Kill
+    const killed = await client.killTask(task.id);
+    expect(killed.killed).toBe(true);
+  });
+
+  // ── Missions ───────────────────────────────────────────
+
+  it("creates, lists, gets, and deletes a mission", async () => {
+    // Create
+    const mission = await client.createMission({
+      name: `sdk-test-${Date.now()}`,
+      prompt: "SDK E2E test mission",
+      data: JSON.stringify({
+        tasks: [{ title: "SDK mission task", description: "Do nothing", assignTo: "coder" }],
+      }),
+    });
+    expect(mission.id).toBeDefined();
+    expect(mission.status).toBe("draft");
+
+    // List
+    const missions = await client.getMissions();
+    expect(missions.find((m) => m.id === mission.id)).toBeDefined();
+
+    // Get
+    const fetched = await client.getMission(mission.id);
+    expect(fetched.id).toBe(mission.id);
+    expect(fetched.prompt).toBe("SDK E2E test mission");
+
+    // Delete
+    const deleted = await client.deleteMission(mission.id);
+    expect(deleted.deleted).toBe(true);
+  });
+
   // ── Health ─────────────────────────────────────────────────
 
   it("health check", async () => {
