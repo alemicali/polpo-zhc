@@ -317,6 +317,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     polpoDir: o.getPolpoDir(),
     workDir: o.getWorkDir(),
     agentWorkDir: o.getAgentWorkDir(),
+    fs: new NodeFileSystem(),
     emit: (event: string, data: any) => o.emit(event as any, data),
   })));
 

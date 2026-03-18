@@ -5,7 +5,7 @@
  * Drop-in replacement pattern: swap with AgentFS, SandboxProxyFS, etc.
  */
 import { readFile, writeFile, mkdir, rm, stat, readdir, rename, access } from "node:fs/promises";
-import type { FileSystem, FileStat } from "@polpo-ai/core/filesystem";
+import type { FileSystem, FileEntry, FileStat } from "@polpo-ai/core/filesystem";
 
 export class NodeFileSystem implements FileSystem {
   async readFile(path: string): Promise<string> {
@@ -29,6 +29,15 @@ export class NodeFileSystem implements FileSystem {
     return readdir(path);
   }
 
+  async readdirWithTypes(path: string): Promise<FileEntry[]> {
+    const entries = await readdir(path, { withFileTypes: true });
+    return entries.map((e) => ({
+      name: e.name,
+      isDirectory: e.isDirectory(),
+      isFile: e.isFile(),
+    }));
+  }
+
   async mkdir(path: string): Promise<void> {
     await mkdir(path, { recursive: true });
   }
@@ -49,5 +58,13 @@ export class NodeFileSystem implements FileSystem {
 
   async rename(oldPath: string, newPath: string): Promise<void> {
     await rename(oldPath, newPath);
+  }
+
+  async readFileBuffer(path: string): Promise<Uint8Array> {
+    return readFile(path);
+  }
+
+  async writeFileBuffer(path: string, data: Uint8Array): Promise<void> {
+    await writeFile(path, data);
   }
 }

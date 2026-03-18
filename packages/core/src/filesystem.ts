@@ -1,5 +1,5 @@
 /**
- * FileSystem abstraction for agent tools.
+ * FileSystem abstraction for agent tools and server routes.
  *
  * Decouples tools from node:fs so they can work on any backend:
  *   - NodeFileSystem:     node:fs (self-hosted, default)
@@ -18,8 +18,11 @@ export interface FileSystem {
   /** Check if a path exists. */
   exists(path: string): Promise<boolean>;
 
-  /** List entries in a directory. */
+  /** List entries in a directory (names only). */
   readdir(path: string): Promise<string[]>;
+
+  /** List entries in a directory with type metadata. */
+  readdirWithTypes?(path: string): Promise<FileEntry[]>;
 
   /** Create a directory (recursive). */
   mkdir(path: string): Promise<void>;
@@ -32,6 +35,18 @@ export interface FileSystem {
 
   /** Rename/move a file or directory. */
   rename(oldPath: string, newPath: string): Promise<void>;
+
+  /** Read file as raw bytes (for binary files: images, PDFs, audio, etc.). */
+  readFileBuffer?(path: string): Promise<Uint8Array>;
+
+  /** Write raw bytes to a file (for uploads, binary content). */
+  writeFileBuffer?(path: string, data: Uint8Array): Promise<void>;
+}
+
+export interface FileEntry {
+  name: string;
+  isDirectory: boolean;
+  isFile: boolean;
 }
 
 export interface FileStat {

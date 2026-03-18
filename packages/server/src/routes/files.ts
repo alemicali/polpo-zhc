@@ -1,7 +1,29 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { resolve, relative, extname, basename, dirname } from "node:path";
-import { POLPO_DIR_NAME } from "../../core/constants.js";
 import type { FileSystem } from "@polpo-ai/core";
+
+const POLPO_DIR_NAME = ".polpo";
+
+// ── FS helpers for optional methods ──────────────────────────────────────────
+// Optional methods use `as any` cast because they're defined with `?` on the interface.
+// At runtime, implementations (NodeFileSystem, SandboxProxyFS) always provide them.
+
+interface FileEntry { name: string; isDirectory: boolean; isFile: boolean; }
+
+async function readdirTyped(fs: FileSystem, path: string): Promise<FileEntry[]> {
+  if ((fs as any).readdirWithTypes) return (fs as any).readdirWithTypes(path);
+  return (await fs.readdir(path)).map((n) => ({ name: n, isDirectory: false, isFile: true }));
+}
+
+async function readBuffer(fs: FileSystem, path: string): Promise<Uint8Array> {
+  if ((fs as any).readFileBuffer) return (fs as any).readFileBuffer(path);
+  return new TextEncoder().encode(await fs.readFile(path));
+}
+
+async function writeBuffer(fs: FileSystem, path: string, data: Uint8Array): Promise<void> {
+  if ((fs as any).writeFileBuffer) return (fs as any).writeFileBuffer(path, data);
+  return fs.writeFile(path, new TextDecoder().decode(data));
+}
 
 // ── MIME type map ────────────────────────────────────────────────────────────
 const EXT_MIME: Record<string, string> = {
@@ -161,9 +183,7 @@ export function fileRoutes(getDeps: () => FileRouteDeps): OpenAPIHono {
       if (depth > 8) return { files: 0, bytes: 0 };
       let files = 0, bytes = 0;
       try {
-        const entries = fs.readdirWithTypes
-          ? await fs.readdirWithTypes(dir)
-          : (await fs.readdir(dir)).map((n) => ({ name: n, isDirectory: false, isFile: true }));
+        const entries = await readdirTyped(fs, dir);
         for (const e of entries) {
           if (SKIP.has(e.name)) continue;
           const full = resolve(dir, e.name);
@@ -227,9 +247,7 @@ export function fileRoutes(getDeps: () => FileRouteDeps): OpenAPIHono {
     try { s = await fs.stat(resolved); } catch { return c.json({ ok: false, error: "Path not found" }, 404); }
     if (!s.isDirectory) return c.json({ ok: false, error: "Path is not a directory" }, 400);
 
-    const rawEntries = fs.readdirWithTypes
-      ? await fs.readdirWithTypes(resolved)
-      : (await fs.readdir(resolved)).map((n) => ({ name: n, isDirectory: false, isFile: true }));
+    const rawEntries = await readdirTyped(fs, resolved);
 
     const entries = [];
     for (const d of rawEntries) {
@@ -281,9 +299,7 @@ export function fileRoutes(getDeps: () => FileRouteDeps): OpenAPIHono {
     const fileName = basename(resolved);
 
     // Read via buffer abstraction (works with Node, Sandbox, etc.)
-    const buffer = fs.readFileBuffer
-      ? await fs.readFileBuffer(resolved)
-      : new TextEncoder().encode(await fs.readFile(resolved));
+    const buffer = await readBuffer(fs, resolved);
 
     const headers: Record<string, string> = {
       "Content-Type": mime,
@@ -358,9 +374,7 @@ export function fileRoutes(getDeps: () => FileRouteDeps): OpenAPIHono {
         result.truncated = truncated;
       } else {
         // For large files, read via buffer and decode partial
-        const buffer = fs.readFileBuffer
-          ? await fs.readFileBuffer(resolved)
-          : new TextEncoder().encode(await fs.readFile(resolved));
+        const buffer = await readBuffer(fs, resolved);
         const partial = new TextDecoder().decode(buffer.slice(0, MAX_SIZE));
         result.content = partial;
         result.truncated = true;
@@ -396,11 +410,7 @@ export function fileRoutes(getDeps: () => FileRouteDeps): OpenAPIHono {
       const rel = relative(resolvedDir, filePath);
       if (rel.startsWith("..") || rel.includes("/")) continue;
       const data = new Uint8Array(await file.arrayBuffer());
-      if (fs.writeFileBuffer) {
-        await fs.writeFileBuffer(filePath, data);
-      } else {
-        await fs.writeFile(filePath, new TextDecoder().decode(data));
-      }
+      await writeBuffer(fs, filePath, data);
       uploaded.push({ name: file.name, size: data.byteLength });
     }
 
@@ -502,9 +512,7 @@ export function fileRoutes(getDeps: () => FileRouteDeps): OpenAPIHono {
     async function walk(dir: string, depth: number) {
       if (depth > 10 || results.length >= limit) return;
       try {
-        const entries = fs.readdirWithTypes
-          ? await fs.readdirWithTypes(dir)
-          : (await fs.readdir(dir)).map((n) => ({ name: n, isDirectory: false, isFile: true }));
+        const entries = await readdirTyped(fs, dir);
         for (const e of entries) {
           if (results.length >= limit) return;
           if (SKIP.has(e.name)) continue;

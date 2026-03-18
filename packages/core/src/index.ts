@@ -39,7 +39,7 @@ export type { VaultStore } from "./vault-store.js";
 export type { PlaybookStore } from "./playbook-store.js";
 
 // ── FileSystem & Shell Abstractions ──────────────────────────────────────
-export type { FileSystem, FileStat } from "./filesystem.js";
+export type { FileSystem, FileEntry, FileStat } from "./filesystem.js";
 export type { Shell, ShellOptions, ShellResult } from "./shell.js";
 
 // ── Spawner Abstraction ─────────────────────────────────────────────────
