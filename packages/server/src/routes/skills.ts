@@ -10,8 +10,9 @@
  */
 
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
-import { resolve, join } from "node:path";
+import { resolve, join, basename } from "node:path";
 import type { FileSystem } from "@polpo-ai/core";
+import type { Shell } from "@polpo-ai/core";
 // Dynamic import to work around workspace version resolution.
 // At publish time, @polpo-ai/core@^0.3.5 will be resolved correctly.
 // @ts-ignore — resolved at publish time with @polpo-ai/core@^0.3.5
@@ -39,6 +40,8 @@ type SkillIndex = Record<string, { tags?: string[]; category?: string }>;
 export interface SkillRouteDeps {
   polpoDir: string;
   fs: FileSystem;
+  /** Shell for executing git clone (optional — install route disabled without it). */
+  shell?: Shell;
   getAgents: () => Promise<Array<{ name: string; skills?: string[] }>>;
   /** Update an agent's skills list. Used for assign/unassign. */
   updateAgentSkills?: (agentName: string, skills: string[]) => Promise<void>;
@@ -289,6 +292,161 @@ export function skillRoutes(getDeps: () => SkillRouteDeps): OpenAPIHono {
       await updateAgentSkills(agentName, current.filter((s) => s !== skillName));
 
       return c.json({ ok: true, data: { skill: skillName, agent: agentName } });
+    },
+  );
+
+  // POST /add — install skills from GitHub repo or local path
+  app.openapi(
+    createRoute({
+      method: "post", path: "/add", tags: ["Skills"], summary: "Install skills from a source",
+      request: {
+        body: {
+          content: {
+            "application/json": {
+              schema: z.object({
+                source: z.string().min(1).describe("GitHub owner/repo, full URL, or local path"),
+                skillNames: z.array(z.string()).optional().describe("Only install specific skill names"),
+                force: z.boolean().optional().describe("Overwrite existing skills"),
+              }),
+            },
+          },
+        },
+      },
+      responses: {
+        200: { content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.any() }) } }, description: "Install result" },
+        400: { content: { "application/json": { schema: z.object({ ok: z.literal(false), error: z.string() }) } }, description: "Error" },
+      },
+    }),
+    async (c: any) => {
+      const { fs, shell, polpoDir } = getDeps();
+      if (!shell) {
+        return c.json({ ok: false, error: "Skill installation not available (no shell)" }, 400);
+      }
+
+      const { source, skillNames, force } = await c.req.json();
+
+      // Parse source
+      let cloneUrl: string | null = null;
+      let sourceDir: string;
+
+      if (source.startsWith("/") || source.startsWith("./") || source.startsWith("../")) {
+        // Local path
+        if (!(await fs.exists(source))) {
+          return c.json({ ok: false, error: `Local path not found: ${source}` }, 400);
+        }
+        sourceDir = source;
+      } else {
+        // GitHub — clone to temp dir
+        const ghMatch = source.match(/github\.com\/([^/]+\/[^/]+)/);
+        const ownerRepo = ghMatch
+          ? ghMatch[1].replace(/\.git$/, "")
+          : /^[^/]+\/[^/]+$/.test(source) ? source : null;
+
+        cloneUrl = ownerRepo
+          ? `https://github.com/${ownerRepo}.git`
+          : source;
+
+        const tmpDir = `/tmp/polpo-skills-${Date.now()}`;
+        const cloneResult = await shell.execute(`git clone --depth 1 --quiet "${cloneUrl}" "${tmpDir}"`, { timeout: 60_000 });
+        if (cloneResult.exitCode !== 0) {
+          return c.json({ ok: false, error: `Failed to clone: ${cloneResult.stderr}` }, 400);
+        }
+        sourceDir = tmpDir;
+      }
+
+      // Scan for SKILL.md files (up to 3 levels deep)
+      const found: Array<{ name: string; description: string; path: string }> = [];
+
+      async function scanDir(dir: string, depth: number): Promise<void> {
+        if (depth > 3) return;
+        const SKIP = new Set(["node_modules", ".git"]);
+        try {
+          const entries = (fs as any).readdirWithTypes
+            ? await (fs as any).readdirWithTypes(dir)
+            : (await fs.readdir(dir)).map((n: string) => ({ name: n, isDirectory: true, isFile: false }));
+
+          for (const entry of entries) {
+            if (SKIP.has(entry.name)) continue;
+            if (!entry.isDirectory) continue;
+            const entryPath = resolve(dir, entry.name);
+            const skillMd = join(entryPath, "SKILL.md");
+            if (await fs.exists(skillMd)) {
+              try {
+                const raw = await fs.readFile(skillMd);
+                const core = await coreImport();
+                const fm = core.parseSkillFrontmatter(raw);
+                found.push({ name: fm?.name ?? entry.name, description: fm?.description ?? "", path: entryPath });
+              } catch { /* skip */ }
+            } else {
+              await scanDir(entryPath, depth + 1);
+            }
+          }
+        } catch { /* skip */ }
+      }
+
+      // Check root
+      if (await fs.exists(join(sourceDir, "SKILL.md"))) {
+        const raw = await fs.readFile(join(sourceDir, "SKILL.md"));
+        const core = await coreImport();
+        const fm = core.parseSkillFrontmatter(raw);
+        found.push({ name: fm?.name ?? basename(sourceDir), description: fm?.description ?? "", path: sourceDir });
+      }
+
+      // Check standard locations
+      for (const sub of ["skills", ".polpo/skills", ".agents/skills", ".claude/skills"]) {
+        const subDir = join(sourceDir, sub);
+        if (await fs.exists(subDir)) await scanDir(subDir, 0);
+      }
+
+      // Fallback: recursive scan
+      if (found.length === 0) await scanDir(sourceDir, 0);
+
+      if (found.length === 0) {
+        // Cleanup
+        if (cloneUrl) await shell.execute(`rm -rf "${sourceDir}"`).catch(() => {});
+        return c.json({ ok: false, error: `No skills found in ${source}` }, 400);
+      }
+
+      // Filter by requested names
+      const toInstall = skillNames
+        ? found.filter((s) => skillNames.includes(s.name))
+        : found;
+
+      if (skillNames && toInstall.length === 0) {
+        if (cloneUrl) await shell.execute(`rm -rf "${sourceDir}"`).catch(() => {});
+        return c.json({
+          ok: false,
+          error: `Requested skills not found: ${skillNames.join(", ")}. Available: ${found.map((s) => s.name).join(", ")}`,
+        }, 400);
+      }
+
+      // Install
+      const targetBase = join(polpoDir, "skills");
+      await fs.mkdir(targetBase).catch(() => {});
+
+      const installed: string[] = [];
+      const skipped: string[] = [];
+      const errors: string[] = [];
+
+      for (const skill of toInstall) {
+        const targetDir = join(targetBase, skill.name);
+        if (await fs.exists(targetDir)) {
+          if (!force) { skipped.push(skill.name); continue; }
+          await fs.remove(targetDir);
+        }
+        // Copy via shell (recursive cp)
+        const cpResult = await shell.execute(`cp -r "${skill.path}" "${targetDir}"`);
+        if (cpResult.exitCode === 0) {
+          installed.push(skill.name);
+        } else {
+          errors.push(`${skill.name}: ${cpResult.stderr}`);
+        }
+      }
+
+      // Cleanup cloned repo
+      if (cloneUrl) await shell.execute(`rm -rf "${sourceDir}"`).catch(() => {});
+
+      return c.json({ ok: true, data: { installed, skipped, errors, source } });
     },
   );
 
