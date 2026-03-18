@@ -1,22 +1,31 @@
 /**
- * Build the identity/personality section of an agent's system prompt.
+ * Build the system prompt for an agent.
  *
  * Pure logic — no runtime dependencies (Node.js, pi-ai, filesystem).
  * Used by both self-hosted (src/adapters/engine.ts) and cloud (handler.ts).
  *
- * This builds the "who you are" part of the prompt. Shell-specific concerns
- * (skills, tool descriptions, cwd, sandbox paths) are appended by the caller.
- */
-import type { AgentConfig } from "./types.js";
-
-/**
- * Build the core system prompt for an agent: preamble + identity + responsibilities +
- * communication style + personality + hierarchy + custom systemPrompt.
+ * Includes: preamble, identity, responsibilities, tone, personality, hierarchy,
+ * custom systemPrompt, and optionally skills (if provided).
  *
- * Does NOT include: skills, tool descriptions, cwd, output dir, sandbox paths.
+ * Does NOT include: tool descriptions, cwd, output dir, sandbox paths.
  * Those are shell-specific and appended by the caller.
  */
-export function buildAgentSystemPrompt(agent: AgentConfig): string {
+import type { AgentConfig } from "./types.js";
+import type { LoadedSkill } from "./skills-reader.js";
+import { buildSkillPrompt } from "./skills-reader.js";
+
+export interface AgentPromptOptions {
+  /** Pre-loaded skills to inject into the prompt. */
+  skills?: LoadedSkill[];
+}
+
+/**
+ * Build the system prompt for an agent.
+ *
+ * @param agent - Agent configuration (identity, role, systemPrompt, etc.)
+ * @param options - Optional: skills to inject.
+ */
+export function buildAgentSystemPrompt(agent: AgentConfig, options?: AgentPromptOptions): string {
   const parts = [
     `You are ${agent.name}, a ${agent.role ?? "helpful assistant"} managed by Polpo, an AI agent orchestrator.`,
     "Complete your assigned task autonomously. Make reasonable decisions and proceed without asking questions.",
@@ -80,6 +89,12 @@ export function buildAgentSystemPrompt(agent: AgentConfig): string {
 
   // Custom system prompt
   if (agent.systemPrompt) parts.push("", agent.systemPrompt);
+
+  // Skills
+  if (options?.skills?.length) {
+    const skillBlock = buildSkillPrompt(options.skills);
+    if (skillBlock) parts.push("", skillBlock);
+  }
 
   return parts.join("\n");
 }

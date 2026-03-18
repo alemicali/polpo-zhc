@@ -226,18 +226,16 @@ function describeToolsForAgent(agent: AgentConfig): string {
  * Build the system prompt for the agent, including loaded skills.
  */
 export function buildSystemPrompt(agent: AgentConfig, cwd: string, polpoDir?: string, outputDir?: string, allowedPaths?: string[]): string {
-  // Core prompt: identity, responsibilities, tone, personality, hierarchy, systemPrompt
+  // Load skills (sync, Node.js filesystem)
+  const skills = polpoDir
+    ? loadAgentSkills(cwd, polpoDir, agent.name, agent.skills)
+    : [];
+
+  // Core prompt: identity, responsibilities, tone, personality, hierarchy, systemPrompt, skills
   // This is the shared logic between self-hosted and cloud (lives in @polpo-ai/core).
-  const parts = [buildAgentSystemPrompt(agent)];
+  const parts = [buildAgentSystemPrompt(agent, { skills })];
 
-  // Shell-specific sections below (skills, tools, cwd, sandbox paths)
-
-  // Load and inject skills
-  if (polpoDir) {
-    const skills = loadAgentSkills(cwd, polpoDir, agent.name, agent.skills);
-    const skillBlock = buildSkillPrompt(skills);
-    if (skillBlock) parts.push("", skillBlock);
-  }
+  // Shell-specific sections below (tools, cwd, sandbox paths)
 
   // Available tools — enumerate what the agent can use so it doesn't resort to
   // shell scripts, npm installs, or manual workarounds for capabilities it already has.
