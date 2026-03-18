@@ -45,6 +45,13 @@ export type { Shell, ShellOptions, ShellResult } from "./shell.js";
 // ── Spawner Abstraction ─────────────────────────────────────────────────
 export type { Spawner, SpawnResult } from "./spawner.js";
 
+// ── Agent Prompt Builder ────────────────────────────────────────────────
+export { buildAgentSystemPrompt } from "./agent-prompt.js";
+
+// ── Model Spec Parsing ─────────────────────────────────────────────────
+export { parseModelSpec, PROVIDER_ENV_MAP } from "./model-spec.js";
+export type { ParsedModelSpec } from "./model-spec.js";
+
 // ── EventBus Interface ──────────────────────────────────────────────────
 export type { EventBus } from "./event-bus.js";
 

@@ -12,7 +12,7 @@ describe("buildSystemPrompt — base", () => {
     const agent = createTestAgent({ name: "dev" });
     const prompt = buildSystemPrompt(agent, CWD);
     expect(prompt).toContain("Polpo");
-    expect(prompt).toContain("coding agent");
+    expect(prompt).toContain("managed by Polpo");
     expect(prompt).toContain("<shared-memory>");
   });
 
