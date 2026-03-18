@@ -1,6 +1,6 @@
 {
   "name": "@polpo-ai/tools",
-  "version": "0.2.8",
+  "version": "0.2.9",
   "description": "Agent tools for Polpo — coding, browser, email, search, and more. Core tools work everywhere, extended tools are opt-in.",
   "type": "module",
   "main": "dist/index.js",

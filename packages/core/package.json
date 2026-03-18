@@ -1,6 +1,6 @@
 {
   "name": "@polpo-ai/core",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "Pure business logic, types, schemas, and store interfaces for the Polpo AI agent orchestration platform",
   "type": "module",
   "main": "dist/index.js",
@@ -204,7 +204,10 @@
   "devDependencies": {
     "typescript": "^5.7.3"
   },
-  "files": ["dist", "README.md"],
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "license": "MIT",
   "keywords": [
     "polpo",
