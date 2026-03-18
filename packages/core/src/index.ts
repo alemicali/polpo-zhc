@@ -48,6 +48,13 @@ export type { Spawner, SpawnResult } from "./spawner.js";
 // ── Agent Prompt Builder ────────────────────────────────────────────────
 export { buildAgentSystemPrompt } from "./agent-prompt.js";
 
+// ── Skills Reader (async, FileSystem-based) ────────────────────────────
+export {
+  discoverSkills, loadAgentSkills, listSkillsWithAssignments,
+  buildSkillPrompt, parseSkillFrontmatter, extractSkillBody,
+} from "./skills-reader.js";
+export type { SkillInfo, LoadedSkill, SkillWithAssignment, SkillIndex, SkillIndexEntry } from "./skills-reader.js";
+
 // ── Model Spec Parsing ─────────────────────────────────────────────────
 export { parseModelSpec, PROVIDER_ENV_MAP } from "./model-spec.js";
 export type { ParsedModelSpec } from "./model-spec.js";

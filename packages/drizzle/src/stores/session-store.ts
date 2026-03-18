@@ -67,9 +67,7 @@ export class DrizzleSessionStore implements SessionStore {
 
   async updateMessage(sessionId: string, messageId: string, content: string, toolCalls?: ToolCallInfo[]): Promise<boolean> {
     const now = new Date().toISOString();
-    const tcValue = toolCalls
-      ? (this.dialect === "sqlite" ? JSON.stringify(toolCalls) : toolCalls)
-      : null;
+    const tcValue = toolCalls ? JSON.stringify(toolCalls) : null;
 
     const result = await this.db.update(this.messages)
       .set({ content, toolCalls: tcValue })

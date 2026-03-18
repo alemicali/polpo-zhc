@@ -1,6 +1,6 @@
 {
   "name": "@polpo-ai/drizzle",
-  "version": "0.2.7",
+  "version": "0.2.8",
   "description": "Drizzle ORM store implementations for the Polpo AI agent orchestration platform (PostgreSQL + SQLite)",
   "type": "module",
   "main": "dist/index.js",
@@ -43,7 +43,10 @@
     "better-sqlite3": "^11.0.0",
     "drizzle-kit": "^0.31.0"
   },
-  "files": ["dist", "README.md"],
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "license": "MIT",
   "keywords": [
     "polpo",

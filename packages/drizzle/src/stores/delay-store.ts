@@ -23,7 +23,7 @@ export class DrizzleDelayStore implements DelayStore {
   }
 
   async save(state: DelayState): Promise<void> {
-    const value = this.dialect === "sqlite" ? JSON.stringify(state) : state;
+    const value = JSON.stringify(state);
     await this.db.insert(this.metadata).values({ key: DELAY_KEY, value })
       .onConflictDoUpdate({ target: this.metadata.key, set: { value } });
   }
