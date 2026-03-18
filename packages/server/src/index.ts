@@ -26,6 +26,7 @@ export { agentRoutes } from "./routes/agents.js";
 export { eventRoutes, type EventBridge, type EventClient } from "./routes/events.js";
 export { configRoutes } from "./routes/config.js";
 export { fileRoutes, type FileRouteDeps } from "./routes/files.js";
+export { skillRoutes, type SkillRouteDeps } from "./routes/skills.js";
 
 // Dependency types
 export type {
@@ -42,7 +43,6 @@ export type {
   StateRouteDeps,
   ConfigRouteDeps,
   AuthRouteDeps,
-  SkillRouteDeps,
   AgentRouteDeps,
 } from "./deps.js";
 
