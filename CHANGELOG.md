@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.3] — 2026-03-19 — CI Fix
+
+### Fixed
+- React SDK references updated from `@polpo-ai/client` to `@polpo-ai/sdk` (package rename missed in react-sdk)
+- Release workflow updated to build `@polpo-ai/sdk` instead of `@polpo-ai/client`
+- Lockfile synced with workspace dependencies
+
 ## [0.3.2] — 2026-03-19 — Ports & Adapters, SDK, Skills
 
 ### Added

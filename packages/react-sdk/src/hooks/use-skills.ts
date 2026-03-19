@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { usePolpoContext } from "../provider/polpo-context.js";
-import type { SkillWithAssignment } from "@polpo-ai/client";
+import type { SkillWithAssignment } from "@polpo-ai/sdk";
 
 export interface UseSkillsReturn {
   skills: SkillWithAssignment[];

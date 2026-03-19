@@ -4,7 +4,7 @@ import type {
   PlaybookInfo,
   PlaybookDefinition,
   PlaybookRunResult,
-} from "@polpo-ai/client";
+} from "@polpo-ai/sdk";
 
 export interface UsePlaybooksReturn {
   /** List of discovered playbooks (lightweight metadata). */

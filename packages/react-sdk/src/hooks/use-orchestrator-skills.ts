@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { usePolpoContext } from "../provider/polpo-context.js";
-import type { SkillInfo } from "@polpo-ai/client";
+import type { SkillInfo } from "@polpo-ai/sdk";
 
 export interface UseOrchestratorSkillsReturn {
   skills: SkillInfo[];

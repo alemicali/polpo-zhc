@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { usePolpoContext } from "../provider/polpo-context.js";
-import type { AgentConfig } from "@polpo-ai/client";
+import type { AgentConfig } from "@polpo-ai/sdk";
 
 export interface UseAgentReturn {
   agent: AgentConfig | null;
