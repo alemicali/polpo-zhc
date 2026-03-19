@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.4] — 2026-03-19 — Desktop Sidecar Fix
+
+### Fixed
+- Release workflow now builds and uploads all workspace packages (vault-crypto, tools, server were missing)
+- Desktop sidecar build resolves all @polpo-ai/* dependencies correctly
+
 ## [0.3.3] — 2026-03-19 — CI Fix
 
 ### Fixed
