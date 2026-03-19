@@ -280,6 +280,10 @@ export class Orchestrator extends TypedEmitter {
     await this.validateProviders();
 
     await this.initManagers();
+
+    // Sync config.teams from stores (authoritative source — agents.json / teams.json)
+    await this.agentMgr.syncConfigCache();
+
     this.initVaultStore();
     this.playbookStore = this.drizzleStores?.playbookStore ?? new FilePlaybookStore(this.workDir, this.polpoDir);
   }
@@ -680,12 +684,16 @@ export class Orchestrator extends TypedEmitter {
     }
 
     await this.initManagers();
+
+    // Sync config.teams from stores (authoritative source — agents.json / teams.json)
+    await this.agentMgr.syncConfigCache();
+
     this.initVaultStore();
     this.playbookStore = this.drizzleStores?.playbookStore ?? new FilePlaybookStore(this.workDir, this.polpoDir);
     this.interactive = true;
     await this.registry.setState({
       project,
-      teams: teamsArray,
+      teams: this.config.teams,
       startedAt: new Date().toISOString(),
     });
 

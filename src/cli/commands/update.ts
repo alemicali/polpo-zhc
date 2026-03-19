@@ -3,6 +3,19 @@ import type { Command } from "commander";
 import chalk from "chalk";
 
 /**
+ * Check if running inside an Electron (desktop) app.
+ */
+function isDesktopApp(): boolean {
+  if ((process.versions as any).electron) return true;
+  const execPath = process.execPath || "";
+  return (
+    execPath.includes("Polpo.app") ||
+    execPath.includes("polpo-server") ||
+    !!process.env.ELECTRON_RUN_AS_NODE
+  );
+}
+
+/**
  * Detect which package manager installed polpo globally.
  */
 function detectPackageManager(): "pnpm" | "npm" {
@@ -73,6 +86,15 @@ export function registerUpdateCommand(program: Command): void {
           console.log(chalk.green(`\n  Updated to ${newVer}`));
         } catch {
           console.log(chalk.green(`\n  Update complete. Restart your shell to use the new version.`));
+        }
+
+        if (isDesktopApp()) {
+          console.log(
+            chalk.yellow(`\n  You're running inside the Polpo desktop app.`),
+          );
+          console.log(
+            chalk.yellow(`  Restart the app to apply the update to the desktop binary.`),
+          );
         }
       } catch (err: any) {
         console.error(chalk.red(`\n  Update failed: ${err.message}`));
