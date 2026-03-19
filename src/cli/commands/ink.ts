@@ -133,7 +133,7 @@ async function installPackages(
 
   // Load config for settings/providers merging (non-team data)
   let config: PolpoFileConfig = loadPolpoConfig(polpoDir) ?? {
-    org: "",
+    project: "",
     teams: [{ name: "default", agents: [] }],
     settings: { maxRetries: 3, workDir: ".", logLevel: "normal" },
   } as any;

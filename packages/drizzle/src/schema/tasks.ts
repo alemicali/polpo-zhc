@@ -131,7 +131,7 @@ export const missionsPg = pgTable("missions", {
 
 export const metadataPg = pgTable("metadata", {
   key: pgText("key").primaryKey(),
-  value: pgText("value").notNull(),
+  value: jsonb("value").notNull(),
 });
 
 export const processesPg = pgTable("processes", {

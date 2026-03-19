@@ -246,11 +246,9 @@ export function validateInkCompany(def: unknown): InkValidationResult {
 
   const obj = def as Record<string, unknown>;
 
-  // Accept both `org` (new) and `project` (legacy)
-  const hasOrg = typeof obj.org === "string" && !!obj.org;
   const hasProject = typeof obj.project === "string" && !!obj.project;
-  if (!hasOrg && !hasProject) {
-    errors.push("Missing or invalid 'org' field");
+  if (!hasProject) {
+    errors.push("Missing or invalid 'project' field");
   }
 
   if (obj.teams !== undefined && !Array.isArray(obj.teams)) {

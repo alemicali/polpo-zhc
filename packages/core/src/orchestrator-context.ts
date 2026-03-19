@@ -20,6 +20,7 @@ import type { TeamStore } from "./team-store.js";
 import type { AgentStore } from "./agent-store.js";
 import type { PolpoConfig, PolpoFileConfig, Task, AssessmentResult, ReviewContext, ReasoningLevel, ModelConfig } from "./types.js";
 import type { HookRegistry } from "./hooks.js";
+import type { Spawner } from "./spawner.js";
 
 /** Progress event for individual assessment checks. */
 export interface CheckProgressEvent {
@@ -63,6 +64,7 @@ export interface OrchestratorContext {
   readonly agentWorkDir: string;
   readonly polpoDir: string;
   readonly assessFn: AssessFn;
+  readonly spawner: Spawner;
 
   // ── Optional ports (injected by shell) ──────────────────────────
 
@@ -84,8 +86,14 @@ export interface OrchestratorContext {
   /** Build execution summary from JSONL log. */
   readonly buildExecutionSummary?: (logPath: string) => { summary: string; toolsSummary?: string };
 
-  /** Validate that provider API keys are configured. */
-  readonly validateProviderKeys?: (config: PolpoConfig) => { valid: boolean; missing: string[] };
+  /** Validate that provider API keys are configured for the given model specs. */
+  readonly validateProviderKeys?: (modelSpecs: string[]) => { provider: string; modelSpec: string }[];
+
+  /** Read raw JSONL content for a run log (used by TaskRunner timeout diagnosis). */
+  readonly readRunLog?: (runId: string) => string | null;
+
+  /** UDS path for push-notifying the orchestrator on runner completion. */
+  readonly notifySocketPath?: string;
 
   // ── Optional store ports (injected by shell for non-file backends) ──
 

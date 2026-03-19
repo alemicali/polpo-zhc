@@ -60,7 +60,7 @@ describe("redactTeam", () => {
 describe("redactPolpoState", () => {
   it("returns state unchanged (pass-through)", () => {
     const state: PolpoState = {
-      org: "test",
+      project: "test",
       teams: [{
         name: "t",
         agents: [{ name: "x" }],
@@ -71,7 +71,7 @@ describe("redactPolpoState", () => {
 
     const result = redactPolpoState(state);
     expect(result).toBe(state); // same reference
-    expect(result.org).toBe("test");
+    expect(result.project).toBe("test");
   });
 });
 
@@ -81,7 +81,7 @@ describe("redactPolpoConfig", () => {
   it("returns config as-is — providers no longer contain secrets", () => {
     const config = {
       version: "1",
-      org: "test",
+      project: "test",
       teams: [{
         name: "t",
         agents: [{ name: "a" }],
@@ -105,7 +105,7 @@ describe("redactPolpoConfig", () => {
   it("handles config without providers", () => {
     const config = {
       version: "1",
-      org: "test",
+      project: "test",
       teams: [{ name: "t", agents: [] }],
       tasks: [],
       settings: { maxRetries: 1, workDir: ".", logLevel: "quiet" as const },

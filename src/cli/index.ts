@@ -61,9 +61,9 @@ import { startUpdateCheck } from "./update-check.js";
 
 /** Wire orchestrator events to console output with chalk formatting. */
 function wireConsoleEvents(orchestrator: Orchestrator): void {
-  orchestrator.on("orchestrator:started", ({ org, agents }) => {
+  orchestrator.on("orchestrator:started", ({ project, agents }) => {
     const ts = new Date().toLocaleTimeString();
-    console.log(chalk.dim(`[${ts}]`) + ` ${chalk.bold(`Polpo started — ${org}`)}`);
+    console.log(chalk.dim(`[${ts}]`) + ` ${chalk.bold(`Polpo started — ${project}`)}`);
     console.log(chalk.dim(`[${ts}]`) + ` ${chalk.dim(`Team agents: ${agents.join(", ")}`)}`);
     console.log();
   });
@@ -454,7 +454,7 @@ program
         } catch { /* fallback to state */ }
       }
       console.log(`\n  ${headerIcon} ${LOGO_MINI} ${headerIcon}`);
-      console.log(chalk.dim(`    ${state.org || "org"} | Teams: ${teamsLabel} | Agents: ${agentsLabel}`));
+      console.log(chalk.dim(`    ${state.project || "project"} | Teams: ${teamsLabel} | Agents: ${agentsLabel}`));
       console.log(chalk.dim(`    Elapsed: ${totalElapsed}`));
 
       // Progress bar

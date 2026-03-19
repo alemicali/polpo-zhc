@@ -123,12 +123,13 @@ export function chatRoutes(getDeps: () => { sessionStore?: any }): OpenAPIHono {
     const messages = await sessionStore.getMessages(id);
     // SECURITY: Redact vault credentials from persisted tool calls before serving to client
     const safeMessages = messages.map((m: any) => {
-      if (!m.toolCalls) return m;
-      const hasVault = m.toolCalls.some((tc: any) => tc.name === "set_vault_entry" || tc.name === "update_vault_credentials");
+      const toolCalls = Array.isArray(m.toolCalls) ? m.toolCalls : undefined;
+      if (!toolCalls || toolCalls.length === 0) return m;
+      const hasVault = toolCalls.some((tc: any) => tc.name === "set_vault_entry" || tc.name === "update_vault_credentials");
       if (!hasVault) return m;
       return {
         ...m,
-        toolCalls: m.toolCalls.map((tc: any) => {
+        toolCalls: toolCalls.map((tc: any) => {
           if ((tc.name !== "set_vault_entry" && tc.name !== "update_vault_credentials") || !tc.arguments) return tc;
           const args = { ...tc.arguments };
           if (args.credentials && typeof args.credentials === "object") {
@@ -172,6 +173,41 @@ export function chatRoutes(getDeps: () => { sessionStore?: any }): OpenAPIHono {
       return c.json({ ok: false, error: "Session not found", code: "NOT_FOUND" }, 404);
     }
     return c.json({ ok: true, data: { deleted: true } }, 200);
+  });
+
+  // POST /sessions/import — bulk import a session with messages
+  app.post("/sessions/import", async (c) => {
+    const { sessionStore } = getDeps();
+    if (!sessionStore) {
+      return c.json({ ok: false, error: "Sessions not available", code: "NOT_AVAILABLE" }, 501);
+    }
+
+    const body = await c.req.json<{
+      title?: string;
+      agent?: string;
+      messages: Array<{
+        role: "user" | "assistant";
+        content: string;
+        toolCalls?: unknown[];
+      }>;
+    }>();
+
+    if (!body.messages || !Array.isArray(body.messages)) {
+      return c.json({ ok: false, error: "messages array required" }, 400);
+    }
+
+    const sessionId = await sessionStore.create(body.title, body.agent);
+    let imported = 0;
+
+    for (const msg of body.messages) {
+      const added = await sessionStore.addMessage(sessionId, msg.role, msg.content);
+      if (msg.toolCalls && msg.toolCalls.length > 0) {
+        await sessionStore.updateMessage(sessionId, added.id, msg.content, msg.toolCalls as any);
+      }
+      imported++;
+    }
+
+    return c.json({ ok: true, data: { sessionId, imported } }, 201);
   });
 
   return app;

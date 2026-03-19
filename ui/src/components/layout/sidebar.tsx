@@ -345,8 +345,8 @@ export function Sidebar() {
             </TooltipTrigger>
             <TooltipContent side="right" className="text-xs">
               <p className="font-medium">{status.label}</p>
-              {info?.org && (
-                <p className="text-muted-foreground mt-0.5">{info.org}</p>
+              {info?.project && (
+                <p className="text-muted-foreground mt-0.5">{info.project}</p>
               )}
               {info?.version && (
                 <p className="text-muted-foreground/60 mt-0.5 font-mono">v{info.version}</p>
@@ -355,9 +355,9 @@ export function Sidebar() {
           </Tooltip>
         ) : (
           <>
-            {info?.org && (
+            {info?.project && (
               <div className="text-[10px] text-muted-foreground/60 truncate font-mono tracking-wider uppercase">
-                {info.org}
+                {info.project}
               </div>
             )}
             <div className="flex items-center gap-2.5 text-xs text-muted-foreground">

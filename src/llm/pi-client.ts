@@ -186,53 +186,17 @@ export async function resolveApiKeyAsync(provider: string): Promise<string | und
 }
 
 // ─── Model Spec Parsing ─────────────────────────────
+// Core logic lives in @polpo-ai/core. Re-exported here for backward compat.
 
-export interface ParsedModelSpec {
-  provider: string;
-  modelId: string;
-}
+import { parseModelSpec as _parseModelSpec } from "@polpo-ai/core";
+export type { ParsedModelSpec } from "@polpo-ai/core";
 
 /**
  * Parse a model spec string into provider + modelId.
- *
- * Supported formats:
- *   "provider:model" — explicit (e.g. "anthropic:claude-opus-4-6")
- *   "model-id"       — auto-inferred from prefix map
- *
  * Falls back to POLPO_MODEL env var. Throws if no model is available.
  */
-export function parseModelSpec(spec?: string): ParsedModelSpec {
-  const s = spec || process.env.POLPO_MODEL;
-  if (!s) {
-    throw new Error(
-      "No model configured. Set a model on your agent in .polpo/polpo.json, " +
-      "set the POLPO_MODEL env var, or run 'polpo setup'."
-    );
-  }
-
-  // Explicit "provider:model" format
-  const colonIdx = s.indexOf(":");
-  if (colonIdx > 0) {
-    const provider = s.slice(0, colonIdx);
-    const modelId = s.slice(colonIdx + 1);
-    // Validate it's not a windows path or similar
-    if (!provider.includes("/") && !provider.includes("\\")) {
-      return { provider, modelId };
-    }
-  }
-
-  // Auto-infer from prefix map
-  const lower = s.toLowerCase();
-  for (const [prefix, provider] of PREFIX_MAP) {
-    if (lower.startsWith(prefix)) {
-      return { provider, modelId: s };
-    }
-  }
-
-  // Unknown bare model ID — cannot infer provider
-  throw new Error(
-    `Cannot infer provider for model "${s}". Use "provider:model" format (e.g. "anthropic:${s}").`
-  );
+export function parseModelSpec(spec?: string): { provider: string; modelId: string } {
+  return _parseModelSpec(spec, process.env.POLPO_MODEL);
 }
 
 /**

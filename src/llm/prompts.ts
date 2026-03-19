@@ -1247,7 +1247,7 @@ export async function buildChatSystemPrompt(
     ``,
     `## Current state`,
     ``,
-    `Org: ${state?.org || config?.org || "polpo-interactive"}`,
+    `Project: ${state?.project || config?.project || "polpo-interactive"}`,
     `Teams: ${teams.length}`,
   );
 

@@ -31,7 +31,7 @@ const TEAM: Team = {
 };
 
 const BASE_CONFIG: PolpoFileConfig = {
-  org: "cli-test",
+  project: "cli-test",
   teams: [TEAM],
   settings: { maxRetries: 2, workDir: ".", logLevel: "normal" },
 };

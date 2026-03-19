@@ -1,6 +1,6 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { join, extname } from "node:path";
-import { existsSync, readFileSync, readdirSync, mkdirSync, writeFileSync } from "node:fs";
+import type { FileSystem } from "@polpo-ai/core";
 import { AddAgentSchema, UpdateAgentSchema, RenameTeamSchema, AddTeamSchema } from "../schemas.js";
 import { redactAgentConfig, redactTeam, sanitizeTranscriptEntry } from "../security.js";
 
@@ -20,6 +20,7 @@ export function agentRoutes(getDeps: () => {
   taskStore: any;
   runStore: any;
   polpoDir: string;
+  fs?: FileSystem;
 }): OpenAPIHono {
   const app = new OpenAPIHono();
 
@@ -273,9 +274,10 @@ export function agentRoutes(getDeps: () => {
   app.openapi(getActivityRoute, async (c) => {
     const deps = getDeps();
     const { taskId } = c.req.valid("param");
+    const fs = deps.fs;
     const logsDir = join(deps.polpoDir, "logs");
 
-    if (!existsSync(logsDir)) {
+    if (!fs || !(await fs.exists(logsDir))) {
       return c.json({ ok: true, data: [] });
     }
 
@@ -285,11 +287,10 @@ export function agentRoutes(getDeps: () => {
     if (run) {
       runId = run.id;
     } else {
-      // Scan run-*.jsonl files for matching taskId in the header line
-      const files = readdirSync(logsDir).filter(f => f.startsWith("run-") && f.endsWith(".jsonl"));
+      const files = (await fs.readdir(logsDir)).filter((f: string) => f.startsWith("run-") && f.endsWith(".jsonl"));
       for (const file of files) {
         try {
-          const firstLine = readFileSync(join(logsDir, file), "utf-8").split("\n")[0];
+          const firstLine = (await fs.readFile(join(logsDir, file))).split("\n")[0];
           const header = JSON.parse(firstLine);
           if (header._run && header.taskId === taskId) {
             runId = header.runId;
@@ -304,14 +305,14 @@ export function agentRoutes(getDeps: () => {
     }
 
     const logPath = join(logsDir, `run-${runId}.jsonl`);
-    if (!existsSync(logPath)) {
+    if (!(await fs.exists(logPath))) {
       return c.json({ ok: true, data: [] });
     }
 
     try {
-      const lines = readFileSync(logPath, "utf-8").split("\n").filter(Boolean);
+      const lines = (await fs.readFile(logPath)).split("\n").filter(Boolean);
       const entries = lines
-        .map(line => { try { return JSON.parse(line); } catch { return null; } })
+        .map((line: string) => { try { return JSON.parse(line); } catch { return null; } })
         .filter(Boolean)
         .map(sanitizeTranscriptEntry);
       return c.json({ ok: true, data: entries });
@@ -434,7 +435,10 @@ export function agentRoutes(getDeps: () => {
     // Save to .polpo/avatars/<name>.<ext>
     const polpoDir = deps.polpoDir;
     const avatarsDir = join(polpoDir, "avatars");
-    if (!existsSync(avatarsDir)) mkdirSync(avatarsDir, { recursive: true });
+    const fs = deps.fs;
+    if (!fs) return c.json({ ok: false, error: "Filesystem not available" }, 501);
+
+    await fs.mkdir(avatarsDir);
 
     const ext = extname(file.name || "avatar.png") || ".png";
     const filename = `${name}${ext}`;
@@ -442,7 +446,7 @@ export function agentRoutes(getDeps: () => {
     const relativePath = `.polpo/avatars/${filename}`;
 
     const buffer = Buffer.from(await file.arrayBuffer());
-    writeFileSync(avatarPath, buffer);
+    await fs.writeFile(avatarPath, buffer.toString("base64"));
 
     // Update agent identity with avatar path
     const identity = { ...(agent.identity ?? {}), avatar: relativePath };

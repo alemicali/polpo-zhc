@@ -32,7 +32,7 @@ export function registerConfigCommands(program: Command): void {
           return;
         }
 
-        console.log(chalk.bold("\n  Org:     ") + config.org);
+        console.log(chalk.bold("\n  Project: ") + config.project);
         console.log(chalk.bold("  Version: ") + config.version);
 
         // Read teams and agents from stores
@@ -115,7 +115,7 @@ export function registerConfigCommands(program: Command): void {
         const { agentStore } = await createCliTeamAndAgentStores(polpoDir);
         const allAgents = await agentStore.getAgents();
         console.log(chalk.green("\n  \u2713 Configuration valid"));
-        console.log(chalk.dim(`    Org: ${config.org}`));
+        console.log(chalk.dim(`    Project: ${config.project}`));
         console.log(chalk.dim(`    Agents:  ${allAgents.length}`));
         console.log();
         process.exit(0);

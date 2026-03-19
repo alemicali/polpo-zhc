@@ -6,13 +6,14 @@
  * The bash tool runs with cwd set to the agent's primary working directory.
  */
 
-import { readFileSync, writeFileSync, mkdirSync, readdirSync, statSync } from "node:fs";
-import { execSync, spawn as spawnChild } from "node:child_process";
 import { join, dirname, resolve, relative } from "node:path";
+import type { FileSystem } from "@polpo-ai/core/filesystem";
+import type { Shell } from "@polpo-ai/core/shell";
+import { NodeFileSystem } from "../adapters/node-filesystem.js";
+import { NodeShell } from "../adapters/node-shell.js";
 import { Type } from "@sinclair/typebox";
-import type { AgentTool, AgentToolResult } from "@mariozechner/pi-agent-core";
+import type { AgentTool } from "@mariozechner/pi-agent-core";
 import { resolveAllowedPaths, assertPathAllowed } from "./path-sandbox.js";
-import { bashSafeEnv } from "./safe-env.js";
 import { createOutcomeTools as createOutcomeToolsCore } from "./outcome-tools.js";
 import { createHttpTools as createHttpToolsCore, ALL_HTTP_TOOL_NAMES as CORE_HTTP_TOOL_NAMES } from "./http-tools.js";
 import { createVaultToolsCore } from "./vault-tools.js";
@@ -31,7 +32,7 @@ const ReadSchema = Type.Object({
   limit: Type.Optional(Type.Number({ description: "Max number of lines to read" })),
 });
 
-function createReadTool(cwd: string, sandbox: string[]): AgentTool<typeof ReadSchema> {
+function createReadTool(cwd: string, sandbox: string[], fs: FileSystem): AgentTool<typeof ReadSchema> {
   return {
     name: "read",
     label: "Read File",
@@ -40,7 +41,7 @@ function createReadTool(cwd: string, sandbox: string[]): AgentTool<typeof ReadSc
     async execute(_toolCallId, params) {
       const filePath = resolve(cwd, params.path);
       assertPathAllowed(filePath, sandbox, "read");
-      const raw = readFileSync(filePath, "utf-8");
+      const raw = await fs.readFile(filePath);
       const allLines = raw.split("\n");
       const offset = (params.offset ?? 1) - 1;
       const limit = params.limit ?? MAX_READ_LINES;
@@ -63,7 +64,7 @@ const WriteSchema = Type.Object({
   content: Type.String({ description: "File content to write" }),
 });
 
-function createWriteTool(cwd: string, sandbox: string[]): AgentTool<typeof WriteSchema> {
+function createWriteTool(cwd: string, sandbox: string[], fs: FileSystem): AgentTool<typeof WriteSchema> {
   return {
     name: "write",
     label: "Write File",
@@ -72,8 +73,8 @@ function createWriteTool(cwd: string, sandbox: string[]): AgentTool<typeof Write
     async execute(_toolCallId, params) {
       const filePath = resolve(cwd, params.path);
       assertPathAllowed(filePath, sandbox, "write");
-      mkdirSync(dirname(filePath), { recursive: true });
-      writeFileSync(filePath, params.content, "utf-8");
+      await fs.mkdir(dirname(filePath));
+      await fs.writeFile(filePath, params.content);
       return {
         content: [{ type: "text", text: `File written: ${filePath} (${params.content.length} bytes)` }],
         details: { path: filePath, bytes: params.content.length },
@@ -90,7 +91,7 @@ const EditSchema = Type.Object({
   new_text: Type.String({ description: "Replacement text" }),
 });
 
-function createEditTool(cwd: string, sandbox: string[]): AgentTool<typeof EditSchema> {
+function createEditTool(cwd: string, sandbox: string[], fs: FileSystem): AgentTool<typeof EditSchema> {
   return {
     name: "edit",
     label: "Edit File",
@@ -99,7 +100,7 @@ function createEditTool(cwd: string, sandbox: string[]): AgentTool<typeof EditSc
     async execute(_toolCallId, params) {
       const filePath = resolve(cwd, params.path);
       assertPathAllowed(filePath, sandbox, "edit");
-      const content = readFileSync(filePath, "utf-8");
+      const content = await fs.readFile(filePath);
       const occurrences = content.split(params.old_text).length - 1;
       if (occurrences === 0) {
         return {
@@ -114,7 +115,7 @@ function createEditTool(cwd: string, sandbox: string[]): AgentTool<typeof EditSc
         };
       }
       const updated = content.replace(params.old_text, params.new_text);
-      writeFileSync(filePath, updated, "utf-8");
+      await fs.writeFile(filePath, updated);
       return {
         content: [{ type: "text", text: `Edited ${filePath}: replaced ${params.old_text.length} chars with ${params.new_text.length} chars` }],
         details: { path: filePath },
@@ -130,60 +131,30 @@ const BashSchema = Type.Object({
   timeout: Type.Optional(Type.Number({ description: "Timeout in milliseconds (default: 120000)" })),
 });
 
-function createBashTool(cwd: string): AgentTool<typeof BashSchema> {
+function createBashTool(cwd: string, shell: Shell): AgentTool<typeof BashSchema> {
   return {
     name: "bash",
     label: "Execute Shell",
     description: "Execute a shell command and return its output. Use for running tests, installing packages, git operations, etc.",
     parameters: BashSchema,
-    async execute(_toolCallId, params, signal) {
+    async execute(_toolCallId, params) {
       const timeout = params.timeout ?? 120_000;
-      return new Promise<AgentToolResult<any>>((res) => {
-        const child = spawnChild(params.command, {
-          shell: true,
-          cwd,
-          env: bashSafeEnv(),
-          stdio: ["ignore", "pipe", "pipe"],
-        });
-
-        const chunks: Buffer[] = [];
-        let killed = false;
-
-        const timer = setTimeout(() => {
-          killed = true;
-          child.kill("SIGTERM");
-          setTimeout(() => { if (!child.killed) child.kill("SIGKILL"); }, 3000);
-        }, timeout);
-
-        const onAbort = () => { killed = true; child.kill("SIGTERM"); };
-        signal?.addEventListener("abort", onAbort, { once: true });
-
-        child.stdout.on("data", (d: Buffer) => chunks.push(d));
-        child.stderr.on("data", (d: Buffer) => chunks.push(d));
-
-        child.on("close", (code) => {
-          clearTimeout(timer);
-          signal?.removeEventListener("abort", onAbort);
-          let output = Buffer.concat(chunks).toString("utf-8");
-          if (output.length > MAX_OUTPUT_BYTES) {
-            output = output.slice(-MAX_OUTPUT_BYTES) + "\n[truncated to last 30KB]";
-          }
-          const suffix = killed ? "\n[timed out]" : "";
-          res({
-            content: [{ type: "text", text: `Exit code: ${code ?? 1}\n${output}${suffix}` }],
-            details: { command: params.command, exitCode: code ?? 1 },
-          });
-        });
-
-        child.on("error", (err) => {
-          clearTimeout(timer);
-          signal?.removeEventListener("abort", onAbort);
-          res({
-            content: [{ type: "text", text: `Error: ${err.message}` }],
-            details: { command: params.command, error: err.message },
-          });
-        });
-      });
+      try {
+        const result = await shell.execute(params.command, { cwd, timeout });
+        let output = result.stdout + (result.stderr ? "\n" + result.stderr : "");
+        if (output.length > MAX_OUTPUT_BYTES) {
+          output = output.slice(-MAX_OUTPUT_BYTES) + "\n[truncated to last 30KB]";
+        }
+        return {
+          content: [{ type: "text", text: `Exit code: ${result.exitCode}\n${output}` }],
+          details: { command: params.command, exitCode: result.exitCode },
+        };
+      } catch (err: any) {
+        return {
+          content: [{ type: "text", text: `Error: ${err.message}` }],
+          details: { command: params.command, error: err.message },
+        };
+      }
     },
   };
 }
@@ -195,7 +166,7 @@ const GlobSchema = Type.Object({
   path: Type.Optional(Type.String({ description: "Directory to search in (default: cwd)" })),
 });
 
-function createGlobTool(cwd: string, sandbox: string[]): AgentTool<typeof GlobSchema> {
+function createGlobTool(cwd: string, sandbox: string[], shell: Shell): AgentTool<typeof GlobSchema> {
   return {
     name: "glob",
     label: "Find Files",
@@ -205,24 +176,23 @@ function createGlobTool(cwd: string, sandbox: string[]): AgentTool<typeof GlobSc
       const searchDir = params.path ? resolve(cwd, params.path) : cwd;
       assertPathAllowed(searchDir, sandbox, "glob");
       try {
-        // Use find command as cross-platform glob
-        const result = execSync(
+        const result = await shell.execute(
           `find ${JSON.stringify(searchDir)} -type f -name ${JSON.stringify(params.pattern)} 2>/dev/null | head -200`,
-          { encoding: "utf-8", timeout: 10_000 },
-        ).trim();
-        // If find with -name doesn't work well for globs, fallback to shell glob
-        if (!result) {
-          const shResult = execSync(
+          { cwd, timeout: 10_000 },
+        );
+        const output = result.stdout.trim();
+        if (!output) {
+          const fallback = await shell.execute(
             `cd ${JSON.stringify(searchDir)} && ls -1 ${JSON.stringify(params.pattern)} 2>/dev/null | head -200`,
-            { encoding: "utf-8", timeout: 10_000, shell: "/bin/bash" },
-          ).trim();
-          const files = shResult ? shResult.split("\n") : [];
+            { cwd, timeout: 10_000 },
+          );
+          const files = fallback.stdout.trim() ? fallback.stdout.trim().split("\n") : [];
           return {
             content: [{ type: "text", text: files.length > 0 ? files.join("\n") : "No files found" }],
             details: { pattern: params.pattern, count: files.length },
           };
         }
-        const files = result.split("\n").map(f => relative(cwd, f));
+        const files = output.split("\n").map((f: string) => relative(cwd, f));
         return {
           content: [{ type: "text", text: files.join("\n") }],
           details: { pattern: params.pattern, count: files.length },
@@ -245,7 +215,7 @@ const GrepSchema = Type.Object({
   include: Type.Optional(Type.String({ description: "File glob filter (e.g. '*.ts')" })),
 });
 
-function createGrepTool(cwd: string, sandbox: string[]): AgentTool<typeof GrepSchema> {
+function createGrepTool(cwd: string, sandbox: string[], shell: Shell): AgentTool<typeof GrepSchema> {
   return {
     name: "grep",
     label: "Search Code",
@@ -256,10 +226,11 @@ function createGrepTool(cwd: string, sandbox: string[]): AgentTool<typeof GrepSc
       assertPathAllowed(searchPath, sandbox, "grep");
       const includeFlag = params.include ? `--include=${JSON.stringify(params.include)}` : "";
       try {
-        const result = execSync(
+        const r = await shell.execute(
           `grep -rn ${includeFlag} -E ${JSON.stringify(params.pattern)} ${JSON.stringify(searchPath)} 2>/dev/null | head -100`,
-          { encoding: "utf-8", timeout: 15_000 },
-        ).trim();
+          { cwd, timeout: 15_000 },
+        );
+        const result = r.stdout.trim();
         if (!result) {
           return {
             content: [{ type: "text", text: "No matches found" }],
@@ -287,7 +258,7 @@ const LsSchema = Type.Object({
   path: Type.Optional(Type.String({ description: "Directory to list (default: cwd)" })),
 });
 
-function createLsTool(cwd: string, sandbox: string[]): AgentTool<typeof LsSchema> {
+function createLsTool(cwd: string, sandbox: string[], fs: FileSystem): AgentTool<typeof LsSchema> {
   return {
     name: "ls",
     label: "List Directory",
@@ -296,14 +267,14 @@ function createLsTool(cwd: string, sandbox: string[]): AgentTool<typeof LsSchema
     async execute(_toolCallId, params) {
       const dir = params.path ? resolve(cwd, params.path) : cwd;
       assertPathAllowed(dir, sandbox, "ls");
-      const entries = readdirSync(dir).map(name => {
+      const names = await fs.readdir(dir);
+      const entries: string[] = [];
+      for (const name of names) {
         try {
-          const stat = statSync(join(dir, name));
-          return stat.isDirectory() ? `${name}/` : name;
-        } catch {
-          return name;
-        }
-      });
+          const s = await fs.stat(join(dir, name));
+          entries.push(s.isDirectory ? `${name}/` : name);
+        } catch { entries.push(name); }
+      }
       return {
         content: [{ type: "text", text: entries.join("\n") }],
         details: { path: dir, count: entries.length },
@@ -350,9 +321,9 @@ export function expandToolWildcards(allowedTools: string[], allNames: readonly s
 // === Factory ===
 
 /** Tool name to filter by in allowedTools config */
-type CodingToolName = "read" | "write" | "edit" | "bash" | "glob" | "grep" | "ls";
+type SystemToolName = "read" | "write" | "edit" | "bash" | "glob" | "grep" | "ls";
 
-const ALL_TOOL_NAMES: CodingToolName[] = ["read", "write", "edit", "bash", "glob", "grep", "ls"];
+const ALL_TOOL_NAMES: SystemToolName[] = ["read", "write", "edit", "bash", "glob", "grep", "ls"];
 
 /**
  * Create the standard set of coding tools scoped to a working directory.
@@ -365,17 +336,19 @@ const ALL_TOOL_NAMES: CodingToolName[] = ["read", "write", "edit", "bash", "glob
  * - http_fetch, http_download
  * - vault_get, vault_list (when vault is provided)
  */
-export function createCodingTools(cwd: string, allowedTools?: string[], allowedPaths?: string[], outputDir?: string, vault?: ResolvedVault): AgentTool<any>[] {
+export function createSystemTools(cwd: string, allowedTools?: string[], allowedPaths?: string[], outputDir?: string, vault?: ResolvedVault, fs?: FileSystem, shell?: Shell): AgentTool<any>[] {
+  const _fs = fs ?? new NodeFileSystem();
+  const _shell = shell ?? new NodeShell();
   const sandbox = resolveAllowedPaths(cwd, allowedPaths);
 
-  const factories: Record<CodingToolName, () => AgentTool<any>> = {
-    read: () => createReadTool(cwd, sandbox),
-    write: () => createWriteTool(cwd, sandbox),
-    edit: () => createEditTool(cwd, sandbox),
-    bash: () => createBashTool(cwd),
-    glob: () => createGlobTool(cwd, sandbox),
-    grep: () => createGrepTool(cwd, sandbox),
-    ls: () => createLsTool(cwd, sandbox),
+  const factories: Record<SystemToolName, () => AgentTool<any>> = {
+    read: () => createReadTool(cwd, sandbox, _fs),
+    write: () => createWriteTool(cwd, sandbox, _fs),
+    edit: () => createEditTool(cwd, sandbox, _fs),
+    bash: () => createBashTool(cwd, _shell),
+    glob: () => createGlobTool(cwd, sandbox, _shell),
+    grep: () => createGrepTool(cwd, sandbox, _shell),
+    ls: () => createLsTool(cwd, sandbox, _fs),
   };
 
   const names = allowedTools
@@ -430,7 +403,7 @@ export type { PhoneToolName } from "./phone-tools.js";
 export type { InkToolName } from "./ink-tools.js";
 
 /** All known tool names across all categories */
-export type ExtendedToolName = CodingToolName
+export type ExtendedToolName = SystemToolName
   | import("./browser-tools.js").BrowserToolName
   | import("./http-tools.js").HttpToolName
   | import("./email-tools.js").EmailToolName
@@ -491,6 +464,10 @@ export interface CreateAllToolsOptions {
   whatsappSendMessage?: (jid: string, text: string) => Promise<string | undefined>;
   /** Polpo directory (.polpo/) for Ink tools. */
   polpoDir?: string;
+  /** FileSystem implementation (default: NodeFileSystem). */
+  fs?: FileSystem;
+  /** Shell implementation (default: NodeShell). */
+  shell?: Shell;
 }
 
 /**
@@ -520,7 +497,7 @@ export async function createAllTools(options: CreateAllToolsOptions): Promise<Ag
     allowedTools?.some(a => names.some(n => n === a.toLowerCase()));
 
   // Core coding tools (always included unless filtered out) — includes vault_get/vault_list
-  tools.push(...createCodingTools(cwd, allowedTools, allowedPaths, options.outputDir, options.vault));
+  tools.push(...createSystemTools(cwd, allowedTools, allowedPaths, options.outputDir, options.vault, options.fs, options.shell));
 
   // Ink tools (always included when polpoDir is available)
   if (options.polpoDir) {
@@ -580,7 +557,7 @@ export async function createAllTools(options: CreateAllToolsOptions): Promise<Ag
     tools.push(...createPhoneTools(options.vault, allowedTools));
   }
 
-  // HTTP, register_outcome, and vault are already included via createCodingTools() above — no need to add again
+  // HTTP, register_outcome, and vault are already included via createSystemTools() above — no need to add again
 
   return tools;
 }

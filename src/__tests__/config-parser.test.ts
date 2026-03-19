@@ -16,7 +16,7 @@ function writeConfig(config: object): string {
 /** Minimal valid config for reuse. */
 function minimalConfig() {
   return {
-    org: "test-project",
+    project: "test-project",
     team: {
       name: "test-team",
       agents: [
@@ -50,7 +50,7 @@ describe("parseConfig (.polpo/polpo.json)", () => {
       const config = await parseConfig(workDir);
 
       expect(config.version).toBe("1");
-      expect(config.org).toBe("test-project");
+      expect(config.project).toBe("test-project");
       expect(config.teams[0].name).toBe("test-team");
       expect(config.teams[0].agents).toHaveLength(1);
       expect(config.teams[0].agents[0].name).toBe("agent-1");
@@ -211,7 +211,7 @@ describe("parseConfig (.polpo/polpo.json)", () => {
 describe("generatePolpoConfigDefault", () => {
   it("returns a valid config with project name", () => {
     const config = generatePolpoConfigDefault("my-project");
-    expect(config.org).toBe("my-project");
+    expect(config.project).toBe("my-project");
     expect(config.teams[0].name).toBe("default");
     expect(config.teams[0].agents).toHaveLength(1);
     expect(config.teams[0].agents[0].name).toBe("agent-1");
@@ -225,7 +225,7 @@ describe("generatePolpoConfigDefault", () => {
     savePolpoConfig(join(TMP, ".polpo"), config);
 
     const parsed = await parseConfig(TMP);
-    expect(parsed.org).toBe("round-trip");
+    expect(parsed.project).toBe("round-trip");
     expect(parsed.teams[0].name).toBe("default");
     expect(parsed.teams[0].agents).toHaveLength(1);
     expect(parsed.settings.maxRetries).toBe(3);

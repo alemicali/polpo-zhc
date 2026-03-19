@@ -73,6 +73,8 @@ export interface PolpoClientConfig {
   projectId?: string;
   apiKey?: string;
   fetch?: typeof globalThis.fetch;
+  /** API path prefix. Default: "/v1" for polpo.sh, "/api/v1" for self-hosted. */
+  apiPrefix?: string;
 }
 
 /**
@@ -236,6 +238,7 @@ export class ChatCompletionStream implements AsyncIterable<ChatCompletionChunk> 
 
 export class PolpoClient {
   private readonly baseUrl: string;
+  private readonly apiPrefix: string;
   private readonly headers: Record<string, string>;
   private readonly fetchFn: typeof globalThis.fetch;
   /** In-flight GET deduplication */
@@ -243,17 +246,20 @@ export class PolpoClient {
 
   constructor(config: PolpoClientConfig) {
     this.baseUrl = config.baseUrl.replace(/\/$/, "");
+    // Cloud (api.polpo.sh) uses /v1, self-hosted uses /api/v1
+    this.apiPrefix = config.apiPrefix ?? (this.baseUrl.includes("polpo.sh") ? "/v1" : "/api/v1");
     this.fetchFn = config.fetch ?? globalThis.fetch.bind(globalThis);
     this.headers = {};
     if (config.apiKey) {
       this.headers["x-api-key"] = config.apiKey;
+      this.headers["Authorization"] = `Bearer ${config.apiKey}`;
     }
   }
 
   // ── Helpers ──────────────────────────────────────────────
 
   private apiUrl(path: string): string {
-    return `${this.baseUrl}/api/v1${path}`;
+    return `${this.baseUrl}${this.apiPrefix}${path}`;
   }
 
   private async request<T>(method: string, url: string, body?: unknown): Promise<T> {
@@ -801,8 +807,11 @@ export class PolpoClient {
   runTemplate(name: string, params?: Record<string, string | number | boolean>): Promise<PlaybookRunResult> { return this.runPlaybook(name, params); }
 
   /** Health check (instance method — uses configured base URL). */
-  getHealth(): Promise<HealthResponse> {
-    return this.get<HealthResponse>("/health");
+  async getHealth(): Promise<HealthResponse> {
+    const res = await this.fetchFn(`${this.baseUrl}/health`, {
+      headers: { ...this.headers },
+    });
+    return res.json();
   }
 
   // ── Static ───────────────────────────────────────────────

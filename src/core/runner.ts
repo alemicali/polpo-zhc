@@ -119,6 +119,7 @@ class RunActivityLog {
 interface RunnerStores {
   runStore: RunStore;
   logStore?: LogStore;
+  vaultStore?: VaultStore;
 }
 
 async function createStores(config: RunnerConfig): Promise<RunnerStores> {
@@ -129,7 +130,7 @@ async function createStores(config: RunnerConfig): Promise<RunnerStores> {
     const sql = postgres(config.databaseUrl);
     const db = drizzle(sql);
     const stores = createPgStores(db);
-    return { runStore: stores.runStore, logStore: stores.logStore };
+    return { runStore: stores.runStore, logStore: stores.logStore, vaultStore: stores.vaultStore };
   }
   if (config.storage === "sqlite") {
     const { createSqliteStores } = await import("@polpo-ai/drizzle");
@@ -146,7 +147,7 @@ async function createStores(config: RunnerConfig): Promise<RunnerStores> {
     const { drizzle } = await import("drizzle-orm/better-sqlite3");
     const db = drizzle(sqlite);
     const stores = createSqliteStores(db);
-    return { runStore: stores.runStore, logStore: stores.logStore };
+    return { runStore: stores.runStore, logStore: stores.logStore, vaultStore: stores.vaultStore };
   }
   return { runStore: new FileRunStore(config.polpoDir) };
 }
@@ -154,7 +155,7 @@ async function createStores(config: RunnerConfig): Promise<RunnerStores> {
 async function main(): Promise<void> {
   const isDbMode = process.argv.includes("--run-id");
   const config = isDbMode ? await readConfigFromDb() : readConfigFromFile();
-  const { runStore, logStore } = await createStores(config);
+  const { runStore, logStore, vaultStore: drizzleVaultStore } = await createStores(config);
   const actLog = new RunActivityLog(config.polpoDir, config.runId, config.taskId, config.agent.name);
 
   // When LogStore is available (postgres/sqlite), persist transcript to DB.
@@ -182,8 +183,11 @@ async function main(): Promise<void> {
 
   let handle;
   try {
-    let vaultStore: VaultStore | undefined;
-    try { vaultStore = new EncryptedVaultStore(config.polpoDir); } catch { /* vault unavailable */ }
+    // Use Drizzle vault store when available (postgres/sqlite), fall back to file-based
+    let vaultStore: VaultStore | undefined = drizzleVaultStore;
+    if (!vaultStore) {
+      try { vaultStore = new EncryptedVaultStore(config.polpoDir); } catch { /* vault unavailable */ }
+    }
 
     // WhatsApp store + send function (if configured)
     let waStore: WhatsAppStore | undefined;
@@ -244,10 +248,10 @@ async function main(): Promise<void> {
       actLog.logTranscript(entry);
       // Persist transcript to DB when LogStore is available (cloud mode)
       if (logStore && logSessionId) {
-        const event = entry.role === "assistant" ? "transcript:assistant"
-          : entry.role === "tool_result" ? "transcript:tool_result"
-          : entry.role === "tool_use" ? "transcript:tool_use"
-          : `transcript:${entry.role ?? "unknown"}`;
+        const event = entry.type === "assistant" ? "transcript:assistant"
+          : entry.type === "tool_result" ? "transcript:tool_result"
+          : entry.type === "tool_use" ? "transcript:tool_use"
+          : `transcript:${entry.type ?? "unknown"}`;
         logStore.append({ ts: new Date().toISOString(), event, data: sanitizeTranscriptEntry(entry) })
           .catch(() => {}); // best-effort, don't block engine
       }

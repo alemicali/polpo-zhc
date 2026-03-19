@@ -1,9 +1,7 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { resolve, relative, extname, basename, dirname } from "node:path";
 import { POLPO_DIR_NAME } from "../../core/constants.js";
-import { existsSync, statSync, readdirSync, createReadStream, mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { readFile, writeFile } from "node:fs/promises";
-import { Readable } from "node:stream";
+import type { FileSystem } from "@polpo-ai/core";
 
 // ── MIME type map ────────────────────────────────────────────────────────────
 const EXT_MIME: Record<string, string> = {
@@ -61,18 +59,16 @@ function isPreviewable(mime: string): boolean {
 
 // ── Security: path sandboxing ────────────────────────────────────────────────
 
-function resolveSandboxed(requestPath: string, allowedRoots: string[]): string | null {
-  // Reject obvious traversal
+async function resolveSandboxed(requestPath: string, allowedRoots: string[], fs: FileSystem): Promise<string | null> {
   if (requestPath.includes("..")) return null;
 
   for (const root of allowedRoots) {
-    // Handle absolute paths: check if they fall within an allowed root
     const resolved = requestPath.startsWith("/")
       ? requestPath
       : resolve(root, requestPath);
     const rel = relative(root, resolved);
     if (!rel.startsWith("..") && !rel.startsWith("/")) {
-      if (existsSync(resolved)) return resolved;
+      if (await fs.exists(resolved)) return resolved;
     }
   }
   return null;
@@ -101,25 +97,16 @@ const listFilesRoute = createRoute({
   path: "/list",
   tags: ["Files"],
   summary: "List directory contents",
-  description: "List files and subdirectories at the given path. Path is sandboxed to the .polpo/ directory and the project working directory. Returns entries with name, type (file/directory), size, mimeType, and modifiedAt.",
+  description: "List files and subdirectories at the given path. Path is sandboxed to the .polpo/ directory and the project working directory.",
   request: {
     query: z.object({
       path: z.string().optional().openapi({ description: "Directory path to list. Defaults to the project root.", example: ".polpo/output" }),
     }),
   },
   responses: {
-    200: {
-      content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.any() }) } },
-      description: "Directory listing with path and entries array",
-    },
-    400: {
-      content: { "application/json": { schema: errorSchema } },
-      description: "Invalid or disallowed path",
-    },
-    404: {
-      content: { "application/json": { schema: errorSchema } },
-      description: "Path not found",
-    },
+    200: { content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.any() }) } }, description: "Directory listing" },
+    400: { content: { "application/json": { schema: errorSchema } }, description: "Invalid or disallowed path" },
+    404: { content: { "application/json": { schema: errorSchema } }, description: "Path not found" },
   },
 });
 
@@ -128,102 +115,90 @@ const previewFileRoute = createRoute({
   path: "/preview",
   tags: ["Files"],
   summary: "Preview file",
-  description: "Returns structured preview metadata for a file. For text files, includes the file content (optionally truncated). For binary files (images, audio, video, PDF), returns a URL to stream the content via the /files/read endpoint. Response includes: path, name, mimeType, size, previewable (boolean), type (text|image|pdf|audio|video|binary), url, and optionally content and truncated for text files.",
+  description: "Returns structured preview metadata for a file.",
   request: {
     query: z.object({
-      path: z.string().openapi({ description: "Absolute or relative file path", example: ".polpo/output/task-123/report.md" }),
+      path: z.string().openapi({ description: "Absolute or relative file path" }),
       maxLines: z.string().optional().openapi({ description: "Maximum lines to return for text files (default: 500)" }),
     }),
   },
   responses: {
-    200: {
-      content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.any() }) } },
-      description: "File preview data",
-    },
-    400: {
-      content: { "application/json": { schema: errorSchema } },
-      description: "Invalid or disallowed path",
-    },
-    404: {
-      content: { "application/json": { schema: errorSchema } },
-      description: "File not found",
-    },
+    200: { content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.any() }) } }, description: "File preview data" },
+    400: { content: { "application/json": { schema: errorSchema } }, description: "Invalid or disallowed path" },
+    404: { content: { "application/json": { schema: errorSchema } }, description: "File not found" },
   },
 });
 
-// ── Route factory ────────────────────────────────────────────────────────────
+// ── Dependencies ─────────────────────────────────────────────────────────────
 
-export function fileRoutes(getDeps: () => {
+export interface FileRouteDeps {
   polpoDir: string;
   workDir: string;
   agentWorkDir: string;
+  fs: FileSystem;
   emit: (event: string, data: any) => void;
-}): OpenAPIHono {
+}
+
+// ── Route factory ────────────────────────────────────────────────────────────
+
+export function fileRoutes(getDeps: () => FileRouteDeps): OpenAPIHono {
   const app = new OpenAPIHono();
 
   function getAllowedRoots(): string[] {
     const deps = getDeps();
-    // workDir must come before polpoDir so that "." resolves to the project root, not .polpo
     const roots = [deps.workDir, deps.polpoDir];
     if (!roots.includes(deps.agentWorkDir)) roots.push(deps.agentWorkDir);
     return roots;
   }
 
   // ── GET /roots — available root directories ──
-  app.openapi(listRootsRoute, ((c: any) => {
+  app.openapi(listRootsRoute, (async (c: any) => {
     const deps = getDeps();
-    const workDir = deps.workDir;
-    const polpoDir = deps.polpoDir;
-    const agentWorkDir = deps.agentWorkDir;
+    const { workDir, polpoDir, agentWorkDir, fs } = deps;
 
-    // Recursively compute total files and total size for a directory.
-    // Skips node_modules, .git, and similar heavy dirs to stay fast.
     const SKIP = new Set(["node_modules", ".git", ".next", "dist", "__pycache__", ".cache"]);
-    function dirStats(dir: string, depth = 0): { files: number; bytes: number } {
-      if (depth > 8) return { files: 0, bytes: 0 }; // cap recursion
+    async function dirStats(dir: string, depth = 0): Promise<{ files: number; bytes: number }> {
+      if (depth > 8) return { files: 0, bytes: 0 };
       let files = 0, bytes = 0;
       try {
-        const entries = readdirSync(dir, { withFileTypes: true });
+        const entries = fs.readdirWithTypes
+          ? await fs.readdirWithTypes(dir)
+          : (await fs.readdir(dir)).map((n) => ({ name: n, isDirectory: false, isFile: true }));
         for (const e of entries) {
           if (SKIP.has(e.name)) continue;
           const full = resolve(dir, e.name);
-          if (e.isDirectory()) {
-            const sub = dirStats(full, depth + 1);
+          if (e.isDirectory) {
+            const sub = await dirStats(full, depth + 1);
             files += sub.files;
             bytes += sub.bytes;
-          } else if (e.isFile()) {
+          } else if (e.isFile) {
             files++;
-            try { bytes += statSync(full).size; } catch { /* skip */ }
+            try { bytes += (await fs.stat(full)).size; } catch { /* skip */ }
           }
         }
       } catch { /* unreadable dir */ }
       return { files, bytes };
     }
 
-    // Agent workspace relative path from project root
     const agentWorkRel = relative(workDir, agentWorkDir);
     const hasCustomWorkspace = agentWorkDir !== workDir;
-
-    const roots: any[] = [];
-
-    // Workspace — where agents operate.
-    // When settings.workDir is a subdirectory, show it with its relative path.
-    // When settings.workDir is "." (workspace = project root), show the root as workspace.
     const wsDir = hasCustomWorkspace ? agentWorkDir : workDir;
-    const wsStats = dirStats(wsDir);
-    roots.push({
-      id: "workspace",
-      name: hasCustomWorkspace ? basename(agentWorkDir) : basename(workDir),
-      path: hasCustomWorkspace ? agentWorkRel : ".",
-      absolutePath: wsDir,
-      description: "Agent workspace",
-      icon: "folder-open",
-      totalFiles: wsStats.files,
-      totalSize: wsStats.bytes,
-    });
+    const wsStats = await dirStats(wsDir);
 
-    // .polpo config dir
-    const polpoStats = dirStats(polpoDir);
+    const roots: any[] = [
+      {
+        id: "workspace",
+        name: hasCustomWorkspace ? basename(agentWorkDir) : basename(workDir),
+        path: hasCustomWorkspace ? agentWorkRel : ".",
+        absolutePath: wsDir,
+        description: "Agent workspace",
+        icon: "folder-open",
+        totalFiles: wsStats.files,
+        totalSize: wsStats.bytes,
+      },
+    ];
+
+    const polpoStats = await dirStats(polpoDir);
     roots.push({
       id: "polpo",
       name: POLPO_DIR_NAME,
@@ -238,43 +213,46 @@ export function fileRoutes(getDeps: () => {
     return c.json({ ok: true, data: { roots } }, 200);
   }) as any);
 
-  // ── GET /list — directory listing (OpenAPI) ──
-  app.openapi(listFilesRoute, ((c: any) => {
+  // ── GET /list — directory listing ──
+  app.openapi(listFilesRoute, (async (c: any) => {
+    const deps = getDeps();
+    const { fs } = deps;
     const { path: reqPath = "." } = c.req.valid("query");
     const roots = getAllowedRoots();
 
-    const resolved = resolveSandboxed(reqPath, roots);
-    if (!resolved) {
-      return c.json({ ok: false, error: "Invalid or disallowed path" }, 400);
-    }
+    const resolved = await resolveSandboxed(reqPath, roots, fs);
+    if (!resolved) return c.json({ ok: false, error: "Invalid or disallowed path" }, 400);
 
-    let stat;
-    try { stat = statSync(resolved); } catch { return c.json({ ok: false, error: "Path not found" }, 404); }
-    if (!stat.isDirectory()) {
-      return c.json({ ok: false, error: "Path is not a directory" }, 400);
-    }
+    let s;
+    try { s = await fs.stat(resolved); } catch { return c.json({ ok: false, error: "Path not found" }, 404); }
+    if (!s.isDirectory) return c.json({ ok: false, error: "Path is not a directory" }, 400);
 
-    const entries = readdirSync(resolved, { withFileTypes: true })
-      .filter((d: any) => !d.name.startsWith(".") || d.name === ".agent")
-      .map((d: any) => {
-        const fullPath = resolve(resolved, d.name);
-        const isDir = d.isDirectory();
-        const s = (() => { try { return statSync(fullPath); } catch { return undefined; } })();
-        return {
-          name: d.name,
-          type: isDir ? "directory" : "file",
-          ...(s ? {
-            ...(isDir ? {} : { size: s.size, mimeType: guessMime(d.name) }),
-            modifiedAt: s.mtime.toISOString(),
-          } : {}),
-        };
-      })
-      .sort((a: any, b: any) => {
-        if (a.type !== b.type) return a.type === "directory" ? -1 : 1;
-        return a.name.localeCompare(b.name);
+    const rawEntries = fs.readdirWithTypes
+      ? await fs.readdirWithTypes(resolved)
+      : (await fs.readdir(resolved)).map((n) => ({ name: n, isDirectory: false, isFile: true }));
+
+    const entries = [];
+    for (const d of rawEntries) {
+      if (d.name.startsWith(".") && d.name !== ".agent") continue;
+      const fullPath = resolve(resolved, d.name);
+      const isDir = d.isDirectory;
+      let fileStat;
+      try { fileStat = await fs.stat(fullPath); } catch { /* skip */ }
+      entries.push({
+        name: d.name,
+        type: isDir ? "directory" : "file",
+        ...(fileStat ? {
+          ...(isDir ? {} : { size: fileStat.size, mimeType: guessMime(d.name) }),
+          modifiedAt: fileStat.modifiedAt?.toISOString(),
+        } : {}),
       });
+    }
 
-    // Display path relative to the first matching root
+    entries.sort((a: any, b: any) => {
+      if (a.type !== b.type) return a.type === "directory" ? -1 : 1;
+      return a.name.localeCompare(b.name);
+    });
+
     const displayPath = roots.reduce((p: string, root: string) => {
       const rel = relative(root, resolved);
       return !rel.startsWith("..") ? rel || "." : p;
@@ -283,27 +261,33 @@ export function fileRoutes(getDeps: () => {
     return c.json({ ok: true, data: { path: displayPath, entries } }, 200);
   }) as any);
 
-  // ── GET /read — stream file content (plain handler — binary response) ──
-  // NOTE: Binary streaming cannot use app.openapi() because it returns raw bytes, not JSON.
-  app.get("/read", (c) => {
+  // ── GET /read — stream file content (binary response) ──
+  app.get("/read", async (c) => {
+    const deps = getDeps();
+    const { fs } = deps;
     const reqPath = c.req.query("path");
     const download = c.req.query("download");
     if (!reqPath) return c.json({ ok: false, error: "Missing path parameter" }, 400);
 
     const roots = getAllowedRoots();
-    const resolved = resolveSandboxed(reqPath, roots);
+    const resolved = await resolveSandboxed(reqPath, roots, fs);
     if (!resolved) return c.json({ ok: false, error: "Invalid or disallowed path" }, 400);
 
-    let stat;
-    try { stat = statSync(resolved); } catch { return c.json({ ok: false, error: "File not found" }, 404); }
-    if (stat.isDirectory()) return c.json({ ok: false, error: "Path is a directory" }, 400);
+    let s;
+    try { s = await fs.stat(resolved); } catch { return c.json({ ok: false, error: "File not found" }, 404); }
+    if (s.isDirectory) return c.json({ ok: false, error: "Path is a directory" }, 400);
 
     const mime = guessMime(resolved);
     const fileName = basename(resolved);
 
+    // Read via buffer abstraction (works with Node, Sandbox, etc.)
+    const buffer = fs.readFileBuffer
+      ? await fs.readFileBuffer(resolved)
+      : new TextEncoder().encode(await fs.readFile(resolved));
+
     const headers: Record<string, string> = {
       "Content-Type": mime,
-      "Content-Length": String(stat.size),
+      "Content-Length": String(buffer.byteLength),
       "Cache-Control": "private, max-age=60",
     };
 
@@ -315,31 +299,30 @@ export function fileRoutes(getDeps: () => {
       headers["Content-Disposition"] = `attachment; filename="${fileName}"`;
     }
 
-    const nodeStream = createReadStream(resolved);
-    const webStream = Readable.toWeb(nodeStream) as ReadableStream;
-    return new Response(webStream, { status: 200, headers });
+    return new Response(new Uint8Array(buffer) as any, { status: 200, headers });
   });
 
-  // ── GET /preview — structured preview data for the UI (OpenAPI) ──
+  // ── GET /preview — structured preview data ──
   app.openapi(previewFileRoute, (async (c: any) => {
+    const deps = getDeps();
+    const { fs } = deps;
     const { path: reqPath, maxLines: maxLinesStr } = c.req.valid("query");
     if (!reqPath) return c.json({ ok: false, error: "Missing path parameter" }, 400);
 
     const roots = getAllowedRoots();
     const maxLines = maxLinesStr ? parseInt(maxLinesStr, 10) : 500;
 
-    const resolved = resolveSandboxed(reqPath, roots);
+    const resolved = await resolveSandboxed(reqPath, roots, fs);
     if (!resolved) return c.json({ ok: false, error: "Invalid or disallowed path" }, 400);
 
-    let stat;
-    try { stat = statSync(resolved); } catch { return c.json({ ok: false, error: "File not found" }, 404); }
-    if (stat.isDirectory()) return c.json({ ok: false, error: "Path is a directory" }, 400);
+    let s;
+    try { s = await fs.stat(resolved); } catch { return c.json({ ok: false, error: "File not found" }, 404); }
+    if (s.isDirectory) return c.json({ ok: false, error: "Path is a directory" }, 400);
 
     const mime = guessMime(resolved);
     const fileName = basename(resolved);
     const fileUrl = `/api/v1/files/read?path=${encodeURIComponent(reqPath)}`;
 
-    // Determine preview type
     let type: "text" | "image" | "pdf" | "audio" | "video" | "binary";
     if (mime.startsWith("text/") || mime === "application/json" || mime === "application/xml" || mime === "application/x-ndjson") {
       type = "text";
@@ -359,31 +342,27 @@ export function fileRoutes(getDeps: () => {
       path: reqPath,
       name: fileName,
       mimeType: mime,
-      size: stat.size,
+      size: s.size,
       previewable: type !== "binary",
       type,
       url: fileUrl,
     };
 
-    // For text files, include content (truncated)
     if (type === "text") {
-      const MAX_SIZE = 512 * 1024; // 512KB
-      if (stat.size <= MAX_SIZE) {
-        const raw = await readFile(resolved, "utf-8");
+      const MAX_SIZE = 512 * 1024;
+      if (s.size <= MAX_SIZE) {
+        const raw = await fs.readFile(resolved);
         const lines = raw.split("\n");
         const truncated = lines.length > maxLines;
         result.content = truncated ? lines.slice(0, maxLines).join("\n") : raw;
         result.truncated = truncated;
       } else {
-        // Read first chunk only
-        const content = await new Promise<string>((res) => {
-          let data = "";
-          const s = createReadStream(resolved, { start: 0, end: MAX_SIZE - 1, encoding: "utf-8" });
-          s.on("data", (chunk) => { data += String(chunk); });
-          s.on("end", () => res(data));
-          s.on("error", () => res(""));
-        });
-        result.content = content;
+        // For large files, read via buffer and decode partial
+        const buffer = fs.readFileBuffer
+          ? await fs.readFileBuffer(resolved)
+          : new TextEncoder().encode(await fs.readFile(resolved));
+        const partial = new TextDecoder().decode(buffer.slice(0, MAX_SIZE));
+        result.content = partial;
         result.truncated = true;
       }
     }
@@ -391,42 +370,42 @@ export function fileRoutes(getDeps: () => {
     return c.json({ ok: true, data: result }, 200);
   }) as any);
 
-  // ── POST /upload — upload file(s) to a directory (plain handler — multipart body) ──
+  // ── POST /upload — upload file(s) ──
   app.post("/upload", async (c) => {
+    const deps = getDeps();
+    const { fs } = deps;
     const body = await c.req.parseBody({ all: true });
     const destPath = (body.path as string | undefined) ?? ".";
     const roots = getAllowedRoots();
-    const resolvedDir = resolveSandboxed(destPath, roots);
+    const resolvedDir = await resolveSandboxed(destPath, roots, fs);
     if (!resolvedDir) return c.json({ ok: false, error: "Invalid or disallowed path" }, 400);
-    if (!existsSync(resolvedDir) || !statSync(resolvedDir).isDirectory()) {
-      return c.json({ ok: false, error: "Destination is not a directory" }, 400);
-    }
 
-    // body.file can be a single File or an array of Files
+    const dirStat = await fs.stat(resolvedDir).catch(() => null);
+    if (!dirStat?.isDirectory) return c.json({ ok: false, error: "Destination is not a directory" }, 400);
+
     const rawFiles = body.file;
     const files: globalThis.File[] = Array.isArray(rawFiles)
       ? rawFiles.filter((f): f is globalThis.File => f instanceof globalThis.File)
       : rawFiles instanceof globalThis.File ? [rawFiles] : [];
 
-    if (files.length === 0) {
-      return c.json({ ok: false, error: "No files provided" }, 400);
-    }
+    if (files.length === 0) return c.json({ ok: false, error: "No files provided" }, 400);
 
     const uploaded: { name: string; size: number }[] = [];
     for (const file of files) {
       const filePath = resolve(resolvedDir, file.name);
-      // Safety: ensure the resolved path is still within sandbox
       const rel = relative(resolvedDir, filePath);
-      if (rel.startsWith("..") || rel.includes("/")) continue; // skip traversal attempts
-      const buffer = Buffer.from(await file.arrayBuffer());
-      writeFileSync(filePath, buffer);
-      uploaded.push({ name: file.name, size: buffer.byteLength });
+      if (rel.startsWith("..") || rel.includes("/")) continue;
+      const data = new Uint8Array(await file.arrayBuffer());
+      if (fs.writeFileBuffer) {
+        await fs.writeFileBuffer(filePath, data);
+      } else {
+        await fs.writeFile(filePath, new TextDecoder().decode(data));
+      }
+      uploaded.push({ name: file.name, size: data.byteLength });
     }
 
-    // Emit file:changed for each uploaded file
-    const uploadDeps = getDeps();
     for (const u of uploaded) {
-      uploadDeps.emit("file:changed", { path: resolve(resolvedDir, u.name), dir: resolvedDir, action: "created", source: "server" });
+      deps.emit("file:changed", { path: resolve(resolvedDir, u.name), dir: resolvedDir, action: "created", source: "server" });
     }
 
     return c.json({ ok: true, data: { uploaded, count: uploaded.length } }, 200);
@@ -434,24 +413,28 @@ export function fileRoutes(getDeps: () => {
 
   // ── POST /mkdir — create a directory ──
   app.post("/mkdir", async (c) => {
+    const deps = getDeps();
+    const { fs } = deps;
     const body = await c.req.json<{ path: string }>().catch(() => null);
     if (!body?.path) return c.json({ ok: false, error: "Missing path" }, 400);
 
     const roots = getAllowedRoots();
     const parent = dirname(body.path);
-    const resolvedParent = resolveSandboxed(parent === "." ? "." : parent, roots);
+    const resolvedParent = await resolveSandboxed(parent === "." ? "." : parent, roots, fs);
     if (!resolvedParent) return c.json({ ok: false, error: "Invalid or disallowed path" }, 400);
 
     const newDir = resolve(resolvedParent, basename(body.path));
-    if (existsSync(newDir)) return c.json({ ok: false, error: "Directory already exists" }, 400);
+    if (await fs.exists(newDir)) return c.json({ ok: false, error: "Directory already exists" }, 400);
 
-    mkdirSync(newDir, { recursive: true });
-    getDeps().emit("file:changed", { path: newDir, dir: resolvedParent, action: "created", source: "server" });
+    await fs.mkdir(newDir);
+    deps.emit("file:changed", { path: newDir, dir: resolvedParent, action: "created", source: "server" });
     return c.json({ ok: true, data: { path: body.path } }, 200);
   });
 
   // ── POST /rename — rename a file or directory ──
   app.post("/rename", async (c) => {
+    const deps = getDeps();
+    const { fs } = deps;
     const body = await c.req.json<{ path: string; newName: string }>().catch(() => null);
     if (!body?.path || !body?.newName) return c.json({ ok: false, error: "Missing path or newName" }, 400);
     if (body.newName.includes("/") || body.newName.includes("..")) {
@@ -459,83 +442,85 @@ export function fileRoutes(getDeps: () => {
     }
 
     const roots = getAllowedRoots();
-    const resolved = resolveSandboxed(body.path, roots);
+    const resolved = await resolveSandboxed(body.path, roots, fs);
     if (!resolved) return c.json({ ok: false, error: "Invalid or disallowed path" }, 400);
-    if (!existsSync(resolved)) return c.json({ ok: false, error: "Path not found" }, 404);
+    if (!(await fs.exists(resolved))) return c.json({ ok: false, error: "Path not found" }, 404);
 
     const newPath = resolve(dirname(resolved), body.newName);
-    if (existsSync(newPath)) return c.json({ ok: false, error: "A file with that name already exists" }, 400);
+    if (await fs.exists(newPath)) return c.json({ ok: false, error: "A file with that name already exists" }, 400);
 
-    renameSync(resolved, newPath);
-    getDeps().emit("file:changed", { path: resolved, dir: dirname(resolved), action: "renamed", source: "server" });
+    await fs.rename(resolved, newPath);
+    deps.emit("file:changed", { path: resolved, dir: dirname(resolved), action: "renamed", source: "server" });
     return c.json({ ok: true, data: { oldPath: body.path, newName: body.newName } }, 200);
   });
 
-  // ── DELETE /delete — delete a file or empty directory ──
+  // ── POST /delete — delete a file or empty directory ──
   app.post("/delete", async (c) => {
+    const deps = getDeps();
+    const { fs } = deps;
     const body = await c.req.json<{ path: string }>().catch(() => null);
     if (!body?.path) return c.json({ ok: false, error: "Missing path" }, 400);
 
     const roots = getAllowedRoots();
-    const resolved = resolveSandboxed(body.path, roots);
+    const resolved = await resolveSandboxed(body.path, roots, fs);
     if (!resolved) return c.json({ ok: false, error: "Invalid or disallowed path" }, 400);
-    if (!existsSync(resolved)) return c.json({ ok: false, error: "Path not found" }, 404);
+    if (!(await fs.exists(resolved))) return c.json({ ok: false, error: "Path not found" }, 404);
 
-    // Don't allow deleting root directories themselves
     for (const root of roots) {
       if (resolved === root) return c.json({ ok: false, error: "Cannot delete a root directory" }, 400);
     }
 
-    const stat = statSync(resolved);
-    if (stat.isDirectory()) {
-      const entries = readdirSync(resolved);
+    const s = await fs.stat(resolved);
+    if (s.isDirectory) {
+      const entries = await fs.readdir(resolved);
       if (entries.length > 0) return c.json({ ok: false, error: "Directory is not empty" }, 400);
     }
 
-    rmSync(resolved, { force: true });
-    getDeps().emit("file:changed", { path: resolved, dir: dirname(resolved), action: "deleted", source: "server" });
+    await fs.remove(resolved);
+    deps.emit("file:changed", { path: resolved, dir: dirname(resolved), action: "deleted", source: "server" });
     return c.json({ ok: true, data: { path: body.path } }, 200);
   });
 
-  // ── GET /search — recursive flat file listing for mention autocomplete ──
-  app.get("/search", (c) => {
+  // ── GET /search — recursive flat file listing ──
+  app.get("/search", async (c) => {
+    const deps = getDeps();
+    const { fs } = deps;
     const query = (c.req.query("q") ?? "").toLowerCase();
-    const searchDeps = getDeps();
-    // Default to agent workspace (workDir setting), not project root
-    const agentDir = searchDeps.agentWorkDir;
-    const workDir = searchDeps.workDir;
-    const defaultRoot = agentDir !== workDir ? relative(workDir, agentDir) : ".";
+    const agentDir = deps.agentWorkDir;
+    const defaultRoot = agentDir !== deps.workDir ? relative(deps.workDir, agentDir) : ".";
     const root = c.req.query("root") ?? defaultRoot;
     const limitParam = c.req.query("limit");
     const limit = limitParam ? Math.min(Number(limitParam), 500) : 200;
 
     const roots = getAllowedRoots();
-    const resolved = resolveSandboxed(root, roots);
+    const resolved = await resolveSandboxed(root, roots, fs);
     if (!resolved) return c.json({ ok: false, error: "Invalid or disallowed path" }, 400);
 
     const SKIP = new Set(["node_modules", ".git", ".next", "dist", "__pycache__", ".cache", POLPO_DIR_NAME]);
     const results: { name: string; path: string }[] = [];
 
-    function walk(dir: string, depth: number) {
+    async function walk(dir: string, depth: number) {
       if (depth > 10 || results.length >= limit) return;
       try {
-        const entries = readdirSync(dir, { withFileTypes: true });
+        const entries = fs.readdirWithTypes
+          ? await fs.readdirWithTypes(dir)
+          : (await fs.readdir(dir)).map((n) => ({ name: n, isDirectory: false, isFile: true }));
         for (const e of entries) {
           if (results.length >= limit) return;
           if (SKIP.has(e.name)) continue;
           const relPath = relative(resolved!, resolve(dir, e.name));
-          if (e.isFile()) {
+          if (e.isFile) {
             if (!query || e.name.toLowerCase().includes(query) || relPath.toLowerCase().includes(query)) {
               results.push({ name: e.name, path: relPath });
             }
-          } else if (e.isDirectory()) {
-            walk(resolve(dir, e.name), depth + 1);
+          } else if (e.isDirectory) {
+            await walk(resolve(dir, e.name), depth + 1);
           }
         }
       } catch { /* unreadable dir */ }
     }
 
-    walk(resolved, 0);
+    await walk(resolved, 0);
     return c.json({ ok: true, data: { files: results, total: results.length } }, 200);
   });
 

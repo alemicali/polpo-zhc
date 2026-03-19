@@ -23,9 +23,7 @@ export class DrizzleCheckpointStore implements CheckpointStore {
   }
 
   async save(state: CheckpointState): Promise<void> {
-    const value = this.dialect === "sqlite"
-      ? JSON.stringify(state)
-      : JSON.stringify(state); // metadata.value is always TEXT, not JSONB
+    const value = JSON.stringify(state);
     await this.db.insert(this.metadata).values({ key: CHECKPOINT_KEY, value })
       .onConflictDoUpdate({ target: this.metadata.key, set: { value } });
   }

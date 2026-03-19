@@ -10,13 +10,15 @@ import { TypedEmitter } from "../core/events.js";
 import { InMemoryTaskStore, InMemoryRunStore, createTestTask, createMockStores } from "./fixtures.js";
 import type { OrchestratorContext } from "../core/orchestrator-context.js";
 import type { PolpoConfig, Task, Mission, MissionCheckpoint } from "../core/types.js";
+import { FileCheckpointStore } from "../stores/file-checkpoint-store.js";
+import { FileDelayStore } from "../stores/file-delay-store.js";
 
 // ── Helpers ──────────────────────────────────────────
 
 function createMinimalConfig(): PolpoConfig {
   return {
     version: "1",
-    org: "test",
+    project: "test",
     teams: [{ name: "test-team", agents: [{ name: "test-agent" }] }],
     tasks: [],
     settings: { maxRetries: 2, workDir: "/tmp/test", logLevel: "quiet" },
@@ -103,7 +105,11 @@ describe("Checkpoints", () => {
 
   beforeEach(async () => {
     tmpDir = mkdtempSync(join(tmpdir(), "polpo-test-cp-"));
-    ctx = createMockCtx({ polpoDir: tmpDir });
+    ctx = createMockCtx({
+      polpoDir: tmpDir,
+      checkpointStore: new FileCheckpointStore(tmpDir),
+      delayStore: new FileDelayStore(tmpDir),
+    });
     taskMgr = new TaskManager(ctx);
     agentMgr = new AgentManager(ctx);
     missionExec = new MissionExecutor(ctx, taskMgr, agentMgr);

@@ -1,10 +1,19 @@
-import { exec } from "node:child_process";
-import { access } from "node:fs/promises";
-import { mkdir, writeFile, unlink } from "node:fs/promises";
-import { join, resolve } from "node:path";
+/**
+ * Shell shim — delegates to @polpo-ai/core assessor with Node.js adapters.
+ *
+ * Wires NodeFileSystem + NodeShell + runLLMReview into the core's
+ * AssessmentDeps interface. All callers keep their existing signatures.
+ */
+import { resolve } from "node:path";
 import { getPolpoDir } from "../core/constants.js";
-import { promisify } from "node:util";
-import { nanoid } from "nanoid";
+import { NodeFileSystem } from "../adapters/node-filesystem.js";
+import { NodeShell } from "../adapters/node-shell.js";
+import {
+  assessTask as coreAssessTask,
+  runCheck as coreRunCheck,
+  runMetric as coreRunMetric,
+  type AssessmentDeps,
+} from "@polpo-ai/core/assessor";
 import type {
   Task,
   TaskExpectation,
@@ -17,8 +26,34 @@ import type {
 } from "../core/types.js";
 import { runLLMReview } from "./llm-review.js";
 
-const execAsync = promisify(exec);
-const SCRIPT_MAX_BUFFER = 5 * 1024 * 1024; // 5 MB
+// Re-export CheckProgressEvent from core for backward compatibility
+export type { CheckProgressEvent } from "@polpo-ai/core/assessor";
+
+// ── Lazy-initialized shared adapters ────────────────────────────────────
+
+let _fs: NodeFileSystem | undefined;
+let _shell: NodeShell | undefined;
+
+function getFS(): NodeFileSystem {
+  if (!_fs) _fs = new NodeFileSystem();
+  return _fs;
+}
+
+function getShell(): NodeShell {
+  if (!_shell) _shell = new NodeShell();
+  return _shell;
+}
+
+function makeDeps(cwd: string): AssessmentDeps {
+  return {
+    fs: getFS(),
+    shell: getShell(),
+    polpoDir: getPolpoDir(cwd),
+    runLLMReview,
+  };
+}
+
+// ── Backward-compatible signatures (same as before) ─────────────────────
 
 export async function runCheck(
   expectation: TaskExpectation,
@@ -27,166 +62,14 @@ export async function runCheck(
   context?: ReviewContext,
   reasoning?: ReasoningLevel,
 ): Promise<CheckResult> {
-  switch (expectation.type) {
-    case "test": {
-      const cmd = expectation.command ?? "npm test";
-      try {
-        await execAsync(cmd, { cwd });
-        return { type: "test", passed: true, message: `Test passed: ${cmd}` };
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
-        return {
-          type: "test",
-          passed: false,
-          message: `Test failed: ${cmd}`,
-          details: msg,
-        };
-      }
-    }
-
-    case "file_exists": {
-      const paths = expectation.paths ?? [];
-      if (paths.length === 0) {
-        return { type: "file_exists", passed: false, message: "No paths specified" };
-      }
-      const missing: string[] = [];
-      for (const p of paths) {
-        const resolvedPath = resolve(cwd, p);
-        try {
-          await access(resolvedPath);
-        } catch {
-          missing.push(p);
-        }
-      }
-      if (missing.length === 0) {
-        return {
-          type: "file_exists",
-          passed: true,
-          message: `All ${paths.length} file(s) exist`,
-        };
-      }
-      return {
-        type: "file_exists",
-        passed: false,
-        message: `Missing ${missing.length}/${paths.length} file(s)`,
-        details: missing.join(", "),
-      };
-    }
-
-    case "script": {
-      const cmd = expectation.command;
-      if (!cmd) {
-        return {
-          type: "script",
-          passed: false,
-          message: "No script command provided",
-        };
-      }
-
-      const isMultiLine = cmd.includes("\n");
-      const label = isMultiLine
-        ? `script (${cmd.split("\n").length} lines)`
-        : cmd;
-
-      if (!isMultiLine) {
-        // Single-line: execute directly
-        try {
-          await execAsync(cmd, { cwd, maxBuffer: SCRIPT_MAX_BUFFER });
-          return { type: "script", passed: true, message: `Script passed: ${label}` };
-        } catch (err: unknown) {
-          const msg = err instanceof Error ? err.message : String(err);
-          return { type: "script", passed: false, message: `Script failed: ${label}`, details: msg };
-        }
-      }
-
-      // Multi-line: write to temp file, execute with bash, cleanup
-      const tmpDir = join(getPolpoDir(cwd), "tmp");
-      const scriptFile = join(tmpDir, `check-${nanoid(8)}.sh`);
-      try {
-        await mkdir(tmpDir, { recursive: true });
-        // set -euo pipefail: fail on first error, like CI/CD
-        const scriptContent = `#!/usr/bin/env bash\nset -euo pipefail\n\n${cmd}\n`;
-        await writeFile(scriptFile, scriptContent);
-        const { stdout, stderr } = await execAsync(`bash "${scriptFile}"`, {
-          cwd,
-          maxBuffer: SCRIPT_MAX_BUFFER,
-        });
-        return {
-          type: "script",
-          passed: true,
-          message: `Script passed: ${label}`,
-          details: stdout || stderr || undefined,
-        };
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
-        return {
-          type: "script",
-          passed: false,
-          message: `Script failed: ${label}`,
-          details: msg,
-        };
-      } finally {
-        try { await unlink(scriptFile); } catch { /* file already removed */ }
-      }
-    }
-
-    case "llm_review": {
-      return await runLLMReview(expectation, cwd, onProgress, context, reasoning);
-    }
-  }
+  return coreRunCheck(makeDeps(cwd), expectation, cwd, onProgress, context, reasoning);
 }
 
 export async function runMetric(
   metric: TaskMetric,
-  cwd: string
+  cwd: string,
 ): Promise<MetricResult> {
-  try {
-    const { stdout } = await execAsync(metric.command, { cwd });
-    const value = parseFloat(stdout.trim());
-    if (isNaN(value)) {
-      return {
-        name: metric.name,
-        value: 0,
-        threshold: metric.threshold,
-        passed: false,
-      };
-    }
-    return {
-      name: metric.name,
-      value,
-      threshold: metric.threshold,
-      passed: value >= metric.threshold,
-    };
-  } catch { /* metric command failed */
-    return {
-      name: metric.name,
-      value: 0,
-      threshold: metric.threshold,
-      passed: false,
-    };
-  }
-}
-
-/** Label for an expectation — used in progress events. */
-function expectationLabel(exp: TaskExpectation): string {
-  if (exp.type === "test") return exp.command ?? "npm test";
-  if (exp.type === "file_exists") return (exp.paths ?? []).join(", ") || "file_exists";
-  if (exp.type === "script") {
-    const cmd = exp.command ?? "";
-    return cmd.includes("\n") ? `script (${cmd.split("\n").length} lines)` : cmd;
-  }
-  if (exp.type === "llm_review") return exp.criteria ? exp.criteria.slice(0, 60) : "LLM review";
-  return exp.type;
-}
-
-export interface CheckProgressEvent {
-  index: number;
-  total: number;
-  type: string;
-  label: string;
-  phase: "started" | "complete";
-  passed?: boolean;
-  message?: string;
+  return coreRunMetric(makeDeps(cwd), metric, cwd);
 }
 
 export async function assessTask(
@@ -195,38 +78,7 @@ export async function assessTask(
   onProgress?: (msg: string) => void,
   context?: ReviewContext,
   reasoning?: ReasoningLevel,
-  onCheckProgress?: (event: CheckProgressEvent) => void,
+  onCheckProgress?: (event: import("@polpo-ai/core/assessor").CheckProgressEvent) => void,
 ): Promise<AssessmentResult> {
-  const total = task.expectations.length;
-  const checks = await Promise.all(
-    task.expectations.map(async (exp, i) => {
-      const label = expectationLabel(exp);
-      onCheckProgress?.({ index: i, total, type: exp.type, label, phase: "started" });
-      const result = await runCheck(exp, cwd, onProgress, context, reasoning);
-      onCheckProgress?.({ index: i, total, type: exp.type, label, phase: "complete", passed: result.passed, message: result.message });
-      return result;
-    })
-  );
-  const metrics = await Promise.all(
-    task.metrics.map((m) => runMetric(m, cwd))
-  );
-
-  const passed =
-    checks.every((c) => c.passed) && metrics.every((m) => m.passed);
-
-  // Extract LLM review details and scores
-  const llmCheck = checks.find(c => c.type === "llm_review");
-  const llmReview = llmCheck?.details;
-  const scores = llmCheck?.scores;
-  const globalScore = llmCheck?.globalScore;
-
-  return {
-    passed,
-    checks,
-    metrics,
-    llmReview,
-    scores,
-    globalScore,
-    timestamp: new Date().toISOString(),
-  };
+  return coreAssessTask(makeDeps(cwd), task, cwd, onProgress, context, reasoning, onCheckProgress);
 }

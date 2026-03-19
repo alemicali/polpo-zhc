@@ -2,8 +2,9 @@ import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import {
   validateParams,
   instantiatePlaybook,
-} from "../../core/playbook.js";
-import type { PlaybookParameter, PlaybookDefinition } from "../../core/playbook.js";
+  type PlaybookParameter,
+  type PlaybookDefinition,
+} from "../playbook-utils.js";
 
 /**
  * Playbook routes — discover, inspect, and execute reusable mission playbooks.

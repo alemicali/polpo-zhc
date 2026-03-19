@@ -563,10 +563,10 @@ export interface RunnerConfig {
   whatsappProfilePath?: string;
 }
 
-// === Polpo File Config (.polpo/polpo.json — persistent org configuration) ===
+// === Polpo File Config (.polpo/polpo.json — persistent project configuration) ===
 
 export interface PolpoFileConfig {
-  org: string;
+  project: string;
   /** Multiple teams — each with its own agents.
    *  @since 0.2 — replaces the old singular `team` field. */
   teams: Team[];
@@ -583,11 +583,8 @@ export interface PolpoFileConfig {
   tags?: string[];
 }
 
-/** Shape that parseConfig() accepts from disk — supports both old `team` and new `teams`.
- *  Also supports legacy `project` field (migrated to `org`). */
+/** Shape that parseConfig() accepts from disk — supports both old `team` and new `teams`. */
 export interface PolpoFileConfigRaw {
-  org?: string;
-  /** @deprecated Use `org` instead. Kept for backward-compatible migration. */
   project?: string;
   /** @deprecated Use `teams` instead. Kept for backward-compatible migration. */
   team?: Team;
@@ -646,7 +643,7 @@ export interface ModelAllowlistEntry {
 
 export interface PolpoConfig {
   version: string;
-  org: string;
+  project: string;
   teams: Team[];
   tasks: Omit<Task, "status" | "retries" | "result" | "createdAt" | "updatedAt">[];
   settings: PolpoSettings;
@@ -718,7 +715,7 @@ export interface PolpoSettings {
 // === Polpo State (persisted in .polpo/state.json) ===
 
 export interface PolpoState {
-  org: string;
+  project: string;
   teams: Team[];
   tasks: Task[];
   processes: AgentProcess[];
@@ -751,7 +748,7 @@ export function findAgentTeam(teams: Team[], agentName: string): Team | undefine
 
 /** @deprecated Legacy project config stored in config.json */
 export interface ProjectConfig {
-  org: string;
+  project: string;
   judge?: string;
   agent?: string;
   model?: string;

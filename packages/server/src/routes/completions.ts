@@ -18,25 +18,7 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { streamSSE } from "hono/streaming";
 import { nanoid } from "nanoid";
-import type { Orchestrator } from "../../core/orchestrator.js";
-import { buildChatSystemPrompt } from "../../llm/prompts.js";
-import { resolveModel, resolveApiKeyAsync, resolveModelSpec, buildStreamOpts } from "../../llm/pi-client.js";
-import { streamSimple, type Message, type Tool } from "@mariozechner/pi-ai";
-import {
-  ALL_ORCHESTRATOR_TOOLS,
-  executeOrchestratorTool,
-  isInteractive,
-} from "../../llm/orchestrator-tools.js";
-import type { AgentTool } from "@mariozechner/pi-agent-core";
-import type { AskUserQuestion } from "../../core/types.js";
-import type { ToolCallInfo } from "../../core/session-store.js";
-import { dirname } from "node:path";
-import { buildSystemPrompt } from "../../adapters/engine.js";
-import { createCodingTools, createAllTools } from "../../tools/coding-tools.js";
-import { createInkTools } from "../../tools/ink-tools.js";
-import { createMemoryTools } from "../../tools/memory-tools.js";
 import { agentMemoryScope } from "@polpo-ai/core";
-import { resolveAgentVault } from "../../vault/index.js";
 
 const MAX_TURNS = 20;
 
@@ -57,14 +39,16 @@ function emitFileChanged(
   if (!action || result.startsWith("Error:")) return;
   const path = args.path as string | undefined;
   if (!path) return;
-  emit("file:changed", { path, dir: dirname(path), action, source: "chat" });
+  const dir = path.includes("/") ? path.substring(0, path.lastIndexOf("/")) : ".";
+  emit("file:changed", { path, dir, action, source: "chat" });
 }
 
 /**
  * Redact sensitive credential values from vault tool call arguments before persistence.
  * Returns a sanitized copy — original is NOT mutated.
  */
-function redactVaultToolCalls(toolCalls: ToolCallInfo[]): ToolCallInfo[] {
+function redactVaultToolCalls(toolCalls: any[]): any[] {
+  // @ts-ignore — ToolCallInfo shape preserved via duck typing
   return toolCalls.map(tc => {
     if ((tc.name !== "set_vault_entry" && tc.name !== "update_vault_credentials") || !tc.arguments) return tc;
     const args = { ...tc.arguments };
@@ -240,8 +224,8 @@ function toPiContent(content: z.infer<typeof messageSchema>["content"]): string 
   });
 }
 
-function convertMessages(messages: z.infer<typeof messageSchema>[]): { piMessages: Message[]; extraSystemParts: string[] } {
-  const piMessages: Message[] = [];
+function convertMessages(messages: z.infer<typeof messageSchema>[]): { piMessages: any[]; extraSystemParts: string[] } {
+  const piMessages: any[] = [];
   const extraSystemParts: string[] = [];
 
   for (const msg of messages) {
@@ -302,19 +286,42 @@ function completionResponse(id: string, content: string, promptTokens: number, c
 
 // ── Route factory ──────────────────────────────────────────────────────
 
-export function completionRoutes(getDeps: () => {
+/**
+ * Completion route dependencies.
+ *
+ * The consumer provides LLM resolution and tool creation — this allows
+ * the route to run on any runtime (Node.js with full tools, or edge with no tools).
+ */
+export interface CompletionRouteDeps {
   getAgents: () => Promise<any[]>;
-  getAgentWorkDir: () => string;
-  getPolpoDir: () => string;
   getConfig: () => any;
-  getVaultStore: () => any;
   getMemoryStore: () => any;
   getSessionStore: () => any;
   getStore: () => any;
   emit: (event: string, data: any) => void;
-  /** Full orchestrator — required for orchestrator chat mode, optional for agent-direct. */
-  orchestrator?: Orchestrator;
-}, apiKeys?: string[]): OpenAPIHono {
+  /** Resolve agent model + streaming options. */
+  resolveAgentModel: (agentConfig: any, settingsReasoning?: string) => Promise<{ model: any; streamOpts: any }>;
+  /** Build agent system prompt for conversational mode. */
+  buildAgentPrompt: (agentConfig: any) => string | Promise<string>;
+  /** Create tools + executor for the agent. Return empty arrays for chat-only. */
+  resolveAgentTools: (agentConfig: any) => Promise<{
+    tools: any[];
+    executor: (name: string, args: Record<string, unknown>) => Promise<string>;
+  }>;
+  /** LLM streaming function (streamSimple from pi-ai). */
+  streamLLM: (model: any, opts: { systemPrompt: string; messages: any[]; tools: any[] }, streamOpts: any) => any;
+  /** Orchestrator mode support (optional — returns 501 if not provided). */
+  resolveOrchestratorContext?: () => Promise<{
+    systemPrompt: string;
+    model: any;
+    streamOpts: any;
+    tools: any[];
+    executor: (name: string, args: Record<string, unknown>) => Promise<string>;
+    isInteractive: (name: string) => boolean;
+  }>;
+}
+
+export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: string[]): OpenAPIHono {
   const app = new OpenAPIHono();
 
   app.openapi(chatCompletionsRoute, async (c) => {
@@ -335,13 +342,11 @@ export function completionRoutes(getDeps: () => {
 
     // ── Resolve effective context (orchestrator vs agent-direct) ──
     let fullSystemPrompt: string;
-    let m: ReturnType<typeof resolveModel>;
-    let streamOpts: ReturnType<typeof buildStreamOpts>;
-    let effectiveTools: Tool[];
+    let m: any;
+    let streamOpts: any;
+    let effectiveTools: any[];
     let effectiveToolExecutor: (name: string, args: Record<string, unknown>) => Promise<string>;
-
-    // Agent-scoped tool instances (kept alive for the request lifetime)
-    let agentToolInstances: AgentTool<any>[] | null = null;
+    let isInteractiveFn: ((name: string) => boolean) | undefined;
 
     const { piMessages, extraSystemParts } = convertMessages(body.messages);
 
@@ -353,13 +358,8 @@ export function completionRoutes(getDeps: () => {
         return c.json({ error: { message: `Agent "${body.agent}" not found`, type: "invalid_request_error", code: "agent_not_found" } }, 404);
       }
 
-      const cwd = deps.getAgentWorkDir();
-      const polpoDir = deps.getPolpoDir();
-
-      // Build agent system prompt (reuses the same builder as task execution)
-      const agentSystemPrompt = buildSystemPrompt(agentConfig, cwd, polpoDir);
-
-      // Adapt system prompt for conversational mode (agents normally run autonomously)
+      // Build system prompt via dep
+      const agentSystemPrompt = await deps.buildAgentPrompt(agentConfig);
       const conversationalPreamble = [
         "You are now in interactive conversation mode with the user.",
         "Unlike task execution, you should engage in dialogue: ask clarifying questions,",
@@ -372,98 +372,40 @@ export function completionRoutes(getDeps: () => {
         ? `${basePrompt}\n\n## Additional context from caller\n\n${extraSystemParts.join("\n\n")}`
         : basePrompt;
 
-      // Resolve agent model
-      m = resolveModel(agentConfig.model);
-      const apiKey = await resolveApiKeyAsync(m.provider as string);
-      const reasoning = agentConfig.reasoning ?? deps.getConfig()?.settings?.reasoning;
-      streamOpts = buildStreamOpts(apiKey, reasoning, m.maxTokens);
-
-      // Build agent tools (core coding tools + ink tools)
-      const vaultEntries = await deps.getVaultStore()?.getAllForAgent(agentConfig.name);
-      const vault = resolveAgentVault(vaultEntries);
-      agentToolInstances = createCodingTools(cwd, agentConfig.allowedTools, undefined, undefined, vault);
-      agentToolInstances.push(...createInkTools(polpoDir, agentConfig.allowedTools));
-
-      // Load extended tools if configured (browser, email, image, etc.)
-      const hasExtendedTools = agentConfig.allowedTools?.some((t: string) => {
-        const lc = t.toLowerCase();
-        return lc.startsWith("browser_") || lc.startsWith("email_")
-          || lc.startsWith("image_") || lc.startsWith("video_") || lc.startsWith("audio_")
-          || lc.startsWith("excel_") || lc.startsWith("pdf_") || lc.startsWith("docx_")
-          || lc.startsWith("search_") || lc.startsWith("whatsapp_") || lc.startsWith("phone_");
-      }) ?? false;
-
-      if (hasExtendedTools) {
-        const { join } = await import("node:path");
-        const browserProfileDir = join(polpoDir, "browser-profiles", agentConfig.browserProfile || agentConfig.name);
-        agentToolInstances = await createAllTools({
-          cwd,
-          allowedTools: agentConfig.allowedTools,
-          allowedPaths: agentConfig.allowedPaths,
-          browserSession: agentConfig.name,
-          browserProfileDir,
-          vault,
-          emailAllowedDomains: agentConfig.emailAllowedDomains,
-          outputDir: undefined,
-          polpoDir,
-        });
-      }
-
-      // Memory tools — scoped to this agent only
+      // Inject agent memory
       const memoryStore = deps.getMemoryStore();
-      if (memoryStore) {
-        agentToolInstances.push(...createMemoryTools(memoryStore, agentConfig.name));
-      }
-
-      // Inject existing agent memory into the system prompt
       const agentMemory = await memoryStore?.get(agentMemoryScope(agentConfig.name));
       if (agentMemory) {
         fullSystemPrompt += `\n\n## Your persistent memory\n\n${agentMemory}`;
       }
 
-      effectiveTools = agentToolInstances as Tool[];
+      // Resolve model via dep
+      const reasoning = agentConfig.reasoning ?? deps.getConfig()?.settings?.reasoning;
+      const resolved = await deps.resolveAgentModel(agentConfig, reasoning);
+      m = resolved.model;
+      streamOpts = resolved.streamOpts;
 
-      // Tool executor: call AgentTool.execute() directly, return text content
-      const toolMap = new Map(agentToolInstances.map(t => [t.name, t]));
-      effectiveToolExecutor = async (name: string, args: Record<string, unknown>): Promise<string> => {
-        const tool = toolMap.get(name);
-        if (!tool) return `Error: Unknown tool "${name}"`;
-        try {
-          const result = await tool.execute(nanoid(), args as any);
-          return result.content.map((c: any) => c.text ?? "").join("");
-        } catch (err) {
-          return `Error: ${err instanceof Error ? err.message : String(err)}`;
-        }
-      };
+      // Resolve tools via dep
+      const { tools, executor } = await deps.resolveAgentTools(agentConfig);
+      effectiveTools = tools;
+      effectiveToolExecutor = executor;
     } else {
-      // ── Orchestrator mode (default) — requires full orchestrator ──
-      if (!deps.orchestrator) {
+      // ── Orchestrator mode (default) ──
+      if (!deps.resolveOrchestratorContext) {
         return c.json({
           error: { message: "Orchestrator mode is not available. Use agent-direct mode by specifying the 'agent' field.", type: "invalid_request_error", code: "orchestrator_unavailable" },
         }, 501 as any);
       }
-      const orch = deps.orchestrator;
 
-      const state = await (async () => {
-        try { return await deps.getStore()?.getState() ?? null; }
-        catch { return null; }
-      })();
-
-      const systemPrompt = await buildChatSystemPrompt(orch, state);
+      const ctx = await deps.resolveOrchestratorContext();
       fullSystemPrompt = extraSystemParts.length > 0
-        ? `${systemPrompt}\n\n## Additional context from caller\n\n${extraSystemParts.join("\n\n")}`
-        : systemPrompt;
-
-      const settings = deps.getConfig()?.settings;
-      const modelSpec = resolveModelSpec(settings?.orchestratorModel);
-      m = resolveModel(modelSpec);
-      const apiKey = await resolveApiKeyAsync(m.provider as string);
-      const reasoning = settings?.reasoning;
-      streamOpts = buildStreamOpts(apiKey, reasoning, m.maxTokens);
-
-      effectiveTools = ALL_ORCHESTRATOR_TOOLS;
-      effectiveToolExecutor = (name: string, args: Record<string, unknown>) =>
-        executeOrchestratorTool(name, args, orch);
+        ? `${ctx.systemPrompt}\n\n## Additional context from caller\n\n${extraSystemParts.join("\n\n")}`
+        : ctx.systemPrompt;
+      m = ctx.model;
+      streamOpts = ctx.streamOpts;
+      effectiveTools = ctx.tools;
+      effectiveToolExecutor = ctx.executor;
+      isInteractiveFn = ctx.isInteractive;
     }
 
     const completionId = `chatcmpl-${nanoid(24)}`;
@@ -523,16 +465,16 @@ export function completionRoutes(getDeps: () => {
           assistantMsgId = placeholder.id;
         }
 
-        const messages: Message[] = [...piMessages];
+        const messages: any[] = [...piMessages];
         let finalText = "";
-        const toolCallsAccum: ToolCallInfo[] = [];
+        const toolCallsAccum: any[] = [];
 
         try {
           for (let turn = 0; turn < MAX_TURNS; turn++) {
             // Bail out early if the client already disconnected
             if (abortController.signal.aborted) break;
 
-            const piStream = streamSimple(m, {
+            const piStream = deps.streamLLM(m, {
               systemPrompt: fullSystemPrompt,
               messages,
               tools: effectiveTools,
@@ -580,14 +522,14 @@ export function completionRoutes(getDeps: () => {
             finalText += turnText;
 
             const toolCalls = response.content.filter(
-              (cc): cc is { type: "toolCall"; id: string; name: string; arguments: Record<string, any> } =>
+              (cc: any): cc is { type: "toolCall"; id: string; name: string; arguments: Record<string, any> } =>
                 cc.type === "toolCall"
             );
 
             if (toolCalls.length === 0) break;
 
             // Check for interactive tools — only in orchestrator mode (agents don't have interactive tools)
-            const interactiveCall = agentMode ? undefined : toolCalls.find(tc => isInteractive(tc.name));
+            const interactiveCall = agentMode ? undefined : toolCalls.find((tc: any) => isInteractiveFn?.(tc.name));
             if (interactiveCall) {
               // Persist the interactive tool call so it survives session reload
               toolCallsAccum.push({
@@ -598,7 +540,7 @@ export function completionRoutes(getDeps: () => {
               });
 
               if (interactiveCall.name === "ask_user") {
-                const questions = (interactiveCall.arguments as any)?.questions as AskUserQuestion[] ?? [];
+                const questions = (interactiveCall.arguments as any)?.questions as any[] ?? [];
                 await stream.writeSSE({
                   data: sseChunk(completionId, {}, "ask_user", { ask_user: { questions } }),
                 });
@@ -743,13 +685,13 @@ export function completionRoutes(getDeps: () => {
         assistantMsgId = placeholder.id;
       }
 
-      const messages: Message[] = [...piMessages];
+      const messages: any[] = [...piMessages];
       let finalText = "";
-      const toolCallsAccum: ToolCallInfo[] = [];
+      const toolCallsAccum: any[] = [];
 
       try {
         for (let turn = 0; turn < MAX_TURNS; turn++) {
-          const piStream = streamSimple(m, {
+          const piStream = deps.streamLLM(m, {
             systemPrompt: fullSystemPrompt,
             messages,
             tools: effectiveTools,
@@ -774,14 +716,14 @@ export function completionRoutes(getDeps: () => {
           finalText += turnText;
 
           const toolCalls = response.content.filter(
-            (cc): cc is { type: "toolCall"; id: string; name: string; arguments: Record<string, any> } =>
+            (cc: any): cc is { type: "toolCall"; id: string; name: string; arguments: Record<string, any> } =>
               cc.type === "toolCall"
           );
 
           if (toolCalls.length === 0) break;
 
           // Check for interactive tools — only in orchestrator mode (agents don't have interactive tools)
-          const interactiveCall = agentMode ? undefined : toolCalls.find(tc => isInteractive(tc.name));
+          const interactiveCall = agentMode ? undefined : toolCalls.find((tc: any) => isInteractiveFn?.(tc.name));
           if (interactiveCall) {
             // Persist the interactive tool call so it survives session reload
             toolCallsAccum.push({
@@ -804,7 +746,7 @@ export function completionRoutes(getDeps: () => {
             };
 
             if (interactiveCall.name === "ask_user") {
-              const questions = (interactiveCall.arguments as any)?.questions as AskUserQuestion[] ?? [];
+              const questions = (interactiveCall.arguments as any)?.questions as any[] ?? [];
               return c.json({
                 ...baseResponse,
                 choices: [{

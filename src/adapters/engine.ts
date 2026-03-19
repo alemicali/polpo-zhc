@@ -9,6 +9,7 @@
 import type { AgentConfig, AgentActivity, Task, TaskResult, TaskOutcome, OutcomeType } from "../core/types.js";
 import type { AgentHandle, SpawnContext } from "../core/adapter.js";
 import { resolveAgentVault } from "../vault/index.js";
+import { buildAgentSystemPrompt } from "@polpo-ai/core";
 
 /** Create a fresh AgentActivity object */
 export function createActivity(): AgentActivity {
@@ -24,7 +25,7 @@ import { Agent } from "@mariozechner/pi-agent-core";
 import type { AgentEvent } from "@mariozechner/pi-agent-core";
 import { join, sep } from "node:path";
 import { resolveModel, resolveApiKeyAsync, enforceModelAllowlist } from "../llm/pi-client.js";
-import { createCodingTools, createAllTools } from "../tools/coding-tools.js";
+import { createSystemTools, createAllTools } from "../tools/system-tools.js";
 import { createInkTools as createInkToolsFn } from "../tools/ink-tools.js";
 import { loadAgentSkills, buildSkillPrompt } from "../llm/skills.js";
 import { nanoid } from "nanoid";
@@ -225,74 +226,16 @@ function describeToolsForAgent(agent: AgentConfig): string {
  * Build the system prompt for the agent, including loaded skills.
  */
 export function buildSystemPrompt(agent: AgentConfig, cwd: string, polpoDir?: string, outputDir?: string, allowedPaths?: string[]): string {
-  const parts = [
-    "You are a coding agent managed by Polpo, an AI agent orchestrator.",
-    "Complete your assigned task autonomously. Make reasonable decisions and proceed without asking questions.",
-    "",
-    "Your task description may include context tags:",
-    "- <shared-memory> — persistent shared knowledge from previous sessions, visible to all agents",
-    "- <agent-memory> — your private memory from previous sessions (specific to you)",
-    "- <system-context> — standing instructions from the project owner",
-    "- <plan-context> — the plan goal and other tasks being worked on in parallel",
-    "Use this context to make better decisions, but focus on YOUR assigned task.",
-  ];
-  // Identity block
-  if (agent.identity) {
-    parts.push("", "## Your Identity");
-    if (agent.identity.displayName) parts.push(`- Name: ${agent.identity.displayName}`);
-    if (agent.identity.title) parts.push(`- Title: ${agent.identity.title}`);
-    if (agent.identity.company) parts.push(`- Company: ${agent.identity.company}`);
-    if (agent.identity.email) parts.push(`- Email: ${agent.identity.email}`);
-    if (agent.identity.bio) parts.push(`- Bio: ${agent.identity.bio}`);
-    if (agent.identity.timezone) parts.push(`- Timezone: ${agent.identity.timezone}`);
-    if (agent.identity.socials && Object.keys(agent.identity.socials).length > 0) {
-      const entries = Object.entries(agent.identity.socials).map(([k, v]) => `${k}: ${v}`).join(", ");
-      parts.push(`- Socials: ${entries}`);
-    }
-    parts.push("Use this identity when communicating externally (emails, messages, etc.).");
-  }
+  // Load skills (sync, Node.js filesystem)
+  const skills = polpoDir
+    ? loadAgentSkills(cwd, polpoDir, agent.name, agent.skills)
+    : [];
 
-  // Responsibilities (detailed, richer than role) — supports both strings and structured objects
-  if (agent.identity?.responsibilities?.length) {
-    parts.push("", "## Your Responsibilities");
-    for (const r of agent.identity.responsibilities) {
-      if (typeof r === "string") {
-        parts.push(`- ${r}`);
-      } else {
-        const prio = r.priority ? ` [${r.priority}]` : "";
-        parts.push(`- **${r.area}**${prio}: ${r.description}`);
-      }
-    }
-    parts.push("Focus on these responsibilities. Escalate if something falls outside your scope.");
-  }
+  // Core prompt: identity, responsibilities, tone, personality, hierarchy, systemPrompt, skills
+  // This is the shared logic between self-hosted and cloud (lives in @polpo-ai/core).
+  const parts = [buildAgentSystemPrompt(agent, { skills })];
 
-  // Communication tone — HOW the agent communicates
-  if (agent.identity?.tone) {
-    parts.push("", "## Communication Style");
-    parts.push(agent.identity.tone);
-  }
-
-  // Personality — WHO the agent IS
-  if (agent.identity?.personality) {
-    parts.push("", "## Personality");
-    parts.push(agent.identity.personality);
-  }
-
-  // Hierarchy — who this agent reports to
-  if (agent.reportsTo) {
-    parts.push("", "## Organization");
-    parts.push(`You report to: ${agent.reportsTo}`);
-    parts.push("If you encounter blockers or decisions outside your authority, escalate to your manager.");
-  }
-
-  if (agent.systemPrompt) parts.push("", agent.systemPrompt);
-
-  // Load and inject skills
-  if (polpoDir) {
-    const skills = loadAgentSkills(cwd, polpoDir, agent.name, agent.skills);
-    const skillBlock = buildSkillPrompt(skills);
-    if (skillBlock) parts.push("", skillBlock);
-  }
+  // Shell-specific sections below (tools, cwd, sandbox paths)
 
   // Available tools — enumerate what the agent can use so it doesn't resort to
   // shell scripts, npm installs, or manual workarounds for capabilities it already has.
@@ -466,7 +409,7 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
 
   // Vault resolution is async — will be resolved in handle.done before tools are used.
   // Start with core coding tools WITHOUT vault; vault tools are added in the async phase.
-  const codingTools = createCodingTools(cwd, agentConfig.allowedTools, effectiveAllowedPaths, outputDir, undefined);
+  const codingTools = createSystemTools(cwd, agentConfig.allowedTools, effectiveAllowedPaths, outputDir, undefined);
 
   // Ink tools (always available — search, browse, install from Ink Hub)
   if (ctx?.polpoDir) {
@@ -597,7 +540,7 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
       const vault = resolveAgentVault(vaultEntries);
 
       // Rebuild tools with vault resolved
-      let allTools = createCodingTools(cwd, agentConfig.allowedTools, effectiveAllowedPaths, outputDir, vault);
+      let allTools = createSystemTools(cwd, agentConfig.allowedTools, effectiveAllowedPaths, outputDir, vault);
       if (ctx?.polpoDir) {
         allTools.push(...createInkToolsFn(ctx.polpoDir, agentConfig.allowedTools));
       }

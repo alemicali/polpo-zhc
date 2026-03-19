@@ -1,0 +1,56 @@
+{
+  "name": "@polpo-ai/tools",
+  "version": "0.2.9",
+  "description": "Agent tools for Polpo — coding, browser, email, search, and more. Core tools work everywhere, extended tools are opt-in.",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "tsc"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "dependencies": {
+    "@polpo-ai/core": "^0.2.4",
+    "@mariozechner/pi-agent-core": "^0.57.1",
+    "@sinclair/typebox": "^0.34.0",
+    "nanoid": "^5.0.0"
+  },
+  "optionalDependencies": {
+    "execa": "^9.0.0",
+    "playwright-core": "^1.52.0",
+    "nodemailer": "^8.0.0",
+    "imapflow": "^1.2.0",
+    "exceljs": "^4.4.0",
+    "pdf-lib": "^1.17.0",
+    "docx": "^9.5.0",
+    "mammoth": "^1.11.0"
+  },
+  "peerDependencies": {
+    "zod": ">=3.0.0 || >=4.0.0"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/lumea-labs/polpo",
+    "directory": "packages/tools"
+  },
+  "keywords": [
+    "polpo",
+    "agent",
+    "tools",
+    "coding",
+    "filesystem",
+    "shell",
+    "ai"
+  ]
+}

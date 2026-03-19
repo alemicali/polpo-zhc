@@ -82,7 +82,7 @@ function createMockOrchestrator(): Orchestrator {
     }),
     getAgents: vi.fn().mockReturnValue([]),
     getAllMissions: vi.fn().mockReturnValue([]),
-    getConfig: vi.fn().mockReturnValue({ org: "test-project", settings: {} }),
+    getConfig: vi.fn().mockReturnValue({ project: "test-project", settings: {} }),
     getApprovalRequest: vi.fn().mockReturnValue(undefined),
   } as unknown as Orchestrator;
 }

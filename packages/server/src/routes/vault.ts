@@ -9,7 +9,7 @@
  */
 
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
-import type { VaultEntry } from "../../core/types.js";
+import type { VaultEntry } from "@polpo-ai/core/types";
 
 export function vaultRoutes(getDeps: () => { vaultStore?: any }): OpenAPIHono {
   const app = new OpenAPIHono();

@@ -1,5 +1,5 @@
 import { resolve, join } from "node:path";
-import { mkdirSync, existsSync, watch, type FSWatcher } from "node:fs";
+import { mkdirSync, existsSync, readFileSync, watch, type FSWatcher } from "node:fs";
 import { getPolpoDir } from "./constants.js";
 import type { Server } from "node:net";
 import { parseConfig, loadPolpoConfig, savePolpoConfig, loadEnvFile } from "./config.js";
@@ -11,10 +11,11 @@ import { FileLogStore } from "../stores/file-log-store.js";
 import { FileSessionStore } from "../stores/file-session-store.js";
 import type { SessionStore } from "./session-store.js";
 import type { MemoryStore } from "./memory-store.js";
-import { agentMemoryScope } from "./memory-store.js";
 import type { LogStore } from "./log-store.js";
 import { assessTask } from "../assessment/assessor.js";
 import { analyzeBlockedTasks, resolveDeadlock, isResolving } from "./deadlock-resolver.js";
+import { OrchestratorEngine } from "@polpo-ai/core";
+import type { DeadlockResolverPort, DeadlockFacade } from "@polpo-ai/core";
 import { TypedEmitter } from "./events.js";
 import type { TaskStore } from "./task-store.js";
 import type { RunStore } from "./run-store.js";
@@ -44,7 +45,7 @@ import {
 } from "./assessment-prompts.js";
 import type { AssessFn } from "./orchestrator-context.js";
 import { setProviderOverrides, validateProviderKeys, setModelAllowlist } from "../llm/pi-client.js";
-import { startNotificationServer } from "./notification.js";
+import { startNotificationServer, getSocketPath } from "./notification.js";
 import { HookRegistry } from "./hooks.js";
 import { ApprovalManager } from "./approval-manager.js";
 import { FileApprovalStore } from "../stores/file-approval-store.js";
@@ -73,18 +74,19 @@ import { EncryptedVaultStore } from "../vault/encrypted-store.js";
 import type { VaultStore } from "./vault-store.js";
 import type { PlaybookStore } from "./playbook-store.js";
 import { FilePlaybookStore } from "../stores/file-playbook-store.js";
+import { NodeSpawner } from "../adapters/node-spawner.js";
+import type { Spawner } from "./spawner.js";
 
 // Re-export for backward compatibility (consumed by core/index.ts and external modules)
 export { buildFixPrompt, buildRetryPrompt };
 export type { AssessFn };
-
-const POLL_INTERVAL = 5000; // 5s safety net (push notification is primary)
 
 export interface OrchestratorOptions {
   workDir?: string;
   store?: TaskStore;
   runStore?: RunStore;
   assessFn?: AssessFn;
+  spawner?: Spawner;
 }
 
 export class Orchestrator extends TypedEmitter {
@@ -98,6 +100,7 @@ export class Orchestrator extends TypedEmitter {
   private interactive = false;
   private stopped = false;
   private assessFn: AssessFn;
+  private spawner: Spawner;
   private injectedStore?: TaskStore;
   private injectedRunStore?: RunStore;
   private memoryStore!: MemoryStore;
@@ -131,6 +134,9 @@ export class Orchestrator extends TypedEmitter {
   private runner!: TaskRunner;
   private assessor!: AssessmentOrchestrator;
 
+  // Pure orchestration engine (delegates tick, run, and all pure-logic methods)
+  private engine!: OrchestratorEngine;
+
   getWorkDir(): string { return this.workDir; }
   getAgentWorkDir(): string {
     if (!this.cachedAgentWorkDir) {
@@ -163,6 +169,7 @@ export class Orchestrator extends TypedEmitter {
       this.workDir = resolve(workDir);
       this.polpoDir = getPolpoDir(this.workDir);
       this.assessFn = assessTask;
+      this.spawner = new NodeSpawner({ polpoDir: this.polpoDir, cwd: this.workDir });
     } else {
       const opts = workDirOrOptions;
       this.workDir = resolve(opts.workDir ?? ".");
@@ -170,6 +177,7 @@ export class Orchestrator extends TypedEmitter {
       this.assessFn = opts.assessFn ?? assessTask;
       this.injectedStore = opts.store;
       this.injectedRunStore = opts.runStore;
+      this.spawner = opts.spawner ?? new NodeSpawner({ polpoDir: this.polpoDir, cwd: this.workDir });
     }
   }
 
@@ -364,6 +372,7 @@ export class Orchestrator extends TypedEmitter {
       agentWorkDir: this.getAgentWorkDir(),
       polpoDir: this.polpoDir,
       assessFn: this.assessFn,
+      spawner: this.spawner,
 
       // Shell-specific ports (Node.js implementations)
       killProcess: (pid, signal) => { try { process.kill(pid, (signal ?? "SIGTERM") as NodeJS.Signals); } catch { /* already dead */ } },
@@ -375,6 +384,13 @@ export class Orchestrator extends TypedEmitter {
       },
       findLogForTask: (polpoDir, taskId, runId) => findLogForTask(polpoDir, taskId, runId),
       buildExecutionSummary: (logPath) => buildExecutionSummary(logPath),
+      validateProviderKeys: (modelSpecs) => validateProviderKeys(modelSpecs),
+      readRunLog: (runId) => {
+        const logPath = join(this.polpoDir, "logs", `run-${runId}.jsonl`);
+        if (!existsSync(logPath)) return null;
+        return readFileSync(logPath, "utf-8");
+      },
+      notifySocketPath: getSocketPath(this.polpoDir),
 
       // Inject Drizzle stores when storage is "sqlite" or "postgres"
       ...(this.drizzleStores ? {
@@ -520,6 +536,30 @@ export class Orchestrator extends TypedEmitter {
     this.watcherMgr = new TaskWatcherManager(this);
     this.watcherMgr.setActionExecutor(actionExecutor);
     this.watcherMgr.start();
+
+    // Build the deadlock resolver port (wraps the shell's deadlock-resolver module)
+    const deadlockResolver: DeadlockResolverPort = {
+      isResolving,
+      analyzeBlockedTasks,
+      resolveDeadlock: (analysis, facade: DeadlockFacade) =>
+        resolveDeadlock(analysis as ReturnType<typeof analyzeBlockedTasks>, this),
+    };
+
+    // Create the pure orchestration engine
+    this.engine = new OrchestratorEngine({
+      ctx,
+      taskManager: this.taskMgr,
+      agentManager: this.agentMgr,
+      missionExecutor: this.missionExec,
+      taskRunner: this.runner,
+      assessmentOrchestrator: this.assessor,
+      approvalManager: this.approvalMgr,
+      scheduler: this.scheduler,
+      slaMonitor: this.slaMonitor,
+      qualityController: this.qualityController,
+      escalationManager: this.escalationMgr,
+      deadlockResolver,
+    });
   }
 
   /**
@@ -576,7 +616,7 @@ export class Orchestrator extends TypedEmitter {
    * Initialize for interactive mode.
    * Creates .polpo dir and a minimal config from provided team info.
    */
-  async initInteractive(org: string, teams: Team | Team[]): Promise<void> {
+  async initInteractive(project: string, teams: Team | Team[]): Promise<void> {
     const teamsArray = Array.isArray(teams) ? teams : [teams];
     if (!existsSync(this.polpoDir)) {
       mkdirSync(this.polpoDir, { recursive: true });
@@ -624,7 +664,7 @@ export class Orchestrator extends TypedEmitter {
 
     this.config = {
       version: "1",
-      org: polpoConfig?.org ?? org,
+      project: polpoConfig?.project ?? project,
       teams: polpoConfig?.teams ?? teamsArray,
       tasks: [],
       settings,
@@ -644,7 +684,7 @@ export class Orchestrator extends TypedEmitter {
     this.playbookStore = this.drizzleStores?.playbookStore ?? new FilePlaybookStore(this.workDir, this.polpoDir);
     this.interactive = true;
     await this.registry.setState({
-      org,
+      project,
       teams: teamsArray,
       startedAt: new Date().toISOString(),
     });
@@ -684,52 +724,44 @@ export class Orchestrator extends TypedEmitter {
     }
   }
 
-  // ── Task Management (delegates to TaskManager) ──
+  // ── Task Management (delegates to OrchestratorEngine → TaskManager) ──
 
   async addTask(opts: {
     title: string; description: string; assignTo: string;
     expectations?: TaskExpectation[]; expectedOutcomes?: ExpectedOutcome[];
     dependsOn?: string[]; group?: string; maxDuration?: number; retryPolicy?: RetryPolicy;
     notifications?: ScopedNotificationRules; sideEffects?: boolean; draft?: boolean;
-  }): Promise<Task> { return this.taskMgr.addTask(opts); }
-  async updateTaskDescription(taskId: string, description: string): Promise<void> { return this.taskMgr.updateTaskDescription(taskId, description); }
-  async updateTaskAssignment(taskId: string, agentName: string): Promise<void> { return this.taskMgr.updateTaskAssignment(taskId, agentName); }
-  async updateTaskExpectations(taskId: string, expectations: TaskExpectation[]): Promise<void> { return this.taskMgr.updateTaskExpectations(taskId, expectations); }
-  async retryTask(taskId: string): Promise<void> { return this.taskMgr.retryTask(taskId); }
-  reassessTask(taskId: string): Promise<void> { return this.taskMgr.reassessTask(taskId); }
-  async killTask(taskId: string): Promise<boolean> { return this.taskMgr.killTask(taskId); }
-  async deleteTask(taskId: string): Promise<boolean> { return this.registry.removeTask(taskId); }
-  async abortGroup(group: string): Promise<number> {
-    const count = await this.taskMgr.abortGroup(group);
-    // Clean up any schedule tied to this mission group — resolve via task.missionId first
-    const groupTasks = (await this.registry.getAllTasks()).filter(t => t.group === group);
-    const mid = groupTasks.find(t => t.missionId)?.missionId;
-    const mission = mid ? await this.registry.getMission?.(mid) : await this.registry.getMissionByName?.(group);
-    if (mission) this.scheduler?.unregisterMission(mission.id);
-    return count;
-  }
-  async clearTasks(filter: (task: Task) => boolean): Promise<number> { return this.taskMgr.clearTasks(filter); }
-  async forceFailTask(taskId: string): Promise<void> { return this.taskMgr.forceFailTask(taskId); }
+  }): Promise<Task> { return this.engine.addTask(opts); }
+  async updateTaskDescription(taskId: string, description: string): Promise<void> { return this.engine.updateTaskDescription(taskId, description); }
+  async updateTaskAssignment(taskId: string, agentName: string): Promise<void> { return this.engine.updateTaskAssignment(taskId, agentName); }
+  async updateTaskExpectations(taskId: string, expectations: TaskExpectation[]): Promise<void> { return this.engine.updateTaskExpectations(taskId, expectations); }
+  async retryTask(taskId: string): Promise<void> { return this.engine.retryTask(taskId); }
+  reassessTask(taskId: string): Promise<void> { return this.engine.reassessTask(taskId); }
+  async killTask(taskId: string): Promise<boolean> { return this.engine.killTask(taskId); }
+  async deleteTask(taskId: string): Promise<boolean> { return this.engine.deleteTask(taskId); }
+  async abortGroup(group: string): Promise<number> { return this.engine.abortGroup(group); }
+  async clearTasks(filter: (task: Task) => boolean): Promise<number> { return this.engine.clearTasks(filter); }
+  async forceFailTask(taskId: string): Promise<void> { return this.engine.forceFailTask(taskId); }
 
-  // ── Approval Management ──
+  // ── Approval Management (delegates to OrchestratorEngine) ──
 
   async approveRequest(requestId: string, resolvedBy?: string, note?: string): Promise<ApprovalRequest | null> {
-    return (await this.approvalMgr?.approve(requestId, resolvedBy, note)) ?? null;
+    return this.engine.approveRequest(requestId, resolvedBy, note);
   }
   async rejectRequest(requestId: string, feedback: string, resolvedBy?: string): Promise<ApprovalRequest | null> {
-    return (await this.approvalMgr?.reject(requestId, feedback, resolvedBy)) ?? null;
+    return this.engine.rejectRequest(requestId, feedback, resolvedBy);
   }
   async canRejectRequest(requestId: string): Promise<{ allowed: boolean; rejectionCount: number; maxRejections: number }> {
-    return (await this.approvalMgr?.canReject(requestId)) ?? { allowed: false, rejectionCount: 0, maxRejections: 0 };
+    return this.engine.canRejectRequest(requestId);
   }
   async getPendingApprovals(): Promise<ApprovalRequest[]> {
-    return (await this.approvalMgr?.getPending()) ?? [];
+    return this.engine.getPendingApprovals();
   }
   async getAllApprovals(status?: ApprovalStatus): Promise<ApprovalRequest[]> {
-    return (await this.approvalMgr?.getAll(status)) ?? [];
+    return this.engine.getAllApprovals(status);
   }
   async getApprovalRequest(id: string): Promise<ApprovalRequest | undefined> {
-    return this.approvalMgr?.getRequest(id);
+    return this.engine.getApprovalRequest(id);
   }
 
   // ── Store Accessors ──
@@ -758,146 +790,120 @@ export class Orchestrator extends TypedEmitter {
     }
   }
 
-  // ── Agent Management (delegates to AgentManager) ──
+  // ── Agent Management (delegates to OrchestratorEngine → AgentManager) ──
 
-  async getAgents(): Promise<AgentConfig[]> { return this.agentMgr.getAgents(); }
-  async getTeams(): Promise<Team[]> { return this.agentMgr.getTeams(); }
-  async getTeam(name?: string): Promise<Team | undefined> { return this.agentMgr.getTeam(name); }
+  async getAgents(): Promise<AgentConfig[]> { return this.engine.getAgents(); }
+  async getTeams(): Promise<Team[]> { return this.engine.getTeams(); }
+  async getTeam(name?: string): Promise<Team | undefined> { return this.engine.getTeam(name); }
   getConfig(): PolpoConfig | null { return this.config; }
   get isInitialized(): boolean { return this.interactive; }
-  async addTeam(team: Team): Promise<void> { return this.agentMgr.addTeam(team); }
-  async removeTeam(name: string): Promise<boolean> { return this.agentMgr.removeTeam(name); }
-  async renameTeam(oldName: string, newName: string): Promise<void> { return this.agentMgr.renameTeam(oldName, newName); }
-  async addAgent(agent: AgentConfig, teamName?: string): Promise<void> { return this.agentMgr.addAgent(agent, teamName); }
-  async removeAgent(name: string): Promise<boolean> { return this.agentMgr.removeAgent(name); }
-  async updateAgent(name: string, updates: Partial<Omit<AgentConfig, "name">>): Promise<AgentConfig> { return this.agentMgr.updateAgent(name, updates); }
-  async findAgentTeam(name: string): Promise<Team | undefined> { return this.agentMgr.findAgentTeam(name); }
-  async addVolatileAgent(agent: AgentConfig, group: string): Promise<void> { return this.agentMgr.addVolatileAgent(agent, group); }
-  async cleanupVolatileAgents(group: string): Promise<number> { return this.agentMgr.cleanupVolatileAgents(group); }
+  async addTeam(team: Team): Promise<void> { return this.engine.addTeam(team); }
+  async removeTeam(name: string): Promise<boolean> { return this.engine.removeTeam(name); }
+  async renameTeam(oldName: string, newName: string): Promise<void> { return this.engine.renameTeam(oldName, newName); }
+  async addAgent(agent: AgentConfig, teamName?: string): Promise<void> { return this.engine.addAgent(agent, teamName); }
+  async removeAgent(name: string): Promise<boolean> { return this.engine.removeAgent(name); }
+  async updateAgent(name: string, updates: Partial<Omit<AgentConfig, "name">>): Promise<AgentConfig> { return this.engine.updateAgent(name, updates); }
+  async findAgentTeam(name: string): Promise<Team | undefined> { return this.engine.findAgentTeam(name); }
+  async addVolatileAgent(agent: AgentConfig, group: string): Promise<void> { return this.engine.addVolatileAgent(agent, group); }
+  async cleanupVolatileAgents(group: string): Promise<number> { return this.engine.cleanupVolatileAgents(group); }
 
 
-  // ─── Mission Management (delegates to MissionExecutor) ──
+  // ─── Mission Management (delegates to OrchestratorEngine → MissionExecutor) ──
 
-  async saveMission(opts: { data: string; prompt?: string; name?: string; status?: MissionStatus; notifications?: ScopedNotificationRules }): Promise<Mission> { return this.missionExec.saveMission(opts); }
-  async getMission(missionId: string): Promise<Mission | undefined> { return this.missionExec.getMission(missionId); }
-  async getMissionByName(name: string): Promise<Mission | undefined> { return this.missionExec.getMissionByName(name); }
-  async getAllMissions(): Promise<Mission[]> { return this.missionExec.getAllMissions(); }
-  async updateMission(missionId: string, updates: Partial<Omit<Mission, "id">>): Promise<Mission> { return this.missionExec.updateMission(missionId, updates); }
-  async deleteMission(missionId: string): Promise<boolean> {
-    const result = await this.missionExec.deleteMission(missionId);
-    if (result) this.scheduler?.unregisterMission(missionId);
-    return result;
-  }
+  async saveMission(opts: { data: string; prompt?: string; name?: string; status?: MissionStatus; notifications?: ScopedNotificationRules }): Promise<Mission> { return this.engine.saveMission(opts); }
+  async getMission(missionId: string): Promise<Mission | undefined> { return this.engine.getMission(missionId); }
+  async getMissionByName(name: string): Promise<Mission | undefined> { return this.engine.getMissionByName(name); }
+  async getAllMissions(): Promise<Mission[]> { return this.engine.getAllMissions(); }
+  async updateMission(missionId: string, updates: Partial<Omit<Mission, "id">>): Promise<Mission> { return this.engine.updateMission(missionId, updates); }
+  async deleteMission(missionId: string): Promise<boolean> { return this.engine.deleteMission(missionId); }
 
-  // ─── Atomic Mission Data Operations (delegates to MissionExecutor) ──
+  // ─── Atomic Mission Data Operations (delegates to OrchestratorEngine → MissionExecutor) ──
 
   async addMissionTask(missionId: string, task: { title: string; description: string; assignTo?: string; dependsOn?: string[]; expectations?: unknown[]; expectedOutcomes?: unknown[]; maxDuration?: number; retryPolicy?: { escalateAfter?: number; fallbackAgent?: string }; notifications?: unknown }): Promise<Mission> {
-    return this.missionExec.addMissionTask(missionId, task);
+    return this.engine.addMissionTask(missionId, task);
   }
   async updateMissionTask(missionId: string, taskTitle: string, updates: { title?: string; description?: string; assignTo?: string; dependsOn?: string[]; expectations?: unknown[]; expectedOutcomes?: unknown[]; maxDuration?: number; retryPolicy?: { escalateAfter?: number; fallbackAgent?: string }; notifications?: unknown }): Promise<Mission> {
-    return this.missionExec.updateMissionTask(missionId, taskTitle, updates);
+    return this.engine.updateMissionTask(missionId, taskTitle, updates);
   }
   async removeMissionTask(missionId: string, taskTitle: string): Promise<Mission> {
-    return this.missionExec.removeMissionTask(missionId, taskTitle);
+    return this.engine.removeMissionTask(missionId, taskTitle);
   }
   async reorderMissionTasks(missionId: string, titles: string[]): Promise<Mission> {
-    return this.missionExec.reorderMissionTasks(missionId, titles);
+    return this.engine.reorderMissionTasks(missionId, titles);
   }
   async addMissionCheckpoint(missionId: string, cp: { name: string; afterTasks: string[]; blocksTasks: string[]; notifyChannels?: string[]; message?: string }): Promise<Mission> {
-    return this.missionExec.addMissionCheckpoint(missionId, cp);
+    return this.engine.addMissionCheckpoint(missionId, cp);
   }
   async updateMissionCheckpoint(missionId: string, name: string, updates: { name?: string; afterTasks?: string[]; blocksTasks?: string[]; notifyChannels?: string[]; message?: string }): Promise<Mission> {
-    return this.missionExec.updateMissionCheckpoint(missionId, name, updates);
+    return this.engine.updateMissionCheckpoint(missionId, name, updates);
   }
   async removeMissionCheckpoint(missionId: string, name: string): Promise<Mission> {
-    return this.missionExec.removeMissionCheckpoint(missionId, name);
+    return this.engine.removeMissionCheckpoint(missionId, name);
   }
   async addMissionQualityGate(missionId: string, gate: { name: string; afterTasks: string[]; blocksTasks: string[]; minScore?: number; requireAllPassed?: boolean; condition?: string; notifyChannels?: string[] }): Promise<Mission> {
-    return this.missionExec.addMissionQualityGate(missionId, gate);
+    return this.engine.addMissionQualityGate(missionId, gate);
   }
   async updateMissionQualityGate(missionId: string, name: string, updates: { name?: string; afterTasks?: string[]; blocksTasks?: string[]; minScore?: number; requireAllPassed?: boolean; condition?: string; notifyChannels?: string[] }): Promise<Mission> {
-    return this.missionExec.updateMissionQualityGate(missionId, name, updates);
+    return this.engine.updateMissionQualityGate(missionId, name, updates);
   }
   async removeMissionQualityGate(missionId: string, name: string): Promise<Mission> {
-    return this.missionExec.removeMissionQualityGate(missionId, name);
+    return this.engine.removeMissionQualityGate(missionId, name);
   }
   async addMissionDelay(missionId: string, delay: { name: string; afterTasks: string[]; blocksTasks: string[]; duration: string; notifyChannels?: string[]; message?: string }): Promise<Mission> {
-    return this.missionExec.addMissionDelay(missionId, delay);
+    return this.engine.addMissionDelay(missionId, delay);
   }
   async updateMissionDelay(missionId: string, name: string, updates: { name?: string; afterTasks?: string[]; blocksTasks?: string[]; duration?: string; notifyChannels?: string[]; message?: string }): Promise<Mission> {
-    return this.missionExec.updateMissionDelay(missionId, name, updates);
+    return this.engine.updateMissionDelay(missionId, name, updates);
   }
   async removeMissionDelay(missionId: string, name: string): Promise<Mission> {
-    return this.missionExec.removeMissionDelay(missionId, name);
+    return this.engine.removeMissionDelay(missionId, name);
   }
   async addMissionTeamMember(missionId: string, member: { name: string; role?: string; model?: string; [key: string]: unknown }): Promise<Mission> {
-    return this.missionExec.addMissionTeamMember(missionId, member);
+    return this.engine.addMissionTeamMember(missionId, member);
   }
   async updateMissionTeamMember(missionId: string, memberName: string, updates: { name?: string; role?: string; model?: string; [key: string]: unknown }): Promise<Mission> {
-    return this.missionExec.updateMissionTeamMember(missionId, memberName, updates);
+    return this.engine.updateMissionTeamMember(missionId, memberName, updates);
   }
   async removeMissionTeamMember(missionId: string, memberName: string): Promise<Mission> {
-    return this.missionExec.removeMissionTeamMember(missionId, memberName);
+    return this.engine.removeMissionTeamMember(missionId, memberName);
   }
   async updateMissionNotifications(missionId: string, notifications: ScopedNotificationRules | null): Promise<Mission> {
-    return this.missionExec.updateMissionNotifications(missionId, notifications);
+    return this.engine.updateMissionNotifications(missionId, notifications);
   }
 
-  // ─── Shared Memory ─────────────────────────────────── 
+  // ─── Shared Memory (delegates to OrchestratorEngine) ───
 
   /** Check if shared memory exists. */
-  async hasMemory(): Promise<boolean> {
-    return (await this.memoryStore?.exists()) ?? false;
-  }
+  async hasMemory(): Promise<boolean> { return this.engine.hasMemory(); }
 
   /** Get the full shared memory content. */
-  async getMemory(): Promise<string> {
-    return (await this.memoryStore?.get()) ?? "";
-  }
+  async getMemory(): Promise<string> { return this.engine.getMemory(); }
 
   /** Overwrite the shared memory. */
-  async saveMemory(content: string): Promise<void> {
-    await this.memoryStore?.save(content);
-  }
+  async saveMemory(content: string): Promise<void> { return this.engine.saveMemory(content); }
 
   /** Append a line to the shared memory. */
-  async appendMemory(line: string): Promise<void> {
-    await this.memoryStore?.append(line);
-  }
+  async appendMemory(line: string): Promise<void> { return this.engine.appendMemory(line); }
 
   /** Replace a unique substring in the shared memory. */
-  async updateMemory(oldText: string, newText: string): Promise<true | string> {
-    if (!this.memoryStore) return "No memory store configured.";
-    return this.memoryStore.update(oldText, newText);
-  }
+  async updateMemory(oldText: string, newText: string): Promise<true | string> { return this.engine.updateMemory(oldText, newText); }
 
-  // ─── Agent Memory ────────────────────────────────────
+  // ─── Agent Memory (delegates to OrchestratorEngine) ───
 
   /** Check if memory exists for a specific agent. */
-  async hasAgentMemory(agentName: string): Promise<boolean> {
-    return (await this.memoryStore?.exists(agentMemoryScope(agentName))) ?? false;
-  }
+  async hasAgentMemory(agentName: string): Promise<boolean> { return this.engine.hasAgentMemory(agentName); }
 
   /** Get the memory content for a specific agent. */
-  async getAgentMemory(agentName: string): Promise<string> {
-    return (await this.memoryStore?.get(agentMemoryScope(agentName))) ?? "";
-  }
+  async getAgentMemory(agentName: string): Promise<string> { return this.engine.getAgentMemory(agentName); }
 
   /** Overwrite the memory for a specific agent. */
-  async saveAgentMemory(agentName: string, content: string): Promise<void> {
-    await this.memoryStore?.save(content, agentMemoryScope(agentName));
-  }
+  async saveAgentMemory(agentName: string, content: string): Promise<void> { return this.engine.saveAgentMemory(agentName, content); }
 
   /** Append a line to a specific agent's memory. */
-  async appendAgentMemory(agentName: string, line: string): Promise<void> {
-    await this.memoryStore?.append(line, agentMemoryScope(agentName));
-  }
+  async appendAgentMemory(agentName: string, line: string): Promise<void> { return this.engine.appendAgentMemory(agentName, line); }
 
   /** Replace a unique substring in a specific agent's memory. */
-  async updateAgentMemory(agentName: string, oldText: string, newText: string): Promise<true | string> {
-    if (!this.memoryStore) return "No memory store configured.";
-    return this.memoryStore.update(oldText, newText, agentMemoryScope(agentName));
-  }
+  async updateAgentMemory(agentName: string, oldText: string, newText: string): Promise<true | string> { return this.engine.updateAgentMemory(agentName, oldText, newText); }
 
   /** Get the persistent log store. */
   getLogStore(): LogStore | undefined {
@@ -924,37 +930,36 @@ export class Orchestrator extends TypedEmitter {
     try { await this.sessionStore.prune(20); } catch { /* best-effort: non-critical */ }
   }
 
-  // ─── Mission Resume / Execute (delegates to MissionExecutor) ──
+  // ─── Mission Resume / Execute (delegates to OrchestratorEngine → MissionExecutor) ──
 
-  async getResumableMissions(): Promise<Mission[]> { return this.missionExec.getResumableMissions(); }
-  async resumeMission(missionId: string, opts?: { retryFailed?: boolean }): Promise<{ retried: number; pending: number }> { return this.missionExec.resumeMission(missionId, opts); }
-  async executeMission(missionId: string): Promise<{ tasks: Task[]; group: string }> { return this.missionExec.executeMission(missionId); }
+  async getResumableMissions(): Promise<Mission[]> { return this.engine.getResumableMissions(); }
+  async resumeMission(missionId: string, opts?: { retryFailed?: boolean }): Promise<{ retried: number; pending: number }> { return this.engine.resumeMission(missionId, opts); }
+  async executeMission(missionId: string): Promise<{ tasks: Task[]; group: string }> { return this.engine.executeMission(missionId); }
 
-  // ─── Checkpoints ────────────────────────────────────
+  // ─── Checkpoints (delegates to OrchestratorEngine) ──
 
   /** Get all active (unresumed) checkpoints across all mission groups. */
-  getActiveCheckpoints() { return this.missionExec.getActiveCheckpoints(); }
+  getActiveCheckpoints() { return this.engine.getActiveCheckpoints(); }
 
   /** Resume a checkpoint by mission group name and checkpoint name. Returns true if resumed. */
   async resumeCheckpoint(group: string, checkpointName: string): Promise<boolean> {
-    return this.missionExec.resumeCheckpoint(group, checkpointName);
+    return this.engine.resumeCheckpoint(group, checkpointName);
   }
 
   /** Resume a checkpoint by mission ID and checkpoint name. Returns true if resumed. */
   async resumeCheckpointByMissionId(missionId: string, checkpointName: string): Promise<boolean> {
-    const mission = await this.missionExec.getMission(missionId);
-    if (!mission) return false;
-    return this.missionExec.resumeCheckpoint(mission.name, checkpointName);
+    return this.engine.resumeCheckpointByMissionId(missionId, checkpointName);
   }
 
-  // ─── Delays ──────────────────────────────────────────
+  // ─── Delays (delegates to OrchestratorEngine) ─────
 
   /** Get all active (unexpired) delays across all mission groups. */
-  getActiveDelays() { return this.missionExec.getActiveDelays(); }
+  getActiveDelays() { return this.engine.getActiveDelays(); }
 
   /** Stop the supervisor loop (non-graceful — use gracefulStop for clean shutdown) */
   stop(): void {
     this.stopped = true;
+    this.engine?.stop();
   }
 
   /**
@@ -1184,6 +1189,13 @@ export class Orchestrator extends TypedEmitter {
       this.scheduler = undefined;
     }
 
+    // Sync engine with updated optional subsystems
+    this.engine.setApprovalManager(this.approvalMgr);
+    this.engine.setScheduler(this.scheduler);
+    this.engine.setSLAMonitor(this.slaMonitor);
+    this.engine.setQualityController(this.qualityController);
+    this.engine.setEscalationManager(this.escalationMgr);
+
     this.emit("log", { level: "info", message: "[reload] Configuration reloaded successfully" });
     this.emit("config:reloaded", { timestamp: new Date().toISOString() });
     return true;
@@ -1196,7 +1208,7 @@ export class Orchestrator extends TypedEmitter {
    * Then requeue orphaned tasks to "pending" WITHOUT burning retry count
    * (shutdown interrupts are not real failures).
    */
-  async recoverOrphanedTasks(): Promise<number> { return this.runner.recoverOrphanedTasks(); }
+  async recoverOrphanedTasks(): Promise<number> { return this.engine.recoverOrphanedTasks(); }
 
   /**
    * Start a Telegram callback poller if a telegram channel + approval gates are configured.
@@ -1399,7 +1411,7 @@ export class Orchestrator extends TypedEmitter {
     await this.agentMgr.syncConfigCache();
     // Also set initial state for non-interactive mode
     await this.registry.setState({
-      org: this.config.org,
+      project: this.config.project,
       teams: this.config.teams,
       startedAt: new Date().toISOString(),
     });
@@ -1415,227 +1427,26 @@ export class Orchestrator extends TypedEmitter {
       await this.seedTasks();
     }
 
-    this.emit("orchestrator:started", {
-      org: this.config.org,
-      agents: (await this.agentMgr.getAgents()).map((a: AgentConfig) => a.name),
-    });
-
     this.stopped = false;
 
-    // Catch unhandled promise rejections to prevent silent failures
+    // Node.js-specific: catch unhandled promise rejections
     const rejectionHandler = (reason: unknown) => {
       const msg = reason instanceof Error ? reason.message : String(reason);
       this.emit("log", { level: "error", message: `Unhandled rejection in supervisor: ${msg}` });
     };
-    process.on("unhandledRejection", rejectionHandler);
 
-    // Supervisor loop
-    while (!this.stopped) {
-      try {
-        const allDone = await this.tick();
-        if (allDone && !this.interactive) break;
-      } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err);
-        this.emit("log", { level: "error", message: `[supervisor] Error in tick: ${message}` });
-      }
-      await sleep(POLL_INTERVAL);
-    }
-
-    process.removeListener("unhandledRejection", rejectionHandler);
+    await this.engine.run(
+      this.interactive,
+      () => { process.on("unhandledRejection", rejectionHandler); },
+      () => { process.removeListener("unhandledRejection", rejectionHandler); },
+    );
   }
 
   /**
    * Single tick of the supervisor loop. Returns true when all work is done.
    */
   async tick(): Promise<boolean> {
-    // Scheduler checks FIRST — must run before early-return guards because
-    // scheduled/recurring missions have zero tasks until triggered, and the
-    // scheduler is what creates them via executeMission.
-    this.scheduler?.check();
-
-    const tasks = await this.registry.getAllTasks();
-    if (tasks.length === 0) return !this.interactive;
-
-    const pending = tasks.filter(t => t.status === "pending");
-    const awaitingApproval = tasks.filter(t => t.status === "awaiting_approval");
-    const inProgress = tasks.filter(t => t.status === "in_progress" || t.status === "assigned" || t.status === "review");
-
-    // Check if all active tasks are terminal (done or failed)
-    // draft tasks are excluded — they don't participate in orchestration
-    // awaiting_approval tasks are NOT terminal — they're waiting for human action
-    const activeTasks = tasks.filter(t => t.status !== "draft");
-    const terminal = activeTasks.filter(t => t.status === "done" || t.status === "failed");
-    if (activeTasks.length > 0 && terminal.length === activeTasks.length) {
-      // Must run cleanup BEFORE returning — assessment transitions happen async
-      // between ticks, so this may be the first tick that sees all tasks terminal.
-      await this.missionExec.cleanupCompletedGroups(tasks);
-      await this.runner.syncProcessesFromRunStore();
-      return true;
-    }
-
-    // 1. Collect results from finished runners
-    await this.runner.collectResults((id, res) => this.assessor.handleResult(id, res));
-
-    // 2. Enforce health checks (timeouts + stale detection)
-    await this.runner.enforceHealthChecks();
-
-    // 2b. SLA deadline checks
-    this.slaMonitor?.check();
-
-    // 3. Spawn agents for ready tasks (skip tasks from cancelled/completed/paused missions)
-    const readyList: Task[] = [];
-    for (const task of pending) {
-      let isReady = true;
-      if (task.group) {
-        // Resolve mission via direct ID (preferred) or group name (legacy fallback)
-        const mission = task.missionId
-          ? await this.registry.getMission?.(task.missionId)
-          : await this.registry.getMissionByName?.(task.group);
-        if (mission && (mission.status === "cancelled" || mission.status === "completed" || mission.status === "paused")) { isReady = false; }
-
-        // Check quality gates — task may be blocked by a gate even if deps are done
-        if (isReady && this.qualityController) {
-          const gates = this.missionExec.getQualityGates(task.group);
-          if (gates.length > 0) {
-            const blocking = this.qualityController.getBlockingGate(
-              mission?.id ?? task.group,
-              task.title,
-              task.id,
-              gates,
-              tasks,
-            );
-            if (blocking) isReady = false; // Blocked by quality gate
-          }
-        }
-
-        // Check checkpoints — task may be blocked by a checkpoint awaiting human resume
-        if (isReady) {
-          const checkpoints = this.missionExec.getCheckpoints(task.group);
-          if (checkpoints.length > 0) {
-            const blockingCp = await this.missionExec.getBlockingCheckpoint(
-              task.group,
-              task.title,
-              task.id,
-              tasks,
-            );
-            if (blockingCp) isReady = false; // Blocked by checkpoint
-          }
-        }
-
-        // Check delays — task may be blocked by a timed delay
-        if (isReady) {
-          const delays = this.missionExec.getDelays(task.group);
-          if (delays.length > 0) {
-            const blockingDelay = await this.missionExec.getBlockingDelay(
-              task.group,
-              task.title,
-              task.id,
-              tasks,
-            );
-            if (blockingDelay) isReady = false; // Blocked by delay
-          }
-        }
-      }
-      if (isReady) {
-        isReady = task.dependsOn.every(depId => {
-          const dep = tasks.find(t => t.id === depId);
-          return dep && dep.status === "done";
-        });
-      }
-      if (isReady) readyList.push(task);
-    }
-    const ready = readyList;
-
-    // Check for deadlock: no tasks ready, none running, but some pending
-    // Don't consider it a deadlock if tasks are awaiting approval, blocked by checkpoints, or waiting on delays
-    const hasActiveCheckpoints = this.missionExec.getActiveCheckpoints().length > 0;
-    const hasActiveDelays = this.missionExec.getActiveDelays().length > 0;
-    if (ready.length === 0 && inProgress.length === 0 && pending.length > 0 && awaitingApproval.length === 0 && !hasActiveCheckpoints && !hasActiveDelays) {
-      // Async resolution already in progress — wait for next tick
-      if (isResolving()) return false;
-
-      const analysis = analyzeBlockedTasks(pending, tasks);
-
-      if (analysis.resolvable.length > 0) {
-        this.emit("deadlock:detected", {
-          taskIds: pending.map(t => t.id),
-          resolvableCount: analysis.resolvable.length,
-        });
-
-        // Async LLM resolution (same pattern as question detection)
-        resolveDeadlock(analysis, this).catch(async err => {
-          this.emit("log", { level: "error", message: `Deadlock resolution failed: ${err.message}` });
-          for (const t of pending) await this.forceFailTask(t.id);
-        });
-
-        return false; // Don't terminate loop — resolution pending
-      }
-
-      // Only missing deps (unresolvable) → force-fail all
-      this.emit("orchestrator:deadlock", { taskIds: pending.map(t => t.id) });
-      for (const t of pending) await this.forceFailTask(t.id);
-      return true;
-    }
-
-    // Concurrency-aware spawn loop
-    const activeRuns = await this.runStore.getActiveRuns();
-    const globalMax = this.config.settings.maxConcurrency ?? Infinity;
-    let totalActive = activeRuns.length;
-
-    // Per-agent active counts
-    const agentActiveCounts = new Map<string, number>();
-    for (const run of activeRuns) {
-      agentActiveCounts.set(run.agentName, (agentActiveCounts.get(run.agentName) ?? 0) + 1);
-    }
-
-    let queued = 0;
-
-    for (const task of ready) {
-      // Global concurrency limit
-      if (totalActive >= globalMax) {
-        queued += ready.length - ready.indexOf(task);
-        break;
-      }
-
-      // Skip if already running
-      const existingRun = await this.runStore.getRunByTaskId(task.id);
-      if (existingRun && existingRun.status === "running") continue;
-
-      // Per-agent concurrency limit
-      const agentName = task.assignTo;
-      const agentConfig = await this.agentMgr.findAgent(agentName);
-      if (agentConfig?.maxConcurrency) {
-        if ((agentActiveCounts.get(agentName) ?? 0) >= agentConfig.maxConcurrency) {
-          queued++;
-          continue;
-        }
-      }
-
-      await this.runner.spawnForTask(task);
-      totalActive++;
-      agentActiveCounts.set(agentName, (agentActiveCounts.get(agentName) ?? 0) + 1);
-    }
-
-    // Emit tick stats
-    const done = tasks.filter(t => t.status === "done").length;
-    const failed = tasks.filter(t => t.status === "failed").length;
-    this.emit("orchestrator:tick", {
-      pending: pending.length,
-      running: inProgress.length,
-      done,
-      failed,
-      queued,
-    });
-
-    // Clean up volatile agents for completed mission groups.
-    // Re-read tasks fresh — assessment callbacks (async) may have transitioned
-    // tasks to done/failed since the snapshot at the top of tick().
-    await this.missionExec.cleanupCompletedGroups(await this.registry.getAllTasks());
-
-    // Sync process list from RunStore for backward compat
-    await this.runner.syncProcessesFromRunStore();
-
-    return false;
+    return this.engine.tick();
   }
 
   // Assessment pipeline delegated to AssessmentOrchestrator
@@ -1652,5 +1463,8 @@ export class Orchestrator extends TypedEmitter {
     const failed = tasks.filter(t => t.status === "failed");
     this.emit("log", { level: "info", message: `Total: ${tasks.length} | Done: ${done.length} | Failed: ${failed.length}` });
   }
+
+  /** Access the pure orchestration engine (for advanced use / testing). */
+  getEngine(): OrchestratorEngine { return this.engine; }
 }
 

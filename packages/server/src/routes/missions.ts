@@ -430,7 +430,7 @@ export function missionRoutes(getDeps: () => {
     const { missionId } = c.req.valid("param");
     const { endDate, ...rest } = c.req.valid("json");
     // Convert null endDate (clear) to undefined for the Mission interface
-    const updates: Partial<Omit<import("../../core/types.js").Mission, "id">> = {
+    const updates: Partial<Omit<import("@polpo-ai/core/types").Mission, "id">> = {
       ...rest,
       ...(endDate !== undefined ? { endDate: endDate ?? undefined } : {}),
     };

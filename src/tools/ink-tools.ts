@@ -260,7 +260,7 @@ function createInkAddTool(polpoDir: string): AgentTool<typeof InkAddSchema> {
 
         // Load config for settings merging only
         let config: PolpoFileConfig = loadPolpoConfig(polpoDir) ?? {
-          org: "",
+          project: "",
           teams: [{ name: "default", agents: [] }],
           settings: { maxRetries: 3, workDir: ".", logLevel: "normal" },
         } as any;

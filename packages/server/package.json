@@ -1,0 +1,46 @@
+{
+  "name": "@polpo-ai/server",
+  "version": "0.2.13",
+  "description": "Polpo API route factories — edge-compatible Hono routes for tasks, agents, missions, vault, and more",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "tsc"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "dependencies": {
+    "@hono/zod-openapi": ">=1.0.0",
+    "@polpo-ai/core": "^0.3.5",
+    "hono": ">=4.0.0",
+    "nanoid": ">=5.0.0"
+  },
+  "peerDependencies": {
+    "zod": ">=3.0.0 || >=4.0.0"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/lumea-labs/polpo",
+    "directory": "packages/server"
+  },
+  "keywords": [
+    "polpo",
+    "api",
+    "hono",
+    "openapi",
+    "edge",
+    "cloudflare-workers",
+    "serverless"
+  ]
+}

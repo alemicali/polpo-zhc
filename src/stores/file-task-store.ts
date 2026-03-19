@@ -21,7 +21,7 @@ import type { TaskStore } from "../core/task-store.js";
 import { assertValidTransition } from "../core/state-machine.js";
 
 interface MetaState {
-  org: string;
+  project: string;
   teams: Team[];
   processes: AgentProcess[];
   startedAt?: string;
@@ -30,8 +30,6 @@ interface MetaState {
 
 /** Legacy meta state with singular team — auto-migrated on read. */
 interface MetaStateRaw {
-  org?: string;
-  /** @deprecated Use `org` instead. */
   project?: string;
   team?: Team;
   teams?: Team[];
@@ -110,9 +108,7 @@ export class FileTaskStore implements TaskStore {
       : raw.team
         ? [raw.team]
         : [{ name: "", agents: [] }];
-    // Backward compat: accept legacy `project` field
-    const org = raw.org ?? raw.project ?? "";
-    return { org, teams, processes: raw.processes, startedAt: raw.startedAt, completedAt: raw.completedAt };
+    return { project: raw.project ?? "", teams, processes: raw.processes, startedAt: raw.startedAt, completedAt: raw.completedAt };
   }
 
   private writeMeta(meta: MetaState): void {
@@ -155,7 +151,7 @@ export class FileTaskStore implements TaskStore {
     const meta = this.readMeta();
     const tasks = await this.getAllTasks();
     return {
-      org: meta.org,
+      project: meta.project,
       teams: meta.teams,
       tasks,
       processes: meta.processes,
@@ -167,7 +163,7 @@ export class FileTaskStore implements TaskStore {
   async setState(partial: Partial<PolpoState>): Promise<void> {
     const meta = this.readMeta();
 
-    if (partial.org !== undefined) meta.org = partial.org;
+    if (partial.project !== undefined) meta.project = partial.project;
     if (partial.teams !== undefined) meta.teams = partial.teams;
     if (partial.startedAt !== undefined) meta.startedAt = partial.startedAt;
     if (partial.completedAt !== undefined) meta.completedAt = partial.completedAt;
