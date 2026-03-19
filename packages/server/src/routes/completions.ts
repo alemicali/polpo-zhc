@@ -302,7 +302,7 @@ export interface CompletionRouteDeps {
   /** Resolve agent model + streaming options. */
   resolveAgentModel: (agentConfig: any, settingsReasoning?: string) => Promise<{ model: any; streamOpts: any }>;
   /** Build agent system prompt for conversational mode. */
-  buildAgentPrompt: (agentConfig: any) => string;
+  buildAgentPrompt: (agentConfig: any) => string | Promise<string>;
   /** Create tools + executor for the agent. Return empty arrays for chat-only. */
   resolveAgentTools: (agentConfig: any) => Promise<{
     tools: any[];
@@ -359,7 +359,7 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
       }
 
       // Build system prompt via dep
-      const agentSystemPrompt = deps.buildAgentPrompt(agentConfig);
+      const agentSystemPrompt = await deps.buildAgentPrompt(agentConfig);
       const conversationalPreamble = [
         "You are now in interactive conversation mode with the user.",
         "Unlike task execution, you should engage in dialogue: ask clarifying questions,",
