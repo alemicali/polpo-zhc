@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { usePolpoContext } from "../provider/polpo-context.js";
-import type { RunActivityEntry } from "@polpo-ai/client";
+import type { RunActivityEntry } from "@polpo-ai/sdk";
 
 export interface UseTaskActivityReturn {
   entries: RunActivityEntry[];

@@ -28,7 +28,7 @@ export { useVaultEntries } from "./hooks/use-vault-entries.js";
 export { useAuthStatus } from "./hooks/use-auth-status.js";
 export { useAssessmentProgress } from "./hooks/use-assessment-progress.js";
 
-// Re-export client SDK for convenience (backward compat — consumers can also use @polpo-ai/client directly)
+// Re-export client SDK for convenience (backward compat — consumers can also use @polpo-ai/sdk directly)
 export {
   PolpoClient,
   ChatCompletionStream,
@@ -45,7 +45,7 @@ export {
   selectEvents,
   selectAssessmentProgress,
   selectAssessmentChecks,
-} from "@polpo-ai/client";
+} from "@polpo-ai/sdk";
 
 // Re-export all types from client SDK
 export type {
@@ -175,4 +175,4 @@ export type {
   AssessmentProgressEntry,
   AssessmentCheckStatus,
   TaskFilter,
-} from "@polpo-ai/client";
+} from "@polpo-ai/sdk";

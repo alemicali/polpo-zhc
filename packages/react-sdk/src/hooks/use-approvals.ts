@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { usePolpo } from "./use-polpo.js";
 import { useEvents } from "./use-events.js";
-import type { ApprovalRequest, ApprovalStatus } from "@polpo-ai/client";
+import type { ApprovalRequest, ApprovalStatus } from "@polpo-ai/sdk";
 
 export interface UseApprovalsReturn {
   approvals: ApprovalRequest[];

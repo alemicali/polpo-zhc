@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState, useRef } from "react";
 import { usePolpoContext } from "../provider/polpo-context.js";
 import { useEvents } from "./use-events.js";
-import type { ScheduleEntry } from "@polpo-ai/client";
+import type { ScheduleEntry } from "@polpo-ai/sdk";
 
 export interface UseSchedulesReturn {
   schedules: ScheduleEntry[];

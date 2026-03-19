@@ -28,7 +28,7 @@ jobs:
         run: |
           pnpm --filter @polpo-ai/core build
           pnpm --filter @polpo-ai/drizzle build
-          pnpm --filter @polpo-ai/client build
+          pnpm --filter @polpo-ai/sdk build
           ./node_modules/.bin/tsc
           pnpm --filter @polpo-ai/react build
 

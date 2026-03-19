@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { usePolpoContext } from "../provider/polpo-context.js";
-import type { LogSession, LogEntry } from "@polpo-ai/client";
+import type { LogSession, LogEntry } from "@polpo-ai/sdk";
 
 export interface UseLogsReturn {
   sessions: LogSession[];
