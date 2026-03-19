@@ -7,6 +7,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.2] — 2026-03-19 — Ports & Adapters, SDK, Skills
+
+### Added
+- **@polpo-ai/core** — pure business logic package, zero Node.js dependencies (types, schemas, state machine, hooks, store interfaces, EventBus, managers)
+- **@polpo-ai/drizzle** — Drizzle ORM stores with dual-dialect support (PostgreSQL + SQLite), 11 store implementations, `ensurePgSchema()`
+- **@polpo-ai/server** — edge-compatible Hono route factories (agents, missions, tasks, completions, events, config, files, skills)
+- **@polpo-ai/tools** — all agent tools in one lightweight package with FileSystem/Shell abstractions
+- **@polpo-ai/sdk** — TypeScript SDK for the Polpo API (agents, tasks, missions, teams, vault, memory, SSE events)
+- **FileSystem + Shell abstractions** in core — ports & adapters pattern for runtime-agnostic I/O
+- **Skills system** — SKILL.md files with YAML frontmatter, per-agent assignment, GitHub install (`polpo skills add`), injected into agent system prompts
+- **Agent-direct completions** — OpenAI-compatible `POST /v1/chat/completions` for user-to-agent chat with SSE streaming
+- **Session management** — agent-scoped sessions, bulk import (`POST /sessions/import`), rename, delete
+- **Per-agent memory** — agent-scoped memory tools for direct chat context
+- **TeamStore / AgentStore abstractions** — agents persisted independently from polpo.json (FileAgentStore, DrizzleAgentStore)
+- **VaultStore / PlaybookStore** — AES-256-GCM encrypted credential storage with Drizzle backend
+- **OrchestratorEngine + Spawner abstraction** — decoupled orchestration from Node.js process spawning
+- **MissionExecutor in core** — pure logic, zero Node.js dependencies, async store loading via `.ready`
+- **Route factory pattern** — all routes accept dependency injection, reusable across runtimes
+- **Electron auto-updater** — desktop app self-updates via GitHub Releases (multi-platform CI)
+- **SDK E2E tests** — 22 tests covering tasks, missions, vault, teams, SSE events
+
+### Fixed
+- **Agent changes now persist across restarts** — `syncConfigCache()` called on startup, reads from agents.json (authoritative source) instead of stale polpo.json (#35)
+- **Desktop update warning** — `polpo update` detects Electron context and warns to restart the app (#33)
+- PostgreSQL compatibility — split `ensurePgSchema` into individual statements for Neon HTTP driver
+- SDK remote API compatibility — `apiPrefix` auto-detection, Authorization header, health endpoint
+- JSON serialization for text columns — `deserializeJson` handles both string and parsed object inputs
+- Transcript persistence in postgres/sqlite mode
+- VaultStore wiring when `storage=postgres/sqlite`
+- Replace `workspace:*` with versioned deps in published packages
+
+### Changed
+- Renamed `coding-tools` → `system-tools`
+- Renamed `client-sdk` → `@polpo-ai/sdk`
+- Decoupled completions route from Orchestrator class (dependency injection)
+- Tools use FileSystem/Shell abstractions exclusively (no more platform if/else)
+- `buildAgentSystemPrompt` extracted to core, accepts optional skills
+- `parseModelSpec` + `PROVIDER_ENV_MAP` extracted to core
+
+### Removed
+- Raw SQLite stores — all SQL now goes through Drizzle
+- TUI (Ink-based terminal UI) — replaced by web dashboard + CLI
+
 ## [0.3.0] — 2026-02-20 — Quality Layer & Scheduling
 
 ### Added
