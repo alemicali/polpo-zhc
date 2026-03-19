@@ -175,5 +175,40 @@ export function chatRoutes(getDeps: () => { sessionStore?: any }): OpenAPIHono {
     return c.json({ ok: true, data: { deleted: true } }, 200);
   });
 
+  // POST /sessions/import — bulk import a session with messages
+  app.post("/sessions/import", async (c) => {
+    const { sessionStore } = getDeps();
+    if (!sessionStore) {
+      return c.json({ ok: false, error: "Sessions not available", code: "NOT_AVAILABLE" }, 501);
+    }
+
+    const body = await c.req.json<{
+      title?: string;
+      agent?: string;
+      messages: Array<{
+        role: "user" | "assistant";
+        content: string;
+        toolCalls?: unknown[];
+      }>;
+    }>();
+
+    if (!body.messages || !Array.isArray(body.messages)) {
+      return c.json({ ok: false, error: "messages array required" }, 400);
+    }
+
+    const sessionId = await sessionStore.create(body.title, body.agent);
+    let imported = 0;
+
+    for (const msg of body.messages) {
+      const added = await sessionStore.addMessage(sessionId, msg.role, msg.content);
+      if (msg.toolCalls && msg.toolCalls.length > 0) {
+        await sessionStore.updateMessage(sessionId, added.id, msg.content, msg.toolCalls as any);
+      }
+      imported++;
+    }
+
+    return c.json({ ok: true, data: { sessionId, imported } }, 201);
+  });
+
   return app;
 }
