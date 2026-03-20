@@ -78,7 +78,7 @@ export function useMission(missionId: string): UseMissionReturn {
         if (!cancelled) { setError(err as Error); setIsLoading(false); }
       });
     return () => { cancelled = true; };
-  }, [client, store, missionId, !!mission]);
+  }, [client, store, missionId, mission]);
 
   // ── Auto-refetch when missions are marked stale by SSE events ──
   // (e.g. mission:saved after atomic data modifications from the orchestrator)

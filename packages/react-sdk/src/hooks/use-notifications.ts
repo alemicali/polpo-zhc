@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { usePolpo } from "./use-polpo.js";
+import { useStableValue } from "./use-stable-value.js";
 import type {
   NotificationRecord,
   NotificationStats,
@@ -32,11 +33,13 @@ export function useNotifications(opts?: {
   const [stats, setStats] = useState<NotificationStats | null>(null);
   const [loading, setLoading] = useState(true);
 
+  const stableOpts = useStableValue(opts);
+
   const refetch = useCallback(() => {
     if (!client) return;
     setLoading(true);
     Promise.all([
-      client.getNotifications(opts),
+      client.getNotifications(stableOpts),
       client.getNotificationStats(),
     ])
       .then(([records, s]) => {
@@ -45,7 +48,7 @@ export function useNotifications(opts?: {
       })
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, [client, opts?.limit, opts?.status, opts?.channel]);
+  }, [client, stableOpts]);
 
   useEffect(() => {
     refetch();

@@ -32,9 +32,14 @@ export function useProcesses(): UseProcessesReturn {
   }, [client, store]);
 
   useEffect(() => {
+    let cancelled = false;
     setIsLoading(true);
-    refetch().finally(() => setIsLoading(false));
-  }, [refetch]);
+    refetch().finally(() => {
+      if (!cancelled) setIsLoading(false);
+    });
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return { processes, isLoading, error, refetch };
 }
