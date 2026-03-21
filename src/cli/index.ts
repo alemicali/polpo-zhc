@@ -56,6 +56,14 @@ import { registerAgentOnboardCommands } from "./commands/agent-onboard.js";
 import { registerUpdateCommand } from "./commands/update.js";
 import { registerWhatsAppCommands } from "./commands/whatsapp.js";
 import { registerInkCommands } from "./commands/ink.js";
+// Cloud commands (unified CLI)
+import { registerLoginCommand } from "./commands/cloud/login.js";
+import { registerLogoutCommand } from "./commands/cloud/logout.js";
+import { registerDeployCommand } from "./commands/cloud/deploy.js";
+import { registerByokCommand } from "./commands/cloud/byok.js";
+import { registerProjectsCommand } from "./commands/cloud/projects.js";
+import { registerStatusCommand as registerCloudStatusCommand } from "./commands/cloud/status.js";
+import { registerLogsCommand as registerCloudLogsCommand } from "./commands/cloud/logs.js";
 import { ensureSetup } from "./ensure-setup.js";
 import { startUpdateCheck } from "./update-check.js";
 
@@ -585,6 +593,15 @@ registerAgentOnboardCommands(program);
 registerUpdateCommand(program);
 registerWhatsAppCommands(program);
 registerInkCommands(program);
+
+// Cloud commands
+registerLoginCommand(program);
+registerLogoutCommand(program);
+registerDeployCommand(program);
+registerByokCommand(program);
+registerProjectsCommand(program);
+registerCloudStatusCommand(program);
+registerCloudLogsCommand(program);
 
 // Non-blocking update check — prints notice at exit if a new version exists
 const printUpdateNotice = startUpdateCheck(PKG_VERSION);
