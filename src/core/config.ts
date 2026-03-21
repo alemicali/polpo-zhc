@@ -170,6 +170,9 @@ function parseSettings(raw: any): PolpoSettings {
   if (raw?.sla) settings.sla = raw.sla;
   if (raw?.enableScheduler != null) settings.enableScheduler = raw.enableScheduler;
   if (raw?.defaultQualityThreshold != null) settings.defaultQualityThreshold = raw.defaultQualityThreshold;
+  if (raw?.reasoning) settings.reasoning = raw.reasoning;
+  if (raw?.orchestratorSkills) settings.orchestratorSkills = raw.orchestratorSkills;
+  if (raw?.emailAllowedDomains) settings.emailAllowedDomains = raw.emailAllowedDomains;
 
   // Storage backend
   if (raw?.storage && ["file", "sqlite", "postgres"].includes(raw.storage)) {

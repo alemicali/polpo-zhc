@@ -101,6 +101,7 @@ export interface PolpoEventMap {
   "schedule:triggered": { scheduleId: string; missionId: string; expression: string };
   "schedule:created": { scheduleId: string; missionId: string; nextRunAt?: string };
   "schedule:completed": { scheduleId: string; missionId: string };
+  "schedule:expired": { scheduleId: string; missionId: string; endDate?: string };
 
   // Notifications
   "notification:sent": { ruleId: string; channel: string; event: string };

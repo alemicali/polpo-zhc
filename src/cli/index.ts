@@ -1,5 +1,13 @@
 #!/usr/bin/env node
 
+// Node.js version gate — fail fast with a clear message
+const [major] = process.versions.node.split(".").map(Number);
+if (major < 20) {
+  console.error(`\x1b[31mPolpo requires Node.js >= 20. You have ${process.version}.\x1b[0m`);
+  console.error("Install the latest LTS: https://nodejs.org");
+  process.exit(1);
+}
+
 import { resolve, dirname } from "node:path";
 import { mkdir, access, readFile } from "node:fs/promises";
 import { existsSync, readFileSync } from "node:fs";
@@ -245,6 +253,7 @@ const serveAction = async (opts: any) => {
     });
 
     await server.start();
+
 };
 
 const program = new Command();
@@ -291,7 +300,7 @@ program
     }
 
     console.log(chalk.green("\n  Polpo initialized!"));
-    console.log(chalk.dim("  Run: polpo serve\n"));
+    console.log(chalk.dim("  Run: polpo start\n"));
   });
 
 // polpo run
@@ -562,9 +571,10 @@ program
     }
   });
 
-// polpo serve — alias for the default action
+// polpo start (primary) + polpo serve (backward compat)
 program
-  .command("serve")
+  .command("start")
+  .alias("serve")
   .description("Start the Polpo HTTP API server + dashboard")
   .option("-p, --port <port>", "Port to listen on", String(DEFAULT_SERVER_PORT))
   .option("-H, --host <host>", "Host to bind to", DEFAULT_SERVER_HOST)
