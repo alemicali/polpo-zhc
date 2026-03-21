@@ -342,7 +342,7 @@ describe("CLI: config operations", () => {
     const config = await parseConfig(tempDir);
     expect(config.version).toBe("1");
     expect(config.project).toBe("test-cli");
-    expect(config.teams[0].name).toBe("test-team");
+    expect(config.teams).toEqual([]); // teams come from stores, not polpo.json
   });
 
   test("config validate — missing config fails", async () => {
