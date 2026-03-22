@@ -498,6 +498,7 @@ export class TaskRunner {
         startedAt: now,
         updatedAt: now,
         activity: { filesCreated: [], filesEdited: [], toolCalls: 0, totalTokens: 0, lastUpdate: now },
+        config: runnerConfig,
         configPath: spawnResult.configPath,
       };
       await this.ctx.runStore.upsertRun(runRecord);
