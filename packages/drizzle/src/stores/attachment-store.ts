@@ -15,6 +15,7 @@ export class DrizzleAttachmentStore implements AttachmentStore {
     return {
       id: row.id,
       sessionId: row.sessionId,
+      ...(row.messageId ? { messageId: row.messageId } : {}),
       filename: row.filename,
       mimeType: row.mimeType,
       size: row.size,
@@ -27,6 +28,7 @@ export class DrizzleAttachmentStore implements AttachmentStore {
     await this.db.insert(this.attachments).values({
       id: attachment.id,
       sessionId: attachment.sessionId,
+      messageId: attachment.messageId ?? null,
       filename: attachment.filename,
       mimeType: attachment.mimeType,
       size: attachment.size,

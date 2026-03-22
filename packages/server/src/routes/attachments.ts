@@ -129,6 +129,7 @@ export function attachmentRoutes(getDeps: () => AttachmentDeps) {
     const body = await c.req.parseBody({ all: true });
 
     const sessionId = body.sessionId as string;
+    const messageId = (body.messageId as string) || undefined;
     if (!sessionId) {
       return c.json({ ok: false, error: "sessionId is required" }, 400);
     }
@@ -165,6 +166,7 @@ export function attachmentRoutes(getDeps: () => AttachmentDeps) {
       const attachment: Attachment = {
         id,
         sessionId,
+        ...(messageId ? { messageId } : {}),
         filename,
         mimeType: file.type || guessMime(filename),
         size: file.size,
