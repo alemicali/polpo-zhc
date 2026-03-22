@@ -27,6 +27,7 @@ import {
   agentRoutes,
   eventRoutes,
   configRoutes,
+  attachmentRoutes,
 } from "@polpo-ai/server";
 // Node.js-only routes (stay in src/server/routes/)
 import { publicConfigRoutes } from "./routes/config.js";
@@ -35,6 +36,7 @@ import { providerRoutes } from "./routes/providers.js";
 import { skillRoutes } from "./routes/skills.js";
 import { authRoutes } from "./routes/auth.js";
 import { fileRoutes } from "./routes/files.js";
+import { FileAttachmentStore } from "../stores/file-attachment-store.js";
 
 export interface AppOptions {
   apiKeys?: string[];
@@ -319,6 +321,12 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     agentWorkDir: o.getAgentWorkDir(),
     fs: new NodeFileSystem(),
     emit: (event: string, data: any) => o.emit(event as any, data),
+  })));
+
+  authed.route("/attachments", attachmentRoutes(() => ({
+    attachmentStore: new FileAttachmentStore(o.getPolpoDir()),
+    fs: new NodeFileSystem(),
+    workDir: o.getWorkDir(),
   })));
 
   authed.route("/", stateRoutes(() => ({

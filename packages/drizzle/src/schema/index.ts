@@ -14,6 +14,7 @@ export {
 export { teamsSqlite, agentsSqlite } from "./teams.js";
 export { vaultSqlite } from "./vault.js";
 export { playbooksSqlite } from "./playbooks.js";
+export { attachmentsSqlite } from "./attachments.js";
 
 // PostgreSQL schemas
 export {
@@ -31,3 +32,4 @@ export {
 export { teamsPg, agentsPg } from "./teams.js";
 export { vaultPg } from "./vault.js";
 export { playbooksPg } from "./playbooks.js";
+export { attachmentsPg } from "./attachments.js";
