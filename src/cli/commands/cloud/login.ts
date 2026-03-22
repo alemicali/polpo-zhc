@@ -112,10 +112,10 @@ export function registerLoginCommand(program: Command): void {
             process.exit(1);
           }
 
-          const data = (await res.json()) as { status: string; apiKey?: string };
+          const data = (await res.json()) as { status: string; token?: string };
 
-          if (data.status === "approved" && data.apiKey) {
-            saveCredentials(data.apiKey, baseUrl);
+          if (data.status === "approved" && data.token) {
+            saveCredentials(data.token, baseUrl);
             console.log("\n\n  Logged in successfully.\n");
             return;
           }
