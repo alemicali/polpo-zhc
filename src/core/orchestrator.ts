@@ -669,7 +669,7 @@ export class Orchestrator extends TypedEmitter {
     this.config = {
       version: "1",
       project: polpoConfig?.project ?? project,
-      teams: polpoConfig?.teams ?? teamsArray,
+      teams: [], // populated by syncConfigCache() from stores
       tasks: [],
       settings,
       providers: polpoConfig?.providers,

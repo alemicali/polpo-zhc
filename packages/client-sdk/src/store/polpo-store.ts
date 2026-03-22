@@ -137,6 +137,11 @@ export class PolpoStore {
     this.notify();
   }
 
+  setActiveDelays(delays: Map<string, import("../client/types.js").ActiveDelay>): void {
+    this.state = { ...this.state, activeDelays: delays };
+    this.notify();
+  }
+
   // ── SSE event application ──────────────────────────────────
 
   applyEvent(event: SSEEvent): void {

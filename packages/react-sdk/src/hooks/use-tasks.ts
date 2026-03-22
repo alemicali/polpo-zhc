@@ -32,7 +32,7 @@ export function useTasks(filter?: TaskFilter): UseTasksReturn {
     setIsLoading(true);
     client
       .getTasks(stableFilter ? {
-        status: Array.isArray(stableFilter.status) ? stableFilter.status[0] : stableFilter.status,
+        status: Array.isArray(stableFilter.status) ? stableFilter.status.join(",") : stableFilter.status,
         group: stableFilter.group,
         assignTo: stableFilter.assignTo,
       } : undefined)

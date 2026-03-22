@@ -38,11 +38,13 @@ jobs:
       - run: pnpm run typecheck
 
   test:
-    name: Test (Node ${{ matrix.node-version }})
-    runs-on: ubuntu-latest
+    name: Test (Node ${{ matrix.node-version }}, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
-        node-version: [18, 20, 22]
+        node-version: [20, 22]
+        os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -52,6 +54,26 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm run test run
+
+  install-check:
+    name: Install Check
+    runs-on: ubuntu-latest
+    needs: [build]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm pack
+      - name: Verify npm install from tarball
+        run: |
+          mkdir /tmp/install-test && cd /tmp/install-test
+          npm init -y
+          npm install $GITHUB_WORKSPACE/polpo-ai-*.tgz
+          node --input-type=module -e "import 'polpo-ai'"
 
   build:
     name: Build

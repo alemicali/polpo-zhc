@@ -977,7 +977,8 @@ export interface HealthResponse {
 // === Task Filters ===
 
 export interface TaskFilters {
-  status?: TaskStatus;
+  /** Single status or comma-separated list (e.g. "pending,in_progress") */
+  status?: TaskStatus | string;
   group?: string;
   assignTo?: string;
 }

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, type ReactNode } from "react";
+import { useStableValue } from "../hooks/use-stable-value.js";
 import { PolpoClient } from "@polpo-ai/sdk";
 import { EventSourceManager } from "@polpo-ai/sdk";
 import type { SSEEvent } from "@polpo-ai/sdk";
@@ -35,6 +36,7 @@ export function PolpoProvider({
 
   const client = clientRef.current!;
   const store = storeRef.current!;
+  const stableEventFilter = useStableValue(eventFilter);
 
   // SSE connection lifecycle
   useEffect(() => {
@@ -52,7 +54,7 @@ export function PolpoProvider({
     };
 
     const es = new EventSourceManager({
-      url: client.getEventsUrl(eventFilter),
+      url: client.getEventsUrl(stableEventFilter),
       onEvent: (event) => {
         pendingEvents.push(event);
         if (!batchScheduled) {
@@ -78,7 +80,7 @@ export function PolpoProvider({
 
     es.connect();
     return () => es.disconnect();
-  }, [configKey, autoConnect, eventFilter?.join(",")]);
+  }, [configKey, autoConnect, stableEventFilter]);
 
   const value = useMemo(() => ({ client, store }), [client, store]);
 

@@ -51,10 +51,8 @@ describe("parseConfig (.polpo/polpo.json)", () => {
 
       expect(config.version).toBe("1");
       expect(config.project).toBe("test-project");
-      expect(config.teams[0].name).toBe("test-team");
-      expect(config.teams[0].agents).toHaveLength(1);
-      expect(config.teams[0].agents[0].name).toBe("agent-1");
-      expect(config.tasks).toEqual([]); // tasks come from plans, not config
+      expect(config.teams).toEqual([]); // teams come from stores, not polpo.json
+      expect(config.tasks).toEqual([]);
     });
 
     it("parses config with full settings", async () => {
@@ -80,7 +78,7 @@ describe("parseConfig (.polpo/polpo.json)", () => {
       expect(config.settings.orchestratorModel).toBe("claude-sonnet-4-5-20250929");
     });
 
-    it("parses config with multiple agents", async () => {
+    it("ignores teams in polpo.json — returns empty teams", async () => {
       const cfg = {
         ...minimalConfig(),
         team: {
@@ -95,8 +93,7 @@ describe("parseConfig (.polpo/polpo.json)", () => {
       const workDir = writeConfig(cfg);
       const config = await parseConfig(workDir);
 
-      expect(config.teams[0].agents).toHaveLength(3);
-      expect(config.teams[0].agents).toHaveLength(3);
+      expect(config.teams).toEqual([]); // teams come from stores only
     });
 
     it("defaults logLevel to 'normal' when settings are missing", async () => {
@@ -183,16 +180,17 @@ describe("parseConfig (.polpo/polpo.json)", () => {
       await expect(parseConfig(TMP)).rejects.toThrow(/No configuration found/);
     });
 
-    it("throws on agent without name", async () => {
+    it("ignores agents in polpo.json without validation", async () => {
       const cfg = {
         ...minimalConfig(),
         team: {
           name: "team",
-          agents: [{}],
+          agents: [{}], // no name — but parseConfig no longer validates
         },
       };
       const workDir = writeConfig(cfg);
-      await expect(parseConfig(workDir)).rejects.toThrow("Each agent must have a name");
+      const config = await parseConfig(workDir);
+      expect(config.teams).toEqual([]); // ignored
     });
 
     it("throws on invalid logLevel", async () => {
@@ -226,8 +224,7 @@ describe("generatePolpoConfigDefault", () => {
 
     const parsed = await parseConfig(TMP);
     expect(parsed.project).toBe("round-trip");
-    expect(parsed.teams[0].name).toBe("default");
-    expect(parsed.teams[0].agents).toHaveLength(1);
+    expect(parsed.teams).toEqual([]); // teams come from stores, not polpo.json
     expect(parsed.settings.maxRetries).toBe(3);
   });
 });

@@ -1,5 +1,13 @@
 #!/usr/bin/env node
 
+// Node.js version gate — fail fast with a clear message
+const [major] = process.versions.node.split(".").map(Number);
+if (major < 20) {
+  console.error(`\x1b[31mPolpo requires Node.js >= 20. You have ${process.version}.\x1b[0m`);
+  console.error("Install the latest LTS: https://nodejs.org");
+  process.exit(1);
+}
+
 import { resolve, dirname } from "node:path";
 import { mkdir, access, readFile } from "node:fs/promises";
 import { existsSync, readFileSync } from "node:fs";
@@ -56,6 +64,14 @@ import { registerAgentOnboardCommands } from "./commands/agent-onboard.js";
 import { registerUpdateCommand } from "./commands/update.js";
 import { registerWhatsAppCommands } from "./commands/whatsapp.js";
 import { registerInkCommands } from "./commands/ink.js";
+// Cloud commands (unified CLI)
+import { registerLoginCommand } from "./commands/cloud/login.js";
+import { registerLogoutCommand } from "./commands/cloud/logout.js";
+import { registerDeployCommand } from "./commands/cloud/deploy.js";
+import { registerByokCommand } from "./commands/cloud/byok.js";
+import { registerProjectsCommand } from "./commands/cloud/projects.js";
+import { registerStatusCommand as registerCloudStatusCommand } from "./commands/cloud/status.js";
+import { registerLogsCommand as registerCloudLogsCommand } from "./commands/cloud/logs.js";
 import { ensureSetup } from "./ensure-setup.js";
 import { startUpdateCheck } from "./update-check.js";
 
@@ -237,6 +253,7 @@ const serveAction = async (opts: any) => {
     });
 
     await server.start();
+
 };
 
 const program = new Command();
@@ -283,7 +300,7 @@ program
     }
 
     console.log(chalk.green("\n  Polpo initialized!"));
-    console.log(chalk.dim("  Run: polpo serve\n"));
+    console.log(chalk.dim("  Run: polpo start\n"));
   });
 
 // polpo run
@@ -554,9 +571,10 @@ program
     }
   });
 
-// polpo serve — alias for the default action
+// polpo start (primary) + polpo serve (backward compat)
 program
-  .command("serve")
+  .command("start")
+  .alias("serve")
   .description("Start the Polpo HTTP API server + dashboard")
   .option("-p, --port <port>", "Port to listen on", String(DEFAULT_SERVER_PORT))
   .option("-H, --host <host>", "Host to bind to", DEFAULT_SERVER_HOST)
@@ -585,6 +603,15 @@ registerAgentOnboardCommands(program);
 registerUpdateCommand(program);
 registerWhatsAppCommands(program);
 registerInkCommands(program);
+
+// Cloud commands
+registerLoginCommand(program);
+registerLogoutCommand(program);
+registerDeployCommand(program);
+registerByokCommand(program);
+registerProjectsCommand(program);
+registerCloudStatusCommand(program);
+registerCloudLogsCommand(program);
 
 // Non-blocking update check — prints notice at exit if a new version exists
 const printUpdateNotice = startUpdateCheck(PKG_VERSION);

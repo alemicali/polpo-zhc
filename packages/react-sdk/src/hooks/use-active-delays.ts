@@ -40,10 +40,12 @@ export function useActiveDelays(): UseActiveDelaysReturn {
     client.listDelays()
       .then((delays) => {
         setFetchedDelays(delays);
-        // Also seed the store so SSE events can update from here
+        // Seed the store via proper setter (triggers notify → subscribers update)
+        const next = new Map(store.getSnapshot().activeDelays);
         for (const d of delays) {
-          store.getSnapshot().activeDelays.set(`${d.group}:${d.delayName}`, d);
+          next.set(`${d.group}:${d.delayName}`, d);
         }
+        store.setActiveDelays(next);
       })
       .catch(() => { /* best-effort */ })
       .finally(() => setLoading(false));

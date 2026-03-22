@@ -1,157 +1,110 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { writeFileSync, mkdirSync, rmSync } from "node:fs";
-import { join } from "node:path";
-import { parseConfig } from "../core/config.js";
+import { describe, it, expect } from "vitest";
+import { validateAgents } from "../core/config.js";
 
-const TMP = "/tmp/polpo-identity-test";
-const POLPO_DIR = join(TMP, ".polpo");
-
-function writeConfig(config: object): string {
-  mkdirSync(POLPO_DIR, { recursive: true });
-  writeFileSync(join(POLPO_DIR, "polpo.json"), JSON.stringify(config, null, 2));
-  return TMP;
-}
-
-function baseConfig(agentOverrides: object = {}) {
-  return {
-    project: "identity-test",
-    teams: [{
-      name: "test-team",
-      agents: [{ name: "agent-1", ...agentOverrides }],
-    }],
-    settings: { maxRetries: 3, workDir: ".", logLevel: "normal" },
-  };
-}
-
-describe("Config parsing — identity, responsibilities, vault", () => {
-  beforeEach(() => mkdirSync(TMP, { recursive: true }));
-  afterEach(() => rmSync(TMP, { recursive: true, force: true }));
-
-  it("parses responsibilities as string[]", async () => {
-    const workDir = writeConfig(baseConfig({
+/**
+ * These tests validate agent identity/responsibility types via validateAgents().
+ * Since agents are no longer read from polpo.json (they come from FileAgentStore),
+ * we test the validation function directly instead of through parseConfig.
+ */
+describe("Agent validation — identity, responsibilities, vault", () => {
+  it("validates responsibilities as string[]", () => {
+    const agents = [{
+      name: "agent-1",
       identity: { responsibilities: ["Code review", "Bug fixes"] },
-    }));
-    const config = await parseConfig(workDir);
-    const agent = config.teams[0].agents[0];
-    expect(agent.identity?.responsibilities).toEqual(["Code review", "Bug fixes"]);
+    }];
+    expect(() => validateAgents(agents)).not.toThrow();
   });
 
-  it("parses responsibilities as AgentResponsibility[]", async () => {
-    const workDir = writeConfig(baseConfig({
+  it("validates responsibilities as AgentResponsibility[]", () => {
+    const agents = [{
+      name: "agent-1",
       identity: {
         responsibilities: [
-          { area: "Frontend", description: "Build UI", priority: "high" },
+          { area: "Backend", description: "API development", priority: "critical" },
+          { area: "Testing", description: "Unit tests", priority: "medium" },
         ],
       },
-    }));
-    const config = await parseConfig(workDir);
-    const resp = config.teams[0].agents[0].identity?.responsibilities;
-    expect(resp).toHaveLength(1);
-    expect(resp![0]).toEqual({ area: "Frontend", description: "Build UI", priority: "high" });
+    }];
+    expect(() => validateAgents(agents)).not.toThrow();
   });
 
-  it("parses mixed responsibilities (string + structured)", async () => {
-    const workDir = writeConfig(baseConfig({
+  it("validates mixed responsibilities (string + structured)", () => {
+    const agents = [{
+      name: "agent-1",
       identity: {
         responsibilities: [
-          "General tasks",
-          { area: "Testing", description: "Write tests", priority: "medium" },
+          "Code review",
+          { area: "Backend", description: "API development", priority: "high" },
         ],
       },
-    }));
-    const config = await parseConfig(workDir);
-    const resp = config.teams[0].agents[0].identity?.responsibilities;
-    expect(resp).toHaveLength(2);
-    expect(resp![0]).toBe("General tasks");
-    expect(typeof resp![1]).toBe("object");
+    }];
+    expect(() => validateAgents(agents)).not.toThrow();
   });
 
-  it("parses personality", async () => {
-    const workDir = writeConfig(baseConfig({
-      identity: { personality: "Detail-oriented and empathetic" },
-    }));
-    const config = await parseConfig(workDir);
-    expect(config.teams[0].agents[0].identity?.personality).toBe("Detail-oriented and empathetic");
+  it("validates personality", () => {
+    const agents = [{
+      name: "agent-1",
+      identity: { personality: "Patient, methodical, detail-oriented" },
+    }];
+    expect(() => validateAgents(agents)).not.toThrow();
   });
 
-  it("parses tone + personality together", async () => {
-    const workDir = writeConfig(baseConfig({
+  it("validates tone + personality together", () => {
+    const agents = [{
+      name: "agent-1",
       identity: {
-        tone: "Professional but warm",
-        personality: "Creative problem-solver",
+        tone: "Professional but friendly",
+        personality: "Curious, analytical",
       },
-    }));
-    const config = await parseConfig(workDir);
-    const agent = config.teams[0].agents[0];
-    expect(agent.identity?.tone).toBe("Professional but warm");
-    expect(agent.identity?.personality).toBe("Creative problem-solver");
+    }];
+    expect(() => validateAgents(agents)).not.toThrow();
   });
 
-  it("parses full identity (all fields)", async () => {
-    const workDir = writeConfig(baseConfig({
+  it("validates full identity (all fields)", () => {
+    const agents = [{
+      name: "agent-1",
       identity: {
-        displayName: "Alice Chen",
-        title: "CTO",
+        displayName: "Dr. Alice",
+        title: "Lead Engineer",
         company: "Acme Corp",
         email: "alice@acme.com",
-        bio: "Tech leader with 15 years experience",
-        timezone: "US/Pacific",
-        responsibilities: ["Architecture", "Hiring"],
-        tone: "Direct and concise",
-        personality: "Strategic thinker",
-      },
-    }));
-    const config = await parseConfig(workDir);
-    const id = config.teams[0].agents[0].identity!;
-    expect(id.displayName).toBe("Alice Chen");
-    expect(id.title).toBe("CTO");
-    expect(id.company).toBe("Acme Corp");
-    expect(id.email).toBe("alice@acme.com");
-    expect(id.bio).toBe("Tech leader with 15 years experience");
-    expect(id.timezone).toBe("US/Pacific");
-    expect(id.responsibilities).toHaveLength(2);
-    expect(id.tone).toBe("Direct and concise");
-    expect(id.personality).toBe("Strategic thinker");
-  });
-
-  it("silently strips vault from config (vault now lives in encrypted store)", async () => {
-    const workDir = writeConfig(baseConfig({
-      vault: {
-        email: {
-          type: "smtp",
-          credentials: { host: "smtp.example.com", port: "587", user: "u", pass: "p" },
-        },
-      },
-    }));
-    const config = await parseConfig(workDir);
-    const agent = config.teams[0].agents[0];
-    // vault field is silently stripped — no longer on AgentConfig
-    expect((agent as any).vault).toBeUndefined();
-  });
-
-  it("parses reportsTo", async () => {
-    const workDir = writeConfig({
-      project: "identity-test",
-      teams: [{
-        name: "test-team",
-        agents: [
-          { name: "manager" },
-          { name: "worker", reportsTo: "manager" },
+        bio: "Senior engineer with 10 years experience",
+        timezone: "America/New_York",
+        tone: "Direct, technical",
+        personality: "Analytical, precise",
+        responsibilities: [
+          { area: "Architecture", description: "System design", priority: "critical" },
+          "Code review",
         ],
-      }],
-      settings: { maxRetries: 3, workDir: ".", logLevel: "normal" },
-    });
-    const config = await parseConfig(workDir);
-    expect(config.teams[0].agents[1].reportsTo).toBe("manager");
+      },
+    }];
+    expect(() => validateAgents(agents)).not.toThrow();
   });
 
-  it("rejects reportsTo self-reference", async () => {
-    const workDir = writeConfig(baseConfig({ reportsTo: "agent-1" }));
-    await expect(parseConfig(workDir)).rejects.toThrow("cannot report to itself");
+  it("silently strips vault from agent (vault now lives in encrypted store)", () => {
+    const agents = [{
+      name: "agent-1",
+      vault: { smtp: { credentials: { host: "smtp.example.com" } } },
+    }] as any[];
+    validateAgents(agents);
+    expect(agents[0].vault).toBeUndefined();
   });
 
-  it("rejects reportsTo referencing nonexistent agent", async () => {
-    const workDir = writeConfig(baseConfig({ reportsTo: "nonexistent" }));
-    await expect(parseConfig(workDir)).rejects.toThrow("does not match any agent");
+  it("validates reportsTo", () => {
+    const agents = [
+      { name: "junior", reportsTo: "senior" },
+      { name: "senior" },
+    ];
+    expect(() => validateAgents(agents)).not.toThrow();
+  });
+
+  it("rejects reportsTo self-reference", () => {
+    const agents = [{ name: "agent-1", reportsTo: "agent-1" }];
+    expect(() => validateAgents(agents)).toThrow("cannot report to itself");
+  });
+
+  it("rejects reportsTo referencing nonexistent agent", () => {
+    const agents = [{ name: "agent-1", reportsTo: "ghost" }];
+    expect(() => validateAgents(agents)).toThrow('does not match any agent');
   });
 });

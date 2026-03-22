@@ -27,7 +27,7 @@ export interface AgentPromptOptions {
  */
 export function buildAgentSystemPrompt(agent: AgentConfig, options?: AgentPromptOptions): string {
   const parts = [
-    `You are ${agent.name}, a ${agent.role ?? "helpful assistant"} managed by Polpo, an AI agent orchestrator.`,
+    `You are ${agent.name}, a ${agent.role ?? "helpful assistant"}.`,
     "Complete your assigned task autonomously. Make reasonable decisions and proceed without asking questions.",
     "",
     "Your task description may include context tags:",

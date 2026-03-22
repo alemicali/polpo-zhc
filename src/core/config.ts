@@ -170,6 +170,9 @@ function parseSettings(raw: any): PolpoSettings {
   if (raw?.sla) settings.sla = raw.sla;
   if (raw?.enableScheduler != null) settings.enableScheduler = raw.enableScheduler;
   if (raw?.defaultQualityThreshold != null) settings.defaultQualityThreshold = raw.defaultQualityThreshold;
+  if (raw?.reasoning) settings.reasoning = raw.reasoning;
+  if (raw?.orchestratorSkills) settings.orchestratorSkills = raw.orchestratorSkills;
+  if (raw?.emailAllowedDomains) settings.emailAllowedDomains = raw.emailAllowedDomains;
 
   // Storage backend
   if (raw?.storage && ["file", "sqlite", "postgres"].includes(raw.storage)) {
@@ -230,26 +233,9 @@ export async function parseConfig(workDir: string): Promise<PolpoConfig> {
     throw new Error(`No configuration found: missing .polpo/polpo.json in ${workDir}. Run 'polpo init' first.`);
   }
 
-  // Validate agents embedded in polpo.json (if any).
-  // After migration to TeamStore/AgentStore, teams in polpo.json may be empty —
-  // that's fine, agents are validated at the store level.
-  const teamsWithAgents = (polpoConfig.teams ?? []).filter(t => t.agents?.length);
-  if (teamsWithAgents.length > 0) {
-    for (const team of teamsWithAgents) {
-      validateAgents(team.agents);
-    }
-
-    // Check for duplicate agent names across teams
-    const allNames = new Set<string>();
-    for (const team of teamsWithAgents) {
-      for (const agent of team.agents) {
-        if (allNames.has(agent.name)) {
-          throw new Error(`Duplicate agent name "${agent.name}" across teams. Agent names must be globally unique.`);
-        }
-        allNames.add(agent.name);
-      }
-    }
-  }
+  // Teams/agents are no longer read from polpo.json.
+  // They come exclusively from FileAgentStore/FileTeamStore (agents.json / teams.json).
+  // polpo.json only contains: project, settings, providers.
 
   const settings = parseSettings(polpoConfig.settings ?? {});
   const providers = polpoConfig.providers
@@ -259,7 +245,7 @@ export async function parseConfig(workDir: string): Promise<PolpoConfig> {
   return {
     version: "1",
     project: polpoConfig.project,
-    teams: polpoConfig.teams,
+    teams: [], // populated by syncConfigCache() from TeamStore/AgentStore
     tasks: [],
     settings,
     providers: providers && Object.keys(providers).length > 0 ? providers : undefined,

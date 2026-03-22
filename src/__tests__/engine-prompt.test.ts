@@ -8,11 +8,11 @@ const CWD = "/tmp/test-project";
 // ─── Base prompt ─────────────────────────────────────
 
 describe("buildSystemPrompt — base", () => {
-  it("includes Polpo intro for minimal agent", () => {
+  it("includes agent preamble for minimal agent", () => {
     const agent = createTestAgent({ name: "dev" });
     const prompt = buildSystemPrompt(agent, CWD);
-    expect(prompt).toContain("Polpo");
-    expect(prompt).toContain("managed by Polpo");
+    expect(prompt).toContain("You are dev");
+    expect(prompt).toContain("Complete your assigned task autonomously");
     expect(prompt).toContain("<shared-memory>");
   });
 
