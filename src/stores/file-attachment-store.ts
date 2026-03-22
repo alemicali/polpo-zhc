@@ -5,7 +5,7 @@ import type { AttachmentStore, Attachment } from "@polpo-ai/core";
 /**
  * File-backed AttachmentStore.
  * Metadata stored in `.polpo/attachments.json`.
- * Actual files are managed by the FileSystem abstraction in workspace/attachments/.
+ * Actual files are managed by the FileSystem abstraction in attachments/.
  */
 export class FileAttachmentStore implements AttachmentStore {
   private readonly filePath: string;
