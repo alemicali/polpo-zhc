@@ -145,11 +145,11 @@ export function attachmentRoutes(getDeps: () => AttachmentDeps) {
 
       const id = nanoid(12);
       const filename = file.name || `upload-${id}`;
-      const relPath = `attachments/${sessionId}/${filename}`;
+      const relPath = `workspace/attachments/${sessionId}/${filename}`;
       const absPath = join(workDir, relPath);
 
       // Ensure directory exists
-      const dir = join(workDir, "attachments", sessionId);
+      const dir = join(workDir, "workspace", "attachments", sessionId);
       if (!(await fs.exists(dir))) {
         await fs.mkdir(dir);
       }
