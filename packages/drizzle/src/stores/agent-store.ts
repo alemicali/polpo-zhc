@@ -120,6 +120,8 @@ export class DrizzleAgentStore implements AgentStore {
 
   private rowToAgent(row: any): AgentConfig {
     const cfg = deserializeJson<Record<string, unknown>>(row.config, {}, this.dialect);
-    return { name: row.name, ...cfg } as AgentConfig;
+    const agent = { name: row.name, ...cfg } as AgentConfig & { teamName?: string };
+    if (row.teamName) agent.teamName = row.teamName;
+    return agent;
   }
 }

@@ -27,6 +27,7 @@ export { eventRoutes, type EventBridge, type EventClient } from "./routes/events
 export { configRoutes } from "./routes/config.js";
 export { fileRoutes, type FileRouteDeps } from "./routes/files.js";
 export { skillRoutes, type SkillRouteDeps } from "./routes/skills.js";
+export { attachmentRoutes } from "./routes/attachments.js";
 
 // Dependency types
 export type {

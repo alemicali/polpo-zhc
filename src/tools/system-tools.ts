@@ -385,6 +385,7 @@ import { createDocxTools, ALL_DOCX_TOOL_NAMES } from "./docx-tools.js";
 import { createSearchTools, ALL_SEARCH_TOOL_NAMES } from "./search-tools.js";
 import { createWhatsAppTools, ALL_WHATSAPP_TOOL_NAMES } from "./whatsapp-tools.js";
 import { createPhoneTools, ALL_PHONE_TOOL_NAMES } from "./phone-tools.js";
+import { createAttachmentTools, ALL_ATTACHMENT_TOOL_NAMES } from "./attachment-tools.js";
 import { ALL_OUTCOME_TOOL_NAMES } from "./outcome-tools.js";
 
 export type { BrowserToolName } from "./browser-tools.js";
@@ -436,6 +437,7 @@ export const ALL_EXTENDED_TOOL_NAMES: string[] = [
   ...ALL_WHATSAPP_TOOL_NAMES,
   ...ALL_PHONE_TOOL_NAMES,
   ...ALL_INK_TOOL_NAMES,
+  ...ALL_ATTACHMENT_TOOL_NAMES,
 ];
 
 export interface CreateAllToolsOptions {
@@ -556,6 +558,9 @@ export async function createAllTools(options: CreateAllToolsOptions): Promise<Ag
   if (categoryRequested(ALL_PHONE_TOOL_NAMES)) {
     tools.push(...createPhoneTools(options.vault, allowedTools));
   }
+
+  // Attachment tool — always included (reads any file type attached by user)
+  tools.push(...createAttachmentTools(cwd, allowedPaths, allowedTools));
 
   // HTTP, register_outcome, and vault are already included via createSystemTools() above — no need to add again
 

@@ -82,6 +82,10 @@
       "types": "./dist/playbook-store.d.ts",
       "import": "./dist/playbook-store.js"
     },
+    "./attachment-store": {
+      "types": "./dist/attachment-store.d.ts",
+      "import": "./dist/attachment-store.js"
+    },
     "./adapter": {
       "types": "./dist/adapter.d.ts",
       "import": "./dist/adapter.js"
