@@ -63,7 +63,7 @@ export function registerLoginCommand(program: Command): void {
       let code: string;
       let expiresAt: string;
       try {
-        const res = await fetch(`${baseUrl}/api/auth/cli/request`, {
+        const res = await fetch(`${baseUrl}/v1/cli-auth/request`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
         });
@@ -105,7 +105,7 @@ export function registerLoginCommand(program: Command): void {
         await sleep(POLL_MS);
 
         try {
-          const res = await fetch(`${baseUrl}/api/auth/cli/poll/${code}`);
+          const res = await fetch(`${baseUrl}/v1/cli-auth/poll/${code}`);
 
           if (res.status === 404) {
             console.log("\n\n  Code expired. Run `polpo login` again.");
