@@ -195,6 +195,51 @@ describe("@polpo-ai/sdk — Real E2E", () => {
     expect(deleted.deleted).toBe(true);
   });
 
+  // ── Attachments ─────────────────────────────────────────────
+
+  it("attachment CRUD via raw fetch", async () => {
+    const headers = { Authorization: `Bearer ${API_KEY}` };
+
+    // Upload
+    const formData = new FormData();
+    formData.append("sessionId", "sdk-e2e-session");
+    formData.append("file", new File(["SDK test content"], "sdk-test.txt", { type: "text/plain" }));
+
+    const uploadRes = await fetch(`${BASE_URL}/api/v1/attachments`, {
+      method: "POST",
+      headers,
+      body: formData,
+    });
+    expect(uploadRes.status).toBe(201);
+    const uploaded = await uploadRes.json();
+    expect(uploaded.ok).toBe(true);
+    expect(uploaded.data.filename).toBe("sdk-test.txt");
+    const attachmentId = uploaded.data.id;
+
+    // List by session
+    const listRes = await fetch(`${BASE_URL}/api/v1/attachments?sessionId=sdk-e2e-session`, { headers });
+    expect(listRes.status).toBe(200);
+    const listed = await listRes.json();
+    expect(listed.data.find((a: any) => a.id === attachmentId)).toBeDefined();
+
+    // Download
+    const dlRes = await fetch(`${BASE_URL}/api/v1/attachments/${attachmentId}/download`, { headers });
+    expect(dlRes.status).toBe(200);
+    const content = await dlRes.text();
+    expect(content).toBe("SDK test content");
+
+    // Delete
+    const delRes = await fetch(`${BASE_URL}/api/v1/attachments/${attachmentId}`, {
+      method: "DELETE",
+      headers,
+    });
+    expect(delRes.status).toBe(200);
+
+    // Verify deleted
+    const getRes = await fetch(`${BASE_URL}/api/v1/attachments/${attachmentId}`, { headers });
+    expect(getRes.status).toBe(404);
+  });
+
   // ── Health ─────────────────────────────────────────────────
 
   it("health check", async () => {

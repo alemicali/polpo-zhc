@@ -14,3 +14,4 @@ export { DrizzleTeamStore } from "./team-store.js";
 export { DrizzleAgentStore } from "./agent-store.js";
 export { DrizzleVaultStore } from "./vault-store.js";
 export { DrizzlePlaybookStore } from "./playbook-store.js";
+export { DrizzleAttachmentStore } from "./attachment-store.js";

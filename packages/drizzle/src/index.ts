@@ -42,6 +42,7 @@ import {
 } from "./schema/teams.js";
 import { vaultPg, vaultSqlite } from "./schema/vault.js";
 import { playbooksPg, playbooksSqlite } from "./schema/playbooks.js";
+import { attachmentsPg, attachmentsSqlite } from "./schema/attachments.js";
 
 // ── Store classes ─────────────────────────────────────────────────────
 
@@ -60,6 +61,7 @@ import { DrizzleTeamStore } from "./stores/team-store.js";
 import { DrizzleAgentStore } from "./stores/agent-store.js";
 import { DrizzleVaultStore } from "./stores/vault-store.js";
 import { DrizzlePlaybookStore } from "./stores/playbook-store.js";
+import { DrizzleAttachmentStore } from "./stores/attachment-store.js";
 
 // ── Store bundle type ─────────────────────────────────────────────────
 
@@ -78,6 +80,7 @@ import type { TeamStore } from "@polpo-ai/core/team-store";
 import type { AgentStore } from "@polpo-ai/core/agent-store";
 import type { VaultStore } from "@polpo-ai/core/vault-store";
 import type { PlaybookStore } from "@polpo-ai/core/playbook-store";
+import type { AttachmentStore } from "@polpo-ai/core/attachment-store";
 
 export interface DrizzleStores {
   taskStore: TaskStore;
@@ -95,6 +98,7 @@ export interface DrizzleStores {
   agentStore: AgentStore;
   vaultStore: VaultStore;
   playbookStore: PlaybookStore;
+  attachmentStore: AttachmentStore;
 }
 
 // ── PostgreSQL factory ────────────────────────────────────────────────
@@ -126,6 +130,7 @@ export function createPgStores(db: any): DrizzleStores {
     agentStore: new DrizzleAgentStore(db, agentsPg, "pg"),
     vaultStore: new DrizzleVaultStore(db, vaultPg),
     playbookStore: new DrizzlePlaybookStore(db, playbooksPg, "pg"),
+    attachmentStore: new DrizzleAttachmentStore(db, attachmentsPg, "pg"),
   };
 }
 
@@ -158,6 +163,7 @@ export function createSqliteStores(db: any): DrizzleStores {
     agentStore: new DrizzleAgentStore(db, agentsSqlite, "sqlite"),
     vaultStore: new DrizzleVaultStore(db, vaultSqlite),
     playbookStore: new DrizzlePlaybookStore(db, playbooksSqlite, "sqlite"),
+    attachmentStore: new DrizzleAttachmentStore(db, attachmentsSqlite, "sqlite"),
   };
 }
 
@@ -184,6 +190,7 @@ export const pgSchema = {
   agents: agentsPg,
   vault: vaultPg,
   playbooks: playbooksPg,
+  attachments: attachmentsPg,
 };
 
 export const sqliteSchema = {
@@ -207,4 +214,5 @@ export const sqliteSchema = {
   agents: agentsSqlite,
   vault: vaultSqlite,
   playbooks: playbooksSqlite,
+  attachments: attachmentsSqlite,
 };

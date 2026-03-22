@@ -12,3 +12,4 @@ export { FileDelayStore } from "./file-delay-store.js";
 export { FileTeamStore } from "./file-team-store.js";
 export { FileAgentStore } from "./file-agent-store.js";
 export { WhatsAppStore } from "./whatsapp-store.js";
+export { FileAttachmentStore } from "./file-attachment-store.js";

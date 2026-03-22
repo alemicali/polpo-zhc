@@ -1,6 +1,6 @@
 {
   "name": "@polpo-ai/core",
-  "version": "0.3.7",
+  "version": "0.3.9",
   "description": "Pure business logic, types, schemas, and store interfaces for the Polpo AI agent orchestration platform",
   "type": "module",
   "main": "dist/index.js",
@@ -81,6 +81,10 @@
     "./playbook-store": {
       "types": "./dist/playbook-store.d.ts",
       "import": "./dist/playbook-store.js"
+    },
+    "./attachment-store": {
+      "types": "./dist/attachment-store.d.ts",
+      "import": "./dist/attachment-store.js"
     },
     "./adapter": {
       "types": "./dist/adapter.d.ts",

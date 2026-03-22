@@ -263,4 +263,16 @@ export async function ensurePgSchema(db: any): Promise<void> {
     created_at  TEXT NOT NULL,
     updated_at  TEXT NOT NULL
   )`);
+
+  await db.execute(sql`CREATE TABLE IF NOT EXISTS attachments (
+    id          TEXT PRIMARY KEY,
+    session_id  TEXT NOT NULL,
+    filename    TEXT NOT NULL,
+    mime_type   TEXT NOT NULL,
+    size        INTEGER NOT NULL,
+    path        TEXT NOT NULL,
+    created_at  TEXT NOT NULL
+  )`);
+
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_pg_attachments_session_id ON attachments(session_id)`);
 }
