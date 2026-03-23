@@ -94,8 +94,8 @@ describe("CLI E2E", () => {
 
   // ── Deploy with real .polpo/ ──
 
-  // TODO: deploy hangs because Node process doesn't exit after deploy action completes
-  // (open HTTP connections from fetch keep the event loop alive). Needs process.exit(0) at end of deploy.
+  // Deploy requires session token for project resolution (GET /v1/orgs).
+  // With API key auth, the control plane call hangs. Needs dedicated test with session auth.
   it.skip("polpo deploy --yes completes without hanging", async () => {
     await polpo(`login --api-key ${API_KEY} --url ${BASE_URL}`);
     const { exitCode, stdout, stderr, timedOut } = await polpo("deploy --yes --dir .", 20_000);

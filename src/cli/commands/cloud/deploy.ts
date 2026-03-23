@@ -653,6 +653,9 @@ export function registerDeployCommand(program: Command): void {
       }
 
 
-      console.log(`\nDeployed: ${results.join(", ") || "nothing to deploy"}`);
+      console.log(`\n  Deployed: ${results.join(", ") || "nothing to deploy"}\n`);
+
+      // Exit explicitly — open HTTP connections from fetch keep the event loop alive
+      process.exit(0);
     });
 }
