@@ -451,9 +451,9 @@ export function registerDeployCommand(program: Command): void {
             if (existing) {
               projectId = existing.id;
               console.log(`  Project: ${existing.name}\n`);
-            } else if (isTTY()) {
+            } else if (isTTY() || opts.yes) {
               const slug = projectName.toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/-+/g, "-");
-              const ok = await confirm(`  Project "${projectName}" not found. Create it?`);
+              const ok = opts.yes ? true : await confirm(`  Project "${projectName}" not found. Create it?`);
               if (ok) {
                 const createRes = await client.post<any>("/v1/projects", { name: projectName, slug, orgId });
                 projectId = createRes.data?.id;
