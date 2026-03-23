@@ -79,8 +79,8 @@
   "dependencies": {
     "@hono/node-server": "^1.19.9",
     "@hono/zod-openapi": "^1.2.2",
-    "@mariozechner/pi-agent-core": "^0.57.1",
-    "@mariozechner/pi-ai": "^0.57.1",
+    "@mariozechner/pi-agent-core": "^0.62.0",
+    "@mariozechner/pi-ai": "^0.62.0",
     "@polpo-ai/core": "^0.3.9",
     "@polpo-ai/server": "^0.2.14",
     "@polpo-ai/vault-crypto": "^0.2.4",
