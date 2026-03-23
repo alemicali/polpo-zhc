@@ -129,6 +129,7 @@ export function attachmentRoutes(getDeps: () => AttachmentDeps) {
     const body = await c.req.parseBody({ all: true });
 
     const sessionId = body.sessionId as string;
+    const messageId = (body.messageId as string) || undefined;
     if (!sessionId) {
       return c.json({ ok: false, error: "sessionId is required" }, 400);
     }
@@ -145,11 +146,11 @@ export function attachmentRoutes(getDeps: () => AttachmentDeps) {
 
       const id = nanoid(12);
       const filename = file.name || `upload-${id}`;
-      const relPath = `attachments/${sessionId}/${filename}`;
+      const relPath = `workspace/attachments/${sessionId}/${filename}`;
       const absPath = join(workDir, relPath);
 
       // Ensure directory exists
-      const dir = join(workDir, "attachments", sessionId);
+      const dir = join(workDir, "workspace", "attachments", sessionId);
       if (!(await fs.exists(dir))) {
         await fs.mkdir(dir);
       }
@@ -165,6 +166,7 @@ export function attachmentRoutes(getDeps: () => AttachmentDeps) {
       const attachment: Attachment = {
         id,
         sessionId,
+        ...(messageId ? { messageId } : {}),
         filename,
         mimeType: file.type || guessMime(filename),
         size: file.size,

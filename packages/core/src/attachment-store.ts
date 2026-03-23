@@ -8,6 +8,8 @@
 export interface Attachment {
   id: string;
   sessionId: string;
+  /** Message this attachment belongs to (optional — set when attached to a specific message) */
+  messageId?: string;
   filename: string;
   mimeType: string;
   size: number;

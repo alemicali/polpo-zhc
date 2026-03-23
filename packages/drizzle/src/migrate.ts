@@ -267,6 +267,7 @@ export async function ensurePgSchema(db: any): Promise<void> {
   await db.execute(sql`CREATE TABLE IF NOT EXISTS attachments (
     id          TEXT PRIMARY KEY,
     session_id  TEXT NOT NULL,
+    message_id  TEXT,
     filename    TEXT NOT NULL,
     mime_type   TEXT NOT NULL,
     size        INTEGER NOT NULL,
@@ -275,4 +276,16 @@ export async function ensurePgSchema(db: any): Promise<void> {
   )`);
 
   await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_pg_attachments_session_id ON attachments(session_id)`);
+
+  // Migration: add message_id column if missing (added in v0.2.16)
+  await db.execute(sql`
+    DO $$ BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'attachments' AND column_name = 'message_id'
+      ) THEN
+        ALTER TABLE attachments ADD COLUMN message_id TEXT;
+      END IF;
+    END $$
+  `);
 }

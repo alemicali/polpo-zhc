@@ -19,7 +19,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { Command } from "commander";
-import { loadCredentials } from "./config.js";
+import { loadCredentials, saveCredentials } from "./config.js";
 import { createApiClient, type ApiClient } from "./api.js";
 import { isTTY, confirm } from "./prompt.js";
 import { resolveKey, decrypt } from "@polpo-ai/vault-crypto";
@@ -419,14 +419,130 @@ export function registerDeployCommand(program: Command): void {
     .action(async (opts) => {
       const creds = loadCredentials();
       if (!creds) {
-        console.error("Not logged in. Run: polpo-cloud login --api-key <key>");
+        console.error("Not logged in. Run: polpo login");
         process.exit(1);
       }
 
       const polpoDir = resolvePolpoDir(opts.dir);
       const client = createApiClient(creds);
+      const polpoConfig = loadJson(path.join(polpoDir, "polpo.json"));
+      const projectName = polpoConfig?.project ?? path.basename(path.resolve(opts.dir));
 
-      // Scan what's available
+      console.log("\n  Polpo Deploy\n");
+
+      // ── Step 1: Resolve project ────────────────────────
+      let projectId: string | undefined = creds.projectId;
+      let orgId: string | undefined;
+
+      if (!projectId) {
+        try {
+          const orgsRes = await client.get<any>("/v1/orgs");
+          const orgs = Array.isArray(orgsRes.data) ? orgsRes.data : [];
+          if (orgs.length > 0) {
+            orgId = orgs[0].id;
+
+            const projRes = await client.get<any>(`/v1/projects?orgId=${orgId}`);
+            const projects = Array.isArray(projRes.data) ? projRes.data : [];
+            const existing = projects.find((p: any) =>
+              p.name?.toLowerCase() === projectName.toLowerCase() ||
+              p.slug?.toLowerCase() === projectName.toLowerCase().replace(/[^a-z0-9-]/g, "-")
+            );
+
+            if (existing) {
+              projectId = existing.id;
+              console.log(`  Project: ${existing.name}\n`);
+            } else if (isTTY() || opts.yes) {
+              const slug = projectName.toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/-+/g, "-");
+              const ok = opts.yes ? true : await confirm(`  Project "${projectName}" not found. Create it?`);
+              if (ok) {
+                const createRes = await client.post<any>("/v1/projects", { name: projectName, slug, orgId });
+                projectId = createRes.data?.id;
+                console.log(`\n  Project: ${projectName} (created)\n`);
+              } else {
+                console.log("  Aborted.");
+                process.exit(0);
+              }
+            } else {
+              console.error(`  Project "${projectName}" not found.`);
+              process.exit(1);
+            }
+          }
+        } catch {
+          // Control plane auth may not support /v1/orgs — continue without project linking
+        }
+      }
+
+      if (!projectId) {
+        console.log(`  Project: ${projectName}\n`);
+      }
+
+      // Save projectId for future deploys
+      if (projectId && !creds.projectId) {
+        saveCredentials(creds.apiKey, creds.baseUrl, projectId);
+      }
+
+      // ── Step 2: Detect LLM keys ────────────────────────
+      const LLM_KEYS: Record<string, string> = {
+        ANTHROPIC_API_KEY: "anthropic",
+        OPENAI_API_KEY: "openai",
+        GEMINI_API_KEY: "google",
+        XAI_API_KEY: "xai",
+        GROQ_API_KEY: "groq",
+        OPENROUTER_API_KEY: "openrouter",
+        MISTRAL_API_KEY: "mistral",
+        CEREBRAS_API_KEY: "cerebras",
+        MINIMAX_API_KEY: "minimax",
+        HF_TOKEN: "huggingface",
+        AZURE_OPENAI_API_KEY: "azure-openai-responses",
+      };
+
+      const detected: { envVar: string; provider: string; value: string }[] = [];
+
+      // Check process.env
+      for (const [envVar, provider] of Object.entries(LLM_KEYS)) {
+        if (process.env[envVar]) {
+          detected.push({ envVar, provider, value: process.env[envVar]! });
+        }
+      }
+
+      // Check .polpo/.env
+      const envFile = path.join(polpoDir, ".env");
+      if (fs.existsSync(envFile)) {
+        for (const line of fs.readFileSync(envFile, "utf-8").split("\n")) {
+          const t = line.trim();
+          if (!t || t.startsWith("#")) continue;
+          const eq = t.indexOf("=");
+          if (eq === -1) continue;
+          const k = t.slice(0, eq).trim();
+          const v = t.slice(eq + 1).trim().replace(/^["']|["']$/g, "");
+          if (LLM_KEYS[k] && v && !detected.find(d => d.envVar === k)) {
+            detected.push({ envVar: k, provider: LLM_KEYS[k], value: v });
+          }
+        }
+      }
+
+      if (detected.length > 0) {
+        console.log("  Detected LLM keys:");
+        for (const { envVar, value } of detected) {
+          console.log(`    ${envVar.padEnd(25)} ${value.slice(0, 8)}...${value.slice(-4)}`);
+        }
+        console.log();
+
+        if (isTTY() && !opts.yes) {
+          const push = await confirm("  Push LLM keys to cloud?");
+          if (push) {
+            let n = 0;
+            for (const { provider, value } of detected) {
+              try { await client.post("/v1/byok", { provider, key: value }); n++; } catch {}
+            }
+            if (n > 0) console.log(`  Pushed ${n} LLM key(s)\n`);
+          } else {
+            console.log();
+          }
+        }
+      }
+
+      // ── Step 3: Scan resources ────────────────────────
       const hasTeams = fs.existsSync(path.join(polpoDir, "teams.json"));
       const hasAgents = fs.existsSync(path.join(polpoDir, "agents.json"));
       const hasMemory = fs.existsSync(path.join(polpoDir, "memory.md")) ||
@@ -452,35 +568,32 @@ export function registerDeployCommand(program: Command): void {
       const includeRuns = opts.all || opts.includeRuns;
       const includeSessions = opts.all || opts.includeSessions;
 
-      // Summary
-      console.log(`\nDeploy from ${polpoDir}\n`);
-      console.log("Core:");
-      if (hasTeams) console.log("  Teams ........... yes");
-      if (hasAgents) console.log("  Agents .......... yes");
-      if (hasMemory) console.log("  Memory .......... yes");
-      if (hasMissions) console.log("  Missions ........ yes");
-      if (hasPlaybooks) console.log("  Playbooks ....... yes");
-      if (hasSkills) console.log("  Skills .......... yes");
-      if (hasVault) console.log("  Vault ........... yes");
-      if (hasAvatars) console.log("  Avatars ......... yes");
-      if (hasSessions) console.log("  Sessions ........ yes");
-      if (includeTasks && hasTasks) console.log("  Tasks ........... yes (--include-tasks)");
-      if (includeRuns && hasRuns) console.log("  Runs ............ yes (--include-runs)");
-      if (includeSessions && hasSessions) console.log("  Sessions ........ yes (--include-sessions)");
+      console.log("  Resources:");
+      if (hasTeams) console.log("    Teams ........... yes");
+      if (hasAgents) console.log("    Agents .......... yes");
+      if (hasMemory) console.log("    Memory .......... yes");
+      if (hasMissions) console.log("    Missions ........ yes");
+      if (hasPlaybooks) console.log("    Playbooks ....... yes");
+      if (hasSkills) console.log("    Skills .......... yes");
+      if (hasVault) console.log("    Vault ........... yes");
+      if (hasAvatars) console.log("    Avatars ......... yes");
+      if (hasSessions) console.log("    Sessions ........ yes");
+      if (includeTasks && hasTasks) console.log("    Tasks ........... yes");
+      if (includeRuns && hasRuns) console.log("    Runs ............ yes");
+      if (includeSessions && hasSessions) console.log("    Sessions ........ yes");
       console.log("");
 
-      // Confirm
-      if (!opts.yes) {
-        if (isTTY()) {
-          const ok = await confirm("Deploy to cloud?");
-          if (!ok) {
-            console.log("Aborted.");
-            process.exit(0);
-          }
+      if (!opts.yes && isTTY()) {
+        const ok = await confirm("  Deploy?");
+        if (!ok) {
+          console.log("  Aborted.");
+          process.exit(0);
         }
+        console.log();
       }
 
-      // Deploy core
+      // ── Step 4: Deploy ────────────────────────
+      console.log("  Deploying...");
       const results: string[] = [];
 
       if (hasTeams) {
@@ -540,6 +653,9 @@ export function registerDeployCommand(program: Command): void {
       }
 
 
-      console.log(`\nDeployed: ${results.join(", ") || "nothing to deploy"}`);
+      console.log(`\n  Deployed: ${results.join(", ") || "nothing to deploy"}\n`);
+
+      // Exit explicitly — open HTTP connections from fetch keep the event loop alive
+      process.exit(0);
     });
 }
