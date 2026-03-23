@@ -1152,6 +1152,9 @@ export class Orchestrator extends TypedEmitter {
         return task?.outcomes;
       });
       this.startTelegramApprovalPoller();
+    } else if (this.notificationRouter && this.hasTelegramGatewayEnabled()) {
+      // Start Telegram poller even without approval gates when gateway inbound is enabled
+      this.startTelegramApprovalPoller();
     }
 
     // Restart WhatsApp bridge if configured (independent of approval gates)
