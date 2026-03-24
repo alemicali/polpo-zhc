@@ -368,13 +368,7 @@ export function App() {
   const { client } = usePolpo();
   const { theme, toggle: toggleTheme } = useTheme();
   const { sessions, activeSessionId, setActiveSessionId, getMessages, deleteSession, refetch: refetchSessions } = useSessions();
-  const { agents, error: agentsError } = useAgents();
-
-  // Debug — remove after fixing
-  useEffect(() => {
-    console.log("[polpo-chat] agents:", agents.length, agents.map((a: any) => a.name));
-    if (agentsError) console.error("[polpo-chat] agents error:", agentsError);
-  }, [agents, agentsError]);
+  const { agents } = useAgents();
 
   const [messages, setMessages] = useState<Message[]>([]);
   const [streaming, setStreaming] = useState(false);
