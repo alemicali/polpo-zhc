@@ -49,7 +49,7 @@ function Sidebar({
   onNew,
   onDelete,
 }: {
-  sessions: { id: string; title?: string; agentName?: string; createdAt: string }[];
+  sessions: { id: string; title?: string; agent?: string; createdAt: string }[];
   activeId: string | null;
   onSelect: (id: string) => void;
   onNew: () => void;
@@ -120,7 +120,7 @@ function Sidebar({
                   color: activeId === s.id ? "var(--text)" : "var(--text-muted)",
                 }}
               >
-                {s.title || s.agentName || "Untitled"}
+                {s.title || s.agent || "Untitled"}
               </div>
               <div style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: "var(--font-mono)", marginTop: 2 }}>
                 {new Date(s.createdAt).toLocaleDateString()}
@@ -144,71 +144,6 @@ function Sidebar({
         ))}
       </div>
     </aside>
-  );
-}
-
-function AgentSelector({
-  agents,
-  onSelect,
-}: {
-  agents: { name: string; model?: string }[];
-  onSelect: (name: string) => void;
-}) {
-  return (
-    <div
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        justifyContent: "center",
-        height: "100%",
-        gap: 16,
-        padding: 24,
-      }}
-    >
-      <span style={{ fontFamily: "var(--font-mono)", fontSize: 28, fontWeight: 800, letterSpacing: "0.3em", color: "var(--border)" }}>
-        POLPO
-      </span>
-      <span style={{ fontSize: 14, color: "var(--text-muted)" }}>
-        Select an agent to start chatting
-      </span>
-      <div style={{ display: "flex", flexDirection: "column", gap: 6, width: "100%", maxWidth: 320, marginTop: 8 }}>
-        {agents.map((a) => (
-          <button
-            key={a.name}
-            onClick={() => onSelect(a.name)}
-            style={{
-              padding: "12px 16px",
-              background: "var(--bg-secondary)",
-              border: "1px solid var(--border)",
-              color: "var(--text)",
-              fontSize: 14,
-              fontFamily: "var(--font-sans)",
-              cursor: "pointer",
-              textAlign: "left",
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              transition: "border-color 0.15s",
-            }}
-            onMouseEnter={(e) => (e.currentTarget.style.borderColor = "var(--accent)")}
-            onMouseLeave={(e) => (e.currentTarget.style.borderColor = "var(--border)")}
-          >
-            <span style={{ fontWeight: 600 }}>{a.name}</span>
-            {a.model && (
-              <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-muted)" }}>
-                {a.model}
-              </span>
-            )}
-          </button>
-        ))}
-        {agents.length === 0 && (
-          <div style={{ textAlign: "center", color: "var(--text-muted)", fontSize: 13, padding: 20 }}>
-            No agents found. Deploy an agent first.
-          </div>
-        )}
-      </div>
-    </div>
   );
 }
 
@@ -307,7 +242,7 @@ export function App() {
       setMessages(msgs.map((m: ChatMessage) => ({ role: m.role as "user" | "assistant", content: typeof m.content === "string" ? m.content : "" })));
       // Infer agent from session
       const session = sessions.find((s) => s.id === id);
-      if (session?.agentName) setSelectedAgent(session.agentName);
+      if (session?.agent) setSelectedAgent(session.agent);
     } catch {
       setMessages([]);
     }
@@ -391,9 +326,6 @@ export function App() {
     }
   }, [client, messages, selectedAgent, sessionId, refetchSessions]);
 
-  // Show agent selector or chat
-  const showSelector = !selectedAgent && messages.length === 0;
-
   return (
     <div style={{ display: "flex", height: "100%" }}>
       {/* Sidebar */}
@@ -431,24 +363,53 @@ export function App() {
         </header>
 
         {/* Content */}
-        {showSelector ? (
-          <AgentSelector agents={agents as any[]} onSelect={setSelectedAgent} />
-        ) : (
-          <>
-            <div ref={scrollRef} style={{ flex: 1, overflowY: "auto", padding: 24 }}>
-              {messages.length === 0 && selectedAgent && (
-                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", gap: 8 }}>
-                  <span style={{ fontFamily: "var(--font-mono)", fontSize: 24, fontWeight: 800, letterSpacing: "0.3em", color: "var(--border)" }}>POLPO</span>
-                  <span style={{ fontSize: 13, color: "var(--text-muted)" }}>Send a message to start</span>
+        <div ref={scrollRef} style={{ flex: 1, overflowY: "auto", padding: 24 }}>
+          {messages.length === 0 && (
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", gap: 12 }}>
+              <span style={{ fontFamily: "var(--font-mono)", fontSize: 24, fontWeight: 800, letterSpacing: "0.3em", color: "var(--border)" }}>POLPO</span>
+              <span style={{ fontSize: 13, color: "var(--text-muted)" }}>Send a message to start</span>
+
+              {/* Agent selector — only shown when no messages */}
+              {!AGENT_ENV && agents.length > 1 && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 4, width: "100%", maxWidth: 280, marginTop: 12 }}>
+                  <span style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "var(--font-mono)", textAlign: "center", marginBottom: 4 }}>
+                    select agent
+                  </span>
+                  {agents.map((a: any) => (
+                    <button
+                      key={a.name}
+                      onClick={() => setSelectedAgent(a.name)}
+                      style={{
+                        padding: "10px 14px",
+                        background: selectedAgent === a.name ? "var(--accent-dim)" : "var(--bg-secondary)",
+                        border: selectedAgent === a.name ? "1px solid var(--accent)" : "1px solid var(--border)",
+                        color: "var(--text)",
+                        fontSize: 13,
+                        fontFamily: "var(--font-sans)",
+                        cursor: "pointer",
+                        textAlign: "left",
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                      }}
+                    >
+                      <span style={{ fontWeight: 600 }}>{a.name}</span>
+                      {a.model && (
+                        <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-muted)" }}>
+                          {a.model}
+                        </span>
+                      )}
+                    </button>
+                  ))}
                 </div>
               )}
-              {messages.map((msg, i) => (
-                <ChatBubble key={i} msg={msg} />
-              ))}
             </div>
-            <ChatInput onSend={send} disabled={streaming} />
-          </>
-        )}
+          )}
+          {messages.map((msg, i) => (
+            <ChatBubble key={i} msg={msg} />
+          ))}
+        </div>
+        <ChatInput onSend={send} disabled={streaming || !selectedAgent} />
       </div>
 
       <style>{`@keyframes blink { 0%,100% { opacity: 1 } 50% { opacity: 0 } }`}</style>
