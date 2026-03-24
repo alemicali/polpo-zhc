@@ -443,6 +443,11 @@ export function App() {
       streamRef.current = stream;
 
       for await (const chunk of stream) {
+        // Capture session ID from stream (read from response header)
+        if (!sessionId && stream.sessionId) {
+          setSessionId(stream.sessionId);
+        }
+
         const choice = chunk.choices?.[0];
         if (!choice) continue;
 

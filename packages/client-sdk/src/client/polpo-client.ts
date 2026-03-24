@@ -147,8 +147,8 @@ export class ChatCompletionStream implements AsyncIterable<ChatCompletionChunk> 
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
     };
-    if (this.clientHeaders["x-api-key"]) {
-      headers["Authorization"] = `Bearer ${this.clientHeaders["x-api-key"]}`;
+    if (this.clientHeaders["Authorization"]) {
+      headers["Authorization"] = this.clientHeaders["Authorization"];
     }
     if (this.req.sessionId) {
       headers["x-session-id"] = this.req.sessionId;
