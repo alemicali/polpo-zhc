@@ -537,11 +537,14 @@ export function App() {
               <Columns2 size={16} />
             </button>
           )}
-          {selectedAgent && (
-            <span style={{ fontSize: 13, fontWeight: 600, marginRight: "auto" }}>
-              {selectedAgent}
-            </span>
-          )}
+          <span style={{ fontSize: 13, fontWeight: 600, marginRight: "auto", display: "flex", alignItems: "center", gap: 8 }}>
+            {selectedAgent && <span>{selectedAgent}</span>}
+            {sessionId && (
+              <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-muted)", fontWeight: 400 }}>
+                {sessionId.slice(0, 8)}
+              </span>
+            )}
+          </span>
           <button
             onClick={toggleTheme}
             style={{
