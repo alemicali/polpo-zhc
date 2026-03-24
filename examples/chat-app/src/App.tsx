@@ -518,7 +518,6 @@ export function App() {
         {/* Top bar */}
         <header style={{
           padding: "12px 24px",
-          borderBottom: "1px solid var(--border)",
           display: "flex",
           alignItems: "center",
           justifyContent: "flex-end",
