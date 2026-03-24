@@ -400,7 +400,8 @@ function ChatInput({
         rows={1}
         disabled={disabled && !streaming}
         style={{
-          flex: 1, resize: "none", background: "var(--bg-secondary)", border: "1px solid var(--border)",
+          flex: 1, resize: "none", background: "var(--bg-secondary)",
+          border: "1px solid var(--border)", borderRight: "none",
           color: "var(--text)", padding: "10px 14px", fontSize: 14, fontFamily: "var(--font-sans)", outline: "none", lineHeight: "1.5",
         }}
       />
@@ -531,6 +532,17 @@ export function App() {
             const updated = [...prev];
             const last = updated[updated.length - 1];
             updated[updated.length - 1] = { ...last, content: last.content + delta };
+            return updated;
+          });
+        }
+
+        // Thinking/reasoning tokens
+        const thinking = choice.thinking;
+        if (thinking) {
+          setMessages((prev) => {
+            const updated = [...prev];
+            const last = updated[updated.length - 1];
+            updated[updated.length - 1] = { ...last, thinking: (last.thinking ?? "") + thinking };
             return updated;
           });
         }

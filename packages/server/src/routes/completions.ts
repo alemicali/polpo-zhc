@@ -485,7 +485,9 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
 
             for await (const event of piStream) {
               if (abortController.signal.aborted) break;
-              if (event.type === "text_delta") {
+              if (event.type === "thinking_delta") {
+                await stream.writeSSE({ data: sseChunk(completionId, {}, null, { thinking: event.delta }) });
+              } else if (event.type === "text_delta") {
                 turnText += event.delta;
                 await stream.writeSSE({ data: sseChunk(completionId, { content: event.delta }) });
               } else if (event.type === "toolcall_start") {
