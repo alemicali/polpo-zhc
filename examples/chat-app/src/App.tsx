@@ -468,14 +468,15 @@ export function App() {
     setActiveSessionId(id);
     setSessionId(id);
     try {
+      const session = sessions.find((s) => s.id === id);
+      const agentName = session?.agent || selectedAgent || undefined;
+      if (session?.agent) setSelectedAgent(session.agent);
       const msgs = await getMessages(id);
       setMessages(msgs.map((m: ChatMessage) => ({
         role: m.role as "user" | "assistant",
         content: typeof m.content === "string" ? m.content : "",
-        agent: selectedAgent || undefined,
+        agent: m.role === "assistant" ? agentName : undefined,
       })));
-      const session = sessions.find((s) => s.id === id);
-      if (session?.agent) setSelectedAgent(session.agent);
     } catch {
       setMessages([]);
     }
@@ -509,7 +510,7 @@ export function App() {
       { role: "user" as const, content: text },
     ];
 
-    setMessages((prev) => [...prev, { role: "assistant", content: "", agent: selectedAgent, streaming: true }]);
+    setMessages((prev) => [...prev, { role: "assistant", content: "", agent: selectedAgent!, streaming: true }]);
     setStreaming(true);
 
     try {
