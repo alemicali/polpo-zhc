@@ -120,3 +120,76 @@ p {
   margin: 6px 0;
   line-height: 1.7;
 }
+
+/* Streamdown code block — language header + actions */
+.MarkdownCode {
+  position: relative;
+  margin: 12px 0;
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+  overflow: hidden;
+}
+
+.MarkdownCode > div:first-child {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* Copy / download buttons — no background, right aligned */
+.code-block-copy-button,
+.code-block-download-button {
+  background: none !important;
+  border: none !important;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 2px 4px;
+  display: inline-flex;
+  align-items: center;
+}
+
+.code-block-copy-button:hover,
+.code-block-download-button:hover {
+  color: var(--text);
+}
+
+/* Shiki highlighted code */
+.MarkdownCode .shiki {
+  background: transparent !important;
+  margin: 0;
+  border: none;
+}
+
+.MarkdownCode .shiki code {
+  padding: 14px 16px;
+  background: none;
+  color: inherit;
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+/* Fallback pre inside code block */
+.MarkdownCode pre {
+  margin: 0;
+  border: none;
+  background: transparent;
+}
+
+.MarkdownCode pre code {
+  padding: 14px 16px;
+}
+
+/* Thin horizontal scrollbar in code */
+.MarkdownCode pre::-webkit-scrollbar,
+.MarkdownCode code::-webkit-scrollbar {
+  height: 4px;
+}
+.MarkdownCode pre::-webkit-scrollbar-thumb,
+.MarkdownCode code::-webkit-scrollbar-thumb {
+  background: var(--border);
+}
