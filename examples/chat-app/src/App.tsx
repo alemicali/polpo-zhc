@@ -2,9 +2,7 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { usePolpo, useSessions, useAgents } from "@polpo-ai/react";
 import type { ChatMessage, ChatCompletionStream } from "@polpo-ai/sdk";
 import { Streamdown } from "streamdown";
-import { code } from "@streamdown/code";
-import "streamdown/styles";
-import "@streamdown/code/styles";
+import "streamdown/styles.css";
 
 const AGENT_ENV = import.meta.env.VITE_POLPO_AGENT ?? "";
 
@@ -51,54 +49,37 @@ function Sidebar({
   onDelete: (id: string) => void;
 }) {
   return (
-    <>
-      {/* Toggle button — always visible */}
-      <button
-        onClick={onToggle}
-        style={{
-          position: "fixed",
-          top: 14,
-          left: open ? 248 : 12,
-          zIndex: 20,
-          background: "var(--bg-secondary)",
-          border: "1px solid var(--border)",
-          color: "var(--text-muted)",
-          width: 28,
-          height: 28,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          cursor: "pointer",
-          fontSize: 14,
-          fontFamily: "var(--font-mono)",
-          transition: "left 0.2s",
-        }}
-      >
-        {open ? "\u2190" : "\u2192"}
-      </button>
-
-      {/* Panel */}
-      <aside
-        style={{
-          width: open ? 260 : 0,
-          overflow: "hidden",
-          display: "flex",
-          flexDirection: "column",
-          background: "var(--bg-secondary)",
-          flexShrink: 0,
-          transition: "width 0.2s",
-        }}
-      >
-        <div style={{ width: 260, height: "100%", display: "flex", flexDirection: "column" }}>
-          {/* Header */}
-          <div style={{ padding: "16px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <div>
-              <div style={{ fontFamily: "var(--font-mono)", fontSize: 14, fontWeight: 700, letterSpacing: "0.2em" }}>
-                POLPO
-              </div>
-              <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>chat example</div>
+    <aside
+      style={{
+        width: open ? 260 : 0,
+        overflow: "hidden",
+        display: "flex",
+        flexDirection: "column",
+        background: "var(--bg-secondary)",
+        flexShrink: 0,
+        transition: "width 0.2s",
+      }}
+    >
+      <div style={{ width: 260, height: "100%", display: "flex", flexDirection: "column" }}>
+        {/* Header with toggle */}
+        <div style={{ padding: "12px 12px 12px 16px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div>
+            <div style={{ fontFamily: "var(--font-mono)", fontSize: 14, fontWeight: 700, letterSpacing: "0.2em" }}>
+              POLPO
             </div>
+            <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>chat example</div>
           </div>
+          <button
+            onClick={onToggle}
+            style={{
+              background: "none", border: "1px solid var(--border)", color: "var(--text-muted)",
+              width: 26, height: 26, display: "flex", alignItems: "center", justifyContent: "center",
+              cursor: "pointer", fontSize: 12, fontFamily: "var(--font-mono)",
+            }}
+          >
+            {"\u2190"}
+          </button>
+        </div>
 
           {/* New chat */}
           <button
@@ -159,8 +140,7 @@ function Sidebar({
             ))}
           </div>
         </div>
-      </aside>
-    </>
+    </aside>
   );
 }
 
@@ -200,7 +180,6 @@ function ChatBubble({ msg }: { msg: Message }) {
           ) : (
             <Streamdown
               mode={msg.streaming ? "streaming" : "static"}
-              plugins={[code()]}
             >
               {msg.content || "..."}
             </Streamdown>
@@ -332,8 +311,6 @@ export function App() {
     setMessages([]);
     if (AGENT_ENV) {
       setSelectedAgent(AGENT_ENV);
-    } else if (agents.length === 1) {
-      setSelectedAgent(agents[0].name);
     } else {
       setSelectedAgent(null);
     }
@@ -425,6 +402,19 @@ export function App() {
           gap: 12,
           minHeight: 48,
         }}>
+          {/* Sidebar open toggle — only when closed */}
+          {!sidebarOpen && (
+            <button
+              onClick={() => setSidebarOpen(true)}
+              style={{
+                background: "none", border: "1px solid var(--border)", color: "var(--text-muted)",
+                width: 26, height: 26, display: "flex", alignItems: "center", justifyContent: "center",
+                cursor: "pointer", fontSize: 12, fontFamily: "var(--font-mono)", marginRight: 4,
+              }}
+            >
+              {"\u2192"}
+            </button>
+          )}
           {selectedAgent && (
             <span style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--text-muted)", marginRight: "auto" }}>
               {selectedAgent}
@@ -453,7 +443,7 @@ export function App() {
                   <span style={{ fontFamily: "var(--font-mono)", fontSize: 24, fontWeight: 800, letterSpacing: "0.3em", color: "var(--border)" }}>POLPO</span>
                   <span style={{ fontSize: 13, color: "var(--text-muted)" }}>Send a message to start</span>
 
-                  {!AGENT_ENV && agents.length > 1 && (
+                  {!AGENT_ENV && agents.length > 0 && (
                     <div style={{ display: "flex", flexDirection: "column", gap: 4, width: "100%", maxWidth: 280, marginTop: 12 }}>
                       <span style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "var(--font-mono)", textAlign: "center", marginBottom: 4 }}>
                         select agent
