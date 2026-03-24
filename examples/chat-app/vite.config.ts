@@ -1,12 +1,13 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import tailwindcss from "@tailwindcss/vite";
 
 // Target: cloud local (api.polpo.localhost) or production (api.polpo.sh)
 const API_TARGET = process.env.POLPO_PROXY_TARGET ?? "http://api.polpo.localhost";
 const isCloud = !API_TARGET.includes("localhost:") || API_TARGET.includes("polpo.localhost");
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [tailwindcss(), react()],
   server: {
     proxy: {
       // OpenAI-compatible completions: always /v1/chat/completions
