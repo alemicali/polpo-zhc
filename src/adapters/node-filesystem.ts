@@ -39,6 +39,12 @@ export class NodeFileSystem implements FileSystem {
     return readdir(path);
   }
 
+  /** Read directory with type info (file vs directory) for file manager UI */
+  async readdirWithTypes(path: string): Promise<{ name: string; isDirectory: boolean; isFile: boolean }[]> {
+    const entries = await readdir(path, { withFileTypes: true });
+    return entries.map((e) => ({ name: e.name, isDirectory: e.isDirectory(), isFile: e.isFile() }));
+  }
+
   async mkdir(path: string): Promise<void> {
     await mkdir(path, { recursive: true });
   }
