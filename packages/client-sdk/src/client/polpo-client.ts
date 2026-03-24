@@ -691,7 +691,7 @@ export class PolpoClient {
    * Non-streaming mode — returns the full response.
    */
   async chatCompletions(req: ChatCompletionRequest): Promise<ChatCompletionResponse> {
-    const url = `${this.baseUrl}${this.apiPrefix}/chat/completions`;
+    const url = `${this.baseUrl}/v1/chat/completions`;
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
     };
@@ -723,7 +723,7 @@ export class PolpoClient {
    * Streaming mode — returns a ChatCompletionStream (async-iterable + metadata).
    */
   chatCompletionsStream(req: ChatCompletionRequest): ChatCompletionStream {
-    const url = `${this.baseUrl}${this.apiPrefix}/chat/completions`;
+    const url = `${this.baseUrl}/v1/chat/completions`;
     return new ChatCompletionStream(this.fetchFn, url, this.headers, req);
   }
 
