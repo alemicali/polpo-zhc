@@ -4,7 +4,7 @@ import type { ChatMessage, ChatCompletionStream } from "@polpo-ai/sdk";
 import { Streamdown } from "streamdown";
 import { code } from "@streamdown/code";
 import "streamdown/styles.css";
-import { Columns2, Plus, X, Square, ArrowUp, Sun, Moon, ChevronDown, ChevronRight, Wrench, Brain } from "lucide-react";
+import { Columns2, Plus, Trash2, Square, ArrowUp, Sun, Moon, ChevronDown, ChevronRight, Wrench, Brain } from "lucide-react";
 
 const AGENT_ENV = import.meta.env.VITE_POLPO_AGENT ?? "";
 
@@ -43,6 +43,65 @@ interface Message {
   thinking?: string;
 }
 
+// ─── Confirm Dialog ──────────────────────────────────────
+
+function ConfirmDialog({
+  open,
+  title,
+  message,
+  onConfirm,
+  onCancel,
+}: {
+  open: boolean;
+  title: string;
+  message: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  if (!open) return null;
+  return (
+    <div
+      style={{
+        position: "fixed", inset: 0, zIndex: 50,
+        display: "flex", alignItems: "center", justifyContent: "center",
+        background: "rgba(0,0,0,0.5)", backdropFilter: "blur(2px)",
+      }}
+      onClick={onCancel}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          background: "var(--bg)", border: "1px solid var(--border)",
+          padding: 24, width: 320,
+        }}
+      >
+        <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 8 }}>{title}</div>
+        <div style={{ fontSize: 13, color: "var(--text-muted)", lineHeight: 1.5, marginBottom: 20 }}>{message}</div>
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+          <button
+            onClick={onCancel}
+            style={{
+              background: "none", border: "1px solid var(--border)", color: "var(--text-muted)",
+              padding: "6px 14px", fontSize: 13, cursor: "pointer",
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onConfirm}
+            style={{
+              background: "#ef4444", border: "none", color: "#fff",
+              padding: "6px 14px", fontSize: 13, fontWeight: 600, cursor: "pointer",
+            }}
+          >
+            Delete
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Sidebar ─────────────────────────────────────────────
 
 function Sidebar({
@@ -62,6 +121,8 @@ function Sidebar({
   onNew: () => void;
   onDelete: (id: string) => void;
 }) {
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+  const [hoveredId, setHoveredId] = useState<string | null>(null);
   return (
     <aside
       style={{
@@ -125,6 +186,8 @@ function Sidebar({
               <div
                 key={s.id}
                 onClick={() => onSelect(s.id)}
+                onMouseEnter={() => setHoveredId(s.id)}
+                onMouseLeave={() => setHoveredId(null)}
                 style={{
                   padding: "8px 10px",
                   marginBottom: 2,
@@ -150,14 +213,24 @@ function Sidebar({
                     {new Date(s.createdAt).toLocaleDateString()}
                   </div>
                 </div>
-                <button
-                  onClick={(e) => { e.stopPropagation(); onDelete(s.id); }}
-                  style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", padding: "2px", opacity: 0.4, display: "flex", alignItems: "center" }}
-                >
-                  <X size={14} />
-                </button>
+                {hoveredId === s.id && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setDeleteTarget(s.id); }}
+                    style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", padding: "2px", display: "flex", alignItems: "center" }}
+                  >
+                    <Trash2 size={13} />
+                  </button>
+                )}
               </div>
             ))}
+
+            <ConfirmDialog
+              open={deleteTarget !== null}
+              title="Delete chat"
+              message="This will permanently delete this chat and all its messages."
+              onConfirm={() => { if (deleteTarget) { onDelete(deleteTarget); setDeleteTarget(null); } }}
+              onCancel={() => setDeleteTarget(null)}
+            />
           </div>
         </div>
     </aside>
