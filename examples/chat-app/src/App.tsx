@@ -41,11 +41,9 @@ function CustomCodeBlock({ node, className, children, ...props }: any) {
           {copied ? "copied" : "copy"}
         </button>
       </div>
-      <pre style={{ margin: 0, border: "none", background: "transparent", padding: 0, overflow: "auto" }}>
-        <code style={{ display: "block", padding: "14px 16px", background: "none", color: "var(--text-muted)", fontFamily: "var(--font-mono)", fontSize: 13, lineHeight: 1.7 }}>
-          {children}
-        </code>
-      </pre>
+      <div style={{ padding: "14px 16px", overflow: "auto", fontFamily: "var(--font-mono)", fontSize: 13, lineHeight: 1.7, color: "var(--text-muted)" }}>
+        {children}
+      </div>
     </div>
   );
 }
@@ -436,7 +434,7 @@ function ChatInput({
   }
 
   return (
-    <form onSubmit={submit} style={{ display: "flex", gap: 8, padding: "16px 0" }}>
+    <form onSubmit={submit} style={{ display: "flex", alignItems: "flex-end", gap: 8, padding: "16px 0" }}>
       <textarea
         ref={ref}
         value={text}

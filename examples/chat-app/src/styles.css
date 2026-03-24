@@ -82,6 +82,35 @@ pre code {
   padding: 0;
 }
 
+/* Shiki syntax highlighting */
+.shiki {
+  background: transparent !important;
+  margin: 0;
+  padding: 0;
+  overflow: visible;
+}
+
+.shiki code {
+  background: none;
+  padding: 0;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.shiki .line {
+  line-height: 1.7;
+}
+
+/* Dark mode uses the second theme */
+[data-theme="light"] .shiki span {
+  color: var(--shiki-light, inherit) !important;
+}
+
+.shiki span {
+  color: var(--shiki-dark, inherit) !important;
+}
+
 /* Inline markdown */
 strong {
   color: var(--text);
