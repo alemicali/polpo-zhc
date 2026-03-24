@@ -4,16 +4,19 @@ import type { ChatMessage, ChatCompletionStream } from "@polpo-ai/sdk";
 import { Streamdown } from "streamdown";
 import { code } from "@streamdown/code";
 import "streamdown/styles.css";
-import { Columns2, Plus, X, Square, SendHorizonal, Sun, Moon, ChevronDown, ChevronRight, Wrench, Brain } from "lucide-react";
+import { Columns2, Plus, X, Square, ArrowUp, Sun, Moon, ChevronDown, ChevronRight, Wrench, Brain } from "lucide-react";
 
 const AGENT_ENV = import.meta.env.VITE_POLPO_AGENT ?? "";
 
 // ─── Theme ───────────────────────────────────────────────
 
 function useTheme() {
-  const [theme, setTheme] = useState<"dark" | "light">(() =>
-    (typeof window !== "undefined" && localStorage.getItem("polpo-theme") as "dark" | "light") || "dark"
-  );
+  const [theme, setTheme] = useState<"dark" | "light">(() => {
+    if (typeof window === "undefined") return "dark";
+    const saved = localStorage.getItem("polpo-theme") as "dark" | "light" | null;
+    if (saved) return saved;
+    return window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+  });
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
     localStorage.setItem("polpo-theme", theme);
@@ -334,11 +337,12 @@ function ChatInput({
           onClick={onStop}
           style={{
             background: "none", border: "1px solid var(--border)", color: "var(--text-muted)",
-            width: 40, height: 40, display: "flex", alignItems: "center", justifyContent: "center",
-            cursor: "pointer",
+            padding: "0 14px", height: 40, display: "flex", alignItems: "center", justifyContent: "center",
+            gap: 6, cursor: "pointer", fontSize: 13, fontFamily: "var(--font-sans)",
           }}
         >
-          <Square size={14} />
+          <Square size={12} />
+          Stop
         </button>
       ) : (
         <button
@@ -351,7 +355,7 @@ function ChatInput({
             cursor: text.trim() && !disabled ? "pointer" : "default",
           }}
         >
-          <SendHorizonal size={16} />
+          <ArrowUp size={16} />
         </button>
       )}
     </form>
@@ -535,11 +539,8 @@ export function App() {
             </button>
           )}
           {selectedAgent && (
-            <span style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--text-muted)", marginRight: "auto" }}>
+            <span style={{ fontSize: 13, fontWeight: 600, marginRight: "auto" }}>
               {selectedAgent}
-              <span style={{ color: streaming ? "var(--accent)" : "var(--text-muted)", marginLeft: 8 }}>
-                {streaming ? "streaming..." : "ready"}
-              </span>
             </span>
           )}
           <button
