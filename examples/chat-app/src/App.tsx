@@ -5,7 +5,6 @@ import { Streamdown } from "streamdown";
 import { code } from "@streamdown/code";
 import "streamdown/styles.css";
 import { Columns2, Plus, Trash2, Square, ArrowUp, Sun, Moon, ChevronDown, ChevronRight, Wrench, Brain } from "lucide-react";
-import { Button } from "@/components/ui/button";
 
 const AGENT_ENV = import.meta.env.VITE_POLPO_AGENT ?? "";
 
@@ -158,15 +157,23 @@ function Sidebar({
         </div>
 
           {/* New chat */}
-          <Button
-            variant="outline"
-            size="sm"
+          <button
             onClick={onNew}
-            className="mx-3 mt-1 mb-2 w-[calc(100%-24px)] justify-start gap-1.5 text-[13px]"
+            style={{
+              margin: "4px 12px 8px",
+              padding: "8px 12px",
+              background: "var(--bg)",
+              border: "1px solid var(--border)",
+              color: "var(--text)",
+              fontSize: 13,
+              fontFamily: "var(--font-sans)",
+              cursor: "pointer",
+              textAlign: "left",
+            }}
           >
-            <Plus size={14} />
+            <Plus size={14} style={{ marginRight: 6 }} />
             New chat
-          </Button>
+          </button>
 
           {/* Sessions */}
           <div style={{ flex: 1, overflowY: "auto", padding: "4px 12px" }}>
@@ -316,7 +323,12 @@ function ChatBubble({ msg }: { msg: Message }) {
     <div style={{ padding: "6px 0" }}>
       {/* Agent label */}
       {!isUser && msg.agent && (
-        <div className="text-[13px] font-semibold text-foreground mb-1">
+        <div style={{
+          fontSize: 13,
+          fontWeight: 600,
+          color: "var(--text)",
+          marginBottom: 4,
+        }}>
           {msg.agent}
         </div>
       )}
