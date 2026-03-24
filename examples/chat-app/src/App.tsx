@@ -2,8 +2,9 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { usePolpo, useSessions, useAgents } from "@polpo-ai/react";
 import type { ChatMessage, ChatCompletionStream } from "@polpo-ai/sdk";
 import { Streamdown } from "streamdown";
+import { code } from "@streamdown/code";
 import "streamdown/styles.css";
-import { Columns2, Plus, X, Square, SendHorizonal, Sun, Moon } from "lucide-react";
+import { Columns2, Plus, X, Square, SendHorizonal, Sun, Moon, ChevronDown, ChevronRight, Wrench, Brain } from "lucide-react";
 
 const AGENT_ENV = import.meta.env.VITE_POLPO_AGENT ?? "";
 
@@ -23,11 +24,20 @@ function useTheme() {
 
 // ─── Types ───────────────────────────────────────────────
 
+interface ToolCall {
+  name: string;
+  arguments?: Record<string, unknown>;
+  result?: string;
+  state: string;
+}
+
 interface Message {
   role: "user" | "assistant";
   content: string;
   agent?: string;
   streaming?: boolean;
+  toolCalls?: ToolCall[];
+  thinking?: string;
 }
 
 // ─── Sidebar ─────────────────────────────────────────────
@@ -151,6 +161,79 @@ function Sidebar({
   );
 }
 
+// ─── Tool Call ───────────────────────────────────────────
+
+function ToolCallBlock({ tool }: { tool: ToolCall }) {
+  const [open, setOpen] = useState(false);
+  const stateColor = tool.state === "completed" ? "var(--accent)" : tool.state === "error" ? "#ef4444" : "var(--text-muted)";
+
+  return (
+    <div style={{ margin: "6px 0", border: "1px solid var(--border)", fontSize: 13 }}>
+      <button
+        onClick={() => setOpen(!open)}
+        style={{
+          width: "100%", display: "flex", alignItems: "center", gap: 8, padding: "8px 12px",
+          background: "var(--bg-secondary)", border: "none", color: "var(--text-muted)", cursor: "pointer",
+          fontFamily: "var(--font-mono)", fontSize: 12, textAlign: "left",
+        }}
+      >
+        <Wrench size={12} style={{ color: stateColor }} />
+        <span style={{ flex: 1 }}>{tool.name}</span>
+        <span style={{ fontSize: 10, color: stateColor }}>{tool.state}</span>
+        {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+      </button>
+      {open && (
+        <div style={{ padding: "8px 12px", fontFamily: "var(--font-mono)", fontSize: 12, lineHeight: 1.6 }}>
+          {tool.arguments && (
+            <div style={{ marginBottom: 6 }}>
+              <div style={{ color: "var(--text-muted)", marginBottom: 2 }}>args</div>
+              <pre style={{ margin: 0, padding: 8, background: "var(--bg)", border: "1px solid var(--border)" }}>
+                <code>{JSON.stringify(tool.arguments, null, 2)}</code>
+              </pre>
+            </div>
+          )}
+          {tool.result && (
+            <div>
+              <div style={{ color: "var(--text-muted)", marginBottom: 2 }}>result</div>
+              <pre style={{ margin: 0, padding: 8, background: "var(--bg)", border: "1px solid var(--border)", maxHeight: 200, overflow: "auto" }}>
+                <code>{tool.result}</code>
+              </pre>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Thinking ────────────────────────────────────────────
+
+function ThinkingBlock({ content }: { content: string }) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <div style={{ margin: "6px 0", border: "1px solid var(--border)", fontSize: 13 }}>
+      <button
+        onClick={() => setOpen(!open)}
+        style={{
+          width: "100%", display: "flex", alignItems: "center", gap: 8, padding: "8px 12px",
+          background: "var(--bg-secondary)", border: "none", color: "var(--text-muted)", cursor: "pointer",
+          fontFamily: "var(--font-mono)", fontSize: 12, textAlign: "left",
+        }}
+      >
+        <Brain size={12} />
+        <span style={{ flex: 1 }}>Thinking</span>
+        {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+      </button>
+      {open && (
+        <div style={{ padding: "12px", color: "var(--text-muted)", fontSize: 13, lineHeight: 1.7, fontStyle: "italic" }}>
+          {content}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Chat Bubble ─────────────────────────────────────────
 
 function ChatBubble({ msg }: { msg: Message }) {
@@ -185,8 +268,10 @@ function ChatBubble({ msg }: { msg: Message }) {
             msg.content
           ) : (
             <>
+              {msg.thinking && <ThinkingBlock content={msg.thinking} />}
+              {msg.toolCalls?.map((tc, j) => <ToolCallBlock key={j} tool={tc} />)}
               {msg.content ? (
-                <Streamdown mode={msg.streaming ? "streaming" : "static"}>
+                <Streamdown mode={msg.streaming ? "streaming" : "static"} plugins={{ code }}>
                   {msg.content}
                 </Streamdown>
               ) : msg.streaming ? (
@@ -354,12 +439,37 @@ export function App() {
       streamRef.current = stream;
 
       for await (const chunk of stream) {
-        const delta = chunk.choices?.[0]?.delta?.content;
+        const choice = chunk.choices?.[0];
+        if (!choice) continue;
+
+        // Text content
+        const delta = choice.delta?.content;
         if (delta) {
           setMessages((prev) => {
             const updated = [...prev];
             const last = updated[updated.length - 1];
             updated[updated.length - 1] = { ...last, content: last.content + delta };
+            return updated;
+          });
+        }
+
+        // Tool call events
+        const tc = (choice as any).tool_call;
+        if (tc) {
+          setMessages((prev) => {
+            const updated = [...prev];
+            const last = updated[updated.length - 1];
+            const existing = last.toolCalls ?? [];
+            const idx = existing.findIndex((t) => t.name === tc.name && t.state !== "completed");
+            if (idx >= 0) {
+              // Update existing tool call
+              const newCalls = [...existing];
+              newCalls[idx] = { ...newCalls[idx], ...tc };
+              updated[updated.length - 1] = { ...last, toolCalls: newCalls };
+            } else {
+              // New tool call
+              updated[updated.length - 1] = { ...last, toolCalls: [...existing, tc] };
+            }
             return updated;
           });
         }
