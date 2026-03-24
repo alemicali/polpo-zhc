@@ -101,6 +101,11 @@ function Sidebar({
 
           {/* Sessions */}
           <div style={{ flex: 1, overflowY: "auto", padding: "4px 12px" }}>
+            {sessions.length === 0 && (
+              <div style={{ padding: "16px 10px", fontSize: 12, color: "var(--text-muted)", textAlign: "center" }}>
+                No chats yet
+              </div>
+            )}
             {sessions.map((s) => (
               <div
                 key={s.id}
