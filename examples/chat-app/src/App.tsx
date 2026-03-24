@@ -209,8 +209,9 @@ function Sidebar({
                   }}>
                     {s.title || s.agent || "Untitled"}
                   </div>
-                  <div style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: "var(--font-mono)", marginTop: 2 }}>
-                    {new Date(s.createdAt).toLocaleDateString()}
+                  <div style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: "var(--font-mono)", marginTop: 2, display: "flex", gap: 6 }}>
+                    {s.agent && <span>{s.agent}</span>}
+                    <span>{new Date(s.createdAt).toLocaleDateString()}</span>
                   </div>
                 </div>
                 {hoveredId === s.id && (
