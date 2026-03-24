@@ -11,6 +11,8 @@
   "dependencies": {
     "@polpo-ai/sdk": "latest",
     "@polpo-ai/react": "latest",
+    "streamdown": "latest",
+    "@streamdown/code": "latest",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },

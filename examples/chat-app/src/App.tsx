@@ -1,6 +1,10 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { usePolpo, useSessions, useAgents } from "@polpo-ai/react";
-import type { ChatMessage } from "@polpo-ai/sdk";
+import type { ChatMessage, ChatCompletionStream } from "@polpo-ai/sdk";
+import { Streamdown } from "streamdown";
+import { code } from "@streamdown/code";
+import "streamdown/styles";
+import "@streamdown/code/styles";
 
 const AGENT_ENV = import.meta.env.VITE_POLPO_AGENT ?? "";
 
@@ -18,37 +22,28 @@ function useTheme() {
   return { theme, toggle };
 }
 
-// ─── Markdown (minimal) ─────────────────────────────────
-
-function md(text: string): string {
-  return text
-    .replace(/```(\w*)\n([\s\S]*?)```/g, (_m, _l, code) => `<pre><code>${code.replace(/</g, "&lt;")}</code></pre>`)
-    .replace(/`([^`]+)`/g, "<code>$1</code>")
-    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
-    .replace(/^### (.+)$/gm, "<h3>$1</h3>")
-    .replace(/^## (.+)$/gm, "<h2>$1</h2>")
-    .replace(/^# (.+)$/gm, "<h1>$1</h1>")
-    .replace(/^- (.+)$/gm, "<li>$1</li>")
-    .replace(/(<li>.*<\/li>\n?)+/g, (m) => `<ul>${m}</ul>`)
-    .replace(/^(?!<[hulop])(.*\S.*)$/gm, "<p>$1</p>")
-    .replace(/\n\n/g, "");
-}
-
-// ─── Components ──────────────────────────────────────────
+// ─── Types ───────────────────────────────────────────────
 
 interface Message {
   role: "user" | "assistant";
   content: string;
+  agent?: string;
   streaming?: boolean;
 }
 
+// ─── Sidebar ─────────────────────────────────────────────
+
 function Sidebar({
+  open,
+  onToggle,
   sessions,
   activeId,
   onSelect,
   onNew,
   onDelete,
 }: {
+  open: boolean;
+  onToggle: () => void;
   sessions: { id: string; title?: string; agent?: string; createdAt: string }[];
   activeId: string | null;
   onSelect: (id: string) => void;
@@ -56,122 +51,182 @@ function Sidebar({
   onDelete: (id: string) => void;
 }) {
   return (
-    <aside
-      style={{
-        width: 260,
-        borderRight: "1px solid var(--border)",
-        display: "flex",
-        flexDirection: "column",
-        background: "var(--bg)",
-        flexShrink: 0,
-      }}
-    >
-      {/* Header */}
-      <div style={{ padding: "16px", borderBottom: "1px solid var(--border)" }}>
-        <div style={{ fontFamily: "var(--font-mono)", fontSize: 14, fontWeight: 700, letterSpacing: "0.2em" }}>
-          POLPO
-        </div>
-        <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>chat example</div>
-      </div>
-
-      {/* New chat button */}
+    <>
+      {/* Toggle button — always visible */}
       <button
-        onClick={onNew}
+        onClick={onToggle}
         style={{
-          margin: "12px 12px 4px",
-          padding: "8px 12px",
+          position: "fixed",
+          top: 14,
+          left: open ? 248 : 12,
+          zIndex: 20,
           background: "var(--bg-secondary)",
           border: "1px solid var(--border)",
-          color: "var(--text)",
-          fontSize: 13,
-          fontFamily: "var(--font-sans)",
+          color: "var(--text-muted)",
+          width: 28,
+          height: 28,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
           cursor: "pointer",
-          textAlign: "left",
+          fontSize: 14,
+          fontFamily: "var(--font-mono)",
+          transition: "left 0.2s",
         }}
       >
-        + New chat
+        {open ? "\u2190" : "\u2192"}
       </button>
 
-      {/* Sessions list */}
-      <div style={{ flex: 1, overflowY: "auto", padding: "8px 12px" }}>
-        {sessions.map((s) => (
-          <div
-            key={s.id}
-            onClick={() => onSelect(s.id)}
+      {/* Panel */}
+      <aside
+        style={{
+          width: open ? 260 : 0,
+          overflow: "hidden",
+          display: "flex",
+          flexDirection: "column",
+          background: "var(--bg-secondary)",
+          flexShrink: 0,
+          transition: "width 0.2s",
+        }}
+      >
+        <div style={{ width: 260, height: "100%", display: "flex", flexDirection: "column" }}>
+          {/* Header */}
+          <div style={{ padding: "16px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <div>
+              <div style={{ fontFamily: "var(--font-mono)", fontSize: 14, fontWeight: 700, letterSpacing: "0.2em" }}>
+                POLPO
+              </div>
+              <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>chat example</div>
+            </div>
+          </div>
+
+          {/* New chat */}
+          <button
+            onClick={onNew}
             style={{
-              padding: "8px 10px",
-              marginBottom: 2,
+              margin: "4px 12px 8px",
+              padding: "8px 12px",
+              background: "var(--bg)",
+              border: "1px solid var(--border)",
+              color: "var(--text)",
+              fontSize: 13,
+              fontFamily: "var(--font-sans)",
               cursor: "pointer",
-              background: activeId === s.id ? "var(--accent-dim)" : "transparent",
-              borderLeft: activeId === s.id ? "2px solid var(--accent)" : "2px solid transparent",
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              transition: "background 0.1s",
+              textAlign: "left",
             }}
           >
-            <div style={{ overflow: "hidden", flex: 1 }}>
+            + New chat
+          </button>
+
+          {/* Sessions */}
+          <div style={{ flex: 1, overflowY: "auto", padding: "4px 12px" }}>
+            {sessions.map((s) => (
               <div
+                key={s.id}
+                onClick={() => onSelect(s.id)}
                 style={{
-                  fontSize: 13,
-                  whiteSpace: "nowrap",
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  color: activeId === s.id ? "var(--text)" : "var(--text-muted)",
+                  padding: "8px 10px",
+                  marginBottom: 2,
+                  cursor: "pointer",
+                  background: activeId === s.id ? "var(--accent-dim)" : "transparent",
+                  borderLeft: activeId === s.id ? "2px solid var(--accent)" : "2px solid transparent",
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
                 }}
               >
-                {s.title || s.agent || "Untitled"}
+                <div style={{ overflow: "hidden", flex: 1 }}>
+                  <div style={{
+                    fontSize: 13,
+                    whiteSpace: "nowrap",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    color: activeId === s.id ? "var(--text)" : "var(--text-muted)",
+                  }}>
+                    {s.title || s.agent || "Untitled"}
+                  </div>
+                  <div style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: "var(--font-mono)", marginTop: 2 }}>
+                    {new Date(s.createdAt).toLocaleDateString()}
+                  </div>
+                </div>
+                <button
+                  onClick={(e) => { e.stopPropagation(); onDelete(s.id); }}
+                  style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", fontSize: 14, padding: "2px 4px", opacity: 0.4 }}
+                >
+                  x
+                </button>
               </div>
-              <div style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: "var(--font-mono)", marginTop: 2 }}>
-                {new Date(s.createdAt).toLocaleDateString()}
-              </div>
-            </div>
-            <button
-              onClick={(e) => { e.stopPropagation(); onDelete(s.id); }}
-              style={{
-                background: "none",
-                border: "none",
-                color: "var(--text-muted)",
-                cursor: "pointer",
-                fontSize: 14,
-                padding: "2px 4px",
-                opacity: 0.5,
-              }}
-            >
-              x
-            </button>
+            ))}
           </div>
-        ))}
-      </div>
-    </aside>
+        </div>
+      </aside>
+    </>
   );
 }
+
+// ─── Chat Bubble ─────────────────────────────────────────
 
 function ChatBubble({ msg }: { msg: Message }) {
   const isUser = msg.role === "user";
   return (
-    <div style={{ display: "flex", justifyContent: isUser ? "flex-end" : "flex-start", padding: "4px 0" }}>
-      <div
-        style={{
-          maxWidth: isUser ? "75%" : "85%",
+    <div style={{ padding: "6px 0" }}>
+      {/* Agent label */}
+      {!isUser && msg.agent && (
+        <div style={{
+          fontFamily: "var(--font-mono)",
+          fontSize: 11,
+          color: "var(--accent)",
+          marginBottom: 4,
+          letterSpacing: "0.05em",
+        }}>
+          {msg.agent}
+        </div>
+      )}
+      <div style={{
+        display: "flex",
+        justifyContent: isUser ? "flex-end" : "flex-start",
+      }}>
+        <div style={{
+          maxWidth: isUser ? "75%" : "100%",
           padding: isUser ? "10px 14px" : "0",
           background: isUser ? "var(--user-bg)" : "transparent",
           border: isUser ? "1px solid var(--border)" : "none",
           fontSize: 14,
           lineHeight: "1.7",
           color: isUser ? "var(--text)" : "var(--text-muted)",
-        }}
-      >
-        {isUser ? msg.content : <div dangerouslySetInnerHTML={{ __html: md(msg.content || "...") }} />}
-        {msg.streaming && (
-          <span style={{ display: "inline-block", width: 6, height: 14, background: "var(--accent)", marginLeft: 2, animation: "blink 1s infinite" }} />
-        )}
+        }}>
+          {isUser ? (
+            msg.content
+          ) : (
+            <Streamdown
+              mode={msg.streaming ? "streaming" : "static"}
+              plugins={[code()]}
+            >
+              {msg.content || "..."}
+            </Streamdown>
+          )}
+          {msg.streaming && (
+            <span style={{ display: "inline-block", width: 6, height: 14, background: "var(--accent)", marginLeft: 2, animation: "blink 1s infinite" }} />
+          )}
+        </div>
       </div>
     </div>
   );
 }
 
-function ChatInput({ onSend, disabled }: { onSend: (text: string) => void; disabled: boolean }) {
+// ─── Chat Input ──────────────────────────────────────────
+
+function ChatInput({
+  onSend,
+  onStop,
+  disabled,
+  streaming,
+}: {
+  onSend: (text: string) => void;
+  onStop: () => void;
+  disabled: boolean;
+  streaming: boolean;
+}) {
   const [text, setText] = useState("");
   const ref = useRef<HTMLTextAreaElement>(null);
 
@@ -184,31 +239,48 @@ function ChatInput({ onSend, disabled }: { onSend: (text: string) => void; disab
   }
 
   return (
-    <form onSubmit={submit} style={{ display: "flex", gap: 8, padding: "16px 24px", borderTop: "1px solid var(--border)", background: "var(--bg)" }}>
+    <form onSubmit={submit} style={{ display: "flex", gap: 8, padding: "16px 0" }}>
       <textarea
         ref={ref}
         value={text}
-        onChange={(e) => { setText(e.target.value); const el = ref.current; if (el) { el.style.height = "auto"; el.style.height = Math.min(el.scrollHeight, 160) + "px"; } }}
+        onChange={(e) => {
+          setText(e.target.value);
+          const el = ref.current;
+          if (el) { el.style.height = "auto"; el.style.height = Math.min(el.scrollHeight, 160) + "px"; }
+        }}
         onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(e); } }}
         placeholder="Send a message..."
         rows={1}
-        disabled={disabled}
+        disabled={disabled && !streaming}
         style={{
           flex: 1, resize: "none", background: "var(--bg-secondary)", border: "1px solid var(--border)",
           color: "var(--text)", padding: "10px 14px", fontSize: 14, fontFamily: "var(--font-sans)", outline: "none", lineHeight: "1.5",
         }}
       />
-      <button
-        type="submit"
-        disabled={disabled || !text.trim()}
-        style={{
-          background: text.trim() && !disabled ? "var(--text)" : "var(--border)",
-          color: "var(--bg)", border: "none", padding: "0 20px", fontSize: 13,
-          fontWeight: 600, fontFamily: "var(--font-mono)", cursor: text.trim() && !disabled ? "pointer" : "default",
-        }}
-      >
-        {disabled ? "..." : "Send"}
-      </button>
+      {streaming ? (
+        <button
+          type="button"
+          onClick={onStop}
+          style={{
+            background: "none", border: "1px solid var(--border)", color: "var(--text-muted)",
+            padding: "0 16px", fontSize: 13, fontFamily: "var(--font-mono)", cursor: "pointer",
+          }}
+        >
+          Stop
+        </button>
+      ) : (
+        <button
+          type="submit"
+          disabled={disabled || !text.trim()}
+          style={{
+            background: text.trim() && !disabled ? "var(--text)" : "var(--border)",
+            color: "var(--bg)", border: "none", padding: "0 20px", fontSize: 13,
+            fontWeight: 600, fontFamily: "var(--font-mono)", cursor: text.trim() && !disabled ? "pointer" : "default",
+          }}
+        >
+          Send
+        </button>
+      )}
     </form>
   );
 }
@@ -225,7 +297,9 @@ export function App() {
   const [streaming, setStreaming] = useState(false);
   const [selectedAgent, setSelectedAgent] = useState<string | null>(AGENT_ENV || null);
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const streamRef = useRef<ChatCompletionStream | null>(null);
 
   // Auto-scroll
   useEffect(() => {
@@ -233,27 +307,29 @@ export function App() {
     if (el) el.scrollTop = el.scrollHeight;
   }, [messages]);
 
-  // Load messages when selecting a session
+  // Load session
   const loadSession = useCallback(async (id: string) => {
     setActiveSessionId(id);
     setSessionId(id);
     try {
       const msgs = await getMessages(id);
-      setMessages(msgs.map((m: ChatMessage) => ({ role: m.role as "user" | "assistant", content: typeof m.content === "string" ? m.content : "" })));
-      // Infer agent from session
+      setMessages(msgs.map((m: ChatMessage) => ({
+        role: m.role as "user" | "assistant",
+        content: typeof m.content === "string" ? m.content : "",
+        agent: selectedAgent || undefined,
+      })));
       const session = sessions.find((s) => s.id === id);
       if (session?.agent) setSelectedAgent(session.agent);
     } catch {
       setMessages([]);
     }
-  }, [getMessages, setActiveSessionId, sessions]);
+  }, [getMessages, setActiveSessionId, sessions, selectedAgent]);
 
   // New chat
   const startNewChat = useCallback(() => {
     setActiveSessionId(null);
     setSessionId(null);
     setMessages([]);
-    // If only one agent or env agent set, skip selector
     if (AGENT_ENV) {
       setSelectedAgent(AGENT_ENV);
     } else if (agents.length === 1) {
@@ -263,19 +339,23 @@ export function App() {
     }
   }, [setActiveSessionId, agents]);
 
-  // Send message
+  // Abort
+  const handleStop = useCallback(() => {
+    streamRef.current?.abort();
+  }, []);
+
+  // Send
   const send = useCallback(async (text: string) => {
     if (!selectedAgent) return;
 
-    const userMsg: Message = { role: "user", content: text };
-    setMessages((prev) => [...prev, userMsg]);
+    setMessages((prev) => [...prev, { role: "user", content: text }]);
 
     const history = [
       ...messages.map((m) => ({ role: m.role as "user" | "assistant", content: m.content })),
       { role: "user" as const, content: text },
     ];
 
-    setMessages((prev) => [...prev, { role: "assistant", content: "", streaming: true }]);
+    setMessages((prev) => [...prev, { role: "assistant", content: "", agent: selectedAgent, streaming: true }]);
     setStreaming(true);
 
     try {
@@ -285,17 +365,9 @@ export function App() {
         agent: selectedAgent,
         ...(sessionId ? { sessionId } : {}),
       });
-
-      // Capture session ID from first chunk
-      let capturedSessionId = sessionId;
+      streamRef.current = stream;
 
       for await (const chunk of stream) {
-        // Extract session ID from response if available
-        if (!capturedSessionId && (chunk as any).sessionId) {
-          capturedSessionId = (chunk as any).sessionId;
-          setSessionId(capturedSessionId);
-        }
-
         const delta = chunk.choices?.[0]?.delta?.content;
         if (delta) {
           setMessages((prev) => {
@@ -307,15 +379,18 @@ export function App() {
         }
       }
 
-      // Refresh sessions list after new message
       await refetchSessions();
     } catch (err) {
-      setMessages((prev) => {
-        const updated = [...prev];
-        updated[updated.length - 1] = { role: "assistant", content: `Error: ${(err as Error).message}` };
-        return updated;
-      });
+      // Don't show error if aborted
+      if (!(err as Error)?.message?.includes("abort")) {
+        setMessages((prev) => {
+          const updated = [...prev];
+          updated[updated.length - 1] = { role: "assistant", content: `Error: ${(err as Error).message}`, agent: selectedAgent };
+          return updated;
+        });
+      }
     } finally {
+      streamRef.current = null;
       setMessages((prev) => {
         const updated = [...prev];
         const last = updated[updated.length - 1];
@@ -328,8 +403,9 @@ export function App() {
 
   return (
     <div style={{ display: "flex", height: "100%" }}>
-      {/* Sidebar */}
       <Sidebar
+        open={sidebarOpen}
+        onToggle={() => setSidebarOpen((o) => !o)}
         sessions={sessions as any[]}
         activeId={activeSessionId}
         onSelect={loadSession}
@@ -340,17 +416,23 @@ export function App() {
       {/* Main */}
       <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
         {/* Top bar */}
-        <header style={{ padding: "12px 24px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            {selectedAgent && (
-              <span style={{ fontFamily: "var(--font-mono)", fontSize: 13, fontWeight: 600 }}>
-                {selectedAgent}
+        <header style={{
+          padding: "12px 24px",
+          borderBottom: "1px solid var(--border)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "flex-end",
+          gap: 12,
+          minHeight: 48,
+        }}>
+          {selectedAgent && (
+            <span style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--text-muted)", marginRight: "auto" }}>
+              {selectedAgent}
+              <span style={{ color: streaming ? "var(--accent)" : "var(--text-muted)", marginLeft: 8 }}>
+                {streaming ? "streaming..." : "ready"}
               </span>
-            )}
-            <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: streaming ? "var(--accent)" : "var(--text-muted)" }}>
-              {streaming ? "streaming..." : selectedAgent ? "ready" : ""}
             </span>
-          </div>
+          )}
           <button
             onClick={toggleTheme}
             style={{
@@ -362,54 +444,56 @@ export function App() {
           </button>
         </header>
 
-        {/* Content */}
-        <div ref={scrollRef} style={{ flex: 1, overflowY: "auto", padding: 24 }}>
-          {messages.length === 0 && (
-            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", gap: 12 }}>
-              <span style={{ fontFamily: "var(--font-mono)", fontSize: 24, fontWeight: 800, letterSpacing: "0.3em", color: "var(--border)" }}>POLPO</span>
-              <span style={{ fontSize: 13, color: "var(--text-muted)" }}>Send a message to start</span>
+        {/* Chat area — max width centered */}
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+          <div ref={scrollRef} style={{ flex: 1, overflowY: "auto" }}>
+            <div style={{ maxWidth: 720, margin: "0 auto", padding: 24 }}>
+              {messages.length === 0 && (
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "60vh", gap: 12 }}>
+                  <span style={{ fontFamily: "var(--font-mono)", fontSize: 24, fontWeight: 800, letterSpacing: "0.3em", color: "var(--border)" }}>POLPO</span>
+                  <span style={{ fontSize: 13, color: "var(--text-muted)" }}>Send a message to start</span>
 
-              {/* Agent selector — only shown when no messages */}
-              {!AGENT_ENV && agents.length > 1 && (
-                <div style={{ display: "flex", flexDirection: "column", gap: 4, width: "100%", maxWidth: 280, marginTop: 12 }}>
-                  <span style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "var(--font-mono)", textAlign: "center", marginBottom: 4 }}>
-                    select agent
-                  </span>
-                  {agents.map((a: any) => (
-                    <button
-                      key={a.name}
-                      onClick={() => setSelectedAgent(a.name)}
-                      style={{
-                        padding: "10px 14px",
-                        background: selectedAgent === a.name ? "var(--accent-dim)" : "var(--bg-secondary)",
-                        border: selectedAgent === a.name ? "1px solid var(--accent)" : "1px solid var(--border)",
-                        color: "var(--text)",
-                        fontSize: 13,
-                        fontFamily: "var(--font-sans)",
-                        cursor: "pointer",
-                        textAlign: "left",
-                        display: "flex",
-                        justifyContent: "space-between",
-                        alignItems: "center",
-                      }}
-                    >
-                      <span style={{ fontWeight: 600 }}>{a.name}</span>
-                      {a.model && (
-                        <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-muted)" }}>
-                          {a.model}
-                        </span>
-                      )}
-                    </button>
-                  ))}
+                  {!AGENT_ENV && agents.length > 1 && (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 4, width: "100%", maxWidth: 280, marginTop: 12 }}>
+                      <span style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "var(--font-mono)", textAlign: "center", marginBottom: 4 }}>
+                        select agent
+                      </span>
+                      {agents.map((a: any) => (
+                        <button
+                          key={a.name}
+                          onClick={() => setSelectedAgent(a.name)}
+                          style={{
+                            padding: "10px 14px",
+                            background: selectedAgent === a.name ? "var(--accent-dim)" : "var(--bg-secondary)",
+                            border: selectedAgent === a.name ? "1px solid var(--accent)" : "1px solid var(--border)",
+                            color: "var(--text)", fontSize: 13, fontFamily: "var(--font-sans)", cursor: "pointer",
+                            textAlign: "left", display: "flex", justifyContent: "space-between", alignItems: "center",
+                          }}
+                        >
+                          <span style={{ fontWeight: 600 }}>{a.name}</span>
+                          {a.model && <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-muted)" }}>{a.model}</span>}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
+              {messages.map((msg, i) => (
+                <ChatBubble key={i} msg={msg} />
+              ))}
             </div>
-          )}
-          {messages.map((msg, i) => (
-            <ChatBubble key={i} msg={msg} />
-          ))}
+          </div>
+
+          {/* Input — centered */}
+          <div style={{ maxWidth: 720, margin: "0 auto", width: "100%", padding: "0 24px" }}>
+            <ChatInput
+              onSend={send}
+              onStop={handleStop}
+              disabled={!selectedAgent}
+              streaming={streaming}
+            />
+          </div>
         </div>
-        <ChatInput onSend={send} disabled={streaming || !selectedAgent} />
       </div>
 
       <style>{`@keyframes blink { 0%,100% { opacity: 1 } 50% { opacity: 0 } }`}</style>
