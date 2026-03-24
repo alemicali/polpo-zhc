@@ -3,6 +3,7 @@ import { usePolpo, useSessions, useAgents } from "@polpo-ai/react";
 import type { ChatMessage, ChatCompletionStream } from "@polpo-ai/sdk";
 import { Streamdown } from "streamdown";
 import "streamdown/styles.css";
+import { Columns2, Plus, X, Square, SendHorizonal, Sun, Moon } from "lucide-react";
 
 const AGENT_ENV = import.meta.env.VITE_POLPO_AGENT ?? "";
 
@@ -72,12 +73,12 @@ function Sidebar({
           <button
             onClick={onToggle}
             style={{
-              background: "none", border: "1px solid var(--border)", color: "var(--text-muted)",
-              width: 26, height: 26, display: "flex", alignItems: "center", justifyContent: "center",
-              cursor: "pointer", fontSize: 12, fontFamily: "var(--font-mono)",
+              background: "none", border: "none", color: "var(--text-muted)",
+              width: 28, height: 28, display: "flex", alignItems: "center", justifyContent: "center",
+              cursor: "pointer",
             }}
           >
-            {"\u2190"}
+            <Columns2 size={16} />
           </button>
         </div>
 
@@ -96,7 +97,8 @@ function Sidebar({
               textAlign: "left",
             }}
           >
-            + New chat
+            <Plus size={14} style={{ marginRight: 6 }} />
+            New chat
           </button>
 
           {/* Sessions */}
@@ -137,9 +139,9 @@ function Sidebar({
                 </div>
                 <button
                   onClick={(e) => { e.stopPropagation(); onDelete(s.id); }}
-                  style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", fontSize: 14, padding: "2px 4px", opacity: 0.4 }}
+                  style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", padding: "2px", opacity: 0.4, display: "flex", alignItems: "center" }}
                 >
-                  x
+                  <X size={14} />
                 </button>
               </div>
             ))}
@@ -247,10 +249,11 @@ function ChatInput({
           onClick={onStop}
           style={{
             background: "none", border: "1px solid var(--border)", color: "var(--text-muted)",
-            padding: "0 16px", fontSize: 13, fontFamily: "var(--font-mono)", cursor: "pointer",
+            width: 40, height: 40, display: "flex", alignItems: "center", justifyContent: "center",
+            cursor: "pointer",
           }}
         >
-          Stop
+          <Square size={14} />
         </button>
       ) : (
         <button
@@ -258,11 +261,12 @@ function ChatInput({
           disabled={disabled || !text.trim()}
           style={{
             background: text.trim() && !disabled ? "var(--text)" : "var(--border)",
-            color: "var(--bg)", border: "none", padding: "0 20px", fontSize: 13,
-            fontWeight: 600, fontFamily: "var(--font-mono)", cursor: text.trim() && !disabled ? "pointer" : "default",
+            color: "var(--bg)", border: "none", width: 40, height: 40,
+            display: "flex", alignItems: "center", justifyContent: "center",
+            cursor: text.trim() && !disabled ? "pointer" : "default",
           }}
         >
-          Send
+          <SendHorizonal size={16} />
         </button>
       )}
     </form>
@@ -412,12 +416,12 @@ export function App() {
             <button
               onClick={() => setSidebarOpen(true)}
               style={{
-                background: "none", border: "1px solid var(--border)", color: "var(--text-muted)",
-                width: 26, height: 26, display: "flex", alignItems: "center", justifyContent: "center",
-                cursor: "pointer", fontSize: 12, fontFamily: "var(--font-mono)", marginRight: 4,
+                background: "none", border: "none", color: "var(--text-muted)",
+                width: 28, height: 28, display: "flex", alignItems: "center", justifyContent: "center",
+                cursor: "pointer", marginRight: 4,
               }}
             >
-              {"\u2192"}
+              <Columns2 size={16} />
             </button>
           )}
           {selectedAgent && (
@@ -431,11 +435,12 @@ export function App() {
           <button
             onClick={toggleTheme}
             style={{
-              background: "none", border: "1px solid var(--border)", color: "var(--text-muted)",
-              padding: "4px 10px", fontSize: 11, fontFamily: "var(--font-mono)", cursor: "pointer",
+              background: "none", border: "none", color: "var(--text-muted)",
+              width: 28, height: 28, display: "flex", alignItems: "center", justifyContent: "center",
+              cursor: "pointer",
             }}
           >
-            {theme === "dark" ? "light" : "dark"}
+            {theme === "dark" ? <Sun size={15} /> : <Moon size={15} />}
           </button>
         </header>
 
