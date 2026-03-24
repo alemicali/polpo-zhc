@@ -4,6 +4,51 @@ import type { ChatMessage, ChatCompletionStream } from "@polpo-ai/sdk";
 import { Streamdown } from "streamdown";
 import { code } from "@streamdown/code";
 import "streamdown/styles.css";
+import { useState as useStateForCopy } from "react";
+
+// Custom code block renderer — replaces Streamdown's default (which needs Tailwind)
+function CustomCodeBlock({ node, className, children, ...props }: any) {
+  const isBlock = "data-block" in props;
+  if (!isBlock) {
+    // Inline code
+    return <code style={{ fontFamily: "var(--font-mono)", fontSize: 13, background: "var(--accent-dim)", color: "var(--accent)", padding: "2px 5px" }} {...props}>{children}</code>;
+  }
+
+  const langMatch = className?.match(/language-(\S+)/);
+  const lang = langMatch?.[1] ?? "";
+  const codeText = typeof children === "string" ? children
+    : children?.props?.children ?? "";
+
+  const [copied, setCopied] = useStateForCopy(false);
+  const handleCopy = () => {
+    navigator.clipboard.writeText(codeText);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <div style={{ margin: "12px 0", border: "1px solid var(--border)", background: "var(--bg-secondary)", overflow: "hidden" }}>
+      <div style={{
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        padding: "6px 12px", borderBottom: "1px solid var(--border)",
+        fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-muted)",
+      }}>
+        <span>{lang}</span>
+        <button
+          onClick={handleCopy}
+          style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", fontFamily: "var(--font-mono)", fontSize: 11 }}
+        >
+          {copied ? "copied" : "copy"}
+        </button>
+      </div>
+      <pre style={{ margin: 0, border: "none", background: "transparent", padding: 0, overflow: "auto" }}>
+        <code style={{ display: "block", padding: "14px 16px", background: "none", color: "var(--text-muted)", fontFamily: "var(--font-mono)", fontSize: 13, lineHeight: 1.7 }}>
+          {children}
+        </code>
+      </pre>
+    </div>
+  );
+}
 import { Columns2, Plus, Trash2, Square, ArrowUp, Sun, Moon, ChevronDown, ChevronRight, Wrench, Brain } from "lucide-react";
 
 const AGENT_ENV = import.meta.env.VITE_POLPO_AGENT ?? "";
@@ -352,7 +397,7 @@ function ChatBubble({ msg }: { msg: Message }) {
               {msg.thinking && <ThinkingBlock content={msg.thinking} />}
               {msg.toolCalls?.map((tc, j) => <ToolCallBlock key={j} tool={tc} />)}
               {msg.content ? (
-                <Streamdown mode={msg.streaming ? "streaming" : "static"} plugins={{ code }}>
+                <Streamdown mode={msg.streaming ? "streaming" : "static"} plugins={{ code }} components={{ code: CustomCodeBlock }}>
                   {msg.content}
                 </Streamdown>
               ) : msg.streaming ? (
