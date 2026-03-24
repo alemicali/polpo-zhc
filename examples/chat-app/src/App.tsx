@@ -200,6 +200,11 @@ function Sidebar({
                 }}
               >
                 <div style={{ overflow: "hidden", flex: 1 }}>
+                  {s.agent && (
+                    <div style={{ fontSize: 10, fontFamily: "var(--font-mono)", color: "var(--text-muted)", marginBottom: 2 }}>
+                      {s.agent}
+                    </div>
+                  )}
                   <div style={{
                     fontSize: 13,
                     whiteSpace: "nowrap",
@@ -207,11 +212,10 @@ function Sidebar({
                     textOverflow: "ellipsis",
                     color: activeId === s.id ? "var(--text)" : "var(--text-muted)",
                   }}>
-                    {s.title || s.agent || "Untitled"}
+                    {s.title || "Untitled"}
                   </div>
-                  <div style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: "var(--font-mono)", marginTop: 2, display: "flex", gap: 6 }}>
-                    {s.agent && <span>{s.agent}</span>}
-                    <span>{new Date(s.createdAt).toLocaleDateString()}</span>
+                  <div style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: "var(--font-mono)", marginTop: 2 }}>
+                    {new Date(s.createdAt).toLocaleDateString()}
                   </div>
                 </div>
                 {hoveredId === s.id && (
