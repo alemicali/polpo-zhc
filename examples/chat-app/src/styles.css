@@ -102,21 +102,23 @@ pre {
   overflow: hidden;
   font-family: var(--font-mono);
   font-size: 13px;
-  line-height: 1.6;
+  line-height: 1.7;
   margin: 12px 0;
+  border-radius: 0;
 }
 
 pre code {
   display: block;
-  padding: 14px 16px;
+  padding: 16px;
   overflow-x: auto;
   background: none;
   color: var(--text-muted);
   font-family: var(--font-mono);
   font-size: 13px;
+  border: none;
 }
 
-/* Streamdown code block header (language label) */
+/* Streamdown code block header */
 [data-sd-code-block] {
   position: relative;
 }
@@ -125,7 +127,7 @@ pre code {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 6px 16px;
+  padding: 8px 16px;
   border-bottom: 1px solid var(--border);
   font-family: var(--font-mono);
   font-size: 11px;
@@ -149,12 +151,13 @@ pre code {
 }
 
 /* Inline code */
-code {
+:not(pre) > code {
   font-family: var(--font-mono);
   font-size: 13px;
   background: var(--accent-dim);
   color: var(--accent);
   padding: 2px 5px;
+  border: none;
 }
 
 /* Shiki highlighted tokens */
@@ -164,12 +167,23 @@ code {
 
 [data-sd-code-block] .shiki code {
   background: none;
-  padding: 14px 16px;
+  padding: 16px;
   color: inherit;
 }
 
 [data-sd-code-block] .shiki .line {
-  line-height: 1.6;
+  line-height: 1.7;
+}
+
+/* Thin scrollbar for code */
+pre code::-webkit-scrollbar {
+  height: 4px;
+}
+pre code::-webkit-scrollbar-track {
+  background: transparent;
+}
+pre code::-webkit-scrollbar-thumb {
+  background: var(--border);
 }
 
 /* Inline markdown */
