@@ -201,7 +201,7 @@ function Sidebar({
               >
                 <div style={{ overflow: "hidden", flex: 1 }}>
                   {s.agent && (
-                    <div style={{ fontSize: 10, fontFamily: "var(--font-mono)", color: "var(--text-muted)", marginBottom: 2 }}>
+                    <div style={{ fontSize: 10, fontFamily: "var(--font-mono)", fontWeight: 600, color: "var(--text-muted)", marginBottom: 2 }}>
                       {s.agent}
                     </div>
                   )}
