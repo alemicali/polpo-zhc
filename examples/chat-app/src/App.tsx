@@ -153,11 +153,10 @@ function ChatBubble({ msg }: { msg: Message }) {
       {/* Agent label */}
       {!isUser && msg.agent && (
         <div style={{
-          fontFamily: "var(--font-mono)",
-          fontSize: 11,
-          color: "var(--accent)",
+          fontSize: 13,
+          fontWeight: 600,
+          color: "var(--text)",
           marginBottom: 4,
-          letterSpacing: "0.05em",
         }}>
           {msg.agent}
         </div>
@@ -178,14 +177,15 @@ function ChatBubble({ msg }: { msg: Message }) {
           {isUser ? (
             msg.content
           ) : (
-            <Streamdown
-              mode={msg.streaming ? "streaming" : "static"}
-            >
-              {msg.content || "..."}
-            </Streamdown>
-          )}
-          {msg.streaming && (
-            <span style={{ display: "inline-block", width: 6, height: 14, background: "var(--accent)", marginLeft: 2, animation: "blink 1s infinite" }} />
+            <>
+              {msg.content ? (
+                <Streamdown mode={msg.streaming ? "streaming" : "static"}>
+                  {msg.content}
+                </Streamdown>
+              ) : msg.streaming ? (
+                <span style={{ display: "inline-block", width: 6, height: 14, background: "var(--text-muted)", animation: "blink 1s infinite" }} />
+              ) : null}
+            </>
           )}
         </div>
       </div>
