@@ -108,7 +108,7 @@ export class ChatCompletionStream implements AsyncIterable<ChatCompletionChunk> 
   aborted = false;
 
   private fetchFn: typeof globalThis.fetch;
-  private baseUrl: string;
+  private url: string;
   private clientHeaders: Record<string, string>;
   private req: ChatCompletionRequest;
   private reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
@@ -119,12 +119,12 @@ export class ChatCompletionStream implements AsyncIterable<ChatCompletionChunk> 
 
   constructor(
     fetchFn: typeof globalThis.fetch,
-    baseUrl: string,
+    url: string,
     clientHeaders: Record<string, string>,
     req: ChatCompletionRequest,
   ) {
     this.fetchFn = fetchFn;
-    this.baseUrl = baseUrl;
+    this.url = url;
     this.clientHeaders = clientHeaders;
     this.req = req;
   }
@@ -143,7 +143,6 @@ export class ChatCompletionStream implements AsyncIterable<ChatCompletionChunk> 
     if (this.started) return;
     this.started = true;
 
-    const url = `${this.baseUrl}/v1/chat/completions`;
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
     };
@@ -154,7 +153,7 @@ export class ChatCompletionStream implements AsyncIterable<ChatCompletionChunk> 
       headers["x-session-id"] = this.req.sessionId;
     }
     const { sessionId: _, ...body } = this.req;
-    const res = await this.fetchFn(url, {
+    const res = await this.fetchFn(this.url, {
       method: "POST",
       headers,
       body: JSON.stringify({ ...body, stream: true }),
@@ -239,6 +238,7 @@ export class ChatCompletionStream implements AsyncIterable<ChatCompletionChunk> 
 export class PolpoClient {
   private readonly baseUrl: string;
   private readonly apiPrefix: string;
+  private readonly apiKey: string | undefined;
   private readonly headers: Record<string, string>;
   private readonly fetchFn: typeof globalThis.fetch;
   /** In-flight GET deduplication */
@@ -246,9 +246,19 @@ export class PolpoClient {
 
   constructor(config: PolpoClientConfig) {
     this.baseUrl = config.baseUrl.replace(/\/$/, "");
-    // Cloud (api.polpo.sh) uses /v1, self-hosted uses /api/v1
-    this.apiPrefix = config.apiPrefix ?? (this.baseUrl.includes("polpo.sh") ? "/v1" : "/api/v1");
+    // Detect cloud vs self-hosted prefix via proper hostname check
+    if (config.apiPrefix) {
+      this.apiPrefix = config.apiPrefix;
+    } else {
+      try {
+        const hostname = new URL(this.baseUrl).hostname;
+        this.apiPrefix = hostname.endsWith(".polpo.sh") || hostname === "polpo.sh" ? "/v1" : "/api/v1";
+      } catch {
+        this.apiPrefix = "/api/v1";
+      }
+    }
     this.fetchFn = config.fetch ?? globalThis.fetch.bind(globalThis);
+    this.apiKey = config.apiKey;
     this.headers = {};
     if (config.apiKey) {
       this.headers["Authorization"] = `Bearer ${config.apiKey}`;
@@ -681,12 +691,12 @@ export class PolpoClient {
    * Non-streaming mode — returns the full response.
    */
   async chatCompletions(req: ChatCompletionRequest): Promise<ChatCompletionResponse> {
-    const url = `${this.baseUrl}/v1/chat/completions`;
+    const url = `${this.baseUrl}${this.apiPrefix}/chat/completions`;
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
     };
-    if (this.headers["x-api-key"]) {
-      headers["Authorization"] = `Bearer ${this.headers["x-api-key"]}`;
+    if (this.headers["Authorization"]) {
+      headers["Authorization"] = this.headers["Authorization"];
     }
     if (req.sessionId) {
       headers["x-session-id"] = req.sessionId;
@@ -713,7 +723,8 @@ export class PolpoClient {
    * Streaming mode — returns a ChatCompletionStream (async-iterable + metadata).
    */
   chatCompletionsStream(req: ChatCompletionRequest): ChatCompletionStream {
-    return new ChatCompletionStream(this.fetchFn, this.baseUrl, this.headers, req);
+    const url = `${this.baseUrl}${this.apiPrefix}/chat/completions`;
+    return new ChatCompletionStream(this.fetchFn, url, this.headers, req);
   }
 
   // ── Sessions ────────────────────────────────────────────
@@ -805,11 +816,9 @@ export class PolpoClient {
   /** @deprecated Use runPlaybook instead. */
   runTemplate(name: string, params?: Record<string, string | number | boolean>): Promise<PlaybookRunResult> { return this.runPlaybook(name, params); }
 
-  /** Health check (instance method — uses configured base URL). */
+  /** Health check (instance method — uses configured base URL, no auth). */
   async getHealth(): Promise<HealthResponse> {
-    const res = await this.fetchFn(`${this.baseUrl}/health`, {
-      headers: { ...this.headers },
-    });
+    const res = await this.fetchFn(`${this.baseUrl}/health`);
     return res.json();
   }
 
@@ -822,11 +831,11 @@ export class PolpoClient {
     return json.data;
   }
 
-  /** Build SSE URL for EventSource (with optional apiKey as query param) */
+  /** Build SSE URL for EventSource (with optional apiKey as query param — EventSource can't send headers) */
   getEventsUrl(filter?: string[]): string {
     const params = new URLSearchParams();
     if (filter?.length) params.set("filter", filter.join(","));
-    if (this.headers["x-api-key"]) params.set("apiKey", this.headers["x-api-key"]);
+    if (this.apiKey) params.set("apiKey", this.apiKey);
     const qs = params.toString();
     return `${this.apiUrl("/events")}${qs ? `?${qs}` : ""}`;
   }
