@@ -251,7 +251,6 @@ export class PolpoClient {
     this.fetchFn = config.fetch ?? globalThis.fetch.bind(globalThis);
     this.headers = {};
     if (config.apiKey) {
-      this.headers["x-api-key"] = config.apiKey;
       this.headers["Authorization"] = `Bearer ${config.apiKey}`;
     }
   }
