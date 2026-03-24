@@ -1,0 +1,107 @@
+*,
+*::before,
+*::after {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+:root {
+  --bg: #0a0a0a;
+  --bg-secondary: #141414;
+  --border: #262626;
+  --text: #ededed;
+  --text-muted: #737373;
+  --accent: #3ecf8e;
+  --accent-dim: rgba(62, 207, 142, 0.1);
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: "JetBrains Mono", "Fira Code", monospace;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  height: 100dvh;
+  overflow: hidden;
+}
+
+#root {
+  height: 100%;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+}
+
+/* Code blocks */
+pre {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  padding: 12px 16px;
+  overflow-x: auto;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.6;
+  margin: 8px 0;
+}
+
+code {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  background: var(--accent-dim);
+  color: var(--accent);
+  padding: 2px 5px;
+}
+
+pre code {
+  background: none;
+  color: var(--text-muted);
+  padding: 0;
+}
+
+/* Inline markdown */
+strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+a:hover {
+  text-decoration: underline;
+}
+
+ul, ol {
+  padding-left: 20px;
+  margin: 6px 0;
+}
+
+li {
+  margin: 4px 0;
+  line-height: 1.6;
+}
+
+h1, h2, h3 {
+  color: var(--text);
+  margin: 16px 0 8px;
+  font-weight: 700;
+}
+
+h1 { font-size: 20px; }
+h2 { font-size: 17px; }
+h3 { font-size: 15px; }
+
+p {
+  margin: 6px 0;
+  line-height: 1.7;
+}
