@@ -1,5 +1,6 @@
 import { useSyncExternalStore, useCallback, useEffect, useState } from "react";
 import { usePolpoContext } from "../provider/polpo-context.js";
+import { useMutation } from "./use-mutation.js";
 import type { AgentConfig, Team, AddAgentRequest, UpdateAgentRequest, AddTeamRequest } from "@polpo-ai/sdk";
 
 export interface UseAgentsReturn {
@@ -8,12 +9,19 @@ export interface UseAgentsReturn {
   isLoading: boolean;
   error: Error | null;
   addAgent: (req: AddAgentRequest, teamName?: string) => Promise<void>;
+  isAddingAgent: boolean;
   updateAgent: (name: string, req: UpdateAgentRequest) => Promise<AgentConfig>;
+  isUpdatingAgent: boolean;
   removeAgent: (name: string) => Promise<void>;
+  isRemovingAgent: boolean;
   addTeam: (req: AddTeamRequest) => Promise<void>;
+  isAddingTeam: boolean;
   removeTeam: (name: string) => Promise<void>;
+  isRemovingTeam: boolean;
   renameTeam: (oldName: string, newName: string) => Promise<Team>;
+  isRenamingTeam: boolean;
   refetch: () => Promise<void>;
+  invalidate: () => Promise<void>;
 }
 
 export function useAgents(): UseAgentsReturn {
@@ -44,37 +52,86 @@ export function useAgents(): UseAgentsReturn {
     fetchAll().finally(() => setIsLoading(false));
   }, [fetchAll]);
 
-  const addAgent = useCallback(async (req: AddAgentRequest, teamName?: string) => {
-    await client.addAgent(req, teamName);
-    await fetchAll();
-  }, [client, fetchAll]);
+  const { mutate: addAgent, isPending: isAddingAgent } = useMutation(
+    useCallback(
+      async (req: AddAgentRequest, teamName?: string) => {
+        await client.addAgent(req, teamName);
+        await fetchAll();
+      },
+      [client, fetchAll],
+    ),
+  );
 
-  const updateAgent = useCallback(async (name: string, req: UpdateAgentRequest) => {
-    const updated = await client.updateAgent(name, req);
-    await fetchAll();
-    return updated;
-  }, [client, fetchAll]);
+  const { mutate: updateAgent, isPending: isUpdatingAgent } = useMutation(
+    useCallback(
+      async (name: string, req: UpdateAgentRequest) => {
+        const updated = await client.updateAgent(name, req);
+        await fetchAll();
+        return updated;
+      },
+      [client, fetchAll],
+    ),
+  );
 
-  const removeAgent = useCallback(async (name: string) => {
-    await client.removeAgent(name);
-    await fetchAll();
-  }, [client, fetchAll]);
+  const { mutate: removeAgent, isPending: isRemovingAgent } = useMutation(
+    useCallback(
+      async (name: string) => {
+        await client.removeAgent(name);
+        await fetchAll();
+      },
+      [client, fetchAll],
+    ),
+  );
 
-  const addTeam = useCallback(async (req: AddTeamRequest) => {
-    await client.addTeam(req);
-    await fetchAll();
-  }, [client, fetchAll]);
+  const { mutate: addTeam, isPending: isAddingTeam } = useMutation(
+    useCallback(
+      async (req: AddTeamRequest) => {
+        await client.addTeam(req);
+        await fetchAll();
+      },
+      [client, fetchAll],
+    ),
+  );
 
-  const removeTeam = useCallback(async (name: string) => {
-    await client.removeTeam(name);
-    await fetchAll();
-  }, [client, fetchAll]);
+  const { mutate: removeTeam, isPending: isRemovingTeam } = useMutation(
+    useCallback(
+      async (name: string) => {
+        await client.removeTeam(name);
+        await fetchAll();
+      },
+      [client, fetchAll],
+    ),
+  );
 
-  const renameTeam = useCallback(async (oldName: string, newName: string) => {
-    const t = await client.renameTeam(oldName, newName);
-    await fetchAll();
-    return t;
-  }, [client, fetchAll]);
+  const { mutate: renameTeam, isPending: isRenamingTeam } = useMutation(
+    useCallback(
+      async (oldName: string, newName: string) => {
+        const t = await client.renameTeam(oldName, newName);
+        await fetchAll();
+        return t;
+      },
+      [client, fetchAll],
+    ),
+  );
 
-  return { agents, teams, isLoading, error, addAgent, updateAgent, removeAgent, addTeam, removeTeam, renameTeam, refetch: fetchAll };
+  return {
+    agents,
+    teams,
+    isLoading,
+    error,
+    addAgent,
+    isAddingAgent,
+    updateAgent,
+    isUpdatingAgent,
+    removeAgent,
+    isRemovingAgent,
+    addTeam,
+    isAddingTeam,
+    removeTeam,
+    isRemovingTeam,
+    renameTeam,
+    isRenamingTeam,
+    refetch: fetchAll,
+    invalidate: fetchAll,
+  };
 }

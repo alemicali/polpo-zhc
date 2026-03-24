@@ -2,6 +2,7 @@ import { useSyncExternalStore, useCallback, useEffect, useState } from "react";
 import { usePolpoContext } from "../provider/polpo-context.js";
 import { selectTasks, type TaskFilter } from "@polpo-ai/sdk";
 import { useStableValue } from "./use-stable-value.js";
+import { useMutation } from "./use-mutation.js";
 import type { Task, CreateTaskRequest } from "@polpo-ai/sdk";
 
 export interface UseTasksReturn {
@@ -9,9 +10,13 @@ export interface UseTasksReturn {
   isLoading: boolean;
   error: Error | null;
   createTask: (req: CreateTaskRequest) => Promise<Task>;
+  isCreating: boolean;
   deleteTask: (taskId: string) => Promise<void>;
+  isDeleting: boolean;
   retryTask: (taskId: string) => Promise<void>;
+  isRetrying: boolean;
   refetch: () => Promise<void>;
+  invalidate: () => Promise<void>;
 }
 
 export function useTasks(filter?: TaskFilter): UseTasksReturn {
@@ -51,32 +56,50 @@ export function useTasks(filter?: TaskFilter): UseTasksReturn {
     return () => { cancelled = true; };
   }, [client, store, stableFilter]);
 
-  const createTask = useCallback(
-    async (req: CreateTaskRequest) => {
-      const task = await client.createTask(req);
-      return task;
-    },
-    [client],
-  );
-
-  const deleteTask = useCallback(
-    async (taskId: string) => {
-      await client.deleteTask(taskId);
-    },
-    [client],
-  );
-
-  const retryTask = useCallback(
-    async (taskId: string) => {
-      await client.retryTask(taskId);
-    },
-    [client],
-  );
-
   const refetch = useCallback(async () => {
     const t = await client.getTasks();
     store.setTasks(t);
   }, [client, store]);
 
-  return { tasks, isLoading, error, createTask, deleteTask, retryTask, refetch };
+  const { mutate: createTask, isPending: isCreating } = useMutation(
+    useCallback(
+      async (req: CreateTaskRequest) => {
+        const task = await client.createTask(req);
+        return task;
+      },
+      [client],
+    ),
+  );
+
+  const { mutate: deleteTask, isPending: isDeleting } = useMutation(
+    useCallback(
+      async (taskId: string) => {
+        await client.deleteTask(taskId);
+      },
+      [client],
+    ),
+  );
+
+  const { mutate: retryTask, isPending: isRetrying } = useMutation(
+    useCallback(
+      async (taskId: string) => {
+        await client.retryTask(taskId);
+      },
+      [client],
+    ),
+  );
+
+  return {
+    tasks,
+    isLoading,
+    error,
+    createTask,
+    isCreating,
+    deleteTask,
+    isDeleting,
+    retryTask,
+    isRetrying,
+    refetch,
+    invalidate: refetch,
+  };
 }

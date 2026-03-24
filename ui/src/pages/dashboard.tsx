@@ -438,7 +438,7 @@ export function DashboardPage() {
   const { missions } = useMissions();
   const { processes } = useProcesses();
   const { agents } = useAgents();
-  const stats = useStats();
+  const { stats } = useStats();
 
   // Single-pass count reduction instead of 3 separate .filter() calls
   const { activeMissions, doneCount, failedCount } = useMemo(() => {

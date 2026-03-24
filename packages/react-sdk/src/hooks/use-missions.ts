@@ -1,6 +1,7 @@
 import { useSyncExternalStore, useCallback, useEffect, useRef, useState } from "react";
 import { usePolpoContext } from "../provider/polpo-context.js";
 import { selectMissions } from "@polpo-ai/sdk";
+import { useMutation } from "./use-mutation.js";
 import type { Mission, CreateMissionRequest, UpdateMissionRequest, ExecuteMissionResult, ResumeMissionResult } from "@polpo-ai/sdk";
 
 export interface UseMissionsReturn {
@@ -8,12 +9,19 @@ export interface UseMissionsReturn {
   isLoading: boolean;
   error: Error | null;
   createMission: (req: CreateMissionRequest) => Promise<Mission>;
+  isCreating: boolean;
   updateMission: (missionId: string, req: UpdateMissionRequest) => Promise<Mission>;
+  isUpdating: boolean;
   deleteMission: (missionId: string) => Promise<void>;
+  isDeleting: boolean;
   executeMission: (missionId: string) => Promise<ExecuteMissionResult>;
+  isExecuting: boolean;
   resumeMission: (missionId: string, opts?: { retryFailed?: boolean }) => Promise<ResumeMissionResult>;
+  isResuming: boolean;
   abortMission: (missionId: string) => Promise<{ aborted: number }>;
+  isAborting: boolean;
   refetch: () => Promise<void>;
+  invalidate: () => Promise<void>;
 }
 
 export function useMissions(): UseMissionsReturn {
@@ -59,34 +67,46 @@ export function useMissions(): UseMissionsReturn {
     }
   }, [missionsStale, fetchMissions]);
 
-  const createMission = useCallback(
-    (req: CreateMissionRequest) => client.createMission(req),
-    [client],
+  const { mutate: createMission, isPending: isCreating } = useMutation(
+    useCallback(
+      (req: CreateMissionRequest) => client.createMission(req),
+      [client],
+    ),
   );
 
-  const updateMission = useCallback(
-    (missionId: string, req: UpdateMissionRequest) => client.updateMission(missionId, req),
-    [client],
+  const { mutate: updateMission, isPending: isUpdating } = useMutation(
+    useCallback(
+      (missionId: string, req: UpdateMissionRequest) => client.updateMission(missionId, req),
+      [client],
+    ),
   );
 
-  const deleteMission = useCallback(
-    async (missionId: string) => { await client.deleteMission(missionId); },
-    [client],
+  const { mutate: deleteMission, isPending: isDeleting } = useMutation(
+    useCallback(
+      async (missionId: string) => { await client.deleteMission(missionId); },
+      [client],
+    ),
   );
 
-  const executeMission = useCallback(
-    (missionId: string) => client.executeMission(missionId),
-    [client],
+  const { mutate: executeMission, isPending: isExecuting } = useMutation(
+    useCallback(
+      (missionId: string) => client.executeMission(missionId),
+      [client],
+    ),
   );
 
-  const resumeMission = useCallback(
-    (missionId: string, opts?: { retryFailed?: boolean }) => client.resumeMission(missionId, opts),
-    [client],
+  const { mutate: resumeMission, isPending: isResuming } = useMutation(
+    useCallback(
+      (missionId: string, opts?: { retryFailed?: boolean }) => client.resumeMission(missionId, opts),
+      [client],
+    ),
   );
 
-  const abortMission = useCallback(
-    (missionId: string) => client.abortMission(missionId),
-    [client],
+  const { mutate: abortMission, isPending: isAborting } = useMutation(
+    useCallback(
+      (missionId: string) => client.abortMission(missionId),
+      [client],
+    ),
   );
 
   return {
@@ -94,11 +114,18 @@ export function useMissions(): UseMissionsReturn {
     isLoading,
     error,
     createMission,
+    isCreating,
     updateMission,
+    isUpdating,
     deleteMission,
+    isDeleting,
     executeMission,
+    isExecuting,
     resumeMission,
+    isResuming,
     abortMission,
+    isAborting,
     refetch: fetchMissions,
+    invalidate: fetchMissions,
   };
 }
