@@ -564,7 +564,7 @@ export function App() {
                   <span style={{ fontFamily: "var(--font-mono)", fontSize: 24, fontWeight: 800, letterSpacing: "0.3em", color: "var(--border)" }}>POLPO</span>
                   <span style={{ fontSize: 13, color: "var(--text-muted)" }}>Send a message to start</span>
 
-                  {!AGENT_ENV && agents.length > 0 && (
+                  {agents.length > 0 && (
                     <div style={{ display: "flex", flexDirection: "column", gap: 4, width: "100%", maxWidth: 280, marginTop: 12 }}>
                       <span style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "var(--font-mono)", textAlign: "center", marginBottom: 4 }}>
                         select agent
