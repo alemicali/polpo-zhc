@@ -560,7 +560,7 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
           polpoDir: ctx?.polpoDir,
         });
       }
-      agent.setTools(allTools);
+      agent.state.tools = allTools;
 
 
       const prompt = buildPrompt(task);
