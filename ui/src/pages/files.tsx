@@ -346,7 +346,7 @@ export function FilesPage() {
   });
   const [sortKey, setSortKey] = useState<SortKey>("name");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
   const [dragging, setDragging] = useState(false);
   const [renamingEntry, setRenamingEntry] = useState<string | null>(null);
   const [creatingFolder, setCreatingFolder] = useState(false);

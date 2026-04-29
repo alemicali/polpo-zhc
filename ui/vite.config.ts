@@ -58,7 +58,7 @@ const pwaPlugin = VitePWA({
     ],
   },
   devOptions: {
-    enabled: true,
+    enabled: false,
   },
 });
 

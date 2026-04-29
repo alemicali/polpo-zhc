@@ -17,6 +17,7 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Bot,
+  Brain,
   Loader2,
   ArrowLeft,
   RefreshCw,
@@ -46,6 +47,7 @@ import { AgentToolsTab } from "@/components/agents/agent-tools-tab";
 import { AgentCredentialsTab } from "@/components/agents/agent-credentials-tab";
 import { AgentConfigTab } from "@/components/agents/agent-config-tab";
 import { AgentTasksTab } from "@/components/agents/agent-tasks-tab";
+import { AgentMemoryTab } from "@/components/agents/agent-memory-tab";
 
 // ── Breadcrumb ──
 
@@ -142,6 +144,10 @@ function AgentDetailContent() {
               <span className="text-muted-foreground font-normal ml-0.5">({vaultEntries.length})</span>
             )}
           </TabsTrigger>
+          <TabsTrigger value="memory">
+            <Brain className="h-3.5 w-3.5 mr-1" />
+            Memory
+          </TabsTrigger>
           <TabsTrigger value="config">Config</TabsTrigger>
           <TabsTrigger value="tasks">
             Tasks
@@ -165,6 +171,10 @@ function AgentDetailContent() {
 
         <TabsContent value="credentials" className="mt-4 flex-1 min-h-0">
           <AgentCredentialsTab />
+        </TabsContent>
+
+        <TabsContent value="memory" className="mt-4 flex-1 min-h-0">
+          <AgentMemoryTab />
         </TabsContent>
 
         <TabsContent value="config" className="mt-4 flex-1 min-h-0">

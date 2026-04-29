@@ -1,7 +1,8 @@
 import { useLocation } from "react-router-dom";
-import { Sun, Moon, Monitor, MessageCircle, Github, BookOpen } from "lucide-react";
+import { Sun, Moon, Monitor, MessageCircle, Github, Columns2 } from "lucide-react";
 import { useProjectInfo } from "@/hooks/use-polpo";
 import { useSidebarOpen, sidebarActions } from "@/hooks/chat-context";
+import { setLayoutMode } from "@/hooks/use-layout-mode";
 import { Button } from "@/components/ui/button";
 import {
   Tooltip,
@@ -42,6 +43,10 @@ function resolveTitle(pathname: string): string {
   return "";
 }
 
+/**
+ * Header — used only in sidebar layout mode.
+ * In chat-first mode, each panel has its own header (see ChatFirstLayout).
+ */
 export function Header() {
   const { pathname } = useLocation();
   const title = resolveTitle(pathname);
@@ -58,7 +63,7 @@ export function Header() {
         <span className="text-sm font-bold tracking-tight">{title}</span>
       </div>
 
-      {/* Desktop: page title with subtle accent underline */}
+      {/* Desktop: page title */}
       <div className="hidden lg:flex items-center gap-3">
         <h2 className="text-lg font-bold tracking-tight">{title}</h2>
         <div className="h-4 w-px bg-border/60" />
@@ -69,26 +74,11 @@ export function Header() {
 
       {/* Actions */}
       <div className="flex items-center gap-2">
-        {/* Documentation */}
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <a
-              href="https://docs.polpo.sh"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-all"
-            >
-              <BookOpen className="h-4 w-4" />
-              <span className="sr-only">Documentation</span>
-            </a>
-          </TooltipTrigger>
-          <TooltipContent side="bottom" className="text-xs">Documentation</TooltipContent>
-        </Tooltip>
         {/* GitHub */}
         <Tooltip>
           <TooltipTrigger asChild>
             <a
-              href="https://github.com/lumea-labs/polpo"
+              href="https://github.com/alemicali/polpo-zhc"
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-all"
@@ -119,38 +109,37 @@ export function Header() {
             align="end"
             className="min-w-[140px] bg-popover/95 backdrop-blur-lg border-border/50"
           >
-            <DropdownMenuItem
-              onSelect={() => setTheme("light")}
-              className="gap-2.5 text-xs"
-            >
-              <Sun className="h-3.5 w-3.5" />
-              Light
-              {theme === "light" && (
-                <span className="ml-auto h-1.5 w-1.5 rounded-full bg-primary" />
-              )}
+            <DropdownMenuItem onSelect={() => setTheme("light")} className="gap-2.5 text-xs">
+              <Sun className="h-3.5 w-3.5" /> Light
+              {theme === "light" && <span className="ml-auto h-1.5 w-1.5 rounded-full bg-primary" />}
             </DropdownMenuItem>
-            <DropdownMenuItem
-              onSelect={() => setTheme("dark")}
-              className="gap-2.5 text-xs"
-            >
-              <Moon className="h-3.5 w-3.5" />
-              Dark
-              {theme === "dark" && (
-                <span className="ml-auto h-1.5 w-1.5 rounded-full bg-primary" />
-              )}
+            <DropdownMenuItem onSelect={() => setTheme("dark")} className="gap-2.5 text-xs">
+              <Moon className="h-3.5 w-3.5" /> Dark
+              {theme === "dark" && <span className="ml-auto h-1.5 w-1.5 rounded-full bg-primary" />}
             </DropdownMenuItem>
-            <DropdownMenuItem
-              onSelect={() => setTheme("system")}
-              className="gap-2.5 text-xs"
-            >
-              <Monitor className="h-3.5 w-3.5" />
-              System
-              {theme === "system" && (
-                <span className="ml-auto h-1.5 w-1.5 rounded-full bg-primary" />
-              )}
+            <DropdownMenuItem onSelect={() => setTheme("system")} className="gap-2.5 text-xs">
+              <Monitor className="h-3.5 w-3.5" /> System
+              {theme === "system" && <span className="ml-auto h-1.5 w-1.5 rounded-full bg-primary" />}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
+        {/* Layout mode toggle */}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="hidden lg:inline-flex h-8 w-8 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-all"
+              onClick={() => setLayoutMode("chat-first")}
+            >
+              <Columns2 className="h-4 w-4" />
+              <span className="sr-only">Switch to chat-first layout</span>
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom" className="text-xs">
+            Switch to chat-first layout
+          </TooltipContent>
+        </Tooltip>
         {/* Chat sidebar toggle — hidden on /chat page and on mobile */}
         {!isOnChatPage && (
           <Tooltip>

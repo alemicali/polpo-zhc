@@ -34,27 +34,28 @@ function SetupModeRedirect({ children }: { children: React.ReactNode }) {
   const location = useLocation();
   const [state, setState] = useState<"loading" | "setup" | "ready">("loading");
 
+  // Check setup status ONLY on initial mount — not on every pathname change.
+  // Re-checking on navigation was causing the entire tree to unmount/remount
+  // (flash of white) because setState("loading") replaced children with a spinner.
   useEffect(() => {
     if (location.pathname === "/setup") {
       setState("ready");
       return;
     }
-    setState("loading");
     fetch(`${config.baseUrl}/api/v1/config/status`)
       .then((r) => r.json())
       .then((r) => {
         if (r.ok && !r.data.initialized) {
           navigate("/setup", { replace: true });
-          // Don't set ready — wait for location to change to /setup,
-          // which re-triggers this effect and hits the early return above.
         } else {
           setState("ready");
         }
       })
       .catch(() => { setState("ready"); });
-  }, [location.pathname]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  // Block rendering until we know the mode — prevents dashboard API calls
+  // Block rendering only during the initial setup check
   if (state === "loading") {
     return (
       <div className="flex items-center justify-center min-h-screen">

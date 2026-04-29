@@ -179,10 +179,10 @@
   display: none;
 }
 
-/* ─── Custom scrollbar — matches the deep-sea aesthetic ─── */
+/* ─── Custom scrollbar — gentle, theme-aligned ─── */
 * {
   scrollbar-width: thin;
-  scrollbar-color: oklch(0.4 0.03 250) transparent;
+  scrollbar-color: oklch(0.82 0.01 250) transparent;
 }
 
 .dark * {
@@ -199,7 +199,7 @@
 }
 
 *::-webkit-scrollbar-thumb {
-  background-color: oklch(0.4 0.03 250);
+  background-color: oklch(0.82 0.01 250);
   border-radius: 9999px;
 }
 
@@ -208,7 +208,7 @@
 }
 
 *::-webkit-scrollbar-thumb:hover {
-  background-color: oklch(0.5 0.04 250);
+  background-color: oklch(0.72 0.02 250);
 }
 
 .dark *::-webkit-scrollbar-thumb:hover {

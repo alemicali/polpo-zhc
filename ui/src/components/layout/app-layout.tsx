@@ -4,11 +4,27 @@ import { Header } from "./header";
 import { BottomNav } from "./bottom-nav";
 import { ChatSidebar } from "./chat-sidebar";
 import { ChatNavigationEffects } from "./chat-navigation-effects";
+import { ChatFirstLayout } from "./chat-first-layout";
+import { useLayoutMode } from "@/hooks/use-layout-mode";
 
 export function AppLayout() {
+  const layoutMode = useLayoutMode();
+
+  // Both branches return a root <div> so React reconciles without remounting.
+  // The key ensures each layout mode has a stable identity.
+
+  if (layoutMode === "chat-first") {
+    return (
+      <div className="flex h-[100dvh] w-screen overflow-hidden bg-background text-foreground">
+        <ChatFirstLayout />
+        <BottomNav />
+        <ChatNavigationEffects />
+      </div>
+    );
+  }
+
   return (
     <div className="flex h-[100dvh] w-screen overflow-hidden bg-background text-foreground">
-      {/* Desktop sidebar with deep-sea gradient */}
       <div className="hidden lg:flex">
         <Sidebar />
       </div>
@@ -22,7 +38,6 @@ export function AppLayout() {
         </div>
       </div>
       <BottomNav />
-      {/* Root-level chat navigation effects (open_file, navigate_to, open_tab) */}
       <ChatNavigationEffects />
     </div>
   );
