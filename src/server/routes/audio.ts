@@ -15,7 +15,7 @@ import { execFile } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { edgeTtsAvailable, resolveEdgeVoice } from "../../tools/audio-tools.js";
+import { resolveEdgeTtsBin, resolveEdgeVoice } from "../../tools/audio-tools.js";
 
 const TTS_TIMEOUT_MS = 60_000;
 const MAX_TEXT_LENGTH = 5000;
@@ -44,7 +44,8 @@ export function audioRoutes(): Hono {
       return c.json({ ok: false, error: `text too long (max ${MAX_TEXT_LENGTH} chars)` }, 400);
     }
 
-    if (!edgeTtsAvailable()) {
+    const bin = resolveEdgeTtsBin();
+    if (!bin) {
       return c.json({
         ok: false,
         error: "edge-tts CLI is not installed on the server. Install with: pip install edge-tts",
@@ -58,7 +59,7 @@ export function audioRoutes(): Hono {
     try {
       await new Promise<void>((resolvePromise, reject) => {
         const child = execFile(
-          "edge-tts",
+          bin,
           ["--text", text, "--voice", voice, "--write-media", filePath],
           { timeout: TTS_TIMEOUT_MS },
           (err, _stdout, stderr) => {
