@@ -12,6 +12,16 @@ export class NodeFileSystem implements FileSystem {
     return readFile(path, "utf-8");
   }
 
+  /** Read file as raw binary buffer (for images, PDFs, etc.) */
+  async readFileBuffer(path: string): Promise<Uint8Array> {
+    return new Uint8Array(await readFile(path));
+  }
+
+  /** Write raw binary buffer to file */
+  async writeFileBuffer(path: string, data: Uint8Array): Promise<void> {
+    await writeFile(path, data);
+  }
+
   async writeFile(path: string, content: string): Promise<void> {
     await writeFile(path, content, "utf-8");
   }
@@ -27,6 +37,12 @@ export class NodeFileSystem implements FileSystem {
 
   async readdir(path: string): Promise<string[]> {
     return readdir(path);
+  }
+
+  /** Read directory with type info (file vs directory) for file manager UI */
+  async readdirWithTypes(path: string): Promise<{ name: string; isDirectory: boolean; isFile: boolean }[]> {
+    const entries = await readdir(path, { withFileTypes: true });
+    return entries.map((e) => ({ name: e.name, isDirectory: e.isDirectory(), isFile: e.isFile() }));
   }
 
   async mkdir(path: string): Promise<void> {

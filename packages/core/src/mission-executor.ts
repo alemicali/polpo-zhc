@@ -569,9 +569,9 @@ export class MissionExecutor {
   async executeMission(missionId: string): Promise<{ tasks: Task[]; group: string }> {
     const mission = await this.ctx.registry.getMission?.(missionId);
     if (!mission) throw new Error("Mission not found");
-    const executableStates = ["draft", "scheduled", "recurring"];
+    const executableStates = ["draft", "scheduled", "recurring", "failed", "cancelled"];
     if (!executableStates.includes(mission.status)) {
-      throw new Error(`Cannot execute mission in "${mission.status}" state (must be "draft", "scheduled", or "recurring")`);
+      throw new Error(`Cannot execute mission in "${mission.status}" state`);
     }
     // Remember whether this is a scheduled/recurring mission so we can restore status after completion
     const scheduledStatus = mission.status === "scheduled" || mission.status === "recurring" ? mission.status : undefined;

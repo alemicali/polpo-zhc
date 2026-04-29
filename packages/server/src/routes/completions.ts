@@ -381,7 +381,13 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
 
       // Resolve model via dep
       const reasoning = agentConfig.reasoning ?? deps.getConfig()?.settings?.reasoning;
-      const resolved = await deps.resolveAgentModel(agentConfig, reasoning);
+      let resolved;
+      try {
+        resolved = await deps.resolveAgentModel(agentConfig, reasoning);
+      } catch (modelErr) {
+        const msg = modelErr instanceof Error ? modelErr.message : String(modelErr);
+        return c.json({ error: { message: msg, type: "invalid_request_error" } }, 400 as any);
+      }
       m = resolved.model;
       streamOpts = resolved.streamOpts;
 
@@ -485,7 +491,9 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
 
             for await (const event of piStream) {
               if (abortController.signal.aborted) break;
-              if (event.type === "text_delta") {
+              if (event.type === "thinking_delta") {
+                await stream.writeSSE({ data: sseChunk(completionId, {}, null, { thinking: event.delta }) });
+              } else if (event.type === "text_delta") {
                 turnText += event.delta;
                 await stream.writeSSE({ data: sseChunk(completionId, { content: event.delta }) });
               } else if (event.type === "toolcall_start") {

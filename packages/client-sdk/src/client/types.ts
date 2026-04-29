@@ -1222,6 +1222,8 @@ export interface ChatCompletionChunk {
     open_tab?: OpenTabPayload;
     /** Present when the server is executing a tool call. */
     tool_call?: ToolCallEvent;
+    /** Present when the model is emitting thinking/reasoning tokens. */
+    thinking?: string;
   }>;
 }
 

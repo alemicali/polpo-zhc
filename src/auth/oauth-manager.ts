@@ -125,18 +125,16 @@ export async function oauthLogin(
 
   switch (provider) {
     case "anthropic":
-      creds = await loginAnthropic(
-        (url) =>
-          callbacks.onAuthUrl(
-            url,
-            "Open this URL in your browser and paste the authorization code",
-          ),
-        () =>
+      creds = await loginAnthropic({
+        onAuth: (info) => callbacks.onAuthUrl(info.url, info.instructions),
+        onPrompt: (prompt) => callbacks.onPrompt(prompt.message, prompt.placeholder),
+        onProgress: callbacks.onProgress,
+        onManualCodeInput: () =>
           callbacks.onPrompt(
             "Paste the authorization code from the browser (format: code#state)",
             "code#state",
           ),
-      );
+      });
       break;
 
     case "openai-codex":

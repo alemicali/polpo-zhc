@@ -3,16 +3,22 @@ export { PolpoProvider } from "./provider/polpo-provider.js";
 export type { PolpoProviderProps } from "./provider/polpo-provider.js";
 
 // Hooks
+export { useMutation } from "./hooks/use-mutation.js";
+export type { MutationState } from "./hooks/use-mutation.js";
 export { usePolpo } from "./hooks/use-polpo.js";
 export { useTasks } from "./hooks/use-tasks.js";
+export type { UseTasksReturn } from "./hooks/use-tasks.js";
 export { useTask } from "./hooks/use-task.js";
 export { useMissions } from "./hooks/use-missions.js";
+export type { UseMissionsReturn } from "./hooks/use-missions.js";
 export { useMission } from "./hooks/use-mission.js";
 export { useAgents } from "./hooks/use-agents.js";
+export type { UseAgentsReturn } from "./hooks/use-agents.js";
 export { useAgent } from "./hooks/use-agent.js";
 export { useProcesses } from "./hooks/use-processes.js";
 export { useEvents } from "./hooks/use-events.js";
 export { useStats } from "./hooks/use-stats.js";
+export type { UseStatsReturn } from "./hooks/use-stats.js";
 export { useMemory, useAgentMemory } from "./hooks/use-memory.js";
 export { useLogs } from "./hooks/use-logs.js";
 export { useSessions } from "./hooks/use-sessions.js";
@@ -21,10 +27,12 @@ export { useSkills } from "./hooks/use-skills.js";
 export { useOrchestratorSkills } from "./hooks/use-orchestrator-skills.js";
 export { useNotifications } from "./hooks/use-notifications.js";
 export { useApprovals } from "./hooks/use-approvals.js";
+export type { UseApprovalsReturn } from "./hooks/use-approvals.js";
 export { useActiveDelays } from "./hooks/use-active-delays.js";
 export { usePlaybooks, useTemplates } from "./hooks/use-playbooks.js";
 export { useSchedules } from "./hooks/use-schedules.js";
 export { useVaultEntries } from "./hooks/use-vault-entries.js";
+export type { UseVaultEntriesReturn } from "./hooks/use-vault-entries.js";
 export { useAuthStatus } from "./hooks/use-auth-status.js";
 export { useAssessmentProgress } from "./hooks/use-assessment-progress.js";
 
