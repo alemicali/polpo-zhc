@@ -27,9 +27,9 @@
  *   ELEVENLABS_API_KEY — elevenlabs provider (TTS)
  */
 
-import { readFileSync, writeFileSync, mkdirSync, statSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, statSync, existsSync } from "node:fs";
 import { resolve, dirname, extname } from "node:path";
-import { execFile } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { Type } from "@sinclair/typebox";
 import type { AgentTool, AgentToolResult } from "@mariozechner/pi-agent-core";
 
@@ -576,22 +576,57 @@ function resolveEdgeVoice(voice?: string, language?: string, gender?: "male" | "
   return gender === "male" ? pair[1] : pair[0]; // default female if no gender hint
 }
 
-/** Check if edge-tts CLI is available on the system. */
-function isEdgeTtsAvailable(): boolean {
-  try {
-    const { execFileSync } = require("node:child_process") as typeof import("node:child_process");
-    execFileSync("edge-tts", ["--version"], { stdio: "pipe", timeout: 5000 });
-    return true;
-  } catch {
-    return false;
+/**
+ * Resolve the edge-tts binary path. Tries PATH first, then common pip-install
+ * locations that may not be on the server process PATH (e.g. ~/.local/bin
+ * when the server is launched from a context without user shell init).
+ *
+ * Returns the absolute path (or "edge-tts" if PATH lookup worked) or null.
+ */
+function resolveEdgeTtsBinUncached(): string | null {
+  // Allow override via env var
+  const override = process.env.POLPO_EDGE_TTS_BIN;
+  if (override && existsSync(override)) {
+    try {
+      execFileSync(override, ["--version"], { stdio: "pipe", timeout: 5000 });
+      return override;
+    } catch { /* fall through */ }
   }
+
+  // 1. PATH lookup
+  try {
+    execFileSync("edge-tts", ["--version"], { stdio: "pipe", timeout: 5000 });
+    return "edge-tts";
+  } catch { /* fall through */ }
+
+  // 2. Common pip install locations not always on the server's PATH
+  const home = process.env.HOME ?? "";
+  const candidates = [
+    home && `${home}/.local/bin/edge-tts`,
+    home && `${home}/.local/share/pipx/venvs/edge-tts/bin/edge-tts`,
+    "/usr/local/bin/edge-tts",
+    "/opt/homebrew/bin/edge-tts",
+  ].filter((p): p is string => !!p);
+
+  for (const candidate of candidates) {
+    if (!existsSync(candidate)) continue;
+    try {
+      execFileSync(candidate, ["--version"], { stdio: "pipe", timeout: 5000 });
+      return candidate;
+    } catch { /* try next */ }
+  }
+
+  return null;
 }
 
-// Cache the availability check
-let _edgeTtsAvailable: boolean | undefined;
+let _edgeTtsBin: string | null | undefined;
+export function resolveEdgeTtsBin(): string | null {
+  if (_edgeTtsBin === undefined) _edgeTtsBin = resolveEdgeTtsBinUncached();
+  return _edgeTtsBin;
+}
+
 export function edgeTtsAvailable(): boolean {
-  if (_edgeTtsAvailable === undefined) _edgeTtsAvailable = isEdgeTtsAvailable();
-  return _edgeTtsAvailable;
+  return resolveEdgeTtsBin() !== null;
 }
 
 export { resolveEdgeVoice };
@@ -601,7 +636,8 @@ async function speakEdgeTts(
   params: { text: string; voice?: string; language?: string; gender?: "male" | "female" },
   signal?: AbortSignal,
 ): Promise<ToolResult> {
-  if (!edgeTtsAvailable()) {
+  const bin = resolveEdgeTtsBin();
+  if (!bin) {
     throw new Error("edge-tts CLI is not installed. Install it with: pip install edge-tts");
   }
 
@@ -616,7 +652,7 @@ async function speakEdgeTts(
   ];
 
   return new Promise<ToolResult>((resolvePromise, reject) => {
-    const child = execFile("edge-tts", args, { timeout: DEFAULT_TIMEOUT }, (err, _stdout, stderr) => {
+    const child = execFile(bin, args, { timeout: DEFAULT_TIMEOUT }, (err, _stdout, stderr) => {
       if (err) {
         reject(new Error(`edge-tts failed: ${err.message}${stderr ? ` — ${stderr}` : ""}`));
         return;
