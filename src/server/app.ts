@@ -36,6 +36,7 @@ import { providerRoutes } from "./routes/providers.js";
 import { skillRoutes } from "./routes/skills.js";
 import { authRoutes } from "./routes/auth.js";
 import { fileRoutes } from "./routes/files.js";
+import { audioRoutes } from "./routes/audio.js";
 import { FileAttachmentStore } from "../stores/file-attachment-store.js";
 
 export interface AppOptions {
@@ -322,6 +323,8 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     fs: new NodeFileSystem(),
     emit: (event: string, data: any) => o.emit(event as any, data),
   })));
+
+  authed.route("/audio", audioRoutes());
 
   authed.route("/attachments", attachmentRoutes(() => ({
     attachmentStore: new FileAttachmentStore(o.getPolpoDir()),

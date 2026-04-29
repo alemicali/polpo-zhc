@@ -19,6 +19,9 @@ import {
   ArrowDown,
   Mic,
   MicOff,
+  Volume2,
+  Pause,
+  Loader2,
   X,
   Play,
   Save,
@@ -967,6 +970,100 @@ function CopyAction({ text }: { text: string }) {
         <Check className="h-3.5 w-3.5 text-emerald-500" />
       ) : (
         <Copy className="h-3.5 w-3.5" />
+      )}
+    </MessageAction>
+  );
+}
+
+// ── Speak button (TTS via /api/v1/audio/speak — edge-tts under the hood) ──
+
+// Singleton: only one message can play at a time. Clicking another stops the previous.
+let currentTtsAudio: HTMLAudioElement | null = null;
+let currentTtsStop: (() => void) | null = null;
+
+function SpeakAction({ text }: { text: string }) {
+  const [state, setState] = useState<"idle" | "loading" | "playing">("idle");
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const objectUrlRef = useRef<string | null>(null);
+
+  const stop = useCallback(() => {
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.src = "";
+      audioRef.current = null;
+    }
+    if (objectUrlRef.current) {
+      URL.revokeObjectURL(objectUrlRef.current);
+      objectUrlRef.current = null;
+    }
+    if (currentTtsAudio === audioRef.current) currentTtsAudio = null;
+    if (currentTtsStop === stop) currentTtsStop = null;
+    setState("idle");
+  }, []);
+
+  const play = useCallback(async () => {
+    if (state === "loading") return;
+    if (state === "playing") { stop(); return; }
+
+    // Stop any other speak action that's currently active
+    if (currentTtsStop && currentTtsStop !== stop) currentTtsStop();
+
+    setState("loading");
+    try {
+      const base = config.baseUrl || "";
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (config.apiKey) headers["Authorization"] = `Bearer ${config.apiKey}`;
+      const language = (navigator.language || "en").split("-")[0];
+      const res = await fetch(`${base}/api/v1/audio/speak`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ text, language }),
+      });
+      if (!res.ok) {
+        let msg = `TTS failed (${res.status})`;
+        try {
+          const j = await res.json();
+          if (j?.error) msg = j.error;
+        } catch { /* ignore */ }
+        console.warn("[TTS]", msg);
+        setState("idle");
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      objectUrlRef.current = url;
+      const audio = new Audio(url);
+      audioRef.current = audio;
+      currentTtsAudio = audio;
+      currentTtsStop = stop;
+      audio.onended = stop;
+      audio.onerror = stop;
+      await audio.play();
+      setState("playing");
+    } catch (err) {
+      console.warn("[TTS] play error:", err);
+      setState("idle");
+    }
+  }, [state, text, stop]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (audioRef.current) audioRef.current.pause();
+      if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
+    };
+  }, []);
+
+  const tooltip = state === "playing" ? "Stop" : state === "loading" ? "Generating…" : "Read aloud";
+
+  return (
+    <MessageAction tooltip={tooltip} onClick={play}>
+      {state === "loading" ? (
+        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+      ) : state === "playing" ? (
+        <Pause className="h-3.5 w-3.5 text-emerald-500" />
+      ) : (
+        <Volume2 className="h-3.5 w-3.5" />
       )}
     </MessageAction>
   );
@@ -2354,6 +2451,7 @@ function ChatMessages() {
                         {!isStreaming && !msg.askUserQuestions?.length && !msg.missionPreview && !msg.vaultPreview && (
                           <MessageActions className="mt-2 opacity-0 group-hover:opacity-100 transition-opacity">
                             <CopyAction text={msg.content} />
+                            {msg.content.trim() && <SpeakAction text={msg.content} />}
                           </MessageActions>
                         )}
                         {msg.askUserQuestions && msg.askUserQuestions.length > 0 && (

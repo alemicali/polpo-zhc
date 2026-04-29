@@ -589,10 +589,12 @@ function isEdgeTtsAvailable(): boolean {
 
 // Cache the availability check
 let _edgeTtsAvailable: boolean | undefined;
-function edgeTtsAvailable(): boolean {
+export function edgeTtsAvailable(): boolean {
   if (_edgeTtsAvailable === undefined) _edgeTtsAvailable = isEdgeTtsAvailable();
   return _edgeTtsAvailable;
 }
+
+export { resolveEdgeVoice };
 
 async function speakEdgeTts(
   filePath: string,
