@@ -290,6 +290,8 @@ export function useChat() {
     const onVisible = () => {
       if (document.visibilityState !== "visible") return;
       refetchSessions();
+      // Don't clobber an in-flight stream — local state is fresher than the server snapshot.
+      if (streamRef.current) return;
       if (sessionId) {
         getMessages(sessionId)
           .then((raw) => {
