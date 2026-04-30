@@ -47,40 +47,63 @@
   --color-sidebar-ring: var(--sidebar-ring);
 }
 
-/* ─── Light theme: warm parchment + deep ink ─── */
+/* ─── Light theme: tide pool — Mediterranean shore at midday ───
+ *
+ * The light counterpart to the dark "deep-sea bioluminescence" theme.
+ * Same animal (the octopus), different hour: shallow tidal water on
+ * limestone, sunlight refracting through it, hints of coral, anemone,
+ * wet sand. Cool teals dominate, warm coral for destructive/accents,
+ * jade & ochre for chart variety.
+ *
+ * Reference: Vietri ceramics, Hockney pools, Roman pool mosaics.
+ */
 :root {
   --radius: 0.75rem;
-  --background: oklch(0.98 0.005 80);
-  --foreground: oklch(0.13 0.02 260);
-  --card: oklch(0.995 0.003 80);
-  --card-foreground: oklch(0.13 0.02 260);
-  --popover: oklch(0.995 0.003 80);
-  --popover-foreground: oklch(0.13 0.02 260);
-  --primary: oklch(0.55 0.18 250);
-  --primary-foreground: oklch(0.98 0 0);
-  --secondary: oklch(0.95 0.01 250);
-  --secondary-foreground: oklch(0.25 0.03 260);
-  --muted: oklch(0.95 0.008 250);
-  --muted-foreground: oklch(0.5 0.02 260);
-  --accent: oklch(0.93 0.015 250);
-  --accent-foreground: oklch(0.2 0.03 260);
-  --destructive: oklch(0.58 0.22 25);
-  --border: oklch(0.9 0.01 250);
-  --input: oklch(0.9 0.01 250);
-  --ring: oklch(0.55 0.18 250);
-  --chart-1: oklch(0.55 0.18 250);
-  --chart-2: oklch(0.65 0.2 170);
-  --chart-3: oklch(0.65 0.16 330);
-  --chart-4: oklch(0.7 0.15 85);
-  --chart-5: oklch(0.6 0.2 30);
-  --sidebar: oklch(0.96 0.02 230);
-  --sidebar-foreground: oklch(0.18 0.04 250);
-  --sidebar-primary: oklch(0.5 0.18 240);
-  --sidebar-primary-foreground: oklch(0.98 0 0);
-  --sidebar-accent: oklch(0.91 0.035 220);
-  --sidebar-accent-foreground: oklch(0.18 0.04 250);
-  --sidebar-border: oklch(0.88 0.03 230);
-  --sidebar-ring: oklch(0.5 0.18 240);
+
+  /* Surfaces — pearlescent whites with the faintest seawater cast */
+  --background: oklch(0.985 0.006 215);
+  --foreground: oklch(0.205 0.04 235);
+  --card: oklch(0.997 0.003 215);
+  --card-foreground: oklch(0.205 0.04 235);
+  --popover: oklch(0.997 0.003 215);
+  --popover-foreground: oklch(0.205 0.04 235);
+
+  /* Primary — sunlit shallow water, not generic cobalt */
+  --primary: oklch(0.6 0.115 205);
+  --primary-foreground: oklch(0.99 0.002 215);
+
+  /* Secondary / muted / accent — wet limestone & sea glass */
+  --secondary: oklch(0.945 0.012 215);
+  --secondary-foreground: oklch(0.28 0.04 235);
+  --muted: oklch(0.955 0.009 215);
+  --muted-foreground: oklch(0.52 0.025 230);
+  --accent: oklch(0.935 0.02 200);
+  --accent-foreground: oklch(0.24 0.04 235);
+
+  /* Coral instead of red traffic-light — alive, not aggressive */
+  --destructive: oklch(0.625 0.165 28);
+
+  /* Borders — sea-glass edge */
+  --border: oklch(0.9 0.014 215);
+  --input: oklch(0.9 0.014 215);
+  --ring: oklch(0.6 0.115 205);
+
+  /* Chart family — tide-pool inhabitants */
+  --chart-1: oklch(0.6 0.115 205);   /* shallows teal */
+  --chart-2: oklch(0.7 0.155 30);    /* coral */
+  --chart-3: oklch(0.72 0.105 165);  /* sea-grass jade */
+  --chart-4: oklch(0.76 0.105 75);   /* wet-sand ochre */
+  --chart-5: oklch(0.62 0.13 320);   /* anemone violet */
+
+  /* Sidebar — the pool itself: cooler, deeper, more saturated than chrome */
+  --sidebar: oklch(0.955 0.018 200);
+  --sidebar-foreground: oklch(0.205 0.04 235);
+  --sidebar-primary: oklch(0.55 0.12 205);
+  --sidebar-primary-foreground: oklch(0.99 0.002 215);
+  --sidebar-accent: oklch(0.92 0.028 200);
+  --sidebar-accent-foreground: oklch(0.24 0.04 235);
+  --sidebar-border: oklch(0.885 0.024 205);
+  --sidebar-ring: oklch(0.55 0.12 205);
 }
 
 /* ─── Dark theme: deep-sea bioluminescence ─── */
@@ -182,7 +205,7 @@
 /* ─── Custom scrollbar — gentle, theme-aligned ─── */
 * {
   scrollbar-width: thin;
-  scrollbar-color: oklch(0.82 0.01 250) transparent;
+  scrollbar-color: oklch(0.84 0.018 210) transparent;
 }
 
 .dark * {
@@ -199,7 +222,7 @@
 }
 
 *::-webkit-scrollbar-thumb {
-  background-color: oklch(0.82 0.01 250);
+  background-color: oklch(0.84 0.018 210);
   border-radius: 9999px;
 }
 
@@ -208,7 +231,7 @@
 }
 
 *::-webkit-scrollbar-thumb:hover {
-  background-color: oklch(0.72 0.02 250);
+  background-color: oklch(0.74 0.03 210);
 }
 
 .dark *::-webkit-scrollbar-thumb:hover {
@@ -242,12 +265,17 @@
   background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
 }
 
-/* ─── Gradient mesh background for sidebar ─── */
+/* ─── Gradient mesh background for sidebar ───
+ *
+ * Light: a tide pool — sunlit teal at the bottom, a hint of coral at
+ * the top edge, jade in the deepest spot. Sub­tle, never saturated.
+ * Dark: deep-sea bioluminescence (unchanged).
+ */
 .deep-sea-bg {
   background:
-    radial-gradient(ellipse at 20% 80%, oklch(0.88 0.06 200 / 50%) 0%, transparent 50%),
-    radial-gradient(ellipse at 80% 20%, oklch(0.9 0.05 330 / 35%) 0%, transparent 50%),
-    radial-gradient(ellipse at 50% 100%, oklch(0.85 0.04 250 / 30%) 0%, transparent 60%);
+    radial-gradient(ellipse at 20% 85%, oklch(0.9 0.045 205 / 65%) 0%, transparent 55%),
+    radial-gradient(ellipse at 85% 15%, oklch(0.92 0.04 30 / 35%) 0%, transparent 55%),
+    radial-gradient(ellipse at 50% 100%, oklch(0.86 0.04 165 / 28%) 0%, transparent 60%);
 }
 
 .dark .deep-sea-bg {

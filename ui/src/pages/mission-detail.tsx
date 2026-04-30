@@ -57,7 +57,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { useMission, useTasks, useSchedules, useActiveDelays } from "@polpo-ai/react";
-import type { MissionReport, TaskStatus, Task, ActiveDelay } from "@polpo-ai/react";
+import type { MissionReport, TaskStatus, Task, ActiveDelay, Mission, ScheduleEntry } from "@polpo-ai/react";
 import { toast } from "sonner";
 import { formatDistanceToNow, format } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -1603,22 +1603,43 @@ function RunsTimeline({
 
 // ── Main page ──
 
-export function MissionDetailPage() {
-  const { missionId } = useParams<{ missionId: string }>();
-  const navigate = useNavigate();
-  const { mission, report, isLoading, error, executeMission, resumeMission, abortMission } = useMission(missionId ?? "");
-  const { tasks: allTasks } = useTasks();
-  const { schedules } = useSchedules();
-  const { activeDelays: liveDelays } = useActiveDelays();
+/**
+ * Pure mission detail view — used by both the standalone page and the
+ * preview dialog (when intercepting a mission from chat). All API
+ * fetching is done by the caller; this component only renders.
+ *
+ * variant="page": back button + Execute/Resume/Abort actions
+ * variant="dialog": no back button, no API actions (Dialog has its own X
+ *   and the parent card carries Execute/Refine/Cancel)
+ */
+export interface MissionDetailViewProps {
+  mission: Mission;
+  report?: MissionReport;
+  groupTasks: Task[];
+  liveDelays: ActiveDelay[];
+  scheduleEntry?: ScheduleEntry;
+  variant?: "page" | "dialog";
+  navigate: (path: string) => void;
+  onBack?: () => void;
+  onExecute?: () => Promise<unknown>;
+  onResume?: () => Promise<unknown>;
+  onAbort?: () => Promise<unknown>;
+}
 
-  const parsed = useMemo(() => mission ? parseMissionData(mission.data) : null, [mission]);
-
-  // Match live tasks to this mission's group
-  const missionGroup = mission?.name;
-  const groupTasks = useMemo(
-    () => missionGroup ? allTasks.filter(t => t.group === missionGroup) : [],
-    [allTasks, missionGroup]
-  );
+export function MissionDetailView({
+  mission,
+  report,
+  groupTasks,
+  liveDelays,
+  scheduleEntry,
+  variant = "page",
+  navigate,
+  onBack,
+  onExecute,
+  onResume,
+  onAbort,
+}: MissionDetailViewProps) {
+  const parsed = useMemo(() => parseMissionData(mission.data), [mission.data]);
 
   const findLiveTask = useCallback(
     (title: string) => groupTasks.find(t => t.title === title),
@@ -1631,33 +1652,26 @@ export function MissionDetailPage() {
   const totalCount = parsed?.tasks.length ?? 0;
   const progress = totalCount > 0 ? Math.round((doneCount / totalCount) * 100) : 0;
 
-  const isRecurring = mission?.status === "recurring";
-  const isScheduled = mission?.status === "scheduled";
+  const isRecurring = mission.status === "recurring";
+  const isScheduled = mission.status === "scheduled";
   /** Blueprint mode: scheduled/recurring missions show task definitions as templates, not live instances */
   const isBlueprint = isRecurring || isScheduled;
 
   const findBlueprintTask = useCallback(() => undefined, []);
 
-  // Build active delay map and expired set for the current mission group
   const activeDelayMap = useMemo(() => {
-    if (!missionGroup) return new Map<string, ActiveDelay>();
     const map = new Map<string, ActiveDelay>();
     for (const d of liveDelays) {
-      if (d.group === missionGroup) map.set(d.delayName, d);
+      if (d.group === mission.name) map.set(d.delayName, d);
     }
     return map;
-  }, [liveDelays, missionGroup]);
+  }, [liveDelays, mission.name]);
 
-  // Expired delays: tasks in blocksTasks that are already running/done indicate the delay expired.
-  // We detect this from groupTasks — if ALL blocksTasks of a delay are no longer "pending"/"assigned", it expired.
   const expiredDelays = useMemo(() => {
     const set = new Set<string>();
-    if (!parsed?.delays || !missionGroup) return set;
+    if (!parsed?.delays) return set;
     for (const dl of parsed.delays) {
-      // If it's currently active, it hasn't expired yet
       if (activeDelayMap.has(dl.name)) continue;
-      // If any afterTask is done, the delay was at least triggered.
-      // If all afterTasks are done/failed and it's NOT in activeDelayMap, it must have expired.
       const allAfterDone = dl.afterTasks.every(t => {
         const live = groupTasks.find(gt => gt.title === t);
         return live && (live.status === "done" || live.status === "failed");
@@ -1665,13 +1679,9 @@ export function MissionDetailPage() {
       if (allAfterDone) set.add(dl.name);
     }
     return set;
-  }, [parsed?.delays, missionGroup, activeDelayMap, groupTasks]);
+  }, [parsed?.delays, activeDelayMap, groupTasks]);
 
-  const scheduleEntry = useMemo(
-    () => missionId ? schedules.find((s: { missionId: string }) => s.missionId === missionId) : undefined,
-    [schedules, missionId],
-  );
-  const hasScheduleInfo = !!(mission?.schedule || mission?.deadline || mission?.endDate || mission?.qualityThreshold != null || scheduleEntry);
+  const hasScheduleInfo = !!(mission.schedule || mission.deadline || mission.endDate || mission.qualityThreshold != null || scheduleEntry);
 
   const [actionPending, setActionPending] = useState<string | null>(null);
   const handleAction = async (action: () => Promise<unknown>, label: string) => {
@@ -1687,38 +1697,20 @@ export function MissionDetailPage() {
     }
   };
 
-  if (isLoading) {
-    return (
-      <div className="flex items-center justify-center h-full">
-        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-      </div>
-    );
-  }
-
-  if (error || !mission) {
-    return (
-      <div className="flex flex-col items-center justify-center h-full gap-3 text-muted-foreground">
-        <AlertTriangle className="h-10 w-10 opacity-40" />
-        <p className="text-sm">Mission not found</p>
-        <Button variant="outline" size="sm" onClick={() => navigate("/missions")}>
-          <ArrowLeft className="h-3.5 w-3.5 mr-1.5" />
-          Back to Missions
-        </Button>
-      </div>
-    );
-  }
-
   const style = missionStatusStyles[mission.status];
   const StatusIcon = style.icon;
+  const isPage = variant === "page";
 
   return (
     <div className="flex flex-col flex-1 min-h-0 gap-4">
       {/* Back + title bar */}
       <div className="flex items-center justify-between shrink-0">
         <div className="flex items-center gap-3 min-w-0">
-          <Button variant="ghost" size="sm" onClick={() => navigate("/missions")} className="shrink-0">
-            <ArrowLeft className="h-4 w-4" />
-          </Button>
+          {isPage && onBack && (
+            <Button variant="ghost" size="sm" onClick={onBack} className="shrink-0">
+              <ArrowLeft className="h-4 w-4" />
+            </Button>
+          )}
           <div className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-lg", style.bg)}>
             <StatusIcon className={cn("h-4 w-4", style.color, mission.status === "active" && "animate-spin")} />
           </div>
@@ -1750,18 +1742,18 @@ export function MissionDetailPage() {
               )}
             </div>
           )}
-          {mission.status === "draft" && (
-            <Button size="sm" disabled={!!actionPending} onClick={() => handleAction(executeMission, "Mission executed")}>
+          {mission.status === "draft" && onExecute && (
+            <Button size="sm" disabled={!!actionPending} onClick={() => handleAction(onExecute, "Mission executed")}>
               {actionPending === "Mission executed" ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Play className="h-3.5 w-3.5 mr-1.5" />} Execute
             </Button>
           )}
-          {(mission.status === "active" || mission.status === "failed") && (
-            <Button variant="outline" size="sm" disabled={!!actionPending} onClick={() => handleAction(() => resumeMission(), "Mission resumed")}>
+          {(mission.status === "active" || mission.status === "failed") && onResume && (
+            <Button variant="outline" size="sm" disabled={!!actionPending} onClick={() => handleAction(onResume, "Mission resumed")}>
               {actionPending === "Mission resumed" ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5 mr-1.5" />} Resume
             </Button>
           )}
-          {mission.status === "active" && (
-            <Button variant="outline" size="sm" className="text-red-400 hover:text-red-500" disabled={!!actionPending} onClick={() => handleAction(abortMission, "Mission aborted")}>
+          {mission.status === "active" && onAbort && (
+            <Button variant="outline" size="sm" className="text-red-400 hover:text-red-500" disabled={!!actionPending} onClick={() => handleAction(onAbort, "Mission aborted")}>
               {actionPending === "Mission aborted" ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <XCircle className="h-3.5 w-3.5 mr-1.5" />} Abort
             </Button>
           )}
@@ -2105,5 +2097,65 @@ export function MissionDetailPage() {
         )}
       </Tabs>
     </div>
+  );
+}
+
+/**
+ * Standalone page wrapper — fetches mission state via API and renders
+ * the shared MissionDetailView with full action handlers.
+ */
+export function MissionDetailPage() {
+  const { missionId } = useParams<{ missionId: string }>();
+  const navigate = useNavigate();
+  const { mission, report, isLoading, error, executeMission, resumeMission, abortMission } = useMission(missionId ?? "");
+  const { tasks: allTasks } = useTasks();
+  const { schedules } = useSchedules();
+  const { activeDelays: liveDelays } = useActiveDelays();
+
+  const groupTasks = useMemo(
+    () => mission ? allTasks.filter(t => t.group === mission.name) : [],
+    [allTasks, mission],
+  );
+
+  const scheduleEntry = useMemo(
+    () => missionId ? schedules.find((s: ScheduleEntry) => s.missionId === missionId) : undefined,
+    [schedules, missionId],
+  );
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  if (error || !mission) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full gap-3 text-muted-foreground">
+        <AlertTriangle className="h-10 w-10 opacity-40" />
+        <p className="text-sm">Mission not found</p>
+        <Button variant="outline" size="sm" onClick={() => navigate("/missions")}>
+          <ArrowLeft className="h-3.5 w-3.5 mr-1.5" />
+          Back to Missions
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <MissionDetailView
+      mission={mission}
+      report={report}
+      groupTasks={groupTasks}
+      liveDelays={liveDelays}
+      scheduleEntry={scheduleEntry}
+      variant="page"
+      navigate={navigate}
+      onBack={() => navigate("/missions")}
+      onExecute={executeMission}
+      onResume={() => resumeMission()}
+      onAbort={abortMission}
+    />
   );
 }

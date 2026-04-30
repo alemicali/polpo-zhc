@@ -22,6 +22,7 @@ import {
   Volume2,
   Pause,
   Loader2,
+  Maximize2,
   X,
   Play,
   Save,
@@ -79,6 +80,7 @@ import {
 } from "@/components/ai-elements/prompt-input";
 import type { PromptInputMessage } from "@/components/ai-elements/prompt-input";
 import { useChatState, useChatActions, useChatInputDisabled } from "@/hooks/chat-context";
+import { MissionPreviewDialog } from "@/components/mission-preview-dialog";
 import type { AskUserQuestion, AskUserAnswer, MessageSegment, ToolCallInfo, MissionPreviewData, MissionPreviewAction, VaultPreviewData, VaultPreviewAction } from "@/hooks/use-polpo";
 import { FilePreviewDialog, useFilePreview, mimeFromPath } from "@/components/shared/file-preview";
 import { ToolCallList, ToolInvocation, ToolCallGroup } from "@/components/ai-elements/tool";
@@ -408,6 +410,7 @@ function MissionPreviewCard({
   const [feedback, setFeedback] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [expandedTasks, setExpandedTasks] = useState<Set<number>>(new Set());
+  const [fullViewOpen, setFullViewOpen] = useState(false);
 
   const mission = preview.data as MissionDataShape;
   const tasks = mission?.tasks ?? [];
@@ -471,10 +474,31 @@ function MissionPreviewCard({
             )}
           </p>
         </div>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 shrink-0 text-muted-foreground hover:text-foreground"
+              onClick={() => setFullViewOpen(true)}
+              aria-label="Open full mission view"
+            >
+              <Maximize2 className="h-3.5 w-3.5" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom" className="text-xs">Open full view</TooltipContent>
+        </Tooltip>
         <Badge variant="outline" className="text-[10px] shrink-0">
           Preview
         </Badge>
       </div>
+
+      <MissionPreviewDialog
+        preview={preview}
+        open={fullViewOpen}
+        onOpenChange={setFullViewOpen}
+      />
 
       {/* Task list — interleaved with checkpoints, delays, quality gates at correct positions */}
       <div className="px-4 py-3 space-y-1 max-h-80 overflow-y-auto">
@@ -1014,10 +1038,12 @@ function SpeakAction({ text }: { text: string }) {
       const headers: Record<string, string> = { "Content-Type": "application/json" };
       if (config.apiKey) headers["Authorization"] = `Bearer ${config.apiKey}`;
       const language = (navigator.language || "en").split("-")[0];
+      // Giuseppe (it-IT) is multilingual — handles IT + EN + FR + ES well in one voice.
+      const voice = "it-IT-GiuseppeMultilingualNeural";
       const res = await fetch(`${base}/api/v1/audio/speak`, {
         method: "POST",
         headers,
-        body: JSON.stringify({ text, language }),
+        body: JSON.stringify({ text, language, voice }),
       });
       if (!res.ok) {
         let msg = `TTS failed (${res.status})`;
