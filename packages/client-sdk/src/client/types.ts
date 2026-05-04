@@ -448,7 +448,7 @@ export interface MissionReport {
 // === Notifications ===
 
 export type NotificationSeverity = "info" | "warning" | "critical";
-export type NotificationChannelType = "slack" | "email" | "telegram" | "whatsapp" | "webhook";
+export type NotificationChannelType = "slack" | "email" | "telegram" | "whatsapp" | "webhook" | "push";
 export type NotificationStatus = "sent" | "failed";
 
 export type DmPolicy = "pairing" | "allowlist" | "open" | "disabled";
@@ -471,6 +471,11 @@ export interface NotificationChannelConfig {
   profileDir?: string;
   url?: string;
   headers?: Record<string, string>;
+  vapidPublicKey?: string;
+  vapidPrivateKey?: string;
+  vapidSubject?: string;
+  ttl?: number;
+  urgency?: "very-low" | "low" | "normal" | "high";
   host?: string;
   port?: number;
   from?: string;

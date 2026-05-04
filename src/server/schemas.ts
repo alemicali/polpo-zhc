@@ -293,7 +293,7 @@ const ChannelGatewaySchema = z.object({
 }).strict();
 
 export const NotificationChannelConfigSchema = z.object({
-  type: z.enum(["slack", "email", "telegram", "whatsapp", "webhook"]),
+  type: z.enum(["slack", "email", "telegram", "whatsapp", "webhook", "push"]),
   // Slack
   webhookUrl: z.string().url().optional(),
   // Email
@@ -312,6 +312,12 @@ export const NotificationChannelConfigSchema = z.object({
   // Webhook
   url: z.string().url().optional(),
   headers: z.record(z.string(), z.string()).optional(),
+  // Push
+  vapidPublicKey: z.string().optional(),
+  vapidPrivateKey: z.string().optional(),
+  vapidSubject: z.string().optional(),
+  ttl: z.number().int().min(0).optional(),
+  urgency: z.enum(["very-low", "low", "normal", "high"]).optional(),
   // Gateway
   gateway: ChannelGatewaySchema.optional(),
 });

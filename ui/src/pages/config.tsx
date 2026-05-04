@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -69,6 +69,13 @@ import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { JsonBlock } from "@/components/json-block";
 import { config as appConfig } from "@/lib/config";
+import {
+  disablePushNotifications,
+  enablePushNotifications,
+  getCurrentPushState,
+  getPushSupportState,
+  type PushSubscriptionState,
+} from "@/lib/push-notifications";
 import { AuthStep, OAuthFlow, ApiKeyStep } from "@/components/shared/provider-auth";
 import type { Provider as AuthProvider, OAuthProvider } from "@/components/shared/provider-auth";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
@@ -387,9 +394,10 @@ const CHANNEL_META: Record<string, { label: string; icon: LucideIcon; color: str
   slack:    { label: "Slack", icon: MessageSquare, color: "border-l-green-500", description: "Post to a Slack channel via webhook" },
   email:    { label: "Email", icon: Mail, color: "border-l-amber-500", description: "Send email via Resend, SendGrid, or SMTP" },
   webhook:  { label: "Webhook", icon: Link2, color: "border-l-violet-500", description: "POST JSON to any HTTP endpoint" },
+  push:     { label: "Push", icon: Monitor, color: "border-l-fuchsia-500", description: "Send PWA push notifications to subscribed browsers" },
 };
 
-const ALL_CHANNEL_TYPES: NotificationChannelType[] = ["telegram", "slack", "email", "webhook"];
+const ALL_CHANNEL_TYPES: NotificationChannelType[] = ["telegram", "slack", "email", "webhook", "push"];
 
 /** Default empty config per channel type */
 function defaultChannelConfig(type: NotificationChannelType): NotificationChannelConfig {
@@ -398,6 +406,7 @@ function defaultChannelConfig(type: NotificationChannelType): NotificationChanne
     case "slack":    return { type, webhookUrl: "" };
     case "email":    return { type, provider: "resend", apiKey: "", from: "", to: [] };
     case "webhook":  return { type, url: "" };
+    case "push":     return { type, vapidSubject: "mailto:hello@polpo.ai", ttl: 3600, urgency: "normal" };
     default:         return { type };
   }
 }
@@ -507,6 +516,35 @@ function ChannelForm({ config, onChange }: {
           </Field>
         </>
       )}
+
+      {config.type === "push" && (
+        <>
+          <Field label="VAPID Subject" hint="Contact URI sent to push services. Use mailto: or https:.">
+            <Input className="h-8 text-xs font-mono" placeholder="mailto:ops@example.com" value={config.vapidSubject ?? ""} onChange={(e) => set({ vapidSubject: e.target.value || undefined })} />
+          </Field>
+          <div className="grid grid-cols-2 gap-2">
+            <Field label="TTL Seconds" hint="How long push services may retain the notification.">
+              <Input className="h-8 text-xs font-mono" type="number" min={0} value={config.ttl ?? 3600} onChange={(e) => set({ ttl: e.target.value ? Number(e.target.value) : undefined })} />
+            </Field>
+            <Field label="Urgency">
+              <Select value={config.urgency ?? "normal"} onValueChange={(v) => set({ urgency: v as NotificationChannelConfig["urgency"] })}>
+                <SelectTrigger className="h-8 text-xs w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="very-low" className="text-xs">Very low</SelectItem>
+                  <SelectItem value="low" className="text-xs">Low</SelectItem>
+                  <SelectItem value="normal" className="text-xs">Normal</SelectItem>
+                  <SelectItem value="high" className="text-xs">High</SelectItem>
+                </SelectContent>
+              </Select>
+            </Field>
+          </div>
+          <p className="text-[10px] text-muted-foreground leading-tight">
+            VAPID keys are generated once and stored in .polpo/push.json. Override them with config values or env references only when you need stable keys across deployments.
+          </p>
+        </>
+      )}
     </div>
   );
 }
@@ -572,6 +610,13 @@ function ChannelCard({ name, ch, onEdit, onDelete, onTest, deleting, testing, te
             )}
           </div>
         )}
+        {ch.type === "push" && (
+          <div className="space-y-0.5">
+            <Row label="VAPID" value={ch.vapidPublicKey || ch.vapidPrivateKey ? "custom keys" : "project generated"} mono />
+            <Row label="TTL" value={`${ch.ttl ?? 3600}s`} mono />
+            <Row label="Urgency" value={<Badge variant="secondary" className="text-[10px]">{ch.urgency ?? "normal"}</Badge>} />
+          </div>
+        )}
 
         {/* Gateway */}
         {gateway && (
@@ -596,6 +641,77 @@ function ChannelCard({ name, ch, onEdit, onDelete, onTest, deleting, testing, te
           <Button variant="ghost" size="sm" className="h-7 text-[11px] px-2 text-muted-foreground hover:text-destructive" onClick={onDelete} disabled={deleting}>
             {deleting ? <Loader2 className="h-3 w-3 animate-spin" /> : <X className="h-3 w-3" />}
           </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function PushBrowserControls({ hasPushChannel }: { hasPushChannel: boolean }) {
+  const [state, setState] = useState<PushSubscriptionState>(() => getPushSupportState());
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    getCurrentPushState()
+      .then((next) => { if (alive) setState(next); })
+      .catch(() => undefined);
+    return () => { alive = false; };
+  }, []);
+
+  const enable = async () => {
+    setBusy(true);
+    try {
+      const next = await enablePushNotifications();
+      setState(next);
+      toast.success("Push notifications enabled for this browser");
+    } catch (err) {
+      toast.error((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const disable = async () => {
+    setBusy(true);
+    try {
+      const next = await disablePushNotifications();
+      setState(next);
+      toast.success("Push notifications disabled for this browser");
+    } catch (err) {
+      toast.error((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Card className="bg-card/70 border-border/40 py-0">
+      <CardContent className="p-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0 space-y-1">
+          <div className="flex items-center gap-2">
+            <Monitor className="h-3.5 w-3.5 text-muted-foreground" />
+            <span className="text-sm font-semibold">This browser</span>
+            <Badge variant={state.subscribed ? "default" : "outline"} className="text-[10px]">
+              {state.subscribed ? "Subscribed" : state.permission === "denied" ? "Blocked" : "Not subscribed"}
+            </Badge>
+          </div>
+          <p className="text-[11px] text-muted-foreground">
+            {state.supported
+              ? `${state.subscriptionCount} saved browser subscription${state.subscriptionCount === 1 ? "" : "s"}`
+              : "Requires HTTPS or localhost, Service Worker, Notification API, and PushManager"}
+          </p>
+        </div>
+        <div className="flex gap-2">
+          {state.subscribed ? (
+            <Button variant="outline" size="sm" className="h-8 text-xs" onClick={disable} disabled={busy}>
+              {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <X className="h-3 w-3" />} Disable
+            </Button>
+          ) : (
+            <Button size="sm" className="h-8 text-xs" onClick={enable} disabled={busy || !state.supported || !hasPushChannel || state.permission === "denied"}>
+              {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Bell className="h-3 w-3" />} Enable
+            </Button>
+          )}
         </div>
       </CardContent>
     </Card>
@@ -696,9 +812,24 @@ function ChannelsTab({ settings, onUpdateConfig }: {
 
   const configuredTypes = new Set(Object.values(channels).map((c) => c.type));
   const unconfiguredTypes = ALL_CHANNEL_TYPES.filter((t) => !configuredTypes.has(t));
+  const hasPushChannel = Object.values(channels).some((ch) => ch.type === "push");
 
   return (
     <div className="space-y-6">
+      <section>
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+            <Monitor className="h-3.5 w-3.5" /> PWA Push
+          </h3>
+        </div>
+        <PushBrowserControls hasPushChannel={hasPushChannel} />
+        {!hasPushChannel && (
+          <p className="mt-2 text-[11px] text-muted-foreground">
+            Add a Push channel first, then enable notifications for this browser.
+          </p>
+        )}
+      </section>
+
       {/* Configured channels */}
       <section>
         <div className="flex items-center justify-between mb-3">

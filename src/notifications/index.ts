@@ -10,6 +10,7 @@ import { TelegramChannel } from "./channels/telegram.js";
 import { EmailChannel } from "./channels/email.js";
 import { WebhookChannel } from "./channels/webhook.js";
 import { WhatsAppChannel } from "./channels/whatsapp.js";
+import { PushChannel } from "./channels/push.js";
 
 export type { NotificationChannel, Notification, OutcomeAttachment } from "./types.js";
 export type { NotificationStore, NotificationRecord, NotificationStatus } from "../core/notification-store.js";
@@ -709,6 +710,9 @@ export class NotificationRouter {
         return new WhatsAppChannel(config, this.polpoDir);
       case "webhook":
         return new WebhookChannel(config);
+      case "push":
+        if (!this.polpoDir) throw new Error("Push channel requires polpoDir (pass it via init())");
+        return new PushChannel(config, this.polpoDir);
       default:
         throw new Error(`Unknown channel type: ${config.type}`);
     }
@@ -910,7 +914,7 @@ function sanitizeChannelError(err: unknown, config: NotificationChannelConfig): 
   let msg = raw.replace(/\s+/g, " ").trim();
 
   // Redact known secret values present in the config
-  const secrets = [config.apiKey, config.botToken, config.webhookUrl, config.url]
+  const secrets = [config.apiKey, config.botToken, config.webhookUrl, config.url, config.vapidPrivateKey]
     .filter((v): v is string => typeof v === "string" && v.length > 6);
   for (const secret of secrets) {
     if (msg.includes(secret)) {

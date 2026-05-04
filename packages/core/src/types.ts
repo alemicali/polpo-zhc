@@ -910,7 +910,7 @@ export interface PresenceEntry {
 
 // === Notification System ===
 
-export type NotificationChannelType = "slack" | "email" | "telegram" | "whatsapp" | "webhook";
+export type NotificationChannelType = "slack" | "email" | "telegram" | "whatsapp" | "webhook" | "push";
 
 export interface NotificationChannelConfig {
   type: NotificationChannelType;
@@ -932,6 +932,16 @@ export interface NotificationChannelConfig {
   url?: string;
   /** Webhook: custom headers. */
   headers?: Record<string, string>;
+  /** Push: VAPID public key. Defaults to the generated project key. */
+  vapidPublicKey?: string;
+  /** Push: VAPID private key. Defaults to the generated project key. */
+  vapidPrivateKey?: string;
+  /** Push: VAPID subject ("mailto:" or "https:" contact). */
+  vapidSubject?: string;
+  /** Push: message TTL in seconds. */
+  ttl?: number;
+  /** Push: delivery urgency. */
+  urgency?: "very-low" | "low" | "normal" | "high";
   /** SMTP host. */
   host?: string;
   /** SMTP port. */

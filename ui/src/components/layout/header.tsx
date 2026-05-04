@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useTheme } from "@/hooks/use-theme";
 import { usePalette, PALETTES } from "@/lib/palette";
+import { PwaInstallQrButton } from "./pwa-install-qr-button";
 
 const titles: Record<string, string> = {
   "/dashboard": "Dashboard",
@@ -78,6 +79,7 @@ export function Header() {
 
       {/* Actions */}
       <div className="flex items-center gap-2">
+        <PwaInstallQrButton />
         {/* GitHub */}
         <Tooltip>
           <TooltipTrigger asChild>

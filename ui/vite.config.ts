@@ -43,6 +43,7 @@ const pwaPlugin = VitePWA({
     ],
   },
   workbox: {
+    importScripts: ["push-handlers.js"],
     navigateFallback: "/index.html",
     globPatterns: ["**/*.{js,css,html,svg,woff2}"],
     navigateFallbackDenylist: [/^\/api\//, /^\/v1\//],
