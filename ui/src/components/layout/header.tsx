@@ -61,11 +61,11 @@ export function Header() {
   const isOnChatPage = pathname === "/chat";
 
   return (
-    <header className="flex h-14 shrink-0 items-center justify-between border-b border-border/50 bg-background/80 backdrop-blur-md px-5 lg:px-8 pt-safe">
+    <header className="min-h-safe-head flex shrink-0 items-center justify-between border-b border-border/50 bg-background/80 px-4 pt-safe-head backdrop-blur-md sm:px-5 lg:min-h-14 lg:px-8 lg:pt-0">
       {/* Mobile: logo + title */}
-      <div className="flex items-center gap-2.5 lg:hidden">
+      <div className="flex min-w-0 items-center gap-2.5 lg:hidden">
         <span className="text-lg">🐙</span>
-        <span className="text-sm font-bold tracking-tight">{title}</span>
+        <span className="truncate text-sm font-bold tracking-tight">{title}</span>
       </div>
 
       {/* Desktop: page title */}
@@ -78,7 +78,7 @@ export function Header() {
       </div>
 
       {/* Actions */}
-      <div className="flex items-center gap-2">
+      <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
         <PwaInstallQrButton />
         {/* GitHub */}
         <Tooltip>

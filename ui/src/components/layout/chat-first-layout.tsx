@@ -92,11 +92,11 @@ function ChatPanelHeader() {
   const chatActions = useChatActions();
 
   return (
-    <header className="flex h-14 shrink-0 items-center justify-between border-b border-border/50 bg-background/80 backdrop-blur-md px-4">
-      <div className="flex items-center gap-2.5">
+    <header className="min-h-safe-head flex shrink-0 items-center justify-between border-b border-border/50 bg-background/80 px-4 pt-safe-head backdrop-blur-md lg:min-h-14 lg:pt-0">
+      <div className="flex min-w-0 items-center gap-2.5">
         <span className="text-lg">🐙</span>
-        <div>
-          <h2 className="text-sm font-bold tracking-tight">ZHC by Polpo</h2>
+        <div className="min-w-0">
+          <h2 className="truncate text-sm font-bold tracking-tight">ZHC by Polpo</h2>
           <p className="text-[9px] font-mono uppercase tracking-widest text-muted-foreground/50 leading-none">
             {info?.project ?? "Agent Wrangler"}
           </p>
@@ -150,7 +150,7 @@ const PagesPanelHeader = memo(function PagesPanelHeader() {
   const { palette, setPalette } = usePalette();
 
   return (
-    <header className="flex h-14 shrink-0 items-center bg-background/80 backdrop-blur-md px-3 gap-2">
+    <header className="min-h-safe-head flex shrink-0 items-center gap-2 bg-background/80 px-3 pt-safe-head backdrop-blur-md lg:min-h-14 lg:pt-0">
       {/* Tab icons — plain buttons with navigate() */}
       <div className="flex items-center gap-0.5 flex-1 min-w-0">
         {tabs.map(({ path, icon: Icon, label }) => {
@@ -161,9 +161,9 @@ const PagesPanelHeader = memo(function PagesPanelHeader() {
               title={label}
               onClick={() => navigate(path)}
               className={cn(
-                "inline-flex items-center justify-center rounded-lg shrink-0 transition-all gap-1.5",
+                "inline-flex items-center justify-center rounded-lg shrink-0 transition-colors gap-1.5",
                 isActive
-                  ? "h-8 px-2.5 text-primary bg-primary/10 hover:bg-primary/15"
+                  ? "h-8 px-2.5 text-primary bg-primary/8 hover:bg-primary/10"
                   : "h-8 w-8 text-muted-foreground hover:text-foreground hover:bg-accent/50",
               )}
             >

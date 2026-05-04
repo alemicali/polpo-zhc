@@ -12,11 +12,11 @@ export function SectionHeader({ title, icon: Icon, count, className }: {
   className?: string;
 }) {
   return (
-    <div className={cn("flex items-center gap-2 mb-3", className)}>
-      <Icon className="h-3.5 w-3.5 text-primary" />
-      <h3 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">{title}</h3>
+    <div className={cn("mb-3 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1", className)}>
+      <Icon className="h-3.5 w-3.5 shrink-0 text-primary" />
+      <h3 className="min-w-0 break-words text-xs font-semibold uppercase tracking-wider text-muted-foreground sm:tracking-widest">{title}</h3>
       {count != null && count > 0 && (
-        <Badge variant="secondary" className="text-[9px] ml-1">{count}</Badge>
+        <Badge variant="secondary" className="ml-1 shrink-0 text-[9px]">{count}</Badge>
       )}
     </div>
   );

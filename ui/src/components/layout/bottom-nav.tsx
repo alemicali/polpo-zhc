@@ -50,30 +50,27 @@ export function BottomNav() {
 
   return (
     <>
-      <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-50 border-t border-border/40 bg-background/90 backdrop-blur-xl supports-[backdrop-filter]:bg-background/70 pb-safe px-safe">
-        <div className="flex h-16 items-stretch">
+      <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-50 bg-background/92 px-safe pb-safe pt-0.5 shadow-[0_-1px_12px_oklch(0_0_0_/_8%)] backdrop-blur-xl supports-[backdrop-filter]:bg-background/75">
+        <div className="flex h-[3.25rem] items-center">
           {primaryNav.map(({ to, icon: Icon, label }) => (
             <NavLink
               key={to}
               to={to}
               className={({ isActive }) =>
                 cn(
-                  "flex flex-1 flex-col items-center justify-center gap-0.5 text-[10px] font-medium min-h-[44px] transition-all duration-200 relative",
+                  "relative flex min-h-11 flex-1 flex-col items-center justify-center gap-0.5 rounded-xl px-1 text-[10px] font-medium transition-colors duration-200",
                   isActive
-                    ? "text-primary"
+                    ? "bg-primary/8 text-primary"
                     : "text-muted-foreground active:text-primary/70"
                 )
               }
             >
               {({ isActive }) => (
                 <>
-                  <Icon className={cn("h-5 w-5", isActive && "drop-shadow-[0_0_6px_oklch(0.7_0.15_200_/_40%)]")} />
-                  <span className="tracking-wide">{label}</span>
+                  <Icon className={cn("h-5 w-5", isActive && "drop-shadow-[0_0_5px_oklch(0.7_0.15_200_/_28%)]")} />
+                  <span className="max-w-full truncate tracking-wide">{label}</span>
                   {to === "/dashboard" && connectionStatus === "connected" && (
-                    <span className="absolute top-2 right-1/2 translate-x-4 h-1.5 w-1.5 rounded-full bg-teal-400 bio-pulse" />
-                  )}
-                  {isActive && (
-                    <span className="absolute top-0 left-1/2 -translate-x-1/2 h-0.5 w-10 rounded-full bg-primary shadow-[0_0_8px_oklch(0.7_0.15_200_/_50%)]" />
+                    <span className="absolute top-2 right-1/2 h-1.5 w-1.5 translate-x-4 rounded-full bg-teal-400 bio-pulse" />
                   )}
                 </>
               )}
@@ -84,17 +81,14 @@ export function BottomNav() {
             type="button"
             onClick={() => setMoreOpen(true)}
             className={cn(
-              "flex flex-1 flex-col items-center justify-center gap-0.5 text-[10px] font-medium min-h-[44px] transition-all duration-200 relative",
+              "relative flex min-h-11 flex-1 flex-col items-center justify-center gap-0.5 rounded-xl px-1 text-[10px] font-medium transition-colors duration-200",
               isSecondaryActive
-                ? "text-primary"
+                ? "bg-primary/8 text-primary"
                 : "text-muted-foreground active:text-primary/70"
             )}
           >
             <MoreHorizontal className="h-5 w-5" />
             <span className="tracking-wide">More</span>
-            {isSecondaryActive && (
-              <span className="absolute top-0 left-1/2 -translate-x-1/2 h-0.5 w-10 rounded-full bg-primary shadow-[0_0_8px_oklch(0.7_0.15_200_/_50%)]" />
-            )}
           </button>
         </div>
       </nav>

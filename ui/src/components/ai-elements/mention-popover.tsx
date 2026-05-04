@@ -99,6 +99,11 @@ export interface MentionPopoverProps {
 // Hook: useMentionTrigger
 // ────────────────────────────────────────────────────────────────────────────
 
+function isTouchMobileInput() {
+  if (typeof window === "undefined") return false;
+  return window.matchMedia("(pointer: coarse)").matches || window.innerWidth < 768;
+}
+
 function useMentionTrigger(textareaRef: RefObject<HTMLTextAreaElement | null>) {
   const [state, setState] = useState<TriggerState>({
     isOpen: false,
@@ -133,6 +138,11 @@ function useMentionTrigger(textareaRef: RefObject<HTMLTextAreaElement | null>) {
         return;
       }
       if (ch === "/") {
+        if (isTouchMobileInput()) {
+          close();
+          return;
+        }
+
         // Slash trigger requires beginning-of-line or whitespace before it
         const prev = i > 0 ? value[i - 1] : "\n";
         if (prev === " " || prev === "\n" || i === 0) {

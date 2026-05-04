@@ -474,10 +474,10 @@ function MissionPreviewCard({
   };
 
   return (
-    <div className="mt-3 rounded-xl border border-primary/20 bg-primary/[0.03] overflow-hidden">
+    <div className="mobile-no-x mt-3 overflow-hidden rounded-xl border border-primary/20 bg-primary/[0.03]">
       {/* Header */}
-      <div className="flex items-center gap-2 px-4 py-3 border-b border-primary/10 bg-primary/[0.02]">
-        <Target className="h-4 w-4 text-primary shrink-0" />
+      <div className="flex items-center gap-2 border-b border-primary/10 bg-primary/[0.02] px-3 py-2 sm:px-4 sm:py-3">
+        <Target className="h-3.5 w-3.5 shrink-0 text-primary sm:h-4 sm:w-4" />
         <div className="flex-1 min-w-0">
           <p className="text-sm font-semibold truncate">{preview.name || mission?.name || "Mission"}</p>
           <p className="text-[11px] text-muted-foreground">
@@ -493,7 +493,7 @@ function MissionPreviewCard({
               type="button"
               variant="ghost"
               size="icon"
-              className="h-7 w-7 shrink-0 text-muted-foreground hover:text-foreground"
+              className="h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground sm:h-7 sm:w-7"
               onClick={() => setFullViewOpen(true)}
               aria-label="Open full mission view"
             >
@@ -502,7 +502,7 @@ function MissionPreviewCard({
           </TooltipTrigger>
           <TooltipContent side="bottom" className="text-xs">Open full view</TooltipContent>
         </Tooltip>
-        <Badge variant="outline" className="text-[10px] shrink-0">
+        <Badge variant="outline" className="hidden shrink-0 text-[10px] sm:inline-flex">
           Preview
         </Badge>
       </div>
@@ -514,7 +514,7 @@ function MissionPreviewCard({
       />
 
       {/* Task list — interleaved with checkpoints, delays, quality gates at correct positions */}
-      <div className="px-4 py-3 space-y-1 max-h-80 overflow-y-auto">
+      <div className="max-h-56 space-y-0.5 overflow-y-auto px-3 py-2 sm:max-h-80 sm:space-y-1 sm:px-4 sm:py-3">
         {(() => {
           // Build a title→index map for positioning flow-control elements
           const titleIndex = new Map<string, number>();
@@ -575,11 +575,11 @@ function MissionPreviewCard({
             if (item.kind === "checkpoint") {
               const cp = item.data;
               return (
-                <div key={key} className="flex items-start gap-2 rounded-lg border border-amber-500/15 bg-amber-500/[0.03] px-3 py-2 ml-6">
-                  <PauseCircle className="h-3.5 w-3.5 text-amber-500 mt-0.5 shrink-0" />
+                <div key={key} className="ml-0 flex items-start gap-2 rounded-lg border border-amber-500/15 bg-amber-500/[0.03] px-2.5 py-1.5 sm:ml-6 sm:px-3 sm:py-2">
+                  <PauseCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-500" />
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <p className="text-sm font-medium">{cp.name}</p>
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                      <p className="min-w-0 text-sm font-medium leading-snug">{cp.name}</p>
                       <span className="text-[9px] font-medium uppercase tracking-wider text-amber-500">Checkpoint</span>
                     </div>
                     {cp.message && <p className="text-[11px] text-muted-foreground mt-0.5">{cp.message}</p>}
@@ -595,11 +595,11 @@ function MissionPreviewCard({
             if (item.kind === "delay") {
               const dl = item.data;
               return (
-                <div key={key} className="flex items-start gap-2 rounded-lg border border-blue-500/15 bg-blue-500/[0.03] px-3 py-2 ml-6">
+                <div key={key} className="ml-0 flex items-start gap-2 rounded-lg border border-blue-500/15 bg-blue-500/[0.03] px-2.5 py-1.5 sm:ml-6 sm:px-3 sm:py-2">
                   <Timer className="h-3.5 w-3.5 text-blue-500 mt-0.5 shrink-0" />
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <p className="text-sm font-medium">{dl.name}</p>
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                      <p className="min-w-0 text-sm font-medium leading-snug">{dl.name}</p>
                       <span className="text-[9px] font-medium uppercase tracking-wider text-blue-500">Delay</span>
                     </div>
                     {dl.message && <p className="text-[11px] text-muted-foreground mt-0.5">{dl.message}</p>}
@@ -615,11 +615,11 @@ function MissionPreviewCard({
             // gate
             const qg = item.data as MissionQualityGateShape;
             return (
-              <div key={key} className="flex items-start gap-2 rounded-lg border border-violet-500/15 bg-violet-500/[0.03] px-3 py-2 ml-6">
+              <div key={key} className="ml-0 flex items-start gap-2 rounded-lg border border-violet-500/15 bg-violet-500/[0.03] px-2.5 py-1.5 sm:ml-6 sm:px-3 sm:py-2">
                 <BarChart3 className="h-3.5 w-3.5 text-violet-500 mt-0.5 shrink-0" />
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <p className="text-sm font-medium">{qg.name}</p>
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                    <p className="min-w-0 text-sm font-medium leading-snug">{qg.name}</p>
                     <span className="text-[9px] font-medium uppercase tracking-wider text-violet-500">Quality Gate</span>
                   </div>
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-1">
@@ -668,7 +668,7 @@ function MissionPreviewCard({
               <div key={`task-${idx}`} className="rounded-lg transition-colors hover:bg-primary/[0.03]">
                 <button
                   type="button"
-                  className="flex items-start gap-2 py-2 px-1.5 w-full text-left"
+                  className="flex w-full items-start gap-2 px-1 py-1.5 text-left sm:px-1.5 sm:py-2"
                   onClick={() => toggleTask(idx)}
                 >
                   <span className="text-[11px] font-mono text-muted-foreground mt-0.5 w-5 text-right shrink-0">
@@ -676,7 +676,7 @@ function MissionPreviewCard({
                   </span>
                   <div className="flex-1 min-w-0">
                     <p className="font-medium text-sm leading-snug">{task.title}</p>
-                    <div className="flex items-center gap-3 mt-0.5">
+                    <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5">
                       <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
                         <User className="h-3 w-3" />
                         {task.assignTo}
@@ -762,11 +762,11 @@ function MissionPreviewCard({
 
       {/* Refine feedback input */}
       {refineMode && (
-        <div className="px-4 pb-3 border-t border-primary/10">
+        <div className="border-t border-primary/10 px-3 pb-3 sm:px-4">
           <p className="text-xs text-muted-foreground mt-2 mb-1.5">What would you like to change?</p>
           <Textarea
             placeholder="e.g., Add a task for writing tests, change the agent assignment..."
-            className="text-sm min-h-[60px] bg-background/60"
+            className="min-h-[60px] bg-background/60 text-base sm:text-sm"
             value={feedback}
             onChange={(e) => setFeedback(e.target.value)}
             onKeyDown={(e) => {
@@ -805,24 +805,24 @@ function MissionPreviewCard({
 
       {/* Action buttons — Cancel left, actions right */}
       {!refineMode && (
-        <div className="flex items-center gap-2 px-4 py-3 border-t border-primary/10 bg-primary/[0.02]">
+        <div className="grid grid-cols-2 gap-2 border-t border-primary/10 bg-primary/[0.02] px-3 py-2.5 sm:flex sm:items-center sm:px-4 sm:py-3">
           <Button
             variant="ghost"
             size="sm"
             disabled={disabled || submitting}
             onClick={() => handleAction("cancel")}
-            className="gap-1.5 text-muted-foreground hover:text-destructive"
+            className="w-full gap-1.5 text-muted-foreground hover:text-destructive sm:w-auto"
           >
             <Ban className="h-3.5 w-3.5" />
             Cancel
           </Button>
-          <div className="flex-1" />
+          <div className="hidden flex-1 sm:block" />
           <Button
             variant="outline"
             size="sm"
             disabled={disabled || submitting}
             onClick={() => setRefineMode(true)}
-            className="gap-1.5"
+            className="w-full gap-1.5 sm:w-auto"
           >
             <RefreshCw className="h-3.5 w-3.5" />
             Refine
@@ -832,16 +832,17 @@ function MissionPreviewCard({
             size="sm"
             disabled={disabled || submitting}
             onClick={() => handleAction("draft")}
-            className="gap-1.5"
+            className="w-full gap-1.5 sm:w-auto"
           >
             <Save className="h-3.5 w-3.5" />
-            Save Draft
+            <span className="sm:hidden">Draft</span>
+            <span className="hidden sm:inline">Save Draft</span>
           </Button>
           <Button
             size="sm"
             disabled={disabled || submitting}
             onClick={() => handleAction("execute")}
-            className="gap-1.5"
+            className="w-full gap-1.5 sm:w-auto"
           >
             {submitting ? (
               <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />

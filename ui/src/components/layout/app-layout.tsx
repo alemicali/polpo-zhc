@@ -15,7 +15,7 @@ export function AppLayout() {
 
   if (layoutMode === "chat-first") {
     return (
-      <div className="flex h-[100dvh] w-screen overflow-hidden bg-background text-foreground">
+      <div className="flex h-[100dvh] w-full max-w-full overflow-hidden bg-background text-foreground">
         <ChatFirstLayout />
         <BottomNav />
         <ChatNavigationEffects />
@@ -24,7 +24,7 @@ export function AppLayout() {
   }
 
   return (
-    <div className="flex h-[100dvh] w-screen overflow-hidden bg-background text-foreground">
+    <div className="flex h-[100dvh] w-full max-w-full overflow-hidden bg-background text-foreground">
       <div className="hidden lg:flex">
         <Sidebar />
       </div>
