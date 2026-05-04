@@ -115,6 +115,7 @@ export interface TaskActions {
   retry: (id: string) => void;
   kill: (id: string) => void;
   queue: (id: string) => void;
+  moveToKanbanColumn: (task: Task, columnKey: string) => void;
   click: (id: string) => void;
 }
 
@@ -339,6 +340,24 @@ export function useTasksPageState() {
     }
   }, [client, refetch]);
 
+  const handleMoveToKanbanColumn = useCallback(async (task: Task, columnKey: string) => {
+    if (columnKey !== "queued") {
+      toast.info("Only Draft → Queued is supported right now");
+      return;
+    }
+    if (task.status !== "draft") {
+      toast.info("Only draft tasks can be queued from the board");
+      return;
+    }
+    try {
+      await client.queueTask(task.id);
+      toast.success("Task queued");
+      refetch();
+    } catch (e) {
+      toast.error((e as Error).message);
+    }
+  }, [client, refetch]);
+
   const handleTaskClick = useCallback((id: string) => {
     navigate(`/tasks/${id}`);
   }, [navigate]);
@@ -351,8 +370,9 @@ export function useTasksPageState() {
     retry: handleRetry,
     kill: handleKill,
     queue: handleQueue,
+    moveToKanbanColumn: handleMoveToKanbanColumn,
     click: handleTaskClick,
-  }), [handleRetry, handleKill, handleQueue, handleTaskClick]);
+  }), [handleRetry, handleKill, handleQueue, handleMoveToKanbanColumn, handleTaskClick]);
 
   return {
     // Data

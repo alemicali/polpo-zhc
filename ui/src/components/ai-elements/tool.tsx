@@ -31,6 +31,7 @@ export type ToolState = "preparing" | "calling" | "completed" | "error" | "inter
 export interface ToolCallInfo {
   id: string;
   name: string;
+  argumentsText?: string;
   arguments?: Record<string, unknown>;
   result?: string;
   state: ToolState;
@@ -220,6 +221,15 @@ export function ToolInvocation({
                   <div className="text-xs bg-muted/50 rounded-md px-2.5 py-1.5 max-h-32 overflow-y-auto">
                     <MessageResponse>{`\`\`\`json\n${JSON.stringify(tool.arguments, null, 2)}\n\`\`\``}</MessageResponse>
                   </div>
+                </div>
+              )}
+
+              {!tool.arguments && tool.argumentsText && (
+                <div>
+                  <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-1">
+                    Input draft
+                  </p>
+                  <pre className="text-xs bg-muted/50 rounded-md px-2.5 py-1.5 max-h-32 overflow-y-auto whitespace-pre-wrap break-words font-mono">{tool.argumentsText}</pre>
                 </div>
               )}
 

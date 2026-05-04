@@ -1,4 +1,11 @@
-import { useState, useCallback, useRef, useEffect, useMemo } from "react";
+import {
+  useState,
+  useCallback,
+  useRef,
+  useEffect,
+  useMemo,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 import {
   Copy,
   Check,
@@ -71,6 +78,11 @@ import {
   MessageActions,
   MessageAction,
 } from "@/components/ai-elements/message";
+import {
+  Reasoning,
+  ReasoningContent,
+  ReasoningTrigger,
+} from "@/components/ai-elements/reasoning";
 import {
   PromptInput,
   PromptInputTextarea,
@@ -1652,9 +1664,26 @@ function SessionIdCopy({ sessionId }: { sessionId: string }) {
 /** Key used for orchestrator (non-agent) sessions in the group map */
 const ORCHESTRATOR_KEY = "__orchestrator__";
 const SIDEBAR_VIEW_KEY = "polpo-chat-sidebar-view";
+const SESSION_SIDEBAR_WIDTH_KEY = "polpo-chat-session-sidebar-width";
+const SESSION_SIDEBAR_DEFAULT_WIDTH = 288;
+const SESSION_SIDEBAR_MIN_WIDTH = 240;
+const SESSION_SIDEBAR_MAX_WIDTH = 420;
 
 type SessionItem = { id: string; title?: string; createdAt: string; updatedAt: string; messageCount: number; agent?: string };
 type SidebarView = "drill" | "flat";
+
+const clampSessionSidebarWidth = (value: number) => {
+  const viewportCap = typeof window === "undefined"
+    ? SESSION_SIDEBAR_MAX_WIDTH
+    : Math.max(SESSION_SIDEBAR_MIN_WIDTH, Math.min(SESSION_SIDEBAR_MAX_WIDTH, window.innerWidth - 560));
+  return Math.min(Math.max(value, SESSION_SIDEBAR_MIN_WIDTH), viewportCap);
+};
+
+const readStoredSessionSidebarWidth = () => {
+  if (typeof window === "undefined") return SESSION_SIDEBAR_DEFAULT_WIDTH;
+  const parsed = Number(localStorage.getItem(SESSION_SIDEBAR_WIDTH_KEY));
+  return Number.isFinite(parsed) ? clampSessionSidebarWidth(parsed) : SESSION_SIDEBAR_DEFAULT_WIDTH;
+};
 
 /** Shared session row — used by both drill-down and flat views */
 function SessionRow({
@@ -1750,6 +1779,39 @@ function SessionSidebar({
 }) {
   const { agents } = useAgents();
   const agentMap = agents ? Object.fromEntries(agents.map((a) => [a.name, a])) : {};
+  const [sidebarWidth, setSidebarWidth] = useState(readStoredSessionSidebarWidth);
+
+  useEffect(() => {
+    if (!fullWidth) {
+      localStorage.setItem(SESSION_SIDEBAR_WIDTH_KEY, String(sidebarWidth));
+    }
+  }, [fullWidth, sidebarWidth]);
+
+  const startResize = useCallback((event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (fullWidth) return;
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = sidebarWidth;
+
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+
+    const handlePointerMove = (moveEvent: PointerEvent) => {
+      setSidebarWidth(clampSessionSidebarWidth(startWidth + moveEvent.clientX - startX));
+    };
+
+    const stopResize = () => {
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", stopResize);
+      window.removeEventListener("pointercancel", stopResize);
+    };
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", stopResize);
+    window.addEventListener("pointercancel", stopResize);
+  }, [fullWidth, sidebarWidth]);
 
   // ── View toggle (drill-down vs flat/accordion) ──
   const [view, setView] = useState<SidebarView>(() => {
@@ -2139,9 +2201,21 @@ function SessionSidebar({
 
   return (
     <div className={cn(
-      "border-r border-border/30 flex flex-col bg-card/40 h-full",
-      fullWidth ? "w-full" : "w-72"
-    )}>
+      "relative border-r border-border/30 flex flex-col bg-card/40 h-full",
+      fullWidth ? "w-full" : "shrink-0"
+    )}
+    style={fullWidth ? undefined : { width: sidebarWidth }}
+    >
+      {!fullWidth && (
+        <button
+          type="button"
+          aria-label="Resize Agent Chats sidebar"
+          onPointerDown={startResize}
+          className="absolute inset-y-0 -right-1 z-20 w-2 cursor-col-resize rounded-full outline-none focus-visible:ring-2 focus-visible:ring-primary/40 group"
+        >
+          <span className="absolute inset-y-3 left-1/2 w-px -translate-x-1/2 rounded-full bg-border transition-all group-hover:w-[3px] group-hover:bg-primary/40" />
+        </button>
+      )}
       {renderHeader()}
       <div className="flex-1 overflow-y-auto min-h-0">
         {sessions.length === 0 ? (
@@ -2488,14 +2562,25 @@ function ChatMessages() {
                             </span>
                           )}
                         </div>
-                        {/* Render segments chronologically, grouping consecutive tools */}
+                        {/* Render segments chronologically, grouping consecutive tools and reasoning chunks */}
                         {msg.segments && msg.segments.length > 0 ? (
                           (() => {
-                            const groups: Array<{ type: "text"; content: string } | { type: "tools"; tools: ToolCallInfo[] }> = [];
+                            const groups: Array<
+                              | { type: "text"; content: string }
+                              | { type: "thinking"; content: string }
+                              | { type: "tools"; tools: ToolCallInfo[] }
+                            > = [];
                             for (const seg of msg.segments as MessageSegment[]) {
                               if (seg.type === "text") {
                                 groups.push({ type: "text", content: seg.content });
-                              } else {
+                              } else if (seg.type === "thinking") {
+                                const last = groups[groups.length - 1];
+                                if (last && last.type === "thinking") {
+                                  last.content += seg.content;
+                                } else {
+                                  groups.push({ type: "thinking", content: seg.content });
+                                }
+                              } else if (seg.type === "tool") {
                                 const last = groups[groups.length - 1];
                                 if (last && last.type === "tools") {
                                   last.tools.push(seg.tool);
@@ -2509,6 +2594,11 @@ function ChatMessages() {
                                 <MessageContent key={`g-${gi}`}>
                                   <MessageResponse mode={isStreaming ? "streaming" : "static"}>{g.content}</MessageResponse>
                                 </MessageContent>
+                              ) : g.type === "thinking" ? (
+                                <Reasoning key={`r-${gi}`} isStreaming={isStreaming}>
+                                  <ReasoningTrigger />
+                                  <ReasoningContent>{g.content}</ReasoningContent>
+                                </Reasoning>
                               ) : g.tools.length === 1 ? (
                                 <ToolInvocation key={g.tools[0].id} tool={g.tools[0]} />
                               ) : (
@@ -2518,6 +2608,12 @@ function ChatMessages() {
                           })()
                         ) : (
                           <>
+                            {msg.thinkingText && (
+                              <Reasoning isStreaming={isStreaming}>
+                                <ReasoningTrigger />
+                                <ReasoningContent>{msg.thinkingText}</ReasoningContent>
+                              </Reasoning>
+                            )}
                             {msg.toolCalls && msg.toolCalls.length > 0 && (
                               <ToolCallList tools={msg.toolCalls} />
                             )}
@@ -2710,7 +2806,7 @@ function ChatInput() {
           </PromptInput>
         </MentionPopover>
         <p className="text-[10px] text-muted-foreground text-center mt-0.5">
-          @ to mention · Enter to send · Shift+Enter for new line.
+          @ to mention · / for skills · Enter to send · Shift+Enter for new line.
           {sessionId && (
             <SessionIdCopy sessionId={sessionId} />
           )}
@@ -2754,7 +2850,7 @@ function ChatLoadingSkeleton({ compact }: { compact?: boolean }) {
               </PromptInputFooter>
             </PromptInput>
             <p className="text-[10px] text-muted-foreground text-center mt-0.5">
-              @ to mention · Enter to send · Shift+Enter for new line.
+              @ to mention · / for skills · Enter to send · Shift+Enter for new line.
             </p>
           </div>
         </div>

@@ -1191,6 +1191,8 @@ export interface ToolCallEvent {
   id: string;
   /** Tool name (e.g. "create_task", "get_status") */
   name: string;
+  /** Raw partial JSON arguments while the model is still generating the tool call. */
+  argumentsText?: string;
   /** Tool input arguments (present when state is "calling") */
   arguments?: Record<string, unknown>;
   /** Tool execution result (present when state is "completed" or "error") */

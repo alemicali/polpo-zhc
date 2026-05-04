@@ -32,6 +32,8 @@ import {
   MessageCircle,
   ChevronsLeft,
   Plus,
+  Palette as PaletteIcon,
+  Check,
 } from "lucide-react";
 import {
   ResizablePanelGroup,
@@ -48,6 +50,8 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
 import { ChatPage } from "@/pages/chat";
@@ -55,6 +59,7 @@ import { useChatActions } from "@/hooks/chat-context";
 import { useProjectInfo } from "@/hooks/use-polpo";
 import { setLayoutMode, useChatFirstSessionsOpen, toggleChatFirstSessions } from "@/hooks/use-layout-mode";
 import { useTheme } from "@/hooks/use-theme";
+import { usePalette, PALETTES } from "@/lib/palette";
 import { cn } from "@/lib/utils";
 
 type TabDef = {
@@ -141,6 +146,7 @@ const PagesPanelHeader = memo(function PagesPanelHeader() {
   const { pathname } = useLocation();
   const navigate = useNavigate();
   const { theme, resolved, setTheme } = useTheme();
+  const { palette, setPalette } = usePalette();
 
   return (
     <header className="flex h-14 shrink-0 items-center bg-background/80 backdrop-blur-md px-3 gap-2">
@@ -194,19 +200,47 @@ const PagesPanelHeader = memo(function PagesPanelHeader() {
               {resolved === "dark" ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="min-w-[140px] bg-popover/95 backdrop-blur-lg border-border/50">
+          <DropdownMenuContent align="end" className="min-w-[220px] bg-popover/95 backdrop-blur-lg border-border/50">
+            <DropdownMenuLabel className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70">
+              Mode
+            </DropdownMenuLabel>
             <DropdownMenuItem onSelect={() => setTheme("light")} className="gap-2.5 text-xs">
               <Sun className="h-3.5 w-3.5" /> Light
-              {theme === "light" && <span className="ml-auto h-1.5 w-1.5 rounded-full bg-primary" />}
+              {theme === "light" && <Check className="ml-auto h-3 w-3 text-primary" />}
             </DropdownMenuItem>
             <DropdownMenuItem onSelect={() => setTheme("dark")} className="gap-2.5 text-xs">
               <Moon className="h-3.5 w-3.5" /> Dark
-              {theme === "dark" && <span className="ml-auto h-1.5 w-1.5 rounded-full bg-primary" />}
+              {theme === "dark" && <Check className="ml-auto h-3 w-3 text-primary" />}
             </DropdownMenuItem>
             <DropdownMenuItem onSelect={() => setTheme("system")} className="gap-2.5 text-xs">
               <Monitor className="h-3.5 w-3.5" /> System
-              {theme === "system" && <span className="ml-auto h-1.5 w-1.5 rounded-full bg-primary" />}
+              {theme === "system" && <Check className="ml-auto h-3 w-3 text-primary" />}
             </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70 flex items-center gap-1.5">
+              <PaletteIcon className="h-3 w-3" /> Palette
+            </DropdownMenuLabel>
+            {PALETTES.map((p) => {
+              const swatch = resolved === "dark" ? p.swatchDark : p.swatchLight;
+              return (
+                <DropdownMenuItem
+                  key={p.id}
+                  onSelect={() => setPalette(p.id)}
+                  className="gap-2.5 text-xs py-1.5"
+                >
+                  <span className="relative inline-flex shrink-0 h-4 w-4 items-center justify-center">
+                    <span className="absolute inset-0 rounded-full ring-1 ring-border/60" style={{ backgroundColor: swatch[0] }} />
+                    <span className="absolute h-3 w-3 rounded-full" style={{ backgroundColor: swatch[1], left: "30%", top: "10%" }} />
+                    <span className="absolute h-2 w-2 rounded-full" style={{ backgroundColor: swatch[2], left: "55%", top: "50%" }} />
+                  </span>
+                  <span className="flex-1 min-w-0">
+                    <span className="block leading-tight">{p.name}</span>
+                    <span className="block text-[10px] text-muted-foreground/70 leading-tight">{p.blurb}</span>
+                  </span>
+                  {palette === p.id && <Check className="h-3 w-3 text-primary shrink-0" />}
+                </DropdownMenuItem>
+              );
+            })}
           </DropdownMenuContent>
         </DropdownMenu>
         <Tooltip>

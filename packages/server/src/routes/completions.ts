@@ -513,6 +513,7 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
 
             let turnText = "";
             let streamError: string | undefined;
+            const toolCallPartials = new Map<number, { id: string; name: string; argumentsText: string }>();
 
             for await (const event of piStream) {
               if (abortController.signal.aborted) break;
@@ -527,8 +528,29 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
                 const block = event.partial.content[event.contentIndex] as
                   | { type: "toolCall"; id: string; name: string } | undefined;
                 if (block?.type === "toolCall") {
+                  toolCallPartials.set(event.contentIndex, { id: block.id, name: block.name, argumentsText: "" });
                   await emit(sseChunk(completionId, {}, null, {
                     tool_call: { id: block.id, name: block.name, state: "preparing" },
+                  }));
+                }
+              } else if (event.type === "toolcall_delta") {
+                const contentIndex = (event as any).contentIndex as number;
+                const block = (event as any).partial?.content?.[contentIndex] as
+                  | { type: "toolCall"; id: string; name: string } | undefined;
+                let partial = toolCallPartials.get(contentIndex);
+                if (!partial && block?.type === "toolCall") {
+                  partial = { id: block.id, name: block.name, argumentsText: "" };
+                  toolCallPartials.set(contentIndex, partial);
+                }
+                if (partial) {
+                  partial.argumentsText += String((event as any).delta ?? "");
+                  await emit(sseChunk(completionId, {}, null, {
+                    tool_call: {
+                      id: partial.id,
+                      name: partial.name,
+                      argumentsText: partial.argumentsText,
+                      state: "preparing",
+                    },
                   }));
                 }
               } else if (event.type === "error") {

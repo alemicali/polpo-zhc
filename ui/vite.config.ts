@@ -46,6 +46,9 @@ const pwaPlugin = VitePWA({
     navigateFallback: "/index.html",
     globPatterns: ["**/*.{js,css,html,svg,woff2}"],
     navigateFallbackDenylist: [/^\/api\//, /^\/v1\//],
+    // Bundle has crept past 2 MB — bump the precache cap rather than fail
+    // the build. Code-splitting can come later as a perf pass.
+    maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
     runtimeCaching: [
       {
         urlPattern: /\.(png|jpg|svg|woff2)$/,
@@ -58,7 +61,9 @@ const pwaPlugin = VitePWA({
     ],
   },
   devOptions: {
-    enabled: false,
+    // Enable the PWA service worker in web dev so install/update behavior can
+    // be tested locally. Keep it disabled for Electron/file:// builds.
+    enabled: !isElectron,
   },
 });
 

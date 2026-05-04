@@ -24,8 +24,17 @@ import type { AgentConfig, Task, Mission, SkillWithAssignment, PlaybookInfo } fr
 // Types
 // ────────────────────────────────────────────────────────────────────────────
 
-/** All mentions use @ as trigger — categories are visual only in the menu */
+/**
+ * Two trigger characters power the popover:
+ *   - `@` → entity mentions (agents, tasks, missions, files)
+ *   - `/` → slash commands (skills + playbooks/templates)
+ *
+ * Categories are visual only in the menu — the trigger char itself decides
+ * which categories are eligible.
+ */
 type MentionCategory = "agent" | "task" | "mission" | "skill" | "playbook" | "file";
+
+export type MentionTrigger = "@" | "/";
 
 /** A mentionable file entry (path relative to project root) */
 export interface MentionFile {
@@ -37,6 +46,7 @@ interface TriggerState {
   isOpen: boolean;
   query: string;
   triggerIndex: number;
+  trigger: MentionTrigger;
 }
 
 interface MentionItem {
@@ -70,6 +80,7 @@ export interface MentionPopoverHandle {
    * Replaces all display mentions with their wire equivalents.
    */
   resolveMessage: (displayText: string) => string;
+  /** Manually open the popover with `@` (used by the AtSign button). */
   toggle: () => void;
 }
 
@@ -93,10 +104,11 @@ function useMentionTrigger(textareaRef: RefObject<HTMLTextAreaElement | null>) {
     isOpen: false,
     query: "",
     triggerIndex: -1,
+    trigger: "@",
   });
 
   const close = useCallback(() => {
-    setState({ isOpen: false, query: "", triggerIndex: -1 });
+    setState({ isOpen: false, query: "", triggerIndex: -1, trigger: "@" });
   }, []);
 
   const handleInput = useCallback(() => {
@@ -109,7 +121,10 @@ function useMentionTrigger(textareaRef: RefObject<HTMLTextAreaElement | null>) {
       return;
     }
 
-    // Scan backwards from cursor looking for @
+    // Scan backwards from cursor looking for `@` or `/`. Whichever comes
+    // first (closest to cursor without a whitespace/break in between) wins.
+    // `/` only counts as a trigger when at start-of-message or after
+    // whitespace — otherwise URLs and paths would constantly open the menu.
     let i = selectionStart - 1;
     while (i >= 0) {
       const ch = value[i];
@@ -117,10 +132,22 @@ function useMentionTrigger(textareaRef: RefObject<HTMLTextAreaElement | null>) {
         close();
         return;
       }
+      if (ch === "/") {
+        // Slash trigger requires beginning-of-line or whitespace before it
+        const prev = i > 0 ? value[i - 1] : "\n";
+        if (prev === " " || prev === "\n" || i === 0) {
+          const query = value.slice(i + 1, selectionStart);
+          setState({ isOpen: true, query, triggerIndex: i, trigger: "/" });
+          return;
+        }
+        // Not a valid slash command position — keep scanning, may still find @
+        i--;
+        continue;
+      }
       if (ch === "@") {
         if (i === 0 || value[i - 1] === " " || value[i - 1] === "\n") {
           const query = value.slice(i + 1, selectionStart);
-          setState({ isOpen: true, query, triggerIndex: i });
+          setState({ isOpen: true, query, triggerIndex: i, trigger: "@" });
           return;
         }
         close();
@@ -147,9 +174,10 @@ const CATEGORY_LABELS: Record<MentionCategory, string> = {
   file: "Files",
 };
 
-/** Format a name as @name or @"name with spaces" */
-function formatMention(name: string): string {
-  return /[\s]/.test(name) ? `@"${name}"` : `@${name}`;
+
+/** Format a name as @name / /name (or quoted variant when it contains spaces). */
+function formatMention(name: string, trigger: MentionTrigger = "@"): string {
+  return /[\s]/.test(name) ? `${trigger}"${name}"` : `${trigger}${name}`;
 }
 
 /**
@@ -236,7 +264,7 @@ export const MentionPopover = forwardRef<
   { textareaRef, agents, tasks, missions, skills = [], templates = [], files = [], children },
   ref,
 ) {
-  const { isOpen, query, triggerIndex, close, handleInput } =
+  const { isOpen, query, triggerIndex, trigger, close, handleInput } =
     useMentionTrigger(textareaRef);
 
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -250,88 +278,93 @@ export const MentionPopover = forwardRef<
    */
   const mentionsMapRef = useRef<Map<string, string>>(new Map());
 
-  // Build structured list: agents → tasks → missions → files, all triggered by @
+  // Build structured list — items differ based on which trigger fired.
+  //   `@` → navigation shortcuts + agents + tasks + missions + files
+  //   `/` → skills + playbooks/templates (slash-command-style)
   const items = useMemo<MentionItem[]>(() => {
     const lowerQ = query.toLowerCase();
     const result: MentionItem[] = [];
 
-    for (const a of agents) {
-      if (lowerQ && !a.name.toLowerCase().includes(lowerQ)) continue;
-      result.push({
-        id: `agent:${a.name}`,
-        label: a.name,
-        value: a.name, // agents: name IS the ID
-        secondary: a.role,
-        icon: <User className="size-4 shrink-0 text-blue-500" />,
-        category: "agent",
-      });
-    }
+    if (trigger === "@") {
+      for (const a of agents) {
+        if (lowerQ && !a.name.toLowerCase().includes(lowerQ)) continue;
+        result.push({
+          id: `agent:${a.name}`,
+          label: a.name,
+          value: a.name, // agents: name IS the ID
+          secondary: a.role,
+          icon: <User className="size-4 shrink-0 text-blue-500" />,
+          category: "agent",
+        });
+      }
 
-    for (const t of tasks) {
-      const matchText = `${t.title} ${t.id}`.toLowerCase();
-      if (lowerQ && !matchText.includes(lowerQ)) continue;
-      result.push({
-        id: `task:${t.id}`,
-        label: t.title,   // display: task title
-        value: t.id,       // wire: task ID
-        secondary: t.id,
-        badge: t.status,
-        icon: <ListChecks className="size-4 shrink-0 text-amber-500" />,
-        category: "task",
-      });
-    }
+      for (const t of tasks) {
+        const matchText = `${t.title} ${t.id}`.toLowerCase();
+        if (lowerQ && !matchText.includes(lowerQ)) continue;
+        result.push({
+          id: `task:${t.id}`,
+          label: t.title,
+          value: t.id,
+          secondary: t.id,
+          badge: t.status,
+          icon: <ListChecks className="size-4 shrink-0 text-amber-500" />,
+          category: "task",
+        });
+      }
 
-    for (const m of missions) {
-      if (lowerQ && !m.name.toLowerCase().includes(lowerQ)) continue;
-      result.push({
-        id: `mission:${m.id}`,
-        label: m.name,    // display: mission name
-        value: m.id,       // wire: mission ID
-        badge: m.status,
-        icon: <Target className="size-4 shrink-0 text-emerald-500" />,
-        category: "mission",
-      });
-    }
+      for (const m of missions) {
+        if (lowerQ && !m.name.toLowerCase().includes(lowerQ)) continue;
+        result.push({
+          id: `mission:${m.id}`,
+          label: m.name,
+          value: m.id,
+          badge: m.status,
+          icon: <Target className="size-4 shrink-0 text-emerald-500" />,
+          category: "mission",
+        });
+      }
 
-    for (const s of skills) {
-      if (lowerQ && !s.name.toLowerCase().includes(lowerQ)) continue;
-      result.push({
-        id: `skill:${s.name}`,
-        label: s.name,
-        value: s.name,
-        secondary: s.description,
-        icon: <Sparkles className="size-4 shrink-0 text-violet-500" />,
-        category: "skill",
-      });
-    }
+      for (const f of files) {
+        const matchText = `${f.name} ${f.path}`.toLowerCase();
+        if (lowerQ && !matchText.includes(lowerQ)) continue;
+        result.push({
+          id: `file:${f.path}`,
+          label: f.name,
+          value: f.path,
+          secondary: f.path !== f.name ? f.path : undefined,
+          icon: <FileText className="size-4 shrink-0 text-purple-500" />,
+          category: "file",
+        });
+      }
+    } else {
+      // `/` — slash commands (skills + playbook templates)
+      for (const s of skills) {
+        if (lowerQ && !s.name.toLowerCase().includes(lowerQ)) continue;
+        result.push({
+          id: `skill:${s.name}`,
+          label: s.name,
+          value: s.name,
+          secondary: s.description,
+          icon: <Sparkles className="size-4 shrink-0 text-violet-500" />,
+          category: "skill",
+        });
+      }
 
-    for (const t of templates) {
-      if (lowerQ && !t.name.toLowerCase().includes(lowerQ)) continue;
-      result.push({
-        id: `playbook:${t.name}`,
-        label: t.name,
-        value: t.name,
-        secondary: t.description,
-        icon: <Workflow className="size-4 shrink-0 text-teal-500" />,
-        category: "playbook",
-      });
-    }
-
-    for (const f of files) {
-      const matchText = `${f.name} ${f.path}`.toLowerCase();
-      if (lowerQ && !matchText.includes(lowerQ)) continue;
-      result.push({
-        id: `file:${f.path}`,
-        label: f.name,     // display: filename
-        value: f.path,     // wire: relative path
-        secondary: f.path !== f.name ? f.path : undefined,
-        icon: <FileText className="size-4 shrink-0 text-purple-500" />,
-        category: "file",
-      });
+      for (const t of templates) {
+        if (lowerQ && !t.name.toLowerCase().includes(lowerQ)) continue;
+        result.push({
+          id: `playbook:${t.name}`,
+          label: t.name,
+          value: t.name,
+          secondary: t.description,
+          icon: <Workflow className="size-4 shrink-0 text-teal-500" />,
+          category: "playbook",
+        });
+      }
     }
 
     return result;
-  }, [query, agents, tasks, missions, skills, templates, files]);
+  }, [query, trigger, agents, tasks, missions, skills, templates, files]);
 
   const filteredItems = useMemo(
     () => categoryFilter === "all" ? items : items.filter(i => i.category === categoryFilter),
@@ -340,7 +373,7 @@ export const MentionPopover = forwardRef<
 
   const availableCategories = useMemo(() => {
     const cats = new Set(items.map(i => i.category));
-    return (["agent", "task", "mission", "skill", "playbook", "file"] as MentionCategory[]).filter(c => cats.has(c));
+    return (["navigation", "agent", "task", "mission", "skill", "playbook", "file"] as MentionCategory[]).filter(c => cats.has(c));
   }, [items]);
 
   // Reset selection when the query or filtered count changes
@@ -360,8 +393,8 @@ export const MentionPopover = forwardRef<
   }, [selectedIndex]);
 
   // Ref to hold latest values for stable callbacks (avoids stale closures)
-  const stateRef = useRef({ isOpen, filteredItems, selectedIndex, triggerIndex });
-  stateRef.current = { isOpen, filteredItems, selectedIndex, triggerIndex };
+  const stateRef = useRef({ isOpen, filteredItems, selectedIndex, triggerIndex, trigger, availableCategories, categoryFilter });
+  stateRef.current = { isOpen, filteredItems, selectedIndex, triggerIndex, trigger, availableCategories, categoryFilter };
 
   const insertMention = useCallback(
     (item: MentionItem) => {
@@ -370,11 +403,12 @@ export const MentionPopover = forwardRef<
 
       const value = textarea.value;
       const cursorPos = textarea.selectionStart ?? value.length;
+      const ti = stateRef.current.triggerIndex;
+      const tr = stateRef.current.trigger;
 
-      // Display text: always use label (human-readable)
-      const displayMention = formatMention(item.label);
-      // Wire text: use value (ID for tasks/missions, name for agents)
-      const wireMention = formatMention(item.value);
+      // Display text: always use label (human-readable). Wire text: use value.
+      const displayMention = formatMention(item.label, tr);
+      const wireMention = formatMention(item.value, tr);
 
       // Track the mapping for submit-time resolution
       if (displayMention !== wireMention) {
@@ -382,7 +416,6 @@ export const MentionPopover = forwardRef<
       }
 
       const mention = displayMention + " ";
-      const ti = stateRef.current.triggerIndex;
       const before = value.slice(0, ti);
       const after = value.slice(cursorPos);
       const newValue = before + mention + after;
@@ -422,8 +455,29 @@ export const MentionPopover = forwardRef<
     ref,
     () => ({
       handleTextareaKeyDown: (e) => {
-        const { isOpen: open, filteredItems: fi, selectedIndex: si } = stateRef.current;
+        const {
+          isOpen: open,
+          filteredItems: fi,
+          selectedIndex: si,
+          availableCategories: cats,
+          categoryFilter: cf,
+        } = stateRef.current;
         if (!open || fi.length === 0) return;
+
+        const PAGE = 5;
+        const meta = e.metaKey || e.ctrlKey;
+
+        // Cycle category tabs with Cmd/Ctrl + ←/→ (only when there's >1 category)
+        if (meta && (e.key === "ArrowRight" || e.key === "ArrowLeft")) {
+          if (cats.length <= 1) return;
+          e.preventDefault();
+          const sequence: Array<"all" | MentionCategory> = ["all", ...cats];
+          const idx = sequence.indexOf(cf);
+          const dir = e.key === "ArrowRight" ? 1 : -1;
+          const next = sequence[(idx + dir + sequence.length) % sequence.length];
+          setCategoryFilter(next);
+          return;
+        }
 
         if (e.key === "ArrowDown") {
           e.preventDefault();
@@ -431,6 +485,18 @@ export const MentionPopover = forwardRef<
         } else if (e.key === "ArrowUp") {
           e.preventDefault();
           setSelectedIndex((prev) => (prev - 1 + fi.length) % fi.length);
+        } else if (e.key === "PageDown") {
+          e.preventDefault();
+          setSelectedIndex((prev) => Math.min(prev + PAGE, fi.length - 1));
+        } else if (e.key === "PageUp") {
+          e.preventDefault();
+          setSelectedIndex((prev) => Math.max(prev - PAGE, 0));
+        } else if (e.key === "Home") {
+          e.preventDefault();
+          setSelectedIndex(0);
+        } else if (e.key === "End") {
+          e.preventDefault();
+          setSelectedIndex(fi.length - 1);
         } else if (e.key === "Enter" || e.key === "Tab") {
           e.preventDefault();
           insertMention(fi[si]);
@@ -593,7 +659,33 @@ export const MentionPopover = forwardRef<
             });
           })()}
         </div>
+
+        {/* Keyboard shortcut hints — sticky footer */}
+        <div className="shrink-0 border-t border-border/50 px-2 py-1.5 flex items-center gap-2.5 text-[9.5px] text-muted-foreground/70 select-none flex-wrap">
+          <KbdHint keys={["↑", "↓"]} label="navigate" />
+          <KbdHint keys={["↵"]} label="pick" />
+          {availableCategories.length > 1 && (
+            <KbdHint keys={["⌘", "←/→"]} label="category" />
+          )}
+          <KbdHint keys={["esc"]} label="close" />
+        </div>
       </PopoverContent>
     </Popover>
   );
 });
+
+function KbdHint({ keys, label }: { keys: string[]; label: string }) {
+  return (
+    <span className="inline-flex items-center gap-1">
+      {keys.map((k, i) => (
+        <kbd
+          key={i}
+          className="inline-flex items-center justify-center min-w-[14px] h-3.5 px-1 rounded-[3px] border border-border/70 bg-muted/40 font-mono text-[8.5px] font-medium leading-none"
+        >
+          {k}
+        </kbd>
+      ))}
+      <span className="ml-0.5">{label}</span>
+    </span>
+  );
+}

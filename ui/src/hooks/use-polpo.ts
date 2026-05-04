@@ -81,14 +81,16 @@ export type ToolCallState = "preparing" | "calling" | "completed" | "error" | "i
 export interface ToolCallInfo {
   id: string;
   name: string;
+  argumentsText?: string;
   arguments?: Record<string, unknown>;
   result?: string;
   state: ToolCallState;
 }
 
-/** Ordered segment — either a text chunk or a tool invocation */
+/** Ordered segment — text, model thinking, or a tool invocation */
 export type MessageSegment =
   | { type: "text"; content: string }
+  | { type: "thinking"; content: string }
   | { type: "tool"; tool: ToolCallInfo };
 
 /** A chat message enriched with optional ask_user questions, tool calls, mission preview, vault preview, and client-side actions */
@@ -100,6 +102,7 @@ export interface ChatMessageWithQuestions extends ChatMessage {
   navigateTo?: NavigateToData;
   openTab?: OpenTabData;
   toolCalls?: ToolCallInfo[];
+  thinkingText?: string;
   /** Chronologically ordered segments (text interleaved with tool calls) */
   segments?: MessageSegment[];
 }
@@ -223,9 +226,12 @@ export function useChat() {
   // Reconstruct segments from persisted toolCalls + text content.
   // Since we can't know exact interleaving, show tool calls before text.
   const reconstructSegments = (msg: ChatMessageWithQuestions): MessageSegment[] | undefined => {
-    if (msg.role !== "assistant" || !msg.toolCalls || msg.toolCalls.length === 0) return undefined;
+    if (msg.role !== "assistant" || (!msg.toolCalls?.length && !msg.thinkingText)) return undefined;
     const segments: MessageSegment[] = [];
-    for (const tc of msg.toolCalls) {
+    if (msg.thinkingText) {
+      segments.push({ type: "thinking", content: msg.thinkingText });
+    }
+    for (const tc of msg.toolCalls ?? []) {
       segments.push({ type: "tool", tool: tc });
     }
     if (msg.content.trim()) {
@@ -253,15 +259,24 @@ export function useChat() {
     setIsLoading(true);
 
     let fullContent = "";
+    let thinkingText = "";
     const toolCalls: ToolCallInfo[] = [];
     const segments: MessageSegment[] = [];
     let currentTextIdx = -1;
+    let currentThinkingIdx = -1;
+
+    const messagePatch = () => ({
+      content: fullContent,
+      thinkingText: thinkingText || undefined,
+      toolCalls: toolCalls.length > 0 ? [...toolCalls] : undefined,
+      segments: [...segments],
+    });
 
     const updateMsg = () => {
       setMessages((prev) =>
         prev.map((m) =>
           m.id === assistantId
-            ? { ...m, content: fullContent, toolCalls: toolCalls.length > 0 ? [...toolCalls] : undefined, segments: [...segments] }
+            ? { ...m, ...messagePatch() }
             : m
         )
       );
@@ -295,6 +310,18 @@ export function useChat() {
           try { chunk = JSON.parse(data); } catch { continue; }
           const choice = chunk.choices?.[0];
           const delta = choice?.delta;
+          const thinking = choice?.thinking as string | undefined;
+          if (thinking) {
+            thinkingText += thinking;
+            if (currentThinkingIdx >= 0 && segments[currentThinkingIdx]?.type === "thinking") {
+              (segments[currentThinkingIdx] as { type: "thinking"; content: string }).content += thinking;
+            } else {
+              segments.push({ type: "thinking", content: thinking });
+              currentThinkingIdx = segments.length - 1;
+            }
+            currentTextIdx = -1;
+            updateMsg();
+          }
           if (delta?.content) {
             fullContent += delta.content;
             if (currentTextIdx >= 0 && segments[currentTextIdx]?.type === "text") {
@@ -303,6 +330,7 @@ export function useChat() {
               segments.push({ type: "text", content: delta.content });
               currentTextIdx = segments.length - 1;
             }
+            currentThinkingIdx = -1;
             updateMsg();
           }
           const tc = choice?.tool_call as ToolCallInfo | undefined;
@@ -310,6 +338,7 @@ export function useChat() {
             const existing = toolCalls.find((t) => t.id === tc.id);
             if (existing) {
               existing.state = tc.state;
+              if (tc.argumentsText !== undefined) existing.argumentsText = tc.argumentsText;
               if (tc.arguments !== undefined) existing.arguments = tc.arguments;
               if (tc.result !== undefined) existing.result = tc.result;
               const segIdx = segments.findIndex((s) => s.type === "tool" && s.tool.id === tc.id);
@@ -321,6 +350,7 @@ export function useChat() {
               toolCalls.push(info);
               segments.push({ type: "tool", tool: info });
               currentTextIdx = -1;
+              currentThinkingIdx = -1;
             }
             updateMsg();
           }
@@ -515,17 +545,26 @@ export function useChat() {
       currentTurnIdRef.current = null;
 
       let fullContent = "";
+      let thinkingText = "";
       const toolCalls: ToolCallInfo[] = [];
       // Chronologically ordered segments for interleaved rendering
       const segments: MessageSegment[] = [];
       // Track index of the current text segment (if last segment is text, append to it)
       let currentTextIdx = -1;
+      let currentThinkingIdx = -1;
+
+      const messagePatch = () => ({
+        content: fullContent,
+        thinkingText: thinkingText || undefined,
+        toolCalls: toolCalls.length > 0 ? [...toolCalls] : undefined,
+        segments: [...segments],
+      });
 
       const updateMsg = () => {
         setMessages((prev) =>
           prev.map((m) =>
             m.id === assistantId
-              ? { ...m, content: fullContent, toolCalls: toolCalls.length > 0 ? [...toolCalls] : undefined, segments: [...segments] }
+              ? { ...m, ...messagePatch() }
               : m
           )
         );
@@ -539,6 +578,19 @@ export function useChat() {
         }
         const choice = chunk.choices[0];
         const delta = choice?.delta;
+        const thinking = choice?.thinking as string | undefined;
+
+        if (thinking) {
+          thinkingText += thinking;
+          if (currentThinkingIdx >= 0 && segments[currentThinkingIdx]?.type === "thinking") {
+            (segments[currentThinkingIdx] as { type: "thinking"; content: string }).content += thinking;
+          } else {
+            segments.push({ type: "thinking", content: thinking });
+            currentThinkingIdx = segments.length - 1;
+          }
+          currentTextIdx = -1;
+          updateMsg();
+        }
 
         // Text content — append to current text segment or create a new one
         if (delta?.content) {
@@ -549,6 +601,7 @@ export function useChat() {
             segments.push({ type: "text", content: delta.content });
             currentTextIdx = segments.length - 1;
           }
+          currentThinkingIdx = -1;
           updateMsg();
         }
 
@@ -559,6 +612,7 @@ export function useChat() {
             if (existing) {
               // Update existing tool call (preparing → calling → completed/error)
               existing.state = tc.state;
+              if (tc.argumentsText !== undefined) existing.argumentsText = tc.argumentsText;
               if (tc.arguments !== undefined) existing.arguments = tc.arguments;
               if (tc.result !== undefined) existing.result = tc.result;
               // Also update the segment in-place
@@ -573,6 +627,7 @@ export function useChat() {
             segments.push({ type: "tool", tool: info });
             // Next text delta should start a new text segment
             currentTextIdx = -1;
+            currentThinkingIdx = -1;
           }
           updateMsg();
         }
@@ -588,7 +643,7 @@ export function useChat() {
         setMessages((prev) =>
           prev.map((m) =>
             m.id === assistantId
-              ? { ...m, content: fullContent, askUserQuestions: stream.askUser!.questions, toolCalls: toolCalls.length > 0 ? toolCalls : undefined, segments: [...segments] }
+              ? { ...m, ...messagePatch(), askUserQuestions: stream.askUser!.questions }
               : m
           )
         );
@@ -605,7 +660,7 @@ export function useChat() {
         setMessages((prev) =>
           prev.map((m) =>
             m.id === assistantId
-              ? { ...m, content: fullContent, missionPreview: preview, toolCalls: toolCalls.length > 0 ? toolCalls : undefined, segments: [...segments] }
+              ? { ...m, ...messagePatch(), missionPreview: preview }
               : m
           )
         );
@@ -625,7 +680,7 @@ export function useChat() {
         setMessages((prev) =>
           prev.map((m) =>
             m.id === assistantId
-              ? { ...m, content: fullContent, vaultPreview: vaultData, toolCalls: toolCalls.length > 0 ? toolCalls : undefined, segments: [...segments] }
+              ? { ...m, ...messagePatch(), vaultPreview: vaultData }
               : m
           )
         );
@@ -642,7 +697,7 @@ export function useChat() {
         setMessages((prev) =>
           prev.map((m) =>
             m.id === assistantId
-              ? { ...m, content: fullContent, openFile: openFileData, toolCalls: toolCalls.length > 0 ? toolCalls : undefined, segments: [...segments] }
+              ? { ...m, ...messagePatch(), openFile: openFileData }
               : m
           )
         );
@@ -664,7 +719,7 @@ export function useChat() {
         setMessages((prev) =>
           prev.map((m) =>
             m.id === assistantId
-              ? { ...m, content: fullContent, navigateTo: navData, toolCalls: toolCalls.length > 0 ? toolCalls : undefined, segments: [...segments] }
+              ? { ...m, ...messagePatch(), navigateTo: navData }
               : m
           )
         );
@@ -683,7 +738,7 @@ export function useChat() {
         setMessages((prev) =>
           prev.map((m) =>
             m.id === assistantId
-              ? { ...m, content: fullContent, openTab: openTabData, toolCalls: toolCalls.length > 0 ? toolCalls : undefined, segments: [...segments] }
+              ? { ...m, ...messagePatch(), openTab: openTabData }
               : m
           )
         );

@@ -7,7 +7,11 @@ import { Toaster } from "@/components/ui/sonner";
 import { ChatProvider } from "@/hooks/chat-context";
 import { App } from "./app";
 import { config } from "./lib/config";
+import { bootstrapPalette } from "./lib/palette";
 import "./index.css";
+
+// Apply saved palette before React mounts to avoid a flash of default colours
+bootstrapPalette();
 
 // Use HashRouter for Electron (file:// protocol), BrowserRouter for web
 const isFileProtocol = window.location.protocol === "file:";
