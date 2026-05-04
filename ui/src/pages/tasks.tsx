@@ -1235,10 +1235,10 @@ export function TasksPage() {
   return (
     <TaskActionsProvider actions={taskActions}>
       <CardSettingsContext value={cardSettingsCtx}>
-      <div className="flex flex-col flex-1 min-h-0 gap-2">
+      <div className="flex flex-col flex-1 min-h-0 min-w-0 gap-2">
         {/* ── Row 1: Search + data filters + active chips ── */}
-        <div className="flex items-center gap-2 shrink-0">
-          <div className="relative flex-1 min-w-[140px] max-w-xs">
+        <div className="flex shrink-0 flex-col gap-2 sm:flex-row sm:items-center">
+          <div className="relative min-w-0 flex-1 sm:max-w-xs">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground/50" />
             <Input
               placeholder="Search..."
@@ -1247,7 +1247,7 @@ export function TasksPage() {
               onChange={(e) => setSearch(e.target.value)}
             />
           </div>
-          <div className="flex items-center gap-1.5">
+          <div className="flex max-w-full items-center gap-1.5 overflow-x-auto scrollbar-none pb-0.5 sm:overflow-visible sm:pb-0">
             <MultiSelectFilter
               icon={<Target className="h-3.5 w-3.5" />}
               label="Missions"
@@ -1275,7 +1275,7 @@ export function TasksPage() {
           {hasActiveFilters && (
             <>
               <div className="h-4 w-px bg-border/50 mx-0.5" />
-              <div className="flex items-center gap-1 flex-wrap min-w-0">
+              <div className="flex min-w-0 flex-wrap items-center gap-1">
                 {Array.from(selectedMissions).map((name) => (
                   <Badge
                     key={`m-${name}`}
@@ -1314,17 +1314,18 @@ export function TasksPage() {
               </div>
             </>
           )}
-          <div className="flex-1" />
-          <span className="text-[11px] text-muted-foreground/50 tabular-nums shrink-0">
-            {filtered.length}{hasActiveFilters ? `/${tasks.length}` : ""} task{filtered.length !== 1 ? "s" : ""}
-          </span>
-          <Button variant="outline" size="sm" className="h-7 px-2 shrink-0" onClick={handleRefresh} disabled={isRefreshing}>
-            <RefreshCw className={cn("h-3.5 w-3.5", isRefreshing && "animate-spin")} />
-          </Button>
+          <div className="flex items-center justify-between gap-2 sm:ml-auto">
+            <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground/50">
+              {filtered.length}{hasActiveFilters ? `/${tasks.length}` : ""} task{filtered.length !== 1 ? "s" : ""}
+            </span>
+            <Button variant="outline" size="sm" className="h-7 px-2 shrink-0" onClick={handleRefresh} disabled={isRefreshing}>
+              <RefreshCw className={cn("h-3.5 w-3.5", isRefreshing && "animate-spin")} />
+            </Button>
+          </div>
         </div>
 
         {/* ── Row 2: View controls ── */}
-        <div className="flex items-center gap-1.5 shrink-0">
+        <div className="flex max-w-full shrink-0 items-center gap-1.5 overflow-x-auto scrollbar-none pb-0.5">
           {/* View toggle */}
           <div className="flex items-center rounded-md border border-border/50 mr-1">
             <Button
@@ -1436,7 +1437,7 @@ export function TasksPage() {
           )}
 
           {/* Spacer */}
-          <div className="flex-1" />
+          <div className="hidden flex-1 sm:block" />
 
           {/* Card fields */}
           <CardFieldSettings fields={cardFields} onToggle={toggleCardField} />

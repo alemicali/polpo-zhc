@@ -1118,16 +1118,16 @@ export function FilesPage() {
   };
 
   return (
-    <div className="flex flex-col flex-1 min-h-0 gap-0">
+    <div className="flex flex-col flex-1 min-h-0 min-w-0 gap-0">
       {/* Hidden file input */}
       <input ref={fileInputRef} type="file" multiple className="hidden" onChange={handleFileInputChange} />
 
       {/* Top bar */}
-      <div className="flex items-center gap-2 px-1 pb-3 shrink-0">
-        <div className="flex-1 min-w-0">
+      <div className="flex shrink-0 flex-col gap-2 px-1 pb-3 lg:flex-row lg:items-center">
+        <div className="min-w-0 flex-1">
           <Breadcrumb segments={pathSegments} onNavigate={handleBreadcrumbNav} />
         </div>
-        <div className="flex items-center gap-1 shrink-0">
+        <div className="flex max-w-full shrink-0 items-center gap-1 overflow-x-auto scrollbar-none pb-0.5 lg:overflow-visible lg:pb-0">
           {/* Upload */}
           <Tooltip>
             <TooltipTrigger asChild>
@@ -1148,25 +1148,25 @@ export function FilesPage() {
             <TooltipContent side="bottom">New folder</TooltipContent>
           </Tooltip>
 
-          <Separator orientation="vertical" className="h-5 mx-1" />
+          <Separator orientation="vertical" className="h-5 mx-1 shrink-0" />
 
           {/* Search */}
-          <div className="relative">
+          <div className="relative shrink-0">
             <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
             <Input
               placeholder="Filter..."
               value={search}
               onChange={e => setSearch(e.target.value)}
-              className="h-8 w-36 lg:w-48 pl-7 text-sm"
+              className="h-8 w-32 pl-7 text-sm lg:w-48"
             />
           </div>
 
-          <Separator orientation="vertical" className="h-5 mx-1" />
+          <Separator orientation="vertical" className="h-5 mx-1 shrink-0" />
 
           {/* Sort */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="sm" className="h-8 text-xs gap-1">
+              <Button variant="ghost" size="sm" className="h-8 shrink-0 text-xs gap-1">
                 <ChevronDown className="h-3 w-3" />
                 {sortKey}
               </Button>
@@ -1188,7 +1188,7 @@ export function FilesPage() {
           </DropdownMenu>
 
           {/* View toggle */}
-          <div className="flex items-center border rounded-md">
+          <div className="flex shrink-0 items-center rounded-md border">
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button variant={viewMode === "list" ? "secondary" : "ghost"} size="icon" className="h-7 w-7 rounded-r-none rounded-l-md" onClick={() => setViewMode("list")}>

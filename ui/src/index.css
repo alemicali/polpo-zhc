@@ -540,6 +540,7 @@
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --safe-left: env(safe-area-inset-left, 0px);
   --safe-right: env(safe-area-inset-right, 0px);
+  --mobile-nav-reserve: calc(5.75rem + var(--safe-bottom));
 }
 
 .pt-safe { padding-top: var(--safe-top); }
@@ -557,7 +558,7 @@
 
 /* Bottom padding for mobile nav */
 .pb-bottom-nav {
-  padding-bottom: calc(3.5rem + var(--safe-bottom));
+  padding-bottom: var(--mobile-nav-reserve);
 }
 
 @media (max-width: 767px) {
@@ -583,11 +584,13 @@
   }
 
   [data-slot="tabs-list"] {
+    width: 100%;
     max-width: 100%;
     justify-content: flex-start;
     overflow-x: auto;
     overflow-y: hidden;
     -webkit-overflow-scrolling: touch;
+    scroll-snap-type: x proximity;
     scrollbar-width: none;
   }
 
@@ -598,6 +601,7 @@
   [data-slot="tabs-trigger"] {
     flex: 0 0 auto;
     min-height: 2rem;
+    scroll-snap-align: start;
   }
 
   [data-slot="button-group"] {

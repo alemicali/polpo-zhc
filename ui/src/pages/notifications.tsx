@@ -434,9 +434,9 @@ export function NotificationsPage() {
   }
 
   return (
-    <div className="flex flex-col flex-1 min-h-0 gap-4">
+    <div className="flex flex-col flex-1 min-h-0 min-w-0 gap-4">
       {/* ── Stats row ── */}
-      <div className="grid grid-cols-4 gap-3 shrink-0">
+      <div className="grid grid-cols-2 gap-2 shrink-0 sm:grid-cols-4 sm:gap-3">
         <StatCard
           label="Total"
           value={stats?.total ?? 0}
@@ -471,8 +471,8 @@ export function NotificationsPage() {
       </div>
 
       {/* ── Toolbar ── */}
-      <div className="flex items-center gap-3 shrink-0">
-        <div className="relative w-72">
+      <div className="flex shrink-0 flex-col gap-2 lg:flex-row lg:items-center lg:gap-3">
+        <div className="relative min-w-0 flex-1 lg:w-72 lg:flex-none">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
           <Input
             placeholder="Search notifications..."
@@ -483,43 +483,43 @@ export function NotificationsPage() {
         </div>
 
         {/* Status filter */}
-        <Select value={statusFilter} onValueChange={setStatusFilter}>
-          <SelectTrigger className="h-8 w-28 text-xs bg-input/50 border-border/40">
-            <Filter className="h-3 w-3 mr-1.5 text-muted-foreground" />
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All status</SelectItem>
-            <SelectItem value="sent">Sent</SelectItem>
-            <SelectItem value="failed">Failed</SelectItem>
-          </SelectContent>
-        </Select>
+        <div className="flex max-w-full items-center gap-2 overflow-x-auto scrollbar-none pb-0.5 lg:ml-auto lg:overflow-visible lg:pb-0">
+          <Select value={statusFilter} onValueChange={setStatusFilter}>
+            <SelectTrigger className="h-8 w-28 shrink-0 text-xs bg-input/50 border-border/40">
+              <Filter className="h-3 w-3 mr-1.5 text-muted-foreground" />
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All status</SelectItem>
+              <SelectItem value="sent">Sent</SelectItem>
+              <SelectItem value="failed">Failed</SelectItem>
+            </SelectContent>
+          </Select>
 
-        {/* Severity filter */}
-        <Select value={severityFilter} onValueChange={setSeverityFilter}>
-          <SelectTrigger className="h-8 w-28 text-xs bg-input/50 border-border/40">
-            <AlertTriangle className="h-3 w-3 mr-1.5 text-muted-foreground" />
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All severity</SelectItem>
-            <SelectItem value="info">Info</SelectItem>
-            <SelectItem value="warning">Warning</SelectItem>
-            <SelectItem value="critical">Critical</SelectItem>
-          </SelectContent>
-        </Select>
+          {/* Severity filter */}
+          <Select value={severityFilter} onValueChange={setSeverityFilter}>
+            <SelectTrigger className="h-8 w-28 shrink-0 text-xs bg-input/50 border-border/40">
+              <AlertTriangle className="h-3 w-3 mr-1.5 text-muted-foreground" />
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All severity</SelectItem>
+              <SelectItem value="info">Info</SelectItem>
+              <SelectItem value="warning">Warning</SelectItem>
+              <SelectItem value="critical">Critical</SelectItem>
+            </SelectContent>
+          </Select>
 
-        <div className="flex-1" />
+          <Badge variant="secondary" className="shrink-0 text-xs">
+            {filtered.length} notification{filtered.length !== 1 ? "s" : ""}
+          </Badge>
 
-        <Badge variant="secondary" className="text-xs shrink-0">
-          {filtered.length} notification{filtered.length !== 1 ? "s" : ""}
-        </Badge>
+          <Button variant="outline" size="sm" className="h-8 shrink-0 gap-1.5" onClick={refetch}>
+            <RefreshCw className="h-3.5 w-3.5" />
+          </Button>
 
-        <Button variant="outline" size="sm" className="h-8 gap-1.5" onClick={refetch}>
-          <RefreshCw className="h-3.5 w-3.5" />
-        </Button>
-
-        <SendDirectDialog onSend={handleSend} sending={sending} />
+          <SendDirectDialog onSend={handleSend} sending={sending} />
+        </div>
       </div>
 
       {/* ── Notification list ── */}
