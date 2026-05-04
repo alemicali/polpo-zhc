@@ -219,6 +219,62 @@ export const UpdateSettingsSchema = z.object({
   reasoning: z.enum(["off", "minimal", "low", "medium", "high", "xhigh"]).optional(),
 });
 
+// ── Notification rule (full top-level, with action passthrough) ───────
+
+export const UpsertNotificationRuleSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1).optional(),
+  events: z.array(z.string().min(1)).min(1),
+  channels: z.array(z.string().min(1)).min(1),
+  severity: z.enum(["info", "warning", "error", "critical"]).optional(),
+  template: z.string().optional(),
+  condition: z.any().optional(),
+  cooldownMs: z.number().int().min(0).optional(),
+  includeOutcomes: z.boolean().optional(),
+  outcomeFilter: z
+    .object({
+      types: z.array(z.string()).optional(),
+      tags: z.array(z.string()).optional(),
+    })
+    .optional(),
+  maxAttachmentSize: z.number().int().min(0).optional(),
+  actions: z.array(z.any()).optional(),
+});
+
+// ── Approval gate ─────────────────────────────────────────────────────
+
+const LifecycleHookSchema = z.enum([
+  "task:create",
+  "task:spawn",
+  "task:transition",
+  "task:complete",
+  "task:fail",
+  "task:retry",
+  "mission:execute",
+  "mission:complete",
+  "assessment:run",
+  "assessment:complete",
+  "quality:gate",
+  "quality:sla",
+  "schedule:trigger",
+  "orchestrator:tick",
+  "orchestrator:shutdown",
+]);
+
+export const UpsertApprovalGateSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  handler: z.enum(["auto", "human"]),
+  hook: LifecycleHookSchema,
+  condition: z.object({ expression: z.string().min(1) }).optional(),
+  notifyChannels: z.array(z.string().min(1)).optional(),
+  timeoutMs: z.number().int().min(0).optional(),
+  timeoutAction: z.enum(["approve", "reject"]).optional(),
+  priority: z.number().int().optional(),
+  maxRevisions: z.number().int().min(0).optional(),
+  includeOutcomes: z.boolean().optional(),
+});
+
 // ── Agent schemas ─────────────────────────────────────────────────────
 
 const AgentResponsibilitySchema = z.object({

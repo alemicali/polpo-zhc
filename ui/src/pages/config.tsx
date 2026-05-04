@@ -58,6 +58,8 @@ import {
   Keyboard,
    Pencil,
   X,
+  Plus,
+  Trash2,
   type LucideIcon,
 } from "lucide-react";
 import { useConfig } from "@/hooks/use-polpo";
@@ -71,6 +73,9 @@ import { AuthStep, OAuthFlow, ApiKeyStep } from "@/components/shared/provider-au
 import type { Provider as AuthProvider, OAuthProvider } from "@/components/shared/provider-auth";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import { ModelPicker } from "@/components/shared/model-picker";
+import { RuleFormDialog, type NotificationRuleDraft } from "@/components/config/rule-form-dialog";
+import { GateFormDialog, type ApprovalGateDraft, type LifecycleHook as GateLifecycleHook } from "@/components/config/gate-form-dialog";
+import { toast } from "sonner";
 
 // ── API helper (same pattern as setup.tsx) ──
 
@@ -1478,6 +1483,18 @@ export function ConfigPage() {
   const { authStatus, refetch: refetchAuth } = useAuthStatus();
   const [activeSection, setActiveSection] = useState<SectionId>("general");
 
+  // ── Rule dialog state ──
+  const [ruleDialogOpen, setRuleDialogOpen] = useState(false);
+  const [ruleDialogInitial, setRuleDialogInitial] = useState<NotificationRuleDraft | undefined>(undefined);
+  const [deleteRuleId, setDeleteRuleId] = useState<string | null>(null);
+  const [ruleBusy, setRuleBusy] = useState(false);
+
+  // ── Gate dialog state ──
+  const [gateDialogOpen, setGateDialogOpen] = useState(false);
+  const [gateDialogInitial, setGateDialogInitial] = useState<ApprovalGateDraft | undefined>(undefined);
+  const [deleteGateId, setDeleteGateId] = useState<string | null>(null);
+  const [gateBusy, setGateBusy] = useState(false);
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-full">
@@ -1501,9 +1518,10 @@ export function ConfigPage() {
   const { settings, providers } = config;
   const notifications = settings.notifications as Record<string, unknown> | undefined;
   const rules = (notifications?.rules ?? []) as Array<{
-    id: string; name: string; events: string[]; channels: string[];
+    id: string; name?: string; events: string[]; channels: string[];
     severity?: string; template?: string; condition?: Record<string, unknown>;
-    cooldownMs?: number; includeOutcomes?: boolean; outcomeFilter?: string[];
+    cooldownMs?: number; includeOutcomes?: boolean;
+    outcomeFilter?: string[] | { types?: string[]; tags?: string[] };
     maxAttachmentSize?: number; actions?: Array<{ type: string; [key: string]: unknown }>;
   }>;
 
@@ -1552,8 +1570,80 @@ export function ConfigPage() {
 
   const hasPolicies = !!(escalation || sla || (gates && gates.length > 0));
 
-  // Build visible sections — hide policies when empty
-  const sections = baseSections.filter(s => s.id !== "policies" || hasPolicies);
+  // Build visible sections — hide policies when empty (but always allow adding new gates from Policies tab when present, so we always show it)
+  const sections = baseSections;
+  void hasPolicies;
+
+  // ── Channel name list (used by rule/gate forms) ──
+  const channelNames = Object.keys(
+    (settings.notifications?.channels ?? {}) as Record<string, NotificationChannelConfig>,
+  );
+
+  // ── Rule persistence helpers ──
+  const saveRule = async (rule: NotificationRuleDraft) => {
+    setRuleBusy(true);
+    try {
+      const res = await api(`/config/rules/${encodeURIComponent(rule.id)}`, {
+        method: "PUT",
+        body: JSON.stringify(rule),
+      });
+      if (!res.ok) throw new Error(res.error ?? "Failed to save rule");
+      if (res.data) setOptimistic(res.data);
+      else await refetch();
+      toast.success(`Rule "${rule.id}" saved`);
+    } finally {
+      setRuleBusy(false);
+    }
+  };
+
+  const removeRule = async (id: string) => {
+    setRuleBusy(true);
+    try {
+      const res = await api(`/config/rules/${encodeURIComponent(id)}`, { method: "DELETE" });
+      if (!res.ok) throw new Error(res.error ?? "Failed to delete rule");
+      if (res.data) setOptimistic(res.data);
+      else await refetch();
+      toast.success(`Rule "${id}" deleted`);
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setRuleBusy(false);
+      setDeleteRuleId(null);
+    }
+  };
+
+  // ── Gate persistence helpers ──
+  const saveGate = async (gate: ApprovalGateDraft) => {
+    setGateBusy(true);
+    try {
+      const res = await api(`/config/gates/${encodeURIComponent(gate.id)}`, {
+        method: "PUT",
+        body: JSON.stringify(gate),
+      });
+      if (!res.ok) throw new Error(res.error ?? "Failed to save gate");
+      if (res.data) setOptimistic(res.data);
+      else await refetch();
+      toast.success(`Gate "${gate.id}" saved`);
+    } finally {
+      setGateBusy(false);
+    }
+  };
+
+  const removeGate = async (id: string) => {
+    setGateBusy(true);
+    try {
+      const res = await api(`/config/gates/${encodeURIComponent(id)}`, { method: "DELETE" });
+      if (!res.ok) throw new Error(res.error ?? "Failed to delete gate");
+      if (res.data) setOptimistic(res.data);
+      else await refetch();
+      toast.success(`Gate "${id}" deleted`);
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setGateBusy(false);
+      setDeleteGateId(null);
+    }
+  };
 
   return (
     <div className="flex flex-col flex-1 min-h-0 gap-4">
@@ -1762,6 +1852,19 @@ export function ConfigPage() {
         {/* ═══ RULES ═══ */}
         {activeSection === "rules" && (
           <>
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-[11px] text-muted-foreground">
+                Trigger notifications when lifecycle events match. Persisted to <code className="font-mono text-primary">.polpo/polpo.json</code>.
+              </p>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => { setRuleDialogInitial(undefined); setRuleDialogOpen(true); }}
+                disabled={ruleBusy}
+              >
+                <Plus className="h-3.5 w-3.5 mr-1" /> New rule
+              </Button>
+            </div>
             {rules.length > 0 ? (
               <div className="space-y-2">
                 {rules.map((rule) => (
@@ -1769,12 +1872,50 @@ export function ConfigPage() {
                     <CardContent className="pt-3 pb-3">
                       <div className="flex items-center gap-2 mb-2">
                         <Eye className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                        <span className="text-sm font-semibold">{rule.name}</span>
+                        <span className="text-sm font-semibold">{rule.name ?? rule.id}</span>
                         {rule.severity && (
                           <Badge variant={rule.severity === "critical" ? "destructive" : rule.severity === "warning" ? "secondary" : "outline"} className="text-[10px]">
                             {rule.severity}
                           </Badge>
                         )}
+                        <div className="ml-auto flex items-center gap-1">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 px-2"
+                            onClick={() => {
+                              setRuleDialogInitial({
+                                id: rule.id,
+                                name: rule.name,
+                                events: rule.events ?? [],
+                                channels: rule.channels ?? [],
+                                severity: rule.severity as NotificationRuleDraft["severity"],
+                                template: rule.template,
+                                condition: rule.condition,
+                                cooldownMs: rule.cooldownMs,
+                                includeOutcomes: rule.includeOutcomes,
+                                outcomeFilter: Array.isArray(rule.outcomeFilter)
+                                  ? { types: rule.outcomeFilter }
+                                  : (rule.outcomeFilter as { types?: string[]; tags?: string[] } | undefined),
+                                maxAttachmentSize: rule.maxAttachmentSize,
+                                actions: rule.actions,
+                              });
+                              setRuleDialogOpen(true);
+                            }}
+                            disabled={ruleBusy}
+                          >
+                            <Pencil className="h-3 w-3 mr-1" /> Edit
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 px-2 text-destructive hover:text-destructive"
+                            onClick={() => setDeleteRuleId(rule.id)}
+                            disabled={ruleBusy}
+                          >
+                            <Trash2 className="h-3 w-3" />
+                          </Button>
+                        </div>
                       </div>
                       {/* Events → Channels flow */}
                       <div className="flex flex-wrap items-center gap-1.5 mb-2">
@@ -1805,13 +1946,18 @@ export function ConfigPage() {
                               {rule.cooldownMs >= 60000 ? `${(rule.cooldownMs / 60000).toFixed(0)}min` : `${(rule.cooldownMs / 1000).toFixed(0)}s`} cooldown
                             </span>
                           )}
-                          {rule.includeOutcomes && (
-                            <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
-                              <Paperclip className="h-3 w-3" />
-                              Outcomes{rule.outcomeFilter?.length ? ` (${rule.outcomeFilter.join(", ")})` : ""}
-                              {rule.maxAttachmentSize ? ` max ${(rule.maxAttachmentSize / 1048576).toFixed(0)}MB` : ""}
-                            </span>
-                          )}
+                          {rule.includeOutcomes && (() => {
+                            const types = Array.isArray(rule.outcomeFilter)
+                              ? rule.outcomeFilter
+                              : rule.outcomeFilter?.types ?? [];
+                            return (
+                              <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                                <Paperclip className="h-3 w-3" />
+                                Outcomes{types.length ? ` (${types.join(", ")})` : ""}
+                                {rule.maxAttachmentSize ? ` max ${(rule.maxAttachmentSize / 1048576).toFixed(0)}MB` : ""}
+                              </span>
+                            );
+                          })()}
                           {rule.actions && rule.actions.length > 0 && (
                             <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
                               <Zap className="h-3 w-3" />
@@ -1827,11 +1973,23 @@ export function ConfigPage() {
             ) : (
               <Empty text="No notification rules configured" />
             )}
+
+            {rules.length > 0 && (
+              <details className="mt-4 group">
+                <summary className="text-[11px] text-muted-foreground cursor-pointer hover:text-foreground select-none">
+                  Show raw JSON
+                </summary>
+                <JsonBlock
+                  data={rules}
+                  className="mt-2 text-[11px] leading-relaxed font-mono bg-muted/20 rounded-lg px-4 py-3 whitespace-pre-wrap max-h-64 overflow-auto border border-border/20"
+                />
+              </details>
+            )}
           </>
         )}
 
         {/* ═══ POLICIES ═══ */}
-        {activeSection === "policies" && hasPolicies && (
+        {activeSection === "policies" && (
               <div className="space-y-4">
                 {/* Escalation Policy — structured display */}
                 {escalation && (
@@ -1934,12 +2092,24 @@ export function ConfigPage() {
                 )}
 
                 {/* Approval Gates — structured display */}
-                {gates && gates.length > 0 && (
-                  <div>
-                    <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-2 flex items-center gap-1.5">
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
                       <Shield className="h-3.5 w-3.5" /> Approval Gates
-                      <Badge variant="secondary" className="text-[9px] h-4 px-1.5">{gates.length}</Badge>
+                      {gates && gates.length > 0 && (
+                        <Badge variant="secondary" className="text-[9px] h-4 px-1.5">{gates.length}</Badge>
+                      )}
                     </h3>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => { setGateDialogInitial(undefined); setGateDialogOpen(true); }}
+                      disabled={gateBusy}
+                    >
+                      <Plus className="h-3.5 w-3.5 mr-1" /> New gate
+                    </Button>
+                  </div>
+                  {gates && gates.length > 0 ? (
                     <div className="space-y-2">
                       {gates.map((gate) => (
                         <Card key={gate.id} className="bg-card/60 border-border/30 py-0 gap-0">
@@ -1952,8 +2122,45 @@ export function ConfigPage() {
                               </Badge>
                               <code className="text-[10px] font-mono text-muted-foreground">{gate.hook}</code>
                               {gate.priority && gate.priority !== 100 && (
-                                <Badge variant="outline" className="text-[9px] ml-auto">priority: {gate.priority}</Badge>
+                                <Badge variant="outline" className="text-[9px]">priority: {gate.priority}</Badge>
                               )}
+                              <div className="ml-auto flex items-center gap-1">
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-7 px-2"
+                                  onClick={() => {
+                                    setGateDialogInitial({
+                                      id: gate.id,
+                                      name: gate.name,
+                                      handler: (gate.handler === "auto" ? "auto" : "human"),
+                                      hook: gate.hook as GateLifecycleHook,
+                                      condition: gate.condition?.expression
+                                        ? { expression: gate.condition.expression }
+                                        : undefined,
+                                      notifyChannels: gate.notifyChannels,
+                                      timeoutMs: gate.timeoutMs,
+                                      timeoutAction: gate.timeoutAction === "approve" ? "approve" : gate.timeoutAction === "reject" ? "reject" : undefined,
+                                      priority: gate.priority,
+                                      maxRevisions: gate.maxRevisions,
+                                      includeOutcomes: gate.includeOutcomes,
+                                    });
+                                    setGateDialogOpen(true);
+                                  }}
+                                  disabled={gateBusy}
+                                >
+                                  <Pencil className="h-3 w-3 mr-1" /> Edit
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-7 px-2 text-destructive hover:text-destructive"
+                                  onClick={() => setDeleteGateId(gate.id)}
+                                  disabled={gateBusy}
+                                >
+                                  <Trash2 className="h-3 w-3" />
+                                </Button>
+                              </div>
                             </div>
                             <div className="flex flex-wrap items-center gap-3 text-[11px] text-muted-foreground">
                               {gate.timeoutMs && (
@@ -1995,11 +2202,53 @@ export function ConfigPage() {
                         </Card>
                       ))}
                     </div>
-                  </div>
-                )}
+                  ) : (
+                    <Empty text="No approval gates configured" />
+                  )}
+                </div>
               </div>
         )}
       </div>
+
+      {/* ── Notification rule dialog ── */}
+      <RuleFormDialog
+        open={ruleDialogOpen}
+        onOpenChange={setRuleDialogOpen}
+        initial={ruleDialogInitial}
+        channels={channelNames}
+        existingIds={rules.map((r) => r.id)}
+        onSave={saveRule}
+      />
+      <ConfirmDialog
+        open={!!deleteRuleId}
+        onOpenChange={(o) => { if (!o) setDeleteRuleId(null); }}
+        title="Delete notification rule"
+        description={`Remove rule "${deleteRuleId ?? ""}" from polpo.json? This cannot be undone.`}
+        confirmLabel="Delete"
+        destructive
+        loading={ruleBusy}
+        onConfirm={() => deleteRuleId && removeRule(deleteRuleId)}
+      />
+
+      {/* ── Approval gate dialog ── */}
+      <GateFormDialog
+        open={gateDialogOpen}
+        onOpenChange={setGateDialogOpen}
+        initial={gateDialogInitial}
+        channels={channelNames}
+        existingIds={(gates ?? []).map((g) => g.id)}
+        onSave={saveGate}
+      />
+      <ConfirmDialog
+        open={!!deleteGateId}
+        onOpenChange={(o) => { if (!o) setDeleteGateId(null); }}
+        title="Delete approval gate"
+        description={`Remove gate "${deleteGateId ?? ""}" from polpo.json? This cannot be undone.`}
+        confirmLabel="Delete"
+        destructive
+        loading={gateBusy}
+        onConfirm={() => deleteGateId && removeGate(deleteGateId)}
+      />
     </div>
   );
 }

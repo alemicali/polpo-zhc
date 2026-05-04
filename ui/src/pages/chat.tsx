@@ -1949,65 +1949,58 @@ function SessionSidebar({
       );
     }
 
-    // Top-level header (both views when no drill-down is active)
+    // Top-level header (both views when no drill-down is active).
+    // Sidebar toggle now lives on the RIGHT (using Columns2 to evoke
+    // "show/hide a column"). The "+ new session" button used to live there;
+    // it's been removed because each group already exposes a "+" inline,
+    // and orchestrator new-session is reachable via that group's header.
     return (
       <div className="px-3 py-2.5 border-b border-border/40 flex items-center gap-2 shrink-0">
-        {onBack && (
-          <Button
-            variant="ghost"
-            size="icon"
-            className={cn("h-7 w-7 shrink-0", mobileOnlyBack && "lg:hidden")}
-            onClick={onBack}
-          >
-            <ChevronLeft className="h-4 w-4" />
-          </Button>
-        )}
         <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider flex-1">
           Agent Chats
         </span>
-        {/* View toggle */}
+        {/* View toggle — text labels, not icons */}
         <div className="flex items-center bg-muted/60 rounded-md p-0.5 gap-0.5">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                className={cn(
-                  "h-6 w-6 flex items-center justify-center rounded transition-colors",
-                  view === "drill"
-                    ? "bg-background text-foreground shadow-sm"
-                    : "text-muted-foreground hover:text-foreground"
-                )}
-                onClick={() => setView("drill")}
-              >
-                <Compass className="h-3.5 w-3.5" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom" className="text-xs">Drill-down</TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                className={cn(
-                  "h-6 w-6 flex items-center justify-center rounded transition-colors",
-                  view === "flat"
-                    ? "bg-background text-foreground shadow-sm"
-                    : "text-muted-foreground hover:text-foreground"
-                )}
-                onClick={() => setView("flat")}
-              >
-                <ListChecks className="h-3.5 w-3.5" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom" className="text-xs">All chats</TooltipContent>
-          </Tooltip>
+          <button
+            className={cn(
+              "h-6 px-2 flex items-center justify-center rounded text-[10.5px] font-medium transition-colors",
+              view === "drill"
+                ? "bg-background text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground"
+            )}
+            onClick={() => setView("drill")}
+          >
+            By agent
+          </button>
+          <button
+            className={cn(
+              "h-6 px-2 flex items-center justify-center rounded text-[10.5px] font-medium transition-colors",
+              view === "flat"
+                ? "bg-background text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground"
+            )}
+            onClick={() => setView("flat")}
+          >
+            All
+          </button>
         </div>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => onNew()}>
-              <Plus className="h-3.5 w-3.5" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom" className="text-xs">New session</TooltipContent>
-        </Tooltip>
+        {/* Sidebar close button — pure close (the open action lives elsewhere) */}
+        {onBack && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className={cn("h-7 w-7 shrink-0", mobileOnlyBack && "lg:hidden")}
+                onClick={onBack}
+                aria-label="Close chat sidebar"
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" className="text-xs">Close</TooltipContent>
+          </Tooltip>
+        )}
       </div>
     );
   };

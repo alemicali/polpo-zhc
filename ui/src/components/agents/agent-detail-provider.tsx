@@ -71,6 +71,7 @@ export interface AgentDetailState {
 
 export interface AgentDetailActions {
   refetch: () => void;
+  refetchVault: () => Promise<void>;
 }
 
 export interface AgentDetailMeta {
@@ -107,7 +108,7 @@ export function AgentDetailProvider({ children }: { children: React.ReactNode })
   const { agents, teams } = useAgents();
   const { processes } = useProcesses();
   const { skills: allSkills } = useSkills();
-  const { entries: vaultEntries } = useVaultEntries(agentName);
+  const { entries: vaultEntries, refetch: refetchVault } = useVaultEntries(agentName);
   const { tasks: agentTasks } = useTasks({ assignTo: agentName });
 
   // Skill pool map
@@ -203,12 +204,12 @@ export function AgentDetailProvider({ children }: { children: React.ReactNode })
       teamName: teamInfo.teamName,
       teamColorIndex: teamInfo.teamColorIndex,
     },
-    actions: { refetch },
+    actions: { refetch, refetchVault },
     meta: { agentName },
   }), [
     agent, isLoading, error, process, subordinates, manager,
     taskStats, sortedTasks, skillPool, vaultEntries, mcpEntries,
-    agentAllowedTools, enabledCategories, teamInfo, refetch, agentName,
+    agentAllowedTools, enabledCategories, teamInfo, refetch, refetchVault, agentName,
   ]);
 
   return (

@@ -392,6 +392,73 @@ export class NotificationRouter {
   }
 
   /**
+   * Test an ephemeral channel config without persisting it.
+   * Constructs an in-memory channel from the given config, attempts a test
+   * (which for most channels also performs a real send), and returns the result.
+   *
+   * Errors are sanitized — no stack traces or token leaks.
+   *
+   * @param config The candidate channel configuration to validate.
+   * @param timeoutMs Maximum time to wait before aborting (default 10s).
+   */
+  async testChannelConfig(
+    config: NotificationChannelConfig,
+    timeoutMs = 10_000,
+  ): Promise<{ ok: boolean; error?: string }> {
+    let channel: NotificationChannel;
+    try {
+      channel = this.createChannel(config);
+    } catch (err) {
+      return { ok: false, error: sanitizeChannelError(err, config) };
+    }
+
+    const testNotification: Notification = {
+      id: nanoid(),
+      channel: "test-config",
+      title: "Polpo connection test",
+      body: "This is a test notification from Polpo to verify your channel configuration.",
+      severity: "info",
+      sourceEvent: "channel:test-config",
+      sourceData: { test: true },
+      ruleId: "test-config",
+      timestamp: new Date().toISOString(),
+    };
+
+    // Race the test/send against a timeout
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<{ ok: false; error: string; timedOut: true }>((resolve) => {
+      timer = setTimeout(() => resolve({
+        ok: false,
+        error: "Connection timed out, network or auth issue?",
+        timedOut: true,
+      }), timeoutMs);
+    });
+
+    // Run channel.test() first (cheap validation), then a real send when test() returns true.
+    const attempt = (async (): Promise<{ ok: boolean; error?: string }> => {
+      try {
+        const reachable = await channel.test();
+        if (!reachable) {
+          return { ok: false, error: "Channel rejected the test handshake — check credentials and target." };
+        }
+        // For channels where test() only validates URL shape (e.g. Slack), a real send
+        // gives us actual confirmation. Failures throw, which we catch below.
+        await channel.send(testNotification);
+        return { ok: true };
+      } catch (err) {
+        return { ok: false, error: sanitizeChannelError(err, config) };
+      }
+    })();
+
+    try {
+      const result = await Promise.race([attempt, timeout]);
+      return { ok: result.ok, error: result.error };
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
+  /**
    * Register a custom channel programmatically.
    */
   registerChannel(id: string, channel: NotificationChannel): void {
@@ -830,6 +897,36 @@ function evaluateCondition(condition: NotificationCondition, data: unknown): boo
     default:
       return false;
   }
+}
+
+/**
+ * Sanitize an error from a channel test/send into a user-friendly message.
+ * Strips stack traces, redacts tokens/keys/URLs that match secret patterns,
+ * and trims output to a single line of reasonable length.
+ */
+function sanitizeChannelError(err: unknown, config: NotificationChannelConfig): string {
+  const raw = err instanceof Error ? err.message : String(err ?? "Unknown error");
+  // Strip newlines / collapse whitespace
+  let msg = raw.replace(/\s+/g, " ").trim();
+
+  // Redact known secret values present in the config
+  const secrets = [config.apiKey, config.botToken, config.webhookUrl, config.url]
+    .filter((v): v is string => typeof v === "string" && v.length > 6);
+  for (const secret of secrets) {
+    if (msg.includes(secret)) {
+      msg = msg.split(secret).join("***");
+    }
+  }
+  // Generic bearer-token / xox(b|p) / re_ patterns
+  msg = msg
+    .replace(/Bearer\s+[A-Za-z0-9._\-]+/g, "Bearer ***")
+    .replace(/\bxox[abprs]-[A-Za-z0-9-]+/g, "xox***")
+    .replace(/\bre_[A-Za-z0-9_]+/g, "re_***")
+    .replace(/\b[0-9]{6,}:AA[A-Za-z0-9_\-]+/g, "***:***"); // telegram bot token
+
+  // Cap length
+  if (msg.length > 280) msg = `${msg.slice(0, 277)}...`;
+  return msg || "Channel test failed";
 }
 
 /** Resolve a dotted property path (e.g. "task.status") on the data object. */
