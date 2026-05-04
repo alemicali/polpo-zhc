@@ -7,7 +7,7 @@ import { fileURLToPath } from "url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-const isElectron = !!process.env.VITE_POLPO_API_URL;
+const isElectron = process.env.POLPO_ELECTRON === "1";
 
 const pwaPlugin = VitePWA({
   registerType: "autoUpdate",

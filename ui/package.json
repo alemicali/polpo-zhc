@@ -15,8 +15,8 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "electron:dev": "VITE_POLPO_API_URL=http://localhost:3890 vite build && electron .",
-    "electron:build": "VITE_POLPO_API_URL=http://localhost:3890 vite build && electron-builder"
+    "electron:dev": "POLPO_ELECTRON=1 VITE_POLPO_API_URL=http://localhost:3890 vite build && electron .",
+    "electron:build": "POLPO_ELECTRON=1 VITE_POLPO_API_URL=http://localhost:3890 vite build && electron-builder"
   },
   "dependencies": {
     "@ai-sdk/react": "^3.0.88",
