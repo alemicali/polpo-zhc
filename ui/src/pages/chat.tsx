@@ -354,6 +354,33 @@ function MentionButton({ disabled, onOpen }: { disabled?: boolean; onOpen: () =>
   );
 }
 
+// ── Slash / button (lives inside PromptInput) ──
+
+function SlashButton({ disabled, onOpen }: { disabled?: boolean; onOpen: () => void }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8 rounded-full text-muted-foreground hover:text-foreground hover:bg-accent"
+          onMouseDown={(e) => {
+            e.preventDefault();
+            onOpen();
+          }}
+          disabled={disabled}
+        >
+          <span className="text-base font-semibold leading-none">/</span>
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent side="top" className="text-xs">
+        Run a skill or playbook
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
 // ── Mission data shape (mirrors server-side MissionData from mission-generator.ts) ──
 
 interface MissionExpectation {
@@ -2821,7 +2848,11 @@ function ChatInput() {
                 <AttachButton disabled={inputDisabled} />
                 <MentionButton
                   disabled={inputDisabled}
-                  onOpen={() => mentionRef.current?.toggle()}
+                  onOpen={() => mentionRef.current?.toggle("@")}
+                />
+                <SlashButton
+                  disabled={inputDisabled}
+                  onOpen={() => mentionRef.current?.toggle("/")}
                 />
               </div>
               <div className="flex items-center gap-1">
@@ -2835,7 +2866,7 @@ function ChatInput() {
             </PromptInputFooter>
           </PromptInput>
         </MentionPopover>
-        <p className="text-[10px] text-muted-foreground text-center mt-0.5">
+        <p className="hidden sm:block text-[10px] text-muted-foreground text-center mt-0.5">
           @ to mention · / for skills · Enter to send · Shift+Enter for new line.
           {sessionId && (
             <SessionIdCopy sessionId={sessionId} />
@@ -2879,7 +2910,7 @@ function ChatLoadingSkeleton({ compact }: { compact?: boolean }) {
                 <PromptInputSubmit disabled />
               </PromptInputFooter>
             </PromptInput>
-            <p className="text-[10px] text-muted-foreground text-center mt-0.5">
+            <p className="hidden sm:block text-[10px] text-muted-foreground text-center mt-0.5">
               @ to mention · / for skills · Enter to send · Shift+Enter for new line.
             </p>
           </div>

@@ -80,8 +80,8 @@ export interface MentionPopoverHandle {
    * Replaces all display mentions with their wire equivalents.
    */
   resolveMessage: (displayText: string) => string;
-  /** Manually open the popover with `@` (used by the AtSign button). */
-  toggle: () => void;
+  /** Manually open the popover with the given trigger char (default `@`). */
+  toggle: (trigger?: MentionTrigger) => void;
 }
 
 export interface MentionPopoverProps {
@@ -517,7 +517,7 @@ export const MentionPopover = forwardRef<
       },
       handleInput,
       resolveMessage,
-      toggle: () => {
+      toggle: (trigger: MentionTrigger = "@") => {
         const textarea = textareaRef.current;
         if (!textarea) return;
 
@@ -545,7 +545,7 @@ export const MentionPopover = forwardRef<
         const cursor = selectionStart ?? value.length;
 
         const needsSpace = cursor > 0 && value[cursor - 1] !== " " && value[cursor - 1] !== "\n";
-        const insert = needsSpace ? " @" : "@";
+        const insert = needsSpace ? ` ${trigger}` : trigger;
 
         const before = value.slice(0, cursor);
         const after = value.slice(cursor);
