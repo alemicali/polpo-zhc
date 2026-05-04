@@ -5,59 +5,89 @@ RUN corepack enable && corepack prepare pnpm@10.29.3 --activate
 
 WORKDIR /app
 
-# Dependencies first (cache layer)
-# Include workspace manifests + patches so pnpm resolves workspace: refs
+# Dependencies first. Copy every workspace manifest so workspace:* references and
+# pnpm's lockfile stay valid even when a package is not part of this image.
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY patches/ patches/
 COPY packages/core/package.json packages/core/
 COPY packages/drizzle/package.json packages/drizzle/
 COPY packages/client-sdk/package.json packages/client-sdk/
 COPY packages/react-sdk/package.json packages/react-sdk/
+COPY packages/server/package.json packages/server/
+COPY packages/tools/package.json packages/tools/
+COPY packages/vault-crypto/package.json packages/vault-crypto/
 COPY ui/package.json ui/
+COPY website/package.json website/
 RUN pnpm install --frozen-lockfile
 
-# Build workspace packages that root src/ re-exports from
+# Build the packages used by the CLI/server plus the extended tools package.
 COPY packages/core/ packages/core/
 COPY packages/drizzle/ packages/drizzle/
-RUN pnpm --filter @polpo-ai/core build && pnpm --filter @polpo-ai/drizzle build
-
-# Source + compile root
+COPY packages/server/ packages/server/
+COPY packages/tools/ packages/tools/
+COPY packages/vault-crypto/ packages/vault-crypto/
 COPY tsconfig.json ./
 COPY src/ src/
-RUN ./node_modules/.bin/tsc
+RUN pnpm --filter @polpo-ai/vault-crypto build \
+    && pnpm --filter @polpo-ai/core build \
+    && pnpm --filter @polpo-ai/drizzle build \
+    && pnpm --filter @polpo-ai/server build \
+    && pnpm --filter @polpo-ai/tools build \
+    && ./node_modules/.bin/tsc
 
 # ── Stage 2: Runtime ──────────────────────────────────────────────────────────
 FROM node:22-bookworm-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      git bash curl ca-certificates poppler-utils \
+      bash \
+      ca-certificates \
+      chromium \
+      curl \
+      fonts-liberation \
+      fonts-noto-color-emoji \
+      git \
+      poppler-utils \
+      python3 \
+      python3-pip \
+    && pip3 install --no-cache-dir --break-system-packages edge-tts \
     && rm -rf /var/lib/apt/lists/*
 
 RUN corepack enable && corepack prepare pnpm@10.29.3 --activate
 
 WORKDIR /app
 
-# Production deps only
+# Production deps only, including optional deps used by document, browser,
+# database, email, and media tools.
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY patches/ patches/
 COPY packages/core/package.json packages/core/
 COPY packages/drizzle/package.json packages/drizzle/
 COPY packages/client-sdk/package.json packages/client-sdk/
 COPY packages/react-sdk/package.json packages/react-sdk/
+COPY packages/server/package.json packages/server/
+COPY packages/tools/package.json packages/tools/
+COPY packages/vault-crypto/package.json packages/vault-crypto/
 COPY ui/package.json ui/
+COPY website/package.json website/
 RUN pnpm install --frozen-lockfile --prod
 
-# Compiled output (root + workspace packages)
+# Compiled output (root + workspace packages required by runtime imports).
 COPY --from=builder /app/dist/ dist/
 COPY --from=builder /app/packages/core/dist/ packages/core/dist/
 COPY --from=builder /app/packages/drizzle/dist/ packages/drizzle/dist/
+COPY --from=builder /app/packages/server/dist/ packages/server/dist/
+COPY --from=builder /app/packages/tools/dist/ packages/tools/dist/
+COPY --from=builder /app/packages/vault-crypto/dist/ packages/vault-crypto/dist/
+COPY docker/server-entrypoint.sh /usr/local/bin/polpo-server-entrypoint
+RUN chmod +x /usr/local/bin/polpo-server-entrypoint
 
-# Workspace volume — this is where your project lives
 VOLUME /workspace
 
 ENV NODE_ENV=production
+ENV PORT=3890
+ENV POLPO_WORKDIR=/workspace
+ENV POLPO_CHROMIUM_EXECUTABLE=/usr/bin/chromium
+
 EXPOSE 3890
 
-# Default: headless server mode
-ENTRYPOINT ["node", "dist/cli/index.js"]
-CMD ["serve", "--host", "0.0.0.0", "--port", "3890", "--dir", "/workspace"]
+ENTRYPOINT ["polpo-server-entrypoint"]

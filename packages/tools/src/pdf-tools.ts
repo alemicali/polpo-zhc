@@ -12,13 +12,25 @@
  * All file operations enforce path sandboxing.
  */
 
-import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { Type } from "@sinclair/typebox";
 import type { AgentTool, AgentToolResult } from "@mariozechner/pi-agent-core";
 import { resolveAllowedPaths, assertPathAllowed } from "./path-sandbox.js";
 
 const MAX_TEXT_OUTPUT = 50_000;
+
+function resolveChromiumExecutable(): string | undefined {
+  const configured = process.env.POLPO_CHROMIUM_EXECUTABLE
+    ?? process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH;
+  if (configured) return configured;
+
+  for (const candidate of ["/usr/bin/chromium", "/usr/bin/chromium-browser"]) {
+    if (existsSync(candidate)) return candidate;
+  }
+
+  return undefined;
+}
 
 // ─── Tool: pdf_read ───
 
@@ -187,8 +199,10 @@ function createPdfCreateTool(cwd: string, sandbox: string[]): AgentTool<typeof P
       let browser: any;
       try {
         const { chromium } = await import("playwright-core");
+        const executablePath = resolveChromiumExecutable();
 
         browser = await chromium.launch({
+          ...(executablePath ? { executablePath } : {}),
           headless: true,
           args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
         });
@@ -244,7 +258,7 @@ function createPdfCreateTool(cwd: string, sandbox: string[]): AgentTool<typeof P
         // Provide actionable hints for common errors
         if (msg.includes("Executable doesn't exist") || msg.includes("browserType.launch")) {
           return {
-            content: [{ type: "text", text: `PDF create error: Chromium not found. Install it with: npx playwright install chromium\n\nOriginal error: ${msg}` }],
+            content: [{ type: "text", text: `PDF create error: Chromium not found. Set POLPO_CHROMIUM_EXECUTABLE to a Chromium binary or install it with: npx playwright install chromium. The official Docker server image includes /usr/bin/chromium.\n\nOriginal error: ${msg}` }],
             details: { error: "chromium_not_installed" },
           };
         }

@@ -1,0 +1,12 @@
+services:
+  server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: polpo-server:local
+
+  ui:
+    build:
+      context: .
+      dockerfile: ui/Dockerfile
+    image: polpo-ui:local
