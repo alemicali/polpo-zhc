@@ -19,6 +19,7 @@ import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { streamSSE } from "hono/streaming";
 import { nanoid } from "nanoid";
 import { agentMemoryScope } from "@polpo-ai/core";
+import { streamRegistry } from "../stream-registry.js";
 
 const MAX_TURNS = 20;
 
@@ -456,12 +457,36 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
 
     if (body.stream) {
       // ── Streaming mode ──
-      return streamSSE(c, async (stream) => {
-        // Abort controller: cancelled when the client disconnects (closes SSE)
-        const abortController = new AbortController();
-        stream.onAbort(() => { abortController.abort(); });
+      // Resumable: each turn gets a registry entry. Buffered deltas survive
+      // client disconnect, so a returning client can replay + tail.
+      const turnId = `turn-${nanoid(20)}`;
+      const registryEntry = streamRegistry.register(turnId, sessionId ?? "anon");
+      // Surface the turn id so the client can persist it for resume.
+      c.header("x-turn-id", turnId);
 
-        await stream.writeSSE({ data: sseChunk(completionId, { role: "assistant" }) });
+      return streamSSE(c, async (stream) => {
+        // Client-disconnect ≠ LLM-abort. Disconnect just means stop trying to
+        // write to this socket; the LLM keeps running and feeds the registry.
+        // Explicit user cancel goes through registry.abort() which fires
+        // registryEntry.abortController.
+        let clientGone = false;
+        stream.onAbort(() => { clientGone = true; });
+
+        const abortController = registryEntry.abortController;
+
+        // Single emit point: append to the registry (always) AND best-effort
+        // write to the still-connected client.
+        const emit = async (data: string) => {
+          streamRegistry.append(turnId, data);
+          if (clientGone) return;
+          try {
+            await stream.writeSSE({ data });
+          } catch {
+            clientGone = true;
+          }
+        };
+
+        await emit(sseChunk(completionId, { role: "assistant" }));
 
         // Reserve a placeholder message in the store BEFORE streaming.
         // This guarantees the assistant message exists even if the client disconnects.
@@ -492,21 +517,19 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
             for await (const event of piStream) {
               if (abortController.signal.aborted) break;
               if (event.type === "thinking_delta") {
-                await stream.writeSSE({ data: sseChunk(completionId, {}, null, { thinking: event.delta }) });
+                await emit(sseChunk(completionId, {}, null, { thinking: event.delta }));
               } else if (event.type === "text_delta") {
                 turnText += event.delta;
-                await stream.writeSSE({ data: sseChunk(completionId, { content: event.delta }) });
+                await emit(sseChunk(completionId, { content: event.delta }));
               } else if (event.type === "toolcall_start") {
                 // Emit early "preparing" signal — the LLM has started generating a tool call
                 // but arguments are not yet complete. Lets the UI show immediate feedback.
                 const block = event.partial.content[event.contentIndex] as
                   | { type: "toolCall"; id: string; name: string } | undefined;
                 if (block?.type === "toolCall") {
-                  await stream.writeSSE({
-                    data: sseChunk(completionId, {}, null, {
-                      tool_call: { id: block.id, name: block.name, state: "preparing" },
-                    }),
-                  });
+                  await emit(sseChunk(completionId, {}, null, {
+                    tool_call: { id: block.id, name: block.name, state: "preparing" },
+                  }));
                 }
               } else if (event.type === "error") {
                 streamError = (event as any).error?.errorMessage ?? "Model returned an error";
@@ -521,7 +544,7 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
 
             if (streamError) {
               finalText += `\n\nError: ${streamError}`;
-              await stream.writeSSE({ data: sseChunk(completionId, { content: `\n\nError: ${streamError}` }) });
+              await emit(sseChunk(completionId, { content: `\n\nError: ${streamError}` }));
               break;
             }
 
@@ -549,69 +572,57 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
 
               if (interactiveCall.name === "ask_user") {
                 const questions = (interactiveCall.arguments as any)?.questions as any[] ?? [];
-                await stream.writeSSE({
-                  data: sseChunk(completionId, {}, "ask_user", { ask_user: { questions } }),
-                });
+                await emit(sseChunk(completionId, {}, "ask_user", { ask_user: { questions } }));
               } else if (interactiveCall.name === "create_mission") {
                 const args = interactiveCall.arguments as Record<string, unknown>;
                 let missionData: unknown;
                 try { missionData = JSON.parse(args.data as string); } catch { missionData = args.data; }
-                await stream.writeSSE({
-                  data: sseChunk(completionId, {}, "mission_preview", {
-                    mission_preview: {
-                      name: args.name as string,
-                      data: missionData,
-                      prompt: args.prompt as string | undefined,
-                    },
-                  }),
-                });
+                await emit(sseChunk(completionId, {}, "mission_preview", {
+                  mission_preview: {
+                    name: args.name as string,
+                    data: missionData,
+                    prompt: args.prompt as string | undefined,
+                  },
+                }));
               } else if (interactiveCall.name === "set_vault_entry") {
                 const args = interactiveCall.arguments as Record<string, unknown>;
-                await stream.writeSSE({
-                  data: sseChunk(completionId, {}, "vault_preview", {
-                    vault_preview: {
-                      agent: args.agent as string,
-                      service: args.service as string,
-                      type: args.type as string,
-                      label: args.label as string | undefined,
-                      credentials: args.credentials as Record<string, string>,
-                    },
-                  }),
-                });
+                await emit(sseChunk(completionId, {}, "vault_preview", {
+                  vault_preview: {
+                    agent: args.agent as string,
+                    service: args.service as string,
+                    type: args.type as string,
+                    label: args.label as string | undefined,
+                    credentials: args.credentials as Record<string, string>,
+                  },
+                }));
               } else if (interactiveCall.name === "open_file") {
                 const args = interactiveCall.arguments as Record<string, unknown>;
-                await stream.writeSSE({
-                  data: sseChunk(completionId, {}, "open_file", {
-                    open_file: {
-                      path: args.path as string,
-                    },
-                  }),
-                });
+                await emit(sseChunk(completionId, {}, "open_file", {
+                  open_file: {
+                    path: args.path as string,
+                  },
+                }));
               } else if (interactiveCall.name === "navigate_to") {
                 const args = interactiveCall.arguments as Record<string, unknown>;
-                await stream.writeSSE({
-                  data: sseChunk(completionId, {}, "navigate_to", {
-                    navigate_to: {
-                      target: args.target as string,
-                      id: args.id as string | undefined,
-                      name: args.name as string | undefined,
-                      path: args.path as string | undefined,
-                      highlight: args.highlight as string | undefined,
-                    },
-                  }),
-                });
+                await emit(sseChunk(completionId, {}, "navigate_to", {
+                  navigate_to: {
+                    target: args.target as string,
+                    id: args.id as string | undefined,
+                    name: args.name as string | undefined,
+                    path: args.path as string | undefined,
+                    highlight: args.highlight as string | undefined,
+                  },
+                }));
               } else if (interactiveCall.name === "open_tab") {
                 const args = interactiveCall.arguments as Record<string, unknown>;
-                await stream.writeSSE({
-                  data: sseChunk(completionId, {}, "open_tab", {
-                    open_tab: {
-                      url: args.url as string,
-                      label: args.label as string | undefined,
-                    },
-                  }),
-                });
+                await emit(sseChunk(completionId, {}, "open_tab", {
+                  open_tab: {
+                    url: args.url as string,
+                    label: args.label as string | undefined,
+                  },
+                }));
               }
-              await stream.writeSSE({ data: "[DONE]" });
+              await emit("[DONE]");
               return; // finally block will persist whatever finalText we have
             }
 
@@ -620,11 +631,9 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
               if (abortController.signal.aborted) break;
 
               // Notify client that a tool is being called
-              await stream.writeSSE({
-                data: sseChunk(completionId, {}, null, {
-                  tool_call: { id: call.id, name: call.name, arguments: call.arguments, state: "calling" },
-                }),
-              });
+              await emit(sseChunk(completionId, {}, null, {
+                tool_call: { id: call.id, name: call.name, arguments: call.arguments, state: "calling" },
+              }));
 
               const result = await effectiveToolExecutor(call.name, call.arguments);
               const isError = result.startsWith("Error:");
@@ -641,11 +650,9 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
 
               // Notify client with tool result (skip if aborted mid-tool)
               if (!abortController.signal.aborted) {
-                await stream.writeSSE({
-                  data: sseChunk(completionId, {}, null, {
-                    tool_call: { id: call.id, name: call.name, result, state: isError ? "error" : "completed" },
-                  }),
-                });
+                await emit(sseChunk(completionId, {}, null, {
+                  tool_call: { id: call.id, name: call.name, result, state: isError ? "error" : "completed" },
+                }));
               }
 
               messages.push({
@@ -660,15 +667,22 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
           }
 
           if (!abortController.signal.aborted) {
-            await stream.writeSSE({ data: sseChunk(completionId, {}, "stop") });
-            await stream.writeSSE({ data: "[DONE]" });
+            await emit(sseChunk(completionId, {}, "stop"));
+            await emit("[DONE]");
           }
         } catch (err) {
-          // Suppress AbortError — expected when client disconnects
+          // Suppress AbortError — expected when explicit user abort fires
           if (!(err instanceof DOMException && err.name === "AbortError") && !abortController.signal.aborted) {
+            // Surface to subscribers so resume clients see the failure
+            streamRegistry.error(turnId, (err as Error)?.message ?? "stream failed");
             throw err;
           }
         } finally {
+          // Mark the registry entry as done so resume subscribers terminate
+          // cleanly. abort() may already have flipped the status — complete()
+          // is a no-op in that case.
+          streamRegistry.complete(turnId);
+
           // Always persist the assistant response — even on disconnect.
           // SECURITY: Redact vault credentials before persisting to SQLite
           const safeToolCalls = redactVaultToolCalls(toolCallsAccum);
@@ -897,6 +911,103 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
         }
       }
     }
+  });
+
+  // ── Resumable streaming endpoints ──────────────────────────────────────
+  //
+  // GET  /resume/:turnId       — replay buffered deltas + tail until done
+  // POST /abort/:turnId        — explicit user cancel (kills LLM call)
+  // GET  /active-turn          — query: ?sessionId=X — returns live turnId, if any
+  //
+  // These complement the POST root that opens new streams. A client that
+  // disconnects mid-stream can come back to /resume/:turnId and pick up
+  // exactly where it left off.
+
+  app.get("/resume/:turnId", async (c) => {
+    if (apiKeys && apiKeys.length > 0) {
+      const auth = c.req.header("Authorization");
+      const token = auth?.startsWith("Bearer ") ? auth.slice(7) : null;
+      if (!token || !apiKeys.includes(token)) {
+        return c.json({ error: { message: "Invalid API key", type: "invalid_request_error" } }, 401);
+      }
+    }
+
+    const turnId = c.req.param("turnId");
+    const entry = streamRegistry.get(turnId);
+    if (!entry) {
+      return c.json({ error: { message: "Turn not found or expired", type: "invalid_request_error" } }, 404);
+    }
+
+    return streamSSE(c, async (stream) => {
+      let clientGone = false;
+      stream.onAbort(() => { clientGone = true; });
+
+      const safeWrite = async (data: string) => {
+        if (clientGone) return;
+        try { await stream.writeSSE({ data }); } catch { clientGone = true; }
+      };
+
+      // Pump events from registry → this client. Replay first (subscribe
+      // calls push synchronously for the existing buffer), then live tail.
+      let done = false;
+      const pending: Array<Promise<void>> = [];
+      const unsubscribe = streamRegistry.subscribe(turnId, {
+        push: (ev) => {
+          pending.push(safeWrite(ev.data));
+        },
+        finish: () => {
+          done = true;
+        },
+      });
+
+      // Wait until the entry finishes or the client leaves. Polling is
+      // light here — most of the wait time is sleep, not CPU.
+      while (!done && !clientGone) {
+        if (pending.length > 0) {
+          await Promise.all(pending.splice(0));
+        } else {
+          await new Promise<void>((r) => setTimeout(r, 25));
+        }
+      }
+      // Drain any final writes
+      if (pending.length > 0) {
+        try { await Promise.all(pending.splice(0)); } catch { /* ignore */ }
+      }
+
+      if (unsubscribe) unsubscribe();
+    }) as any;
+  });
+
+  app.post("/abort/:turnId", async (c) => {
+    if (apiKeys && apiKeys.length > 0) {
+      const auth = c.req.header("Authorization");
+      const token = auth?.startsWith("Bearer ") ? auth.slice(7) : null;
+      if (!token || !apiKeys.includes(token)) {
+        return c.json({ error: { message: "Invalid API key", type: "invalid_request_error" } }, 401);
+      }
+    }
+    const turnId = c.req.param("turnId");
+    const ok = streamRegistry.abort(turnId);
+    if (!ok) {
+      return c.json({ ok: false, error: "Turn not found or already finished" }, 404);
+    }
+    return c.json({ ok: true });
+  });
+
+  app.get("/active-turn", async (c) => {
+    if (apiKeys && apiKeys.length > 0) {
+      const auth = c.req.header("Authorization");
+      const token = auth?.startsWith("Bearer ") ? auth.slice(7) : null;
+      if (!token || !apiKeys.includes(token)) {
+        return c.json({ error: { message: "Invalid API key", type: "invalid_request_error" } }, 401);
+      }
+    }
+    const sessionId = c.req.query("sessionId");
+    if (!sessionId) {
+      return c.json({ ok: false, error: "sessionId is required" }, 400);
+    }
+    const turnId = streamRegistry.getActiveTurnForSession(sessionId);
+    return c.json({ ok: true, data: { turnId: turnId ?? null } });
   });
 
   return app;

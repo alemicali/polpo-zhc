@@ -317,11 +317,11 @@ function TaskNodeComponent({ data, selected }: NodeProps<Node<TaskNodeData>>) {
           )}
           {score != null && (
             <Badge
-              variant={score >= 0.7 ? "default" : "destructive"}
+              variant={score >= 3.5 ? "default" : "destructive"}
               className="text-[8px] px-1 py-0 ml-auto"
             >
               <Star className="h-2 w-2 mr-0.5" />
-              {Math.round(score * 100)}%
+              {score.toFixed(1)}/5
             </Badge>
           )}
         </div>
@@ -1252,14 +1252,14 @@ export function TaskStepCard({
               </div>
 
               <div className="flex items-center gap-2 shrink-0">
-                {/* Score ring */}
+                {/* Score ring (0-5 scale) */}
                 {score != null && (
                   <div className={cn(
                     "flex flex-col items-center justify-center h-10 w-10 rounded-full border-2",
-                    score >= 0.7 ? "border-emerald-500/50 text-emerald-400" : "border-red-500/50 text-red-400",
+                    score >= 3.5 ? "border-emerald-500/50 text-emerald-400" : "border-red-500/50 text-red-400",
                   )}>
-                    <span className="text-xs font-bold leading-none">{Math.round(score * 100)}</span>
-                    <span className="text-[7px] text-muted-foreground leading-none">%</span>
+                    <span className="text-xs font-bold leading-none tabular-nums">{score.toFixed(1)}</span>
+                    <span className="text-[7px] text-muted-foreground leading-none">/ 5</span>
                   </div>
                 )}
                 <ChevronDown className={cn("h-4 w-4 text-muted-foreground transition-transform", expanded && "rotate-180")} />

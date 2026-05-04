@@ -1794,6 +1794,19 @@ function SessionSidebar({
     });
   }, []);
 
+  // ── Within-group "show more": which groups have all sessions visible ──
+  // Per-group cap so an agent with 30 sessions doesn't flood the sidebar.
+  const [showAllGroups, setShowAllGroups] = useState<Set<string>>(new Set());
+  const SESSIONS_PER_GROUP_PREVIEW = 4;
+  const toggleShowAll = useCallback((key: string) => {
+    setShowAllGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }, []);
+
   // Auto-expand group of active session when it changes
   useEffect(() => {
     if (view !== "flat" || !activeSessionId) return;
@@ -1843,7 +1856,13 @@ function SessionSidebar({
           </Button>
           <div className="flex items-center gap-2 flex-1 min-w-0">
             {agent ? (
-              <AgentAvatar avatar={agent.identity?.avatar} name={name} size="sm" />
+              <AgentAvatar
+                avatar={agent.identity?.avatar}
+                name={name}
+                size="sm"
+                fallbackVariant="circle"
+                shape="circle"
+              />
             ) : (
               <span className="text-sm leading-none">🐙</span>
             )}
@@ -1967,6 +1986,8 @@ function SessionSidebar({
                   avatar={agent.identity?.avatar}
                   name={displayName}
                   size="md"
+                  fallbackVariant="circle"
+                  shape="circle"
                 />
               ) : (
                 <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-base">
@@ -2027,6 +2048,8 @@ function SessionSidebar({
                     avatar={agent.identity?.avatar}
                     name={displayName}
                     size="sm"
+                    fallbackVariant="circle"
+                    shape="circle"
                   />
                 ) : (
                   <div className="flex h-6 w-6 items-center justify-center rounded-full bg-primary/10 text-xs">
@@ -2034,12 +2057,17 @@ function SessionSidebar({
                   </div>
                 )}
               </div>
-              <div className="flex-1 min-w-0 flex items-center gap-2">
-                <span className="text-[12px] font-semibold truncate text-foreground">
-                  {displayName}
-                </span>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[12.5px] font-bold tracking-tight truncate text-foreground leading-tight">
+                    {displayName}
+                  </span>
+                  <span className="shrink-0 text-[8px] font-bold tracking-[0.12em] uppercase text-muted-foreground/55 border border-border/60 rounded-sm px-1 py-px leading-none">
+                    {agent ? "Agent" : "Orchestrator"}
+                  </span>
+                </div>
                 <span className="text-[10px] text-muted-foreground/60">
-                  {count}
+                  {count} chat{count !== 1 ? "s" : ""}
                 </span>
               </div>
               <Button
@@ -2059,21 +2087,45 @@ function SessionSidebar({
                 <ChevronDown className="h-3 w-3 text-muted-foreground/50 shrink-0" />
               )}
             </div>
-            {/* Collapsible session list */}
-            {isExpanded && (
-              <div className="pl-4 pr-1 pb-1 space-y-0.5 mt-0.5">
-                {groupSessions.map((s) => (
-                  <SessionRow
-                    key={s.id}
-                    session={s}
-                    isActive={activeSessionId === s.id}
-                    isStreaming={streamingSessionId === s.id}
-                    onSelect={onSelect}
-                    onDelete={onDelete}
-                  />
-                ))}
-              </div>
-            )}
+            {/* Collapsible session list — capped to N most-recent unless "show more" clicked.
+                groupSessions is already sorted most-recent-first upstream. */}
+            {isExpanded && (() => {
+              const showAll = showAllGroups.has(key);
+              // Always show the active session even if outside the cap, so the
+              // visible row never disappears just because the user clicks an
+              // older one in another view.
+              const activeIdx = groupSessions.findIndex((s) => s.id === activeSessionId);
+              const cap = showAll
+                ? groupSessions.length
+                : Math.max(SESSIONS_PER_GROUP_PREVIEW, activeIdx + 1);
+              const visible = groupSessions.slice(0, cap);
+              const hidden = groupSessions.length - visible.length;
+              return (
+                <div className="pl-4 pr-1 pb-1 space-y-0.5 mt-0.5">
+                  {visible.map((s) => (
+                    <SessionRow
+                      key={s.id}
+                      session={s}
+                      isActive={activeSessionId === s.id}
+                      isStreaming={streamingSessionId === s.id}
+                      onSelect={onSelect}
+                      onDelete={onDelete}
+                    />
+                  ))}
+                  {(hidden > 0 || showAll) && (
+                    <button
+                      type="button"
+                      onClick={() => toggleShowAll(key)}
+                      className="w-full text-left text-[10.5px] font-medium text-muted-foreground hover:text-foreground px-2 py-1 rounded-md hover:bg-accent/30 transition-colors"
+                    >
+                      {showAll
+                        ? "Show less"
+                        : `Show ${hidden} more`}
+                    </button>
+                  )}
+                </div>
+              );
+            })()}
           </div>
         );
       })}

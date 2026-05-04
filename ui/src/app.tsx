@@ -26,6 +26,7 @@ const SkillDetailPage = lazy(() => import("@/pages/skill-detail").then(m => ({ d
 // Schedules are now integrated into the Missions page — redirect old URL for bookmarks
 
 const FilesPage = lazy(() => import("@/pages/files").then(m => ({ default: m.FilesPage })));
+const BrowserPage = lazy(() => import("@/pages/browser").then(m => ({ default: m.BrowserPage })));
 const SetupPage = lazy(() => import("@/pages/setup").then(m => ({ default: m.SetupPage })));
 
 // Check if server is in setup mode — blocks all rendering until resolved
@@ -105,6 +106,7 @@ export function App() {
           <Route path="schedules" element={<Navigate to="/missions" replace />} />
           <Route path="config" element={<Suspense fallback={<PageLoader />}><ConfigPage /></Suspense>} />
           <Route path="files" element={<Suspense fallback={<PageLoader />}><FilesPage /></Suspense>} />
+ <Route path="browser" element={<Suspense fallback={<PageLoader />}><BrowserPage /></Suspense>} />
         </Route>
       </Routes>
     </SetupModeRedirect>

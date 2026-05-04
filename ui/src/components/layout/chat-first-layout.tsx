@@ -23,6 +23,7 @@ import {
   Workflow,
   Settings2,
   FolderOpen,
+  Globe2,
   Sun,
   Moon,
   Monitor,
@@ -72,6 +73,7 @@ const tabs: TabDef[] = [
   { path: "/memory", icon: Brain, label: "Memory" },
   { path: "/playbooks", icon: Workflow, label: "Playbooks" },
   { path: "/files", icon: FolderOpen, label: "Files" },
+  { path: "/browser", icon: Globe2, label: "Browser" },
   { path: "/notifications", icon: Bell, label: "Notifications" },
   { path: "/config", icon: Settings2, label: "Configuration" },
 ];
@@ -88,7 +90,7 @@ function ChatPanelHeader() {
       <div className="flex items-center gap-2.5">
         <span className="text-lg">🐙</span>
         <div>
-          <h2 className="text-sm font-bold tracking-tight">Polpo</h2>
+          <h2 className="text-sm font-bold tracking-tight">ZHC by Polpo</h2>
           <p className="text-[9px] font-mono uppercase tracking-widest text-muted-foreground/50 leading-none">
             {info?.project ?? "Agent Wrangler"}
           </p>
@@ -141,7 +143,7 @@ const PagesPanelHeader = memo(function PagesPanelHeader() {
   const { theme, resolved, setTheme } = useTheme();
 
   return (
-    <header className="flex h-14 shrink-0 items-center border-b border-border/50 bg-background/80 backdrop-blur-md px-3 gap-2">
+    <header className="flex h-14 shrink-0 items-center bg-background/80 backdrop-blur-md px-3 gap-2">
       {/* Tab icons — plain buttons with navigate() */}
       <div className="flex items-center gap-0.5 flex-1 min-w-0">
         {tabs.map(({ path, icon: Icon, label }) => {

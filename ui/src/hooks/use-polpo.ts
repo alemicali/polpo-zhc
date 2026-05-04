@@ -14,6 +14,7 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import { usePolpo, useSessions } from "@polpo-ai/react";
 import type { ChatMessage, ChatCompletionMessage, PolpoConfig } from "@polpo-ai/react";
 import type { ChatCompletionStream } from "@polpo-ai/react";
+import { config as appConfig } from "@/lib/config";
 
 // Local mirror of SDK ask_user types (avoids build-order issues)
 export interface AskUserOption {
@@ -144,6 +145,10 @@ export function useChat() {
   const streamRef = useRef<ChatCompletionStream | null>(null);
   /** True when the user explicitly requested a new session — consumed on first send */
   const wantsNewSessionRef = useRef(false);
+  /** Active turn ID — set by streamCompletion/resume, used by stop() to abort server-side */
+  const currentTurnIdRef = useRef<string | null>(null);
+  /** Abort controller for an in-flight resume SSE — separate from streamRef.abort() */
+  const resumeAbortRef = useRef<AbortController | null>(null);
 
   // Reconstruct interactive state from persisted "interrupted" tool calls on the last assistant message.
   // If the last message is an assistant with an interrupted ask_user/create_mission, restore the pending state.
@@ -229,6 +234,133 @@ export function useChat() {
     return segments;
   };
 
+  /**
+   * Re-attach to an in-flight server-side turn. Replays buffered deltas
+   * accumulated server-side while the client was disconnected, then tails
+   * live deltas until the turn completes.
+   *
+   * UI-wise: writes everything into `assistantId` (a placeholder pushed by
+   * the caller). On finish, refetches messages from the server (the source
+   * of truth — picks up the persisted message with full toolCalls etc.).
+   */
+  const runResume = useCallback(async (turnId: string, assistantId: string, sid: string) => {
+    const base = appConfig.baseUrl || "";
+    const headers: Record<string, string> = {};
+    if (appConfig.apiKey) headers["Authorization"] = `Bearer ${appConfig.apiKey}`;
+    const ac = new AbortController();
+    resumeAbortRef.current = ac;
+    currentTurnIdRef.current = turnId;
+    setIsLoading(true);
+
+    let fullContent = "";
+    const toolCalls: ToolCallInfo[] = [];
+    const segments: MessageSegment[] = [];
+    let currentTextIdx = -1;
+
+    const updateMsg = () => {
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === assistantId
+            ? { ...m, content: fullContent, toolCalls: toolCalls.length > 0 ? [...toolCalls] : undefined, segments: [...segments] }
+            : m
+        )
+      );
+    };
+
+    try {
+      const res = await fetch(`${base}/api/v1/chat/completions/resume/${turnId}`, {
+        method: "GET",
+        headers,
+        signal: ac.signal,
+      });
+      if (!res.ok || !res.body) throw new Error(`Resume failed: ${res.status}`);
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      readLoop: while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed.startsWith("data: ")) continue;
+          const data = trimmed.slice(6);
+          if (data === "[DONE]") break readLoop;
+          let chunk: any;
+          try { chunk = JSON.parse(data); } catch { continue; }
+          const choice = chunk.choices?.[0];
+          const delta = choice?.delta;
+          if (delta?.content) {
+            fullContent += delta.content;
+            if (currentTextIdx >= 0 && segments[currentTextIdx]?.type === "text") {
+              (segments[currentTextIdx] as { type: "text"; content: string }).content += delta.content;
+            } else {
+              segments.push({ type: "text", content: delta.content });
+              currentTextIdx = segments.length - 1;
+            }
+            updateMsg();
+          }
+          const tc = choice?.tool_call as ToolCallInfo | undefined;
+          if (tc) {
+            const existing = toolCalls.find((t) => t.id === tc.id);
+            if (existing) {
+              existing.state = tc.state;
+              if (tc.arguments !== undefined) existing.arguments = tc.arguments;
+              if (tc.result !== undefined) existing.result = tc.result;
+              const segIdx = segments.findIndex((s) => s.type === "tool" && s.tool.id === tc.id);
+              if (segIdx >= 0) {
+                (segments[segIdx] as { type: "tool"; tool: ToolCallInfo }).tool = { ...existing };
+              }
+            } else {
+              const info = { ...tc };
+              toolCalls.push(info);
+              segments.push({ type: "tool", tool: info });
+              currentTextIdx = -1;
+            }
+            updateMsg();
+          }
+        }
+      }
+
+      // Refetch from server — picks up the canonical persisted message
+      // (the server may have appended tool calls or a final stop frame
+      // we missed if we joined late).
+      try {
+        const raw = await getMessages(sid);
+        const msgs: ChatMessageWithQuestions[] = raw
+          .filter((m) => m.content.trim().length > 0)
+          .map((m) => {
+            const enriched: ChatMessageWithQuestions = { ...m };
+            const serverMsg = m as ChatMessageWithQuestions;
+            if (serverMsg.toolCalls && serverMsg.toolCalls.length > 0) {
+              enriched.toolCalls = serverMsg.toolCalls;
+              enriched.segments = reconstructSegments(enriched);
+            }
+            return enriched;
+          });
+        restoreInteractiveState(msgs);
+        setMessages(msgs);
+        conversationRef.current = msgs.map((m) => ({
+          role: m.role as "user" | "assistant",
+          content: m.content,
+        }));
+      } catch { /* ignore — keep what we streamed */ }
+    } catch (err) {
+      if ((err as Error).name !== "AbortError") {
+        console.warn("[resume] failed:", err);
+      }
+    } finally {
+      setIsLoading(false);
+      currentTurnIdRef.current = null;
+      resumeAbortRef.current = null;
+    }
+  }, [getMessages]);
+
   // Load a specific session's messages
   const loadSession = useCallback(
     async (id: string) => {
@@ -262,6 +394,37 @@ export function useChat() {
           role: m.role as "user" | "assistant",
           content: m.content,
         }));
+
+        // Resume detection: if the server has an in-flight turn for this
+        // session (because the previous client disconnected), reattach to
+        // the buffered stream and tail it live.
+        try {
+          const base = appConfig.baseUrl || "";
+          const headers: Record<string, string> = {};
+          if (appConfig.apiKey) headers["Authorization"] = `Bearer ${appConfig.apiKey}`;
+          const r = await fetch(`${base}/api/v1/chat/completions/active-turn?sessionId=${encodeURIComponent(id)}`, { headers });
+          if (r.ok) {
+            const j = await r.json() as { ok: boolean; data?: { turnId: string | null } };
+            if (j.ok && j.data?.turnId) {
+              // Append a placeholder for the in-progress assistant turn and
+              // start replaying. The trailing assistant message in `msgs`
+              // (if any) is the partial placeholder reserved server-side —
+              // we reuse its id when present, otherwise allocate a temp.
+              const trailing = msgs.length > 0 && msgs[msgs.length - 1].role === "assistant"
+                ? msgs[msgs.length - 1]
+                : null;
+              const assistantId = trailing?.id ?? `temp-${Date.now()}-resume`;
+              if (!trailing) {
+                setMessages((prev) => [
+                  ...prev,
+                  { id: assistantId, role: "assistant", content: "", ts: new Date().toISOString() },
+                ]);
+              }
+              // fire-and-forget — runResume manages its own loading state
+              void runResume(j.data.turnId, assistantId, id);
+            }
+          }
+        } catch { /* offline or endpoint missing — silent */ }
       } catch {
         setMessages([]);
         conversationRef.current = [];
@@ -269,7 +432,7 @@ export function useChat() {
         setMessagesLoading(false);
       }
     },
-    [setSessionId, getMessages, sessions]
+    [setSessionId, getMessages, sessions, runResume]
   );
 
   // Auto-select most recent non-empty session on first load
@@ -346,6 +509,10 @@ export function useChat() {
         ...(selectedAgent ? { agent: selectedAgent } : {}),
       });
       streamRef.current = stream;
+      // turnId is populated by the SDK after the first network exchange — refresh
+      // it on every chunk loop iteration. Used by stop() and by other tabs that
+      // want to abort this turn from elsewhere.
+      currentTurnIdRef.current = null;
 
       let fullContent = "";
       const toolCalls: ToolCallInfo[] = [];
@@ -365,6 +532,11 @@ export function useChat() {
       };
 
       for await (const chunk of stream) {
+        // turnId is captured by the SDK from the response header on the first
+        // chunk — pick it up as soon as it's populated.
+        if (!currentTurnIdRef.current && (stream as { turnId?: string | null }).turnId) {
+          currentTurnIdRef.current = (stream as { turnId?: string | null }).turnId ?? null;
+        }
         const choice = chunk.choices[0];
         const delta = choice?.delta;
 
@@ -596,13 +768,33 @@ export function useChat() {
     [streamCompletion]
   );
 
-  // Stop the current streaming response
+  // Stop the current streaming response.
+  //
+  // Server-first abort: with resumable streams enabled, simply closing the
+  // local SSE no longer cancels the LLM (the server keeps generating into
+  // its buffer). So we POST to /abort/:turnId, then close the local stream.
   const stop = useCallback(() => {
+    const turnId = currentTurnIdRef.current;
     const stream = streamRef.current;
+    const resumeAc = resumeAbortRef.current;
+
+    if (turnId) {
+      const base = appConfig.baseUrl || "";
+      const headers: Record<string, string> = {};
+      if (appConfig.apiKey) headers["Authorization"] = `Bearer ${appConfig.apiKey}`;
+      // fire-and-forget — best effort
+      void fetch(`${base}/api/v1/chat/completions/abort/${turnId}`, { method: "POST", headers })
+        .catch(() => { /* server may already be done — ignore */ });
+    }
     if (stream) {
       stream.abort();
       streamRef.current = null;
     }
+    if (resumeAc) {
+      resumeAc.abort();
+      resumeAbortRef.current = null;
+    }
+    currentTurnIdRef.current = null;
     setIsLoading(false);
   }, []);
 

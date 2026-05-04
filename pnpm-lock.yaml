@@ -29,14 +29,14 @@ importers:
         specifier: ^0.70.6
         version: 0.70.6(@modelcontextprotocol/sdk@1.26.0(zod@4.3.6))(ws@8.19.0)(zod@4.3.6)
       '@polpo-ai/core':
-        specifier: ^0.3.9
-        version: 0.3.9
+        specifier: workspace:*
+        version: link:packages/core
       '@polpo-ai/server':
-        specifier: ^0.2.14
-        version: 0.2.14(zod@4.3.6)
+        specifier: workspace:*
+        version: link:packages/server
       '@polpo-ai/vault-crypto':
-        specifier: ^0.2.4
-        version: 0.2.4
+        specifier: workspace:*
+        version: link:packages/vault-crypto
       '@sinclair/typebox':
         specifier: ^0.34.48
         version: 0.34.48
@@ -91,8 +91,8 @@ importers:
         version: 3.2.4(@types/debug@4.1.12)(@types/node@22.19.11)(jiti@2.6.1)(jsdom@29.0.1(@noble/hashes@1.8.0))(lightningcss@1.30.2)(msw@2.12.10(@types/node@22.19.11)(typescript@5.9.3))(terser@5.46.0)(tsx@4.21.0)(yaml@2.8.2)
     optionalDependencies:
       '@polpo-ai/drizzle':
-        specifier: ^0.2.10
-        version: 0.2.12(@cloudflare/workers-types@4.20260307.1)(@opentelemetry/api@1.9.0)(@types/better-sqlite3@7.6.13)(better-sqlite3@12.6.2)(postgres@3.4.8)
+        specifier: workspace:*
+        version: link:packages/drizzle
       '@whiskeysockets/baileys':
         specifier: 7.0.0-rc.9
         version: 7.0.0-rc.9(sharp@0.34.5)
@@ -2326,31 +2326,6 @@ packages:
 
   '@polpo-ai/core@0.3.6':
     resolution: {integrity: sha512-Jd+tfwQ20ezrMatetF+IH5fJoCs5f3K1hgdEPkWsWLdFc70jh1iRu1nxLsdheGQlNVIzHhbFn0eqjeueoIzLjA==}
-    engines: {node: '>=18.0.0'}
-
-  '@polpo-ai/core@0.3.9':
-    resolution: {integrity: sha512-UpoLxfOAQzvvx4F346IM5v+dnnuHky7VRK3P2HFaVrPcH2qQLPerjyiQabCfnvGLc5wJo+0PvOxi6FjtjeiIGg==}
-    engines: {node: '>=18.0.0'}
-
-  '@polpo-ai/drizzle@0.2.12':
-    resolution: {integrity: sha512-GCorBh+cuy2w2E5YpSMzldLOnndJdKctFz8FpIQOw7SAPLKaJ3keiRm8yY8XeX7LheRErF40Nz4cGiAOijx9UA==}
-    engines: {node: '>=18.0.0'}
-    peerDependencies:
-      better-sqlite3: ^11.0.0 || ^12.0.0
-      postgres: ^3.4.0
-    peerDependenciesMeta:
-      better-sqlite3:
-        optional: true
-      postgres:
-        optional: true
-
-  '@polpo-ai/server@0.2.14':
-    resolution: {integrity: sha512-zQ84Mgg+U1DK2uf0yil8Zk64H0/XOt8+Lffz0hooeHTjG2fixkXhAaDFW8WNIMWPvy+QHJs2WgI8x2muIpMYTg==}
-    peerDependencies:
-      zod: '>=3.0.0 || >=4.0.0'
-
-  '@polpo-ai/vault-crypto@0.2.4':
-    resolution: {integrity: sha512-IsU/zdb9P3O2/If773LNpQ7H5toeTNqaHS3WDFQpr2aQpYywZg0xsRuPensTdrg5Eai9SyZMmDsxizNW8IFnlQ==}
     engines: {node: '>=18.0.0'}
 
   '@poppinss/colors@4.1.6':
@@ -11380,60 +11355,6 @@ snapshots:
     dependencies:
       nanoid: 5.1.6
       zod: 4.3.6
-
-  '@polpo-ai/core@0.3.9':
-    dependencies:
-      nanoid: 5.1.6
-      zod: 4.3.6
-
-  '@polpo-ai/drizzle@0.2.12(@cloudflare/workers-types@4.20260307.1)(@opentelemetry/api@1.9.0)(@types/better-sqlite3@7.6.13)(better-sqlite3@12.6.2)(postgres@3.4.8)':
-    dependencies:
-      '@polpo-ai/core': 0.3.9
-      '@polpo-ai/vault-crypto': 0.2.4
-      drizzle-orm: 0.44.7(@cloudflare/workers-types@4.20260307.1)(@opentelemetry/api@1.9.0)(@types/better-sqlite3@7.6.13)(better-sqlite3@12.6.2)(postgres@3.4.8)
-      nanoid: 5.1.6
-    optionalDependencies:
-      better-sqlite3: 12.6.2
-      postgres: 3.4.8
-    transitivePeerDependencies:
-      - '@aws-sdk/client-rds-data'
-      - '@cloudflare/workers-types'
-      - '@electric-sql/pglite'
-      - '@libsql/client'
-      - '@libsql/client-wasm'
-      - '@neondatabase/serverless'
-      - '@op-engineering/op-sqlite'
-      - '@opentelemetry/api'
-      - '@planetscale/database'
-      - '@prisma/client'
-      - '@tidbcloud/serverless'
-      - '@types/better-sqlite3'
-      - '@types/pg'
-      - '@types/sql.js'
-      - '@upstash/redis'
-      - '@vercel/postgres'
-      - '@xata.io/client'
-      - bun-types
-      - expo-sqlite
-      - gel
-      - knex
-      - kysely
-      - mysql2
-      - pg
-      - prisma
-      - sql.js
-      - sqlite3
-    optional: true
-
-  '@polpo-ai/server@0.2.14(zod@4.3.6)':
-    dependencies:
-      '@hono/zod-openapi': 1.2.2(hono@4.11.9)(zod@4.3.6)
-      '@polpo-ai/core': 0.3.9
-      hono: 4.11.9
-      nanoid: 5.1.6
-      zod: 4.3.6
-
-  '@polpo-ai/vault-crypto@0.2.4': {}
 
   '@poppinss/colors@4.1.6':
     dependencies:

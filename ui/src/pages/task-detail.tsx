@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState, memo } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -55,6 +55,12 @@ import {
 } from "lucide-react";
 import { MessageResponse } from "@/components/ai-elements/message";
 import {
+  Dialog,
+  DialogContent,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import {
   FilePreviewDialog,
   fileReadUrl,
   filePreviewUrl,
@@ -74,6 +80,114 @@ import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { toast } from "sonner";
 import { formatDistanceToNow, format } from "date-fns";
 import { cn } from "@/lib/utils";
+
+// ── Heavy-content helpers ──
+//
+// Detail tab can carry tens-of-KB stdout/stderr/description blobs. Streamdown
+// markdown + Shiki highlighting on every render of these freezes the main
+// thread, especially when a parent state change re-mounts the subtree.
+// These helpers memoize the markdown parse and gate large content behind
+// a "Show full" dialog so the page stays responsive.
+
+const LARGE_TEXT_THRESHOLD = 4000; // chars
+const LARGE_TEXT_PREVIEW_LINES = 80;
+
+/**
+ * Memoized markdown — re-renders only when the string content changes.
+ * Prevents Streamdown from re-parsing on parent re-renders that don't
+ * actually touch the body.
+ */
+const MemoMarkdown = memo(function MemoMarkdown({
+  children,
+  className,
+}: {
+  children: string;
+  className?: string;
+}) {
+  return (
+    <MessageResponse mode="static" className={className}>
+      {children}
+    </MessageResponse>
+  );
+});
+
+/**
+ * Renders potentially-large output. Small payloads inline (memoized).
+ * Large payloads: tail preview in a plain <pre>, with "Open full" dialog
+ * that shows the full content as <pre> (no markdown parse, no Shiki).
+ */
+const LargeTextBlock = memo(function LargeTextBlock({
+  content,
+  label,
+  tone = "default",
+}: {
+  content: string;
+  label: string;
+  tone?: "default" | "error";
+}) {
+  const isLarge = content.length > LARGE_TEXT_THRESHOLD;
+  const lineCount = useMemo(() => content.split("\n").length, [content]);
+
+  const tail = useMemo(() => {
+    if (!isLarge) return content;
+    const lines = content.split("\n");
+    const tailLines = lines.slice(Math.max(0, lines.length - LARGE_TEXT_PREVIEW_LINES));
+    return tailLines.join("\n");
+  }, [content, isLarge]);
+
+  const preCls = tone === "error"
+    ? "text-xs bg-red-500/5 px-4 py-3 whitespace-pre-wrap font-mono text-red-400/80 leading-relaxed"
+    : "text-xs bg-muted/30 px-4 py-3 whitespace-pre-wrap font-mono text-foreground/90 leading-relaxed";
+
+  if (!isLarge) {
+    if (tone === "error") {
+      return <pre className={preCls}>{content}</pre>;
+    }
+    return (
+      <div className="rounded-md border border-border/30 px-4 py-3 bg-muted/20">
+        <MemoMarkdown className="text-sm">{content}</MemoMarkdown>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-md border border-border/30 overflow-hidden">
+      <div className="flex items-center justify-between px-3 py-1.5 bg-muted/30 border-b border-border/30 text-[10px]">
+        <span className="text-muted-foreground">
+          Showing last {Math.min(LARGE_TEXT_PREVIEW_LINES, lineCount)} of {lineCount.toLocaleString()} lines
+          ({(content.length / 1024).toFixed(1)} KB)
+        </span>
+        <Dialog>
+          <DialogTrigger asChild>
+            <Button variant="ghost" size="sm" className="h-6 px-2 text-[10px] gap-1">
+              <Eye className="h-3 w-3" /> Open full
+            </Button>
+          </DialogTrigger>
+          <DialogContent className="!max-w-none w-[96vw] h-[92dvh] p-0 flex flex-col gap-0">
+            <DialogTitle className="px-5 pt-4 pb-2 text-sm font-semibold flex items-center gap-2">
+              <Terminal className="h-4 w-4" /> {label}
+              <span className="ml-auto text-[10px] text-muted-foreground font-normal">
+                {lineCount.toLocaleString()} lines · {(content.length / 1024).toFixed(1)} KB
+              </span>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 text-[10px] gap-1 mr-7"
+                onClick={() => { navigator.clipboard.writeText(content); toast.success(`${label} copied`); }}
+              >
+                <Copy className="h-3 w-3" /> Copy all
+              </Button>
+            </DialogTitle>
+            <div className="flex-1 min-h-0 overflow-auto m-0">
+              <pre className={cn(preCls, "h-full m-0 rounded-none")}>{content}</pre>
+            </div>
+          </DialogContent>
+        </Dialog>
+      </div>
+      <pre className={preCls}>{tail}</pre>
+    </div>
+  );
+});
 
 // ── Status config ──
 
@@ -1267,13 +1381,24 @@ export function TaskDetailPage() {
                 </Card>
               )}
 
-              {/* ── Output (stdout/stderr — collapsible, open by default) ── */}
-              {task.result && (task.result.stdout || task.result.stderr) && (
-                <Collapsible defaultOpen>
+              {/* ── Output (stdout/stderr — collapsible) ──
+                  Auto-collapsed when content is large to keep render light;
+                  large blocks expose a "Open full" dialog with plain <pre>. */}
+              {task.result && (task.result.stdout || task.result.stderr) && (() => {
+                const stdoutLen = task.result.stdout?.length ?? 0;
+                const stderrLen = task.result.stderr?.length ?? 0;
+                const hasLarge = stdoutLen > LARGE_TEXT_THRESHOLD || stderrLen > LARGE_TEXT_THRESHOLD;
+                return (
+                <Collapsible defaultOpen={!hasLarge}>
                   <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0">
                     <CardContent className="pt-4 space-y-3">
                       <CollapsibleTrigger className="flex items-center gap-1.5 text-[10px] font-medium text-muted-foreground uppercase tracking-widest hover:text-foreground transition-colors cursor-pointer group w-full">
                         <Terminal className="h-3 w-3" /> Output
+                        {hasLarge && (
+                          <span className="text-[9px] text-amber-400/80 font-normal normal-case tracking-normal">
+                            (large — click to expand)
+                          </span>
+                        )}
                         <ChevronDown className="h-3 w-3 ml-auto transition-transform group-data-[state=open]:rotate-180" />
                       </CollapsibleTrigger>
                       <CollapsibleContent>
@@ -1292,9 +1417,7 @@ export function TaskDetailPage() {
                                   </Button>
                                 </div>
                               </div>
-                              <div className="rounded-md border border-border/30 px-4 py-3 bg-muted/20">
-                                <MessageResponse mode="static" className="text-sm">{task.result.stdout}</MessageResponse>
-                              </div>
+                              <LargeTextBlock content={task.result.stdout} label="stdout" />
                             </div>
                           )}
                           {task.result.stderr && (
@@ -1311,11 +1434,7 @@ export function TaskDetailPage() {
                                   </Button>
                                 </div>
                               </div>
-                              <div className="rounded-md border border-red-500/20">
-                                <pre className="text-xs bg-red-500/5 px-4 py-3 whitespace-pre-wrap font-mono text-red-400/80 leading-relaxed">
-                                  {task.result.stderr}
-                                </pre>
-                              </div>
+                              <LargeTextBlock content={task.result.stderr} label="stderr" tone="error" />
                             </div>
                           )}
                         </div>
@@ -1323,7 +1442,8 @@ export function TaskDetailPage() {
                     </CardContent>
                   </Card>
                 </Collapsible>
-              )}
+                );
+              })()}
 
               {/* ── Description (collapsible, open by default) ── */}
               <Collapsible defaultOpen>
@@ -1336,7 +1456,7 @@ export function TaskDetailPage() {
                   <CollapsibleContent>
                     <div className="space-y-4 pt-1">
                       <div className="rounded-md bg-muted/30 px-4 py-3 text-sm">
-                        <MessageResponse>{task.description}</MessageResponse>
+                        <MemoMarkdown>{task.description}</MemoMarkdown>
                       </div>
                       {task.originalDescription && task.originalDescription !== task.description && (
                         <Collapsible>
@@ -1346,7 +1466,7 @@ export function TaskDetailPage() {
                           </CollapsibleTrigger>
                           <CollapsibleContent>
                             <div className="rounded-md bg-muted/20 px-4 py-3 text-sm opacity-70 mt-2">
-                              <MessageResponse>{task.originalDescription}</MessageResponse>
+                              <MemoMarkdown>{task.originalDescription}</MemoMarkdown>
                             </div>
                           </CollapsibleContent>
                         </Collapsible>
@@ -1407,9 +1527,9 @@ export function TaskDetailPage() {
                             )}
                           </div>
                           {exp.command && (
-                            <MessageResponse mode="static" className="text-[11px] [&_pre]:my-0 [&_code]:text-[11px]">
+                            <MemoMarkdown className="text-[11px] [&_pre]:my-0 [&_code]:text-[11px]">
                               {`\`\`\`bash\n${exp.command}\n\`\`\``}
-                            </MessageResponse>
+                            </MemoMarkdown>
                           )}
                           {exp.paths && exp.paths.length > 0 && (
                             <div className="flex flex-wrap gap-1">
@@ -1624,16 +1744,16 @@ export function TaskDetailPage() {
                             {/* Inline text content — rendered as markdown */}
                             {o.text && (
                               <div className="border-t border-border/30 px-3 py-2">
-                                <MessageResponse mode="static" className="text-sm">{o.text}</MessageResponse>
+                                <MemoMarkdown className="text-sm">{o.text}</MemoMarkdown>
                               </div>
                             )}
 
                             {/* JSON data — formatted code block */}
                             {o.type === "json" && o.data !== undefined && (
                               <div className="border-t border-border/30 px-3 py-2">
-                                <MessageResponse mode="static" className="text-sm">
+                                <MemoMarkdown className="text-sm">
                                   {"```json\n" + JSON.stringify(o.data, null, 2) + "\n```"}
-                                </MessageResponse>
+                                </MemoMarkdown>
                               </div>
                             )}
 

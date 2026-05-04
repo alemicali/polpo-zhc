@@ -279,7 +279,7 @@ export function Sidebar() {
                 🐙
               </div>
               <div>
-                <h1 className="text-sm font-bold tracking-tight text-foreground">Polpo</h1>
+                <h1 className="text-sm font-bold tracking-tight text-foreground">ZHC by Polpo</h1>
                 <p className="text-[10px] tracking-wide uppercase text-muted-foreground/70">Agent Wrangler</p>
               </div>
             </div>

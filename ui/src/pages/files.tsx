@@ -29,6 +29,9 @@ import {
   Pencil,
   Trash2,
   Copy,
+  Play,
+  Music,
+  LayoutPanelLeft,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -86,7 +89,7 @@ interface RootDir {
   totalSize?: number;
 }
 
-type ViewMode = "list" | "grid";
+type ViewMode = "list" | "grid" | "rows";
 type SortKey = "name" | "type" | "size" | "modified";
 type SortDir = "asc" | "desc";
 
@@ -228,6 +231,274 @@ async function apiDelete(path: string): Promise<void> {
 }
 
 // ── Root selector component ──
+
+// ── Finder-style grid: lazy thumbnails ─────────────────────────────────
+//
+// Tiles auto-fit ~144px columns. Real preview for images/videos; stylised
+// fallback "paper card" for PDF / audio / code / generic. Lazy-loaded via
+// IntersectionObserver — only tiles near the viewport request bytes.
+
+/** Lazy mount helper — true once the element comes within `rootMargin`. */
+function useInView(rootMargin = "200px"): [React.RefObject<HTMLDivElement | null>, boolean] {
+  const ref = useRef<HTMLDivElement | null>(null);
+  const [inView, setInView] = useState(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    if (inView) return; // sticky — once visible, stay loaded
+    const io = new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) {
+          if (e.isIntersecting) {
+            setInView(true);
+            io.disconnect();
+            return;
+          }
+        }
+      },
+      { rootMargin },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [inView, rootMargin]);
+  return [ref, inView];
+}
+
+const EXTENSION_PALETTE: Record<string, { ink: string; chip: string }> = {
+  pdf:      { ink: "text-rose-500",    chip: "bg-rose-500/12 text-rose-500 border-rose-500/30" },
+  doc:      { ink: "text-blue-500",    chip: "bg-blue-500/12 text-blue-500 border-blue-500/30" },
+  docx:     { ink: "text-blue-500",    chip: "bg-blue-500/12 text-blue-500 border-blue-500/30" },
+  xls:      { ink: "text-emerald-500", chip: "bg-emerald-500/12 text-emerald-500 border-emerald-500/30" },
+  xlsx:     { ink: "text-emerald-500", chip: "bg-emerald-500/12 text-emerald-500 border-emerald-500/30" },
+  zip:      { ink: "text-amber-500",   chip: "bg-amber-500/12 text-amber-500 border-amber-500/30" },
+  tar:      { ink: "text-amber-500",   chip: "bg-amber-500/12 text-amber-500 border-amber-500/30" },
+  gz:       { ink: "text-amber-500",   chip: "bg-amber-500/12 text-amber-500 border-amber-500/30" },
+};
+
+function extensionPalette(ext: string): { ink: string; chip: string } {
+  return EXTENSION_PALETTE[ext.toLowerCase()] ?? {
+    ink: "text-muted-foreground",
+    chip: "bg-muted/40 text-muted-foreground border-border/60",
+  };
+}
+
+/**
+ * Stylised paper-card fallback used for non-previewable types.
+ * The card has a top-right corner fold so it visually reads as a document.
+ */
+function PaperCard({ ext, accent }: { ext: string; accent: { ink: string; chip: string } }) {
+  return (
+    <div className="relative w-full h-full flex items-center justify-center">
+      <div className="relative w-[64%] h-[80%] rounded-md bg-background/80 border border-border/60 shadow-[0_2px_6px_-2px_oklch(0.18_0.04_235_/_18%)] overflow-hidden">
+        {/* corner fold */}
+        <div className="absolute top-0 right-0 w-3.5 h-3.5">
+          <div className="absolute inset-0 bg-muted/60" style={{ clipPath: "polygon(0 0, 100% 0, 100% 100%)" }} />
+          <div className="absolute inset-0 border-l border-b border-border/70" style={{ clipPath: "polygon(0 100%, 0 0, 100% 100%)" }} />
+        </div>
+        {/* faux text lines */}
+        <div className="absolute inset-x-2 top-2 space-y-1">
+          <div className="h-0.5 w-3/4 bg-muted/60 rounded-full" />
+          <div className="h-0.5 w-full bg-muted/40 rounded-full" />
+          <div className="h-0.5 w-5/6 bg-muted/40 rounded-full" />
+          <div className="h-0.5 w-2/3 bg-muted/40 rounded-full" />
+        </div>
+        {/* extension chip — center-bottom */}
+        <div className="absolute inset-x-0 bottom-2 flex justify-center">
+          <span className={cn(
+            "px-1.5 py-px rounded font-mono text-[9px] font-bold uppercase tracking-wider border",
+            accent.chip,
+          )}>
+            {ext || "file"}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Custom tide-pool folder — gradient SVG, more polished than the generic
+ * lucide outline.
+ */
+function FolderGlyph({ open }: { open?: boolean }) {
+  return (
+    <div className="relative w-[68%] h-[68%]">
+      <svg viewBox="0 0 64 56" className="w-full h-full drop-shadow-[0_3px_4px_oklch(0.2_0.04_235_/_18%)]">
+        <defs>
+          <linearGradient id="folder-back" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="oklch(0.78 0.07 200)" />
+            <stop offset="100%" stopColor="oklch(0.62 0.115 205)" />
+          </linearGradient>
+          <linearGradient id="folder-front" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="oklch(0.86 0.05 205)" />
+            <stop offset="100%" stopColor="oklch(0.7 0.1 205)" />
+          </linearGradient>
+        </defs>
+        {/* back leaf */}
+        <path d="M 4 10 Q 4 6 8 6 L 22 6 L 28 12 L 56 12 Q 60 12 60 16 L 60 50 Q 60 54 56 54 L 8 54 Q 4 54 4 50 Z"
+              fill="url(#folder-back)" />
+        {/* front pocket */}
+        <path d={open
+          ? "M 6 22 L 58 22 Q 62 22 60 26 L 54 50 Q 53 54 49 54 L 8 54 Q 4 54 4 50 L 4 26 Q 4 22 8 22 Z"
+          : "M 4 22 L 60 22 L 60 50 Q 60 54 56 54 L 8 54 Q 4 54 4 50 Z"}
+              fill="url(#folder-front)" />
+      </svg>
+    </div>
+  );
+}
+
+/** Renders the right preview content for a file given its category. */
+function FileThumb({
+  entry,
+  path,
+  category,
+  inView,
+}: {
+  entry: FileEntry;
+  path: string;
+  category: ReturnType<typeof previewCategory>;
+  inView: boolean;
+}) {
+  const [errored, setErrored] = useState(false);
+  const ext = (entry.name.split(".").pop() ?? "").toLowerCase();
+
+  if (entry.type === "directory") {
+    return (
+      <div className="w-full h-full flex items-center justify-center">
+        <FolderGlyph />
+      </div>
+    );
+  }
+
+  if (category === "image" && !errored) {
+    return (
+      <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-muted/20 to-muted/40">
+        {inView && (
+          <img
+            src={fileReadUrl(path)}
+            alt={entry.name}
+            loading="lazy"
+            decoding="async"
+            onError={() => setErrored(true)}
+            className="w-full h-full object-cover"
+          />
+        )}
+      </div>
+    );
+  }
+
+  if (category === "video" && !errored) {
+    return (
+      <div className="relative w-full h-full bg-gradient-to-br from-muted/30 to-muted/50">
+        {inView && (
+          <video
+            src={`${fileReadUrl(path)}#t=0.5`}
+            preload="metadata"
+            muted
+            playsInline
+            onError={() => setErrored(true)}
+            className="w-full h-full object-cover"
+          />
+        )}
+        {/* play overlay */}
+        <div className="absolute inset-0 flex items-center justify-center bg-black/10 opacity-0 group-hover:opacity-100 transition-opacity">
+          <div className="h-8 w-8 rounded-full bg-background/85 backdrop-blur-sm flex items-center justify-center shadow-md ring-1 ring-border/40">
+            <Play className="h-3.5 w-3.5 fill-foreground text-foreground translate-x-px" />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (category === "audio") {
+    return (
+      <div className="relative w-full h-full flex items-center justify-center bg-gradient-to-br from-violet-500/8 to-fuchsia-500/8">
+        {/* faux waveform */}
+        <div className="flex items-end gap-px h-1/2 px-3">
+          {[3, 6, 4, 8, 5, 9, 6, 4, 7, 3, 6, 5, 8, 4, 7].map((h, i) => (
+            <span key={i} className="w-1 rounded-full bg-violet-500/60" style={{ height: `${h * 8}%` }} />
+          ))}
+        </div>
+        <div className="absolute top-1.5 left-1.5 h-5 w-5 rounded-full bg-background/85 backdrop-blur-sm flex items-center justify-center ring-1 ring-violet-500/30">
+          <Music className="h-2.5 w-2.5 text-violet-500" />
+        </div>
+      </div>
+    );
+  }
+
+  // PDF / code / text / binary — paper-card with extension chip
+  return <PaperCard ext={ext} accent={extensionPalette(ext)} />;
+}
+
+interface FileTileProps {
+  entry: FileEntry;
+  path: string;
+  selected: boolean;
+  onClick: () => void;
+  onDoubleClick: () => void;
+  onContextMenu: () => void;
+}
+
+/** Finder-style tile: square thumb + 2-line filename. */
+function FileTile({ entry, path, selected, onClick, onDoubleClick, onContextMenu }: FileTileProps) {
+  const [ref, inView] = useInView();
+  const category = previewCategory(entry.mimeType ?? mimeFromPath(entry.name));
+  const isPreviewable = entry.type === "file" && (category === "image" || category === "video");
+
+  return (
+    <div
+      ref={ref}
+      onClick={onClick}
+      onDoubleClick={onDoubleClick}
+      onContextMenu={onContextMenu}
+      className={cn(
+        "group flex flex-col items-center gap-1.5 p-2 rounded-xl cursor-pointer select-none",
+        "transition-[background-color,box-shadow,transform] duration-150",
+        selected
+          ? "bg-primary/10 ring-1 ring-primary/40 shadow-[0_0_20px_oklch(0.6_0.115_205_/_22%)]"
+          : "hover:bg-accent/30",
+      )}
+    >
+      <div
+        className={cn(
+          "relative aspect-square w-full overflow-hidden rounded-lg",
+          "bg-card/60 border border-border/50",
+          isPreviewable
+            ? "shadow-[0_2px_6px_-2px_oklch(0.18_0.04_235_/_15%)]"
+            : "",
+          "transition-shadow duration-150 group-hover:shadow-[0_6px_14px_-4px_oklch(0.18_0.04_235_/_22%)]",
+        )}
+      >
+        <FileThumb entry={entry} path={path} category={category} inView={inView} />
+      </div>
+      <span
+        className="text-[11px] text-center leading-tight max-w-full font-medium px-0.5 line-clamp-2 break-words"
+        title={entry.name}
+      >
+        {entry.name}
+      </span>
+      {entry.size != null && (
+        <span className="text-[9px] text-muted-foreground/60 font-mono tabular-nums -mt-1">
+          {formatSize(entry.size)}
+        </span>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Compact 44px thumbnail for the rows view — same renderer as FileTile but
+ * with smaller fixed dimensions, no card wrapper, eager-loaded since rows
+ * are short and there are typically fewer in viewport at once.
+ */
+function RowThumb({ entry, path }: { entry: FileEntry; path: string }) {
+  const category = previewCategory(entry.mimeType ?? mimeFromPath(entry.name));
+  return (
+    <div className="relative h-11 w-11 shrink-0 overflow-hidden rounded-md border border-border/50 bg-card/60">
+      <FileThumb entry={entry} path={path} category={category} inView />
+    </div>
+  );
+}
 
 function RootItem({
   root,
@@ -691,27 +962,70 @@ export function FilesPage() {
     );
   };
 
-  // ── Render entry card (grid view) ──
-  const renderGridEntry = (entry: FileEntry) => {
-    const Icon = fileIcon(entry);
-    const color = fileIconColor(entry);
+  // ── Render entry row (rows / list-with-thumbnail view) ──
+  // List metadata layout (name, size, date, hover actions) but with a real
+  // 48px thumbnail leading each row instead of a flat icon.
+  const renderRowsEntry = (entry: FileEntry) => {
     const canPreview = isPreviewableEntry(entry);
+    const isRenaming = renamingEntry === entry.name;
+    const isSelected = selectedEntry === entry.name;
+    const path = entryPath(currentPath, entry.name);
 
-    const isSelectedGrid = selectedEntry === entry.name;
-    const card = (
+    const row = (
       <div
-        onClick={() => handleEntryClick(entry)}
-        onDoubleClick={() => handleEntryDoubleClick(entry)}
+        onClick={() => !isRenaming && handleEntryClick(entry)}
+        onDoubleClick={() => !isRenaming && handleEntryDoubleClick(entry)}
         onContextMenu={() => setSelectedEntry(entry.name)}
         className={cn(
-          "flex flex-col items-center gap-1.5 p-3 rounded-lg group cursor-pointer select-none",
-          isSelectedGrid ? "bg-primary/10 ring-1 ring-primary/30 hover:bg-primary/15" : "hover:bg-accent/30",
+          "flex items-center gap-3 w-full px-3 py-2.5 text-left group cursor-pointer select-none",
+          isSelected ? "bg-primary/10 hover:bg-primary/15" : "hover:bg-accent/30",
         )}
       >
-        <Icon className={cn("h-8 w-8", color)} />
-        <span className="text-[11px] text-center leading-tight max-w-full truncate w-full">{entry.name}</span>
-        {entry.size != null && (
-          <span className="text-[9px] text-muted-foreground/50">{formatSize(entry.size)}</span>
+        <RowThumb entry={entry} path={path} />
+        {isRenaming ? (
+          <InlineRename
+            initialName={entry.name}
+            onConfirm={name => handleRename(entry, name)}
+            onCancel={() => setRenamingEntry(null)}
+          />
+        ) : (
+          <>
+            <div className="flex-1 min-w-0">
+              <div className="text-sm truncate font-medium">
+                {entry.name}
+                {entry.type === "directory" && <span className="text-muted-foreground/40">/</span>}
+              </div>
+              {(entry.size != null || entry.modifiedAt) && (
+                <div className="flex items-center gap-2 text-[11px] text-muted-foreground/60 mt-0.5">
+                  {entry.size != null && <span className="tabular-nums">{formatSize(entry.size)}</span>}
+                  {entry.size != null && entry.modifiedAt && <span className="opacity-50">·</span>}
+                  {entry.modifiedAt && <span>{formatDate(entry.modifiedAt)}</span>}
+                </div>
+              )}
+            </div>
+            <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+              {entry.type === "file" && canPreview && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={e => { e.stopPropagation(); const m = entry.mimeType ?? mimeFromPath(entry.name); openPreview({ label: entry.name, path, mimeType: m, size: entry.size }); }}>
+                      <Eye className="h-3.5 w-3.5" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="left">Preview</TooltipContent>
+                </Tooltip>
+              )}
+              {entry.type === "file" && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={e => { e.stopPropagation(); window.open(fileReadUrl(path, true), "_blank"); }}>
+                      <Download className="h-3.5 w-3.5" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="left">Download</TooltipContent>
+                </Tooltip>
+              )}
+            </div>
+          </>
         )}
       </div>
     );
@@ -719,7 +1033,57 @@ export function FilesPage() {
     return (
       <ContextMenu key={entry.name}>
         <ContextMenuTrigger asChild>
-          {card}
+          {row}
+        </ContextMenuTrigger>
+        <ContextMenuContent>
+          {entry.type === "directory" ? (
+            <ContextMenuItem onSelect={() => navigateTo(path)}>
+              <FolderOpen className="h-3.5 w-3.5 mr-2" /> Open
+            </ContextMenuItem>
+          ) : (
+            <>
+              {canPreview && (
+                <ContextMenuItem onSelect={() => { const m = entry.mimeType ?? mimeFromPath(entry.name); openPreview({ label: entry.name, path, mimeType: m, size: entry.size }); }}>
+                  <Eye className="h-3.5 w-3.5 mr-2" /> Preview
+                </ContextMenuItem>
+              )}
+              <ContextMenuItem onSelect={() => window.open(fileReadUrl(path, true), "_blank")}>
+                <Download className="h-3.5 w-3.5 mr-2" /> Download
+              </ContextMenuItem>
+            </>
+          )}
+          <ContextMenuSeparator />
+          <ContextMenuItem onSelect={() => { navigator.clipboard.writeText(entry.name); toast.success("Name copied"); }}>
+            <Copy className="h-3.5 w-3.5 mr-2" /> Copy name
+          </ContextMenuItem>
+          <ContextMenuItem onSelect={() => setRenamingEntry(entry.name)}>
+            <Pencil className="h-3.5 w-3.5 mr-2" /> Rename
+          </ContextMenuItem>
+          <ContextMenuItem variant="destructive" onSelect={() => handleDelete(entry)}>
+            <Trash2 className="h-3.5 w-3.5 mr-2" /> Delete
+          </ContextMenuItem>
+        </ContextMenuContent>
+      </ContextMenu>
+    );
+  };
+
+  // ── Render entry card (grid / Finder-style thumbnail view) ──
+  const renderGridEntry = (entry: FileEntry) => {
+    const canPreview = isPreviewableEntry(entry);
+    const isSelectedGrid = selectedEntry === entry.name;
+    const path = entryPath(currentPath, entry.name);
+
+    return (
+      <ContextMenu key={entry.name}>
+        <ContextMenuTrigger asChild>
+          <FileTile
+            entry={entry}
+            path={path}
+            selected={isSelectedGrid}
+            onClick={() => handleEntryClick(entry)}
+            onDoubleClick={() => handleEntryDoubleClick(entry)}
+            onContextMenu={() => setSelectedEntry(entry.name)}
+          />
         </ContextMenuTrigger>
         <ContextMenuContent>
           {entry.type === "directory" ? (
@@ -825,12 +1189,30 @@ export function FilesPage() {
 
           {/* View toggle */}
           <div className="flex items-center border rounded-md">
-            <Button variant={viewMode === "list" ? "secondary" : "ghost"} size="icon" className="h-7 w-7 rounded-r-none" onClick={() => setViewMode("list")}>
-              <LayoutList className="h-3.5 w-3.5" />
-            </Button>
-            <Button variant={viewMode === "grid" ? "secondary" : "ghost"} size="icon" className="h-7 w-7 rounded-l-none" onClick={() => setViewMode("grid")}>
-              <LayoutGrid className="h-3.5 w-3.5" />
-            </Button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant={viewMode === "list" ? "secondary" : "ghost"} size="icon" className="h-7 w-7 rounded-r-none rounded-l-md" onClick={() => setViewMode("list")}>
+                  <LayoutList className="h-3.5 w-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">Compact list</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant={viewMode === "rows" ? "secondary" : "ghost"} size="icon" className="h-7 w-7 rounded-none border-x" onClick={() => setViewMode("rows")}>
+                  <LayoutPanelLeft className="h-3.5 w-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">Rows with previews</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant={viewMode === "grid" ? "secondary" : "ghost"} size="icon" className="h-7 w-7 rounded-l-none rounded-r-md" onClick={() => setViewMode("grid")}>
+                  <LayoutGrid className="h-3.5 w-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">Thumbnails</TooltipContent>
+            </Tooltip>
           </div>
 
           {/* Back / Refresh */}
@@ -965,8 +1347,12 @@ export function FilesPage() {
                       <div className="divide-y divide-border/30">
                         {filtered.map(renderListEntry)}
                       </div>
+                    ) : viewMode === "rows" ? (
+                      <div className="divide-y divide-border/20">
+                        {filtered.map(renderRowsEntry)}
+                      </div>
                     ) : (
-                      <div className="grid grid-cols-[repeat(auto-fill,minmax(120px,1fr))] gap-1 p-2">
+                      <div className="grid grid-cols-[repeat(auto-fill,minmax(144px,1fr))] gap-2 p-3">
                         {filtered.map(renderGridEntry)}
                       </div>
                     )}

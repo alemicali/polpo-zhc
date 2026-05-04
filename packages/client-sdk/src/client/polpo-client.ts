@@ -86,6 +86,14 @@ export class ChatCompletionStream implements AsyncIterable<ChatCompletionChunk> 
   /** Session ID assigned by the server. Available after the first `next()` call. */
   sessionId: string | null = null;
 
+  /**
+   * Turn ID assigned by the server (`x-turn-id` header). Identifies this
+   * specific in-flight completion turn so a disconnected client can come
+   * back and resume from where it left off via /chat/completions/resume/:turnId.
+   * Available after the first `next()` call.
+   */
+  turnId: string | null = null;
+
   /** If the stream ended with finish_reason "ask_user", this contains the questions. */
   askUser: AskUserPayload | null = null;
 
@@ -168,8 +176,9 @@ export class ChatCompletionStream implements AsyncIterable<ChatCompletionChunk> 
       );
     }
 
-    // Capture session ID from response header
+    // Capture session/turn IDs from response headers
     this.sessionId = res.headers.get("x-session-id");
+    this.turnId = res.headers.get("x-turn-id");
 
     this.reader = res.body?.getReader() ?? null;
     if (!this.reader) throw new PolpoApiError("No response body", "INTERNAL_ERROR", 500);
