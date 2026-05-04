@@ -4,6 +4,7 @@ import {
   useRef,
   useEffect,
   useMemo,
+  type CSSProperties,
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import {
@@ -1758,17 +1759,19 @@ function SessionRow({
 function SessionSidebar({
   sessions,
   activeSessionId,
-  streamingSessionId,
+  streamingSessionIds,
   onSelect,
   onNew,
   onDelete,
   onBack,
   fullWidth,
+  mobileFullWidth,
+  mobileOnlyBack,
 }: {
   sessions: SessionItem[];
   activeSessionId: string | null;
-  /** Session ID currently receiving a streaming response (null if idle) */
-  streamingSessionId: string | null;
+  /** Session IDs currently receiving a streaming response. */
+  streamingSessionIds: string[];
   onSelect: (id: string) => void;
   onNew: (agent?: string) => void;
   onDelete: (id: string) => void;
@@ -1776,6 +1779,10 @@ function SessionSidebar({
   onBack?: () => void;
   /** When true, sidebar takes full width instead of fixed w-72 */
   fullWidth?: boolean;
+  /** Full width on mobile, resizable fixed width on desktop. */
+  mobileFullWidth?: boolean;
+  /** Show the close/back control only while the mobile overlay layout applies. */
+  mobileOnlyBack?: boolean;
 }) {
   const { agents } = useAgents();
   const agentMap = agents ? Object.fromEntries(agents.map((a) => [a.name, a])) : {};
@@ -1946,7 +1953,12 @@ function SessionSidebar({
     return (
       <div className="px-3 py-2.5 border-b border-border/40 flex items-center gap-2 shrink-0">
         {onBack && (
-          <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={onBack}>
+          <Button
+            variant="ghost"
+            size="icon"
+            className={cn("h-7 w-7 shrink-0", mobileOnlyBack && "lg:hidden")}
+            onClick={onBack}
+          >
             <ChevronLeft className="h-4 w-4" />
           </Button>
         )}
@@ -2013,7 +2025,7 @@ function SessionSidebar({
           key={s.id}
           session={s}
           isActive={activeSessionId === s.id}
-          isStreaming={streamingSessionId === s.id}
+          isStreaming={streamingSessionIds.includes(s.id)}
           onSelect={onSelect}
           onDelete={onDelete}
         />
@@ -2169,7 +2181,7 @@ function SessionSidebar({
                       key={s.id}
                       session={s}
                       isActive={activeSessionId === s.id}
-                      isStreaming={streamingSessionId === s.id}
+                      isStreaming={streamingSessionIds.includes(s.id)}
                       onSelect={onSelect}
                       onDelete={onDelete}
                     />
@@ -2198,20 +2210,30 @@ function SessionSidebar({
   const activeGroupSessions = activeGroup
     ? (groups.find(([k]: [string, SessionItem[]]) => k === activeGroup)?.[1] ?? [])
     : [];
+  const sidebarStyle = fullWidth
+    ? undefined
+    : ({ "--session-sidebar-width": `${sidebarWidth}px` } as CSSProperties);
 
   return (
     <div className={cn(
       "relative border-r border-border/30 flex flex-col bg-card/40 h-full",
-      fullWidth ? "w-full" : "shrink-0"
+      fullWidth
+        ? "w-full"
+        : mobileFullWidth
+          ? "w-full lg:w-[var(--session-sidebar-width)] lg:shrink-0"
+          : "w-[var(--session-sidebar-width)] shrink-0"
     )}
-    style={fullWidth ? undefined : { width: sidebarWidth }}
+    style={sidebarStyle}
     >
       {!fullWidth && (
         <button
           type="button"
           aria-label="Resize Agent Chats sidebar"
           onPointerDown={startResize}
-          className="absolute inset-y-0 -right-1 z-20 w-2 cursor-col-resize rounded-full outline-none focus-visible:ring-2 focus-visible:ring-primary/40 group"
+          className={cn(
+            "absolute inset-y-0 -right-1 z-20 w-2 cursor-col-resize rounded-full outline-none focus-visible:ring-2 focus-visible:ring-primary/40 group",
+            mobileFullWidth && "hidden lg:block"
+          )}
         >
           <span className="absolute inset-y-3 left-1/2 w-px -translate-x-1/2 rounded-full bg-border transition-all group-hover:w-[3px] group-hover:bg-primary/40" />
         </button>
@@ -2293,13 +2315,13 @@ function ChatToolbar({
   const agentConfig = sessionAgent && agents ? agents.find((a) => a.name === sessionAgent) : undefined;
 
   return (
-    <div className="flex items-center gap-2 px-4 py-2 border-b border-border/40 bg-background/80 backdrop-blur-md shrink-0">
+    <div className="flex items-center gap-1.5 px-2 py-2 border-b border-border/40 bg-background/80 backdrop-blur-md shrink-0 sm:gap-2 sm:px-4">
       <Tooltip>
         <TooltipTrigger asChild>
           <Button
             variant="ghost"
             size="icon"
-            className="h-7 w-7"
+            className="h-7 w-7 shrink-0"
             onClick={onToggleSidebar}
           >
             {sidebarOpen ? <ChevronsLeft className="h-4 w-4" /> : <MessageCircle className="h-4 w-4" />}
@@ -2316,7 +2338,7 @@ function ChatToolbar({
             <Button
               variant="ghost"
               size="icon"
-              className="h-7 w-7"
+              className="h-7 w-7 shrink-0"
               onClick={newSession}
             >
               <Plus className="h-4 w-4" />
@@ -2329,13 +2351,13 @@ function ChatToolbar({
       )}
       {/* Left: agent avatar + name */}
       {agentConfig ? (
-        <div className="flex items-center gap-1.5 shrink-0">
+        <div className="flex min-w-0 max-w-[8rem] items-center gap-1.5 shrink-0 sm:max-w-48">
           <AgentAvatar
             avatar={agentConfig.identity?.avatar}
             name={agentConfig.identity?.displayName ?? agentConfig.name}
             size="xs"
           />
-          <span className="text-sm font-medium text-foreground">
+          <span className="truncate text-sm font-medium text-foreground">
             {agentConfig.identity?.displayName ?? agentConfig.name}
           </span>
         </div>
@@ -2358,7 +2380,7 @@ function ChatToolbar({
       {/* Right: message count + actions */}
       {messages.length > 0 && (
         <>
-          <Badge variant="secondary" className="text-[10px]">
+          <Badge variant="secondary" className="hidden shrink-0 text-[10px] sm:inline-flex">
             {messages.length} messages
           </Badge>
           {!isLoading && (
@@ -2367,7 +2389,7 @@ function ChatToolbar({
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                  className="h-7 w-7 shrink-0 text-muted-foreground hover:text-destructive"
                   onClick={clear}
                 >
                   <Trash2 className="h-3.5 w-3.5" />
@@ -2713,7 +2735,7 @@ function ChatMessages() {
 function ChatInput() {
   const { isLoading, pendingQuestions, pendingMission, pendingVault, sessionId, selectedAgent } = useChatState();
   const { send, stop } = useChatActions();
-  const inputDisabled = useChatInputDisabled();
+  const inputDisabled = useChatInputDisabled({ includeLoading: false });
 
   const inputWrapperRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -2738,7 +2760,10 @@ function ChatInput() {
 
   const handleSubmit = useCallback(
     async (message: PromptInputMessage) => {
-      if (!message.text.trim() || isLoading) return;
+      if (isLoading) {
+        throw new Error("Cannot submit while a response is streaming.");
+      }
+      if (!message.text.trim()) return;
       // Resolve display mentions → wire mentions
       const resolvedText = mentionRef.current?.resolveMessage(message.text.trim()) ?? message.text.trim();
       const images = message.files
@@ -2778,9 +2803,20 @@ function ChatInput() {
           >
             <AttachmentPreview />
             <PromptInputTextarea
-              placeholder={isLoading ? `${recipientName} is working...` : pendingQuestions ? "Answer the questions above first..." : pendingMission ? "Review the mission preview above..." : pendingVault ? "Review the vault entry above..." : `Message ${recipientName}...`}
+              placeholder={isLoading ? `Draft next message for ${recipientName}...` : pendingQuestions ? "Answer the questions above first..." : pendingMission ? "Review the mission preview above..." : pendingVault ? "Review the vault entry above..." : `Message ${recipientName}...`}
               disabled={inputDisabled}
-              onKeyDown={(e) => mentionRef.current?.handleTextareaKeyDown(e)}
+              onKeyDown={(e) => {
+                mentionRef.current?.handleTextareaKeyDown(e);
+                if (
+                  !e.defaultPrevented &&
+                  isLoading &&
+                  e.key === "Enter" &&
+                  !e.shiftKey &&
+                  !e.nativeEvent.isComposing
+                ) {
+                  e.preventDefault();
+                }
+              }}
               onInput={(e) => {
                 if (!textareaRef.current) textareaRef.current = e.currentTarget;
                 mentionRef.current?.handleInput();
@@ -2862,7 +2898,7 @@ function ChatLoadingSkeleton({ compact }: { compact?: boolean }) {
 // ── ChatPage — full-page composition with session sidebar ──
 
 export function ChatPage({ compact, embedded }: { compact?: boolean; embedded?: boolean } = {}) {
-  const { sessions, sessionsLoading, sessionId, isLoading } = useChatState();
+  const { sessions, sessionsLoading, sessionId, streamingSessionIds } = useChatState();
   const { loadSession, newSession, deleteSession, setSelectedAgent } = useChatActions();
 
   // In embedded mode, session sidebar is controlled externally
@@ -2878,20 +2914,23 @@ export function ChatPage({ compact, embedded }: { compact?: boolean; embedded?: 
     (s: { messageCount: number; title?: string }) => s.messageCount > 1 || (s.messageCount === 1 && s.title),
   );
 
-  // Streaming indicator: only the active session can stream
-  const streamingSessionId = isLoading ? sessionId : null;
+  const shouldCloseSidebarAfterMobileAction = useCallback(() => {
+    if (compact) return true;
+    if (embedded || typeof window === "undefined") return false;
+    return window.matchMedia("(max-width: 1023px)").matches;
+  }, [compact, embedded]);
 
   // All hooks MUST be above the early return to satisfy Rules of Hooks
   const handleSelectSession = useCallback((id: string) => {
     loadSession(id);
-    if (compact) setSidebarOpen(false);
-  }, [loadSession, compact, setSidebarOpen]);
+    if (shouldCloseSidebarAfterMobileAction()) setSidebarOpen(false);
+  }, [loadSession, setSidebarOpen, shouldCloseSidebarAfterMobileAction]);
 
   const handleNewSession = useCallback((agent?: string) => {
     newSession();
     setSelectedAgent(agent ?? null);
-    if (compact) setSidebarOpen(false);
-  }, [newSession, setSelectedAgent, compact, setSidebarOpen]);
+    if (shouldCloseSidebarAfterMobileAction()) setSidebarOpen(false);
+  }, [newSession, setSelectedAgent, setSidebarOpen, shouldCloseSidebarAfterMobileAction]);
 
   if (sessionsLoading) {
     return <ChatLoadingSkeleton compact={compact} />;
@@ -2899,7 +2938,7 @@ export function ChatPage({ compact, embedded }: { compact?: boolean; embedded?: 
 
   return (
     <div className={cn(
-      "flex flex-1 min-h-0",
+      "relative flex flex-1 min-h-0",
       !compact && !embedded && "-mx-4 -mt-4 -mb-2 lg:-mx-6 lg:-mt-6 lg:-mb-3",
     )}>
       {/* Compact mode: sidebar replaces the entire chat area */}
@@ -2907,7 +2946,7 @@ export function ChatPage({ compact, embedded }: { compact?: boolean; embedded?: 
         <SessionSidebar
           sessions={visibleSessions}
           activeSessionId={sessionId}
-          streamingSessionId={streamingSessionId}
+          streamingSessionIds={streamingSessionIds}
           onSelect={handleSelectSession}
           onNew={handleNewSession}
           onDelete={deleteSession}
@@ -2918,15 +2957,21 @@ export function ChatPage({ compact, embedded }: { compact?: boolean; embedded?: 
         <>
           {/* Session sidebar panel — full-page or embedded mode */}
           {!compact && sidebarOpen && (
-            <div className={embedded ? "flex" : "hidden lg:flex"}>
+            <div className={cn(
+              embedded
+                ? "flex"
+                : "absolute inset-0 z-40 flex bg-background lg:static lg:inset-auto lg:z-auto lg:bg-transparent"
+            )}>
               <SessionSidebar
                 sessions={visibleSessions}
                 activeSessionId={sessionId}
-                streamingSessionId={streamingSessionId}
+                streamingSessionIds={streamingSessionIds}
                 onSelect={handleSelectSession}
                 onNew={handleNewSession}
                 onDelete={deleteSession}
-                onBack={embedded ? () => setSidebarOpen(false) : undefined}
+                onBack={embedded || !compact ? () => setSidebarOpen(false) : undefined}
+                mobileFullWidth={!embedded && !compact}
+                mobileOnlyBack={!embedded && !compact}
               />
             </div>
           )}

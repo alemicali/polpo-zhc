@@ -83,6 +83,7 @@ export interface ChatStateValue {
   sessionId: string | null;
   sessions: { id: string; title?: string; createdAt: string; updatedAt: string; messageCount: number; agent?: string }[];
   sessionsLoading: boolean;
+  streamingSessionIds: string[];
   pendingQuestions: AskUserQuestion[] | null;
   pendingMission: MissionPreviewData | null;
   pendingVault: VaultPreviewData | null;
@@ -124,6 +125,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     sessionId: chat.sessionId,
     sessions: chat.sessions,
     sessionsLoading: chat.sessionsLoading,
+    streamingSessionIds: chat.streamingSessionIds,
     pendingQuestions: chat.pendingQuestions,
     pendingMission: chat.pendingMission,
     pendingVault: chat.pendingVault,
@@ -133,7 +135,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     selectedAgent: chat.selectedAgent,
   }), [
     chat.messages, chat.isLoading, chat.messagesLoading,
-    chat.sessionId, chat.sessions, chat.sessionsLoading,
+    chat.sessionId, chat.sessions, chat.sessionsLoading, chat.streamingSessionIds,
     chat.pendingQuestions, chat.pendingMission, chat.pendingVault,
     chat.pendingOpenFile, chat.pendingNavigateTo,
     chat.pendingOpenTab, chat.selectedAgent,
@@ -189,15 +191,14 @@ export function useChatActions(): ChatActionsValue {
  * Derived hook — true when the chat input should be disabled.
  * Centralises the boolean chain so consumers don't repeat it.
  */
-export function useChatInputDisabled(): boolean {
+export function useChatInputDisabled(options?: { includeLoading?: boolean }): boolean {
   const {
     isLoading, pendingQuestions, pendingMission, pendingVault,
     pendingOpenFile, pendingNavigateTo, pendingOpenTab,
   } = useChatState();
+  const includeLoading = options?.includeLoading ?? true;
   return (
-    isLoading || !!pendingQuestions || !!pendingMission || !!pendingVault
+    (includeLoading && isLoading) || !!pendingQuestions || !!pendingMission || !!pendingVault
     || !!pendingOpenFile || !!pendingNavigateTo || !!pendingOpenTab
   );
 }
-
-

@@ -111,6 +111,17 @@ export interface ChatMessageWithQuestions extends ChatMessage {
 // Builds on the SDK's useSessions hook for session management,
 // uses chatCompletionsStream() for real-time streaming responses.
 
+const NEW_SESSION_KEY = "__polpo_new_session__";
+
+interface SessionPendingState {
+  questions: AskUserQuestion[] | null;
+  mission: MissionPreviewData | null;
+  vault: VaultPreviewData | null;
+  openFile: OpenFileData | null;
+  navigateTo: NavigateToData | null;
+  openTab: OpenTabData | null;
+}
+
 export function useChat() {
   const { client } = usePolpo();
   const {
@@ -123,39 +134,155 @@ export function useChat() {
     refetch: refetchSessions,
   } = useSessions();
 
-  const [messages, setMessages] = useState<ChatMessageWithQuestions[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
+  const [messagesBySession, setMessagesBySession] = useState<Record<string, ChatMessageWithQuestions[]>>({});
+  const [streamingBySession, setStreamingBySession] = useState<Record<string, boolean>>({});
+  const [pendingBySession, setPendingBySession] = useState<Record<string, SessionPendingState>>({});
   /** True while loading messages for an existing session (distinguishes from empty "new chat" state) */
   const [messagesLoading, setMessagesLoading] = useState(false);
   /** Selected agent for agent-direct chat mode. null = orchestrator (default). */
   const [selectedAgent, setSelectedAgent] = useState<string | null>(null);
-  /** Questions waiting for user response (null = no pending questions) */
-  const [pendingQuestions, setPendingQuestions] = useState<AskUserQuestion[] | null>(null);
-  /** Mission preview waiting for user action (null = no pending preview) */
-  const [pendingMission, setPendingMission] = useState<MissionPreviewData | null>(null);
-  /** Vault entry preview waiting for user confirmation (null = no pending vault) */
-  const [pendingVault, setPendingVault] = useState<VaultPreviewData | null>(null);
-  /** Client-side open_file — path of file to open in preview dialog */
-  const [pendingOpenFile, setPendingOpenFile] = useState<OpenFileData | null>(null);
-  /** Client-side navigate_to — target page + params (consumed immediately) */
-  const [pendingNavigateTo, setPendingNavigateTo] = useState<NavigateToData | null>(null);
-  /** Client-side open_tab — opens URL in new browser tab (consumed immediately) */
-  const [pendingOpenTab, setPendingOpenTab] = useState<OpenTabData | null>(null);
   const initialLoadDone = useRef(false);
-  /** Conversation history sent to the completions endpoint */
-  const conversationRef = useRef<ChatCompletionMessage[]>([]);
-  /** Currently active stream (for abort support) */
-  const streamRef = useRef<ChatCompletionStream | null>(null);
+  const activeSessionKey = sessionId ?? NEW_SESSION_KEY;
+  const activeSessionKeyRef = useRef(activeSessionKey);
+  /** Conversation history sent to the completions endpoint, keyed by session. */
+  const conversationBySessionRef = useRef<Map<string, ChatCompletionMessage[]>>(new Map());
+  /** Active client streams, keyed by session. */
+  const streamsBySessionRef = useRef<Map<string, ChatCompletionStream>>(new Map());
   /** True when the user explicitly requested a new session — consumed on first send */
   const wantsNewSessionRef = useRef(false);
-  /** Active turn ID — set by streamCompletion/resume, used by stop() to abort server-side */
-  const currentTurnIdRef = useRef<string | null>(null);
-  /** Abort controller for an in-flight resume SSE — separate from streamRef.abort() */
-  const resumeAbortRef = useRef<AbortController | null>(null);
+  /** Active turn IDs, keyed by session, used by stop() to abort server-side. */
+  const turnIdsBySessionRef = useRef<Map<string, string>>(new Map());
+  /** Abort controllers for in-flight resume SSE streams, keyed by session. */
+  const resumeAbortBySessionRef = useRef<Map<string, AbortController>>(new Map());
+
+  useEffect(() => {
+    activeSessionKeyRef.current = activeSessionKey;
+  }, [activeSessionKey]);
+
+  const messages = messagesBySession[activeSessionKey] ?? [];
+  const isLoading = streamingBySession[activeSessionKey] ?? false;
+  const pendingState = pendingBySession[activeSessionKey];
+  const pendingQuestions = pendingState?.questions ?? null;
+  const pendingMission = pendingState?.mission ?? null;
+  const pendingVault = pendingState?.vault ?? null;
+  const pendingOpenFile = pendingState?.openFile ?? null;
+  const pendingNavigateTo = pendingState?.navigateTo ?? null;
+  const pendingOpenTab = pendingState?.openTab ?? null;
+  const streamingSessionIds = Object.entries(streamingBySession)
+    .filter(([key, active]) => active && key !== NEW_SESSION_KEY)
+    .map(([key]) => key);
+
+  const updateSessionMessages = useCallback((
+    key: string,
+    updater: ChatMessageWithQuestions[] | ((prev: ChatMessageWithQuestions[]) => ChatMessageWithQuestions[]),
+  ) => {
+    setMessagesBySession((prev) => {
+      const current = prev[key] ?? [];
+      const next = typeof updater === "function" ? updater(current) : updater;
+      return { ...prev, [key]: next };
+    });
+  }, []);
+
+  const setActiveMessages = useCallback((
+    updater: ChatMessageWithQuestions[] | ((prev: ChatMessageWithQuestions[]) => ChatMessageWithQuestions[]),
+  ) => updateSessionMessages(activeSessionKeyRef.current, updater), [updateSessionMessages]);
+
+  const setSessionStreaming = useCallback((key: string, active: boolean) => {
+    setStreamingBySession((prev) => {
+      if ((prev[key] ?? false) === active) return prev;
+      return { ...prev, [key]: active };
+    });
+  }, []);
+
+  const setSessionPending = useCallback((key: string, patch: Partial<SessionPendingState>) => {
+    setPendingBySession((prev) => {
+      const current = prev[key] ?? {
+        questions: null,
+        mission: null,
+        vault: null,
+        openFile: null,
+        navigateTo: null,
+        openTab: null,
+      };
+      return {
+        ...prev,
+        [key]: {
+          ...current,
+          ...patch,
+        },
+      };
+    });
+  }, []);
+
+  const clearSessionPending = useCallback((key: string) => {
+    setSessionPending(key, {
+      questions: null,
+      mission: null,
+      vault: null,
+      openFile: null,
+      navigateTo: null,
+      openTab: null,
+    });
+  }, [setSessionPending]);
+
+  const setConversation = useCallback((key: string, conversation: ChatCompletionMessage[]) => {
+    conversationBySessionRef.current.set(key, conversation);
+  }, []);
+
+  const appendConversation = useCallback((key: string, message: ChatCompletionMessage) => {
+    const current = conversationBySessionRef.current.get(key) ?? [];
+    conversationBySessionRef.current.set(key, [...current, message]);
+  }, []);
+
+  const migrateSessionKey = useCallback((fromKey: string, toKey: string) => {
+    if (fromKey === toKey) return;
+
+    setMessagesBySession((prev) => {
+      const fromMessages = prev[fromKey];
+      if (!fromMessages) return prev;
+      const next = { ...prev, [toKey]: fromMessages };
+      delete next[fromKey];
+      return next;
+    });
+    setStreamingBySession((prev) => {
+      if (!(fromKey in prev)) return prev;
+      const next = { ...prev, [toKey]: prev[fromKey] };
+      delete next[fromKey];
+      return next;
+    });
+    setPendingBySession((prev) => {
+      const fromPending = prev[fromKey];
+      if (!fromPending) return prev;
+      const next = { ...prev, [toKey]: fromPending };
+      delete next[fromKey];
+      return next;
+    });
+
+    const conversation = conversationBySessionRef.current.get(fromKey);
+    if (conversation) {
+      conversationBySessionRef.current.set(toKey, conversation);
+      conversationBySessionRef.current.delete(fromKey);
+    }
+    const stream = streamsBySessionRef.current.get(fromKey);
+    if (stream) {
+      streamsBySessionRef.current.set(toKey, stream);
+      streamsBySessionRef.current.delete(fromKey);
+    }
+    const turnId = turnIdsBySessionRef.current.get(fromKey);
+    if (turnId) {
+      turnIdsBySessionRef.current.set(toKey, turnId);
+      turnIdsBySessionRef.current.delete(fromKey);
+    }
+    const resumeAbort = resumeAbortBySessionRef.current.get(fromKey);
+    if (resumeAbort) {
+      resumeAbortBySessionRef.current.set(toKey, resumeAbort);
+      resumeAbortBySessionRef.current.delete(fromKey);
+    }
+  }, []);
 
   // Reconstruct interactive state from persisted "interrupted" tool calls on the last assistant message.
   // If the last message is an assistant with an interrupted ask_user/create_mission, restore the pending state.
-  const restoreInteractiveState = (msgs: ChatMessageWithQuestions[]) => {
+  const restoreInteractiveState = useCallback((msgs: ChatMessageWithQuestions[], key: string) => {
     if (msgs.length === 0) return;
     const lastMsg = msgs[msgs.length - 1];
     // Only restore if the last message is from the assistant (no user reply yet)
@@ -168,7 +295,7 @@ export function useChat() {
         const questions = (tc.arguments as any)?.questions as AskUserQuestion[] ?? [];
         if (questions.length > 0) {
           lastMsg.askUserQuestions = questions;
-          setPendingQuestions(questions);
+          setSessionPending(key, { questions });
         }
       } else if (tc.name === "create_mission" && tc.arguments) {
         const args = tc.arguments as Record<string, unknown>;
@@ -180,7 +307,7 @@ export function useChat() {
           prompt: args.prompt as string | undefined,
         };
         lastMsg.missionPreview = preview;
-        setPendingMission(preview);
+        setSessionPending(key, { mission: preview });
       } else if (tc.name === "set_vault_entry" && tc.arguments) {
         const args = tc.arguments as Record<string, unknown>;
         const vaultPreview: VaultPreviewData = {
@@ -191,7 +318,7 @@ export function useChat() {
           credentials: (args.credentials as Record<string, string>) ?? {},
         };
         lastMsg.vaultPreview = vaultPreview;
-        setPendingVault(vaultPreview);
+        setSessionPending(key, { vault: vaultPreview });
       // NOTE: open_file, navigate_to, open_tab are one-shot navigation actions.
       // They must NOT be restored as pending because:
       // 1. They were already consumed when originally fired (navigate + streamCompletion).
@@ -221,7 +348,7 @@ export function useChat() {
         };
       }
     }
-  };
+  }, [setSessionPending]);
 
   // Reconstruct segments from persisted toolCalls + text content.
   // Since we can't know exact interleaving, show tool calls before text.
@@ -240,6 +367,32 @@ export function useChat() {
     return segments;
   };
 
+  const toUiMessages = useCallback((raw: ChatMessage[]): ChatMessageWithQuestions[] => raw
+    .filter((m) => m.content.trim().length > 0)
+    .map((m) => {
+      const enriched: ChatMessageWithQuestions = { ...m };
+      const serverMsg = m as ChatMessageWithQuestions;
+      if (serverMsg.toolCalls && serverMsg.toolCalls.length > 0) {
+        enriched.toolCalls = serverMsg.toolCalls;
+        enriched.segments = reconstructSegments(enriched);
+      }
+      return enriched;
+    }), []);
+
+  const conversationFromMessages = useCallback((msgs: ChatMessageWithQuestions[]): ChatCompletionMessage[] => msgs.map((m) => ({
+    role: m.role as "user" | "assistant",
+    content: m.content,
+  })), []);
+
+  const applyServerMessages = useCallback((key: string, raw: ChatMessage[]) => {
+    const msgs = toUiMessages(raw);
+    clearSessionPending(key);
+    restoreInteractiveState(msgs, key);
+    updateSessionMessages(key, msgs);
+    setConversation(key, conversationFromMessages(msgs));
+    return msgs;
+  }, [clearSessionPending, conversationFromMessages, restoreInteractiveState, setConversation, toUiMessages, updateSessionMessages]);
+
   /**
    * Re-attach to an in-flight server-side turn. Replays buffered deltas
    * accumulated server-side while the client was disconnected, then tails
@@ -254,9 +407,9 @@ export function useChat() {
     const headers: Record<string, string> = {};
     if (appConfig.apiKey) headers["Authorization"] = `Bearer ${appConfig.apiKey}`;
     const ac = new AbortController();
-    resumeAbortRef.current = ac;
-    currentTurnIdRef.current = turnId;
-    setIsLoading(true);
+    resumeAbortBySessionRef.current.set(sid, ac);
+    turnIdsBySessionRef.current.set(sid, turnId);
+    setSessionStreaming(sid, true);
 
     let fullContent = "";
     let thinkingText = "";
@@ -273,7 +426,7 @@ export function useChat() {
     });
 
     const updateMsg = () => {
-      setMessages((prev) =>
+      updateSessionMessages(sid, (prev) =>
         prev.map((m) =>
           m.id === assistantId
             ? { ...m, ...messagePatch() }
@@ -362,68 +515,37 @@ export function useChat() {
       // we missed if we joined late).
       try {
         const raw = await getMessages(sid);
-        const msgs: ChatMessageWithQuestions[] = raw
-          .filter((m) => m.content.trim().length > 0)
-          .map((m) => {
-            const enriched: ChatMessageWithQuestions = { ...m };
-            const serverMsg = m as ChatMessageWithQuestions;
-            if (serverMsg.toolCalls && serverMsg.toolCalls.length > 0) {
-              enriched.toolCalls = serverMsg.toolCalls;
-              enriched.segments = reconstructSegments(enriched);
-            }
-            return enriched;
-          });
-        restoreInteractiveState(msgs);
-        setMessages(msgs);
-        conversationRef.current = msgs.map((m) => ({
-          role: m.role as "user" | "assistant",
-          content: m.content,
-        }));
+        applyServerMessages(sid, raw);
       } catch { /* ignore — keep what we streamed */ }
     } catch (err) {
       if ((err as Error).name !== "AbortError") {
         console.warn("[resume] failed:", err);
       }
     } finally {
-      setIsLoading(false);
-      currentTurnIdRef.current = null;
-      resumeAbortRef.current = null;
+      setSessionStreaming(sid, false);
+      turnIdsBySessionRef.current.delete(sid);
+      resumeAbortBySessionRef.current.delete(sid);
     }
-  }, [getMessages]);
+  }, [applyServerMessages, getMessages, setSessionStreaming, updateSessionMessages]);
 
   // Load a specific session's messages
   const loadSession = useCallback(
     async (id: string) => {
       setSessionId(id);
       setMessagesLoading(true);
-      setPendingQuestions(null);
-      setPendingMission(null);
-      setPendingVault(null);
+      clearSessionPending(id);
       // Restore agent scope from the loaded session
       const session = sessions.find((s) => s.id === id);
       setSelectedAgent(session?.agent ?? null);
+
+      if (streamsBySessionRef.current.has(id) || resumeAbortBySessionRef.current.has(id)) {
+        setMessagesLoading(false);
+        return;
+      }
+
       try {
         const raw = await getMessages(id);
-        // Filter out empty placeholder messages (server saves them before streaming starts)
-        const msgs: ChatMessageWithQuestions[] = raw
-          .filter((m) => m.content.trim().length > 0)
-          .map((m) => {
-            const enriched: ChatMessageWithQuestions = { ...m };
-            // Reconstruct toolCalls from server-persisted data (cast for SDK build-order safety)
-            const serverMsg = m as ChatMessageWithQuestions;
-            if (serverMsg.toolCalls && serverMsg.toolCalls.length > 0) {
-              enriched.toolCalls = serverMsg.toolCalls;
-              enriched.segments = reconstructSegments(enriched);
-            }
-            return enriched;
-          });
-        // Restore any pending interactive state (ask_user / mission preview) from the last message
-        restoreInteractiveState(msgs);
-        setMessages(msgs);
-        conversationRef.current = msgs.map((m) => ({
-          role: m.role as "user" | "assistant",
-          content: m.content,
-        }));
+        const msgs = applyServerMessages(id, raw);
 
         // Resume detection: if the server has an in-flight turn for this
         // session (because the previous client disconnected), reattach to
@@ -445,7 +567,7 @@ export function useChat() {
                 : null;
               const assistantId = trailing?.id ?? `temp-${Date.now()}-resume`;
               if (!trailing) {
-                setMessages((prev) => [
+                updateSessionMessages(id, (prev) => [
                   ...prev,
                   { id: assistantId, role: "assistant", content: "", ts: new Date().toISOString() },
                 ]);
@@ -456,13 +578,13 @@ export function useChat() {
           }
         } catch { /* offline or endpoint missing — silent */ }
       } catch {
-        setMessages([]);
-        conversationRef.current = [];
+        updateSessionMessages(id, []);
+        conversationBySessionRef.current.delete(id);
       } finally {
         setMessagesLoading(false);
       }
     },
-    [setSessionId, getMessages, sessions, runResume]
+    [applyServerMessages, clearSessionPending, getMessages, runResume, sessions, setSessionId, updateSessionMessages]
   );
 
   // Auto-select most recent non-empty session on first load
@@ -484,65 +606,42 @@ export function useChat() {
       if (document.visibilityState !== "visible") return;
       refetchSessions();
       // Don't clobber an in-flight stream — local state is fresher than the server snapshot.
-      if (streamRef.current) return;
+      if (streamsBySessionRef.current.has(activeSessionKeyRef.current) || resumeAbortBySessionRef.current.has(activeSessionKeyRef.current)) return;
       if (sessionId) {
         getMessages(sessionId)
-          .then((raw) => {
-            const msgs: ChatMessageWithQuestions[] = raw
-              .filter((m) => m.content.trim().length > 0)
-              .map((m) => {
-                const enriched: ChatMessageWithQuestions = { ...m };
-                const serverMsg = m as ChatMessageWithQuestions;
-                if (serverMsg.toolCalls && serverMsg.toolCalls.length > 0) {
-                  enriched.toolCalls = serverMsg.toolCalls;
-                  enriched.segments = reconstructSegments(enriched);
-                }
-                return enriched;
-              });
-            // Restore any pending interactive state on visibility change
-            restoreInteractiveState(msgs);
-            setMessages(msgs);
-            conversationRef.current = msgs.map((m) => ({
-              role: m.role as "user" | "assistant",
-              content: m.content,
-            }));
-          })
+          .then((raw) => { applyServerMessages(sessionId, raw); })
           .catch(() => { /* silent */ });
       }
     };
     document.addEventListener("visibilitychange", onVisible);
     return () => document.removeEventListener("visibilitychange", onVisible);
-  }, [sessionId, getMessages, refetchSessions]);
+  }, [applyServerMessages, sessionId, getMessages, refetchSessions]);
 
   // Start a new empty session
   const newSession = useCallback(() => {
     setSessionId(null);
-    setMessages([]);
-    setPendingQuestions(null);
-    setPendingMission(null);
-    setPendingVault(null);
+    updateSessionMessages(NEW_SESSION_KEY, []);
+    clearSessionPending(NEW_SESSION_KEY);
     setSelectedAgent(null);
-    conversationRef.current = [];
+    conversationBySessionRef.current.delete(NEW_SESSION_KEY);
     wantsNewSessionRef.current = true;
-  }, [setSessionId]);
+  }, [clearSessionPending, setSessionId, updateSessionMessages]);
 
   // Core streaming function (shared between send and answerQuestions)
   const streamCompletion = useCallback(
-    async (assistantId: string) => {
-      // If user explicitly requested a new session, send "new" sentinel to force server-side creation.
-      // Otherwise send the current sessionId (or undefined to let server auto-select).
-      const effectiveSessionId = wantsNewSessionRef.current ? "new" : (sessionId ?? undefined);
-      wantsNewSessionRef.current = false;
+    async (assistantId: string, options: { sessionKey: string; requestSessionId?: string; agent?: string | null }) => {
+      let streamSessionKey = options.sessionKey;
       const stream = client.chatCompletionsStream({
-        messages: conversationRef.current,
-        sessionId: effectiveSessionId,
-        ...(selectedAgent ? { agent: selectedAgent } : {}),
+        messages: conversationBySessionRef.current.get(streamSessionKey) ?? [],
+        sessionId: options.requestSessionId,
+        ...(options.agent ? { agent: options.agent } : {}),
       });
-      streamRef.current = stream;
+      streamsBySessionRef.current.set(streamSessionKey, stream);
+      setSessionStreaming(streamSessionKey, true);
       // turnId is populated by the SDK after the first network exchange — refresh
       // it on every chunk loop iteration. Used by stop() and by other tabs that
       // want to abort this turn from elsewhere.
-      currentTurnIdRef.current = null;
+      turnIdsBySessionRef.current.delete(streamSessionKey);
 
       let fullContent = "";
       let thinkingText = "";
@@ -561,7 +660,7 @@ export function useChat() {
       });
 
       const updateMsg = () => {
-        setMessages((prev) =>
+        updateSessionMessages(streamSessionKey, (prev) =>
           prev.map((m) =>
             m.id === assistantId
               ? { ...m, ...messagePatch() }
@@ -570,12 +669,23 @@ export function useChat() {
         );
       };
 
-      for await (const chunk of stream) {
-        // turnId is captured by the SDK from the response header on the first
-        // chunk — pick it up as soon as it's populated.
-        if (!currentTurnIdRef.current && (stream as { turnId?: string | null }).turnId) {
-          currentTurnIdRef.current = (stream as { turnId?: string | null }).turnId ?? null;
+      const syncServerIds = () => {
+        const nextSessionId = stream.sessionId;
+        if (nextSessionId && nextSessionId !== streamSessionKey) {
+          const wasActive = activeSessionKeyRef.current === streamSessionKey;
+          migrateSessionKey(streamSessionKey, nextSessionId);
+          streamSessionKey = nextSessionId;
+          if (wasActive) {
+            setSessionId(nextSessionId);
+          }
         }
+        if (stream.turnId) {
+          turnIdsBySessionRef.current.set(streamSessionKey, stream.turnId);
+        }
+      };
+
+      for await (const chunk of stream) {
+        syncServerIds();
         const choice = chunk.choices[0];
         const delta = choice?.delta;
         const thinking = choice?.thinking as string | undefined;
@@ -633,23 +743,19 @@ export function useChat() {
         }
       }
 
-      // Capture session ID
-      if (stream.sessionId && stream.sessionId !== sessionId) {
-        setSessionId(stream.sessionId);
-      }
+      syncServerIds();
 
       // Check if the LLM is asking questions
       if (stream.askUser && stream.askUser.questions.length > 0) {
-        setMessages((prev) =>
+        updateSessionMessages(streamSessionKey, (prev) =>
           prev.map((m) =>
             m.id === assistantId
               ? { ...m, ...messagePatch(), askUserQuestions: stream.askUser!.questions }
-              : m
+            : m
           )
         );
-        setPendingQuestions(stream.askUser.questions);
-        setPendingMission(null);
-        conversationRef.current.push({ role: "assistant", content: fullContent });
+        setSessionPending(streamSessionKey, { questions: stream.askUser.questions, mission: null, vault: null });
+        appendConversation(streamSessionKey, { role: "assistant", content: fullContent });
       } else if (stream.missionPreview) {
         // Mission preview — show interactive card for user to Execute/Draft/Refine/Cancel
         const preview: MissionPreviewData = {
@@ -657,17 +763,15 @@ export function useChat() {
           data: stream.missionPreview.data,
           prompt: stream.missionPreview.prompt ?? undefined,
         };
-        setMessages((prev) =>
+        updateSessionMessages(streamSessionKey, (prev) =>
           prev.map((m) =>
             m.id === assistantId
               ? { ...m, ...messagePatch(), missionPreview: preview }
-              : m
+            : m
           )
         );
-        setPendingMission(preview);
-        setPendingQuestions(null);
-        setPendingVault(null);
-        conversationRef.current.push({ role: "assistant", content: fullContent });
+        setSessionPending(streamSessionKey, { mission: preview, questions: null, vault: null });
+        appendConversation(streamSessionKey, { role: "assistant", content: fullContent });
       } else if (stream.vaultPreview) {
         // Vault preview — show interactive card for user to Confirm/Cancel
         const vaultData: VaultPreviewData = {
@@ -677,35 +781,30 @@ export function useChat() {
           label: stream.vaultPreview.label ?? undefined,
           credentials: stream.vaultPreview.credentials,
         };
-        setMessages((prev) =>
+        updateSessionMessages(streamSessionKey, (prev) =>
           prev.map((m) =>
             m.id === assistantId
               ? { ...m, ...messagePatch(), vaultPreview: vaultData }
-              : m
+            : m
           )
         );
-        setPendingVault(vaultData);
-        setPendingQuestions(null);
-        setPendingMission(null);
-        conversationRef.current.push({ role: "assistant", content: fullContent });
+        setSessionPending(streamSessionKey, { vault: vaultData, questions: null, mission: null });
+        appendConversation(streamSessionKey, { role: "assistant", content: fullContent });
       } else if ((stream as any).openFile) {
         // Client-side open_file — open file preview dialog
         const of = (stream as any).openFile;
         const openFileData: OpenFileData = {
           path: of.path,
         };
-        setMessages((prev) =>
+        updateSessionMessages(streamSessionKey, (prev) =>
           prev.map((m) =>
             m.id === assistantId
               ? { ...m, ...messagePatch(), openFile: openFileData }
-              : m
+            : m
           )
         );
-        setPendingOpenFile(openFileData);
-        setPendingQuestions(null);
-        setPendingMission(null);
-        setPendingVault(null);
-        conversationRef.current.push({ role: "assistant", content: fullContent });
+        setSessionPending(streamSessionKey, { openFile: openFileData, questions: null, mission: null, vault: null });
+        appendConversation(streamSessionKey, { role: "assistant", content: fullContent });
       } else if ((stream as any).navigateTo) {
         // Client-side navigate_to — navigate the UI to a specific page
         const nav = (stream as any).navigateTo;
@@ -716,18 +815,15 @@ export function useChat() {
           path: nav.path,
           highlight: nav.highlight,
         };
-        setMessages((prev) =>
+        updateSessionMessages(streamSessionKey, (prev) =>
           prev.map((m) =>
             m.id === assistantId
               ? { ...m, ...messagePatch(), navigateTo: navData }
-              : m
+            : m
           )
         );
-        setPendingNavigateTo(navData);
-        setPendingQuestions(null);
-        setPendingMission(null);
-        setPendingVault(null);
-        conversationRef.current.push({ role: "assistant", content: fullContent });
+        setSessionPending(streamSessionKey, { navigateTo: navData, questions: null, mission: null, vault: null });
+        appendConversation(streamSessionKey, { role: "assistant", content: fullContent });
       } else if ((stream as any).openTab) {
         // Client-side open_tab — open URL in new browser tab
         const tab = (stream as any).openTab;
@@ -735,41 +831,78 @@ export function useChat() {
           url: tab.url,
           label: tab.label,
         };
-        setMessages((prev) =>
+        updateSessionMessages(streamSessionKey, (prev) =>
           prev.map((m) =>
             m.id === assistantId
               ? { ...m, ...messagePatch(), openTab: openTabData }
-              : m
+            : m
           )
         );
-        setPendingOpenTab(openTabData);
-        setPendingQuestions(null);
-        setPendingMission(null);
-        setPendingVault(null);
-        conversationRef.current.push({ role: "assistant", content: fullContent });
+        setSessionPending(streamSessionKey, { openTab: openTabData, questions: null, mission: null, vault: null });
+        appendConversation(streamSessionKey, { role: "assistant", content: fullContent });
       } else {
-        setPendingQuestions(null);
-        setPendingMission(null);
-        setPendingVault(null);
-        setPendingOpenFile(null);
-        setPendingNavigateTo(null);
-        setPendingOpenTab(null);
-        conversationRef.current.push({ role: "assistant", content: fullContent });
+        clearSessionPending(streamSessionKey);
+        appendConversation(streamSessionKey, { role: "assistant", content: fullContent });
       }
 
-      streamRef.current = null;
+      streamsBySessionRef.current.delete(streamSessionKey);
+      turnIdsBySessionRef.current.delete(streamSessionKey);
+      setSessionStreaming(streamSessionKey, false);
       refetchSessions();
       return fullContent;
     },
-    [client, sessionId, selectedAgent, setSessionId, refetchSessions]
+    [appendConversation, clearSessionPending, client, migrateSessionKey, refetchSessions, setSessionId, setSessionPending, setSessionStreaming, updateSessionMessages]
   );
+
+  const appendUserAndStream = useCallback(async (
+    userContent: string,
+    conversationContent: ChatCompletionMessage["content"] = userContent,
+    opts?: { forceNew?: boolean },
+  ) => {
+    const sessionKey = activeSessionKeyRef.current;
+    const requestSessionId = opts?.forceNew
+      ? "new"
+      : (sessionKey === NEW_SESSION_KEY ? undefined : sessionKey);
+    const agent = selectedAgent;
+
+    const userMsg: ChatMessageWithQuestions = {
+      id: `temp-${Date.now()}`,
+      role: "user",
+      content: userContent,
+      ts: new Date().toISOString(),
+    };
+    const assistantId = `temp-${Date.now()}-a`;
+    updateSessionMessages(sessionKey, (prev) => [
+      ...prev,
+      userMsg,
+      { id: assistantId, role: "assistant", content: "", ts: new Date().toISOString() },
+    ]);
+    appendConversation(sessionKey, { role: "user", content: conversationContent });
+
+    try {
+      await streamCompletion(assistantId, { sessionKey, requestSessionId, agent });
+    } catch (e) {
+      const stream = streamsBySessionRef.current.get(sessionKey);
+      if (stream?.aborted) {
+        streamsBySessionRef.current.delete(sessionKey);
+      } else {
+        updateSessionMessages(sessionKey, (prev) =>
+          prev.map((m) =>
+            m.id === assistantId
+              ? { ...m, content: `Error: ${(e as Error).message}` }
+              : m
+          )
+        );
+      }
+      setSessionStreaming(sessionKey, false);
+    }
+  }, [appendConversation, selectedAgent, setSessionStreaming, streamCompletion, updateSessionMessages]);
 
   // Send a message (streaming). Optionally attach images (data URLs).
   const send = useCallback(
     async (message: string, images?: { url: string; mimeType: string }[]) => {
-      setPendingQuestions(null);
-      setPendingMission(null);
-      setPendingVault(null);
+      const sessionKey = activeSessionKeyRef.current;
+      clearSessionPending(sessionKey);
 
       // Build content: plain string or multimodal content parts
       const content: ChatCompletionMessage["content"] =
@@ -783,44 +916,11 @@ export function useChat() {
             ]
           : message;
 
-      // Optimistic user message (display always shows text only)
-      const userMsg: ChatMessageWithQuestions = {
-        id: `temp-${Date.now()}`,
-        role: "user",
-        content: message,
-        ts: new Date().toISOString(),
-      };
-      setMessages((prev) => [...prev, userMsg]);
-      conversationRef.current.push({ role: "user", content });
-
-      // Placeholder for streaming assistant response
-      const assistantId = `temp-${Date.now()}-a`;
-      setMessages((prev) => [
-        ...prev,
-        { id: assistantId, role: "assistant", content: "", ts: new Date().toISOString() },
-      ]);
-      setIsLoading(true);
-
-      try {
-        await streamCompletion(assistantId);
-      } catch (e) {
-        // Don't show error for user-initiated abort
-        if (streamRef.current?.aborted) {
-          streamRef.current = null;
-        } else {
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === assistantId
-                ? { ...m, content: `Error: ${(e as Error).message}` }
-                : m
-            )
-          );
-        }
-      } finally {
-        setIsLoading(false);
-      }
+      const forceNew = wantsNewSessionRef.current;
+      wantsNewSessionRef.current = false;
+      await appendUserAndStream(message, content, { forceNew });
     },
-    [streamCompletion]
+    [appendUserAndStream, clearSessionPending]
   );
 
   // Stop the current streaming response.
@@ -829,9 +929,10 @@ export function useChat() {
   // local SSE no longer cancels the LLM (the server keeps generating into
   // its buffer). So we POST to /abort/:turnId, then close the local stream.
   const stop = useCallback(() => {
-    const turnId = currentTurnIdRef.current;
-    const stream = streamRef.current;
-    const resumeAc = resumeAbortRef.current;
+    const key = activeSessionKeyRef.current;
+    const turnId = turnIdsBySessionRef.current.get(key);
+    const stream = streamsBySessionRef.current.get(key);
+    const resumeAc = resumeAbortBySessionRef.current.get(key);
 
     if (turnId) {
       const base = appConfig.baseUrl || "";
@@ -843,15 +944,15 @@ export function useChat() {
     }
     if (stream) {
       stream.abort();
-      streamRef.current = null;
+      streamsBySessionRef.current.delete(key);
     }
     if (resumeAc) {
       resumeAc.abort();
-      resumeAbortRef.current = null;
+      resumeAbortBySessionRef.current.delete(key);
     }
-    currentTurnIdRef.current = null;
-    setIsLoading(false);
-  }, []);
+    turnIdsBySessionRef.current.delete(key);
+    setSessionStreaming(key, false);
+  }, [setSessionStreaming]);
 
   // Answer pending questions — formats answers as a user message and continues the conversation
   const answerQuestions = useCallback(
@@ -872,45 +973,10 @@ export function useChat() {
       });
       const answerText = answerLines.join("\n");
 
-      setPendingQuestions(null);
-
-      // Add user answer as a visible message
-      const userMsg: ChatMessageWithQuestions = {
-        id: `temp-${Date.now()}`,
-        role: "user",
-        content: answerText,
-        ts: new Date().toISOString(),
-      };
-      setMessages((prev) => [...prev, userMsg]);
-      conversationRef.current.push({ role: "user", content: answerText });
-
-      // Placeholder for assistant continuation
-      const assistantId = `temp-${Date.now()}-a`;
-      setMessages((prev) => [
-        ...prev,
-        { id: assistantId, role: "assistant", content: "", ts: new Date().toISOString() },
-      ]);
-      setIsLoading(true);
-
-      try {
-        await streamCompletion(assistantId);
-      } catch (e) {
-        if (streamRef.current?.aborted) {
-          streamRef.current = null;
-        } else {
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === assistantId
-                ? { ...m, content: `Error: ${(e as Error).message}` }
-                : m
-            )
-          );
-        }
-      } finally {
-        setIsLoading(false);
-      }
+      setSessionPending(activeSessionKeyRef.current, { questions: null });
+      await appendUserAndStream(answerText);
     },
-    [pendingQuestions, streamCompletion]
+    [appendUserAndStream, pendingQuestions, setSessionPending]
   );
 
   // Respond to a mission preview.
@@ -926,40 +992,12 @@ export function useChat() {
 
       // Helper: send a user message to the orchestrator and stream the LLM response
       const sendAndStream = async (userContent: string): Promise<void> => {
-        const userMsg: ChatMessageWithQuestions = {
-          id: `temp-${Date.now()}`,
-          role: "user",
-          content: userContent,
-          ts: new Date().toISOString(),
-        };
-        setMessages((prev) => [...prev, userMsg]);
-        conversationRef.current.push({ role: "user", content: userContent });
-
-        const assistantId = `temp-${Date.now()}-a`;
-        setMessages((prev) => [
-          ...prev,
-          { id: assistantId, role: "assistant", content: "", ts: new Date().toISOString() },
-        ]);
-        setIsLoading(true);
-
-        try {
-          await streamCompletion(assistantId);
-        } catch (e) {
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === assistantId
-                ? { ...m, content: `Error: ${(e as Error).message}` }
-                : m
-            )
-          );
-        } finally {
-          setIsLoading(false);
-        }
+        await appendUserAndStream(userContent);
       };
 
       // ── Execute: save as draft, execute, then inform orchestrator ──
       if (action === "execute") {
-        setPendingMission(null);
+        setSessionPending(activeSessionKeyRef.current, { mission: null });
         try {
           const mission = await client.createMission({
             data: dataStr,
@@ -982,14 +1020,14 @@ export function useChat() {
             content: `Failed to execute mission: ${errMsg}`,
             ts: new Date().toISOString(),
           };
-          setMessages((prev) => [...prev, errorConfirm]);
+          setActiveMessages((prev) => [...prev, errorConfirm]);
           return { error: errMsg };
         }
       }
 
       // ── Draft: save, then inform orchestrator ──
       if (action === "draft") {
-        setPendingMission(null);
+        setSessionPending(activeSessionKeyRef.current, { mission: null });
         try {
           const mission = await client.createMission({
             data: dataStr,
@@ -1011,14 +1049,14 @@ export function useChat() {
             content: `Failed to save mission: ${errMsg}`,
             ts: new Date().toISOString(),
           };
-          setMessages((prev) => [...prev, errorConfirm]);
+          setActiveMessages((prev) => [...prev, errorConfirm]);
           return { error: errMsg };
         }
       }
 
       // ── Cancel: inform orchestrator ──
       if (action === "cancel") {
-        setPendingMission(null);
+        setSessionPending(activeSessionKeyRef.current, { mission: null });
         await sendAndStream(
           `I decided not to proceed with the proposed mission "${pendingMission.name}". Let's move on.`
         );
@@ -1027,13 +1065,13 @@ export function useChat() {
 
       // ── Refine: send feedback back to the LLM for re-planning ──
       if (action === "refine" && feedback?.trim()) {
-        setPendingMission(null);
+        setSessionPending(activeSessionKeyRef.current, { mission: null });
         await sendAndStream(`Please refine the mission plan with these changes:\n${feedback.trim()}`);
       }
 
       return {};
     },
-    [pendingMission, client, streamCompletion]
+    [appendUserAndStream, client, pendingMission, setActiveMessages, setSessionPending]
   );
 
   // Respond to a vault preview.
@@ -1046,7 +1084,7 @@ export function useChat() {
     async (action: VaultPreviewAction, editedCredentials?: Record<string, string>) => {
       if (!pendingVault) return;
 
-      setPendingVault(null);
+      setSessionPending(activeSessionKeyRef.current, { vault: null });
 
       if (action === "confirm") {
         const creds = editedCredentials ?? pendingVault.credentials;
@@ -1071,70 +1109,14 @@ export function useChat() {
           ? `Failed to save vault entry "${pendingVault.service}" for agent "${pendingVault.agent}": ${saveError}`
           : `Vault entry "${pendingVault.service}" (${pendingVault.type}) saved for agent "${pendingVault.agent}". Credential fields: ${credKeys}`;
 
-        const userMsg: ChatMessageWithQuestions = {
-          id: `temp-${Date.now()}`,
-          role: "user",
-          content: responseText,
-          ts: new Date().toISOString(),
-        };
-        setMessages((prev) => [...prev, userMsg]);
-        conversationRef.current.push({ role: "user", content: responseText });
-
-        const assistantId = `temp-${Date.now()}-a`;
-        setMessages((prev) => [
-          ...prev,
-          { id: assistantId, role: "assistant", content: "", ts: new Date().toISOString() },
-        ]);
-        setIsLoading(true);
-
-        try {
-          await streamCompletion(assistantId);
-        } catch (e) {
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === assistantId
-                ? { ...m, content: `Error: ${(e as Error).message}` }
-                : m
-            )
-          );
-        } finally {
-          setIsLoading(false);
-        }
+        await appendUserAndStream(responseText);
       } else {
         // Cancel — tell the LLM the user declined
         const cancelText = `Declined saving vault entry for "${pendingVault.service}" on agent "${pendingVault.agent}".`;
-        const userMsg: ChatMessageWithQuestions = {
-          id: `temp-${Date.now()}`,
-          role: "user",
-          content: cancelText,
-          ts: new Date().toISOString(),
-        };
-        setMessages((prev) => [...prev, userMsg]);
-        conversationRef.current.push({ role: "user", content: cancelText });
-
-        const assistantId = `temp-${Date.now()}-a`;
-        setMessages((prev) => [
-          ...prev,
-          { id: assistantId, role: "assistant", content: "", ts: new Date().toISOString() },
-        ]);
-        setIsLoading(true);
-
-        try {
-          await streamCompletion(assistantId);
-        } catch (e) {
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === assistantId
-                ? { ...m, content: `Error: ${(e as Error).message}` }
-                : m
-            )
-          );
-        } finally {
-          setIsLoading(false);
-        }
+        await appendUserAndStream(cancelText);
       }
     },
-    [pendingVault, client, streamCompletion]
+    [appendUserAndStream, client, pendingVault, setSessionPending]
   );
 
   // Consume the preview_file pending state after the dialog is opened.
@@ -1142,43 +1124,17 @@ export function useChat() {
   const consumeOpenFile = useCallback(() => {
     if (!pendingOpenFile) return;
     const data = pendingOpenFile;
-    setPendingOpenFile(null);
+    setSessionPending(activeSessionKeyRef.current, { openFile: null });
 
     const responseText = `File "${data.path}" opened for user.`;
-    const userMsg: ChatMessageWithQuestions = {
-      id: `temp-${Date.now()}`,
-      role: "user",
-      content: responseText,
-      ts: new Date().toISOString(),
-    };
-    setMessages((prev) => [...prev, userMsg]);
-    conversationRef.current.push({ role: "user", content: responseText });
-
-    const assistantId = `temp-${Date.now()}-a`;
-    setMessages((prev) => [
-      ...prev,
-      { id: assistantId, role: "assistant", content: "", ts: new Date().toISOString() },
-    ]);
-    setIsLoading(true);
-
-    streamCompletion(assistantId)
-      .catch((e) => {
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === assistantId
-              ? { ...m, content: `Error: ${(e as Error).message}` }
-              : m
-          )
-        );
-      })
-      .finally(() => setIsLoading(false));
-  }, [pendingOpenFile, streamCompletion]);
+    void appendUserAndStream(responseText);
+  }, [appendUserAndStream, pendingOpenFile, setSessionPending]);
 
   // Consume navigate_to — build a human-readable description and resume conversation
   const consumeNavigateTo = useCallback(() => {
     if (!pendingNavigateTo) return;
     const data = pendingNavigateTo;
-    setPendingNavigateTo(null);
+    setSessionPending(activeSessionKeyRef.current, { navigateTo: null });
 
     // Build a descriptive response
     let label = data.target;
@@ -1186,71 +1142,19 @@ export function useChat() {
     if (data.name) label += ` "${data.name}"`;
     if (data.path) label += ` (${data.path})`;
     const responseText = `Navigated to ${label}.`;
-    const userMsg: ChatMessageWithQuestions = {
-      id: `temp-${Date.now()}`,
-      role: "user",
-      content: responseText,
-      ts: new Date().toISOString(),
-    };
-    setMessages((prev) => [...prev, userMsg]);
-    conversationRef.current.push({ role: "user", content: responseText });
-
-    const assistantId = `temp-${Date.now()}-a`;
-    setMessages((prev) => [
-      ...prev,
-      { id: assistantId, role: "assistant", content: "", ts: new Date().toISOString() },
-    ]);
-    setIsLoading(true);
-
-    streamCompletion(assistantId)
-      .catch((e) => {
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === assistantId
-              ? { ...m, content: `Error: ${(e as Error).message}` }
-              : m
-          )
-        );
-      })
-      .finally(() => setIsLoading(false));
-  }, [pendingNavigateTo, streamCompletion]);
+    void appendUserAndStream(responseText);
+  }, [appendUserAndStream, pendingNavigateTo, setSessionPending]);
 
   // Consume open_tab — open URL in new tab and resume conversation
   const consumeOpenTab = useCallback(() => {
     if (!pendingOpenTab) return;
     const data = pendingOpenTab;
-    setPendingOpenTab(null);
+    setSessionPending(activeSessionKeyRef.current, { openTab: null });
 
     const label = data.label ?? data.url;
     const responseText = `Opened tab: ${label}`;
-    const userMsg: ChatMessageWithQuestions = {
-      id: `temp-${Date.now()}`,
-      role: "user",
-      content: responseText,
-      ts: new Date().toISOString(),
-    };
-    setMessages((prev) => [...prev, userMsg]);
-    conversationRef.current.push({ role: "user", content: responseText });
-
-    const assistantId = `temp-${Date.now()}-a`;
-    setMessages((prev) => [
-      ...prev,
-      { id: assistantId, role: "assistant", content: "", ts: new Date().toISOString() },
-    ]);
-    setIsLoading(true);
-
-    streamCompletion(assistantId)
-      .catch((e) => {
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === assistantId
-              ? { ...m, content: `Error: ${(e as Error).message}` }
-              : m
-          )
-        );
-      })
-      .finally(() => setIsLoading(false));
-  }, [pendingOpenTab, streamCompletion]);
+    void appendUserAndStream(responseText);
+  }, [appendUserAndStream, pendingOpenTab, setSessionPending]);
 
   // Delete a session — clear messages if active
   const deleteSession = useCallback(
@@ -1258,31 +1162,29 @@ export function useChat() {
       try {
         await sdkDeleteSession(id);
         if (sessionId === id) {
-          setMessages([]);
-          conversationRef.current = [];
-          setPendingQuestions(null);
-          setPendingMission(null);
-          setPendingVault(null);
-          setPendingOpenFile(null);
-          setPendingOpenTab(null);
+          updateSessionMessages(id, []);
+          conversationBySessionRef.current.delete(id);
+          clearSessionPending(id);
         }
+        streamsBySessionRef.current.get(id)?.abort();
+        streamsBySessionRef.current.delete(id);
+        resumeAbortBySessionRef.current.get(id)?.abort();
+        resumeAbortBySessionRef.current.delete(id);
+        turnIdsBySessionRef.current.delete(id);
+        setSessionStreaming(id, false);
       } catch {
         // silent
       }
     },
-    [sdkDeleteSession, sessionId]
+    [clearSessionPending, sdkDeleteSession, sessionId, setSessionStreaming, updateSessionMessages]
   );
 
   const clear = useCallback(() => {
-    setMessages([]);
+    updateSessionMessages(activeSessionKeyRef.current, []);
     setSessionId(null);
-    setPendingQuestions(null);
-    setPendingMission(null);
-    setPendingVault(null);
-    setPendingOpenFile(null);
-    setPendingOpenTab(null);
-    conversationRef.current = [];
-  }, [setSessionId]);
+    clearSessionPending(activeSessionKeyRef.current);
+    conversationBySessionRef.current.delete(activeSessionKeyRef.current);
+  }, [clearSessionPending, setSessionId, updateSessionMessages]);
 
   return {
     messages,
@@ -1291,6 +1193,7 @@ export function useChat() {
     sessionId,
     sessions,
     sessionsLoading,
+    streamingSessionIds,
     pendingQuestions,
     pendingMission,
     pendingVault,
