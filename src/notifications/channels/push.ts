@@ -84,6 +84,10 @@ export class PushChannel implements NotificationChannel {
     );
 
     const failures = results.filter((result) => result.status === "rejected");
+    const remainingSubscriptions = this.store.count();
+    if (remainingSubscriptions === 0) {
+      throw new Error("All push subscriptions are expired or invalid. Enable notifications from this browser again.");
+    }
     if (failures.length === results.length) {
       const first = failures[0] as PromiseRejectedResult | undefined;
       const msg = first?.reason instanceof Error ? first.reason.message : "Push delivery failed";
@@ -92,7 +96,27 @@ export class PushChannel implements NotificationChannel {
   }
 
   async test(): Promise<boolean> {
-    return !!this.vapid.publicKey && !!this.vapid.privateKey && this.store.count() > 0;
+    if (!this.vapid.publicKey || !this.vapid.privateKey) {
+      throw new Error("Push VAPID keys are missing");
+    }
+    if (this.store.count() === 0) {
+      throw new Error("No push subscriptions registered for this project. Enable notifications from this browser first.");
+    }
+    return true;
+  }
+
+  async sendTest(): Promise<void> {
+    await this.send({
+      id: "push-test",
+      channel: "push",
+      title: "Polpo push test",
+      body: "Push notifications are working for this browser.",
+      severity: "info",
+      sourceEvent: "notification:test",
+      sourceData: { test: true },
+      ruleId: "push-test",
+      timestamp: new Date().toISOString(),
+    });
   }
 
   private configureVapid(): void {

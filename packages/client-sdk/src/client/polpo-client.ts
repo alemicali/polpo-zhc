@@ -616,8 +616,8 @@ export class PolpoClient {
     return this.del<PolpoConfig>(`/config/channels/${encodeURIComponent(name)}`);
   }
 
-  testChannel(name: string): Promise<{ success: boolean }> {
-    return this.post<{ success: boolean }>(`/config/channels/${encodeURIComponent(name)}/test`);
+  testChannel(name: string): Promise<{ success: boolean; error?: string }> {
+    return this.post<{ success: boolean; error?: string }>(`/config/channels/${encodeURIComponent(name)}/test`);
   }
 
   getMemory(): Promise<{ exists: boolean; content: string }> {

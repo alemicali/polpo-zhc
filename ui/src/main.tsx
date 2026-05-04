@@ -8,10 +8,13 @@ import { ChatProvider } from "@/hooks/chat-context";
 import { App } from "./app";
 import { config } from "./lib/config";
 import { bootstrapPalette } from "./lib/palette";
+import { bootstrapIconify } from "./lib/iconify-bootstrap";
 import "./index.css";
 
 // Apply saved palette before React mounts to avoid a flash of default colours
 bootstrapPalette();
+// Register the offline Iconify "logos" pack so brand icons render instantly
+bootstrapIconify();
 
 // Use HashRouter for Electron (file:// protocol), BrowserRouter for web
 const isFileProtocol = window.location.protocol === "file:";

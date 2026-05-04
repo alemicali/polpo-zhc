@@ -58,10 +58,8 @@ export async function enablePushNotifications(): Promise<PushSubscriptionState> 
 
   const registration = await navigator.serviceWorker.ready;
   const existing = await registration.pushManager.getSubscription();
-  const subscription = existing ?? await registration.pushManager.subscribe({
-    userVisibleOnly: true,
-    applicationServerKey: urlBase64ToUint8Array(key.data.publicKey),
-  });
+  const applicationServerKey = urlBase64ToUint8Array(key.data.publicKey);
+  const subscription = await getCurrentOrCreateSubscription(registration, existing, applicationServerKey);
 
   const saved = await pushApi<{ subscriptions: number }>("/push/subscribe", {
     method: "POST",
@@ -116,4 +114,42 @@ function urlBase64ToUint8Array(base64String: string): Uint8Array<ArrayBuffer> {
   const outputArray = new Uint8Array(new ArrayBuffer(rawData.length));
   for (let i = 0; i < rawData.length; i += 1) outputArray[i] = rawData.charCodeAt(i);
   return outputArray;
+}
+
+async function getCurrentOrCreateSubscription(
+  registration: ServiceWorkerRegistration,
+  existing: PushSubscription | null,
+  applicationServerKey: Uint8Array<ArrayBuffer>,
+): Promise<PushSubscription> {
+  if (existing && pushSubscriptionUsesKey(existing, applicationServerKey)) {
+    return existing;
+  }
+
+  if (existing) {
+    await pushApi("/push/unsubscribe", {
+      method: "POST",
+      body: JSON.stringify({ endpoint: existing.endpoint }),
+    });
+    await existing.unsubscribe();
+  }
+
+  return registration.pushManager.subscribe({
+    userVisibleOnly: true,
+    applicationServerKey,
+  });
+}
+
+function pushSubscriptionUsesKey(subscription: PushSubscription, applicationServerKey: Uint8Array<ArrayBuffer>): boolean {
+  const currentKey = subscription.options.applicationServerKey;
+  if (!currentKey) return false;
+  return arrayBufferEquals(currentKey, applicationServerKey);
+}
+
+function arrayBufferEquals(left: ArrayBuffer, right: Uint8Array<ArrayBuffer>): boolean {
+  if (left.byteLength !== right.byteLength) return false;
+  const leftView = new Uint8Array(left);
+  for (let i = 0; i < leftView.length; i += 1) {
+    if (leftView[i] !== right[i]) return false;
+  }
+  return true;
 }

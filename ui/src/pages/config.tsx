@@ -63,6 +63,8 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { useConfig } from "@/hooks/use-polpo";
+import { ChannelLogo } from "@/components/shared/channel-logo";
+import { ProviderIcon } from "@/components/shared/provider-icon";
 import { useAgents, useAuthStatus, useOrchestratorSkills } from "@polpo-ai/react";
 import type { CustomModelDef, ProviderConfig, AuthProfileMeta, ProviderAuthInfo, SkillInfo, PolpoSettings, AuthStatusResponse, ReasoningLevel, NotificationChannelType, NotificationChannelConfig } from "@polpo-ai/react";
 import { cn } from "@/lib/utils";
@@ -177,7 +179,7 @@ type SectionId = SectionIdBase;
 // ── Reusable display components ──
 
 /** Key-value row — label left, value right, dotted filler in between */
-function Row({ label, value, mono }: { label: string; value: React.ReactNode; mono?: boolean }) {
+function Row({ label, value, mono }: { label: React.ReactNode; value: React.ReactNode; mono?: boolean }) {
   return (
     <div className="flex items-baseline gap-2 py-1.5 min-w-0">
       <span className="text-xs text-muted-foreground shrink-0">{label}</span>
@@ -243,12 +245,21 @@ function ProviderCard({ name, prov, agentModels, authInfo, onConnect, onDisconne
       {/* Header */}
       <div className="flex items-center gap-2.5">
         <div className={cn(
-          "flex h-8 w-8 items-center justify-center rounded-lg shrink-0",
-          isAuthenticated ? "bg-emerald-500/10" : "bg-zinc-500/10",
+          "relative flex h-9 w-9 items-center justify-center rounded-lg shrink-0 border bg-card",
+          isAuthenticated ? "border-emerald-500/30" : "border-border",
         )}>
-          {isLocal ? <Server className="h-4 w-4 text-emerald-500" /> :
-           isAuthenticated ? <Lock className="h-4 w-4 text-emerald-500" /> :
-                    <Unlock className="h-4 w-4 text-zinc-500" />}
+          <ProviderIcon name={name} size={20} />
+          {/* Auth-state pip overlapping the brand icon */}
+          <span
+            className={cn(
+              "absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 rounded-full flex items-center justify-center ring-2 ring-background",
+              isLocal ? "bg-emerald-500" : isAuthenticated ? "bg-emerald-500" : "bg-zinc-500",
+            )}
+          >
+            {isLocal ? <Server className="h-2 w-2 text-white" /> :
+             isAuthenticated ? <Lock className="h-2 w-2 text-white" /> :
+                      <Unlock className="h-2 w-2 text-white" />}
+          </span>
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
@@ -389,15 +400,26 @@ function ProviderCard({ name, prov, agentModels, authInfo, onConnect, onDisconne
 
 // ── Channel helpers ──
 
-const CHANNEL_META: Record<string, { label: string; icon: LucideIcon; color: string; description: string }> = {
-  telegram: { label: "Telegram", icon: Send, color: "border-l-sky-500", description: "Send notifications to a Telegram chat via bot" },
-  slack:    { label: "Slack", icon: MessageSquare, color: "border-l-green-500", description: "Post to a Slack channel via webhook" },
-  email:    { label: "Email", icon: Mail, color: "border-l-amber-500", description: "Send email via Resend, SendGrid, or SMTP" },
-  webhook:  { label: "Webhook", icon: Link2, color: "border-l-violet-500", description: "POST JSON to any HTTP endpoint" },
-  push:     { label: "Push", icon: Monitor, color: "border-l-fuchsia-500", description: "Send PWA push notifications to subscribed browsers" },
+const CHANNEL_META: Record<string, { label: string; icon: LucideIcon; color: string; hue: string; description: string }> = {
+  telegram: { label: "Telegram", icon: Send,            color: "border-l-sky-500",     hue: "sky",     description: "Send notifications to a Telegram chat via bot" },
+  slack:    { label: "Slack",    icon: MessageSquare,   color: "border-l-green-500",   hue: "green",   description: "Post to a Slack channel via webhook" },
+  whatsapp: { label: "WhatsApp", icon: MessageSquare,   color: "border-l-emerald-500", hue: "emerald", description: "Send notifications to a WhatsApp chat (unofficial)" },
+  email:    { label: "Email",    icon: Mail,            color: "border-l-amber-500",   hue: "amber",   description: "Send email via Resend, SendGrid, or SMTP" },
+  webhook:  { label: "Webhook",  icon: Link2,           color: "border-l-violet-500",  hue: "violet",  description: "POST JSON to any HTTP endpoint" },
+  push:     { label: "Push",     icon: Monitor,         color: "border-l-fuchsia-500", hue: "fuchsia", description: "Send PWA push notifications to subscribed browsers" },
 };
 
 const ALL_CHANNEL_TYPES: NotificationChannelType[] = ["telegram", "slack", "email", "webhook", "push"];
+
+const HUE_STYLES: Record<string, { iconBg: string; iconRing: string; gradient: string; pip: string }> = {
+  sky: { iconBg: "bg-sky-500/12", iconRing: "ring-sky-500/30", gradient: "from-sky-500/15", pip: "bg-sky-500" },
+  green: { iconBg: "bg-green-500/12", iconRing: "ring-green-500/30", gradient: "from-green-500/15", pip: "bg-green-500" },
+  amber: { iconBg: "bg-amber-500/12", iconRing: "ring-amber-500/30", gradient: "from-amber-500/15", pip: "bg-amber-500" },
+  violet: { iconBg: "bg-violet-500/12", iconRing: "ring-violet-500/30", gradient: "from-violet-500/15", pip: "bg-violet-500" },
+  fuchsia: { iconBg: "bg-fuchsia-500/12", iconRing: "ring-fuchsia-500/30", gradient: "from-fuchsia-500/15", pip: "bg-fuchsia-500" },
+  emerald: { iconBg: "bg-emerald-500/12", iconRing: "ring-emerald-500/30", gradient: "from-emerald-500/15", pip: "bg-emerald-500" },
+  zinc: { iconBg: "bg-zinc-500/12", iconRing: "ring-zinc-500/30", gradient: "from-zinc-500/15", pip: "bg-zinc-500" },
+};
 
 /** Default empty config per channel type */
 function defaultChannelConfig(type: NotificationChannelType): NotificationChannelConfig {
@@ -550,6 +572,11 @@ function ChannelForm({ config, onChange }: {
 }
 
 /** Interactive channel card with edit / delete / test */
+interface ChannelTestResult {
+  success: boolean;
+  error?: string;
+}
+
 function ChannelCard({ name, ch, onEdit, onDelete, onTest, deleting, testing, testResult }: {
   name: string;
   ch: NotificationChannelConfig;
@@ -558,88 +585,162 @@ function ChannelCard({ name, ch, onEdit, onDelete, onTest, deleting, testing, te
   onTest: () => void;
   deleting?: boolean;
   testing?: boolean;
-  testResult?: boolean | null;
+  testResult?: ChannelTestResult | null;
 }) {
-  const meta = CHANNEL_META[ch.type] ?? { label: ch.type, icon: Bell, color: "border-l-zinc-500" };
-  const Ic = meta.icon;
+  const meta = CHANNEL_META[ch.type] ?? { label: ch.type, icon: Bell, color: "border-l-zinc-500", hue: "zinc" };
+  const hue = HUE_STYLES[meta.hue] ?? HUE_STYLES.zinc;
   const gateway = ch.gateway;
 
   return (
-    <Card className={cn("bg-card/80 border-border/40 border-l-2 py-0 gap-0", meta.color)}>
-      <CardContent className="pt-3 pb-3 space-y-2.5">
-        {/* Header */}
-        <div className="flex items-center gap-2">
-          <Ic className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-          <span className="text-sm font-semibold flex-1 truncate">{name}</span>
-          <Badge variant="outline" className="text-[10px] shrink-0">{meta.label}</Badge>
-          {gateway?.enableInbound && (
-            <Badge variant="secondary" className="text-[10px] shrink-0">
-              <Zap className="h-2.5 w-2.5 mr-0.5" /> Inbound
-            </Badge>
+    <Card className={cn(
+      "relative overflow-hidden bg-card border border-border/40 py-0 gap-0 group",
+      "transition-all duration-200 hover:border-border/70 hover:shadow-md",
+    )}>
+      {/* Brand gradient wash — diagonal soft tint, fades to nothing */}
+      <div
+        className={cn(
+          "absolute inset-0 pointer-events-none bg-gradient-to-br via-transparent to-transparent",
+          hue.gradient,
+        )}
+        aria-hidden
+      />
+      {/* Top-left brand accent strip (4px) */}
+      <div
+        className={cn(
+          "absolute top-0 left-0 h-full w-[3px] rounded-l-xl",
+          hue.pip.replace("bg-", "bg-"),
+        )}
+        aria-hidden
+      />
+
+      <CardContent className="relative pt-4 pb-3 px-4 space-y-3">
+        {/* Hero header — big brand mark + name + meta */}
+        <div className="flex items-start gap-3">
+          <div className={cn(
+            "h-11 w-11 rounded-xl flex items-center justify-center shrink-0 ring-1",
+            hue.iconBg,
+            hue.iconRing,
+          )}>
+            <ChannelLogo type={ch.type} size={24} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="text-sm font-semibold truncate">{name}</span>
+              {gateway?.enableInbound && (
+                <Badge variant="secondary" className="text-[9px] gap-0.5 px-1.5 py-0 h-4">
+                  <Zap className="h-2 w-2" /> Inbound
+                </Badge>
+              )}
+            </div>
+            <p className="text-[10.5px] text-muted-foreground/80 mt-0.5 flex items-center gap-1.5">
+              <span className={cn("inline-block h-1.5 w-1.5 rounded-full", hue.pip)} />
+              <span className="capitalize">{meta.label}</span>
+              <span className="text-muted-foreground/40">·</span>
+              <code className="font-mono text-[10px]">{ch.type}</code>
+            </p>
+          </div>
+          {/* Inline delete — ghost X, top-right */}
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 shrink-0 text-muted-foreground/60 hover:text-destructive opacity-0 group-hover:opacity-100 transition-opacity"
+            onClick={onDelete}
+            disabled={deleting}
+            aria-label="Delete channel"
+          >
+            {deleting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <X className="h-3.5 w-3.5" />}
+          </Button>
+        </div>
+
+        {/* Type-specific summary — softer styling, indented under the icon */}
+        <div className="space-y-0.5 pl-[3.5rem] -mt-1">
+          {ch.type === "telegram" && (
+            <>
+              <Row label="Bot Token" value={ch.botToken ? "*** configured" : "not set"} mono />
+              <Row label="Chat ID" value={ch.chatId || "not set"} mono />
+            </>
+          )}
+          {ch.type === "slack" && (
+            <>
+              <Row label="Webhook" value={ch.webhookUrl ? "*** configured" : "not set"} mono />
+              {ch.apiKey && <StatusDot ok label="File uploads enabled" />}
+            </>
+          )}
+          {ch.type === "whatsapp" && (
+            <>
+              <Row label="Chat ID" value={ch.chatId || "not set"} mono />
+              {ch.profileDir && <Row label="Profile" value={ch.profileDir} mono />}
+            </>
+          )}
+          {ch.type === "email" && (
+            <>
+              <Row label="Provider" value={<Badge variant="secondary" className="text-[10px]">{ch.provider ?? "resend"}</Badge>} />
+              {ch.from && <Row label="From" value={ch.from} mono />}
+              {(ch.to?.length ?? 0) > 0 && (
+                <Row label="To" value={`${ch.to!.length} recipient${ch.to!.length > 1 ? "s" : ""}`} />
+              )}
+              <StatusDot ok={!!ch.apiKey || !!ch.host} label={ch.apiKey ? "API key set" : ch.host ? "SMTP configured" : "No credentials"} />
+            </>
+          )}
+          {ch.type === "webhook" && (
+            <>
+              <Row label="URL" value={ch.url || "not set"} mono />
+              {ch.headers && Object.keys(ch.headers).length > 0 && (
+                <Row label="Headers" value={`${Object.keys(ch.headers).length} custom`} />
+              )}
+            </>
+          )}
+          {ch.type === "push" && (
+            <>
+              <Row label="VAPID" value={ch.vapidPublicKey || ch.vapidPrivateKey ? "custom keys" : "project generated"} mono />
+              <Row label="TTL" value={`${ch.ttl ?? 3600}s`} mono />
+              <Row label="Urgency" value={<Badge variant="secondary" className="text-[10px]">{ch.urgency ?? "normal"}</Badge>} />
+            </>
+          )}
+
+          {/* Gateway — inline footnote */}
+          {gateway && (
+            <div className="pt-1.5 mt-1.5 border-t border-border/20">
+              <Row
+                label={
+                  <span className="flex items-center gap-1">
+                    <Zap className="h-2.5 w-2.5" /> DM Policy
+                  </span>
+                }
+                value={gateway.dmPolicy ?? "allowlist"}
+                mono
+              />
+            </div>
           )}
         </div>
 
-        {/* Type-specific summary */}
-        {ch.type === "telegram" && (
-          <div className="space-y-0.5">
-            <Row label="Bot Token" value={ch.botToken ? "*** configured" : "not set"} mono />
-            <Row label="Chat ID" value={ch.chatId || "not set"} mono />
-          </div>
-        )}
-        {ch.type === "slack" && (
-          <div className="space-y-0.5">
-            <Row label="Webhook" value={ch.webhookUrl ? "*** configured" : "not set"} mono />
-            {ch.apiKey && <StatusDot ok label="File uploads enabled" />}
-          </div>
-        )}
-        {ch.type === "email" && (
-          <div className="space-y-0.5">
-            <Row label="Provider" value={<Badge variant="secondary" className="text-[10px]">{ch.provider ?? "resend"}</Badge>} />
-            {ch.from && <Row label="From" value={ch.from} mono />}
-            {(ch.to?.length ?? 0) > 0 && (
-              <Row label="To" value={`${ch.to!.length} recipient${ch.to!.length > 1 ? "s" : ""}`} />
-            )}
-            <StatusDot ok={!!ch.apiKey || !!ch.host} label={ch.apiKey ? "API key set" : ch.host ? "SMTP configured" : "No credentials"} />
-          </div>
-        )}
-        {ch.type === "webhook" && (
-          <div className="space-y-0.5">
-            <Row label="URL" value={ch.url || "not set"} mono />
-            {ch.headers && Object.keys(ch.headers).length > 0 && (
-              <Row label="Headers" value={`${Object.keys(ch.headers).length} custom`} />
-            )}
-          </div>
-        )}
-        {ch.type === "push" && (
-          <div className="space-y-0.5">
-            <Row label="VAPID" value={ch.vapidPublicKey || ch.vapidPrivateKey ? "custom keys" : "project generated"} mono />
-            <Row label="TTL" value={`${ch.ttl ?? 3600}s`} mono />
-            <Row label="Urgency" value={<Badge variant="secondary" className="text-[10px]">{ch.urgency ?? "normal"}</Badge>} />
+        {/* Test result error — just above actions */}
+        {testResult?.success === false && testResult.error && (
+          <div className="rounded-md border border-destructive/25 bg-destructive/10 px-2.5 py-1.5 text-[10.5px] leading-relaxed text-destructive">
+            {testResult.error}
           </div>
         )}
 
-        {/* Gateway */}
-        {gateway && (
-          <div className="pt-2 border-t border-border/20 space-y-0.5">
-            <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Gateway</span>
-            <Row label="DM Policy" value={gateway.dmPolicy ?? "allowlist"} mono />
-          </div>
-        )}
-
-        {/* Actions */}
-        <div className="flex items-center gap-2 pt-1.5 border-t border-border/20">
+        {/* Actions — separated by hairline, denser */}
+        <div className="flex items-center gap-1 pt-2.5 -mx-4 px-4 border-t border-border/30">
           <Button variant="ghost" size="sm" className="h-7 text-[11px] gap-1 px-2" onClick={onEdit}>
             <Pencil className="h-3 w-3" /> Edit
           </Button>
-          <Button variant="ghost" size="sm" className="h-7 text-[11px] gap-1 px-2" onClick={onTest} disabled={testing}>
-            {testing ? <Loader2 className="h-3 w-3 animate-spin" /> : <Activity className="h-3 w-3" />}
-            Test
-            {testResult === true && <span className="text-emerald-500 text-[10px]">OK</span>}
-            {testResult === false && <span className="text-red-500 text-[10px]">Fail</span>}
-          </Button>
-          <div className="flex-1" />
-          <Button variant="ghost" size="sm" className="h-7 text-[11px] px-2 text-muted-foreground hover:text-destructive" onClick={onDelete} disabled={deleting}>
-            {deleting ? <Loader2 className="h-3 w-3 animate-spin" /> : <X className="h-3 w-3" />}
+          <Button
+            variant={testResult?.success === true ? "secondary" : "ghost"}
+            size="sm"
+            className={cn(
+              "h-7 text-[11px] gap-1 px-2 transition-colors",
+              testResult?.success === true && "text-emerald-600 bg-emerald-500/10 hover:bg-emerald-500/15",
+              testResult?.success === false && "text-destructive hover:bg-destructive/10",
+            )}
+            onClick={onTest}
+            disabled={testing}
+          >
+            {testing ? <Loader2 className="h-3 w-3 animate-spin" /> :
+             testResult?.success === true ? <Activity className="h-3 w-3 fill-current" /> :
+             <Activity className="h-3 w-3" />}
+            {testing ? "Testing…" : testResult?.success === true ? "Reachable" : testResult?.success === false ? "Failed" : "Test"}
           </Button>
         </div>
       </CardContent>
@@ -650,23 +751,33 @@ function ChannelCard({ name, ch, onEdit, onDelete, onTest, deleting, testing, te
 function PushBrowserControls({ hasPushChannel }: { hasPushChannel: boolean }) {
   const [state, setState] = useState<PushSubscriptionState>(() => getPushSupportState());
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
     getCurrentPushState()
-      .then((next) => { if (alive) setState(next); })
-      .catch(() => undefined);
+      .then((next) => {
+        if (!alive) return;
+        setState(next);
+        setError(null);
+      })
+      .catch((err) => {
+        if (alive) setError(err instanceof Error ? err.message : "Could not load push state");
+      });
     return () => { alive = false; };
   }, []);
 
   const enable = async () => {
     setBusy(true);
+    setError(null);
     try {
       const next = await enablePushNotifications();
       setState(next);
       toast.success("Push notifications enabled for this browser");
     } catch (err) {
-      toast.error((err as Error).message);
+      const msg = (err as Error).message;
+      setError(msg);
+      toast.error(msg);
     } finally {
       setBusy(false);
     }
@@ -674,12 +785,15 @@ function PushBrowserControls({ hasPushChannel }: { hasPushChannel: boolean }) {
 
   const disable = async () => {
     setBusy(true);
+    setError(null);
     try {
       const next = await disablePushNotifications();
       setState(next);
       toast.success("Push notifications disabled for this browser");
     } catch (err) {
-      toast.error((err as Error).message);
+      const msg = (err as Error).message;
+      setError(msg);
+      toast.error(msg);
     } finally {
       setBusy(false);
     }
@@ -687,32 +801,39 @@ function PushBrowserControls({ hasPushChannel }: { hasPushChannel: boolean }) {
 
   return (
     <Card className="bg-card/70 border-border/40 py-0">
-      <CardContent className="p-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="min-w-0 space-y-1">
-          <div className="flex items-center gap-2">
-            <Monitor className="h-3.5 w-3.5 text-muted-foreground" />
-            <span className="text-sm font-semibold">This browser</span>
-            <Badge variant={state.subscribed ? "default" : "outline"} className="text-[10px]">
-              {state.subscribed ? "Subscribed" : state.permission === "denied" ? "Blocked" : "Not subscribed"}
-            </Badge>
+      <CardContent className="p-3 space-y-3">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0 space-y-1">
+            <div className="flex items-center gap-2">
+              <Monitor className="h-3.5 w-3.5 text-muted-foreground" />
+              <span className="text-sm font-semibold">This browser</span>
+              <Badge variant={state.subscribed ? "default" : "outline"} className="text-[10px]">
+                {state.subscribed ? "Subscribed" : state.permission === "denied" ? "Blocked" : "Not subscribed"}
+              </Badge>
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              {state.supported
+                ? `${state.subscriptionCount} saved browser subscription${state.subscriptionCount === 1 ? "" : "s"}`
+                : "Requires HTTPS or localhost, Service Worker, Notification API, and PushManager"}
+            </p>
           </div>
-          <p className="text-[11px] text-muted-foreground">
-            {state.supported
-              ? `${state.subscriptionCount} saved browser subscription${state.subscriptionCount === 1 ? "" : "s"}`
-              : "Requires HTTPS or localhost, Service Worker, Notification API, and PushManager"}
-          </p>
+          <div className="flex gap-2">
+            {state.subscribed ? (
+              <Button variant="outline" size="sm" className="h-8 text-xs" onClick={disable} disabled={busy}>
+                {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <X className="h-3 w-3" />} Disable
+              </Button>
+            ) : (
+              <Button size="sm" className="h-8 text-xs" onClick={enable} disabled={busy || !state.supported || !hasPushChannel || state.permission === "denied"}>
+                {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Bell className="h-3 w-3" />} Enable
+              </Button>
+            )}
+          </div>
         </div>
-        <div className="flex gap-2">
-          {state.subscribed ? (
-            <Button variant="outline" size="sm" className="h-8 text-xs" onClick={disable} disabled={busy}>
-              {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <X className="h-3 w-3" />} Disable
-            </Button>
-          ) : (
-            <Button size="sm" className="h-8 text-xs" onClick={enable} disabled={busy || !state.supported || !hasPushChannel || state.permission === "denied"}>
-              {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Bell className="h-3 w-3" />} Enable
-            </Button>
-          )}
-        </div>
+        {error && (
+          <div className="rounded-md border border-destructive/25 bg-destructive/10 px-2 py-1.5 text-[10px] leading-relaxed text-destructive">
+            {error}
+          </div>
+        )}
       </CardContent>
     </Card>
   );
@@ -746,7 +867,7 @@ function ChannelsTab({ settings, onUpdateConfig }: {
 
   // Test
   const [testing, setTesting] = useState<string | null>(null);
-  const [testResults, setTestResults] = useState<Record<string, boolean | null>>({});
+  const [testResults, setTestResults] = useState<Record<string, ChannelTestResult | null>>({});
 
   // Add new channel — choose type first
   const [typePickerOpen, setTypePickerOpen] = useState(false);
@@ -802,9 +923,14 @@ function ChannelsTab({ settings, onUpdateConfig }: {
     try {
       const res = await fetch(`${appConfig.baseUrl}/api/v1/config/channels/${encodeURIComponent(name)}/test`, { method: "POST" });
       const data = await res.json();
-      setTestResults((prev) => ({ ...prev, [name]: data.ok ? data.data.success : false }));
+      setTestResults((prev) => ({
+        ...prev,
+        [name]: data.ok
+          ? { success: !!data.data?.success, error: data.data?.error }
+          : { success: false, error: data.error ?? "Channel test failed" },
+      }));
     } catch {
-      setTestResults((prev) => ({ ...prev, [name]: false }));
+      setTestResults((prev) => ({ ...prev, [name]: { success: false, error: "Could not connect to server" } }));
     } finally {
       setTesting(null);
     }
@@ -872,14 +998,13 @@ function ChannelsTab({ settings, onUpdateConfig }: {
             {unconfiguredTypes.map((type) => {
               const meta = CHANNEL_META[type];
               if (!meta) return null;
-              const Icon = meta.icon;
               return (
                 <button
                   key={type}
                   onClick={() => openAdd(type)}
                   className="flex items-center gap-2.5 rounded-lg border border-dashed border-border/40 bg-muted/10 px-3 py-2.5 hover:border-primary/30 hover:bg-accent/30 transition-colors text-left cursor-pointer"
                 >
-                  <Icon className="h-3.5 w-3.5 text-muted-foreground/50" />
+                  <ChannelLogo type={type} size={16} />
                   <div>
                     <span className="text-xs text-muted-foreground/70">{meta.label}</span>
                     <p className="text-[10px] text-muted-foreground/40">Click to add</p>
@@ -902,15 +1027,14 @@ function ChannelsTab({ settings, onUpdateConfig }: {
             {ALL_CHANNEL_TYPES.map((type) => {
               const meta = CHANNEL_META[type];
               if (!meta) return null;
-              const Icon = meta.icon;
               return (
                 <button
                   key={type}
                   onClick={() => openAdd(type)}
                   className="w-full flex items-center gap-4 p-3 rounded-lg border border-border hover:border-primary/30 hover:bg-accent/50 text-left transition-all cursor-pointer"
                 >
-                  <div className={cn("h-10 w-10 rounded-lg flex items-center justify-center shrink-0", meta.color.replace("border-l-", "bg-").replace("500", "500/10"))}>
-                    <Icon className="h-5 w-5 text-muted-foreground" />
+                  <div className={cn("h-10 w-10 rounded-lg flex items-center justify-center shrink-0 bg-muted/40", meta.color.replace("border-l-", "ring-1 ring-").replace("500", "500/30"))}>
+                    <ChannelLogo type={type} size={22} />
                   </div>
                   <div className="min-w-0">
                     <p className="text-sm font-medium">{meta.label}</p>

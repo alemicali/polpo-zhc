@@ -50,6 +50,7 @@ export class FilePushSubscriptionStore {
   }
 
   ensureVapid(subject = process.env.POLPO_PUSH_VAPID_SUBJECT ?? DEFAULT_VAPID_SUBJECT): PushVapidConfig {
+    this.refresh();
     if (this.data.vapid?.publicKey && this.data.vapid.privateKey) {
       return this.data.vapid;
     }
@@ -64,6 +65,7 @@ export class FilePushSubscriptionStore {
   }
 
   getVapid(): PushVapidConfig | undefined {
+    this.refresh();
     return this.data.vapid;
   }
 
@@ -72,6 +74,7 @@ export class FilePushSubscriptionStore {
     expirationTime?: number | null;
     keys: PushSubscriptionKeys;
   }, userAgent?: string): PushSubscriptionRecord {
+    this.refresh();
     const now = new Date().toISOString();
     const records = this.data.subscriptions ?? [];
     const existing = records.find((record) => record.endpoint === subscription.endpoint);
@@ -103,6 +106,7 @@ export class FilePushSubscriptionStore {
   }
 
   remove(endpoint: string): boolean {
+    this.refresh();
     const records = this.data.subscriptions ?? [];
     const next = records.filter((record) => record.endpoint !== endpoint);
     if (next.length === records.length) return false;
@@ -112,14 +116,17 @@ export class FilePushSubscriptionStore {
   }
 
   list(): PushSubscriptionRecord[] {
+    this.refresh();
     return [...(this.data.subscriptions ?? [])];
   }
 
   count(): number {
+    this.refresh();
     return this.data.subscriptions?.length ?? 0;
   }
 
   markSuccess(endpoint: string): void {
+    this.refresh();
     const record = this.data.subscriptions?.find((item) => item.endpoint === endpoint);
     if (!record) return;
     record.lastSuccessAt = new Date().toISOString();
@@ -129,11 +136,16 @@ export class FilePushSubscriptionStore {
   }
 
   markFailure(endpoint: string): void {
+    this.refresh();
     const record = this.data.subscriptions?.find((item) => item.endpoint === endpoint);
     if (!record) return;
     record.lastFailureAt = new Date().toISOString();
     record.failureCount = (record.failureCount ?? 0) + 1;
     this.save();
+  }
+
+  private refresh(): void {
+    this.data = this.load();
   }
 
   private load(): PushStoreFile {

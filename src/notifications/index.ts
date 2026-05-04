@@ -29,6 +29,7 @@ export type { NotificationStore, NotificationRecord, NotificationStatus } from "
  */
 export class NotificationRouter {
   private channels = new Map<string, NotificationChannel>();
+  private channelConfigs = new Map<string, NotificationChannelConfig>();
   private rules: NotificationRule[] = [];
   private cooldowns = new Map<string, number>(); // ruleId → last dispatch timestamp
   private listeners: Array<{ event: string; fn: (...args: unknown[]) => void }> = [];
@@ -93,6 +94,7 @@ export class NotificationRouter {
       try {
         const channel = this.createChannel(channelConfig);
         this.channels.set(id, channel);
+        this.channelConfigs.set(id, channelConfig);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         this.emitter.emit("log", {
@@ -390,6 +392,27 @@ export class NotificationRouter {
       }
     }
     return results;
+  }
+
+  /**
+   * Test one configured channel and preserve the failure reason.
+   */
+  async testChannel(channelId: string): Promise<{ success: boolean; error?: string }> {
+    const channel = this.channels.get(channelId);
+    if (!channel) return { success: false, error: `Channel "${channelId}" not found` };
+
+    try {
+      const success = await channel.test();
+      if (!success) {
+        return { success: false, error: `${channel.type} channel test returned false` };
+      }
+      await channel.sendTest?.();
+      return { success: true };
+    } catch (err) {
+      const config = this.channelConfigs.get(channelId)
+        ?? ({ type: channel.type } as NotificationChannelConfig);
+      return { success: false, error: sanitizeChannelError(err, config) };
+    }
   }
 
   /**

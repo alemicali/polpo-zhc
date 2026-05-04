@@ -49,7 +49,7 @@ const pwaPlugin = VitePWA({
     navigateFallbackDenylist: [/^\/api\//, /^\/v1\//],
     // Bundle has crept past 2 MB — bump the precache cap rather than fail
     // the build. Code-splitting can come later as a perf pass.
-    maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
+    maximumFileSizeToCacheInBytes: 12 * 1024 * 1024,
     runtimeCaching: [
       {
         urlPattern: /\.(png|jpg|svg|woff2)$/,

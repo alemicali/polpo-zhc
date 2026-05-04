@@ -20,6 +20,9 @@
   },
   "dependencies": {
     "@ai-sdk/react": "^3.0.88",
+    "@iconify-json/logos": "^1.2.11",
+    "@iconify/react": "^6.0.2",
+    "@lobehub/icons": "^2.46.0",
     "@polpo-ai/react": "workspace:*",
     "@radix-ui/react-use-controllable-state": "^1.2.2",
     "@streamdown/cjk": "^1.0.2",

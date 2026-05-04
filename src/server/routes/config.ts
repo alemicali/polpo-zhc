@@ -379,10 +379,15 @@ export function configRoutes(getDeps: () => {
     }
 
     try {
+      if (typeof notificationRouter.testChannel === "function") {
+        const result = await notificationRouter.testChannel(name);
+        return c.json({ ok: true, data: result }, 200);
+      }
       const results = await notificationRouter.testChannels();
       return c.json({ ok: true, data: { success: results[name] ?? false } }, 200);
-    } catch {
-      return c.json({ ok: true, data: { success: false } }, 200);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Channel test failed";
+      return c.json({ ok: true, data: { success: false, error: msg } }, 200);
     }
   });
 
