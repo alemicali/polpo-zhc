@@ -20,6 +20,7 @@ import {
 import { useTheme } from "@/hooks/use-theme";
 import { usePalette, PALETTES } from "@/lib/palette";
 import { PwaInstallQrButton } from "./pwa-install-qr-button";
+import { LogoutButton } from "./logout-button";
 
 const titles: Record<string, string> = {
   "/dashboard": "Dashboard",
@@ -80,6 +81,7 @@ export function Header() {
       {/* Actions */}
       <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
         <PwaInstallQrButton />
+        <LogoutButton />
         {/* GitHub */}
         <Tooltip>
           <TooltipTrigger asChild>

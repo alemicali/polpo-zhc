@@ -165,6 +165,15 @@ function formatCost(cost?: { input: number; output: number }): string {
   return `$${cost.input}/M in, $${cost.output}/M out`;
 }
 
+function asRecord<T = unknown>(value: unknown): Record<string, T> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return value as Record<string, T>;
+}
+
+function asArray<T = unknown>(value: unknown): T[] {
+  return Array.isArray(value) ? value as T[] : [];
+}
+
 // ── Section definitions ──
 
 const baseSections = [
@@ -234,8 +243,9 @@ function ProviderCard({ name, prov, agentModels, authInfo, onConnect, onDisconne
   disconnecting?: boolean;
 }) {
   const hasEnvKey = authInfo?.hasEnvKey ?? false;
-  const hasOAuth = (authInfo?.profiles.length ?? 0) > 0;
-  const activeOAuth = authInfo?.profiles.filter((p: AuthProfileMeta) => p.status === "active").length ?? 0;
+  const profiles = asArray<AuthProfileMeta>(authInfo?.profiles);
+  const hasOAuth = profiles.length > 0;
+  const activeOAuth = profiles.filter((p: AuthProfileMeta) => p.status === "active").length;
   const isLocal = !!prov.baseUrl && (prov.baseUrl.includes("localhost") || prov.baseUrl.includes("127.0.0.1"));
   const isAuthenticated = hasEnvKey || hasOAuth || isLocal;
 
@@ -318,7 +328,7 @@ function ProviderCard({ name, prov, agentModels, authInfo, onConnect, onDisconne
       {/* OAuth profiles */}
       {hasOAuth && (
         <div className="space-y-1.5">
-          {authInfo!.profiles.map((profile: AuthProfileMeta) => {
+          {profiles.map((profile: AuthProfileMeta) => {
             const dotColor: Record<string, string> = {
               active: "bg-emerald-500", cooldown: "bg-amber-500",
               billing_disabled: "bg-red-500", expired: "bg-zinc-500",
@@ -856,7 +866,8 @@ function ChannelsTab({ settings, onUpdateConfig }: {
   settings: PolpoSettings;
   onUpdateConfig: (action: ChannelApiAction) => Promise<void>;
 }) {
-  const channels = (settings.notifications?.channels ?? {}) as Record<string, NotificationChannelConfig>;
+  const notifications = asRecord(settings.notifications);
+  const channels = asRecord<NotificationChannelConfig>(notifications.channels);
 
   // Dialog state
   const [editOpen, setEditOpen] = useState(false);
@@ -1530,18 +1541,15 @@ function AgentTab({ settings, primaryModel, fallbackModels, authStatus, onUpdate
   const [modelSaving, setModelSaving] = useState<"orchestrator" | "image" | null>(null);
 
   // Active providers (have credentials) — derived from auth status
-  const configuredProviders = authStatus
-    ? Object.entries(authStatus.providers)
-        .filter(([, info]) => info.hasEnvKey || info.profiles.some((p) => p.status === "active"))
+  const authProviders = asRecord<ProviderAuthInfo>(authStatus?.providers);
+  const configuredProviders = Object.entries(authProviders)
+        .filter(([, info]) => info.hasEnvKey || asArray<AuthProfileMeta>(info.profiles).some((p) => p.status === "active"))
         .map(([name]) => name)
-    : [];
-  const providerSources = authStatus
-    ? Object.fromEntries(
-        Object.entries(authStatus.providers)
-          .filter(([, info]) => info.hasEnvKey || info.profiles.some((p) => p.status === "active"))
+  const providerSources = Object.fromEntries(
+        Object.entries(authProviders)
+          .filter(([, info]) => info.hasEnvKey || asArray<AuthProfileMeta>(info.profiles).some((p) => p.status === "active"))
           .map(([name, info]) => [name, info.hasEnvKey ? "env" : "oauth"]),
-      )
-    : {};
+      );
 
   const handleReasoningChange = async (value: string) => {
     setReasoningSaving(true);
@@ -1788,6 +1796,9 @@ function ProvidersTab({ settings, providers, allProviderNames, providerAgentUsag
   authStatus: AuthStatusResponse | null | undefined;
   onRefresh: () => Promise<void>;
 }) {
+  const authProviderMap = asRecord<ProviderAuthInfo>(authStatus?.providers);
+  const modelAllowlist = asRecord<{ alias?: string; params?: Record<string, unknown> }>(settings.modelAllowlist);
+
   // ── "Add provider" dialog (full AuthStep — lists all providers) ──
   const [addDialogOpen, setAddDialogOpen] = useState(false);
   const [authProviders, setAuthProviders] = useState<AuthProvider[]>([]);
@@ -1823,7 +1834,7 @@ function ProvidersTab({ settings, providers, allProviderNames, providerAgentUsag
 
   // ── Connect: card button → open direct dialog for that provider ──
   const handleConnect = useCallback(async (name: string) => {
-    const info = authStatus?.providers[name];
+    const info = asRecord<ProviderAuthInfo>(authStatus?.providers)[name];
     setConnectTarget(name);
 
     if (info?.oauthAvailable) {
@@ -1915,7 +1926,7 @@ function ProvidersTab({ settings, providers, allProviderNames, providerAgentUsag
             {[...allProviderNames].sort().map((name) => {
               const prov = providers?.[name] ?? {} as ProviderConfig;
               const agentUsage = providerAgentUsage.get(name) ?? [];
-              const authInfo = authStatus?.providers[name];
+              const authInfo = authProviderMap[name];
               return (
                 <ProviderCard
                   key={name}
@@ -1936,17 +1947,17 @@ function ProvidersTab({ settings, providers, allProviderNames, providerAgentUsag
       </section>
 
       {/* ── Model Allowlist ── */}
-      {settings.modelAllowlist && Object.keys(settings.modelAllowlist).length > 0 && (
+      {Object.keys(modelAllowlist).length > 0 && (
         <section>
           <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-2 flex items-center gap-1.5">
             <Shield className="h-3.5 w-3.5" /> Model Allowlist
           </h3>
           <div className="space-y-1.5 max-w-lg">
-            {Object.entries(settings.modelAllowlist).map(([model, opts]) => (
+            {Object.entries(modelAllowlist).map(([model, opts]) => (
               <div key={model} className="flex items-center gap-2 rounded-md bg-muted/20 px-2.5 py-1.5 min-w-0">
                 <code className="text-[11px] font-mono truncate flex-1">{model}</code>
                 {opts.alias && <Badge variant="outline" className="text-[10px] shrink-0">{opts.alias}</Badge>}
-                {opts.params && Object.entries(opts.params).map(([k, v]) => (
+                {Object.entries(asRecord(opts.params)).map(([k, v]) => (
                   <Badge key={k} variant="secondary" className="text-[10px] shrink-0">{k}: {String(v)}</Badge>
                 ))}
               </div>
@@ -2119,15 +2130,19 @@ export function ConfigPage() {
     );
   }
 
-  const { settings, providers } = config;
-  const notifications = settings.notifications as Record<string, unknown> | undefined;
-  const rules = (notifications?.rules ?? []) as Array<{
+  const settings = (config.settings ?? {}) as PolpoSettings;
+  const providers = asRecord<ProviderConfig>(config.providers);
+  const notifications = asRecord(settings.notifications);
+  const rules = asArray<{
     id: string; name?: string; events: string[]; channels: string[];
     severity?: string; template?: string; condition?: Record<string, unknown>;
     cooldownMs?: number; includeOutcomes?: boolean;
     outcomeFilter?: string[] | { types?: string[]; tags?: string[] };
     maxAttachmentSize?: number; actions?: Array<{ type: string; [key: string]: unknown }>;
-  }>;
+  }>(notifications.rules);
+  const authProviderMap = asRecord<ProviderAuthInfo>(authStatus?.providers);
+  const notificationChannels = asRecord<NotificationChannelConfig>(notifications.channels);
+  const mcpToolAllowlist = asRecord<unknown>(settings.mcpToolAllowlist);
 
   // ── Models & Providers helpers ──
 
@@ -2158,9 +2173,9 @@ export function ConfigPage() {
 
   // All provider names (configured + referenced + auth)
   const allProviderNames = new Set<string>();
-  if (providers) for (const name of Object.keys(providers)) allProviderNames.add(name);
+  for (const name of Object.keys(providers)) allProviderNames.add(name);
   for (const name of providerAgentUsage.keys()) allProviderNames.add(name);
-  if (authStatus) for (const name of Object.keys(authStatus.providers)) allProviderNames.add(name);
+  for (const name of Object.keys(authProviderMap)) allProviderNames.add(name);
 
   // ── Policies typed casts ──
 
@@ -2179,9 +2194,7 @@ export function ConfigPage() {
   void hasPolicies;
 
   // ── Channel name list (used by rule/gate forms) ──
-  const channelNames = Object.keys(
-    (settings.notifications?.channels ?? {}) as Record<string, NotificationChannelConfig>,
-  );
+  const channelNames = Object.keys(notificationChannels);
 
   // ── Rule persistence helpers ──
   const saveRule = async (rule: NotificationRuleDraft) => {
@@ -2367,17 +2380,17 @@ export function ConfigPage() {
             )}
 
             {/* ── MCP Tool Allowlist ── */}
-            {settings.mcpToolAllowlist && Object.keys(settings.mcpToolAllowlist).length > 0 && (
+            {Object.keys(mcpToolAllowlist).length > 0 && (
               <section>
                 <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5 flex items-center gap-1.5">
                   <Wrench className="h-3.5 w-3.5" /> MCP Tool Allowlist
                 </h3>
                 <div className="space-y-2.5 max-w-lg">
-                  {Object.entries(settings.mcpToolAllowlist).map(([server, tools]) => (
+                  {Object.entries(mcpToolAllowlist).map(([server, tools]) => (
                     <div key={server}>
                       <code className="text-[11px] font-mono text-muted-foreground font-semibold">{server}</code>
                       <div className="flex flex-wrap gap-1 mt-1">
-                        {tools.map((t) => (
+                        {asArray<string>(tools).map((t) => (
                           <Badge key={t} variant="outline" className="text-[10px] font-mono">{t}</Badge>
                         ))}
                       </div>

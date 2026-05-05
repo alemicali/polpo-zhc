@@ -36,6 +36,11 @@ function SetupModeRedirect({ children }: { children: React.ReactNode }) {
   const location = useLocation();
   const [state, setState] = useState<"loading" | "setup" | "ready">("loading");
 
+  const loginPath = () => {
+    const next = `${location.pathname}${location.search}${location.hash}`;
+    return `/login?next=${encodeURIComponent(next === "/" ? "/chat" : next)}`;
+  };
+
   // Check setup status ONLY on initial mount — not on every pathname change.
   // Re-checking on navigation was causing the entire tree to unmount/remount
   // (flash of white) because setState("loading") replaced children with a spinner.
@@ -58,13 +63,21 @@ function SetupModeRedirect({ children }: { children: React.ReactNode }) {
             .catch(() => null);
           if (auth?.ok && !auth.data.authenticated) {
             setState("ready");
-            navigate("/login", { replace: true });
+            navigate(loginPath(), { replace: true });
+            return;
+          }
+          if (!auth?.ok) {
+            setState("ready");
+            navigate(loginPath(), { replace: true });
             return;
           }
         }
         setState("ready");
       })
-      .catch(() => { setState("ready"); });
+      .catch(() => {
+        setState("ready");
+        if (location.pathname !== "/login") navigate(loginPath(), { replace: true });
+      });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -98,7 +111,7 @@ export function App() {
 
         {/* Main app with sidebar layout */}
         <Route element={<AppLayout />}>
-          <Route index element={<Navigate to="/dashboard" replace />} />
+          <Route index element={<Navigate to="/chat" replace />} />
           <Route path="dashboard" element={<Suspense fallback={<PageLoader />}><DashboardPage /></Suspense>} />
           <Route path="tasks" element={<Suspense fallback={<PageLoader />}><TasksPage /></Suspense>} />
           <Route path="tasks/:taskId" element={<Suspense fallback={<PageLoader />}><TaskDetailPage /></Suspense>} />

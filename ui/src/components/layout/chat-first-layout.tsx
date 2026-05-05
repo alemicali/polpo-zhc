@@ -62,6 +62,7 @@ import { useTheme } from "@/hooks/use-theme";
 import { usePalette, PALETTES } from "@/lib/palette";
 import { cn } from "@/lib/utils";
 import { PwaInstallQrButton } from "./pwa-install-qr-button";
+import { LogoutButton } from "./logout-button";
 
 type TabDef = {
   path: string;
@@ -179,6 +180,7 @@ const PagesPanelHeader = memo(function PagesPanelHeader() {
       {/* Right actions */}
       <div className="flex items-center gap-1 shrink-0">
         <PwaInstallQrButton />
+        <LogoutButton />
         <Tooltip>
           <TooltipTrigger asChild>
             <a

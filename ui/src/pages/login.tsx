@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { ArrowRight, Loader2, Mail } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -24,6 +24,10 @@ function isValidEmail(value: string): boolean {
 
 export function LoginPage() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const params = new URLSearchParams(location.search);
+  const requestedNext = params.get("next");
+  const next = requestedNext?.startsWith("/") && !requestedNext.startsWith("//") ? requestedNext : "/chat";
   const [email, setEmail] = useState("");
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
@@ -34,12 +38,12 @@ export function LoginPage() {
     authApi("/status")
       .then((r) => {
         if (r.ok && (!r.data.enabled || r.data.authenticated)) {
-          navigate("/chat", { replace: true });
+          navigate(next, { replace: true });
         }
       })
       .catch(() => undefined)
       .finally(() => setLoading(false));
-  }, [navigate]);
+  }, [navigate, next]);
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
