@@ -3,11 +3,17 @@ import type { MiddlewareHandler } from "hono";
 import { getCookie } from "hono/cookie";
 import { AUTH_COOKIE_NAME, isInstanceAuthEnabled, validateSession } from "../auth/instance-auth.js";
 
-export function instanceAuthMiddleware(polpoDir: string, apiKeys: string[] = []): MiddlewareHandler {
+type PolpoDirRef = string | (() => string);
+
+function resolvePolpoDir(ref: PolpoDirRef): string {
+  return typeof ref === "function" ? ref() : ref;
+}
+
+export function instanceAuthMiddleware(polpoDir: PolpoDirRef, apiKeys: string[] = []): MiddlewareHandler {
   return async (c, next) => {
     if (!isInstanceAuthEnabled()) return next();
     if (hasValidApiKey(c.req.raw, apiKeys)) return next();
-    const session = validateSession(polpoDir, getCookie(c, AUTH_COOKIE_NAME));
+    const session = validateSession(resolvePolpoDir(polpoDir), getCookie(c, AUTH_COOKIE_NAME));
     if (!session) {
       return c.json({ ok: false, error: "Login required", code: "AUTH_REQUIRED" }, 401);
     }

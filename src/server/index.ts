@@ -29,6 +29,7 @@ export class PolpoServer {
   private sseBridge!: SSEBridge;
   private server: ReturnType<typeof serve> | null = null;
   private shutdownHandlers: (() => void)[] = [];
+  private supervisorRun: Promise<void> | null = null;
 
   constructor(private config: ServerConfig) {}
 
@@ -62,17 +63,34 @@ export class PolpoServer {
   async completeSetup(workDir: string): Promise<void> {
     this.orchestrator.resetWorkDir(workDir);
     await this.initOrchestrator(workDir);
-    if (this.config.autoStart !== false) {
-      this.orchestrator.run().catch((err) => {
-        console.error(`[PolpoServer] Supervisor loop crashed:`, err instanceof Error ? err.message : err);
+    this.ensureSupervisorRunning("setup complete");
+  }
+
+  private ensureSupervisorRunning(reason: string): void {
+    if (this.config.autoStart === false) return;
+    if (!this.orchestrator?.isInitialized) return;
+    if (this.supervisorRun) return;
+
+    this.supervisorRun = this.orchestrator.run()
+      .catch((err) => {
+        console.error(`[PolpoServer] Supervisor loop crashed (${reason}):`, err instanceof Error ? err.message : err);
+      })
+      .finally(() => {
+        this.supervisorRun = null;
       });
-    }
   }
 
   /** Start the server: init orchestrator if config exists, bind HTTP. */
   async start(): Promise<void> {
     const workDir = resolve(this.config.workDir);
     this.orchestrator = new Orchestrator(workDir);
+    const wakeSupervisor = () => this.ensureSupervisorRunning("task event");
+    this.orchestrator.on("task:created", wakeSupervisor);
+    this.orchestrator.on("task:updated", wakeSupervisor);
+    this.shutdownHandlers.push(() => {
+      this.orchestrator.off("task:created", wakeSupervisor);
+      this.orchestrator.off("task:updated", wakeSupervisor);
+    });
 
     const configPath = join(getPolpoDir(workDir), "polpo.json");
     const hasConfig = existsSync(configPath);
@@ -80,11 +98,7 @@ export class PolpoServer {
     if (hasConfig) {
       await this.initOrchestrator();
 
-      if (this.config.autoStart !== false) {
-        this.orchestrator.run().catch((err) => {
-          console.error(`[PolpoServer] Supervisor loop crashed:`, err instanceof Error ? err.message : err);
-        });
-      }
+      this.ensureSupervisorRunning("startup");
     } else {
       // No config yet — placeholder SSE bridge, orchestrator will be initialized after setup
       this.sseBridge = new SSEBridge(this.orchestrator);
@@ -95,6 +109,7 @@ export class PolpoServer {
       corsOrigins: this.config.corsOrigins,
       workDir,
       onInitialize: (workDir: string) => this.completeSetup(workDir),
+      wakeSupervisor: () => this.ensureSupervisorRunning("task route"),
     });
 
     this.server = serve({

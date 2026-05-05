@@ -221,13 +221,20 @@ const removeMemberRoute = createRoute({
   },
 });
 
-export function instanceAuthRoutes(polpoDir: string): OpenAPIHono {
+type PolpoDirRef = string | (() => string);
+
+function resolvePolpoDir(ref: PolpoDirRef): string {
+  return typeof ref === "function" ? ref() : ref;
+}
+
+export function instanceAuthRoutes(polpoDir: PolpoDirRef): OpenAPIHono {
   const app = new OpenAPIHono();
 
   app.openapi(statusRoute, (c) => {
+    const dir = resolvePolpoDir(polpoDir);
     const enabled = isInstanceAuthEnabled();
-    const config = loadInstanceAuth(polpoDir);
-    const session = validateSession(polpoDir, getCookie(c, AUTH_COOKIE_NAME));
+    const config = loadInstanceAuth(dir);
+    const session = validateSession(dir, getCookie(c, AUTH_COOKIE_NAME));
     return c.json({
       ok: true,
       data: {
@@ -245,7 +252,8 @@ export function instanceAuthRoutes(polpoDir: string): OpenAPIHono {
     }
 
     const { email } = c.req.valid("json");
-    const link = createMagicLink(polpoDir, email);
+    const dir = resolvePolpoDir(polpoDir);
+    const link = createMagicLink(dir, email);
     if (!link) {
       return c.json({ ok: true, data: { sent: true } }, 200);
     }
@@ -266,19 +274,21 @@ export function instanceAuthRoutes(polpoDir: string): OpenAPIHono {
       return c.json({ ok: false, error: "Instance auth is disabled." }, 400);
     }
 
-    const config = loadInstanceAuth(polpoDir);
+    const dir = resolvePolpoDir(polpoDir);
+    const config = loadInstanceAuth(dir);
     if (config?.enabled && config.allowedEmails.length > 0) {
       return c.json({ ok: false, error: "Instance auth is already configured." }, 409);
     }
 
     const { email } = c.req.valid("json");
-    createInitialInstanceAuth(polpoDir, normalizeEmail(email));
+    createInitialInstanceAuth(dir, normalizeEmail(email));
     return c.json({ ok: true, data: { configured: true } }, 200);
   });
 
   app.openapi(callbackRoute, (c) => {
     const { token } = c.req.valid("query");
-    const session = consumeMagicLink(polpoDir, token);
+    const dir = resolvePolpoDir(polpoDir);
+    const session = consumeMagicLink(dir, token);
     if (!session) {
       return c.text("Invalid or expired login link.", 400);
     }
@@ -294,34 +304,36 @@ export function instanceAuthRoutes(polpoDir: string): OpenAPIHono {
   });
 
   app.openapi(logoutRoute, (c) => {
-    clearSession(polpoDir, getCookie(c, AUTH_COOKIE_NAME));
+    clearSession(resolvePolpoDir(polpoDir), getCookie(c, AUTH_COOKIE_NAME));
     deleteCookie(c, AUTH_COOKIE_NAME, { path: "/" });
     return c.json({ ok: true, data: { loggedOut: true } }, 200);
   });
 
   app.openapi(membersRoute, (c) => {
-    const auth = requireMemberManagementAuth(polpoDir, getCookie(c, AUTH_COOKIE_NAME));
+    const dir = resolvePolpoDir(polpoDir);
+    const auth = requireMemberManagementAuth(dir, getCookie(c, AUTH_COOKIE_NAME));
     if (auth) return c.json(auth, 401);
     return c.json({
       ok: true,
       data: {
         enabled: isInstanceAuthEnabled(),
-        members: listAllowedEmails(polpoDir).map((email) => ({ email })),
+        members: listAllowedEmails(dir).map((email) => ({ email })),
       },
     }, 200);
   });
 
   app.openapi(addMemberRoute, async (c) => {
-    const auth = requireMemberManagementAuth(polpoDir, getCookie(c, AUTH_COOKIE_NAME));
+    const dir = resolvePolpoDir(polpoDir);
+    const auth = requireMemberManagementAuth(dir, getCookie(c, AUTH_COOKIE_NAME));
     if (auth) return c.json(auth, 401);
     const { email, sendInvite } = c.req.valid("json");
-    const config = addAllowedEmail(polpoDir, email);
+    const config = addAllowedEmail(dir, email);
     const normalizedEmail = normalizeEmail(email);
     let invited = false;
     let inviteError: string | undefined;
 
     if (sendInvite && isInstanceAuthEnabled()) {
-      const link = createMagicLink(polpoDir, normalizedEmail);
+      const link = createMagicLink(dir, normalizedEmail);
       if (link) {
         const callbackUrl = `${resolveServerPublicUrl(c.req.raw)}/api/v1/auth/instance/callback?token=${encodeURIComponent(link.token)}`;
         try {
@@ -344,17 +356,18 @@ export function instanceAuthRoutes(polpoDir: string): OpenAPIHono {
   });
 
   app.openapi(removeMemberRoute, (c) => {
-    const auth = requireMemberManagementAuth(polpoDir, getCookie(c, AUTH_COOKIE_NAME));
+    const dir = resolvePolpoDir(polpoDir);
+    const auth = requireMemberManagementAuth(dir, getCookie(c, AUTH_COOKIE_NAME));
     if (auth) return c.json(auth, 401);
     const { email } = c.req.valid("param");
-    const config = loadInstanceAuth(polpoDir);
+    const config = loadInstanceAuth(dir);
     if ((config?.allowedEmails.length ?? 0) <= 1) {
       return c.json({ ok: false, error: "At least one member must remain." }, 400);
     }
-    const result = removeAllowedEmail(polpoDir, decodeURIComponent(email));
+    const result = removeAllowedEmail(dir, decodeURIComponent(email));
     return c.json({
       ok: true,
-      data: { members: (result?.config.allowedEmails ?? listAllowedEmails(polpoDir)).map((allowedEmail) => ({ email: allowedEmail })) },
+      data: { members: (result?.config.allowedEmails ?? listAllowedEmails(dir)).map((allowedEmail) => ({ email: allowedEmail })) },
     }, 200);
   });
 

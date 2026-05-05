@@ -48,6 +48,7 @@ export interface AppOptions {
   corsOrigins?: string[];
   workDir?: string;
   onInitialize?: (workDir: string) => Promise<void>;
+  wakeSupervisor?: () => void;
 }
 
 /**
@@ -60,6 +61,8 @@ export interface AppOptions {
  */
 export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts?: AppOptions): OpenAPIHono {
   const app = new OpenAPIHono();
+  const activeWorkDir = () => orchestrator.isInitialized ? orchestrator.getWorkDir() : opts?.workDir;
+  const activePolpoDir = () => getPolpoDir(activeWorkDir() ?? opts?.workDir ?? process.cwd());
 
   // Global middleware
   app.use("*", errorMiddleware());
@@ -97,12 +100,12 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     // provider-auth-status routes (/api/v1/auth/status) that live behind
     // the auth gate. Instance-auth deals with this Polpo *instance*'s
     // session/login; provider-auth-status deals with LLM provider keys.
-    app.route("/api/v1/auth/instance", instanceAuthRoutes(getPolpoDir(opts.workDir)));
+    app.route("/api/v1/auth/instance", instanceAuthRoutes(activePolpoDir));
   }
 
   // Filesystem browsing — always available (used by setup wizard path picker)
   if (opts?.workDir) {
-    const setupAwareInstanceAuth = instanceAuthMiddleware(getPolpoDir(opts.workDir), opts.apiKeys ?? []);
+    const setupAwareInstanceAuth = instanceAuthMiddleware(activePolpoDir, opts.apiKeys ?? []);
     app.use("/api/v1/filesystem", async (c, next) => {
       if (!orchestrator.isInitialized) return next();
       return setupAwareInstanceAuth(c, next);
@@ -126,8 +129,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
 
   // Provider management — always available (API key CRUD, OAuth flows, model listing)
   if (opts?.workDir) {
-    const polpoDir = getPolpoDir(opts.workDir);
-    app.route("/api/v1/providers", providerRoutes(polpoDir));
+    app.route("/api/v1/providers", providerRoutes(activePolpoDir));
   }
 
   // OpenAI-compatible chat completions
@@ -155,14 +157,22 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
       const { createSystemTools } = await import("../tools/system-tools.js");
       const { createMemoryTools } = await import("../tools/memory-tools.js");
       const { resolveAgentVault } = await import("../vault/index.js");
+      const { CLIENT_SIDE_CHAT_TOOLS, isClientSideChatTool } = await import("../llm/orchestrator-tools.js");
       const { nanoid } = await import("nanoid");
       const vaultEntries = await o.getVaultStore()?.getAllForAgent(agentConfig.name);
       const vault = resolveAgentVault(vaultEntries);
       const tools: any[] = createSystemTools(o.getAgentWorkDir(), agentConfig.allowedTools, undefined, undefined, vault);
       const memoryStore = o.getMemoryStore();
       if (memoryStore) tools.push(...createMemoryTools(memoryStore, agentConfig.name));
+      const existingToolNames = new Set(tools.map((tool: any) => tool.name));
+      for (const tool of CLIENT_SIDE_CHAT_TOOLS) {
+        if (!existingToolNames.has(tool.name)) tools.push(tool);
+      }
       const toolMap = new Map(tools.map((t: any) => [t.name, t]));
       const executor = async (name: string, args: Record<string, unknown>): Promise<string> => {
+        if (isClientSideChatTool(name)) {
+          return `Client-side tool ${name} completed.`;
+        }
         const tool = toolMap.get(name);
         if (!tool) return `Error: Unknown tool "${name}"`;
         try {
@@ -172,7 +182,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
           return `Error: ${err.message}`;
         }
       };
-      return { tools, executor };
+      return { tools, executor, isInteractive: isClientSideChatTool };
     },
     streamLLM: streamSimple as any,
     resolveOrchestratorContext: async () => {
@@ -225,6 +235,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
 
   authed.route("/tasks", taskRoutes(() => ({
     taskStore: o.getStore(),
+    wakeSupervisor: opts?.wakeSupervisor,
     addTask: (opts: any) => o.addTask(opts),
     deleteTask: (id: string) => o.deleteTask(id),
     retryTask: (id: string) => o.retryTask(id),

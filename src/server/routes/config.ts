@@ -423,14 +423,15 @@ export function publicConfigRoutes(
   onInitialize?: (workDir: string) => Promise<void>,
 ): OpenAPIHono {
   const app = new OpenAPIHono();
-  const polpoDir = getPolpoDir(workDir);
 
   // GET /config/status
   app.openapi(configStatusRoute, (c) => {
-    const hasConfig = existsSync(join(polpoDir, "polpo.json"));
+    const activeWorkDir = orchestrator.isInitialized ? orchestrator.getWorkDir() : workDir;
+    const activePolpoDir = getPolpoDir(activeWorkDir);
+    const hasConfig = existsSync(join(activePolpoDir, "polpo.json"));
     const providers = detectProviders();
     const hasProviders = providers.some((p) => p.hasKey);
-    const authConfig = loadInstanceAuth(polpoDir);
+    const authConfig = loadInstanceAuth(activePolpoDir);
 
     return c.json({
       ok: true,
@@ -443,8 +444,8 @@ export function publicConfigRoutes(
           enabled: isInstanceAuthEnabled(),
           configured: !!authConfig?.enabled && authConfig.allowedEmails.length > 0,
         },
-        workDir,
-        orgName: basename(workDir),
+        workDir: activeWorkDir,
+        orgName: basename(activeWorkDir),
       },
     });
   });

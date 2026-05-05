@@ -308,6 +308,7 @@ export interface CompletionRouteDeps {
   resolveAgentTools: (agentConfig: any) => Promise<{
     tools: any[];
     executor: (name: string, args: Record<string, unknown>) => Promise<string>;
+    isInteractive?: (name: string) => boolean;
   }>;
   /** LLM streaming function (streamSimple from pi-ai). */
   streamLLM: (model: any, opts: { systemPrompt: string; messages: any[]; tools: any[] }, streamOpts: any) => any;
@@ -366,6 +367,10 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
         "Unlike task execution, you should engage in dialogue: ask clarifying questions,",
         "explain your reasoning, and wait for user input when needed.",
         "You still have access to all your coding tools to help the user.",
+        "You may also use the client-side UI tools open_file, navigate_to, and open_tab when",
+        "the user asks to view a file, move to a Polpo page, or open an external URL.",
+        "After one of those client-side tools completes, the UI sends a system acknowledgement;",
+        "treat it as the tool result and do not repeat the same UI action for the same request.",
       ].join("\n");
 
       const basePrompt = `${conversationalPreamble}\n\n${agentSystemPrompt}`;
@@ -393,9 +398,10 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
       streamOpts = resolved.streamOpts;
 
       // Resolve tools via dep
-      const { tools, executor } = await deps.resolveAgentTools(agentConfig);
+      const { tools, executor, isInteractive } = await deps.resolveAgentTools(agentConfig);
       effectiveTools = tools;
       effectiveToolExecutor = executor;
+      isInteractiveFn = isInteractive;
     } else {
       // ── Orchestrator mode (default) ──
       if (!deps.resolveOrchestratorContext) {
@@ -581,8 +587,9 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
 
             if (toolCalls.length === 0) break;
 
-            // Check for interactive tools — only in orchestrator mode (agents don't have interactive tools)
-            const interactiveCall = agentMode ? undefined : toolCalls.find((tc: any) => isInteractiveFn?.(tc.name));
+            // Check for interactive tools. Orchestrator has its full preview/input
+            // set; agent-direct mode only gets UI-side tools supplied by deps.
+            const interactiveCall = toolCalls.find((tc: any) => isInteractiveFn?.(tc.name));
             if (interactiveCall) {
               // Persist the interactive tool call so it survives session reload
               toolCallsAccum.push({
@@ -780,8 +787,9 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
 
           if (toolCalls.length === 0) break;
 
-          // Check for interactive tools — only in orchestrator mode (agents don't have interactive tools)
-          const interactiveCall = agentMode ? undefined : toolCalls.find((tc: any) => isInteractiveFn?.(tc.name));
+          // Check for interactive tools. Orchestrator has its full preview/input
+          // set; agent-direct mode only gets UI-side tools supplied by deps.
+          const interactiveCall = toolCalls.find((tc: any) => isInteractiveFn?.(tc.name));
           if (interactiveCall) {
             // Persist the interactive tool call so it survives session reload
             toolCallsAccum.push({

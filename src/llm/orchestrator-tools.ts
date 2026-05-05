@@ -1400,7 +1400,7 @@ const phoneDisableInboundTool: Tool = {
 //  CLIENT-SIDE TOOLS (executed on the user's browser, not the server)
 // ═══════════════════════════════════════════════════════
 
-const openFileTool: Tool = {
+export const openFileTool: Tool = {
   name: "open_file",
   description: `Open a file for the user in an inline preview dialog, without navigating away.
 Use this when the user says "open the file", "show me the file", "let me see it", etc.
@@ -1412,7 +1412,7 @@ Prefer this over navigate_to with target="files" when the user wants to SEE the 
   }),
 };
 
-const navigateToTool: Tool = {
+export const navigateToTool: Tool = {
   name: "navigate_to",
   description: `Navigate the user's UI to any page in the dashboard.
 Use this when the user asks to see a specific section or detail page, e.g. "show me the dashboard",
@@ -1453,7 +1453,7 @@ Examples:
   }),
 };
 
-const openTabTool: Tool = {
+export const openTabTool: Tool = {
   name: "open_tab",
   description: `Open a URL in a new browser tab on the user's device.
 Use this when the user asks to open a link, website, documentation page, PR, issue, deploy URL, etc.
@@ -1596,6 +1596,8 @@ export const WRITE_TOOLS = new Set([
 
 /** Tools that pause the conversation to collect user input / show a preview. */
 export const INTERACTIVE_TOOLS = new Set(["ask_user", "create_mission", "set_vault_entry", "open_file", "navigate_to", "open_tab", "set_design"]);
+export const CLIENT_SIDE_CHAT_TOOLS: Tool[] = [openFileTool, navigateToTool, openTabTool];
+export const CLIENT_SIDE_CHAT_TOOL_NAMES = new Set(CLIENT_SIDE_CHAT_TOOLS.map((tool) => tool.name));
 
 export function needsApproval(toolName: string): boolean {
   return WRITE_TOOLS.has(toolName);
@@ -1603,6 +1605,10 @@ export function needsApproval(toolName: string): boolean {
 
 export function isInteractive(toolName: string): boolean {
   return INTERACTIVE_TOOLS.has(toolName);
+}
+
+export function isClientSideChatTool(toolName: string): boolean {
+  return CLIENT_SIDE_CHAT_TOOL_NAMES.has(toolName);
 }
 
 export const ALL_ORCHESTRATOR_TOOLS: Tool[] = [

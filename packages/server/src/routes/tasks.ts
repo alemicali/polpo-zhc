@@ -227,6 +227,7 @@ const bulkDeleteTasksRoute = createRoute({
  */
 export function taskRoutes(getDeps: () => {
   taskStore: any;
+  wakeSupervisor?: () => void;
   addTask: (opts: any) => Promise<any>;
   deleteTask: (taskId: string) => Promise<any>;
   retryTask: (taskId: string) => Promise<any>;
@@ -285,6 +286,7 @@ export function taskRoutes(getDeps: () => {
       draft: body.draft,
     });
 
+    if (task.status !== "draft") deps.wakeSupervisor?.();
     return c.json({ ok: true, data: task }, 201);
   });
 
@@ -301,6 +303,7 @@ export function taskRoutes(getDeps: () => {
 
     if (body.status !== undefined) {
       await deps.taskStore.unsafeSetStatus(taskId, body.status as any, "manual status update via API");
+      if (body.status === "pending") deps.wakeSupervisor?.();
     }
     if (body.description !== undefined) {
       await deps.updateTaskDescription(taskId, body.description);
@@ -341,6 +344,7 @@ export function taskRoutes(getDeps: () => {
     const deps = getDeps();
     const { taskId } = c.req.valid("param");
     await deps.retryTask(taskId);
+    deps.wakeSupervisor?.();
     return c.json({ ok: true, data: { retried: true } });
   });
 
@@ -375,6 +379,7 @@ export function taskRoutes(getDeps: () => {
       return c.json({ ok: false, error: `Task is not in draft state (current: ${task.status})`, code: "INVALID_STATE" }, 404);
     }
     await deps.taskStore.transition(taskId, "pending");
+    deps.wakeSupervisor?.();
     return c.json({ ok: true, data: { queued: true } }, 200);
   });
 

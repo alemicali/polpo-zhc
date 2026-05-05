@@ -349,7 +349,13 @@ setInterval(() => {
  * Provider management routes — always available.
  * Auth is handled by the middleware in app.ts (conditional on setup mode).
  */
-export function providerRoutes(polpoDir: string): OpenAPIHono {
+type PolpoDirRef = string | (() => string);
+
+function resolvePolpoDir(ref: PolpoDirRef): string {
+  return typeof ref === "function" ? ref() : ref;
+}
+
+export function providerRoutes(polpoDir: PolpoDirRef): OpenAPIHono {
   const app = new OpenAPIHono();
 
   // ── Static paths first (before /:name wildcard) ──
@@ -466,7 +472,7 @@ export function providerRoutes(polpoDir: string): OpenAPIHono {
     if (!envVar) return c.json({ ok: false, error: `Unknown provider: ${name}` }, 400);
 
     process.env[envVar] = apiKey;
-    const targetDir = bodyWorkDir ? getPolpoDir(resolve(bodyWorkDir)) : polpoDir;
+    const targetDir = bodyWorkDir ? getPolpoDir(resolve(bodyWorkDir)) : resolvePolpoDir(polpoDir);
     persistToEnvFile(targetDir, envVar, apiKey);
 
     return c.json({ ok: true, data: { message: `${envVar} saved to .polpo/.env` } });
@@ -485,7 +491,7 @@ export function providerRoutes(polpoDir: string): OpenAPIHono {
     if (!envVar) return c.json({ ok: false, error: `Unknown provider: ${name}` }, 400);
 
     delete process.env[envVar];
-    const targetDir = bodyWorkDir ? getPolpoDir(resolve(bodyWorkDir)) : polpoDir;
+    const targetDir = bodyWorkDir ? getPolpoDir(resolve(bodyWorkDir)) : resolvePolpoDir(polpoDir);
     removeFromEnvFile(targetDir, envVar);
 
     return c.json({ ok: true, data: { message: `${envVar} removed` } });
@@ -506,7 +512,7 @@ export function providerRoutes(polpoDir: string): OpenAPIHono {
     const envVar = PROVIDER_ENV_MAP[name];
     if (envVar && process.env[envVar]) {
       delete process.env[envVar];
-      const targetDir = bodyWorkDir ? getPolpoDir(resolve(bodyWorkDir)) : polpoDir;
+      const targetDir = bodyWorkDir ? getPolpoDir(resolve(bodyWorkDir)) : resolvePolpoDir(polpoDir);
       removeFromEnvFile(targetDir, envVar);
       actions.push("API key removed");
     }
