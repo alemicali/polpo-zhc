@@ -1903,41 +1903,6 @@ const missionSuggestions = [
   },
 ];
 
-// ── Session ID copy button ──
-
-function SessionIdCopy({ sessionId }: { sessionId: string }) {
-  const [copied, setCopied] = useState(false);
-
-  const handleCopy = useCallback(() => {
-    navigator.clipboard.writeText(sessionId);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  }, [sessionId]);
-
-  return (
-    <span
-      className="inline-flex items-center gap-1 cursor-pointer group"
-      onClick={handleCopy}
-      title="Click to copy session ID"
-    >
-      {copied ? (
-        <>
-          <Check className="inline h-2.5 w-2.5 text-emerald-500" />
-          <span className="text-emerald-500">Copied!</span>
-        </>
-      ) : (
-        <>
-          {" Session "}
-          <code className="font-mono hover:text-foreground transition-colors">
-            {sessionId.slice(0, 8)}
-          </code>
-          <Copy className="inline h-2.5 w-2.5 opacity-0 group-hover:opacity-100 transition-opacity" />
-        </>
-      )}
-    </span>
-  );
-}
-
 // ── Session sidebar (two-level: agent groups → session list) ──
 
 /** Key used for orchestrator (non-agent) sessions in the group map */
@@ -3314,11 +3279,6 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
                 </div>
               </div>
               <div className="flex min-w-0 items-center gap-1">
-                {sessionId && (
-                  <span className="hidden max-w-32 truncate text-[10px] text-muted-foreground lg:inline-flex">
-                    <SessionIdCopy sessionId={sessionId} />
-                  </span>
-                )}
                 <MicButton
                   onTranscript={setTextareaValue}
                   disabled={inputDisabled}

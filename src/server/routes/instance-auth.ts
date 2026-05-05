@@ -4,9 +4,11 @@ import {
   AUTH_COOKIE_NAME,
   clearSession,
   consumeMagicLink,
+  createInitialInstanceAuth,
   createMagicLink,
   isInstanceAuthEnabled,
   loadInstanceAuth,
+  normalizeEmail,
   validateSession,
 } from "../auth/instance-auth.js";
 
@@ -57,6 +59,36 @@ const magicLinkRoute = createRoute({
     500: {
       content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string() }) } },
       description: "Magic link failed",
+    },
+  },
+});
+
+const setupRoute = createRoute({
+  method: "post",
+  path: "/setup",
+  tags: ["Auth"],
+  summary: "Configure the first instance auth admin",
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: z.object({ email: z.string().email() }),
+        },
+      },
+    },
+  },
+  responses: {
+    200: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.object({ configured: z.boolean() }) }) } },
+      description: "Instance auth configured",
+    },
+    400: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string() }) } },
+      description: "Instance auth is disabled",
+    },
+    409: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string() }) } },
+      description: "Instance auth is already configured",
     },
   },
 });
@@ -126,6 +158,21 @@ export function instanceAuthRoutes(polpoDir: string): OpenAPIHono {
       const msg = err instanceof Error ? err.message : "Failed to send magic link";
       return c.json({ ok: false, error: msg }, 500);
     }
+  });
+
+  app.openapi(setupRoute, async (c) => {
+    if (!isInstanceAuthEnabled()) {
+      return c.json({ ok: false, error: "Instance auth is disabled." }, 400);
+    }
+
+    const config = loadInstanceAuth(polpoDir);
+    if (config?.enabled && config.allowedEmails.length > 0) {
+      return c.json({ ok: false, error: "Instance auth is already configured." }, 409);
+    }
+
+    const { email } = c.req.valid("json");
+    createInitialInstanceAuth(polpoDir, normalizeEmail(email));
+    return c.json({ ok: true, data: { configured: true } }, 200);
   });
 
   app.openapi(callbackRoute, (c) => {

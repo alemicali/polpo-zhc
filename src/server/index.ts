@@ -62,6 +62,11 @@ export class PolpoServer {
   async completeSetup(workDir: string): Promise<void> {
     this.orchestrator.resetWorkDir(workDir);
     await this.initOrchestrator(workDir);
+    if (this.config.autoStart !== false) {
+      this.orchestrator.run().catch((err) => {
+        console.error(`[PolpoServer] Supervisor loop crashed:`, err instanceof Error ? err.message : err);
+      });
+    }
   }
 
   /** Start the server: init orchestrator if config exists, bind HTTP. */

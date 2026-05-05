@@ -584,15 +584,18 @@ export function SetupPage() {
   const [oauthActive, setOauthActive] = useState(false);
   const [loading, setLoading] = useState(true);
   const [alreadyInitialized, setAlreadyInitialized] = useState(false);
+  const [authBootstrapOnly, setAuthBootstrapOnly] = useState(false);
   const [authEnabled, setAuthEnabled] = useState(false);
   const [adminEmail, setAdminEmail] = useState("");
 
   const STEPS = [
-    { id: "project", icon: FolderOpen, label: "Project" },
-    ...(authEnabled ? [{ id: "access", icon: Mail, label: "Access" }] : []),
-    { id: "provider", icon: KeyRound, label: "Provider" },
-    { id: "model", icon: Cpu, label: "Model" },
-    { id: "agent", icon: Sparkles, label: "Agent" },
+    ...(authBootstrapOnly ? [] : [{ id: "project", icon: FolderOpen, label: "Project" }]),
+    ...(authEnabled || authBootstrapOnly ? [{ id: "access", icon: Mail, label: "Access" }] : []),
+    ...(authBootstrapOnly ? [] : [
+      { id: "provider", icon: KeyRound, label: "Provider" },
+      { id: "model", icon: Cpu, label: "Model" },
+      { id: "agent", icon: Sparkles, label: "Agent" },
+    ]),
   ];
   const currentStep = STEPS[step]?.id ?? "agent";
   const hasConfiguredProvider = providers.some((p) => p.hasKey);
@@ -600,7 +603,11 @@ export function SetupPage() {
     (currentStep !== "project" || !!workDir) &&
     (currentStep !== "access" || isValidEmail(adminEmail)) &&
     (currentStep !== "provider" || hasConfiguredProvider);
-  const canComplete = !completing && hasConfiguredProvider && (!authEnabled || isValidEmail(adminEmail));
+  const canComplete = !completing && (
+    authBootstrapOnly
+      ? isValidEmail(adminEmail)
+      : hasConfiguredProvider && (!authEnabled || isValidEmail(adminEmail))
+  );
 
   // Load status on mount
   useEffect(() => {
@@ -609,7 +616,14 @@ export function SetupPage() {
         if (r.ok) {
           const status = r.data as SetupStatus;
           if (status.initialized) {
-            setAlreadyInitialized(true);
+            if (status.auth?.enabled && !status.auth.configured) {
+              setWorkDir(status.workDir);
+              setOrgName(status.orgName);
+              setAuthEnabled(true);
+              setAuthBootstrapOnly(true);
+            } else {
+              setAlreadyInitialized(true);
+            }
           } else {
             setWorkDir(status.workDir);
             setOrgName(status.orgName);
@@ -652,6 +666,20 @@ export function SetupPage() {
     setCompleting(true);
     setSetupError(null);
     try {
+      if (authBootstrapOnly) {
+        const result = await api("/auth/setup", {
+          method: "POST",
+          body: JSON.stringify({ email: adminEmail.trim() }),
+        });
+        if (result.ok) {
+          navigate("/login?next=%2Fchat", { replace: true });
+        } else {
+          setSetupError(result.error || "Could not configure instance access.");
+          setCompleting(false);
+        }
+        return;
+      }
+
       const result = await api("/config/initialize", {
         method: "POST",
         body: JSON.stringify({
@@ -664,7 +692,7 @@ export function SetupPage() {
         }),
       });
       if (result.ok) {
-        navigate("/chat", { replace: true });
+        navigate(authEnabled ? "/login?next=%2Fchat" : "/chat", { replace: true });
       } else {
         setSetupError(result.error || "Setup failed. Check server logs.");
         setCompleting(false);
