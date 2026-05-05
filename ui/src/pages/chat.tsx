@@ -1880,29 +1880,6 @@ function isFileAllowedForAgent(file: MentionFile, agent?: AgentConfig): boolean 
   });
 }
 
-const missionSuggestions = [
-  {
-    icon: ShieldCheck,
-    title: "Review and harden OAuth login",
-    prompt: "Create a mission to review and harden OAuth login flows, including callback handling, error states, and user-facing recovery steps.",
-  },
-  {
-    icon: FileCode,
-    title: "Refactor auth module",
-    prompt: "Create a mission to refactor the auth module, reduce duplication, improve naming, and add focused tests for the main login paths.",
-  },
-  {
-    icon: Compass,
-    title: "Improve onboarding setup",
-    prompt: "Create a mission to improve the onboarding setup flow, fixing confusing states, redirects, and deployment-specific edge cases.",
-  },
-  {
-    icon: ListChecks,
-    title: "Stabilize tests and CI",
-    prompt: "Create a mission to inspect failing tests and CI checks, identify the root causes, and implement the smallest reliable fixes.",
-  },
-];
-
 // ── Session sidebar (two-level: agent groups → session list) ──
 
 /** Key used for orchestrator (non-agent) sessions in the group map */
@@ -2652,7 +2629,6 @@ function ChatEmptyState() {
   const { selectedAgent } = useChatState();
   const { agents } = useAgents();
   const { skills } = useSkills();
-  const [showMissionSuggestions, setShowMissionSuggestions] = useState(false);
   const agentConfig = selectedAgent && agents ? agents.find((a) => a.name === selectedAgent) : undefined;
   const name = agentConfig?.identity?.displayName ?? agentConfig?.name ?? "Polpo";
   const agentSuggestions = useMemo(() => {
@@ -2773,45 +2749,18 @@ function ChatEmptyState() {
             ))}
           </div>
         )
-      ) : showMissionSuggestions ? (
-        <div className="w-full max-w-2xl">
-          <button
-            type="button"
-            onClick={() => setShowMissionSuggestions(false)}
-            className="mb-3 inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
-          >
-            <ChevronLeft className="h-3.5 w-3.5" />
-            Back to suggestions
-          </button>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {missionSuggestions.map((s) => (
-              <button
-                key={s.title}
-                type="button"
-                onClick={() => send(s.prompt)}
-                className="flex items-start gap-2.5 rounded-lg border border-border/50 bg-card/40 p-3 text-left transition-all hover:bg-accent/35 hover:border-primary/25"
-              >
-                <s.icon className="h-4 w-4 text-primary shrink-0 mt-0.5" />
-                <div>
-                  <p className="text-xs font-medium">{s.title}</p>
-                  <p className="text-xs text-muted-foreground mt-0.5">Create a multi-task mission</p>
-                </div>
-              </button>
-            ))}
-          </div>
-        </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-w-xl w-full">
           <button
             type="button"
-            onClick={() => setShowMissionSuggestions(true)}
+            onClick={() => send("Create a mission")}
             className="flex items-start gap-2.5 rounded-lg border border-primary/20 bg-primary/5 p-3 text-left transition-all hover:bg-primary/10 hover:border-primary/35"
           >
             <Target className="h-4 w-4 text-primary shrink-0 mt-0.5" />
             <div>
               <p className="text-xs font-medium">Create a mission</p>
               <p className="text-xs text-muted-foreground mt-0.5">
-                Pick from common mission prompts
+                Polpo will ask what to build
               </p>
             </div>
           </button>
@@ -3092,6 +3041,15 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const mentionRef = useRef<MentionPopoverHandle>(null);
   const [isRecording, setIsRecording] = useState(false);
+  const copySessionId = useCallback(async () => {
+    if (!sessionId) return;
+    try {
+      await navigator.clipboard.writeText(sessionId);
+      toast.success("Session ID copied");
+    } catch {
+      toast.error("Could not copy session ID");
+    }
+  }, [sessionId]);
 
   // Mention autocomplete data
   const { agents } = useAgents();
@@ -3273,10 +3231,6 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
             <PromptInputFooter>
               <div className="flex min-w-0 items-center gap-1">
                 <AttachButton disabled={inputDisabled} />
-                <div className="ml-1 flex min-w-0 items-center gap-2.5">
-                  <ChatInputHint trigger="@" label="mentions" />
-                  <ChatInputHint trigger="/" label="skills" />
-                </div>
               </div>
               <div className="flex min-w-0 items-center gap-1">
                 <MicButton
@@ -3303,9 +3257,29 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
             </PromptInputFooter>
           </PromptInput>
         </MentionPopover>
-        <p className="hidden text-center text-[10px] text-muted-foreground sm:block">
-          Enter to send · Shift+Enter for new line
-        </p>
+        <div className="mt-1 flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-[10px] text-muted-foreground">
+          <ChatInputHint trigger="@" label="mentions" />
+          <span aria-hidden="true">·</span>
+          <ChatInputHint trigger="/" label="skills" />
+          <span aria-hidden="true">·</span>
+          <span>Enter to send</span>
+          <span aria-hidden="true">·</span>
+          <span>Shift+Enter for new line</span>
+          {sessionId && (
+            <>
+              <span aria-hidden="true">·</span>
+              <button
+                type="button"
+                onClick={copySessionId}
+                className="inline-flex min-w-0 items-center gap-1 rounded px-1 py-0.5 font-mono text-[10px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                title="Copy session ID"
+              >
+                <span className="truncate">session:{sessionId.slice(0, 8)}</span>
+                <Copy className="h-2.5 w-2.5 shrink-0" />
+              </button>
+            </>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -3344,9 +3318,15 @@ function ChatLoadingSkeleton({ compact }: { compact?: boolean }) {
                 <PromptInputSubmit disabled />
               </PromptInputFooter>
             </PromptInput>
-            <p className="hidden sm:block text-[10px] text-muted-foreground text-center mt-0.5">
-              @ to mention · / for skills · Enter to send · Shift+Enter for new line.
-            </p>
+            <div className="mt-1 flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-[10px] text-muted-foreground">
+              <ChatInputHint trigger="@" label="mentions" />
+              <span aria-hidden="true">·</span>
+              <ChatInputHint trigger="/" label="skills" />
+              <span aria-hidden="true">·</span>
+              <span>Enter to send</span>
+              <span aria-hidden="true">·</span>
+              <span>Shift+Enter for new line</span>
+            </div>
           </div>
         </div>
       </div>

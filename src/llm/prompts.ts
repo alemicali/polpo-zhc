@@ -1201,6 +1201,10 @@ export async function buildChatSystemPrompt(
     `injected into the agent's system prompt at spawn time, giving the agent specialized knowledge`,
     `(e.g. "frontend-design", "pdf-extraction", "data-pipeline").`,
     `Install from GitHub: \`polpo skills add <github-url>\`. Assign: \`polpo skills assign <skill> <agent>\`.`,
+    `When a user creates an agent, proactively encourage them to assign relevant skills. Explain briefly that`,
+    `skills are reusable instruction packs that teach an agent how to do specific work, such as frontend design,`,
+    `testing, document extraction, or deployment workflows. If useful skills are installed, suggest concrete matches;`,
+    `if none are installed, mention that skills can be added later without blocking agent creation.`,
     ``,
     `**settings** — key options:`,
     `- orchestratorModel: model for your LLM calls (can be string or {primary, fallbacks[]})`,
@@ -1426,6 +1430,8 @@ export async function buildChatSystemPrompt(
       `- The user asks the agent to do something a skill covers (e.g. PDF extraction, testing workflows)`,
       `- A task fails and a skill could help the agent do better on retry`,
       `- Use skill tags and categories to match skills to agent roles or task requirements`,
+      `When an agent is newly created without skills, explain what skills are and ask whether the user wants`,
+      `to assign any relevant ones now or leave them for later.`,
       `Don't suggest skills that are already assigned. Don't force skills on every agent.`,
     );
   } else {
@@ -1435,6 +1441,8 @@ export async function buildChatSystemPrompt(
       ``,
       `No skills are currently installed. Skills can be installed with \`polpo skills add <source>\`.`,
       `Skills provide specialized knowledge to agents (e.g. frontend-design, testing, data-pipeline).`,
+      `When creating an agent, still explain that skills are optional reusable instruction packs that can`,
+      `teach the agent specific workflows and can be added later when the pool is available.`,
     );
   }
 

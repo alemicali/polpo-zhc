@@ -38,17 +38,35 @@ RUN pnpm --filter @polpo-ai/vault-crypto build \
 # ── Stage 2: Runtime ──────────────────────────────────────────────────────────
 FROM node:22-bookworm-slim
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
       bash \
       ca-certificates \
       chromium \
       curl \
+      ffmpeg \
+      file \
+      findutils \
+      fontconfig \
+      fonts-dejavu \
       fonts-liberation \
+      fonts-noto-core \
       fonts-noto-color-emoji \
       git \
+      grep \
+      libreoffice-calc \
+      libreoffice-impress \
+      libreoffice-writer \
       poppler-utils \
+      procps \
       python3 \
       python3-pip \
+      ripgrep \
+      tar \
+      unzip \
+      zip \
+      gzip \
+    && npm install -g agent-browser@0.26.0 \
+    && npm cache clean --force \
     && pip3 install --no-cache-dir --break-system-packages edge-tts \
     && rm -rf /var/lib/apt/lists/*
 
@@ -87,6 +105,8 @@ ENV NODE_ENV=production
 ENV PORT=3890
 ENV POLPO_WORKDIR=/workspace
 ENV POLPO_CHROMIUM_EXECUTABLE=/usr/bin/chromium
+ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium
+ENV AGENT_BROWSER_ARGS=--no-sandbox,--disable-dev-shm-usage,--disable-gpu
 
 EXPOSE 3890
 

@@ -6,7 +6,7 @@
  * shell layer (src/core/events.ts), not here.
  */
 
-import type { Task, TaskStatus, DimensionScore, MissionStatus, MissionReport, ChannelType, PeerIdentity } from "./types.js";
+import type { AgentConfig, Task, TaskStatus, DimensionScore, MissionStatus, MissionReport, ChannelType, PeerIdentity, Team } from "./types.js";
 
 export interface PolpoEventMap {
   // Task lifecycle
@@ -19,6 +19,12 @@ export interface PolpoEventMap {
   "agent:spawned": { taskId: string; agentName: string; taskTitle: string };
   "agent:finished": { taskId: string; agentName: string; exitCode: number; duration: number; sessionId?: string };
   "agent:activity": { taskId: string; agentName: string; tool?: string; file?: string; summary?: string };
+  "agent:created": { agentName: string; teamName?: string; agents: AgentConfig[]; teams: Team[]; timestamp: string };
+  "agent:updated": { agentName: string; agents: AgentConfig[]; teams: Team[]; timestamp: string };
+  "agent:removed": { agentName: string; agents: AgentConfig[]; teams: Team[]; timestamp: string };
+  "team:created": { teamName: string; agents: AgentConfig[]; teams: Team[]; timestamp: string };
+  "team:updated": { oldName?: string; teamName: string; agents: AgentConfig[]; teams: Team[]; timestamp: string };
+  "team:removed": { teamName: string; agents: AgentConfig[]; teams: Team[]; timestamp: string };
 
   // Assessment
   "assessment:started": { taskId: string };

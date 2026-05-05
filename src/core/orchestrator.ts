@@ -101,6 +101,7 @@ export class Orchestrator extends TypedEmitter {
   private stopped = false;
   private assessFn: AssessFn;
   private spawner: Spawner;
+  private ownsSpawner = true;
   private injectedStore?: TaskStore;
   private injectedRunStore?: RunStore;
   private memoryStore!: MemoryStore;
@@ -160,6 +161,9 @@ export class Orchestrator extends TypedEmitter {
     this.workDir = resolve(newWorkDir);
     this.polpoDir = getPolpoDir(this.workDir);
     this.cachedAgentWorkDir = null;
+    if (this.ownsSpawner) {
+      this.spawner = new NodeSpawner({ polpoDir: this.polpoDir, cwd: this.workDir });
+    }
   }
 
   constructor(workDirOrOptions?: string | OrchestratorOptions) {
@@ -178,6 +182,7 @@ export class Orchestrator extends TypedEmitter {
       this.injectedStore = opts.store;
       this.injectedRunStore = opts.runStore;
       this.spawner = opts.spawner ?? new NodeSpawner({ polpoDir: this.polpoDir, cwd: this.workDir });
+      this.ownsSpawner = !opts.spawner;
     }
   }
 
