@@ -100,6 +100,7 @@ const api = async (path: string, init?: RequestInit) => {
     const res = await fetch(`${appConfig.baseUrl}/api/v1${path}`, {
       ...init,
       headers,
+      credentials: "include",
     });
     const data = await res.json();
     return data;
@@ -179,6 +180,7 @@ function arrayOrEmpty<T = unknown>(value: unknown): T[] {
 
 const baseSections = [
   { id: "general", label: "General", icon: Hash },
+  { id: "members", label: "Members", icon: Users },
   { id: "agent", label: "Agent", icon: Bot },
   { id: "providers", label: "Providers", icon: Key },
   { id: "channels", label: "Channels", icon: Send },
@@ -1527,6 +1529,175 @@ function AppearanceTab() {
   );
 }
 
+interface InstanceMember {
+  email: string;
+}
+
+function MembersTab() {
+  const [members, setMembers] = useState<InstanceMember[]>([]);
+  const [enabled, setEnabled] = useState(false);
+  const [email, setEmail] = useState("");
+  const [sendInvite, setSendInvite] = useState(true);
+  const [loading, setLoading] = useState(true);
+  const [busyEmail, setBusyEmail] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  const loadMembers = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await api("/auth/instance/members");
+      if (!res.ok) throw new Error(res.error ?? "Could not load members");
+      setEnabled(!!res.data?.enabled);
+      setMembers(arrayOrEmpty<InstanceMember>(res.data?.members));
+    } catch (err) {
+      toast.error((err as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadMembers();
+  }, [loadMembers]);
+
+  const addMember = async () => {
+    const normalized = email.trim().toLowerCase();
+    if (!normalized) return;
+    setSaving(true);
+    try {
+      const res = await api("/auth/instance/members", {
+        method: "POST",
+        body: JSON.stringify({ email: normalized, sendInvite }),
+      });
+      if (!res.ok) throw new Error(res.error ?? "Could not add member");
+      setMembers(arrayOrEmpty<InstanceMember>(res.data?.members));
+      setEmail("");
+      if (sendInvite && res.data?.inviteError) {
+        toast.warning(`Member added, invite not sent: ${res.data.inviteError}`);
+      } else if (sendInvite && res.data?.invited) {
+        toast.success("Member added and invite sent");
+      } else {
+        toast.success("Member added");
+      }
+    } catch (err) {
+      toast.error((err as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const removeMember = async (memberEmail: string) => {
+    setBusyEmail(memberEmail);
+    try {
+      const res = await api(`/auth/instance/members/${encodeURIComponent(memberEmail)}`, { method: "DELETE" });
+      if (!res.ok) throw new Error(res.error ?? "Could not remove member");
+      setMembers(arrayOrEmpty<InstanceMember>(res.data?.members));
+      toast.success("Member removed");
+    } catch (err) {
+      toast.error((err as Error).message);
+    } finally {
+      setBusyEmail(null);
+    }
+  };
+
+  return (
+    <div className="space-y-4 max-w-2xl">
+      <section>
+        <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5 flex items-center gap-1.5">
+          <Users className="h-3.5 w-3.5" /> Tenant Members
+        </h3>
+        <p className="text-xs text-muted-foreground">
+          These emails can request a magic link and access this Polpo instance.
+        </p>
+      </section>
+
+      {!enabled && (
+        <Card className="bg-muted/20 border-border/40 py-0 gap-0">
+          <CardContent className="py-3 px-4 flex items-start gap-2">
+            <Unlock className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+            <div>
+              <p className="text-sm font-medium">Instance auth is disabled</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Set <code className="font-mono">POLPO_AUTH_ENABLED=true</code> to enforce the member allowlist.
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      <Card className="bg-card/80 border-border/40 py-0 gap-0">
+        <CardContent className="py-3 px-4 space-y-3">
+          <div className="flex flex-col sm:flex-row gap-2">
+            <div className="relative flex-1">
+              <Mail className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+              <Input
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") void addMember();
+                }}
+                type="email"
+                inputMode="email"
+                placeholder="person@example.com"
+                className="pl-8"
+              />
+            </div>
+            <Button size="sm" className="h-9 gap-1.5" onClick={addMember} disabled={saving || !email.trim()}>
+              {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
+              Add
+            </Button>
+          </div>
+          <label className={cn(
+            "flex w-fit items-center gap-2 rounded-md border border-border/40 bg-muted/20 px-2.5 py-1.5 text-xs text-muted-foreground",
+            !enabled && "opacity-60",
+          )}>
+            <input
+              type="checkbox"
+              checked={sendInvite}
+              onChange={(e) => setSendInvite(e.target.checked)}
+              disabled={!enabled}
+              className="h-3.5 w-3.5 accent-primary"
+            />
+            Send invite email now
+          </label>
+
+          {loading ? (
+            <div className="flex items-center gap-2 py-6 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" /> Loading members...
+            </div>
+          ) : members.length > 0 ? (
+            <div className="divide-y divide-border/40 rounded-lg border border-border/40 overflow-hidden">
+              {members.map((member) => (
+                <div key={member.email} className="flex items-center gap-3 px-3 py-2.5 bg-background/40">
+                  <div className="h-7 w-7 rounded-full bg-primary/10 text-primary flex items-center justify-center shrink-0">
+                    <Mail className="h-3.5 w-3.5" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium truncate">{member.email}</p>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                    onClick={() => removeMember(member.email)}
+                    disabled={members.length <= 1 || busyEmail === member.email}
+                    title={members.length <= 1 ? "At least one member must remain" : "Remove member"}
+                  >
+                    {busyEmail === member.email ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                  </Button>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <Empty text="No members configured" />
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
 function AgentTab({ settings, primaryModel, fallbackModels, authStatus, onUpdateSettings }: {
   settings: PolpoSettings;
   primaryModel: string | undefined;
@@ -2416,6 +2587,11 @@ export function ConfigPage() {
         {/* ═══ APPEARANCE ═══ */}
         {activeSection === "appearance" && (
           <AppearanceTab />
+        )}
+
+        {/* ═══ MEMBERS ═══ */}
+        {activeSection === "members" && (
+          <MembersTab />
         )}
 
         {/* ═══ AGENT (orchestrator config) ═══ */}

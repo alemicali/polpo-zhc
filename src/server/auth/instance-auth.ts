@@ -108,6 +108,46 @@ export function createInitialInstanceAuth(polpoDir: string, adminEmail: string):
   return config;
 }
 
+export function listAllowedEmails(polpoDir: string): string[] {
+  return loadInstanceAuth(polpoDir)?.allowedEmails ?? [];
+}
+
+export function addAllowedEmail(polpoDir: string, email: string): InstanceAuthConfig {
+  const now = new Date().toISOString();
+  const normalized = normalizeEmail(email);
+  const config = loadInstanceAuth(polpoDir) ?? {
+    enabled: true,
+    allowedEmails: [],
+    magicLinks: [],
+    sessions: [],
+    createdAt: now,
+    updatedAt: now,
+  };
+  if (!config.allowedEmails.includes(normalized)) {
+    config.allowedEmails = [...config.allowedEmails, normalized].sort();
+    config.updatedAt = now;
+    saveInstanceAuth(polpoDir, config);
+  }
+  return config;
+}
+
+export function removeAllowedEmail(polpoDir: string, email: string): { config: InstanceAuthConfig; removed: boolean } | null {
+  const config = loadInstanceAuth(polpoDir);
+  if (!config) return null;
+
+  const normalized = normalizeEmail(email);
+  const nextEmails = config.allowedEmails.filter((allowed) => allowed !== normalized);
+  const removed = nextEmails.length !== config.allowedEmails.length;
+  if (!removed) return { config, removed: false };
+
+  config.allowedEmails = nextEmails;
+  config.magicLinks = config.magicLinks.filter((link) => link.email !== normalized);
+  config.sessions = config.sessions.filter((session) => session.email !== normalized);
+  config.updatedAt = new Date().toISOString();
+  saveInstanceAuth(polpoDir, config);
+  return { config, removed: true };
+}
+
 export function createMagicLink(polpoDir: string, email: string): { token: string; expiresAt: string } | null {
   const config = loadInstanceAuth(polpoDir);
   const normalized = normalizeEmail(email);

@@ -2,13 +2,16 @@ import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import {
   AUTH_COOKIE_NAME,
+  addAllowedEmail,
   clearSession,
   consumeMagicLink,
   createInitialInstanceAuth,
   createMagicLink,
   isInstanceAuthEnabled,
+  listAllowedEmails,
   loadInstanceAuth,
   normalizeEmail,
+  removeAllowedEmail,
   validateSession,
 } from "../auth/instance-auth.js";
 
@@ -120,6 +123,104 @@ const logoutRoute = createRoute({
   },
 });
 
+const membersRoute = createRoute({
+  method: "get",
+  path: "/members",
+  tags: ["Auth"],
+  summary: "List allowed instance members",
+  responses: {
+    200: {
+      content: {
+        "application/json": {
+          schema: z.object({
+            ok: z.boolean(),
+            data: z.object({
+              enabled: z.boolean(),
+              members: z.array(z.object({ email: z.string() })),
+            }),
+          }),
+        },
+      },
+      description: "Allowed members",
+    },
+    401: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string() }) } },
+      description: "Login required",
+    },
+  },
+});
+
+const addMemberRoute = createRoute({
+  method: "post",
+  path: "/members",
+  tags: ["Auth"],
+  summary: "Add an allowed instance member",
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: z.object({
+            email: z.string().email(),
+            sendInvite: z.boolean().optional(),
+          }),
+        },
+      },
+    },
+  },
+  responses: {
+    200: {
+      content: {
+        "application/json": {
+          schema: z.object({
+            ok: z.boolean(),
+            data: z.object({
+              members: z.array(z.object({ email: z.string() })),
+              invited: z.boolean().optional(),
+              inviteError: z.string().optional(),
+            }),
+          }),
+        },
+      },
+      description: "Member added",
+    },
+    401: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string() }) } },
+      description: "Login required",
+    },
+  },
+});
+
+const removeMemberRoute = createRoute({
+  method: "delete",
+  path: "/members/{email}",
+  tags: ["Auth"],
+  summary: "Remove an allowed instance member",
+  request: {
+    params: z.object({ email: z.string().min(1) }),
+  },
+  responses: {
+    200: {
+      content: {
+        "application/json": {
+          schema: z.object({
+            ok: z.boolean(),
+            data: z.object({ members: z.array(z.object({ email: z.string() })) }),
+          }),
+        },
+      },
+      description: "Member removed",
+    },
+    400: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string() }) } },
+      description: "Cannot remove member",
+    },
+    401: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string() }) } },
+      description: "Login required",
+    },
+  },
+});
+
 export function instanceAuthRoutes(polpoDir: string): OpenAPIHono {
   const app = new OpenAPIHono();
 
@@ -198,7 +299,72 @@ export function instanceAuthRoutes(polpoDir: string): OpenAPIHono {
     return c.json({ ok: true, data: { loggedOut: true } }, 200);
   });
 
+  app.openapi(membersRoute, (c) => {
+    const auth = requireMemberManagementAuth(polpoDir, getCookie(c, AUTH_COOKIE_NAME));
+    if (auth) return c.json(auth, 401);
+    return c.json({
+      ok: true,
+      data: {
+        enabled: isInstanceAuthEnabled(),
+        members: listAllowedEmails(polpoDir).map((email) => ({ email })),
+      },
+    }, 200);
+  });
+
+  app.openapi(addMemberRoute, async (c) => {
+    const auth = requireMemberManagementAuth(polpoDir, getCookie(c, AUTH_COOKIE_NAME));
+    if (auth) return c.json(auth, 401);
+    const { email, sendInvite } = c.req.valid("json");
+    const config = addAllowedEmail(polpoDir, email);
+    const normalizedEmail = normalizeEmail(email);
+    let invited = false;
+    let inviteError: string | undefined;
+
+    if (sendInvite && isInstanceAuthEnabled()) {
+      const link = createMagicLink(polpoDir, normalizedEmail);
+      if (link) {
+        const callbackUrl = `${resolveServerPublicUrl(c.req.raw)}/api/v1/auth/instance/callback?token=${encodeURIComponent(link.token)}`;
+        try {
+          await sendMagicLinkEmail(normalizedEmail, callbackUrl, link.expiresAt);
+          invited = true;
+        } catch (err) {
+          inviteError = err instanceof Error ? err.message : "Failed to send invite";
+        }
+      }
+    }
+
+    return c.json({
+      ok: true,
+      data: {
+        members: config.allowedEmails.map((allowedEmail) => ({ email: allowedEmail })),
+        invited,
+        inviteError,
+      },
+    }, 200);
+  });
+
+  app.openapi(removeMemberRoute, (c) => {
+    const auth = requireMemberManagementAuth(polpoDir, getCookie(c, AUTH_COOKIE_NAME));
+    if (auth) return c.json(auth, 401);
+    const { email } = c.req.valid("param");
+    const config = loadInstanceAuth(polpoDir);
+    if ((config?.allowedEmails.length ?? 0) <= 1) {
+      return c.json({ ok: false, error: "At least one member must remain." }, 400);
+    }
+    const result = removeAllowedEmail(polpoDir, decodeURIComponent(email));
+    return c.json({
+      ok: true,
+      data: { members: (result?.config.allowedEmails ?? listAllowedEmails(polpoDir)).map((allowedEmail) => ({ email: allowedEmail })) },
+    }, 200);
+  });
+
   return app;
+}
+
+function requireMemberManagementAuth(polpoDir: string, sessionToken: string | undefined): { ok: false; error: string } | null {
+  if (!isInstanceAuthEnabled()) return null;
+  const session = validateSession(polpoDir, sessionToken);
+  return session ? null : { ok: false, error: "Login required" };
 }
 
 function resolveServerPublicUrl(req: Request): string {
