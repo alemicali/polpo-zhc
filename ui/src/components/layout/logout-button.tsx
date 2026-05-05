@@ -17,7 +17,7 @@ export function LogoutButton({ className }: { className?: string }) {
 
   useEffect(() => {
     let alive = true;
-    fetch(`${config.baseUrl}/api/v1/auth/status`, { credentials: "include" })
+    fetch(`${config.baseUrl}/api/v1/auth/instance/status`, { credentials: "include" })
       .then((res) => res.json())
       .then((body) => {
         if (!alive) return;
@@ -32,7 +32,7 @@ export function LogoutButton({ className }: { className?: string }) {
   const logout = async () => {
     setBusy(true);
     try {
-      await fetch(`${config.baseUrl}/api/v1/auth/logout`, {
+      await fetch(`${config.baseUrl}/api/v1/auth/instance/logout`, {
         method: "POST",
         credentials: "include",
       });

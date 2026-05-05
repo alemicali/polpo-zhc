@@ -77,7 +77,7 @@ function SetupModeRedirect({ children }: { children: React.ReactNode }) {
         }
 
         if (auth?.enabled) {
-          const authStatus = await fetch(`${config.baseUrl}/api/v1/auth/status`, { credentials: "include" })
+          const authStatus = await fetch(`${config.baseUrl}/api/v1/auth/instance/status`, { credentials: "include" })
             .then((res) => res.json())
             .catch(() => null);
           if (cancelled) return;

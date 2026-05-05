@@ -667,7 +667,7 @@ export function SetupPage() {
     setSetupError(null);
     try {
       if (authBootstrapOnly) {
-        const result = await api("/auth/setup", {
+        const result = await api("/auth/instance/setup", {
           method: "POST",
           body: JSON.stringify({ email: adminEmail.trim() }),
         });

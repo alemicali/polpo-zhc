@@ -10,7 +10,7 @@ import { config } from "@/lib/config";
 async function authApi(path: string, init?: RequestInit) {
   const headers: Record<string, string> = { ...(init?.headers as Record<string, string> | undefined) };
   if (init?.body) headers["Content-Type"] = "application/json";
-  const res = await fetch(`${config.baseUrl}/api/v1/auth${path}`, {
+  const res = await fetch(`${config.baseUrl}/api/v1/auth/instance${path}`, {
     ...init,
     headers,
     credentials: "include",

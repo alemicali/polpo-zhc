@@ -93,7 +93,11 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
   // Config status + initialize — always available so setup wizard works
   if (opts?.workDir) {
     app.route("/api/v1/config", publicConfigRoutes(orchestrator, opts.workDir, opts.onInitialize));
-    app.route("/api/v1/auth", instanceAuthRoutes(getPolpoDir(opts.workDir)));
+    // NB: mounted at /auth/instance to avoid path collision with the
+    // provider-auth-status routes (/api/v1/auth/status) that live behind
+    // the auth gate. Instance-auth deals with this Polpo *instance*'s
+    // session/login; provider-auth-status deals with LLM provider keys.
+    app.route("/api/v1/auth/instance", instanceAuthRoutes(getPolpoDir(opts.workDir)));
   }
 
   // Filesystem browsing — always available (used by setup wizard path picker)

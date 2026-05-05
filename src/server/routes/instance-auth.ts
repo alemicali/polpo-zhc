@@ -150,7 +150,7 @@ export function instanceAuthRoutes(polpoDir: string): OpenAPIHono {
     }
 
     const serverUrl = resolveServerPublicUrl(c.req.raw);
-    const callbackUrl = `${serverUrl}/api/v1/auth/callback?token=${encodeURIComponent(link.token)}`;
+    const callbackUrl = `${serverUrl}/api/v1/auth/instance/callback?token=${encodeURIComponent(link.token)}`;
     try {
       await sendMagicLinkEmail(email, callbackUrl, link.expiresAt);
       return c.json({ ok: true, data: { sent: true } }, 200);
