@@ -35,6 +35,9 @@ RUN pnpm --filter @polpo-ai/vault-crypto build \
     && pnpm --filter @polpo-ai/tools build \
     && ./node_modules/.bin/tsc
 
+# ── code-server runtime bits ─────────────────────────────────────────────────
+FROM codercom/code-server:4.117.0 AS code_server
+
 # ── Stage 2: Runtime ──────────────────────────────────────────────────────────
 FROM node:22-bookworm-slim
 
@@ -65,10 +68,13 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
       unzip \
       zip \
       gzip \
-    && npm install --unsafe-perm -g agent-browser@0.26.0 code-server \
+    && npm install -g agent-browser@0.26.0 \
     && npm cache clean --force \
     && pip3 install --no-cache-dir --break-system-packages edge-tts \
     && rm -rf /var/lib/apt/lists/*
+
+COPY --from=code_server /usr/bin/code-server /usr/bin/code-server
+COPY --from=code_server /usr/lib/code-server /usr/lib/code-server
 
 RUN corepack enable && corepack prepare pnpm@10.29.3 --activate
 
