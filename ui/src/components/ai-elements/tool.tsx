@@ -67,6 +67,7 @@ const INTERACTIVE_LABELS: Record<string, string> = {
   update_vault_credentials: "Updating vault credentials…",
   navigate_to: "Navigating…",
   open_tab: "Opening tab…",
+  set_design: "Updating design…",
 };
 
 /** Convert tool_name to "Tool Name" */
@@ -148,6 +149,8 @@ export function ToolInvocation({
   useEffect(() => {
     if (shouldOpenForStreamingInput || tool.state === "error") {
       setOpen(true);
+    } else if (tool.state === "completed" || tool.state === "interrupted") {
+      setOpen(false);
     }
   }, [shouldOpenForStreamingInput, tool.state]);
 
@@ -181,8 +184,10 @@ export function ToolInvocation({
         </div>
       );
     }
-    // Already executed — don't render anything
-    return null;
+    if (tool.state !== "preparing") {
+      // Already executed — don't render anything
+      return null;
+    }
   }
 
   return (
@@ -312,8 +317,10 @@ export function ToolCallGroup({ tools, className, ...props }: ToolCallGroupProps
   useEffect(() => {
     if (hasError || shouldOpenForStreamingInput) {
       setOpen(true);
+    } else if (!isCalling) {
+      setOpen(false);
     }
-  }, [hasError, shouldOpenForStreamingInput]);
+  }, [hasError, isCalling, shouldOpenForStreamingInput]);
 
   const summaryIcon = isCalling
     ? <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />

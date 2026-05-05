@@ -29,7 +29,7 @@ import {
   Monitor,
   Github,
   PanelLeft,
-  MessageCircle,
+  History,
   ChevronsLeft,
   Plus,
   Palette as PaletteIcon,
@@ -92,13 +92,13 @@ function ChatPanelHeader() {
   const chatActions = useChatActions();
 
   return (
-    <header className="min-h-safe-head flex shrink-0 items-center justify-between border-b border-border/50 bg-background/80 px-4 pt-safe-head backdrop-blur-md lg:min-h-14 lg:pt-0">
+    <header className="flex min-h-12 shrink-0 items-center justify-between border-b border-border/50 bg-background/80 px-4 pt-0 backdrop-blur-md max-lg:min-h-safe-head max-lg:pt-safe-head lg:min-h-14">
       <div className="flex min-w-0 items-center gap-2.5">
         <span className="text-lg">🐙</span>
         <div className="min-w-0">
-          <h2 className="truncate text-sm font-bold tracking-tight">ZHC by Polpo</h2>
+          <h2 className="truncate text-sm font-bold tracking-tight">{info?.project ?? "Polpo"}</h2>
           <p className="text-[9px] font-mono uppercase tracking-widest text-muted-foreground/50 leading-none">
-            {info?.project ?? "Agent Wrangler"}
+            AI Factory
           </p>
         </div>
       </div>
@@ -116,7 +116,7 @@ function ChatPanelHeader() {
               )}
               onClick={toggleChatFirstSessions}
             >
-              {sessionsOpen ? <ChevronsLeft className="h-4 w-4" /> : <MessageCircle className="h-4 w-4" />}
+              {sessionsOpen ? <ChevronsLeft className="h-4 w-4" /> : <History className="h-4 w-4" />}
             </Button>
           </TooltipTrigger>
           <TooltipContent side="bottom" className="text-xs">
@@ -150,7 +150,7 @@ const PagesPanelHeader = memo(function PagesPanelHeader() {
   const { palette, setPalette } = usePalette();
 
   return (
-    <header className="min-h-safe-head flex shrink-0 items-center gap-2 bg-background/80 px-3 pt-safe-head backdrop-blur-md lg:min-h-14 lg:pt-0">
+    <header className="flex min-h-12 shrink-0 items-center gap-2 bg-background/80 px-3 pt-0 backdrop-blur-md max-lg:min-h-safe-head max-lg:pt-safe-head lg:min-h-14">
       {/* Tab icons — plain buttons with navigate() */}
       <div className="flex items-center gap-0.5 flex-1 min-w-0">
         {tabs.map(({ path, icon: Icon, label }) => {

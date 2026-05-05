@@ -38,6 +38,8 @@ import type { InkPackage, InkLockEntry } from "../core/ink.js";
 import { FileTeamStore } from "../stores/file-team-store.js";
 import { FileAgentStore } from "../stores/file-agent-store.js";
 import { FileMemoryStore } from "../stores/file-memory-store.js";
+import { detectProviders } from "../setup/providers.js";
+import { listModels, resolveModelSpec } from "./pi-client.js";
 
 
 
@@ -570,6 +572,11 @@ const addAgentTool: Tool = {
     model: Type.Optional(Type.String({ description: "LLM model (e.g. 'claude-sonnet-4-5-20250929', 'gpt-4o')" })),
     systemPrompt: Type.Optional(Type.String({ description: "Custom system prompt for this agent" })),
     skills: Type.Optional(Type.Array(Type.String(), { description: "Skill names to assign" })),
+    suggestions: Type.Optional(Type.Array(Type.Union([Type.String(), Type.Object({
+      title: Type.String({ description: "Short suggestion label shown in the chat empty state" }),
+      prompt: Type.Optional(Type.String({ description: "Prompt to send when selected. Defaults to title." })),
+      description: Type.Optional(Type.String({ description: "Short helper text shown below the title" })),
+    })]), { description: "Starter prompts shown when opening a new chat with this agent. Items can be strings or objects." })),
     allowedPaths: Type.Optional(Type.Array(Type.String(), { description: "Filesystem paths this agent can access (relative to workDir)" })),
     allowedTools: Type.Optional(Type.Array(Type.String(), { description: "Tool names/wildcards to enable (e.g. ['read','write','bash','browser_*','email_*','image_*','video_*','audio_*','excel_*','pdf_*','docx_*','whatsapp_*']). Vault tools are always available. Omit for core coding tools only." })),
     reportsTo: Type.Optional(Type.String({ description: "Name of the agent this one reports to (org chart hierarchy, e.g. 'lead-dev')" })),
@@ -599,6 +606,11 @@ const updateAgentTool: Tool = {
     model: Type.Optional(Type.String({ description: "New LLM model" })),
     systemPrompt: Type.Optional(Type.String({ description: "New system prompt" })),
     skills: Type.Optional(Type.Array(Type.String(), { description: "New skill list (replaces existing)" })),
+    suggestions: Type.Optional(Type.Array(Type.Union([Type.String(), Type.Object({
+      title: Type.String({ description: "Short suggestion label shown in the chat empty state" }),
+      prompt: Type.Optional(Type.String({ description: "Prompt to send when selected. Defaults to title." })),
+      description: Type.Optional(Type.String({ description: "Short helper text shown below the title" })),
+    })]), { description: "Starter prompts shown when opening a new chat with this agent (replaces existing). Items can be strings or objects." })),
     allowedPaths: Type.Optional(Type.Array(Type.String(), { description: "New allowed paths (replaces existing)" })),
     allowedTools: Type.Optional(Type.Array(Type.String(), { description: "Tool names/wildcards to enable (replaces existing). Include 'browser_*', 'email_*', 'image_*', 'video_*', 'audio_*', 'excel_*', 'pdf_*', 'docx_*', or 'whatsapp_*' to grant those categories. Vault tools are always available. Omit to keep current." })),
     reportsTo: Type.Optional(Type.String({ description: "Name of the agent this one reports to. Use empty string to remove." })),
@@ -1453,6 +1465,47 @@ This is a client-side action — calls window.open() in the user's browser.`,
   }),
 };
 
+const designThemeParameters = Type.Object({
+  primary: Type.String({ description: "Primary color as 6-digit hex, e.g. #2563eb" }),
+  secondary: Type.String({ description: "Secondary/accent color as 6-digit hex, e.g. #f1f5f9" }),
+  text: Type.String({ description: "Main text color as 6-digit hex, e.g. #0f172a" }),
+  radius: Type.Number({ description: "Roundedness in pixels, 0-24" }),
+  fontFamily: Type.String({ description: "CSS font-family stack. Supports any installed or loaded browser font." }),
+});
+
+const setDesignTool: Tool = {
+  name: "set_design",
+  description: `Propose UI appearance overrides on the user's device.
+Use this when the user asks to change the app design, colors, typography, or roundness.
+This is a client-side action: the UI shows a preview and the user must confirm before applying it.
+
+Supported properties:
+- enabled: turn appearance overrides on/off. Use true when setting any override, false to restore the selected palette.
+- light: complete light-mode override object.
+- dark: complete dark-mode override object.
+
+Each light/dark object must include every supported override field:
+- primary: main brand/action color as a 6-digit hex value, e.g. "#2563eb".
+- secondary: secondary/accent surface color as a 6-digit hex value.
+- text: main text color as a 6-digit hex value.
+- radius: roundedness in pixels, 0-24.
+- fontFamily: any valid CSS font-family stack, e.g. '"Inter", ui-sans-serif, system-ui, sans-serif'.
+
+Examples:
+- set_design({ enabled: true, light: { primary: "#7c3aed", secondary: "#f4f4f5", text: "#18181b", radius: 12, fontFamily: '"Inter", ui-sans-serif, system-ui, sans-serif' }, dark: { primary: "#a78bfa", secondary: "#27272a", text: "#fafafa", radius: 12, fontFamily: '"Inter", ui-sans-serif, system-ui, sans-serif' } })
+- set_design({ enabled: false })`,
+  parameters: Type.Object({
+    enabled: Type.Optional(Type.Boolean({ description: "Enable or disable appearance overrides. Defaults to true when any override property is provided." })),
+    light: Type.Optional(designThemeParameters),
+    dark: Type.Optional(designThemeParameters),
+    primary: Type.Optional(Type.String({ description: "Legacy fallback: primary color as 6-digit hex, applied to both modes when light/dark are omitted." })),
+    secondary: Type.Optional(Type.String({ description: "Legacy fallback: secondary/accent color as 6-digit hex, applied to both modes when light/dark are omitted." })),
+    text: Type.Optional(Type.String({ description: "Legacy fallback: main text color as 6-digit hex, applied to both modes when light/dark are omitted." })),
+    radius: Type.Optional(Type.Number({ description: "Legacy fallback: roundedness in pixels, 0-24, applied to both modes when light/dark are omitted." })),
+    fontFamily: Type.Optional(Type.String({ description: "Legacy fallback: CSS font-family stack, applied to both modes when light/dark are omitted." })),
+  }),
+};
+
 // ═══════════════════════════════════════════════════════
 //  INTERACTIVE TOOLS
 // ═══════════════════════════════════════════════════════
@@ -1542,7 +1595,7 @@ export const WRITE_TOOLS = new Set([
 ]);
 
 /** Tools that pause the conversation to collect user input / show a preview. */
-export const INTERACTIVE_TOOLS = new Set(["ask_user", "create_mission", "set_vault_entry", "open_file", "navigate_to", "open_tab"]);
+export const INTERACTIVE_TOOLS = new Set(["ask_user", "create_mission", "set_vault_entry", "open_file", "navigate_to", "open_tab", "set_design"]);
 
 export function needsApproval(toolName: string): boolean {
   return WRITE_TOOLS.has(toolName);
@@ -1607,8 +1660,8 @@ export const ALL_ORCHESTRATOR_TOOLS: Tool[] = [
   whatsappSendTool, whatsappReadTool,
   // Interactive (1)
   askUserTool,
-  // Client-side (3)
-  openFileTool, navigateToTool, openTabTool,
+  // Client-side (4)
+  openFileTool, navigateToTool, openTabTool, setDesignTool,
 ];
 
 /** Tool action labels for the approval prompt title. */
@@ -1696,6 +1749,7 @@ const TOOL_LABELS: Record<string, string> = {
   whatsapp_read: "WhatsApp Read",
   // Client-side
   open_tab: "Open Tab",
+  set_design: "Set Design",
   // Ink Hub
   ink_search: "Search Ink Hub",
   ink_browse: "Browse Installed Packages",
@@ -2193,6 +2247,16 @@ export async function formatToolDetails(
     case "open_tab":
       main.push(["URL", trunc(args.url)]);
       if (args.label) main.push(["Label", trunc(args.label)]);
+      break;
+    case "set_design":
+      if (args.enabled !== undefined) main.push(["Override", args.enabled ? "on" : "off"]);
+      if (args.light) main.push(["Light", "custom"]);
+      if (args.dark) main.push(["Dark", "custom"]);
+      if (args.primary) main.push(["Primary", String(args.primary)]);
+      if (args.secondary) main.push(["Secondary", String(args.secondary)]);
+      if (args.text) main.push(["Text", String(args.text)]);
+      if (args.radius !== undefined) main.push(["Radius", String(args.radius)]);
+      if (args.fontFamily) extra.push(["Font", trunc(args.fontFamily)]);
       break;
     default:
       for (const [k, v] of Object.entries(args)) {
@@ -2731,6 +2795,31 @@ async function execUpdateMissionNotifications(polpo: Orchestrator, args: Record<
 //  TEAM IMPLEMENTATIONS
 // ═══════════════════════════════════════════════════════
 
+function getModelProvider(spec: string | undefined): string | undefined {
+  if (!spec) return undefined;
+  if (spec.includes(":")) return spec.split(":")[0];
+  if (spec.includes("/")) return spec.split("/")[0];
+  return undefined;
+}
+
+function resolveAgentModelForConnectedProvider(polpo: Orchestrator, requested: string | undefined): string | undefined {
+  const connectedProviders = detectProviders().filter((provider) => provider.hasKey).map((provider) => provider.name);
+  if (connectedProviders.length === 0) return requested;
+
+  const requestedProvider = getModelProvider(requested);
+  if (requested && requestedProvider && connectedProviders.includes(requestedProvider)) return requested;
+
+  const orchestratorModel = resolveModelSpec(polpo.getConfig()?.settings?.orchestratorModel);
+  const orchestratorProvider = getModelProvider(orchestratorModel);
+  if (orchestratorModel && orchestratorProvider && connectedProviders.includes(orchestratorProvider)) {
+    return orchestratorModel;
+  }
+
+  const fallbackProvider = connectedProviders[0];
+  const fallbackModel = listModels(fallbackProvider)[0];
+  return fallbackModel ? `${fallbackProvider}:${fallbackModel.id}` : requested;
+}
+
 async function execAddAgent(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
   const existing = await polpo.getAgents();
   // For add_agent, check if agent already exists (by name or displayName)
@@ -2739,12 +2828,14 @@ async function execAddAgent(polpo: Orchestrator, args: Record<string, unknown>):
     return `Error: Agent "${args.name}" already exists (matched "${dup.name}"). Use update_agent to modify.`;
   }
   const teamName = args.team as string | undefined;
+  const model = resolveAgentModelForConnectedProvider(polpo, args.model as string | undefined);
   const config: Record<string, unknown> = {
     name: args.name as string,
     role: args.role as string | undefined,
-    model: args.model as string | undefined,
+    model,
     systemPrompt: args.systemPrompt as string | undefined,
     skills: args.skills as string[] | undefined,
+    suggestions: args.suggestions as Array<string | { title: string; prompt?: string; description?: string }> | undefined,
     allowedPaths: args.allowedPaths as string[] | undefined,
     allowedTools: args.allowedTools as string[] | undefined,
     reportsTo: args.reportsTo as string | undefined,
@@ -2786,9 +2877,10 @@ async function execUpdateAgent(polpo: Orchestrator, args: Record<string, unknown
   // Build updates from explicit args, only including fields that were provided
   const updates: Record<string, unknown> = {};
   if (args.role !== undefined) updates.role = args.role as string;
-  if (args.model !== undefined) updates.model = args.model as string;
+  if (args.model !== undefined) updates.model = resolveAgentModelForConnectedProvider(polpo, args.model as string | undefined);
   if (args.systemPrompt !== undefined) updates.systemPrompt = args.systemPrompt as string;
   if (args.skills !== undefined) updates.skills = args.skills as string[];
+  if (args.suggestions !== undefined) updates.suggestions = args.suggestions as Array<string | { title: string; prompt?: string; description?: string }>;
   if (args.allowedPaths !== undefined) updates.allowedPaths = args.allowedPaths as string[];
   if (args.allowedTools !== undefined) updates.allowedTools = args.allowedTools as string[];
   if (args.reportsTo !== undefined) updates.reportsTo = reportsTo;

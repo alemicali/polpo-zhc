@@ -494,7 +494,7 @@
     height: 100dvh;
     width: 100%;
     max-width: 100%;
-    font-family: "Satoshi", ui-sans-serif, system-ui, sans-serif;
+    font-family: var(--app-font-family, "Satoshi", ui-sans-serif, system-ui, sans-serif);
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
@@ -540,25 +540,30 @@
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --safe-left: env(safe-area-inset-left, 0px);
   --safe-right: env(safe-area-inset-right, 0px);
-  --mobile-nav-reserve: calc(5.75rem + var(--safe-bottom));
+  --mobile-nav-offset: max(0.15rem, calc(var(--safe-bottom) - 0.45rem));
+  --mobile-nav-reserve: calc(4.75rem + var(--mobile-nav-offset));
 }
 
-.pt-safe { padding-top: var(--safe-top); }
-.pb-safe { padding-bottom: var(--safe-bottom); }
-.pl-safe { padding-left: var(--safe-left); }
-.pr-safe { padding-right: var(--safe-right); }
-.px-safe {
-  padding-left: var(--safe-left);
-  padding-right: var(--safe-right);
-}
-.mt-safe { margin-top: var(--safe-top); }
-.mb-safe { margin-bottom: var(--safe-bottom); }
-.pt-safe-head { padding-top: max(var(--safe-top), 1rem); }
-.min-h-safe-head { min-height: calc(3rem + max(var(--safe-top), 1rem)); }
+/* Safe-area utilities — wrapped in @layer utilities so tailwind responsive
+ * overrides like `lg:pt-0` can win the cascade against them. */
+@layer utilities {
+  .pt-safe { padding-top: var(--safe-top); }
+  .pb-safe { padding-bottom: var(--safe-bottom); }
+  .pl-safe { padding-left: var(--safe-left); }
+  .pr-safe { padding-right: var(--safe-right); }
+  .px-safe {
+    padding-left: var(--safe-left);
+    padding-right: var(--safe-right);
+  }
+  .mt-safe { margin-top: var(--safe-top); }
+  .mb-safe { margin-bottom: var(--safe-bottom); }
+  .pt-safe-head { padding-top: max(var(--safe-top), 1.5rem); }
+  .min-h-safe-head { min-height: calc(3rem + max(var(--safe-top), 1.5rem)); }
 
-/* Bottom padding for mobile nav */
-.pb-bottom-nav {
-  padding-bottom: var(--mobile-nav-reserve);
+  /* Bottom padding for mobile nav */
+  .pb-bottom-nav {
+    padding-bottom: var(--mobile-nav-reserve);
+  }
 }
 
 @media (max-width: 767px) {

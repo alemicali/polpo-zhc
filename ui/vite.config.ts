@@ -13,8 +13,8 @@ const pwaPlugin = VitePWA({
   registerType: "autoUpdate",
   includeAssets: ["favicon.svg", "icons/*.png"],
   manifest: {
-    name: "ZHC by Polpo — AI Agent Wrangler",
-    short_name: "ZHC by Polpo",
+    name: "Polpo ZHC — AI Factory",
+    short_name: "Polpo ZHC",
     description:
       "Monitor and orchestrate your AI coding agent team",
     theme_color: "#0a0e1a",

@@ -10,15 +10,15 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
-import { User, ListChecks, Target, FileText, Sparkles, Workflow } from "lucide-react";
+import { User, ListChecks, Target, FileText, BookOpen, Workflow } from "lucide-react";
 import {
   Popover,
   PopoverAnchor,
   PopoverContent,
 } from "@/components/ui/popover";
-import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import type { AgentConfig, Task, Mission, SkillWithAssignment, PlaybookInfo } from "@polpo-ai/react";
+import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 
 // ────────────────────────────────────────────────────────────────────────────
 // Types
@@ -61,6 +61,12 @@ interface MentionItem {
   category: MentionCategory;
 }
 
+type MentionRow =
+  | { type: "header"; key: string; category: MentionCategory; count: number }
+  | { type: "item"; key: string; item: MentionItem; itemIndex: number };
+
+type MentionTab = "all" | MentionCategory;
+
 /**
  * Tracks one inserted mention: the display text shown in the textarea
  * and the wire value to substitute at submit time.
@@ -92,6 +98,7 @@ export interface MentionPopoverProps {
   skills?: SkillWithAssignment[];
   templates?: PlaybookInfo[];
   files?: MentionFile[];
+  onTriggerOpen?: (trigger: MentionTrigger) => void;
   children: ReactNode;
 }
 
@@ -184,6 +191,18 @@ const CATEGORY_LABELS: Record<MentionCategory, string> = {
   file: "Files",
 };
 
+const CATEGORY_ORDER: MentionCategory[] = ["agent", "task", "mission", "file", "skill", "playbook"];
+
+const TRIGGER_COPY: Record<MentionTrigger, { title: string; subtitle: string }> = {
+  "@": {
+    title: "Mentions",
+    subtitle: "Agents, tasks, missions and files. Keep typing to filter.",
+  },
+  "/": {
+    title: "Skills",
+    subtitle: "Skills and playbooks available for this chat.",
+  },
+};
 
 /** Format a name as @name / /name (or quoted variant when it contains spaces). */
 function formatMention(name: string, trigger: MentionTrigger = "@"): string {
@@ -271,15 +290,15 @@ export const MentionPopover = forwardRef<
   MentionPopoverHandle,
   MentionPopoverProps
 >(function MentionPopover(
-  { textareaRef, agents, tasks, missions, skills = [], templates = [], files = [], children },
+  { textareaRef, agents, tasks, missions, skills = [], templates = [], files = [], onTriggerOpen, children },
   ref,
 ) {
   const { isOpen, query, triggerIndex, trigger, close, handleInput } =
     useMentionTrigger(textareaRef);
 
   const [selectedIndex, setSelectedIndex] = useState(0);
-  const [categoryFilter, setCategoryFilter] = useState<"all" | MentionCategory>("all");
-  const listRef = useRef<HTMLDivElement>(null);
+  const [activeTab, setActiveTab] = useState<MentionTab>("all");
+  const listRef = useRef<VirtuosoHandle>(null);
 
   /**
    * Map of display text → wire text for all inserted mentions.
@@ -355,7 +374,7 @@ export const MentionPopover = forwardRef<
           label: s.name,
           value: s.name,
           secondary: s.description,
-          icon: <Sparkles className="size-4 shrink-0 text-violet-500" />,
+          icon: <BookOpen className="size-4 shrink-0 text-violet-500" />,
           category: "skill",
         });
       }
@@ -377,34 +396,80 @@ export const MentionPopover = forwardRef<
   }, [query, trigger, agents, tasks, missions, skills, templates, files]);
 
   const filteredItems = useMemo(
-    () => categoryFilter === "all" ? items : items.filter(i => i.category === categoryFilter),
-    [items, categoryFilter],
+    () => activeTab === "all" ? items : items.filter((item) => item.category === activeTab),
+    [activeTab, items],
   );
 
   const availableCategories = useMemo(() => {
     const cats = new Set(items.map(i => i.category));
-    return (["navigation", "agent", "task", "mission", "skill", "playbook", "file"] as MentionCategory[]).filter(c => cats.has(c));
+    return CATEGORY_ORDER.filter(c => cats.has(c));
   }, [items]);
+
+  const categoryCounts = useMemo(() => {
+    const counts = new Map<MentionCategory, number>();
+    for (const item of items) {
+      counts.set(item.category, (counts.get(item.category) ?? 0) + 1);
+    }
+    return counts;
+  }, [items]);
+
+  const tabs = useMemo<MentionTab[]>(
+    () => ["all", ...availableCategories],
+    [availableCategories],
+  );
+
+  const rows = useMemo<MentionRow[]>(() => {
+    const result: MentionRow[] = [];
+    let lastCategory: MentionCategory | null = null;
+
+    filteredItems.forEach((item, itemIndex) => {
+      if (item.category !== lastCategory) {
+        result.push({
+          type: "header",
+          key: `header:${item.category}`,
+          category: item.category,
+          count: categoryCounts.get(item.category) ?? 0,
+        });
+        lastCategory = item.category;
+      }
+
+      result.push({
+        type: "item",
+        key: item.id,
+        item,
+        itemIndex,
+      });
+    });
+
+    return result;
+  }, [categoryCounts, filteredItems]);
 
   // Reset selection when the query or filtered count changes
   const filteredCount = filteredItems.length;
   useEffect(() => {
     setSelectedIndex(0);
-  }, [query, filteredCount, categoryFilter]);
+  }, [activeTab, query, filteredCount]);
 
   useEffect(() => {
-    if (!isOpen) setCategoryFilter("all");
-  }, [isOpen]);
+    setActiveTab("all");
+  }, [trigger]);
 
   useEffect(() => {
-    if (!listRef.current) return;
-    const el = listRef.current.querySelector(`[data-mention-index="${selectedIndex}"]`);
-    el?.scrollIntoView({ block: "nearest" });
-  }, [selectedIndex]);
+    if (isOpen) onTriggerOpen?.(trigger);
+  }, [isOpen, onTriggerOpen, trigger]);
+
+  useEffect(() => {
+    const rowIndex = rows.findIndex(
+      (row) => row.type === "item" && row.itemIndex === selectedIndex,
+    );
+    if (rowIndex >= 0) {
+      listRef.current?.scrollToIndex({ index: rowIndex, align: "center", behavior: "auto" });
+    }
+  }, [rows, selectedIndex]);
 
   // Ref to hold latest values for stable callbacks (avoids stale closures)
-  const stateRef = useRef({ isOpen, filteredItems, selectedIndex, triggerIndex, trigger, availableCategories, categoryFilter });
-  stateRef.current = { isOpen, filteredItems, selectedIndex, triggerIndex, trigger, availableCategories, categoryFilter };
+  const stateRef = useRef({ isOpen, filteredItems, selectedIndex, triggerIndex, trigger, tabs, activeTab });
+  stateRef.current = { isOpen, filteredItems, selectedIndex, triggerIndex, trigger, tabs, activeTab };
 
   const insertMention = useCallback(
     (item: MentionItem) => {
@@ -469,25 +534,24 @@ export const MentionPopover = forwardRef<
           isOpen: open,
           filteredItems: fi,
           selectedIndex: si,
-          availableCategories: cats,
-          categoryFilter: cf,
+          tabs: currentTabs,
+          activeTab: currentTab,
         } = stateRef.current;
-        if (!open || fi.length === 0) return;
+        if (!open) return;
 
         const PAGE = 5;
-        const meta = e.metaKey || e.ctrlKey;
 
-        // Cycle category tabs with Cmd/Ctrl + ←/→ (only when there's >1 category)
-        if (meta && (e.key === "ArrowRight" || e.key === "ArrowLeft")) {
-          if (cats.length <= 1) return;
+        if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
+          if (currentTabs.length <= 1) return;
           e.preventDefault();
-          const sequence: Array<"all" | MentionCategory> = ["all", ...cats];
-          const idx = sequence.indexOf(cf);
+          const idx = Math.max(0, currentTabs.indexOf(currentTab));
           const dir = e.key === "ArrowRight" ? 1 : -1;
-          const next = sequence[(idx + dir + sequence.length) % sequence.length];
-          setCategoryFilter(next);
+          const next = currentTabs[(idx + dir + currentTabs.length) % currentTabs.length];
+          setActiveTab(next);
           return;
         }
+
+        if (fi.length === 0) return;
 
         if (e.key === "ArrowDown") {
           e.preventDefault();
@@ -562,7 +626,7 @@ export const MentionPopover = forwardRef<
     [insertMention, close, handleInput, resolveMessage, textareaRef],
   );
 
-  const showTabs = availableCategories.length > 1;
+  const triggerCopy = TRIGGER_COPY[trigger];
 
   return (
     <Popover open={isOpen && items.length > 0} modal={false}>
@@ -570,132 +634,157 @@ export const MentionPopover = forwardRef<
       <PopoverContent
         side="top"
         align="start"
-        className="w-80 p-0 h-72 overflow-hidden flex flex-col"
+        className="flex h-[24rem] w-[min(30rem,92vw)] flex-col overflow-hidden rounded-md border border-border bg-popover p-0 text-popover-foreground shadow-[0_18px_60px_-30px_rgba(0,0,0,0.35)]"
         onOpenAutoFocus={(e) => e.preventDefault()}
         onInteractOutside={(e) => e.preventDefault()}
         onCloseAutoFocus={(e) => e.preventDefault()}
       >
-        {/* Category tabs */}
-        {showTabs && (
-          <div className="flex items-center gap-0.5 px-1.5 pt-1.5 pb-1 border-b border-border/50">
-            <button
-              type="button"
-              className={cn(
-                "px-2 py-0.5 text-[11px] font-medium rounded-md transition-colors select-none",
-                categoryFilter === "all"
-                  ? "bg-accent text-accent-foreground"
-                  : "text-muted-foreground hover:text-foreground hover:bg-accent/50",
-              )}
-              onMouseDown={(e) => {
-                e.preventDefault();
-                setCategoryFilter("all");
-              }}
-            >
-              All
-            </button>
-            {availableCategories.map((cat) => (
-              <button
-                key={cat}
-                type="button"
-                className={cn(
-                  "px-2 py-0.5 text-[11px] font-medium rounded-md transition-colors select-none",
-                  categoryFilter === cat
-                    ? "bg-accent text-accent-foreground"
-                    : "text-muted-foreground hover:text-foreground hover:bg-accent/50",
-                )}
-                onMouseDown={(e) => {
-                  e.preventDefault();
-                  setCategoryFilter(cat);
-                }}
-              >
-                {CATEGORY_LABELS[cat]}
-              </button>
-            ))}
+        <div className="flex shrink-0 items-start gap-3 border-b border-border bg-muted/35 px-3 py-2.5">
+          <div className="flex h-8 min-w-8 items-center justify-center rounded-md border border-border bg-background font-mono text-sm font-bold text-foreground">
+            {trigger}
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2">
+              <p className="truncate text-sm font-semibold text-foreground">{triggerCopy.title}</p>
+              {query ? (
+                <span className="truncate font-mono text-[10px] text-muted-foreground">
+                  query: {query}
+                </span>
+              ) : null}
+            </div>
+            <p className="truncate text-[11px] text-muted-foreground">{triggerCopy.subtitle}</p>
+          </div>
+          <span className="rounded border border-border bg-background px-1.5 py-0.5 font-mono text-[10px] tabular-nums text-muted-foreground">
+            {filteredItems.length}
+          </span>
+        </div>
+
+        {tabs.length > 1 && (
+          <div className="flex shrink-0 items-center gap-1 overflow-x-auto border-b border-border bg-background/80 px-2 py-1.5">
+            {tabs.map((tab) => {
+              const active = tab === activeTab;
+              const label = tab === "all" ? "All" : CATEGORY_LABELS[tab];
+              const count = tab === "all" ? items.length : categoryCounts.get(tab) ?? 0;
+              return (
+                <button
+                  key={tab}
+                  type="button"
+                  className={cn(
+                    "inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2.5 text-[11px] font-medium transition-colors",
+                    active
+                      ? "bg-primary/10 text-primary"
+                      : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
+                  )}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    setActiveTab(tab);
+                  }}
+                >
+                  <span>{label}</span>
+                  <span className="font-mono text-[9px] tabular-nums opacity-70">{count}</span>
+                </button>
+              );
+            })}
           </div>
         )}
 
         {/* Item list */}
-        <div ref={listRef} className="overflow-y-auto flex-1 py-1">
+        <div className="min-h-0 flex-1">
           {filteredItems.length === 0 ? (
-            <div className="px-2 py-3 text-xs text-muted-foreground text-center">
+            <div className="px-3 py-4 text-center font-mono text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
               No matches
             </div>
-          ) : (() => {
-            let lastCategory: MentionCategory | null = null;
-            return filteredItems.map((item, i) => {
-              const showHeader = categoryFilter === "all" && item.category !== lastCategory;
-              lastCategory = item.category;
-              return (
-                <div key={item.id}>
-                  {showHeader && (
-                    <div className="px-2 pt-1.5 pb-0.5 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
-                      {CATEGORY_LABELS[item.category]}
+          ) : (
+            <Virtuoso
+              ref={listRef}
+              data={rows}
+              className="h-full"
+              itemContent={(_, row) => {
+                if (row.type === "header") {
+                  return (
+                    <div className="sticky top-0 z-10 flex items-center gap-2 border-y border-border/60 bg-popover/95 px-3 py-1.5 backdrop-blur">
+                      <span className="font-mono text-[9.5px] font-bold uppercase tracking-[0.18em] text-muted-foreground">
+                        {CATEGORY_LABELS[row.category]}
+                      </span>
+                      <span className="ml-auto rounded border border-border/70 bg-muted/40 px-1.5 py-0.5 font-mono text-[9px] tabular-nums text-muted-foreground">
+                        {row.count}
+                      </span>
                     </div>
-                  )}
+                  );
+                }
+
+                const { item, itemIndex } = row;
+                return (
                   <button
                     type="button"
-                    data-mention-index={i}
                     className={cn(
-                      "flex w-full items-start gap-2 px-2 py-1.5 text-sm text-left cursor-default rounded-sm outline-hidden select-none",
-                      i === selectedIndex
-                        ? "bg-accent text-accent-foreground"
-                        : "text-popover-foreground hover:bg-accent/50",
+                      "group/row flex w-full items-start gap-3 px-3 py-2.5 text-left transition-colors outline-hidden select-none",
+                      itemIndex === selectedIndex
+                        ? "bg-accent"
+                        : "hover:bg-accent/60",
                     )}
-                    onMouseEnter={() => setSelectedIndex(i)}
+                    onMouseEnter={() => setSelectedIndex(itemIndex)}
                     onMouseDown={(e) => {
                       e.preventDefault();
                       insertMention(item);
                     }}
                   >
-                    <span className="mt-0.5">{item.icon}</span>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-1.5">
-                        <span className="truncate font-medium">{item.label}</span>
-                        {item.badge && (
-                          <Badge variant="outline" className="ml-auto text-[10px] shrink-0">
-                            {item.badge}
-                          </Badge>
+                    <span
+                      className={cn(
+                        "mt-0.5 inline-flex size-7 shrink-0 items-center justify-center rounded-md border border-border bg-background text-muted-foreground group-hover/row:text-foreground",
+                        itemIndex === selectedIndex && "border-foreground/40",
+                      )}
+                      aria-hidden
+                    >
+                      {item.icon}
+                    </span>
+                    <div className="min-w-0 flex-1 leading-tight">
+                      <div className="flex items-baseline gap-2">
+                        <span className="truncate text-[13px] font-semibold text-foreground">{item.label}</span>
+                        {item.category === "file" && (
+                          <span className="shrink-0 font-mono text-[9px] uppercase tracking-[0.14em] text-muted-foreground/70">
+                            file
+                          </span>
                         )}
                       </div>
                       {item.secondary && item.category !== "task" && (
-                        <p className="truncate text-muted-foreground text-xs mt-0.5">
+                        <p className="mt-0.5 truncate text-[12px] text-muted-foreground">
                           {item.secondary}
                         </p>
                       )}
                     </div>
+                    {item.badge && (
+                      <kbd className="ml-auto shrink-0 rounded border border-border bg-muted/60 px-1 py-px font-mono text-[9.5px] font-bold uppercase tracking-[0.14em] text-muted-foreground">
+                        {item.badge}
+                      </kbd>
+                    )}
                   </button>
-                </div>
-              );
-            });
-          })()}
+                );
+              }}
+            />
+          )}
         </div>
 
         {/* Keyboard shortcut hints — sticky footer */}
-        <div className="shrink-0 border-t border-border/50 px-2 py-1.5 flex items-center gap-2.5 text-[9.5px] text-muted-foreground/70 select-none flex-wrap">
-          <KbdHint keys={["↑", "↓"]} label="navigate" />
-          <KbdHint keys={["↵"]} label="pick" />
-          {availableCategories.length > 1 && (
-            <KbdHint keys={["⌘", "←/→"]} label="category" />
-          )}
-          <KbdHint keys={["esc"]} label="close" />
+        <div className="flex shrink-0 items-center justify-between gap-3 border-t border-border bg-muted/30 px-3 py-2 text-[11px] text-muted-foreground">
+          <span className="inline-flex min-w-0 items-center gap-2">
+            <span className="hidden sm:inline">Use</span>
+            <span className="font-mono text-[10px] uppercase tracking-[0.12em]">←→</span>
+            <span>tabs</span>
+            <span className="font-mono text-[10px] uppercase tracking-[0.12em]">↑↓</span>
+            <span>to move</span>
+            <span className="font-mono text-[10px] uppercase tracking-[0.12em]">Enter</span>
+            <span>to insert</span>
+          </span>
+          <button
+            type="button"
+            onClick={close}
+            className="cursor-pointer font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground transition-colors hover:text-foreground"
+          >
+            Esc
+          </button>
         </div>
       </PopoverContent>
     </Popover>
   );
 });
-
-function KbdHint({ keys, label }: { keys: string[]; label: string }) {
-  return (
-    <span className="inline-flex items-center gap-1">
-      {keys.map((k, i) => (
-        <kbd
-          key={i}
-          className="inline-flex items-center justify-center min-w-[14px] h-3.5 px-1 rounded-[3px] border border-border/70 bg-muted/40 font-mono text-[8.5px] font-medium leading-none"
-        >
-          {k}
-        </kbd>
-      ))}
-      <span className="ml-0.5">{label}</span>
-    </span>
-  );
-}

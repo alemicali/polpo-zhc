@@ -50,7 +50,7 @@ export function BottomNav() {
 
   return (
     <>
-      <nav className="fixed inset-x-3 z-50 mx-auto max-w-md rounded-3xl border border-white/10 bg-background/88 p-1 shadow-[0_18px_60px_oklch(0_0_0_/_45%),0_0_0_1px_oklch(1_0_0_/_5%)] backdrop-blur-2xl supports-[backdrop-filter]:bg-background/72 lg:hidden bottom-[calc(0.65rem+var(--safe-bottom))]">
+      <nav className="fixed inset-x-3 z-50 mx-auto max-w-md rounded-3xl border border-white/10 bg-background/88 p-1 shadow-[0_18px_60px_oklch(0_0_0_/_45%),0_0_0_1px_oklch(1_0_0_/_5%)] backdrop-blur-2xl supports-[backdrop-filter]:bg-background/72 lg:hidden bottom-[var(--mobile-nav-offset)]">
         <div className="flex h-[3.55rem] items-center">
           {primaryNav.map(({ to, icon: Icon, label }) => (
             <NavLink

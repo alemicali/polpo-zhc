@@ -12,6 +12,7 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
+import { APPEARANCE_SCOPE_EVENT, scopedStorageKey } from "@/lib/appearance";
 
 export type Palette = "tide" | "brutal" | "editorial" | "cyber" | "mono";
 
@@ -82,7 +83,7 @@ function applyPalette(p: Palette) {
 export function usePalette() {
   const [palette, setPaletteState] = useState<Palette>(() => {
     try {
-      const saved = localStorage.getItem(STORAGE_KEY);
+      const saved = localStorage.getItem(scopedStorageKey(STORAGE_KEY));
       return isPalette(saved) ? saved : DEFAULT_PALETTE;
     } catch {
       return DEFAULT_PALETTE;
@@ -91,13 +92,29 @@ export function usePalette() {
 
   const setPalette = useCallback((p: Palette) => {
     setPaletteState(p);
-    try { localStorage.setItem(STORAGE_KEY, p); } catch { /* ignore */ }
+    try { localStorage.setItem(scopedStorageKey(STORAGE_KEY), p); } catch { /* ignore */ }
     applyPalette(p);
   }, []);
 
   useEffect(() => {
     applyPalette(palette);
   }, [palette]);
+
+  useEffect(() => {
+    const syncScopedPalette = () => {
+      try {
+        const saved = localStorage.getItem(scopedStorageKey(STORAGE_KEY));
+        const next = isPalette(saved) ? saved : DEFAULT_PALETTE;
+        setPaletteState(next);
+        applyPalette(next);
+      } catch {
+        setPaletteState(DEFAULT_PALETTE);
+        applyPalette(DEFAULT_PALETTE);
+      }
+    };
+    window.addEventListener(APPEARANCE_SCOPE_EVENT, syncScopedPalette);
+    return () => window.removeEventListener(APPEARANCE_SCOPE_EVENT, syncScopedPalette);
+  }, []);
 
   return { palette, setPalette } as const;
 }
@@ -108,7 +125,7 @@ export function usePalette() {
  */
 export function bootstrapPalette(): void {
   try {
-    const saved = localStorage.getItem(STORAGE_KEY);
+    const saved = localStorage.getItem(scopedStorageKey(STORAGE_KEY));
     applyPalette(isPalette(saved) ? saved : DEFAULT_PALETTE);
   } catch {
     applyPalette(DEFAULT_PALETTE);

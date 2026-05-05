@@ -30,6 +30,7 @@ import {
   ArrowRight,
   Pencil,
   Search,
+  Mail,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { AuthStep } from "@/components/shared/provider-auth";
@@ -45,6 +46,10 @@ interface SetupStatus {
   detectedProviders: Provider[];
   workDir: string;
   orgName: string;
+  auth?: {
+    enabled: boolean;
+    configured: boolean;
+  };
 }
 
 // ── API helpers ──
@@ -56,6 +61,7 @@ const api = async (path: string, init?: RequestInit) => {
     const res = await fetch(`${config.baseUrl}/api/v1${path}`, {
       ...init,
       headers,
+      credentials: "include",
     });
     const data = await res.json();
     return data;
@@ -444,6 +450,46 @@ function ProjectStep({
   );
 }
 
+function isValidEmail(value: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+}
+
+function AccessStep({
+  adminEmail,
+  onChangeEmail,
+}: {
+  adminEmail: string;
+  onChangeEmail: (v: string) => void;
+}) {
+  return (
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-xl font-semibold tracking-tight">Admin access</h2>
+        <p className="text-sm text-muted-foreground mt-1">
+          This email will receive magic links for this Polpo instance.
+        </p>
+      </div>
+
+      <div className="space-y-2">
+        <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+          Admin email
+        </label>
+        <Input
+          value={adminEmail}
+          onChange={(e) => onChangeEmail(e.target.value)}
+          type="email"
+          inputMode="email"
+          autoComplete="email"
+          placeholder="you@example.com"
+        />
+        <p className="text-xs text-muted-foreground">
+          Saved in <code className="bg-muted px-1 py-0.5 rounded">.polpo/auth.json</code>. Login links are sent with Resend.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 // Step 2: Model selection — uses shared ModelPicker
 function ModelStep({
   onSelect,
@@ -538,13 +584,23 @@ export function SetupPage() {
   const [oauthActive, setOauthActive] = useState(false);
   const [loading, setLoading] = useState(true);
   const [alreadyInitialized, setAlreadyInitialized] = useState(false);
+  const [authEnabled, setAuthEnabled] = useState(false);
+  const [adminEmail, setAdminEmail] = useState("");
 
   const STEPS = [
-    { icon: FolderOpen, label: "Project" },
-    { icon: KeyRound, label: "Provider" },
-    { icon: Cpu, label: "Model" },
-    { icon: Sparkles, label: "Agent" },
+    { id: "project", icon: FolderOpen, label: "Project" },
+    ...(authEnabled ? [{ id: "access", icon: Mail, label: "Access" }] : []),
+    { id: "provider", icon: KeyRound, label: "Provider" },
+    { id: "model", icon: Cpu, label: "Model" },
+    { id: "agent", icon: Sparkles, label: "Agent" },
   ];
+  const currentStep = STEPS[step]?.id ?? "agent";
+  const hasConfiguredProvider = providers.some((p) => p.hasKey);
+  const canGoNext =
+    (currentStep !== "project" || !!workDir) &&
+    (currentStep !== "access" || isValidEmail(adminEmail)) &&
+    (currentStep !== "provider" || hasConfiguredProvider);
+  const canComplete = !completing && hasConfiguredProvider && (!authEnabled || isValidEmail(adminEmail));
 
   // Load status on mount
   useEffect(() => {
@@ -558,6 +614,7 @@ export function SetupPage() {
             setWorkDir(status.workDir);
             setOrgName(status.orgName);
             setProviders(status.detectedProviders);
+            setAuthEnabled(!!status.auth?.enabled);
           }
         }
       })
@@ -603,6 +660,7 @@ export function SetupPage() {
           model: selectedModel || undefined,
           agentName: agentName || "agent-1",
           agentRole: agentRole || "founder",
+          adminEmail: authEnabled ? adminEmail.trim() : undefined,
         }),
       });
       if (result.ok) {
@@ -683,7 +741,7 @@ export function SetupPage() {
           <Card className="border-border/60 shadow-lg shadow-black/[0.03]">
             <CardContent className="pt-6 pb-6 px-6 min-h-[320px] flex flex-col">
               <div className="flex-1">
-                {step === 0 && (
+                {currentStep === "project" && (
                   <ProjectStep
                     workDir={workDir}
                     orgName={orgName}
@@ -691,7 +749,13 @@ export function SetupPage() {
                     onChangeOrg={setOrgName}
                   />
                 )}
-                {step === 1 && (
+                {currentStep === "access" && (
+                  <AccessStep
+                    adminEmail={adminEmail}
+                    onChangeEmail={setAdminEmail}
+                  />
+                )}
+                {currentStep === "provider" && (
                   <AuthStep
                     providers={providers}
                     onKeySave={handleSaveKey}
@@ -701,7 +765,7 @@ export function SetupPage() {
                     apiFetch={api}
                   />
                 )}
-                {step === 2 && (
+                {currentStep === "model" && (
                   <ModelStep
                     onSelect={setSelectedModel}
                     configuredProviders={providers.filter((p) => p.hasKey).map((p) => p.name)}
@@ -710,7 +774,7 @@ export function SetupPage() {
                     )}
                   />
                 )}
-                {step === 3 && (
+                {currentStep === "agent" && (
                   <AgentStep
                     agentName={agentName}
                     agentRole={agentRole}
@@ -740,10 +804,7 @@ export function SetupPage() {
                   <Button
                     size="sm"
                     onClick={() => setStep(step + 1)}
-                    disabled={
-                      (step === 0 && !workDir) ||
-                      (step === 1 && !providers.some((p) => p.hasKey))
-                    }
+                    disabled={!canGoNext}
                     className="gap-1"
                   >
                     Next <ChevronRight className="h-4 w-4" />
@@ -756,7 +817,7 @@ export function SetupPage() {
                     <Button
                       size="sm"
                       onClick={handleComplete}
-                      disabled={completing || !providers.some((p) => p.hasKey)}
+                      disabled={!canComplete}
                       className="gap-1.5"
                     >
                       {completing ? (

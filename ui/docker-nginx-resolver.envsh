@@ -12,5 +12,16 @@ if [ -z "${NGINX_RESOLVER:-}" ]; then
   exit 1
 fi
 
+# Nginx requires IPv6 resolver literals to be bracketed. Railway can expose an
+# IPv6 DNS resolver such as fd12::10; without brackets nginx parses the trailing
+# :10 as a port and fails startup with "invalid port in resolver".
+case "$NGINX_RESOLVER" in
+  \[*\]*|*.*)
+    ;;
+  *:*)
+    NGINX_RESOLVER="[$NGINX_RESOLVER]"
+    ;;
+esac
+
 export POLPO_API_UPSTREAM
 export NGINX_RESOLVER

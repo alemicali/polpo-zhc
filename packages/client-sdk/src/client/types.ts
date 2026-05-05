@@ -217,6 +217,8 @@ export interface AgentConfig {
   reportsTo?: string;
   systemPrompt?: string;
   skills?: string[];
+  /** Suggested starter prompts shown when opening a new chat with this agent. */
+  suggestions?: AgentSuggestion[];
   maxTurns?: number;
   /** Max concurrent tasks for this agent. Default: unlimited. */
   maxConcurrency?: number;
@@ -231,6 +233,17 @@ export interface AgentConfig {
   browserProfile?: string;
   /** Allowed recipient email domains for email_send. Overrides global setting. */
   emailAllowedDomains?: string[];
+}
+
+export type AgentSuggestion = string | AgentSuggestionConfig;
+
+export interface AgentSuggestionConfig {
+  /** Short label shown in the UI. */
+  title: string;
+  /** Optional prompt sent to the agent. Defaults to title. */
+  prompt?: string;
+  /** Optional secondary text shown below the title. */
+  description?: string;
 }
 
 export interface AgentActivity {
@@ -921,6 +934,7 @@ export interface AddAgentRequest {
   allowedTools?: string[];
   systemPrompt?: string;
   skills?: string[];
+  suggestions?: AgentSuggestion[];
   maxTurns?: number;
   /** Max concurrent tasks for this agent. */
   maxConcurrency?: number;
@@ -945,6 +959,7 @@ export interface UpdateAgentRequest {
   allowedPaths?: string[];
   systemPrompt?: string;
   skills?: string[];
+  suggestions?: AgentSuggestion[];
   maxTurns?: number;
   maxConcurrency?: number;
   identity?: AgentIdentity;
@@ -1154,7 +1169,7 @@ export interface ChatCompletionRequest {
 export interface ChatCompletionChoice {
   index: number;
   message: { role: "assistant"; content: string };
-  finish_reason: "stop" | "length" | "ask_user" | "mission_preview" | "vault_preview" | "open_file" | "navigate_to" | "open_tab";
+  finish_reason: "stop" | "length" | "ask_user" | "mission_preview" | "vault_preview" | "open_file" | "navigate_to" | "open_tab" | "set_design";
   /** Present when finish_reason is "ask_user" — structured questions for the user. */
   ask_user?: AskUserPayload;
   /** Present when finish_reason is "mission_preview" — proposed mission for user review. */
@@ -1167,6 +1182,8 @@ export interface ChatCompletionChoice {
   navigate_to?: NavigateToPayload;
   /** Present when finish_reason is "open_tab" — open a URL in a new browser tab. */
   open_tab?: OpenTabPayload;
+  /** Present when finish_reason is "set_design" — apply local appearance overrides. */
+  set_design?: SetDesignPayload;
 }
 
 export interface ChatCompletionResponse {
@@ -1227,6 +1244,8 @@ export interface ChatCompletionChunk {
     navigate_to?: NavigateToPayload;
     /** Present when finish_reason is "open_tab" — open a URL in a new browser tab. */
     open_tab?: OpenTabPayload;
+    /** Present when finish_reason is "set_design" — apply local appearance overrides. */
+    set_design?: SetDesignPayload;
     /** Present when the server is executing a tool call. */
     tool_call?: ToolCallEvent;
     /** Present when the model is emitting thinking/reasoning tokens. */
@@ -1371,4 +1390,27 @@ export interface OpenTabPayload {
   url: string;
   /** Optional human-readable label */
   label?: string;
+}
+
+export interface DesignThemePayload {
+  /** Primary color as 6-digit hex. */
+  primary?: string;
+  /** Secondary/accent color as 6-digit hex. */
+  secondary?: string;
+  /** Main text color as 6-digit hex. */
+  text?: string;
+  /** Roundedness in px, 0-24. */
+  radius?: number;
+  /** Any valid CSS font-family stack. */
+  fontFamily?: string;
+}
+
+/** Payload for set_design — proposes local appearance overrides in the browser. */
+export interface SetDesignPayload extends DesignThemePayload {
+  /** Enable/disable appearance overrides. Defaults to true when an override value is present. */
+  enabled?: boolean;
+  /** Light-mode override values. */
+  light?: DesignThemePayload;
+  /** Dark-mode override values. */
+  dark?: DesignThemePayload;
 }

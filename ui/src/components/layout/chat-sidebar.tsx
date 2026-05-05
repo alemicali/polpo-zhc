@@ -97,7 +97,7 @@ function SidebarSkeleton() {
       {/* Real prompt input — disabled during loading */}
       <div className="bg-background/80 backdrop-blur-md px-4 pt-2 pb-1.5 shrink-0">
         <div className="mx-auto max-w-3xl">
-          <PromptInput onSubmit={() => {}} className="[&_[data-slot=input-group]]:rounded-2xl">
+          <PromptInput onSubmit={() => {}} className="[&_[data-slot=input-group]]:rounded-[calc(var(--radius)+8px)]">
             <PromptInputTextarea placeholder="Message Polpo..." disabled />
             <PromptInputFooter>
               <div className="flex items-center gap-1" />

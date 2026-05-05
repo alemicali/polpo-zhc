@@ -9,6 +9,7 @@ import { detectProviders } from "../../setup/index.js";
 import { FileAgentStore } from "../../stores/file-agent-store.js";
 import { FileTeamStore } from "../../stores/file-team-store.js";
 import type { Orchestrator } from "../../core/orchestrator.js";
+import { createInitialInstanceAuth, isInstanceAuthEnabled, loadInstanceAuth, normalizeEmail } from "../auth/instance-auth.js";
 
 // ── Authed route definitions ──────────────────────────────────────────
 
@@ -69,6 +70,10 @@ const configStatusRoute = createRoute({
                 hasKey: z.boolean(),
                 source: z.enum(["env", "oauth", "none"]),
               })),
+              auth: z.object({
+                enabled: z.boolean(),
+                configured: z.boolean(),
+              }),
             }),
           }),
         },
@@ -93,6 +98,7 @@ const initializeRoute = createRoute({
             model: z.string().optional(),
             agentName: z.string().optional(),
             agentRole: z.string().optional(),
+            adminEmail: z.string().email().optional(),
             providers: z.record(z.string(), z.object({
               baseUrl: z.string().optional(),
               api: z.enum(["openai-completions", "openai-responses", "anthropic-messages"]).optional(),
@@ -118,6 +124,14 @@ const initializeRoute = createRoute({
         },
       },
       description: "Already initialized or initialization in progress",
+    },
+    400: {
+      content: {
+        "application/json": {
+          schema: z.object({ ok: z.boolean(), error: z.string() }),
+        },
+      },
+      description: "Invalid setup request",
     },
     500: {
       content: {
@@ -416,6 +430,7 @@ export function publicConfigRoutes(
     const hasConfig = existsSync(join(polpoDir, "polpo.json"));
     const providers = detectProviders();
     const hasProviders = providers.some((p) => p.hasKey);
+    const authConfig = loadInstanceAuth(polpoDir);
 
     return c.json({
       ok: true,
@@ -424,6 +439,10 @@ export function publicConfigRoutes(
         hasConfig,
         hasProviders,
         detectedProviders: providers,
+        auth: {
+          enabled: isInstanceAuthEnabled(),
+          configured: !!authConfig?.enabled && authConfig.allowedEmails.length > 0,
+        },
         workDir,
         orgName: basename(workDir),
       },
@@ -448,6 +467,10 @@ export function publicConfigRoutes(
       const targetDir = body.workDir ? resolve(body.workDir) : workDir;
       const targetPolpoDir = getPolpoDir(targetDir);
       const org = body.orgName || basename(targetDir);
+      const adminEmail = typeof body.adminEmail === "string" ? normalizeEmail(body.adminEmail) : "";
+      if (isInstanceAuthEnabled() && !adminEmail) {
+        return c.json({ ok: false, error: "Admin email is required when instance auth is enabled." }, 400);
+      }
 
       const config = generatePolpoConfigDefault(org, {
         model: body.model || undefined,
@@ -465,6 +488,9 @@ export function publicConfigRoutes(
         await agentStore.seed(teams.flatMap((team) =>
           team.agents.map((agent) => ({ ...agent, teamName: team.name })),
         ));
+        if (isInstanceAuthEnabled() && adminEmail) {
+          createInitialInstanceAuth(targetPolpoDir, adminEmail);
+        }
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : "Unknown error";
         return c.json({ ok: false, error: `Failed to save config: ${msg}` }, 500);

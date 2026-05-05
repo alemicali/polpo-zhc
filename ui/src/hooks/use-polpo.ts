@@ -15,6 +15,7 @@ import { usePolpo, useSessions } from "@polpo-ai/react";
 import type { ChatMessage, ChatCompletionMessage, PolpoConfig } from "@polpo-ai/react";
 import type { ChatCompletionStream } from "@polpo-ai/react";
 import { config as appConfig } from "@/lib/config";
+import { setAppearanceScope } from "@/lib/appearance";
 
 // Local mirror of SDK ask_user types (avoids build-order issues)
 export interface AskUserOption {
@@ -75,6 +76,20 @@ export interface OpenTabData {
   label?: string;
 }
 
+export interface DesignThemeData {
+  primary?: string;
+  secondary?: string;
+  text?: string;
+  radius?: number;
+  fontFamily?: string;
+}
+
+export interface SetDesignData extends DesignThemeData {
+  enabled?: boolean;
+  light?: DesignThemeData;
+  dark?: DesignThemeData;
+}
+
 // Local mirror of SDK tool call types
 export type ToolCallState = "preparing" | "calling" | "completed" | "error" | "interrupted";
 
@@ -101,6 +116,7 @@ export interface ChatMessageWithQuestions extends ChatMessage {
   openFile?: OpenFileData;
   navigateTo?: NavigateToData;
   openTab?: OpenTabData;
+  setDesign?: SetDesignData;
   toolCalls?: ToolCallInfo[];
   thinkingText?: string;
   /** Chronologically ordered segments (text interleaved with tool calls) */
@@ -111,7 +127,13 @@ export interface ChatMessageWithQuestions extends ChatMessage {
 // Builds on the SDK's useSessions hook for session management,
 // uses chatCompletionsStream() for real-time streaming responses.
 
-const NEW_SESSION_KEY = "__polpo_new_session__";
+const NEW_SESSION_KEY_PREFIX = "__polpo_new_session__";
+
+const createLocalNewSessionKey = () =>
+  `${NEW_SESSION_KEY_PREFIX}:${Date.now()}:${Math.random().toString(36).slice(2)}`;
+
+const isLocalNewSessionKey = (key: string) =>
+  key === NEW_SESSION_KEY_PREFIX || key.startsWith(`${NEW_SESSION_KEY_PREFIX}:`);
 
 interface SessionPendingState {
   questions: AskUserQuestion[] | null;
@@ -120,6 +142,7 @@ interface SessionPendingState {
   openFile: OpenFileData | null;
   navigateTo: NavigateToData | null;
   openTab: OpenTabData | null;
+  setDesign: SetDesignData | null;
 }
 
 export function useChat() {
@@ -140,9 +163,11 @@ export function useChat() {
   /** True while loading messages for an existing session (distinguishes from empty "new chat" state) */
   const [messagesLoading, setMessagesLoading] = useState(false);
   /** Selected agent for agent-direct chat mode. null = orchestrator (default). */
-  const [selectedAgent, setSelectedAgent] = useState<string | null>(null);
+  const [selectedAgent, setSelectedAgentState] = useState<string | null>(null);
+  const selectedAgentRef = useRef<string | null>(null);
   const initialLoadDone = useRef(false);
-  const activeSessionKey = sessionId ?? NEW_SESSION_KEY;
+  const [localNewSessionKey, setLocalNewSessionKey] = useState(createLocalNewSessionKey);
+  const activeSessionKey = sessionId ?? localNewSessionKey;
   const activeSessionKeyRef = useRef(activeSessionKey);
   /** Conversation history sent to the completions endpoint, keyed by session. */
   const conversationBySessionRef = useRef<Map<string, ChatCompletionMessage[]>>(new Map());
@@ -159,6 +184,11 @@ export function useChat() {
     activeSessionKeyRef.current = activeSessionKey;
   }, [activeSessionKey]);
 
+  const setSelectedAgent = useCallback((agent: string | null) => {
+    selectedAgentRef.current = agent;
+    setSelectedAgentState(agent);
+  }, []);
+
   const messages = messagesBySession[activeSessionKey] ?? [];
   const isLoading = streamingBySession[activeSessionKey] ?? false;
   const pendingState = pendingBySession[activeSessionKey];
@@ -168,8 +198,9 @@ export function useChat() {
   const pendingOpenFile = pendingState?.openFile ?? null;
   const pendingNavigateTo = pendingState?.navigateTo ?? null;
   const pendingOpenTab = pendingState?.openTab ?? null;
+  const pendingSetDesign = pendingState?.setDesign ?? null;
   const streamingSessionIds = Object.entries(streamingBySession)
-    .filter(([key, active]) => active && key !== NEW_SESSION_KEY)
+    .filter(([key, active]) => active && !isLocalNewSessionKey(key))
     .map(([key]) => key);
 
   const updateSessionMessages = useCallback((
@@ -203,6 +234,7 @@ export function useChat() {
         openFile: null,
         navigateTo: null,
         openTab: null,
+        setDesign: null,
       };
       return {
         ...prev,
@@ -222,6 +254,7 @@ export function useChat() {
       openFile: null,
       navigateTo: null,
       openTab: null,
+      setDesign: null,
     });
   }, [setSessionPending]);
 
@@ -280,8 +313,20 @@ export function useChat() {
     }
   }, []);
 
+  const resetToLocalNewSession = useCallback((opts?: { selectedAgent?: string | null }) => {
+    const nextKey = createLocalNewSessionKey();
+    activeSessionKeyRef.current = nextKey;
+    wantsNewSessionRef.current = true;
+    setLocalNewSessionKey(nextKey);
+    setSessionId(null);
+    updateSessionMessages(nextKey, []);
+    clearSessionPending(nextKey);
+    setSelectedAgent(opts?.selectedAgent ?? null);
+    conversationBySessionRef.current.delete(nextKey);
+  }, [clearSessionPending, setSelectedAgent, setSessionId, updateSessionMessages]);
+
   // Reconstruct interactive state from persisted "interrupted" tool calls on the last assistant message.
-  // If the last message is an assistant with an interrupted ask_user/create_mission, restore the pending state.
+    // If the last message is an assistant with an interrupted interactive tool, restore the pending state.
   const restoreInteractiveState = useCallback((msgs: ChatMessageWithQuestions[], key: string) => {
     if (msgs.length === 0) return;
     const lastMsg = msgs[msgs.length - 1];
@@ -325,7 +370,7 @@ export function useChat() {
       // 2. Restoring them triggers the useEffect in ChatPage → consume* → new
       //    streamCompletion, creating an infinite loop on every visibility change
       //    or session reload.
-      // Only interactive prompts (ask_user, create_mission, set_vault_entry) that
+      // Only interactive prompts (ask_user, create_mission, set_vault_entry, set_design) that
       // require explicit user input should be restored.
       } else if (tc.name === "open_file" && tc.arguments) {
         const args = tc.arguments as Record<string, unknown>;
@@ -346,6 +391,20 @@ export function useChat() {
           url: (args.url as string) ?? "",
           label: args.label as string | undefined,
         };
+      } else if (tc.name === "set_design" && tc.arguments) {
+        const args = tc.arguments as Record<string, unknown>;
+        const setDesign: SetDesignData = {
+          enabled: args.enabled as boolean | undefined,
+          light: args.light as DesignThemeData | undefined,
+          dark: args.dark as DesignThemeData | undefined,
+          primary: args.primary as string | undefined,
+          secondary: args.secondary as string | undefined,
+          text: args.text as string | undefined,
+          radius: args.radius as number | undefined,
+          fontFamily: args.fontFamily as string | undefined,
+        };
+        lastMsg.setDesign = setDesign;
+        setSessionPending(key, { setDesign });
       }
     }
   }, [setSessionPending]);
@@ -436,7 +495,7 @@ export function useChat() {
     };
 
     try {
-      const res = await fetch(`${base}/api/v1/chat/completions/resume/${turnId}`, {
+      const res = await fetch(`${base}/v1/chat/completions/resume/${turnId}`, {
         method: "GET",
         headers,
         signal: ac.signal,
@@ -531,6 +590,8 @@ export function useChat() {
   // Load a specific session's messages
   const loadSession = useCallback(
     async (id: string) => {
+      activeSessionKeyRef.current = id;
+      wantsNewSessionRef.current = false;
       setSessionId(id);
       setMessagesLoading(true);
       clearSessionPending(id);
@@ -554,7 +615,7 @@ export function useChat() {
           const base = appConfig.baseUrl || "";
           const headers: Record<string, string> = {};
           if (appConfig.apiKey) headers["Authorization"] = `Bearer ${appConfig.apiKey}`;
-          const r = await fetch(`${base}/api/v1/chat/completions/active-turn?sessionId=${encodeURIComponent(id)}`, { headers });
+          const r = await fetch(`${base}/v1/chat/completions/active-turn?sessionId=${encodeURIComponent(id)}`, { headers });
           if (r.ok) {
             const j = await r.json() as { ok: boolean; data?: { turnId: string | null } };
             if (j.ok && j.data?.turnId) {
@@ -584,7 +645,7 @@ export function useChat() {
         setMessagesLoading(false);
       }
     },
-    [applyServerMessages, clearSessionPending, getMessages, runResume, sessions, setSessionId, updateSessionMessages]
+    [applyServerMessages, clearSessionPending, getMessages, runResume, sessions, setSelectedAgent, setSessionId, updateSessionMessages]
   );
 
   // Auto-select most recent non-empty session on first load
@@ -619,13 +680,8 @@ export function useChat() {
 
   // Start a new empty session
   const newSession = useCallback(() => {
-    setSessionId(null);
-    updateSessionMessages(NEW_SESSION_KEY, []);
-    clearSessionPending(NEW_SESSION_KEY);
-    setSelectedAgent(null);
-    conversationBySessionRef.current.delete(NEW_SESSION_KEY);
-    wantsNewSessionRef.current = true;
-  }, [clearSessionPending, setSessionId, updateSessionMessages]);
+    resetToLocalNewSession();
+  }, [resetToLocalNewSession]);
 
   // Core streaming function (shared between send and answerQuestions)
   const streamCompletion = useCallback(
@@ -754,7 +810,7 @@ export function useChat() {
             : m
           )
         );
-        setSessionPending(streamSessionKey, { questions: stream.askUser.questions, mission: null, vault: null });
+        setSessionPending(streamSessionKey, { questions: stream.askUser.questions, mission: null, vault: null, openFile: null, navigateTo: null, openTab: null, setDesign: null });
         appendConversation(streamSessionKey, { role: "assistant", content: fullContent });
       } else if (stream.missionPreview) {
         // Mission preview — show interactive card for user to Execute/Draft/Refine/Cancel
@@ -770,7 +826,7 @@ export function useChat() {
             : m
           )
         );
-        setSessionPending(streamSessionKey, { mission: preview, questions: null, vault: null });
+        setSessionPending(streamSessionKey, { mission: preview, questions: null, vault: null, openFile: null, navigateTo: null, openTab: null, setDesign: null });
         appendConversation(streamSessionKey, { role: "assistant", content: fullContent });
       } else if (stream.vaultPreview) {
         // Vault preview — show interactive card for user to Confirm/Cancel
@@ -788,7 +844,7 @@ export function useChat() {
             : m
           )
         );
-        setSessionPending(streamSessionKey, { vault: vaultData, questions: null, mission: null });
+        setSessionPending(streamSessionKey, { vault: vaultData, questions: null, mission: null, openFile: null, navigateTo: null, openTab: null, setDesign: null });
         appendConversation(streamSessionKey, { role: "assistant", content: fullContent });
       } else if ((stream as any).openFile) {
         // Client-side open_file — open file preview dialog
@@ -803,7 +859,7 @@ export function useChat() {
             : m
           )
         );
-        setSessionPending(streamSessionKey, { openFile: openFileData, questions: null, mission: null, vault: null });
+        setSessionPending(streamSessionKey, { openFile: openFileData, questions: null, mission: null, vault: null, navigateTo: null, openTab: null, setDesign: null });
         appendConversation(streamSessionKey, { role: "assistant", content: fullContent });
       } else if ((stream as any).navigateTo) {
         // Client-side navigate_to — navigate the UI to a specific page
@@ -822,7 +878,7 @@ export function useChat() {
             : m
           )
         );
-        setSessionPending(streamSessionKey, { navigateTo: navData, questions: null, mission: null, vault: null });
+        setSessionPending(streamSessionKey, { navigateTo: navData, questions: null, mission: null, vault: null, openFile: null, openTab: null, setDesign: null });
         appendConversation(streamSessionKey, { role: "assistant", content: fullContent });
       } else if ((stream as any).openTab) {
         // Client-side open_tab — open URL in new browser tab
@@ -838,7 +894,58 @@ export function useChat() {
             : m
           )
         );
-        setSessionPending(streamSessionKey, { openTab: openTabData, questions: null, mission: null, vault: null });
+        setSessionPending(streamSessionKey, { openTab: openTabData, questions: null, mission: null, vault: null, openFile: null, navigateTo: null, setDesign: null });
+        appendConversation(streamSessionKey, { role: "assistant", content: fullContent });
+      } else if ((stream as any).setDesign) {
+        // Client-side set_design — show preview card and wait for user confirmation
+        const design = (stream as any).setDesign;
+        const setDesignData: SetDesignData = {
+          enabled: design.enabled,
+          light: design.light,
+          dark: design.dark,
+          primary: design.primary,
+          secondary: design.secondary,
+          text: design.text,
+          radius: design.radius,
+          fontFamily: design.fontFamily,
+        };
+        updateSessionMessages(streamSessionKey, (prev) => {
+          let attached = false;
+          const patched = prev.map((m) => {
+            if (m.id !== assistantId) return m;
+            attached = true;
+            return { ...m, ...messagePatch(), setDesign: setDesignData };
+          });
+
+          if (attached) return patched;
+
+          let lastAssistantIndex = -1;
+          for (let index = patched.length - 1; index >= 0; index -= 1) {
+            if (patched[index]?.role === "assistant") {
+              lastAssistantIndex = index;
+              break;
+            }
+          }
+          if (lastAssistantIndex >= 0) {
+            return patched.map((m, index) =>
+              index === lastAssistantIndex
+                ? { ...m, ...messagePatch(), setDesign: setDesignData }
+                : m
+            );
+          }
+
+          return [
+            ...patched,
+            {
+              id: assistantId,
+              role: "assistant",
+              ts: new Date().toISOString(),
+              ...messagePatch(),
+              setDesign: setDesignData,
+            },
+          ];
+        });
+        setSessionPending(streamSessionKey, { setDesign: setDesignData, questions: null, mission: null, vault: null, openFile: null, navigateTo: null, openTab: null });
         appendConversation(streamSessionKey, { role: "assistant", content: fullContent });
       } else {
         clearSessionPending(streamSessionKey);
@@ -860,10 +967,10 @@ export function useChat() {
     opts?: { forceNew?: boolean },
   ) => {
     const sessionKey = activeSessionKeyRef.current;
-    const requestSessionId = opts?.forceNew
+    const requestSessionId = opts?.forceNew || isLocalNewSessionKey(sessionKey)
       ? "new"
-      : (sessionKey === NEW_SESSION_KEY ? undefined : sessionKey);
-    const agent = selectedAgent;
+      : sessionKey;
+    const agent = selectedAgentRef.current;
 
     const userMsg: ChatMessageWithQuestions = {
       id: `temp-${Date.now()}`,
@@ -896,7 +1003,38 @@ export function useChat() {
       }
       setSessionStreaming(sessionKey, false);
     }
-  }, [appendConversation, selectedAgent, setSessionStreaming, streamCompletion, updateSessionMessages]);
+  }, [appendConversation, setSessionStreaming, streamCompletion, updateSessionMessages]);
+
+  const appendSystemAndStream = useCallback(async (content: string) => {
+    const sessionKey = activeSessionKeyRef.current;
+    const requestSessionId = isLocalNewSessionKey(sessionKey) ? "new" : sessionKey;
+    const agent = selectedAgentRef.current;
+    const assistantId = `temp-${Date.now()}-a`;
+
+    updateSessionMessages(sessionKey, (prev) => [
+      ...prev,
+      { id: assistantId, role: "assistant", content: "", ts: new Date().toISOString() },
+    ]);
+    appendConversation(sessionKey, { role: "system", content });
+
+    try {
+      await streamCompletion(assistantId, { sessionKey, requestSessionId, agent });
+    } catch (e) {
+      const stream = streamsBySessionRef.current.get(sessionKey);
+      if (stream?.aborted) {
+        streamsBySessionRef.current.delete(sessionKey);
+      } else {
+        updateSessionMessages(sessionKey, (prev) =>
+          prev.map((m) =>
+            m.id === assistantId
+              ? { ...m, content: `Error: ${(e as Error).message}` }
+              : m
+          )
+        );
+      }
+      setSessionStreaming(sessionKey, false);
+    }
+  }, [appendConversation, setSessionStreaming, streamCompletion, updateSessionMessages]);
 
   // Send a message (streaming). Optionally attach images (data URLs).
   const send = useCallback(
@@ -939,7 +1077,7 @@ export function useChat() {
       const headers: Record<string, string> = {};
       if (appConfig.apiKey) headers["Authorization"] = `Bearer ${appConfig.apiKey}`;
       // fire-and-forget — best effort
-      void fetch(`${base}/api/v1/chat/completions/abort/${turnId}`, { method: "POST", headers })
+      void fetch(`${base}/v1/chat/completions/abort/${turnId}`, { method: "POST", headers })
         .catch(() => { /* server may already be done — ignore */ });
     }
     if (stream) {
@@ -1126,9 +1264,10 @@ export function useChat() {
     const data = pendingOpenFile;
     setSessionPending(activeSessionKeyRef.current, { openFile: null });
 
-    const responseText = `File "${data.path}" opened for user.`;
-    void appendUserAndStream(responseText);
-  }, [appendUserAndStream, pendingOpenFile, setSessionPending]);
+    void appendSystemAndStream(
+      `Client-side tool open_file completed successfully for path "${data.path}". Do not call open_file again for this same request. Continue with the final answer.`,
+    );
+  }, [appendSystemAndStream, pendingOpenFile, setSessionPending]);
 
   // Consume navigate_to — build a human-readable description and resume conversation
   const consumeNavigateTo = useCallback(() => {
@@ -1141,9 +1280,10 @@ export function useChat() {
     if (data.id) label += ` "${data.id}"`;
     if (data.name) label += ` "${data.name}"`;
     if (data.path) label += ` (${data.path})`;
-    const responseText = `Navigated to ${label}.`;
-    void appendUserAndStream(responseText);
-  }, [appendUserAndStream, pendingNavigateTo, setSessionPending]);
+    void appendSystemAndStream(
+      `Client-side tool navigate_to completed successfully. Destination: ${label}. Do not call navigate_to again for this same request. Continue with the final answer.`,
+    );
+  }, [appendSystemAndStream, pendingNavigateTo, setSessionPending]);
 
   // Consume open_tab — open URL in new tab and resume conversation
   const consumeOpenTab = useCallback(() => {
@@ -1152,9 +1292,21 @@ export function useChat() {
     setSessionPending(activeSessionKeyRef.current, { openTab: null });
 
     const label = data.label ?? data.url;
-    const responseText = `Opened tab: ${label}`;
+    void appendSystemAndStream(
+      `Client-side tool open_tab completed successfully. Opened: ${label}. Do not call open_tab again for this same request. Continue with the final answer.`,
+    );
+  }, [appendSystemAndStream, pendingOpenTab, setSessionPending]);
+
+  // Consume set_design — the UI previews the design, then resumes after apply/cancel
+  const consumeSetDesign = useCallback((result?: { applied: boolean; description: string }) => {
+    if (!pendingSetDesign) return;
+    setSessionPending(activeSessionKeyRef.current, { setDesign: null });
+
+    const responseText = result?.applied
+      ? `Design updated: ${result.description}.`
+      : `Design update cancelled: ${result?.description ?? "not applied"}.`;
     void appendUserAndStream(responseText);
-  }, [appendUserAndStream, pendingOpenTab, setSessionPending]);
+  }, [appendUserAndStream, pendingSetDesign, setSessionPending]);
 
   // Delete a session — clear messages if active
   const deleteSession = useCallback(
@@ -1181,10 +1333,10 @@ export function useChat() {
 
   const clear = useCallback(() => {
     updateSessionMessages(activeSessionKeyRef.current, []);
-    setSessionId(null);
     clearSessionPending(activeSessionKeyRef.current);
     conversationBySessionRef.current.delete(activeSessionKeyRef.current);
-  }, [clearSessionPending, setSessionId, updateSessionMessages]);
+    resetToLocalNewSession({ selectedAgent: selectedAgentRef.current });
+  }, [clearSessionPending, resetToLocalNewSession, updateSessionMessages]);
 
   return {
     messages,
@@ -1200,6 +1352,7 @@ export function useChat() {
     pendingOpenFile,
     pendingNavigateTo,
     pendingOpenTab,
+    pendingSetDesign,
     send,
     stop,
     answerQuestions,
@@ -1208,6 +1361,7 @@ export function useChat() {
     consumeOpenFile,
     consumeNavigateTo,
     consumeOpenTab,
+    consumeSetDesign,
     clear,
     loadSession,
     newSession,
@@ -1243,6 +1397,35 @@ export function useAsyncAction<T extends unknown[]>(
 
 // ── useProjectInfo ──
 
+function inferProjectNameFromConfig(value: unknown): string | null {
+  const config = value as {
+    project?: unknown;
+    teams?: Array<{
+      name?: unknown;
+      agents?: Array<{
+        identity?: { company?: unknown };
+      }>;
+    }>;
+  } | null | undefined;
+
+  const project = typeof config?.project === "string" ? config.project.trim() : "";
+  if (project) return project;
+
+  for (const team of config?.teams ?? []) {
+    for (const agent of team.agents ?? []) {
+      const company = typeof agent.identity?.company === "string" ? agent.identity.company.trim() : "";
+      if (company) return company;
+    }
+  }
+
+  for (const team of config?.teams ?? []) {
+    const teamName = typeof team.name === "string" ? team.name.trim() : "";
+    if (teamName && teamName.toLowerCase() !== "default") return teamName;
+  }
+
+  return null;
+}
+
 export function useProjectInfo() {
   const { client } = usePolpo();
   const [info, setInfo] = useState<{ project: string; version?: string } | null>(null);
@@ -1253,11 +1436,13 @@ export function useProjectInfo() {
 
     Promise.all([
       client.getState().catch(() => null),
+      client.getConfig().catch(() => null),
       client.getHealth().catch(() => null),
-    ]).then(([state, health]) => {
+    ]).then(([state, config, health]) => {
       if (cancelled) return;
-      const project = state?.project;
+      const project = inferProjectNameFromConfig(state) ?? inferProjectNameFromConfig(config);
       if (project) {
+        setAppearanceScope({ project });
         setInfo({ project, version: health?.version });
       }
     }).finally(() => {

@@ -28,6 +28,7 @@ import type {
   OpenFileData,
   NavigateToData,
   OpenTabData,
+  SetDesignData,
   ChatMessageWithQuestions,
   AskUserAnswer,
   MissionPreviewAction,
@@ -90,6 +91,7 @@ export interface ChatStateValue {
   pendingOpenFile: OpenFileData | null;
   pendingNavigateTo: NavigateToData | null;
   pendingOpenTab: OpenTabData | null;
+  pendingSetDesign: SetDesignData | null;
   /** Currently selected agent for agent-direct chat. null = orchestrator. */
   selectedAgent: string | null;
 }
@@ -104,6 +106,7 @@ export interface ChatActionsValue {
   consumeOpenFile: () => void;
   consumeNavigateTo: () => void;
   consumeOpenTab: () => void;
+  consumeSetDesign: (result?: { applied: boolean; description: string }) => void;
   clear: () => void;
   loadSession: (id: string) => Promise<void>;
   newSession: () => void;
@@ -132,13 +135,14 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     pendingOpenFile: chat.pendingOpenFile,
     pendingNavigateTo: chat.pendingNavigateTo,
     pendingOpenTab: chat.pendingOpenTab,
+    pendingSetDesign: chat.pendingSetDesign,
     selectedAgent: chat.selectedAgent,
   }), [
     chat.messages, chat.isLoading, chat.messagesLoading,
     chat.sessionId, chat.sessions, chat.sessionsLoading, chat.streamingSessionIds,
     chat.pendingQuestions, chat.pendingMission, chat.pendingVault,
     chat.pendingOpenFile, chat.pendingNavigateTo,
-    chat.pendingOpenTab, chat.selectedAgent,
+    chat.pendingOpenTab, chat.pendingSetDesign, chat.selectedAgent,
   ]);
 
   const actions: ChatActionsValue = useMemo(() => ({
@@ -150,6 +154,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     consumeOpenFile: chat.consumeOpenFile,
     consumeNavigateTo: chat.consumeNavigateTo,
     consumeOpenTab: chat.consumeOpenTab,
+    consumeSetDesign: chat.consumeSetDesign,
     clear: chat.clear,
     loadSession: chat.loadSession,
     newSession: chat.newSession,
@@ -159,7 +164,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     chat.send, chat.stop, chat.answerQuestions,
     chat.respondToMission, chat.respondToVault,
     chat.consumeOpenFile, chat.consumeNavigateTo,
-    chat.consumeOpenTab,
+    chat.consumeOpenTab, chat.consumeSetDesign,
     chat.clear, chat.loadSession, chat.newSession, chat.deleteSession,
     chat.setSelectedAgent,
   ]);
@@ -194,11 +199,11 @@ export function useChatActions(): ChatActionsValue {
 export function useChatInputDisabled(options?: { includeLoading?: boolean }): boolean {
   const {
     isLoading, pendingQuestions, pendingMission, pendingVault,
-    pendingOpenFile, pendingNavigateTo, pendingOpenTab,
+    pendingOpenFile, pendingNavigateTo, pendingOpenTab, pendingSetDesign,
   } = useChatState();
   const includeLoading = options?.includeLoading ?? true;
   return (
     (includeLoading && isLoading) || !!pendingQuestions || !!pendingMission || !!pendingVault
-    || !!pendingOpenFile || !!pendingNavigateTo || !!pendingOpenTab
+    || !!pendingOpenFile || !!pendingNavigateTo || !!pendingOpenTab || !!pendingSetDesign
   );
 }

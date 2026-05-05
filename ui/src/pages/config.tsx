@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, type CSSProperties } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -26,6 +26,7 @@ import {
   RefreshCw,
   Bot,
   Settings2,
+  Check,
   ChevronRight,
   Globe,
   Key,
@@ -56,7 +57,8 @@ import {
   AlertTriangle,
   LogIn,
   Keyboard,
-   Pencil,
+  Palette as PaletteIcon,
+  Pencil,
   X,
   Plus,
   Trash2,
@@ -84,6 +86,8 @@ import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import { ModelPicker } from "@/components/shared/model-picker";
 import { RuleFormDialog, type NotificationRuleDraft } from "@/components/config/rule-form-dialog";
 import { GateFormDialog, type ApprovalGateDraft, type LifecycleHook as GateLifecycleHook } from "@/components/config/gate-form-dialog";
+import { useAppearance } from "@/lib/appearance";
+import { PALETTES, usePalette } from "@/lib/palette";
 import { toast } from "sonner";
 
 // ── API helper (same pattern as setup.tsx) ──
@@ -170,6 +174,7 @@ const baseSections = [
   { id: "channels", label: "Channels", icon: Send },
   { id: "rules", label: "Rules", icon: Bell },
   { id: "policies", label: "Policies", icon: Shield },
+  { id: "appearance", label: "Appearance", icon: PaletteIcon },
 ] as const;
 
 type SectionIdBase = (typeof baseSections)[number]["id"];
@@ -1165,6 +1170,350 @@ function SettingRow({ icon: Icon, label, description, value, placeholder, onClic
   );
 }
 
+function AppearanceTab() {
+  const { palette, setPalette } = usePalette();
+  const { appearance, setAppearance, resetAppearance } = useAppearance();
+  const [mode, setMode] = useState<"light" | "dark">("light");
+  const activeTheme = appearance[mode];
+  const [primaryDraft, setPrimaryDraft] = useState(activeTheme.primary);
+  const [secondaryDraft, setSecondaryDraft] = useState(activeTheme.secondary);
+  const [textDraft, setTextDraft] = useState(activeTheme.text);
+  const [fontDraft, setFontDraft] = useState(activeTheme.fontFamily);
+
+  const updateAppearance = (patch: Partial<typeof appearance> | { enabled: boolean }) => {
+    setAppearance({ ...appearance, ...patch });
+  };
+
+  const updateTheme = (patch: Partial<typeof activeTheme>) => {
+    setAppearance({
+      ...appearance,
+      [mode]: {
+        ...activeTheme,
+        ...patch,
+      },
+    });
+  };
+
+  useEffect(() => {
+    setPrimaryDraft(activeTheme.primary);
+    setSecondaryDraft(activeTheme.secondary);
+    setTextDraft(activeTheme.text);
+    setFontDraft(activeTheme.fontFamily);
+  }, [activeTheme.fontFamily, activeTheme.primary, activeTheme.secondary, activeTheme.text]);
+
+  const updateHexDraft = (
+    value: string,
+    setDraft: (value: string) => void,
+    key: "primary" | "secondary" | "text",
+  ) => {
+    setDraft(value);
+    if (/^#[0-9a-f]{6}$/i.test(value)) {
+      updateTheme({ [key]: value });
+    }
+  };
+
+  const fontPresets = [
+    { label: "Satoshi", value: "\"Satoshi\", ui-sans-serif, system-ui, sans-serif" },
+    { label: "System", value: "ui-sans-serif, system-ui, sans-serif" },
+    { label: "Inter", value: "\"Inter\", ui-sans-serif, system-ui, sans-serif" },
+    { label: "Serif", value: "ui-serif, Georgia, Cambria, \"Times New Roman\", Times, serif" },
+    { label: "Mono", value: "\"JetBrains Mono\", ui-monospace, \"Cascadia Code\", monospace" },
+  ];
+
+  const previewStyle = {
+    "--preview-primary": activeTheme.primary,
+    "--preview-secondary": activeTheme.secondary,
+    "--preview-text": activeTheme.text,
+    "--preview-radius": `${activeTheme.radius}px`,
+    "--preview-font": activeTheme.fontFamily,
+  } as CSSProperties;
+
+  return (
+    <div className="space-y-6">
+      <section>
+        <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-2 flex items-center gap-1.5">
+          <PaletteIcon className="h-3.5 w-3.5" /> Palette
+        </h3>
+        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+          {PALETTES.map((option) => (
+            <button
+              key={option.id}
+              type="button"
+              onClick={() => setPalette(option.id)}
+              className={cn(
+                "rounded-lg border p-3 text-left transition-colors",
+                palette === option.id
+                  ? "border-primary/60 bg-primary/5"
+                  : "border-border/40 bg-card/60 hover:border-border/70 hover:bg-accent/25",
+              )}
+            >
+              <div className="mb-2 flex items-center justify-between gap-3">
+                <span className="text-sm font-semibold">{option.name}</span>
+                {palette === option.id && <Check className="h-3.5 w-3.5 text-primary" />}
+              </div>
+              <div className="mb-2 flex h-5 overflow-hidden rounded-md border border-border/30">
+                {option.swatchLight.map((color, index) => (
+                  <span key={index} className="flex-1" style={{ background: color }} />
+                ))}
+              </div>
+              <p className="text-[11px] leading-snug text-muted-foreground">{option.blurb}</p>
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <section>
+        <div className="mb-2 flex items-center justify-between gap-3">
+          <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+            <Settings2 className="h-3.5 w-3.5" /> Overrides
+          </h3>
+          <div className="flex items-center gap-2">
+            <div className="inline-flex rounded-lg border border-border/40 bg-muted/20 p-0.5">
+              {[
+                { label: "No", value: false },
+                { label: "Yes", value: true },
+              ].map((option) => (
+                <button
+                  key={option.label}
+                  type="button"
+                  onClick={() => updateAppearance({ enabled: option.value })}
+                  className={cn(
+                    "h-7 rounded-md px-3 text-xs font-medium transition-colors",
+                    appearance.enabled === option.value
+                      ? "bg-background text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+            <Button variant="outline" size="sm" className="h-8 text-xs" onClick={resetAppearance}>
+              Reset
+            </Button>
+          </div>
+        </div>
+        <div className={cn(
+          "grid gap-3 lg:grid-cols-[minmax(0,1fr)_18rem]",
+          !appearance.enabled && "opacity-60",
+        )}>
+          <div className="space-y-3">
+            <div className="rounded-lg border border-border/40 bg-card/60 p-3">
+              <label className="mb-2 block text-xs font-medium">Theme target</label>
+              <div className="inline-flex rounded-lg border border-border/40 bg-muted/20 p-0.5">
+                {[
+                  { label: "Light", value: "light" as const },
+                  { label: "Dark", value: "dark" as const },
+                ].map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => setMode(option.value)}
+                    className={cn(
+                      "h-7 rounded-md px-3 text-xs font-medium transition-colors",
+                      mode === option.value
+                        ? "bg-background text-foreground shadow-sm"
+                        : "text-muted-foreground hover:text-foreground",
+                    )}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-border/40 bg-card/60 p-3">
+              <label className="mb-2 flex items-center justify-between gap-3 text-xs font-medium">
+                Primary
+                <code className="text-[11px] text-muted-foreground">{activeTheme.primary}</code>
+              </label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="color"
+                  value={activeTheme.primary}
+                  onChange={(event) => {
+                    setPrimaryDraft(event.target.value);
+                    updateTheme({ primary: event.target.value });
+                  }}
+                  disabled={!appearance.enabled}
+                  className="h-9 w-12 shrink-0 cursor-pointer rounded-md border border-border bg-transparent p-1"
+                />
+                <Input
+                  value={primaryDraft}
+                  onChange={(event) => updateHexDraft(event.target.value, setPrimaryDraft, "primary")}
+                  disabled={!appearance.enabled}
+                  className="h-9 font-mono text-xs"
+                />
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-border/40 bg-card/60 p-3">
+              <label className="mb-2 flex items-center justify-between gap-3 text-xs font-medium">
+                Secondary
+                <code className="text-[11px] text-muted-foreground">{activeTheme.secondary}</code>
+              </label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="color"
+                  value={activeTheme.secondary}
+                  onChange={(event) => {
+                    setSecondaryDraft(event.target.value);
+                    updateTheme({ secondary: event.target.value });
+                  }}
+                  disabled={!appearance.enabled}
+                  className="h-9 w-12 shrink-0 cursor-pointer rounded-md border border-border bg-transparent p-1"
+                />
+                <Input
+                  value={secondaryDraft}
+                  onChange={(event) => updateHexDraft(event.target.value, setSecondaryDraft, "secondary")}
+                  disabled={!appearance.enabled}
+                  className="h-9 font-mono text-xs"
+                />
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-border/40 bg-card/60 p-3">
+              <label className="mb-2 flex items-center justify-between gap-3 text-xs font-medium">
+                Text
+                <code className="text-[11px] text-muted-foreground">{activeTheme.text}</code>
+              </label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="color"
+                  value={activeTheme.text}
+                  onChange={(event) => {
+                    setTextDraft(event.target.value);
+                    updateTheme({ text: event.target.value });
+                  }}
+                  disabled={!appearance.enabled}
+                  className="h-9 w-12 shrink-0 cursor-pointer rounded-md border border-border bg-transparent p-1"
+                />
+                <Input
+                  value={textDraft}
+                  onChange={(event) => updateHexDraft(event.target.value, setTextDraft, "text")}
+                  disabled={!appearance.enabled}
+                  className="h-9 font-mono text-xs"
+                />
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-border/40 bg-card/60 p-3">
+              <label className="mb-2 flex items-center justify-between gap-3 text-xs font-medium">
+                Font
+                <span className="text-[11px] text-muted-foreground">any CSS font stack</span>
+              </label>
+              <div className="grid gap-2 sm:grid-cols-[12rem_minmax(0,1fr)]">
+                <Select
+                  value={fontPresets.some((font) => font.value === activeTheme.fontFamily) ? activeTheme.fontFamily : "custom"}
+                  onValueChange={(value) => {
+                    if (value === "custom") return;
+                    setFontDraft(value);
+                    updateTheme({ fontFamily: value });
+                  }}
+                  disabled={!appearance.enabled}
+                >
+                  <SelectTrigger className="h-9 text-xs">
+                    <SelectValue placeholder="Preset" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {fontPresets.map((font) => (
+                      <SelectItem key={font.label} value={font.value}>
+                        {font.label}
+                      </SelectItem>
+                    ))}
+                    <SelectItem value="custom">Custom</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Input
+                  value={fontDraft}
+                  onChange={(event) => {
+                    setFontDraft(event.target.value);
+                    updateTheme({ fontFamily: event.target.value });
+                  }}
+                  disabled={!appearance.enabled}
+                  className="h-9 font-mono text-xs"
+                />
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-border/40 bg-card/60 p-3">
+              <label className="mb-2 flex items-center justify-between gap-3 text-xs font-medium">
+                Rounded
+                <code className="text-[11px] text-muted-foreground">{activeTheme.radius}px</code>
+              </label>
+              <input
+                type="range"
+                min={0}
+                max={24}
+                step={1}
+                value={activeTheme.radius}
+                onChange={(event) => updateTheme({ radius: Number(event.target.value) })}
+                disabled={!appearance.enabled}
+                className="w-full accent-primary"
+              />
+            </div>
+          </div>
+
+          <div className="rounded-lg border border-border/40 bg-card/60 p-4" style={previewStyle}>
+            <div className="mb-3 flex items-center justify-between">
+              <span className="text-xs font-semibold">Preview</span>
+              <Badge variant="outline" className="text-[10px]">{mode}</Badge>
+            </div>
+            <div
+              className="space-y-3 rounded-[var(--preview-radius)] border p-3"
+              style={{
+                borderColor: "color-mix(in srgb, var(--preview-primary) 28%, transparent)",
+                color: "var(--preview-text)",
+                fontFamily: "var(--preview-font)",
+              }}
+            >
+              <button
+                type="button"
+                className="h-9 w-full rounded-[var(--preview-radius)] px-3 text-sm font-medium"
+                style={{
+                  background: "var(--preview-primary)",
+                  color: "#fff",
+                }}
+              >
+                Primary action
+              </button>
+              <div
+                className="rounded-[var(--preview-radius)] p-3 text-xs"
+                style={{
+                  background: "var(--preview-secondary)",
+                  color: "var(--preview-text)",
+                }}
+              >
+                Secondary surface
+              </div>
+              <p className="text-sm" style={{ color: "var(--preview-text)" }}>
+                Text color and font preview
+              </p>
+              <div className="flex gap-2">
+                <span
+                  className="inline-flex rounded-full px-2 py-0.5 text-xs font-medium"
+                  style={{ background: "var(--preview-primary)", color: "#fff" }}
+                >
+                  Badge
+                </span>
+                <span
+                  className="inline-flex rounded-full border px-2 py-0.5 text-xs font-medium"
+                  style={{
+                    borderColor: "var(--preview-primary)",
+                    color: "var(--preview-text)",
+                  }}
+                >
+                  Secondary
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function AgentTab({ settings, primaryModel, fallbackModels, authStatus, onUpdateSettings }: {
   settings: PolpoSettings;
   primaryModel: string | undefined;
@@ -2052,6 +2401,11 @@ export function ConfigPage() {
               </section>
             )}
           </div>
+        )}
+
+        {/* ═══ APPEARANCE ═══ */}
+        {activeSection === "appearance" && (
+          <AppearanceTab />
         )}
 
         {/* ═══ AGENT (orchestrator config) ═══ */}

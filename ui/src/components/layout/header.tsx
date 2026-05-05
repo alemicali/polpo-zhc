@@ -61,7 +61,7 @@ export function Header() {
   const isOnChatPage = pathname === "/chat";
 
   return (
-    <header className="min-h-safe-head flex shrink-0 items-center justify-between border-b border-border/50 bg-background/80 px-4 pt-safe-head backdrop-blur-md sm:px-5 lg:min-h-14 lg:px-8 lg:pt-0">
+    <header className="flex min-h-12 shrink-0 items-center justify-between border-b border-border/50 bg-background/80 px-4 pt-0 backdrop-blur-md max-lg:min-h-safe-head max-lg:pt-safe-head sm:px-5 lg:min-h-14 lg:px-8">
       {/* Mobile: logo + title */}
       <div className="flex min-w-0 items-center gap-2.5 lg:hidden">
         <span className="text-lg">🐙</span>
@@ -73,7 +73,7 @@ export function Header() {
         <h2 className="text-lg font-bold tracking-tight">{title}</h2>
         <div className="h-4 w-px bg-border/60" />
         <span className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground/60">
-          {info?.project ?? "ZHC by Polpo"}
+          {info?.project ?? "Polpo"}
         </span>
       </div>
 

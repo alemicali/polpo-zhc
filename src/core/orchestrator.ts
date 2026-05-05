@@ -805,15 +805,45 @@ export class Orchestrator extends TypedEmitter {
   async getTeam(name?: string): Promise<Team | undefined> { return this.engine.getTeam(name); }
   getConfig(): PolpoConfig | null { return this.config; }
   get isInitialized(): boolean { return this.interactive; }
-  async addTeam(team: Team): Promise<void> { return this.engine.addTeam(team); }
-  async removeTeam(name: string): Promise<boolean> { return this.engine.removeTeam(name); }
-  async renameTeam(oldName: string, newName: string): Promise<void> { return this.engine.renameTeam(oldName, newName); }
-  async addAgent(agent: AgentConfig, teamName?: string): Promise<void> { return this.engine.addAgent(agent, teamName); }
-  async removeAgent(name: string): Promise<boolean> { return this.engine.removeAgent(name); }
-  async updateAgent(name: string, updates: Partial<Omit<AgentConfig, "name">>): Promise<AgentConfig> { return this.engine.updateAgent(name, updates); }
+  async addTeam(team: Team): Promise<void> {
+    await this.engine.addTeam(team);
+    await this.emitTeamSnapshot("team:created", { teamName: team.name });
+  }
+  async removeTeam(name: string): Promise<boolean> {
+    const removed = await this.engine.removeTeam(name);
+    if (removed) await this.emitTeamSnapshot("team:removed", { teamName: name });
+    return removed;
+  }
+  async renameTeam(oldName: string, newName: string): Promise<void> {
+    await this.engine.renameTeam(oldName, newName);
+    await this.emitTeamSnapshot("team:updated", { oldName, teamName: newName });
+  }
+  async addAgent(agent: AgentConfig, teamName?: string): Promise<void> {
+    await this.engine.addAgent(agent, teamName);
+    await this.emitTeamSnapshot("agent:created", { agentName: agent.name, teamName });
+  }
+  async removeAgent(name: string): Promise<boolean> {
+    const removed = await this.engine.removeAgent(name);
+    if (removed) await this.emitTeamSnapshot("agent:removed", { agentName: name });
+    return removed;
+  }
+  async updateAgent(name: string, updates: Partial<Omit<AgentConfig, "name">>): Promise<AgentConfig> {
+    const agent = await this.engine.updateAgent(name, updates);
+    await this.emitTeamSnapshot("agent:updated", { agentName: agent.name });
+    return agent;
+  }
   async findAgentTeam(name: string): Promise<Team | undefined> { return this.engine.findAgentTeam(name); }
   async addVolatileAgent(agent: AgentConfig, group: string): Promise<void> { return this.engine.addVolatileAgent(agent, group); }
   async cleanupVolatileAgents(group: string): Promise<number> { return this.engine.cleanupVolatileAgents(group); }
+
+  private async emitTeamSnapshot(event: string, data: Record<string, unknown>): Promise<void> {
+    this.emit(event, {
+      ...data,
+      agents: await this.getAgents(),
+      teams: await this.getTeams(),
+      timestamp: new Date().toISOString(),
+    });
+  }
 
 
   // ─── Mission Management (delegates to OrchestratorEngine → MissionExecutor) ──
@@ -1478,4 +1508,3 @@ export class Orchestrator extends TypedEmitter {
   /** Access the pure orchestration engine (for advanced use / testing). */
   getEngine(): OrchestratorEngine { return this.engine; }
 }
-

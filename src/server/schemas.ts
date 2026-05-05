@@ -241,6 +241,13 @@ const AgentIdentitySchema = z.object({
   socials: z.record(z.string(), z.string()).optional(),
 });
 
+const AgentSuggestionObjectSchema = z.object({
+  title: z.string().min(1),
+  prompt: z.string().optional(),
+  description: z.string().optional(),
+});
+const AgentSuggestionSchema = z.union([z.string().min(1), AgentSuggestionObjectSchema]);
+
 export const AddAgentSchema = z.object({
   name: z.string().min(1),
   role: z.string().optional(),
@@ -248,6 +255,7 @@ export const AddAgentSchema = z.object({
   allowedTools: z.array(z.string()).optional(),
   systemPrompt: z.string().optional(),
   skills: z.array(z.string()).optional(),
+  suggestions: z.array(AgentSuggestionSchema).optional(),
   maxTurns: z.number().int().positive().optional(),
   // Identity & hierarchy (vault credentials managed via encrypted store)
   identity: AgentIdentitySchema.optional(),
@@ -263,6 +271,7 @@ export const UpdateAgentSchema = z.object({
   allowedPaths: z.array(z.string()).optional(),
   systemPrompt: z.string().optional(),
   skills: z.array(z.string()).optional(),
+  suggestions: z.array(AgentSuggestionSchema).optional(),
   maxTurns: z.number().int().positive().optional(),
   maxConcurrency: z.number().int().positive().optional(),
   identity: AgentIdentitySchema.optional(),

@@ -28,6 +28,7 @@ const SkillDetailPage = lazy(() => import("@/pages/skill-detail").then(m => ({ d
 const FilesPage = lazy(() => import("@/pages/files").then(m => ({ default: m.FilesPage })));
 const BrowserPage = lazy(() => import("@/pages/browser").then(m => ({ default: m.BrowserPage })));
 const SetupPage = lazy(() => import("@/pages/setup").then(m => ({ default: m.SetupPage })));
+const LoginPage = lazy(() => import("@/pages/login").then(m => ({ default: m.LoginPage })));
 
 // Check if server is in setup mode — blocks all rendering until resolved
 function SetupModeRedirect({ children }: { children: React.ReactNode }) {
@@ -39,19 +40,29 @@ function SetupModeRedirect({ children }: { children: React.ReactNode }) {
   // Re-checking on navigation was causing the entire tree to unmount/remount
   // (flash of white) because setState("loading") replaced children with a spinner.
   useEffect(() => {
-    if (location.pathname === "/setup") {
+    if (location.pathname === "/setup" || location.pathname === "/login") {
       setState("ready");
       return;
     }
     fetch(`${config.baseUrl}/api/v1/config/status`)
       .then((r) => r.json())
-      .then((r) => {
+      .then(async (r) => {
         if (r.ok && !r.data.initialized) {
           setState("ready");
           navigate("/setup", { replace: true });
-        } else {
-          setState("ready");
+          return;
         }
+        if (r.ok && r.data.auth?.enabled) {
+          const auth = await fetch(`${config.baseUrl}/api/v1/auth/status`, { credentials: "include" })
+            .then((res) => res.json())
+            .catch(() => null);
+          if (auth?.ok && !auth.data.authenticated) {
+            setState("ready");
+            navigate("/login", { replace: true });
+            return;
+          }
+        }
+        setState("ready");
       })
       .catch(() => { setState("ready"); });
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -83,6 +94,7 @@ export function App() {
       <Routes>
         {/* Setup wizard — full-screen, no sidebar */}
         <Route path="setup" element={<Suspense fallback={<PageLoader />}><SetupPage /></Suspense>} />
+        <Route path="login" element={<Suspense fallback={<PageLoader />}><LoginPage /></Suspense>} />
 
         {/* Main app with sidebar layout */}
         <Route element={<AppLayout />}>

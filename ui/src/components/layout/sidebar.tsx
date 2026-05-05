@@ -265,8 +265,8 @@ export function Sidebar() {
                 🐙
               </div>
               <div>
-                <h1 className="text-sm font-bold tracking-tight text-foreground">ZHC by Polpo</h1>
-                <p className="text-[10px] tracking-wide uppercase text-muted-foreground/70">Agent Wrangler</p>
+                <h1 className="text-sm font-bold tracking-tight text-foreground">Polpo ZHC</h1>
+                <p className="text-[10px] tracking-wide uppercase text-muted-foreground/70">AI Factory</p>
               </div>
             </div>
             <button
@@ -309,10 +309,10 @@ export function Sidebar() {
         ))}
       </nav>
 
-      {/* Footer — connection + project */}
+      {/* Footer — project + connection */}
       <div
         className={cn(
-          "border-t border-border/40 space-y-2",
+          "border-t border-border/40",
           collapsed ? "p-0 py-3 flex flex-col items-center" : "px-4 py-3"
         )}
       >
@@ -330,38 +330,39 @@ export function Sidebar() {
               </div>
             </TooltipTrigger>
             <TooltipContent side="right" className="text-xs">
-              <p className="font-medium">{status.label}</p>
-              {info?.project && (
-                <p className="text-muted-foreground mt-0.5">{info.project}</p>
-              )}
+              <div className="flex items-center gap-1.5">
+                <span className={cn("h-1.5 w-1.5 rounded-full", status.color, status.pulse && "bio-pulse")} />
+                <span>{status.label}</span>
+                <span className="text-muted-foreground/40">·</span>
+                <span className="font-semibold text-foreground">{info?.project ?? "Polpo"}</span>
+              </div>
               {info?.version && (
                 <p className="text-muted-foreground/60 mt-0.5 font-mono">v{info.version}</p>
               )}
             </TooltipContent>
           </Tooltip>
         ) : (
-          <>
-            {info?.project && (
-              <div className="text-[10px] text-muted-foreground/60 truncate font-mono tracking-wider uppercase">
-                {info.project}
-              </div>
-            )}
-            <div className="flex items-center gap-2.5 text-xs text-muted-foreground">
-              <div
-                className={cn(
-                  "h-2 w-2 rounded-full",
-                  status.color,
-                  status.pulse && "bio-pulse"
-                )}
-              />
-              <span className="font-medium">{status.label}</span>
-              {info?.version && (
-                <span className="ml-auto text-[10px] font-mono text-muted-foreground/50">
-                  v{info.version}
-                </span>
+          <div className="flex min-w-0 items-center gap-2.5">
+            <div
+              className={cn(
+                "h-2 w-2 shrink-0 rounded-full",
+                status.color,
+                status.pulse && "bio-pulse"
               )}
+            />
+            <span className="shrink-0 text-xs font-medium text-muted-foreground">
+              {status.label}
+            </span>
+            <div className="h-4 w-px shrink-0 bg-border/60" />
+            <span className="min-w-0 truncate text-[10px] font-mono uppercase tracking-widest text-muted-foreground/60">
+              {info?.project ?? "Polpo"}
+            </span>
+            {info?.version && (
+              <span className="ml-auto shrink-0 text-[10px] font-mono text-muted-foreground/50">
+                v{info.version}
+              </span>
+            )}
             </div>
-          </>
         )}
       </div>
     </aside>

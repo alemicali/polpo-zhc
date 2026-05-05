@@ -48,6 +48,7 @@ import type {
   OpenFilePayload,
   NavigateToPayload,
   OpenTabPayload,
+  SetDesignPayload,
   RunActivityEntry,
   SkillInfo,
   LoadedSkill,
@@ -112,6 +113,9 @@ export class ChatCompletionStream implements AsyncIterable<ChatCompletionChunk> 
   /** If the stream ended with finish_reason "open_tab", this contains the URL to open. */
   openTab: OpenTabPayload | null = null;
 
+  /** If the stream ended with finish_reason "set_design", this contains appearance overrides. */
+  setDesign: SetDesignPayload | null = null;
+
   /** Whether abort() has been called. */
   aborted = false;
 
@@ -166,6 +170,7 @@ export class ChatCompletionStream implements AsyncIterable<ChatCompletionChunk> 
       headers,
       body: JSON.stringify({ ...body, stream: true }),
       signal: this.abortController.signal,
+      credentials: "include",
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({ error: { message: res.statusText } }));
@@ -229,6 +234,10 @@ export class ChatCompletionStream implements AsyncIterable<ChatCompletionChunk> 
             if (choice?.finish_reason === "open_tab" && choice.open_tab) {
               this.openTab = choice.open_tab;
             }
+            // Capture set_design payload from the chunk
+            if (choice?.finish_reason === "set_design" && choice.set_design) {
+              this.setDesign = choice.set_design;
+            }
             yield chunk;
           } catch {
             // skip malformed chunks
@@ -285,6 +294,7 @@ export class PolpoClient {
       method,
       headers: { ...this.headers, "Content-Type": "application/json" },
       body: body !== undefined ? JSON.stringify(body) : undefined,
+      credentials: "include",
     });
     const json = (await res.json()) as ApiResult<T>;
     if (!json.ok) {
@@ -715,6 +725,7 @@ export class PolpoClient {
       method: "POST",
       headers,
       body: JSON.stringify({ ...body, stream: false }),
+      credentials: "include",
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({ error: { message: res.statusText } }));

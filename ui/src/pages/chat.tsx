@@ -12,10 +12,10 @@ import {
   Check,
   Trash2,
   Zap,
+  History,
   ListChecks,
   Target,
   MessageSquare,
-  MessageCircle,
   Plus,
 
   ChevronsLeft,
@@ -51,8 +51,8 @@ import {
   PauseCircle,
   Timer,
   BarChart3,
-  AtSign,
   Compass,
+  Palette,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -94,17 +94,19 @@ import {
 import type { PromptInputMessage } from "@/components/ai-elements/prompt-input";
 import { useChatState, useChatActions, useChatInputDisabled } from "@/hooks/chat-context";
 import { MissionPreviewDialog } from "@/components/mission-preview-dialog";
-import type { AskUserQuestion, AskUserAnswer, MessageSegment, ToolCallInfo, MissionPreviewData, MissionPreviewAction, VaultPreviewData, VaultPreviewAction } from "@/hooks/use-polpo";
+import type { AskUserQuestion, AskUserAnswer, MessageSegment, ToolCallInfo, MissionPreviewData, MissionPreviewAction, VaultPreviewData, VaultPreviewAction, SetDesignData } from "@/hooks/use-polpo";
 import { FilePreviewDialog, useFilePreview, mimeFromPath } from "@/components/shared/file-preview";
 import { ToolCallList, ToolInvocation, ToolCallGroup } from "@/components/ai-elements/tool";
-import { MentionPopover, MentionText, type MentionPopoverHandle, type MentionFile } from "@/components/ai-elements/mention-popover";
+import { MentionPopover, MentionText, type MentionPopoverHandle, type MentionFile, type MentionTrigger } from "@/components/ai-elements/mention-popover";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
-import { useAgents, useTasks, useMissions, useSkills, usePlaybooks } from "@polpo-ai/react";
+import { useAgents, useSkills, usePolpo } from "@polpo-ai/react";
+import type { AgentConfig, Mission, PlaybookInfo, SkillWithAssignment, Task } from "@polpo-ai/react";
 import { cn } from "@/lib/utils";
 import { config } from "@/lib/config";
 import { useChatFirstSessionsOpen, setChatFirstSessionsOpen } from "@/hooks/use-layout-mode";
 import { toast } from "sonner";
 import { formatDistanceToNow } from "date-fns";
+import { useAppearance, type AppearanceSettings, type AppearanceThemeSettings } from "@/lib/appearance";
 
 /** Like formatDistanceToNow but returns "just now" for < 30 s */
 function chatTimeAgo(date: Date): string {
@@ -224,14 +226,20 @@ function useSpeechRecognition(opts?: { lang?: string; onResult?: (text: string) 
 function MicButton({
   onTranscript,
   disabled,
+  onListeningChange,
 }: {
   onTranscript: (text: string) => void;
   disabled?: boolean;
+  onListeningChange?: (listening: boolean) => void;
 }) {
   const { isListening, isSupported, toggle } = useSpeechRecognition({
     lang: "it-IT",
     onResult: onTranscript,
   });
+
+  useEffect(() => {
+    onListeningChange?.(isListening);
+  }, [isListening, onListeningChange]);
 
   if (!isSupported) return null;
 
@@ -243,7 +251,7 @@ function MicButton({
           variant="ghost"
           size="icon"
           className={cn(
-            "h-8 w-8 rounded-full transition-all",
+            "h-8 w-8 rounded-[calc(var(--radius)+999px)] transition-all",
             isListening
               ? "bg-red-500/15 text-red-400 hover:bg-red-500/25 ring-2 ring-red-500/30 animate-pulse"
               : "text-muted-foreground hover:text-foreground hover:bg-accent",
@@ -313,7 +321,7 @@ function AttachButton({ disabled }: { disabled?: boolean }) {
           type="button"
           variant="ghost"
           size="icon"
-          className="h-8 w-8 rounded-full text-muted-foreground hover:text-foreground hover:bg-accent"
+          className="h-8 w-8 rounded-[calc(var(--radius)+999px)] text-muted-foreground hover:text-foreground hover:bg-accent"
           onClick={openFileDialog}
           disabled={disabled}
         >
@@ -327,57 +335,14 @@ function AttachButton({ disabled }: { disabled?: boolean }) {
   );
 }
 
-// ── Mention @ button (lives inside PromptInput) ──
-
-function MentionButton({ disabled, onOpen }: { disabled?: boolean; onOpen: () => void }) {
+function ChatInputHint({ trigger, label }: { trigger: "@" | "/"; label: string }) {
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          className="h-8 w-8 rounded-full text-muted-foreground hover:text-foreground hover:bg-accent"
-          onMouseDown={(e) => {
-            e.preventDefault(); // Prevent stealing focus from textarea
-            onOpen();
-          }}
-          disabled={disabled}
-        >
-          <AtSign className="h-4 w-4" />
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent side="top" className="text-xs">
-        Mention agent, task, or mission
-      </TooltipContent>
-    </Tooltip>
-  );
-}
-
-// ── Slash / button (lives inside PromptInput) ──
-
-function SlashButton({ disabled, onOpen }: { disabled?: boolean; onOpen: () => void }) {
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          className="h-8 w-8 rounded-full text-muted-foreground hover:text-foreground hover:bg-accent"
-          onMouseDown={(e) => {
-            e.preventDefault();
-            onOpen();
-          }}
-          disabled={disabled}
-        >
-          <span className="text-base font-semibold leading-none">/</span>
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent side="top" className="text-xs">
-        Run a skill or playbook
-      </TooltipContent>
-    </Tooltip>
+    <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+      <span className="font-mono text-[10px] font-semibold text-foreground">
+        {trigger}
+      </span>
+      <span className="hidden sm:inline">for {label}</span>
+    </span>
   );
 }
 
@@ -1018,6 +983,215 @@ function VaultPreviewCard({
   );
 }
 
+// ── Design Preview Card ──
+
+type DesignMode = "light" | "dark";
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isHexColor(value: string): boolean {
+  return /^#[0-9a-f]{6}$/i.test(value);
+}
+
+function themePatchFromPreview(preview: SetDesignData, mode: DesignMode) {
+  const nested = preview[mode];
+  if (nested && isRecord(nested)) return nested;
+
+  const patch: Record<string, unknown> = {};
+  for (const key of ["primary", "secondary", "text", "radius", "fontFamily"] as const) {
+    if (preview[key] !== undefined) patch[key] = preview[key];
+  }
+  return Object.keys(patch).length > 0 ? patch : null;
+}
+
+function applyThemePatch(
+  base: AppearanceThemeSettings,
+  patch: Record<string, unknown> | null,
+  label: string,
+): { theme: AppearanceThemeSettings; changed: string[]; error?: string } {
+  const next = { ...base };
+  const changed: string[] = [];
+  if (!patch) return { theme: next, changed };
+
+  for (const key of ["primary", "secondary", "text"] as const) {
+    if (patch[key] === undefined) continue;
+    if (typeof patch[key] !== "string" || !isHexColor(patch[key])) {
+      return { theme: next, changed, error: `${label} ${key} must be a 6-digit hex color` };
+    }
+    next[key] = patch[key];
+    changed.push(`${label} ${key} ${patch[key]}`);
+  }
+
+  if (patch.radius !== undefined) {
+    if (typeof patch.radius !== "number" || !Number.isFinite(patch.radius)) {
+      return { theme: next, changed, error: `${label} radius must be a number` };
+    }
+    next.radius = Math.min(24, Math.max(0, patch.radius));
+    changed.push(`${label} radius ${next.radius}px`);
+  }
+
+  if (patch.fontFamily !== undefined) {
+    if (typeof patch.fontFamily !== "string" || !patch.fontFamily.trim()) {
+      return { theme: next, changed, error: `${label} fontFamily cannot be empty` };
+    }
+    next.fontFamily = patch.fontFamily.trim();
+    changed.push(`${label} font`);
+  }
+
+  return { theme: next, changed };
+}
+
+function buildAppearancePreview(preview: SetDesignData, current: AppearanceSettings) {
+  if (preview.enabled === false) {
+    return {
+      next: { ...current, enabled: false },
+      changed: ["overrides off"],
+    };
+  }
+
+  const light = applyThemePatch(current.light, themePatchFromPreview(preview, "light"), "light");
+  if (light.error) return { error: light.error };
+  const dark = applyThemePatch(current.dark, themePatchFromPreview(preview, "dark"), "dark");
+  if (dark.error) return { error: dark.error };
+
+  const changed = ["overrides on", ...light.changed, ...dark.changed];
+  return {
+    next: {
+      ...current,
+      enabled: true,
+      light: light.theme,
+      dark: dark.theme,
+    },
+    changed,
+  };
+}
+
+function hasAppearancePreview(
+  value: ReturnType<typeof buildAppearancePreview>,
+): value is { next: AppearanceSettings; changed: string[] } {
+  return "next" in value;
+}
+
+function ThemeSwatch({ label, theme }: { label: string; theme: AppearanceThemeSettings }) {
+  return (
+    <div className="rounded-lg border border-border/40 bg-background/70 p-3">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <p className="text-xs font-semibold">{label}</p>
+        <span className="text-[10px] text-muted-foreground">{theme.radius}px radius</span>
+      </div>
+      <div className="mb-2 flex h-8 overflow-hidden rounded-md border border-border/30">
+        <span className="flex-1" style={{ background: theme.primary }} />
+        <span className="flex-1" style={{ background: theme.secondary }} />
+        <span className="flex-1" style={{ background: theme.text }} />
+      </div>
+      <div className="grid grid-cols-[4.5rem_minmax(0,1fr)] gap-x-2 gap-y-1 text-[11px]">
+        <span className="text-muted-foreground">Primary</span>
+        <code className="truncate">{theme.primary}</code>
+        <span className="text-muted-foreground">Secondary</span>
+        <code className="truncate">{theme.secondary}</code>
+        <span className="text-muted-foreground">Text</span>
+        <code className="truncate">{theme.text}</code>
+        <span className="text-muted-foreground">Font</span>
+        <code className="truncate">{theme.fontFamily}</code>
+      </div>
+    </div>
+  );
+}
+
+function DesignPreviewCard({
+  preview,
+  onRespond,
+  disabled,
+}: {
+  preview: SetDesignData;
+  onRespond: (result?: { applied: boolean; description: string }) => void;
+  disabled?: boolean;
+}) {
+  const { appearance, setAppearance } = useAppearance();
+  const [submitting, setSubmitting] = useState(false);
+  const computed = useMemo(() => buildAppearancePreview(preview, appearance), [appearance, preview]);
+  const canApply = hasAppearancePreview(computed);
+  const nextAppearance = canApply ? computed.next : appearance;
+
+  const apply = () => {
+    if (!hasAppearancePreview(computed)) {
+      toast.error("Design preview is invalid", { description: computed.error });
+      return;
+    }
+    setSubmitting(true);
+    setAppearance(computed.next);
+    onRespond({ applied: true, description: computed.changed.join(", ") });
+    toast.success("Design updated");
+    setSubmitting(false);
+  };
+
+  const cancel = () => {
+    onRespond({ applied: false, description: "user declined preview" });
+  };
+
+  return (
+    <div className="mt-3 overflow-hidden rounded-xl border border-primary/20 bg-primary/[0.03]">
+      <div className="flex items-center gap-2 border-b border-primary/10 bg-primary/[0.02] px-4 py-3">
+        <Palette className="h-4 w-4 shrink-0 text-primary" />
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-semibold">Design preview</p>
+          <p className="text-[11px] text-muted-foreground">
+            {preview.enabled === false ? "Appearance overrides will be disabled" : "Review the proposed light and dark theme before applying"}
+          </p>
+        </div>
+        <Badge variant="outline" className="shrink-0 text-[10px]">Preview</Badge>
+      </div>
+
+      <div className="space-y-3 px-4 py-3">
+        {preview.enabled === false ? (
+          <div className="rounded-lg border border-border/40 bg-background/70 p-3 text-xs text-muted-foreground">
+            The selected palette and default theme variables will be restored.
+          </div>
+        ) : (
+          <div className="grid gap-3 sm:grid-cols-2">
+            <ThemeSwatch label="Light" theme={nextAppearance.light} />
+            <ThemeSwatch label="Dark" theme={nextAppearance.dark} />
+          </div>
+        )}
+        {!canApply && (
+          <div className="flex items-start gap-2 rounded-lg border border-destructive/20 bg-destructive/5 p-3 text-xs text-destructive">
+            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            <span>{computed.error}</span>
+          </div>
+        )}
+      </div>
+
+      <div className="flex items-center justify-between border-t border-primary/10 bg-primary/[0.02] px-4 py-3">
+        <Button
+          variant="ghost"
+          size="sm"
+          disabled={disabled || submitting}
+          onClick={cancel}
+          className="gap-1.5 text-muted-foreground hover:text-destructive"
+        >
+          <Ban className="h-3.5 w-3.5" />
+          Cancel
+        </Button>
+        <Button
+          size="sm"
+          disabled={disabled || submitting || !canApply}
+          onClick={apply}
+          className="gap-1.5"
+        >
+          {submitting ? (
+            <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />
+          ) : (
+            <Check className="h-3.5 w-3.5" />
+          )}
+          Apply design
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 // ── Copy button ──
 
 function CopyAction({ text }: { text: string }) {
@@ -1630,7 +1804,7 @@ function AskUserCards({
 
 // ── Suggestions for empty state ──
 
-const suggestions = [
+const orchestratorSuggestions = [
   {
     icon: Zap,
     title: "What's the current status?",
@@ -1642,14 +1816,90 @@ const suggestions = [
     description: "Tasks that need attention",
   },
   {
-    icon: Target,
-    title: "Create a mission to refactor the auth module",
-    description: "Generate a multi-task execution mission",
+    icon: MessageSquare,
+    title: "Create a new agent",
+    description: "Add a specialist agent to the team",
+  },
+];
+
+const MAX_AGENT_SUGGESTIONS = 4;
+
+type AgentStarterSuggestion = string | {
+  title: string;
+  prompt?: string;
+  description?: string;
+};
+
+interface LazyMentionData {
+  tasks: Task[];
+  missions: Mission[];
+  skills: SkillWithAssignment[];
+  playbooks: PlaybookInfo[];
+  files: MentionFile[];
+}
+
+function parseMissionAgents(data: string): string[] {
+  try {
+    const parsed = JSON.parse(data) as {
+      tasks?: Array<{ assignTo?: string }>;
+      team?: Array<{ name?: string }>;
+    };
+    const agents = new Set<string>();
+
+    if (Array.isArray(parsed.tasks)) {
+      for (const task of parsed.tasks) {
+        if (task.assignTo) agents.add(task.assignTo);
+      }
+    }
+
+    if (Array.isArray(parsed.team)) {
+      for (const agent of parsed.team) {
+        if (agent.name) agents.add(agent.name);
+      }
+    }
+
+    return Array.from(agents);
+  } catch {
+    return [];
+  }
+}
+
+function normalizeMentionPath(path: string): string {
+  return path.replace(/\\/g, "/").replace(/^\.?\//, "").replace(/\/+$/, "");
+}
+
+function isFileAllowedForAgent(file: MentionFile, agent?: AgentConfig): boolean {
+  const allowedPaths = agent?.allowedPaths;
+  if (!allowedPaths || allowedPaths.length === 0) return true;
+
+  const filePath = normalizeMentionPath(file.path);
+  return allowedPaths.some((allowedPath) => {
+    const normalizedAllowed = normalizeMentionPath(allowedPath);
+    if (!normalizedAllowed || normalizedAllowed === ".") return true;
+    return filePath === normalizedAllowed || filePath.startsWith(`${normalizedAllowed}/`);
+  });
+}
+
+const missionSuggestions = [
+  {
+    icon: ShieldCheck,
+    title: "Review and harden OAuth login",
+    prompt: "Create a mission to review and harden OAuth login flows, including callback handling, error states, and user-facing recovery steps.",
   },
   {
-    icon: MessageSquare,
-    title: "List all active agents",
-    description: "See which agents are configured",
+    icon: FileCode,
+    title: "Refactor auth module",
+    prompt: "Create a mission to refactor the auth module, reduce duplication, improve naming, and add focused tests for the main login paths.",
+  },
+  {
+    icon: Compass,
+    title: "Improve onboarding setup",
+    prompt: "Create a mission to improve the onboarding setup flow, fixing confusing states, redirects, and deployment-specific edge cases.",
+  },
+  {
+    icon: ListChecks,
+    title: "Stabilize tests and CI",
+    prompt: "Create a mission to inspect failing tests and CI checks, identify the root causes, and implement the smallest reliable fixes.",
   },
 ];
 
@@ -1863,13 +2113,16 @@ function SessionSidebar({
 
   // ── Drill-down state ──
   const [activeGroup, setActiveGroup] = useState<string | null>(null);
+  const lastAutoDrilledSessionRef = useRef<string | null>(null);
 
   // Auto-drill into the group that contains the active session
   useEffect(() => {
     if (view !== "drill" || !activeSessionId) return;
+    if (lastAutoDrilledSessionRef.current === activeSessionId) return;
     const session = sessions.find((s) => s.id === activeSessionId);
     if (session) {
       setActiveGroup(session.agent ?? ORCHESTRATOR_KEY);
+      lastAutoDrilledSessionRef.current = activeSessionId;
     }
   }, [activeSessionId, sessions, view]);
 
@@ -2345,7 +2598,7 @@ function ChatToolbar({
             className="h-7 w-7 shrink-0"
             onClick={onToggleSidebar}
           >
-            {sidebarOpen ? <ChevronsLeft className="h-4 w-4" /> : <MessageCircle className="h-4 w-4" />}
+            {sidebarOpen ? <ChevronsLeft className="h-4 w-4" /> : <History className="h-4 w-4" />}
           </Button>
         </TooltipTrigger>
         <TooltipContent side="bottom" className="text-xs">
@@ -2433,84 +2686,188 @@ function ChatEmptyState() {
   const { send, setSelectedAgent } = useChatActions();
   const { selectedAgent } = useChatState();
   const { agents } = useAgents();
+  const { skills } = useSkills();
+  const [showMissionSuggestions, setShowMissionSuggestions] = useState(false);
   const agentConfig = selectedAgent && agents ? agents.find((a) => a.name === selectedAgent) : undefined;
   const name = agentConfig?.identity?.displayName ?? agentConfig?.name ?? "Polpo";
+  const agentSuggestions = useMemo(() => {
+    if (!agentConfig) return [];
+
+    const configuredSuggestions =
+      ((agentConfig as typeof agentConfig & { suggestions?: AgentStarterSuggestion[] }).suggestions ?? []);
+    const configured = configuredSuggestions.map((suggestion: AgentStarterSuggestion) => {
+      const title = typeof suggestion === "string" ? suggestion : suggestion.title;
+      return {
+        icon: MessageSquare,
+        title,
+        description: typeof suggestion === "string"
+          ? "Agent starter prompt"
+          : suggestion.description ?? "Agent starter prompt",
+        prompt: typeof suggestion === "string" ? suggestion : suggestion.prompt ?? suggestion.title,
+      };
+    });
+
+    const configuredTitles = new Set(configured.map((s: { title: string }) => s.title.toLowerCase()));
+    const assignedSkills = (skills ?? [])
+      .filter((skill) =>
+        skill.assignedTo?.includes(agentConfig.name) ||
+        agentConfig.skills?.includes(skill.name)
+      )
+      .filter((skill) => !configuredTitles.has(skill.name.toLowerCase()))
+      .slice(0, Math.max(0, MAX_AGENT_SUGGESTIONS - configured.length))
+      .map((skill) => ({
+        icon: FileCode,
+        title: skill.name,
+        description: skill.description || "Use this agent skill",
+        prompt: skill.name,
+      }));
+
+    return [...configured, ...assignedSkills].slice(0, MAX_AGENT_SUGGESTIONS);
+  }, [agentConfig, skills]);
 
   return (
-    <div className="flex flex-col items-center justify-center h-full">
-      {/* Agent selector — text-only dropdown above the avatar */}
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <button
-            type="button"
-            className="inline-flex items-center gap-1 text-sm transition-colors mb-3 focus-visible:outline-none"
-          >
-            <span className="font-semibold text-foreground">{name}</span>
-            <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
-          </button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="center" className="w-52">
-          <DropdownMenuItem
-            onClick={() => setSelectedAgent(null)}
-            className="gap-2"
-          >
-            <span className="text-xs leading-none">🐙</span>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium">Polpo</p>
-              <p className="text-[11px] text-muted-foreground">Orchestrator</p>
-            </div>
-            {!selectedAgent && <Check className="h-3.5 w-3.5 text-primary shrink-0" />}
-          </DropdownMenuItem>
-          {agents && agents.length > 0 && <DropdownMenuSeparator />}
-          {agents?.map((a) => (
-            <DropdownMenuItem
-              key={a.name}
-              onClick={() => setSelectedAgent(a.name)}
-              className="gap-2"
-            >
-              <AgentAvatar
-                avatar={a.identity?.avatar}
-                name={a.identity?.displayName ?? a.name}
-                size="xs"
-              />
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium truncate">{a.identity?.displayName ?? a.name}</p>
-                {a.role && <p className="text-[11px] text-muted-foreground truncate">{a.role}</p>}
-              </div>
-              {selectedAgent === a.name && <Check className="h-3.5 w-3.5 text-primary shrink-0" />}
-            </DropdownMenuItem>
-          ))}
-        </DropdownMenuContent>
-      </DropdownMenu>
+    <div className="flex h-full flex-col items-center justify-center px-4 py-8">
       {/* Avatar */}
-      <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10 mb-4 text-3xl">
+      <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 mb-4 text-3xl">
         {agentConfig ? (
           <AgentAvatar avatar={agentConfig.identity?.avatar} name={name} size="xl" />
         ) : (
           <>🐙</>
         )}
       </div>
-      <h2 className="text-2xl font-semibold mb-2">Chat with {name}</h2>
-      <p className="text-sm text-muted-foreground mb-8 max-w-md text-center">
+      <h2 className="mb-2 flex flex-wrap items-center justify-center gap-2 text-2xl font-semibold">
+        <span>Chat with</span>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              className="inline-flex min-w-0 items-center gap-1 rounded-lg border border-primary/20 bg-primary/5 px-2.5 py-1 text-2xl font-semibold transition-colors hover:border-primary/35 hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
+            >
+              <span className="truncate">{name}</span>
+              <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="center" className="max-h-80 w-72 overflow-y-auto">
+            <DropdownMenuItem
+              onClick={() => setSelectedAgent(null)}
+              className="gap-2"
+            >
+              <span className="text-xs leading-none">🐙</span>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium">Polpo</p>
+                <p className="text-[11px] text-muted-foreground">Orchestrator</p>
+              </div>
+              {!selectedAgent && <Check className="h-3.5 w-3.5 text-primary shrink-0" />}
+            </DropdownMenuItem>
+            {agents && agents.length > 0 && <DropdownMenuSeparator />}
+            {agents?.map((a) => (
+              <DropdownMenuItem
+                key={a.name}
+                onClick={() => setSelectedAgent(a.name)}
+                className="gap-2"
+              >
+                <AgentAvatar
+                  avatar={a.identity?.avatar}
+                  name={a.identity?.displayName ?? a.name}
+                  size="xs"
+                />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium truncate">{a.identity?.displayName ?? a.name}</p>
+                  {a.role && <p className="text-[11px] text-muted-foreground truncate">{a.role}</p>}
+                </div>
+                {selectedAgent === a.name && <Check className="h-3.5 w-3.5 text-primary shrink-0" />}
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </h2>
+      <p className="text-sm text-muted-foreground mb-5 max-w-md text-center">
         {agentConfig?.role ?? "Orchestrator"}
       </p>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-xl w-full px-4">
-        {suggestions.map((s) => (
+      <div className="mb-5 w-full max-w-3xl">
+        <ChatInput embedded />
+      </div>
+      {agentConfig ? (
+        agentSuggestions.length > 0 && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-w-xl w-full">
+            {agentSuggestions.map((s) => (
+              <button
+                key={s.title}
+                type="button"
+                onClick={() => send(s.prompt)}
+                className="flex min-w-0 items-start gap-2.5 rounded-lg border border-border/40 p-2.5 text-left transition-all hover:bg-accent/30 hover:border-primary/20"
+              >
+                <s.icon className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
+                <div className="min-w-0">
+                  <p className="truncate text-xs font-medium">{s.title}</p>
+                  <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                    {s.description}
+                  </p>
+                </div>
+              </button>
+            ))}
+          </div>
+        )
+      ) : showMissionSuggestions ? (
+        <div className="w-full max-w-2xl">
           <button
-            key={s.title}
-            onClick={() => send(s.title)}
-            className="flex items-start gap-3 rounded-xl border border-border/40 p-4 text-left transition-all hover:bg-accent/30 hover:border-primary/20"
+            type="button"
+            onClick={() => setShowMissionSuggestions(false)}
+            className="mb-3 inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
           >
-            <s.icon className="h-5 w-5 text-muted-foreground shrink-0 mt-0.5" />
+            <ChevronLeft className="h-3.5 w-3.5" />
+            Back to suggestions
+          </button>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {missionSuggestions.map((s) => (
+              <button
+                key={s.title}
+                type="button"
+                onClick={() => send(s.prompt)}
+                className="flex items-start gap-2.5 rounded-lg border border-border/50 bg-card/40 p-3 text-left transition-all hover:bg-accent/35 hover:border-primary/25"
+              >
+                <s.icon className="h-4 w-4 text-primary shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-xs font-medium">{s.title}</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">Create a multi-task mission</p>
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-w-xl w-full">
+          <button
+            type="button"
+            onClick={() => setShowMissionSuggestions(true)}
+            className="flex items-start gap-2.5 rounded-lg border border-primary/20 bg-primary/5 p-3 text-left transition-all hover:bg-primary/10 hover:border-primary/35"
+          >
+            <Target className="h-4 w-4 text-primary shrink-0 mt-0.5" />
             <div>
-              <p className="text-sm font-medium">{s.title}</p>
+              <p className="text-xs font-medium">Create a mission</p>
               <p className="text-xs text-muted-foreground mt-0.5">
-                {s.description}
+                Pick from common mission prompts
               </p>
             </div>
           </button>
-        ))}
-      </div>
+          {orchestratorSuggestions.map((s) => (
+            <button
+              key={s.title}
+              type="button"
+              onClick={() => send(s.title)}
+              className="flex items-start gap-2.5 rounded-lg border border-border/40 p-3 text-left transition-all hover:bg-accent/30 hover:border-primary/20"
+            >
+              <s.icon className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
+              <div>
+                <p className="text-xs font-medium">{s.title}</p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  {s.description}
+                </p>
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -2518,8 +2875,8 @@ function ChatEmptyState() {
 // ── ChatMessages — Virtuoso message list, empty state, scroll-to-bottom ──
 
 function ChatMessages() {
-  const { messages, isLoading, messagesLoading, pendingQuestions, pendingMission, pendingVault, selectedAgent, sessions, sessionId } = useChatState();
-  const { answerQuestions, respondToMission, respondToVault } = useChatActions();
+  const { messages, isLoading, messagesLoading, pendingQuestions, pendingMission, pendingVault, pendingSetDesign, selectedAgent, sessions, sessionId } = useChatState();
+  const { answerQuestions, respondToMission, respondToVault, consumeSetDesign } = useChatActions();
 
   // Resolve agent config for agent-direct sessions
   const { agents } = useAgents();
@@ -2665,7 +3022,7 @@ function ChatMessages() {
                             </MessageContent>
                           </>
                         )}
-                        {!isStreaming && !msg.askUserQuestions?.length && !msg.missionPreview && !msg.vaultPreview && (
+                        {!isStreaming && !msg.askUserQuestions?.length && !msg.missionPreview && !msg.vaultPreview && !msg.setDesign && (
                           <MessageActions className="mt-2 opacity-0 group-hover:opacity-100 transition-opacity">
                             <CopyAction text={msg.content} />
                             {msg.content.trim() && <SpeakAction text={msg.content} />}
@@ -2690,6 +3047,13 @@ function ChatMessages() {
                             preview={msg.vaultPreview}
                             onRespond={respondToVault}
                             disabled={isLoading || !pendingVault}
+                          />
+                        )}
+                        {msg.setDesign && (
+                          <DesignPreviewCard
+                            preview={msg.setDesign}
+                            onRespond={consumeSetDesign}
+                            disabled={isLoading || !pendingSetDesign}
                           />
                         )}
                         {msg.openFile && (
@@ -2717,13 +3081,13 @@ function ChatMessages() {
               <div className="w-full py-2 px-4">
                 <div className="mx-auto max-w-3xl">
                   <div className="flex items-center gap-2.5 pl-10 py-1.5">
-                    <div className="flex items-center gap-1">
-                      <span className="h-1.5 w-1.5 rounded-full bg-primary/60 animate-bounce [animation-delay:0ms]" />
-                      <span className="h-1.5 w-1.5 rounded-full bg-primary/60 animate-bounce [animation-delay:150ms]" />
-                      <span className="h-1.5 w-1.5 rounded-full bg-primary/60 animate-bounce [animation-delay:300ms]" />
-                    </div>
-                    <span className="text-[11px] text-muted-foreground animate-pulse">
-                      {assistantName} is thinking...
+                    <span className="relative flex h-4 w-4 items-center justify-center">
+                      <span className="absolute h-4 w-4 rounded-full border border-primary/20" />
+                      <span className="absolute h-4 w-4 animate-spin rounded-full border-2 border-transparent border-r-primary/70 border-t-primary" />
+                      <span className="h-1.5 w-1.5 rounded-full bg-primary/70" />
+                    </span>
+                    <span className="text-[11px] text-muted-foreground">
+                      Agent is working
                     </span>
                   </div>
                 </div>
@@ -2753,31 +3117,71 @@ function ChatMessages() {
 
 // ── ChatInput — prompt input area with mentions, attachments, mic ──
 
-function ChatInput() {
-  const { isLoading, pendingQuestions, pendingMission, pendingVault, sessionId, selectedAgent } = useChatState();
+function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
+  const { isLoading, pendingQuestions, pendingMission, pendingVault, pendingSetDesign, sessionId, selectedAgent, sessions } = useChatState();
   const { send, stop } = useChatActions();
   const inputDisabled = useChatInputDisabled({ includeLoading: false });
+  const { client } = usePolpo();
 
   const inputWrapperRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const mentionRef = useRef<MentionPopoverHandle>(null);
+  const [isRecording, setIsRecording] = useState(false);
 
   // Mention autocomplete data
   const { agents } = useAgents();
-  const { tasks } = useTasks();
-  const { missions } = useMissions();
-  const { skills } = useSkills();
-  const { playbooks } = usePlaybooks();
+  const [mentionData, setMentionData] = useState<LazyMentionData>({
+    tasks: [],
+    missions: [],
+    skills: [],
+    playbooks: [],
+    files: [],
+  });
+  const mentionLoadedRef = useRef<Record<MentionTrigger, boolean>>({ "@": false, "/": false });
+  const mentionLoadingRef = useRef<Record<MentionTrigger, boolean>>({ "@": false, "/": false });
 
-  // Files for @mention autocomplete — fetch once on mount
-  const [mentionFiles, setMentionFiles] = useState<MentionFile[]>([]);
-  useEffect(() => {
-    const base = config.baseUrl || "";
-    fetch(`${base}/api/v1/files/search?limit=200`)
-      .then(r => r.json())
-      .then(json => { if (json.ok) setMentionFiles(json.data.files); })
-      .catch(() => {});
-  }, []);
+  const ensureMentionData = useCallback(async (trigger: MentionTrigger) => {
+    if (mentionLoadedRef.current[trigger] || mentionLoadingRef.current[trigger]) return;
+
+    mentionLoadingRef.current[trigger] = true;
+    try {
+      if (trigger === "@") {
+        const base = config.baseUrl || "";
+        const [tasks, missions, filesJson] = await Promise.all([
+          client.getTasks(),
+          client.getMissions(),
+          fetch(`${base}/api/v1/files/search?limit=200`)
+            .then((r) => r.json())
+            .catch(() => ({ ok: false })),
+        ]);
+
+        setMentionData((prev) => ({
+          ...prev,
+          tasks,
+          missions,
+          files: filesJson.ok ? filesJson.data.files : prev.files,
+        }));
+      } else {
+        const [skills, playbooks] = await Promise.all([
+          client.getSkills(),
+          client.getPlaybooks(),
+        ]);
+
+        setMentionData((prev) => ({
+          ...prev,
+          skills,
+          playbooks,
+        }));
+      }
+
+      mentionLoadedRef.current[trigger] = true;
+    } catch (error) {
+      toast.error(`Could not load ${trigger === "@" ? "mentions" : "commands"}`);
+      console.error(error);
+    } finally {
+      mentionLoadingRef.current[trigger] = false;
+    }
+  }, [client]);
 
   const handleSubmit = useCallback(
     async (message: PromptInputMessage) => {
@@ -2805,13 +3209,70 @@ function ChatInput() {
   }, []);
 
   // Resolve selected agent config for display
-  const selectedAgentConfig = selectedAgent && agents ? agents.find((a) => a.name === selectedAgent) : undefined;
+  const currentAgentName =
+    selectedAgent ?? sessions.find((s: { id: string; agent?: string }) => s.id === sessionId)?.agent ?? null;
+  const isOrchestratorChat = !currentAgentName || currentAgentName === "orchestrator";
+  const selectedAgentConfig = currentAgentName && agents ? agents.find((a) => a.name === currentAgentName) : undefined;
   const recipientName = selectedAgentConfig?.identity?.displayName ?? selectedAgentConfig?.name ?? "Polpo";
 
+  const mentionAgents = useMemo(
+    () => (isOrchestratorChat ? agents : []),
+    [agents, isOrchestratorChat],
+  );
+  const mentionTasks = useMemo(
+    () => isOrchestratorChat
+      ? mentionData.tasks
+      : mentionData.tasks.filter((task) => task.assignTo === currentAgentName),
+    [currentAgentName, isOrchestratorChat, mentionData.tasks],
+  );
+  const mentionMissions = useMemo(
+    () => isOrchestratorChat
+      ? mentionData.missions
+      : mentionData.missions.filter((mission) => parseMissionAgents(mission.data).includes(currentAgentName ?? "")),
+    [currentAgentName, isOrchestratorChat, mentionData.missions],
+  );
+  const mentionSkills = useMemo(
+    () => isOrchestratorChat
+      ? mentionData.skills
+      : mentionData.skills.filter((skill) =>
+          skill.assignedTo?.includes(currentAgentName ?? "") ||
+          selectedAgentConfig?.skills?.includes(skill.name),
+        ),
+    [currentAgentName, isOrchestratorChat, mentionData.skills, selectedAgentConfig?.skills],
+  );
+  const mentionPlaybooks = useMemo(
+    () => (isOrchestratorChat ? mentionData.playbooks : []),
+    [isOrchestratorChat, mentionData.playbooks],
+  );
+  const mentionFiles = useMemo(
+    () => isOrchestratorChat
+      ? mentionData.files
+      : mentionData.files.filter((file) => isFileAllowedForAgent(file, selectedAgentConfig)),
+    [isOrchestratorChat, mentionData.files, selectedAgentConfig],
+  );
+
   return (
-    <div className="bg-background/80 backdrop-blur-md px-4 pt-2 pb-1.5 shrink-0" ref={inputWrapperRef}>
+    <div
+      className={cn(
+        "shrink-0",
+        embedded
+          ? "bg-transparent px-0 pt-0 pb-0"
+          : "bg-background/80 backdrop-blur-md px-4 pt-2 pb-1.5",
+      )}
+      ref={inputWrapperRef}
+    >
       <div className="mx-auto max-w-3xl">
-        <MentionPopover ref={mentionRef} textareaRef={textareaRef} agents={agents} tasks={tasks} missions={missions} skills={skills} templates={playbooks} files={mentionFiles}>
+        <MentionPopover
+          ref={mentionRef}
+          textareaRef={textareaRef}
+          agents={mentionAgents}
+          tasks={mentionTasks}
+          missions={mentionMissions}
+          skills={mentionSkills}
+          templates={mentionPlaybooks}
+          files={mentionFiles}
+          onTriggerOpen={(trigger) => { void ensureMentionData(trigger); }}
+        >
           <PromptInput
             onSubmit={handleSubmit}
             accept="image/*"
@@ -2820,11 +3281,12 @@ function ChatInput() {
             maxFiles={5}
             maxFileSize={10 * 1024 * 1024}
             onError={(err) => toast.error(err.message)}
-            className="[&_[data-slot=input-group]]:rounded-2xl [&_[data-slot=input-group]]:focus-within:ring-0 [&_[data-slot=input-group]]:focus-within:border-input"
+            className="[&_[data-slot=input-group]]:rounded-[calc(var(--radius)+8px)] [&_[data-slot=input-group]]:focus-within:ring-0 [&_[data-slot=input-group]]:focus-within:border-input"
           >
             <AttachmentPreview />
             <PromptInputTextarea
-              placeholder={isLoading ? `Draft next message for ${recipientName}...` : pendingQuestions ? "Answer the questions above first..." : pendingMission ? "Review the mission preview above..." : pendingVault ? "Review the vault entry above..." : `Message ${recipientName}...`}
+              ref={textareaRef}
+              placeholder={isLoading ? `Draft next message for ${recipientName}...` : pendingQuestions ? "Answer the questions above first..." : pendingMission ? "Review the mission preview above..." : pendingVault ? "Review the vault entry above..." : pendingSetDesign ? "Review the design preview above..." : `Message ${recipientName}...`}
               disabled={inputDisabled}
               onKeyDown={(e) => {
                 mentionRef.current?.handleTextareaKeyDown(e);
@@ -2844,33 +3306,45 @@ function ChatInput() {
               }}
             />
             <PromptInputFooter>
-              <div className="flex items-center gap-1">
+              <div className="flex min-w-0 items-center gap-1">
                 <AttachButton disabled={inputDisabled} />
-                <MentionButton
-                  disabled={inputDisabled}
-                  onOpen={() => mentionRef.current?.toggle("@")}
-                />
-                <SlashButton
-                  disabled={inputDisabled}
-                  onOpen={() => mentionRef.current?.toggle("/")}
-                />
+                <div className="ml-1 flex min-w-0 items-center gap-2.5">
+                  <ChatInputHint trigger="@" label="mentions" />
+                  <ChatInputHint trigger="/" label="skills" />
+                </div>
               </div>
-              <div className="flex items-center gap-1">
-                <MicButton onTranscript={setTextareaValue} disabled={inputDisabled} />
-                <PromptInputSubmit
-                  status={isLoading ? "streaming" : undefined}
-                  disabled={isLoading ? false : inputDisabled}
-                  onStop={stop}
+              <div className="flex min-w-0 items-center gap-1">
+                {sessionId && (
+                  <span className="hidden max-w-32 truncate text-[10px] text-muted-foreground lg:inline-flex">
+                    <SessionIdCopy sessionId={sessionId} />
+                  </span>
+                )}
+                <MicButton
+                  onTranscript={setTextareaValue}
+                  disabled={inputDisabled}
+                  onListeningChange={setIsRecording}
                 />
+                {isRecording ? (
+                  <div className="inline-flex h-8 items-center gap-2 rounded-[calc(var(--radius)+999px)] border border-red-500/30 bg-red-500/10 px-3 text-xs font-medium text-red-500">
+                    <span className="relative flex h-2 w-2">
+                      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-500 opacity-75" />
+                      <span className="relative inline-flex h-2 w-2 rounded-full bg-red-500" />
+                    </span>
+                    Recording
+                  </div>
+                ) : (
+                  <PromptInputSubmit
+                    status={isLoading ? "streaming" : undefined}
+                    disabled={isLoading ? false : inputDisabled}
+                    onStop={stop}
+                  />
+                )}
               </div>
             </PromptInputFooter>
           </PromptInput>
         </MentionPopover>
-        <p className="hidden sm:block text-[10px] text-muted-foreground text-center mt-0.5">
-          @ to mention · / for skills · Enter to send · Shift+Enter for new line.
-          {sessionId && (
-            <SessionIdCopy sessionId={sessionId} />
-          )}
+        <p className="hidden text-center text-[10px] text-muted-foreground sm:block">
+          Enter to send · Shift+Enter for new line
         </p>
       </div>
     </div>
@@ -2903,7 +3377,7 @@ function ChatLoadingSkeleton({ compact }: { compact?: boolean }) {
         {/* Disabled prompt input */}
         <div className="bg-background/80 backdrop-blur-md px-4 pt-2 pb-1.5 shrink-0">
           <div className="mx-auto max-w-3xl">
-            <PromptInput onSubmit={() => {}} className="[&_[data-slot=input-group]]:rounded-2xl">
+            <PromptInput onSubmit={() => {}} className="[&_[data-slot=input-group]]:rounded-[calc(var(--radius)+8px)]">
               <PromptInputTextarea placeholder="Message Polpo..." disabled />
               <PromptInputFooter>
                 <div className="flex items-center gap-1" />
@@ -2923,7 +3397,7 @@ function ChatLoadingSkeleton({ compact }: { compact?: boolean }) {
 // ── ChatPage — full-page composition with session sidebar ──
 
 export function ChatPage({ compact, embedded }: { compact?: boolean; embedded?: boolean } = {}) {
-  const { sessions, sessionsLoading, sessionId, streamingSessionIds } = useChatState();
+  const { sessions, sessionsLoading, sessionId, streamingSessionIds, messages, messagesLoading } = useChatState();
   const { loadSession, newSession, deleteSession, setSelectedAgent } = useChatActions();
 
   // In embedded mode, session sidebar is controlled externally
@@ -2938,6 +3412,7 @@ export function ChatPage({ compact, embedded }: { compact?: boolean; embedded?: 
   const visibleSessions = sessions.filter(
     (s: { messageCount: number; title?: string }) => s.messageCount > 1 || (s.messageCount === 1 && s.title),
   );
+  const isEmptyThread = messages.length === 0 && !messagesLoading;
 
   const shouldCloseSidebarAfterMobileAction = useCallback(() => {
     if (compact) return true;
@@ -3011,7 +3486,7 @@ export function ChatPage({ compact, embedded }: { compact?: boolean; embedded?: 
               />
             )}
             <ChatMessages />
-            <ChatInput />
+            {!isEmptyThread && <ChatInput />}
           </div>
         </>
       )}

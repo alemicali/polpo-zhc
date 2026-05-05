@@ -124,7 +124,7 @@ const completionResponseSchema = z.object({
       role: z.literal("assistant"),
       content: z.string(),
     }),
-    finish_reason: z.enum(["stop", "length", "ask_user", "mission_preview", "vault_preview"]),
+    finish_reason: z.enum(["stop", "length", "ask_user", "mission_preview", "vault_preview", "open_file", "navigate_to", "open_tab", "set_design"]),
   })),
   usage: z.object({
     prompt_tokens: z.number().int(),
@@ -643,6 +643,20 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
                     label: args.label as string | undefined,
                   },
                 }));
+              } else if (interactiveCall.name === "set_design") {
+                const args = interactiveCall.arguments as Record<string, unknown>;
+                await emit(sseChunk(completionId, {}, "set_design", {
+                  set_design: {
+                    enabled: args.enabled as boolean | undefined,
+                    light: args.light as Record<string, unknown> | undefined,
+                    dark: args.dark as Record<string, unknown> | undefined,
+                    primary: args.primary as string | undefined,
+                    secondary: args.secondary as string | undefined,
+                    text: args.text as string | undefined,
+                    radius: args.radius as number | undefined,
+                    fontFamily: args.fontFamily as string | undefined,
+                  },
+                }));
               }
               await emit("[DONE]");
               return; // finally block will persist whatever finalText we have
@@ -885,6 +899,28 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
                   open_tab: {
                     url: args.url as string,
                     label: args.label as string | undefined,
+                  },
+                }],
+              });
+            }
+
+            if (interactiveCall.name === "set_design") {
+              const args = interactiveCall.arguments as Record<string, unknown>;
+              return c.json({
+                ...baseResponse,
+                choices: [{
+                  index: 0,
+                  message: { role: "assistant" as const, content: finalText },
+                  finish_reason: "set_design" as const,
+                  set_design: {
+                    enabled: args.enabled as boolean | undefined,
+                    light: args.light as Record<string, unknown> | undefined,
+                    dark: args.dark as Record<string, unknown> | undefined,
+                    primary: args.primary as string | undefined,
+                    secondary: args.secondary as string | undefined,
+                    text: args.text as string | undefined,
+                    radius: args.radius as number | undefined,
+                    fontFamily: args.fontFamily as string | undefined,
                   },
                 }],
               });

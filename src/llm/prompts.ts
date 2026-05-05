@@ -5,8 +5,9 @@
 import type { Orchestrator } from "../core/orchestrator.js";
 import type { AgentConfig, PolpoState } from "../core/types.js";
 import { discoverSkills, loadOrchestratorSkills, buildSkillPrompt, type SkillInfo } from "./skills.js";
-import { buildModelListingForPrompt } from "./pi-client.js";
+import { buildModelListingForPrompt, resolveModelSpec } from "./pi-client.js";
 import { readSystemContext } from "./orchestrator-tools.js";
+import { detectProviders } from "../setup/providers.js";
 
 /**
  * Describe what tools/capabilities an agent has based on its allowedTools config.
@@ -39,6 +40,29 @@ function describeAgentCapabilities(agent: AgentConfig, skillPool?: SkillInfo[]):
   return caps.join(" | ");
 }
 
+function buildConnectedProviderGuidance(orchestratorModel: string | undefined, agents: AgentConfig[]): string {
+  const connected = detectProviders().filter((provider) => provider.hasKey);
+  const connectedNames = connected.map((provider) => `${provider.name} (${provider.source})`);
+  const agentModels = agents
+    .map((agent) => agent.model)
+    .filter((model): model is string => !!model);
+
+  return [
+    `## Connected model providers`,
+    ``,
+    connected.length > 0
+      ? `Connected providers with usable credentials: ${connectedNames.join(", ")}.`
+      : `No connected providers were detected from env keys or OAuth profiles.`,
+    orchestratorModel ? `Current orchestrator model: ${orchestratorModel}.` : `Current orchestrator model: not explicitly configured.`,
+    agentModels.length > 0 ? `Current agent models in use: ${[...new Set(agentModels)].join(", ")}.` : `No existing agent model choices yet.`,
+    ``,
+    `When creating or updating an agent, set its model only to a model whose provider is connected.`,
+    `If the user does not ask for a specific provider, prefer the current orchestrator model when its provider is connected.`,
+    `If only one provider is connected, use a model from that provider unless the user explicitly says otherwise.`,
+    `Do NOT invent or assign models from providers that are not connected, because those agents will fail at runtime.`,
+  ].join("\n");
+}
+
 /** Build the system prompt for chat mode responses */
 export async function buildChatSystemPrompt(
   orchestrator: Orchestrator,
@@ -46,6 +70,7 @@ export async function buildChatSystemPrompt(
   _workDir?: string,
 ): Promise<string> {
   const teams = await orchestrator.getTeams();
+  const agents = await orchestrator.getAgents();
   const config = orchestrator.getConfig();
   const memory = await orchestrator.getMemory();
   const polpoDir = orchestrator.getPolpoDir();
@@ -619,6 +644,7 @@ export async function buildChatSystemPrompt(
     `  - **model**: LLM to use, format "provider:model" (e.g. "anthropic:claude-sonnet-4-5-20250929").`,
     `  - **systemPrompt**: Custom instructions appended to the agent's built-in prompt.`,
     `  - **skills**: Array of skill names from the installed pool (see "Available agent skills" below).`,
+    `  - **suggestions**: Starter prompts shown in the UI when opening a new chat with this agent. Use short, actionable strings or objects { title, prompt?, description? }. Add 2-4 useful suggestions when creating user-facing agents.`,
     `  - **allowedPaths**: Filesystem sandbox — directories the agent can access (relative to workDir).`,
     `  - **allowedTools**: Restrict to specific tool names (e.g. ["read", "write", "bash", "glob"]).`,
     `    Omit to grant all core tools. Use this for security — limit what an agent CAN do.`,
@@ -1005,9 +1031,12 @@ export async function buildChatSystemPrompt(
     ``,
     `### Client-side actions`,
     ``,
-    `**Tools**: navigate_to, open_file, open_tab`,
+    `**Tools**: navigate_to, open_file, open_tab, set_design`,
     `These tools execute on the USER'S device (browser), not the server. They trigger immediate`,
     `client-side actions — no confirmation card, no waiting.`,
+    `After navigate_to/open_file/open_tab completes, the UI sends you a system message saying the`,
+    `client-side tool completed. Treat that as a tool result acknowledgement, NOT as a new user`,
+    `request. Do not call the same client-side tool again for the same request; give the final answer.`,
     ``,
     `- **navigate_to**: Navigate the user's UI to any page in the dashboard. Use this when the user`,
     `  wants to go to a specific section or detail page. Available targets:`,
@@ -1048,6 +1077,16 @@ export async function buildChatSystemPrompt(
     `  - open_tab({ url: "https://github.com/org/repo/issues/42", label: "Issue #42" })`,
     `  - User says "open the docs", "open the link" → open_tab with the relevant URL`,
     ``,
+    `- **set_design**: Propose UI appearance overrides in the user's browser. Use when the user asks`,
+    `  to change app design, colors, typography, or roundness. The UI shows a preview and the user`,
+    `  confirms before applying. Arguments: enabled, light, dark. Use enabled=false to restore`,
+    `  the selected palette/default theme. When enabled=true, include BOTH light and dark objects,`,
+    `  and include every supported field in each object: primary, secondary, text, radius, fontFamily.`,
+    `  Colors must be 6-digit hex. Radius is 0-24 px.`,
+    `  Examples:`,
+    `  - set_design({ enabled: true, light: { primary: "#7c3aed", secondary: "#f4f4f5", text: "#18181b", radius: 12, fontFamily: '"Inter", ui-sans-serif, system-ui, sans-serif' }, dark: { primary: "#a78bfa", secondary: "#27272a", text: "#fafafa", radius: 12, fontFamily: '"Inter", ui-sans-serif, system-ui, sans-serif' } })`,
+    `  - set_design({ enabled: false })`,
+    ``,
     `**Proactive navigation**: When you CREATE something new (mission, agent, task, skill, etc.),`,
     `navigate the user to it right after. This is a natural UX — you just made it, show it.`,
     `- After create_mission → navigate_to({ target: "mission", id: "<newId>" })`,
@@ -1069,6 +1108,7 @@ export async function buildChatSystemPrompt(
     `- User says "open", "show me the file", "let me see the file" → open_file`,
     `- User says "go to the file", "where is" → navigate_to with target="files"`,
     `- User says "open this link", "visit URL" → open_tab`,
+    `- User asks to change theme/design/colors/font/roundedness → set_design`,
     ``,
     `---`,
     ``,
@@ -1134,7 +1174,7 @@ export async function buildChatSystemPrompt(
     `Top-level keys: \`project\`, \`teams\` (array), \`settings\`, \`providers\` (optional).`,
     ``,
     `**teams[].agents[]** — each agent has: name (required, globally unique), role, model (\`"provider:model"\` format),`,
-    `systemPrompt, skills[], allowedPaths[], allowedTools[] (restrict tool names), maxTurns (default 200),`,
+    `systemPrompt, skills[], suggestions[] (new-chat starter prompts), allowedPaths[], allowedTools[] (restrict tool names), maxTurns (default 200),`,
     `maxConcurrency, reasoning ("off"|"low"|"medium"|"high" — overrides global setting),`,
     `and allowedTools wildcards: "browser_*", "email_*", "image_*", "video_*", "audio_*", "excel_*", "pdf_*", "docx_*", "search_*", "whatsapp_*".`,
     `Core tools (always available, no need for allowedTools): http_fetch, http_download, vault_get, vault_list.`,
@@ -1404,6 +1444,8 @@ export async function buildChatSystemPrompt(
     `## Available models`,
     ``,
     buildModelListingForPrompt(),
+    ``,
+    buildConnectedProviderGuidance(resolveModelSpec(config?.settings?.orchestratorModel), agents),
   );
 
   // ── Skill creation guidance ──

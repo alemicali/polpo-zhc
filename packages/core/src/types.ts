@@ -260,6 +260,8 @@ export interface AgentConfig {
   systemPrompt?: string;
   /** Installed skill names (e.g. "find-skills", "frontend-design") */
   skills?: string[];
+  /** Suggested starter prompts shown when opening a new chat with this agent. */
+  suggestions?: AgentSuggestion[];
   /** Max conversation turns before stopping. Default 150 */
   maxTurns?: number;
   /** Max concurrent tasks for this agent. Default: unlimited (undefined). */
@@ -297,6 +299,17 @@ export interface AgentConfig {
   author?: string;
   /** Searchable tags for registry discovery (e.g. ["frontend", "react", "testing"]). */
   tags?: string[];
+}
+
+export type AgentSuggestion = string | AgentSuggestionConfig;
+
+export interface AgentSuggestionConfig {
+  /** Short label shown in the UI. */
+  title: string;
+  /** Optional prompt sent to the agent. Defaults to title. */
+  prompt?: string;
+  /** Optional secondary text shown below the title. */
+  description?: string;
 }
 
 export interface AgentActivity {

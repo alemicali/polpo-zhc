@@ -8,11 +8,26 @@ import { ChatProvider } from "@/hooks/chat-context";
 import { App } from "./app";
 import { config } from "./lib/config";
 import { bootstrapPalette } from "./lib/palette";
+import { bootstrapAppearance } from "./lib/appearance";
+import { bootstrapTheme } from "./hooks/use-theme";
 import { bootstrapIconify } from "./lib/iconify-bootstrap";
 import "./index.css";
 
-// Apply saved palette before React mounts to avoid a flash of default colours
+const nativeFetch = window.fetch.bind(window);
+window.fetch = (input, init) => {
+  const rawUrl = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+  const apiBase = config.baseUrl.replace(/\/$/, "");
+  const isPolpoApi = apiBase
+    ? rawUrl.startsWith(apiBase)
+    : rawUrl.startsWith("/api/") || rawUrl.startsWith("/v1/");
+  if (!isPolpoApi || init?.credentials) return nativeFetch(input, init);
+  return nativeFetch(input, { ...init, credentials: "include" });
+};
+
+// Apply saved theme/palette before React mounts to avoid a flash of default colours
+bootstrapTheme();
 bootstrapPalette();
+bootstrapAppearance();
 // Register the offline Iconify "logos" pack so brand icons render instantly
 bootstrapIconify();
 

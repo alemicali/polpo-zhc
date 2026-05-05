@@ -8,7 +8,9 @@ import type { Orchestrator } from "../core/orchestrator.js";
 import type { SSEBridge } from "./sse-bridge.js";
 import { authMiddleware } from "./middleware/auth.js";
 import { errorMiddleware } from "./middleware/error.js";
+import { instanceAuthMiddleware } from "./middleware/instance-auth.js";
 import { rateLimitMiddleware } from "./middleware/rate-limit.js";
+import { isInstanceAuthEnabled } from "./auth/instance-auth.js";
 // Shared routes from @polpo-ai/server (edge-compatible, single source of truth)
 import {
   healthRoutes,
@@ -35,6 +37,7 @@ import { filesystemRoutes } from "./routes/filesystem.js";
 import { providerRoutes } from "./routes/providers.js";
 import { skillRoutes } from "./routes/skills.js";
 import { authRoutes } from "./routes/auth.js";
+import { instanceAuthRoutes } from "./routes/instance-auth.js";
 import { fileRoutes } from "./routes/files.js";
 import { audioRoutes } from "./routes/audio.js";
 import { pushRoutes } from "./routes/push.js";
@@ -66,7 +69,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
 
   const corsExposeHeaders = ["x-session-id"];
   if (opts?.corsOrigins && opts.corsOrigins.length > 0) {
-    app.use("*", cors({ origin: opts.corsOrigins, exposeHeaders: corsExposeHeaders }));
+    app.use("*", cors({ origin: opts.corsOrigins, exposeHeaders: corsExposeHeaders, credentials: true }));
   } else {
     // Default: restrict to localhost origins only
     app.use("*", cors({
@@ -79,6 +82,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
         "http://127.0.0.1:5173", "http://127.0.0.1:5174", "http://127.0.0.1:5175", "http://127.0.0.1:5176",
       ],
       exposeHeaders: corsExposeHeaders,
+      credentials: true,
     }));
   }
 
@@ -89,9 +93,31 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
   // Config status + initialize — always available so setup wizard works
   if (opts?.workDir) {
     app.route("/api/v1/config", publicConfigRoutes(orchestrator, opts.workDir, opts.onInitialize));
+    app.route("/api/v1/auth", instanceAuthRoutes(getPolpoDir(opts.workDir)));
   }
 
   // Filesystem browsing — always available (used by setup wizard path picker)
+  if (opts?.workDir) {
+    const setupAwareInstanceAuth = instanceAuthMiddleware(getPolpoDir(opts.workDir), opts.apiKeys ?? []);
+    app.use("/api/v1/filesystem", async (c, next) => {
+      if (!orchestrator.isInitialized) return next();
+      return setupAwareInstanceAuth(c, next);
+    });
+    app.use("/api/v1/filesystem/*", async (c, next) => {
+      if (!orchestrator.isInitialized) return next();
+      return setupAwareInstanceAuth(c, next);
+    });
+    app.use("/api/v1/providers", async (c, next) => {
+      if (!orchestrator.isInitialized) return next();
+      return setupAwareInstanceAuth(c, next);
+    });
+    app.use("/api/v1/providers/*", async (c, next) => {
+      if (!orchestrator.isInitialized) return next();
+      return setupAwareInstanceAuth(c, next);
+    });
+  }
+
+  // Filesystem browsing — always available during setup (used by path picker)
   app.route("/api/v1/filesystem", filesystemRoutes());
 
   // Provider management — always available (API key CRUD, OAuth flows, model listing)
@@ -101,6 +127,9 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
   }
 
   // OpenAI-compatible chat completions
+  if (opts?.workDir) {
+    app.use("/v1/*", instanceAuthMiddleware(getPolpoDir(opts.workDir), opts.apiKeys ?? []));
+  }
   app.route("/v1/chat/completions", completionRoutes(() => ({
     getAgents: () => o.getAgents(),
     getConfig: () => o.getConfig(),
@@ -166,8 +195,11 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
   // ── Authenticated routes (require initialized orchestrator) ───────────
 
   const authed = new OpenAPIHono();
-  if (opts?.apiKeys && opts.apiKeys.length > 0) {
+  if (!isInstanceAuthEnabled() && opts?.apiKeys && opts.apiKeys.length > 0) {
     authed.use("*", authMiddleware(opts.apiKeys));
+  }
+  if (opts?.workDir) {
+    authed.use("*", instanceAuthMiddleware(getPolpoDir(opts.workDir), opts.apiKeys ?? []));
   }
 
   // Gate: orchestrator must be initialized for these routes
