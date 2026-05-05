@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { GhosttyCore } from "@wterm/ghostty";
 import type { TerminalCore } from "@wterm/dom";
-import ghosttyWasmUrl from "../../../node_modules/@wterm/ghostty/wasm/ghostty-vt.wasm?url";
+import ghosttyWasmUrl from "../../node_modules/@wterm/ghostty/wasm/ghostty-vt.wasm?url";
 import { config } from "@/lib/config";
 
 type TerminalCoreState = {
