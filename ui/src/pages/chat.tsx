@@ -3261,10 +3261,6 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
           <ChatInputHint trigger="@" label="mentions" />
           <span aria-hidden="true">·</span>
           <ChatInputHint trigger="/" label="skills" />
-          <span aria-hidden="true">·</span>
-          <span>Enter to send</span>
-          <span aria-hidden="true">·</span>
-          <span>Shift+Enter for new line</span>
           {sessionId && (
             <>
               <span aria-hidden="true">·</span>
@@ -3322,10 +3318,6 @@ function ChatLoadingSkeleton({ compact }: { compact?: boolean }) {
               <ChatInputHint trigger="@" label="mentions" />
               <span aria-hidden="true">·</span>
               <ChatInputHint trigger="/" label="skills" />
-              <span aria-hidden="true">·</span>
-              <span>Enter to send</span>
-              <span aria-hidden="true">·</span>
-              <span>Shift+Enter for new line</span>
             </div>
           </div>
         </div>

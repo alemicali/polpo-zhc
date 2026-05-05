@@ -54,6 +54,10 @@
       "types": "./dist/session-store.d.ts",
       "import": "./dist/session-store.js"
     },
+    "./coding-session-store": {
+      "types": "./dist/coding-session-store.d.ts",
+      "import": "./dist/coding-session-store.js"
+    },
     "./notification-store": {
       "types": "./dist/notification-store.d.ts",
       "import": "./dist/notification-store.js"

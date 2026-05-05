@@ -4,6 +4,8 @@ import { getPolpoDir } from "../core/constants.js";
 import { loadPolpoConfig } from "../core/config.js";
 import { serve } from "@hono/node-server";
 import { createApp } from "./app.js";
+import { attachTerminalWebSocket, type TerminalWebSocketHandle } from "./terminal.js";
+import { attachCodeServerWebSocket, CodeServerManager } from "./code-server.js";
 
 import { Orchestrator } from "../core/orchestrator.js";
 import { SSEBridge } from "./sse-bridge.js";
@@ -28,6 +30,9 @@ export class PolpoServer {
   private orchestrator!: Orchestrator;
   private sseBridge!: SSEBridge;
   private server: ReturnType<typeof serve> | null = null;
+  private terminalWs: TerminalWebSocketHandle | null = null;
+  private codeServerManager: CodeServerManager | null = null;
+  private codeServerWs: { close: () => void } | null = null;
   private shutdownHandlers: (() => void)[] = [];
   private supervisorRun: Promise<void> | null = null;
 
@@ -84,6 +89,7 @@ export class PolpoServer {
   async start(): Promise<void> {
     const workDir = resolve(this.config.workDir);
     this.orchestrator = new Orchestrator(workDir);
+    this.codeServerManager = new CodeServerManager(this.orchestrator);
     const wakeSupervisor = () => this.ensureSupervisorRunning("task event");
     this.orchestrator.on("task:created", wakeSupervisor);
     this.orchestrator.on("task:updated", wakeSupervisor);
@@ -110,12 +116,21 @@ export class PolpoServer {
       workDir,
       onInitialize: (workDir: string) => this.completeSetup(workDir),
       wakeSupervisor: () => this.ensureSupervisorRunning("task route"),
+      codeServerManager: this.codeServerManager,
     });
 
     this.server = serve({
       fetch: app.fetch,
       port: this.config.port,
       hostname: this.config.host,
+    });
+    this.terminalWs = attachTerminalWebSocket(this.server, this.orchestrator, {
+      apiKeys: this.config.apiKeys,
+      workDir,
+    });
+    this.codeServerWs = attachCodeServerWebSocket(this.server, this.codeServerManager, this.orchestrator, {
+      apiKeys: this.config.apiKeys,
+      workDir,
     });
 
     const base = `http://${this.config.host}:${this.config.port}`;
@@ -139,6 +154,11 @@ export class PolpoServer {
   async stop(): Promise<void> {
     console.log("\nShutting down Polpo Server...");
     this.sseBridge?.dispose();
+    this.terminalWs?.close();
+    this.terminalWs = null;
+    this.codeServerWs?.close();
+    this.codeServerWs = null;
+    this.codeServerManager?.close();
     if (this.orchestrator?.isInitialized) {
       await this.orchestrator.gracefulStop();
     }

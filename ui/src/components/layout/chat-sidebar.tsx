@@ -104,9 +104,6 @@ function SidebarSkeleton() {
               <PromptInputSubmit disabled />
             </PromptInputFooter>
           </PromptInput>
-          <p className="text-[10px] text-muted-foreground text-center mt-0.5">
-            @ to mention · Enter to send · Shift+Enter for new line.
-          </p>
         </div>
       </div>
     </div>

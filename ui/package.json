@@ -30,6 +30,8 @@
     "@streamdown/math": "^1.0.2",
     "@streamdown/mermaid": "^1.0.2",
     "@tailwindcss/vite": "^4.1.18",
+    "@wterm/ghostty": "^0.3.0",
+    "@wterm/react": "^0.3.0",
     "@xyflow/react": "^12.10.1",
     "ai": "^6.0.86",
     "class-variance-authority": "^0.7.1",

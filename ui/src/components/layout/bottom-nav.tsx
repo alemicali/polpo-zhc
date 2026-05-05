@@ -11,6 +11,8 @@ import {
   ShieldCheck,
   Workflow,
   Settings2,
+  Terminal,
+  Code2,
   MoreHorizontal,
 
 } from "lucide-react";
@@ -36,6 +38,8 @@ const secondaryNav = [
   { to: "/notifications", icon: Bell, label: "Notifications" },
   { to: "/approvals", icon: ShieldCheck, label: "Approvals" },
   { to: "/playbooks", icon: Workflow, label: "Playbooks" },
+  { to: "/coding", icon: Code2, label: "Coding" },
+  { to: "/terminal", icon: Terminal, label: "Terminal" },
   { to: "/config", icon: Settings2, label: "Config" },
 ];
 

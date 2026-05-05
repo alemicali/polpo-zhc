@@ -180,7 +180,9 @@ export function App() {
           <Route path="schedules" element={<Navigate to="/missions" replace />} />
           <Route path="config" element={<Suspense fallback={<PageLoader />}><ConfigPage /></Suspense>} />
           <Route path="files" element={<Suspense fallback={<PageLoader />}><FilesPage /></Suspense>} />
- <Route path="browser" element={<Suspense fallback={<PageLoader />}><BrowserPage /></Suspense>} />
+          <Route path="browser" element={<Suspense fallback={<PageLoader />}><BrowserPage /></Suspense>} />
+          <Route path="terminal" element={<></>} />
+          <Route path="coding" element={<></>} />
         </Route>
       </Routes>
     </SetupModeRedirect>

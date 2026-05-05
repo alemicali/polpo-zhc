@@ -10,6 +10,8 @@ import { FileMemoryStore } from "../stores/file-memory-store.js";
 import { FileLogStore } from "../stores/file-log-store.js";
 import { FileSessionStore } from "../stores/file-session-store.js";
 import type { SessionStore } from "./session-store.js";
+import { FileCodingSessionStore } from "../stores/file-coding-session-store.js";
+import type { CodingSessionStore } from "./coding-session-store.js";
 import type { MemoryStore } from "./memory-store.js";
 import type { LogStore } from "./log-store.js";
 import { assessTask } from "../assessment/assessor.js";
@@ -107,6 +109,7 @@ export class Orchestrator extends TypedEmitter {
   private memoryStore!: MemoryStore;
   private logStore!: LogStore;
   private sessionStore!: SessionStore;
+  private codingSessionStore!: CodingSessionStore;
   private notificationServer?: Server;
   private hookRegistry = new HookRegistry();
   private approvalMgr?: ApprovalManager;
@@ -273,6 +276,7 @@ export class Orchestrator extends TypedEmitter {
     } else {
       await this.initSessionStore();
     }
+    this.codingSessionStore = new FileCodingSessionStore(this.polpoDir);
     this.memoryStore = ("memoryStore" in stores && stores.memoryStore)
       ? stores.memoryStore
       : new FileMemoryStore(this.polpoDir);
@@ -659,6 +663,7 @@ export class Orchestrator extends TypedEmitter {
     } else {
       await this.initSessionStore();
     }
+    this.codingSessionStore = new FileCodingSessionStore(this.polpoDir);
     this.memoryStore = ("memoryStore" in stores && stores.memoryStore)
       ? stores.memoryStore
       : new FileMemoryStore(this.polpoDir);
@@ -785,6 +790,7 @@ export class Orchestrator extends TypedEmitter {
   getMemoryStore(): MemoryStore { return this.memoryStore; }
   getVaultStore(): VaultStore | undefined { return this.vaultStore; }
   getPlaybookStore(): PlaybookStore { return this.playbookStore; }
+  getCodingSessionStore(): CodingSessionStore { return this.codingSessionStore; }
   getTeamStore(): TeamStore { return this.teamStore; }
   getAgentStore(): AgentStore { return this.agentStore; }
 

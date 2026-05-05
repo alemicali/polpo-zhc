@@ -65,7 +65,7 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
       unzip \
       zip \
       gzip \
-    && npm install -g agent-browser@0.26.0 \
+    && npm install -g agent-browser@0.26.0 code-server \
     && npm cache clean --force \
     && pip3 install --no-cache-dir --break-system-packages edge-tts \
     && rm -rf /var/lib/apt/lists/*

@@ -39,9 +39,13 @@ import { skillRoutes } from "./routes/skills.js";
 import { authRoutes } from "./routes/auth.js";
 import { instanceAuthRoutes } from "./routes/instance-auth.js";
 import { fileRoutes } from "./routes/files.js";
+import { gitRoutes } from "./routes/git.js";
 import { audioRoutes } from "./routes/audio.js";
 import { pushRoutes } from "./routes/push.js";
+import { codingRoutes } from "./routes/coding.js";
 import { FileAttachmentStore } from "../stores/file-attachment-store.js";
+import { isTerminalEnabled } from "./terminal.js";
+import type { CodeServerManager } from "./code-server.js";
 
 export interface AppOptions {
   apiKeys?: string[];
@@ -49,6 +53,7 @@ export interface AppOptions {
   workDir?: string;
   onInitialize?: (workDir: string) => Promise<void>;
   wakeSupervisor?: () => void;
+  codeServerManager?: CodeServerManager;
 }
 
 /**
@@ -374,8 +379,17 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
 
   authed.route("/audio", audioRoutes());
 
+  authed.route("/git", gitRoutes(() => ({
+    workDir: o.getWorkDir(),
+  })));
+
   authed.route("/push", pushRoutes(() => ({
     polpoDir: o.getPolpoDir(),
+  })));
+
+  authed.route("/coding", codingRoutes(() => ({
+    codingSessionStore: o.getCodingSessionStore(),
+    codeServerManager: opts?.codeServerManager,
   })));
 
   authed.route("/attachments", attachmentRoutes(() => ({
@@ -383,6 +397,16 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     fs: new NodeFileSystem(),
     workDir: o.getWorkDir(),
   })));
+
+  authed.get("/terminal/status", (c) => c.json({
+    ok: true,
+    data: {
+      enabled: isTerminalEnabled(),
+      workDir: o.getWorkDir(),
+      agentWorkDir: o.getAgentWorkDir(),
+      shell: process.env.POLPO_TERMINAL_SHELL || process.env.SHELL || "/bin/bash",
+    },
+  }));
 
   authed.route("/", stateRoutes(() => ({
     taskStore: o.getStore(),

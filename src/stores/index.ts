@@ -5,6 +5,7 @@ export { PolpoConfigStore, JsonConfigStore } from "./json-config-store.js";
 export { FileMemoryStore } from "./file-memory-store.js";
 export { FileLogStore } from "./file-log-store.js";
 export { FileSessionStore } from "./file-session-store.js";
+export { FileCodingSessionStore } from "./file-coding-session-store.js";
 export { FileApprovalStore } from "./file-approval-store.js";
 export { FileCheckpointStore } from "./file-checkpoint-store.js";
 export { FileNotificationStore } from "./file-notification-store.js";

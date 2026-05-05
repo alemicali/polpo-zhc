@@ -10,7 +10,7 @@
  */
 
 import { memo, useEffect } from "react";
-import { Outlet, useNavigate, useLocation } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import {
   LayoutDashboard,
   ListChecks,
@@ -23,6 +23,8 @@ import {
   Workflow,
   Settings2,
   FolderOpen,
+  Terminal,
+  Code2,
   Globe2,
   Sun,
   Moon,
@@ -63,6 +65,7 @@ import { usePalette, PALETTES } from "@/lib/palette";
 import { cn } from "@/lib/utils";
 import { PwaInstallQrButton } from "./pwa-install-qr-button";
 import { LogoutButton } from "./logout-button";
+import { PersistentPageOutlet } from "./persistent-page-outlet";
 
 type TabDef = {
   path: string;
@@ -80,6 +83,8 @@ const tabs: TabDef[] = [
   { path: "/memory", icon: Brain, label: "Memory" },
   { path: "/playbooks", icon: Workflow, label: "Playbooks" },
   { path: "/files", icon: FolderOpen, label: "Files" },
+  { path: "/coding", icon: Code2, label: "Coding" },
+  { path: "/terminal", icon: Terminal, label: "Terminal" },
   { path: "/browser", icon: Globe2, label: "Browser" },
   { path: "/notifications", icon: Bell, label: "Notifications" },
   { path: "/config", icon: Settings2, label: "Configuration" },
@@ -280,6 +285,16 @@ function RightPanelContent() {
 
   // Resolve a page title from current path
   const title = resolvePageTitle(pathname);
+  // /coding owns its full pane — no tab strip, no title, no padding
+  const fullBleed = pathname === "/coding" || pathname.startsWith("/coding/");
+
+  if (fullBleed) {
+    return (
+      <div className="flex flex-col h-full overflow-hidden">
+        <PersistentPageOutlet />
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -290,7 +305,7 @@ function RightPanelContent() {
         </div>
       )}
       <main className="flex-1 flex flex-col min-h-0 min-w-0 overflow-auto p-4 lg:p-5">
-        <Outlet />
+        <PersistentPageOutlet />
       </main>
     </div>
   );
@@ -333,6 +348,8 @@ function resolvePageTitle(pathname: string): string {
     "/approvals": "Approvals",
     "/playbooks": "Playbooks",
     "/files": "Files",
+    "/coding": "Coding",
+    "/terminal": "Terminal",
     "/config": "Configuration",
   };
   if (titles[pathname]) return titles[pathname];
