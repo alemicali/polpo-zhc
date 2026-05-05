@@ -6,6 +6,8 @@ import { redactPolpoConfig } from "../security.js";
 import { UpdateSettingsSchema, NotificationChannelConfigSchema } from "../schemas.js";
 import { loadPolpoConfig, savePolpoConfig, generatePolpoConfigDefault } from "../../core/config.js";
 import { detectProviders } from "../../setup/index.js";
+import { FileAgentStore } from "../../stores/file-agent-store.js";
+import { FileTeamStore } from "../../stores/file-team-store.js";
 import type { Orchestrator } from "../../core/orchestrator.js";
 
 // ── Authed route definitions ──────────────────────────────────────────
@@ -453,9 +455,16 @@ export function publicConfigRoutes(
         agentRole: body.agentRole || undefined,
         providers: body.providers,
       });
+      const teams = config.teams;
 
       try {
-        savePolpoConfig(targetPolpoDir, config);
+        savePolpoConfig(targetPolpoDir, { ...config, teams: [] });
+        const teamStore = new FileTeamStore(targetPolpoDir);
+        const agentStore = new FileAgentStore(targetPolpoDir);
+        await teamStore.seed(teams);
+        await agentStore.seed(teams.flatMap((team) =>
+          team.agents.map((agent) => ({ ...agent, teamName: team.name })),
+        ));
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : "Unknown error";
         return c.json({ ok: false, error: `Failed to save config: ${msg}` }, 500);

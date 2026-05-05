@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { resolve, basename, join } from "node:path";
 import { getPolpoDir } from "../core/constants.js";
+import { loadPolpoConfig } from "../core/config.js";
 import { serve } from "@hono/node-server";
 import { createApp } from "./app.js";
 
@@ -34,12 +35,20 @@ export class PolpoServer {
   /** Initialize the orchestrator (called at start or after setup completes). */
   private async initOrchestrator(overrideWorkDir?: string): Promise<void> {
     const workDir = resolve(overrideWorkDir ?? this.config.workDir);
+    const polpoDir = getPolpoDir(workDir);
+    const persistedConfig = loadPolpoConfig(polpoDir);
     const defaultTeam: Team = {
       name: "default",
       agents: [{ name: "dev-1", role: "developer" }],
     };
+    const hasSeededStores = existsSync(join(polpoDir, "teams.json")) || existsSync(join(polpoDir, "agents.json"));
+    const teams = persistedConfig?.teams?.length
+      ? persistedConfig.teams as Team[]
+      : hasSeededStores
+        ? []
+      : [defaultTeam];
 
-    await this.orchestrator.initInteractive(basename(workDir), defaultTeam);
+    await this.orchestrator.initInteractive(persistedConfig?.project ?? basename(workDir), teams);
 
     // (Re-)create SSE bridge
     this.sseBridge?.dispose();

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
@@ -525,6 +526,7 @@ function AgentStep({
 // ── Main setup wizard ──
 
 export function SetupPage() {
+  const navigate = useNavigate();
   const [step, setStep] = useState(0);
   const [providers, setProviders] = useState<Provider[]>([]);
   const [selectedModel, setSelectedModel] = useState("");
@@ -604,8 +606,7 @@ export function SetupPage() {
         }),
       });
       if (result.ok) {
-        // Full reload to re-check setup status — works for both file:// (HashRouter) and http (BrowserRouter)
-        window.location.href = window.location.pathname + window.location.search + "#/";
+        navigate("/chat", { replace: true });
       } else {
         setSetupError(result.error || "Setup failed. Check server logs.");
         setCompleting(false);
@@ -643,10 +644,10 @@ export function SetupPage() {
             </div>
             <h2 className="text-xl font-semibold">Already configured</h2>
             <p className="text-sm text-muted-foreground">
-              Polpo is already set up and running. To change providers, models, or other settings, use the configuration page.
+              Polpo is already set up and running.
             </p>
-            <Button onClick={() => { window.location.href = window.location.pathname + window.location.search + "#/config"; }} className="gap-1.5">
-              Go to Configuration <ArrowRight className="h-4 w-4" />
+            <Button onClick={() => navigate("/chat", { replace: true })} className="gap-1.5">
+              Let's go <ArrowRight className="h-4 w-4" />
             </Button>
           </CardContent>
         </Card>

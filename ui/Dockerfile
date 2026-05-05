@@ -30,6 +30,8 @@ RUN rm /etc/nginx/conf.d/default.conf
 ENV POLPO_API_UPSTREAM=http://server:3890
 
 COPY ui/nginx.conf.template /etc/nginx/templates/default.conf.template
+COPY ui/docker-nginx-resolver.envsh /docker-entrypoint.d/10-polpo-resolver.envsh
+RUN chmod +x /docker-entrypoint.d/10-polpo-resolver.envsh
 COPY --from=builder /app/ui/dist/ /usr/share/nginx/html/
 
 EXPOSE 80

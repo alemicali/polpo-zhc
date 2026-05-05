@@ -47,6 +47,7 @@ function SetupModeRedirect({ children }: { children: React.ReactNode }) {
       .then((r) => r.json())
       .then((r) => {
         if (r.ok && !r.data.initialized) {
+          setState("ready");
           navigate("/setup", { replace: true });
         } else {
           setState("ready");
