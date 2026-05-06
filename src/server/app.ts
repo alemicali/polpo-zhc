@@ -47,6 +47,7 @@ import { syncRoutes } from "./routes/sync.js";
 import { FileAttachmentStore } from "../stores/file-attachment-store.js";
 import { isTerminalEnabled, type TerminalWebSocketHandle } from "./terminal.js";
 import type { CodeServerManager } from "./code-server.js";
+import type { SyncScheduler } from "./sync-scheduler.js";
 
 export interface AppOptions {
   apiKeys?: string[];
@@ -59,6 +60,9 @@ export interface AppOptions {
    * attached *after* the Hono app is constructed (it needs the bound
    * server). The "Processes" panel uses this to enumerate live ptys. */
   getTerminalHandle?: () => TerminalWebSocketHandle | null | undefined;
+  /** Hands the long-lived scheduler to /sync routes so flipping the
+   * enabled toggle re-arms the cron without a server restart. */
+  syncScheduler?: SyncScheduler;
 }
 
 /**
@@ -402,6 +406,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
   authed.route("/sync", syncRoutes(() => ({
     polpoDir: o.getPolpoDir(),
     workDir: o.getWorkDir(),
+    scheduler: opts?.syncScheduler,
   })));
 
   authed.route("/attachments", attachmentRoutes(() => ({

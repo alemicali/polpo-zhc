@@ -3071,10 +3071,14 @@ type SyncR2 = {
   bucket: string;
   prefix?: string;
 };
+type SyncSchedule = { enabled: boolean; cron: string };
 type SyncCfg = {
   r2?: SyncR2;
   lastPushedAt?: string;
   lastPulledAt?: string;
+  schedule?: SyncSchedule;
+  excludes?: string[];
+  nextRunAt?: string | null;
 };
 
 type ActiveSync = {
@@ -3125,7 +3129,14 @@ function CloudSyncPanel() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [progress, setProgress] = useState<SyncProgress>({ active: null, mode: null, recent: [] });
-  const [confirm, setConfirm] = useState<{ kind: "push" | "pull"; mode: "sync" } | null>(null);
+  const [preview, setPreview] = useState<{
+    kind: "push" | "pull";
+    mode: "copy" | "sync";
+    status: "running" | "ready";
+    files: number;
+    bytes: number;
+    error?: string;
+  } | null>(null);
   const [history, setHistory] = useState<SyncHistoryEntry[]>([]);
   const [showSecret, setShowSecret] = useState(false);
   const [draft, setDraft] = useState<SyncR2>({ endpoint: "", accessKeyId: "", secretAccessKey: "", bucket: "", prefix: "" });
@@ -3273,40 +3284,78 @@ function CloudSyncPanel() {
     } catch { /* ignore */ }
   };
 
-  const trigger = async (kind: "push" | "pull", mode: "copy" | "sync" = "copy") => {
+  /** Run rclone once with the given args. `dryRun` makes rclone print
+   * what it WOULD do without actually transferring/deleting. The promise
+   * resolves to the parsed final stats (files, bytes) so the caller can
+   * show a preview modal. */
+  const runSync = async (kind: "push" | "pull", mode: "copy" | "sync", dryRun: boolean): Promise<{ ok: boolean; files: number; bytes: number; error?: string }> => {
     setProgress({ active: kind, mode, recent: [] });
+    let summary = { files: 0, bytes: 0 };
+    let result: { ok: boolean; error?: string } = { ok: false };
     try {
       const res = await fetch(apiUrl(`/api/v1/sync/${kind}`), {
         method: "POST",
         credentials: "include",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ mode }),
+        body: JSON.stringify({ mode, dryRun }),
       });
       if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buf = "";
+      const consume = (line: string) => {
+        if (!line) return;
+        try {
+          const evt = JSON.parse(line);
+          if (evt?.type === "done") {
+            result = { ok: !!evt.ok, error: evt.error };
+            if (evt.summary) summary = { files: evt.summary.files ?? 0, bytes: evt.summary.bytes ?? 0 };
+          }
+        } catch { /* non-JSON */ }
+        handleSyncEvent(line, setProgress);
+      };
       while (true) {
         const { value, done } = await reader.read();
         if (done) break;
         buf += decoder.decode(value, { stream: true });
-        // NDJSON: one event per line.
         let nl: number;
         while ((nl = buf.indexOf("\n")) >= 0) {
           const line = buf.slice(0, nl).trim();
           buf = buf.slice(nl + 1);
-          if (!line) continue;
-          handleSyncEvent(line, setProgress);
+          consume(line);
         }
       }
-      // Drain any tail.
-      if (buf.trim()) handleSyncEvent(buf.trim(), setProgress);
+      if (buf.trim()) consume(buf.trim());
+    } catch (err) {
+      result = { ok: false, error: err instanceof Error ? err.message : "failed" };
+    }
+    if (!dryRun) {
       await fetchCfg();
       await fetchHistory();
-    } catch (err) {
-      setProgress((p) => ({ ...p, error: err instanceof Error ? err.message : `${kind} failed` }));
-      toast.error(err instanceof Error ? err.message : `${kind} failed`);
+    } else {
+      // Clear the live progress block once preview finishes — the modal
+      // takes over from here.
+      setProgress((p) => ({ ...p, active: null, mode: null, recent: [], done: undefined }));
     }
+    return { ...result, ...summary };
+  };
+
+  /** Two-phase trigger: dry-run first, then real run on user confirm.
+   * The preview modal shows the file/byte summary so the user knows
+   * what's about to happen before any side effect. */
+  const trigger = async (kind: "push" | "pull", mode: "copy" | "sync" = "copy") => {
+    setPreview({ kind, mode, status: "running", files: 0, bytes: 0 });
+    const r = await runSync(kind, mode, true);
+    setPreview({ kind, mode, status: "ready", files: r.files, bytes: r.bytes, error: r.ok ? undefined : r.error });
+  };
+
+  const confirmAndRun = async () => {
+    if (!preview) return;
+    const { kind, mode } = preview;
+    setPreview(null);
+    const r = await runSync(kind, mode, false);
+    if (r.ok) toast.success(`${kind === "push" ? "Pushed" : "Pulled"} ${r.files} file${r.files === 1 ? "" : "s"}`);
+    else if (r.error) toast.error(r.error);
   };
 
   const configured = !!cfg?.r2;
@@ -3396,12 +3445,12 @@ function CloudSyncPanel() {
             Pull (update)
           </Button>
           <div className="mx-1 h-5 w-px bg-border" />
-          <Button size="sm" variant="ghost" onClick={() => setConfirm({ kind: "push", mode: "sync" })} disabled={!configured || progress.active != null}
+          <Button size="sm" variant="ghost" onClick={() => void trigger("push", "sync")} disabled={!configured || progress.active != null || preview != null}
             className="text-rose-400 hover:text-rose-300 hover:bg-rose-500/10">
             {progress.active === "push" && progress.mode === "sync" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
             Replace remote
           </Button>
-          <Button size="sm" variant="ghost" onClick={() => setConfirm({ kind: "pull", mode: "sync" })} disabled={!configured || progress.active != null}
+          <Button size="sm" variant="ghost" onClick={() => void trigger("pull", "sync")} disabled={!configured || progress.active != null || preview != null}
             className="text-rose-400 hover:text-rose-300 hover:bg-rose-500/10">
             {progress.active === "pull" && progress.mode === "sync" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
             Replace local
@@ -3465,6 +3514,10 @@ function CloudSyncPanel() {
         </div>
       </section>
 
+      <ExcludesSection cfg={cfg} reload={fetchCfg} />
+
+      <ScheduleSection cfg={cfg} configured={configured} reload={fetchCfg} />
+
       <section>
         <div className="flex items-center justify-between mb-1.5">
           <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
@@ -3481,24 +3534,260 @@ function CloudSyncPanel() {
         <SyncHistoryTable entries={history} />
       </section>
 
-      <ConfirmDialog
-        open={!!confirm}
-        onOpenChange={(o) => { if (!o) setConfirm(null); }}
-        title={confirm?.kind === "push" ? "Replace remote with local?" : "Replace local with remote?"}
-        description={
-          confirm?.kind === "push"
-            ? "This will mirror your local workDir up to R2 and DELETE any files on the bucket that aren't local. Use only to promote a clean snapshot."
-            : "This will mirror R2 down to your local workDir and DELETE any local files that aren't on R2. Use only for first hydration."
-        }
-        confirmLabel="Replace"
-        destructive
-        onConfirm={() => {
-          if (!confirm) return;
-          void trigger(confirm.kind, "sync");
-          setConfirm(null);
-        }}
+      <SyncPreviewDialog
+        preview={preview}
+        onCancel={() => setPreview(null)}
+        onConfirm={() => void confirmAndRun()}
       />
     </div>
+  );
+}
+
+/** Exclude-pattern editor. Patterns use rclone's filter syntax:
+ *
+ *   node_modules/**   → any node_modules folder, recursively
+ *   .git/**           → any .git
+ *   *.log             → any .log file at any level
+ *   /dist/**          → only the top-level dist (anchored)
+ *
+ * Saved as `excludes: string[]` on sync-config.json. Applied to manual
+ * push/pull AND the scheduler. */
+const COMMON_EXCLUDES = [
+  "node_modules/**",
+  ".git/**",
+  ".next/**",
+  "dist/**",
+  "build/**",
+  ".cache/**",
+  "target/**",
+  ".turbo/**",
+  ".venv/**",
+  "__pycache__/**",
+  "*.log",
+  ".DS_Store",
+];
+
+function ExcludesSection({ cfg, reload }: { cfg: SyncCfg | null; reload: () => Promise<void> }) {
+  const initial = (cfg?.excludes ?? []).join("\n");
+  const [text, setText] = useState(initial);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => { setText((cfg?.excludes ?? []).join("\n")); }, [cfg]);
+
+  const patterns = text
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0 && !l.startsWith("#"));
+
+  const addPreset = (p: string) => {
+    if (patterns.includes(p)) return;
+    setText((prev) => (prev.trim() ? prev.trim() + "\n" + p : p));
+  };
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const res = await fetch(apiUrl("/api/v1/sync/config"), {
+        method: "PUT",
+        credentials: "include",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ excludes: patterns }),
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok || !body?.ok) throw new Error(body?.error || "save failed");
+      toast.success(`Excludes saved (${patterns.length})`);
+      await reload();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to save");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const dirty = text.trim() !== (cfg?.excludes ?? []).join("\n").trim();
+
+  return (
+    <section>
+      <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5 flex items-center gap-1.5">
+        <X className="h-3.5 w-3.5" /> Excludes
+      </h3>
+      <p className="text-[11px] text-muted-foreground/80 mb-3">
+        rclone-style filter patterns — applied to every push and pull, and to the auto-sync scheduler. <code className="font-mono">node_modules/**</code> matches a <code className="font-mono">node_modules</code> folder at any depth. Lines starting with <code className="font-mono">#</code> are comments. Empty list means no filtering.
+      </p>
+      <div className="space-y-2 max-w-2xl">
+        <textarea
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          placeholder="node_modules/**&#10;.git/**&#10;*.log"
+          rows={8}
+          className="w-full rounded-md border border-border bg-card px-3 py-2 font-mono text-[12px] focus:outline-none focus:ring-1 focus:ring-primary"
+          spellCheck={false}
+        />
+        <div className="flex flex-wrap gap-1.5">
+          {COMMON_EXCLUDES.map((p) => {
+            const already = patterns.includes(p);
+            return (
+              <button
+                key={p}
+                type="button"
+                disabled={already}
+                onClick={() => addPreset(p)}
+                className={cn(
+                  "rounded-md px-2 py-0.5 font-mono text-[10.5px] border transition-colors",
+                  already
+                    ? "border-border bg-card/40 text-muted-foreground cursor-default"
+                    : "border-border bg-card hover:bg-accent",
+                )}
+                title={already ? "Already in list" : `Add ${p}`}
+              >
+                + {p}
+              </button>
+            );
+          })}
+        </div>
+        <div className="flex items-center gap-2 pt-1">
+          <Button size="sm" onClick={() => void save()} disabled={!dirty || saving}>
+            {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+            Save
+          </Button>
+          <span className="text-[11px] text-muted-foreground">
+            {patterns.length} pattern{patterns.length === 1 ? "" : "s"} active
+          </span>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/** Schedule editor — preset dropdown for the common cases plus a custom
+ * cron field. Toggling `enabled` flips the server-side timer
+ * immediately; the schedule itself rehydrates from sync-config.json on
+ * server restart so cron jobs survive a polpo restart. */
+const SCHEDULE_PRESETS: { label: string; cron: string }[] = [
+  { label: "Every 15 minutes", cron: "*/15 * * * *" },
+  { label: "Every hour", cron: "0 * * * *" },
+  { label: "Every 6 hours", cron: "0 */6 * * *" },
+  { label: "Daily at 03:00", cron: "0 3 * * *" },
+  { label: "Custom…", cron: "" },
+];
+
+function ScheduleSection({ cfg, configured, reload }: { cfg: SyncCfg | null; configured: boolean; reload: () => Promise<void> }) {
+  const initialCron = cfg?.schedule?.cron ?? "*/15 * * * *";
+  const initialEnabled = !!cfg?.schedule?.enabled;
+  const matchingPreset = SCHEDULE_PRESETS.find((p) => p.cron === initialCron);
+  const initialPreset = matchingPreset ? matchingPreset.cron : "";
+  const [enabled, setEnabled] = useState(initialEnabled);
+  const [preset, setPreset] = useState(initialPreset);
+  const [cron, setCron] = useState(initialCron);
+  const [saving, setSaving] = useState(false);
+
+  // Re-hydrate from server when cfg changes (after save / mount).
+  useEffect(() => {
+    setEnabled(!!cfg?.schedule?.enabled);
+    setCron(cfg?.schedule?.cron ?? "*/15 * * * *");
+    const m = SCHEDULE_PRESETS.find((p) => p.cron === cfg?.schedule?.cron);
+    setPreset(m ? m.cron : "");
+  }, [cfg]);
+
+  const onPresetChange = (v: string) => {
+    setPreset(v);
+    if (v) setCron(v);
+  };
+
+  const save = async (nextEnabled?: boolean) => {
+    setSaving(true);
+    try {
+      const res = await fetch(apiUrl("/api/v1/sync/config"), {
+        method: "PUT",
+        credentials: "include",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          schedule: { enabled: nextEnabled ?? enabled, cron },
+        }),
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok || !body?.ok) throw new Error(body?.error || "save failed");
+      toast.success(nextEnabled === undefined ? "Schedule saved" : nextEnabled ? "Auto-sync enabled" : "Auto-sync disabled");
+      await reload();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to save");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <section>
+      <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5 flex items-center gap-1.5">
+        <Activity className="h-3.5 w-3.5" /> Auto-sync (push)
+      </h3>
+      <p className="text-[11px] text-muted-foreground/80 mb-3">
+        Schedule a recurring <strong>copy --update</strong> push from this host to R2. Replace mode is intentionally not exposed here — auto-runs are non-destructive only.
+        Schedule survives server restarts.
+      </p>
+      <div className="space-y-3 max-w-xl">
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            role="switch"
+            aria-checked={enabled}
+            disabled={!configured || saving}
+            onClick={() => { const next = !enabled; setEnabled(next); void save(next); }}
+            className={cn(
+              "relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors",
+              enabled ? "bg-emerald-500/70" : "bg-white/[0.12]",
+              (!configured || saving) && "opacity-40 cursor-not-allowed",
+            )}
+          >
+            <span className={cn("inline-block h-3.5 w-3.5 rounded-full bg-white transition-transform",
+              enabled ? "translate-x-[1.125rem]" : "translate-x-0.5")} />
+          </button>
+          <span className="text-[12px] text-foreground/80">{enabled ? "Enabled" : "Disabled"}</span>
+        </div>
+
+        <div>
+          <label className="block text-[11px] text-muted-foreground mb-1">Preset</label>
+          <select
+            value={preset}
+            onChange={(e) => onPresetChange(e.target.value)}
+            className="w-full h-9 rounded-md border border-border bg-card px-3 text-[12px] focus:outline-none focus:ring-1 focus:ring-primary"
+          >
+            {SCHEDULE_PRESETS.map((p) => (
+              <option key={p.label} value={p.cron}>{p.label}</option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <label className="block text-[11px] text-muted-foreground mb-1">
+            Cron expression
+            <span className="ml-2 text-[10px] text-muted-foreground/70">(5 fields: minute hour dom month dow)</span>
+          </label>
+          <input
+            type="text"
+            value={cron}
+            onChange={(e) => { setCron(e.target.value); setPreset(""); }}
+            className="w-full h-9 rounded-md border border-border bg-card px-3 font-mono text-[12px] focus:outline-none focus:ring-1 focus:ring-primary"
+            placeholder="*/15 * * * *"
+          />
+        </div>
+
+        <div className="flex items-center gap-2">
+          <Button size="sm" onClick={() => void save()} disabled={!configured || saving}>
+            {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+            Save
+          </Button>
+          <span className="text-[11px] text-muted-foreground">
+            Next run: <span className="font-mono text-foreground/80">{cfg?.nextRunAt ? formatTime(cfg.nextRunAt) : "—"}</span>
+          </span>
+        </div>
+        {!configured && (
+          <p className="text-[10.5px] text-amber-300/80">
+            Configure R2 above before enabling the schedule.
+          </p>
+        )}
+      </div>
+    </section>
   );
 }
 
@@ -3577,6 +3866,67 @@ function formatDuration(ms: number): string {
   const m = Math.floor(ms / 60_000);
   const s = Math.round((ms % 60_000) / 1000);
   return s ? `${m}m ${s}s` : `${m}m`;
+}
+
+/** Preview dialog — runs `rclone --dry-run` first, shows the user what
+ * would change, then asks for confirmation before doing the real run. */
+function SyncPreviewDialog({
+  preview,
+  onCancel,
+  onConfirm,
+}: {
+  preview: { kind: "push" | "pull"; mode: "copy" | "sync"; status: "running" | "ready"; files: number; bytes: number; error?: string } | null;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const open = !!preview;
+  const isReplace = preview?.mode === "sync";
+  const dirLabel = preview?.kind === "push" ? "local → remote" : "remote → local";
+  return (
+    <ConfirmDialog
+      open={open}
+      onOpenChange={(o) => { if (!o) onCancel(); }}
+      title={preview?.status === "running"
+        ? "Computing changes…"
+        : `Confirm ${preview?.kind} (${preview?.mode === "sync" ? "replace" : "update"})`}
+      description={
+        preview?.status === "running" ? (
+          <span className="flex items-center gap-2 text-[12px]">
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            Running rclone in dry-run mode against {dirLabel}…
+          </span>
+        ) : preview?.error ? (
+          <span className="text-rose-300">{preview.error}</span>
+        ) : (
+          <div className="space-y-2 text-[12px]">
+            <div>
+              About to <strong>{preview?.kind === "push" ? "push" : "pull"}</strong> ({dirLabel})
+              in <strong>{isReplace ? "replace" : "update"}</strong> mode.
+            </div>
+            <div className="rounded-md border border-border bg-card/40 p-2 font-mono text-[11.5px]">
+              <div><strong>{preview?.files ?? 0}</strong> file{preview?.files === 1 ? "" : "s"} to transfer</div>
+              <div><strong>{formatBytes(preview?.bytes)}</strong> total size</div>
+            </div>
+            {isReplace && (
+              <div className="text-rose-300/90 text-[11.5px]">
+                ⚠ Replace mode also DELETES files on the destination that aren't on the source.
+                The dry-run preview shows transfers but the count of deletes isn't summarized — proceed with care.
+              </div>
+            )}
+            {preview?.files === 0 && !preview?.error && (
+              <div className="text-emerald-300/85 text-[11.5px]">
+                Nothing to do — source and destination already match.
+              </div>
+            )}
+          </div>
+        )
+      }
+      confirmLabel={preview?.status === "running" ? "…" : "Run for real"}
+      destructive={isReplace}
+      loading={preview?.status === "running"}
+      onConfirm={() => { if (preview?.status === "ready" && !preview?.error) onConfirm(); }}
+    />
+  );
 }
 
 function SyncProgressBar({ progress }: { progress: SyncProgress }) {

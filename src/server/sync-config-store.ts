@@ -19,12 +19,29 @@ export type R2Config = {
   prefix?: string;
 };
 
+export type SyncSchedule = {
+  enabled: boolean;
+  /** Cron expression (5- or 6-field). Croner picks up "every 15m" via
+   * \"every-15min cron\", "daily 03:00" via "0 3 * * *", etc. */
+  cron: string;
+  /** Direction is always push for scheduled runs (the use case is
+   * automated backup of the workDir up to R2). Mode is locked to copy
+   * `--update` so we never auto-delete remote files. */
+};
+
 export type SyncConfig = {
   r2?: R2Config;
   /** Last successful sync timestamps (ISO). Lets the UI surface "Last
    * pushed 3m ago" without server-side timers. */
   lastPushedAt?: string;
   lastPulledAt?: string;
+  /** Optional auto-push schedule. Lives in the same JSON so it
+   * rehydrates on server restart. */
+  schedule?: SyncSchedule;
+  /** rclone-style filter patterns to skip during every push/pull.
+   * Applied at every directory level (e.g. `node_modules/**` matches a
+   * node_modules folder anywhere in the tree). Empty = no filtering. */
+  excludes?: string[];
 };
 
 export const DEFAULT_SYNC_CONFIG: SyncConfig = {};
@@ -63,7 +80,19 @@ function normalize(value: unknown): SyncConfig {
     r2: normalizeR2(record.r2),
     lastPushedAt: typeof record.lastPushedAt === "string" ? record.lastPushedAt : undefined,
     lastPulledAt: typeof record.lastPulledAt === "string" ? record.lastPulledAt : undefined,
+    schedule: normalizeSchedule(record.schedule),
+    excludes: Array.isArray(record.excludes)
+      ? record.excludes.filter((p): p is string => typeof p === "string" && p.trim().length > 0).map((p) => p.trim())
+      : [],
   };
+}
+
+function normalizeSchedule(value: unknown): SyncSchedule | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const r = value as Record<string, unknown>;
+  const cron = typeof r.cron === "string" ? r.cron.trim() : "";
+  if (!cron) return undefined;
+  return { enabled: r.enabled === true, cron };
 }
 
 function normalizeR2(value: unknown): R2Config | undefined {

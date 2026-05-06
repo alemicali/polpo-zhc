@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { z } from "zod";
 import { publicSyncConfig, readSyncConfig, writeSyncConfig, type R2Config } from "../sync-config-store.js";
 import { appendHistoryEntry, readHistory } from "../sync-history-store.js";
+import type { SyncScheduler } from "../sync-scheduler.js";
 
 /** Module-level handle to the in-flight rclone process. Only one sync is
  * allowed at a time (the UI already enforces that), so a single ref is
@@ -45,15 +46,27 @@ const R2ConfigSchema = z.object({
   prefix: z.string().trim().optional(),
 });
 
-const SyncConfigPatchSchema = z.object({
-  r2: R2ConfigSchema.nullable().optional(),
+const ScheduleSchema = z.object({
+  enabled: z.boolean(),
+  cron: z.string().trim().min(1),
 });
 
-export function syncRoutes(getDeps: () => { polpoDir: string; workDir: string }): OpenAPIHono {
+const SyncConfigPatchSchema = z.object({
+  r2: R2ConfigSchema.nullable().optional(),
+  schedule: ScheduleSchema.nullable().optional(),
+  excludes: z.array(z.string().trim().min(1)).optional(),
+});
+
+export function syncRoutes(getDeps: () => {
+  polpoDir: string;
+  workDir: string;
+  scheduler?: SyncScheduler;
+}): OpenAPIHono {
   const app = new OpenAPIHono();
 
   app.get("/config", (c) => {
-    return c.json({ ok: true, data: publicSyncConfig(readSyncConfig(getDeps().polpoDir)) });
+    const cfg = publicSyncConfig(readSyncConfig(getDeps().polpoDir));
+    return c.json({ ok: true, data: { ...cfg, nextRunAt: getDeps().scheduler?.nextRunAt() ?? null } });
   });
 
   app.put("/config", async (c) => {
@@ -65,8 +78,6 @@ export function syncRoutes(getDeps: () => { polpoDir: string; workDir: string })
       r2 = undefined;
     } else if (parsed.data.r2) {
       const incoming = parsed.data.r2;
-      // If the secret looks like the masked placeholder we sent down,
-      // keep the existing one instead of clobbering it.
       const isMasked = isMaskedSecret(incoming.secretAccessKey);
       const secret = isMasked && current.r2 ? current.r2.secretAccessKey : incoming.secretAccessKey;
       r2 = {
@@ -77,8 +88,18 @@ export function syncRoutes(getDeps: () => { polpoDir: string; workDir: string })
         prefix: incoming.prefix || undefined,
       };
     }
-    const next = writeSyncConfig(getDeps().polpoDir, { r2 });
-    return c.json({ ok: true, data: publicSyncConfig(next) });
+    const schedule = parsed.data.schedule === null
+      ? undefined
+      : (parsed.data.schedule ?? current.schedule);
+    const excludes = parsed.data.excludes !== undefined
+      ? parsed.data.excludes
+      : current.excludes;
+    const next = writeSyncConfig(getDeps().polpoDir, { r2, schedule, excludes });
+    // Reload the scheduler so a flip of `enabled` or change of cron
+    // takes effect immediately, not on the next server restart.
+    getDeps().scheduler?.reload();
+    const publicCfg = publicSyncConfig(next);
+    return c.json({ ok: true, data: { ...publicCfg, nextRunAt: getDeps().scheduler?.nextRunAt() ?? null } });
   });
 
   app.post("/test", async (c) => {
@@ -94,14 +115,15 @@ export function syncRoutes(getDeps: () => { polpoDir: string; workDir: string })
     const { polpoDir, workDir } = getDeps();
     const cfg = readSyncConfig(polpoDir);
     if (!cfg.r2) return c.json({ ok: false, error: "Configure R2 in Settings first." }, 400);
-    const mode = await readModeFlag(c);
+    const { mode, dryRun } = await readSyncFlags(c);
     const remote = `r2:${joinRemote(cfg.r2.bucket, cfg.r2.prefix)}`;
-    const args = baseArgs(mode, workDir, remote);
+    const args = baseArgs(mode, workDir, remote, { dryRun, excludes: cfg.excludes });
     return streamRclone(c, cfg.r2, args, {
       direction: "push",
       mode,
+      dryRun,
       polpoDir,
-      onSuccess: () => writeSyncConfig(polpoDir, { lastPushedAt: new Date().toISOString() }),
+      onSuccess: () => { if (!dryRun) writeSyncConfig(polpoDir, { lastPushedAt: new Date().toISOString() }); },
     });
   });
 
@@ -109,14 +131,15 @@ export function syncRoutes(getDeps: () => { polpoDir: string; workDir: string })
     const { polpoDir, workDir } = getDeps();
     const cfg = readSyncConfig(polpoDir);
     if (!cfg.r2) return c.json({ ok: false, error: "Configure R2 in Settings first." }, 400);
-    const mode = await readModeFlag(c);
+    const { mode, dryRun } = await readSyncFlags(c);
     const remote = `r2:${joinRemote(cfg.r2.bucket, cfg.r2.prefix)}`;
-    const args = baseArgs(mode, remote, workDir);
+    const args = baseArgs(mode, remote, workDir, { dryRun, excludes: cfg.excludes });
     return streamRclone(c, cfg.r2, args, {
       direction: "pull",
       mode,
+      dryRun,
       polpoDir,
-      onSuccess: () => writeSyncConfig(polpoDir, { lastPulledAt: new Date().toISOString() }),
+      onSuccess: () => { if (!dryRun) writeSyncConfig(polpoDir, { lastPulledAt: new Date().toISOString() }); },
     });
   });
 
@@ -147,24 +170,37 @@ export function syncRoutes(getDeps: () => { polpoDir: string; workDir: string })
   return app;
 }
 
-function baseArgs(mode: "copy" | "sync", source: string, dest: string): string[] {
+function baseArgs(
+  mode: "copy" | "sync",
+  source: string,
+  dest: string,
+  opts: { dryRun?: boolean; excludes?: string[] } = {},
+): string[] {
   // copy --update keeps only newer files (non-destructive); sync makes the
   // destination an exact mirror (deletes extras). --use-json-log + 1s stats
   // give us machine-parseable progress to stream to the UI.
   const verb = mode === "sync" ? "sync" : "copy";
   const args = [verb, "--fast-list", "--use-json-log", "--stats=1s", "--stats-log-level", "INFO", "--verbose"];
   if (mode === "copy") args.push("--update");
+  if (opts.dryRun) args.push("--dry-run");
+  for (const pattern of opts.excludes ?? []) {
+    args.push("--exclude", pattern);
+  }
   return [...args, source, dest];
 }
 
-async function readModeFlag(c: { req: { json: () => Promise<unknown> } }): Promise<"copy" | "sync"> {
+async function readSyncFlags(c: { req: { json: () => Promise<unknown> } }): Promise<{ mode: "copy" | "sync"; dryRun: boolean }> {
   try {
     const body = await c.req.json();
-    if (body && typeof body === "object" && (body as Record<string, unknown>).mode === "sync") {
-      return "sync";
+    if (body && typeof body === "object") {
+      const r = body as Record<string, unknown>;
+      return {
+        mode: r.mode === "sync" ? "sync" : "copy",
+        dryRun: r.dryRun === true,
+      };
     }
-  } catch { /* no body / invalid JSON — default to copy */ }
-  return "copy";
+  } catch { /* no body / invalid JSON — fall through to defaults */ }
+  return { mode: "copy", dryRun: false };
 }
 
 /** Spawn rclone and stream its JSON-log output back to the client as
@@ -180,6 +216,9 @@ function streamRclone(
   meta: {
     direction: "push" | "pull";
     mode: "copy" | "sync";
+    /** Skip writing into history + lastPushed/PulledAt — dry runs only
+     * preview, they shouldn't show up next to real syncs. */
+    dryRun?: boolean;
     polpoDir: string;
     onSuccess?: () => void;
   },
@@ -282,20 +321,26 @@ function streamRclone(
         ? undefined
         : (stats.lastError ?? `rclone exited with code ${code}`);
 
-    appendHistoryEntry(meta.polpoDir, {
-      id,
-      direction: meta.direction,
-      mode: meta.mode,
-      startedAt: startedAt.toISOString(),
-      endedAt: endedAt.toISOString(),
-      durationMs: endedAt.getTime() - startedAt.getTime(),
-      ok,
-      files: stats.files ?? 0,
-      bytes: stats.bytes ?? 0,
-      ...(errorMsg ? { error: errorMsg } : {}),
-    });
+    if (!meta.dryRun) {
+      appendHistoryEntry(meta.polpoDir, {
+        id,
+        direction: meta.direction,
+        mode: meta.mode,
+        startedAt: startedAt.toISOString(),
+        endedAt: endedAt.toISOString(),
+        durationMs: endedAt.getTime() - startedAt.getTime(),
+        ok,
+        files: stats.files ?? 0,
+        bytes: stats.bytes ?? 0,
+        ...(errorMsg ? { error: errorMsg } : {}),
+      });
+    }
 
-    await sse.writeln(JSON.stringify({ type: "done", ok, code, cancelled, error: errorMsg }));
+    await sse.writeln(JSON.stringify({
+      type: "done", ok, code, cancelled, error: errorMsg,
+      dryRun: !!meta.dryRun,
+      summary: { files: stats.files ?? 0, bytes: stats.bytes ?? 0 },
+    }));
   });
 }
 

@@ -4,6 +4,7 @@ import { getPolpoDir } from "../core/constants.js";
 import { loadPolpoConfig } from "../core/config.js";
 import { serve } from "@hono/node-server";
 import { createApp } from "./app.js";
+import { SyncScheduler } from "./sync-scheduler.js";
 import { attachTerminalWebSocket, type TerminalWebSocketHandle } from "./terminal.js";
 import { attachCodeServerWebSocket, CodeServerManager } from "./code-server.js";
 
@@ -33,6 +34,8 @@ export class PolpoServer {
   private terminalWs: TerminalWebSocketHandle | null = null;
   private codeServerManager: CodeServerManager | null = null;
   private codeServerWs: { close: () => void } | null = null;
+  private syncScheduler: SyncScheduler | null = null;
+  private syncRunning = false;
   private shutdownHandlers: (() => void)[] = [];
   private supervisorRun: Promise<void> | null = null;
 
@@ -110,6 +113,16 @@ export class PolpoServer {
       this.sseBridge = new SSEBridge(this.orchestrator);
     }
 
+    // Auto-push scheduler — reads `<polpoDir>/sync-config.json` so its
+    // state survives restarts. Activates only when the schedule's
+    // `enabled` flag is true and R2 is configured.
+    this.syncScheduler = new SyncScheduler(
+      getPolpoDir(workDir),
+      workDir,
+      () => this.syncRunning,
+    );
+    this.syncScheduler.reload();
+
     const app = createApp(this.orchestrator, this.sseBridge, {
       apiKeys: this.config.apiKeys,
       corsOrigins: this.config.corsOrigins,
@@ -120,6 +133,7 @@ export class PolpoServer {
       // Late-bound: terminalWs is created after this createApp() call, but
       // the Processes panel only reads it at request time.
       getTerminalHandle: () => this.terminalWs,
+      syncScheduler: this.syncScheduler,
     });
 
     this.server = serve({
@@ -161,6 +175,7 @@ export class PolpoServer {
     this.terminalWs = null;
     this.codeServerWs?.close();
     this.codeServerWs = null;
+    this.syncScheduler?.stop();
     this.codeServerManager?.close();
     if (this.orchestrator?.isInitialized) {
       await this.orchestrator.gracefulStop();
