@@ -4,6 +4,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Button } from "@/components/ui/button";
 import { apiUrl } from "@/lib/config";
 import { cn } from "@/lib/utils";
+import type { CodingTerminal, CodingWorkspace } from "./types";
 
 type ProcessNode = {
   pid: number;
@@ -38,9 +39,17 @@ type CodeServerItem = {
 
 type ProcessItem = TerminalItem | CodeServerItem;
 
-type Props = { open: boolean; onOpenChange: (open: boolean) => void };
+type Props = {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  /** Used to resolve `process.id` → human label/workspace for each row. */
+  terminals: CodingTerminal[];
+  workspaces: CodingWorkspace[];
+};
 
-export function ProcessesDialog({ open, onOpenChange }: Props) {
+export function ProcessesDialog({ open, onOpenChange, terminals, workspaces }: Props) {
+  const terminalById = useMemo(() => new Map(terminals.map((t) => [t.id, t])), [terminals]);
+  const workspaceById = useMemo(() => new Map(workspaces.map((w) => [w.id, w])), [workspaces]);
   const [items, setItems] = useState<ProcessItem[]>([]);
   const [capturedAt, setCapturedAt] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -89,7 +98,7 @@ export function ProcessesDialog({ open, onOpenChange }: Props) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl border-white/[0.08] bg-[#141414] text-white/85">
+      <DialogContent className="!max-w-[min(96vw,1100px)] w-[min(96vw,1100px)] border-white/[0.08] bg-[#141414] text-white/85">
         <DialogHeader>
           <div className="flex items-start justify-between gap-3">
             <div>
@@ -118,21 +127,46 @@ export function ProcessesDialog({ open, onOpenChange }: Props) {
               {loading ? "Loading…" : "No managed processes."}
             </div>
           )}
-          {items.map((item) => (
-            <ProcessRow
-              key={`${item.kind}-${item.id}`}
-              item={item}
-              onKill={() => void kill(item.kind, item.id)}
-              killing={killing === `${item.kind}/${item.id}`}
-            />
-          ))}
+          {items.map((item) => {
+            // Resolve owning session (and its workspace) by id for terminal
+            // kind; code-server rows fall back to workspace lookup by cwd.
+            const term = item.kind === "terminal" ? terminalById.get(item.id) : undefined;
+            const ws = term
+              ? workspaceById.get(term.workspaceId)
+              : workspaces.find((w) => w.cwd === item.cwd);
+            return (
+              <ProcessRow
+                key={`${item.kind}-${item.id}`}
+                item={item}
+                sessionLabel={term?.label || undefined}
+                workspaceName={ws?.name}
+                workspaceCwd={ws?.cwd}
+                onKill={() => void kill(item.kind, item.id)}
+                killing={killing === `${item.kind}/${item.id}`}
+              />
+            );
+          })}
         </div>
       </DialogContent>
     </Dialog>
   );
 }
 
-function ProcessRow({ item, onKill, killing }: { item: ProcessItem; onKill: () => void; killing: boolean }) {
+function ProcessRow({
+  item,
+  sessionLabel,
+  workspaceName,
+  workspaceCwd,
+  onKill,
+  killing,
+}: {
+  item: ProcessItem;
+  sessionLabel?: string;
+  workspaceName?: string;
+  workspaceCwd?: string;
+  onKill: () => void;
+  killing: boolean;
+}) {
   const [expanded, setExpanded] = useState(false);
   const descendants = countDescendants(item.tree);
   const hasTree = !!item.tree && item.tree.children.length > 0;
@@ -154,10 +188,18 @@ function ProcessRow({ item, onKill, killing }: { item: ProcessItem; onKill: () =
           <Code2 className="h-3.5 w-3.5 shrink-0 text-emerald-300/80" />
         )}
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2 text-[12px]">
-            <span className="font-medium text-white/85">
-              {item.kind === "terminal" ? agentLabel(item.agentKind) : `code-server :${item.port}`}
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[12px]">
+            <span className="font-medium text-white/90">
+              {sessionLabel || (item.kind === "terminal" ? agentLabel(item.agentKind) : `code-server :${item.port}`)}
             </span>
+            {sessionLabel && item.kind === "terminal" && (
+              <span className="text-[11px] text-white/45">{agentLabel(item.agentKind)}</span>
+            )}
+            {workspaceName && (
+              <span className="rounded bg-white/[0.04] px-1.5 py-px text-[10px] text-white/55" title={workspaceCwd}>
+                {workspaceName}
+              </span>
+            )}
             <span className="font-mono text-[10.5px] tabular-nums text-white/35">pid {item.pid ?? "—"}</span>
             {item.kind === "terminal" && item.clients > 0 && (
               <span className="rounded bg-emerald-500/10 px-1.5 py-px text-[10px] font-medium text-emerald-300">

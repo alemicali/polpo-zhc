@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   Cloud,
@@ -22,7 +22,9 @@ import { useCodingState } from "./coding/use-coding-state";
 import { useGitInfo } from "./coding/use-git-info";
 import { CodingSidebar } from "./coding/sidebar";
 import { RightPanel } from "./coding/right-panel";
+import { SessionTabs } from "./coding/session-tabs";
 import { TerminalSession } from "./coding/terminal-session";
+import { EmptyWorkspaceQuickStart } from "./coding/empty-quickstart";
 import { useCodingSettings } from "./coding/coding-settings";
 import { useLocalState } from "./coding/use-local-state";
 
@@ -41,18 +43,6 @@ export function CodingPage() {
   // react-resizable-panels v4 dropped autoSaveId — wire defaultLayout and
   // onLayoutChanged manually. Layout is { panelId: percentage }.
   const [panelLayout, setPanelLayout] = useLocalState<Record<string, number>>("polpo:coding:panelLayout", {});
-  const [collapsedList, setCollapsedList] = useLocalState<string[]>("polpo:coding:collapsedWorkspaces", []);
-  const collapsedWorkspaces = useMemo(() => new Set(collapsedList), [collapsedList]);
-  const setCollapsedWorkspaces = useCallback(
-    (updater: Set<string> | ((prev: Set<string>) => Set<string>)) => {
-      setCollapsedList((prev) => {
-        const prevSet = new Set(prev);
-        const nextSet = typeof updater === "function" ? updater(prevSet) : updater;
-        return Array.from(nextSet);
-      });
-    },
-    [setCollapsedList],
-  );
 
   const {
     workspaces,
@@ -64,6 +54,9 @@ export function CodingPage() {
     closeWorkspace,
     addTerminal,
     closeTerminal,
+    hideTerminalTab,
+    unhideTerminalTab,
+    reorderTerminal,
     renameTerminal,
     setConnection,
   } = useCodingState();
@@ -71,11 +64,87 @@ export function CodingPage() {
   const [codingSettings] = useCodingSettings();
   const [busy, setBusy] = useState(false);
 
+  /** Empty worktrees that exist on disk but haven't spawned a session yet.
+   * Survives reloads via localStorage; removed when the first session lands.
+   * Keyed by `${projectId}::${branch}::${cwd}` to match WorkspaceGroup keys. */
+  type Pending = { key: string; projectId: string; branch: string; cwd: string; label: string };
+  const [pendingWorkspaces, setPendingWorkspaces] = useLocalState<Pending[]>("polpo:coding:pendingWorkspaces", []);
+  const [activePendingKey, setActivePendingKey] = useLocalState<string | null>("polpo:coding:activePendingKey", null);
+
   const activeTerminal = terminals.find((t) => t.id === activeId);
   const activeWorkspace = workspaces.find((w) => w.id === activeTerminal?.workspaceId);
   const activeCwd = activeWorkspace?.cwd ?? ".";
   const activeRevision = activeTerminal?.revision ?? 0;
-  const git = useGitInfo(activeCwd, activeRevision);
+  // Header git info follows the active *worktree* (where the user is
+  // actually working) rather than the project root — otherwise branch /
+  // PR / diff stats up top stay frozen on `main` while sessions live in
+  // their own worktree branches.
+  const headerCwd = activeTerminal?.cwdOverride || activeCwd;
+  const git = useGitInfo(headerCwd, activeRevision);
+
+  /** Conductor-style auto-name. The branch must be unique inside the repo
+   * so we keep the suffix; the workspace label is just the city,
+   * capitalized — that's the thing the user identifies the worktree by,
+   * and it survives any future `git branch -m` rename. */
+  const autoNames = () => {
+    const cities = [
+      "nagoya", "montreal", "salvador", "khartoum", "lisbon", "tokyo", "oslo",
+      "vienna", "paris", "kyoto", "helsinki", "dublin", "prague", "vancouver",
+      "lima", "athens", "dakar", "manila", "tunis", "cairo", "hanoi", "rome",
+      "berlin", "madrid", "london", "sydney", "austin", "denver", "taipei",
+      "seoul", "beirut", "mumbai", "bogota", "nairobi", "riga", "sofia",
+      "zurich", "geneva", "valencia", "porto", "naples", "milan", "turin",
+      "bologna", "florence", "venice", "palermo", "genoa", "bari", "trieste",
+    ];
+    const c = cities[Math.floor(Math.random() * cities.length)] ?? "session";
+    const s = Math.random().toString(36).slice(2, 5);
+    // Label and branch start identical — the label persists if the agent
+    // later renames the branch, but at creation we don't prettify.
+    const branch = `${c}-${s}`;
+    return { branch, label: branch };
+  };
+
+  /** "+ Add workspace" handler — creates the worktree on disk in one shot
+   * and lands the user on the empty quick-start screen. No agent picker,
+   * no branch input. */
+  const addWorkspaceFast = async (projectId: string) => {
+    const project = workspaces.find((w) => w.id === projectId);
+    if (!project) return;
+    const { branch, label } = autoNames();
+    try {
+      const res = await fetch(apiUrl("/api/v1/git/worktree/create"), {
+        method: "POST",
+        credentials: "include",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ cwd: project.cwd, branch }),
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok || !body?.ok) throw new Error(body?.error || `Worktree create failed (${res.status})`);
+      const cwd = body.data.path as string;
+      const resolvedBranch = (body.data.branch as string) || branch;
+      const key = `${projectId}::${resolvedBranch}::${cwd}`;
+      setPendingWorkspaces((prev) => prev.some((p) => p.key === key) ? prev : [...prev, { key, projectId, branch: resolvedBranch, cwd, label }]);
+      setActivePendingKey(key);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to create workspace");
+    }
+  };
+
+  /** Quick-start spawn from the empty workspace screen — adds a session in
+   * the pending worktree's branch+cwd and drops the pending placeholder. */
+  const startQuickSession = (kind: "terminal" | "claude" | "codex") => {
+    if (!activePendingKey) return;
+    const pending = pendingWorkspaces.find((p) => p.key === activePendingKey);
+    if (!pending) return;
+    addTerminal(pending.projectId, {
+      agentKind: kind,
+      cwdOverride: pending.cwd,
+      branch: pending.branch,
+      workspaceLabel: pending.label,
+    });
+    setPendingWorkspaces((prev) => prev.filter((p) => p.key !== pending.key));
+    setActivePendingKey(null);
+  };
 
   const openPR = () => {
     // Spin up a one-shot Claude session that stages, commits, pushes, and
@@ -116,15 +185,6 @@ export function CodingPage() {
     } finally {
       setBusy(false);
     }
-  };
-
-  const toggleCollapsed = (id: string) => {
-    setCollapsedWorkspaces((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
   };
 
   useEffect(() => {
@@ -263,16 +323,15 @@ export function CodingPage() {
                   workspaces={workspaces}
                   terminals={terminals}
                   activeId={activeId}
-                  connections={connections}
-                  collapsed={collapsedWorkspaces}
+                  pendingWorkspaces={pendingWorkspaces}
+                  activePendingKey={activePendingKey}
                   workDir={status.workDir}
-                  onToggleCollapsed={toggleCollapsed}
-                  onSelect={setActiveId}
-                  onAddWorkspace={addWorkspace}
-                  onCloseWorkspace={closeWorkspace}
-                  onAddTerminal={addTerminal}
+                  onSelectTerminal={(id) => { setActiveId(id); setActivePendingKey(null); }}
+                  onSelectPending={(key) => { setActivePendingKey(key); }}
+                  onAddProject={addWorkspace}
+                  onCloseProject={closeWorkspace}
+                  onAddWorkspace={addWorkspaceFast}
                   onCloseTerminal={closeTerminal}
-                  onRenameTerminal={renameTerminal}
                 />
               </ResizablePanel>
               <ResizableHandle />
@@ -281,6 +340,46 @@ export function CodingPage() {
 
           <ResizablePanel id="main">
             <main className="relative flex h-full w-full flex-col overflow-hidden bg-[#0a0a0a]">
+              {activePendingKey ? (() => {
+                const pending = pendingWorkspaces.find((p) => p.key === activePendingKey);
+                return pending ? (
+                  <EmptyWorkspaceQuickStart
+                    branch={pending.branch}
+                    projectName={workspaces.find((w) => w.id === pending.projectId)?.name ?? ""}
+                    cwd={pending.cwd}
+                    onStart={startQuickSession}
+                  />
+                ) : null;
+              })() : (<>
+              <SessionTabs
+                workspace={activeWorkspace}
+                terminals={terminals.filter((t) => {
+                  // Visible tabs of the active worktree.
+                  if (!activeTerminal) return false;
+                  if (t.workspaceId !== activeTerminal.workspaceId) return false;
+                  if (t.tabHidden) return false;
+                  return (t.cwdOverride || "") === (activeTerminal.cwdOverride || "")
+                    && (t.branch || "") === (activeTerminal.branch || "");
+                })}
+                hidden={terminals.filter((t) => {
+                  // Hidden tabs = "history" — only those of the active
+                  // worktree, so the popover stays scoped.
+                  if (!activeTerminal) return false;
+                  if (t.workspaceId !== activeTerminal.workspaceId) return false;
+                  if (!t.tabHidden) return false;
+                  return (t.cwdOverride || "") === (activeTerminal.cwdOverride || "")
+                    && (t.branch || "") === (activeTerminal.branch || "");
+                })}
+                activeId={activeId}
+                activeTerminal={activeTerminal}
+                connections={connections}
+                onSelect={setActiveId}
+                onCloseTab={hideTerminalTab}
+                onUnhideTab={unhideTerminalTab}
+                onReorder={reorderTerminal}
+                onRename={renameTerminal}
+                onAddTerminal={addTerminal}
+              />
               <div className="relative flex-1 min-h-0">
                 {terminals.map((terminal) => {
                   const ws = workspaces.find((w) => w.id === terminal.workspaceId);
@@ -299,6 +398,7 @@ export function CodingPage() {
                   );
                 })}
               </div>
+              </>)}
             </main>
           </ResizablePanel>
 

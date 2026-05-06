@@ -107,6 +107,8 @@ function normalizeTerminal(value: unknown, workspaceIds: Set<string>): CodingTer
     ...(typeof record.agentCommand === "string" && record.agentCommand ? { agentCommand: record.agentCommand } : {}),
     ...(typeof record.cwdOverride === "string" && record.cwdOverride ? { cwdOverride: record.cwdOverride } : {}),
     ...(typeof record.branch === "string" && record.branch ? { branch: record.branch } : {}),
+    ...(typeof record.workspaceLabel === "string" && record.workspaceLabel ? { workspaceLabel: record.workspaceLabel } : {}),
+    ...(record.tabHidden === true ? { tabHidden: true } : {}),
   };
 }
 

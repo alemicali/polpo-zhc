@@ -13,6 +13,24 @@ import { isTerminalEnabled, type TerminalWebSocketHandle } from "../terminal.js"
 import { readCodingConfig, writeCodingConfig } from "../coding-config-store.js";
 import { describeTrees } from "../process-registry.js";
 
+/** Run `cmd args` and return trimmed stdout, or empty string on any
+ * failure (missing binary, non-zero exit). Used for "best effort"
+ * identity probes — we don't surface errors to the user. */
+function execCommand(cmd: string, args: string[]): Promise<string> {
+  return new Promise((resolvePromise) => {
+    try {
+      const r = spawnSync(cmd, args, { encoding: "utf-8", timeout: 3_000 });
+      resolvePromise(r.status === 0 ? (r.stdout ?? "").trim() : "");
+    } catch {
+      resolvePromise("");
+    }
+  });
+}
+
+function execGit(args: string[]): Promise<string> {
+  return execCommand("git", args);
+}
+
 const CodingWorkspaceSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
@@ -29,6 +47,8 @@ const CodingTerminalSchema = z.object({
   agentCommand: z.string().optional(),
   cwdOverride: z.string().optional(),
   branch: z.string().optional(),
+  workspaceLabel: z.string().optional(),
+  tabHidden: z.boolean().optional(),
 });
 
 const CodingCodeServerSchema = z.object({
@@ -95,6 +115,93 @@ export function codingRoutes(getDeps: () => {
     }
     const next = writeCodingConfig(getDeps().polpoDir, parsed.data);
     return c.json({ ok: true, data: next });
+  });
+
+  // Git + GitHub identity surface — surfaced in the Settings dialog so the
+  // user can confirm "who am I committing as" before the agent runs `gh
+  // pr create` on their behalf.
+  // List the authenticated user's GitHub repos via `gh`. Used by the
+  // "Add project → from repo" picker so the user doesn't have to paste
+  // a URL when gh is signed in.
+  app.get("/projects/gh-repos", async (c) => {
+    const stdout = await execCommand("gh", [
+      "repo", "list",
+      "--limit", "100",
+      "--json", "nameWithOwner,description,sshUrl,url,updatedAt,isPrivate,isArchived",
+    ]);
+    if (!stdout) {
+      return c.json({ ok: false, error: "gh not signed in or returned no repos" }, 401);
+    }
+    try {
+      const repos = JSON.parse(stdout) as Array<{
+        nameWithOwner: string;
+        description: string | null;
+        sshUrl: string;
+        url: string;
+        updatedAt: string;
+        isPrivate: boolean;
+        isArchived: boolean;
+      }>;
+      return c.json({ ok: true, data: repos.filter((r) => !r.isArchived) });
+    } catch {
+      return c.json({ ok: false, error: "Failed to parse gh output" }, 500);
+    }
+  });
+
+  // Clone a remote repo into a polpo-managed location, then return the
+  // resulting on-disk path so the UI can add it as a project. The clone
+  // sits under <polpoDir>/repos/<basename>; safe under the implicit
+  // allowed-roots whitelist that lives there too.
+  app.post("/projects/clone", async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    const url = String(body?.url ?? "").trim();
+    if (!url) return c.json({ ok: false, error: "url required" }, 400);
+    if (!/^(https?:\/\/|git@|ssh:\/\/|file:\/\/)/.test(url)) {
+      return c.json({ ok: false, error: "Unsupported URL scheme" }, 400);
+    }
+    // Parse "owner/repo" out of GitHub URLs so we can hand the clone to
+    // `gh` — it uses its own OAuth token instead of requiring an SSH key
+    // (which is the most common dead-end for the SSH form).
+    const ghMatch = url.match(/^(?:git@github\.com:|https?:\/\/github\.com\/|ssh:\/\/git@github\.com\/)([^/]+\/[^/]+?)(?:\.git)?$/);
+    const ghTarget = ghMatch?.[1];
+    const repoLeaf = (ghTarget ? ghTarget.split("/")[1] : url.split(/[\/:]/).pop()) ?? "repo";
+    const slug = repoLeaf.replace(/\.git$/, "").replace(/[^a-zA-Z0-9._-]/g, "-") || "repo";
+    const reposDir = `${getDeps().polpoDir}/repos`;
+    const target = `${reposDir}/${slug}`;
+    try {
+      const fs = await import("node:fs");
+      fs.mkdirSync(reposDir, { recursive: true });
+      if (fs.existsSync(target)) {
+        return c.json({ ok: false, error: `Already exists: ${target}` }, 409);
+      }
+      // Prefer `gh repo clone <owner/repo>` for github URLs (handles auth
+      // via the user's gh token). Fall back to plain `git clone` otherwise.
+      const r = ghTarget
+        ? spawnSync("gh", ["repo", "clone", ghTarget, target], { encoding: "utf-8", timeout: 600_000 })
+        : spawnSync("git", ["clone", "--", url, target], { encoding: "utf-8", timeout: 600_000 });
+      if (r.status !== 0) {
+        return c.json({ ok: false, error: (r.stderr || r.stdout || "clone failed").trim() }, 500);
+      }
+      return c.json({ ok: true, data: { path: target, name: slug } });
+    } catch (err) {
+      return c.json({ ok: false, error: err instanceof Error ? err.message : "clone failed" }, 500);
+    }
+  });
+
+  app.get("/git-identity", async (c) => {
+    const [name, email, ghUser, ghHost] = await Promise.all([
+      execGit(["config", "--global", "user.name"]),
+      execGit(["config", "--global", "user.email"]),
+      execCommand("gh", ["api", "user", "-q", ".login"]),
+      execCommand("gh", ["api", "user", "-q", ".html_url"]),
+    ]);
+    return c.json({
+      ok: true,
+      data: {
+        git: { name: name || null, email: email || null },
+        gh: ghUser ? { login: ghUser, url: ghHost || null } : null,
+      },
+    });
   });
 
   // ── Live process tracker ──

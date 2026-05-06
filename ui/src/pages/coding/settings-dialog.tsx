@@ -17,9 +17,16 @@ const AGENT_LABEL: Record<CodingAgentKind, string> = {
   codex: "Codex",
 };
 
+type GitIdentity = {
+  git: { name: string | null; email: string | null };
+  gh: { login: string; url: string | null } | null;
+};
+
 export function CodingSettingsDialog({ open, onOpenChange }: Props) {
   const [settings, update] = useCodingSettings();
   const [capabilities, setCapabilities] = useState<CodingCapabilities | null>(null);
+  const [identity, setIdentity] = useState<GitIdentity | null>(null);
+  const [identityState, setIdentityState] = useState<"loading" | "ok" | "error">("loading");
   const [newPath, setNewPath] = useState("");
 
   useEffect(() => {
@@ -33,6 +40,15 @@ export function CodingSettingsDialog({ open, onOpenChange }: Props) {
       })
       .then((data) => { if (!cancelled) setCapabilities(data); })
       .catch(() => { if (!cancelled) setCapabilities(null); });
+    setIdentityState("loading");
+    fetch(apiUrl("/api/v1/coding/git-identity"), { credentials: "include" })
+      .then(async (res) => {
+        const body = await res.json().catch(() => null);
+        if (!res.ok || !body?.ok) throw new Error("git-identity");
+        return body.data as GitIdentity;
+      })
+      .then((data) => { if (!cancelled) { setIdentity(data); setIdentityState("ok"); } })
+      .catch(() => { if (!cancelled) { setIdentity(null); setIdentityState("error"); } });
     return () => { cancelled = true; };
   }, [open]);
 
@@ -72,13 +88,62 @@ export function CodingSettingsDialog({ open, onOpenChange }: Props) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg border-white/[0.08] bg-[#141414] text-white/85">
+      <DialogContent className="flex max-w-lg max-h-[85vh] flex-col border-white/[0.08] bg-[#141414] text-white/85">
         <DialogHeader>
           <DialogTitle className="text-white/90">Coding settings</DialogTitle>
           <DialogDescription className="text-white/45">
             Local-only — stored in this browser.
           </DialogDescription>
         </DialogHeader>
+
+        <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto pr-1">
+
+        {/* Git identity — read-only surface so the user can confirm
+            "who am I committing as" before agents run gh on their behalf. */}
+        <section className="space-y-1.5">
+          <h3 className="text-[10px] font-semibold uppercase tracking-[0.14em] text-white/40">
+            Git identity
+          </h3>
+          {identityState === "loading" && (
+            <div className="text-[11.5px] text-white/40">Loading…</div>
+          )}
+          {identityState === "error" && (
+            <div className="text-[11.5px] text-rose-300/70">
+              Failed to load identity — restart the server to pick up <code className="font-mono">/git-identity</code>.
+            </div>
+          )}
+          {identityState === "ok" && identity && (
+            <div className="space-y-1 rounded-md border border-white/[0.06] bg-white/[0.02] p-2 text-[11.5px]">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-white/45">git user</span>
+                <span className="truncate font-mono text-white/85">
+                  {identity.git.name ?? "—"}
+                  {identity.git.email && (
+                    <span className="text-white/40"> &lt;{identity.git.email}&gt;</span>
+                  )}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-white/45">gh auth</span>
+                {identity.gh ? (
+                  <a
+                    href={identity.gh.url ?? `https://github.com/${identity.gh.login}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="truncate font-mono text-emerald-300/85 hover:text-emerald-200"
+                  >
+                    @{identity.gh.login}
+                  </a>
+                ) : (
+                  <span className="font-mono text-rose-300/70">not signed in</span>
+                )}
+              </div>
+            </div>
+          )}
+          <p className="text-[10.5px] text-white/35">
+            Configure with <code className="font-mono">git config --global user.name/email</code> and <code className="font-mono">gh auth login</code>.
+          </p>
+        </section>
 
         {/* Agent commands */}
         <section className="space-y-2">
@@ -223,6 +288,7 @@ export function CodingSettingsDialog({ open, onOpenChange }: Props) {
             </div>
           )}
         </section>
+        </div>
       </DialogContent>
     </Dialog>
   );

@@ -43,6 +43,14 @@ export type CodingTerminal = {
   cwdOverride?: string;
   /** Branch checked out in this terminal's worktree, if it owns one. */
   branch?: string;
+  /** Friendly label for the workspace (= worktree group) this session
+   * lives in. Set when the worktree is created and persists even if the
+   * underlying branch is later renamed by the agent (à la Conductor). */
+  workspaceLabel?: string;
+  /** Tab is hidden from the session-tabs strip but the underlying session
+   * is *still alive* on the server. The user can re-open it via the
+   * History button. Distinct from "Archive" (which kills the process). */
+  tabHidden?: boolean;
 };
 
 export type CodingCodeServerSession = {

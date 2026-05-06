@@ -56,15 +56,18 @@ export function writeCodingConfig(polpoDir: string, patch: Partial<CodingConfig>
   return next;
 }
 
-/** Combined whitelist: persisted config + env var (env wins as a hard
- * override for hosted/self-managed setups). */
+/** Combined whitelist: polpoDir itself (always allowed — that's where we
+ * manage worktrees, code-server user data, etc.) + persisted config +
+ * env var (env wins as a hard override for hosted setups). */
 export function getEffectiveAllowedRoots(polpoDir: string): string[] {
   const fromConfig = readCodingConfig(polpoDir).allowedExtraRoots;
   const raw = process.env.POLPO_ALLOWED_WORKSPACE_ROOTS;
   const fromEnv = raw
     ? raw.split(/[,:]/).map((s) => s.trim()).filter(Boolean)
     : [];
-  const all = [...fromConfig, ...fromEnv].filter((p) => isAbsolute(p)).map((p) => resolve(p));
+  const all = [polpoDir, ...fromConfig, ...fromEnv]
+    .filter((p) => isAbsolute(p))
+    .map((p) => resolve(p));
   return Array.from(new Set(all));
 }
 

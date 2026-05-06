@@ -66,7 +66,7 @@ export function RightPanel({ workspaces, terminals, activeWorkspaceId, activeTer
   return (
     <div className="@container flex h-full w-full flex-col">
       <Tabs value={tab} onValueChange={(v) => setTab(v as RightTab)} className="contents">
-        <TabsList className="h-9 shrink-0 rounded-none border-b border-white/[0.06] bg-transparent p-0 px-2 gap-0.5">
+        <TabsList className="h-9 shrink-0 rounded-none border-b border-white/[0.08] bg-[#0d0d0d] p-0 gap-0 justify-start">
           <RightTabTrigger value="changes" icon={<FileText className="h-3.5 w-3.5" />} label="Changes" />
           <RightTabTrigger value="browser" icon={<Globe className="h-3.5 w-3.5" />} label="Browser" />
           <RightTabTrigger value="terminal" icon={<TerminalSquare className="h-3.5 w-3.5" />} label="Terminal" />
@@ -162,9 +162,13 @@ function RightTabTrigger({ value, icon, label }: { value: RightTab; icon: React.
       value={value}
       title={label}
       className={cn(
-        "h-7 gap-1.5 rounded-md px-2 text-[11px] font-medium",
-        "text-white/40 hover:text-white/70",
-        "data-[state=active]:bg-white/[0.05] data-[state=active]:text-white/90 data-[state=active]:shadow-none",
+        // Match the SessionTabs aesthetic: squared, classic, neutral
+        // underline beneath the active item — no rounded pill, no
+        // emerald accent.
+        "relative h-9 gap-1.5 rounded-none border-r border-white/[0.04] bg-transparent px-3 text-[11px] font-medium",
+        "text-white/45 hover:text-white/85 hover:bg-white/[0.02]",
+        "data-[state=active]:text-white data-[state=active]:bg-transparent data-[state=active]:shadow-none",
+        "data-[state=active]:after:absolute data-[state=active]:after:inset-x-0 data-[state=active]:after:bottom-0 data-[state=active]:after:h-[2px] data-[state=active]:after:bg-white/85",
       )}
     >
       {icon}

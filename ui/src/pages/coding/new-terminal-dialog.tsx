@@ -13,6 +13,11 @@ import type { CodingAgentKind, CodingCapabilities } from "./types";
 type Props = {
   workspaceCwd: string;
   trigger: React.ReactNode;
+  /** When set, the worktree-mode picker is hidden and the value is forced.
+   * "new" = used by the project's "+" in the sidebar (always a fresh
+   * worktree). "same" = used by the session-tabs "+" (always the active
+   * workspace's worktree). Undefined = legacy free-choice dialog. */
+  forceMode?: WorktreeMode;
   onCreate: (config: { agentKind: CodingAgentKind; cwdOverride?: string; branch?: string; label?: string }) => void;
 };
 
@@ -23,13 +28,13 @@ const AGENTS: { kind: CodingAgentKind; label: string; description: string; icon:
     kind: "claude",
     label: "Claude",
     description: "Anthropic Claude Code CLI",
-    icon: <Icon icon="logos:anthropic-icon" className="h-4 w-4" />,
+    icon: <img src="/claude-favicon.svg" alt="Claude" className="h-4 w-4" />,
   },
   {
     kind: "codex",
     label: "Codex",
     description: "OpenAI Codex CLI",
-    icon: <Icon icon="logos:openai-icon" className="h-4 w-4" />,
+    icon: <Icon icon="logos:openai-icon" className="h-4 w-4 invert" />,
   },
   {
     kind: "terminal",
@@ -39,14 +44,16 @@ const AGENTS: { kind: CodingAgentKind; label: string; description: string; icon:
   },
 ];
 
-export function NewTerminalDialog({ workspaceCwd, trigger, onCreate }: Props) {
+export function NewTerminalDialog({ workspaceCwd, trigger, forceMode, onCreate }: Props) {
   const [open, setOpen] = useState(false);
   // Pre-warm the logos pack the first time the dialog opens so the
   // Anthropic / OpenAI brand icons render without a flash.
-  useEffect(() => { if (open) ensureLogosPack(); }, [open]);
   const [agent, setAgent] = useState<CodingAgentKind>("terminal");
-  const [worktreeMode, setWorktreeMode] = useState<WorktreeMode>("same");
+  const [worktreeMode, setWorktreeMode] = useState<WorktreeMode>(forceMode ?? "same");
   const [branch, setBranch] = useState("");
+  // Keep forced state in sync when the prop changes mid-mount.
+  useEffect(() => { if (forceMode) setWorktreeMode(forceMode); }, [forceMode]);
+  useEffect(() => { if (open) ensureLogosPack(); }, [open]);
   const [busy, setBusy] = useState(false);
   const [capabilities, setCapabilities] = useState<CodingCapabilities | null>(null);
 
@@ -83,7 +90,9 @@ export function NewTerminalDialog({ workspaceCwd, trigger, onCreate }: Props) {
 
   const reset = () => {
     setAgent("terminal");
-    setWorktreeMode("same");
+    // Respect forceMode on close — without this, the next open momentarily
+    // showed "same" and Add workspace silently created sessions on main.
+    setWorktreeMode(forceMode ?? "same");
     setBranch("");
     setBusy(false);
   };
@@ -96,12 +105,10 @@ export function NewTerminalDialog({ workspaceCwd, trigger, onCreate }: Props) {
       let resolvedBranch: string | undefined;
 
       if (worktreeMode === "new") {
-        const trimmed = branch.trim();
-        if (!trimmed) {
-          toast.error("Branch name required");
-          setBusy(false);
-          return;
-        }
+        // Branch is optional now: if blank, auto-generate `wt/<short-utc>`
+        // so the user can fire-and-forget. Conductor does the same — first
+        // chat then renames the branch to match the work.
+        const trimmed = branch.trim() || autoBranchName();
         const res = await fetch(apiUrl("/api/v1/git/worktree/create"), {
           method: "POST",
           credentials: "include",
@@ -174,23 +181,31 @@ export function NewTerminalDialog({ workspaceCwd, trigger, onCreate }: Props) {
           </div>
         </fieldset>
 
-        {/* Worktree picker */}
+        {/* Worktree picker — hidden when the caller forced a mode (sidebar
+            +project = "new"; tab-strip + = "same"). */}
         <fieldset className="border-t border-white/[0.06] px-2 py-2">
           <legend className="px-1 text-[10px] font-semibold uppercase tracking-widest text-white/35">Worktree</legend>
-          <div className="mt-1 grid grid-cols-2 gap-1">
-            <ChoicePill
-              selected={worktreeMode === "same"}
-              onClick={() => setWorktreeMode("same")}
-              label="Same"
-              detail="Use the workspace cwd"
-            />
-            <ChoicePill
-              selected={worktreeMode === "new"}
-              onClick={() => setWorktreeMode("new")}
-              label="New"
-              detail="Branch + worktree"
-            />
-          </div>
+          {!forceMode && (
+            <div className="mt-1 grid grid-cols-2 gap-1">
+              <ChoicePill
+                selected={worktreeMode === "same"}
+                onClick={() => setWorktreeMode("same")}
+                label="Same"
+                detail="Use the workspace cwd"
+              />
+              <ChoicePill
+                selected={worktreeMode === "new"}
+                onClick={() => setWorktreeMode("new")}
+                label="New"
+                detail="Branch + worktree"
+              />
+            </div>
+          )}
+          {forceMode === "same" && (
+            <div className="mt-1 px-1 text-[10.5px] text-white/45">
+              New session in the active workspace.
+            </div>
+          )}
           {worktreeMode === "new" && (
             <div className="mt-2 flex items-center gap-1.5 rounded-md border border-white/[0.08] bg-white/[0.02] px-2 py-1">
               <GitBranch className="h-3.5 w-3.5 text-white/40" />
@@ -198,7 +213,7 @@ export function NewTerminalDialog({ workspaceCwd, trigger, onCreate }: Props) {
                 autoFocus
                 value={branch}
                 onChange={(e) => setBranch(e.target.value)}
-                placeholder="feat/my-thing"
+                placeholder="feat/my-thing  (auto if empty)"
                 className="h-5 min-w-0 flex-1 border-0 bg-transparent px-0.5 font-mono text-[11.5px] text-white/85 shadow-none focus-visible:ring-0"
               />
             </div>
@@ -218,7 +233,7 @@ export function NewTerminalDialog({ workspaceCwd, trigger, onCreate }: Props) {
           <Button
             size="sm"
             onClick={submit}
-            disabled={busy || (worktreeMode === "new" && !branch.trim())}
+            disabled={busy}
             className="h-7 rounded-md px-3 text-[11px] font-medium"
           >
             {busy && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
@@ -228,6 +243,27 @@ export function NewTerminalDialog({ workspaceCwd, trigger, onCreate }: Props) {
       </PopoverContent>
     </Popover>
   );
+}
+
+/** Cities pool used as the fallback branch name when "New workspace" is
+ * submitted without one — same flavour Conductor picked, just rendered
+ * directly as the branch (no prefix). A short random suffix avoids the
+ * worst-case "you spawned two workspaces called 'nagoya' in the same repo"
+ * collision while still reading naturally in `git branch`. */
+const AUTO_CITIES = [
+  "nagoya", "montreal", "salvador", "khartoum", "lisbon", "tokyo", "oslo",
+  "vienna", "paris", "kyoto", "helsinki", "dublin", "prague", "vancouver",
+  "lima", "athens", "dakar", "manila", "tunis", "cairo", "hanoi", "rome",
+  "berlin", "madrid", "london", "sydney", "austin", "denver", "taipei",
+  "seoul", "beirut", "mumbai", "bogota", "nairobi", "riga", "sofia",
+  "zurich", "geneva", "valencia", "porto", "naples", "milan", "turin",
+  "bologna", "florence", "venice", "palermo", "genoa", "bari", "trieste",
+];
+
+function autoBranchName(): string {
+  const city = AUTO_CITIES[Math.floor(Math.random() * AUTO_CITIES.length)] ?? "session";
+  const suffix = Math.random().toString(36).slice(2, 5);
+  return `${city}-${suffix}`;
 }
 
 function ChoicePill({ selected, onClick, label, detail }: { selected: boolean; onClick: () => void; label: string; detail: string }) {

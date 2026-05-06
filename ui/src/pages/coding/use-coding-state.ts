@@ -139,6 +139,8 @@ export function useCodingState() {
       cwdOverride?: string;
       branch?: string;
       label?: string;
+      /** Friendly workspace name (preserves identity across branch renames). */
+      workspaceLabel?: string;
       /** When true, do not steal focus to the new terminal. Used for
        * fire-and-forget actions like the PR button — the session is
        * still in the sidebar so the user can monitor/kill it, but their
@@ -175,6 +177,7 @@ export function useCodingState() {
         agentCommand: opts?.agentCommand,
         cwdOverride: opts?.cwdOverride,
         branch: opts?.branch,
+        workspaceLabel: opts?.workspaceLabel,
       };
       return [...current, terminal];
     });
@@ -183,6 +186,13 @@ export function useCodingState() {
   }, []);
 
   const closeTerminal = useCallback((id: string) => {
+    // Kill the server-side pty too — otherwise archiving from the UI just
+    // hides the row and leaves an orphan process running until the polpo
+    // server itself restarts.
+    void fetch(apiUrl(`/api/v1/coding/processes/terminal/${encodeURIComponent(id)}`), {
+      method: "DELETE",
+      credentials: "include",
+    }).catch(() => undefined);
     setTerminals((current) => {
       const index = current.findIndex((t) => t.id === id);
       const next = current.filter((t) => t.id !== id);
@@ -195,6 +205,13 @@ export function useCodingState() {
   const closeWorkspace = useCallback((workspaceId: string) => {
     setTerminals((currentTerminals) => {
       const removedIds = new Set(currentTerminals.filter((t) => t.workspaceId === workspaceId).map((t) => t.id));
+      // Kill server-side ptys for every terminal owned by this workspace.
+      for (const id of removedIds) {
+        void fetch(apiUrl(`/api/v1/coding/processes/terminal/${encodeURIComponent(id)}`), {
+          method: "DELETE",
+          credentials: "include",
+        }).catch(() => undefined);
+      }
       const nextTerminals = currentTerminals.filter((t) => !removedIds.has(t.id));
       setActiveId((prev) => (removedIds.has(prev) ? (nextTerminals[0]?.id ?? "") : prev));
       setConnections((current) => {
@@ -206,12 +223,63 @@ export function useCodingState() {
       });
       return nextTerminals;
     });
+    // Stop the workspace's code-server too so we don't leave that process hanging.
+    void fetch(apiUrl(`/api/v1/coding/code-server/stop`), {
+      method: "POST",
+      credentials: "include",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ workspaceId }),
+    }).catch(() => undefined);
     setWorkspaces((current) => current.filter((w) => w.id !== workspaceId));
     setCodeServers((current) => current.filter((session) => session.workspaceId !== workspaceId));
   }, []);
 
   const renameTerminal = useCallback((id: string, label: string) => {
     setTerminals((current) => current.map((t) => (t.id === id ? { ...t, label } : t)));
+  }, []);
+
+  /** Hide a session from the tabs strip without killing it. The pty keeps
+   * running on the server; the user re-opens via the History popover. */
+  const hideTerminalTab = useCallback((id: string) => {
+    setTerminals((current) => {
+      const target = current.find((t) => t.id === id);
+      if (!target) return current;
+      const next = current.map((t) => (t.id === id ? { ...t, tabHidden: true } : t));
+      // If we just hid the active tab, jump to another visible sibling
+      // in the same worktree (or any visible tab in the project, then
+      // anywhere). Avoids leaving the user staring at a hidden session.
+      if (id === activeId) {
+        const sameWt = next.find((t) =>
+          !t.tabHidden && t.id !== id
+            && t.workspaceId === target.workspaceId
+            && (t.branch || "") === (target.branch || "")
+            && (t.cwdOverride || "") === (target.cwdOverride || ""));
+        const sameProject = sameWt ?? next.find((t) => !t.tabHidden && t.id !== id && t.workspaceId === target.workspaceId);
+        const fallback = sameProject ?? next.find((t) => !t.tabHidden && t.id !== id);
+        setActiveId(fallback?.id ?? "");
+      }
+      return next;
+    });
+  }, [activeId]);
+
+  const unhideTerminalTab = useCallback((id: string) => {
+    setTerminals((current) => current.map((t) => (t.id === id ? { ...t, tabHidden: false } : t)));
+    setActiveId(id);
+  }, []);
+
+  /** Move terminal `sourceId` to occupy `targetId`'s slot. Reorders the
+   * underlying array so the visual order in the tab strip persists. */
+  const reorderTerminal = useCallback((sourceId: string, targetId: string) => {
+    if (sourceId === targetId) return;
+    setTerminals((current) => {
+      const srcIdx = current.findIndex((t) => t.id === sourceId);
+      const tgtIdx = current.findIndex((t) => t.id === targetId);
+      if (srcIdx < 0 || tgtIdx < 0) return current;
+      const next = current.slice();
+      const [moved] = next.splice(srcIdx, 1);
+      next.splice(tgtIdx, 0, moved!);
+      return next;
+    });
   }, []);
 
   const updateWorkspace = useCallback((id: string, patch: Partial<Pick<CodingWorkspace, "name" | "cwd">>) => {
@@ -237,6 +305,9 @@ export function useCodingState() {
     closeWorkspace,
     addTerminal,
     closeTerminal,
+    hideTerminalTab,
+    unhideTerminalTab,
+    reorderTerminal,
     renameTerminal,
     updateWorkspace,
     restartTerminal,

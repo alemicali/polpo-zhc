@@ -25,6 +25,12 @@ export interface CodingTerminal {
   cwdOverride?: string;
   /** Branch checked out in this terminal's worktree, if it owns a worktree. */
   branch?: string;
+  /** Friendly label for the workspace this session belongs to — survives
+   * branch renames so the user can still identify the original worktree. */
+  workspaceLabel?: string;
+  /** Tab is hidden from the UI but the underlying pty still runs — the
+   * user re-opens it via the History popover. Distinct from archiving. */
+  tabHidden?: boolean;
 }
 
 export interface CodingCodeServerSession {

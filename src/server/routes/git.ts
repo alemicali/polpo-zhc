@@ -1,6 +1,7 @@
 import { OpenAPIHono } from "@hono/zod-openapi";
 import { execa, execaCommand } from "execa";
-import { resolve, isAbsolute } from "node:path";
+import { basename, resolve, isAbsolute, join } from "node:path";
+import { getPolpoDir } from "../../core/constants.js";
 
 type GitPullRequest = {
   number: number;
@@ -238,11 +239,17 @@ export function gitRoutes(getDeps: () => { workDir: string }) {
     const { workDir } = getDeps();
     const root = isAbsolute(cwdParam) ? cwdParam : resolve(workDir, cwdParam);
 
-    // Default layout: <repo-root>/.worktrees/<branch> (sibling to .git)
+    // Default layout: <polpoDir>/worktrees/<repo-name>/<branch-slug> — out
+    // of the repo (no .gitignore noise, no build-tool surprises). Conductor
+    // picked this same approach (~/conductor/workspaces/<repo>/<city>/) for
+    // exactly that reason. `customPath` still wins when explicitly given.
     const repoRoot = (await safeExec("git rev-parse --show-toplevel", root)) || root;
+    const repoName = basename(repoRoot) || "repo";
+    const branchSlug = branch.replace(/[/\\]/g, "_");
+    const polpoDir = getPolpoDir(workDir);
     const target = customPath
       ? (isAbsolute(customPath) ? customPath : resolve(repoRoot, customPath))
-      : resolve(repoRoot, ".worktrees", branch.replace(/[/\\]/g, "_"));
+      : join(polpoDir, "worktrees", repoName, branchSlug);
 
     // Does the branch already exist? Use array-form execa here too so the
     // branch name is passed as a single argv entry without shell interpretation.
