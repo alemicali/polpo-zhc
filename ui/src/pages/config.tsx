@@ -62,6 +62,10 @@ import {
   X,
   Plus,
   Trash2,
+  Cloud as CloudIcon,
+  Upload,
+  Download,
+  EyeOff,
   type LucideIcon,
 } from "lucide-react";
 import { useConfig } from "@/hooks/use-polpo";
@@ -72,7 +76,7 @@ import type { CustomModelDef, ProviderConfig, AuthProfileMeta, ProviderAuthInfo,
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { JsonBlock } from "@/components/json-block";
-import { config as appConfig } from "@/lib/config";
+import { config as appConfig, apiUrl } from "@/lib/config";
 import {
   disablePushNotifications,
   enablePushNotifications,
@@ -187,6 +191,7 @@ const baseSections = [
   { id: "rules", label: "Rules", icon: Bell },
   { id: "policies", label: "Policies", icon: Shield },
   { id: "appearance", label: "Appearance", icon: PaletteIcon },
+  { id: "sync", label: "Cloud sync", icon: CloudIcon },
 ] as const;
 
 type SectionIdBase = (typeof baseSections)[number]["id"];
@@ -3003,6 +3008,11 @@ export function ConfigPage() {
                 </div>
               </div>
         )}
+
+        {/* ═══ CLOUD SYNC (R2 / S3) ═══ */}
+        {activeSection === "sync" && (
+          <CloudSyncPanel />
+        )}
       </div>
 
       {/* ── Notification rule dialog ── */}
@@ -3046,4 +3056,622 @@ export function ConfigPage() {
       />
     </div>
   );
+}
+
+// ── Cloud sync (R2 / S3) ──────────────────────────────────────────────
+//
+// Operator-level credentials + push/pull controls for the entire workDir.
+// Backed by `<polpoDir>/sync-config.json` server-side, which shells out
+// to `rclone copy --update` (non-destructive, only newer files).
+
+type SyncR2 = {
+  endpoint: string;
+  accessKeyId: string;
+  secretAccessKey: string;
+  bucket: string;
+  prefix?: string;
+};
+type SyncCfg = {
+  r2?: SyncR2;
+  lastPushedAt?: string;
+  lastPulledAt?: string;
+};
+
+type ActiveSync = {
+  id: string;
+  direction: "push" | "pull";
+  mode: "copy" | "sync";
+  startedAt: string;
+  bytes?: number;
+  totalBytes?: number;
+  transfers?: number;
+  totalTransfers?: number;
+  speed?: number;
+  eta?: number;
+  current?: string;
+  recent: string[];
+};
+
+type SyncHistoryEntry = {
+  id: string;
+  direction: "push" | "pull";
+  mode: "copy" | "sync";
+  startedAt: string;
+  endedAt: string;
+  durationMs: number;
+  ok: boolean;
+  files: number;
+  bytes: number;
+  error?: string;
+};
+
+type SyncProgress = {
+  active: "push" | "pull" | null;
+  mode: "copy" | "sync" | null;
+  bytes?: number;
+  totalBytes?: number;
+  transfers?: number;
+  totalTransfers?: number;
+  speed?: number;
+  eta?: number;
+  current?: string;
+  recent: string[]; // last few "Copied: ..." filenames
+  done?: { ok: boolean; code: number };
+  error?: string;
+};
+
+function CloudSyncPanel() {
+  const [cfg, setCfg] = useState<SyncCfg | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [progress, setProgress] = useState<SyncProgress>({ active: null, mode: null, recent: [] });
+  const [confirm, setConfirm] = useState<{ kind: "push" | "pull"; mode: "sync" } | null>(null);
+  const [history, setHistory] = useState<SyncHistoryEntry[]>([]);
+  const [showSecret, setShowSecret] = useState(false);
+  const [draft, setDraft] = useState<SyncR2>({ endpoint: "", accessKeyId: "", secretAccessKey: "", bucket: "", prefix: "" });
+  const [secretDirty, setSecretDirty] = useState(false);
+
+  const fetchCfg = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(apiUrl("/api/v1/sync/config"), { credentials: "include" });
+      const body = await res.json().catch(() => null);
+      if (!res.ok || !body?.ok) throw new Error("config");
+      setCfg(body.data as SyncCfg);
+      const r2 = (body.data as SyncCfg).r2;
+      setDraft({
+        endpoint: r2?.endpoint ?? "",
+        accessKeyId: r2?.accessKeyId ?? "",
+        secretAccessKey: r2?.secretAccessKey ?? "",
+        bucket: r2?.bucket ?? "",
+        prefix: r2?.prefix ?? "",
+      });
+      setSecretDirty(false);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchHistory = async () => {
+    try {
+      const res = await fetch(apiUrl("/api/v1/sync/history?limit=50"), { credentials: "include" });
+      const body = await res.json().catch(() => null);
+      if (res.ok && body?.ok) setHistory(body.data as SyncHistoryEntry[]);
+    } catch { /* ignore */ }
+  };
+
+  /** Re-attach to a sync that's still running on the server (e.g. user
+   * navigated away mid-push). The polling stops automatically once the
+   * server-side process completes (active comes back null). */
+  const fetchActive = async () => {
+    try {
+      const res = await fetch(apiUrl("/api/v1/sync/active"), { credentials: "include" });
+      const body = await res.json().catch(() => null);
+      if (!res.ok || !body?.ok) return null;
+      return body.data as ActiveSync | null;
+    } catch { return null; }
+  };
+
+  useEffect(() => { void fetchCfg(); void fetchHistory(); }, []);
+
+  // On mount + every 1.5s, ask the server whether a sync is in flight.
+  // If so, surface it as a non-streaming progress block; once the server
+  // reports `null` we refresh history (the run finished).
+  useEffect(() => {
+    let cancelled = false;
+    let timer: ReturnType<typeof setInterval> | null = null;
+    const tick = async () => {
+      const active = await fetchActive();
+      if (cancelled) return;
+      if (active) {
+        setProgress((p) => ({
+          ...p,
+          // Don't clobber a locally-streaming run — only adopt the snapshot
+          // if we're not the one driving it.
+          active: p.active ?? active.direction,
+          mode: p.mode ?? active.mode,
+          bytes: active.bytes ?? p.bytes,
+          totalBytes: active.totalBytes ?? p.totalBytes,
+          transfers: active.transfers ?? p.transfers,
+          totalTransfers: active.totalTransfers ?? p.totalTransfers,
+          speed: active.speed ?? p.speed,
+          eta: active.eta ?? p.eta,
+          current: active.current ?? p.current,
+          recent: active.recent.length > p.recent.length ? active.recent : p.recent,
+        }));
+      } else {
+        // Server says no active sync — clear if we were tracking one.
+        setProgress((p) => (p.active ? { active: null, mode: null, recent: [], done: p.done } : p));
+        void fetchHistory();
+      }
+    };
+    void tick();
+    timer = setInterval(() => void tick(), 1500);
+    return () => { cancelled = true; if (timer) clearInterval(timer); };
+  }, []);
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const res = await fetch(apiUrl("/api/v1/sync/config"), {
+        method: "PUT",
+        credentials: "include",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ r2: draft }),
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok || !body?.ok) throw new Error(body?.error || "save failed");
+      toast.success("Sync config saved");
+      setCfg(body.data as SyncCfg);
+      setSecretDirty(false);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to save");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const clearConfig = async () => {
+    setSaving(true);
+    try {
+      const res = await fetch(apiUrl("/api/v1/sync/config"), {
+        method: "PUT",
+        credentials: "include",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ r2: null }),
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok || !body?.ok) throw new Error(body?.error || "clear failed");
+      toast.success("Sync config cleared");
+      setCfg(body.data as SyncCfg);
+      setDraft({ endpoint: "", accessKeyId: "", secretAccessKey: "", bucket: "", prefix: "" });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to clear");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const test = async () => {
+    setSaving(true);
+    try {
+      const res = await fetch(apiUrl("/api/v1/sync/test"), { method: "POST", credentials: "include" });
+      const body = await res.json().catch(() => null);
+      if (!res.ok || !body?.ok) throw new Error(body?.error || "test failed");
+      toast.success("R2 connection OK");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Connection test failed");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const cancelSync = async () => {
+    try {
+      const res = await fetch(apiUrl("/api/v1/sync/cancel"), { method: "POST", credentials: "include" });
+      if (res.ok) toast.message("Cancelling…");
+    } catch { /* ignore */ }
+  };
+
+  const trigger = async (kind: "push" | "pull", mode: "copy" | "sync" = "copy") => {
+    setProgress({ active: kind, mode, recent: [] });
+    try {
+      const res = await fetch(apiUrl(`/api/v1/sync/${kind}`), {
+        method: "POST",
+        credentials: "include",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ mode }),
+      });
+      if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = "";
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        // NDJSON: one event per line.
+        let nl: number;
+        while ((nl = buf.indexOf("\n")) >= 0) {
+          const line = buf.slice(0, nl).trim();
+          buf = buf.slice(nl + 1);
+          if (!line) continue;
+          handleSyncEvent(line, setProgress);
+        }
+      }
+      // Drain any tail.
+      if (buf.trim()) handleSyncEvent(buf.trim(), setProgress);
+      await fetchCfg();
+      await fetchHistory();
+    } catch (err) {
+      setProgress((p) => ({ ...p, error: err instanceof Error ? err.message : `${kind} failed` }));
+      toast.error(err instanceof Error ? err.message : `${kind} failed`);
+    }
+  };
+
+  const configured = !!cfg?.r2;
+
+  return (
+    <div className="space-y-6 max-w-2xl">
+      <section>
+        <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5 flex items-center gap-1.5">
+          <CloudIcon className="h-3.5 w-3.5" /> R2 / S3-compatible target
+        </h3>
+        <p className="text-[11px] text-muted-foreground/80 mb-3">
+          Sync the entire <code className="font-mono">workDir</code> to a Cloudflare R2 bucket via <code className="font-mono">rclone copy --update</code>.
+          Non-destructive: only newer files are transferred, nothing on the destination is deleted.
+        </p>
+
+        {loading ? (
+          <div className="flex items-center gap-2 text-[12px] text-muted-foreground">
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            Loading config…
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <SyncField label="Endpoint" placeholder="https://<account-id>.r2.cloudflarestorage.com" value={draft.endpoint}
+              onChange={(v) => setDraft({ ...draft, endpoint: v })} mono />
+            <SyncField label="Bucket" placeholder="my-bucket" value={draft.bucket}
+              onChange={(v) => setDraft({ ...draft, bucket: v })} mono />
+            <SyncField label="Prefix (optional)" placeholder="hosts/lumea" value={draft.prefix ?? ""}
+              onChange={(v) => setDraft({ ...draft, prefix: v })} mono />
+            <SyncField label="Access key ID" placeholder="AK..." value={draft.accessKeyId}
+              onChange={(v) => setDraft({ ...draft, accessKeyId: v })} mono />
+            <div>
+              <label className="block text-[11px] text-muted-foreground mb-1">Secret access key</label>
+              <div className="flex items-center gap-2">
+                <input
+                  type={showSecret ? "text" : "password"}
+                  value={draft.secretAccessKey}
+                  onChange={(e) => { setDraft({ ...draft, secretAccessKey: e.target.value }); setSecretDirty(true); }}
+                  placeholder={configured && !secretDirty ? "(stored — click to replace)" : "raw secret"}
+                  onFocus={() => { if (configured && !secretDirty) setDraft({ ...draft, secretAccessKey: "" }); }}
+                  className="flex-1 h-9 rounded-md border border-border bg-card px-3 font-mono text-[12px] focus:outline-none focus:ring-1 focus:ring-primary"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowSecret((v) => !v)}
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-border bg-card hover:bg-accent"
+                  title={showSecret ? "Hide" : "Show"}
+                >
+                  {showSecret ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                </button>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2 pt-1">
+              <Button size="sm" onClick={save} disabled={saving}>
+                {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+                Save
+              </Button>
+              <Button size="sm" variant="outline" onClick={test} disabled={saving || !configured}>
+                Test connection
+              </Button>
+              {configured && (
+                <Button size="sm" variant="ghost" onClick={clearConfig} disabled={saving}
+                  className="text-rose-400 hover:text-rose-300 hover:bg-rose-500/10">
+                  Clear
+                </Button>
+              )}
+            </div>
+          </div>
+        )}
+      </section>
+
+      <section>
+        <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5 flex items-center gap-1.5">
+          <Activity className="h-3.5 w-3.5" /> Sync now
+        </h3>
+        <p className="text-[11px] text-muted-foreground/80 mb-3">
+          One-shot sync of the current workDir against the configured remote. Requires <code className="font-mono">rclone</code> on the server.
+          The default <strong>copy/update</strong> mode is non-destructive (newer files only). The <strong>replace</strong> mode mirrors source → destination and <em>deletes</em> extras — used for first hydration or to promote a clean snapshot.
+        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button size="sm" onClick={() => void trigger("push", "copy")} disabled={!configured || progress.active != null}>
+            {progress.active === "push" && progress.mode === "copy" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
+            Push (update)
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => void trigger("pull", "copy")} disabled={!configured || progress.active != null}>
+            {progress.active === "pull" && progress.mode === "copy" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+            Pull (update)
+          </Button>
+          <div className="mx-1 h-5 w-px bg-border" />
+          <Button size="sm" variant="ghost" onClick={() => setConfirm({ kind: "push", mode: "sync" })} disabled={!configured || progress.active != null}
+            className="text-rose-400 hover:text-rose-300 hover:bg-rose-500/10">
+            {progress.active === "push" && progress.mode === "sync" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
+            Replace remote
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => setConfirm({ kind: "pull", mode: "sync" })} disabled={!configured || progress.active != null}
+            className="text-rose-400 hover:text-rose-300 hover:bg-rose-500/10">
+            {progress.active === "pull" && progress.mode === "sync" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+            Replace local
+          </Button>
+        </div>
+
+        {progress.active && (
+          <div className="mt-4 rounded-md border border-border bg-card/40 p-3 space-y-2">
+            <div className="flex items-center justify-between text-[11px]">
+              <span className="font-medium">
+                {progress.active === "push" ? "Pushing" : "Pulling"}
+                {progress.mode === "sync" && <span className="ml-1 text-rose-400">(replace)</span>}
+              </span>
+              <div className="flex items-center gap-2">
+                <span className="font-mono tabular-nums text-muted-foreground">
+                  {progress.transfers ?? 0} / {progress.totalTransfers ?? "?"} files
+                </span>
+                <button
+                  type="button"
+                  onClick={() => void cancelSync()}
+                  className="inline-flex items-center gap-1 rounded bg-rose-500/15 px-2 py-0.5 text-[10.5px] font-medium text-rose-300 hover:bg-rose-500/25"
+                >
+                  <X className="h-3 w-3" />
+                  Cancel
+                </button>
+              </div>
+            </div>
+            <SyncProgressBar progress={progress} />
+            <div className="grid grid-cols-3 gap-2 font-mono text-[10.5px] tabular-nums text-muted-foreground">
+              <div>{formatBytes(progress.bytes)} / {formatBytes(progress.totalBytes)}</div>
+              <div>{progress.speed != null ? `${formatBytes(progress.speed)}/s` : "—"}</div>
+              <div className="text-right">ETA {formatEta(progress.eta)}</div>
+            </div>
+            {progress.current && (
+              <div className="truncate font-mono text-[11px] text-foreground/80" title={progress.current}>
+                ⮕ {progress.current}
+              </div>
+            )}
+            {progress.recent.length > 0 && (
+              <details className="mt-1">
+                <summary className="cursor-pointer text-[10.5px] text-muted-foreground hover:text-foreground/80">Recent files ({progress.recent.length})</summary>
+                <div className="mt-1 max-h-32 overflow-y-auto font-mono text-[10.5px] text-muted-foreground space-y-0.5">
+                  {progress.recent.map((line, i) => <div key={i} className="truncate">{line}</div>)}
+                </div>
+              </details>
+            )}
+          </div>
+        )}
+        {progress.done && !progress.active && (
+          <div className={cn("mt-4 rounded-md border p-3 text-[11.5px]",
+            progress.done.ok ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300" : "border-rose-500/30 bg-rose-500/10 text-rose-300")}>
+            {progress.done.ok
+              ? `Done — ${progress.transfers ?? 0} files transferred.`
+              : (progress.error ?? `rclone exited with code ${progress.done.code}`)}
+          </div>
+        )}
+
+        <div className="mt-3 grid grid-cols-2 gap-2 max-w-md text-[11px] text-muted-foreground">
+          <div>Last push: <span className="font-mono text-foreground/80">{cfg?.lastPushedAt ? formatTime(cfg.lastPushedAt) : "—"}</span></div>
+          <div>Last pull: <span className="font-mono text-foreground/80">{cfg?.lastPulledAt ? formatTime(cfg.lastPulledAt) : "—"}</span></div>
+        </div>
+      </section>
+
+      <section>
+        <div className="flex items-center justify-between mb-1.5">
+          <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+            <Activity className="h-3.5 w-3.5" /> History
+          </h3>
+          <button
+            type="button"
+            onClick={() => void fetchHistory()}
+            className="text-[10.5px] text-muted-foreground hover:text-foreground/80"
+          >
+            Refresh
+          </button>
+        </div>
+        <SyncHistoryTable entries={history} />
+      </section>
+
+      <ConfirmDialog
+        open={!!confirm}
+        onOpenChange={(o) => { if (!o) setConfirm(null); }}
+        title={confirm?.kind === "push" ? "Replace remote with local?" : "Replace local with remote?"}
+        description={
+          confirm?.kind === "push"
+            ? "This will mirror your local workDir up to R2 and DELETE any files on the bucket that aren't local. Use only to promote a clean snapshot."
+            : "This will mirror R2 down to your local workDir and DELETE any local files that aren't on R2. Use only for first hydration."
+        }
+        confirmLabel="Replace"
+        destructive
+        onConfirm={() => {
+          if (!confirm) return;
+          void trigger(confirm.kind, "sync");
+          setConfirm(null);
+        }}
+      />
+    </div>
+  );
+}
+
+function SyncHistoryTable({ entries }: { entries: SyncHistoryEntry[] }) {
+  if (entries.length === 0) {
+    return (
+      <div className="rounded-md border border-border bg-card/40 px-3 py-4 text-center text-[11px] text-muted-foreground">
+        No syncs yet — push or pull to start the history.
+      </div>
+    );
+  }
+  return (
+    <div className="overflow-x-auto rounded-md border border-border">
+      <table className="w-full text-[11px]">
+        <thead className="bg-card/60 text-[10px] uppercase tracking-wider text-muted-foreground">
+          <tr>
+            <th className="px-2 py-1.5 text-left font-medium">When</th>
+            <th className="px-2 py-1.5 text-left font-medium">Type</th>
+            <th className="px-2 py-1.5 text-right font-medium">Files</th>
+            <th className="px-2 py-1.5 text-right font-medium">Size</th>
+            <th className="px-2 py-1.5 text-right font-medium">Duration</th>
+            <th className="px-2 py-1.5 text-left font-medium">Result</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-border/50">
+          {entries.map((e) => (
+            <tr key={e.id} className="hover:bg-card/40">
+              <td className="px-2 py-1.5 font-mono text-foreground/80">{formatTime(e.startedAt)}</td>
+              <td className="px-2 py-1.5">
+                <SyncTypeBadge direction={e.direction} mode={e.mode} />
+              </td>
+              <td className="px-2 py-1.5 text-right font-mono tabular-nums">{e.files}</td>
+              <td className="px-2 py-1.5 text-right font-mono tabular-nums">{formatBytes(e.bytes)}</td>
+              <td className="px-2 py-1.5 text-right font-mono tabular-nums">{formatDuration(e.durationMs)}</td>
+              <td className="px-2 py-1.5">
+                {e.ok ? (
+                  <span className="inline-flex items-center gap-1 rounded bg-emerald-500/15 px-1.5 py-px text-[10px] font-medium text-emerald-300">ok</span>
+                ) : (
+                  <span title={e.error} className="inline-flex items-center gap-1 rounded bg-rose-500/15 px-1.5 py-px text-[10px] font-medium text-rose-300">
+                    failed
+                  </span>
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function SyncTypeBadge({ direction, mode }: { direction: "push" | "pull"; mode: "copy" | "sync" }) {
+  const isPush = direction === "push";
+  const replace = mode === "sync";
+  const arrow = isPush ? "↑" : "↓";
+  const label = `${arrow} ${isPush ? "push" : "pull"}${replace ? " · replace" : ""}`;
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1 rounded px-1.5 py-px font-mono text-[10px]",
+        replace
+          ? "bg-rose-500/10 text-rose-300/90"
+          : isPush
+            ? "bg-sky-500/10 text-sky-300/90"
+            : "bg-emerald-500/10 text-emerald-300/90",
+      )}
+    >
+      {label}
+    </span>
+  );
+}
+
+function formatDuration(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
+  const m = Math.floor(ms / 60_000);
+  const s = Math.round((ms % 60_000) / 1000);
+  return s ? `${m}m ${s}s` : `${m}m`;
+}
+
+function SyncProgressBar({ progress }: { progress: SyncProgress }) {
+  const pct = progress.totalBytes && progress.totalBytes > 0
+    ? Math.min(100, Math.round((progress.bytes ?? 0) / progress.totalBytes * 100))
+    : null;
+  return (
+    <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-white/[0.05]">
+      {pct != null ? (
+        <div
+          className="h-full rounded-full bg-emerald-400/80 transition-[width]"
+          style={{ width: `${pct}%` }}
+        />
+      ) : (
+        <div className="absolute inset-y-0 left-0 h-full w-1/3 animate-pulse rounded-full bg-emerald-400/40" />
+      )}
+    </div>
+  );
+}
+
+/** Parse one NDJSON line emitted by the /sync streaming endpoints and
+ * fold it into the panel's progress state. */
+function handleSyncEvent(line: string, setProgress: React.Dispatch<React.SetStateAction<SyncProgress>>) {
+  let evt: any;
+  try { evt = JSON.parse(line); } catch { return; }
+  if (evt?.type === "done") {
+    setProgress((p) => ({ ...p, done: { ok: !!evt.ok, code: evt.code ?? -1 }, error: evt.error || p.error, active: null }));
+    return;
+  }
+  if (evt?.type !== "log") return;
+  // Stats payload — shape from rclone --use-json-log
+  if (evt.source === "accounting/stats" || evt.stats) {
+    const s = evt.stats ?? evt;
+    const tx = Array.isArray(s.transferring) ? s.transferring[0] : null;
+    setProgress((p) => ({
+      ...p,
+      bytes: typeof s.bytes === "number" ? s.bytes : p.bytes,
+      totalBytes: typeof s.totalBytes === "number" ? s.totalBytes : p.totalBytes,
+      transfers: typeof s.transfers === "number" ? s.transfers : p.transfers,
+      totalTransfers: typeof s.totalTransfers === "number" ? s.totalTransfers : p.totalTransfers,
+      speed: typeof s.speed === "number" ? s.speed : p.speed,
+      eta: typeof s.eta === "number" ? s.eta : p.eta,
+      current: tx?.name ?? p.current,
+    }));
+    return;
+  }
+  // Per-file events: msg ~ "Copied (new)" or similar; object = filename
+  if (typeof evt.object === "string" && /Copied|Updated|Deleted/i.test(evt.msg ?? "")) {
+    setProgress((p) => ({
+      ...p,
+      recent: [`${evt.msg}: ${evt.object}`, ...p.recent].slice(0, 8),
+    }));
+  }
+}
+
+function formatBytes(n?: number): string {
+  if (n == null) return "—";
+  const units = ["B", "KiB", "MiB", "GiB", "TiB"];
+  let i = 0; let v = n;
+  while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+  return `${v.toFixed(v >= 100 ? 0 : v >= 10 ? 1 : 2)} ${units[i]}`;
+}
+
+function formatEta(s?: number): string {
+  if (s == null || !Number.isFinite(s) || s < 0) return "—";
+  if (s < 60) return `${Math.round(s)}s`;
+  const m = Math.floor(s / 60);
+  const r = Math.round(s % 60);
+  if (m < 60) return `${m}m${r ? ` ${r}s` : ""}`;
+  const h = Math.floor(m / 60);
+  return `${h}h ${m % 60}m`;
+}
+
+function SyncField({
+  label, value, onChange, placeholder, mono,
+}: {
+  label: string; value: string; onChange: (v: string) => void; placeholder?: string; mono?: boolean;
+}) {
+  return (
+    <div>
+      <label className="block text-[11px] text-muted-foreground mb-1">{label}</label>
+      <input
+        type="text"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        className={cn(
+          "w-full h-9 rounded-md border border-border bg-card px-3 text-[12px] focus:outline-none focus:ring-1 focus:ring-primary",
+          mono && "font-mono",
+        )}
+      />
+    </div>
+  );
+}
+
+function formatTime(iso: string): string {
+  try { return new Date(iso).toLocaleString(); } catch { return iso; }
 }

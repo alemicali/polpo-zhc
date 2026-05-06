@@ -43,6 +43,7 @@ import { gitRoutes } from "./routes/git.js";
 import { audioRoutes } from "./routes/audio.js";
 import { pushRoutes } from "./routes/push.js";
 import { codingRoutes } from "./routes/coding.js";
+import { syncRoutes } from "./routes/sync.js";
 import { FileAttachmentStore } from "../stores/file-attachment-store.js";
 import { isTerminalEnabled, type TerminalWebSocketHandle } from "./terminal.js";
 import type { CodeServerManager } from "./code-server.js";
@@ -396,6 +397,11 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     codeServerManager: opts?.codeServerManager,
     polpoDir: o.getPolpoDir(),
     getTerminalHandle: opts?.getTerminalHandle,
+  })));
+
+  authed.route("/sync", syncRoutes(() => ({
+    polpoDir: o.getPolpoDir(),
+    workDir: o.getWorkDir(),
   })));
 
   authed.route("/attachments", attachmentRoutes(() => ({
