@@ -120,29 +120,40 @@ export function codingRoutes(getDeps: () => {
   // Git + GitHub identity surface — surfaced in the Settings dialog so the
   // user can confirm "who am I committing as" before the agent runs `gh
   // pr create` on their behalf.
-  // List the authenticated user's GitHub repos via `gh`. Used by the
-  // "Add project → from repo" picker so the user doesn't have to paste
-  // a URL when gh is signed in.
+  // List repos the authenticated user can clone — owned, collaborator, and
+  // organization-member. We use `gh api user/repos` rather than
+  // `gh repo list` because the latter only surfaces the user's own repos
+  // and misses orgs/collaborator access.
   app.get("/projects/gh-repos", async (c) => {
     const stdout = await execCommand("gh", [
-      "repo", "list",
-      "--limit", "100",
-      "--json", "nameWithOwner,description,sshUrl,url,updatedAt,isPrivate,isArchived",
+      "api",
+      "user/repos?per_page=100&sort=updated&direction=desc&affiliation=owner,collaborator,organization_member",
     ]);
     if (!stdout) {
       return c.json({ ok: false, error: "gh not signed in or returned no repos" }, 401);
     }
     try {
-      const repos = JSON.parse(stdout) as Array<{
-        nameWithOwner: string;
+      type ApiRepo = {
+        full_name: string;
         description: string | null;
-        sshUrl: string;
-        url: string;
-        updatedAt: string;
-        isPrivate: boolean;
-        isArchived: boolean;
-      }>;
-      return c.json({ ok: true, data: repos.filter((r) => !r.isArchived) });
+        ssh_url: string;
+        html_url: string;
+        updated_at: string;
+        private: boolean;
+        archived: boolean;
+      };
+      const repos = JSON.parse(stdout) as ApiRepo[];
+      const data = repos
+        .filter((r) => !r.archived)
+        .map((r) => ({
+          nameWithOwner: r.full_name,
+          description: r.description,
+          sshUrl: r.ssh_url,
+          url: r.html_url,
+          updatedAt: r.updated_at,
+          isPrivate: r.private,
+        }));
+      return c.json({ ok: true, data });
     } catch {
       return c.json({ ok: false, error: "Failed to parse gh output" }, 500);
     }
