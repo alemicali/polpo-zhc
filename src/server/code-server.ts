@@ -93,7 +93,7 @@ export class CodeServerManager {
     }
 
     const cwd = resolveWorkspaceCwd(this.orchestrator.getAgentWorkDir(), requestedCwd);
-    const port = await getFreePort();
+    const port = await getFreePort(serverReservedPorts());
     const baseDir = join(this.orchestrator.getPolpoDir(), "code-server", id);
     const userDataDir = prepareCodeServerUserData(baseDir, theme);
     const extensionsDir = join(baseDir, "extensions");
@@ -114,7 +114,7 @@ export class CodeServerManager {
     ], {
       cwd,
       env: {
-        ...process.env,
+        ...codeServerEnv(),
         POLPO_WORKDIR: this.orchestrator.getWorkDir(),
         POLPO_AGENT_WORKDIR: this.orchestrator.getAgentWorkDir(),
       },
@@ -306,9 +306,10 @@ function resolveCodeServerBin(): string {
   if (process.env.POLPO_CODE_SERVER_BIN?.trim()) return process.env.POLPO_CODE_SERVER_BIN.trim();
 
   const candidates = [
+    process.platform === "win32" ? "" : "/usr/bin/code-server",
     join(process.cwd(), "node_modules", ".bin", process.platform === "win32" ? "code-server.cmd" : "code-server"),
     join(process.cwd(), "..", "node_modules", ".bin", process.platform === "win32" ? "code-server.cmd" : "code-server"),
-  ];
+  ].filter(Boolean);
   for (const candidate of candidates) {
     if (existsSync(candidate)) return candidate;
   }
@@ -322,7 +323,28 @@ function makeDirectUrl(port: number): string {
   return `${protocol}://${host}:${port}/`;
 }
 
-async function getFreePort(): Promise<number> {
+function codeServerEnv(): NodeJS.ProcessEnv {
+  const { PORT: _port, ...env } = process.env;
+  return env;
+}
+
+function serverReservedPorts(): Set<number> {
+  const ports = new Set<number>();
+  const raw = process.env.PORT;
+  const parsed = raw ? Number.parseInt(raw, 10) : NaN;
+  if (Number.isInteger(parsed) && parsed > 0 && parsed < 65536) ports.add(parsed);
+  return ports;
+}
+
+async function getFreePort(reserved = new Set<number>()): Promise<number> {
+  for (let attempt = 0; attempt < 40; attempt++) {
+    const port = await getEphemeralPort();
+    if (!reserved.has(port)) return port;
+  }
+  throw new Error("Could not allocate a code-server port.");
+}
+
+function getEphemeralPort(): Promise<number> {
   return new Promise((resolvePort, reject) => {
     const server = createServer();
     server.listen(0, "127.0.0.1", () => {

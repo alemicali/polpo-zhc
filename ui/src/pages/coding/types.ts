@@ -8,6 +8,23 @@ export type CodingWorkspace = {
 
 export type CodingAgentKind = "terminal" | "claude" | "codex";
 
+export type CodingCapabilities = {
+  agents: Record<CodingAgentKind, {
+    available: boolean;
+    command: string;
+  }>;
+  terminal: {
+    enabled: boolean;
+    available: boolean;
+    shell: string;
+  };
+  codeServer: {
+    enabled: boolean;
+    available: boolean;
+    bin: string;
+  };
+};
+
 export type CodingTerminal = {
   id: string;
   workspaceId: string;

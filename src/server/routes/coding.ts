@@ -1,4 +1,5 @@
 import { OpenAPIHono } from "@hono/zod-openapi";
+import { spawnSync } from "node:child_process";
 import type { Context } from "hono";
 import { z } from "zod";
 import type { CodingSessionStore } from "../../core/coding-session-store.js";
@@ -8,6 +9,7 @@ import {
   type CodeServerManager,
   type CodeServerSessionInfo,
 } from "../code-server.js";
+import { isTerminalEnabled } from "../terminal.js";
 
 const CodingWorkspaceSchema = z.object({
   id: z.string().min(1),
@@ -82,6 +84,38 @@ export function codingRoutes(getDeps: () => {
 
     const state = await getDeps().codingSessionStore.saveState(parsed.data);
     return c.json({ ok: true, data: { state, initialized: true } });
+  });
+
+  app.get("/capabilities", (c) => {
+    return c.json({
+      ok: true,
+      data: {
+        terminal: {
+          enabled: isTerminalEnabled(),
+          shell: process.env.POLPO_TERMINAL_SHELL || process.env.SHELL || "/bin/bash",
+          available: commandExists(process.env.POLPO_TERMINAL_SHELL || process.env.SHELL || "bash"),
+        },
+        codeServer: {
+          enabled: isCodeServerEnabled(),
+          available: !!getDeps().codeServerManager && commandExists(process.env.POLPO_CODE_SERVER_BIN || "code-server"),
+          bin: process.env.POLPO_CODE_SERVER_BIN || "code-server",
+        },
+        agents: {
+          terminal: {
+            available: isTerminalEnabled() && commandExists(process.env.POLPO_TERMINAL_SHELL || process.env.SHELL || "bash"),
+            command: process.env.POLPO_TERMINAL_SHELL || process.env.SHELL || "bash",
+          },
+          claude: {
+            available: commandExists("claude"),
+            command: "claude",
+          },
+          codex: {
+            available: commandExists("codex"),
+            command: "codex",
+          },
+        },
+      },
+    });
   });
 
   app.get("/code-server/status", (c) => {
@@ -201,4 +235,18 @@ function makeRequestDirectUrl(port: number, requestUrl: string): string {
   const protocol = process.env.POLPO_CODE_SERVER_PUBLIC_PROTOCOL || request.protocol.replace(":", "") || "http";
   const host = process.env.POLPO_CODE_SERVER_PUBLIC_HOST || request.hostname || "localhost";
   return `${protocol}://${host}:${port}/`;
+}
+
+function commandExists(command: string): boolean {
+  const trimmed = command.trim();
+  if (!trimmed) return false;
+  const result = spawnSync("sh", ["-lc", `command -v ${shellQuote(trimmed)}`], {
+    stdio: "ignore",
+    timeout: 2_000,
+  });
+  return result.status === 0;
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, "'\\''")}'`;
 }

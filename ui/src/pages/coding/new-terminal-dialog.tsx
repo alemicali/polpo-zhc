@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { GitBranch, Loader2, TerminalSquare } from "lucide-react";
 import { Icon } from "@iconify/react";
 import { toast } from "sonner";
@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { apiUrl } from "@/lib/config";
 import { cn } from "@/lib/utils";
-import type { CodingAgentKind } from "./types";
+import type { CodingAgentKind, CodingCapabilities } from "./types";
 
 type Props = {
   workspaceCwd: string;
@@ -40,13 +40,45 @@ const AGENTS: { kind: CodingAgentKind; label: string; description: string; icon:
 
 export function NewTerminalDialog({ workspaceCwd, trigger, onCreate }: Props) {
   const [open, setOpen] = useState(false);
-  const [agent, setAgent] = useState<CodingAgentKind>("claude");
+  const [agent, setAgent] = useState<CodingAgentKind>("terminal");
   const [worktreeMode, setWorktreeMode] = useState<WorktreeMode>("same");
   const [branch, setBranch] = useState("");
   const [busy, setBusy] = useState(false);
+  const [capabilities, setCapabilities] = useState<CodingCapabilities | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    fetch(apiUrl("/api/v1/coding/capabilities"), { credentials: "include" })
+      .then(async (res) => {
+        const body = await res.json().catch(() => null);
+        if (!res.ok || !body?.ok) throw new Error(body?.error || `Capabilities failed (${res.status})`);
+        return body.data as CodingCapabilities;
+      })
+      .then((data) => {
+        if (!cancelled) setCapabilities(data);
+      })
+      .catch(() => {
+        if (!cancelled) setCapabilities(null);
+      });
+    return () => { cancelled = true; };
+  }, [open]);
+
+  const availableAgents = useMemo(() => {
+    if (!capabilities) return AGENTS.filter((a) => a.kind === "terminal");
+    return AGENTS.filter((a) => capabilities.agents[a.kind]?.available);
+  }, [capabilities]);
+
+  useEffect(() => {
+    if (!open) return;
+    if (availableAgents.length === 0) return;
+    if (!availableAgents.some((a) => a.kind === agent)) {
+      setAgent(availableAgents[0].kind);
+    }
+  }, [agent, availableAgents, open]);
 
   const reset = () => {
-    setAgent("claude");
+    setAgent("terminal");
     setWorktreeMode("same");
     setBranch("");
     setBusy(false);
@@ -112,7 +144,7 @@ export function NewTerminalDialog({ workspaceCwd, trigger, onCreate }: Props) {
         <fieldset className="px-2 py-2">
           <legend className="px-1 text-[10px] font-semibold uppercase tracking-widest text-white/35">Agent</legend>
           <div className="mt-1 grid gap-1">
-            {AGENTS.map((a) => (
+            {availableAgents.map((a) => (
               <button
                 key={a.kind}
                 type="button"
@@ -130,6 +162,11 @@ export function NewTerminalDialog({ workspaceCwd, trigger, onCreate }: Props) {
                 {agent === a.kind && <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />}
               </button>
             ))}
+            {capabilities && availableAgents.length < AGENTS.length && (
+              <div className="px-2 py-1 text-[10px] leading-snug text-white/35">
+                Claude/Codex appear only when their CLI is installed in the server image.
+              </div>
+            )}
           </div>
         </fieldset>
 
