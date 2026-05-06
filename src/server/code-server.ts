@@ -11,6 +11,7 @@ import { WebSocket, WebSocketServer } from "ws";
 import { getPolpoDir } from "../core/constants.js";
 import type { Orchestrator } from "../core/orchestrator.js";
 import { AUTH_COOKIE_NAME, isInstanceAuthEnabled, validateSession } from "./auth/instance-auth.js";
+import { getEffectiveAllowedRoots } from "./coding-config-store.js";
 
 type UpgradeServer = {
   on(event: "upgrade", listener: (req: IncomingMessage, socket: Duplex, head: Buffer) => void): unknown;
@@ -30,6 +31,8 @@ export interface CodeServerSessionInfo {
   directUrl: string;
   running: boolean;
   theme: CodeServerTheme;
+  pid?: number;
+  startedAt?: string;
 }
 
 export type CodeServerTheme = "light" | "dark";
@@ -45,6 +48,7 @@ type RuntimeSession = {
   cwd: string;
   theme: CodeServerTheme;
   process: ChildProcessWithoutNullStreams;
+  startedAt: string;
 };
 
 type FetchInitWithDuplex = RequestInit & { duplex?: "half" };
@@ -92,8 +96,8 @@ export class CodeServerManager {
       return this.info(aliveAfterStop);
     }
 
-    const cwd = resolveWorkspaceCwd(this.orchestrator.getAgentWorkDir(), requestedCwd);
-    const port = await getFreePort(serverReservedPorts());
+    const cwd = resolveWorkspaceCwd(this.orchestrator.getAgentWorkDir(), requestedCwd, this.orchestrator.getPolpoDir());
+    const port = await getFreePort(serverReservedPorts(), codeServerPortRange());
     const baseDir = join(this.orchestrator.getPolpoDir(), "code-server", id);
     const userDataDir = prepareCodeServerUserData(baseDir, theme);
     const extensionsDir = join(baseDir, "extensions");
@@ -129,7 +133,7 @@ export class CodeServerManager {
       if (text) console.warn(`[code-server:${id}] ${text}`);
     });
 
-    const session: RuntimeSession = { id, port, cwd, theme, process: child };
+    const session: RuntimeSession = { id, port, cwd, theme, process: child, startedAt: new Date().toISOString() };
     this.sessions.set(id, session);
     try {
       await waitForCodeServer(child, port, 8_000);
@@ -191,6 +195,8 @@ export class CodeServerManager {
       directUrl: makeDirectUrl(session.port),
       running: session.process.exitCode == null,
       theme: session.theme,
+      pid: session.process.pid,
+      startedAt: session.startedAt,
     };
   }
 }
@@ -267,15 +273,25 @@ export async function proxyCodeServerRequest(session: CodeServerSessionInfo, pat
   });
 }
 
-function resolveWorkspaceCwd(agentWorkDir: string, requested: string | undefined): string {
+function resolveWorkspaceCwd(agentWorkDir: string, requested: string | undefined, polpoDir: string): string {
   const root = resolve(agentWorkDir);
   const target = resolve(root, requested?.trim() || ".");
-  const rel = relative(root, target);
-  if (rel === ".." || rel.startsWith(`..${sep}`) || resolve(target) !== target) {
-    throw new Error("code-server cwd must be inside the agent workspace.");
+  if (!isInsideAnyRoot(target, [root, ...getEffectiveAllowedRoots(polpoDir)])) {
+    throw new Error("code-server cwd must be inside the agent workspace or a whitelisted root.");
   }
   mkdirSync(target, { recursive: true });
   return target;
+}
+
+function isInsideAnyRoot(target: string, roots: string[]): boolean {
+  const t = resolve(target);
+  for (const root of roots) {
+    const r = resolve(root);
+    if (t === r) return true;
+    const rel = relative(r, t);
+    if (rel && rel !== ".." && !rel.startsWith(`..${sep}`)) return true;
+  }
+  return false;
 }
 
 function prepareCodeServerUserData(baseDir: string, theme: CodeServerTheme): string {
@@ -336,12 +352,47 @@ function serverReservedPorts(): Set<number> {
   return ports;
 }
 
-async function getFreePort(reserved = new Set<number>()): Promise<number> {
+async function getFreePort(
+  reserved = new Set<number>(),
+  range?: { min: number; max: number },
+): Promise<number> {
+  if (range) {
+    // Try each port in the range in randomized order. Allows the operator to
+    // restrict code-server to a port window that is pre-exposed via the
+    // public reverse proxy / tailnet (so the iframe can target it directly).
+    const candidates: number[] = [];
+    for (let p = range.min; p <= range.max; p++) if (!reserved.has(p)) candidates.push(p);
+    for (let i = candidates.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [candidates[i], candidates[j]] = [candidates[j]!, candidates[i]!];
+    }
+    for (const port of candidates) if (await isPortFree(port)) return port;
+    throw new Error(`Could not allocate a code-server port in range ${range.min}-${range.max}.`);
+  }
   for (let attempt = 0; attempt < 40; attempt++) {
     const port = await getEphemeralPort();
     if (!reserved.has(port)) return port;
   }
   throw new Error("Could not allocate a code-server port.");
+}
+
+function isPortFree(port: number): Promise<boolean> {
+  return new Promise((resolvePort) => {
+    const server = createServer();
+    server.once("error", () => resolvePort(false));
+    server.listen(port, "127.0.0.1", () => server.close(() => resolvePort(true)));
+  });
+}
+
+function codeServerPortRange(): { min: number; max: number } | undefined {
+  const raw = process.env.POLPO_CODE_SERVER_PORT_RANGE?.trim();
+  if (!raw) return undefined;
+  const m = raw.match(/^(\d+)\s*-\s*(\d+)$/);
+  if (!m) return undefined;
+  const min = Number.parseInt(m[1]!, 10);
+  const max = Number.parseInt(m[2]!, 10);
+  if (!Number.isInteger(min) || !Number.isInteger(max) || min < 1 || max > 65535 || min > max) return undefined;
+  return { min, max };
 }
 
 function getEphemeralPort(): Promise<number> {

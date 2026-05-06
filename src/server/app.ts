@@ -44,7 +44,7 @@ import { audioRoutes } from "./routes/audio.js";
 import { pushRoutes } from "./routes/push.js";
 import { codingRoutes } from "./routes/coding.js";
 import { FileAttachmentStore } from "../stores/file-attachment-store.js";
-import { isTerminalEnabled } from "./terminal.js";
+import { isTerminalEnabled, type TerminalWebSocketHandle } from "./terminal.js";
 import type { CodeServerManager } from "./code-server.js";
 
 export interface AppOptions {
@@ -54,6 +54,10 @@ export interface AppOptions {
   onInitialize?: (workDir: string) => Promise<void>;
   wakeSupervisor?: () => void;
   codeServerManager?: CodeServerManager;
+  /** Closure rather than a direct ref because the terminal websocket is
+   * attached *after* the Hono app is constructed (it needs the bound
+   * server). The "Processes" panel uses this to enumerate live ptys. */
+  getTerminalHandle?: () => TerminalWebSocketHandle | null | undefined;
 }
 
 /**
@@ -390,6 +394,8 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
   authed.route("/coding", codingRoutes(() => ({
     codingSessionStore: o.getCodingSessionStore(),
     codeServerManager: opts?.codeServerManager,
+    polpoDir: o.getPolpoDir(),
+    getTerminalHandle: opts?.getTerminalHandle,
   })));
 
   authed.route("/attachments", attachmentRoutes(() => ({

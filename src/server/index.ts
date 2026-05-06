@@ -117,6 +117,9 @@ export class PolpoServer {
       onInitialize: (workDir: string) => this.completeSetup(workDir),
       wakeSupervisor: () => this.ensureSupervisorRunning("task route"),
       codeServerManager: this.codeServerManager,
+      // Late-bound: terminalWs is created after this createApp() call, but
+      // the Processes panel only reads it at request time.
+      getTerminalHandle: () => this.terminalWs,
     });
 
     this.server = serve({

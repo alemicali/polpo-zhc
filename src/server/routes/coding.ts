@@ -9,7 +9,9 @@ import {
   type CodeServerManager,
   type CodeServerSessionInfo,
 } from "../code-server.js";
-import { isTerminalEnabled } from "../terminal.js";
+import { isTerminalEnabled, type TerminalWebSocketHandle } from "../terminal.js";
+import { readCodingConfig, writeCodingConfig } from "../coding-config-store.js";
+import { describeTrees } from "../process-registry.js";
 
 const CodingWorkspaceSchema = z.object({
   id: z.string().min(1),
@@ -24,6 +26,7 @@ const CodingTerminalSchema = z.object({
   revision: z.number().finite().default(0),
   agentKind: z.enum(["terminal", "claude", "codex"]).optional(),
   agentSessionId: z.string().optional(),
+  agentCommand: z.string().optional(),
   cwdOverride: z.string().optional(),
   branch: z.string().optional(),
 });
@@ -54,11 +57,106 @@ const CodeServerStopSchema = z.object({
   workspaceId: z.string().min(1),
 });
 
+const CodingConfigSchema = z.object({
+  agentCommands: z
+    .object({
+      claude: z.string().trim().optional(),
+      codex: z.string().trim().optional(),
+      terminal: z.string().trim().optional(),
+    })
+    .partial()
+    .default({}),
+  allowedExtraRoots: z
+    .array(z.string().trim().min(1))
+    .default([]),
+  prCommand: z.string().trim().min(1).optional(),
+});
+
 export function codingRoutes(getDeps: () => {
   codingSessionStore: CodingSessionStore;
   codeServerManager?: CodeServerManager;
+  polpoDir: string;
+  getTerminalHandle?: () => TerminalWebSocketHandle | null | undefined;
 }): OpenAPIHono {
   const app = new OpenAPIHono();
+
+  // Persisted coding config (agent commands + allowed extra workspace
+  // roots). Lives in `<polpoDir>/coding-config.json`. The "allowed roots"
+  // list is *also* the security source-of-truth used by the terminal /
+  // code-server cwd resolvers — never trust the client for that check.
+  app.get("/config", (c) => {
+    return c.json({ ok: true, data: readCodingConfig(getDeps().polpoDir) });
+  });
+
+  app.put("/config", async (c) => {
+    const parsed = CodingConfigSchema.safeParse(await c.req.json().catch(() => undefined));
+    if (!parsed.success) {
+      return c.json({ ok: false, error: "Invalid coding config" }, 400);
+    }
+    const next = writeCodingConfig(getDeps().polpoDir, parsed.data);
+    return c.json({ ok: true, data: next });
+  });
+
+  // ── Live process tracker ──
+  // Lists every long-running OS process spawned through the polpo server
+  // (terminal ptys + code-server children) and walks /proc to surface
+  // their descendant tree (the user-launched `bun run dev`, `claude`, etc.).
+  app.get("/processes", (c) => {
+    const deps = getDeps();
+    const handle = deps.getTerminalHandle?.();
+    const terminals = handle?.listSessions() ?? [];
+    const codeServers = deps.codeServerManager?.listSessions() ?? [];
+
+    const rootPids = [
+      ...terminals.map((t) => t.pid),
+      ...codeServers.map((s) => s.pid),
+    ].filter((n): n is number => typeof n === "number" && n > 0);
+    const trees = describeTrees(rootPids, 4);
+    const treeByPid = new Map(trees.map((t) => [t.pid, t]));
+
+    const items = [
+      ...terminals.map((t) => ({
+        kind: "terminal" as const,
+        id: t.id,
+        pid: t.pid,
+        cwd: t.cwd,
+        agentKind: t.agentKind,
+        agentCommand: t.agentCommand,
+        startedAt: t.startedAt,
+        clients: t.clients,
+        tree: treeByPid.get(t.pid) ?? null,
+      })),
+      ...codeServers.map((s) => ({
+        kind: "code-server" as const,
+        id: s.id,
+        pid: s.pid ?? null,
+        cwd: s.cwd,
+        port: s.port,
+        startedAt: s.startedAt,
+        running: s.running,
+        tree: s.pid ? treeByPid.get(s.pid) ?? null : null,
+      })),
+    ];
+
+    return c.json({ ok: true, data: { items, capturedAt: new Date().toISOString() } });
+  });
+
+  // DELETE /processes/<kind>/<id>  — kill a managed session (and, by way
+  // of pty SIGHUP propagation, its descendants).
+  app.delete("/processes/:kind/:id", async (c) => {
+    const { kind, id } = c.req.param();
+    const deps = getDeps();
+    if (kind === "terminal") {
+      const handle = deps.getTerminalHandle?.();
+      const ok = handle?.killSession(id) ?? false;
+      return c.json({ ok });
+    }
+    if (kind === "code-server") {
+      const ok = (await deps.codeServerManager?.stopSession(id)) ?? false;
+      return c.json({ ok });
+    }
+    return c.json({ ok: false, error: "unknown kind" }, 400);
+  });
 
   app.get("/sessions", async (c) => {
     const { state, initialized } = await getDeps().codingSessionStore.getState();

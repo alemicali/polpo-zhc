@@ -1,5 +1,5 @@
 import { OpenAPIHono } from "@hono/zod-openapi";
-import { execaCommand } from "execa";
+import { execa, execaCommand } from "execa";
 import { resolve, isAbsolute } from "node:path";
 
 type GitPullRequest = {
@@ -244,13 +244,23 @@ export function gitRoutes(getDeps: () => { workDir: string }) {
       ? (isAbsolute(customPath) ? customPath : resolve(repoRoot, customPath))
       : resolve(repoRoot, ".worktrees", branch.replace(/[/\\]/g, "_"));
 
-    // Does the branch already exist?
-    const existing = await safeExec(`git rev-parse --verify ${JSON.stringify(branch)}`, root);
-    const flag = existing ? "" : "-b";
-    const cmd = `git worktree add ${flag} ${JSON.stringify(target)} ${JSON.stringify(branch)}`.trim();
+    // Does the branch already exist? Use array-form execa here too so the
+    // branch name is passed as a single argv entry without shell interpretation.
+    let existing = false;
+    try {
+      await execa("git", ["rev-parse", "--verify", branch], { cwd: root, timeout: 5_000 });
+      existing = true;
+    } catch { /* branch missing — we'll create it with -b */ }
+
+    // Correct git syntax is: git worktree add [-b NEW_BRANCH] PATH [START_POINT]
+    // Earlier versions of this route inverted PATH/BRANCH and used a shell
+    // string with JSON.stringify quotes that execaCommand passed literally.
+    const args = existing
+      ? ["worktree", "add", target, branch]
+      : ["worktree", "add", "-b", branch, target];
 
     try {
-      await execaCommand(cmd, { cwd: root, timeout: 30_000 });
+      await execa("git", args, { cwd: root, timeout: 30_000 });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       return c.json({ ok: false, error: msg }, 500);

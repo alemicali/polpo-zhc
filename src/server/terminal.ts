@@ -1,7 +1,8 @@
 import { timingSafeEqual } from "node:crypto";
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, statSync } from "node:fs";
+import { homedir } from "node:os";
 import type { IncomingMessage } from "node:http";
-import { relative, resolve, sep } from "node:path";
+import { join, relative, resolve, sep } from "node:path";
 import type { Duplex } from "node:stream";
 import { parse as parseUrl } from "node:url";
 import type { IPty } from "node-pty";
@@ -9,6 +10,7 @@ import { WebSocketServer, type WebSocket } from "ws";
 import { getPolpoDir } from "../core/constants.js";
 import type { Orchestrator } from "../core/orchestrator.js";
 import { AUTH_COOKIE_NAME, isInstanceAuthEnabled, validateSession } from "./auth/instance-auth.js";
+import { getEffectiveAllowedRoots } from "./coding-config-store.js";
 
 type NodePtyModule = typeof import("node-pty");
 type UpgradeServer = {
@@ -21,8 +23,20 @@ export interface TerminalWebSocketOptions {
   workDir?: string;
 }
 
+export interface TerminalSessionSnapshot {
+  id: string;
+  pid: number;
+  cwd: string;
+  agentKind: "terminal" | "claude" | "codex";
+  agentCommand?: string;
+  startedAt: string;
+  clients: number;
+}
+
 export interface TerminalWebSocketHandle {
   close: () => void;
+  listSessions: () => TerminalSessionSnapshot[];
+  killSession: (id: string) => boolean;
 }
 
 type RuntimeTerminalSession = {
@@ -31,6 +45,10 @@ type RuntimeTerminalSession = {
   shell: IPty;
   clients: Set<WebSocket>;
   buffer: string;
+  cwd: string;
+  agentKind: "terminal" | "claude" | "codex";
+  agentCommand?: string;
+  startedAt: string;
 };
 
 const TERMINAL_BUFFER_LIMIT = 200_000;
@@ -78,15 +96,20 @@ export function attachTerminalWebSocket(
     try {
       const pty = await loadNodePty();
       const agentWorkDir = orchestrator.getAgentWorkDir();
-      const cwd = resolveTerminalCwd(agentWorkDir, firstValue(query.cwd));
+      const cwd = resolveTerminalCwd(agentWorkDir, firstValue(query.cwd), orchestrator.getPolpoDir());
       const shellPath = process.env.POLPO_TERMINAL_SHELL || process.env.SHELL || "/bin/bash";
       const cols = clampNumber(firstValue(query.cols), 20, 240, 100);
       const rows = clampNumber(firstValue(query.rows), 8, 80, 30);
       const agentKind = parseAgentKind(firstValue(query.agent));
       const agentSessionId = firstValue(query.agent_session_id) ?? "";
+      const agentCommandOverride = firstValue(query.agent_command);
       const sessionId = normalizeSessionId(firstValue(query.session_id));
       const revision = clampNumber(firstValue(query.revision), 0, Number.MAX_SAFE_INTEGER, 0);
-      const { command, args } = buildAgentInvocation(agentKind, shellPath);
+      const { command, args } = buildAgentInvocation(agentKind, shellPath, {
+        override: agentCommandOverride,
+        sessionId: agentSessionId,
+        cwd,
+      });
 
       let session = sessions.get(sessionId);
       if (session && session.revision !== revision) {
@@ -96,13 +119,16 @@ export function attachTerminalWebSocket(
       }
       if (!session) {
         const shell = pty.spawn(command, args, {
-          name: "xterm-ghostty",
+          // xterm-256color is universally available in terminfo databases;
+          // xterm-ghostty requires shipping ghostty's terminfo on the host
+          // and trips up `less`, `vim`, and friends with "unknown terminal".
+          name: "xterm-256color",
           cols,
           rows,
           cwd,
           env: {
             ...process.env,
-            TERM: "xterm-ghostty",
+            TERM: "xterm-256color",
             COLORTERM: "truecolor",
             POLPO_WORKDIR: orchestrator.getWorkDir(),
             POLPO_AGENT_WORKDIR: agentWorkDir,
@@ -111,7 +137,17 @@ export function attachTerminalWebSocket(
             POLPO_AGENT_SESSION_ID: agentSessionId,
           } as Record<string, string>,
         });
-        session = { id: sessionId, revision, shell, clients: new Set(), buffer: "" };
+        session = {
+          id: sessionId,
+          revision,
+          shell,
+          clients: new Set(),
+          buffer: "",
+          cwd,
+          agentKind,
+          agentCommand: agentCommandOverride,
+          startedAt: new Date().toISOString(),
+        };
         sessions.set(sessionId, session);
 
         const dataDisposable = shell.onData((data) => {
@@ -175,6 +211,22 @@ export function attachTerminalWebSocket(
       sessions.clear();
       wss.close();
     },
+    listSessions: () => Array.from(sessions.values()).map((session) => ({
+      id: session.id,
+      pid: session.shell.pid,
+      cwd: session.cwd,
+      agentKind: session.agentKind,
+      agentCommand: session.agentCommand,
+      startedAt: session.startedAt,
+      clients: session.clients.size,
+    })),
+    killSession: (id: string) => {
+      const session = sessions.get(id);
+      if (!session) return false;
+      session.shell.kill();
+      sessions.delete(id);
+      return true;
+    },
   };
 }
 
@@ -183,15 +235,25 @@ function appendTerminalBuffer(buffer: string, data: string): string {
   return next.length > TERMINAL_BUFFER_LIMIT ? next.slice(next.length - TERMINAL_BUFFER_LIMIT) : next;
 }
 
-function resolveTerminalCwd(agentWorkDir: string, requested: string | undefined): string {
+function resolveTerminalCwd(agentWorkDir: string, requested: string | undefined, polpoDir: string): string {
   const root = resolve(agentWorkDir);
   const target = resolve(root, requested?.trim() || ".");
-  const rel = relative(root, target);
-  if (rel === ".." || rel.startsWith(`..${sep}`) || resolve(target) !== target) {
-    throw new Error("Terminal cwd must be inside the agent workspace.");
+  if (!isInsideAnyRoot(target, [root, ...getEffectiveAllowedRoots(polpoDir)])) {
+    throw new Error("Terminal cwd must be inside the agent workspace or a whitelisted root.");
   }
   mkdirSync(target, { recursive: true });
   return target;
+}
+
+function isInsideAnyRoot(target: string, roots: string[]): boolean {
+  const t = resolve(target);
+  for (const root of roots) {
+    const r = resolve(root);
+    if (t === r) return true;
+    const rel = relative(r, t);
+    if (rel && rel !== ".." && !rel.startsWith(`..${sep}`)) return true;
+  }
+  return false;
 }
 
 function activePolpoDir(orchestrator: Orchestrator, opts: TerminalWebSocketOptions): string {
@@ -302,24 +364,100 @@ function parseAgentKind(value: string | undefined): AgentKind {
 }
 
 /**
- * Builds the spawn command for the given agent kind. Always launches
- * through a login shell so:
- * - PATH/aliases/nvm are available
- * - claude/codex find their auth state in the user's home dir
+ * Builds the spawn command for the given agent kind.
  *
- * For agent kinds, we let the user `--continue` themselves rather than
- * forcing flags — claude/codex have rich resume semantics that vary by
- * version. The agent kind + session id are exposed via env vars so the
- * agent CLI (or the shell rc) can react if desired.
+ * For Claude/Codex we also wire in transcript-based session resumption:
+ *   - Claude has `--session-id <UUID>` so we control the id at first run,
+ *     then `--resume <id>` on subsequent reattaches once the transcript
+ *     file exists at `~/.claude/projects/<encoded-cwd>/<id>.jsonl`.
+ *   - Codex doesn't accept a pre-chosen id at start, so we spawn plain on
+ *     first run and `codex resume --last` on reattach (cwd-scoped, picks
+ *     the most recent conversation tied to this directory).
+ *
+ * The whole command is still launched through a login shell so PATH/nvm/
+ * aliases resolve identically to what the user would see in their own
+ * terminal.
  */
-function buildAgentInvocation(kind: AgentKind, shellPath: string): { command: string; args: string[] } {
+function buildAgentInvocation(
+  kind: AgentKind,
+  shellPath: string,
+  opts: { override?: string; sessionId?: string; cwd?: string } = {},
+): { command: string; args: string[] } {
+  // When the client provides a custom one-shot command (set via the coding
+  // settings dialog — typically `claude -p ...` for the PR button) we
+  // execute it as-is and skip session-resumption logic entirely; -p mode
+  // doesn't persist anyway.
+  const trimmed = opts.override?.trim();
+  if (trimmed) {
+    if (kind === "terminal") {
+      // For a plain shell session we ignore the override — opening "the shell"
+      // shouldn't silently morph into another binary.
+      return { command: shellPath, args: [] };
+    }
+    return { command: shellPath, args: ["-l", "-c", trimmed] };
+  }
   switch (kind) {
     case "claude":
-      return { command: shellPath, args: ["-l", "-c", "claude"] };
+      return { command: shellPath, args: ["-l", "-c", buildClaudeShellCmd(opts.sessionId)] };
     case "codex":
-      return { command: shellPath, args: ["-l", "-c", "codex"] };
+      return { command: shellPath, args: ["-l", "-c", buildCodexShellCmd(opts.cwd)] };
     case "terminal":
     default:
       return { command: shellPath, args: [] };
   }
+}
+
+function buildClaudeShellCmd(sessionId: string | undefined): string {
+  if (!sessionId) return "claude";
+  // If a transcript for this UUID already exists, resume; otherwise pin
+  // the id at session start so future reattaches can `--resume`.
+  return claudeTranscriptExists(sessionId)
+    ? `claude --resume ${shellQuote(sessionId)}`
+    : `claude --session-id ${shellQuote(sessionId)}`;
+}
+
+function buildCodexShellCmd(cwd: string | undefined): string {
+  // Codex auto-generates ids and scopes `resume --last` to the cwd, so
+  // we just rely on its own per-cwd transcript bookkeeping.
+  if (!cwd || !codexHasSessionFor(cwd)) return "codex";
+  return "codex resume --last";
+}
+
+/** Claude stores transcripts at ~/.claude/projects/<encoded>/<UUID>.jsonl
+ * where `encoded` is the cwd with `/` and `.` collapsed to `-`. We don't
+ * trust the encoding to stay stable across versions, so we just scan all
+ * project dirs for the UUID file (UUIDs are unique across projects). */
+function claudeTranscriptExists(sessionId: string): boolean {
+  const projectsDir = join(homedir(), ".claude", "projects");
+  if (!existsSync(projectsDir)) return false;
+  let entries: string[];
+  try { entries = readdirSync(projectsDir); } catch { return false; }
+  for (const name of entries) {
+    if (existsSync(join(projectsDir, name, `${sessionId}.jsonl`))) return true;
+  }
+  return false;
+}
+
+/** Has codex ever recorded a session whose `cwd` field matches ours? We
+ * only need a yes/no, so a fast "is the sessions dir non-empty" check is
+ * sufficient — `codex resume --last` itself does the cwd matching. */
+function codexHasSessionFor(_cwd: string): boolean {
+  const dir = join(homedir(), ".codex", "sessions");
+  if (!existsSync(dir)) return false;
+  try {
+    const entries = readdirSync(dir);
+    for (const name of entries) {
+      const full = join(dir, name);
+      try {
+        const st = statSync(full);
+        if (st.isFile() || st.isDirectory()) return true;
+      } catch { /* ignore */ }
+    }
+  } catch { /* ignore */ }
+  return false;
+}
+
+function shellQuote(value: string): string {
+  // UUIDs only — but be safe in case anything else slips through.
+  return `'${value.replace(/'/g, "'\\''")}'`;
 }

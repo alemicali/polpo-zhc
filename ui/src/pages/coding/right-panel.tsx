@@ -17,10 +17,20 @@ import { cn } from "@/lib/utils";
 import { ChangesPanel } from "./changes-panel";
 import { BrowserTab } from "./browser-tab";
 import { TerminalSession } from "./terminal-session";
+import { useLocalState } from "./use-local-state";
+
+type RightPanelTerminal = {
+  id: string;
+  workspaceId: string;
+  cwd: string;
+  revision: number;
+};
 
 type Props = {
   workspaces: { id: string; cwd: string }[];
+  terminals: RightPanelTerminal[];
   activeWorkspaceId: string | undefined;
+  activeTerminalId: string | undefined;
   cwd: string;
   refreshKey: number;
 };
@@ -28,21 +38,30 @@ type Props = {
 type RightTab = "changes" | "browser" | "terminal" | "vscode";
 
 /**
- * Right-hand panel — stacks Changes / Files / Browser / Terminal / VS Code.
+ * Right-hand panel — stacks Changes / Browser / Aux-Terminal / VS Code.
  *
- * Content is mounted *outside* the radix Tabs primitive: tab triggers use
- * radix for keyboard nav + styling, but the panes themselves live in a
- * single absolute-positioned stack. Inactive panes get `opacity-0
- * pointer-events-none` so layout (and therefore ResizeObserver, terminal
- * sizing, iframes) stays valid even when hidden — switching tabs never
- * unmounts a running terminal or breaks an iframe's state.
+ * Per-session: a record of `{ terminalId → state }` lets each terminal in
+ * the sidebar keep its own active right-tab and its own browser URL. We
+ * stack one Changes/Browser layer per *terminal* (visibility toggled by
+ * `activeTerminalId`) so iframes & their scroll state survive a switch
+ * over to another session and back.
  *
- * Terminal and Browser are *also* mounted per-workspace, so flipping the
- * active workspace doesn't tear down processes for the workspaces you're
- * not currently looking at.
+ * Aux-Terminal and VS Code remain workspace-scoped: code-server is one
+ * pty per workspace on the server, and the right-panel "scratch terminal"
+ * is intentionally a per-workspace shared shell (you don't want N+ extra
+ * ptys spun up just by browsing sessions).
  */
-export function RightPanel({ workspaces, activeWorkspaceId, cwd, refreshKey }: Props) {
-  const [tab, setTab] = useState<RightTab>("changes");
+const DEFAULT_TAB: RightTab = "changes";
+
+export function RightPanel({ workspaces, terminals, activeWorkspaceId, activeTerminalId, cwd, refreshKey }: Props) {
+  // Per-terminal active right-tab. We keep a single localStorage record
+  // (one key for the whole map) so we don't blow up the keyspace.
+  const [tabsByTerm, setTabsByTerm] = useLocalState<Record<string, RightTab>>("polpo:coding:rightTabs", {});
+  const tab: RightTab = activeTerminalId ? (tabsByTerm[activeTerminalId] ?? DEFAULT_TAB) : DEFAULT_TAB;
+  const setTab = (next: RightTab) => {
+    if (!activeTerminalId) return;
+    setTabsByTerm((prev) => ({ ...prev, [activeTerminalId]: next }));
+  };
 
   return (
     <div className="@container flex h-full w-full flex-col">
@@ -57,16 +76,24 @@ export function RightPanel({ workspaces, activeWorkspaceId, cwd, refreshKey }: P
 
       <div className="relative min-h-0 flex-1 overflow-hidden">
         <TabPane visible={tab === "changes"}>
-          <ChangesPanel cwd={cwd} refreshKey={refreshKey} />
+          {terminals.length === 0 ? (
+            <PlaceholderTab title="No session" detail="Open a session first." />
+          ) : (
+            terminals.map((t) => (
+              <WorkspaceLayer key={t.id} visible={t.id === activeTerminalId}>
+                <ChangesPanel cwd={t.cwd} refreshKey={t.revision} />
+              </WorkspaceLayer>
+            ))
+          )}
         </TabPane>
 
         <TabPane visible={tab === "browser"}>
-          {workspaces.length === 0 ? (
-            <PlaceholderTab title="No workspace" detail="Open a workspace first." />
+          {terminals.length === 0 ? (
+            <PlaceholderTab title="No session" detail="Open a session first." />
           ) : (
-            workspaces.map((w) => (
-              <WorkspaceLayer key={w.id} visible={w.id === activeWorkspaceId}>
-                <BrowserTab />
+            terminals.map((t) => (
+              <WorkspaceLayer key={t.id} visible={t.id === activeTerminalId}>
+                <BrowserTab workspaceId={t.id} />
               </WorkspaceLayer>
             ))
           )}
@@ -172,6 +199,36 @@ function VsCodeTab({ workspaceId, cwd }: { workspaceId: string | undefined; cwd:
     setError(null);
   }, [cwd, workspaceId]);
 
+  // Re-attach to an already-running code-server for this workspace on mount.
+  // The backend's CodeServerManager keeps the child alive across page reloads;
+  // calling /start with `force:false` is idempotent and returns the live port.
+  useEffect(() => {
+    if (!workspaceId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const sessionsRes = await fetch(apiUrl("/api/v1/coding/sessions"), { credentials: "include" });
+        const sessionsBody = await sessionsRes.json().catch(() => null);
+        const codeServers = sessionsBody?.data?.state?.codeServers;
+        const has = Array.isArray(codeServers) && codeServers.some((s: { workspaceId?: string }) => s?.workspaceId === workspaceId);
+        if (!has || cancelled) return;
+        const res = await fetch(apiUrl("/api/v1/coding/code-server/start"), {
+          method: "POST",
+          credentials: "include",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ workspaceId, cwd, theme: resolved, force: false }),
+        });
+        const body = await res.json().catch(() => null);
+        if (!res.ok || !body?.ok) return;
+        if (cancelled) return;
+        const port = body.data.port;
+        const { protocol, hostname } = window.location;
+        setUrl(port ? `${protocol}//${hostname}:${port}/` : apiUrl(body.data.url));
+      } catch { /* offline / not authorized — silent */ }
+    })();
+    return () => { cancelled = true; };
+  }, [workspaceId, cwd, resolved]);
+
   const start = async () => {
     if (!workspaceId || busy) return;
     setBusy(true);
@@ -185,9 +242,12 @@ function VsCodeTab({ workspaceId, cwd }: { workspaceId: string | undefined; cwd:
       });
       const body = await res.json().catch(() => null);
       if (!res.ok || !body?.ok) throw new Error(body?.error || `VS Code failed to start (${res.status})`);
-      // Always embed through the Polpo API proxy. The direct code-server port is
-      // only reachable from the server network on hosted platforms like Railway.
-      setUrl(apiUrl(body.data.url));
+      // Embed via the page host on the code-server port directly; assumes
+      // the operator has exposed that port through the same reverse proxy
+      // (e.g. tailscale serve) that fronts the UI.
+      const port = body.data.port;
+      const { protocol, hostname } = window.location;
+      setUrl(port ? `${protocol}//${hostname}:${port}/` : apiUrl(body.data.url));
     } catch (err) {
       setError(err instanceof Error ? err.message : "VS Code failed to start.");
     } finally {

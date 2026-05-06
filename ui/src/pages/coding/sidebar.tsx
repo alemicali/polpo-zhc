@@ -1,8 +1,11 @@
 import { useState } from "react";
-import { Archive, ChevronDown, ChevronRight, GitBranch, HelpCircle, Plus, Settings, Trash2 } from "lucide-react";
+import { Activity, Archive, ChevronDown, ChevronRight, GitBranch, Plus, Settings, Trash2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { cn } from "@/lib/utils";
+import { CodingSettingsDialog } from "./settings-dialog";
+import { ProcessesDialog } from "./processes-dialog";
+import { useCodingSettings } from "./coding-settings";
 
 /** A workspace is bound to a folder, so the displayed name = basename(cwd). */
 function workspaceLabel(workspace: CodingWorkspace): string {
@@ -18,6 +21,7 @@ import type { CodingAgentKind, CodingTerminal, CodingWorkspace, ConnectionState,
 
 export type NewTerminalConfig = {
   agentKind: CodingAgentKind;
+  agentCommand?: string;
   cwdOverride?: string;
   branch?: string;
   label?: string;
@@ -41,8 +45,14 @@ type SidebarProps = {
 };
 
 export function CodingSidebar(props: SidebarProps) {
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [processesOpen, setProcessesOpen] = useState(false);
+  const [settings] = useCodingSettings();
+  const extraRoots = settings.allowOutsideWorkspace ? settings.allowedExtraRoots : [];
   return (
     <aside className="flex h-full w-full flex-col">
+      <CodingSettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
+      <ProcessesDialog open={processesOpen} onOpenChange={setProcessesOpen} />
       <div className="flex h-9 shrink-0 items-center px-3">
         <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-white/35">
           Workspaces
@@ -72,11 +82,18 @@ export function CodingSidebar(props: SidebarProps) {
       </div>
 
       <div className="flex shrink-0 items-center gap-0.5 border-t border-white/[0.06] px-1 py-1.5">
-        <NewWorkspacePopover root={props.workDir} onCreate={(cwd, name) => props.onAddWorkspace({ cwd, name })} />
+        <NewWorkspacePopover
+          root={props.workDir}
+          extraRoots={extraRoots}
+          onCreate={(cwd, name) => props.onAddWorkspace({ cwd, name })}
+        />
         <div className="flex-1" />
-        <FooterIconButton label="Archive"><Archive className="h-4 w-4" /></FooterIconButton>
-        <FooterIconButton label="Help"><HelpCircle className="h-4 w-4" /></FooterIconButton>
-        <FooterIconButton label="Settings"><Settings className="h-4 w-4" /></FooterIconButton>
+        <FooterIconButton label="Processes" onClick={() => setProcessesOpen(true)}>
+          <Activity className="h-4 w-4" />
+        </FooterIconButton>
+        <FooterIconButton label="Settings" onClick={() => setSettingsOpen(true)}>
+          <Settings className="h-4 w-4" />
+        </FooterIconButton>
       </div>
     </aside>
   );

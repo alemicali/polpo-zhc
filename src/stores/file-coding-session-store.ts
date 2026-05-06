@@ -100,6 +100,13 @@ function normalizeTerminal(value: unknown, workspaceIds: Set<string>): CodingTer
     workspaceId: record.workspaceId,
     label: typeof record.label === "string" ? record.label : typeof record.name === "string" ? record.name : "",
     revision: typeof record.revision === "number" && Number.isFinite(record.revision) ? record.revision : 0,
+    ...(typeof record.agentKind === "string" && (record.agentKind === "claude" || record.agentKind === "codex" || record.agentKind === "terminal")
+      ? { agentKind: record.agentKind }
+      : {}),
+    ...(typeof record.agentSessionId === "string" && record.agentSessionId ? { agentSessionId: record.agentSessionId } : {}),
+    ...(typeof record.agentCommand === "string" && record.agentCommand ? { agentCommand: record.agentCommand } : {}),
+    ...(typeof record.cwdOverride === "string" && record.cwdOverride ? { cwdOverride: record.cwdOverride } : {}),
+    ...(typeof record.branch === "string" && record.branch ? { branch: record.branch } : {}),
   };
 }
 

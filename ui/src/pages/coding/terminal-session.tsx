@@ -18,6 +18,9 @@ type Props = {
   agent?: "terminal" | "claude" | "codex";
   /** Stable id used by the agent CLI for `--continue` / `--resume`. */
   agentSessionId?: string;
+  /** Override the shell command executed for this agent session. When unset
+   * the server falls back to its baked-in default for the agent kind. */
+  agentCommand?: string;
   onConnectionChange: (state: ConnectionState) => void;
 };
 
@@ -28,7 +31,7 @@ type Props = {
  * websocket URL is keyed off `sessionId + revision` so the server can replay
  * the scrollback buffer when we reconnect (see `/ws/terminal` handler).
  */
-export function TerminalSession({ sessionId, revision, cwd, active, agent, agentSessionId, onConnectionChange }: Props) {
+export function TerminalSession({ sessionId, revision, cwd, active, agent, agentSessionId, agentCommand, onConnectionChange }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
@@ -97,12 +100,19 @@ export function TerminalSession({ sessionId, revision, cwd, active, agent, agent
     url.searchParams.set("revision", String(revision));
     if (agent && agent !== "terminal") url.searchParams.set("agent", agent);
     if (agentSessionId) url.searchParams.set("agent_session_id", agentSessionId);
+    if (agentCommand && agentCommand.trim()) url.searchParams.set("agent_command", agentCommand.trim());
     if (config.apiKey) url.searchParams.set("api_key", config.apiKey);
     return url.toString();
-  }, [agent, agentSessionId, cwd, sessionId, revision]);
+  }, [agent, agentSessionId, agentCommand, cwd, sessionId, revision]);
 
   // WebSocket lifecycle — opens once xterm is ready, sends input + resize,
   // pipes pty output into the terminal.
+  //
+  // ⚠️ `active` is intentionally NOT in the deps list. The WS must persist
+  // across tab switches (changing `active`); otherwise every nav between
+  // right-panel tabs tears down the connection and the server replays the
+  // full scrollback buffer on reattach — looking like a refresh. Focus and
+  // re-fit on visibility live in a separate effect below.
   useEffect(() => {
     if (!ready) return;
     const term = termRef.current;
@@ -122,7 +132,6 @@ export function TerminalSession({ sessionId, revision, cwd, active, agent, agent
     ws.addEventListener("open", () => {
       onConnRef.current("connected");
       sendResize();
-      if (active) term.focus();
     });
     ws.addEventListener("message", (event) => {
       const payload = typeof event.data === "string" ? event.data : new Uint8Array(event.data);
@@ -144,7 +153,7 @@ export function TerminalSession({ sessionId, revision, cwd, active, agent, agent
       socketRef.current = null;
       ws.close();
     };
-  }, [active, ready, wsUrl]);
+  }, [ready, wsUrl]);
 
   // When this pane becomes visible again, re-fit + focus + scroll-to-bottom.
   useEffect(() => {

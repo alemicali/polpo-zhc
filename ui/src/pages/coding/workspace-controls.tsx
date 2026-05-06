@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ChevronLeft, FolderOpen, Plus } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Button } from "@/components/ui/button";
@@ -14,14 +14,28 @@ import { browseDir, type BrowseResult } from "./use-git-meta";
 // `root` constrains traversal — the browser starts at `root` and won't let
 // the user navigate above it. Falls back to the server's default browse
 // location (homedir) when not provided.
+//
+// `extraRoots` widens the picker: when non-empty, the user can switch the
+// active root to any whitelisted absolute path (configured via the coding
+// settings dialog when "allow outside workspace" is on).
 export function NewWorkspacePopover({
   root,
+  extraRoots = [],
   onCreate,
 }: {
   root?: string;
+  extraRoots?: string[];
   onCreate: (cwd: string, name: string) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const roots = useMemo(() => {
+    const list = [root, ...extraRoots].filter((p): p is string => !!p && p.length > 0);
+    return Array.from(new Set(list));
+  }, [root, extraRoots]);
+  const [activeRoot, setActiveRoot] = useState<string | undefined>(root);
+
+  useEffect(() => { setActiveRoot(root); }, [root]);
+
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
@@ -38,10 +52,31 @@ export function NewWorkspacePopover({
       <PopoverContent
         side="top"
         align="start"
-        className="w-80 max-h-96 overflow-hidden p-0 border-white/[0.08] bg-[#141414] text-white/80"
+        className="w-80 max-h-[28rem] overflow-hidden p-0 border-white/[0.08] bg-[#141414] text-white/80"
       >
+        {roots.length > 1 && (
+          <div className="flex flex-wrap gap-1 border-b border-white/[0.06] px-2 py-1.5">
+            {roots.map((r) => (
+              <button
+                key={r}
+                type="button"
+                onClick={() => setActiveRoot(r)}
+                className={cn(
+                  "rounded px-1.5 py-0.5 font-mono text-[10.5px] transition-colors",
+                  activeRoot === r
+                    ? "bg-emerald-500/15 text-emerald-300"
+                    : "bg-white/[0.04] text-white/55 hover:bg-white/[0.08] hover:text-white",
+                )}
+                title={r}
+              >
+                {labelForRoot(r)}
+              </button>
+            ))}
+          </div>
+        )}
         <PathBrowser
-          root={root}
+          key={activeRoot ?? "default"}
+          root={activeRoot}
           onConfirm={(path) => {
             const name = path.split("/").filter(Boolean).pop() ?? "Workspace";
             onCreate(path, name);
@@ -51,6 +86,10 @@ export function NewWorkspacePopover({
       </PopoverContent>
     </Popover>
   );
+}
+
+function labelForRoot(path: string): string {
+  return path.split("/").filter(Boolean).pop() ?? path;
 }
 
 // ── Reusable directory browser ───────────────────────────────────────────
@@ -119,4 +158,3 @@ function PathBrowser({ root, onConfirm }: { root?: string; onConfirm: (path: str
     </>
   );
 }
-

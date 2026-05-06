@@ -135,28 +135,51 @@ export function useCodingState() {
     workspaceId: string,
     opts?: {
       agentKind?: CodingTerminal["agentKind"];
+      agentCommand?: string;
       cwdOverride?: string;
       branch?: string;
       label?: string;
+      /** When true, do not steal focus to the new terminal. Used for
+       * fire-and-forget actions like the PR button — the session is
+       * still in the sidebar so the user can monitor/kill it, but their
+       * current terminal stays in view. */
+      silent?: boolean;
     },
   ) => {
     const useAgent = !!opts?.agentKind && opts.agentKind !== "terminal";
-    const terminal: CodingTerminal = {
-      id: makeId("terminal"),
-      workspaceId,
-      label: opts?.label ?? "",
-      revision: 0,
-      agentKind: opts?.agentKind,
-      // crypto.randomUUID is available in modern browsers; we generate the id
-      // up-front so the agent CLI gets a stable handle for `--continue`.
-      agentSessionId: useAgent
-        ? (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function" ? crypto.randomUUID() : makeId("agent"))
-        : undefined,
-      cwdOverride: opts?.cwdOverride,
-      branch: opts?.branch,
-    };
-    setTerminals((current) => [...current, terminal]);
-    setActiveId(terminal.id);
+    const id = makeId("terminal");
+    setTerminals((current) => {
+      // Pick the lowest available "Session N" slot in this workspace —
+      // never reuse a number that another live terminal already owns,
+      // even after the user has closed earlier sessions.
+      const used = new Set<number>();
+      for (const t of current) {
+        if (t.workspaceId !== workspaceId) continue;
+        const m = t.label.match(/^Session (\d+)$/);
+        if (m) used.add(Number(m[1]));
+      }
+      let n = 1;
+      while (used.has(n)) n++;
+      const autoLabel = `Session ${n}`;
+      const terminal: CodingTerminal = {
+        id,
+        workspaceId,
+        label: opts?.label?.trim() ? opts.label : autoLabel,
+        revision: 0,
+        agentKind: opts?.agentKind,
+        // crypto.randomUUID is available in modern browsers; we generate the
+        // id up-front so the agent CLI gets a stable handle for --resume.
+        agentSessionId: useAgent
+          ? (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function" ? crypto.randomUUID() : makeId("agent"))
+          : undefined,
+        agentCommand: opts?.agentCommand,
+        cwdOverride: opts?.cwdOverride,
+        branch: opts?.branch,
+      };
+      return [...current, terminal];
+    });
+    if (!opts?.silent) setActiveId(id);
+    return id;
   }, []);
 
   const closeTerminal = useCallback((id: string) => {

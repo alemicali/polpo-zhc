@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   Cloud,
@@ -23,6 +23,8 @@ import { useGitInfo } from "./coding/use-git-info";
 import { CodingSidebar } from "./coding/sidebar";
 import { RightPanel } from "./coding/right-panel";
 import { TerminalSession } from "./coding/terminal-session";
+import { useCodingSettings } from "./coding/coding-settings";
+import { useLocalState } from "./coding/use-local-state";
 
 type TerminalStatus = {
   enabled: boolean;
@@ -34,9 +36,23 @@ type TerminalStatus = {
 export function CodingPage() {
   const [status, setStatus] = useState<TerminalStatus | null>(null);
   const [statusError, setStatusError] = useState<string | null>(null);
-  const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [rightOpen, setRightOpen] = useState(true);
-  const [collapsedWorkspaces, setCollapsedWorkspaces] = useState<Set<string>>(new Set());
+  const [sidebarOpen, setSidebarOpen] = useLocalState<boolean>("polpo:coding:sidebarOpen", true);
+  const [rightOpen, setRightOpen] = useLocalState<boolean>("polpo:coding:rightOpen", true);
+  // react-resizable-panels v4 dropped autoSaveId — wire defaultLayout and
+  // onLayoutChanged manually. Layout is { panelId: percentage }.
+  const [panelLayout, setPanelLayout] = useLocalState<Record<string, number>>("polpo:coding:panelLayout", {});
+  const [collapsedList, setCollapsedList] = useLocalState<string[]>("polpo:coding:collapsedWorkspaces", []);
+  const collapsedWorkspaces = useMemo(() => new Set(collapsedList), [collapsedList]);
+  const setCollapsedWorkspaces = useCallback(
+    (updater: Set<string> | ((prev: Set<string>) => Set<string>)) => {
+      setCollapsedList((prev) => {
+        const prevSet = new Set(prev);
+        const nextSet = typeof updater === "function" ? updater(prevSet) : updater;
+        return Array.from(nextSet);
+      });
+    },
+    [setCollapsedList],
+  );
 
   const {
     workspaces,
@@ -52,6 +68,7 @@ export function CodingPage() {
     setConnection,
   } = useCodingState();
 
+  const [codingSettings] = useCodingSettings();
   const [busy, setBusy] = useState(false);
 
   const activeTerminal = terminals.find((t) => t.id === activeId);
@@ -60,24 +77,25 @@ export function CodingPage() {
   const activeRevision = activeTerminal?.revision ?? 0;
   const git = useGitInfo(activeCwd, activeRevision);
 
-  const openPR = async () => {
-    if (busy) return;
-    setBusy(true);
-    try {
-      const res = await fetch(apiUrl("/api/v1/git/pr/create"), {
-        method: "POST",
-        credentials: "include",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ cwd: activeCwd }),
-      });
-      const body = await res.json().catch(() => null);
-      if (!res.ok || !body?.ok) throw new Error(body?.error || `Create PR failed (${res.status})`);
-      toast.success(body.data?.url ? `PR opened: #${body.data.number}` : "PR opened");
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to open PR");
-    } finally {
-      setBusy(false);
+  const openPR = () => {
+    // Spin up a one-shot Claude session that stages, commits, pushes, and
+    // opens the PR for the active terminal's branch — using the user's
+    // configured `prCommand` (default is non-interactive end-to-end).
+    // `silent: true` means we do NOT steal focus; the session lives in the
+    // sidebar so the user can peek at progress (or kill it from Activity).
+    if (!activeTerminal || !activeWorkspace) {
+      toast.error("Open a workspace first");
+      return;
     }
+    addTerminal(activeWorkspace.id, {
+      agentKind: "claude",
+      agentCommand: codingSettings.prCommand,
+      cwdOverride: activeTerminal.cwdOverride || activeWorkspace.cwd,
+      branch: activeTerminal.branch,
+      label: "PR",
+      silent: true,
+    });
+    toast.success("PR session started — see sidebar / Activity");
   };
 
   const mergePR = async () => {
@@ -225,7 +243,13 @@ export function CodingPage() {
       </header>
 
       <div className="flex min-h-0 flex-1 overflow-hidden">
-        <ResizablePanelGroup orientation="horizontal" id="polpo-coding-panels" className="flex-1">
+        <ResizablePanelGroup
+          orientation="horizontal"
+          id="polpo-coding-panels"
+          defaultLayout={Object.keys(panelLayout).length > 0 ? panelLayout : undefined}
+          onLayoutChanged={(layout) => setPanelLayout(layout)}
+          className="flex-1"
+        >
           {sidebarOpen && (
             <>
               <ResizablePanel
@@ -269,6 +293,7 @@ export function CodingPage() {
                       active={terminal.id === activeId}
                       agent={terminal.agentKind}
                       agentSessionId={terminal.agentSessionId}
+                      agentCommand={terminal.agentCommand ?? (terminal.agentKind ? codingSettings.agentCommands[terminal.agentKind] : undefined)}
                       onConnectionChange={(state) => setConnection(terminal.id, state)}
                     />
                   );
@@ -289,7 +314,17 @@ export function CodingPage() {
               >
                 <RightPanel
                   workspaces={workspaces}
+                  terminals={terminals.map((t) => {
+                    const ws = workspaces.find((w) => w.id === t.workspaceId);
+                    return {
+                      id: t.id,
+                      workspaceId: t.workspaceId,
+                      cwd: t.cwdOverride || ws?.cwd || ".",
+                      revision: t.revision,
+                    };
+                  })}
                   activeWorkspaceId={activeWorkspace?.id}
+                  activeTerminalId={activeTerminal?.id}
                   cwd={activeCwd}
                   refreshKey={activeRevision}
                 />

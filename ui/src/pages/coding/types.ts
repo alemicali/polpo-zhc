@@ -35,6 +35,10 @@ export type CodingTerminal = {
   agentKind?: CodingAgentKind;
   /** Stable id used by the agent CLI for `--continue` / `--resume`. */
   agentSessionId?: string;
+  /** Override the shell command for this session — set by the workspace
+   * "PR" button so it can pin a one-shot prompt independent of the user's
+   * default agent command. */
+  agentCommand?: string;
   /** Override cwd — set when the terminal lives inside a dedicated worktree. */
   cwdOverride?: string;
   /** Branch checked out in this terminal's worktree, if it owns one. */

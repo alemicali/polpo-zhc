@@ -1,14 +1,42 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ExternalLink, Globe, RefreshCcw } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { useLocalState } from "./use-local-state";
 
-/** Reusable iframe-based browser preview pane. */
-export function BrowserTab({ defaultUrl = "http://localhost:3000" }: { defaultUrl?: string }) {
-  const [draft, setDraft] = useState(defaultUrl);
-  const [url, setUrl] = useState<string | null>(null);
+function defaultPreviewUrl(port = 5173): string {
+  if (typeof window === "undefined") return `http://localhost:${port}`;
+  const { protocol, hostname } = window.location;
+  return `${protocol}//${hostname}:${port}`;
+}
+
+/** Reusable iframe-based browser preview pane.
+ *
+ * Persists the loaded URL per workspace in localStorage so reloading the
+ * page restores whatever the user was last previewing instead of dropping
+ * back to the empty-state placeholder. */
+export function BrowserTab({ workspaceId, defaultUrl }: { workspaceId?: string; defaultUrl?: string }) {
+  const initial = defaultUrl ?? defaultPreviewUrl();
+  const storageKey = `polpo:coding:browserUrl:${workspaceId ?? "_"}`;
+  const [savedUrl, setSavedUrl] = useLocalState<string | null>(storageKey, null);
+  const [draft, setDraft] = useState(savedUrl ?? initial);
+  const [url, setUrl] = useState<string | null>(savedUrl);
   // Bumped to force the iframe to remount on reload.
   const [reloadKey, setReloadKey] = useState(0);
+
+  // Each workspace has its own slot — re-hydrate when the prop changes
+  // (the parent stacks multiple BrowserTab instances and toggles visibility).
+  useEffect(() => {
+    setUrl(savedUrl);
+    setDraft(savedUrl ?? initial);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workspaceId]);
+
+  // Mirror loaded URL back into the persisted slot.
+  useEffect(() => {
+    setSavedUrl(url);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [url]);
 
   return (
     <div className="flex h-full w-full flex-col">
@@ -20,7 +48,7 @@ export function BrowserTab({ defaultUrl = "http://localhost:3000" }: { defaultUr
         <Input
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
-          placeholder="http://localhost:3000"
+          placeholder={initial}
           className="h-6 min-w-0 flex-1 border-0 bg-white/[0.04] px-2 font-mono text-[11px] text-white/85 shadow-none focus-visible:ring-1 focus-visible:ring-white/15"
         />
         <Button
