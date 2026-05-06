@@ -135,10 +135,14 @@ export function gitRoutes(getDeps: () => { workDir: string }) {
     const { workDir } = getDeps();
     const root = isAbsolute(cwdParam) ? cwdParam : resolve(workDir, cwdParam);
 
+    // Status/diff are always reported for the *whole* repo containing the
+    // requested cwd — running from the repo root keeps paths relative to it
+    // regardless of how deep the cwd sits in the tree.
+    const repoRoot = (await safeExec("git rev-parse --show-toplevel", root)) || root;
     const [unstaged, staged, porcelain] = await Promise.all([
-      safeExec("git diff --numstat", root),
-      safeExec("git diff --numstat --cached", root),
-      safeExec("git status --porcelain", root),
+      safeExec("git diff --numstat", repoRoot),
+      safeExec("git diff --numstat --cached", repoRoot),
+      safeExec("git status --porcelain", repoRoot),
     ]);
 
     type FileEntry = { path: string; status: string; insertions: number; deletions: number; staged: boolean };

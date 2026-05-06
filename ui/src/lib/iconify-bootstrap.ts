@@ -12,6 +12,7 @@
 
 import { addCollection } from "@iconify/react";
 import logosPack from "@iconify-json/logos/icons.json";
+import vscodeIconsPack from "@iconify-json/vscode-icons/icons.json";
 
 let booted = false;
 
@@ -20,4 +21,8 @@ export function bootstrapIconify(): void {
   booted = true;
   // Type-assert: the JSON shape matches Iconify's IconifyJSON schema
   addCollection(logosPack as Parameters<typeof addCollection>[0]);
+  // VS Code's file/folder icon set — used by the coding page's changes/files
+  // panels to render per-extension icons. Pack is ~3.5 MB raw JSON; gzip
+  // compresses it to ~500 KB which we accept for offline rendering.
+  addCollection(vscodeIconsPack as Parameters<typeof addCollection>[0]);
 }

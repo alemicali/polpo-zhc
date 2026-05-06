@@ -1,5 +1,7 @@
+import { AlertTriangle, ArrowRight, Copy as CopyIcon, HelpCircle, Minus, Pencil, Plus } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useGitStatus } from "./use-git-status";
+import { FileIcon } from "./file-icon";
 import type { GitFile } from "./types";
 
 export function ChangesPanel({ cwd, refreshKey }: { cwd: string; refreshKey: number }) {
@@ -40,30 +42,53 @@ export function ChangesPanel({ cwd, refreshKey }: { cwd: string; refreshKey: num
 function ChangedFileRow({ file }: { file: GitFile }) {
   const fileName = file.path.split("/").pop() ?? file.path;
   const dir = file.path.includes("/") ? file.path.slice(0, file.path.lastIndexOf("/")) : "";
+  const status = describeStatus(file.status);
   return (
     <div
-      title={file.path}
-      className="group/file flex items-center gap-2 rounded-md px-2 py-1 hover:bg-white/[0.03]"
+      title={`${status.label} · ${file.path}`}
+      className="group/file flex h-7 items-center gap-2 rounded-md px-2 hover:bg-white/[0.03]"
     >
-      <span className={cn(
-        "inline-flex h-4 w-4 shrink-0 items-center justify-center rounded font-mono text-[10px] font-bold",
-        file.status === "M" ? "bg-amber-500/15 text-amber-400"
-        : file.status === "A" ? "bg-emerald-500/15 text-emerald-400"
-        : file.status === "D" ? "bg-rose-500/15 text-rose-400"
-        : file.status === "R" ? "bg-sky-500/15 text-sky-400"
-        : file.status === "?" ? "bg-white/[0.06] text-white/55"
-        : "bg-white/[0.06] text-white/55",
-      )}>
-        {file.status === "?" ? "U" : file.status}
-      </span>
-      <div className="min-w-0 flex-1">
-        <div className="text-[12px] font-mono text-white/85 truncate">{fileName}</div>
-        {dir && <div className="text-[10px] font-mono text-white/30 truncate">{dir}</div>}
+      <FileIcon path={file.path} className="h-4 w-4 shrink-0" />
+      <div className="flex min-w-0 flex-1 items-baseline gap-1.5">
+        <span className={cn(
+          "shrink-0 truncate text-[12px] font-mono max-w-[60%]",
+          file.status === "D" ? "text-white/55 line-through decoration-rose-400/40" : "text-white/85",
+        )}>
+          {fileName}
+        </span>
+        {dir && (
+          <span className="min-w-0 truncate text-[10px] font-mono text-white/25">{dir}</span>
+        )}
       </div>
-      <span className="flex shrink-0 items-center gap-1 font-mono text-[10px] tabular-nums">
+      <span className="flex shrink-0 items-center gap-1 font-mono text-[10px] tabular-nums w-[4.5rem] justify-end">
         {file.insertions > 0 && <span className="text-emerald-400/85">+{file.insertions}</span>}
         {file.deletions > 0 && <span className="text-rose-400/85">−{file.deletions}</span>}
       </span>
+      <span
+        title={status.label}
+        className={cn("inline-flex h-4 w-4 shrink-0 items-center justify-center rounded", status.bg, status.text)}
+      >
+        <status.icon className="h-3 w-3" />
+      </span>
     </div>
   );
+}
+
+/**
+ * Maps a git porcelain status code to a human label + colour.
+ * "M" modified, "A" added, "D" deleted, "R" renamed, "C" copied,
+ * "U" unmerged, "?" untracked.
+ */
+type StatusVisual = { label: string; text: string; bg: string; icon: typeof Pencil };
+function describeStatus(code: string): StatusVisual {
+  switch (code) {
+    case "M": return { label: "Modified", text: "text-amber-400", bg: "bg-amber-500/15", icon: Pencil };
+    case "A": return { label: "Added", text: "text-emerald-400", bg: "bg-emerald-500/15", icon: Plus };
+    case "D": return { label: "Deleted", text: "text-rose-400", bg: "bg-rose-500/15", icon: Minus };
+    case "R": return { label: "Renamed", text: "text-sky-400", bg: "bg-sky-500/15", icon: ArrowRight };
+    case "C": return { label: "Copied", text: "text-sky-400", bg: "bg-sky-500/15", icon: CopyIcon };
+    case "U": return { label: "Conflict", text: "text-purple-400", bg: "bg-purple-500/15", icon: AlertTriangle };
+    case "?": return { label: "Untracked", text: "text-white/60", bg: "bg-white/[0.06]", icon: HelpCircle };
+    default: return { label: "Changed", text: "text-white/60", bg: "bg-white/[0.06]", icon: Pencil };
+  }
 }

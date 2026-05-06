@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Terminal as WTermTerminal, type TerminalHandle } from "@wterm/react";
-import "@wterm/react/css";
+import { Terminal } from "@xterm/xterm";
+import { FitAddon } from "@xterm/addon-fit";
+import { WebLinksAddon } from "@xterm/addon-web-links";
+import "@xterm/xterm/css/xterm.css";
 import { ShieldAlert } from "lucide-react";
-import { useTerminalCore } from "@/hooks/use-terminal-core";
 import { config, websocketUrl } from "@/lib/config";
 import { cn } from "@/lib/utils";
 import type { ConnectionState } from "./types";
@@ -20,32 +21,79 @@ type Props = {
   onConnectionChange: (state: ConnectionState) => void;
 };
 
-/** Self-contained terminal session — owns its WS, its xterm instance, and its lifecycle. */
+/**
+ * Self-contained xterm.js terminal session.
+ *
+ * Owns its own xterm instance, FitAddon, ResizeObserver and WebSocket. The
+ * websocket URL is keyed off `sessionId + revision` so the server can replay
+ * the scrollback buffer when we reconnect (see `/ws/terminal` handler).
+ */
 export function TerminalSession({ sessionId, revision, cwd, active, agent, agentSessionId, onConnectionChange }: Props) {
-  const [terminalReady, setTerminalReady] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const terminalCore = useTerminalCore(revision);
-  const terminalRef = useRef<TerminalHandle>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const termRef = useRef<Terminal | null>(null);
+  const fitRef = useRef<FitAddon | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
-  const sizeRef = useRef({ cols: 100, rows: 30 });
-  const activeRef = useRef(active);
+  const [error, setError] = useState<string | null>(null);
+  const [ready, setReady] = useState(false);
   const onConnRef = useRef(onConnectionChange);
-
-  useEffect(() => { activeRef.current = active; }, [active]);
   useEffect(() => { onConnRef.current = onConnectionChange; }, [onConnectionChange]);
 
+  // Mount the xterm instance once per (sessionId, revision). Bumping the
+  // revision tears down the terminal and reconnects, which the server treats
+  // as a fresh shell.
   useEffect(() => {
-    setTerminalReady(false);
+    const host = containerRef.current;
+    if (!host) return;
     setError(null);
+    setReady(false);
     onConnRef.current("loading");
-  }, [revision, terminalCore.loading]);
+
+    const term = new Terminal({
+      fontFamily: "Menlo, Consolas, 'DejaVu Sans Mono', monospace",
+      fontSize: 13,
+      cursorBlink: true,
+      allowProposedApi: true,
+      scrollback: 5_000,
+      theme: {
+        background: "#0a0a0a",
+        foreground: "#e6e6e6",
+        cursor: "#e6e6e6",
+      },
+    });
+    const fit = new FitAddon();
+    term.loadAddon(fit);
+    term.loadAddon(new WebLinksAddon());
+    term.open(host);
+
+    termRef.current = term;
+    fitRef.current = fit;
+
+    // First fit once the host has its size from layout.
+    requestAnimationFrame(() => {
+      try { fit.fit(); } catch { /* host detached */ }
+      setReady(true);
+    });
+
+    // Re-fit on container resize (panel drag, window resize, etc.)
+    const ro = new ResizeObserver(() => {
+      try { fit.fit(); } catch { /* layout in flux */ }
+    });
+    ro.observe(host);
+
+    return () => {
+      ro.disconnect();
+      term.dispose();
+      termRef.current = null;
+      fitRef.current = null;
+    };
+  }, [sessionId, revision]);
 
   const wsUrl = useMemo(() => {
     const url = new URL(websocketUrl("/ws/terminal"));
     url.searchParams.set("session_id", sessionId);
     url.searchParams.set("cwd", cwd || ".");
-    url.searchParams.set("cols", String(sizeRef.current.cols));
-    url.searchParams.set("rows", String(sizeRef.current.rows));
+    url.searchParams.set("cols", "100");
+    url.searchParams.set("rows", "30");
     url.searchParams.set("revision", String(revision));
     if (agent && agent !== "terminal") url.searchParams.set("agent", agent);
     if (agentSessionId) url.searchParams.set("agent_session_id", agentSessionId);
@@ -53,48 +101,58 @@ export function TerminalSession({ sessionId, revision, cwd, active, agent, agent
     return url.toString();
   }, [agent, agentSessionId, cwd, sessionId, revision]);
 
+  // WebSocket lifecycle — opens once xterm is ready, sends input + resize,
+  // pipes pty output into the terminal.
   useEffect(() => {
-    if (!terminalReady || terminalCore.loading || terminalCore.error) return;
+    if (!ready) return;
+    const term = termRef.current;
+    const fit = fitRef.current;
+    if (!term || !fit) return;
+
     onConnRef.current("connecting");
     const ws = new WebSocket(wsUrl);
+    ws.binaryType = "arraybuffer";
     socketRef.current = ws;
+
+    const sendResize = () => {
+      if (ws.readyState !== WebSocket.OPEN) return;
+      ws.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
+    };
 
     ws.addEventListener("open", () => {
       onConnRef.current("connected");
-      if (activeRef.current) terminalRef.current?.focus();
-      ws.send(JSON.stringify({ type: "resize", ...sizeRef.current }));
+      sendResize();
+      if (active) term.focus();
     });
     ws.addEventListener("message", (event) => {
-      const data = typeof event.data === "string" ? event.data : new Uint8Array(event.data);
-      terminalRef.current?.write(data);
-      // wterm only auto-scrolls when its element was already at the bottom;
-      // when the terminal is hidden (different right-panel tab, inactive
-      // session) measurements drift and it stops. Force-pin to the bottom on
-      // every chunk so output is never trapped above the fold.
-      const el = terminalRef.current?.instance?.element;
-      if (el) el.scrollTop = el.scrollHeight;
+      const payload = typeof event.data === "string" ? event.data : new Uint8Array(event.data);
+      term.write(payload);
     });
     ws.addEventListener("close", () => onConnRef.current("closed"));
     ws.addEventListener("error", () => onConnRef.current("error"));
 
+    const dataDisposable = term.onData((data) => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "input", data }));
+      }
+    });
+    const resizeDisposable = term.onResize(() => sendResize());
+
     return () => {
+      dataDisposable.dispose();
+      resizeDisposable.dispose();
       socketRef.current = null;
       ws.close();
     };
-  }, [terminalCore.error, terminalCore.loading, terminalReady, wsUrl]);
+  }, [active, ready, wsUrl]);
 
+  // When this pane becomes visible again, re-fit + focus + scroll-to-bottom.
   useEffect(() => {
     if (!active) return;
     const id = window.requestAnimationFrame(() => {
-      terminalRef.current?.resize(sizeRef.current.cols, sizeRef.current.rows);
-      terminalRef.current?.focus();
-      // Snap back to the live edge — output that arrived while we were
-      // hidden may have left the scroll position in the middle.
-      const el = terminalRef.current?.instance?.element;
-      if (el) el.scrollTop = el.scrollHeight;
-      if (socketRef.current?.readyState === WebSocket.OPEN) {
-        socketRef.current.send(JSON.stringify({ type: "resize", ...sizeRef.current }));
-      }
+      try { fitRef.current?.fit(); } catch { /* hidden */ }
+      termRef.current?.focus();
+      termRef.current?.scrollToBottom();
     });
     return () => window.cancelAnimationFrame(id);
   }, [active]);
@@ -102,49 +160,20 @@ export function TerminalSession({ sessionId, revision, cwd, active, agent, agent
   return (
     <div
       className={cn(
-        "absolute inset-0 transition-opacity duration-100",
+        "absolute inset-0 transition-opacity duration-100 bg-[#0a0a0a]",
         active ? "z-10 opacity-100" : "z-0 opacity-0 pointer-events-none",
       )}
       aria-hidden={!active}
     >
-      {terminalCore.error || error ? (
+      {error ? (
         <div className="flex h-full items-center justify-center p-6 text-center">
           <div className="flex flex-col items-center gap-2 text-white/70">
             <ShieldAlert className="h-5 w-5 text-rose-400" />
-            <p className="text-sm">{terminalCore.error ?? error ?? "Terminal failed to initialize."}</p>
+            <p className="text-sm">{error}</p>
           </div>
         </div>
-      ) : terminalCore.loading ? (
-        <div className="flex h-full items-center justify-center p-6 text-center">
-          <div className="text-sm text-white/55">Loading Ghostty terminal core...</div>
-        </div>
       ) : (
-        <WTermTerminal
-          key={revision}
-          ref={terminalRef}
-          core={terminalCore.core ?? undefined}
-          autoResize
-          cursorBlink
-          // Override @wterm/react/css defaults so the terminal sits flush in the panel:
-          // remove the 8px rounded corners + drop shadow but keep the inner 12px padding.
-          className="!rounded-none !border-0 !shadow-none h-full w-full"
-          onReady={() => setTerminalReady(true)}
-          onData={(data) => {
-            if (socketRef.current?.readyState === WebSocket.OPEN) {
-              socketRef.current.send(JSON.stringify({ type: "input", data }));
-            }
-          }}
-          onResize={(cols, rows) => {
-            sizeRef.current = { cols, rows };
-            if (socketRef.current?.readyState === WebSocket.OPEN) {
-              socketRef.current.send(JSON.stringify({ type: "resize", cols, rows }));
-            }
-          }}
-          onError={(err) => {
-            setError(err instanceof Error ? err.message : "Terminal failed to initialize.");
-            onConnRef.current("error");
-          }}
-        />
+        <div ref={containerRef} className="h-full w-full p-2" />
       )}
     </div>
   );
