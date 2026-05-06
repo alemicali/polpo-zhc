@@ -1,6 +1,6 @@
 services:
   server:
-    image: ${POLPO_SERVER_IMAGE:-ghcr.io/alemicali/polpo-zhc/server:latest}
+    image: ${POLPO_SERVER_IMAGE:-ghcr.io/alemicali/polpo/server:latest}
     ports:
       - "${POLPO_SERVER_PORT:-3890}:3890"
     volumes:
@@ -34,7 +34,7 @@ services:
     restart: unless-stopped
 
   ui:
-    image: ${POLPO_UI_IMAGE:-ghcr.io/alemicali/polpo-zhc/ui:latest}
+    image: ${POLPO_UI_IMAGE:-ghcr.io/alemicali/polpo/ui:latest}
     ports:
       - "${POLPO_UI_PORT:-3080}:80"
     environment:

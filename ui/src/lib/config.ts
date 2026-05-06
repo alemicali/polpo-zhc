@@ -4,7 +4,6 @@
 export const config = {
   baseUrl: import.meta.env.VITE_POLPO_API_URL ?? "",
   apiKey: import.meta.env.VITE_POLPO_API_KEY ?? undefined,
-  terminalCore: import.meta.env.VITE_POLPO_TERMINAL_CORE === "wterm" ? "wterm" : "ghostty",
 } as const;
 
 export function apiUrl(path: string): string {

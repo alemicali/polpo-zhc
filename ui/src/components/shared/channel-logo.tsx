@@ -7,10 +7,12 @@
  * good brand logo (webhook, push, generic email).
  */
 
+import { useEffect, useState } from "react";
 import type { LucideIcon } from "lucide-react";
 import { Icon } from "@iconify/react";
 import { Link2, Bell, Mail, MessageSquare } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { ensureLogosPack } from "@/lib/iconify-bootstrap";
 
 /** Channel type → iconify "logos:" id. Null when we want a lucide fallback. */
 const LOGO_BY_TYPE: Record<string, string | null> = {
@@ -45,7 +47,17 @@ export function ChannelLogo({
   className?: string;
 }) {
   const logoId = LOGO_BY_TYPE[type];
-  if (logoId) {
+  // Trigger the lazy logos pack load on first render — `ensureLogosPack`
+  // is idempotent so multiple ChannelLogo instances share the same fetch.
+  const [logosReady, setLogosReady] = useState(false);
+  useEffect(() => {
+    if (!logoId) return;
+    let cancelled = false;
+    ensureLogosPack().then(() => { if (!cancelled) setLogosReady(true); });
+    return () => { cancelled = true; };
+  }, [logoId]);
+
+  if (logoId && logosReady) {
     return (
       <Icon
         icon={logoId}

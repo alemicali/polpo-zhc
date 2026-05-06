@@ -8,7 +8,10 @@ import { config } from "./lib/config";
 import { bootstrapPalette } from "./lib/palette";
 import { bootstrapAppearance } from "./lib/appearance";
 import { bootstrapTheme } from "./hooks/use-theme";
-import { bootstrapIconify } from "./lib/iconify-bootstrap";
+// iconify packs (`logos`, `vscode-icons`) are lazy-loaded by the components
+// that need them — see `ensureLogosPack` / `ensureVscodeIconsPack` in
+// `./lib/iconify-bootstrap`. Pulling them eagerly added ~11 MB to the entry
+// chunk.
 import "./index.css";
 
 const nativeFetch = window.fetch.bind(window);
@@ -26,8 +29,6 @@ window.fetch = (input, init) => {
 bootstrapTheme();
 bootstrapPalette();
 bootstrapAppearance();
-// Register the offline Iconify "logos" pack so brand icons render instantly
-bootstrapIconify();
 
 // Use HashRouter for Electron (file:// protocol), BrowserRouter for web
 const isFileProtocol = window.location.protocol === "file:";

@@ -2180,7 +2180,7 @@ function SessionSidebar({
     return (
       <div className="px-3 py-2.5 border-b border-border/40 flex items-center gap-2 shrink-0">
         <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider flex-1">
-          Agent Chats
+          History
         </span>
         {/* View toggle — text labels, not icons */}
         <div className="flex items-center bg-muted/60 rounded-md p-0.5 gap-0.5">
@@ -3180,7 +3180,11 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
         "shrink-0",
         embedded
           ? "bg-transparent px-0 pt-0 pb-0"
-          : "bg-background/80 backdrop-blur-md px-4 pt-2 pb-1.5",
+          // /chat hides the BottomNav, so we only need the iOS home-indicator
+          // safe area at the bottom — no nav-height reservation. Add a small
+          // `pb-2` on top of the safe-area so the composer is not glued to
+          // the bezel on phones without a home indicator.
+          : "bg-background/80 backdrop-blur-md px-4 pt-2 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] lg:pb-1.5",
       )}
       ref={inputWrapperRef}
     >
@@ -3231,6 +3235,27 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
             <PromptInputFooter>
               <div className="flex min-w-0 items-center gap-1">
                 <AttachButton disabled={inputDisabled} />
+                {/* Mobile-only mention/skill quick triggers — replace the
+                    "@ for mentions · / for skills" hint that we hide on
+                    mobile. Tapping opens the same popover. */}
+                <button
+                  type="button"
+                  onClick={() => mentionRef.current?.toggle("@")}
+                  disabled={inputDisabled}
+                  aria-label="Insert mention"
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground hover:bg-accent/60 hover:text-foreground disabled:opacity-40 lg:hidden"
+                >
+                  <span className="font-mono text-sm font-semibold">@</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => mentionRef.current?.toggle("/")}
+                  disabled={inputDisabled}
+                  aria-label="Insert skill"
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground hover:bg-accent/60 hover:text-foreground disabled:opacity-40 lg:hidden"
+                >
+                  <span className="font-mono text-sm font-semibold">/</span>
+                </button>
               </div>
               <div className="flex min-w-0 items-center gap-1">
                 <MicButton
@@ -3257,7 +3282,9 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
             </PromptInputFooter>
           </PromptInput>
         </MentionPopover>
-        <div className="mt-1 flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-[10px] text-muted-foreground">
+        {/* Hint row — desktop only. On mobile the @/ buttons inside the
+            footer take over and the session id is hidden as not actionable. */}
+        <div className="mt-1 hidden lg:flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-[10px] text-muted-foreground">
           <ChatInputHint trigger="@" label="mentions" />
           <span aria-hidden="true">·</span>
           <ChatInputHint trigger="/" label="skills" />

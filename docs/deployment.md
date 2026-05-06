@@ -2,13 +2,13 @@
 
 Polpo self-hosting is split into two Docker images:
 
-- Server image: `ghcr.io/<owner>/<repo>/server` (also published as `ghcr.io/<owner>/<repo>` for backward compatibility)
+- Server image: `ghcr.io/<owner>/<repo>/server`
 - UI image: `ghcr.io/<owner>/<repo>/ui`
 
-For this fork, the default compose file points to:
+For this repository, the canonical images are:
 
-- `ghcr.io/alemicali/polpo-zhc/server:latest`
-- `ghcr.io/alemicali/polpo-zhc/ui:latest`
+- `ghcr.io/alemicali/polpo/server:latest`
+- `ghcr.io/alemicali/polpo/ui:latest`
 
 The server image is the runtime image. It contains the CLI/server build plus the optional runtime dependencies used by the extended tools: document libraries, SQLite/Postgres clients, email clients, `pdftotext` from poppler, system Chromium for Playwright PDF generation, and `edge-tts`.
 

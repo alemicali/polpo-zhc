@@ -185,7 +185,9 @@ function VsCodeTab({ workspaceId, cwd }: { workspaceId: string | undefined; cwd:
       });
       const body = await res.json().catch(() => null);
       if (!res.ok || !body?.ok) throw new Error(body?.error || `VS Code failed to start (${res.status})`);
-      setUrl(body.data.directUrl ?? apiUrl(body.data.url));
+      // Always embed through the Polpo API proxy. The direct code-server port is
+      // only reachable from the server network on hosted platforms like Railway.
+      setUrl(apiUrl(body.data.url));
     } catch (err) {
       setError(err instanceof Error ? err.message : "VS Code failed to start.");
     } finally {

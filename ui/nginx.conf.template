@@ -1,3 +1,8 @@
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    '' '';
+}
+
 server {
     listen 80;
     server_name _;
@@ -17,12 +22,13 @@ server {
         proxy_http_version 1.1;
         proxy_ssl_server_name on;
         proxy_ssl_name $proxy_host;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
         proxy_set_header Host $proxy_host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
 
-        proxy_set_header Connection '';
         proxy_buffering off;
         proxy_cache off;
         proxy_read_timeout 86400s;
@@ -33,12 +39,13 @@ server {
         proxy_http_version 1.1;
         proxy_ssl_server_name on;
         proxy_ssl_name $proxy_host;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
         proxy_set_header Host $proxy_host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
 
-        proxy_set_header Connection '';
         proxy_buffering off;
         proxy_cache off;
         proxy_read_timeout 86400s;
@@ -50,7 +57,7 @@ server {
         proxy_ssl_server_name on;
         proxy_ssl_name $proxy_host;
         proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
+        proxy_set_header Connection $connection_upgrade;
         proxy_set_header Host $proxy_host;
         proxy_read_timeout 86400s;
     }

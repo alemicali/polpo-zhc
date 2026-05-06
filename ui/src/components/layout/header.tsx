@@ -1,5 +1,5 @@
 import { useLocation } from "react-router-dom";
-import { Sun, Moon, Monitor, MessageCircle, Github, Columns2, Palette as PaletteIcon, Check } from "lucide-react";
+import { Sun, Moon, Monitor, MessageCircle, Github, Columns2, Menu, Palette as PaletteIcon, Check } from "lucide-react";
 import { useProjectInfo } from "@/hooks/use-polpo";
 import { useSidebarOpen, sidebarActions } from "@/hooks/chat-context";
 import { setLayoutMode } from "@/hooks/use-layout-mode";
@@ -21,6 +21,7 @@ import { useTheme } from "@/hooks/use-theme";
 import { usePalette, PALETTES } from "@/lib/palette";
 import { PwaInstallQrButton } from "./pwa-install-qr-button";
 import { LogoutButton } from "./logout-button";
+import { MobileNavSheet } from "./mobile-nav-sheet";
 
 const titles: Record<string, string> = {
   "/dashboard": "Dashboard",
@@ -63,8 +64,18 @@ export function Header() {
 
   return (
     <header className="flex min-h-12 shrink-0 items-center justify-between border-b border-border/50 bg-background/80 px-4 pt-0 backdrop-blur-md max-lg:min-h-safe-head max-lg:pt-safe-head sm:px-5 lg:min-h-14 lg:px-8">
-      {/* Mobile: logo + title */}
-      <div className="flex min-w-0 items-center gap-2.5 lg:hidden">
+      {/* Mobile: hamburger + logo + title */}
+      <div className="flex min-w-0 items-center gap-1.5 lg:hidden">
+        <MobileNavSheet>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-9 w-9 rounded-lg text-foreground hover:bg-accent/50 -ml-1"
+            aria-label="Open navigation"
+          >
+            <Menu className="h-5 w-5" />
+          </Button>
+        </MobileNavSheet>
         <span className="text-lg">🐙</span>
         <span className="truncate text-sm font-bold tracking-tight">{title}</span>
       </div>
@@ -78,18 +89,21 @@ export function Header() {
         </span>
       </div>
 
-      {/* Actions */}
+      {/* Actions — Phone (PWA install QR), GitHub and Theme are desktop-only.
+          On mobile they live inside the MobileNavSheet drawer. */}
       <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
-        <PwaInstallQrButton />
+        <div className="hidden lg:block">
+          <PwaInstallQrButton />
+        </div>
         <LogoutButton />
-        {/* GitHub */}
+        {/* GitHub — desktop only */}
         <Tooltip>
           <TooltipTrigger asChild>
             <a
               href="https://github.com/alemicali/polpo-zhc"
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-all"
+              className="hidden lg:inline-flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-all"
             >
               <Github className="h-4 w-4" />
               <span className="sr-only">GitHub</span>
@@ -97,13 +111,13 @@ export function Header() {
           </TooltipTrigger>
           <TooltipContent side="bottom" className="text-xs">GitHub</TooltipContent>
         </Tooltip>
-        {/* Theme toggle */}
+        {/* Theme toggle — desktop only */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button
               variant="ghost"
               size="icon"
-              className="h-8 w-8 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-all"
+              className="hidden lg:inline-flex h-8 w-8 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-all"
             >
               {resolved === "dark" ? (
                 <Moon className="h-4 w-4" />

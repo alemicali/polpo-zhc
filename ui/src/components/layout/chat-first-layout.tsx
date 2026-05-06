@@ -33,6 +33,7 @@ import {
   PanelLeft,
   History,
   ChevronsLeft,
+  Menu,
   Plus,
   Palette as PaletteIcon,
   Check,
@@ -65,6 +66,7 @@ import { usePalette, PALETTES } from "@/lib/palette";
 import { cn } from "@/lib/utils";
 import { PwaInstallQrButton } from "./pwa-install-qr-button";
 import { LogoutButton } from "./logout-button";
+import { MobileNavSheet } from "./mobile-nav-sheet";
 import { PersistentPageOutlet } from "./persistent-page-outlet";
 
 type TabDef = {
@@ -99,7 +101,20 @@ function ChatPanelHeader() {
 
   return (
     <header className="flex min-h-12 shrink-0 items-center justify-between border-b border-border/50 bg-background/80 px-4 pt-0 backdrop-blur-md max-lg:min-h-safe-head max-lg:pt-safe-head lg:min-h-14">
-      <div className="flex min-w-0 items-center gap-2.5">
+      <div className="flex min-w-0 items-center gap-1.5">
+        {/* Mobile-only hamburger — reuses the global nav sheet. */}
+        <div className="lg:hidden -ml-1">
+          <MobileNavSheet>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-9 w-9 rounded-lg text-foreground hover:bg-accent/50"
+              aria-label="Open navigation"
+            >
+              <Menu className="h-5 w-5" />
+            </Button>
+          </MobileNavSheet>
+        </div>
         <span className="text-lg">🐙</span>
         <div className="min-w-0">
           <h2 className="truncate text-sm font-bold tracking-tight">{info?.project ?? "Polpo"}</h2>
@@ -182,9 +197,12 @@ const PagesPanelHeader = memo(function PagesPanelHeader() {
 
       <div className="h-5 w-px bg-border/50 shrink-0" />
 
-      {/* Right actions */}
+      {/* Right actions — Phone/GitHub/Theme are desktop-only; mobile uses
+          the MobileNavSheet drawer for these. */}
       <div className="flex items-center gap-1 shrink-0">
-        <PwaInstallQrButton />
+        <div className="hidden lg:block">
+          <PwaInstallQrButton />
+        </div>
         <LogoutButton />
         <Tooltip>
           <TooltipTrigger asChild>
@@ -192,7 +210,7 @@ const PagesPanelHeader = memo(function PagesPanelHeader() {
               href="https://github.com/alemicali/polpo-zhc"
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-all"
+              className="hidden lg:inline-flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-all"
             >
               <Github className="h-4 w-4" />
             </a>
@@ -204,7 +222,7 @@ const PagesPanelHeader = memo(function PagesPanelHeader() {
             <Button
               variant="ghost"
               size="icon"
-              className="h-8 w-8 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-all"
+              className="hidden lg:inline-flex h-8 w-8 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-all"
             >
               {resolved === "dark" ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
             </Button>

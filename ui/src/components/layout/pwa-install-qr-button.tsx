@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import QRCode from "qrcode";
+// `qrcode` is ~50 KB. Loaded only when the user opens the popover.
 import { Check, Copy, Loader2, QrCode, Smartphone } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -39,19 +39,20 @@ export function PwaInstallQrButton({ className }: PwaInstallQrButtonProps) {
     if (!open || !installUrl) return;
     let cancelled = false;
     setQrDataUrl(null);
-    QRCode.toDataURL(installUrl, {
-      errorCorrectionLevel: "M",
-      margin: 1,
-      width: 260,
-      color: {
-        dark: "#0a0e1a",
-        light: "#ffffff",
-      },
-    }).then((url) => {
-      if (!cancelled) setQrDataUrl(url);
-    }).catch(() => {
-      if (!cancelled) setQrDataUrl(null);
-    });
+    void (async () => {
+      try {
+        const { default: QRCode } = await import("qrcode");
+        const url = await QRCode.toDataURL(installUrl, {
+          errorCorrectionLevel: "M",
+          margin: 1,
+          width: 260,
+          color: { dark: "#0a0e1a", light: "#ffffff" },
+        });
+        if (!cancelled) setQrDataUrl(url);
+      } catch {
+        if (!cancelled) setQrDataUrl(null);
+      }
+    })();
     return () => { cancelled = true; };
   }, [installUrl, open]);
 

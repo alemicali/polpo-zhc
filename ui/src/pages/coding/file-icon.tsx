@@ -1,4 +1,6 @@
+import { useEffect, useState } from "react";
 import { Icon } from "@iconify/react";
+import { ensureVscodeIconsPack } from "@/lib/iconify-bootstrap";
 
 /**
  * Maps a filename / path to a vscode-icons icon name.
@@ -133,5 +135,15 @@ function iconName(path: string): string {
 }
 
 export function FileIcon({ path, className }: { path: string; className?: string }) {
+  // Lazy-load the (~3.5 MB) vscode-icons pack on first render. While the
+  // fetch is in-flight, render an empty span of the same size to avoid
+  // layout jumps. Subsequent FileIcon mounts share the cached promise.
+  const [ready, setReady] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    ensureVscodeIconsPack().then(() => { if (!cancelled) setReady(true); });
+    return () => { cancelled = true; };
+  }, []);
+  if (!ready) return <span className={className} aria-hidden />;
   return <Icon icon={iconName(path)} className={className} />;
 }

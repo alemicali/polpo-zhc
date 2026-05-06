@@ -1,11 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Terminal as WTermTerminal, type TerminalHandle } from "@wterm/react";
-import "@wterm/react/css";
+import { useEffect, useState } from "react";
 import { Terminal as TerminalIcon, Loader2, ShieldAlert, RefreshCcw, Plus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { useTerminalCore } from "@/hooks/use-terminal-core";
-import { apiUrl, config, websocketUrl } from "@/lib/config";
+import { apiUrl } from "@/lib/config";
 import { cn } from "@/lib/utils";
+import { TerminalSession } from "@/pages/coding/terminal-session";
 
 type TerminalStatus = {
   enabled: boolean;
@@ -29,7 +27,7 @@ function createTerminalTab(index: number): TerminalTab {
 export function TerminalPage() {
   const [status, setStatus] = useState<TerminalStatus | null>(null);
   const [statusError, setStatusError] = useState<string | null>(null);
-  const [loadingStep, setLoadingStep] = useState("Checking terminal status...");
+  const [loadingStep] = useState("Checking terminal status...");
   const [tabs, setTabs] = useState<TerminalTab[]>(() => [createTerminalTab(1)]);
   const [activeId, setActiveId] = useState(() => tabs[0].id);
   const [connections, setConnections] = useState<Record<string, ConnectionState>>({});
@@ -38,8 +36,6 @@ export function TerminalPage() {
     let cancelled = false;
     const controller = new AbortController();
     const timeout = window.setTimeout(() => controller.abort(), 8_000);
-    setStatusError(null);
-    setLoadingStep("Checking terminal status...");
 
     fetch(apiUrl("/api/v1/terminal/status"), { credentials: "include", signal: controller.signal })
       .then(async (res) => {
@@ -206,7 +202,9 @@ export function TerminalPage() {
           {tabs.map((tab) => (
             <TerminalSession
               key={tab.id}
-              tab={tab}
+              sessionId={tab.id}
+              revision={tab.revision}
+              cwd="."
               active={tab.id === activeTab.id}
               onConnectionChange={(state) => updateConnection(tab.id, state)}
             />
@@ -214,138 +212,6 @@ export function TerminalPage() {
         </div>
       </div>
     </TerminalShell>
-  );
-}
-
-function TerminalSession({
-  tab,
-  active,
-  onConnectionChange,
-}: {
-  tab: TerminalTab;
-  active: boolean;
-  onConnectionChange: (state: ConnectionState) => void;
-}) {
-  const [terminalReady, setTerminalReady] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const terminalCore = useTerminalCore(tab.revision);
-  const terminalRef = useRef<TerminalHandle>(null);
-  const socketRef = useRef<WebSocket | null>(null);
-  const sizeRef = useRef({ cols: 100, rows: 30 });
-  const activeRef = useRef(active);
-  const onConnectionChangeRef = useRef(onConnectionChange);
-
-  useEffect(() => {
-    activeRef.current = active;
-  }, [active]);
-
-  useEffect(() => {
-    onConnectionChangeRef.current = onConnectionChange;
-  }, [onConnectionChange]);
-
-  useEffect(() => {
-    setTerminalReady(false);
-    setError(null);
-    onConnectionChangeRef.current("loading");
-  }, [tab.revision, terminalCore.loading]);
-
-  const wsUrl = useMemo(() => {
-    const url = new URL(websocketUrl("/ws/terminal"));
-    url.searchParams.set("session_id", tab.id);
-    url.searchParams.set("cols", String(sizeRef.current.cols));
-    url.searchParams.set("rows", String(sizeRef.current.rows));
-    url.searchParams.set("revision", String(tab.revision));
-    if (config.apiKey) url.searchParams.set("api_key", config.apiKey);
-    return url.toString();
-  }, [tab.id, tab.revision]);
-
-  useEffect(() => {
-    if (!terminalReady || terminalCore.loading || terminalCore.error) return;
-
-    onConnectionChangeRef.current("connecting");
-    const ws = new WebSocket(wsUrl);
-    socketRef.current = ws;
-
-    ws.addEventListener("open", () => {
-      onConnectionChangeRef.current("connected");
-      if (activeRef.current) terminalRef.current?.focus();
-      ws.send(JSON.stringify({ type: "resize", ...sizeRef.current }));
-    });
-    ws.addEventListener("message", (event) => {
-      terminalRef.current?.write(typeof event.data === "string" ? event.data : new Uint8Array(event.data));
-    });
-    ws.addEventListener("close", () => {
-      onConnectionChangeRef.current("closed");
-    });
-    ws.addEventListener("error", () => {
-      onConnectionChangeRef.current("error");
-    });
-
-    return () => {
-      socketRef.current = null;
-      ws.close();
-    };
-  }, [terminalCore.error, terminalCore.loading, terminalReady, wsUrl]);
-
-  useEffect(() => {
-    if (!active) return;
-    const id = window.requestAnimationFrame(() => {
-      terminalRef.current?.resize(sizeRef.current.cols, sizeRef.current.rows);
-      terminalRef.current?.focus();
-      if (socketRef.current?.readyState === WebSocket.OPEN) {
-        socketRef.current.send(JSON.stringify({ type: "resize", ...sizeRef.current }));
-      }
-    });
-    return () => window.cancelAnimationFrame(id);
-  }, [active]);
-
-  return (
-    <div
-      className={cn(
-        "absolute inset-0 transition-opacity duration-100",
-        active ? "z-10 opacity-100" : "z-0 opacity-0 pointer-events-none",
-      )}
-      aria-hidden={!active}
-    >
-      {terminalCore.error || error ? (
-        <TerminalNotice
-          icon={<ShieldAlert className="h-5 w-5" />}
-          title="Terminal unavailable"
-          detail={terminalCore.error ?? error ?? "Terminal failed to initialize."}
-        />
-      ) : terminalCore.loading ? (
-        <TerminalNotice
-          icon={<Loader2 className="h-5 w-5 animate-spin" />}
-          title="Loading terminal"
-          detail="Loading Ghostty terminal core..."
-        />
-      ) : (
-        <WTermTerminal
-          key={tab.revision}
-          ref={terminalRef}
-          core={terminalCore.core ?? undefined}
-          autoResize
-          cursorBlink
-          className="h-full w-full !rounded-none !border-0 !shadow-none"
-          onReady={() => setTerminalReady(true)}
-          onData={(data) => {
-            if (socketRef.current?.readyState === WebSocket.OPEN) {
-              socketRef.current.send(JSON.stringify({ type: "input", data }));
-            }
-          }}
-          onResize={(cols, rows) => {
-            sizeRef.current = { cols, rows };
-            if (socketRef.current?.readyState === WebSocket.OPEN) {
-              socketRef.current.send(JSON.stringify({ type: "resize", cols, rows }));
-            }
-          }}
-          onError={(err) => {
-            setError(err instanceof Error ? err.message : "Terminal failed to initialize.");
-            onConnectionChange("error");
-          }}
-        />
-      )}
-    </div>
   );
 }
 

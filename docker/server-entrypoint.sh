@@ -7,8 +7,9 @@ fi
 
 : "${PORT:=3890}"
 : "${POLPO_WORKDIR:=/workspace}"
+: "${POLPO_HOST:=::}"
 
-set -- node dist/cli/index.js serve --host 0.0.0.0 --port "$PORT" --dir "$POLPO_WORKDIR"
+set -- node dist/cli/index.js serve --host "$POLPO_HOST" --port "$PORT" --dir "$POLPO_WORKDIR"
 
 if [ -n "${POLPO_API_KEY:-}" ]; then
   set -- "$@" --api-key "$POLPO_API_KEY"

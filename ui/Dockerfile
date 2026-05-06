@@ -11,7 +11,7 @@ COPY packages/client-sdk/package.json packages/client-sdk/
 COPY packages/react-sdk/package.json packages/react-sdk/
 COPY ui/package.json ui/
 COPY website/package.json website/
-RUN pnpm install --frozen-lockfile
+RUN pnpm install --frozen-lockfile --filter ui... --ignore-scripts
 
 COPY packages/client-sdk/ packages/client-sdk/
 COPY packages/react-sdk/ packages/react-sdk/

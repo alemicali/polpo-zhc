@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { GitBranch, Loader2, TerminalSquare } from "lucide-react";
 import { Icon } from "@iconify/react";
+import { ensureLogosPack } from "@/lib/iconify-bootstrap";
 import { toast } from "sonner";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Input } from "@/components/ui/input";
@@ -40,6 +41,9 @@ const AGENTS: { kind: CodingAgentKind; label: string; description: string; icon:
 
 export function NewTerminalDialog({ workspaceCwd, trigger, onCreate }: Props) {
   const [open, setOpen] = useState(false);
+  // Pre-warm the logos pack the first time the dialog opens so the
+  // Anthropic / OpenAI brand icons render without a flash.
+  useEffect(() => { if (open) ensureLogosPack(); }, [open]);
   const [agent, setAgent] = useState<CodingAgentKind>("terminal");
   const [worktreeMode, setWorktreeMode] = useState<WorktreeMode>("same");
   const [branch, setBranch] = useState("");
