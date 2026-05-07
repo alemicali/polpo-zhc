@@ -923,7 +923,7 @@ export interface PresenceEntry {
 
 // === Notification System ===
 
-export type NotificationChannelType = "slack" | "email" | "telegram" | "whatsapp" | "webhook" | "push";
+export type NotificationChannelType = "slack" | "email" | "telegram" | "whatsapp" | "webhook" | "push" | "expo-push";
 
 export interface NotificationChannelConfig {
   type: NotificationChannelType;

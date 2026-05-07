@@ -42,6 +42,7 @@ import { fileRoutes } from "./routes/files.js";
 import { gitRoutes } from "./routes/git.js";
 import { audioRoutes } from "./routes/audio.js";
 import { pushRoutes } from "./routes/push.js";
+import { expoPushRoutes } from "./routes/expo-push.js";
 import { codingRoutes } from "./routes/coding.js";
 import { syncRoutes } from "./routes/sync.js";
 import { FileAttachmentStore } from "../stores/file-attachment-store.js";
@@ -393,6 +394,10 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
   })));
 
   authed.route("/push", pushRoutes(() => ({
+    polpoDir: o.getPolpoDir(),
+  })));
+
+  authed.route("/expo-push", expoPushRoutes(() => ({
     polpoDir: o.getPolpoDir(),
   })));
 

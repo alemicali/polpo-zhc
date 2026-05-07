@@ -90,6 +90,7 @@
     "commander": "^13.1.0",
     "croner": "^10.0.1",
     "execa": "^9.6.1",
+    "expo-server-sdk": "^3.10.0",
     "hono": "^4.11.9",
     "nanoid": "^5.1.2",
     "node-pty": "^1.1.0",
