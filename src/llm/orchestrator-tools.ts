@@ -1532,6 +1532,73 @@ After receiving answers, continue with the task using the clarified information.
   }),
 };
 
+export const renderWidgetTool: Tool = {
+  name: "render_widget",
+  description: `Render an interactive HTML widget inline as a card in the user's chat. Use ONLY when the visual/interactive form delivers genuinely more value than markdown.
+
+✅ USE WHEN
+• The user explicitly asks for a chart, graph, simulation, interactive demo, animated diagram, what-if calculator, force-directed graph, timeline
+• A concept truly needs interaction or visual layout to land at a glance
+
+❌ DO NOT USE WHEN markdown already covers it
+• Tabular data → use a markdown table
+• Code → use a fenced code block
+• Static image / lists / headings → markdown
+• 'Just show the result' → plain text
+
+The user pays for tokens and screen space. Default to markdown. Only reach for the widget when there's clear added value.`,
+  parameters: Type.Object({
+    html: Type.String({ description: "Self-contained HTML (with embedded <style> and <script>). Max ~8KB. NO external resources (no <link>, no <script src=...>, no http(s) images). Inherits theme via prefers-color-scheme. Will be rendered inside a sandboxed iframe (sandbox=\"allow-scripts\")." }),
+    title: Type.Optional(Type.String({ description: "Short title shown in the card header" })),
+    height: Type.Optional(Type.Number({ description: "Suggested height in px. Clamped to [120, 800] by the client. Default 320." })),
+    description: Type.Optional(Type.String({ description: "Brief alt text for accessibility / search" })),
+  }),
+};
+
+/** Maximum HTML payload size for render_widget (bytes). */
+export const RENDER_WIDGET_MAX_HTML_BYTES = 8192;
+
+/** Patterns that indicate disallowed external resources / nested iframes inside widget HTML. */
+const RENDER_WIDGET_FORBIDDEN_PATTERNS: RegExp[] = [
+  /<script[^>]+\bsrc\s*=/i,
+  /<link[^>]+\bhref\s*=\s*["']?https?:/i,
+  /<img[^>]+\bsrc\s*=\s*["']?https?:/i,
+  /<iframe/i,
+];
+
+/**
+ * Validate render_widget tool arguments.
+ * Returns null on success, or an error message string suitable for returning to the LLM as the tool result.
+ *
+ * The caller (the streaming/non-streaming completions loop) should:
+ * - On null: emit the widget_render interactive intercept and return a tool result of
+ *   "Widget rendered to the user. Continue with prose only if necessary."
+ * - On non-null: skip the emit and feed the returned string back to the model as the tool result.
+ */
+export function validateRenderWidgetArgs(args: Record<string, unknown>): string | null {
+  const html = typeof args.html === "string" ? args.html : "";
+  if (!html) {
+    return "Error: render_widget requires a non-empty 'html' string argument.";
+  }
+  // Use byte length (UTF-8) — generous: code points outside ASCII count more.
+  const byteLen = Buffer.byteLength(html, "utf8");
+  if (byteLen > RENDER_WIDGET_MAX_HTML_BYTES) {
+    return "Error: Widget HTML exceeds 8KB. Trim it (remove comments, minify CSS, simplify SVG paths) and retry.";
+  }
+  for (const pat of RENDER_WIDGET_FORBIDDEN_PATTERNS) {
+    if (pat.test(html)) {
+      return "Error: Widget HTML must be self-contained: no external scripts/links/images, no nested iframes.";
+    }
+  }
+  // Soft clamp on height — log a warning but accept the call.
+  const height = typeof args.height === "number" ? args.height : undefined;
+  if (height !== undefined && (height < 120 || height > 800)) {
+    // eslint-disable-next-line no-console
+    console.warn(`[render_widget] height ${height}px outside [120, 800], will be clamped by client.`);
+  }
+  return null;
+}
+
 // ═══════════════════════════════════════════════════════
 //  TOOL COLLECTIONS
 // ═══════════════════════════════════════════════════════
@@ -1595,7 +1662,7 @@ export const WRITE_TOOLS = new Set([
 ]);
 
 /** Tools that pause the conversation to collect user input / show a preview. */
-export const INTERACTIVE_TOOLS = new Set(["ask_user", "create_mission", "set_vault_entry", "open_file", "navigate_to", "open_tab", "set_design"]);
+export const INTERACTIVE_TOOLS = new Set(["ask_user", "create_mission", "set_vault_entry", "open_file", "navigate_to", "open_tab", "set_design", "render_widget"]);
 export const CLIENT_SIDE_CHAT_TOOLS: Tool[] = [openFileTool, navigateToTool, openTabTool];
 export const CLIENT_SIDE_CHAT_TOOL_NAMES = new Set(CLIENT_SIDE_CHAT_TOOLS.map((tool) => tool.name));
 
@@ -1664,8 +1731,8 @@ export const ALL_ORCHESTRATOR_TOOLS: Tool[] = [
   phoneSetupInboundTool, phoneGetInboundConfigTool, phoneDisableInboundTool,
   // WhatsApp (2)
   whatsappSendTool, whatsappReadTool,
-  // Interactive (1)
-  askUserTool,
+  // Interactive (2)
+  askUserTool, renderWidgetTool,
   // Client-side (4)
   openFileTool, navigateToTool, openTabTool, setDesignTool,
 ];
@@ -1756,6 +1823,7 @@ const TOOL_LABELS: Record<string, string> = {
   // Client-side
   open_tab: "Open Tab",
   set_design: "Set Design",
+  render_widget: "Render Widget",
   // Ink Hub
   ink_search: "Search Ink Hub",
   ink_browse: "Browse Installed Packages",
@@ -1990,6 +2058,11 @@ export async function executeOrchestratorTool(
       // ── Interactive (handled by the calling loop, not here) ──
       case "ask_user":
         return "Questions sent to user. Waiting for answers.";
+      case "render_widget":
+        // Validation + emit happen in the completions loop. If we ever get here it
+        // means the tool wasn't intercepted — fall back to validating args so the
+        // model gets a useful error rather than a silent no-op.
+        return validateRenderWidgetArgs(args) ?? "Widget rendered to the user. Continue with prose only if necessary.";
 
       default:
         return `Unknown tool: ${toolName}`;
@@ -2263,6 +2336,12 @@ export async function formatToolDetails(
       if (args.text) main.push(["Text", String(args.text)]);
       if (args.radius !== undefined) main.push(["Radius", String(args.radius)]);
       if (args.fontFamily) extra.push(["Font", trunc(args.fontFamily)]);
+      break;
+    case "render_widget":
+      if (args.title) main.push(["Title", trunc(args.title)]);
+      if (args.height !== undefined) main.push(["Height", `${String(args.height)}px`]);
+      if (typeof args.html === "string") main.push(["HTML size", `${Buffer.byteLength(args.html, "utf8")} bytes`]);
+      if (args.description) extra.push(["Description", trunc(args.description, 200)]);
       break;
     default:
       for (const [k, v] of Object.entries(args)) {

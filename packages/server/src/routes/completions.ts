@@ -124,7 +124,7 @@ const completionResponseSchema = z.object({
       role: z.literal("assistant"),
       content: z.string(),
     }),
-    finish_reason: z.enum(["stop", "length", "ask_user", "mission_preview", "vault_preview", "open_file", "navigate_to", "open_tab", "set_design"]),
+    finish_reason: z.enum(["stop", "length", "ask_user", "mission_preview", "vault_preview", "open_file", "navigate_to", "open_tab", "set_design", "widget_render"]),
   })),
   usage: z.object({
     prompt_tokens: z.number().int(),
@@ -244,6 +244,43 @@ function convertMessages(messages: z.infer<typeof messageSchema>[]): { piMessage
   }
 
   return { piMessages, extraSystemParts };
+}
+
+/** Maximum HTML payload size for render_widget (bytes). */
+const RENDER_WIDGET_MAX_HTML_BYTES = 8192;
+
+/** Patterns that disqualify widget HTML (external resources, nested iframes). */
+const RENDER_WIDGET_FORBIDDEN_PATTERNS: RegExp[] = [
+  /<script[^>]+\bsrc\s*=/i,
+  /<link[^>]+\bhref\s*=\s*["']?https?:/i,
+  /<img[^>]+\bsrc\s*=\s*["']?https?:/i,
+  /<iframe/i,
+];
+
+/**
+ * Validate render_widget tool args.
+ * Returns null on success, or an error string suitable for handing back to the LLM as a tool result
+ * so it can retry.
+ */
+function validateRenderWidgetArgs(args: Record<string, unknown>): string | null {
+  const html = typeof args.html === "string" ? args.html : "";
+  if (!html) return "Error: render_widget requires a non-empty 'html' string argument.";
+  // UTF-8 byte length — emoji/non-ASCII count more than chars.
+  const byteLen = Buffer.byteLength(html, "utf8");
+  if (byteLen > RENDER_WIDGET_MAX_HTML_BYTES) {
+    return "Error: Widget HTML exceeds 8KB. Trim it (remove comments, minify CSS, simplify SVG paths) and retry.";
+  }
+  for (const pat of RENDER_WIDGET_FORBIDDEN_PATTERNS) {
+    if (pat.test(html)) {
+      return "Error: Widget HTML must be self-contained: no external scripts/links/images, no nested iframes.";
+    }
+  }
+  const height = typeof args.height === "number" ? args.height : undefined;
+  if (height !== undefined && (height < 120 || height > 800)) {
+    // eslint-disable-next-line no-console
+    console.warn(`[render_widget] height ${height}px outside [120, 800], will be clamped by client.`);
+  }
+  return null;
 }
 
 function sseChunk(
@@ -589,7 +626,42 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
 
             // Check for interactive tools. Orchestrator has its full preview/input
             // set; agent-direct mode only gets UI-side tools supplied by deps.
-            const interactiveCall = toolCalls.find((tc: any) => isInteractiveFn?.(tc.name));
+            let interactiveCall = toolCalls.find((tc: any) => isInteractiveFn?.(tc.name));
+            // Tool-call ids that have already been handled inline (e.g. failed widget
+            // validation) and must NOT be re-executed by the trailing for-loop.
+            const skipIds = new Set<string>();
+            // render_widget needs server-side validation BEFORE the intercept fires.
+            // If the HTML payload is invalid, downgrade to a normal tool result so the
+            // model can fix the args and retry within the same turn.
+            if (interactiveCall?.name === "render_widget") {
+              const widgetValidationError = validateRenderWidgetArgs(interactiveCall.arguments);
+              if (widgetValidationError) {
+                await emit(sseChunk(completionId, {}, null, {
+                  tool_call: { id: interactiveCall.id, name: interactiveCall.name, arguments: interactiveCall.arguments, state: "calling" },
+                }));
+                toolCallsAccum.push({
+                  id: interactiveCall.id,
+                  name: interactiveCall.name,
+                  arguments: interactiveCall.arguments,
+                  result: widgetValidationError,
+                  state: "error",
+                });
+                await emit(sseChunk(completionId, {}, null, {
+                  tool_call: { id: interactiveCall.id, name: interactiveCall.name, result: widgetValidationError, state: "error" },
+                }));
+                messages.push({
+                  role: "toolResult",
+                  toolCallId: interactiveCall.id,
+                  toolName: interactiveCall.name,
+                  content: [{ type: "text", text: widgetValidationError }],
+                  isError: true,
+                  timestamp: Date.now(),
+                });
+                skipIds.add(interactiveCall.id);
+                // Drop the interactive call so the loop continues with the rest.
+                interactiveCall = undefined;
+              }
+            }
             if (interactiveCall) {
               // Persist the interactive tool call so it survives session reload
               toolCallsAccum.push({
@@ -602,6 +674,16 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
               if (interactiveCall.name === "ask_user") {
                 const questions = (interactiveCall.arguments as any)?.questions as any[] ?? [];
                 await emit(sseChunk(completionId, {}, "ask_user", { ask_user: { questions } }));
+              } else if (interactiveCall.name === "render_widget") {
+                const args = interactiveCall.arguments as Record<string, unknown>;
+                await emit(sseChunk(completionId, {}, "widget_render", {
+                  widget_render: {
+                    html: args.html as string,
+                    title: (args.title as string | undefined) ?? null,
+                    height: (args.height as number | undefined) ?? 320,
+                    description: (args.description as string | undefined) ?? null,
+                  },
+                }));
               } else if (interactiveCall.name === "create_mission") {
                 const args = interactiveCall.arguments as Record<string, unknown>;
                 let missionData: unknown;
@@ -672,6 +754,8 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
             for (const call of toolCalls) {
               // Stop executing tools if client disconnected
               if (abortController.signal.aborted) break;
+              // Skip calls that were already handled inline (e.g. render_widget validation failure).
+              if (skipIds.has(call.id)) continue;
 
               // Notify client that a tool is being called
               await emit(sseChunk(completionId, {}, null, {
@@ -789,7 +873,35 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
 
           // Check for interactive tools. Orchestrator has its full preview/input
           // set; agent-direct mode only gets UI-side tools supplied by deps.
-          const interactiveCall = toolCalls.find((tc: any) => isInteractiveFn?.(tc.name));
+          let interactiveCall = toolCalls.find((tc: any) => isInteractiveFn?.(tc.name));
+          // Tool-call ids that have already been handled inline (e.g. failed widget
+          // validation) and must NOT be re-executed by the trailing for-loop.
+          const skipIds = new Set<string>();
+          // render_widget: validate args BEFORE returning the intercept response.
+          // Invalid args fall through to the regular tool-execution path so the
+          // model can see the error and retry within the same turn.
+          if (interactiveCall?.name === "render_widget") {
+            const widgetValidationError = validateRenderWidgetArgs(interactiveCall.arguments);
+            if (widgetValidationError) {
+              toolCallsAccum.push({
+                id: interactiveCall.id,
+                name: interactiveCall.name,
+                arguments: interactiveCall.arguments,
+                result: widgetValidationError,
+                state: "error",
+              });
+              messages.push({
+                role: "toolResult",
+                toolCallId: interactiveCall.id,
+                toolName: interactiveCall.name,
+                content: [{ type: "text", text: widgetValidationError }],
+                isError: true,
+                timestamp: Date.now(),
+              });
+              skipIds.add(interactiveCall.id);
+              interactiveCall = undefined;
+            }
+          }
           if (interactiveCall) {
             // Persist the interactive tool call so it survives session reload
             toolCallsAccum.push({
@@ -933,10 +1045,29 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
                 }],
               });
             }
+
+            if (interactiveCall.name === "render_widget") {
+              const args = interactiveCall.arguments as Record<string, unknown>;
+              return c.json({
+                ...baseResponse,
+                choices: [{
+                  index: 0,
+                  message: { role: "assistant" as const, content: finalText },
+                  finish_reason: "widget_render" as const,
+                  widget_render: {
+                    html: args.html as string,
+                    title: (args.title as string | undefined) ?? null,
+                    height: (args.height as number | undefined) ?? 320,
+                    description: (args.description as string | undefined) ?? null,
+                  },
+                }],
+              });
+            }
             // Note: finally block persists finalText + toolCallsAccum
           }
 
           for (const call of toolCalls) {
+            if (skipIds.has(call.id)) continue;
             const result = await effectiveToolExecutor(call.name, call.arguments);
             const isError = result.startsWith("Error:");
             emitFileChanged(call.name, call.arguments, result, deps.emit);
