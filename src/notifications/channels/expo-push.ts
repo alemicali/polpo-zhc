@@ -76,6 +76,41 @@ export async function isExpoPushTokenSafe(token: unknown): Promise<boolean> {
 }
 
 /**
+ * Strip lightweight Markdown so the OS notification UI doesn't render
+ * raw asterisks / backticks / link-syntax to the user. Notification
+ * rules sometimes feed Markdown-ish bodies (carryover from email/web
+ * channels); native push only renders plain text. Conservative: leaves
+ * unknown punctuation alone, only handles the constructs the templates
+ * actually emit (bold, italic, code, links, headers, blockquotes).
+ */
+function stripMarkdown(s: string | undefined): string | undefined {
+  if (!s) return s;
+  let out = s;
+  // Code fences and inline code → drop the backticks, keep content.
+  out = out.replace(/```[\s\S]*?```/g, (m) => m.replace(/```/g, "").trim());
+  out = out.replace(/`([^`]+)`/g, "$1");
+  // Links [text](url) → text. Images ![alt](url) → alt.
+  out = out.replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1");
+  out = out.replace(/\[([^\]]+)\]\([^)]*\)/g, "$1");
+  // Bold/italic: **x**, __x__, *x*, _x_ → x. Order matters (longest first).
+  out = out.replace(/\*\*([^*]+)\*\*/g, "$1");
+  out = out.replace(/__([^_]+)__/g, "$1");
+  out = out.replace(/\*([^*]+)\*/g, "$1");
+  out = out.replace(/(?:^|[^_\w])_([^_]+)_(?!\w)/g, (_m, g1) => g1);
+  // Strikethrough.
+  out = out.replace(/~~([^~]+)~~/g, "$1");
+  // Headers (ATX) at line start.
+  out = out.replace(/^\s{0,3}#{1,6}\s+/gm, "");
+  // Blockquotes.
+  out = out.replace(/^\s{0,3}>\s?/gm, "");
+  // Unordered list bullets.
+  out = out.replace(/^\s{0,3}[-*+]\s+/gm, "");
+  // Collapse 3+ newlines to 2.
+  out = out.replace(/\n{3,}/g, "\n\n");
+  return out.trim();
+}
+
+/**
  * Expo Push channel — fan-outs a Polpo notification to every registered
  * Expo push token (one per device). Mirrors the contract of PushChannel
  * (Web Push) so the router can swap them transparently per rule.
@@ -125,8 +160,8 @@ export class ExpoPushChannel implements NotificationChannel {
 
     const messages: ExpoPushMessage[] = valid.map((t) => ({
       to: t.token,
-      title: notification.title,
-      body: notification.body,
+      title: stripMarkdown(notification.title),
+      body: stripMarkdown(notification.body),
       sound: "default",
       priority: "high",
       data: {
