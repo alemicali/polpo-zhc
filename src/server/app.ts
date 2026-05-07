@@ -196,6 +196,17 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
       const browserProfileDir = polpoDir
         ? join(polpoDir, "browser-profiles", agentConfig.browserProfile || agentConfig.name)
         : undefined;
+      // WhatsApp send wiring: il WhatsAppBridge live dell'orchestrator ha
+      // un sendMessage(jid, text) che ritorna l'id del messaggio. Senza
+      // questo `createAllTools` skip-pava silenziosamente l'intera categoria
+      // whatsapp_* (vedi system-tools.ts: il branch richiede ENTRAMBI store
+      // E sendMessage). Risultato pre-fix: agent in chat con whatsapp_* in
+      // allowedTools non vedeva i tool. Bind al bridge se disponibile, altrimenti
+      // undefined (i tool whatsapp_* restano disattivati come prima).
+      const waBridge = o.getWhatsAppBridge?.();
+      const whatsappSendMessage = waBridge
+        ? (jid: string, text: string) => waBridge.sendMessage(jid, text)
+        : undefined;
       const tools: any[] = await createAllTools({
         cwd: o.getAgentWorkDir(),
         allowedTools: agentConfig.allowedTools,
@@ -206,7 +217,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
         emailAllowedDomains: agentConfig.emailAllowedDomains,
         outputDir: undefined,
         whatsappStore: o.getWhatsAppStore?.(),
-        whatsappSendMessage: undefined,
+        whatsappSendMessage,
         polpoDir,
       });
       const memoryStore = o.getMemoryStore();
