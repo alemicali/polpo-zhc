@@ -65,8 +65,76 @@ export type VaultPreviewAction = "confirm" | "cancel";
 export interface WidgetRenderData {
   html: string;
   title?: string | null;
-  height?: number | null;
   description?: string | null;
+  /** Show card chrome (border + header). Default true. False = full canvas. */
+  chrome?: boolean;
+  /** Opt-in: was the widget invoked with stream:true on the LLM tool call?
+   *  Drives whether the UI shows a chunk-by-chunk live preview during
+   *  generation. Default false (atomic render only). */
+  stream?: boolean;
+  /** True while THIS specific instance is a live partial (extracted from
+   *  argumentsText mid-stream). Distinct from `stream` (the model's
+   *  intent flag). UI uses this to show a "Live" badge and skip the
+   *  auto-height shim during preview iterations. */
+  streaming?: boolean;
+}
+
+// Tolerant extractor: pulls a `boolean` value of a top-level field
+// from an in-progress JSON object string. Returns null if not found
+// (i.e. field absent or value not yet streamed). Tollerante: rispetta
+// whitespace, non distingue le quote (cerca solo "true" / "false").
+function extractPartialBooleanFromArgs(argsText: string, key: string): boolean | null {
+  if (!argsText) return null;
+  const re = new RegExp(`"${key}"\\s*:\\s*(true|false)\\b`);
+  const m = argsText.match(re);
+  if (!m) return null;
+  return m[1] === "true";
+}
+
+// Tolerant extractor: pull a partial `html` value out of a JSON object's
+// argumentsText that's still being streamed. We treat the JSON as a flat
+// string and look for the first `"html"` key, then consume chars from
+// after the opening quote until the closing quote (or end-of-buffer if
+// the model hasn't closed it yet). Properly unescapes `\"` and \n etc.
+// Returns null if the html field hasn't started arriving yet.
+function extractPartialHtmlFromArgs(argsText: string): string | null {
+  if (!argsText) return null;
+  // Locate `"html"` key — be lenient with whitespace.
+  const m = argsText.match(/"html"\s*:\s*"/);
+  if (!m) return null;
+  const startIdx = m.index! + m[0].length;
+  let out = "";
+  let i = startIdx;
+  while (i < argsText.length) {
+    const ch = argsText[i];
+    if (ch === "\\" && i + 1 < argsText.length) {
+      const next = argsText[i + 1];
+      if (next === '"') out += '"';
+      else if (next === "\\") out += "\\";
+      else if (next === "n") out += "\n";
+      else if (next === "r") out += "\r";
+      else if (next === "t") out += "\t";
+      else if (next === "/") out += "/";
+      else if (next === "u" && i + 5 < argsText.length) {
+        const hex = argsText.slice(i + 2, i + 6);
+        if (/^[0-9a-fA-F]{4}$/.test(hex)) {
+          out += String.fromCharCode(parseInt(hex, 16));
+          i += 6;
+          continue;
+        }
+        out += next;
+      } else {
+        out += next;
+      }
+      i += 2;
+      continue;
+    }
+    if (ch === '"') return out; // closed
+    out += ch;
+    i += 1;
+  }
+  // Stream not closed — return what we got (partial).
+  return out.length > 0 ? out : null;
 }
 
 // Client-side tool types
@@ -124,7 +192,10 @@ export interface ChatMessageWithQuestions extends ChatMessage {
   askUserQuestions?: AskUserQuestion[];
   missionPreview?: MissionPreviewData;
   vaultPreview?: VaultPreviewData;
-  widgetRender?: WidgetRenderData;
+  /** Inline interactive HTML widgets emitted by render_widget. Multiple
+   *  widgets can be emitted in the same turn — they're rendered in
+   *  order, each as its own card/canvas. */
+  widgets?: WidgetRenderData[];
   openFile?: OpenFileData;
   navigateTo?: NavigateToData;
   openTab?: OpenTabData;
@@ -346,7 +417,12 @@ export function useChat() {
     if (lastMsg.role !== "assistant" || !lastMsg.toolCalls) return;
 
     for (const tc of lastMsg.toolCalls) {
-      if (tc.state !== "interrupted") continue;
+      // Interactive intercepts arrivano con state="interrupted" (turn
+      // bloccato in attesa input utente). render_widget è display-only,
+      // arriva con state="completed" — accettiamo entrambi i casi.
+      const isInteractiveInterrupted = tc.state === "interrupted";
+      const isWidgetCompleted = tc.name === "render_widget" && tc.state === "completed";
+      if (!isInteractiveInterrupted && !isWidgetCompleted) continue;
 
       if (tc.name === "ask_user" && tc.arguments) {
         const questions = (tc.arguments as any)?.questions as AskUserQuestion[] ?? [];
@@ -376,19 +452,10 @@ export function useChat() {
         };
         lastMsg.vaultPreview = vaultPreview;
         setSessionPending(key, { vault: vaultPreview });
-      } else if (tc.name === "render_widget" && tc.arguments) {
-        // Display-only — restore the widget on the message so it re-renders
-        // after a page reload. NOT pending (no user response required).
-        const args = tc.arguments as Record<string, unknown>;
-        const html = typeof args.html === "string" ? args.html : "";
-        if (html) {
-          lastMsg.widgetRender = {
-            html,
-            title: (args.title as string | undefined) ?? null,
-            height: (args.height as number | undefined) ?? null,
-            description: (args.description as string | undefined) ?? null,
-          };
-        }
+      } else if (tc.name === "render_widget") {
+        // Già gestito da toUiMessages (per ogni messaggio, non solo
+        // l'ultimo). Niente da fare qui — render_widget non è una
+        // pending intercept, è solo display.
       // NOTE: open_file, navigate_to, open_tab are one-shot navigation actions.
       // They must NOT be restored as pending because:
       // 1. They were already consumed when originally fired (navigate + streamCompletion).
@@ -452,13 +519,43 @@ export function useChat() {
   };
 
   const toUiMessages = useCallback((raw: ChatMessage[]): ChatMessageWithQuestions[] => raw
-    .filter((m) => m.content.trim().length > 0)
+    // Filtriamo SOLO i messaggi davvero vuoti (no content + no toolCalls):
+    // un assistant message può legittimamente avere solo toolCalls
+    // (es. render_widget) senza prose. Filtrando per content.trim()==='' si
+    // perdevano tutti i messaggi "widget-only" al refresh.
+    .filter((m) => {
+      const serverMsg = m as ChatMessageWithQuestions;
+      const hasText = m.content.trim().length > 0;
+      const hasToolCalls = !!serverMsg.toolCalls && serverMsg.toolCalls.length > 0;
+      return hasText || hasToolCalls;
+    })
     .map((m) => {
       const enriched: ChatMessageWithQuestions = { ...m };
       const serverMsg = m as ChatMessageWithQuestions;
       if (serverMsg.toolCalls && serverMsg.toolCalls.length > 0) {
         enriched.toolCalls = serverMsg.toolCalls;
         enriched.segments = reconstructSegments(enriched);
+        // Restore widgets[] da TUTTI i toolCall render_widget completed/interrupted
+        // di QUESTO messaggio, in ordine. Nessun limite "solo l'ultimo
+        // messaggio" come fa restoreInteractiveState — un turn passato
+        // può aver prodotto widget e devono ricomparire al refresh.
+        const widgets: WidgetRenderData[] = [];
+        for (const tc of serverMsg.toolCalls) {
+          if (tc.name !== "render_widget") continue;
+          if (tc.state !== "completed" && tc.state !== "interrupted") continue;
+          const args = tc.arguments as Record<string, unknown> | undefined;
+          if (!args) continue;
+          const html = typeof args.html === "string" ? args.html : "";
+          if (!html) continue;
+          widgets.push({
+            html,
+            title: (args.title as string | undefined) ?? null,
+            description: (args.description as string | undefined) ?? null,
+            chrome: (args.chrome as boolean | undefined) ?? true,
+            stream: (args.stream as boolean | undefined) ?? false,
+          });
+        }
+        if (widgets.length > 0) enriched.widgets = widgets;
       }
       return enriched;
     }), []);
@@ -501,14 +598,14 @@ export function useChat() {
     const segments: MessageSegment[] = [];
     let currentTextIdx = -1;
     let currentThinkingIdx = -1;
-    let widgetRender: WidgetRenderData | null = null;
+    const widgets: WidgetRenderData[] = [];
 
     const messagePatch = () => ({
       content: fullContent,
       thinkingText: thinkingText || undefined,
       toolCalls: toolCalls.length > 0 ? [...toolCalls] : undefined,
       segments: [...segments],
-      ...(widgetRender ? { widgetRender } : {}),
+      ...(widgets.length > 0 ? { widgets: [...widgets] } : {}),
     });
 
     const updateMsg = () => {
@@ -596,15 +693,16 @@ export function useChat() {
 
           // Widget render intercept — display-only, just paint it onto the message.
           const wr = choice?.widget_render as
-            | { html: string; title?: string | null; height?: number | null; description?: string | null }
+            | { html: string; title?: string | null; description?: string | null; chrome?: boolean; stream?: boolean }
             | undefined;
           if (wr && typeof wr.html === "string") {
-            widgetRender = {
+            widgets.push({
               html: wr.html,
               title: wr.title ?? null,
-              height: wr.height ?? null,
               description: wr.description ?? null,
-            };
+              chrome: wr.chrome ?? true,
+              stream: wr.stream ?? false,
+            });
             updateMsg();
           }
         }
@@ -748,15 +846,16 @@ export function useChat() {
       // Track index of the current text segment (if last segment is text, append to it)
       let currentTextIdx = -1;
       let currentThinkingIdx = -1;
-      // Widget render intercept — captured from the SSE chunk (the SDK
-      // doesn't expose it yet, so we read it directly off the choice).
-      let widgetRender: WidgetRenderData | null = null;
+      // Widget render intercept — array (multiple widget_render calls in
+      // the same turn append in order, in lo stesso ordine di emit).
+      const widgets: WidgetRenderData[] = [];
 
       const messagePatch = () => ({
         content: fullContent,
         thinkingText: thinkingText || undefined,
         toolCalls: toolCalls.length > 0 ? [...toolCalls] : undefined,
         segments: [...segments],
+        ...(widgets.length > 0 ? { widgets: [...widgets] } : {}),
       });
 
       const updateMsg = () => {
@@ -767,6 +866,86 @@ export function useChat() {
               : m
           )
         );
+      };
+
+      // ── Live widget preview (throttled) ───────────────────────────────
+      // Mentre il modello scrive gli `arguments` di render_widget arrivano
+      // tool_call deltas con argumentsText cumulativo. Qui estraiamo il
+      // valore del campo `html` (anche se non chiuso) e aggiorniamo un
+      // widget preview ogni LIVE_THROTTLE_MS — l'iframe re-renderizza ad
+      // ogni cambio srcDoc, quindi spammare a ogni token sarebbe troppo.
+      // 1000ms ≈ 1 fps. Aggiornare l'iframe srcDoc ricostruisce TUTTO il
+      // DOM, esegue da zero il <script>, riapplica CSP — costoso. Sotto a
+      // ~1s su widget complessi affossa anche desktop. Throttle per ID
+      // tool + dedup sull'html: se nei chunk successivi html non è
+      // cambiato (il modello sta scrivendo gli ALTRI campi dopo `html`)
+      // skippiamo il re-render senza nemmeno guardare l'orologio.
+      const LIVE_THROTTLE_MS = 1000;
+      const liveLastEmitAt = new Map<string, number>(); // toolCallId → ts
+      const liveLastHtmlByTool = new Map<string, string>(); // toolCallId → ultimo html emesso
+      const liveWidgetIdxByTool = new Map<string, number>(); // toolCallId → idx in widgets[]
+      const tryEmitLivePreview = (toolId: string, argsText: string | undefined) => {
+        if (!argsText) return false;
+        // Live preview è OPT-IN: parte solo se il modello ha esplicitato
+        // `stream: true` nei tool args. Altrimenti il widget appare solo
+        // al final intercept (atomico) — è il default e il caso più
+        // frequente perché il throttle dell'iframe rebuild è costoso.
+        const streamOpt = extractPartialBooleanFromArgs(argsText, "stream");
+        if (streamOpt !== true) return false;
+
+        const html = extractPartialHtmlFromArgs(argsText);
+        if (!html) return false;
+        // Dedup cheap: se l'html parziale è identico all'ultimo emesso
+        // (es. il modello sta ora scrivendo title/chrome DOPO l'html),
+        // niente re-render dell'iframe. È il caso più frequente di
+        // sofferenza percepita perché ogni token genera un chunk SSE.
+        if (liveLastHtmlByTool.get(toolId) === html) return false;
+        const now = Date.now();
+        const last = liveLastEmitAt.get(toolId) ?? 0;
+        if (now - last < LIVE_THROTTLE_MS) return false;
+        liveLastEmitAt.set(toolId, now);
+        liveLastHtmlByTool.set(toolId, html);
+
+        // Estraiamo anche `chrome` dal JSON parziale così il preview
+        // rispetta l'intent del modello.
+        const chromeOpt = extractPartialBooleanFromArgs(argsText, "chrome");
+
+        const liveData: WidgetRenderData = {
+          html,
+          title: null,
+          description: null,
+          chrome: chromeOpt ?? true,
+          stream: true,
+          streaming: true,
+        };
+        const existingIdx = liveWidgetIdxByTool.get(toolId);
+        if (existingIdx !== undefined && widgets[existingIdx]) {
+          widgets[existingIdx] = liveData;
+        } else {
+          widgets.push(liveData);
+          liveWidgetIdxByTool.set(toolId, widgets.length - 1);
+        }
+        return true;
+      };
+
+      // Quando l'intercept finale `widget_render` arriva, sovrascriviamo
+      // il preview live con il widget canonico (no più streaming flag).
+      // Caso normale: il preview live e l'intercept hanno corrispondenza
+      // 1:1 nell'ordine. Caso edge (più tool render_widget back-to-back):
+      // appendiamo nuovo widget se nessun live preview è in attesa.
+      let nextFinalSlot = 0;
+      const promoteToFinal = (final: WidgetRenderData) => {
+        // Trova il primo widget streaming=true a partire da nextFinalSlot.
+        for (let i = nextFinalSlot; i < widgets.length; i += 1) {
+          if (widgets[i]?.streaming) {
+            widgets[i] = { ...final, streaming: false };
+            nextFinalSlot = i + 1;
+            return;
+          }
+        }
+        // Nessun preview pending: append.
+        widgets.push({ ...final, streaming: false });
+        nextFinalSlot = widgets.length;
       };
 
       const syncServerIds = () => {
@@ -819,6 +998,7 @@ export function useChat() {
         const tc = (choice as any)?.tool_call as ToolCallInfo | undefined;
         if (tc) {
           const existing = toolCalls.find((t) => t.id === tc.id);
+            const prevState = existing?.state;
             if (existing) {
               // Update existing tool call (preparing → calling → completed/error)
               existing.state = tc.state;
@@ -839,21 +1019,46 @@ export function useChat() {
             currentTextIdx = -1;
             currentThinkingIdx = -1;
           }
-          updateMsg();
+          // Live preview throttled per render_widget tool calls — vedi
+          // tryEmitLivePreview (1s + dedup html). Estrae l'html parziale
+          // da argumentsText e mostra un widget "streaming" mentre il
+          // modello ancora scrive.
+          let didLive = false;
+          const isWidgetTool = tc.name === "render_widget" && (tc.state === "preparing" || tc.state === "calling");
+          if (isWidgetTool) {
+            didLive = tryEmitLivePreview(tc.id, (existing?.argumentsText ?? tc.argumentsText));
+          }
+          // OTTIMIZZAZIONE: durante un tool render_widget in scrittura
+          // (preparing/calling) i delta arrivano a centinaia. Ognuno
+          // mutava `existing` in place + chiamava updateMsg → React
+          // re-renderizzava TUTTO il messaggio (chat compresa) per
+          // niente. Ora setState SOLO quando:
+          //   - il preview live è effettivamente cambiato (didLive)
+          //   - oppure il tool ha cambiato STATO (preparing→calling→
+          //     completed→error) — evento raro, va sempre flushato
+          //   - oppure NON è un tool render_widget (gli altri tool
+          //     hanno UI live nella tool card e devono aggiornare)
+          const stateChanged = prevState !== tc.state;
+          if (!isWidgetTool || didLive || stateChanged) {
+            updateMsg();
+          }
         }
 
         // Widget render intercept — same shape as mission_preview/vault_preview
         // but display-only: turn ends, no user response expected.
         const wr = (choice as any)?.widget_render as
-          | { html: string; title?: string | null; height?: number | null; description?: string | null }
+          | { html: string; title?: string | null; description?: string | null; chrome?: boolean; stream?: boolean }
           | undefined;
         if (wr && typeof wr.html === "string") {
-          widgetRender = {
+          // Promuove l'eventuale live preview a widget definitivo.
+          promoteToFinal({
             html: wr.html,
             title: wr.title ?? null,
-            height: wr.height ?? null,
             description: wr.description ?? null,
-          };
+            chrome: wr.chrome ?? true,
+            stream: wr.stream ?? false,
+          });
+          updateMsg();
         }
       }
 
@@ -1005,26 +1210,27 @@ export function useChat() {
         });
         setSessionPending(streamSessionKey, { setDesign: setDesignData, questions: null, mission: null, vault: null, openFile: null, navigateTo: null, openTab: null });
         appendConversation(streamSessionKey, { role: "assistant", content: fullContent });
-      } else if (widgetRender) {
-        // Widget render — display-only intercept, the turn ends after the
-        // widget is shown. Attach to the assistant message so it survives
-        // a refresh (also restored from persisted toolCalls — see
-        // restoreInteractiveState below).
-        // Same find-or-create pattern of setDesign: il widget arriva di solito
-        // PRIMA di qualunque text delta, quindi assistantId potrebbe non
-        // esistere ancora nei messages → senza fallback la card sparisce.
-        const widgetData = widgetRender;
+      } else if (widgets.length > 0 || (stream as any).widgetRender) {
+        // Widget render — display-only intercept. N widget catturati in
+        // ordine durante il chunk loop, OPPURE 1 widget esposto dallo SDK
+        // come `stream.widgetRender` (fallback per quando il chunk loop
+        // non lo cattura). Attach all'assistant message così sopravvive
+        // a un refresh (oltre al restore da toolCall persistito).
+        // Find-or-create pattern: il widget può arrivare PRIMA di qualunque
+        // text delta, quindi assistantId potrebbe non esistere ancora.
+        const allWidgets = widgets.length > 0
+          ? [...widgets]
+          : [(stream as any).widgetRender as WidgetRenderData];
         updateSessionMessages(streamSessionKey, (prev) => {
           let attached = false;
           const patched = prev.map((m) => {
             if (m.id !== assistantId) return m;
             attached = true;
-            return { ...m, ...messagePatch(), widgetRender: widgetData };
+            return { ...m, ...messagePatch(), widgets: allWidgets };
           });
 
           if (attached) return patched;
 
-          // Last-resort: cerca l'ultimo assistant esistente e aggancia lì.
           let lastAssistantIndex = -1;
           for (let index = patched.length - 1; index >= 0; index -= 1) {
             if (patched[index]?.role === "assistant") {
@@ -1035,12 +1241,11 @@ export function useChat() {
           if (lastAssistantIndex >= 0) {
             return patched.map((m, index) =>
               index === lastAssistantIndex
-                ? { ...m, ...messagePatch(), widgetRender: widgetData }
+                ? { ...m, ...messagePatch(), widgets: allWidgets }
                 : m
             );
           }
 
-          // Nessun assistant: creiamo un messaggio nuovo apposta.
           return [
             ...patched,
             {
@@ -1048,7 +1253,7 @@ export function useChat() {
               role: "assistant",
               ts: new Date().toISOString(),
               ...messagePatch(),
-              widgetRender: widgetData,
+              widgets: allWidgets,
             },
           ];
         });

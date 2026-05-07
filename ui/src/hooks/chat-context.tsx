@@ -73,6 +73,45 @@ export function useSidebarOpen(): boolean {
 export const sidebarActions = { setSidebarOpen, toggleSidebar } as const;
 
 // ═══════════════════════════════════════════════════════
+//  Dedicated /chat page session sidebar store
+// ═══════════════════════════════════════════════════════
+
+let _chatPageSessionsOpen = false;
+const chatPageSessionsListeners = new Set<() => void>();
+
+function chatPageSessionsSubscribe(cb: () => void) {
+  chatPageSessionsListeners.add(cb);
+  return () => { chatPageSessionsListeners.delete(cb); };
+}
+
+function getChatPageSessionsSnapshot() {
+  return _chatPageSessionsOpen;
+}
+
+export function setChatPageSessionsOpen(open: boolean) {
+  if (_chatPageSessionsOpen === open) return;
+  _chatPageSessionsOpen = open;
+  chatPageSessionsListeners.forEach((cb) => cb());
+}
+
+function toggleChatPageSessions() {
+  setChatPageSessionsOpen(!_chatPageSessionsOpen);
+}
+
+export function useChatPageSessionsOpen(): boolean {
+  return useSyncExternalStore(
+    chatPageSessionsSubscribe,
+    getChatPageSessionsSnapshot,
+    getChatPageSessionsSnapshot,
+  );
+}
+
+export const chatPageSessionActions = {
+  setOpen: setChatPageSessionsOpen,
+  toggle: toggleChatPageSessions,
+} as const;
+
+// ═══════════════════════════════════════════════════════
 //  Chat contexts — split state from actions
 // ═══════════════════════════════════════════════════════
 

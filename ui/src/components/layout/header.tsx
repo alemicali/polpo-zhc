@@ -1,7 +1,7 @@
 import { useLocation } from "react-router-dom";
-import { Sun, Moon, Monitor, MessageCircle, Github, Columns2, Menu, Palette as PaletteIcon, Check } from "lucide-react";
+import { Sun, Moon, Monitor, MessageCircle, Github, Columns2, Menu, Palette as PaletteIcon, Check, History, Plus, Trash2, ChevronsLeft } from "lucide-react";
 import { useProjectInfo } from "@/hooks/use-polpo";
-import { useSidebarOpen, sidebarActions } from "@/hooks/chat-context";
+import { useChatActions, useChatPageSessionsOpen, useChatState, useSidebarOpen, sidebarActions, chatPageSessionActions } from "@/hooks/chat-context";
 import { setLayoutMode } from "@/hooks/use-layout-mode";
 import { Button } from "@/components/ui/button";
 import {
@@ -22,6 +22,8 @@ import { usePalette, PALETTES } from "@/lib/palette";
 import { PwaInstallQrButton } from "./pwa-install-qr-button";
 import { LogoutButton } from "./logout-button";
 import { MobileNavSheet } from "./mobile-nav-sheet";
+import { AgentAvatar } from "@/components/shared/agent-avatar";
+import { useAgents } from "@polpo-ai/react";
 
 const titles: Record<string, string> = {
   "/dashboard": "Dashboard",
@@ -49,6 +51,103 @@ function resolveTitle(pathname: string): string {
   return "";
 }
 
+function ChatHeaderCenter() {
+  const sessionsOpen = useChatPageSessionsOpen();
+  const { messages, isLoading, sessionId, sessions, selectedAgent } = useChatState();
+  const { newSession, clear } = useChatActions();
+  const { agents } = useAgents();
+  const sessionAgent = selectedAgent ?? sessions.find((s: { id: string; agent?: string }) => s.id === sessionId)?.agent ?? null;
+  const agentConfig = sessionAgent && agents ? agents.find((a) => a.name === sessionAgent) : undefined;
+  const agentName = agentConfig?.identity?.displayName ?? agentConfig?.name ?? "Polpo";
+  const sessionTitle = sessionId
+    ? sessions.find((s: { id: string; title?: string }) => s.id === sessionId)?.title || "Session"
+    : "New session";
+
+  return (
+    <div className="hidden w-full min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 lg:grid">
+      <div className="flex min-w-0 shrink-0 items-center gap-2">
+        <div className="flex shrink-0 items-center gap-1">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className={sessionsOpen
+                  ? "h-8 w-8 rounded-lg bg-primary/10 text-primary hover:bg-primary/15"
+                  : "h-8 w-8 rounded-lg text-muted-foreground hover:bg-accent/50 hover:text-foreground"}
+                onClick={chatPageSessionActions.toggle}
+                aria-label={sessionsOpen ? "Hide threads" : "Show threads"}
+              >
+                {sessionsOpen ? <ChevronsLeft className="h-4 w-4" /> : <History className="h-4 w-4" />}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" className="text-xs">
+              {sessionsOpen ? "Hide threads" : "Threads"}
+            </TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 rounded-lg text-muted-foreground hover:bg-accent/50 hover:text-foreground"
+                onClick={newSession}
+                aria-label="New session"
+              >
+                <Plus className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" className="text-xs">New session</TooltipContent>
+          </Tooltip>
+        </div>
+
+        <div className="flex min-w-0 max-w-44 items-center gap-1.5 rounded-full bg-muted/45 px-2 py-1">
+          {agentConfig ? (
+            <AgentAvatar
+              avatar={agentConfig.identity?.avatar}
+              name={agentName}
+              size="xs"
+            />
+          ) : (
+            <span className="shrink-0 text-sm leading-none">🐙</span>
+          )}
+          <span className="truncate text-xs font-semibold text-foreground">{agentName}</span>
+        </div>
+      </div>
+
+      <div className="min-w-0 text-center">
+        <div className="truncate text-sm font-semibold leading-5 text-foreground" title={sessionTitle}>
+          {sessionTitle}
+        </div>
+      </div>
+
+      <div className="flex shrink-0 items-center justify-end gap-1">
+        {messages.length > 0 && (
+          <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium leading-4 text-muted-foreground">
+            {messages.length}
+          </span>
+        )}
+        {!isLoading && messages.length > 0 && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 rounded-lg text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                onClick={clear}
+                aria-label="Clear session"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" className="text-xs">Clear session</TooltipContent>
+          </Tooltip>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /**
  * Header — used only in sidebar layout mode.
  * In chat-first mode, each panel has its own header (see ChatFirstLayout).
@@ -63,7 +162,7 @@ export function Header() {
   const isOnChatPage = pathname === "/chat";
 
   return (
-    <header className="flex min-h-12 shrink-0 items-center justify-between border-b border-border/50 bg-background/80 px-4 pt-0 backdrop-blur-md max-lg:min-h-safe-head max-lg:pt-safe-head sm:px-5 lg:min-h-14 lg:px-8">
+    <header className="relative flex min-h-12 shrink-0 items-center justify-between border-b border-border/50 bg-background/80 px-4 pt-0 backdrop-blur-md max-lg:min-h-safe-head max-lg:pt-safe-head sm:px-5 lg:min-h-14 lg:px-8">
       {/* Mobile: hamburger + logo + title */}
       <div className="flex min-w-0 items-center gap-1.5 lg:hidden">
         <MobileNavSheet>
@@ -88,6 +187,14 @@ export function Header() {
           {info?.project ?? "Polpo"}
         </span>
       </div>
+
+      {isOnChatPage && (
+        <div className="pointer-events-none absolute left-1/2 top-1/2 z-10 w-[min(72rem,72vw)] -translate-x-1/2 -translate-y-1/2">
+          <div className="pointer-events-auto flex justify-center">
+            <ChatHeaderCenter />
+          </div>
+        </div>
+      )}
 
       {/* Actions — Phone (PWA install QR), GitHub and Theme are desktop-only.
           On mobile they live inside the MobileNavSheet drawer. */}

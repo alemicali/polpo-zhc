@@ -215,32 +215,68 @@ const GrepSchema = Type.Object({
   include: Type.Optional(Type.String({ description: "File glob filter (e.g. '*.ts')" })),
 });
 
+// Caps to keep grep output context-friendly. Long minified lines or
+// matches in vendored bundles can otherwise dump hundreds of KB into
+// the LLM context. Per-line cap protects against single huge lines;
+// total-byte cap protects against many medium lines. The agent still
+// sees the TOTAL match count so it knows if it needs to refine.
+const GREP_MAX_LINES = 100;
+const GREP_MAX_LINE_CHARS = 240;
+const GREP_MAX_TOTAL_CHARS = 8_000;
+
 function createGrepTool(cwd: string, sandbox: string[], shell: Shell): AgentTool<typeof GrepSchema> {
   return {
     name: "grep",
     label: "Search Code",
-    description: "Search for a regex pattern in files. Returns matching lines with file paths and line numbers.",
+    description: "Search for a regex pattern in files. Returns matching lines with file paths and line numbers. Long lines and large outputs are truncated — refine the pattern if results are cut.",
     parameters: GrepSchema,
     async execute(_toolCallId, params) {
       const searchPath = params.path ? resolve(cwd, params.path) : cwd;
       assertPathAllowed(searchPath, sandbox, "grep");
       const includeFlag = params.include ? `--include=${JSON.stringify(params.include)}` : "";
       try {
+        // First get total count, then bounded slice. `wc -l` runs after
+        // grep without the head cap so we know the true number even
+        // when we'll only return the first GREP_MAX_LINES.
         const r = await shell.execute(
-          `grep -rn ${includeFlag} -E ${JSON.stringify(params.pattern)} ${JSON.stringify(searchPath)} 2>/dev/null | head -100`,
+          `grep -rn ${includeFlag} -E ${JSON.stringify(params.pattern)} ${JSON.stringify(searchPath)} 2>/dev/null`,
           { cwd, timeout: 15_000 },
         );
-        const result = r.stdout.trim();
-        if (!result) {
+        const raw = r.stdout.trimEnd();
+        if (!raw) {
           return {
             content: [{ type: "text", text: "No matches found" }],
             details: { pattern: params.pattern, count: 0 },
           };
         }
-        const lines = result.split("\n");
+        const allLines = raw.split("\n");
+        const totalCount = allLines.length;
+        // Slice to max lines first.
+        const slicedLines = allLines.slice(0, GREP_MAX_LINES);
+        // Per-line truncation.
+        const truncatedLines = slicedLines.map((ln) =>
+          ln.length > GREP_MAX_LINE_CHARS ? `${ln.slice(0, GREP_MAX_LINE_CHARS)}…` : ln,
+        );
+        // Total-byte truncation.
+        let acc = "";
+        let included = 0;
+        for (const ln of truncatedLines) {
+          if (acc.length + ln.length + 1 > GREP_MAX_TOTAL_CHARS) break;
+          acc += (acc ? "\n" : "") + ln;
+          included++;
+        }
+        const wasTruncated = included < totalCount;
+        const text = wasTruncated
+          ? `${acc}\n… ${totalCount - included} more match${totalCount - included === 1 ? "" : "es"} truncated; refine pattern or narrow path/include.`
+          : acc;
         return {
-          content: [{ type: "text", text: result }],
-          details: { pattern: params.pattern, count: lines.length },
+          content: [{ type: "text", text }],
+          details: {
+            pattern: params.pattern,
+            count: totalCount,
+            shown: included,
+            truncated: wasTruncated,
+          },
         };
       } catch {
         return {

@@ -25,6 +25,7 @@ import type {
   PolpoConfig,
   AgentConfig,
   Task,
+  TaskStatus,
   TaskResult,
   TaskExpectation,
   ExpectedOutcome,
@@ -130,6 +131,7 @@ export class Orchestrator extends TypedEmitter {
   private configReloadTimer?: ReturnType<typeof setTimeout>;
   private vaultStore?: VaultStore;
   private playbookStore!: PlaybookStore;
+  private eventingTaskStores = new WeakMap<TaskStore, TaskStore>();
 
   // Managers
   private agentMgr!: AgentManager;
@@ -191,6 +193,63 @@ export class Orchestrator extends TypedEmitter {
 
   /** Drizzle store bundle — populated when storage is "sqlite" or "postgres". */
   private drizzleStores?: import("@polpo-ai/drizzle").DrizzleStores;
+
+  /**
+   * Decorate task status changes with task:transition events.
+   *
+   * Watchers, SSE, notification rules, and CLI status output all depend on this
+   * event. Keeping it at the store boundary prevents missed events when callers
+   * use registry.transition(...) directly.
+   */
+  private withTaskTransitionEvents(store: TaskStore): TaskStore {
+    const cached = this.eventingTaskStores.get(store);
+    if (cached) return cached;
+
+    const orchestrator = this;
+    const wrapped = new Proxy(store, {
+      get(target, prop, receiver) {
+        if (prop === "__emitsTaskTransitionEvents") return true;
+
+        if (prop === "transition") {
+          return async (taskId: string, newStatus: TaskStatus) => {
+            const before = await target.getTask(taskId);
+            const updated = await target.transition(taskId, newStatus);
+            if (before && before.status !== updated.status) {
+              orchestrator.emit("task:transition", {
+                taskId,
+                from: before.status,
+                to: updated.status,
+                task: updated,
+              });
+            }
+            return updated;
+          };
+        }
+
+        if (prop === "unsafeSetStatus") {
+          return async (taskId: string, newStatus: TaskStatus, reason: string) => {
+            const before = await target.getTask(taskId);
+            const updated = await target.unsafeSetStatus(taskId, newStatus, reason);
+            if (before && before.status !== updated.status) {
+              orchestrator.emit("task:transition", {
+                taskId,
+                from: before.status,
+                to: updated.status,
+                task: updated,
+              });
+            }
+            return updated;
+          };
+        }
+
+        const value = Reflect.get(target, prop, receiver);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    }) as TaskStore;
+
+    this.eventingTaskStores.set(store, wrapped);
+    return wrapped;
+  }
 
   /** Create task + run stores based on the configured storage backend. */
   private async createStores(storage?: "file" | "sqlite" | "postgres", databaseUrl?: string): Promise<{
@@ -260,7 +319,7 @@ export class Orchestrator extends TypedEmitter {
     const stores = this.injectedStore
       ? { task: this.injectedStore, run: this.injectedRunStore! }
       : await this.createStores(this.config.settings.storage, this.config.settings.databaseUrl);
-    this.registry = stores.task;
+    this.registry = this.withTaskTransitionEvents(stores.task);
     this.runStore = stores.run;
 
     // When storage is "postgres", Drizzle provides all stores; otherwise use file-based defaults
@@ -647,7 +706,7 @@ export class Orchestrator extends TypedEmitter {
     const stores = this.injectedStore
       ? { task: this.injectedStore, run: this.injectedRunStore! }
       : await this.createStores(storageBackend, dbUrl);
-    this.registry = stores.task;
+    this.registry = this.withTaskTransitionEvents(stores.task);
     this.runStore = stores.run;
 
     // Use Drizzle-provided stores when available, otherwise fall back to file-based

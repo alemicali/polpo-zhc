@@ -172,7 +172,12 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
       const { createSystemTools } = await import("../tools/system-tools.js");
       const { createMemoryTools } = await import("../tools/memory-tools.js");
       const { resolveAgentVault } = await import("../vault/index.js");
-      const { CLIENT_SIDE_CHAT_TOOLS, isClientSideChatTool } = await import("../llm/orchestrator-tools.js");
+      const {
+        CLIENT_SIDE_CHAT_TOOLS,
+        isClientSideChatTool,
+        renderWidgetTool,
+        validateRenderWidgetArgs,
+      } = await import("../llm/orchestrator-tools.js");
       const { nanoid } = await import("nanoid");
       const vaultEntries = await o.getVaultStore()?.getAllForAgent(agentConfig.name);
       const vault = resolveAgentVault(vaultEntries);
@@ -183,8 +188,30 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
       for (const tool of CLIENT_SIDE_CHAT_TOOLS) {
         if (!existingToolNames.has(tool.name)) tools.push(tool);
       }
+      // Opt-in `render_widget` per agente, via allowedTools (es.
+      // `["read","write","render_widget"]` in polpo.json). NON è nei
+      // CLIENT_SIDE_CHAT_TOOLS perché è un display tool potente: lo
+      // diamo solo agli agent che lo dichiarano esplicitamente. Side-
+      // effect del chunk widget_render emesso dal route in
+      // packages/server/src/routes/completions.ts (case `name ===
+      // "render_widget"` nel for-loop tool execution) — funziona
+      // identico a orchestrator mode.
+      const allowsRenderWidget = Array.isArray(agentConfig.allowedTools)
+        && agentConfig.allowedTools.includes("render_widget");
+      if (allowsRenderWidget && !existingToolNames.has("render_widget")) {
+        tools.push(renderWidgetTool);
+      }
       const toolMap = new Map(tools.map((t: any) => [t.name, t]));
       const executor = async (name: string, args: Record<string, unknown>): Promise<string> => {
+        if (name === "render_widget") {
+          // Validate args; errori sono restituiti come tool result così
+          // il modello può ritentare nello stesso turn (stesso pattern
+          // dell'orchestrator). On success il route emette poi il chunk
+          // widget_render dopo questo executor.
+          const err = validateRenderWidgetArgs(args);
+          if (err) return err;
+          return "Widget rendered to the user. Continue with prose only if necessary.";
+        }
         if (isClientSideChatTool(name)) {
           return `Client-side tool ${name} completed.`;
         }

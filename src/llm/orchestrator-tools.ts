@@ -1548,10 +1548,11 @@ export const renderWidgetTool: Tool = {
 
 The user pays for tokens and screen space. Default to markdown. Only reach for the widget when there's clear added value.`,
   parameters: Type.Object({
-    html: Type.String({ description: "Self-contained HTML (with embedded <style> and <script>). Max ~8KB. NO external resources (no <link>, no <script src=...>, no http(s) images). Inherits theme via prefers-color-scheme. Will be rendered inside a sandboxed iframe (sandbox=\"allow-scripts\")." }),
-    title: Type.Optional(Type.String({ description: "Short title shown in the card header" })),
-    height: Type.Optional(Type.Number({ description: "Suggested height in px. Clamped to [120, 800] by the client. Default 320." })),
+    html: Type.String({ description: "Self-contained HTML (with embedded <style> and <script>). Max ~8KB. NO external resources (no <link>, no <script src=...>, no http(s) images). Inherits theme via prefers-color-scheme. Will be rendered inside a sandboxed iframe (sandbox=\"allow-scripts\"). The iframe auto-sizes to your content height via postMessage — design accordingly. Always full-width of the chat bubble." }),
+    title: Type.Optional(Type.String({ description: "Short title shown in the card header. Ignored if chrome=false." })),
     description: Type.Optional(Type.String({ description: "Brief alt text for accessibility / search" })),
+    chrome: Type.Optional(Type.Boolean({ description: "Show card chrome (border + header). Default true. Set false for free-form / shaped widgets that should sit directly on the chat canvas (e.g. a circular clock, a custom-shaped diagram)." })),
+    stream: Type.Optional(Type.Boolean({ description: "Opt-in chunk-by-chunk live preview. Default false (atomic — widget appears only when the HTML is fully composed). Set true ONLY when the HTML is large/complex enough that watching it materialise has value (e.g. ASCII-art diagrams that build up shape, animations whose first frames are themselves interesting). For small/instant widgets leave it off — the live preview costs an iframe rebuild every ~1s and is overkill." })),
   }),
 };
 
@@ -1590,12 +1591,10 @@ export function validateRenderWidgetArgs(args: Record<string, unknown>): string 
       return "Error: Widget HTML must be self-contained: no external scripts/links/images, no nested iframes.";
     }
   }
-  // Soft clamp on height — log a warning but accept the call.
-  const height = typeof args.height === "number" ? args.height : undefined;
-  if (height !== undefined && (height < 120 || height > 800)) {
-    // eslint-disable-next-line no-console
-    console.warn(`[render_widget] height ${height}px outside [120, 800], will be clamped by client.`);
-  }
+  // height removed from tool params — il widget auto-sizes sempre via
+  // postMessage. Lasciamo passare anche se il modello dovesse ancora
+  // includerlo per qualche reason (vecchio prompt cached): viene
+  // semplicemente ignorato lato client.
   return null;
 }
 
@@ -1662,7 +1661,11 @@ export const WRITE_TOOLS = new Set([
 ]);
 
 /** Tools that pause the conversation to collect user input / show a preview. */
-export const INTERACTIVE_TOOLS = new Set(["ask_user", "create_mission", "set_vault_entry", "open_file", "navigate_to", "open_tab", "set_design", "render_widget"]);
+// render_widget NON è interactive: è un tool "fire-and-display" che
+// emette un chunk widget_render durante l'esecuzione, NON ferma il turn,
+// e può essere chiamato N volte nello stesso turno (multiple widgets
+// inline). Gli interactive bloccano il turn aspettando input utente.
+export const INTERACTIVE_TOOLS = new Set(["ask_user", "create_mission", "set_vault_entry", "open_file", "navigate_to", "open_tab", "set_design"]);
 export const CLIENT_SIDE_CHAT_TOOLS: Tool[] = [openFileTool, navigateToTool, openTabTool];
 export const CLIENT_SIDE_CHAT_TOOL_NAMES = new Set(CLIENT_SIDE_CHAT_TOOLS.map((tool) => tool.name));
 

@@ -152,18 +152,18 @@ export function ChatSidebar() {
 
   return (
     <div
-      className="relative hidden lg:flex flex-col shrink-0 h-full py-2 pr-2"
+      className="relative hidden lg:flex flex-col shrink-0 h-full border-l border-border/50 bg-card/50"
       style={{ width }}
     >
       <button
         type="button"
         aria-label="Resize chat sidebar"
         onPointerDown={startResize}
-        className="absolute inset-y-3 -left-1 z-20 w-2 cursor-col-resize rounded-full outline-none focus-visible:ring-2 focus-visible:ring-primary/40 group"
+        className="absolute inset-y-0 -left-1 z-20 w-2 cursor-col-resize rounded-full outline-none focus-visible:ring-2 focus-visible:ring-primary/40 group"
       >
         <span className="absolute inset-y-2 left-1/2 w-px -translate-x-1/2 rounded-full bg-border transition-all group-hover:w-[3px] group-hover:bg-primary/40" />
       </button>
-      <div className="flex flex-col flex-1 min-h-0 rounded-xl border bg-card/50 overflow-hidden">
+      <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
         <Suspense fallback={<SidebarSkeleton />}>
           <ChatPage compact />
         </Suspense>

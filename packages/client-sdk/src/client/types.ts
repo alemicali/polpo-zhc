@@ -1169,7 +1169,7 @@ export interface ChatCompletionRequest {
 export interface ChatCompletionChoice {
   index: number;
   message: { role: "assistant"; content: string };
-  finish_reason: "stop" | "length" | "ask_user" | "mission_preview" | "vault_preview" | "open_file" | "navigate_to" | "open_tab" | "set_design";
+  finish_reason: "stop" | "length" | "ask_user" | "mission_preview" | "vault_preview" | "open_file" | "navigate_to" | "open_tab" | "set_design" | "widget_render";
   /** Present when finish_reason is "ask_user" — structured questions for the user. */
   ask_user?: AskUserPayload;
   /** Present when finish_reason is "mission_preview" — proposed mission for user review. */
@@ -1184,6 +1184,8 @@ export interface ChatCompletionChoice {
   open_tab?: OpenTabPayload;
   /** Present when finish_reason is "set_design" — apply local appearance overrides. */
   set_design?: SetDesignPayload;
+  /** Present when finish_reason is "widget_render" — render an inline HTML widget. */
+  widget_render?: WidgetRenderPayload;
 }
 
 export interface ChatCompletionResponse {
@@ -1246,6 +1248,8 @@ export interface ChatCompletionChunk {
     open_tab?: OpenTabPayload;
     /** Present when finish_reason is "set_design" — apply local appearance overrides. */
     set_design?: SetDesignPayload;
+    /** Present when finish_reason is "widget_render" — render an inline HTML widget. */
+    widget_render?: WidgetRenderPayload;
     /** Present when the server is executing a tool call. */
     tool_call?: ToolCallEvent;
     /** Present when the model is emitting thinking/reasoning tokens. */
@@ -1413,4 +1417,18 @@ export interface SetDesignPayload extends DesignThemePayload {
   light?: DesignThemePayload;
   /** Dark-mode override values. */
   dark?: DesignThemePayload;
+}
+
+/** Payload for widget_render — display-only inline interactive HTML widget. */
+export interface WidgetRenderPayload {
+  /** Self-contained HTML to render inside a sandboxed iframe. */
+  html: string;
+  /** Optional title shown in the card header. Ignored if `chrome` is false. */
+  title?: string | null;
+  /** Brief alt text / a11y description. */
+  description?: string | null;
+  /** Show card chrome (border + header). Default true. */
+  chrome?: boolean;
+  /** Opt-in chunk-by-chunk live preview during stream. Default false. */
+  stream?: boolean;
 }

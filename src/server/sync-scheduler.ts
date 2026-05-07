@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { appendHistoryEntry } from "./sync-history-store.js";
 import { readSyncConfig, writeSyncConfig, type R2Config, type SyncConfig } from "./sync-config-store.js";
+import { INTERNAL_EXCLUDES } from "./routes/sync.js";
 
 /**
  * Auto-push scheduler.
@@ -99,7 +100,7 @@ async function runScheduledPush(polpoDir: string, workDir: string, cfg: SyncConf
     "copy", "--update", "--fast-list", "--use-json-log",
     "--stats=10s", "--stats-log-level", "INFO",
   ];
-  for (const pattern of cfg.excludes ?? []) {
+  for (const pattern of [...INTERNAL_EXCLUDES, ...(cfg.excludes ?? [])]) {
     args.push("--exclude", pattern);
   }
   args.push(workDir, remote);

@@ -95,8 +95,8 @@ import type { PromptInputMessage } from "@/components/ai-elements/prompt-input";
 import { useChatState, useChatActions, useChatInputDisabled } from "@/hooks/chat-context";
 import { setChatPageSessionsOpen, useChatPageSessionsOpen } from "@/hooks/chat-context";
 import { MissionPreviewDialog } from "@/components/mission-preview-dialog";
-import { WidgetCard } from "@/components/widget-card";
-import type { AskUserQuestion, AskUserAnswer, MessageSegment, ToolCallInfo, MissionPreviewData, MissionPreviewAction, VaultPreviewData, VaultPreviewAction, SetDesignData } from "@/hooks/use-polpo";
+import { WidgetCard, WidgetPendingCard } from "@/components/widget-card";
+import type { AskUserQuestion, AskUserAnswer, MessageSegment, ToolCallInfo, MissionPreviewData, MissionPreviewAction, VaultPreviewData, VaultPreviewAction, SetDesignData, WidgetRenderData } from "@/hooks/use-polpo";
 import { FilePreviewDialog, useFilePreview, mimeFromPath } from "@/components/shared/file-preview";
 import { ToolCallList, ToolInvocation, ToolCallGroup } from "@/components/ai-elements/tool";
 import { MentionPopover, MentionText, type MentionPopoverHandle, type MentionFile, type MentionTrigger } from "@/components/ai-elements/mention-popover";
@@ -2963,11 +2963,20 @@ function ChatMessages() {
                         {/* Render segments chronologically, grouping consecutive tools and reasoning chunks */}
                         {msg.segments && msg.segments.length > 0 ? (
                           (() => {
+                            // Mappa N-esimo render_widget segment → N-esimo
+                            // widget in msg.widgets. Garantisce che il widget
+                            // (sia preview live, sia finale) appaia nello
+                            // stesso punto cronologico del flusso, NON in
+                            // fondo al messaggio.
                             const groups: Array<
                               | { type: "text"; content: string }
                               | { type: "thinking"; content: string }
                               | { type: "tools"; tools: ToolCallInfo[] }
+                              | { type: "widget"; widget: WidgetRenderData; key: string }
+                              | { type: "widget-pending"; tool: ToolCallInfo }
                             > = [];
+                            const widgetsArr = msg.widgets ?? [];
+                            let widgetCounter = 0;
                             for (const seg of msg.segments as MessageSegment[]) {
                               if (seg.type === "text") {
                                 groups.push({ type: "text", content: seg.content });
@@ -2979,30 +2988,75 @@ function ChatMessages() {
                                   groups.push({ type: "thinking", content: seg.content });
                                 }
                               } else if (seg.type === "tool") {
-                                const last = groups[groups.length - 1];
-                                if (last && last.type === "tools") {
-                                  last.tools.push(seg.tool);
+                                if (seg.tool.name === "render_widget") {
+                                  // Inline widget: trova il widget corrispondente
+                                  // in widgets[] (per-occorrenza) e renderizzalo
+                                  // qui, NON in fondo al messaggio. Se non c'è
+                                  // ancora un widget (caso "preparing" senza
+                                  // ancora abbastanza html), mostra un placeholder
+                                  // pending — sennò la struttura del messaggio
+                                  // "salta" quando arriva il primo batch.
+                                  const w = widgetsArr[widgetCounter];
+                                  if (w) {
+                                    groups.push({ type: "widget", widget: w, key: seg.tool.id });
+                                  } else if (seg.tool.state === "error") {
+                                    // Errore di validation backend → mostra la tool
+                                    // card normale per dare feedback (con il messaggio
+                                    // di errore visibile).
+                                    const last = groups[groups.length - 1];
+                                    if (last && last.type === "tools") last.tools.push(seg.tool);
+                                    else groups.push({ type: "tools", tools: [seg.tool] });
+                                  } else {
+                                    groups.push({ type: "widget-pending", tool: seg.tool });
+                                  }
+                                  widgetCounter += 1;
                                 } else {
-                                  groups.push({ type: "tools", tools: [seg.tool] });
+                                  const last = groups[groups.length - 1];
+                                  if (last && last.type === "tools") last.tools.push(seg.tool);
+                                  else groups.push({ type: "tools", tools: [seg.tool] });
                                 }
                               }
                             }
-                            return groups.map((g, gi) =>
-                              g.type === "text" ? (
-                                <MessageContent key={`g-${gi}`}>
-                                  <MessageResponse mode={isStreaming ? "streaming" : "static"}>{g.content}</MessageResponse>
-                                </MessageContent>
-                              ) : g.type === "thinking" ? (
-                                <Reasoning key={`r-${gi}`} isStreaming={isStreaming}>
-                                  <ReasoningTrigger />
-                                  <ReasoningContent>{g.content}</ReasoningContent>
-                                </Reasoning>
-                              ) : g.tools.length === 1 ? (
+                            return groups.map((g, gi) => {
+                              if (g.type === "text") {
+                                return (
+                                  <MessageContent key={`g-${gi}`}>
+                                    <MessageResponse mode={isStreaming ? "streaming" : "static"}>{g.content}</MessageResponse>
+                                  </MessageContent>
+                                );
+                              }
+                              if (g.type === "thinking") {
+                                return (
+                                  <Reasoning key={`r-${gi}`} isStreaming={isStreaming}>
+                                    <ReasoningTrigger />
+                                    <ReasoningContent>{g.content}</ReasoningContent>
+                                  </Reasoning>
+                                );
+                              }
+                              if (g.type === "widget") {
+                                return <WidgetCard key={`w-${g.key}`} widget={g.widget} />;
+                              }
+                              if (g.type === "widget-pending") {
+                                // Loader skeleton dedicato — il modello
+                                // sta scrivendo gli args del render_widget
+                                // ma il campo `html` non è ancora arrivato
+                                // (es. emette title/chrome prima). Niente
+                                // iframe, niente FOUC: un placeholder
+                                // statico finché il primo chunk html
+                                // parziale arriva e swappa al WidgetCard.
+                                return (
+                                  <WidgetPendingCard
+                                    key={`wp-${g.tool.id}`}
+                                    argsBytes={g.tool.argumentsText?.length}
+                                  />
+                                );
+                              }
+                              return g.tools.length === 1 ? (
                                 <ToolInvocation key={g.tools[0].id} tool={g.tools[0]} />
                               ) : (
                                 <ToolCallGroup key={`tg-${gi}`} tools={g.tools} />
-                              )
-                            );
+                              );
+                            });
                           })()
                         ) : (
                           <>
@@ -3012,9 +3066,16 @@ function ChatMessages() {
                                 <ReasoningContent>{msg.thinkingText}</ReasoningContent>
                               </Reasoning>
                             )}
-                            {msg.toolCalls && msg.toolCalls.length > 0 && (
-                              <ToolCallList tools={msg.toolCalls} />
-                            )}
+                            {(() => {
+                              // Stesso filtro del segments path: nascondiamo
+                              // i tool render_widget interrupted/completed
+                              // perché sotto c'è già la WidgetCard.
+                              const visibleTools = (msg.toolCalls ?? []).filter((tc) => !(
+                                tc.name === "render_widget" &&
+                                (tc.state === "interrupted" || tc.state === "completed")
+                              ));
+                              return visibleTools.length > 0 ? <ToolCallList tools={visibleTools} /> : null;
+                            })()}
                             <MessageContent>
                               <MessageResponse mode={isStreaming ? "streaming" : "static"}>{msg.content}</MessageResponse>
                             </MessageContent>
@@ -3047,9 +3108,9 @@ function ChatMessages() {
                             disabled={isLoading || !pendingVault}
                           />
                         )}
-                        {msg.widgetRender && (
-                          <WidgetCard widget={msg.widgetRender} />
-                        )}
+                        {/* I widget sono renderizzati INLINE nei segments
+                            (vedi map sopra), nel loro punto cronologico —
+                            non più in fondo al messaggio. */}
                         {msg.setDesign && (
                           <DesignPreviewCard
                             preview={msg.setDesign}

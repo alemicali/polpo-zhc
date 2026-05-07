@@ -66,7 +66,14 @@ export function syncRoutes(getDeps: () => {
 
   app.get("/config", (c) => {
     const cfg = publicSyncConfig(readSyncConfig(getDeps().polpoDir));
-    return c.json({ ok: true, data: { ...cfg, nextRunAt: getDeps().scheduler?.nextRunAt() ?? null } });
+    return c.json({
+      ok: true,
+      data: {
+        ...cfg,
+        nextRunAt: getDeps().scheduler?.nextRunAt() ?? null,
+        internalExcludes: INTERNAL_EXCLUDES,
+      },
+    });
   });
 
   app.put("/config", async (c) => {
@@ -170,6 +177,17 @@ export function syncRoutes(getDeps: () => {
   return app;
 }
 
+/** Patterns we ALWAYS strip from any sync, regardless of user config:
+ * - sync-config.json holds the R2 secret — round-tripping it through R2
+ *   is both a security smell and a chicken-and-egg.
+ * - sync-history.jsonl is the local audit log of syncs themselves.
+ * The list is intentionally minimal — anything else stays user-driven.
+ */
+export const INTERNAL_EXCLUDES = [
+  ".polpo/sync-config.json",
+  ".polpo/sync-history.jsonl",
+];
+
 function baseArgs(
   mode: "copy" | "sync",
   source: string,
@@ -183,7 +201,7 @@ function baseArgs(
   const args = [verb, "--fast-list", "--use-json-log", "--stats=1s", "--stats-log-level", "INFO", "--verbose"];
   if (mode === "copy") args.push("--update");
   if (opts.dryRun) args.push("--dry-run");
-  for (const pattern of opts.excludes ?? []) {
+  for (const pattern of [...INTERNAL_EXCLUDES, ...(opts.excludes ?? [])]) {
     args.push("--exclude", pattern);
   }
   return [...args, source, dest];

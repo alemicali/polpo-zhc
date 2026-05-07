@@ -3079,6 +3079,7 @@ type SyncCfg = {
   schedule?: SyncSchedule;
   excludes?: string[];
   nextRunAt?: string | null;
+  internalExcludes?: string[];
 };
 
 type ActiveSync = {
@@ -3615,6 +3616,19 @@ function ExcludesSection({ cfg, reload }: { cfg: SyncCfg | null; reload: () => P
         rclone-style filter patterns — applied to every push and pull, and to the auto-sync scheduler. <code className="font-mono">node_modules/**</code> matches a <code className="font-mono">node_modules</code> folder at any depth. Lines starting with <code className="font-mono">#</code> are comments. Empty list means no filtering.
       </p>
       <div className="space-y-2 max-w-2xl">
+        {cfg?.internalExcludes && cfg.internalExcludes.length > 0 && (
+          <div className="rounded-md border border-border bg-card/40 p-2 text-[11px]">
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground/70 mb-1">
+              Always excluded by Polpo
+            </div>
+            <ul className="space-y-0.5 font-mono text-[11px] text-foreground/70">
+              {cfg.internalExcludes.map((p) => <li key={p}>· {p}</li>)}
+            </ul>
+            <div className="mt-1 text-[10px] text-muted-foreground/60">
+              These hold the R2 secret + the local sync log — sending them to R2 would defeat their purpose.
+            </div>
+          </div>
+        )}
         <textarea
           value={text}
           onChange={(e) => setText(e.target.value)}

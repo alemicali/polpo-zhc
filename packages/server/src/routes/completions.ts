@@ -65,6 +65,27 @@ function redactVaultToolCalls(toolCalls: any[]): any[] {
   });
 }
 
+async function persistAssistantMessage(
+  sessionStore: { updateMessage: (sessionId: string, messageId: string, content: string, toolCalls?: any[]) => Promise<boolean> },
+  sessionId: string,
+  messageId: string,
+  finalText: string,
+  toolCalls: any[],
+): Promise<void> {
+  const text = finalText.trim();
+  if (text) {
+    await sessionStore.updateMessage(sessionId, messageId, text, toolCalls);
+    return;
+  }
+
+  if (toolCalls.length > 0) {
+    await sessionStore.updateMessage(sessionId, messageId, "", toolCalls);
+    return;
+  }
+
+  await sessionStore.updateMessage(sessionId, messageId, "", toolCalls);
+}
+
 // ── Zod Schemas ────────────────────────────────────────────────────────
 
 /** OpenAI-compatible content part (text or image_url). */
@@ -275,11 +296,7 @@ function validateRenderWidgetArgs(args: Record<string, unknown>): string | null 
       return "Error: Widget HTML must be self-contained: no external scripts/links/images, no nested iframes.";
     }
   }
-  const height = typeof args.height === "number" ? args.height : undefined;
-  if (height !== undefined && (height < 120 || height > 800)) {
-    // eslint-disable-next-line no-console
-    console.warn(`[render_widget] height ${height}px outside [120, 800], will be clamped by client.`);
-  }
+  // height removed — auto-size always.
   return null;
 }
 
@@ -626,42 +643,13 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
 
             // Check for interactive tools. Orchestrator has its full preview/input
             // set; agent-direct mode only gets UI-side tools supplied by deps.
-            let interactiveCall = toolCalls.find((tc: any) => isInteractiveFn?.(tc.name));
-            // Tool-call ids that have already been handled inline (e.g. failed widget
-            // validation) and must NOT be re-executed by the trailing for-loop.
+            // NB: render_widget is NOT interactive — viene eseguito normalmente
+            // nel for-loop sotto, emettendo widget_render come side-effect e
+            // permettendo N widget per turn invece di uno solo.
+            const interactiveCall = toolCalls.find((tc: any) => isInteractiveFn?.(tc.name));
+            // Tool-call ids handled inline (per ora vuoto — niente skipIds da
+            // questa branch dopo lo spostamento di render_widget al for-loop).
             const skipIds = new Set<string>();
-            // render_widget needs server-side validation BEFORE the intercept fires.
-            // If the HTML payload is invalid, downgrade to a normal tool result so the
-            // model can fix the args and retry within the same turn.
-            if (interactiveCall?.name === "render_widget") {
-              const widgetValidationError = validateRenderWidgetArgs(interactiveCall.arguments);
-              if (widgetValidationError) {
-                await emit(sseChunk(completionId, {}, null, {
-                  tool_call: { id: interactiveCall.id, name: interactiveCall.name, arguments: interactiveCall.arguments, state: "calling" },
-                }));
-                toolCallsAccum.push({
-                  id: interactiveCall.id,
-                  name: interactiveCall.name,
-                  arguments: interactiveCall.arguments,
-                  result: widgetValidationError,
-                  state: "error",
-                });
-                await emit(sseChunk(completionId, {}, null, {
-                  tool_call: { id: interactiveCall.id, name: interactiveCall.name, result: widgetValidationError, state: "error" },
-                }));
-                messages.push({
-                  role: "toolResult",
-                  toolCallId: interactiveCall.id,
-                  toolName: interactiveCall.name,
-                  content: [{ type: "text", text: widgetValidationError }],
-                  isError: true,
-                  timestamp: Date.now(),
-                });
-                skipIds.add(interactiveCall.id);
-                // Drop the interactive call so the loop continues with the rest.
-                interactiveCall = undefined;
-              }
-            }
             if (interactiveCall) {
               // Persist the interactive tool call so it survives session reload
               toolCallsAccum.push({
@@ -674,16 +662,6 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
               if (interactiveCall.name === "ask_user") {
                 const questions = (interactiveCall.arguments as any)?.questions as any[] ?? [];
                 await emit(sseChunk(completionId, {}, "ask_user", { ask_user: { questions } }));
-              } else if (interactiveCall.name === "render_widget") {
-                const args = interactiveCall.arguments as Record<string, unknown>;
-                await emit(sseChunk(completionId, {}, "widget_render", {
-                  widget_render: {
-                    html: args.html as string,
-                    title: (args.title as string | undefined) ?? null,
-                    height: (args.height as number | undefined) ?? 320,
-                    description: (args.description as string | undefined) ?? null,
-                  },
-                }));
               } else if (interactiveCall.name === "create_mission") {
                 const args = interactiveCall.arguments as Record<string, unknown>;
                 let missionData: unknown;
@@ -766,6 +744,25 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
               const isError = result.startsWith("Error:");
               emitFileChanged(call.name, call.arguments, result, deps.emit);
 
+              // render_widget side-effect: emit widget_render chunk so the
+              // client renders the HTML widget inline. Non blocca il turn —
+              // il modello continua a generare prose / chiamare altri tool /
+              // emettere altri widget. validateRenderWidgetArgs è già stato
+              // applicato dentro effectiveToolExecutor (se invalid, result
+              // inizia con "Error:" e isError = true → skippiamo l'emit).
+              if (call.name === "render_widget" && !isError) {
+                const args = call.arguments as Record<string, unknown>;
+                await emit(sseChunk(completionId, {}, null, {
+                  widget_render: {
+                    html: args.html as string,
+                    title: (args.title as string | undefined) ?? null,
+                    description: (args.description as string | undefined) ?? null,
+                    chrome: (args.chrome as boolean | undefined) ?? true,
+                    stream: (args.stream as boolean | undefined) ?? false,
+                  },
+                }));
+              }
+
               // Accumulate for persistence
               toolCallsAccum.push({
                 id: call.id,
@@ -814,14 +811,7 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
           // SECURITY: Redact vault credentials before persisting to SQLite
           const safeToolCalls = redactVaultToolCalls(toolCallsAccum);
           if (sessionStore && sessionId && assistantMsgId) {
-            if (finalText.trim()) {
-              await sessionStore.updateMessage(sessionId, assistantMsgId, finalText.trim(), safeToolCalls);
-            }
-            // If finalText is empty (LLM never responded), remove the empty placeholder
-            // by setting content to a marker that indicates an interrupted response
-            else {
-              await sessionStore.updateMessage(sessionId, assistantMsgId, "[Response interrupted]", safeToolCalls);
-            }
+            await persistAssistantMessage(sessionStore, sessionId, assistantMsgId, finalText, safeToolCalls);
           }
         }
       }) as any;
@@ -1057,8 +1047,9 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
                   widget_render: {
                     html: args.html as string,
                     title: (args.title as string | undefined) ?? null,
-                    height: (args.height as number | undefined) ?? 320,
                     description: (args.description as string | undefined) ?? null,
+                    chrome: (args.chrome as boolean | undefined) ?? true,
+                    stream: (args.stream as boolean | undefined) ?? false,
                   },
                 }],
               });
@@ -1100,11 +1091,7 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
         // SECURITY: Redact vault credentials before persisting to SQLite
         const safeToolCalls = redactVaultToolCalls(toolCallsAccum);
         if (sessionStore && sessionId && assistantMsgId) {
-          if (finalText.trim()) {
-            await sessionStore.updateMessage(sessionId, assistantMsgId, finalText.trim(), safeToolCalls);
-          } else {
-            await sessionStore.updateMessage(sessionId, assistantMsgId, "[Response interrupted]", safeToolCalls);
-          }
+          await persistAssistantMessage(sessionStore, sessionId, assistantMsgId, finalText, safeToolCalls);
         }
       }
     }

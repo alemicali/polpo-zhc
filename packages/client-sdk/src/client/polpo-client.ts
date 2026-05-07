@@ -49,6 +49,7 @@ import type {
   NavigateToPayload,
   OpenTabPayload,
   SetDesignPayload,
+  WidgetRenderPayload,
   RunActivityEntry,
   SkillInfo,
   LoadedSkill,
@@ -115,6 +116,9 @@ export class ChatCompletionStream implements AsyncIterable<ChatCompletionChunk> 
 
   /** If the stream ended with finish_reason "set_design", this contains appearance overrides. */
   setDesign: SetDesignPayload | null = null;
+
+  /** If the stream ended with finish_reason "widget_render", this contains the inline widget. */
+  widgetRender: WidgetRenderPayload | null = null;
 
   /** Whether abort() has been called. */
   aborted = false;
@@ -237,6 +241,10 @@ export class ChatCompletionStream implements AsyncIterable<ChatCompletionChunk> 
             // Capture set_design payload from the chunk
             if (choice?.finish_reason === "set_design" && choice.set_design) {
               this.setDesign = choice.set_design;
+            }
+            // Capture widget_render payload from the chunk
+            if (choice?.finish_reason === "widget_render" && choice.widget_render) {
+              this.widgetRender = choice.widget_render;
             }
             yield chunk;
           } catch {
