@@ -93,7 +93,9 @@ import {
 } from "@/components/ai-elements/prompt-input";
 import type { PromptInputMessage } from "@/components/ai-elements/prompt-input";
 import { useChatState, useChatActions, useChatInputDisabled } from "@/hooks/chat-context";
+import { setChatPageSessionsOpen, useChatPageSessionsOpen } from "@/hooks/chat-context";
 import { MissionPreviewDialog } from "@/components/mission-preview-dialog";
+import { WidgetCard } from "@/components/widget-card";
 import type { AskUserQuestion, AskUserAnswer, MessageSegment, ToolCallInfo, MissionPreviewData, MissionPreviewAction, VaultPreviewData, VaultPreviewAction, SetDesignData } from "@/hooks/use-polpo";
 import { FilePreviewDialog, useFilePreview, mimeFromPath } from "@/components/shared/file-preview";
 import { ToolCallList, ToolInvocation, ToolCallGroup } from "@/components/ai-elements/tool";
@@ -1886,9 +1888,9 @@ function isFileAllowedForAgent(file: MentionFile, agent?: AgentConfig): boolean 
 const ORCHESTRATOR_KEY = "__orchestrator__";
 const SIDEBAR_VIEW_KEY = "polpo-chat-sidebar-view";
 const SESSION_SIDEBAR_WIDTH_KEY = "polpo-chat-session-sidebar-width";
-const SESSION_SIDEBAR_DEFAULT_WIDTH = 288;
-const SESSION_SIDEBAR_MIN_WIDTH = 240;
-const SESSION_SIDEBAR_MAX_WIDTH = 420;
+const SESSION_SIDEBAR_DEFAULT_WIDTH = 360;
+const SESSION_SIDEBAR_MIN_WIDTH = 320;
+const SESSION_SIDEBAR_MAX_WIDTH = 520;
 
 type SessionItem = { id: string; title?: string; createdAt: string; updatedAt: string; messageCount: number; agent?: string };
 type SidebarView = "drill" | "flat";
@@ -1924,7 +1926,7 @@ function SessionRow({
   return (
     <div
       className={cn(
-        "group flex items-center gap-3 rounded-lg px-3 py-2.5 cursor-pointer transition-colors",
+        "group flex items-start gap-2.5 rounded-lg px-3 py-2.5 cursor-pointer transition-colors",
         isActive
           ? "bg-accent/80 text-accent-foreground"
           : "hover:bg-accent/30 text-muted-foreground"
@@ -1932,39 +1934,31 @@ function SessionRow({
       onClick={() => onSelect(session.id)}
     >
       <div className="flex-1 min-w-0">
-        <div className="flex items-center justify-between gap-2">
-          <p className={cn(
-            "text-[13px] font-medium truncate",
-            isActive ? "text-accent-foreground" : "text-foreground"
-          )}>
-            {session.title || "Untitled"}
-          </p>
-          <div className="flex items-center gap-1.5 shrink-0">
-            {isStreaming && (
-              <span className="flex items-center gap-1 text-[10px] text-primary font-medium">
-                <span className="relative flex h-2 w-2">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75" />
-                  <span className="relative inline-flex rounded-full h-2 w-2 bg-primary" />
-                </span>
-              </span>
-            )}
-            <span className="text-[10px] text-muted-foreground">
-              {formatDistanceToNow(new Date(session.updatedAt), { addSuffix: false })}
-            </span>
-          </div>
-        </div>
-        <p className="text-[10px] opacity-50 mt-0.5">
-          {isStreaming ? (
-            <span className="text-primary/70">Streaming...</span>
-          ) : (
-            <>{session.messageCount} message{session.messageCount !== 1 ? "s" : ""}</>
-          )}
+        <p className={cn(
+          "whitespace-normal break-words text-[13px] font-medium leading-snug",
+          isActive ? "text-accent-foreground" : "text-foreground"
+        )}>
+          {session.title || "Untitled"}
         </p>
+        <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-muted-foreground/70">
+          {isStreaming ? (
+            <span className="flex items-center gap-1 font-medium text-primary/70">
+              <span className="relative flex h-2 w-2 shrink-0">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75" />
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-primary" />
+              </span>
+              Streaming...
+            </span>
+          ) : (
+            <span>{session.messageCount} message{session.messageCount !== 1 ? "s" : ""}</span>
+          )}
+          <span>{formatDistanceToNow(new Date(session.updatedAt), { addSuffix: false })}</span>
+        </div>
       </div>
       <Button
         variant="ghost"
         size="icon"
-        className="h-5 w-5 opacity-0 group-hover:opacity-100 shrink-0 text-muted-foreground hover:text-destructive -mr-1"
+        className="-mr-1 h-5 w-5 shrink-0 text-muted-foreground opacity-0 hover:text-destructive group-hover:opacity-100"
         onClick={(e) => {
           e.stopPropagation();
           onDelete(session.id);
@@ -2137,7 +2131,7 @@ function SessionSidebar({
       const agent = activeGroup !== ORCHESTRATOR_KEY ? agentMap[activeGroup] : undefined;
       const name = agent ? (agent.identity?.displayName ?? agent.name) : "Polpo";
       return (
-        <div className="px-3 py-2.5 border-b border-border/40 flex items-center gap-2 shrink-0">
+        <div className="px-3 py-2.5 border-b border-border/40 flex items-start gap-2 shrink-0">
           <Button
             variant="ghost"
             size="icon"
@@ -2146,7 +2140,7 @@ function SessionSidebar({
           >
             <ChevronLeft className="h-4 w-4" />
           </Button>
-          <div className="flex items-center gap-2 flex-1 min-w-0">
+          <div className="flex items-start gap-2 flex-1 min-w-0">
             {agent ? (
               <AgentAvatar
                 avatar={agent.identity?.avatar}
@@ -2158,7 +2152,7 @@ function SessionSidebar({
             ) : (
               <span className="text-sm leading-none">🐙</span>
             )}
-            <span className="text-sm font-medium truncate">{name}</span>
+            <span className="whitespace-normal break-words text-sm font-medium leading-snug">{name}</span>
           </div>
           <Tooltip>
             <TooltipTrigger asChild>
@@ -2263,7 +2257,7 @@ function SessionSidebar({
           <div
             key={key}
             className={cn(
-              "group flex items-center gap-3 rounded-lg px-3 py-3 cursor-pointer transition-colors",
+              "group flex items-start gap-3 rounded-lg px-3 py-3 cursor-pointer transition-colors",
               hasActive
                 ? "bg-accent/60 text-accent-foreground"
                 : "hover:bg-accent/30 text-muted-foreground"
@@ -2286,21 +2280,15 @@ function SessionSidebar({
               )}
             </div>
             <div className="flex-1 min-w-0">
-              <div className="flex items-baseline justify-between gap-2">
-                <p className={cn(
-                  "text-[13px] font-semibold truncate",
-                  hasActive ? "text-accent-foreground" : "text-foreground"
-                )}>
-                  {displayName}
-                </p>
-                <span className="text-[10px] text-muted-foreground shrink-0">
-                  {formatDistanceToNow(new Date(latestSession.updatedAt), { addSuffix: false })}
-                </span>
-              </div>
-              <div className="flex items-center gap-1.5 mt-0.5">
-                <span className="text-[11px] opacity-60">
-                  {count} chat{count !== 1 ? "s" : ""}
-                </span>
+              <p className={cn(
+                "whitespace-normal break-words text-[13px] font-semibold leading-snug",
+                hasActive ? "text-accent-foreground" : "text-foreground"
+              )}>
+                {displayName}
+              </p>
+              <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-muted-foreground/70">
+                <span>{count} chat{count !== 1 ? "s" : ""}</span>
+                <span>{formatDistanceToNow(new Date(latestSession.updatedAt), { addSuffix: false })}</span>
               </div>
             </div>
             <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/50 shrink-0" />
@@ -2325,7 +2313,7 @@ function SessionSidebar({
             {/* Group header — click to expand/collapse */}
             <div
               className={cn(
-                "flex items-center gap-2.5 rounded-lg px-3 py-2 cursor-pointer transition-colors",
+                "flex items-start gap-2.5 rounded-lg px-3 py-2 cursor-pointer transition-colors",
                 hasActive
                   ? "bg-accent/40"
                   : "hover:bg-accent/20"
@@ -2348,8 +2336,8 @@ function SessionSidebar({
                 )}
               </div>
               <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-[12.5px] font-bold tracking-tight truncate text-foreground leading-tight">
+                <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1">
+                  <span className="whitespace-normal break-words text-[12.5px] font-bold tracking-tight text-foreground leading-tight">
                     {displayName}
                   </span>
                   <span className="shrink-0 text-[8px] font-bold tracking-[0.12em] uppercase text-muted-foreground/55 border border-border/60 rounded-sm px-1 py-px leading-none">
@@ -2529,84 +2517,88 @@ function ChatToolbar({
   // Resolve agent for the current session
   const sessionAgent = selectedAgent ?? sessions.find((s: { id: string; agent?: string }) => s.id === sessionId)?.agent ?? null;
   const agentConfig = sessionAgent && agents ? agents.find((a) => a.name === sessionAgent) : undefined;
+  const sessionTitle = sessionId
+    ? sessions.find((s: { id: string; title?: string }) => s.id === sessionId)?.title || "Session"
+    : "New session";
 
-  return (
-    <div className="flex items-center gap-1.5 px-2 py-2 border-b border-border/40 bg-background/80 backdrop-blur-md shrink-0 sm:gap-2 sm:px-4">
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7 shrink-0"
-            onClick={onToggleSidebar}
-          >
-            {sidebarOpen ? <ChevronsLeft className="h-4 w-4" /> : <History className="h-4 w-4" />}
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent side="bottom" className="text-xs">
-          {sidebarOpen ? "Hide threads" : "Threads"}
-        </TooltipContent>
-      </Tooltip>
-      {/* New session — only when sidebar is closed (or in compact mode) */}
-      {(!sidebarOpen || compact) && (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7 shrink-0"
-              onClick={newSession}
-            >
-              <Plus className="h-4 w-4" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom" className="text-xs">
-            New session
-          </TooltipContent>
-        </Tooltip>
-      )}
-      {/* Left: agent avatar + name */}
-      {agentConfig ? (
-        <div className="flex min-w-0 max-w-[8rem] items-center gap-1.5 shrink-0 sm:max-w-48">
-          <AgentAvatar
-            avatar={agentConfig.identity?.avatar}
-            name={agentConfig.identity?.displayName ?? agentConfig.name}
-            size="xs"
-          />
-          <span className="truncate text-sm font-medium text-foreground">
-            {agentConfig.identity?.displayName ?? agentConfig.name}
-          </span>
-        </div>
-      ) : (
-        <div className="flex items-center gap-1.5 shrink-0">
-          <span className="text-sm leading-none">🐙</span>
-          <span className="text-sm font-medium text-foreground">Polpo</span>
-        </div>
-      )}
-      {/* Session title — flex-1 pushes right-side actions to the edge */}
-      <div className="flex-1 min-w-0">
-        {sessionId ? (
-          <span className="text-xs text-muted-foreground truncate block">
-            {sessions.find((s: { id: string; title?: string }) => s.id === sessionId)?.title || "Session"}
-          </span>
-        ) : (
-          <span className="text-xs text-muted-foreground">New session</span>
-        )}
-      </div>
-      {/* Right: message count + actions */}
-      {messages.length > 0 && (
-        <>
-          <Badge variant="secondary" className="hidden shrink-0 text-[10px] sm:inline-flex">
-            {messages.length} messages
-          </Badge>
-          {!isLoading && (
+  if (compact) {
+    return (
+      <div className="grid shrink-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 border-b border-border/40 bg-background/80 px-2 py-1.5 backdrop-blur-md">
+        <div className="flex shrink-0 items-center gap-1">
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="h-7 w-7 shrink-0 text-muted-foreground hover:text-destructive"
+                  className="h-7 w-7 rounded-md text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+                  onClick={onToggleSidebar}
+                  aria-label={sidebarOpen ? "Hide threads" : "Show threads"}
+                >
+                  {sidebarOpen ? <ChevronsLeft className="h-4 w-4" /> : <History className="h-4 w-4" />}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" className="text-xs">
+                {sidebarOpen ? "Hide threads" : "Threads"}
+              </TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 rounded-md text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+                  onClick={newSession}
+                  aria-label="New session"
+                >
+                  <Plus className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" className="text-xs">
+                New session
+              </TooltipContent>
+            </Tooltip>
+        </div>
+
+        <div className="min-w-0">
+          <div className="flex min-w-0 items-center gap-1.5">
+            {agentConfig ? (
+              <>
+                <AgentAvatar
+                  avatar={agentConfig.identity?.avatar}
+                  name={agentConfig.identity?.displayName ?? agentConfig.name}
+                  size="xs"
+                />
+                <span className="truncate text-sm font-semibold leading-5 text-foreground">
+                  {agentConfig.identity?.displayName ?? agentConfig.name}
+                </span>
+              </>
+            ) : (
+              <>
+                <span className="shrink-0 text-sm leading-none">🐙</span>
+                <span className="truncate text-sm font-semibold leading-5 text-foreground">Polpo</span>
+              </>
+            )}
+          </div>
+          <span className="block whitespace-normal break-words text-xs leading-4 text-muted-foreground" title={sessionTitle}>
+            {sessionTitle}
+          </span>
+        </div>
+
+        <div className="flex shrink-0 items-center justify-end gap-1">
+          {messages.length > 0 && (
+            <span className="hidden rounded-full bg-muted/70 px-2 py-0.5 text-[10px] font-medium leading-4 text-muted-foreground min-[430px]:inline-flex">
+              {messages.length}
+            </span>
+          )}
+          {!isLoading && messages.length > 0 && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
                   onClick={clear}
+                  aria-label="Clear session"
                 >
                   <Trash2 className="h-3.5 w-3.5" />
                 </Button>
@@ -2616,8 +2608,100 @@ function ChatToolbar({
               </TooltipContent>
             </Tooltip>
           )}
-        </>
-      )}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="grid shrink-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 border-b border-border/40 bg-background/80 px-2 py-1.5 backdrop-blur-md sm:px-3">
+      <div className="flex shrink-0 items-center gap-1">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 rounded-md text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+              onClick={onToggleSidebar}
+              aria-label={sidebarOpen ? "Hide threads" : "Show threads"}
+            >
+              {sidebarOpen ? <ChevronsLeft className="h-4 w-4" /> : <History className="h-4 w-4" />}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom" className="text-xs">
+            {sidebarOpen ? "Hide threads" : "Threads"}
+          </TooltipContent>
+        </Tooltip>
+        {!sidebarOpen && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7 rounded-md text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+                onClick={newSession}
+                aria-label="New session"
+              >
+                <Plus className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" className="text-xs">
+              New session
+            </TooltipContent>
+          </Tooltip>
+        )}
+      </div>
+
+      <div className="min-w-0">
+        <div className="flex min-w-0 items-center gap-1.5">
+          {agentConfig ? (
+            <>
+              <AgentAvatar
+                avatar={agentConfig.identity?.avatar}
+                name={agentConfig.identity?.displayName ?? agentConfig.name}
+                size="xs"
+              />
+              <span className="truncate text-sm font-semibold leading-5 text-foreground">
+                {agentConfig.identity?.displayName ?? agentConfig.name}
+              </span>
+            </>
+          ) : (
+            <>
+              <span className="shrink-0 text-sm leading-none">🐙</span>
+              <span className="truncate text-sm font-semibold leading-5 text-foreground">Polpo</span>
+            </>
+          )}
+        </div>
+        <span className="block whitespace-normal break-words text-xs leading-4 text-muted-foreground" title={sessionTitle}>
+          {sessionTitle}
+        </span>
+      </div>
+
+      <div className="flex shrink-0 items-center justify-end gap-1">
+        {messages.length > 0 && (
+          <Badge variant="secondary" className="hidden shrink-0 text-[10px] md:inline-flex">
+            {messages.length} messages
+          </Badge>
+        )}
+        {!isLoading && messages.length > 0 && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7 rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                onClick={clear}
+                aria-label="Clear session"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" className="text-xs">
+              Clear session
+            </TooltipContent>
+          </Tooltip>
+        )}
+      </div>
     </div>
   );
 }
@@ -2962,6 +3046,9 @@ function ChatMessages() {
                             onRespond={respondToVault}
                             disabled={isLoading || !pendingVault}
                           />
+                        )}
+                        {msg.widgetRender && (
+                          <WidgetCard widget={msg.widgetRender} />
                         )}
                         {msg.setDesign && (
                           <DesignPreviewCard
@@ -3361,11 +3448,14 @@ export function ChatPage({ compact, embedded }: { compact?: boolean; embedded?: 
 
   // In embedded mode, session sidebar is controlled externally
   const externalSessionsOpen = useChatFirstSessionsOpen();
-  const [internalSidebarOpen, setInternalSidebarOpen] = useState(false);
-  const sidebarOpen = embedded ? externalSessionsOpen : internalSidebarOpen;
+  const pageSessionsOpen = useChatPageSessionsOpen();
+  const [compactSidebarOpen, setCompactSidebarOpen] = useState(false);
+  const sidebarOpen = embedded ? externalSessionsOpen : compact ? compactSidebarOpen : pageSessionsOpen;
   const setSidebarOpen = embedded
     ? setChatFirstSessionsOpen
-    : setInternalSidebarOpen;
+    : compact
+      ? setCompactSidebarOpen
+      : setChatPageSessionsOpen;
 
   // Filter out empty/orphan sessions
   const visibleSessions = sessions.filter(
@@ -3437,7 +3527,7 @@ export function ChatPage({ compact, embedded }: { compact?: boolean; embedded?: 
 
           {/* Main chat area */}
           <div className="flex-1 flex flex-col min-w-0 h-full">
-            {!embedded && (
+            {!embedded && compact && (
               <ChatToolbar
                 sidebarOpen={sidebarOpen}
                 onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}

@@ -58,6 +58,17 @@ export interface VaultPreviewData {
 
 export type VaultPreviewAction = "confirm" | "cancel";
 
+// Local mirror of SDK widget render types — display-only intercept.
+// Renders self-contained HTML inside a sandboxed iframe; the turn ends
+// after the widget is shown. No user response is required (unlike
+// mission/vault), the user just views it.
+export interface WidgetRenderData {
+  html: string;
+  title?: string | null;
+  height?: number | null;
+  description?: string | null;
+}
+
 // Client-side tool types
 export interface OpenFileData {
   path: string;
@@ -113,6 +124,7 @@ export interface ChatMessageWithQuestions extends ChatMessage {
   askUserQuestions?: AskUserQuestion[];
   missionPreview?: MissionPreviewData;
   vaultPreview?: VaultPreviewData;
+  widgetRender?: WidgetRenderData;
   openFile?: OpenFileData;
   navigateTo?: NavigateToData;
   openTab?: OpenTabData;
@@ -364,6 +376,19 @@ export function useChat() {
         };
         lastMsg.vaultPreview = vaultPreview;
         setSessionPending(key, { vault: vaultPreview });
+      } else if (tc.name === "render_widget" && tc.arguments) {
+        // Display-only — restore the widget on the message so it re-renders
+        // after a page reload. NOT pending (no user response required).
+        const args = tc.arguments as Record<string, unknown>;
+        const html = typeof args.html === "string" ? args.html : "";
+        if (html) {
+          lastMsg.widgetRender = {
+            html,
+            title: (args.title as string | undefined) ?? null,
+            height: (args.height as number | undefined) ?? null,
+            description: (args.description as string | undefined) ?? null,
+          };
+        }
       // NOTE: open_file, navigate_to, open_tab are one-shot navigation actions.
       // They must NOT be restored as pending because:
       // 1. They were already consumed when originally fired (navigate + streamCompletion).
@@ -476,12 +501,14 @@ export function useChat() {
     const segments: MessageSegment[] = [];
     let currentTextIdx = -1;
     let currentThinkingIdx = -1;
+    let widgetRender: WidgetRenderData | null = null;
 
     const messagePatch = () => ({
       content: fullContent,
       thinkingText: thinkingText || undefined,
       toolCalls: toolCalls.length > 0 ? [...toolCalls] : undefined,
       segments: [...segments],
+      ...(widgetRender ? { widgetRender } : {}),
     });
 
     const updateMsg = () => {
@@ -564,6 +591,20 @@ export function useChat() {
               currentTextIdx = -1;
               currentThinkingIdx = -1;
             }
+            updateMsg();
+          }
+
+          // Widget render intercept — display-only, just paint it onto the message.
+          const wr = choice?.widget_render as
+            | { html: string; title?: string | null; height?: number | null; description?: string | null }
+            | undefined;
+          if (wr && typeof wr.html === "string") {
+            widgetRender = {
+              html: wr.html,
+              title: wr.title ?? null,
+              height: wr.height ?? null,
+              description: wr.description ?? null,
+            };
             updateMsg();
           }
         }
@@ -707,6 +748,9 @@ export function useChat() {
       // Track index of the current text segment (if last segment is text, append to it)
       let currentTextIdx = -1;
       let currentThinkingIdx = -1;
+      // Widget render intercept — captured from the SSE chunk (the SDK
+      // doesn't expose it yet, so we read it directly off the choice).
+      let widgetRender: WidgetRenderData | null = null;
 
       const messagePatch = () => ({
         content: fullContent,
@@ -796,6 +840,20 @@ export function useChat() {
             currentThinkingIdx = -1;
           }
           updateMsg();
+        }
+
+        // Widget render intercept — same shape as mission_preview/vault_preview
+        // but display-only: turn ends, no user response expected.
+        const wr = (choice as any)?.widget_render as
+          | { html: string; title?: string | null; height?: number | null; description?: string | null }
+          | undefined;
+        if (wr && typeof wr.html === "string") {
+          widgetRender = {
+            html: wr.html,
+            title: wr.title ?? null,
+            height: wr.height ?? null,
+            description: wr.description ?? null,
+          };
         }
       }
 
@@ -946,6 +1004,21 @@ export function useChat() {
           ];
         });
         setSessionPending(streamSessionKey, { setDesign: setDesignData, questions: null, mission: null, vault: null, openFile: null, navigateTo: null, openTab: null });
+        appendConversation(streamSessionKey, { role: "assistant", content: fullContent });
+      } else if (widgetRender) {
+        // Widget render — display-only intercept, the turn ends after the
+        // widget is shown. Attach to the assistant message so it survives
+        // a refresh (also restored from persisted toolCalls — see
+        // restoreInteractiveState below).
+        const widgetData = widgetRender;
+        updateSessionMessages(streamSessionKey, (prev) =>
+          prev.map((m) =>
+            m.id === assistantId
+              ? { ...m, ...messagePatch(), widgetRender: widgetData }
+              : m
+          )
+        );
+        clearSessionPending(streamSessionKey);
         appendConversation(streamSessionKey, { role: "assistant", content: fullContent });
       } else {
         clearSessionPending(streamSessionKey);
