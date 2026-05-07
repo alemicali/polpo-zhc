@@ -1010,14 +1010,48 @@ export function useChat() {
         // widget is shown. Attach to the assistant message so it survives
         // a refresh (also restored from persisted toolCalls — see
         // restoreInteractiveState below).
+        // Same find-or-create pattern of setDesign: il widget arriva di solito
+        // PRIMA di qualunque text delta, quindi assistantId potrebbe non
+        // esistere ancora nei messages → senza fallback la card sparisce.
         const widgetData = widgetRender;
-        updateSessionMessages(streamSessionKey, (prev) =>
-          prev.map((m) =>
-            m.id === assistantId
-              ? { ...m, ...messagePatch(), widgetRender: widgetData }
-              : m
-          )
-        );
+        updateSessionMessages(streamSessionKey, (prev) => {
+          let attached = false;
+          const patched = prev.map((m) => {
+            if (m.id !== assistantId) return m;
+            attached = true;
+            return { ...m, ...messagePatch(), widgetRender: widgetData };
+          });
+
+          if (attached) return patched;
+
+          // Last-resort: cerca l'ultimo assistant esistente e aggancia lì.
+          let lastAssistantIndex = -1;
+          for (let index = patched.length - 1; index >= 0; index -= 1) {
+            if (patched[index]?.role === "assistant") {
+              lastAssistantIndex = index;
+              break;
+            }
+          }
+          if (lastAssistantIndex >= 0) {
+            return patched.map((m, index) =>
+              index === lastAssistantIndex
+                ? { ...m, ...messagePatch(), widgetRender: widgetData }
+                : m
+            );
+          }
+
+          // Nessun assistant: creiamo un messaggio nuovo apposta.
+          return [
+            ...patched,
+            {
+              id: assistantId,
+              role: "assistant",
+              ts: new Date().toISOString(),
+              ...messagePatch(),
+              widgetRender: widgetData,
+            },
+          ];
+        });
         clearSessionPending(streamSessionKey);
         appendConversation(streamSessionKey, { role: "assistant", content: fullContent });
       } else {
