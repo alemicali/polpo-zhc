@@ -43,6 +43,7 @@ import { gitRoutes } from "./routes/git.js";
 import { audioRoutes } from "./routes/audio.js";
 import { pushRoutes } from "./routes/push.js";
 import { expoPushRoutes } from "./routes/expo-push.js";
+import { whatsappRoutes } from "./routes/whatsapp.js";
 import { codingRoutes } from "./routes/coding.js";
 import { syncRoutes } from "./routes/sync.js";
 import { FileAttachmentStore } from "../stores/file-attachment-store.js";
@@ -169,7 +170,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
       return buildSystemPrompt(agentConfig, o.getAgentWorkDir(), o.getPolpoDir());
     },
     resolveAgentTools: async (agentConfig: any) => {
-      const { createSystemTools } = await import("../tools/system-tools.js");
+      const { createAllTools } = await import("../tools/system-tools.js");
       const { createMemoryTools } = await import("../tools/memory-tools.js");
       const { resolveAgentVault } = await import("../vault/index.js");
       const {
@@ -179,9 +180,35 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
         validateRenderWidgetArgs,
       } = await import("../llm/orchestrator-tools.js");
       const { nanoid } = await import("nanoid");
+      const { join } = await import("node:path");
       const vaultEntries = await o.getVaultStore()?.getAllForAgent(agentConfig.name);
       const vault = resolveAgentVault(vaultEntries);
-      const tools: any[] = createSystemTools(o.getAgentWorkDir(), agentConfig.allowedTools, undefined, undefined, vault);
+      // Mirror del path task (src/adapters/engine.ts) — se l'agent dichiara
+      // tool estesi (browser_*, email_*, image_*, video_*, audio_*, excel_*,
+      // pdf_*, docx_*, search_*, whatsapp_*, phone_*) li registriamo anche
+      // in chat completions. Senza questo l'agente in chat poteva solo
+      // read/write/bash/grep/glob/ls/http_fetch/http_download mentre nei
+      // task aveva accesso completo — incoerenza intenzionalmente rimossa.
+      // Performance: la chiamata sotto cade nel core-only path se
+      // allowedTools non contiene nessun prefisso esteso (createAllTools
+      // attiva ogni categoria solo quando richiesta).
+      const polpoDir = o.getPolpoDir();
+      const browserProfileDir = polpoDir
+        ? join(polpoDir, "browser-profiles", agentConfig.browserProfile || agentConfig.name)
+        : undefined;
+      const tools: any[] = await createAllTools({
+        cwd: o.getAgentWorkDir(),
+        allowedTools: agentConfig.allowedTools,
+        allowedPaths: undefined,
+        browserSession: agentConfig.name,
+        browserProfileDir,
+        vault,
+        emailAllowedDomains: agentConfig.emailAllowedDomains,
+        outputDir: undefined,
+        whatsappStore: o.getWhatsAppStore?.(),
+        whatsappSendMessage: undefined,
+        polpoDir,
+      });
       const memoryStore = o.getMemoryStore();
       if (memoryStore) tools.push(...createMemoryTools(memoryStore, agentConfig.name));
       const existingToolNames = new Set(tools.map((tool: any) => tool.name));
@@ -426,6 +453,11 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
 
   authed.route("/expo-push", expoPushRoutes(() => ({
     polpoDir: o.getPolpoDir(),
+  })));
+
+  authed.route("/whatsapp", whatsappRoutes(() => ({
+    polpoDir: o.getPolpoDir(),
+    reloadConfig: () => o.reloadConfig(),
   })));
 
   authed.route("/coding", codingRoutes(() => ({

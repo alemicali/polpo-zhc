@@ -432,7 +432,7 @@ const CHANNEL_META: Record<string, { label: string; icon: LucideIcon; color: str
   push:     { label: "Push",     icon: Monitor,         color: "border-l-fuchsia-500", hue: "fuchsia", description: "Send PWA push notifications to subscribed browsers" },
 };
 
-const ALL_CHANNEL_TYPES: NotificationChannelType[] = ["telegram", "slack", "email", "webhook", "push"];
+const ALL_CHANNEL_TYPES: NotificationChannelType[] = ["telegram", "whatsapp", "slack", "email", "webhook", "push"];
 
 const HUE_STYLES: Record<string, { iconBg: string; iconRing: string; gradient: string; pip: string }> = {
   sky: { iconBg: "bg-sky-500/12", iconRing: "ring-sky-500/30", gradient: "from-sky-500/15", pip: "bg-sky-500" },
@@ -447,7 +447,8 @@ const HUE_STYLES: Record<string, { iconBg: string; iconRing: string; gradient: s
 /** Default empty config per channel type */
 function defaultChannelConfig(type: NotificationChannelType): NotificationChannelConfig {
   switch (type) {
-    case "telegram": return { type, botToken: "", chatId: "" };
+    case "telegram": return { type, botToken: "", chatId: "", gateway: { enableInbound: false, dmPolicy: "pairing" } };
+    case "whatsapp": return { type, chatId: "", profileDir: "default", gateway: { enableInbound: false, dmPolicy: "pairing" } };
     case "slack":    return { type, webhookUrl: "" };
     case "email":    return { type, provider: "resend", apiKey: "", from: "", to: [] };
     case "webhook":  return { type, url: "" };
@@ -467,22 +468,346 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
   );
 }
 
-/** Channel config form — renders type-specific fields */
-function ChannelForm({ config, onChange }: {
-  config: NotificationChannelConfig;
-  onChange: (config: NotificationChannelConfig) => void;
-}) {
-  const set = (patch: Partial<NotificationChannelConfig>) => onChange({ ...config, ...patch });
+type GatewayConfig = NonNullable<NotificationChannelConfig["gateway"]>;
+type GatewayPolicy = NonNullable<GatewayConfig["dmPolicy"]>;
+type WhatsAppLoginStatus = "starting" | "qr" | "connected" | "error" | "expired" | "cancelled";
+
+interface WhatsAppProfileInfo {
+  profileDir: string;
+  authenticated: boolean;
+  status: string;
+  path: string;
+}
+
+interface WhatsAppLoginSessionInfo {
+  id: string;
+  profileDir: string;
+  status: WhatsAppLoginStatus;
+  qr?: string;
+  error?: string;
+  startedAt: string;
+  updatedAt: string;
+  expiresAt: string;
+}
+
+function channelSupportsInbound(type: NotificationChannelType): boolean {
+  return type === "telegram" || type === "whatsapp";
+}
+
+function splitList(value: string): string[] {
+  return value.split(",").map((s) => s.trim()).filter(Boolean);
+}
+
+function ChannelConceptPanel({ type }: { type: NotificationChannelType }) {
+  const meta = CHANNEL_META[type];
+  const inbound = channelSupportsInbound(type);
 
   return (
-    <div className="space-y-3">
+    <div className="rounded-lg border border-border/40 bg-muted/15 px-3 py-2.5 space-y-2">
+      <div className="flex items-start gap-2">
+        <Bell className="mt-0.5 h-3.5 w-3.5 text-muted-foreground shrink-0" />
+        <div className="min-w-0">
+          <p className="text-xs font-medium">Notification delivery</p>
+          <p className="text-[10.5px] leading-relaxed text-muted-foreground">
+            Outbound path: Polpo sends alerts, task updates, approvals, or rule events through this {meta?.label ?? type} channel.
+          </p>
+        </div>
+      </div>
+      <div className="flex items-start gap-2">
+        <MessageSquare className="mt-0.5 h-3.5 w-3.5 text-muted-foreground shrink-0" />
+        <div className="min-w-0">
+          <p className="text-xs font-medium">Inbound gateway</p>
+          <p className="text-[10.5px] leading-relaxed text-muted-foreground">
+            {inbound
+              ? "Inbound path: people can message Polpo from this channel and the gateway routes the text into a Polpo session."
+              : "This channel is delivery-only here. It can receive notifications, but it does not expose a chat gateway."}
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ChannelSetupGuide({ type }: { type: NotificationChannelType }) {
+  if (type === "telegram") {
+    return (
+      <div className="rounded-lg border border-sky-500/20 bg-sky-500/5 px-3 py-2.5">
+        <p className="text-xs font-medium">Telegram setup</p>
+        <div className="mt-1 grid gap-1 text-[10.5px] leading-relaxed text-muted-foreground">
+          <span>1. Create a bot with @BotFather and paste the bot token.</span>
+          <span>2. Add the bot to the target chat or group and set the chat ID.</span>
+          <span>3. Enable inbound only if users should talk to Polpo from Telegram.</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (type === "whatsapp") {
+    return (
+      <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/5 px-3 py-2.5">
+        <p className="text-xs font-medium">WhatsApp setup</p>
+        <div className="mt-1 grid gap-1 text-[10.5px] leading-relaxed text-muted-foreground">
+          <span>1. Pair this server as a linked device with the Connect WhatsApp button below.</span>
+          <span>2. Use the same profile directory here, then set the destination phone/chat ID.</span>
+          <span>3. Enable inbound only for a dedicated or trusted number. This uses WhatsApp Web connectivity.</span>
+        </div>
+      </div>
+    );
+  }
+
+  return null;
+}
+
+function WhatsAppProfileSetup({ config, onChange }: {
+  config: NotificationChannelConfig;
+  onChange: (patch: Partial<NotificationChannelConfig>) => void;
+}) {
+  const profileDir = config.profileDir || "default";
+  const [profiles, setProfiles] = useState<WhatsAppProfileInfo[]>([]);
+  const [session, setSession] = useState<WhatsAppLoginSessionInfo | null>(null);
+  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const activeProfile = profiles.find((p) => p.profileDir === profileDir);
+  const authenticated = !!activeProfile?.authenticated || session?.status === "connected";
+
+  const loadProfiles = useCallback(async () => {
+    try {
+      const res = await fetch(`${appConfig.baseUrl}/api/v1/whatsapp/profiles`, { credentials: "include" });
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error ?? "Could not load WhatsApp profiles");
+      setProfiles(data.data?.profiles ?? []);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not load WhatsApp profiles");
+    }
+  }, []);
+
+  useEffect(() => {
+    if (config.type !== "whatsapp") return;
+    void loadProfiles();
+  }, [config.type, loadProfiles]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!session?.qr) {
+      setQrDataUrl(null);
+      return;
+    }
+    import("qrcode")
+      .then((QRCode) => QRCode.toDataURL(session.qr!, { margin: 1, width: 260 }))
+      .then((url) => { if (!cancelled) setQrDataUrl(url); })
+      .catch(() => { if (!cancelled) setQrDataUrl(null); });
+    return () => { cancelled = true; };
+  }, [session?.qr]);
+
+  useEffect(() => {
+    if (!session || !["starting", "qr"].includes(session.status)) return;
+    const timer = window.setInterval(async () => {
+      try {
+        const res = await fetch(`${appConfig.baseUrl}/api/v1/whatsapp/login/${session.id}`, { credentials: "include" });
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error ?? "Could not read WhatsApp login status");
+        const next = data.data?.session as WhatsAppLoginSessionInfo;
+        setSession(next);
+        if (["connected", "error", "expired", "cancelled"].includes(next.status)) {
+          window.clearInterval(timer);
+          void loadProfiles();
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Could not read WhatsApp login status");
+      }
+    }, 1500);
+    return () => window.clearInterval(timer);
+  }, [session, loadProfiles]);
+
+  const startLogin = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(`${appConfig.baseUrl}/api/v1/whatsapp/login/start`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ profileDir }),
+      });
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error ?? "Could not start WhatsApp login");
+      setSession(data.data?.session ?? null);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Could not start WhatsApp login";
+      setError(msg);
+      toast.error(msg);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const cancelLogin = async () => {
+    if (!session || !["starting", "qr"].includes(session.status)) return;
+    try {
+      await fetch(`${appConfig.baseUrl}/api/v1/whatsapp/login/${session.id}/cancel`, {
+        method: "POST",
+        credentials: "include",
+      });
+    } finally {
+      setSession(null);
+      setQrDataUrl(null);
+      void loadProfiles();
+    }
+  };
+
+  const logout = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(`${appConfig.baseUrl}/api/v1/whatsapp/logout`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ profileDir }),
+      });
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error ?? "Could not remove WhatsApp profile");
+      setSession(null);
+      setQrDataUrl(null);
+      setProfiles(data.data?.profiles ?? []);
+      toast.success(`WhatsApp profile "${profileDir}" removed`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Could not remove WhatsApp profile";
+      setError(msg);
+      toast.error(msg);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="rounded-lg border border-border/40 bg-background/50 px-3 py-3 space-y-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <LogIn className="h-3.5 w-3.5 text-muted-foreground" />
+            <span className="text-xs font-semibold">WhatsApp profile</span>
+            <Badge variant={authenticated ? "secondary" : "outline"} className={cn("h-4 text-[9px] px-1.5", authenticated && "text-emerald-600")}>
+              {authenticated ? "Connected" : session?.status === "qr" ? "Scan QR" : "Not linked"}
+            </Badge>
+          </div>
+          <p className="mt-1 text-[10.5px] leading-relaxed text-muted-foreground">
+            Pair this server as a WhatsApp linked device. The profile powers tool access; notifications and inbound stay optional.
+          </p>
+        </div>
+        <Button type="button" variant="outline" size="sm" className="h-7 shrink-0 text-[11px] gap-1.5" onClick={() => void loadProfiles()}>
+          <RefreshCw className="h-3 w-3" /> Refresh
+        </Button>
+      </div>
+
+      <Field label="Profile Directory" hint="Stored under .polpo/whatsapp-profiles/<profileDir>.">
+        <Input
+          className="h-8 text-xs font-mono"
+          placeholder="default"
+          value={profileDir}
+          onChange={(e) => onChange({ profileDir: e.target.value || "default" })}
+        />
+      </Field>
+
+      <div className="flex flex-wrap gap-2">
+        <Button
+          type="button"
+          size="sm"
+          className="h-8 text-xs gap-1.5"
+          onClick={startLogin}
+          disabled={busy || ["starting", "qr"].includes(session?.status ?? "")}
+        >
+          {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <LogIn className="h-3 w-3" />}
+          {authenticated ? "Reconnect" : "Connect WhatsApp"}
+        </Button>
+        {session && ["starting", "qr"].includes(session.status) && (
+          <Button type="button" variant="outline" size="sm" className="h-8 text-xs" onClick={cancelLogin}>
+            Cancel
+          </Button>
+        )}
+        {authenticated && (
+          <Button type="button" variant="ghost" size="sm" className="h-8 text-xs text-destructive hover:text-destructive" onClick={logout} disabled={busy}>
+            <Trash2 className="h-3 w-3" /> Logout
+          </Button>
+        )}
+      </div>
+
+      {session?.status === "starting" && (
+        <div className="rounded-md border border-border/30 bg-muted/15 px-2.5 py-2 text-[10.5px] text-muted-foreground flex items-center gap-2">
+          <Loader2 className="h-3.5 w-3.5 animate-spin" /> Waiting for WhatsApp QR code...
+        </div>
+      )}
+
+      {session?.status === "qr" && (
+        <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-3 space-y-2">
+          <p className="text-xs font-medium">Scan with WhatsApp</p>
+          <p className="text-[10.5px] leading-relaxed text-muted-foreground">
+            Open WhatsApp, go to Linked Devices, then scan this QR code.
+          </p>
+          {qrDataUrl ? (
+            <img src={qrDataUrl} alt="WhatsApp login QR code" className="h-[260px] w-[260px] rounded-md border border-border/40 bg-white p-2" />
+          ) : (
+            <div className="flex h-[260px] w-[260px] items-center justify-center rounded-md border border-border/40 bg-muted/20">
+              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+            </div>
+          )}
+        </div>
+      )}
+
+      {session && ["connected", "error", "expired", "cancelled"].includes(session.status) && (
+        <div className={cn(
+          "rounded-md border px-2.5 py-2 text-[10.5px] leading-relaxed",
+          session.status === "connected"
+            ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-600"
+            : "border-destructive/25 bg-destructive/10 text-destructive",
+        )}>
+          {session.status === "connected"
+            ? "WhatsApp linked. The server will reconnect the bridge when this profile is configured."
+            : session.error ?? `WhatsApp login ${session.status}.`}
+        </div>
+      )}
+
+      {error && (
+        <div className="rounded-md border border-destructive/25 bg-destructive/10 px-2.5 py-2 text-[10.5px] leading-relaxed text-destructive">
+          {error}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DeliveryFields({ config, onChange }: {
+  config: NotificationChannelConfig;
+  onChange: (patch: Partial<NotificationChannelConfig>) => void;
+}) {
+  const set = onChange;
+
+  return (
+    <div className="rounded-lg border border-border/40 bg-background/50 px-3 py-3 space-y-3">
+      <div className="flex items-center gap-2">
+        <Bell className="h-3.5 w-3.5 text-muted-foreground" />
+        <span className="text-xs font-semibold">Notification delivery</span>
+      </div>
+
       {config.type === "telegram" && (
         <>
           <Field label="Bot Token" hint="From @BotFather on Telegram">
             <Input className="h-8 text-xs font-mono" placeholder="123456:ABC-DEF..." value={config.botToken ?? ""} onChange={(e) => set({ botToken: e.target.value })} />
           </Field>
-          <Field label="Chat ID" hint="Numeric chat or group ID">
+          <Field label="Chat ID" hint="Numeric chat or group ID used for outbound notifications">
             <Input className="h-8 text-xs font-mono" placeholder="-1001234567890" value={config.chatId ?? ""} onChange={(e) => set({ chatId: e.target.value })} />
+          </Field>
+        </>
+      )}
+
+      {config.type === "whatsapp" && (
+        <>
+          <WhatsAppProfileSetup config={config} onChange={set} />
+          <Field label="Notification Chat ID" hint="Optional. Only needed if notification rules should send outbound WhatsApp alerts. Leave empty for tool-only access.">
+            <Input className="h-8 text-xs font-mono" placeholder="Optional: +393331234567 or 393331234567@s.whatsapp.net" value={config.chatId ?? ""} onChange={(e) => set({ chatId: e.target.value })} />
           </Field>
         </>
       )}
@@ -492,7 +817,7 @@ function ChannelForm({ config, onChange }: {
           <Field label="Webhook URL" hint="Slack Incoming Webhook URL">
             <Input className="h-8 text-xs font-mono" placeholder="https://hooks.slack.com/services/..." value={config.webhookUrl ?? ""} onChange={(e) => set({ webhookUrl: e.target.value })} />
           </Field>
-          <Field label="API Key" hint="Optional — enables file uploads">
+          <Field label="API Key" hint="Optional - enables file uploads">
             <Input className="h-8 text-xs font-mono" placeholder="xoxb-..." value={config.apiKey ?? ""} onChange={(e) => set({ apiKey: e.target.value || undefined })} />
           </Field>
         </>
@@ -533,7 +858,7 @@ function ChannelForm({ config, onChange }: {
           <Field label="Recipients" hint="Comma-separated email addresses">
             <Input className="h-8 text-xs font-mono" placeholder="alice@example.com, bob@example.com"
               value={(config.to ?? []).join(", ")}
-              onChange={(e) => set({ to: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) })}
+              onChange={(e) => set({ to: splitList(e.target.value) })}
             />
           </Field>
         </>
@@ -589,6 +914,128 @@ function ChannelForm({ config, onChange }: {
             VAPID keys are generated once and stored in .polpo/push.json. Override them with config values or env references only when you need stable keys across deployments.
           </p>
         </>
+      )}
+    </div>
+  );
+}
+
+function InboundGatewayForm({ config, onChange }: {
+  config: NotificationChannelConfig;
+  onChange: (config: NotificationChannelConfig) => void;
+}) {
+  const gateway = config.gateway ?? {};
+  const enabled = gateway.enableInbound === true;
+  const policy = gateway.dmPolicy ?? "pairing";
+  const updateGateway = (patch: Partial<GatewayConfig>) => {
+    onChange({
+      ...config,
+      gateway: {
+        dmPolicy: "pairing",
+        ...gateway,
+        ...patch,
+      },
+    });
+  };
+
+  return (
+    <div className="rounded-lg border border-border/40 bg-background/50 px-3 py-3 space-y-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <MessageSquare className="h-3.5 w-3.5 text-muted-foreground" />
+            <span className="text-xs font-semibold">Inbound gateway</span>
+          </div>
+          <p className="mt-1 text-[10.5px] leading-relaxed text-muted-foreground">
+            Let people send messages to Polpo from {CHANNEL_META[config.type]?.label ?? config.type}. This is separate from outbound notifications.
+          </p>
+        </div>
+        <Button
+          type="button"
+          variant={enabled ? "secondary" : "outline"}
+          size="sm"
+          className="h-7 shrink-0 text-[11px] gap-1.5"
+          onClick={() => updateGateway({ enableInbound: !enabled })}
+        >
+          <ToggleRight className={cn("h-3.5 w-3.5", enabled && "text-emerald-500")} />
+          {enabled ? "Enabled" : "Off"}
+        </Button>
+      </div>
+
+      {enabled ? (
+        <>
+          <div className="grid grid-cols-2 gap-2">
+            <Field label="DM Policy" hint="Controls who can start a Polpo session.">
+              <Select value={policy} onValueChange={(v) => updateGateway({ dmPolicy: v as GatewayPolicy })}>
+                <SelectTrigger className="h-8 text-xs w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="pairing" className="text-xs">Pairing</SelectItem>
+                  <SelectItem value="allowlist" className="text-xs">Allowlist</SelectItem>
+                  <SelectItem value="open" className="text-xs">Open</SelectItem>
+                  <SelectItem value="disabled" className="text-xs">Disabled</SelectItem>
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field label="Idle Timeout" hint="Minutes before a session expires.">
+              <Input
+                className="h-8 text-xs font-mono"
+                type="number"
+                min={1}
+                placeholder="60"
+                value={gateway.sessionIdleMinutes ?? ""}
+                onChange={(e) => updateGateway({ sessionIdleMinutes: e.target.value ? Number(e.target.value) : undefined })}
+              />
+            </Field>
+          </div>
+          <Field
+            label="Allow From"
+            hint={policy === "allowlist"
+              ? "Comma-separated external IDs allowed to message Polpo."
+              : policy === "open"
+                ? "Optional. Leave empty for open access, or document expected IDs."
+                : "Optional. Pairing policy normally uses /pair CODE instead."}
+          >
+            <Input
+              className="h-8 text-xs font-mono"
+              placeholder={config.type === "whatsapp" ? "+393331234567, 393331234567" : "123456789, -1001234567890"}
+              value={(gateway.allowFrom ?? []).join(", ")}
+              onChange={(e) => {
+                const allowFrom = splitList(e.target.value);
+                updateGateway({ allowFrom: allowFrom.length > 0 ? allowFrom : undefined });
+              }}
+            />
+          </Field>
+          <div className="rounded-md border border-border/30 bg-muted/15 px-2.5 py-2 text-[10.5px] leading-relaxed text-muted-foreground">
+            {policy === "pairing" && "Pairing requires the user to send /pair with a valid code before free text is routed to Polpo."}
+            {policy === "allowlist" && "Allowlist accepts only configured IDs. Use this for production channels with known operators."}
+            {policy === "open" && "Open allows any direct message that reaches the channel. Use only for controlled or disposable endpoints."}
+            {policy === "disabled" && "Disabled keeps the gateway block configured but rejects inbound messages."}
+          </div>
+        </>
+      ) : (
+        <p className="rounded-md border border-border/30 bg-muted/15 px-2.5 py-2 text-[10.5px] leading-relaxed text-muted-foreground">
+          Inbound is off. This channel can still send notifications; messages from users will not become Polpo conversations.
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** Channel config form — renders type-specific fields */
+function ChannelForm({ config, onChange }: {
+  config: NotificationChannelConfig;
+  onChange: (config: NotificationChannelConfig) => void;
+}) {
+  const set = (patch: Partial<NotificationChannelConfig>) => onChange({ ...config, ...patch });
+
+  return (
+    <div className="space-y-3">
+      <ChannelConceptPanel type={config.type} />
+      <ChannelSetupGuide type={config.type} />
+      <DeliveryFields config={config} onChange={set} />
+      {channelSupportsInbound(config.type) && (
+        <InboundGatewayForm config={config} onChange={onChange} />
       )}
     </div>
   );
@@ -722,7 +1169,7 @@ function ChannelCard({ name, ch, onEdit, onDelete, onTest, deleting, testing, te
           )}
 
           {/* Gateway — inline footnote */}
-          {gateway && (
+          {gateway?.enableInbound && (
             <div className="pt-1.5 mt-1.5 border-t border-border/20">
               <Row
                 label={
@@ -967,6 +1414,44 @@ function ChannelsTab({ settings, onUpdateConfig }: {
 
   return (
     <div className="space-y-6">
+      <section className="rounded-lg border border-border/40 bg-card/50 px-4 py-3">
+        <div className="grid gap-3 sm:grid-cols-3">
+          <div className="flex items-start gap-2.5 min-w-0">
+            <div className="flex h-7 w-7 items-center justify-center rounded-md bg-muted/40 shrink-0">
+              <Bell className="h-3.5 w-3.5 text-muted-foreground" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-xs font-semibold">Notifications</p>
+              <p className="mt-0.5 text-[10.5px] leading-relaxed text-muted-foreground">
+                Outbound alerts generated by rules, tasks, approvals, and lifecycle events.
+              </p>
+            </div>
+          </div>
+          <div className="flex items-start gap-2.5 min-w-0">
+            <div className="flex h-7 w-7 items-center justify-center rounded-md bg-muted/40 shrink-0">
+              <MessageSquare className="h-3.5 w-3.5 text-muted-foreground" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-xs font-semibold">Inbound gateway</p>
+              <p className="mt-0.5 text-[10.5px] leading-relaxed text-muted-foreground">
+                Optional chat entrypoint where Telegram or WhatsApp messages become Polpo sessions.
+              </p>
+            </div>
+          </div>
+          <div className="flex items-start gap-2.5 min-w-0">
+            <div className="flex h-7 w-7 items-center justify-center rounded-md bg-muted/40 shrink-0">
+              <Wrench className="h-3.5 w-3.5 text-muted-foreground" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-xs font-semibold">Agent tools</p>
+              <p className="mt-0.5 text-[10.5px] leading-relaxed text-muted-foreground">
+                Separate capabilities an agent may use to read or send through a service.
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <section>
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
@@ -988,7 +1473,7 @@ function ChannelsTab({ settings, onUpdateConfig }: {
             <Bell className="h-3.5 w-3.5" /> Channels
           </h3>
           <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={() => setTypePickerOpen(true)}>
-            <Zap className="h-3 w-3" /> Add channel
+            <Plus className="h-3 w-3" /> Add channel
           </Button>
         </div>
 
@@ -1019,7 +1504,7 @@ function ChannelsTab({ settings, onUpdateConfig }: {
           <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-2 flex items-center gap-1.5">
             <Zap className="h-3.5 w-3.5" /> Quick Add
           </h3>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-2">
             {unconfiguredTypes.map((type) => {
               const meta = CHANNEL_META[type];
               if (!meta) return null;
@@ -1043,10 +1528,10 @@ function ChannelsTab({ settings, onUpdateConfig }: {
 
       {/* ── Type Picker Dialog ── */}
       <Dialog open={typePickerOpen} onOpenChange={setTypePickerOpen}>
-        <DialogContent className="sm:max-w-md p-0 gap-0 overflow-hidden">
+        <DialogContent className="sm:max-w-lg p-0 gap-0 overflow-hidden">
           <DialogHeader className="px-6 pt-6 pb-0">
-            <DialogTitle className="text-base">Add Notification Channel</DialogTitle>
-            <DialogDescription className="text-xs">Choose a channel type to configure.</DialogDescription>
+            <DialogTitle className="text-base">Add Channel</DialogTitle>
+            <DialogDescription className="text-xs">Choose a delivery channel. Telegram and WhatsApp can also expose an inbound gateway.</DialogDescription>
           </DialogHeader>
           <div className="px-6 py-5 space-y-2">
             {ALL_CHANNEL_TYPES.map((type) => {
@@ -1062,7 +1547,12 @@ function ChannelsTab({ settings, onUpdateConfig }: {
                     <ChannelLogo type={type} size={22} />
                   </div>
                   <div className="min-w-0">
-                    <p className="text-sm font-medium">{meta.label}</p>
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-medium">{meta.label}</p>
+                      {channelSupportsInbound(type) && (
+                        <Badge variant="secondary" className="text-[9px] h-4 px-1.5">Inbound capable</Badge>
+                      )}
+                    </div>
                     <p className="text-xs text-muted-foreground mt-0.5">{meta.description}</p>
                   </div>
                 </button>
@@ -1074,11 +1564,11 @@ function ChannelsTab({ settings, onUpdateConfig }: {
 
       {/* ── Edit/Add Channel Dialog ── */}
       <Dialog open={editOpen} onOpenChange={setEditOpen}>
-        <DialogContent className="sm:max-w-md p-0 gap-0 overflow-hidden">
+        <DialogContent className="sm:max-w-xl p-0 gap-0 overflow-hidden">
           <DialogHeader className="px-6 pt-6 pb-0">
             <DialogTitle className="text-base">{isNew ? "Add" : "Edit"} {CHANNEL_META[editConfig.type]?.label ?? editConfig.type} Channel</DialogTitle>
             <DialogDescription className="text-xs">
-              {isNew ? "Configure the channel and give it a unique name." : `Editing channel "${editName}".`}
+              {isNew ? "Configure delivery first, then optionally enable inbound where supported." : `Editing channel "${editName}".`}
             </DialogDescription>
           </DialogHeader>
           <div className="px-6 py-5 space-y-4 max-h-[60vh] overflow-y-auto">

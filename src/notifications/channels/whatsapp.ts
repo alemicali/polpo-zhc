@@ -82,7 +82,7 @@ function truncate(text: string, max = 4000): string {
 
 export class WhatsAppChannel implements NotificationChannel {
   readonly type = "whatsapp";
-  private chatJid: string;
+  private chatJid?: string;
   private polpoDir: string;
   private profilePath: string;
   private sock?: WASocket;
@@ -90,8 +90,7 @@ export class WhatsAppChannel implements NotificationChannel {
 
   constructor(config: NotificationChannelConfig, polpoDir: string) {
     const chatId = config.chatId ?? "";
-    if (!chatId) throw new Error("WhatsApp channel requires chatId (phone number with country code)");
-    this.chatJid = phoneToJid(chatId);
+    this.chatJid = chatId ? phoneToJid(chatId) : undefined;
     this.polpoDir = polpoDir;
     const profileName = config.profileDir ?? "default";
     this.profilePath = join(polpoDir, "whatsapp-profiles", profileName);
@@ -99,7 +98,7 @@ export class WhatsAppChannel implements NotificationChannel {
   }
 
   getProfilePath(): string { return this.profilePath; }
-  getChatJid(): string { return this.chatJid; }
+  getChatJid(): string { return this.chatJid ?? ""; }
   isConnected(): boolean { return this.connected; }
 
   /** Set the Baileys socket (injected by WhatsAppBridge after connection). */
@@ -119,12 +118,14 @@ export class WhatsAppChannel implements NotificationChannel {
 
   async send(notification: Notification): Promise<void> {
     if (!this.sock) throw new Error("WhatsApp not connected — run `polpo whatsapp login` first");
+    if (!this.chatJid) throw new Error("WhatsApp channel requires chatId for outbound notifications");
     const text = this.formatMessage(notification);
     await this.sock.sendMessage(this.chatJid, { text });
   }
 
   async sendWithAttachments(notification: Notification, attachments: OutcomeAttachment[]): Promise<void> {
     if (!this.sock) throw new Error("WhatsApp not connected");
+    if (!this.chatJid) throw new Error("WhatsApp channel requires chatId for outbound notifications");
 
     // Send main message
     const text = this.formatMessage(notification);
@@ -573,6 +574,7 @@ export class WhatsAppBridge {
 
     return new Promise<void>((resolve, reject) => {
       let credsSaved = false;
+      let settled = false;
 
       const sock = makeWASocket({
         version,
@@ -585,6 +587,7 @@ export class WhatsAppBridge {
         generateHighQualityLinkPreview: false,
         syncFullHistory: false, // CLI login doesn't need history, just pairing
       });
+      this.sock = sock;
 
       sock.ev.on("creds.update", async () => {
         await saveCreds();
@@ -602,7 +605,9 @@ export class WhatsAppBridge {
           this.log("info", "WhatsApp connected successfully");
           // Wait for creds to be saved before closing — Baileys saves asynchronously
           const waitForCreds = () => {
+            if (settled) return;
             if (credsSaved) {
+              settled = true;
               this.log("info", "Credentials saved, closing interactive session");
               setTimeout(() => {
                 try { sock.end(undefined); } catch { /* ignore */ }
@@ -619,7 +624,11 @@ export class WhatsAppBridge {
         if (connection === "close") {
           const statusCode = (lastDisconnect?.error as any)?.output?.statusCode;
           if (statusCode === DisconnectReason.loggedOut) {
+            settled = true;
             reject(new Error("WhatsApp login was rejected"));
+          } else if (this.stopping && !settled) {
+            settled = true;
+            reject(new Error("WhatsApp login was cancelled"));
           }
           // Other close reasons during interactive login are handled by QR re-display
         }
